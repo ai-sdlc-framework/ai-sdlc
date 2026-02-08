@@ -48,6 +48,11 @@ jobs:
     runs-on: ubuntu-latest
     # Only run on push to main (not PRs from forks, which lack secrets)
     if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      statuses: read
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
