@@ -10,7 +10,7 @@ metadata:
 spec:
   interface: IssueTracker
   type: linear
-  version: "1.2.0"
+  version: '1.2.0'
   config:
     apiKey:
       secretRef: linear-api-key
@@ -28,7 +28,7 @@ metadata:
 spec:
   interface: SourceControl
   type: github
-  version: "2.0.0"
+  version: '2.0.0'
   config:
     token:
       secretRef: github-token
@@ -44,21 +44,21 @@ metadata:
   name: code-agent
   namespace: team-alpha
 spec:
-  role: "Senior Software Engineer"
-  goal: "Implement features from specifications with clean, tested code"
-  backstory: "Expert in TypeScript and Python with focus on testable architecture"
+  role: 'Senior Software Engineer'
+  goal: 'Implement features from specifications with clean, tested code'
+  backstory: 'Expert in TypeScript and Python with focus on testable architecture'
   tools: [code_editor, terminal, git_client, test_runner]
   constraints:
     maxFilesPerChange: 20
     requireTests: true
     allowedLanguages: [python, typescript]
-    blockedPaths: ["**/secrets/**", "**/.env*"]
+    blockedPaths: ['**/secrets/**', '**/.env*']
   handoffs:
     - target: reviewer-agent
       trigger: implementation_complete
   skills:
     - id: implement_feature
-      description: "Implements features from ticket specifications"
+      description: 'Implements features from ticket specifications'
       tags: [coding, implementation]
 
 ---
@@ -68,14 +68,14 @@ metadata:
   name: reviewer-agent
   namespace: team-alpha
 spec:
-  role: "Code Reviewer"
-  goal: "Review code changes for quality, security, and correctness"
+  role: 'Code Reviewer'
+  goal: 'Review code changes for quality, security, and correctness'
   tools: [code_editor, git_client]
   constraints:
     maxFilesPerChange: 50
   skills:
     - id: code_review
-      description: "Reviews pull requests for quality and security"
+      description: 'Reviews pull requests for quality and security'
       tags: [review, quality]
 
 ---
@@ -92,7 +92,7 @@ spec:
       enforcement: soft-mandatory
       rule:
         metric: line-coverage
-        operator: ">="
+        operator: '>='
         threshold: 80
       override:
         requiredRole: engineering-manager
@@ -115,7 +115,7 @@ spec:
     - level: 0
       name: Intern
       permissions:
-        read: ["*"]
+        read: ['*']
         write: []
         execute: []
       guardrails:
@@ -125,7 +125,7 @@ spec:
     - level: 1
       name: Junior
       permissions:
-        read: ["*"]
+        read: ['*']
         write: [draft-pr, comment]
         execute: [test-suite]
       guardrails:
@@ -136,7 +136,7 @@ spec:
     - level: 2
       name: Senior
       permissions:
-        read: ["*"]
+        read: ['*']
         write: [branch, pr, comment]
         execute: [test-suite, lint, build]
       guardrails:
@@ -147,7 +147,7 @@ spec:
     - level: 3
       name: Principal
       permissions:
-        read: ["*"]
+        read: ['*']
         write: [branch, pr, comment, merge-non-critical]
         execute: [test-suite, lint, build, deploy-staging]
       guardrails:
@@ -155,28 +155,28 @@ spec:
         maxLinesPerPR: 1000
       monitoring: audit-log
   promotionCriteria:
-    "0-to-1":
+    '0-to-1':
       minimumTasks: 20
       conditions:
         - metric: recommendation-acceptance-rate
-          operator: ">="
+          operator: '>='
           threshold: 0.90
       requiredApprovals: [engineering-manager]
-    "1-to-2":
+    '1-to-2':
       minimumTasks: 50
       conditions:
         - metric: pr-approval-rate
-          operator: ">="
+          operator: '>='
           threshold: 0.90
         - metric: rollback-rate
-          operator: "<="
+          operator: '<='
           threshold: 0.02
       requiredApprovals: [engineering-manager, security-lead]
-    "2-to-3":
+    '2-to-3':
       minimumTasks: 100
       conditions:
         - metric: pr-approval-rate
-          operator: ">="
+          operator: '>='
           threshold: 0.95
       requiredApprovals: [engineering-manager, security-lead, vp-engineering]
   demotionTriggers:

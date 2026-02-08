@@ -6,3 +6,9 @@
  */
 
 export { validate, validateResource, type ValidationResult } from '@ai-sdlc/reference';
+export {
+  runConformanceTests,
+  expectedValidity,
+  type FixtureResult,
+  type RunnerReport,
+} from './runner.js';

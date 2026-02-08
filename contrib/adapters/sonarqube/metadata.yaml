@@ -1,9 +1,9 @@
 name: sonarqube
-displayName: "SonarQube"
-description: "CodeAnalysis adapter for SonarQube"
-version: "0.1.0"
+displayName: 'SonarQube'
+description: 'CodeAnalysis adapter for SonarQube'
+version: '0.1.0'
 stability: alpha
 interfaces:
   - CodeAnalysis@v1
 owner: community
-specVersions: ["v1alpha1"]
+specVersions: ['v1alpha1']

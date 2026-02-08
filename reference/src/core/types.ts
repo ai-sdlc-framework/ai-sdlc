@@ -79,11 +79,7 @@ export interface Stage {
   qualityGates?: string[];
 }
 
-export type RoutingStrategy =
-  | 'fully-autonomous'
-  | 'ai-with-review'
-  | 'ai-assisted'
-  | 'human-led';
+export type RoutingStrategy = 'fully-autonomous' | 'ai-with-review' | 'ai-assisted' | 'human-led';
 
 export interface ComplexityThreshold {
   min: number;
@@ -102,12 +98,7 @@ export interface PipelineSpec {
   routing?: Routing;
 }
 
-export type PipelinePhase =
-  | 'Pending'
-  | 'Running'
-  | 'Succeeded'
-  | 'Failed'
-  | 'Suspended';
+export type PipelinePhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Suspended';
 
 export interface PipelineStatus {
   phase?: PipelinePhase;
@@ -208,12 +199,7 @@ export interface ProvenanceRule {
   requireHumanReview?: boolean;
 }
 
-export type GateRule =
-  | MetricRule
-  | ToolRule
-  | ReviewerRule
-  | DocumentationRule
-  | ProvenanceRule;
+export type GateRule = MetricRule | ToolRule | ReviewerRule | DocumentationRule | ProvenanceRule;
 
 export type EnforcementLevel = 'advisory' | 'soft-mandatory' | 'hard-mandatory';
 
@@ -353,9 +339,4 @@ export type AdapterBinding = Resource<'AdapterBinding', AdapterBindingSpec, Adap
 
 // ── Union Type ────────────────────────────────────────────────────────
 
-export type AnyResource =
-  | Pipeline
-  | AgentRole
-  | QualityGate
-  | AutonomyPolicy
-  | AdapterBinding;
+export type AnyResource = Pipeline | AgentRole | QualityGate | AutonomyPolicy | AdapterBinding;

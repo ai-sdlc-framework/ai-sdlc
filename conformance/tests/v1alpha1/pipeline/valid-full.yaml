@@ -63,5 +63,5 @@ status:
   activeStage: implement
   conditions:
     - type: Healthy
-      status: "True"
-      lastTransitionTime: "2026-02-07T10:00:00Z"
+      status: 'True'
+      lastTransitionTime: '2026-02-07T10:00:00Z'

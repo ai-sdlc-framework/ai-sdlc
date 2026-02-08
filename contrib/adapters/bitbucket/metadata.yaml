@@ -1,9 +1,9 @@
 name: bitbucket
-displayName: "Atlassian Bitbucket"
-description: "SourceControl adapter for Atlassian Bitbucket"
-version: "0.1.0"
+displayName: 'Atlassian Bitbucket'
+description: 'SourceControl adapter for Atlassian Bitbucket'
+version: '0.1.0'
 stability: alpha
 interfaces:
   - SourceControl@v1
 owner: community
-specVersions: ["v1alpha1"]
+specVersions: ['v1alpha1']

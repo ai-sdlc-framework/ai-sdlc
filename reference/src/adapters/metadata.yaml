@@ -3,14 +3,14 @@
 
 adapters:
   - name: github
-    displayName: "GitHub"
+    displayName: 'GitHub'
     interfaces:
       - SourceControl@v1
       - CIPipeline@v1
     stability: alpha
 
   - name: linear
-    displayName: "Linear"
+    displayName: 'Linear'
     interfaces:
       - IssueTracker@v1
     stability: alpha

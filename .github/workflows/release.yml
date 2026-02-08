@@ -1,0 +1,38 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to release
+        required: true
+        type: choice
+        options:
+          - '@ai-sdlc/reference'
+          - '@ai-sdlc/sdk'
+          - '@ai-sdlc/conformance'
+      dry-run:
+        description: Dry run (skip publish)
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  release:
+    name: Release ${{ inputs.package }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - name: Publish (placeholder)
+        run: |
+          echo "Would publish ${{ inputs.package }}"
+          echo "Dry run: ${{ inputs.dry-run }}"
+          echo "Publishing is not yet configured — this is a placeholder."

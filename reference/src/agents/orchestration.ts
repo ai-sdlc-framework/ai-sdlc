@@ -52,10 +52,7 @@ export function parallel(agents: AgentRole[]): OrchestrationPlan {
 /**
  * Build a router orchestration plan with a dispatcher and specialists.
  */
-export function router(
-  dispatcher: AgentRole,
-  specialists: AgentRole[],
-): OrchestrationPlan {
+export function router(dispatcher: AgentRole, specialists: AgentRole[]): OrchestrationPlan {
   const steps: OrchestrationStep[] = [
     { agent: dispatcher.metadata.name },
     ...specialists.map((s) => ({
@@ -69,10 +66,7 @@ export function router(
 /**
  * Build a hierarchical orchestration plan with a manager and workers.
  */
-export function hierarchical(
-  manager: AgentRole,
-  workers: AgentRole[],
-): OrchestrationPlan {
+export function hierarchical(manager: AgentRole, workers: AgentRole[]): OrchestrationPlan {
   const steps: OrchestrationStep[] = [
     { agent: manager.metadata.name },
     ...workers.map((w) => ({
@@ -90,9 +84,7 @@ export function hierarchical(
 export function collaborative(agents: AgentRole[]): OrchestrationPlan {
   const steps: OrchestrationStep[] = agents.map((agent) => {
     const dependsOn = agents
-      .filter((other) =>
-        other.spec.handoffs?.some((h) => h.target === agent.metadata.name),
-      )
+      .filter((other) => other.spec.handoffs?.some((h) => h.target === agent.metadata.name))
       .map((other) => other.metadata.name);
     return {
       agent: agent.metadata.name,

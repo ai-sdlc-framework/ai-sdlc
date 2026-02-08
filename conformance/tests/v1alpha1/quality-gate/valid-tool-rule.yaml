@@ -5,7 +5,7 @@ metadata:
 spec:
   scope:
     repositories:
-      - "org/service-*"
+      - 'org/service-*'
     authorTypes:
       - ai-agent
   gates:

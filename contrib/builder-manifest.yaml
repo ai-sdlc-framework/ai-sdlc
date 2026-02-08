@@ -5,11 +5,11 @@
 spec_version: v1alpha1
 adapters:
   - name: jira
-    version: "0.1.0"
+    version: '0.1.0'
   - name: gitlab
-    version: "0.1.0"
+    version: '0.1.0'
   - name: sonarqube
-    version: "0.1.0"
+    version: '0.1.0'
 output:
   name: my-ai-sdlc
-  version: "1.0.0"
+  version: '1.0.0'

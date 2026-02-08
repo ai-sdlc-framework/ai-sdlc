@@ -9,6 +9,7 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo",
+    "lint": "eslint src/",
     "test": "vitest run"
   },
   "dependencies": {

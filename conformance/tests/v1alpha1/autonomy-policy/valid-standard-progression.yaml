@@ -8,7 +8,7 @@ spec:
       name: Intern
       description: Read-only observation, no code generation
       permissions:
-        read: ["*"]
+        read: ['*']
         write: []
         execute: []
       guardrails:
@@ -19,33 +19,33 @@ spec:
       name: Junior
       description: Recommend changes with mandatory human approval
       permissions:
-        read: ["*"]
+        read: ['*']
         write: [draft-pr, comment]
         execute: [test-suite]
       guardrails:
         requireApproval: all
         maxLinesPerPR: 200
-        blockedPaths: ["**/auth/**", "**/payment/**"]
+        blockedPaths: ['**/auth/**', '**/payment/**']
       monitoring: continuous
       minimumDuration: 4w
     - level: 2
       name: Senior
       description: Execute within guardrails with real-time notification
       permissions:
-        read: ["*"]
+        read: ['*']
         write: [branch, pr, comment]
         execute: [test-suite, lint, build]
       guardrails:
         requireApproval: security-critical-only
         maxLinesPerPR: 500
-        blockedPaths: ["**/auth/**"]
+        blockedPaths: ['**/auth/**']
       monitoring: real-time-notification
       minimumDuration: 8w
     - level: 3
       name: Principal
       description: Autonomous within domain, continuous validation
       permissions:
-        read: ["*"]
+        read: ['*']
         write: [branch, pr, comment, merge-non-critical]
         execute: [test-suite, lint, build, deploy-staging]
       guardrails:
@@ -53,40 +53,40 @@ spec:
         maxLinesPerPR: 1000
       monitoring: audit-log
   promotionCriteria:
-    "0-to-1":
+    '0-to-1':
       minimumTasks: 20
       conditions:
         - metric: recommendation-acceptance-rate
-          operator: ">="
+          operator: '>='
           threshold: 0.90
         - metric: security-incidents
-          operator: "=="
+          operator: '=='
           threshold: 0
       requiredApprovals: [engineering-manager]
-    "1-to-2":
+    '1-to-2':
       minimumTasks: 50
       conditions:
         - metric: pr-approval-rate
-          operator: ">="
+          operator: '>='
           threshold: 0.90
         - metric: rollback-rate
-          operator: "<="
+          operator: '<='
           threshold: 0.02
         - metric: security-incidents
-          operator: "=="
+          operator: '=='
           threshold: 0
       requiredApprovals: [engineering-manager, security-lead]
-    "2-to-3":
+    '2-to-3':
       minimumTasks: 100
       conditions:
         - metric: pr-approval-rate
-          operator: ">="
+          operator: '>='
           threshold: 0.95
         - metric: rollback-rate
-          operator: "<="
+          operator: '<='
           threshold: 0.01
         - metric: production-incidents-caused
-          operator: "=="
+          operator: '=='
           threshold: 0
       requiredApprovals: [engineering-manager, security-lead, vp-engineering]
   demotionTriggers:

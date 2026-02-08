@@ -67,9 +67,7 @@ function getValidator(kind: ResourceKind): ValidatorFn {
     if (!schemaFile) {
       throw new Error(`Unknown resource kind: ${kind}`);
     }
-    const schema = JSON.parse(
-      readFileSync(resolve(SCHEMA_DIR, schemaFile), 'utf-8'),
-    );
+    const schema = JSON.parse(readFileSync(resolve(SCHEMA_DIR, schemaFile), 'utf-8'));
     validator = getAjv().compile(schema);
     validators.set(kind, validator);
   }
@@ -90,11 +88,13 @@ export function validate<T extends AnyResource = AnyResource>(
     return { valid: true, data: data as T };
   }
 
-  const errors: ValidationError[] = (validator.errors ?? []).map((err: { instancePath: string; message?: string; keyword: string }) => ({
-    path: err.instancePath || '/',
-    message: err.message ?? 'Unknown validation error',
-    keyword: err.keyword,
-  }));
+  const errors: ValidationError[] = (validator.errors ?? []).map(
+    (err: { instancePath: string; message?: string; keyword: string }) => ({
+      path: err.instancePath || '/',
+      message: err.message ?? 'Unknown validation error',
+      keyword: err.keyword,
+    }),
+  );
 
   return { valid: false, errors };
 }

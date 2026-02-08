@@ -8,7 +8,7 @@ spec:
       enforcement: soft-mandatory
       rule:
         metric: line-coverage
-        operator: ">="
+        operator: '>='
         threshold: 80
       override:
         requiredRole: engineering-manager

@@ -5,8 +5,8 @@ metadata:
 spec:
   interface: IssueTracker
   type: linear
-  version: "1.2.0"
-  source: "registry.ai-sdlc.io/adapters/linear"
+  version: '1.2.0'
+  source: 'registry.ai-sdlc.io/adapters/linear'
   config:
     apiKey:
       secretRef: linear-api-key

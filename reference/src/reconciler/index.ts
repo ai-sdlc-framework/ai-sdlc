@@ -16,7 +16,12 @@ import {
   DEFAULT_RECONCILER_CONFIG,
 } from './types.js';
 
-export { type ReconcileResult, type ReconcilerFn, type ReconcilerConfig, DEFAULT_RECONCILER_CONFIG } from './types.js';
+export {
+  type ReconcileResult,
+  type ReconcilerFn,
+  type ReconcilerConfig,
+  DEFAULT_RECONCILER_CONFIG,
+} from './types.js';
 
 /**
  * Calculate exponential backoff with jitter.
@@ -25,10 +30,7 @@ export function calculateBackoff(
   attempt: number,
   config: ReconcilerConfig = DEFAULT_RECONCILER_CONFIG,
 ): number {
-  const backoff = Math.min(
-    config.initialBackoffMs * Math.pow(2, attempt),
-    config.maxBackoffMs,
-  );
+  const backoff = Math.min(config.initialBackoffMs * Math.pow(2, attempt), config.maxBackoffMs);
   // Add up to 10% jitter
   const jitter = backoff * 0.1 * Math.random();
   return Math.floor(backoff + jitter);

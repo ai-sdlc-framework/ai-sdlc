@@ -15,8 +15,8 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo",
-    "lint": "tsc --noEmit",
-    "test": "vitest run"
+    "lint": "eslint src/",
+    "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*"
