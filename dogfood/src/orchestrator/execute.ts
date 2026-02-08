@@ -58,6 +58,11 @@ async function commentOnIssue(
   });
 }
 
+async function resolveRepoRoot(): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel']);
+  return stdout.trim();
+}
+
 /**
  * Execute the full AI-SDLC dogfood pipeline for a given issue number.
  */
@@ -65,7 +70,7 @@ export async function executePipeline(
   issueNumber: number,
   options: ExecuteOptions = {},
 ): Promise<void> {
-  const workDir = options.workDir ?? process.cwd();
+  const workDir = options.workDir ?? (await resolveRepoRoot());
   const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
 
   // 1. Load .ai-sdlc/ config
@@ -130,11 +135,10 @@ export async function executePipeline(
     throw new Error('No autonomy level 0 or 1 found in policy');
   }
 
-  // 7. Create branch
+  // 7. Create branch and checkout locally
   const branchName = `ai-sdlc/issue-${issueNumber}`;
   await sc.createBranch({ name: branchName });
-
-  // 8. Checkout branch locally
+  await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir });
   await execFileAsync('git', ['checkout', branchName], { cwd: workDir });
 
   // 9. Invoke agent
