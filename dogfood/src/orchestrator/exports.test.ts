@@ -20,9 +20,7 @@ describe('package.json orchestrator exports', () => {
   });
 
   it('orchestrator subpath re-exports expected symbols', async () => {
-    const orchestrator = await import(
-      resolve(PKG_ROOT, pkg.exports['./orchestrator'].import)
-    );
+    const orchestrator = await import(resolve(PKG_ROOT, pkg.exports['./orchestrator'].import));
     expect(orchestrator.loadConfig).toBeDefined();
     expect(orchestrator.validateIssue).toBeDefined();
     expect(orchestrator.parseComplexity).toBeDefined();
