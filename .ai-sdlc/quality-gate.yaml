@@ -1,0 +1,31 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: QualityGate
+metadata:
+  name: dogfood-quality-gates
+  labels:
+    ai-sdlc.io/component: dogfood
+spec:
+  scope:
+    authorTypes:
+      - ai-agent
+  gates:
+    - name: issue-has-description
+      enforcement: advisory
+      rule:
+        metric: description-length
+        operator: '>='
+        threshold: 1
+    - name: issue-has-acceptance-criteria
+      enforcement: soft-mandatory
+      rule:
+        metric: has-acceptance-criteria
+        operator: '>='
+        threshold: 1
+      override:
+        requiredRole: maintainer
+    - name: complexity-in-range
+      enforcement: hard-mandatory
+      rule:
+        metric: complexity
+        operator: '<='
+        threshold: 3

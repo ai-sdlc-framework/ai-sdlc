@@ -1,0 +1,59 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AutonomyPolicy
+metadata:
+  name: dogfood-autonomy
+  labels:
+    ai-sdlc.io/component: dogfood
+spec:
+  levels:
+    - level: 0
+      name: Observer
+      description: Read-only access for monitoring and analysis
+      permissions:
+        read:
+          - '**'
+        write: []
+        execute:
+          - analyze
+      guardrails:
+        requireApproval: all
+      monitoring: continuous
+    - level: 1
+      name: Junior
+      description: Read and limited write access with full approval required
+      permissions:
+        read:
+          - '**'
+        write:
+          - 'src/**'
+          - 'tests/**'
+        execute:
+          - analyze
+          - code-edit
+          - test-run
+      guardrails:
+        requireApproval: all
+        maxLinesPerPR: 200
+        blockedPaths:
+          - '.github/workflows/**'
+          - '.ai-sdlc/**'
+      monitoring: continuous
+  promotionCriteria:
+    0-to-1:
+      minimumTasks: 10
+      conditions:
+        - metric: approval-rate
+          operator: '>='
+          threshold: 0.95
+        - metric: test-pass-rate
+          operator: '>='
+          threshold: 1.0
+      requiredApprovals:
+        - maintainer
+  demotionTriggers:
+    - trigger: failed-test
+      action: demote-to-0
+      cooldown: 7d
+    - trigger: security-finding
+      action: demote-to-0
+      cooldown: 30d
