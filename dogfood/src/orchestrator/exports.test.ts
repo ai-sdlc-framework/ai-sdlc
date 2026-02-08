@@ -36,10 +36,10 @@ describe('package.json orchestrator exports', () => {
 // No runtime assertion needed — a compilation failure here means the types
 // are not properly re-exported.
 import type {
-  AiSdlcConfig,
-  ExecuteOptions,
-  ValidationContext,
-  ValidationResult,
-  ValidationViolation,
-  Logger,
+  AiSdlcConfig as _AiSdlcConfig,
+  ExecuteOptions as _ExecuteOptions,
+  ValidationContext as _ValidationContext,
+  ValidationResult as _ValidationResult,
+  ValidationViolation as _ValidationViolation,
+  Logger as _Logger,
 } from './index.js';
