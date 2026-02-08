@@ -43,6 +43,25 @@ jobs:
       - run: pnpm test
       - run: pnpm validate-schemas
 
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    # Only run on push to main (not PRs from forks, which lack secrets)
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Run integration tests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm --filter @ai-sdlc/reference test
+
   ci-ok:
     name: CI OK
     if: always()
