@@ -33,8 +33,8 @@ describe('METRIC_NAMES', () => {
     }
   });
 
-  it('has exactly 9 metric names', () => {
-    expect(Object.keys(METRIC_NAMES)).toHaveLength(9);
+  it('has exactly 21 metric names', () => {
+    expect(Object.keys(METRIC_NAMES)).toHaveLength(21);
   });
 
   it('contains gauge, counter, and histogram metrics', () => {

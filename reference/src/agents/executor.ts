@@ -187,6 +187,100 @@ export async function executeOrchestration(
 }
 
 /**
+ * Schema resolver: maps a schema reference string to a JSON Schema object.
+ */
+export type SchemaResolver = (schemaRef: string) => Record<string, unknown> | undefined;
+
+export interface SchemaValidationError {
+  path: string;
+  message: string;
+}
+
+/**
+ * Simple structural JSON Schema validator.
+ * Checks `type`, `required`, and `properties` without full AJV dependency.
+ */
+export function simpleSchemaValidate(
+  schema: Record<string, unknown>,
+  data: unknown,
+  path = '',
+): SchemaValidationError[] {
+  const errors: SchemaValidationError[] = [];
+
+  if (data === null || data === undefined) {
+    errors.push({ path: path || '/', message: 'Value is null or undefined' });
+    return errors;
+  }
+
+  // Type check
+  if (schema['type']) {
+    const expectedType = schema['type'] as string;
+    const actualType = Array.isArray(data) ? 'array' : typeof data;
+    if (expectedType === 'integer') {
+      if (typeof data !== 'number' || !Number.isInteger(data)) {
+        errors.push({ path: path || '/', message: `Expected integer, got ${actualType}` });
+      }
+    } else if (actualType !== expectedType) {
+      errors.push({ path: path || '/', message: `Expected ${expectedType}, got ${actualType}` });
+    }
+  }
+
+  // Required fields
+  if (schema['required'] && typeof data === 'object' && !Array.isArray(data)) {
+    const obj = data as Record<string, unknown>;
+    for (const field of schema['required'] as string[]) {
+      if (!(field in obj)) {
+        errors.push({ path: `${path}/${field}`, message: `Missing required field "${field}"` });
+      }
+    }
+  }
+
+  // Properties
+  if (schema['properties'] && typeof data === 'object' && !Array.isArray(data)) {
+    const props = schema['properties'] as Record<string, Record<string, unknown>>;
+    const obj = data as Record<string, unknown>;
+    for (const [key, propSchema] of Object.entries(props)) {
+      if (key in obj) {
+        const nested = simpleSchemaValidate(propSchema, obj[key], `${path}/${key}`);
+        errors.push(...nested);
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Validate a handoff contract's payload against its schema reference.
+ */
+export function validateHandoffContract(
+  handoff: { contract?: { schema?: string; requiredFields?: string[] } },
+  payload: Record<string, unknown>,
+  schemaResolver?: SchemaResolver,
+): HandoffValidationError | null {
+  if (!handoff.contract?.schema || !schemaResolver) {
+    return null;
+  }
+
+  const schema = schemaResolver(handoff.contract.schema);
+  if (!schema) {
+    // Schema not found is a warning, not a blocking error
+    return null;
+  }
+
+  const errors = simpleSchemaValidate(schema, payload);
+  if (errors.length > 0) {
+    return {
+      from: '',
+      to: '',
+      message: `Schema validation failed: ${errors.map((e) => `${e.path}: ${e.message}`).join('; ')}`,
+    };
+  }
+
+  return null;
+}
+
+/**
  * Validate a handoff between two agents.
  * Returns null if valid, or a HandoffValidationError if invalid.
  */
@@ -194,6 +288,7 @@ export function validateHandoff(
   from: AgentRole,
   to: AgentRole,
   payload: Record<string, unknown>,
+  schemaResolver?: SchemaResolver,
 ): HandoffValidationError | null {
   const handoff = from.spec.handoffs?.find((h) => h.target === to.metadata.name);
 
@@ -212,6 +307,18 @@ export function validateHandoff(
         from: from.metadata.name,
         to: to.metadata.name,
         message: `Missing required fields: ${missing.join(', ')}`,
+      };
+    }
+  }
+
+  // Validate against schema if resolver provided
+  if (handoff.contract?.schema && schemaResolver) {
+    const schemaError = validateHandoffContract(handoff, payload, schemaResolver);
+    if (schemaError) {
+      return {
+        from: from.metadata.name,
+        to: to.metadata.name,
+        message: schemaError.message,
       };
     }
   }

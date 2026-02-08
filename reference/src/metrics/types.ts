@@ -153,4 +153,54 @@ export const STANDARD_METRICS: readonly MetricDefinition[] = [
     description: 'Number of demotions per time period',
     unit: 'per-month',
   },
+
+  // Additional operational metrics (PRD Section 14.1)
+  {
+    name: 'handoff-count',
+    category: 'task-effectiveness',
+    description: 'Total number of agent-to-agent handoffs',
+    unit: 'count',
+  },
+  {
+    name: 'handoff-failure-rate',
+    category: 'task-effectiveness',
+    description: 'Percentage of handoffs that failed validation',
+    unit: 'percent',
+  },
+  {
+    name: 'approval-wait-time',
+    category: 'human-in-loop',
+    description: 'Average time waiting for human approval',
+    unit: 'milliseconds',
+  },
+  {
+    name: 'sandbox-violation-count',
+    category: 'code-quality',
+    description: 'Number of sandbox constraint violations',
+    unit: 'count',
+  },
+  {
+    name: 'kill-switch-activation-count',
+    category: 'autonomy-trajectory',
+    description: 'Number of kill switch activations',
+    unit: 'count',
+  },
+  {
+    name: 'compliance-coverage',
+    category: 'code-quality',
+    description: 'Percentage of applicable compliance controls covered',
+    unit: 'percent',
+  },
+  {
+    name: 'adapter-health-rate',
+    category: 'task-effectiveness',
+    description: 'Percentage of adapters reporting healthy status',
+    unit: 'percent',
+  },
+  {
+    name: 'agent-discovery-count',
+    category: 'task-effectiveness',
+    description: 'Number of agents discovered via A2A protocol',
+    unit: 'count',
+  },
 ] as const;

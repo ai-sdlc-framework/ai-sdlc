@@ -22,6 +22,10 @@ export interface AuditEntry {
   readonly decision: 'allowed' | 'denied' | 'overridden';
   /** Additional details about the action. */
   readonly details?: Record<string, unknown>;
+  /** SHA-256 hash of this entry's content + previousHash for tamper detection. */
+  readonly hash?: string;
+  /** Hash of the preceding entry in the chain. */
+  readonly previousHash?: string;
 }
 
 export interface AuditFilter {
@@ -37,8 +41,14 @@ export interface AuditSink {
   write(entry: AuditEntry): void | Promise<void>;
 }
 
+export interface IntegrityResult {
+  valid: boolean;
+  brokenAt?: number;
+}
+
 export interface AuditLog {
   record(entry: Omit<AuditEntry, 'id' | 'timestamp'> & { timestamp?: string }): AuditEntry;
   entries(): readonly AuditEntry[];
   query(filter: AuditFilter): readonly AuditEntry[];
+  verifyIntegrity(): IntegrityResult;
 }

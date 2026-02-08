@@ -31,6 +31,13 @@ export { createGateReconciler, type GateReconcilerDeps } from './gate-reconciler
 
 export { createAutonomyReconciler, type AutonomyReconcilerDeps } from './autonomy-reconciler.js';
 
+export {
+  resourceFingerprint,
+  hasSpecChanged,
+  createResourceCache,
+  type ResourceCache,
+} from './diff.js';
+
 /**
  * Calculate exponential backoff with jitter.
  */

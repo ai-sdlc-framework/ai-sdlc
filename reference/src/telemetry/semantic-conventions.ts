@@ -37,6 +37,30 @@ export const METRIC_NAMES = {
   PROMOTION_TOTAL: 'ai_sdlc.autonomy.promotion.total',
   /** Count of autonomy demotions (counter). */
   DEMOTION_TOTAL: 'ai_sdlc.autonomy.demotion.total',
+  /** Total number of agent-to-agent handoffs (counter). */
+  HANDOFF_TOTAL: 'ai_sdlc.handoff.total',
+  /** Total number of failed handoffs (counter). */
+  HANDOFF_FAILURE_TOTAL: 'ai_sdlc.handoff.failure.total',
+  /** Time waiting for human approval in milliseconds (histogram). */
+  APPROVAL_WAIT_MS: 'ai_sdlc.approval.wait_ms',
+  /** Total number of sandbox constraint violations (counter). */
+  SANDBOX_VIOLATION_TOTAL: 'ai_sdlc.sandbox.violation.total',
+  /** Total number of kill switch activations (counter). */
+  KILL_SWITCH_ACTIVATION_TOTAL: 'ai_sdlc.killswitch.activation.total',
+  /** Compliance coverage percentage (gauge). */
+  COMPLIANCE_COVERAGE_PERCENT: 'ai_sdlc.compliance.coverage_percent',
+  /** Total number of healthy adapter checks (counter). */
+  ADAPTER_HEALTH_TOTAL: 'ai_sdlc.adapter.health.total',
+  /** Total number of agents discovered via A2A (counter). */
+  AGENT_DISCOVERY_TOTAL: 'ai_sdlc.agent.discovery.total',
+  /** Duration of admission pipeline in milliseconds (histogram). */
+  ADMISSION_DURATION_MS: 'ai_sdlc.admission.duration_ms',
+  /** Duration of LLM evaluation in milliseconds (histogram). */
+  LLM_EVAL_DURATION_MS: 'ai_sdlc.llm_eval.duration_ms',
+  /** LLM evaluation score (gauge). */
+  LLM_EVAL_SCORE: 'ai_sdlc.llm_eval.score',
+  /** Duration of expression evaluation in milliseconds (histogram). */
+  EXPRESSION_EVAL_DURATION_MS: 'ai_sdlc.expression_eval.duration_ms',
 } as const;
 
 /** Standard attribute keys for spans and metrics. */

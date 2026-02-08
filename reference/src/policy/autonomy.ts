@@ -3,8 +3,11 @@
  * Implements the autonomy level transitions from spec/policy.md.
  */
 
-import type { AutonomyPolicy, DemotionTrigger } from '../core/types.js';
+import type { AutonomyPolicy, DemotionTrigger, Duration } from '../core/types.js';
 import { compareMetric } from '../core/compare.js';
+
+/** Default cooldown after demotion: 1 hour. */
+export const DEFAULT_COOLDOWN_MS = 3_600_000;
 
 export interface AgentMetrics {
   name: string;
@@ -12,6 +15,8 @@ export interface AgentMetrics {
   totalTasksCompleted: number;
   metrics: Record<string, number>;
   approvals: string[];
+  promotedAt?: Date;
+  demotedAt?: Date;
 }
 
 export interface PromotionResult {
@@ -26,6 +31,44 @@ export interface DemotionResult {
   trigger?: string;
   fromLevel: number;
   toLevel: number;
+}
+
+/**
+ * Parse a duration string to milliseconds.
+ * Supports: 60s, 5m, 2h, 1d, 2w, and ISO 8601 (P1D, PT1H, etc.).
+ */
+export function parseDuration(d: Duration): number {
+  if (!d) return 0;
+
+  // Simple format: number + unit suffix
+  const simple = /^(\d+(?:\.\d+)?)\s*(s|m|h|d|w)$/i.exec(d);
+  if (simple) {
+    const value = parseFloat(simple[1]);
+    switch (simple[2].toLowerCase()) {
+      case 's':
+        return value * 1000;
+      case 'm':
+        return value * 60 * 1000;
+      case 'h':
+        return value * 60 * 60 * 1000;
+      case 'd':
+        return value * 24 * 60 * 60 * 1000;
+      case 'w':
+        return value * 7 * 24 * 60 * 60 * 1000;
+    }
+  }
+
+  // ISO 8601 duration: P[nD][T[nH][nM][nS]]
+  const iso = /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i.exec(d);
+  if (iso) {
+    const days = parseInt(iso[1] || '0', 10);
+    const hours = parseInt(iso[2] || '0', 10);
+    const minutes = parseInt(iso[3] || '0', 10);
+    const seconds = parseFloat(iso[4] || '0');
+    return days * 86_400_000 + hours * 3_600_000 + minutes * 60_000 + seconds * 1000;
+  }
+
+  return 0;
 }
 
 /**
@@ -47,6 +90,34 @@ export function evaluatePromotion(policy: AutonomyPolicy, agent: AgentMetrics): 
   }
 
   const unmetConditions: string[] = [];
+
+  // Check minimumDuration at current level
+  const currentLevelDef = policy.spec.levels.find((l) => l.level === fromLevel);
+  if (currentLevelDef?.minimumDuration && agent.promotedAt) {
+    const minMs = parseDuration(currentLevelDef.minimumDuration);
+    const elapsed = Date.now() - agent.promotedAt.getTime();
+    if (elapsed < minMs) {
+      unmetConditions.push(
+        `Minimum duration at level ${fromLevel} not met: ${elapsed}ms < ${minMs}ms`,
+      );
+    }
+  }
+
+  // Check demotion cooldown
+  if (agent.demotedAt) {
+    // Find matching demotion trigger cooldown (use longest)
+    let cooldownMs = 0;
+    for (const trigger of policy.spec.demotionTriggers) {
+      const cd = parseDuration(trigger.cooldown);
+      if (cd > cooldownMs) cooldownMs = cd;
+    }
+    if (cooldownMs === 0) cooldownMs = DEFAULT_COOLDOWN_MS;
+
+    const elapsed = Date.now() - agent.demotedAt.getTime();
+    if (elapsed < cooldownMs) {
+      unmetConditions.push(`Demotion cooldown not expired: ${elapsed}ms < ${cooldownMs}ms`);
+    }
+  }
 
   if (agent.totalTasksCompleted < criteria.minimumTasks) {
     unmetConditions.push(`Minimum tasks: ${agent.totalTasksCompleted}/${criteria.minimumTasks}`);

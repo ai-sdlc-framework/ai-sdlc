@@ -1,2 +1,2 @@
-export type { AuditEntry, AuditFilter, AuditSink, AuditLog } from './types.js';
-export { createAuditLog } from './logger.js';
+export type { AuditEntry, AuditFilter, AuditSink, AuditLog, IntegrityResult } from './types.js';
+export { createAuditLog, computeEntryHash } from './logger.js';

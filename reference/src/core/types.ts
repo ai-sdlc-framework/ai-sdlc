@@ -298,6 +298,7 @@ export interface AgentAutonomyStatus {
   name: string;
   currentLevel: number;
   promotedAt?: string;
+  demotedAt?: string;
   nextEvaluationAt?: string;
   metrics?: Record<string, number>;
 }

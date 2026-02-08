@@ -70,3 +70,12 @@ export {
   type LLMEvaluationRule,
   type LLMGateVerdict,
 } from './llm-evaluator.js';
+
+export {
+  admitResource,
+  type AdmissionRequest,
+  type AdmissionPipeline,
+  type AdmissionResult,
+} from './admission.js';
+
+export { parseDuration, DEFAULT_COOLDOWN_MS } from './autonomy.js';

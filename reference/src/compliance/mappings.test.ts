@@ -58,10 +58,13 @@ describe('getMappingsForFramework', () => {
 });
 
 describe('REGULATORY_FRAMEWORKS', () => {
-  it('lists all three frameworks', () => {
-    expect(REGULATORY_FRAMEWORKS).toHaveLength(3);
+  it('lists all six frameworks', () => {
+    expect(REGULATORY_FRAMEWORKS).toHaveLength(6);
     expect(REGULATORY_FRAMEWORKS).toContain('eu-ai-act');
     expect(REGULATORY_FRAMEWORKS).toContain('nist-ai-rmf');
     expect(REGULATORY_FRAMEWORKS).toContain('iso-42001');
+    expect(REGULATORY_FRAMEWORKS).toContain('iso-12207');
+    expect(REGULATORY_FRAMEWORKS).toContain('owasp-asi');
+    expect(REGULATORY_FRAMEWORKS).toContain('csa-atf');
   });
 });

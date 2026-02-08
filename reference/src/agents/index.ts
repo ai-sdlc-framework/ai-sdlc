@@ -12,12 +12,16 @@ export {
 export {
   executeOrchestration,
   validateHandoff,
+  validateHandoffContract,
+  simpleSchemaValidate,
   type AgentExecutionState,
   type StepResult,
   type OrchestrationResult,
   type TaskFn,
   type ExecutionOptions,
   type HandoffValidationError,
+  type SchemaResolver,
+  type SchemaValidationError,
 } from './executor.js';
 
 export {
@@ -35,6 +39,9 @@ export {
 export {
   createAgentDiscovery,
   matchAgentBySkill,
+  createStubAgentCardFetcher,
   type AgentDiscovery,
   type AgentFilter,
+  type AgentCardFetcher,
+  type A2AAgentCard,
 } from './discovery.js';

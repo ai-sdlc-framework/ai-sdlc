@@ -6,3 +6,13 @@ export {
 } from './semantic-conventions.js';
 
 export { getTracer, getMeter, withSpan, withSpanSync } from './instrumentation.js';
+
+export {
+  createNoOpLogger,
+  createBufferLogger,
+  createConsoleLogger,
+  type StructuredLogger,
+  type BufferLogger,
+  type LogEntry,
+  type LogLevel,
+} from './logging.js';

@@ -40,6 +40,7 @@ export function createAutonomyReconciler(
           if (result.demoted) {
             agentStatus.currentLevel = result.toLevel;
             agentStatus.promotedAt = undefined;
+            agentStatus.demotedAt = new Date().toISOString();
             deps.onDemotion?.(agentStatus.name, result.fromLevel, result.toLevel, trigger);
             demoted = true;
             break;

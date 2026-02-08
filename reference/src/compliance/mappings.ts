@@ -4,7 +4,13 @@
  * EU AI Act, NIST AI RMF, and ISO 42001.
  */
 
-export type RegulatoryFramework = 'eu-ai-act' | 'nist-ai-rmf' | 'iso-42001';
+export type RegulatoryFramework =
+  | 'eu-ai-act'
+  | 'nist-ai-rmf'
+  | 'iso-42001'
+  | 'iso-12207'
+  | 'owasp-asi'
+  | 'csa-atf';
 
 export interface ComplianceControl {
   id: string;
@@ -229,6 +235,114 @@ export const ISO_42001_MAPPINGS: readonly ControlMapping[] = [
   },
 ];
 
+/** Mappings from AI-SDLC controls to ISO 12207 software lifecycle processes. */
+export const ISO_12207_MAPPINGS: readonly ControlMapping[] = [
+  {
+    controlId: 'quality-gates',
+    framework: 'iso-12207',
+    frameworkReference: 'Clause 7.2.3 - Software Qualification Testing',
+    description: 'Quality gates enforce qualification testing at lifecycle transitions',
+  },
+  {
+    controlId: 'audit-logging',
+    framework: 'iso-12207',
+    frameworkReference: 'Clause 7.2.4 - Software Integration',
+    description: 'Audit logs trace integration decisions and outcomes',
+  },
+  {
+    controlId: 'provenance-tracking',
+    framework: 'iso-12207',
+    frameworkReference: 'Clause 7.2.5 - Software Configuration Management',
+    description: 'Provenance tracking supports configuration management processes',
+  },
+  {
+    controlId: 'human-review',
+    framework: 'iso-12207',
+    frameworkReference: 'Clause 7.2.6 - Software Review',
+    description: 'Human review gates implement formal software review processes',
+  },
+  {
+    controlId: 'metrics-collection',
+    framework: 'iso-12207',
+    frameworkReference: 'Clause 7.1.2 - Software Lifecycle Model Management',
+    description: 'Metrics collection supports lifecycle model monitoring and improvement',
+  },
+  {
+    controlId: 'complexity-routing',
+    framework: 'iso-12207',
+    frameworkReference: 'Clause 7.1.3 - Infrastructure Management',
+    description: 'Complexity routing allocates appropriate infrastructure to task demands',
+  },
+];
+
+/** Mappings from AI-SDLC controls to OWASP AI Security Interface (ASI) guidelines. */
+export const OWASP_ASI_MAPPINGS: readonly ControlMapping[] = [
+  {
+    controlId: 'sandbox-isolation',
+    framework: 'owasp-asi',
+    frameworkReference: 'ASI-03 - AI Execution Isolation',
+    description: 'Sandbox isolation prevents AI agents from escaping execution boundaries',
+  },
+  {
+    controlId: 'kill-switch',
+    framework: 'owasp-asi',
+    frameworkReference: 'ASI-07 - AI Emergency Controls',
+    description: 'Kill switch provides emergency halt for compromised AI agents',
+  },
+  {
+    controlId: 'audit-logging',
+    framework: 'owasp-asi',
+    frameworkReference: 'ASI-05 - AI Activity Monitoring',
+    description: 'Audit logging enables detection of anomalous AI behavior',
+  },
+  {
+    controlId: 'autonomy-governance',
+    framework: 'owasp-asi',
+    frameworkReference: 'ASI-01 - AI Privilege Management',
+    description: 'Autonomy governance enforces least-privilege for AI agents',
+  },
+  {
+    controlId: 'quality-gates',
+    framework: 'owasp-asi',
+    frameworkReference: 'ASI-04 - AI Output Validation',
+    description: 'Quality gates validate AI outputs before deployment',
+  },
+];
+
+/** Mappings from AI-SDLC controls to CSA AI Trust Framework (ATF) requirements. */
+export const CSA_ATF_MAPPINGS: readonly ControlMapping[] = [
+  {
+    controlId: 'audit-logging',
+    framework: 'csa-atf',
+    frameworkReference: 'ATF-AUD-01 - AI Audit Trail',
+    description: 'Audit logging provides comprehensive AI decision audit trail',
+  },
+  {
+    controlId: 'metrics-collection',
+    framework: 'csa-atf',
+    frameworkReference: 'ATF-MON-02 - Continuous Monitoring',
+    description: 'Metrics collection implements continuous AI performance monitoring',
+  },
+  {
+    controlId: 'provenance-tracking',
+    framework: 'csa-atf',
+    frameworkReference: 'ATF-GOV-03 - AI Artifact Governance',
+    description: 'Provenance tracking ensures governance over AI-generated artifacts',
+  },
+  {
+    controlId: 'human-review',
+    framework: 'csa-atf',
+    frameworkReference: 'ATF-HUM-01 - Human Oversight',
+    description: 'Human review ensures human oversight in cloud AI workflows',
+  },
+  {
+    controlId: 'kill-switch',
+    framework: 'csa-atf',
+    frameworkReference: 'ATF-SEC-04 - AI Incident Response',
+    description: 'Kill switch enables rapid incident response for cloud AI services',
+  },
+];
+
 /** Get all mappings for a given framework. */
 export function getMappingsForFramework(framework: RegulatoryFramework): readonly ControlMapping[] {
   switch (framework) {
@@ -238,6 +352,12 @@ export function getMappingsForFramework(framework: RegulatoryFramework): readonl
       return NIST_AI_RMF_MAPPINGS;
     case 'iso-42001':
       return ISO_42001_MAPPINGS;
+    case 'iso-12207':
+      return ISO_12207_MAPPINGS;
+    case 'owasp-asi':
+      return OWASP_ASI_MAPPINGS;
+    case 'csa-atf':
+      return CSA_ATF_MAPPINGS;
   }
 }
 
@@ -246,4 +366,7 @@ export const REGULATORY_FRAMEWORKS: readonly RegulatoryFramework[] = [
   'eu-ai-act',
   'nist-ai-rmf',
   'iso-42001',
+  'iso-12207',
+  'owasp-asi',
+  'csa-atf',
 ];

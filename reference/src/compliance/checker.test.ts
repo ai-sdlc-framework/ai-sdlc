@@ -51,11 +51,14 @@ describe('checkCompliance', () => {
 describe('checkAllFrameworks', () => {
   it('returns reports for all frameworks', () => {
     const reports = checkAllFrameworks(getAllControlIds());
-    expect(reports).toHaveLength(3);
+    expect(reports).toHaveLength(6);
     const frameworks = reports.map((r) => r.framework);
     expect(frameworks).toContain('eu-ai-act');
     expect(frameworks).toContain('nist-ai-rmf');
     expect(frameworks).toContain('iso-42001');
+    expect(frameworks).toContain('iso-12207');
+    expect(frameworks).toContain('owasp-asi');
+    expect(frameworks).toContain('csa-atf');
   });
 
   it('all frameworks show 100% with all controls', () => {
