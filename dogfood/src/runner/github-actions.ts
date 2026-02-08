@@ -9,25 +9,50 @@ import type { AgentRunner, AgentContext, AgentResult } from './types.js';
 
 const execFileAsync = promisify(execFile);
 
-function buildPrompt(ctx: AgentContext): string {
+export function buildPrompt(ctx: AgentContext): string {
   const lines = [
     `You are fixing issue #${ctx.issueNumber}: ${ctx.issueTitle}`,
     '',
     '## Issue Description',
     ctx.issueBody,
     '',
+  ];
+
+  if (ctx.ciErrors) {
+    lines.push(
+      '## CI Failure Logs',
+      '',
+      '```',
+      ctx.ciErrors,
+      '```',
+      '',
+      '## Instructions',
+      '1. Analyze the CI failure logs above to identify the root cause.',
+      '2. Read the relevant source files to understand the context.',
+      '3. Fix the errors that caused CI to fail.',
+      '4. Write or update tests if needed to cover your fix.',
+      '5. Do NOT modify files matching the blocked paths below.',
+      `6. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+    );
+  } else {
+    lines.push(
+      '## Instructions',
+      '1. Read the relevant source files to understand the codebase.',
+      '2. Implement the fix or feature described in the issue.',
+      '3. Write or update tests to cover your changes.',
+      '4. Do NOT modify files matching the blocked paths below.',
+      `5. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+    );
+  }
+
+  lines.push(
+    '',
     '## Constraints',
     `- Maximum files to change: ${ctx.constraints.maxFilesPerChange}`,
     `- Tests required: ${ctx.constraints.requireTests}`,
     `- Blocked paths (do NOT modify): ${ctx.constraints.blockedPaths.join(', ') || 'none'}`,
-    '',
-    '## Instructions',
-    '1. Read the relevant source files to understand the codebase.',
-    '2. Implement the fix or feature described in the issue.',
-    '3. Write or update tests to cover your changes.',
-    '4. Do NOT modify files matching the blocked paths above.',
-    `5. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
-  ];
+  );
+
   return lines.join('\n');
 }
 

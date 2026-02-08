@@ -8,3 +8,4 @@ export {
   type ValidationViolation,
 } from './validate-agent-output.js';
 export { createLogger, type Logger } from './logger.js';
+export { executeFixCI, countRetryAttempts, fetchCILogs, type FixCIOptions } from './fix-ci.js';
