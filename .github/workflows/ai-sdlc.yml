@@ -4,21 +4,24 @@ on:
   issues:
     types: [labeled]
 
+# Note: permissions block applies to the default GITHUB_TOKEN.
+# The AI_SDLC_PAT secret is used for git push and PR creation so that
+# the resulting events trigger the CI workflow (GITHUB_TOKEN cannot).
 permissions:
   contents: write
   issues: write
   pull-requests: write
-  statuses: write
 
 jobs:
   agent:
     name: AI Agent Pipeline
     runs-on: ubuntu-latest
     if: github.event.label.name == 'ai-eligible'
-    outputs:
-      branch: ai-sdlc/issue-${{ github.event.issue.number }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Use PAT so git push triggers CI on the resulting PR
+          token: ${{ secrets.AI_SDLC_PAT }}
 
       - uses: pnpm/action-setup@v4
 
@@ -42,7 +45,7 @@ jobs:
       - name: Run AI-SDLC pipeline
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: pnpm --filter @ai-sdlc/dogfood execute --issue ${{ github.event.issue.number }}
@@ -57,61 +60,4 @@ jobs:
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
               body: '## AI-SDLC: Pipeline Failed\n\nThe AI agent pipeline failed. See the [workflow run](' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + ') for details.'
-            });
-
-  verify:
-    name: Verify PR
-    needs: agent
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.agent.outputs.branch }}
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Build
-        run: pnpm build
-
-      - name: Test
-        run: pnpm test
-
-      - name: Lint
-        run: pnpm lint
-
-      - name: Format check
-        run: pnpm format:check
-
-      - name: Schema validation
-        run: pnpm validate-schemas
-
-      - name: Set commit status
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const sha = '${{ github.event.pull_request.head.sha }}' ||
-              (await github.rest.git.getRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: 'heads/${{ needs.agent.outputs.branch }}'
-              })).data.object.sha;
-
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha,
-              state: '${{ job.status }}' === 'success' ? 'success' : 'failure',
-              context: 'AI-SDLC / Verify PR',
-              description: '${{ job.status }}' === 'success'
-                ? 'Build, test, lint, format, and schema checks passed'
-                : 'Verification failed — see workflow run',
-              target_url: context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId
             });
