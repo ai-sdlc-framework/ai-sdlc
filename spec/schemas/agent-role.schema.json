@@ -1,0 +1,201 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/agent-role.schema.json",
+  "title": "AI-SDLC AgentRole",
+  "description": "Declares an AI agent's identity, capabilities, constraints, and handoff behavior.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "AgentRole"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["role", "goal", "tools"],
+      "properties": {
+        "role": {
+          "type": "string",
+          "description": "The agent's role title (e.g., 'Senior Software Engineer')."
+        },
+        "goal": {
+          "type": "string",
+          "description": "What the agent aims to achieve."
+        },
+        "backstory": {
+          "type": "string",
+          "description": "Context for the agent's persona and expertise."
+        },
+        "tools": {
+          "type": "array",
+          "description": "Tool identifiers the agent is permitted to use.",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "constraints": {
+          "type": "object",
+          "description": "Operational limits on the agent.",
+          "properties": {
+            "maxFilesPerChange": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Maximum files the agent may modify in a single change."
+            },
+            "requireTests": {
+              "type": "boolean",
+              "description": "Whether the agent must include tests with code changes."
+            },
+            "allowedLanguages": {
+              "type": "array",
+              "description": "Programming languages the agent may produce.",
+              "items": { "type": "string" }
+            },
+            "blockedPaths": {
+              "type": "array",
+              "description": "Glob patterns for paths the agent must not modify.",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "handoffs": {
+          "type": "array",
+          "description": "Transitions to other agents.",
+          "items": {
+            "type": "object",
+            "required": ["target", "trigger"],
+            "properties": {
+              "target": {
+                "type": "string",
+                "description": "Name of the target AgentRole resource."
+              },
+              "trigger": {
+                "type": "string",
+                "description": "Condition that initiates the handoff."
+              },
+              "contract": {
+                "type": "object",
+                "description": "Reference to a handoff contract.",
+                "required": ["schema"],
+                "properties": {
+                  "schema": {
+                    "type": "string",
+                    "description": "URI or path to the JSON Schema defining the handoff data structure."
+                  },
+                  "requiredFields": {
+                    "type": "array",
+                    "description": "Fields that must be present in the handoff payload.",
+                    "items": { "type": "string" }
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "skills": {
+          "type": "array",
+          "description": "Declared capabilities for discovery.",
+          "items": {
+            "type": "object",
+            "required": ["id", "description"],
+            "properties": {
+              "id": {
+                "type": "string",
+                "description": "Unique skill identifier."
+              },
+              "description": {
+                "type": "string",
+                "description": "Human-readable description of the skill."
+              },
+              "tags": {
+                "type": "array",
+                "description": "Tags for categorization and discovery.",
+                "items": { "type": "string" }
+              },
+              "examples": {
+                "type": "array",
+                "description": "Input/output examples.",
+                "items": {
+                  "type": "object",
+                  "required": ["input", "output"],
+                  "properties": {
+                    "input": {
+                      "type": "string",
+                      "description": "Example input."
+                    },
+                    "output": {
+                      "type": "string",
+                      "description": "Expected output description."
+                    }
+                  },
+                  "additionalProperties": false
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "agentCard": {
+          "type": "object",
+          "description": "A2A-compatible discovery information.",
+          "required": ["endpoint", "version"],
+          "properties": {
+            "endpoint": {
+              "type": "string",
+              "format": "uri",
+              "description": "The agent's service endpoint."
+            },
+            "version": {
+              "type": "string",
+              "description": "Agent card version."
+            },
+            "securitySchemes": {
+              "type": "array",
+              "description": "Supported authentication methods.",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "autonomyLevel": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "description": "Current autonomy level (0-3)."
+        },
+        "totalTasksCompleted": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Cumulative tasks completed."
+        },
+        "approvalRate": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Ratio of approved tasks (0.0-1.0)."
+        },
+        "lastActive": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of last activity."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

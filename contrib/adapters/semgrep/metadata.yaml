@@ -1,0 +1,9 @@
+name: semgrep
+displayName: "Semgrep"
+description: "CodeAnalysis adapter for Semgrep"
+version: "0.1.0"
+stability: alpha
+interfaces:
+  - CodeAnalysis@v1
+owner: community
+specVersions: ["v1alpha1"]

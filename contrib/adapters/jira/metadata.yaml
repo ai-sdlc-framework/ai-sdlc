@@ -1,0 +1,9 @@
+name: jira
+displayName: "Atlassian Jira"
+description: "IssueTracker adapter for Atlassian Jira"
+version: "0.1.0"
+stability: alpha
+interfaces:
+  - IssueTracker@v1
+owner: community
+specVersions: ["v1alpha1"]

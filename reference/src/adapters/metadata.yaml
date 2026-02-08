@@ -1,0 +1,16 @@
+# Built-in adapter stubs shipped with the reference implementation.
+# Each adapter directory contains an index.ts with the stub implementation.
+
+adapters:
+  - name: github
+    displayName: "GitHub"
+    interfaces:
+      - SourceControl@v1
+      - CIPipeline@v1
+    stability: alpha
+
+  - name: linear
+    displayName: "Linear"
+    interfaces:
+      - IssueTracker@v1
+    stability: alpha

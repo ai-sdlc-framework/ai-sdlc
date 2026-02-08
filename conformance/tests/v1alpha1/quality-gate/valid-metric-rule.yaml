@@ -1,0 +1,15 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: QualityGate
+metadata:
+  name: coverage-gate
+spec:
+  gates:
+    - name: test-coverage
+      enforcement: soft-mandatory
+      rule:
+        metric: line-coverage
+        operator: ">="
+        threshold: 80
+      override:
+        requiredRole: engineering-manager
+        requiresJustification: true

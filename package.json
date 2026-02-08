@@ -1,0 +1,19 @@
+{
+  "name": "ai-sdlc",
+  "private": true,
+  "version": "0.1.0",
+  "description": "AI-SDLC Framework — open, vendor-neutral governance for AI-augmented software development lifecycles",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@9.15.4",
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "clean": "pnpm -r clean",
+    "validate-schemas": "tsx reference/src/core/validate-schemas.ts"
+  }
+}

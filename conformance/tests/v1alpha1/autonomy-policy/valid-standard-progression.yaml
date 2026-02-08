@@ -1,0 +1,101 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AutonomyPolicy
+metadata:
+  name: standard-progression
+spec:
+  levels:
+    - level: 0
+      name: Intern
+      description: Read-only observation, no code generation
+      permissions:
+        read: ["*"]
+        write: []
+        execute: []
+      guardrails:
+        requireApproval: all
+      monitoring: continuous
+      minimumDuration: 2w
+    - level: 1
+      name: Junior
+      description: Recommend changes with mandatory human approval
+      permissions:
+        read: ["*"]
+        write: [draft-pr, comment]
+        execute: [test-suite]
+      guardrails:
+        requireApproval: all
+        maxLinesPerPR: 200
+        blockedPaths: ["**/auth/**", "**/payment/**"]
+      monitoring: continuous
+      minimumDuration: 4w
+    - level: 2
+      name: Senior
+      description: Execute within guardrails with real-time notification
+      permissions:
+        read: ["*"]
+        write: [branch, pr, comment]
+        execute: [test-suite, lint, build]
+      guardrails:
+        requireApproval: security-critical-only
+        maxLinesPerPR: 500
+        blockedPaths: ["**/auth/**"]
+      monitoring: real-time-notification
+      minimumDuration: 8w
+    - level: 3
+      name: Principal
+      description: Autonomous within domain, continuous validation
+      permissions:
+        read: ["*"]
+        write: [branch, pr, comment, merge-non-critical]
+        execute: [test-suite, lint, build, deploy-staging]
+      guardrails:
+        requireApproval: architecture-changes-only
+        maxLinesPerPR: 1000
+      monitoring: audit-log
+  promotionCriteria:
+    "0-to-1":
+      minimumTasks: 20
+      conditions:
+        - metric: recommendation-acceptance-rate
+          operator: ">="
+          threshold: 0.90
+        - metric: security-incidents
+          operator: "=="
+          threshold: 0
+      requiredApprovals: [engineering-manager]
+    "1-to-2":
+      minimumTasks: 50
+      conditions:
+        - metric: pr-approval-rate
+          operator: ">="
+          threshold: 0.90
+        - metric: rollback-rate
+          operator: "<="
+          threshold: 0.02
+        - metric: security-incidents
+          operator: "=="
+          threshold: 0
+      requiredApprovals: [engineering-manager, security-lead]
+    "2-to-3":
+      minimumTasks: 100
+      conditions:
+        - metric: pr-approval-rate
+          operator: ">="
+          threshold: 0.95
+        - metric: rollback-rate
+          operator: "<="
+          threshold: 0.01
+        - metric: production-incidents-caused
+          operator: "=="
+          threshold: 0
+      requiredApprovals: [engineering-manager, security-lead, vp-engineering]
+  demotionTriggers:
+    - trigger: critical-security-incident
+      action: demote-to-0
+      cooldown: 4w
+    - trigger: rollback-rate-exceeds-5-percent
+      action: demote-one-level
+      cooldown: 2w
+    - trigger: unauthorized-access-attempt
+      action: demote-to-0
+      cooldown: 4w

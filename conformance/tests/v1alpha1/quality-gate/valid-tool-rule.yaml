@@ -1,0 +1,24 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: QualityGate
+metadata:
+  name: security-gate
+spec:
+  scope:
+    repositories:
+      - "org/service-*"
+    authorTypes:
+      - ai-agent
+  gates:
+    - name: security-scan
+      enforcement: hard-mandatory
+      rule:
+        tool: semgrep
+        maxSeverity: medium
+        rulesets:
+          - owasp-top-10
+  evaluation:
+    pipeline: pre-merge
+    timeout: 300s
+    retryPolicy:
+      maxRetries: 3
+      backoff: exponential

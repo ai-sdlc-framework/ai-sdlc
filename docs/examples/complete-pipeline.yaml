@@ -1,0 +1,229 @@
+# Complete AI-SDLC Pipeline Example
+# Demonstrates all five resource types working together.
+
+---
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: linear-tracker
+  namespace: team-alpha
+spec:
+  interface: IssueTracker
+  type: linear
+  version: "1.2.0"
+  config:
+    apiKey:
+      secretRef: linear-api-key
+    teamId: ENG
+  healthCheck:
+    interval: 60s
+    timeout: 10s
+
+---
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: github-source
+  namespace: team-alpha
+spec:
+  interface: SourceControl
+  type: github
+  version: "2.0.0"
+  config:
+    token:
+      secretRef: github-token
+    org: reliable-genius
+  healthCheck:
+    interval: 60s
+    timeout: 10s
+
+---
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: code-agent
+  namespace: team-alpha
+spec:
+  role: "Senior Software Engineer"
+  goal: "Implement features from specifications with clean, tested code"
+  backstory: "Expert in TypeScript and Python with focus on testable architecture"
+  tools: [code_editor, terminal, git_client, test_runner]
+  constraints:
+    maxFilesPerChange: 20
+    requireTests: true
+    allowedLanguages: [python, typescript]
+    blockedPaths: ["**/secrets/**", "**/.env*"]
+  handoffs:
+    - target: reviewer-agent
+      trigger: implementation_complete
+  skills:
+    - id: implement_feature
+      description: "Implements features from ticket specifications"
+      tags: [coding, implementation]
+
+---
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: reviewer-agent
+  namespace: team-alpha
+spec:
+  role: "Code Reviewer"
+  goal: "Review code changes for quality, security, and correctness"
+  tools: [code_editor, git_client]
+  constraints:
+    maxFilesPerChange: 50
+  skills:
+    - id: code_review
+      description: "Reviews pull requests for quality and security"
+      tags: [review, quality]
+
+---
+apiVersion: ai-sdlc.io/v1alpha1
+kind: QualityGate
+metadata:
+  name: ai-code-standards
+  namespace: team-alpha
+spec:
+  scope:
+    authorTypes: [ai-agent]
+  gates:
+    - name: test-coverage
+      enforcement: soft-mandatory
+      rule:
+        metric: line-coverage
+        operator: ">="
+        threshold: 80
+      override:
+        requiredRole: engineering-manager
+        requiresJustification: true
+    - name: security-scan
+      enforcement: hard-mandatory
+      rule:
+        tool: semgrep
+        maxSeverity: medium
+        rulesets: [owasp-top-10]
+
+---
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AutonomyPolicy
+metadata:
+  name: standard-progression
+  namespace: team-alpha
+spec:
+  levels:
+    - level: 0
+      name: Intern
+      permissions:
+        read: ["*"]
+        write: []
+        execute: []
+      guardrails:
+        requireApproval: all
+      monitoring: continuous
+      minimumDuration: 2w
+    - level: 1
+      name: Junior
+      permissions:
+        read: ["*"]
+        write: [draft-pr, comment]
+        execute: [test-suite]
+      guardrails:
+        requireApproval: all
+        maxLinesPerPR: 200
+      monitoring: continuous
+      minimumDuration: 4w
+    - level: 2
+      name: Senior
+      permissions:
+        read: ["*"]
+        write: [branch, pr, comment]
+        execute: [test-suite, lint, build]
+      guardrails:
+        requireApproval: security-critical-only
+        maxLinesPerPR: 500
+      monitoring: real-time-notification
+      minimumDuration: 8w
+    - level: 3
+      name: Principal
+      permissions:
+        read: ["*"]
+        write: [branch, pr, comment, merge-non-critical]
+        execute: [test-suite, lint, build, deploy-staging]
+      guardrails:
+        requireApproval: architecture-changes-only
+        maxLinesPerPR: 1000
+      monitoring: audit-log
+  promotionCriteria:
+    "0-to-1":
+      minimumTasks: 20
+      conditions:
+        - metric: recommendation-acceptance-rate
+          operator: ">="
+          threshold: 0.90
+      requiredApprovals: [engineering-manager]
+    "1-to-2":
+      minimumTasks: 50
+      conditions:
+        - metric: pr-approval-rate
+          operator: ">="
+          threshold: 0.90
+        - metric: rollback-rate
+          operator: "<="
+          threshold: 0.02
+      requiredApprovals: [engineering-manager, security-lead]
+    "2-to-3":
+      minimumTasks: 100
+      conditions:
+        - metric: pr-approval-rate
+          operator: ">="
+          threshold: 0.95
+      requiredApprovals: [engineering-manager, security-lead, vp-engineering]
+  demotionTriggers:
+    - trigger: critical-security-incident
+      action: demote-to-0
+      cooldown: 4w
+    - trigger: rollback-rate-exceeds-5-percent
+      action: demote-one-level
+      cooldown: 2w
+
+---
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: feature-delivery
+  namespace: team-alpha
+spec:
+  triggers:
+    - event: issue.assigned
+      filter:
+        labels: [ai-eligible]
+  providers:
+    issueTracker:
+      type: linear
+      config:
+        teamId: ENG
+    sourceControl:
+      type: github
+      config:
+        org: reliable-genius
+  stages:
+    - name: implement
+      agent: code-agent
+      qualityGates: [ai-code-standards]
+    - name: review
+      agent: reviewer-agent
+  routing:
+    complexityThresholds:
+      low:
+        min: 1
+        max: 3
+        strategy: fully-autonomous
+      medium:
+        min: 4
+        max: 6
+        strategy: ai-with-review
+      high:
+        min: 7
+        max: 10
+        strategy: human-led

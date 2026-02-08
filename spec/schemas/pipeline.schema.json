@@ -1,0 +1,164 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/pipeline.schema.json",
+  "title": "AI-SDLC Pipeline",
+  "description": "Defines a complete SDLC workflow from trigger through delivery.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "Pipeline"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["triggers", "providers", "stages"],
+      "properties": {
+        "triggers": {
+          "type": "array",
+          "description": "Events that initiate the pipeline.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["event"],
+            "properties": {
+              "event": {
+                "type": "string",
+                "description": "The event type that triggers the pipeline (e.g., issue.assigned, pr.opened)."
+              },
+              "filter": {
+                "type": "object",
+                "description": "Conditions that must match for the trigger to fire.",
+                "properties": {
+                  "labels": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "branches": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  },
+                  "paths": {
+                    "type": "array",
+                    "items": { "type": "string" }
+                  }
+                },
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "providers": {
+          "type": "object",
+          "description": "Tool integrations used by the pipeline, keyed by interface category.",
+          "additionalProperties": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "type": "string",
+                "description": "The adapter type (e.g., linear, github, jira)."
+              },
+              "config": {
+                "type": "object",
+                "description": "Adapter-specific configuration.",
+                "additionalProperties": true
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "stages": {
+          "type": "array",
+          "description": "Ordered list of execution stages.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["name"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Unique name within the pipeline."
+              },
+              "agent": {
+                "type": "string",
+                "description": "Reference to an AgentRole resource name."
+              },
+              "qualityGates": {
+                "type": "array",
+                "description": "References to QualityGate resource names.",
+                "items": { "type": "string" }
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "routing": {
+          "type": "object",
+          "description": "Complexity-based task routing configuration.",
+          "properties": {
+            "complexityThresholds": {
+              "type": "object",
+              "description": "Named complexity tiers with score ranges and strategies.",
+              "additionalProperties": {
+                "type": "object",
+                "required": ["min", "max", "strategy"],
+                "properties": {
+                  "min": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "description": "Minimum complexity score (inclusive)."
+                  },
+                  "max": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 10,
+                    "description": "Maximum complexity score (inclusive)."
+                  },
+                  "strategy": {
+                    "type": "string",
+                    "enum": ["fully-autonomous", "ai-with-review", "ai-assisted", "human-led"],
+                    "description": "The routing strategy for this complexity tier."
+                  }
+                },
+                "additionalProperties": false
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "phase": {
+          "type": "string",
+          "enum": ["Pending", "Running", "Succeeded", "Failed", "Suspended"],
+          "description": "Current pipeline phase."
+        },
+        "activeStage": {
+          "type": "string",
+          "description": "Name of the currently executing stage."
+        },
+        "conditions": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/condition"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,10 @@
+name: gitlab
+displayName: "GitLab"
+description: "SourceControl and CIPipeline adapter for GitLab"
+version: "0.1.0"
+stability: alpha
+interfaces:
+  - SourceControl@v1
+  - CIPipeline@v1
+owner: community
+specVersions: ["v1alpha1"]

@@ -1,0 +1,11 @@
+# Invalid: missing required "stages" field in spec.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: broken-pipeline
+spec:
+  triggers:
+    - event: issue.assigned
+  providers:
+    issueTracker:
+      type: linear

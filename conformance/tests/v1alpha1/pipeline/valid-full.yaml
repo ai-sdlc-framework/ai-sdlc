@@ -1,0 +1,67 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: feature-delivery
+  namespace: team-alpha
+  labels:
+    team.example.com/tier: production
+  annotations:
+    ai-sdlc.io/owner: engineering
+spec:
+  triggers:
+    - event: issue.assigned
+      filter:
+        labels:
+          - ai-eligible
+    - event: pr.opened
+      filter:
+        branches:
+          - main
+  providers:
+    issueTracker:
+      type: linear
+      config:
+        teamId: ENG
+    sourceControl:
+      type: github
+      config:
+        org: reliable-genius
+  stages:
+    - name: implement
+      agent: code-agent
+      qualityGates:
+        - test-coverage
+        - security-scan
+    - name: review
+      agent: reviewer-agent
+      qualityGates:
+        - human-approval
+    - name: deploy
+      agent: deploy-agent
+      qualityGates:
+        - staging-verification
+  routing:
+    complexityThresholds:
+      low:
+        min: 1
+        max: 3
+        strategy: fully-autonomous
+      medium:
+        min: 4
+        max: 6
+        strategy: ai-with-review
+      high:
+        min: 7
+        max: 8
+        strategy: ai-assisted
+      critical:
+        min: 9
+        max: 10
+        strategy: human-led
+status:
+  phase: Running
+  activeStage: implement
+  conditions:
+    - type: Healthy
+      status: "True"
+      lastTransitionTime: "2026-02-07T10:00:00Z"

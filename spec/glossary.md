@@ -1,0 +1,133 @@
+# AI-SDLC Framework Glossary
+
+<!-- Source: PRD Section 21, expanded -->
+
+**Document type:** Informative
+**Status:** Draft
+**Spec version:** v1alpha1
+
+---
+
+This document defines terms used throughout the AI-SDLC Framework specification. Terms are listed alphabetically. Cross-references to normative sections are provided where applicable.
+
+## Terms
+
+### A2A (Agent-to-Agent Protocol) {#a2a}
+
+A protocol for inter-agent communication, task delegation, and capability discovery, originally developed by Google and governed under the Linux Foundation's AAIF. AI-SDLC agents publish A2A-compatible [Agent Cards](#agent-card) for discovery. See [agents.md](agents.md#agent-discovery).
+
+### Adapter {#adapter}
+
+A standalone module implementing one or more [interface contracts](#interface-contract) for a specific tool. For example, a Linear adapter implements the [IssueTracker](#interface-contract) interface. Adapters are registered via `metadata.yaml` and discovered from a registry, local directory, or git reference. See [adapters.md](adapters.md).
+
+### Adapter Binding {#adapter-binding}
+
+A [resource](#resource) of kind `AdapterBinding` that declares a tool integration as a swappable provider behind a uniform [interface contract](#interface-contract). See [spec.md](spec.md#55-adapterbinding).
+
+### Agent Card {#agent-card}
+
+An A2A-compatible discovery document published at `/.well-known/agent.json` describing an agent's name, capabilities, [skills](#skill), version, and security schemes. See [agents.md](agents.md#agent-discovery).
+
+### Agent Role {#agent-role}
+
+A [resource](#resource) of kind `AgentRole` that declares an AI agent's identity, capabilities, constraints, and [handoff](#handoff-contract) behavior using the [Role-Goal-Backstory](#role-goal-backstory) pattern. See [spec.md](spec.md#52-agentrole).
+
+### Annotation {#annotation}
+
+A key-value pair in a resource's [metadata](#metadata) used for non-identifying information such as build provenance, tooling hints, or operational notes. Annotations are not used for selection or filtering. See [spec.md](spec.md#3-metadata-object).
+
+### Autonomy Level {#autonomy-level}
+
+A numbered tier (0-3) defining the permissions, guardrails, and monitoring intensity for an AI agent. Level 0 (Observer) is read-only; Level 3 (Principal) is autonomous within domain. See [autonomy.md](autonomy.md).
+
+### Autonomy Policy {#autonomy-policy}
+
+A [resource](#resource) of kind `AutonomyPolicy` that declares progressive [autonomy levels](#autonomy-level) with quantitative [promotion criteria](#promotion) and automatic [demotion triggers](#demotion). See [spec.md](spec.md#54-autonomypolicy).
+
+### Complexity Score {#complexity-score}
+
+A numeric value (1-10) assigned to a task that determines the minimum [autonomy level](#autonomy-level) and human involvement required. Used by the [routing](#routing-strategy) system to assign tasks to appropriate agents. See [autonomy.md](autonomy.md#complexity-based-task-routing).
+
+### Condition {#condition}
+
+A structured status entry in a resource's `status.conditions` array. Each condition has a `type`, `status` (True, False, or Unknown), `reason`, and timestamps. Conditions represent individual aspects of a resource's observed state. See [spec.md](spec.md#5-conditions).
+
+### Conformance Level {#conformance-level}
+
+One of three tiers (Core, Adapter, Full) defining the scope of specification compliance an implementation achieves. See [spec.md](spec.md#11-conformance-levels).
+
+### Demotion {#demotion}
+
+Automatic reduction of an agent's [autonomy level](#autonomy-level) triggered by a policy violation such as a security incident, excessive rollback rate, or unauthorized access attempt. Demotions include a cooldown period before re-promotion is possible. See [autonomy.md](autonomy.md#demotion-triggers).
+
+### Enforcement Level {#enforcement-level}
+
+The strictness of a [quality gate](#quality-gate): `advisory` (warning only), `soft-mandatory` (must pass unless overridden), or `hard-mandatory` (must pass, no override). See [policy.md](policy.md#enforcement-levels).
+
+### Handoff Contract {#handoff-contract}
+
+A versioned JSON Schema defining the required data structure for inter-agent transitions. Every agent transition produces a typed, validated, auditable artifact conforming to its handoff contract. See [agents.md](agents.md#handoff-contracts).
+
+### Interface Contract {#interface-contract}
+
+A typed API definition for an integration category (e.g., IssueTracker, SourceControl, CIPipeline, CodeAnalysis, Messenger, DeploymentTarget). Each [adapter](#adapter) implements one or more interface contracts. See [adapters.md](adapters.md#interface-contracts).
+
+### Label {#label}
+
+A key-value pair in a resource's [metadata](#metadata) used for identification, selection, and filtering. Labels enable resource queries and policy targeting. See [spec.md](spec.md#3-metadata-object).
+
+### MCP (Model Context Protocol) {#mcp}
+
+A protocol for connecting AI agents to external tools and data sources, originally developed by Anthropic and governed under the Linux Foundation's AAIF. AI-SDLC [adapters](#adapter) can wrap MCP servers. See [adapters.md](adapters.md).
+
+### Metadata {#metadata}
+
+The `metadata` object present on every [resource](#resource), containing `name`, `namespace`, [labels](#label), and [annotations](#annotation). See [spec.md](spec.md#3-metadata-object).
+
+### Namespace {#namespace}
+
+A scoping unit within the [metadata](#metadata) of a [resource](#resource), typically corresponding to a team or project. Resource names must be unique within a namespace.
+
+### Pipeline {#pipeline}
+
+A [resource](#resource) of kind `Pipeline` that defines a complete SDLC workflow from trigger through delivery, including stages, agent assignments, [quality gates](#quality-gate), and [routing](#routing-strategy) rules. See [spec.md](spec.md#51-pipeline).
+
+### Promotion {#promotion}
+
+Advancement of an agent's [autonomy level](#autonomy-level) after meeting quantitative criteria (minimum tasks, metric thresholds) and receiving explicit approval from designated roles. See [autonomy.md](autonomy.md#promotion-criteria).
+
+### Provenance {#provenance}
+
+The recorded origin of an AI-generated artifact, including model identifier, tool, prompt hash, timestamp, human reviewer identity, and review decision. See [metrics.md](metrics.md#provenance-tracking).
+
+### Quality Gate {#quality-gate}
+
+A [resource](#resource) of kind `QualityGate` that defines a policy rule evaluated against development activity with a defined [enforcement level](#enforcement-level). See [spec.md](spec.md#53-qualitygate).
+
+### Reconciliation Loop {#reconciliation-loop}
+
+The continuous process of observing current state, diffing against desired state, and acting to close the gap. The reconciliation loop is the runtime heart of the AI-SDLC Framework, following the Kubernetes controller pattern. See [spec.md](spec.md#9-reconciliation-semantics).
+
+### Resource {#resource}
+
+A declarative object with five top-level fields: `apiVersion`, `kind`, [metadata](#metadata), `spec`, and `status`. All AI-SDLC configuration is expressed as resources. See [spec.md](spec.md#2-resource-model).
+
+### Role-Goal-Backstory {#role-goal-backstory}
+
+The pattern used by [AgentRole](#agent-role) resources to define an agent's identity. `role` is the agent's title, `goal` is what it aims to achieve, and `backstory` provides context for the agent's persona. Derived from the CrewAI framework. See [agents.md](agents.md#agent-role-schema).
+
+### Routing Strategy {#routing-strategy}
+
+The method by which tasks are assigned to agents based on [complexity score](#complexity-score). Four strategies are defined: `fully-autonomous`, `ai-with-review`, `ai-assisted`, and `human-led`. See [autonomy.md](autonomy.md#complexity-based-task-routing).
+
+### Secret Reference {#secret-reference}
+
+A `secretRef` object used in resource specs to reference sensitive values (API keys, tokens) without embedding them directly. The referenced secret is resolved at runtime by the implementation. See [spec.md](spec.md#2-resource-model).
+
+### Skill {#skill}
+
+A declared capability of an [Agent Role](#agent-role) with an ID, description, tags, and examples. Skills enable [Agent Card](#agent-card) discovery and task routing. See [agents.md](agents.md#agent-role-schema).
+
+### Spec/Status Split {#spec-status-split}
+
+The separation of user intent (`spec`) from system-observed reality (`status`) in every [resource](#resource). `spec` represents desired state; `status` represents what the system observes. Controllers continuously reconcile the gap. See [spec.md](spec.md#4-the-specstatus-split).

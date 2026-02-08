@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/adapter-binding.schema.json",
+  "title": "AI-SDLC AdapterBinding",
+  "description": "Declares a tool integration as a swappable provider behind a uniform interface contract.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "AdapterBinding"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["interface", "type", "version"],
+      "properties": {
+        "interface": {
+          "type": "string",
+          "enum": [
+            "IssueTracker",
+            "SourceControl",
+            "CIPipeline",
+            "CodeAnalysis",
+            "Messenger",
+            "DeploymentTarget"
+          ],
+          "description": "The abstract contract name."
+        },
+        "type": {
+          "type": "string",
+          "description": "The concrete implementation (e.g., linear, github, jira)."
+        },
+        "version": {
+          "type": "string",
+          "description": "Adapter version (SemVer).",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
+        },
+        "source": {
+          "type": "string",
+          "description": "Location of the adapter (registry URI, local path, or git reference)."
+        },
+        "config": {
+          "type": "object",
+          "description": "Adapter-specific configuration. This field permits additional properties.",
+          "additionalProperties": true
+        },
+        "healthCheck": {
+          "type": "object",
+          "description": "Health check configuration.",
+          "properties": {
+            "interval": {
+              "type": "string",
+              "description": "Time between health checks.",
+              "pattern": "^\\d+[smhdw]$"
+            },
+            "timeout": {
+              "type": "string",
+              "description": "Maximum time to wait for a health check response.",
+              "pattern": "^\\d+[smhdw]$"
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "connected": {
+          "type": "boolean",
+          "description": "Whether the adapter is currently connected."
+        },
+        "lastHealthCheck": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp of the last successful health check."
+        },
+        "adapterVersion": {
+          "type": "string",
+          "description": "The running adapter version."
+        },
+        "specVersionSupported": {
+          "type": "string",
+          "description": "The spec version the adapter supports."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

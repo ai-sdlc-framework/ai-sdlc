@@ -1,0 +1,18 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: linear-tracker
+spec:
+  interface: IssueTracker
+  type: linear
+  version: "1.2.0"
+  source: "registry.ai-sdlc.io/adapters/linear"
+  config:
+    apiKey:
+      secretRef: linear-api-key
+    teamId: ENG
+    defaultLabels:
+      - ai-sdlc-managed
+  healthCheck:
+    interval: 60s
+    timeout: 10s
