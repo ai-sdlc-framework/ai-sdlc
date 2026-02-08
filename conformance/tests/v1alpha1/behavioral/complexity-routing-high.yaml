@@ -1,0 +1,19 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'High complexity task routes to human-led'
+metadata:
+  conformanceLevel: core
+test:
+  type: complexity-routing
+  input:
+    complexityInput:
+      filesAffected: 50
+      linesOfChange: 2000
+      securitySensitive: true
+      apiChange: true
+      databaseMigration: true
+      crossServiceChange: true
+  expected:
+    minScore: 8
+    maxScore: 10
+    strategy: human-led

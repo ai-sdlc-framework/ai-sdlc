@@ -1,0 +1,42 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Orchestration step fails when dependency fails'
+metadata:
+  conformanceLevel: core
+test:
+  type: orchestration-error
+  input:
+    plan:
+      pattern: sequential
+      steps:
+        - agent: builder
+        - agent: tester
+          dependsOn:
+            - builder
+    agents:
+      builder:
+        apiVersion: ai-sdlc.io/v1alpha1
+        kind: AgentRole
+        metadata:
+          name: builder
+        spec:
+          role: Builder
+          goal: Build code
+          tools:
+            - compiler
+      tester:
+        apiVersion: ai-sdlc.io/v1alpha1
+        kind: AgentRole
+        metadata:
+          name: tester
+        spec:
+          role: Tester
+          goal: Run tests
+          tools:
+            - test-runner
+    failAgent: builder
+  expected:
+    success: false
+    failedAgents:
+      - builder
+      - tester

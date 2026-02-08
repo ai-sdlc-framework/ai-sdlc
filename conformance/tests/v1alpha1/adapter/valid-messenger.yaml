@@ -1,0 +1,17 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: slack-notifications
+spec:
+  interface: Messenger
+  type: slack
+  version: '2.1.0'
+  source: 'registry.ai-sdlc.io/adapters/slack'
+  config:
+    workspace: engineering
+    defaultChannel: '#ai-sdlc-alerts'
+    token:
+      secretRef: slack-bot-token
+  healthCheck:
+    interval: 300s
+    timeout: 10s

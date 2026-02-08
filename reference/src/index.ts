@@ -12,3 +12,9 @@ export * from './reconciler/index.js';
 
 // Agent orchestration
 export * from './agents/index.js';
+
+// Audit logging
+export * from './audit/index.js';
+
+// Metrics collection
+export * from './metrics/index.js';

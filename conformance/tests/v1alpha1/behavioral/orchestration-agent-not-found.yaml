@@ -1,0 +1,18 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Orchestration fails when agent is not registered'
+metadata:
+  conformanceLevel: core
+test:
+  type: orchestration-error
+  input:
+    plan:
+      pattern: sequential
+      steps:
+        - agent: ghost-agent
+    agents: {}
+    failAgent: null
+  expected:
+    success: false
+    failedAgents:
+      - ghost-agent

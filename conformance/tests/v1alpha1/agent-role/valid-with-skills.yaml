@@ -1,0 +1,25 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: skilled-agent
+spec:
+  role: Full-Stack Developer
+  goal: Build and test features end-to-end
+  tools:
+    - code-editor
+    - terminal
+    - browser
+  skills:
+    - id: react-development
+      description: Build React components with hooks and TypeScript
+      tags:
+        - frontend
+        - react
+      examples:
+        - input: Create a search component with debounce
+          output: React component with useDebounce hook and Tailwind styling
+    - id: api-design
+      description: Design and implement RESTful APIs
+      tags:
+        - backend
+        - api

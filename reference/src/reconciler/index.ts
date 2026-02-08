@@ -25,6 +25,12 @@ export {
 
 export { ReconcilerLoop } from './loop.js';
 
+export { createPipelineReconciler, type PipelineReconcilerDeps } from './pipeline-reconciler.js';
+
+export { createGateReconciler, type GateReconcilerDeps } from './gate-reconciler.js';
+
+export { createAutonomyReconciler, type AutonomyReconcilerDeps } from './autonomy-reconciler.js';
+
 /**
  * Calculate exponential backoff with jitter.
  */
