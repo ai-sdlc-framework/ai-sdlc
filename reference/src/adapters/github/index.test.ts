@@ -373,25 +373,4 @@ describe('error handling', () => {
   });
 });
 
-// ── Integration tests (read-only, gated on GITHUB_TOKEN) ────────────
-
-describe.skipIf(!process.env.GITHUB_TOKEN)('GitHub integration (live)', () => {
-  const liveConfig: GitHubConfig = {
-    org: 'octocat',
-    repo: 'Hello-World',
-    token: { secretRef: 'github-token' },
-  };
-
-  it('listIssues returns real issues', async () => {
-    const tracker = createGitHubIssueTracker(liveConfig);
-    const issues = await tracker.listIssues({});
-    expect(Array.isArray(issues)).toBe(true);
-  });
-
-  it('getFileContents reads a real file', async () => {
-    const sc = createGitHubSourceControl(liveConfig);
-    const file = await sc.getFileContents('README', 'master');
-    expect(file.content).toBeTruthy();
-    expect(file.encoding).toBe('utf-8');
-  });
-});
+// Integration tests live in integration.test.ts (no mocks).
