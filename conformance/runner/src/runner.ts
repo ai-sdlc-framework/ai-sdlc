@@ -3,12 +3,15 @@
  *
  * Recursively finds YAML fixtures and validates them against
  * AI-SDLC JSON Schemas via the reference implementation.
+ * Also runs behavioral test fixtures.
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { validateResource, type ValidationResult } from '@ai-sdlc/reference';
+import { isBehavioralFixture, runBehavioralTest } from './behavioral.js';
+import type { BehavioralResult } from './behavioral.js';
 
 export interface FixtureResult {
   file: string;
@@ -23,6 +26,12 @@ export interface RunnerReport {
   passed: number;
   failed: number;
   results: FixtureResult[];
+  behavioral?: {
+    total: number;
+    passed: number;
+    failed: number;
+    results: BehavioralResult[];
+  };
 }
 
 /**
@@ -57,26 +66,43 @@ export function runConformanceTests(fixturesDir?: string): RunnerReport {
   const dir = fixturesDir ?? resolve(import.meta.dirname, '../../tests/v1alpha1');
   const files = findYamlFiles(dir);
 
-  const results: FixtureResult[] = files.map((file) => {
+  const schemaResults: FixtureResult[] = [];
+  const behavioralResults: BehavioralResult[] = [];
+
+  for (const file of files) {
     const content = readFileSync(file, 'utf-8');
     const doc = parseYaml(content);
+
+    if (isBehavioralFixture(doc)) {
+      behavioralResults.push(runBehavioralTest(doc, file));
+      continue;
+    }
+
     const expectedValid = expectedValidity(file);
     const validation = validateResource(doc);
 
-    return {
+    schemaResults.push({
       file,
       expectedValid,
       actualValid: validation.valid,
       passed: validation.valid === expectedValid,
       errors: validation.valid ? undefined : validation.errors,
-    };
-  });
+    });
+  }
 
-  const passed = results.filter((r) => r.passed).length;
+  const schemaPassed = schemaResults.filter((r) => r.passed).length;
+  const behavioralPassed = behavioralResults.filter((r) => r.passed).length;
+
   return {
-    total: results.length,
-    passed,
-    failed: results.length - passed,
-    results,
+    total: schemaResults.length + behavioralResults.length,
+    passed: schemaPassed + behavioralPassed,
+    failed: schemaResults.length - schemaPassed + behavioralResults.length - behavioralPassed,
+    results: schemaResults,
+    behavioral: {
+      total: behavioralResults.length,
+      passed: behavioralPassed,
+      failed: behavioralResults.length - behavioralPassed,
+      results: behavioralResults,
+    },
   };
 }

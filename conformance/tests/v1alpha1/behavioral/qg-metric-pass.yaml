@@ -1,0 +1,28 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Metric meets threshold — gate should pass'
+metadata:
+  conformanceLevel: core
+test:
+  type: quality-gate-evaluation
+  input:
+    qualityGate:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: QualityGate
+      metadata:
+        name: coverage-gate
+      spec:
+        gates:
+          - name: coverage
+            enforcement: hard-mandatory
+            rule:
+              metric: coverage
+              operator: '>='
+              threshold: 80
+    context:
+      authorType: ai-agent
+      repository: org/repo
+      metrics:
+        coverage: 90
+  expected:
+    allowed: true

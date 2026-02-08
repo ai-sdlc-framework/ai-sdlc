@@ -12,3 +12,10 @@ export {
   type FixtureResult,
   type RunnerReport,
 } from './runner.js';
+
+export {
+  isBehavioralFixture,
+  runBehavioralTest,
+  type BehavioralFixture,
+  type BehavioralResult,
+} from './behavioral.js';

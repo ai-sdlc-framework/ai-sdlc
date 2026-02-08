@@ -1,0 +1,31 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Soft-mandatory gate with authorized override — should allow'
+metadata:
+  conformanceLevel: core
+test:
+  type: quality-gate-evaluation
+  input:
+    qualityGate:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: QualityGate
+      metadata:
+        name: coverage-gate
+      spec:
+        gates:
+          - name: coverage
+            enforcement: soft-mandatory
+            rule:
+              metric: coverage
+              operator: '>='
+              threshold: 80
+            override:
+              requiredRole: eng-manager
+    context:
+      authorType: ai-agent
+      repository: org/repo
+      metrics:
+        coverage: 50
+      overrideRole: eng-manager
+  expected:
+    allowed: true

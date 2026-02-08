@@ -1,0 +1,42 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Valid handoff with required fields present'
+metadata:
+  conformanceLevel: full
+test:
+  type: handoff-validation
+  input:
+    from:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: AgentRole
+      metadata:
+        name: coder
+      spec:
+        role: coder
+        goal: Write code
+        tools:
+          - code-editor
+        handoffs:
+          - target: reviewer
+            trigger: code-complete
+            contract:
+              schema: handoff.json
+              requiredFields:
+                - summary
+                - changedFiles
+    to:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: AgentRole
+      metadata:
+        name: reviewer
+      spec:
+        role: reviewer
+        goal: Review code
+        tools:
+          - code-review
+    payload:
+      summary: 'Added login feature'
+      changedFiles:
+        - src/auth.ts
+  expected:
+    valid: true

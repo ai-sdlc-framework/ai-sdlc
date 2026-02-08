@@ -1,0 +1,49 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Security incident triggers demotion to level 0'
+metadata:
+  conformanceLevel: full
+test:
+  type: autonomy-demotion
+  input:
+    policy:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: AutonomyPolicy
+      metadata:
+        name: standard-progression
+      spec:
+        levels:
+          - level: 0
+            name: Supervised
+            permissions:
+              read: ['*']
+              write: []
+              execute: []
+            guardrails:
+              requireApproval: all
+            monitoring: continuous
+          - level: 2
+            name: Autonomous
+            permissions:
+              read: ['*']
+              write: ['*']
+              execute: ['*']
+            guardrails:
+              requireApproval: none
+            monitoring: audit-log
+        promotionCriteria: {}
+        demotionTriggers:
+          - trigger: security-incident
+            action: demote-to-0
+            cooldown: 7d
+    agent:
+      name: coder-agent
+      currentLevel: 2
+      totalTasksCompleted: 100
+      metrics: {}
+      approvals: []
+    activeTrigger: security-incident
+  expected:
+    demoted: true
+    fromLevel: 2
+    toLevel: 0

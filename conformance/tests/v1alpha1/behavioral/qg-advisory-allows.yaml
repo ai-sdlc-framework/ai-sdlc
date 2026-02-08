@@ -1,0 +1,28 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Advisory enforcement — fail does not block'
+metadata:
+  conformanceLevel: core
+test:
+  type: quality-gate-evaluation
+  input:
+    qualityGate:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: QualityGate
+      metadata:
+        name: docs-gate
+      spec:
+        gates:
+          - name: documentation
+            enforcement: advisory
+            rule:
+              metric: docCoverage
+              operator: '>='
+              threshold: 80
+    context:
+      authorType: ai-agent
+      repository: org/repo
+      metrics:
+        docCoverage: 20
+  expected:
+    allowed: true

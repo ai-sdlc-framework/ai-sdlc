@@ -23,6 +23,8 @@ export {
   DEFAULT_RECONCILER_CONFIG,
 } from './types.js';
 
+export { ReconcilerLoop } from './loop.js';
+
 /**
  * Calculate exponential backoff with jitter.
  */

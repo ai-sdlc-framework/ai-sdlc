@@ -1,0 +1,55 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'All promotion criteria met — agent eligible'
+metadata:
+  conformanceLevel: full
+test:
+  type: autonomy-promotion
+  input:
+    policy:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: AutonomyPolicy
+      metadata:
+        name: standard-progression
+      spec:
+        levels:
+          - level: 0
+            name: Supervised
+            permissions:
+              read: ['*']
+              write: []
+              execute: []
+            guardrails:
+              requireApproval: all
+            monitoring: continuous
+          - level: 1
+            name: Assisted
+            permissions:
+              read: ['*']
+              write: ['docs/*']
+              execute: ['lint']
+            guardrails:
+              requireApproval: security-critical-only
+            monitoring: real-time-notification
+        promotionCriteria:
+          0-to-1:
+            minimumTasks: 10
+            conditions:
+              - metric: approvalRate
+                operator: '>='
+                threshold: 0.95
+            requiredApprovals:
+              - tech-lead
+        demotionTriggers: []
+    agent:
+      name: coder-agent
+      currentLevel: 0
+      totalTasksCompleted: 15
+      metrics:
+        approvalRate: 0.97
+      approvals:
+        - tech-lead
+  expected:
+    eligible: true
+    fromLevel: 0
+    toLevel: 1

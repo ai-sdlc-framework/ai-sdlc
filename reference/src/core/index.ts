@@ -1,4 +1,5 @@
 export * from './types.js';
+export { compareMetric, exceedsSeverity } from './compare.js';
 export {
   validate,
   validateResource,

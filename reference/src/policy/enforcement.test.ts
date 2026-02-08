@@ -80,15 +80,265 @@ describe('evaluateGate()', () => {
     }
   });
 
-  it('tool-based gate stubs as fail', () => {
-    const gate: Gate = {
-      name: 'security-scan',
-      enforcement: 'hard-mandatory',
-      rule: { tool: 'semgrep', maxSeverity: 'medium' },
-    };
-    const result = evaluateGate(gate, makeCtx());
-    expect(result.verdict).toBe('fail');
-    expect(result.message).toContain('adapter');
+  describe('tool-based rules', () => {
+    function makeToolGate(overrides: Partial<Gate> = {}): Gate {
+      return {
+        name: 'security-scan',
+        enforcement: 'hard-mandatory',
+        rule: { tool: 'semgrep', maxSeverity: 'medium' },
+        ...overrides,
+      };
+    }
+
+    it('passes when no findings exceed max severity', () => {
+      const ctx = makeCtx({
+        toolResults: {
+          semgrep: { findings: [{ severity: 'low' }, { severity: 'medium' }] },
+        },
+      });
+      expect(evaluateGate(makeToolGate(), ctx).verdict).toBe('pass');
+    });
+
+    it('fails when findings exceed max severity', () => {
+      const ctx = makeCtx({
+        toolResults: {
+          semgrep: { findings: [{ severity: 'high' }] },
+        },
+      });
+      const result = evaluateGate(makeToolGate(), ctx);
+      expect(result.verdict).toBe('fail');
+      expect(result.message).toContain('exceed max severity');
+    });
+
+    it('fails when tool results are missing', () => {
+      const result = evaluateGate(makeToolGate(), makeCtx());
+      expect(result.verdict).toBe('fail');
+      expect(result.message).toContain('not available');
+    });
+
+    it('passes when no maxSeverity is set and results exist', () => {
+      const gate: Gate = {
+        name: 'lint',
+        enforcement: 'hard-mandatory',
+        rule: { tool: 'eslint' },
+      };
+      const ctx = makeCtx({
+        toolResults: { eslint: { findings: [{ severity: 'critical' }] } },
+      });
+      expect(evaluateGate(gate, ctx).verdict).toBe('pass');
+    });
+
+    it('fails when tool name does not match results', () => {
+      const ctx = makeCtx({
+        toolResults: { eslint: { findings: [] } },
+      });
+      const result = evaluateGate(makeToolGate(), ctx);
+      expect(result.verdict).toBe('fail');
+      expect(result.message).toContain('semgrep');
+    });
+
+    it('passes with empty findings array', () => {
+      const ctx = makeCtx({
+        toolResults: { semgrep: { findings: [] } },
+      });
+      expect(evaluateGate(makeToolGate(), ctx).verdict).toBe('pass');
+    });
+
+    it('critical exceeds high maxSeverity', () => {
+      const gate: Gate = {
+        name: 'scan',
+        enforcement: 'hard-mandatory',
+        rule: { tool: 'snyk', maxSeverity: 'high' },
+      };
+      const ctx = makeCtx({
+        toolResults: { snyk: { findings: [{ severity: 'critical' }] } },
+      });
+      expect(evaluateGate(gate, ctx).verdict).toBe('fail');
+    });
+
+    it('high does not exceed high maxSeverity', () => {
+      const gate: Gate = {
+        name: 'scan',
+        enforcement: 'hard-mandatory',
+        rule: { tool: 'snyk', maxSeverity: 'high' },
+      };
+      const ctx = makeCtx({
+        toolResults: { snyk: { findings: [{ severity: 'high' }] } },
+      });
+      expect(evaluateGate(gate, ctx).verdict).toBe('pass');
+    });
+  });
+
+  describe('reviewer-based rules', () => {
+    function makeReviewerGate(overrides: Partial<Gate> = {}): Gate {
+      return {
+        name: 'review-gate',
+        enforcement: 'hard-mandatory',
+        rule: { minimumReviewers: 2 },
+        ...overrides,
+      };
+    }
+
+    it('passes when reviewer count meets minimum', () => {
+      const ctx = makeCtx({ reviewerCount: 2 });
+      expect(evaluateGate(makeReviewerGate(), ctx).verdict).toBe('pass');
+    });
+
+    it('fails when reviewer count is below minimum', () => {
+      const ctx = makeCtx({ reviewerCount: 1 });
+      const result = evaluateGate(makeReviewerGate(), ctx);
+      expect(result.verdict).toBe('fail');
+      expect(result.message).toContain('Requires 2');
+    });
+
+    it('fails when reviewer count is missing (defaults to 0)', () => {
+      const result = evaluateGate(makeReviewerGate(), makeCtx());
+      expect(result.verdict).toBe('fail');
+    });
+
+    it('requires extra reviewer for AI author', () => {
+      const gate = makeReviewerGate({
+        rule: { minimumReviewers: 1, aiAuthorRequiresExtraReviewer: true },
+      });
+      // AI author needs 1+1=2 reviewers
+      const ctx = makeCtx({ authorType: 'ai-agent', reviewerCount: 1 });
+      expect(evaluateGate(gate, ctx).verdict).toBe('fail');
+
+      const ctx2 = makeCtx({ authorType: 'ai-agent', reviewerCount: 2 });
+      expect(evaluateGate(gate, ctx2).verdict).toBe('pass');
+    });
+
+    it('does not require extra reviewer for human author', () => {
+      const gate = makeReviewerGate({
+        rule: { minimumReviewers: 1, aiAuthorRequiresExtraReviewer: true },
+      });
+      const ctx = makeCtx({ authorType: 'human', reviewerCount: 1 });
+      expect(evaluateGate(gate, ctx).verdict).toBe('pass');
+    });
+  });
+
+  describe('documentation-based rules', () => {
+    function makeDocGate(overrides: Partial<Gate> = {}): Gate {
+      return {
+        name: 'doc-gate',
+        enforcement: 'hard-mandatory',
+        rule: { changedFilesRequireDocUpdate: true },
+        ...overrides,
+      };
+    }
+
+    it('passes when code changes have matching doc changes', () => {
+      const ctx = makeCtx({
+        changedFiles: ['src/foo.ts'],
+        docFiles: ['docs/foo.md'],
+      });
+      expect(evaluateGate(makeDocGate(), ctx).verdict).toBe('pass');
+    });
+
+    it('fails when code changes have no doc changes', () => {
+      const ctx = makeCtx({
+        changedFiles: ['src/foo.ts'],
+        docFiles: [],
+      });
+      const result = evaluateGate(makeDocGate(), ctx);
+      expect(result.verdict).toBe('fail');
+      expect(result.message).toContain('documentation');
+    });
+
+    it('passes when no code changes are present', () => {
+      const ctx = makeCtx({ changedFiles: [], docFiles: [] });
+      expect(evaluateGate(makeDocGate(), ctx).verdict).toBe('pass');
+    });
+
+    it('passes when flag is false', () => {
+      const gate = makeDocGate({
+        rule: { changedFilesRequireDocUpdate: false },
+      });
+      const ctx = makeCtx({ changedFiles: ['src/foo.ts'], docFiles: [] });
+      expect(evaluateGate(gate, ctx).verdict).toBe('pass');
+    });
+  });
+
+  describe('provenance-based rules', () => {
+    function makeProvGate(overrides: Partial<Gate> = {}): Gate {
+      return {
+        name: 'prov-gate',
+        enforcement: 'hard-mandatory',
+        rule: { requireAttribution: true },
+        ...overrides,
+      };
+    }
+
+    it('passes when attribution is present', () => {
+      const ctx = makeCtx({ provenance: { attribution: true } });
+      expect(evaluateGate(makeProvGate(), ctx).verdict).toBe('pass');
+    });
+
+    it('fails when attribution is missing', () => {
+      const ctx = makeCtx({ provenance: { attribution: false } });
+      const result = evaluateGate(makeProvGate(), ctx);
+      expect(result.verdict).toBe('fail');
+      expect(result.message).toContain('Attribution');
+    });
+
+    it('fails when human review is required but missing', () => {
+      const gate = makeProvGate({
+        rule: { requireAttribution: true, requireHumanReview: true },
+      });
+      const ctx = makeCtx({ provenance: { attribution: true, humanReviewed: false } });
+      const result = evaluateGate(gate, ctx);
+      expect(result.verdict).toBe('fail');
+      expect(result.message).toContain('Human review');
+    });
+
+    it('passes when both attribution and human review are present', () => {
+      const gate = makeProvGate({
+        rule: { requireAttribution: true, requireHumanReview: true },
+      });
+      const ctx = makeCtx({ provenance: { attribution: true, humanReviewed: true } });
+      expect(evaluateGate(gate, ctx).verdict).toBe('pass');
+    });
+  });
+
+  describe('override fix — works for non-metric rules', () => {
+    it('allows override for tool rule soft-mandatory gate', () => {
+      const gate: Gate = {
+        name: 'tool-gate',
+        enforcement: 'soft-mandatory',
+        rule: { tool: 'semgrep', maxSeverity: 'low' },
+        override: { requiredRole: 'eng-manager' },
+      };
+      const ctx = makeCtx({
+        toolResults: { semgrep: { findings: [{ severity: 'high' }] } },
+        overrideRole: 'eng-manager',
+      });
+      const result = evaluateGate(gate, ctx);
+      expect(result.verdict).toBe('override');
+    });
+
+    it('allows override for reviewer rule soft-mandatory gate', () => {
+      const gate: Gate = {
+        name: 'review-gate',
+        enforcement: 'soft-mandatory',
+        rule: { minimumReviewers: 3 },
+        override: { requiredRole: 'lead' },
+      };
+      const ctx = makeCtx({ reviewerCount: 1, overrideRole: 'lead' });
+      const result = evaluateGate(gate, ctx);
+      expect(result.verdict).toBe('override');
+    });
+
+    it('allows override for provenance rule soft-mandatory gate', () => {
+      const gate: Gate = {
+        name: 'prov-gate',
+        enforcement: 'soft-mandatory',
+        rule: { requireAttribution: true },
+        override: { requiredRole: 'director' },
+      };
+      const ctx = makeCtx({ provenance: {}, overrideRole: 'director' });
+      const result = evaluateGate(gate, ctx);
+      expect(result.verdict).toBe('override');
+    });
   });
 });
 

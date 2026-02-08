@@ -1,0 +1,35 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Hard-mandatory pass + advisory fail — should allow'
+metadata:
+  conformanceLevel: core
+test:
+  type: quality-gate-evaluation
+  input:
+    qualityGate:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: QualityGate
+      metadata:
+        name: mixed-gate
+      spec:
+        gates:
+          - name: coverage
+            enforcement: hard-mandatory
+            rule:
+              metric: coverage
+              operator: '>='
+              threshold: 80
+          - name: docs
+            enforcement: advisory
+            rule:
+              metric: docCoverage
+              operator: '>='
+              threshold: 100
+    context:
+      authorType: ai-agent
+      repository: org/repo
+      metrics:
+        coverage: 85
+        docCoverage: 0
+  expected:
+    allowed: true
