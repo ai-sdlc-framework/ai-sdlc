@@ -16,5 +16,18 @@ export {
   type StepResult,
   type OrchestrationResult,
   type TaskFn,
+  type ExecutionOptions,
   type HandoffValidationError,
 } from './executor.js';
+
+export {
+  createAgentMemory,
+  type MemoryTier,
+  type MemoryEntry,
+  type WorkingMemory,
+  type ShortTermMemory,
+  type LongTermMemory,
+  type SharedMemory,
+  type EpisodicMemory,
+  type AgentMemory,
+} from './memory/index.js';

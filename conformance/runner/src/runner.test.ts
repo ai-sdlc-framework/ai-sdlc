@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { runConformanceTests, expectedValidity } from './runner.js';
+import { describe, it, expect, beforeAll } from 'vitest';
+import { runConformanceTests, expectedValidity, type RunnerReport } from './runner.js';
 
 describe('expectedValidity()', () => {
   it('returns true for valid-* files', () => {
@@ -16,7 +16,11 @@ describe('expectedValidity()', () => {
 });
 
 describe('runConformanceTests()', () => {
-  const report = runConformanceTests();
+  let report: RunnerReport;
+
+  beforeAll(async () => {
+    report = await runConformanceTests();
+  });
 
   it('finds all fixtures', () => {
     expect(report.total).toBeGreaterThan(0);

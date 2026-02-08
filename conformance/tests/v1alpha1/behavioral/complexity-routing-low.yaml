@@ -1,0 +1,19 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Low complexity task routes to fully-autonomous'
+metadata:
+  conformanceLevel: core
+test:
+  type: complexity-routing
+  input:
+    complexityInput:
+      filesAffected: 2
+      linesOfChange: 15
+      securitySensitive: false
+      apiChange: false
+      databaseMigration: false
+      crossServiceChange: false
+  expected:
+    minScore: 1
+    maxScore: 3
+    strategy: fully-autonomous

@@ -5,6 +5,8 @@
 
 import type { AgentRole } from '../core/types.js';
 import type { OrchestrationPlan } from './orchestration.js';
+import type { AuthorizationHook, AuthorizationContext } from '../policy/authorization.js';
+import type { AuditLog } from '../audit/types.js';
 
 export type AgentExecutionState = 'pending' | 'running' | 'completed' | 'failed';
 
@@ -23,6 +25,11 @@ export interface OrchestrationResult {
 
 export type TaskFn = (agent: AgentRole, input?: unknown) => Promise<unknown>;
 
+export interface ExecutionOptions {
+  authorize?: AuthorizationHook;
+  auditLog?: AuditLog;
+}
+
 export interface HandoffValidationError {
   from: string;
   to: string;
@@ -37,6 +44,7 @@ export async function executeOrchestration(
   plan: OrchestrationPlan,
   agents: Map<string, AgentRole>,
   taskFn: TaskFn,
+  options?: ExecutionOptions,
 ): Promise<OrchestrationResult> {
   const results = new Map<string, StepResult>();
 
@@ -113,6 +121,35 @@ export async function executeOrchestration(
           input = depOutputs;
         }
 
+        // Authorization check (if hook provided)
+        if (options?.authorize) {
+          const authCtx: AuthorizationContext = {
+            agent: step.agent,
+            action: 'execute',
+            target: `plan/${plan.pattern}/${step.agent}`,
+          };
+          const authResult = options.authorize(authCtx);
+          if (!authResult.allowed) {
+            const result: StepResult = {
+              agent: step.agent,
+              state: 'failed',
+              error: `Authorization denied: ${authResult.reason}`,
+            };
+            results.set(step.agent, result);
+            failed.add(step.agent);
+            if (options?.auditLog) {
+              options.auditLog.record({
+                actor: step.agent,
+                action: 'execute',
+                resource: `plan/${plan.pattern}/${step.agent}`,
+                decision: 'denied',
+                details: { reason: authResult.reason },
+              });
+            }
+            return;
+          }
+        }
+
         try {
           const output = await taskFn(agentRole, input);
           results.set(step.agent, {
@@ -121,6 +158,14 @@ export async function executeOrchestration(
             output,
           });
           completed.add(step.agent);
+          if (options?.auditLog) {
+            options.auditLog.record({
+              actor: step.agent,
+              action: 'execute',
+              resource: `plan/${plan.pattern}/${step.agent}`,
+              decision: 'allowed',
+            });
+          }
         } catch (err) {
           results.set(step.agent, {
             agent: step.agent,

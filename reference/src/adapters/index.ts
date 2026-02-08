@@ -23,5 +23,5 @@ export {
   createGitHubCIPipeline,
   createGitHubIssueTracker,
 } from './github/index.js';
-export { createLinearIssueTracker } from './linear/index.js';
+export { createLinearIssueTracker, type LinearClientLike } from './linear/index.js';
 export { resolveSecret } from './resolve-secret.js';

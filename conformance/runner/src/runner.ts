@@ -10,7 +10,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { resolve, basename } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { validateResource, type ValidationResult } from '@ai-sdlc/reference';
-import { isBehavioralFixture, runBehavioralTest } from './behavioral.js';
+import { isBehavioralFixture, runBehavioralTestAsync } from './behavioral.js';
 import type { BehavioralResult } from './behavioral.js';
 
 export interface FixtureResult {
@@ -62,7 +62,7 @@ function findYamlFiles(dir: string): string[] {
 /**
  * Run conformance tests against all YAML fixtures in a directory.
  */
-export function runConformanceTests(fixturesDir?: string): RunnerReport {
+export async function runConformanceTests(fixturesDir?: string): Promise<RunnerReport> {
   const dir = fixturesDir ?? resolve(import.meta.dirname, '../../tests/v1alpha1');
   const files = findYamlFiles(dir);
 
@@ -74,7 +74,7 @@ export function runConformanceTests(fixturesDir?: string): RunnerReport {
     const doc = parseYaml(content);
 
     if (isBehavioralFixture(doc)) {
-      behavioralResults.push(runBehavioralTest(doc, file));
+      behavioralResults.push(await runBehavioralTestAsync(doc, file));
       continue;
     }
 

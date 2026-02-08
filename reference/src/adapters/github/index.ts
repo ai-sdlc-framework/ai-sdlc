@@ -29,6 +29,13 @@ import type {
   CommitStatus,
   PRFilter,
   PREvent,
+  TriggerBuildInput,
+  Build,
+  BuildStatus,
+  TestResults,
+  CoverageReport,
+  BuildFilter,
+  BuildEvent,
 } from '../interfaces.js';
 
 export type GitHubConfig = {
@@ -257,8 +264,115 @@ export function createGitHubSourceControl(config: GitHubConfig): SourceControl {
   };
 }
 
-// ── CIPipeline (stub) ─────────────────────────────────────────────────
+// ── CIPipeline ────────────────────────────────────────────────────────
 
-export function createGitHubCIPipeline(_config: GitHubConfig): CIPipeline {
-  throw new Error('GitHub CIPipeline adapter not yet implemented');
+export function createGitHubCIPipeline(
+  config: GitHubConfig & { workflowFile?: string },
+): CIPipeline {
+  const octokit = createOctokit(config);
+  const ownerRepo = getOwnerRepo(config);
+  const workflowFile = config.workflowFile ?? 'ci.yml';
+
+  return {
+    async triggerBuild(input: TriggerBuildInput): Promise<Build> {
+      await octokit.actions.createWorkflowDispatch({
+        ...ownerRepo,
+        workflow_id: workflowFile,
+        ref: input.branch,
+        inputs: input.parameters,
+      });
+
+      // GitHub doesn't return the run ID from dispatch — poll for the latest run
+      const { data: runs } = await octokit.actions.listWorkflowRuns({
+        ...ownerRepo,
+        workflow_id: workflowFile,
+        branch: input.branch,
+        per_page: 1,
+      });
+
+      const run = runs.workflow_runs[0];
+      return {
+        id: run ? String(run.id) : 'pending',
+        status: run?.status ?? 'queued',
+        url: run?.html_url,
+      };
+    },
+
+    async getBuildStatus(id: string): Promise<BuildStatus> {
+      const { data } = await octokit.actions.getWorkflowRun({
+        ...ownerRepo,
+        run_id: Number(id),
+      });
+
+      const statusMap: Record<string, BuildStatus['status']> = {
+        queued: 'pending',
+        in_progress: 'running',
+        completed: 'succeeded',
+        cancelled: 'cancelled',
+      };
+
+      let status = statusMap[data.status ?? 'queued'] ?? 'pending';
+      // Override status based on conclusion for completed runs
+      if (data.status === 'completed') {
+        if (data.conclusion === 'failure' || data.conclusion === 'timed_out') {
+          status = 'failed';
+        } else if (data.conclusion === 'cancelled') {
+          status = 'cancelled';
+        }
+      }
+
+      return {
+        id: String(data.id),
+        status,
+        startedAt: data.run_started_at ?? undefined,
+        completedAt: data.updated_at ?? undefined,
+      };
+    },
+
+    async getTestResults(buildId: string): Promise<TestResults> {
+      // Extract test results from check runs associated with the workflow run
+      const { data } = await octokit.checks.listForSuite({
+        ...ownerRepo,
+        check_suite_id: Number(buildId),
+      });
+
+      let passed = 0;
+      let failed = 0;
+      let skipped = 0;
+
+      for (const check of data.check_runs) {
+        if (check.conclusion === 'success') passed++;
+        else if (check.conclusion === 'failure') failed++;
+        else if (check.conclusion === 'skipped' || check.conclusion === 'neutral') skipped++;
+      }
+
+      // If no check runs found, return zero counts
+      return { passed, failed, skipped };
+    },
+
+    async getCoverageReport(buildId: string): Promise<CoverageReport> {
+      // Best-effort: try to find coverage data from artifacts
+      try {
+        const { data } = await octokit.actions.listWorkflowRunArtifacts({
+          ...ownerRepo,
+          run_id: Number(buildId),
+        });
+
+        const coverageArtifact = data.artifacts.find((a) => a.name.includes('coverage'));
+
+        if (!coverageArtifact) {
+          return { lineCoverage: 0 };
+        }
+
+        // Return placeholder — actual coverage parsing depends on format
+        return { lineCoverage: 0, branchCoverage: 0, functionCoverage: 0 };
+      } catch {
+        return { lineCoverage: 0 };
+      }
+    },
+
+    watchBuildEvents(_filter: BuildFilter): EventStream<BuildEvent> {
+      return createStubEventStream();
+    },
+  };
 }

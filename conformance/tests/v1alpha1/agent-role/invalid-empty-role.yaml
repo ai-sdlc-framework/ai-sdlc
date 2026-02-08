@@ -1,0 +1,8 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: empty-role
+spec:
+  role: ''
+  tools:
+    - editor

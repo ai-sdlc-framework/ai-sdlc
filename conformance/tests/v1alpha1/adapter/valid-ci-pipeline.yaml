@@ -1,0 +1,18 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: github-actions
+spec:
+  interface: CIPipeline
+  type: github-actions
+  version: '1.0.0'
+  source: 'registry.ai-sdlc.io/adapters/github-actions'
+  config:
+    org: example-org
+    repo: main-service
+    workflowFile: ci.yml
+    token:
+      secretRef: github-token
+  healthCheck:
+    interval: 120s
+    timeout: 15s

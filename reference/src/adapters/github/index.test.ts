@@ -31,12 +31,25 @@ const mockRepos = {
   createCommitStatus: vi.fn(),
 };
 
+const mockActions = {
+  createWorkflowDispatch: vi.fn(),
+  listWorkflowRuns: vi.fn(),
+  getWorkflowRun: vi.fn(),
+  listWorkflowRunArtifacts: vi.fn(),
+};
+
+const mockChecks = {
+  listForSuite: vi.fn(),
+};
+
 vi.mock('@octokit/rest', () => ({
   Octokit: vi.fn(() => ({
     issues: mockIssues,
     pulls: mockPulls,
     git: mockGit,
     repos: mockRepos,
+    actions: mockActions,
+    checks: mockChecks,
   })),
 }));
 
@@ -367,9 +380,151 @@ describe('error handling', () => {
       'GitHubConfig.repo is required',
     );
   });
+});
 
-  it('CIPipeline stub throws not implemented', () => {
-    expect(() => createGitHubCIPipeline(config)).toThrow('not yet implemented');
+// ── CIPipeline tests ────────────────────────────────────────────────
+
+describe('createGitHubCIPipeline', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  const ci = createGitHubCIPipeline(config);
+
+  it('triggerBuild dispatches workflow and returns latest run', async () => {
+    mockActions.createWorkflowDispatch.mockResolvedValue({ data: {} });
+    mockActions.listWorkflowRuns.mockResolvedValue({
+      data: {
+        workflow_runs: [
+          {
+            id: 12345,
+            status: 'queued',
+            html_url: 'https://github.com/test-org/test-repo/actions/runs/12345',
+          },
+        ],
+      },
+    });
+
+    const build = await ci.triggerBuild({ branch: 'main' });
+    expect(build.id).toBe('12345');
+    expect(build.status).toBe('queued');
+    expect(build.url).toContain('actions/runs');
+    expect(mockActions.createWorkflowDispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ ref: 'main', workflow_id: 'ci.yml' }),
+    );
+  });
+
+  it('triggerBuild handles empty workflow runs', async () => {
+    mockActions.createWorkflowDispatch.mockResolvedValue({ data: {} });
+    mockActions.listWorkflowRuns.mockResolvedValue({
+      data: { workflow_runs: [] },
+    });
+
+    const build = await ci.triggerBuild({ branch: 'feature' });
+    expect(build.id).toBe('pending');
+  });
+
+  it('getBuildStatus maps completed/success', async () => {
+    mockActions.getWorkflowRun.mockResolvedValue({
+      data: {
+        id: 123,
+        status: 'completed',
+        conclusion: 'success',
+        run_started_at: '2026-01-01T00:00:00Z',
+        updated_at: '2026-01-01T00:05:00Z',
+      },
+    });
+
+    const status = await ci.getBuildStatus('123');
+    expect(status.status).toBe('succeeded');
+    expect(status.startedAt).toBe('2026-01-01T00:00:00Z');
+  });
+
+  it('getBuildStatus maps completed/failure', async () => {
+    mockActions.getWorkflowRun.mockResolvedValue({
+      data: { id: 123, status: 'completed', conclusion: 'failure' },
+    });
+
+    const status = await ci.getBuildStatus('123');
+    expect(status.status).toBe('failed');
+  });
+
+  it('getBuildStatus maps in_progress', async () => {
+    mockActions.getWorkflowRun.mockResolvedValue({
+      data: { id: 123, status: 'in_progress', conclusion: null },
+    });
+
+    const status = await ci.getBuildStatus('123');
+    expect(status.status).toBe('running');
+  });
+
+  it('getBuildStatus maps cancelled', async () => {
+    mockActions.getWorkflowRun.mockResolvedValue({
+      data: { id: 123, status: 'completed', conclusion: 'cancelled' },
+    });
+
+    const status = await ci.getBuildStatus('123');
+    expect(status.status).toBe('cancelled');
+  });
+
+  it('getTestResults aggregates check run conclusions', async () => {
+    mockChecks.listForSuite.mockResolvedValue({
+      data: {
+        check_runs: [
+          { conclusion: 'success' },
+          { conclusion: 'success' },
+          { conclusion: 'failure' },
+          { conclusion: 'skipped' },
+        ],
+      },
+    });
+
+    const results = await ci.getTestResults('456');
+    expect(results.passed).toBe(2);
+    expect(results.failed).toBe(1);
+    expect(results.skipped).toBe(1);
+  });
+
+  it('getTestResults returns zeros for no check runs', async () => {
+    mockChecks.listForSuite.mockResolvedValue({
+      data: { check_runs: [] },
+    });
+
+    const results = await ci.getTestResults('789');
+    expect(results).toEqual({ passed: 0, failed: 0, skipped: 0 });
+  });
+
+  it('getCoverageReport returns zero when no artifact', async () => {
+    mockActions.listWorkflowRunArtifacts.mockResolvedValue({
+      data: { artifacts: [] },
+    });
+
+    const report = await ci.getCoverageReport('123');
+    expect(report.lineCoverage).toBe(0);
+  });
+
+  it('getCoverageReport returns placeholder when coverage artifact found', async () => {
+    mockActions.listWorkflowRunArtifacts.mockResolvedValue({
+      data: { artifacts: [{ name: 'test-coverage-report' }] },
+    });
+
+    const report = await ci.getCoverageReport('123');
+    expect(report.lineCoverage).toBe(0);
+    expect(report.branchCoverage).toBe(0);
+  });
+
+  it('getCoverageReport handles API errors gracefully', async () => {
+    mockActions.listWorkflowRunArtifacts.mockRejectedValue(new Error('Not found'));
+
+    const report = await ci.getCoverageReport('999');
+    expect(report.lineCoverage).toBe(0);
+  });
+
+  it('watchBuildEvents returns empty async iterator', async () => {
+    const stream = ci.watchBuildEvents({});
+    const items: unknown[] = [];
+    for await (const item of stream) {
+      items.push(item);
+    }
+    expect(items).toHaveLength(0);
   });
 });
 

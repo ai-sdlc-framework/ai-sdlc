@@ -16,6 +16,7 @@ export {
 export {
   isBehavioralFixture,
   runBehavioralTest,
+  runBehavioralTestAsync,
   type BehavioralFixture,
   type BehavioralResult,
 } from './behavioral.js';
