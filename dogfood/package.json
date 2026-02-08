@@ -15,6 +15,10 @@
     "./runner": {
       "types": "./dist/runner/index.d.ts",
       "import": "./dist/runner/index.js"
+    },
+    "./orchestrator": {
+      "types": "./dist/orchestrator/index.d.ts",
+      "import": "./dist/orchestrator/index.js"
     }
   },
   "scripts": {
