@@ -1,0 +1,12 @@
+# Invalid: "stages" array is empty, violates minItems: 1.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: empty-stages
+spec:
+  triggers:
+    - event: issue.assigned
+  providers:
+    issueTracker:
+      type: linear
+  stages: []

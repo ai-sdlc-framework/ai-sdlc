@@ -1,0 +1,9 @@
+# Invalid: "version" value "latest" does not match SemVer pattern.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: bad-version
+spec:
+  interface: IssueTracker
+  type: linear
+  version: 'latest'

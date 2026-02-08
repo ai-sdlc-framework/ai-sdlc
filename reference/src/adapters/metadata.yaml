@@ -6,6 +6,7 @@ adapters:
     displayName: 'GitHub'
     interfaces:
       - SourceControl@v1
+      - IssueTracker@v1
       - CIPipeline@v1
     stability: alpha
 

@@ -1,0 +1,20 @@
+# Invalid: "levels" array is empty, violates minItems: 1.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AutonomyPolicy
+metadata:
+  name: empty-levels
+spec:
+  levels: []
+  promotionCriteria:
+    '0-to-1':
+      minimumTasks: 20
+      conditions:
+        - metric: recommendation-acceptance-rate
+          operator: '>='
+          threshold: 0.90
+      requiredApprovals:
+        - engineering-manager
+  demotionTriggers:
+    - trigger: critical-security-incident
+      action: demote-to-0
+      cooldown: 4w

@@ -1,0 +1,7 @@
+# Invalid: "gates" array is empty, violates minItems: 1.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: QualityGate
+metadata:
+  name: empty-gates
+spec:
+  gates: []

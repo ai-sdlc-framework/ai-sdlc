@@ -1,0 +1,67 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: senior-engineer
+  namespace: team-alpha
+  labels:
+    team.example.com/role: backend
+  annotations:
+    ai-sdlc.io/owner: engineering
+spec:
+  role: Senior Software Engineer
+  goal: Deliver production-ready features with tests and documentation
+  backstory: >-
+    A seasoned engineer with deep expertise in TypeScript, distributed systems,
+    and test-driven development. Known for writing clean, well-tested code.
+  tools:
+    - code-editor
+    - terminal
+    - browser
+    - test-runner
+  constraints:
+    maxFilesPerChange: 20
+    requireTests: true
+    allowedLanguages:
+      - typescript
+      - javascript
+      - python
+    blockedPaths:
+      - '**/auth/**'
+      - '**/payment/**'
+  handoffs:
+    - target: reviewer-agent
+      trigger: implementation-complete
+      contract:
+        schema: schemas/handoff/impl-to-review.json
+        requiredFields:
+          - prUrl
+          - testResults
+          - coverageReport
+    - target: deploy-agent
+      trigger: review-approved
+  skills:
+    - id: typescript-development
+      description: Write production TypeScript code with full type safety
+      tags:
+        - typescript
+        - backend
+        - frontend
+      examples:
+        - input: Create a REST API endpoint for user registration
+          output: Express route handler with validation, error handling, and tests
+    - id: code-review
+      description: Review pull requests for correctness, style, and security
+      tags:
+        - review
+        - quality
+  agentCard:
+    endpoint: https://agents.example.com/senior-engineer
+    version: '1.0'
+    securitySchemes:
+      - bearer-token
+      - api-key
+status:
+  autonomyLevel: 2
+  totalTasksCompleted: 147
+  approvalRate: 0.94
+  lastActive: '2026-02-07T10:30:00Z'

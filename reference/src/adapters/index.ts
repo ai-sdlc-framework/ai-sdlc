@@ -18,5 +18,10 @@ export type {
   DeploymentStatus,
 } from './interfaces.js';
 
-export { createGitHubSourceControl, createGitHubCIPipeline } from './github/index.js';
+export {
+  createGitHubSourceControl,
+  createGitHubCIPipeline,
+  createGitHubIssueTracker,
+} from './github/index.js';
 export { createLinearIssueTracker } from './linear/index.js';
+export { resolveSecret } from './resolve-secret.js';

@@ -1,0 +1,8 @@
+# Invalid: missing required "tools" array in spec.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: incomplete-agent
+spec:
+  role: Software Engineer
+  goal: Implement features

@@ -1,0 +1,12 @@
+# Invalid: gate is missing required "enforcement" field.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: QualityGate
+metadata:
+  name: no-enforcement
+spec:
+  gates:
+    - name: coverage-check
+      rule:
+        metric: line-coverage
+        operator: '>='
+        threshold: 80

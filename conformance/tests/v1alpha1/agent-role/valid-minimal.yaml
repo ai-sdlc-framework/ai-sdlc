@@ -1,0 +1,9 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: basic-coder
+spec:
+  role: Software Engineer
+  goal: Implement features from issue descriptions
+  tools:
+    - code-editor
