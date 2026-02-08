@@ -8,5 +8,11 @@ export {
   type ValidationViolation,
 } from './orchestrator/validate-agent-output.js';
 export { createLogger, type Logger } from './orchestrator/logger.js';
+export {
+  executeFixCI,
+  countRetryAttempts,
+  fetchCILogs,
+  type FixCIOptions,
+} from './orchestrator/fix-ci.js';
 export type { AgentRunner, AgentContext, AgentResult } from './runner/types.js';
 export { GitHubActionsRunner } from './runner/github-actions.js';

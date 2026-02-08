@@ -26,7 +26,8 @@
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run",
     "test:watch": "vitest",
-    "execute": "tsx src/cli.ts"
+    "execute": "tsx src/cli.ts",
+    "fix-ci": "tsx src/cli-fix-ci.ts"
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
