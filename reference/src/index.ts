@@ -27,3 +27,6 @@ export * from './security/index.js';
 
 // Regulatory compliance
 export * from './compliance/index.js';
+
+// Resource builders
+export * from './builders/index.js';

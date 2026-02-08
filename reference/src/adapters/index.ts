@@ -59,3 +59,27 @@ export {
   createStubDeploymentTarget,
   type StubDeploymentTargetAdapter,
 } from './stubs/deployment-target.js';
+
+// Community adapter stubs
+export {
+  createStubGitLabCI,
+  createStubGitLabSource,
+  type StubGitLabCIAdapter,
+  type StubGitLabSourceAdapter,
+} from './stubs/gitlab.js';
+
+export { createStubJira, type StubJiraAdapter } from './stubs/jira.js';
+
+export { createStubBitbucket, type StubBitbucketAdapter } from './stubs/bitbucket.js';
+
+export {
+  createStubSonarQube,
+  type StubSonarQubeConfig,
+  type StubSonarQubeAdapter,
+} from './stubs/sonarqube.js';
+
+export {
+  createStubSemgrep,
+  type StubSemgrepConfig,
+  type StubSemgrepAdapter,
+} from './stubs/semgrep.js';

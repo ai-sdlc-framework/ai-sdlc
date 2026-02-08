@@ -79,3 +79,7 @@ export {
 } from './admission.js';
 
 export { parseDuration, DEFAULT_COOLDOWN_MS } from './autonomy.js';
+
+export { createRegoEvaluator } from './rego-evaluator.js';
+
+export { createCELEvaluator } from './cel-evaluator.js';
