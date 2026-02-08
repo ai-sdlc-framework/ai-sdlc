@@ -15,6 +15,8 @@ export interface AgentContext {
     requireTests: boolean;
     blockedPaths: string[];
   };
+  /** CI failure logs, populated only during fix-CI retries. */
+  ciErrors?: string;
 }
 
 export interface AgentResult {
