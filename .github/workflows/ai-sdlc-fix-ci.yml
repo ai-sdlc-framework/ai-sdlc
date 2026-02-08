@@ -9,6 +9,7 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
+  actions: read
 
 concurrency:
   group: fix-ci-${{ github.event.workflow_run.head_branch }}
@@ -70,6 +71,8 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          # gh CLI uses GH_TOKEN; default token has actions:read for log fetching
+          GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
