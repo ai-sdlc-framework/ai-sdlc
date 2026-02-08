@@ -18,3 +18,12 @@ export * from './audit/index.js';
 
 // Metrics collection
 export * from './metrics/index.js';
+
+// Telemetry (OpenTelemetry instrumentation)
+export * from './telemetry/index.js';
+
+// Enterprise security
+export * from './security/index.js';
+
+// Regulatory compliance
+export * from './compliance/index.js';

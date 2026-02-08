@@ -199,7 +199,17 @@ export interface ProvenanceRule {
   requireHumanReview?: boolean;
 }
 
-export type GateRule = MetricRule | ToolRule | ReviewerRule | DocumentationRule | ProvenanceRule;
+export interface ExpressionRule {
+  expression: string;
+}
+
+export type GateRule =
+  | MetricRule
+  | ToolRule
+  | ReviewerRule
+  | DocumentationRule
+  | ProvenanceRule
+  | ExpressionRule;
 
 export type EnforcementLevel = 'advisory' | 'soft-mandatory' | 'hard-mandatory';
 

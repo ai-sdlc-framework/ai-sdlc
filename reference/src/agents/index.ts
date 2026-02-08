@@ -31,3 +31,10 @@ export {
   type EpisodicMemory,
   type AgentMemory,
 } from './memory/index.js';
+
+export {
+  createAgentDiscovery,
+  matchAgentBySkill,
+  type AgentDiscovery,
+  type AgentFilter,
+} from './discovery.js';

@@ -35,3 +35,38 @@ export {
   type AuthorizationResult,
   type AuthorizationHook,
 } from './authorization.js';
+
+export {
+  createTokenAuthenticator,
+  createAlwaysAuthenticator,
+  type AuthIdentity,
+  type AuthenticationResult,
+  type Authenticator,
+} from './authentication.js';
+
+export {
+  createLabelInjector,
+  createMetadataEnricher,
+  createReviewerAssigner,
+  applyMutatingGates,
+  type MutatingGate,
+  type MutatingGateContext,
+} from './mutating-gate.js';
+
+export {
+  createSimpleExpressionEvaluator,
+  evaluateExpressionRule,
+  type ExpressionEvaluator,
+  type ExpressionRule,
+  type ExpressionVerdict,
+} from './expression.js';
+
+export {
+  evaluateLLMRule,
+  createStubLLMEvaluator,
+  type LLMEvaluationDimension,
+  type LLMEvaluationResult,
+  type LLMEvaluator,
+  type LLMEvaluationRule,
+  type LLMGateVerdict,
+} from './llm-evaluator.js';
