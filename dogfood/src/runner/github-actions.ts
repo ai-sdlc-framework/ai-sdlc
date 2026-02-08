@@ -3,7 +3,7 @@
  * and collects the result via git diff.
  */
 
-import { execFile } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AgentRunner, AgentContext, AgentResult } from './types.js';
 
@@ -36,29 +36,49 @@ async function gitExec(workDir: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
+function runClaude(prompt: string, workDir: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      'claude',
+      ['-p', '--model', 'claude-opus-4-6', '--allowedTools', 'Edit,Write,Read,Glob,Grep,Bash'],
+      {
+        cwd: workDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env },
+      },
+    );
+
+    const chunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
+
+    child.stdout.on('data', (data: Buffer) => chunks.push(data));
+    child.stderr.on('data', (data: Buffer) => errChunks.push(data));
+
+    child.on('close', (code) => {
+      const stdout = Buffer.concat(chunks).toString('utf-8');
+      if (code === 0) {
+        resolve(stdout);
+      } else {
+        const stderr = Buffer.concat(errChunks).toString('utf-8');
+        reject(new Error(`claude exited with code ${code}: ${stderr || stdout}`));
+      }
+    });
+
+    child.on('error', reject);
+
+    // Send prompt via stdin and close it
+    child.stdin.write(prompt);
+    child.stdin.end();
+  });
+}
+
 export class GitHubActionsRunner implements AgentRunner {
   async run(ctx: AgentContext): Promise<AgentResult> {
     const prompt = buildPrompt(ctx);
 
     try {
-      // Invoke Claude Code CLI in print mode
-      const { stdout } = await execFileAsync(
-        'claude',
-        [
-          '-p',
-          '--model',
-          'claude-opus-4-6',
-          '--allowedTools',
-          'Edit,Write,Read,Glob,Grep,Bash',
-          prompt,
-        ],
-        {
-          cwd: ctx.workDir,
-          maxBuffer: 10 * 1024 * 1024, // 10 MB
-          timeout: 10 * 60 * 1000, // 10 minutes
-          env: { ...process.env },
-        },
-      );
+      // Invoke Claude Code CLI in print mode, sending prompt via stdin
+      const stdout = await runClaude(prompt, ctx.workDir);
 
       // Collect changed files
       const diffOutput = await gitExec(ctx.workDir, ['diff', '--name-only']);
