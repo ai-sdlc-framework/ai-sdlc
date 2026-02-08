@@ -30,9 +30,11 @@ export function buildPrompt(ctx: AgentContext): string {
       '1. Analyze the CI failure logs above to identify the root cause.',
       '2. Read the relevant source files to understand the context.',
       '3. Fix the errors that caused CI to fail.',
-      '4. Write or update tests if needed to cover your fix.',
-      '5. Do NOT modify files matching the blocked paths below.',
-      `6. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+      '4. If the failure is a formatting/prettier error, run `pnpm format` to auto-fix it.',
+      '5. After making ANY code changes, always run `pnpm lint` and `pnpm format` to catch issues before committing.',
+      '6. Write or update tests if needed to cover your fix.',
+      '7. Do NOT modify files matching the blocked paths below.',
+      `8. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   } else {
     lines.push(
@@ -40,8 +42,9 @@ export function buildPrompt(ctx: AgentContext): string {
       '1. Read the relevant source files to understand the codebase.',
       '2. Implement the fix or feature described in the issue.',
       '3. Write or update tests to cover your changes.',
-      '4. Do NOT modify files matching the blocked paths below.',
-      `5. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+      '4. After making code changes, run `pnpm lint` and `pnpm format` to ensure CI will pass.',
+      '5. Do NOT modify files matching the blocked paths below.',
+      `6. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   }
 

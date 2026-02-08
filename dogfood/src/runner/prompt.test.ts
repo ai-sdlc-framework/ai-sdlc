@@ -51,6 +51,15 @@ describe('buildPrompt()', () => {
 
     expect(prompt).toContain('Analyze the CI failure logs');
     expect(prompt).toContain('Fix the errors that caused CI to fail');
+    expect(prompt).toContain('pnpm format');
+    expect(prompt).toContain('pnpm lint');
     expect(prompt).not.toContain('Implement the fix or feature');
+  });
+
+  it('without ciErrors: instructions include lint and format step', () => {
+    const prompt = buildPrompt(makeContext());
+
+    expect(prompt).toContain('pnpm lint');
+    expect(prompt).toContain('pnpm format');
   });
 });
