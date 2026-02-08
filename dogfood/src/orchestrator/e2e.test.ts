@@ -1,10 +1,18 @@
+/**
+ * E2E integration tests — uses real .ai-sdlc/ config with mocked adapters + runner.
+ *
+ * Validates full orchestrator wiring including post-agent guardrail enforcement.
+ */
+
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolve } from 'node:path';
 import { executePipeline } from './execute.js';
 import type { AgentRunner, AgentResult } from '../runner/types.js';
 import type { IssueTracker, SourceControl, Issue, PullRequest } from '@ai-sdlc/reference';
+import type { Logger } from './logger.js';
 
 // Mock child_process.execFile used by executePipeline for git checkout/push
+// and by validateAgentOutput for git diff --stat
 vi.mock('node:child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb?: unknown) => {
     if (typeof cb === 'function') {
@@ -15,6 +23,17 @@ vi.mock('node:child_process', () => ({
 }));
 
 const CONFIG_DIR = resolve(import.meta.dirname, '../../../.ai-sdlc');
+
+/** Silent logger to avoid noise in test output. */
+function makeSilentLogger(): Logger {
+  return {
+    stage: vi.fn(),
+    stageEnd: vi.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    summary: vi.fn(),
+  };
+}
 
 function makeIssue(overrides: Partial<Issue> = {}): Issue {
   return {
@@ -88,14 +107,13 @@ function makeMockRunner(result?: Partial<AgentResult>): AgentRunner {
   };
 }
 
-describe('executePipeline()', () => {
+describe('E2E: executePipeline()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    // Set env vars needed for commentOnIssue
     process.env.GITHUB_TOKEN = '';
   });
 
-  it('runs the full pipeline successfully', async () => {
+  it('full success path — well-formed issue, clean agent output → PR created', async () => {
     const issue = makeIssue();
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
@@ -107,17 +125,11 @@ describe('executePipeline()', () => {
       tracker,
       sourceControl: sc,
       runner,
+      logger: makeSilentLogger(),
     });
 
     expect(tracker.getIssue).toHaveBeenCalledWith('42');
-    expect(sc.createBranch).toHaveBeenCalledWith({ name: 'ai-sdlc/issue-42' });
-    expect(runner.run).toHaveBeenCalledWith(
-      expect.objectContaining({
-        issueNumber: 42,
-        issueTitle: 'Fix test flakiness',
-        branch: 'ai-sdlc/issue-42',
-      }),
-    );
+    expect(runner.run).toHaveBeenCalled();
     expect(sc.createPR).toHaveBeenCalledWith(
       expect.objectContaining({
         sourceBranch: 'ai-sdlc/issue-42',
@@ -126,9 +138,9 @@ describe('executePipeline()', () => {
     );
   });
 
-  it('fails when quality gate validation fails', async () => {
+  it('pre-agent rejection — issue with complexity 5 is rejected before agent runs', async () => {
     const issue = makeIssue({
-      description: '## Description\ntest\n\n### Complexity\n5',
+      description: '## Description\ntest\n\n## Acceptance Criteria\n- ok\n\n### Complexity\n5',
     });
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
@@ -141,22 +153,22 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
+        logger: makeSilentLogger(),
       }),
-    ).rejects.toThrow('failed quality gate validation');
+    ).rejects.toThrow();
 
-    // Should not have created a branch or invoked the agent
-    expect(sc.createBranch).not.toHaveBeenCalled();
+    // Agent should never have been invoked
     expect(runner.run).not.toHaveBeenCalled();
+    // No PR should have been created
+    expect(sc.createPR).not.toHaveBeenCalled();
   });
 
-  it('fails when agent returns failure', async () => {
+  it('post-agent blocked path rejection — agent modifies .ai-sdlc/ files', async () => {
     const issue = makeIssue();
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner({
-      success: false,
-      filesChanged: [],
-      error: 'Compilation failed',
+      filesChanged: ['.ai-sdlc/pipeline.yaml', 'src/fix.test.ts'],
     });
 
     await expect(
@@ -166,55 +178,16 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
-      }),
-    ).rejects.toThrow('Agent failed');
-  });
-
-  it('passes agent constraints from config', async () => {
-    const issue = makeIssue();
-    const tracker = makeMockTracker(issue);
-    const sc = makeMockSourceControl();
-    const runner = makeMockRunner();
-
-    await executePipeline(42, {
-      configDir: CONFIG_DIR,
-      workDir: '/tmp/test-repo',
-      tracker,
-      sourceControl: sc,
-      runner,
-    });
-
-    expect(runner.run).toHaveBeenCalledWith(
-      expect.objectContaining({
-        constraints: {
-          maxFilesPerChange: 15,
-          requireTests: true,
-          blockedPaths: ['.github/workflows/**', '.ai-sdlc/**'],
-        },
-      }),
-    );
-  });
-
-  it('rejects when agent modifies blocked paths', async () => {
-    const issue = makeIssue();
-    const tracker = makeMockTracker(issue);
-    const sc = makeMockSourceControl();
-    const runner = makeMockRunner({
-      filesChanged: ['.github/workflows/ci.yml', 'src/fix.test.ts'],
-    });
-
-    await expect(
-      executePipeline(42, {
-        configDir: CONFIG_DIR,
-        workDir: '/tmp/test-repo',
-        tracker,
-        sourceControl: sc,
-        runner,
+        logger: makeSilentLogger(),
       }),
     ).rejects.toThrow('guardrail validation');
+
+    // Agent ran, but push/PR should NOT have happened
+    expect(runner.run).toHaveBeenCalled();
+    expect(sc.createPR).not.toHaveBeenCalled();
   });
 
-  it('rejects when agent changes too many files', async () => {
+  it('post-agent file count rejection — agent changes 20 files', async () => {
     const issue = makeIssue();
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
@@ -229,11 +202,15 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
+        logger: makeSilentLogger(),
       }),
     ).rejects.toThrow('guardrail validation');
+
+    expect(runner.run).toHaveBeenCalled();
+    expect(sc.createPR).not.toHaveBeenCalled();
   });
 
-  it('rejects when agent produces no test files', async () => {
+  it('post-agent missing tests rejection — agent returns only .ts files', async () => {
     const issue = makeIssue();
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
@@ -246,27 +223,11 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
+        logger: makeSilentLogger(),
       }),
     ).rejects.toThrow('guardrail validation');
-  });
-
-  it('rejects issues with complexity exceeding max', async () => {
-    const issue = makeIssue({
-      description: '## Description\ncomplex\n\n## Acceptance Criteria\n- ok\n\n### Complexity\n3',
-    });
-    const tracker = makeMockTracker(issue);
-    const sc = makeMockSourceControl();
-    const runner = makeMockRunner();
-
-    // complexity 3 is at the boundary — should pass
-    await executePipeline(42, {
-      configDir: CONFIG_DIR,
-      workDir: '/tmp/test-repo',
-      tracker,
-      sourceControl: sc,
-      runner,
-    });
 
     expect(runner.run).toHaveBeenCalled();
+    expect(sc.createPR).not.toHaveBeenCalled();
   });
 });

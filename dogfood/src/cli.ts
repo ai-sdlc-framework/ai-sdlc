@@ -5,6 +5,7 @@
  */
 
 import { executePipeline } from './orchestrator/execute.js';
+import { createLogger } from './orchestrator/logger.js';
 
 function parseArgs(argv: string[]): { issueNumber: number } {
   const idx = argv.indexOf('--issue');
@@ -22,13 +23,14 @@ function parseArgs(argv: string[]): { issueNumber: number } {
 
 async function main(): Promise<void> {
   const { issueNumber } = parseArgs(process.argv);
-  console.log(`[ai-sdlc] Starting pipeline for issue #${issueNumber}`);
+  const logger = createLogger();
+  logger.info(`Starting pipeline for issue #${issueNumber}`);
 
   try {
-    await executePipeline(issueNumber);
-    console.log(`[ai-sdlc] Pipeline completed successfully for issue #${issueNumber}`);
+    await executePipeline(issueNumber, { logger });
+    logger.info(`Pipeline completed successfully for issue #${issueNumber}`);
   } catch (err) {
-    console.error(`[ai-sdlc] Pipeline failed:`, err instanceof Error ? err.message : err);
+    logger.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 }

@@ -16,6 +16,8 @@ import {
 } from '@ai-sdlc/reference';
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
 import { validateIssue, parseComplexity } from './validate-issue.js';
+import { validateAgentOutput } from './validate-agent-output.js';
+import { createLogger, type Logger } from './logger.js';
 import type { AgentRunner } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
 
@@ -32,6 +34,8 @@ export interface ExecuteOptions {
   tracker?: IssueTracker;
   /** Inject a custom source control adapter (for testing). */
   sourceControl?: SourceControl;
+  /** Inject a custom logger (for testing). */
+  logger?: Logger;
 }
 
 async function commentOnIssue(
@@ -72,9 +76,12 @@ export async function executePipeline(
 ): Promise<void> {
   const workDir = options.workDir ?? (await resolveRepoRoot());
   const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
+  const log = options.logger ?? createLogger();
 
   // 1. Load .ai-sdlc/ config
+  log.stage('load-config');
   const config: AiSdlcConfig = loadConfig(configDir);
+  log.stageEnd('load-config');
 
   if (!config.qualityGate) {
     throw new Error('No QualityGate resource found in .ai-sdlc/');
@@ -97,6 +104,7 @@ export async function executePipeline(
   const sc = options.sourceControl ?? createGitHubSourceControl(ghConfig);
 
   // 3. Fetch issue
+  log.stage('validate-issue');
   const issue = await tracker.getIssue(String(issueNumber));
 
   // 4. Validate issue against quality gates
@@ -131,6 +139,7 @@ export async function executePipeline(
 
   // 6. Check autonomy level allows coding
   const currentLevel = config.autonomyPolicy.spec.levels.find((l) => l.level <= 1);
+  log.stageEnd('validate-issue');
   if (!currentLevel) {
     throw new Error('No autonomy level 0 or 1 found in policy');
   }
@@ -142,6 +151,7 @@ export async function executePipeline(
   await execFileAsync('git', ['checkout', branchName], { cwd: workDir });
 
   // 9. Invoke agent
+  log.stage('agent');
   const runner = options.runner ?? new GitHubActionsRunner();
   const constraints = config.agentRole.spec.constraints ?? {
     maxFilesPerChange: 15,
@@ -163,6 +173,7 @@ export async function executePipeline(
   });
 
   if (!result.success) {
+    log.stageEnd('agent');
     await commentOnIssue(
       tracker,
       String(issueNumber),
@@ -170,11 +181,41 @@ export async function executePipeline(
     );
     throw new Error(`Agent failed on issue #${issueNumber}: ${result.error}`);
   }
+  log.stageEnd('agent');
 
-  // 10. Push branch
+  // 10. Validate agent output against guardrails
+  log.stage('validate-output');
+  const validation = await validateAgentOutput({
+    filesChanged: result.filesChanged,
+    workDir,
+    constraints: {
+      maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
+      requireTests: constraints.requireTests ?? true,
+      blockedPaths: constraints.blockedPaths ?? [],
+    },
+    guardrails: { maxLinesPerPR: currentLevel.guardrails.maxLinesPerPR },
+  });
+  log.stageEnd('validate-output');
+
+  if (!validation.passed) {
+    const violationList = validation.violations
+      .map((v) => `- **${v.rule}**: ${v.message}`)
+      .join('\n');
+    await commentOnIssue(
+      tracker,
+      String(issueNumber),
+      `## AI-SDLC: Guardrail Violations\n\n${violationList}`,
+    );
+    throw new Error('Agent output failed guardrail validation');
+  }
+
+  // 11. Push branch
+  log.stage('push');
   await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
+  log.stageEnd('push');
 
-  // 11. Create PR
+  // 12. Create PR
+  log.stage('create-pr');
   const pr = await sc.createPR({
     title: `fix: ${issue.title} (#${issueNumber})`,
     description: [
@@ -195,10 +236,14 @@ export async function executePipeline(
     targetBranch: 'main',
   });
 
-  // 12. Comment on issue with success
+  log.stageEnd('create-pr');
+
+  // 13. Comment on issue with success
   await commentOnIssue(
     tracker,
     String(issueNumber),
     `## AI-SDLC: PR Created\n\nPull request created: ${pr.url}\n\nFiles changed: ${result.filesChanged.length}\n\nPlease review and merge.`,
   );
+
+  log.summary();
 }
