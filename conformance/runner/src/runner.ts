@@ -7,11 +7,21 @@
  */
 
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { resolve, basename } from 'node:path';
+import { resolve, basename, relative } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { validateResource, type ValidationResult } from '@ai-sdlc/reference';
 import { isBehavioralFixture, runBehavioralTestAsync } from './behavioral.js';
 import type { BehavioralResult } from './behavioral.js';
+
+/** Conformance level classification per PRD §18.2. */
+export type ConformanceLevel = 'core' | 'adapter' | 'full';
+
+/** Per-level tally of conformance results. */
+export interface ConformanceLevelReport {
+  core: { total: number; passed: number; failed: number };
+  adapter: { total: number; passed: number; failed: number };
+  full: { total: number; passed: number; failed: number };
+}
 
 export interface FixtureResult {
   file: string;
@@ -19,6 +29,7 @@ export interface FixtureResult {
   actualValid: boolean;
   passed: boolean;
   errors?: ValidationResult['errors'];
+  conformanceLevel?: ConformanceLevel;
 }
 
 export interface RunnerReport {
@@ -32,6 +43,30 @@ export interface RunnerReport {
     failed: number;
     results: BehavioralResult[];
   };
+  conformanceLevels?: ConformanceLevelReport;
+}
+
+/**
+ * Classify a fixture file path into a conformance level.
+ * - pipeline/, quality-gate/ → 'core'
+ * - adapter/, agent-role/ → 'adapter'
+ * - autonomy-policy/ → 'full'
+ */
+export function classifyFixtureLevel(filePath: string, baseDir: string): ConformanceLevel {
+  const rel = relative(baseDir, filePath);
+  const topDir = rel.split('/')[0];
+  switch (topDir) {
+    case 'pipeline':
+    case 'quality-gate':
+      return 'core';
+    case 'adapter':
+    case 'agent-role':
+      return 'adapter';
+    case 'autonomy-policy':
+      return 'full';
+    default:
+      return 'core';
+  }
 }
 
 /**
@@ -80,6 +115,7 @@ export async function runConformanceTests(fixturesDir?: string): Promise<RunnerR
 
     const expectedValid = expectedValidity(file);
     const validation = validateResource(doc);
+    const conformanceLevel = classifyFixtureLevel(file, dir);
 
     schemaResults.push({
       file,
@@ -87,11 +123,25 @@ export async function runConformanceTests(fixturesDir?: string): Promise<RunnerR
       actualValid: validation.valid,
       passed: validation.valid === expectedValid,
       errors: validation.valid ? undefined : validation.errors,
+      conformanceLevel,
     });
   }
 
   const schemaPassed = schemaResults.filter((r) => r.passed).length;
   const behavioralPassed = behavioralResults.filter((r) => r.passed).length;
+
+  // Compute per-level tallies
+  const conformanceLevels: ConformanceLevelReport = {
+    core: { total: 0, passed: 0, failed: 0 },
+    adapter: { total: 0, passed: 0, failed: 0 },
+    full: { total: 0, passed: 0, failed: 0 },
+  };
+  for (const r of schemaResults) {
+    const level = r.conformanceLevel ?? 'core';
+    conformanceLevels[level].total++;
+    if (r.passed) conformanceLevels[level].passed++;
+    else conformanceLevels[level].failed++;
+  }
 
   return {
     total: schemaResults.length + behavioralResults.length,
@@ -104,5 +154,6 @@ export async function runConformanceTests(fixturesDir?: string): Promise<RunnerR
       failed: behavioralResults.length - behavioralPassed,
       results: behavioralResults,
     },
+    conformanceLevels,
   };
 }

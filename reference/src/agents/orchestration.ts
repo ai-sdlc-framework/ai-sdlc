@@ -4,19 +4,14 @@
  * Five orchestration patterns for multi-agent collaboration:
  * 1. Sequential — agents execute in order
  * 2. Parallel — agents execute concurrently
- * 3. Router — single agent dispatches to specialists
+ * 3. Hybrid — single agent dispatches to specialists
  * 4. Hierarchical — manager delegates to workers
- * 5. Collaborative — agents negotiate via handoffs
+ * 5. Swarm — agents negotiate via handoffs
  */
 
 import type { AgentRole } from '../core/types.js';
 
-export type OrchestrationPattern =
-  | 'sequential'
-  | 'parallel'
-  | 'router'
-  | 'hierarchical'
-  | 'collaborative';
+export type OrchestrationPattern = 'sequential' | 'parallel' | 'hybrid' | 'hierarchical' | 'swarm';
 
 export interface OrchestrationStep {
   agent: string;
@@ -50,9 +45,9 @@ export function parallel(agents: AgentRole[]): OrchestrationPlan {
 }
 
 /**
- * Build a router orchestration plan with a dispatcher and specialists.
+ * Build a hybrid orchestration plan with a dispatcher and specialists.
  */
-export function router(dispatcher: AgentRole, specialists: AgentRole[]): OrchestrationPlan {
+export function hybrid(dispatcher: AgentRole, specialists: AgentRole[]): OrchestrationPlan {
   const steps: OrchestrationStep[] = [
     { agent: dispatcher.metadata.name },
     ...specialists.map((s) => ({
@@ -60,7 +55,7 @@ export function router(dispatcher: AgentRole, specialists: AgentRole[]): Orchest
       dependsOn: [dispatcher.metadata.name],
     })),
   ];
-  return { pattern: 'router', steps };
+  return { pattern: 'hybrid', steps };
 }
 
 /**
@@ -78,10 +73,10 @@ export function hierarchical(manager: AgentRole, workers: AgentRole[]): Orchestr
 }
 
 /**
- * Build a collaborative orchestration plan from agents that reference
+ * Build a swarm orchestration plan from agents that reference
  * each other via handoff declarations.
  */
-export function collaborative(agents: AgentRole[]): OrchestrationPlan {
+export function swarm(agents: AgentRole[]): OrchestrationPlan {
   const steps: OrchestrationStep[] = agents.map((agent) => {
     const dependsOn = agents
       .filter((other) => other.spec.handoffs?.some((h) => h.target === agent.metadata.name))
@@ -91,5 +86,11 @@ export function collaborative(agents: AgentRole[]): OrchestrationPlan {
       dependsOn: dependsOn.length > 0 ? dependsOn : undefined,
     };
   });
-  return { pattern: 'collaborative', steps };
+  return { pattern: 'swarm', steps };
 }
+
+/** @deprecated Use `hybrid` instead. */
+export { hybrid as router };
+
+/** @deprecated Use `swarm` instead. */
+export { swarm as collaborative };

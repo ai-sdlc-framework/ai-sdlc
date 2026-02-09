@@ -9,6 +9,9 @@ export { validate, validateResource, type ValidationResult } from '@ai-sdlc/refe
 export {
   runConformanceTests,
   expectedValidity,
+  classifyFixtureLevel,
+  type ConformanceLevel,
+  type ConformanceLevelReport,
   type FixtureResult,
   type RunnerReport,
 } from './runner.js';

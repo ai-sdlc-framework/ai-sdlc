@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { sequential, parallel, router, hierarchical, collaborative } from './orchestration.js';
+import {
+  sequential,
+  parallel,
+  hybrid,
+  hierarchical,
+  swarm,
+  router,
+  collaborative,
+} from './orchestration.js';
 import type { AgentRole } from '../core/types.js';
 import { API_VERSION } from '../core/types.js';
 
@@ -47,12 +55,12 @@ describe('parallel()', () => {
   });
 });
 
-describe('router()', () => {
+describe('hybrid()', () => {
   it('specialists depend on dispatcher', () => {
     const dispatcher = makeAgent('dispatcher');
     const specialists = [makeAgent('s1'), makeAgent('s2')];
-    const plan = router(dispatcher, specialists);
-    expect(plan.pattern).toBe('router');
+    const plan = hybrid(dispatcher, specialists);
+    expect(plan.pattern).toBe('hybrid');
     expect(plan.steps).toHaveLength(3);
     expect(plan.steps[0].agent).toBe('dispatcher');
     expect(plan.steps[0].dependsOn).toBeUndefined();
@@ -75,15 +83,15 @@ describe('hierarchical()', () => {
   });
 });
 
-describe('collaborative()', () => {
+describe('swarm()', () => {
   it('derives deps from handoff declarations', () => {
     const agents = [
       makeAgent('planner', [{ target: 'coder', trigger: 'plan-complete' }]),
       makeAgent('coder', [{ target: 'reviewer', trigger: 'code-complete' }]),
       makeAgent('reviewer'),
     ];
-    const plan = collaborative(agents);
-    expect(plan.pattern).toBe('collaborative');
+    const plan = swarm(agents);
+    expect(plan.pattern).toBe('swarm');
     // planner hands off to coder → coder depends on planner
     // coder hands off to reviewer → reviewer depends on coder
     expect(plan.steps[0].dependsOn).toBeUndefined(); // planner — nobody hands off to it
@@ -93,9 +101,19 @@ describe('collaborative()', () => {
 
   it('no handoffs means no deps', () => {
     const agents = [makeAgent('a'), makeAgent('b')];
-    const plan = collaborative(agents);
+    const plan = swarm(agents);
     for (const step of plan.steps) {
       expect(step.dependsOn).toBeUndefined();
     }
+  });
+});
+
+describe('deprecated aliases', () => {
+  it('router is an alias for hybrid', () => {
+    expect(router).toBe(hybrid);
+  });
+
+  it('collaborative is an alias for swarm', () => {
+    expect(collaborative).toBe(swarm);
   });
 });

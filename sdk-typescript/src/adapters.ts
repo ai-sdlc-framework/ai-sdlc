@@ -79,4 +79,14 @@ export {
   // Linear adapter
   createLinearIssueTracker,
   type LinearClientLike,
+
+  // Git-based adapter resolver
+  parseGitAdapterRef,
+  buildRawUrl,
+  createGitAdapterFetcher,
+  createStubGitAdapterFetcher,
+  resolveGitAdapter,
+  type GitAdapterReference,
+  type GitAdapterFetcher,
+  type GitResolveResult,
 } from '@ai-sdlc/reference';

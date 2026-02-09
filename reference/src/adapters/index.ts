@@ -90,3 +90,15 @@ export {
   type WebhookBridge,
   type WebhookTransformer,
 } from './webhook-bridge.js';
+
+// Git-based adapter resolver
+export {
+  parseGitAdapterRef,
+  buildRawUrl,
+  createGitAdapterFetcher,
+  createStubGitAdapterFetcher,
+  resolveGitAdapter,
+  type GitAdapterReference,
+  type GitAdapterFetcher,
+  type GitResolveResult,
+} from './git-resolver.js';

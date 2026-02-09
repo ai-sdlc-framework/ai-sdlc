@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { executeOrchestration, validateHandoff } from './executor.js';
 import type { TaskFn } from './executor.js';
-import { sequential, parallel, router, hierarchical, collaborative } from './orchestration.js';
+import { sequential, parallel, hybrid, hierarchical, swarm } from './orchestration.js';
 import type { AgentRole } from '../core/types.js';
 import { API_VERSION } from '../core/types.js';
 
@@ -100,11 +100,11 @@ describe('executeOrchestration()', () => {
     });
   });
 
-  describe('router', () => {
+  describe('hybrid', () => {
     it('runs dispatcher first, then specialists', async () => {
       const dispatch = makeAgent('dispatcher');
       const specs = [makeAgent('spec-a'), makeAgent('spec-b')];
-      const plan = router(dispatch, specs);
+      const plan = hybrid(dispatch, specs);
       const order: string[] = [];
       const taskFn: TaskFn = async (agent) => {
         order.push(agent.metadata.name);
@@ -120,7 +120,7 @@ describe('executeOrchestration()', () => {
     it('dispatcher failure prevents specialists from running', async () => {
       const dispatch = makeAgent('dispatcher');
       const specs = [makeAgent('spec-a')];
-      const plan = router(dispatch, specs);
+      const plan = hybrid(dispatch, specs);
       const taskFn: TaskFn = async (agent) => {
         if (agent.metadata.name === 'dispatcher') throw new Error('down');
         return 'ok';
@@ -149,13 +149,13 @@ describe('executeOrchestration()', () => {
     });
   });
 
-  describe('collaborative', () => {
+  describe('swarm', () => {
     it('respects handoff-derived dependencies', async () => {
       const a = makeAgent('writer', {
         handoffs: [{ target: 'reviewer', trigger: 'code-complete' }],
       });
       const b = makeAgent('reviewer');
-      const plan = collaborative([a, b]);
+      const plan = swarm([a, b]);
       const order: string[] = [];
       const taskFn: TaskFn = async (agent) => {
         order.push(agent.metadata.name);

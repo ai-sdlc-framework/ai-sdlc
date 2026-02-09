@@ -48,7 +48,7 @@ describe('SDK subpath exports', () => {
     expect(mod.createABACAuthorizationHook).toBeTypeOf('function');
   });
 
-  it('adapters exports interfaces, registry, scanner, stubs', async () => {
+  it('adapters exports interfaces, registry, scanner, stubs, git resolver', async () => {
     const mod = await import('./adapters.js');
     expect(mod.createAdapterRegistry).toBeTypeOf('function');
     expect(mod.validateAdapterMetadata).toBeTypeOf('function');
@@ -64,6 +64,12 @@ describe('SDK subpath exports', () => {
     expect(mod.createStubBitbucket).toBeTypeOf('function');
     expect(mod.createStubSonarQube).toBeTypeOf('function');
     expect(mod.createStubSemgrep).toBeTypeOf('function');
+    // Git resolver
+    expect(mod.parseGitAdapterRef).toBeTypeOf('function');
+    expect(mod.buildRawUrl).toBeTypeOf('function');
+    expect(mod.createGitAdapterFetcher).toBeTypeOf('function');
+    expect(mod.createStubGitAdapterFetcher).toBeTypeOf('function');
+    expect(mod.resolveGitAdapter).toBeTypeOf('function');
   });
 
   it('reconciler exports loop, domain reconcilers, diff', async () => {
@@ -83,8 +89,11 @@ describe('SDK subpath exports', () => {
     const mod = await import('./agents.js');
     expect(mod.sequential).toBeTypeOf('function');
     expect(mod.parallel).toBeTypeOf('function');
-    expect(mod.router).toBeTypeOf('function');
+    expect(mod.hybrid).toBeTypeOf('function');
     expect(mod.hierarchical).toBeTypeOf('function');
+    expect(mod.swarm).toBeTypeOf('function');
+    // Deprecated aliases
+    expect(mod.router).toBeTypeOf('function');
     expect(mod.collaborative).toBeTypeOf('function');
     expect(mod.executeOrchestration).toBeTypeOf('function');
     expect(mod.validateHandoff).toBeTypeOf('function');

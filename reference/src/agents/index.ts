@@ -1,8 +1,10 @@
 export {
   sequential,
   parallel,
-  router,
+  hybrid,
   hierarchical,
+  swarm,
+  router,
   collaborative,
   type OrchestrationPattern,
   type OrchestrationStep,
