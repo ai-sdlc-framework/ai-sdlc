@@ -83,3 +83,5 @@ export { parseDuration, DEFAULT_COOLDOWN_MS } from './autonomy.js';
 export { createRegoEvaluator } from './rego-evaluator.js';
 
 export { createCELEvaluator } from './cel-evaluator.js';
+
+export { createABACAuthorizationHook, type ABACPolicy, type ABACContext } from './abac.js';
