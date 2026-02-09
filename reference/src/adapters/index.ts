@@ -83,3 +83,10 @@ export {
   type StubSemgrepConfig,
   type StubSemgrepAdapter,
 } from './stubs/semgrep.js';
+
+// Webhook bridge
+export {
+  createWebhookBridge,
+  type WebhookBridge,
+  type WebhookTransformer,
+} from './webhook-bridge.js';
