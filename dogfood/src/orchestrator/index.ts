@@ -1,4 +1,4 @@
-export { loadConfig, type AiSdlcConfig } from './load-config.js';
+export { loadConfig, loadConfigAsync, type AiSdlcConfig } from './load-config.js';
 export { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
 export {
   executePipeline,
@@ -92,8 +92,16 @@ export {
   AdapterBindingBuilder,
   parseBuilderManifest,
   validateBuilderManifest,
+  parsePipelineManifest,
+  buildPipelineDistribution,
   API_VERSION,
+  type BuilderManifest,
+  type BuildDistributionOptions,
+  type DistributionBuildResult,
 } from './builders.js';
+
+// Watch mode
+export { startWatch, type WatchOptions, type WatchHandle } from './watch.js';
 
 // Agent orchestration
 export {
