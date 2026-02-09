@@ -43,13 +43,14 @@ export interface SecurityContext {
 
 /**
  * Create a pipeline security context using stub implementations.
+ * Accepts optional partial overrides to replace individual primitives.
  */
-export function createPipelineSecurity(): SecurityContext {
+export function createPipelineSecurity(overrides?: Partial<SecurityContext>): SecurityContext {
   return {
-    sandbox: createStubSandbox(),
-    jitCredentials: createStubJITCredentialIssuer(),
-    killSwitch: createStubKillSwitch(),
-    approvalWorkflow: createStubApprovalWorkflow(),
+    sandbox: overrides?.sandbox ?? createStubSandbox(),
+    jitCredentials: overrides?.jitCredentials ?? createStubJITCredentialIssuer(),
+    killSwitch: overrides?.killSwitch ?? createStubKillSwitch(),
+    approvalWorkflow: overrides?.approvalWorkflow ?? createStubApprovalWorkflow(),
   };
 }
 

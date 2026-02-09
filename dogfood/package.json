@@ -23,7 +23,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "execute": "tsx src/cli.ts",
-    "fix-ci": "tsx src/cli-fix-ci.ts"
+    "fix-ci": "tsx src/cli-fix-ci.ts",
+    "watch": "tsx src/cli-watch.ts"
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",

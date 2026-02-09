@@ -5,6 +5,7 @@
  */
 
 import {
+  createGitHubIssueTracker,
   evaluateDemotion,
   withSpan,
   getMeter,
@@ -24,6 +25,7 @@ import type { AgentRunner } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
 import {
   execFileAsync,
+  getGitHubConfig,
   extractIssueNumber,
   resolveRepoRoot,
   createDefaultAuditLog,
@@ -34,6 +36,7 @@ import {
   authorizeFilesChanged,
 } from './shared.js';
 import { renderTemplate } from './notifications.js';
+import { parseDuration } from './policy-evaluators.js';
 import {
   checkKillSwitch,
   issueAgentCredentials,
@@ -158,25 +161,37 @@ export async function executeFixCI(
   // Notification templates
   const notifTemplates = config.pipeline?.spec.notifications?.templates;
 
+  // Create default tracker when needed (lazy to avoid resolving secrets in test environments).
+  // In production (no _prComments injected), the tracker is always available.
+  let _tracker: IssueTracker | undefined = options.tracker;
+  function getTracker(): IssueTracker {
+    if (!_tracker) {
+      const { org, repo } = getGitHubConfig();
+      const ghConfig = { org, repo, token: { secretRef: 'github-token' } };
+      _tracker = createGitHubIssueTracker(ghConfig);
+    }
+    return _tracker;
+  }
+  // Tracker is available if injected directly or if we're not in test mode
+  const trackerAvailable = !!options.tracker || options._prComments === undefined;
+
   // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
   let comments: string[];
   if (options._prComments !== undefined) {
     comments = options._prComments;
-  } else if (options.tracker) {
-    const issueComments = await options.tracker.getComments(String(prNumber));
-    comments = issueComments.map((c) => c.body);
   } else {
-    comments = [];
+    const issueComments = await getTracker().getComments(String(prNumber));
+    comments = issueComments.map((c) => c.body);
   }
   const attempts = countRetryAttempts(comments);
   log.info(`Fix-CI attempt ${attempts + 1} of ${maxFixAttempts}`);
   log.stageEnd('check-retries');
 
-  // Helper to add a comment (via tracker or no-op)
+  // Helper to add a comment via tracker (uses default tracker in production)
   const addComment = async (body: string): Promise<void> => {
-    if (options.tracker) {
-      await options.tracker.addComment(String(prNumber), body);
+    if (trackerAvailable) {
+      await getTracker().addComment(String(prNumber), body);
     }
   };
 
@@ -222,13 +237,18 @@ export async function executeFixCI(
   const currentLevel = resolveAutonomyLevel(autonomyPolicy);
   const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
 
-  // 6. Fetch issue data (via tracker if available)
+  // 6. Fetch issue data (via tracker when available)
   let issueTitle = `Issue #${issueNumber}`;
   let issueBody = '';
-  if (options.tracker) {
-    const issueData = await options.tracker.getIssue(String(issueNumber));
+  if (trackerAvailable) {
+    const issueData = await getTracker().getIssue(String(issueNumber));
     issueTitle = issueData.title;
     issueBody = issueData.description ?? '';
+  }
+
+  // Store issue context in working memory
+  if (options.memory) {
+    options.memory.working.set('currentIssue', { prNumber, issueNumber, currentBranch });
   }
 
   // Query episodic memory for previous fix-CI attempts
@@ -241,184 +261,235 @@ export async function executeFixCI(
 
   const meter = getMeter();
 
-  // 7. Invoke agent with CI error context (with JIT credential lifecycle)
-  log.stage('agent');
-  const runner = options.runner ?? new GitHubActionsRunner();
-
-  // Issue JIT credentials before agent execution
-  const jitCred = options.security
-    ? await issueAgentCredentials(options.security, agentRole.metadata.name)
-    : undefined;
-
-  let result;
+  // Wrap agent+validation+push in try/catch for failure episodes
   try {
-    result = await withSpan(
-      SPAN_NAMES.AGENT_TASK,
+    // 7. Invoke agent with CI error context (with sandbox + JIT credential lifecycle)
+    log.stage('agent');
+    const runner = options.runner ?? new GitHubActionsRunner();
+
+    // Sandbox isolation around agent execution
+    let sandboxId: string | undefined;
+    let result;
+    try {
+      if (options.security) {
+        const timeoutMs = codeStage?.timeout ? parseDuration(codeStage.timeout) : 1_800_000;
+        sandboxId = await options.security.sandbox.isolate(`issue-${issueNumber}`, {
+          maxMemoryMb: 512,
+          maxCpuPercent: 80,
+          networkPolicy: 'egress-only',
+          timeoutMs,
+          allowedPaths: [workDir],
+        });
+      }
+
+      // Issue JIT credentials before agent execution
+      const jitCred = options.security
+        ? await issueAgentCredentials(options.security, agentRole.metadata.name)
+        : undefined;
+
+      try {
+        result = await withSpan(
+          SPAN_NAMES.AGENT_TASK,
+          {
+            [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
+            [ATTRIBUTE_KEYS.RESOURCE_NAME]: `pr#${prNumber}`,
+          },
+          async () => {
+            const r = await runner.run({
+              issueNumber,
+              issueTitle,
+              issueBody,
+              workDir,
+              branch: currentBranch,
+              constraints: {
+                maxFilesPerChange: resolved.maxFiles,
+                requireTests: resolved.requireTests,
+                blockedPaths: resolved.blockedPaths,
+              },
+              ciErrors: ciLogs,
+            });
+
+            if (!r.success) {
+              log.stageEnd('agent');
+              auditLog.record({
+                actor: 'system',
+                action: 'execute',
+                resource: `agent/${agentRole.metadata.name}`,
+                decision: 'denied',
+                details: { error: r.error },
+              });
+              meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
+              recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
+
+              // Evaluate demotion on agent failure
+              const agentMetrics: AgentMetrics = {
+                name: agentRole.metadata.name,
+                currentLevel: currentLevel.level,
+                totalTasksCompleted: 0,
+                metrics: {},
+                approvals: [],
+              };
+              const demotion = evaluateDemotion(autonomyPolicy, agentMetrics, 'failed-test');
+              log.info(
+                `Demotion evaluation: ${demotion.demoted ? `demoted from ${demotion.fromLevel} to ${demotion.toLevel}` : 'no demotion'}`,
+              );
+              auditLog.record({
+                actor: 'system',
+                action: 'evaluate',
+                resource: `agent/${agentRole.metadata.name}`,
+                policy: 'demotion',
+                decision: demotion.demoted ? 'denied' : 'allowed',
+                details: {
+                  trigger: demotion.trigger,
+                  fromLevel: demotion.fromLevel,
+                  toLevel: demotion.toLevel,
+                },
+              });
+
+              const agentFailTpl = notifTemplates?.['agent-failure'];
+              const errorDetail = r.error ?? 'Unknown error';
+              const agentFailComment = agentFailTpl
+                ? renderTemplate(agentFailTpl, { stageName: 'fix-ci', details: errorDetail })
+                : { title: 'AI-SDLC: Fix-CI Agent Failed', body: errorDetail };
+              await addComment(
+                `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}`,
+              );
+              throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${r.error}`);
+            }
+            log.stageEnd('agent');
+
+            auditLog.record({
+              actor: 'system',
+              action: 'execute',
+              resource: `agent/${agentRole.metadata.name}`,
+              decision: 'allowed',
+              details: { filesChanged: r.filesChanged.length },
+            });
+            meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
+            recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
+
+            return r;
+          },
+        );
+      } finally {
+        // Revoke JIT credentials after agent execution (success or failure)
+        if (jitCred && options.security) {
+          await revokeAgentCredentials(options.security, jitCred.id);
+        }
+      }
+    } finally {
+      // Destroy sandbox after agent execution
+      if (sandboxId && options.security) {
+        await options.security.sandbox.destroy(sandboxId);
+      }
+    }
+
+    // 8. ABAC authorization check (if write permissions are defined)
+    if (currentLevel.permissions.write.length > 0) {
+      authorizeFilesChanged(
+        result.filesChanged,
+        currentLevel.permissions,
+        agentRole.spec.constraints,
+        auditLog,
+        agentRole.metadata.name,
+      );
+    }
+
+    // 9. Validate agent output against guardrails
+    await withSpan(
+      SPAN_NAMES.PIPELINE_STAGE,
       {
-        [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
-        [ATTRIBUTE_KEYS.RESOURCE_NAME]: `pr#${prNumber}`,
+        [ATTRIBUTE_KEYS.STAGE]: 'validate-output',
       },
       async () => {
-        const r = await runner.run({
-          issueNumber,
-          issueTitle,
-          issueBody,
+        await validateAndAuditOutput({
+          filesChanged: result.filesChanged,
           workDir,
-          branch: currentBranch,
           constraints: {
             maxFilesPerChange: resolved.maxFiles,
             requireTests: resolved.requireTests,
             blockedPaths: resolved.blockedPaths,
           },
-          ciErrors: ciLogs,
+          guardrails: { maxLinesPerPR: currentLevel.guardrails.maxLinesPerPR },
+          auditLog,
+          log,
+          onViolation: async (violationList) => {
+            await addComment(
+              `## AI-SDLC: Fix-CI Guardrail Violations\n\n${violationList}\n\n${RETRY_MARKER}`,
+            );
+          },
         });
-
-        if (!r.success) {
-          log.stageEnd('agent');
-          auditLog.record({
-            actor: 'system',
-            action: 'execute',
-            resource: `agent/${agentRole.metadata.name}`,
-            decision: 'denied',
-            details: { error: r.error },
-          });
-          meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
-          recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
-
-          // Evaluate demotion on agent failure
-          const agentMetrics: AgentMetrics = {
-            name: agentRole.metadata.name,
-            currentLevel: currentLevel.level,
-            totalTasksCompleted: 0,
-            metrics: {},
-            approvals: [],
-          };
-          const demotion = evaluateDemotion(autonomyPolicy, agentMetrics, 'failed-test');
-          log.info(
-            `Demotion evaluation: ${demotion.demoted ? `demoted from ${demotion.fromLevel} to ${demotion.toLevel}` : 'no demotion'}`,
-          );
-          auditLog.record({
-            actor: 'system',
-            action: 'evaluate',
-            resource: `agent/${agentRole.metadata.name}`,
-            policy: 'demotion',
-            decision: demotion.demoted ? 'denied' : 'allowed',
-            details: {
-              trigger: demotion.trigger,
-              fromLevel: demotion.fromLevel,
-              toLevel: demotion.toLevel,
-            },
-          });
-
-          const agentFailTpl = notifTemplates?.['agent-failure'];
-          const errorDetail = r.error ?? 'Unknown error';
-          const agentFailComment = agentFailTpl
-            ? renderTemplate(agentFailTpl, { stageName: 'fix-ci', details: errorDetail })
-            : { title: 'AI-SDLC: Fix-CI Agent Failed', body: errorDetail };
-          await addComment(
-            `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}`,
-          );
-          throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${r.error}`);
-        }
-        log.stageEnd('agent');
-
-        auditLog.record({
-          actor: 'system',
-          action: 'execute',
-          resource: `agent/${agentRole.metadata.name}`,
-          decision: 'allowed',
-          details: { filesChanged: r.filesChanged.length },
-        });
-        meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
-        recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
-
-        return r;
       },
     );
-  } finally {
-    // Revoke JIT credentials after agent execution (success or failure)
-    if (jitCred && options.security) {
-      await revokeAgentCredentials(options.security, jitCred.id);
-    }
-  }
 
-  // 8. ABAC authorization check (if write permissions are defined)
-  if (currentLevel.permissions.write.length > 0) {
-    authorizeFilesChanged(
-      result.filesChanged,
-      currentLevel.permissions,
-      agentRole.spec.constraints,
-      auditLog,
-      agentRole.metadata.name,
-    );
-  }
+    // 10. Push to the same branch (CI re-runs automatically)
+    log.stage('push');
+    await execFileAsync('git', ['push', 'origin', currentBranch], { cwd: workDir });
+    log.stageEnd('push');
 
-  // 9. Validate agent output against guardrails
-  await withSpan(
-    SPAN_NAMES.PIPELINE_STAGE,
-    {
-      [ATTRIBUTE_KEYS.STAGE]: 'validate-output',
-    },
-    async () => {
-      await validateAndAuditOutput({
-        filesChanged: result.filesChanged,
-        workDir,
-        constraints: {
-          maxFilesPerChange: resolved.maxFiles,
-          requireTests: resolved.requireTests,
-          blockedPaths: resolved.blockedPaths,
-        },
-        guardrails: { maxLinesPerPR: currentLevel.guardrails.maxLinesPerPR },
-        auditLog,
-        log,
-        onViolation: async (violationList) => {
-          await addComment(
-            `## AI-SDLC: Fix-CI Guardrail Violations\n\n${violationList}\n\n${RETRY_MARKER}`,
-          );
-        },
-      });
-    },
-  );
-
-  // 10. Push to the same branch (CI re-runs automatically)
-  log.stage('push');
-  await execFileAsync('git', ['push', 'origin', currentBranch], { cwd: workDir });
-  log.stageEnd('push');
-
-  auditLog.record({
-    actor: 'system',
-    action: 'create',
-    resource: `push/${currentBranch}`,
-    decision: 'allowed',
-    details: { prNumber, attempt: attempts + 1 },
-  });
-
-  // 11. Comment on PR with success details
-  await addComment(
-    [
-      '## AI-SDLC: Fix-CI Applied',
-      '',
-      `Attempt ${attempts + 1} of ${MAX_FIX_ATTEMPTS} — pushed fixes to \`${currentBranch}\`.`,
-      '',
-      '### Changes',
-      result.filesChanged.map((f) => `- \`${f}\``).join('\n'),
-      '',
-      RETRY_MARKER,
-    ].join('\n'),
-  );
-
-  // 12. Record episodic memory
-  if (options.memory) {
-    options.memory.episodic.append({
-      key: 'fix-ci-execution',
-      value: {
-        prNumber,
-        issueNumber,
-        filesChanged: result.filesChanged.length,
-        outcome: 'success',
-      },
-      metadata: { summary: `Fix-CI for PR #${prNumber} (attempt ${attempts + 1})` },
+    auditLog.record({
+      actor: 'system',
+      action: 'create',
+      resource: `push/${currentBranch}`,
+      decision: 'allowed',
+      details: { prNumber, attempt: attempts + 1 },
     });
+
+    // 11. Comment on PR with success details
+    const successTpl = notifTemplates?.['fix-ci-success'];
+    const successComment = successTpl
+      ? renderTemplate(successTpl, {
+          attempt: String(attempts + 1),
+          max: String(maxFixAttempts),
+          branch: currentBranch,
+        })
+      : {
+          title: 'AI-SDLC: Fix-CI Applied',
+          body: `Attempt ${attempts + 1} of ${maxFixAttempts} — pushed fixes to \`${currentBranch}\`.`,
+        };
+    await addComment(
+      [
+        `## ${successComment.title}`,
+        '',
+        successComment.body,
+        '',
+        '### Changes',
+        result.filesChanged.map((f) => `- \`${f}\``).join('\n'),
+        '',
+        RETRY_MARKER,
+      ].join('\n'),
+    );
+
+    // 12. Record episodic memory (success)
+    if (options.memory) {
+      options.memory.episodic.append({
+        key: 'fix-ci-execution',
+        value: {
+          prNumber,
+          issueNumber,
+          filesChanged: result.filesChanged.length,
+          outcome: 'success',
+        },
+        metadata: { summary: `Fix-CI for PR #${prNumber} (attempt ${attempts + 1})` },
+      });
+      options.memory.working.clear();
+    }
+  } catch (err) {
+    // Record failure episode before rethrowing
+    if (options.memory) {
+      options.memory.episodic.append({
+        key: 'fix-ci-execution',
+        value: {
+          prNumber,
+          issueNumber,
+          outcome: 'failure',
+          error: err instanceof Error ? err.message : String(err),
+        },
+        metadata: { summary: `Failed fix-CI for PR #${prNumber}` },
+      });
+      options.memory.working.clear();
+    }
+    throw err;
   }
 
   log.summary();

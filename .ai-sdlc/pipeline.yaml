@@ -79,3 +79,11 @@ spec:
         target: pr
         title: 'AI-SDLC: Retry Limit Reached'
         body: 'Max fix attempts reached. Manual intervention needed.'
+      complexity-too-high:
+        target: issue
+        title: 'AI-SDLC: Complexity Too High'
+        body: 'Issue complexity ({score}) routed as "{strategy}" — requires human involvement.'
+      fix-ci-success:
+        target: pr
+        title: 'AI-SDLC: Fix-CI Applied'
+        body: 'Attempt {attempt} of {max} — pushed fixes to `{branch}`.'

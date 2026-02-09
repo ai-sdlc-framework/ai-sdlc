@@ -11,6 +11,7 @@ import {
   createGitHubSourceControl,
   routeByComplexity,
   evaluatePromotion,
+  evaluateComplexity,
   withSpan,
   getMeter,
   SPAN_NAMES,
@@ -60,9 +61,11 @@ import { createPipelineDiscovery, resolveAgentForIssue } from './discovery.js';
 import {
   createPipelineExpressionEvaluator,
   createPipelineLLMEvaluator,
+  parseDuration,
 } from './policy-evaluators.js';
 import { verifyAuditIntegrity } from './audit-extended.js';
 import { renderTemplate } from './notifications.js';
+import { admitIssueResource, type AdmissionPipeline } from './admission.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -113,6 +116,8 @@ export interface ExecuteOptions {
   useDefaultEvaluators?: boolean;
   /** Path to an audit log file for integrity verification at pipeline end. */
   auditFilePath?: string;
+  /** Admission pipeline for pre-execution resource validation. */
+  admission?: AdmissionPipeline;
 }
 
 /**
@@ -138,6 +143,20 @@ export async function executePipeline(
   // Kill switch check (before any work)
   if (options.security) {
     await checkKillSwitch(options.security);
+  }
+
+  // Admission pipeline check (before resource validation)
+  if (options.admission && config.pipeline) {
+    const admissionResult = await admitIssueResource(config.pipeline, options.admission);
+    if (!admissionResult.admitted) {
+      throw new Error(`Pipeline admission denied: ${admissionResult.error ?? 'unknown'}`);
+    }
+    auditLog.record({
+      actor: 'system',
+      action: 'admit',
+      resource: config.pipeline.metadata.name,
+      decision: 'allowed',
+    });
   }
 
   if (!config.qualityGate) {
@@ -320,9 +339,16 @@ async function executePipelineBody(
   });
 
   if (!isAutonomousStrategy(strategy)) {
+    const complexityTpl = config.pipeline?.spec.notifications?.templates?.['complexity-too-high'];
+    const complexityComment = complexityTpl
+      ? renderTemplate(complexityTpl, { score: String(complexity), strategy })
+      : {
+          title: 'AI-SDLC: Complexity Too High',
+          body: `Issue complexity (${complexity}) routed as "${strategy}" — requires human involvement.`,
+        };
     await tracker.addComment(
       String(issueNumber),
-      `## AI-SDLC: Complexity Too High\n\nIssue complexity (${complexity}) routed as "${strategy}" — requires human involvement.`,
+      `## ${complexityComment.title}\n\n${complexityComment.body}`,
     );
     throw new Error(`Issue #${issueNumber} complexity ${complexity} routed as "${strategy}"`);
   }
@@ -356,78 +382,99 @@ async function executePipelineBody(
   // 8. Resolve agent constraints
   const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
 
-  // 9. Invoke agent (with JIT credential lifecycle when security is provided)
+  // 9. Invoke agent (with sandbox + JIT credential lifecycle when security is provided)
   log.stage('agent');
   const runner = options.runner ?? new GitHubActionsRunner();
 
-  // Issue JIT credentials before agent execution
-  const jitCred = options.security
-    ? await issueAgentCredentials(options.security, agentRole.metadata.name)
-    : undefined;
-
+  // Sandbox isolation around agent execution
+  const codeStage = config.pipeline?.spec.stages.find((s) => s.name === 'code');
+  let sandboxId: string | undefined;
   let result;
   try {
-    result = await withSpan(
-      SPAN_NAMES.AGENT_TASK,
-      {
-        [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
-        [ATTRIBUTE_KEYS.RESOURCE_NAME]: `issue#${issueNumber}`,
-      },
-      async () => {
-        const r = await runner.run({
-          issueNumber,
-          issueTitle: issue.title,
-          issueBody: issue.description ?? '',
-          workDir,
-          branch: branchName,
-          constraints: {
-            maxFilesPerChange: resolved.maxFiles,
-            requireTests: resolved.requireTests,
-            blockedPaths: resolved.blockedPaths,
-          },
-        });
+    if (options.security) {
+      const timeoutMs = codeStage?.timeout ? parseDuration(codeStage.timeout) : 1_800_000;
+      sandboxId = await options.security.sandbox.isolate(`issue-${issueNumber}`, {
+        maxMemoryMb: 512,
+        maxCpuPercent: 80,
+        networkPolicy: 'egress-only',
+        timeoutMs,
+        allowedPaths: [workDir],
+      });
+    }
 
-        if (!r.success) {
+    // Issue JIT credentials before agent execution
+    const jitCred = options.security
+      ? await issueAgentCredentials(options.security, agentRole.metadata.name)
+      : undefined;
+
+    try {
+      result = await withSpan(
+        SPAN_NAMES.AGENT_TASK,
+        {
+          [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
+          [ATTRIBUTE_KEYS.RESOURCE_NAME]: `issue#${issueNumber}`,
+        },
+        async () => {
+          const r = await runner.run({
+            issueNumber,
+            issueTitle: issue.title,
+            issueBody: issue.description ?? '',
+            workDir,
+            branch: branchName,
+            constraints: {
+              maxFilesPerChange: resolved.maxFiles,
+              requireTests: resolved.requireTests,
+              blockedPaths: resolved.blockedPaths,
+            },
+          });
+
+          if (!r.success) {
+            log.stageEnd('agent');
+            auditLog.record({
+              actor: 'system',
+              action: 'execute',
+              resource: `agent/${agentRole.metadata.name}`,
+              decision: 'denied',
+              details: { error: r.error },
+            });
+            meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
+            recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
+            const agentFailTpl = config.pipeline?.spec.notifications?.templates?.['agent-failure'];
+            const errorDetail = r.error ?? 'Unknown error';
+            const agentFailComment = agentFailTpl
+              ? renderTemplate(agentFailTpl, { stageName: 'code', details: errorDetail })
+              : { title: 'AI-SDLC: Agent Failed', body: errorDetail };
+            await tracker.addComment(
+              String(issueNumber),
+              `## ${agentFailComment.title}\n\n${agentFailComment.body}`,
+            );
+            throw new Error(`Agent failed on issue #${issueNumber}: ${r.error}`);
+          }
           log.stageEnd('agent');
+
           auditLog.record({
             actor: 'system',
             action: 'execute',
             resource: `agent/${agentRole.metadata.name}`,
-            decision: 'denied',
-            details: { error: r.error },
+            decision: 'allowed',
+            details: { filesChanged: r.filesChanged.length },
           });
-          meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
-          recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
-          const agentFailTpl = config.pipeline?.spec.notifications?.templates?.['agent-failure'];
-          const errorDetail = r.error ?? 'Unknown error';
-          const agentFailComment = agentFailTpl
-            ? renderTemplate(agentFailTpl, { stageName: 'code', details: errorDetail })
-            : { title: 'AI-SDLC: Agent Failed', body: errorDetail };
-          await tracker.addComment(
-            String(issueNumber),
-            `## ${agentFailComment.title}\n\n${agentFailComment.body}`,
-          );
-          throw new Error(`Agent failed on issue #${issueNumber}: ${r.error}`);
-        }
-        log.stageEnd('agent');
+          meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
+          recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
 
-        auditLog.record({
-          actor: 'system',
-          action: 'execute',
-          resource: `agent/${agentRole.metadata.name}`,
-          decision: 'allowed',
-          details: { filesChanged: r.filesChanged.length },
-        });
-        meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
-        recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
-
-        return r;
-      },
-    );
+          return r;
+        },
+      );
+    } finally {
+      // Revoke JIT credentials after agent execution (success or failure)
+      if (jitCred && options.security) {
+        await revokeAgentCredentials(options.security, jitCred.id);
+      }
+    }
   } finally {
-    // Revoke JIT credentials after agent execution (success or failure)
-    if (jitCred && options.security) {
-      await revokeAgentCredentials(options.security, jitCred.id);
+    // Destroy sandbox after agent execution
+    if (sandboxId && options.security) {
+      await options.security.sandbox.destroy(sandboxId);
     }
   }
 
@@ -469,6 +516,38 @@ async function executePipelineBody(
       });
     },
   );
+
+  // 11b. Post-agent complexity evaluation (non-blocking)
+  try {
+    const { stdout: diffStat } = await execFileAsync('git', ['diff', '--stat', 'HEAD~1'], {
+      cwd: workDir,
+    });
+    const insertMatch = diffStat.match(/(\d+) insertions?\(\+\)/);
+    const deleteMatch = diffStat.match(/(\d+) deletions?\(-\)/);
+    const linesOfChange =
+      (insertMatch ? Number(insertMatch[1]) : 0) + (deleteMatch ? Number(deleteMatch[1]) : 0);
+    const postAgentComplexity = evaluateComplexity({
+      filesAffected: result.filesChanged.length,
+      linesOfChange,
+    });
+    auditLog.record({
+      actor: 'system',
+      action: 'evaluate',
+      resource: `issue#${issueNumber}`,
+      policy: 'post-agent-complexity',
+      decision: 'allowed',
+      details: {
+        score: postAgentComplexity.score,
+        strategy: postAgentComplexity.strategy,
+        linesOfChange,
+      },
+    });
+    log.info(
+      `Post-agent complexity: ${postAgentComplexity.score} (${postAgentComplexity.strategy})`,
+    );
+  } catch {
+    log.info('Post-agent complexity evaluation skipped');
+  }
 
   // 12. Push branch
   log.stage('push');

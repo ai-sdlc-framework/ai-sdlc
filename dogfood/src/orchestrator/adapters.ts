@@ -5,16 +5,10 @@
  */
 
 import {
-  // Core adapters
-  createGitHubCIPipeline,
-  createLinearIssueTracker,
-  resolveSecret,
-  // Registry & scanner
+  // Registry & scanner (used in function bodies)
   createAdapterRegistry,
-  validateAdapterMetadata,
-  parseMetadataYaml,
   scanLocalAdapters,
-  // Community stubs
+  // Community stubs (used in registry registration)
   createStubCodeAnalysis,
   createStubMessenger,
   createStubDeploymentTarget,
@@ -24,56 +18,19 @@ import {
   createStubBitbucket,
   createStubSonarQube,
   createStubSemgrep,
-  // Webhook bridge
+  // Webhook bridge (used in function body)
   createWebhookBridge,
-  // Git resolver
-  parseGitAdapterRef,
-  buildRawUrl,
-  createGitAdapterFetcher,
+  // Git resolver (used in function bodies)
   createStubGitAdapterFetcher,
   resolveGitAdapter,
-  // Types
+  // Types (used in function signatures)
   type AdapterRegistry,
   type AdapterMetadata,
-  type AdapterStability,
-  type AdapterFactory,
-  type MetadataValidationResult,
   type ScanOptions,
   type ScanResult,
   type WebhookBridge,
-  type WebhookTransformer,
-  type GitAdapterReference,
   type GitAdapterFetcher,
   type GitResolveResult,
-  type CIPipeline,
-  type CodeAnalysis,
-  type Messenger,
-  type DeploymentTarget,
-  type IssueTracker,
-  type LinearClientLike,
-  type IssueComment,
-  type AdapterInterfaces,
-  type EventStream,
-  type IssueFilter,
-  type CommitStatus,
-  type TestResults,
-  type CoverageReport,
-  type Finding,
-  type SeveritySummary,
-  type DeploymentStatus,
-  type StubCodeAnalysisConfig,
-  type StubCodeAnalysisAdapter,
-  type NotificationLogEntry,
-  type StubMessengerAdapter,
-  type StubDeploymentTargetAdapter,
-  type StubGitLabCIAdapter,
-  type StubGitLabSourceAdapter,
-  type StubJiraAdapter,
-  type StubBitbucketAdapter,
-  type StubSonarQubeConfig,
-  type StubSonarQubeAdapter,
-  type StubSemgrepConfig,
-  type StubSemgrepAdapter,
 } from '@ai-sdlc/reference';
 
 /**
@@ -154,6 +111,7 @@ export async function scanPipelineAdapters(options: ScanOptions): Promise<ScanRe
   return scanLocalAdapters(options);
 }
 
+// Direct re-exports (passthrough)
 export {
   // Core adapters
   createGitHubCIPipeline,
@@ -182,7 +140,7 @@ export {
   createGitAdapterFetcher,
   createStubGitAdapterFetcher,
   resolveGitAdapter,
-};
+} from '@ai-sdlc/reference';
 
 export type {
   AdapterRegistry,
@@ -226,4 +184,4 @@ export type {
   StubSonarQubeAdapter,
   StubSemgrepConfig,
   StubSemgrepAdapter,
-};
+} from '@ai-sdlc/reference';
