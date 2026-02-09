@@ -5,19 +5,10 @@
 
 import {
   checkCompliance,
-  checkAllFrameworks,
   getAllControlIds,
   getMappingsForFramework,
-  AI_SDLC_CONTROLS,
-  EU_AI_ACT_MAPPINGS,
-  NIST_AI_RMF_MAPPINGS,
-  ISO_42001_MAPPINGS,
-  ISO_12207_MAPPINGS,
-  OWASP_ASI_MAPPINGS,
-  CSA_ATF_MAPPINGS,
   REGULATORY_FRAMEWORKS,
   type RegulatoryFramework,
-  type ComplianceControl,
   type ControlMapping,
   type ComplianceCoverageReport,
 } from '@ai-sdlc/reference';
@@ -53,6 +44,7 @@ export function listSupportedFrameworks(): readonly RegulatoryFramework[] {
   return [...REGULATORY_FRAMEWORKS];
 }
 
+// Direct re-exports (passthrough)
 export {
   checkCompliance,
   checkAllFrameworks,
@@ -66,6 +58,11 @@ export {
   OWASP_ASI_MAPPINGS,
   CSA_ATF_MAPPINGS,
   REGULATORY_FRAMEWORKS,
-};
+} from '@ai-sdlc/reference';
 
-export type { RegulatoryFramework, ComplianceControl, ControlMapping, ComplianceCoverageReport };
+export type {
+  RegulatoryFramework,
+  ComplianceControl,
+  ControlMapping,
+  ComplianceCoverageReport,
+} from '@ai-sdlc/reference';

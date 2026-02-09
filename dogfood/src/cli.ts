@@ -4,8 +4,13 @@
  * Usage: pnpm --filter @ai-sdlc/dogfood execute --issue 42
  */
 
+import { join } from 'node:path';
 import { executePipeline } from './orchestrator/execute.js';
-import { createLogger } from './orchestrator/logger.js';
+import { createPipelineSecurity } from './orchestrator/security.js';
+import { createPipelineMetricStore } from './orchestrator/instrumented.js';
+import { createPipelineMemory, resolveRepoRoot } from './orchestrator/shared.js';
+import { createPipelineAdmission } from './orchestrator/admission.js';
+import { loadConfig } from './orchestrator/load-config.js';
 
 function parseArgs(argv: string[]): { issueNumber: number } {
   const idx = argv.indexOf('--issue');
@@ -23,14 +28,35 @@ function parseArgs(argv: string[]): { issueNumber: number } {
 
 async function main(): Promise<void> {
   const { issueNumber } = parseArgs(process.argv);
-  const logger = createLogger();
-  logger.info(`Starting pipeline for issue #${issueNumber}`);
+
+  const workDir = await resolveRepoRoot();
+  const configDir = join(workDir, '.ai-sdlc');
+  const config = loadConfig(configDir);
+
+  const security = createPipelineSecurity();
+  const metricStore = createPipelineMetricStore();
+  const memory = createPipelineMemory(workDir);
+  const auditFilePath = join(configDir, 'audit.jsonl');
+
+  const admission = config.qualityGate
+    ? createPipelineAdmission({ qualityGate: config.qualityGate, evaluationContext: {} })
+    : undefined;
 
   try {
-    await executePipeline(issueNumber, { logger });
-    logger.info(`Pipeline completed successfully for issue #${issueNumber}`);
+    await executePipeline(issueNumber, {
+      security,
+      metricStore,
+      memory,
+      useStructuredLogger: true,
+      includeProvenance: true,
+      useDefaultEvaluators: true,
+      auditFilePath,
+      admission,
+      workDir,
+      configDir,
+    });
   } catch (err) {
-    logger.error(err instanceof Error ? err.message : String(err));
+    console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 }

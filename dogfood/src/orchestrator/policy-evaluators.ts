@@ -12,18 +12,9 @@ import {
   evaluateGate,
   scoreComplexity,
   evaluateComplexity,
-  checkPermission,
-  checkConstraints,
-  createAuthorizationHook,
-  createTokenAuthenticator,
-  parseDuration,
-  DEFAULT_COOLDOWN_MS,
-  DEFAULT_COMPLEXITY_FACTORS,
-  DEFAULT_THRESHOLDS,
   type ExpressionEvaluator,
   type LLMEvaluator,
   type ABACPolicy,
-  type ABACContext,
   type AuthorizationHook,
   type ComplexityInput,
   type ComplexityResult,
@@ -89,6 +80,7 @@ export function evaluatePipelineComplexityRouting(input: ComplexityInput): Compl
   return evaluateComplexity(input);
 }
 
+// Direct re-exports (passthrough)
 export {
   createRegoEvaluator,
   createCELEvaluator,
@@ -106,7 +98,7 @@ export {
   DEFAULT_COOLDOWN_MS,
   DEFAULT_COMPLEXITY_FACTORS,
   DEFAULT_THRESHOLDS,
-};
+} from '@ai-sdlc/reference';
 
 export type {
   ExpressionEvaluator,
@@ -116,4 +108,4 @@ export type {
   ComplexityInput,
   ComplexityResult,
   GateResult,
-};
+} from '@ai-sdlc/reference';

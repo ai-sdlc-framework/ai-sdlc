@@ -5,7 +5,9 @@
  */
 
 import { executeFixCI } from './orchestrator/fix-ci.js';
-import { createLogger } from './orchestrator/logger.js';
+import { createPipelineSecurity } from './orchestrator/security.js';
+import { createPipelineMetricStore } from './orchestrator/instrumented.js';
+import { createPipelineMemory, resolveRepoRoot } from './orchestrator/shared.js';
 
 function parseArgs(argv: string[]): { prNumber: number; runId: number } {
   const prIdx = argv.indexOf('--pr');
@@ -37,14 +39,22 @@ function parseArgs(argv: string[]): { prNumber: number; runId: number } {
 
 async function main(): Promise<void> {
   const { prNumber, runId } = parseArgs(process.argv);
-  const logger = createLogger();
-  logger.info(`Starting fix-CI for PR #${prNumber}, run ${runId}`);
+
+  const workDir = await resolveRepoRoot();
+  const security = createPipelineSecurity();
+  const metricStore = createPipelineMetricStore();
+  const memory = createPipelineMemory(workDir);
 
   try {
-    await executeFixCI(prNumber, runId, { logger });
-    logger.info(`Fix-CI completed for PR #${prNumber}`);
+    await executeFixCI(prNumber, runId, {
+      security,
+      metricStore,
+      memory,
+      useStructuredLogger: true,
+      workDir,
+    });
   } catch (err) {
-    logger.error(err instanceof Error ? err.message : String(err));
+    console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   }
 }
