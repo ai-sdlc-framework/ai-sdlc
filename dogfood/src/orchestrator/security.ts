@@ -11,6 +11,8 @@ import {
   createStubJITCredentialIssuer,
   createStubKillSwitch,
   createStubApprovalWorkflow,
+  createGitHubSandbox,
+  createGitHubJITCredentialIssuer,
   classifyApprovalTier,
   compareTiers,
   type Sandbox,
@@ -20,6 +22,16 @@ import {
   type ApprovalWorkflow,
   type ApprovalTier,
   type ApprovalRequest,
+  type CodespacesClient,
+  type GitHubSandboxConfig,
+  type SecretsClient,
+  type SecretEncryptor,
+  type GitHubJITConfig,
+  type NetworkPolicy,
+  type SandboxConstraints,
+  type SandboxStatus,
+  type ApprovalStatus,
+  type ApprovalClassificationInput,
 } from '@ai-sdlc/reference';
 
 export interface SecurityContext {
@@ -93,5 +105,40 @@ export async function classifyAndSubmitApproval(
   return security.approvalWorkflow.submit(tier, requester, description);
 }
 
-export { classifyApprovalTier, compareTiers };
-export type { ApprovalTier, ApprovalRequest, JITCredential };
+/**
+ * Create a GitHub Codespace-backed sandbox (requires CodespacesClient).
+ */
+export function createGitHubSandboxProvider(
+  client: CodespacesClient,
+  config: GitHubSandboxConfig,
+): Sandbox {
+  return createGitHubSandbox(client, config);
+}
+
+/**
+ * Create a GitHub Secrets-backed JIT credential issuer (requires SecretsClient).
+ * Encryptor can be provided via config.encryptor.
+ */
+export function createGitHubJITProvider(
+  client: SecretsClient,
+  config: GitHubJITConfig,
+): JITCredentialIssuer {
+  return createGitHubJITCredentialIssuer(client, config);
+}
+
+export { classifyApprovalTier, compareTiers, createGitHubSandbox, createGitHubJITCredentialIssuer };
+export type {
+  ApprovalTier,
+  ApprovalRequest,
+  JITCredential,
+  CodespacesClient,
+  GitHubSandboxConfig,
+  SecretsClient,
+  SecretEncryptor,
+  GitHubJITConfig,
+  NetworkPolicy,
+  SandboxConstraints,
+  SandboxStatus,
+  ApprovalStatus,
+  ApprovalClassificationInput,
+};

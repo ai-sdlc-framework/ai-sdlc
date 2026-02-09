@@ -5,6 +5,7 @@ import {
   validatePipelineProvenance,
   provenanceToAnnotations,
   provenanceFromAnnotations,
+  PROVENANCE_ANNOTATION_PREFIX,
 } from './provenance.js';
 
 describe('Provenance tracking', () => {
@@ -64,6 +65,17 @@ describe('Provenance tracking', () => {
     expect(restored!.model).toBe('gpt-4');
     expect(restored!.tool).toBe('copilot');
     expect(restored!.promptHash).toBe(prov.promptHash);
+  });
+
+  it('PROVENANCE_ANNOTATION_PREFIX has expected value', () => {
+    expect(PROVENANCE_ANNOTATION_PREFIX).toBe('ai-sdlc.io/provenance-');
+  });
+
+  it('annotations use PROVENANCE_ANNOTATION_PREFIX', () => {
+    const prov = createPipelineProvenance({});
+    const annotations = provenanceToAnnotations(prov);
+    const keys = Object.keys(annotations);
+    expect(keys.every((k) => k.startsWith(PROVENANCE_ANNOTATION_PREFIX))).toBe(true);
   });
 
   it('includes human reviewer when present', () => {

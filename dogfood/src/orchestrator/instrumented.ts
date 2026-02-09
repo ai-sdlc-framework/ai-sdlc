@@ -7,9 +7,16 @@ import {
   createMetricStore,
   instrumentEnforcement,
   instrumentAutonomy,
+  instrumentExecutor,
+  executeOrchestration,
   STANDARD_METRICS,
   enforce,
   type MetricStore,
+  type MetricCategory,
+  type MetricDefinition,
+  type MetricDataPoint,
+  type MetricQuery,
+  type MetricSummary,
   type InstrumentationConfig,
 } from '@ai-sdlc/reference';
 
@@ -36,4 +43,20 @@ export function createInstrumentedAutonomy(metricStore: MetricStore) {
   return instrumentAutonomy(config);
 }
 
-export { STANDARD_METRICS, createMetricStore };
+/**
+ * Create an instrumented executor that records task execution metrics.
+ */
+export function createInstrumentedExecutor(metricStore: MetricStore) {
+  const config: InstrumentationConfig = { metricStore };
+  return instrumentExecutor(executeOrchestration, config);
+}
+
+export { STANDARD_METRICS, createMetricStore, instrumentExecutor };
+export type {
+  MetricStore,
+  MetricCategory,
+  MetricDefinition,
+  MetricDataPoint,
+  MetricQuery,
+  MetricSummary,
+};

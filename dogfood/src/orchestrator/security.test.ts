@@ -7,6 +7,10 @@ import {
   classifyAndSubmitApproval,
   classifyApprovalTier,
   compareTiers,
+  createGitHubSandbox,
+  createGitHubJITCredentialIssuer,
+  createGitHubSandboxProvider,
+  createGitHubJITProvider,
 } from './security.js';
 
 describe('Security subsystem', () => {
@@ -103,6 +107,58 @@ describe('Security subsystem', () => {
 
     it('same tier returns 0', () => {
       expect(compareTiers('peer-review', 'peer-review')).toBe(0);
+    });
+  });
+
+  describe('GitHub infrastructure backends', () => {
+    it('re-exports createGitHubSandbox', () => {
+      expect(typeof createGitHubSandbox).toBe('function');
+    });
+
+    it('re-exports createGitHubJITCredentialIssuer', () => {
+      expect(typeof createGitHubJITCredentialIssuer).toBe('function');
+    });
+
+    it('createGitHubSandboxProvider wraps createGitHubSandbox', () => {
+      const mockClient = {
+        codespaces: {
+          createWithRepoForAuthenticatedUser: async () => ({
+            data: { id: 1, name: 'test', state: 'Available' },
+          }),
+          getForAuthenticatedUser: async () => ({
+            data: { id: 1, name: 'test', state: 'Available' },
+          }),
+          deleteForAuthenticatedUser: async () => ({ status: 202 }),
+          stopForAuthenticatedUser: async () => ({
+            data: { id: 1, name: 'test', state: 'Shutdown' },
+          }),
+        },
+      };
+      const sandbox = createGitHubSandboxProvider(mockClient, {
+        owner: 'test',
+        repo: 'test',
+        devcontainerPath: '.devcontainer/devcontainer.json',
+      });
+      expect(sandbox).toBeDefined();
+      expect(typeof sandbox.isolate).toBe('function');
+      expect(typeof sandbox.destroy).toBe('function');
+    });
+
+    it('createGitHubJITProvider wraps createGitHubJITCredentialIssuer', () => {
+      const mockClient = {
+        actions: {
+          getRepoPublicKey: async () => ({ data: { key_id: '1', key: 'abc' } }),
+          createOrUpdateRepoSecret: async () => ({ status: 201 }),
+          deleteRepoSecret: async () => ({ status: 204 }),
+        },
+      };
+      const issuer = createGitHubJITProvider(mockClient, {
+        owner: 'test',
+        repo: 'test',
+      });
+      expect(issuer).toBeDefined();
+      expect(typeof issuer.issue).toBe('function');
+      expect(typeof issuer.revoke).toBe('function');
     });
   });
 

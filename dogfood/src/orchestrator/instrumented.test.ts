@@ -3,7 +3,9 @@ import {
   createPipelineMetricStore,
   createInstrumentedEnforcement,
   createInstrumentedAutonomy,
+  createInstrumentedExecutor,
   STANDARD_METRICS,
+  instrumentExecutor,
 } from './instrumented.js';
 import type { QualityGate, EvaluationContext } from '@ai-sdlc/reference';
 
@@ -92,6 +94,18 @@ describe('Metrics instrumentation', () => {
       const result = instrumentedEnforce(makeQualityGate(), makeEvalCtx());
       expect(result.results).toHaveLength(2);
       expect(result.results[0].gate).toBe('description-present');
+    });
+  });
+
+  describe('createInstrumentedExecutor()', () => {
+    it('creates an instrumented executor function', () => {
+      const store = createPipelineMetricStore();
+      const executor = createInstrumentedExecutor(store);
+      expect(typeof executor).toBe('function');
+    });
+
+    it('instrumentExecutor is re-exported', () => {
+      expect(typeof instrumentExecutor).toBe('function');
     });
   });
 

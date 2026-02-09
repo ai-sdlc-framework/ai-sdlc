@@ -4,6 +4,8 @@ import {
   findMatchingAgent,
   resolveAgentForIssue,
   matchAgentBySkill,
+  createStubAgentCardFetcher,
+  createPipelineAgentCardFetcher,
 } from './discovery.js';
 import type { AgentRole } from '@ai-sdlc/reference';
 
@@ -77,6 +79,22 @@ describe('Agent discovery', () => {
     const agent = resolveAgentForIssue(discovery, ['bug']);
     expect(agent).toBeDefined();
     expect(agent!.metadata.name).toBe('debugger');
+  });
+
+  it('createStubAgentCardFetcher creates a fetcher', () => {
+    const fetcher = createStubAgentCardFetcher(new Map());
+    expect(typeof fetcher.fetch).toBe('function');
+  });
+
+  it('createPipelineAgentCardFetcher creates a fetcher with empty map', () => {
+    const fetcher = createPipelineAgentCardFetcher();
+    expect(typeof fetcher.fetch).toBe('function');
+  });
+
+  it('stub agent card fetcher returns null for unknown URLs', async () => {
+    const fetcher = createPipelineAgentCardFetcher();
+    const result = await fetcher.fetch('https://unknown.example.com/.well-known/agent.json');
+    expect(result).toBeNull();
   });
 
   it('resolveAgentForIssue falls back to first available', () => {

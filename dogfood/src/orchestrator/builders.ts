@@ -13,7 +13,11 @@ import {
   parseBuilderManifest,
   validateBuilderManifest,
   buildDistribution,
+  API_VERSION,
   type BuilderManifest,
+  type ManifestAdapter,
+  type ManifestOutput,
+  type ResolvedAdapter,
   type DistributionBuildResult,
   type BuildDistributionOptions,
 } from '@ai-sdlc/reference';
@@ -210,6 +214,14 @@ export {
   parseBuilderManifest,
   validateBuilderManifest,
   buildDistribution,
+  API_VERSION,
 };
 
-export type { BuilderManifest, DistributionBuildResult, BuildDistributionOptions };
+export type {
+  BuilderManifest,
+  ManifestAdapter,
+  ManifestOutput,
+  ResolvedAdapter,
+  DistributionBuildResult,
+  BuildDistributionOptions,
+};

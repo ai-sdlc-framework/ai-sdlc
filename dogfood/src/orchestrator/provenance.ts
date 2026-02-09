@@ -8,7 +8,9 @@ import {
   provenanceToAnnotations,
   provenanceFromAnnotations,
   validateProvenance,
+  PROVENANCE_ANNOTATION_PREFIX,
   type ProvenanceRecord,
+  type ReviewDecision,
 } from '@ai-sdlc/reference';
 import { createHash } from 'node:crypto';
 
@@ -71,5 +73,5 @@ export function validatePipelineProvenance(provenance: Partial<ProvenanceRecord>
   return validateProvenance(provenance);
 }
 
-export { provenanceToAnnotations, provenanceFromAnnotations };
-export type { ProvenanceRecord };
+export { provenanceToAnnotations, provenanceFromAnnotations, PROVENANCE_ANNOTATION_PREFIX };
+export type { ProvenanceRecord, ReviewDecision };

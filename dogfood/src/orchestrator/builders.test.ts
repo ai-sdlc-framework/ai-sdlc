@@ -12,6 +12,7 @@ import {
   AdapterBindingBuilder,
   parseBuilderManifest,
   validateBuilderManifest,
+  API_VERSION,
 } from './builders.js';
 
 describe('Resource builders', () => {
@@ -155,6 +156,17 @@ describe('Resource builders', () => {
         .config({ org: 'test' })
         .build();
       expect(b.spec.config).toEqual({ org: 'test' });
+    });
+  });
+
+  describe('API_VERSION', () => {
+    it('matches the expected version string', () => {
+      expect(API_VERSION).toBe('ai-sdlc.io/v1alpha1');
+    });
+
+    it('is used in built resources', () => {
+      const pipeline = buildDogfoodPipeline();
+      expect(pipeline.apiVersion).toBe(API_VERSION);
     });
   });
 

@@ -6,8 +6,12 @@
 import {
   createAgentDiscovery,
   matchAgentBySkill,
+  createStubAgentCardFetcher,
   type AgentDiscovery,
   type AgentRole,
+  type AgentFilter,
+  type AgentCardFetcher,
+  type A2AAgentCard,
 } from '@ai-sdlc/reference';
 
 /**
@@ -60,4 +64,14 @@ export function resolveAgentForIssue(
   return all[0];
 }
 
-export { matchAgentBySkill };
+/**
+ * Create a stub agent card fetcher for testing A2A discovery.
+ */
+export function createPipelineAgentCardFetcher(
+  cards?: Map<string, A2AAgentCard>,
+): AgentCardFetcher {
+  return createStubAgentCardFetcher(cards ?? new Map());
+}
+
+export { matchAgentBySkill, createStubAgentCardFetcher };
+export type { AgentDiscovery, AgentFilter, AgentCardFetcher, A2AAgentCard };
