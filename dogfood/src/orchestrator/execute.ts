@@ -926,8 +926,9 @@ function runPipelineDiagnostics(input: DiagnosticsInput): void {
   });
 
   // Audit file operations (async, best-effort)
+  // Use /tmp to avoid writing to .ai-sdlc/ which is a blocked path for agents
   if (input.metricStore) {
-    const auditPath = `${input.workDir}/.ai-sdlc/audit.jsonl`;
+    const auditPath = `/tmp/ai-sdlc-diagnostics-audit.jsonl`;
     const fileLog = createFileAuditLog(auditPath);
     fileLog.record({
       actor: 'diagnostics',
