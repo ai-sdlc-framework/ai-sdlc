@@ -20,6 +20,7 @@ import {
 } from '@ai-sdlc/reference';
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
 import { createLogger, type Logger } from './logger.js';
+import { createStructuredConsoleLogger } from './structured-logger.js';
 import type { AgentRunner } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
 import {
@@ -32,6 +33,12 @@ import {
   validateAndAuditOutput,
   authorizeFilesChanged,
 } from './shared.js';
+import {
+  checkKillSwitch,
+  issueAgentCredentials,
+  revokeAgentCredentials,
+  type SecurityContext,
+} from './security.js';
 
 function execFileAsync(
   cmd: string,
@@ -71,6 +78,10 @@ export interface FixCIOptions {
   metricStore?: MetricStore;
   /** Agent memory for episodic recall. */
   memory?: AgentMemory;
+  /** Security context for kill switch and JIT credentials. */
+  security?: SecurityContext;
+  /** Use the reference structured logger instead of the plain console logger. */
+  useStructuredLogger?: boolean;
 }
 
 /**
@@ -126,7 +137,9 @@ export async function executeFixCI(
 ): Promise<void> {
   const workDir = options.workDir ?? (await resolveRepoRoot());
   const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
-  const log = options.logger ?? createLogger();
+  const log =
+    options.logger ??
+    (options.useStructuredLogger ? createStructuredConsoleLogger() : createLogger());
   const auditLog = options.auditLog ?? createDefaultAuditLog(workDir);
   const metricStore = options.metricStore;
 
@@ -134,6 +147,11 @@ export async function executeFixCI(
   log.stage('load-config');
   const config: AiSdlcConfig = loadConfig(configDir);
   log.stageEnd('load-config');
+
+  // Kill switch check (before any work)
+  if (options.security) {
+    await checkKillSwitch(options.security);
+  }
 
   if (!config.agentRole) {
     throw new Error('No AgentRole resource found in .ai-sdlc/');
@@ -220,88 +238,101 @@ export async function executeFixCI(
 
   const meter = getMeter();
 
-  // 7. Invoke agent with CI error context
+  // 7. Invoke agent with CI error context (with JIT credential lifecycle)
   log.stage('agent');
   const runner = options.runner ?? new GitHubActionsRunner();
 
-  const result = await withSpan(
-    SPAN_NAMES.AGENT_TASK,
-    {
-      [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
-      [ATTRIBUTE_KEYS.RESOURCE_NAME]: `pr#${prNumber}`,
-    },
-    async () => {
-      const r = await runner.run({
-        issueNumber,
-        issueTitle,
-        issueBody,
-        workDir,
-        branch: currentBranch,
-        constraints: {
-          maxFilesPerChange: resolved.maxFiles,
-          requireTests: resolved.requireTests,
-          blockedPaths: resolved.blockedPaths,
-        },
-        ciErrors: ciLogs,
-      });
+  // Issue JIT credentials before agent execution
+  const jitCred = options.security
+    ? await issueAgentCredentials(options.security, agentRole.metadata.name)
+    : undefined;
 
-      if (!r.success) {
+  let result;
+  try {
+    result = await withSpan(
+      SPAN_NAMES.AGENT_TASK,
+      {
+        [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
+        [ATTRIBUTE_KEYS.RESOURCE_NAME]: `pr#${prNumber}`,
+      },
+      async () => {
+        const r = await runner.run({
+          issueNumber,
+          issueTitle,
+          issueBody,
+          workDir,
+          branch: currentBranch,
+          constraints: {
+            maxFilesPerChange: resolved.maxFiles,
+            requireTests: resolved.requireTests,
+            blockedPaths: resolved.blockedPaths,
+          },
+          ciErrors: ciLogs,
+        });
+
+        if (!r.success) {
+          log.stageEnd('agent');
+          auditLog.record({
+            actor: 'system',
+            action: 'execute',
+            resource: `agent/${agentRole.metadata.name}`,
+            decision: 'denied',
+            details: { error: r.error },
+          });
+          meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
+          recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
+
+          // Evaluate demotion on agent failure
+          const agentMetrics: AgentMetrics = {
+            name: agentRole.metadata.name,
+            currentLevel: currentLevel.level,
+            totalTasksCompleted: 0,
+            metrics: {},
+            approvals: [],
+          };
+          const demotion = evaluateDemotion(autonomyPolicy, agentMetrics, 'failed-test');
+          log.info(
+            `Demotion evaluation: ${demotion.demoted ? `demoted from ${demotion.fromLevel} to ${demotion.toLevel}` : 'no demotion'}`,
+          );
+          auditLog.record({
+            actor: 'system',
+            action: 'evaluate',
+            resource: `agent/${agentRole.metadata.name}`,
+            policy: 'demotion',
+            decision: demotion.demoted ? 'denied' : 'allowed',
+            details: {
+              trigger: demotion.trigger,
+              fromLevel: demotion.fromLevel,
+              toLevel: demotion.toLevel,
+            },
+          });
+
+          await addComment(
+            `## AI-SDLC: Fix-CI Agent Failed\n\n${r.error ?? 'Unknown error'}\n\n${RETRY_MARKER}`,
+          );
+          throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${r.error}`);
+        }
         log.stageEnd('agent');
+
         auditLog.record({
           actor: 'system',
           action: 'execute',
           resource: `agent/${agentRole.metadata.name}`,
-          decision: 'denied',
-          details: { error: r.error },
+          decision: 'allowed',
+          details: { filesChanged: r.filesChanged.length },
         });
-        meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
-        recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
+        meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
+        recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
 
-        // Evaluate demotion on agent failure
-        const agentMetrics: AgentMetrics = {
-          name: agentRole.metadata.name,
-          currentLevel: currentLevel.level,
-          totalTasksCompleted: 0,
-          metrics: {},
-          approvals: [],
-        };
-        const demotion = evaluateDemotion(autonomyPolicy, agentMetrics, 'failed-test');
-        log.info(
-          `Demotion evaluation: ${demotion.demoted ? `demoted from ${demotion.fromLevel} to ${demotion.toLevel}` : 'no demotion'}`,
-        );
-        auditLog.record({
-          actor: 'system',
-          action: 'evaluate',
-          resource: `agent/${agentRole.metadata.name}`,
-          policy: 'demotion',
-          decision: demotion.demoted ? 'denied' : 'allowed',
-          details: {
-            trigger: demotion.trigger,
-            fromLevel: demotion.fromLevel,
-            toLevel: demotion.toLevel,
-          },
-        });
-
-        await addComment(
-          `## AI-SDLC: Fix-CI Agent Failed\n\n${r.error ?? 'Unknown error'}\n\n${RETRY_MARKER}`,
-        );
-        throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${r.error}`);
-      }
-      log.stageEnd('agent');
-
-      auditLog.record({
-        actor: 'system',
-        action: 'execute',
-        resource: `agent/${agentRole.metadata.name}`,
-        decision: 'allowed',
-        details: { filesChanged: r.filesChanged.length },
-      });
-      meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
-      recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
-
-      return r;
-    },
-  );
+        return r;
+      },
+    );
+  } finally {
+    // Revoke JIT credentials after agent execution (success or failure)
+    if (jitCred && options.security) {
+      await revokeAgentCredentials(options.security, jitCred.id);
+    }
+  }
 
   // 8. ABAC authorization check (if write permissions are defined)
   if (currentLevel.permissions.write.length > 0) {

@@ -11,6 +11,7 @@ import {
 import type { AgentRunner, AgentResult } from '../runner/types.js';
 import type { Logger } from './logger.js';
 import type { AuditLog } from '@ai-sdlc/reference';
+import { createPipelineSecurity } from './security.js';
 
 // Mock child_process — covers git and gh calls.
 // fix-ci.ts wraps execFile in a callback-based promise, so the mock
@@ -259,6 +260,95 @@ describe('executeFixCI()', () => {
     // getMeter() returns a no-op meter without SDK, so we just verify
     // the pipeline completes without error when counter.add() is called
     expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('checks kill switch before fix-CI', async () => {
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    // Activate kill switch
+    await security.killSwitch.activate('maintenance');
+
+    await expect(
+      executeFixCI(100, 5555, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        runner,
+        logger: makeSilentLogger(),
+        _prComments: [],
+        _ciLogs: 'some error',
+        auditLog,
+        security,
+      }),
+    ).rejects.toThrow('kill switch active');
+
+    expect(runner.run).not.toHaveBeenCalled();
+  });
+
+  it('issues and revokes credentials during fix-CI', async () => {
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    const issueSpy = vi.spyOn(security.jitCredentials, 'issue');
+    const revokeSpy = vi.spyOn(security.jitCredentials, 'revoke');
+
+    await executeFixCI(100, 5555, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      runner,
+      logger: makeSilentLogger(),
+      _prComments: [],
+      _ciLogs: 'Error: lint failed',
+      auditLog,
+      security,
+    });
+
+    expect(issueSpy).toHaveBeenCalledWith('coding-agent', expect.any(Array), expect.any(Number));
+    expect(revokeSpy).toHaveBeenCalledWith(expect.stringContaining('cred-'));
+  });
+
+  it('uses structured logger when configured', async () => {
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    // Should complete without error with useStructuredLogger
+    await executeFixCI(100, 5555, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      runner,
+      _prComments: [],
+      _ciLogs: 'Error: lint failed',
+      auditLog,
+      useStructuredLogger: true,
+    });
+
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('revokes credentials even on agent failure in fix-CI', async () => {
+    const runner = makeMockRunner({ success: false, filesChanged: [], error: 'boom' });
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    const revokeSpy = vi.spyOn(security.jitCredentials, 'revoke');
+
+    await expect(
+      executeFixCI(100, 5555, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        runner,
+        logger: makeSilentLogger(),
+        _prComments: [],
+        _ciLogs: 'some error',
+        auditLog,
+        security,
+      }),
+    ).rejects.toThrow('Fix-CI agent failed');
+
+    // Credentials should still be revoked in the finally block
+    expect(revokeSpy).toHaveBeenCalled();
   });
 
   // This test must be last — it overrides the global execFile mock

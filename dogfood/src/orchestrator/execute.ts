@@ -30,6 +30,7 @@ import {
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
 import { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
 import { createLogger, type Logger } from './logger.js';
+import { createStructuredConsoleLogger } from './structured-logger.js';
 import type { AgentRunner } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
 import {
@@ -44,6 +45,21 @@ import {
   evaluatePipelineCompliance,
   authorizeFilesChanged,
 } from './shared.js';
+import {
+  checkKillSwitch,
+  issueAgentCredentials,
+  revokeAgentCredentials,
+  classifyAndSubmitApproval,
+  type SecurityContext,
+} from './security.js';
+import { createPipelineProvenance, attachProvenanceToPR } from './provenance.js';
+import { createInstrumentedEnforcement, createInstrumentedAutonomy } from './instrumented.js';
+import { createPipelineDiscovery, resolveAgentForIssue } from './discovery.js';
+import {
+  createPipelineExpressionEvaluator,
+  createPipelineLLMEvaluator,
+} from './policy-evaluators.js';
+import { verifyAuditIntegrity } from './audit-extended.js';
 
 function execFileAsync(
   cmd: string,
@@ -97,6 +113,16 @@ export interface ExecuteOptions {
   llmEvaluator?: LLMEvaluator;
   /** Callback invoked when promotion eligibility is evaluated. */
   promotionCallback?: (result: PromotionResult) => void | Promise<void>;
+  /** Security context for kill switch, JIT credentials, and approval workflow. */
+  security?: SecurityContext;
+  /** Use the reference structured logger instead of the plain console logger. */
+  useStructuredLogger?: boolean;
+  /** Include provenance metadata in PR descriptions. Defaults to true when security is provided. */
+  includeProvenance?: boolean;
+  /** Auto-create default expression/LLM evaluators when none are provided. */
+  useDefaultEvaluators?: boolean;
+  /** Path to an audit log file for integrity verification at pipeline end. */
+  auditFilePath?: string;
 }
 
 /**
@@ -108,7 +134,9 @@ export async function executePipeline(
 ): Promise<PipelineResult> {
   const workDir = options.workDir ?? (await resolveRepoRoot());
   const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
-  const log = options.logger ?? createLogger();
+  const log =
+    options.logger ??
+    (options.useStructuredLogger ? createStructuredConsoleLogger() : createLogger());
   const auditLog = options.auditLog ?? createDefaultAuditLog(workDir);
   const metricStore = options.metricStore;
 
@@ -116,6 +144,11 @@ export async function executePipeline(
   log.stage('load-config');
   const config: AiSdlcConfig = loadConfig(configDir);
   log.stageEnd('load-config');
+
+  // Kill switch check (before any work)
+  if (options.security) {
+    await checkKillSwitch(options.security);
+  }
 
   if (!config.qualityGate) {
     throw new Error('No QualityGate resource found in .ai-sdlc/');
@@ -131,6 +164,16 @@ export async function executePipeline(
   const qualityGate = config.qualityGate;
   const agentRole = config.agentRole;
   const autonomyPolicy = config.autonomyPolicy;
+
+  // Auto-create default evaluators when requested and none provided
+  if (options.useDefaultEvaluators) {
+    if (!options.expressionEvaluator) {
+      options = { ...options, expressionEvaluator: createPipelineExpressionEvaluator() };
+    }
+    if (!options.llmEvaluator) {
+      options = { ...options, llmEvaluator: createPipelineLLMEvaluator() };
+    }
+  }
 
   // 2. Create adapters (or use injected ones)
   const { org, repo } = getGitHubConfig();
@@ -204,6 +247,17 @@ async function executePipelineBody(
 ): Promise<PipelineResult> {
   const meter = getMeter();
 
+  // Discovery: register agent and resolve by issue labels (observational)
+  const discovery = createPipelineDiscovery();
+  discovery.register(agentRole);
+  const resolvedAgent = resolveAgentForIssue(discovery, issue.labels ?? []);
+  if (resolvedAgent) {
+    log.info(`Discovery resolved agent: ${resolvedAgent.metadata.name}`);
+  }
+
+  // Instrumented enforcement (wraps enforce with metric recording)
+  const instrumentedEnforce = metricStore ? createInstrumentedEnforcement(metricStore) : undefined;
+
   // 4. Validate issue against quality gates
   await withSpan(
     SPAN_NAMES.GATE_EVALUATION,
@@ -218,7 +272,7 @@ async function executePipelineBody(
               expressionEvaluator: options.expressionEvaluator,
               llmEvaluator: options.llmEvaluator,
             })
-          : validateIssue(issue, qualityGate);
+          : validateIssue(issue, qualityGate, instrumentedEnforce);
       if (!enforcement.allowed) {
         const failures = enforcement.results
           .filter((r) => r.verdict === 'fail')
@@ -279,6 +333,21 @@ async function executePipelineBody(
     throw new Error(`Issue #${issueNumber} complexity ${complexity} routed as "${strategy}"`);
   }
 
+  // Approval workflow check (after routing, before agent)
+  if (options.security) {
+    const approval = await classifyAndSubmitApproval(
+      options.security,
+      complexity,
+      agentRole.metadata.name,
+      `Execute pipeline for issue #${issueNumber}`,
+    );
+    if (approval.status === 'pending') {
+      throw new Error(
+        `Issue #${issueNumber} requires approval (tier: ${approval.tier}) — status is pending`,
+      );
+    }
+  }
+
   // 6. Check autonomy level allows coding
   const currentLevel = resolveAutonomyLevel(autonomyPolicy);
   log.stageEnd('validate-issue');
@@ -292,62 +361,75 @@ async function executePipelineBody(
   // 8. Resolve agent constraints
   const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
 
-  // 9. Invoke agent
+  // 9. Invoke agent (with JIT credential lifecycle when security is provided)
   log.stage('agent');
   const runner = options.runner ?? new GitHubActionsRunner();
 
-  const result = await withSpan(
-    SPAN_NAMES.AGENT_TASK,
-    {
-      [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
-      [ATTRIBUTE_KEYS.RESOURCE_NAME]: `issue#${issueNumber}`,
-    },
-    async () => {
-      const r = await runner.run({
-        issueNumber,
-        issueTitle: issue.title,
-        issueBody: issue.description ?? '',
-        workDir,
-        branch: branchName,
-        constraints: {
-          maxFilesPerChange: resolved.maxFiles,
-          requireTests: resolved.requireTests,
-          blockedPaths: resolved.blockedPaths,
-        },
-      });
+  // Issue JIT credentials before agent execution
+  const jitCred = options.security
+    ? await issueAgentCredentials(options.security, agentRole.metadata.name)
+    : undefined;
 
-      if (!r.success) {
+  let result;
+  try {
+    result = await withSpan(
+      SPAN_NAMES.AGENT_TASK,
+      {
+        [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
+        [ATTRIBUTE_KEYS.RESOURCE_NAME]: `issue#${issueNumber}`,
+      },
+      async () => {
+        const r = await runner.run({
+          issueNumber,
+          issueTitle: issue.title,
+          issueBody: issue.description ?? '',
+          workDir,
+          branch: branchName,
+          constraints: {
+            maxFilesPerChange: resolved.maxFiles,
+            requireTests: resolved.requireTests,
+            blockedPaths: resolved.blockedPaths,
+          },
+        });
+
+        if (!r.success) {
+          log.stageEnd('agent');
+          auditLog.record({
+            actor: 'system',
+            action: 'execute',
+            resource: `agent/${agentRole.metadata.name}`,
+            decision: 'denied',
+            details: { error: r.error },
+          });
+          meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
+          recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
+          await tracker.addComment(
+            String(issueNumber),
+            `## AI-SDLC: Agent Failed\n\n${r.error ?? 'Unknown error'}`,
+          );
+          throw new Error(`Agent failed on issue #${issueNumber}: ${r.error}`);
+        }
         log.stageEnd('agent');
+
         auditLog.record({
           actor: 'system',
           action: 'execute',
           resource: `agent/${agentRole.metadata.name}`,
-          decision: 'denied',
-          details: { error: r.error },
+          decision: 'allowed',
+          details: { filesChanged: r.filesChanged.length },
         });
-        meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
-        recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
-        await tracker.addComment(
-          String(issueNumber),
-          `## AI-SDLC: Agent Failed\n\n${r.error ?? 'Unknown error'}`,
-        );
-        throw new Error(`Agent failed on issue #${issueNumber}: ${r.error}`);
-      }
-      log.stageEnd('agent');
+        meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
+        recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
 
-      auditLog.record({
-        actor: 'system',
-        action: 'execute',
-        resource: `agent/${agentRole.metadata.name}`,
-        decision: 'allowed',
-        details: { filesChanged: r.filesChanged.length },
-      });
-      meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
-      recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
-
-      return r;
-    },
-  );
+        return r;
+      },
+    );
+  } finally {
+    // Revoke JIT credentials after agent execution (success or failure)
+    if (jitCred && options.security) {
+      await revokeAgentCredentials(options.security, jitCred.id);
+    }
+  }
 
   // 10. ABAC authorization check (if write permissions are defined)
   if (currentLevel.permissions.write.length > 0) {
@@ -393,7 +475,15 @@ async function executePipelineBody(
   await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
   log.stageEnd('push');
 
-  // 13. Create PR
+  // 13. Create PR (with optional provenance)
+  const shouldIncludeProvenance = options.includeProvenance ?? options.security !== undefined;
+
+  let provenanceBlock = '';
+  if (shouldIncludeProvenance) {
+    const provenance = createPipelineProvenance({ promptText: issue.description });
+    provenanceBlock = '\n\n' + attachProvenanceToPR(provenance);
+  }
+
   log.stage('create-pr');
   const pr = await withSpan(
     SPAN_NAMES.PIPELINE_STAGE,
@@ -416,6 +506,7 @@ async function executePipelineBody(
           '',
           '---',
           '*This PR was generated by [AI-SDLC](https://github.com/ai-sdlc-framework/ai-sdlc) dogfood pipeline.*',
+          provenanceBlock,
         ].join('\n'),
         sourceBranch: branchName,
         targetBranch: 'main',
@@ -441,7 +532,8 @@ async function executePipelineBody(
     `## AI-SDLC: PR Created\n\nPull request created: ${pr.url}\n\nFiles changed: ${result.filesChanged.length}\n\nPlease review and merge.`,
   );
 
-  // 15. Evaluate promotion eligibility (observational only)
+  // 15. Evaluate promotion eligibility (with optional instrumented autonomy)
+  const instrumentedAutonomy = metricStore ? createInstrumentedAutonomy(metricStore) : undefined;
   const agentMetrics: AgentMetrics = {
     name: agentRole.metadata.name,
     currentLevel: currentLevel.level,
@@ -450,6 +542,13 @@ async function executePipelineBody(
     approvals: [],
   };
   const promotion = evaluatePromotion(autonomyPolicy, agentMetrics);
+  if (instrumentedAutonomy && promotion.eligible) {
+    instrumentedAutonomy.onPromotion(
+      agentRole.metadata.name,
+      promotion.fromLevel,
+      promotion.toLevel,
+    );
+  }
   log.info(
     `Promotion eligibility: ${promotion.eligible ? 'eligible' : 'not eligible'} (${promotion.unmetConditions.join(', ') || 'all conditions met'})`,
   );
@@ -500,6 +599,18 @@ async function executePipelineBody(
       metadata: { summary: `Completed issue #${issueNumber}: ${issue.title}` },
     });
     options.memory.working.clear();
+  }
+
+  // 18. Audit integrity verification (non-blocking)
+  if (options.auditFilePath) {
+    try {
+      const integrity = await verifyAuditIntegrity(options.auditFilePath);
+      log.info(`Audit integrity: ${integrity.valid ? 'valid' : 'INVALID'}`);
+    } catch (err) {
+      log.info(
+        `Audit integrity check skipped: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
   }
 
   log.summary();

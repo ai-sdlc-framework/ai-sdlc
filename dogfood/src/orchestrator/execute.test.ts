@@ -11,6 +11,7 @@ import type {
   AgentMemory,
 } from '@ai-sdlc/reference';
 import type { Logger } from './logger.js';
+import { createPipelineSecurity } from './security.js';
 
 // Mock child_process.execFile used by executePipeline for git checkout/push
 vi.mock('node:child_process', () => ({
@@ -498,6 +499,297 @@ describe('executePipeline()', () => {
 
     // Pipeline should complete successfully with expression evaluator wired
     expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('uses structured logger when useStructuredLogger is true', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    // Should complete without error when useStructuredLogger is set
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      useStructuredLogger: true,
+    });
+
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('checks kill switch before execution', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      security,
+    });
+
+    // Kill switch is inactive by default — pipeline should complete
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('aborts when kill switch is active', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    // Activate the kill switch
+    await security.killSwitch.activate('emergency shutdown');
+
+    await expect(
+      executePipeline(42, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        tracker,
+        sourceControl: sc,
+        runner,
+        auditLog,
+        security,
+      }),
+    ).rejects.toThrow('kill switch active');
+
+    expect(runner.run).not.toHaveBeenCalled();
+  });
+
+  it('issues and revokes JIT credentials around agent', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    const issueSpy = vi.spyOn(security.jitCredentials, 'issue');
+    const revokeSpy = vi.spyOn(security.jitCredentials, 'revoke');
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      security,
+    });
+
+    expect(issueSpy).toHaveBeenCalledWith('coding-agent', expect.any(Array), expect.any(Number));
+    expect(revokeSpy).toHaveBeenCalledWith(expect.stringContaining('cred-'));
+  });
+
+  it('revokes credentials even on agent failure', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner({ success: false, filesChanged: [], error: 'boom' });
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    const revokeSpy = vi.spyOn(security.jitCredentials, 'revoke');
+
+    await expect(
+      executePipeline(42, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        tracker,
+        sourceControl: sc,
+        runner,
+        auditLog,
+        security,
+      }),
+    ).rejects.toThrow('Agent failed');
+
+    // Credentials should still be revoked in the finally block
+    expect(revokeSpy).toHaveBeenCalled();
+  });
+
+  it('classifies approval tier after routing', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    const submitSpy = vi.spyOn(security.approvalWorkflow, 'submit');
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      security,
+    });
+
+    // Approval should have been submitted (auto-approved for low complexity)
+    expect(submitSpy).toHaveBeenCalled();
+  });
+
+  it('blocks when approval is pending', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const security = createPipelineSecurity();
+
+    // Override submit to always return pending
+    vi.spyOn(security.approvalWorkflow, 'submit').mockResolvedValue({
+      id: 'approval-1',
+      tier: 'team-lead' as const,
+      requester: 'coding-agent',
+      description: 'test',
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+    });
+
+    await expect(
+      executePipeline(42, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        tracker,
+        sourceControl: sc,
+        runner,
+        auditLog,
+        security,
+      }),
+    ).rejects.toThrow('requires approval');
+
+    expect(runner.run).not.toHaveBeenCalled();
+  });
+
+  it('includes provenance in PR description', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      includeProvenance: true,
+    });
+
+    // PR description should contain provenance block
+    expect(sc.createPR).toHaveBeenCalledWith(
+      expect.objectContaining({
+        description: expect.stringContaining('## Provenance'),
+      }),
+    );
+  });
+
+  it('defaults to evaluators when useDefaultEvaluators is true', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    // Should complete without error — auto-created evaluators take effect
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      useDefaultEvaluators: true,
+    });
+
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('resolves agent via discovery', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const logger = makeSilentLogger();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      logger,
+    });
+
+    // Discovery logs the resolved agent
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Discovery resolved agent'));
+  });
+
+  it('wraps enforcement with instrumented metrics', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const { createMetricStore } = await import('@ai-sdlc/reference');
+    const metricStore = createMetricStore();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      metricStore,
+    });
+
+    // Pipeline completes with instrumented enforcement active
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('verifies audit integrity at end', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const logger = makeSilentLogger();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      logger,
+      auditFilePath: '/tmp/nonexistent-audit.jsonl',
+    });
+
+    // Should log about audit integrity (skipped because file doesn't exist)
+    expect(logger.info).toHaveBeenCalledWith(expect.stringContaining('Audit integrity'));
   });
 
   it('records failure episode when pipeline throws with memory', async () => {

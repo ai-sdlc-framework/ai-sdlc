@@ -47,10 +47,15 @@ function buildEvaluationContext(issue: Issue): EvaluationContext {
 
 /**
  * Validate an issue against the loaded QualityGate resource.
+ * An optional enforceFn can be provided (e.g. instrumented enforcement).
  */
-export function validateIssue(issue: Issue, qualityGate: QualityGate): EnforcementResult {
+export function validateIssue(
+  issue: Issue,
+  qualityGate: QualityGate,
+  enforceFn?: typeof enforce,
+): EnforcementResult {
   const ctx = buildEvaluationContext(issue);
-  return enforce(qualityGate, ctx);
+  return (enforceFn ?? enforce)(qualityGate, ctx);
 }
 
 /**
