@@ -4,6 +4,7 @@
  */
 
 import type { NotificationTemplate } from '@ai-sdlc/reference';
+import { interpolate } from './shared.js';
 
 /**
  * Render a notification template by replacing {key} placeholders with values.
@@ -16,8 +17,4 @@ export function renderTemplate(
     title: interpolate(template.title, vars),
     body: interpolate(template.body ?? '', vars),
   };
-}
-
-function interpolate(text: string, vars: Record<string, string>): string {
-  return text.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
 }

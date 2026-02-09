@@ -4,7 +4,6 @@
  * Capped at MAX_FIX_ATTEMPTS to prevent infinite loops.
  */
 
-import { execFile } from 'node:child_process';
 import {
   evaluateDemotion,
   withSpan,
@@ -24,6 +23,7 @@ import { createStructuredConsoleLogger } from './structured-logger.js';
 import type { AgentRunner } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
 import {
+  execFileAsync,
   extractIssueNumber,
   resolveRepoRoot,
   createDefaultAuditLog,
@@ -33,25 +33,13 @@ import {
   validateAndAuditOutput,
   authorizeFilesChanged,
 } from './shared.js';
+import { renderTemplate } from './notifications.js';
 import {
   checkKillSwitch,
   issueAgentCredentials,
   revokeAgentCredentials,
   type SecurityContext,
 } from './security.js';
-
-function execFileAsync(
-  cmd: string,
-  args: string[],
-  opts?: { cwd?: string; timeout?: number },
-): Promise<{ stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    execFile(cmd, args, opts ?? {}, (err, stdout, stderr) => {
-      if (err) reject(err);
-      else resolve({ stdout, stderr });
-    });
-  });
-}
 
 export const MAX_FIX_ATTEMPTS = 2;
 export const MAX_LOG_LINES = 150;
@@ -163,6 +151,13 @@ export async function executeFixCI(
   const agentRole = config.agentRole;
   const autonomyPolicy = config.autonomyPolicy;
 
+  // Derive max fix attempts from pipeline config (code stage onFailure.maxRetries)
+  const codeStage = config.pipeline?.spec.stages.find((s) => s.name === 'code');
+  const maxFixAttempts = codeStage?.onFailure?.maxRetries ?? MAX_FIX_ATTEMPTS;
+
+  // Notification templates
+  const notifTemplates = config.pipeline?.spec.notifications?.templates;
+
   // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
   let comments: string[];
@@ -175,7 +170,7 @@ export async function executeFixCI(
     comments = [];
   }
   const attempts = countRetryAttempts(comments);
-  log.info(`Fix-CI attempt ${attempts + 1} of ${MAX_FIX_ATTEMPTS}`);
+  log.info(`Fix-CI attempt ${attempts + 1} of ${maxFixAttempts}`);
   log.stageEnd('check-retries');
 
   // Helper to add a comment (via tracker or no-op)
@@ -185,18 +180,26 @@ export async function executeFixCI(
     }
   };
 
-  if (attempts >= MAX_FIX_ATTEMPTS) {
-    log.info(`Fix-CI retry limit reached (${MAX_FIX_ATTEMPTS}). Commenting and stopping.`);
+  if (attempts >= maxFixAttempts) {
+    log.info(`Fix-CI retry limit reached (${maxFixAttempts}). Commenting and stopping.`);
     auditLog.record({
       actor: 'system',
       action: 'evaluate',
       resource: `pr#${prNumber}`,
       decision: 'denied',
-      details: { reason: 'retry-limit-reached', attempts, max: MAX_FIX_ATTEMPTS },
+      details: { reason: 'retry-limit-reached', attempts, max: maxFixAttempts },
     });
-    await addComment(
-      `## AI-SDLC: Fix-CI Retry Limit Reached\n\nThis PR has reached the maximum number of automated fix attempts (${MAX_FIX_ATTEMPTS}). Manual intervention is needed.`,
-    );
+    const limitTpl = notifTemplates?.['fix-ci-limit'];
+    const limitComment = limitTpl
+      ? renderTemplate(limitTpl, {
+          attempts: String(attempts),
+          max: String(maxFixAttempts),
+        })
+      : {
+          title: 'AI-SDLC: Fix-CI Retry Limit Reached',
+          body: `This PR has reached the maximum number of automated fix attempts (${maxFixAttempts}). Manual intervention is needed.`,
+        };
+    await addComment(`## ${limitComment.title}\n\n${limitComment.body}`);
     return;
   }
 
@@ -307,8 +310,13 @@ export async function executeFixCI(
             },
           });
 
+          const agentFailTpl = notifTemplates?.['agent-failure'];
+          const errorDetail = r.error ?? 'Unknown error';
+          const agentFailComment = agentFailTpl
+            ? renderTemplate(agentFailTpl, { stageName: 'fix-ci', details: errorDetail })
+            : { title: 'AI-SDLC: Fix-CI Agent Failed', body: errorDetail };
           await addComment(
-            `## AI-SDLC: Fix-CI Agent Failed\n\n${r.error ?? 'Unknown error'}\n\n${RETRY_MARKER}`,
+            `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}`,
           );
           throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${r.error}`);
         }
