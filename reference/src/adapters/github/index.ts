@@ -196,11 +196,26 @@ export function createGitHubSourceControl(config: GitHubConfig): SourceControl {
         ref,
       });
       const sha = refData.object.sha;
-      await octokit.git.createRef({
-        ...ownerRepo,
-        ref: `refs/heads/${input.name}`,
-        sha,
-      });
+      try {
+        await octokit.git.createRef({
+          ...ownerRepo,
+          ref: `refs/heads/${input.name}`,
+          sha,
+        });
+      } catch (err: unknown) {
+        // Branch already exists — update it to point to the latest SHA
+        const status = (err as { status?: number }).status;
+        if (status === 422) {
+          await octokit.git.updateRef({
+            ...ownerRepo,
+            ref: `heads/${input.name}`,
+            sha,
+            force: true,
+          });
+        } else {
+          throw err;
+        }
+      }
       return { name: input.name, sha };
     },
 
