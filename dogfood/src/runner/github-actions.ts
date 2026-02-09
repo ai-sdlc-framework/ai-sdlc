@@ -92,7 +92,8 @@ function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Pr
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return new Promise((resolve, reject) => {
-    const child = spawn('claude', ['-p', '--model', 'claude-opus-4-6', '--allowedTools', tools], {
+    const model = process.env.AI_SDLC_MODEL ?? 'claude-sonnet-4-5-20250929';
+    const child = spawn('claude', ['-p', '--model', model, '--allowedTools', tools], {
       cwd: workDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },
