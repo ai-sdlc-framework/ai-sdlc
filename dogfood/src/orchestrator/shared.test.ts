@@ -13,6 +13,7 @@ import {
   authorizeFilesChanged,
   interpolateBranchPattern,
   interpolatePRTitle,
+  parseDuration,
 } from './shared.js';
 import type { AutonomyPolicy, AuditLog, MetricStore } from '@ai-sdlc/reference';
 
@@ -347,5 +348,70 @@ describe('authorizeFilesChanged()', () => {
         'test-agent',
       ),
     ).toThrow('Authorization denied');
+  });
+});
+
+describe('parseDuration()', () => {
+  it('parses seconds correctly', () => {
+    expect(parseDuration('30s')).toBe(30000);
+    expect(parseDuration('1s')).toBe(1000);
+    expect(parseDuration('60s')).toBe(60000);
+  });
+
+  it('parses minutes correctly', () => {
+    expect(parseDuration('5m')).toBe(300000);
+    expect(parseDuration('1m')).toBe(60000);
+    expect(parseDuration('10m')).toBe(600000);
+  });
+
+  it('parses hours correctly', () => {
+    expect(parseDuration('2h')).toBe(7200000);
+    expect(parseDuration('1h')).toBe(3600000);
+    expect(parseDuration('24h')).toBe(86400000);
+  });
+
+  it('parses days correctly', () => {
+    expect(parseDuration('7d')).toBe(604800000);
+    expect(parseDuration('1d')).toBe(86400000);
+    expect(parseDuration('30d')).toBe(2592000000);
+  });
+
+  it('throws on invalid format without unit', () => {
+    expect(() => parseDuration('30')).toThrow('Invalid duration format: 30');
+  });
+
+  it('throws on invalid format with invalid unit', () => {
+    expect(() => parseDuration('30x')).toThrow('Invalid duration format: 30x');
+  });
+
+  it('throws on non-numeric value', () => {
+    expect(() => parseDuration('abcs')).toThrow('Invalid duration format: abcs');
+  });
+
+  it('throws on empty string', () => {
+    expect(() => parseDuration('')).toThrow('Invalid duration format: ');
+  });
+
+  it('throws on zero duration', () => {
+    expect(() => parseDuration('0s')).toThrow('Invalid duration format: 0s');
+    expect(() => parseDuration('0m')).toThrow('Invalid duration format: 0m');
+  });
+
+  it('throws on negative duration', () => {
+    expect(() => parseDuration('-5s')).toThrow('Invalid duration format: -5s');
+  });
+
+  it('throws on decimal values', () => {
+    expect(() => parseDuration('1.5s')).toThrow('Invalid duration format: 1.5s');
+  });
+
+  it('throws on multiple units', () => {
+    expect(() => parseDuration('1h30m')).toThrow('Invalid duration format: 1h30m');
+  });
+
+  it('throws on whitespace', () => {
+    expect(() => parseDuration('30 s')).toThrow('Invalid duration format: 30 s');
+    expect(() => parseDuration(' 30s')).toThrow('Invalid duration format:  30s');
+    expect(() => parseDuration('30s ')).toThrow('Invalid duration format: 30s ');
   });
 });
