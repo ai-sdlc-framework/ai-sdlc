@@ -67,3 +67,87 @@ export {
   createStructuredConsoleLogger,
   createStructuredBufferLogger,
 } from './structured-logger.js';
+
+// Resource builders
+export {
+  buildDogfoodPipeline,
+  buildDogfoodAgentRole,
+  buildDogfoodQualityGate,
+  buildDogfoodAutonomyPolicy,
+  buildDogfoodAdapterBinding,
+  PipelineBuilder,
+  AgentRoleBuilder,
+  QualityGateBuilder,
+  AutonomyPolicyBuilder,
+  AdapterBindingBuilder,
+  parseBuilderManifest,
+  validateBuilderManifest,
+} from './builders.js';
+
+// Agent orchestration
+export {
+  createPipelineOrchestration,
+  executePipelineOrchestration,
+  validatePipelineHandoffs,
+  sequential,
+  parallel,
+  hybrid,
+  hierarchical,
+  swarm,
+  validateHandoff,
+  simpleSchemaValidate,
+} from './orchestration.js';
+
+// Policy evaluators
+export {
+  createPipelineRegoEvaluator,
+  createPipelineCELEvaluator,
+  createPipelineABACHook,
+  createPipelineExpressionEvaluator,
+  createPipelineLLMEvaluator,
+  evaluatePipelineGate,
+  scorePipelineComplexity,
+  evaluatePipelineComplexityRouting,
+} from './policy-evaluators.js';
+
+// Adapter ecosystem
+export {
+  createPipelineAdapterRegistry,
+  createPipelineWebhookBridge,
+  resolveAdapterFromGit,
+  scanPipelineAdapters,
+} from './adapters.js';
+
+// Specialized reconcilers
+export {
+  createDogfoodPipelineReconciler,
+  createDogfoodGateReconciler,
+  createDogfoodAutonomyReconciler,
+  hasResourceChanged,
+  fingerprintResource,
+} from './reconcilers.js';
+
+// Extended audit
+export {
+  createFileAuditLog,
+  verifyAuditIntegrity,
+  loadAuditEntries,
+  rotateAuditLog,
+  computeAuditHash,
+} from './audit-extended.js';
+
+// Extended compliance
+export {
+  checkFrameworkCompliance,
+  getControlCatalog,
+  getFrameworkMappings,
+  listSupportedFrameworks,
+} from './compliance-extended.js';
+
+// Extended telemetry
+export {
+  createSilentLogger,
+  withPipelineSpanSync,
+  getPipelineTracer,
+  validateResourceSchema,
+} from './telemetry-extended.js';
