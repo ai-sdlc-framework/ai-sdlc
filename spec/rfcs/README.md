@@ -101,3 +101,4 @@ RFC-NNNN-short-title.md
 | RFC | Title | Status |
 | --- | --- | --- |
 | [RFC-0001](RFC-0001-template.md) | Template | — |
+| [RFC-0002](RFC-0002-pipeline-orchestration.md) | Pipeline Orchestration Policy | Draft |

@@ -32,12 +32,12 @@ Declare desired SDLC state in YAML
 
 The framework sits above the emerging agent standards stack as the **orchestration and governance layer**:
 
-| Protocol       | Scope                         | Relationship to AI-SDLC                   |
-| -------------- | ----------------------------- | ----------------------------------------- |
-| **MCP**        | Agent-to-tool integration     | AI-SDLC adapters can wrap MCP servers     |
-| **A2A**        | Agent-to-agent communication  | AI-SDLC agents publish A2A Agent Cards    |
-| **AGENTS.md**  | Per-project agent instructions| AI-SDLC policies generate AGENTS.md files |
-| **AI-SDLC**    | SDLC orchestration & governance| The orchestration layer above all three   |
+| Protocol       | Scope                           | Relationship to AI-SDLC                   |
+| -------------- | ------------------------------- | ----------------------------------------- |
+| **MCP**        | Agent-to-tool integration       | AI-SDLC adapters can wrap MCP servers     |
+| **A2A**        | Agent-to-agent communication    | AI-SDLC agents publish A2A Agent Cards    |
+| **AGENTS.md**  | Per-project agent instructions  | AI-SDLC policies generate AGENTS.md files |
+| **AI-SDLC**    | SDLC orchestration & governance | The orchestration layer above all three   |
 
 ## Architecture
 
