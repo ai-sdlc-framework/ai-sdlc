@@ -97,3 +97,87 @@ export {
   createStructuredConsoleLogger,
   createStructuredBufferLogger,
 } from './orchestrator/structured-logger.js';
+
+// Resource builders
+export {
+  buildDogfoodPipeline,
+  buildDogfoodAgentRole,
+  buildDogfoodQualityGate,
+  buildDogfoodAutonomyPolicy,
+  buildDogfoodAdapterBinding,
+  PipelineBuilder,
+  AgentRoleBuilder,
+  QualityGateBuilder,
+  AutonomyPolicyBuilder,
+  AdapterBindingBuilder,
+  parseBuilderManifest,
+  validateBuilderManifest,
+} from './orchestrator/builders.js';
+
+// Agent orchestration
+export {
+  createPipelineOrchestration,
+  executePipelineOrchestration,
+  validatePipelineHandoffs,
+  sequential,
+  parallel,
+  hybrid,
+  hierarchical,
+  swarm,
+  validateHandoff,
+  simpleSchemaValidate,
+} from './orchestrator/orchestration.js';
+
+// Policy evaluators
+export {
+  createPipelineRegoEvaluator,
+  createPipelineCELEvaluator,
+  createPipelineABACHook,
+  createPipelineExpressionEvaluator,
+  createPipelineLLMEvaluator,
+  evaluatePipelineGate,
+  scorePipelineComplexity,
+  evaluatePipelineComplexityRouting,
+} from './orchestrator/policy-evaluators.js';
+
+// Adapter ecosystem
+export {
+  createPipelineAdapterRegistry,
+  createPipelineWebhookBridge,
+  resolveAdapterFromGit,
+  scanPipelineAdapters,
+} from './orchestrator/adapters.js';
+
+// Specialized reconcilers
+export {
+  createDogfoodPipelineReconciler,
+  createDogfoodGateReconciler,
+  createDogfoodAutonomyReconciler,
+  hasResourceChanged,
+  fingerprintResource,
+} from './orchestrator/reconcilers.js';
+
+// Extended audit
+export {
+  createFileAuditLog,
+  verifyAuditIntegrity,
+  loadAuditEntries,
+  rotateAuditLog,
+  computeAuditHash,
+} from './orchestrator/audit-extended.js';
+
+// Extended compliance
+export {
+  checkFrameworkCompliance,
+  getControlCatalog,
+  getFrameworkMappings,
+  listSupportedFrameworks,
+} from './orchestrator/compliance-extended.js';
+
+// Extended telemetry
+export {
+  createSilentLogger,
+  withPipelineSpanSync,
+  getPipelineTracer,
+  validateResourceSchema,
+} from './orchestrator/telemetry-extended.js';
