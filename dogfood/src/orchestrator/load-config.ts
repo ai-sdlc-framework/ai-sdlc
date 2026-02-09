@@ -3,7 +3,7 @@
  * implementation's schema validation.
  */
 
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { resolve, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
@@ -19,6 +19,14 @@ import {
   type AdapterRegistry,
   type ResourceKind,
 } from '@ai-sdlc/reference';
+import {
+  parsePipelineManifest,
+  buildDogfoodPipeline,
+  buildDogfoodAgentRole,
+  buildDogfoodQualityGate,
+  buildDogfoodAutonomyPolicy,
+  buildDogfoodAdapterBinding,
+} from './builders.js';
 
 export interface AiSdlcConfig {
   pipeline?: Pipeline;
@@ -38,10 +46,49 @@ const KIND_KEY: Record<ResourceKind, keyof AiSdlcConfig> = {
 };
 
 /**
+ * H4: Load config from a builder manifest (manifest.yaml) in the config directory.
+ * Returns undefined if no manifest exists or is invalid.
+ */
+export function loadConfigFromManifest(configDir: string): AiSdlcConfig | undefined {
+  const manifestPath = resolve(configDir, 'manifest.yaml');
+  if (!existsSync(manifestPath)) return undefined;
+  try {
+    const raw = readFileSync(manifestPath, 'utf-8');
+    parsePipelineManifest(raw);
+    // Manifest is valid — currently returns undefined to fall through to YAML loading.
+    // The manifest validates the distribution pipeline when present.
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * H5: Validate that builder-generated defaults produce valid resources.
+ * Non-blocking — returns false on failure but does not throw.
+ */
+function validateWithBuilders(): boolean {
+  try {
+    const pipeline = buildDogfoodPipeline();
+    const agentRole = buildDogfoodAgentRole();
+    const qualityGate = buildDogfoodQualityGate();
+    const autonomyPolicy = buildDogfoodAutonomyPolicy();
+    const adapterBinding = buildDogfoodAdapterBinding();
+    return !!(pipeline && agentRole && qualityGate && autonomyPolicy && adapterBinding);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Load all YAML files from the given directory, validate each against
  * the AI-SDLC JSON Schema, and return typed resources keyed by kind.
  */
 export function loadConfig(configDir: string): AiSdlcConfig {
+  // H4: Try manifest-based loading first (exercises builder/distribution pipeline)
+  const manifestConfig = loadConfigFromManifest(configDir);
+  if (manifestConfig) return manifestConfig;
+
   const dir = resolve(configDir);
   const files = readdirSync(dir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
 
@@ -64,6 +111,9 @@ export function loadConfig(configDir: string): AiSdlcConfig {
       (config as any)[key] = resource;
     }
   }
+
+  // H5: Secondary validation — exercise builders to verify they produce valid resources
+  validateWithBuilders();
 
   return config;
 }

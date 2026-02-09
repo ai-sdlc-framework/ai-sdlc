@@ -31,7 +31,7 @@ import { loadConfig, type AiSdlcConfig } from './load-config.js';
 import { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
 import { createLogger, type Logger } from './logger.js';
 import { createStructuredConsoleLogger } from './structured-logger.js';
-import type { AgentRunner } from '../runner/types.js';
+import type { AgentRunner, AgentResult } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
 import {
   execFileAsync,
@@ -55,6 +55,7 @@ import {
   classifyAndSubmitApproval,
   type SecurityContext,
 } from './security.js';
+import { createPipelineOrchestration, executePipelineOrchestration } from './orchestration.js';
 import { createPipelineProvenance, attachProvenanceToPR } from './provenance.js';
 import { createInstrumentedEnforcement, createInstrumentedAutonomy } from './instrumented.js';
 import { createPipelineDiscovery, resolveAgentForIssue } from './discovery.js';
@@ -408,63 +409,78 @@ async function executePipelineBody(
       : undefined;
 
     try {
-      result = await withSpan(
-        SPAN_NAMES.AGENT_TASK,
-        {
-          [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
-          [ATTRIBUTE_KEYS.RESOURCE_NAME]: `issue#${issueNumber}`,
-        },
-        async () => {
-          const r = await runner.run({
-            issueNumber,
-            issueTitle: issue.title,
-            issueBody: issue.description ?? '',
-            workDir,
-            branch: branchName,
-            constraints: {
-              maxFilesPerChange: resolved.maxFiles,
-              requireTests: resolved.requireTests,
-              blockedPaths: resolved.blockedPaths,
+      // H1: Wrap agent invocation in orchestration engine
+      // H3: Use discovery-resolved agent when available
+      const effectiveAgent = resolvedAgent ?? agentRole;
+      const plan = createPipelineOrchestration([effectiveAgent], 'sequential');
+
+      const orchestrationResult = await executePipelineOrchestration(
+        plan,
+        [effectiveAgent],
+        async (agent) => {
+          return withSpan(
+            SPAN_NAMES.AGENT_TASK,
+            {
+              [ATTRIBUTE_KEYS.AGENT]: agent.metadata.name,
+              [ATTRIBUTE_KEYS.RESOURCE_NAME]: `issue#${issueNumber}`,
             },
-          });
-
-          if (!r.success) {
-            log.stageEnd('agent');
-            auditLog.record({
-              actor: 'system',
-              action: 'execute',
-              resource: `agent/${agentRole.metadata.name}`,
-              decision: 'denied',
-              details: { error: r.error },
-            });
-            meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
-            recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
-            const agentFailTpl = config.pipeline?.spec.notifications?.templates?.['agent-failure'];
-            const errorDetail = r.error ?? 'Unknown error';
-            const agentFailComment = agentFailTpl
-              ? renderTemplate(agentFailTpl, { stageName: 'code', details: errorDetail })
-              : { title: 'AI-SDLC: Agent Failed', body: errorDetail };
-            await tracker.addComment(
-              String(issueNumber),
-              `## ${agentFailComment.title}\n\n${agentFailComment.body}`,
-            );
-            throw new Error(`Agent failed on issue #${issueNumber}: ${r.error}`);
-          }
-          log.stageEnd('agent');
-
-          auditLog.record({
-            actor: 'system',
-            action: 'execute',
-            resource: `agent/${agentRole.metadata.name}`,
-            decision: 'allowed',
-            details: { filesChanged: r.filesChanged.length },
-          });
-          meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
-          recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
-
-          return r;
+            () =>
+              runner.run({
+                issueNumber,
+                issueTitle: issue.title,
+                issueBody: issue.description ?? '',
+                workDir,
+                branch: branchName,
+                constraints: {
+                  maxFilesPerChange: resolved.maxFiles,
+                  requireTests: resolved.requireTests,
+                  blockedPaths: resolved.blockedPaths,
+                },
+              }),
+          );
         },
       );
+
+      // Extract the AgentResult from orchestration output
+      const stepOutput = orchestrationResult.stepResults[0]?.output as AgentResult | undefined;
+      if (!orchestrationResult.success || !stepOutput?.success) {
+        const err =
+          stepOutput?.error ??
+          orchestrationResult.stepResults[0]?.error ??
+          'Unknown orchestration error';
+        log.stageEnd('agent');
+        auditLog.record({
+          actor: 'system',
+          action: 'execute',
+          resource: `agent/${effectiveAgent.metadata.name}`,
+          decision: 'denied',
+          details: { error: err },
+        });
+        meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
+        recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
+        const agentFailTpl = config.pipeline?.spec.notifications?.templates?.['agent-failure'];
+        const errorDetail = typeof err === 'string' ? err : 'Unknown error';
+        const agentFailComment = agentFailTpl
+          ? renderTemplate(agentFailTpl, { stageName: 'code', details: errorDetail })
+          : { title: 'AI-SDLC: Agent Failed', body: errorDetail };
+        await tracker.addComment(
+          String(issueNumber),
+          `## ${agentFailComment.title}\n\n${agentFailComment.body}`,
+        );
+        throw new Error(`Agent failed on issue #${issueNumber}: ${err}`);
+      }
+      result = stepOutput;
+      log.stageEnd('agent');
+
+      auditLog.record({
+        actor: 'system',
+        action: 'execute',
+        resource: `agent/${effectiveAgent.metadata.name}`,
+        decision: 'allowed',
+        details: { filesChanged: result.filesChanged.length },
+      });
+      meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
+      recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
     } finally {
       // Revoke JIT credentials after agent execution (success or failure)
       if (jitCred && options.security) {
