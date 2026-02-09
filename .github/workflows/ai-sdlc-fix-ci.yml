@@ -79,3 +79,14 @@ jobs:
           PR=${{ steps.pr.outputs.number }}
           RUN_ID=${{ github.event.workflow_run.id }}
           pnpm --filter @ai-sdlc/dogfood fix-ci --pr "$PR" --run-id "$RUN_ID"
+
+      - name: Upload pipeline artifacts
+        if: always() && steps.pr.outputs.number
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-sdlc-fix-ci-pr-${{ steps.pr.outputs.number }}
+          path: |
+            .ai-sdlc/audit.jsonl
+            /tmp/ai-sdlc-diagnostics-audit.jsonl
+          if-no-files-found: ignore
+          retention-days: 30
