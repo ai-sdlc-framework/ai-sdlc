@@ -95,7 +95,6 @@ import {
   verifyAuditIntegrity,
   createFileAuditLog,
   loadAuditEntries,
-  rotateAuditLog,
   computeAuditHash,
 } from './audit-extended.js';
 import { renderTemplate } from './notifications.js';
@@ -925,7 +924,7 @@ function runPipelineDiagnostics(input: DiagnosticsInput): void {
     decision: 'allowed',
   });
 
-  // Audit file operations (async, best-effort)
+  // Audit file operations (best-effort)
   // Use /tmp to avoid writing to .ai-sdlc/ which is a blocked path for agents
   if (input.metricStore) {
     const auditPath = `/tmp/ai-sdlc-diagnostics-audit.jsonl`;
@@ -937,6 +936,7 @@ function runPipelineDiagnostics(input: DiagnosticsInput): void {
       decision: 'allowed',
     });
     void loadAuditEntries(auditPath).catch(() => {});
-    void rotateAuditLog(auditPath).catch(() => {});
+    // Note: rotateAuditLog intentionally omitted — it truncates the file,
+    // which would empty it before artifact upload can capture the contents.
   }
 }
