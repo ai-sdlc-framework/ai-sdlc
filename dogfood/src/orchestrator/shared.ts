@@ -23,7 +23,7 @@ import {
   type ComplianceCoverageReport,
 } from '@ai-sdlc/reference';
 
-function execFileAsync(
+export function execFileAsync(
   cmd: string,
   args: string[],
   opts?: Record<string, unknown>,
@@ -39,6 +39,14 @@ function execFileAsync(
 // ── Template interpolation ────────────────────────────────────────────
 
 /**
+ * Replace `{key}` placeholders in a string with values from `vars`.
+ * Unknown keys are left as-is.
+ */
+export function interpolate(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
+}
+
+/**
  * Interpolate a branch name pattern by replacing `{key}` placeholders.
  * Falls back to `ai-sdlc/issue-{issueNumber}` when no pattern is provided.
  */
@@ -46,8 +54,7 @@ export function interpolateBranchPattern(
   pattern: string | undefined,
   vars: Record<string, string>,
 ): string {
-  const p = pattern ?? 'ai-sdlc/issue-{issueNumber}';
-  return p.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
+  return interpolate(pattern ?? 'ai-sdlc/issue-{issueNumber}', vars);
 }
 
 /**
@@ -58,8 +65,7 @@ export function interpolatePRTitle(
   template: string | undefined,
   vars: Record<string, string>,
 ): string {
-  const t = template ?? 'fix: {issueTitle} (#{issueNumber})';
-  return t.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
+  return interpolate(template ?? 'fix: {issueTitle} (#{issueNumber})', vars);
 }
 
 // ── Branch pattern ───────────────────────────────────────────────────
