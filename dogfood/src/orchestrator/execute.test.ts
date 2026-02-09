@@ -2,7 +2,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolve } from 'node:path';
 import { executePipeline } from './execute.js';
 import type { AgentRunner, AgentResult } from '../runner/types.js';
-import type { IssueTracker, SourceControl, Issue, PullRequest, AuditLog } from '@ai-sdlc/reference';
+import type {
+  IssueTracker,
+  SourceControl,
+  Issue,
+  PullRequest,
+  AuditLog,
+  AgentMemory,
+} from '@ai-sdlc/reference';
 import type { Logger } from './logger.js';
 
 // Mock child_process.execFile used by executePipeline for git checkout/push
@@ -464,5 +471,106 @@ describe('executePipeline()', () => {
     // getMeter() returns a no-op meter without SDK, so we just verify
     // the pipeline completes without error when counter.add() is called
     expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('uses validateIssueWithExtensions when expressionEvaluator is provided', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    // Simple expression evaluator that always passes
+    const expressionEvaluator = {
+      evaluate: vi.fn().mockReturnValue(true),
+      validate: vi.fn().mockReturnValue({ valid: true }),
+    };
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      expressionEvaluator,
+    });
+
+    // Pipeline should complete successfully with expression evaluator wired
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('records failure episode when pipeline throws with memory', async () => {
+    const issue = makeIssue({
+      description: '## Description\ntest\n\n### Complexity\n5',
+    });
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    const appendMock = vi.fn().mockReturnValue({
+      id: 'ep-1',
+      tier: 'episodic' as const,
+      key: 'pipeline-execution',
+      value: {},
+      createdAt: new Date().toISOString(),
+    });
+    const memory: AgentMemory = {
+      working: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn().mockReturnValue(true),
+        clear: vi.fn(),
+        keys: vi.fn().mockReturnValue([]),
+      },
+      shortTerm: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn().mockReturnValue(true),
+        keys: vi.fn().mockReturnValue([]),
+      },
+      longTerm: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn().mockReturnValue(true),
+        search: vi.fn().mockReturnValue([]),
+        keys: vi.fn().mockReturnValue([]),
+      },
+      shared: {
+        get: vi.fn(),
+        set: vi.fn(),
+        delete: vi.fn().mockReturnValue(true),
+        keys: vi.fn().mockReturnValue([]),
+      },
+      episodic: {
+        append: appendMock,
+        recent: vi.fn().mockReturnValue([]),
+        search: vi.fn().mockReturnValue([]),
+      },
+    };
+
+    await expect(
+      executePipeline(42, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        tracker,
+        sourceControl: sc,
+        runner,
+        auditLog,
+        memory,
+      }),
+    ).rejects.toThrow();
+
+    // Verify failure episode was recorded
+    expect(appendMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'pipeline-execution',
+        value: expect.objectContaining({
+          issueNumber: 42,
+          outcome: 'failure',
+        }),
+      }),
+    );
   });
 });

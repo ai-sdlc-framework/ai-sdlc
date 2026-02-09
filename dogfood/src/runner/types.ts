@@ -21,6 +21,10 @@ export interface AgentContext {
   ciErrors?: string;
   /** Agent memory for long-term/episodic recall. */
   memory?: AgentMemory;
+  /** Override the default tool allowlist for the agent subprocess. */
+  allowedTools?: string[];
+  /** Timeout in milliseconds for the agent subprocess (default 300000). */
+  timeoutMs?: number;
 }
 
 export interface AgentResult {

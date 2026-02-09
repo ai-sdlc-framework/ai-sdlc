@@ -8,9 +8,12 @@
 import {
   ReconcilerLoop,
   createResourceCache,
+  instrumentReconciler,
   type ReconcilerConfig,
   type ReconcileResult,
+  type ReconcilerFn,
   type Pipeline,
+  type MetricStore,
 } from '@ai-sdlc/reference';
 import { executePipeline, type ExecuteOptions } from './execute.js';
 
@@ -21,6 +24,8 @@ export interface WatchOptions {
   executeOptions?: Omit<ExecuteOptions, 'configDir' | 'workDir'>;
   /** Callback invoked when a pipeline reconciliation completes. */
   onReconcile?: (pipelineName: string, result: ReconcileResult) => void;
+  /** Optional metric store to instrument reconciliation cycles. */
+  metricStore?: MetricStore;
 }
 
 export interface WatchHandle {
@@ -41,7 +46,7 @@ export function startWatch(options: WatchOptions = {}): WatchHandle {
   const cache = createResourceCache();
   const issueMap = new Map<string, number>();
 
-  const loop = new ReconcilerLoop(async (resource) => {
+  let reconcileFn: ReconcilerFn = async (resource) => {
     const pipeline = resource as Pipeline;
     const issueNumber = issueMap.get(pipeline.metadata.name);
     if (!issueNumber) {
@@ -66,7 +71,14 @@ export function startWatch(options: WatchOptions = {}): WatchHandle {
       options.onReconcile?.(pipeline.metadata.name, result);
       return result;
     }
-  }, options.reconcilerConfig);
+  };
+
+  // Wrap with instrumentation if metric store is provided
+  if (options.metricStore) {
+    reconcileFn = instrumentReconciler(reconcileFn, { metricStore: options.metricStore });
+  }
+
+  const loop = new ReconcilerLoop(reconcileFn, options.reconcilerConfig);
 
   loop.start();
 

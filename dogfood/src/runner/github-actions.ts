@@ -56,6 +56,21 @@ export function buildPrompt(ctx: AgentContext): string {
     `- Blocked paths (do NOT modify): ${ctx.constraints.blockedPaths.join(', ') || 'none'}`,
   );
 
+  // Append relevant episodic memory if available
+  if (ctx.memory) {
+    const episodes = ctx.memory.episodic.search(`issue-${ctx.issueNumber}`);
+    if (episodes.length > 0) {
+      lines.push('', '## Previous Context');
+      for (const ep of episodes.slice(0, 5)) {
+        const summary =
+          ep.metadata && typeof ep.metadata === 'object' && 'summary' in ep.metadata
+            ? (ep.metadata as Record<string, unknown>).summary
+            : ep.key;
+        lines.push(`- ${summary}`);
+      }
+    }
+  }
+
   return lines.join('\n');
 }
 
@@ -64,17 +79,25 @@ async function gitExec(workDir: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-function runClaude(prompt: string, workDir: string): Promise<string> {
+const DEFAULT_ALLOWED_TOOLS = 'Edit,Write,Read,Glob,Grep,Bash';
+const DEFAULT_TIMEOUT_MS = 300_000;
+
+interface RunClaudeOptions {
+  allowedTools?: string[];
+  timeoutMs?: number;
+}
+
+function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Promise<string> {
+  const tools = opts?.allowedTools?.join(',') ?? DEFAULT_ALLOWED_TOOLS;
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      'claude',
-      ['-p', '--model', 'claude-opus-4-6', '--allowedTools', 'Edit,Write,Read,Glob,Grep,Bash'],
-      {
-        cwd: workDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env },
-      },
-    );
+    const child = spawn('claude', ['-p', '--model', 'claude-opus-4-6', '--allowedTools', tools], {
+      cwd: workDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env },
+      timeout: timeoutMs,
+    });
 
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
@@ -106,7 +129,10 @@ export class GitHubActionsRunner implements AgentRunner {
 
     try {
       // Invoke Claude Code CLI in print mode, sending prompt via stdin
-      const stdout = await runClaude(prompt, ctx.workDir);
+      const stdout = await runClaude(prompt, ctx.workDir, {
+        allowedTools: ctx.allowedTools,
+        timeoutMs: ctx.timeoutMs,
+      });
 
       // Collect changed files
       const diffOutput = await gitExec(ctx.workDir, ['diff', '--name-only']);

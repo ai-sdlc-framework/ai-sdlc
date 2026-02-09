@@ -62,4 +62,88 @@ describe('buildPrompt()', () => {
     expect(prompt).toContain('pnpm lint');
     expect(prompt).toContain('pnpm format');
   });
+
+  it('includes Previous Context section when memory has relevant episodes', () => {
+    const ctx = makeContext({
+      memory: {
+        working: {
+          get: () => undefined,
+          set: () => {},
+          delete: () => true,
+          clear: () => {},
+          keys: () => [],
+        },
+        shortTerm: { get: () => undefined, set: () => {}, delete: () => true, keys: () => [] },
+        longTerm: {
+          get: () => undefined,
+          set: () => {},
+          delete: () => true,
+          search: () => [],
+          keys: () => [],
+        },
+        shared: { get: () => undefined, set: () => {}, delete: () => true, keys: () => [] },
+        episodic: {
+          append: () => ({
+            id: 'ep-1',
+            tier: 'episodic' as const,
+            key: 'issue-42',
+            value: {},
+            createdAt: new Date().toISOString(),
+          }),
+          recent: () => [],
+          search: () => [
+            {
+              id: 'ep-1',
+              tier: 'episodic' as const,
+              key: 'issue-42',
+              value: { outcome: 'failure' },
+              createdAt: new Date().toISOString(),
+              metadata: { summary: 'Previous attempt failed on issue #42' },
+            },
+          ],
+        },
+      },
+    });
+    const prompt = buildPrompt(ctx);
+
+    expect(prompt).toContain('## Previous Context');
+    expect(prompt).toContain('Previous attempt failed on issue #42');
+  });
+
+  it('does not include Previous Context when memory has no relevant episodes', () => {
+    const ctx = makeContext({
+      memory: {
+        working: {
+          get: () => undefined,
+          set: () => {},
+          delete: () => true,
+          clear: () => {},
+          keys: () => [],
+        },
+        shortTerm: { get: () => undefined, set: () => {}, delete: () => true, keys: () => [] },
+        longTerm: {
+          get: () => undefined,
+          set: () => {},
+          delete: () => true,
+          search: () => [],
+          keys: () => [],
+        },
+        shared: { get: () => undefined, set: () => {}, delete: () => true, keys: () => [] },
+        episodic: {
+          append: () => ({
+            id: 'ep-1',
+            tier: 'episodic' as const,
+            key: 'x',
+            value: {},
+            createdAt: new Date().toISOString(),
+          }),
+          recent: () => [],
+          search: () => [],
+        },
+      },
+    });
+    const prompt = buildPrompt(ctx);
+
+    expect(prompt).not.toContain('## Previous Context');
+  });
 });

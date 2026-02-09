@@ -25,9 +25,10 @@ import {
   type AgentMemory,
   type ExpressionEvaluator,
   type LLMEvaluator,
+  type Issue,
 } from '@ai-sdlc/reference';
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
-import { validateIssue, parseComplexity } from './validate-issue.js';
+import { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
 import { createLogger, type Logger } from './logger.js';
 import type { AgentRunner } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
@@ -138,7 +139,7 @@ export async function executePipeline(
   const tracker = options.tracker ?? createGitHubIssueTracker(ghConfig);
   const sc = options.sourceControl ?? createGitHubSourceControl(ghConfig);
 
-  // 3. Fetch issue and validate
+  // 3. Fetch issue
   log.stage('validate-issue');
   const issue = await tracker.getIssue(String(issueNumber));
 
@@ -151,6 +152,56 @@ export async function executePipeline(
     });
   }
 
+  // Wrap pipeline body in try/catch to record failure episodes
+  try {
+    return await executePipelineBody(
+      issueNumber,
+      issue,
+      config,
+      qualityGate,
+      agentRole,
+      autonomyPolicy,
+      tracker,
+      sc,
+      auditLog,
+      metricStore,
+      options,
+      log,
+      workDir,
+    );
+  } catch (err) {
+    // Record failure episode before rethrowing
+    if (options.memory) {
+      options.memory.episodic.append({
+        key: 'pipeline-execution',
+        value: {
+          issueNumber,
+          outcome: 'failure',
+          error: err instanceof Error ? err.message : String(err),
+        },
+        metadata: { summary: `Failed issue #${issueNumber}: ${issue.title}` },
+      });
+      options.memory.working.clear();
+    }
+    throw err;
+  }
+}
+
+async function executePipelineBody(
+  issueNumber: number,
+  issue: Issue,
+  config: AiSdlcConfig,
+  qualityGate: NonNullable<AiSdlcConfig['qualityGate']>,
+  agentRole: NonNullable<AiSdlcConfig['agentRole']>,
+  autonomyPolicy: NonNullable<AiSdlcConfig['autonomyPolicy']>,
+  tracker: IssueTracker,
+  sc: SourceControl,
+  auditLog: AuditLog,
+  metricStore: MetricStore | undefined,
+  options: ExecuteOptions,
+  log: Logger,
+  workDir: string,
+): Promise<PipelineResult> {
   const meter = getMeter();
 
   // 4. Validate issue against quality gates
@@ -161,7 +212,13 @@ export async function executePipeline(
       [ATTRIBUTE_KEYS.GATE]: qualityGate.metadata.name,
     },
     async () => {
-      const enforcement = validateIssue(issue, qualityGate);
+      const enforcement =
+        options.expressionEvaluator || options.llmEvaluator
+          ? await validateIssueWithExtensions(issue, qualityGate, {
+              expressionEvaluator: options.expressionEvaluator,
+              llmEvaluator: options.llmEvaluator,
+            })
+          : validateIssue(issue, qualityGate);
       if (!enforcement.allowed) {
         const failures = enforcement.results
           .filter((r) => r.verdict === 'fail')
@@ -430,7 +487,7 @@ export async function executePipeline(
     details: { averageCoverage: avgCoverage, frameworks: complianceReports.length },
   });
 
-  // 17. Record episodic memory
+  // 17. Record episodic memory (success)
   if (options.memory) {
     options.memory.episodic.append({
       key: 'pipeline-execution',
