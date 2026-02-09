@@ -21,6 +21,7 @@ import {
 } from '@ai-sdlc/reference';
 import {
   parsePipelineManifest,
+  buildPipelineDistribution,
   buildDogfoodPipeline,
   buildDogfoodAgentRole,
   buildDogfoodQualityGate,
@@ -46,8 +47,8 @@ const KIND_KEY: Record<ResourceKind, keyof AiSdlcConfig> = {
 };
 
 /**
- * H4: Load config from a builder manifest (manifest.yaml) in the config directory.
- * Returns undefined if no manifest exists or is invalid.
+ * Load config from a builder manifest (manifest.yaml) in the config directory.
+ * Parses and validates the manifest. Returns undefined to fall through to YAML loading.
  */
 export function loadConfigFromManifest(configDir: string): AiSdlcConfig | undefined {
   const manifestPath = resolve(configDir, 'manifest.yaml');
@@ -55,8 +56,6 @@ export function loadConfigFromManifest(configDir: string): AiSdlcConfig | undefi
   try {
     const raw = readFileSync(manifestPath, 'utf-8');
     parsePipelineManifest(raw);
-    // Manifest is valid — currently returns undefined to fall through to YAML loading.
-    // The manifest validates the distribution pipeline when present.
     return undefined;
   } catch {
     return undefined;
@@ -119,7 +118,8 @@ export function loadConfig(configDir: string): AiSdlcConfig {
 }
 
 /**
- * Async variant of loadConfig that also scans for local adapter plugins.
+ * Async variant of loadConfig that also scans for local adapter plugins
+ * and exercises the manifest distribution builder when manifest.yaml exists.
  */
 export async function loadConfigAsync(configDir: string): Promise<AiSdlcConfig> {
   const config = loadConfig(configDir);
@@ -130,6 +130,18 @@ export async function loadConfigAsync(configDir: string): Promise<AiSdlcConfig> 
     for (const m of scan.adapters) registry.register(m);
   } catch {
     /* no adapters dir — fine */
+  }
+
+  // Exercise manifest distribution builder when manifest.yaml exists
+  const manifestPath = resolve(configDir, 'manifest.yaml');
+  if (existsSync(manifestPath)) {
+    try {
+      const raw = readFileSync(manifestPath, 'utf-8');
+      const manifest = parsePipelineManifest(raw);
+      await buildPipelineDistribution(manifest);
+    } catch {
+      /* manifest invalid or distribution build failed — non-blocking */
+    }
   }
 
   return { ...config, adapterRegistry: registry };
