@@ -1,26 +1,20 @@
 /**
  * @ai-sdlc/sdk — TypeScript SDK for building AI-SDLC implementations.
  *
- * Re-exports core types and validation from the reference implementation,
- * and will provide higher-level helpers for common integration patterns.
+ * Main entry point re-exports core types/validation and resource builders.
+ * For domain-specific imports, use subpath exports:
+ *   - @ai-sdlc/sdk/core
+ *   - @ai-sdlc/sdk/builders
+ *   - @ai-sdlc/sdk/policy
+ *   - @ai-sdlc/sdk/adapters
+ *   - @ai-sdlc/sdk/reconciler
+ *   - @ai-sdlc/sdk/agents
+ *   - @ai-sdlc/sdk/audit
+ *   - @ai-sdlc/sdk/metrics
+ *   - @ai-sdlc/sdk/telemetry
+ *   - @ai-sdlc/sdk/security
+ *   - @ai-sdlc/sdk/compliance
  */
 
-export {
-  // Core types
-  type Pipeline,
-  type AgentRole,
-  type QualityGate,
-  type AutonomyPolicy,
-  type AdapterBinding,
-  type AnyResource,
-  type ResourceKind,
-  type Metadata,
-  type Condition,
-  API_VERSION,
-
-  // Validation
-  validate,
-  validateResource,
-  type ValidationResult,
-  type ValidationError,
-} from '@ai-sdlc/reference';
+export * from './core.js';
+export * from './builders.js';

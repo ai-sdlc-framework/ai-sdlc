@@ -35,6 +35,19 @@ import type {
 
 import { API_VERSION } from '../core/types.js';
 
+// Distribution builder
+export {
+  parseBuilderManifest,
+  validateBuilderManifest,
+  buildDistribution,
+  type BuilderManifest,
+  type ManifestAdapter,
+  type ManifestOutput,
+  type ResolvedAdapter,
+  type DistributionBuildResult,
+  type BuildDistributionOptions,
+} from './distribution.js';
+
 // ── Metadata helpers ─────────────────────────────────────────────────
 
 function baseMetadata(name: string): Metadata {
