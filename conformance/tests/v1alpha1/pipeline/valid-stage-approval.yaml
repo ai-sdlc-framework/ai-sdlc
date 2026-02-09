@@ -1,0 +1,24 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: approval-pipeline
+spec:
+  triggers:
+    - event: issue.assigned
+  providers:
+    issueTracker:
+      type: linear
+  stages:
+    - name: implement
+      agent: code-agent
+    - name: review
+      approval:
+        required: true
+        tierOverride: team-lead
+        blocking: true
+        timeout: PT48H
+        onTimeout: abort
+    - name: deploy
+      agent: deploy-agent
+      approval:
+        required: false

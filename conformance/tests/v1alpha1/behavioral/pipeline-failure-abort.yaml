@@ -1,0 +1,36 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Stage failure with abort strategy causes pipeline to fail'
+metadata:
+  conformanceLevel: core
+test:
+  type: pipeline-failure-policy
+  input:
+    pipeline:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: Pipeline
+      metadata:
+        name: abort-test
+      spec:
+        triggers:
+          - event: push
+        providers:
+          ci:
+            type: github
+        stages:
+          - name: build
+            agent: builder
+            onFailure:
+              strategy: abort
+          - name: test
+            agent: tester
+      status:
+        phase: Running
+        activeStage: build
+    failStage: build
+  expected:
+    phase: Failed
+    reachedStages:
+      - build
+    skippedStages:
+      - test

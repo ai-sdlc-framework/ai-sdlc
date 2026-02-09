@@ -17,8 +17,9 @@
 5. [Architecture Overview](#5-architecture-overview)
 6. [Resource Model Walkthrough](#6-resource-model-walkthrough)
 7. [Getting Started](#7-getting-started)
-8. [Target Personas](#8-target-personas)
-9. [Regulatory Context](#9-regulatory-context)
+8. [Pipeline Orchestration](#8-pipeline-orchestration)
+9. [Target Personas](#9-target-personas)
+10. [Regulatory Context](#10-regulatory-context)
 
 ---
 
@@ -301,7 +302,66 @@ spec:
 
 ---
 
-## 8. Target Personas
+## 8. Pipeline Orchestration
+
+Pipeline resources declare _what_ stages exist, but production pipelines also need to declare _how_ those stages execute. The orchestration extensions (introduced in [RFC-0002](../spec/rfcs/RFC-0002-pipeline-orchestration.md)) add declarative controls for stage failure handling, credential management, approval workflows, branching, PR conventions, and notifications.
+
+### Stage-Level Orchestration
+
+Each stage can declare its own failure policy, timeout, credential scope, and approval requirements:
+
+```yaml
+stages:
+  - name: code
+    agent: coding-agent
+    timeout: PT30M
+    credentials:
+      scope: ["repo:read", "repo:write"]
+      ttl: PT15M
+      revokeOnComplete: true
+    onFailure:
+      strategy: retry
+      maxRetries: 2
+      retryDelay: PT1M
+      notification: agent-failure
+  - name: review
+    approval:
+      required: true
+      blocking: true
+      timeout: PT24H
+      onTimeout: abort
+```
+
+The `onFailure` policy supports four strategies: **abort** (stop the pipeline), **retry** (re-execute up to `maxRetries`), **pause** (suspend for manual intervention), and **continue** (proceed to the next stage despite the failure).
+
+### Pipeline-Level Configuration
+
+At the pipeline level, `branching`, `pullRequest`, and `notifications` configure how the pipeline interacts with source control and issue tracking:
+
+```yaml
+branching:
+  pattern: "ai-sdlc/issue-{issueNumber}"
+  targetBranch: main
+  cleanup: on-merge
+
+pullRequest:
+  titleTemplate: "fix: {issueTitle} (#{issueNumber})"
+  includeProvenance: true
+  closeKeyword: Closes
+
+notifications:
+  templates:
+    gate-failure:
+      target: issue
+      title: "AI-SDLC: Quality Gate Failed"
+      body: "{details}"
+```
+
+These configurations replace hardcoded orchestration logic with declarative policy, making pipelines portable and auditable.
+
+---
+
+## 9. Target Personas
 
 | Persona | Role | Primary Needs |
 | --- | --- | --- |
@@ -317,7 +377,7 @@ Not a traditional coder but a strategic architect of intelligent delivery system
 
 ---
 
-## 9. Regulatory Context
+## 10. Regulatory Context
 
 The AI-SDLC Framework is designed to facilitate compliance with three major regulatory frameworks:
 

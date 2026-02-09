@@ -1,0 +1,35 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Stage failure with continue strategy allows pipeline to proceed'
+metadata:
+  conformanceLevel: core
+test:
+  type: pipeline-failure-policy
+  input:
+    pipeline:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: Pipeline
+      metadata:
+        name: continue-test
+      spec:
+        triggers:
+          - event: push
+        providers:
+          ci:
+            type: github
+        stages:
+          - name: lint
+            agent: linter
+            onFailure:
+              strategy: continue
+          - name: test
+            agent: tester
+      status:
+        phase: Running
+        activeStage: lint
+    failStage: lint
+  expected:
+    phase: Succeeded
+    reachedStages:
+      - lint
+      - test

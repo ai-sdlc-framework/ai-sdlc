@@ -159,6 +159,9 @@ A [Pipeline](glossary.md#pipeline) defines a complete SDLC workflow from trigger
 | `providers` | map[string]Provider | MUST | Tool integrations used by the pipeline. |
 | `stages` | array[Stage] | MUST | Ordered list of execution stages. |
 | `routing` | Routing | MAY | Complexity-based task routing configuration. |
+| `branching` | [BranchingConfig](#branching-config-object) | MAY | Branch naming, target, and cleanup policy. |
+| `pullRequest` | [PullRequestConfig](#pull-request-config-object) | MAY | PR creation conventions. |
+| `notifications` | [NotificationsConfig](#notifications-config-object) | MAY | Named notification templates for pipeline events. |
 
 **Trigger Object:**
 
@@ -181,6 +184,10 @@ A [Pipeline](glossary.md#pipeline) defines a complete SDLC workflow from trigger
 | `name` | string | MUST | Unique name within the pipeline. |
 | `agent` | string | MAY | Reference to an AgentRole resource name. |
 | `qualityGates` | array[string] | MAY | References to QualityGate resource names. |
+| `onFailure` | [FailurePolicy](#failure-policy-object) | MAY | What to do when this stage fails. Defaults to `abort`. |
+| `timeout` | string | MAY | Maximum stage duration as an ISO 8601 duration (e.g., `PT30M`). |
+| `credentials` | [CredentialPolicy](#credential-policy-object) | MAY | JIT credential scope and lifetime for this stage. |
+| `approval` | [ApprovalPolicy](#approval-policy-object) | MAY | Approval requirements before stage execution. |
 
 **Routing Object:**
 
@@ -196,6 +203,78 @@ A [Pipeline](glossary.md#pipeline) defines a complete SDLC workflow from trigger
 | `max` | integer | MUST | Maximum complexity score (inclusive). Range: 1-10. |
 | `strategy` | string | MUST | One of: `fully-autonomous`, `ai-with-review`, `ai-assisted`, `human-led`. |
 
+**FailurePolicy Object:** {#failure-policy-object}
+
+<!-- Source: PRD Section 8.1, RFC-0002 -->
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `strategy` | string | MUST | One of: `abort`, `retry`, `pause`, `continue`. |
+| `maxRetries` | integer | Conditional | Maximum retry attempts (1-10). MUST be present when `strategy` is `retry`. |
+| `retryDelay` | string | MAY | Delay between retries as an ISO 8601 duration (e.g., `PT1M`). |
+| `notification` | string | MAY | Name of a notification template to send on failure. |
+
+**CredentialPolicy Object:** {#credential-policy-object}
+
+<!-- Source: RFC-0002 -->
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `scope` | array[string] | MUST | Permission scopes required by the stage (minimum 1 item). |
+| `ttl` | string | MAY | Credential time-to-live as an ISO 8601 duration. Default: `PT10M`. |
+| `revokeOnComplete` | boolean | MAY | Whether to revoke credentials when the stage completes. Default: `true`. |
+
+**ApprovalPolicy Object:** {#approval-policy-object}
+
+<!-- Source: RFC-0002 -->
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `required` | boolean | MUST | Whether approval is required for this stage. |
+| `tierOverride` | string | MAY | One of: `auto`, `peer-review`, `team-lead`, `security-review`. |
+| `blocking` | boolean | MAY | Whether the stage blocks until approval is granted. Default: `true`. |
+| `timeout` | string | MAY | Maximum time to wait for approval as an ISO 8601 duration. |
+| `onTimeout` | string | MAY | One of: `abort`, `escalate`, `auto-approve`. |
+
+**BranchingConfig Object:** {#branching-config-object}
+
+<!-- Source: RFC-0002 -->
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `pattern` | string | MUST | Branch name pattern with placeholders (e.g., `ai-sdlc/issue-{issueNumber}`). |
+| `targetBranch` | string | MAY | Target branch for pull requests. Default: `main`. |
+| `cleanup` | string | MAY | One of: `on-merge`, `on-close`, `manual`. |
+
+**PullRequestConfig Object:** {#pull-request-config-object}
+
+<!-- Source: RFC-0002 -->
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `titleTemplate` | string | MAY | PR title template with placeholders. |
+| `descriptionSections` | array[string] | MAY | Sections to include in the PR description. |
+| `includeProvenance` | boolean | MAY | Whether to include AI [provenance](glossary.md#provenance) metadata. Default: `true`. |
+| `closeKeyword` | string | MAY | Keyword used to auto-close the linked issue (e.g., `Closes`). |
+
+**NotificationsConfig Object:** {#notifications-config-object}
+
+<!-- Source: RFC-0002 -->
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `templates` | map[string]NotificationTemplate | MAY | Named notification templates. |
+
+**NotificationTemplate Object:** {#notification-template-object}
+
+<!-- Source: RFC-0002 -->
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `target` | string | MUST | One of: `issue`, `pr`, `both`. |
+| `title` | string | MUST | Notification title template. |
+| `body` | string | MAY | Notification body template with placeholders. |
+
 #### 5.1.2 Status Fields
 
 | Field | Type | Description |
@@ -203,6 +282,8 @@ A [Pipeline](glossary.md#pipeline) defines a complete SDLC workflow from trigger
 | `phase` | string | Current pipeline phase. One of: `Pending`, `Running`, `Succeeded`, `Failed`, `Suspended`. |
 | `activeStage` | string | Name of the currently executing stage. |
 | `conditions` | array[Condition] | Current state conditions. See [Section 6](#6-conditions). |
+| `stageAttempts` | map[string]integer | Per-stage execution attempt counts. |
+| `pendingApproval` | ApprovalStatus | Approval details when phase is `Suspended`. |
 
 #### 5.1.3 Example
 
@@ -227,21 +308,59 @@ spec:
     - name: implement
       agent: code-agent
       qualityGates: [test-coverage, security-scan]
+      timeout: PT30M
+      credentials:
+        scope: ["repo:read", "repo:write"]
+        ttl: PT15M
+        revokeOnComplete: true
+      onFailure:
+        strategy: retry
+        maxRetries: 2
+        retryDelay: PT1M
+        notification: agent-failure
     - name: review
       agent: reviewer-agent
       qualityGates: [human-approval]
+      approval:
+        required: true
+        blocking: true
+        timeout: PT24H
+        onTimeout: abort
     - name: deploy
       agent: deploy-agent
       qualityGates: [staging-verification]
+      onFailure:
+        strategy: abort
   routing:
     complexityThresholds:
       low: { min: 1, max: 3, strategy: "fully-autonomous" }
       medium: { min: 4, max: 6, strategy: "ai-with-review" }
       high: { min: 7, max: 8, strategy: "ai-assisted" }
       critical: { min: 9, max: 10, strategy: "human-led" }
+  branching:
+    pattern: "ai-sdlc/issue-{issueNumber}"
+    targetBranch: main
+    cleanup: on-merge
+  pullRequest:
+    titleTemplate: "fix: {issueTitle} (#{issueNumber})"
+    descriptionSections: [summary, changes, closes]
+    includeProvenance: true
+    closeKeyword: Closes
+  notifications:
+    templates:
+      agent-failure:
+        target: issue
+        title: "AI-SDLC: Agent Failed"
+        body: "Error during {stageName}: {details}"
+      pr-created:
+        target: issue
+        title: "AI-SDLC: PR Created"
+        body: "Pull request: {prUrl}"
 status:
   phase: Running
   activeStage: implement
+  stageAttempts:
+    implement: 1
   conditions:
     - type: Healthy
       status: "True"

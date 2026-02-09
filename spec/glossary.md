@@ -32,6 +32,10 @@ An A2A-compatible discovery document published at `/.well-known/agent.json` desc
 
 A [resource](#resource) of kind `AgentRole` that declares an AI agent's identity, capabilities, constraints, and [handoff](#handoff-contract) behavior using the [Role-Goal-Backstory](#role-goal-backstory) pattern. See [spec.md](spec.md#52-agentrole).
 
+### Approval Policy {#approval-policy}
+
+A stage-level configuration that specifies approval requirements before a [Pipeline](#pipeline) stage may execute. Approval policies declare whether approval is required, the approval tier, blocking behavior, timeout duration, and the action to take on timeout. See [spec.md](spec.md#approval-policy-object).
+
 ### Annotation {#annotation}
 
 A key-value pair in a resource's [metadata](#metadata) used for non-identifying information such as build provenance, tooling hints, or operational notes. Annotations are not used for selection or filtering. See [spec.md](spec.md#3-metadata-object).
@@ -44,6 +48,10 @@ A numbered tier (0-3) defining the permissions, guardrails, and monitoring inten
 
 A [resource](#resource) of kind `AutonomyPolicy` that declares progressive [autonomy levels](#autonomy-level) with quantitative [promotion criteria](#promotion) and automatic [demotion triggers](#demotion). See [spec.md](spec.md#54-autonomypolicy).
 
+### Branching Config {#branching-config}
+
+A [Pipeline](#pipeline)-level configuration that declares branch naming patterns, target branches, and cleanup policy for feature branches created during pipeline execution. See [spec.md](spec.md#branching-config-object).
+
 ### Complexity Score {#complexity-score}
 
 A numeric value (1-10) assigned to a task that determines the minimum [autonomy level](#autonomy-level) and human involvement required. Used by the [routing](#routing-strategy) system to assign tasks to appropriate agents. See [autonomy.md](autonomy.md#complexity-based-task-routing).
@@ -52,6 +60,10 @@ A numeric value (1-10) assigned to a task that determines the minimum [autonomy 
 
 A structured status entry in a resource's `status.conditions` array. Each condition has a `type`, `status` (True, False, or Unknown), `reason`, and timestamps. Conditions represent individual aspects of a resource's observed state. See [spec.md](spec.md#5-conditions).
 
+### Credential Policy {#credential-policy}
+
+A stage-level configuration that specifies JIT (just-in-time) credential scope, time-to-live, and revocation behavior for a [Pipeline](#pipeline) stage. Credentials are scoped to the minimum permissions needed and automatically revoked on stage completion. See [spec.md](spec.md#credential-policy-object).
+
 ### Conformance Level {#conformance-level}
 
 One of three tiers (Core, Adapter, Full) defining the scope of specification compliance an implementation achieves. See [spec.md](spec.md#11-conformance-levels).
@@ -59,6 +71,10 @@ One of three tiers (Core, Adapter, Full) defining the scope of specification com
 ### Demotion {#demotion}
 
 Automatic reduction of an agent's [autonomy level](#autonomy-level) triggered by a policy violation such as a security incident, excessive rollback rate, or unauthorized access attempt. Demotions include a cooldown period before re-promotion is possible. See [autonomy.md](autonomy.md#demotion-triggers).
+
+### Failure Policy {#failure-policy}
+
+A stage-level configuration that defines how a [Pipeline](#pipeline) handles stage failures. Strategies include `abort` (stop the pipeline), `retry` (re-execute up to a limit), `pause` (suspend for manual intervention), and `continue` (proceed to the next stage). See [spec.md](spec.md#failure-policy-object).
 
 ### Enforcement Level {#enforcement-level}
 
@@ -84,6 +100,10 @@ A protocol for connecting AI agents to external tools and data sources, original
 
 The `metadata` object present on every [resource](#resource), containing `name`, `namespace`, [labels](#label), and [annotations](#annotation). See [spec.md](spec.md#3-metadata-object).
 
+### Notification Template {#notification-template}
+
+A templated message for [Pipeline](#pipeline) events such as gate failures, agent errors, or PR creation. Templates specify a target (`issue`, `pr`, or `both`), a title, and an optional body with placeholder variables. See [spec.md](spec.md#notification-template-object).
+
 ### Namespace {#namespace}
 
 A scoping unit within the [metadata](#metadata) of a [resource](#resource), typically corresponding to a team or project. Resource names must be unique within a namespace.
@@ -95,6 +115,10 @@ A [resource](#resource) of kind `Pipeline` that defines a complete SDLC workflow
 ### Promotion {#promotion}
 
 Advancement of an agent's [autonomy level](#autonomy-level) after meeting quantitative criteria (minimum tasks, metric thresholds) and receiving explicit approval from designated roles. See [autonomy.md](autonomy.md#promotion-criteria).
+
+### Pull Request Config {#pull-request-config}
+
+A [Pipeline](#pipeline)-level configuration that declares conventions for pull request creation, including title templates, description sections, [provenance](#provenance) inclusion, and issue-closing keywords. See [spec.md](spec.md#pull-request-config-object).
 
 ### Provenance {#provenance}
 

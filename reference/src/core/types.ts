@@ -73,10 +73,37 @@ export interface Provider {
   config?: Record<string, unknown>;
 }
 
+// ── Stage Orchestration ──────────────────────────────────────────────
+
+export interface FailurePolicy {
+  strategy: 'abort' | 'retry' | 'pause' | 'continue';
+  maxRetries?: number;
+  retryDelay?: string;
+  notification?: string;
+}
+
+export interface CredentialPolicy {
+  scope: string[];
+  ttl?: string;
+  revokeOnComplete?: boolean;
+}
+
+export interface ApprovalPolicy {
+  required: boolean;
+  tierOverride?: 'auto' | 'peer-review' | 'team-lead' | 'security-review';
+  blocking?: boolean;
+  timeout?: string;
+  onTimeout?: 'abort' | 'escalate' | 'auto-approve';
+}
+
 export interface Stage {
   name: string;
   agent?: string;
   qualityGates?: string[];
+  onFailure?: FailurePolicy;
+  timeout?: string;
+  credentials?: CredentialPolicy;
+  approval?: ApprovalPolicy;
 }
 
 export type RoutingStrategy = 'fully-autonomous' | 'ai-with-review' | 'ai-assisted' | 'human-led';
@@ -91,19 +118,54 @@ export interface Routing {
   complexityThresholds?: Record<string, ComplexityThreshold>;
 }
 
+export interface BranchingConfig {
+  pattern: string;
+  targetBranch?: string;
+  cleanup?: 'on-merge' | 'on-close' | 'manual';
+}
+
+export interface PullRequestConfig {
+  titleTemplate?: string;
+  descriptionSections?: string[];
+  includeProvenance?: boolean;
+  closeKeyword?: string;
+}
+
+export interface NotificationTemplate {
+  target: 'issue' | 'pr' | 'both';
+  title: string;
+  body?: string;
+}
+
+export interface NotificationsConfig {
+  templates: Record<string, NotificationTemplate>;
+}
+
 export interface PipelineSpec {
   triggers: Trigger[];
   providers: Record<string, Provider>;
   stages: Stage[];
   routing?: Routing;
+  branching?: BranchingConfig;
+  pullRequest?: PullRequestConfig;
+  notifications?: NotificationsConfig;
 }
 
 export type PipelinePhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Suspended';
+
+export interface PipelineApprovalStatus {
+  stage: string;
+  tier: string;
+  requestedAt: string;
+  timeoutAt?: string;
+}
 
 export interface PipelineStatus {
   phase?: PipelinePhase;
   activeStage?: string;
   conditions?: Condition[];
+  stageAttempts?: Record<string, number>;
+  pendingApproval?: PipelineApprovalStatus;
 }
 
 export type Pipeline = Resource<'Pipeline', PipelineSpec, PipelineStatus>;

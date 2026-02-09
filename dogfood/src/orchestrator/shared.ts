@@ -36,6 +36,32 @@ function execFileAsync(
   });
 }
 
+// ── Template interpolation ────────────────────────────────────────────
+
+/**
+ * Interpolate a branch name pattern by replacing `{key}` placeholders.
+ * Falls back to `ai-sdlc/issue-{issueNumber}` when no pattern is provided.
+ */
+export function interpolateBranchPattern(
+  pattern: string | undefined,
+  vars: Record<string, string>,
+): string {
+  const p = pattern ?? 'ai-sdlc/issue-{issueNumber}';
+  return p.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
+}
+
+/**
+ * Interpolate a PR title template by replacing `{key}` placeholders.
+ * Falls back to `fix: {issueTitle} (#{issueNumber})` when no template is provided.
+ */
+export function interpolatePRTitle(
+  template: string | undefined,
+  vars: Record<string, string>,
+): string {
+  const t = template ?? 'fix: {issueTitle} (#{issueNumber})';
+  return t.replace(/\{(\w+)\}/g, (_, key: string) => vars[key] ?? `{${key}}`);
+}
+
 // ── Branch pattern ───────────────────────────────────────────────────
 
 export const BRANCH_PATTERN = /^ai-sdlc\/issue-(\d+)$/;

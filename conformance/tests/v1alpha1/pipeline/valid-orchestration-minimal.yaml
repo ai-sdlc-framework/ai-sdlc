@@ -1,0 +1,17 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: minimal-orchestrated
+spec:
+  triggers:
+    - event: issue.assigned
+  providers:
+    issueTracker:
+      type: linear
+  stages:
+    - name: implement
+      agent: code-agent
+      onFailure:
+        strategy: abort
+  branching:
+    pattern: 'feature/{issueNumber}'

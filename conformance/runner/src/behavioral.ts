@@ -11,11 +11,13 @@ import {
   scoreComplexity,
   routeByComplexity,
   executeOrchestration,
+  createPipelineReconciler,
 } from '@ai-sdlc/reference';
 import type {
   QualityGate,
   AutonomyPolicy,
   AgentRole,
+  Pipeline,
   EvaluationContext,
   AgentMetrics,
   ComplexityInput,
@@ -73,12 +75,13 @@ export function runBehavioralTest(fixture: BehavioralFixture, file: string): Beh
     case 'complexity-routing':
       return runComplexityRoutingTest(fixture, file);
     case 'orchestration-error':
-      // Sync fallback — caller should use runBehavioralTestAsync for this type
+    case 'pipeline-failure-policy':
+      // Sync fallback — caller should use runBehavioralTestAsync for these types
       return {
         file,
         description: fixture.description,
         passed: false,
-        message: 'orchestration-error tests require runBehavioralTestAsync',
+        message: `${type} tests require runBehavioralTestAsync`,
       };
     default:
       return {
@@ -99,6 +102,9 @@ export async function runBehavioralTestAsync(
 ): Promise<BehavioralResult> {
   if (fixture.test.type === 'orchestration-error') {
     return runOrchestrationErrorTest(fixture, file);
+  }
+  if (fixture.test.type === 'pipeline-failure-policy') {
+    return runPipelineFailurePolicyTest(fixture, file);
   }
   return runBehavioralTest(fixture, file);
 }
@@ -253,6 +259,109 @@ async function runOrchestrationErrorTest(
     for (const agent of expectedFailed) {
       if (!actualFailed.includes(agent)) {
         checks.push(`expected "${agent}" to fail but it did not`);
+      }
+    }
+  }
+
+  return {
+    file,
+    description: fixture.description,
+    passed: checks.length === 0,
+    message: checks.length > 0 ? checks.join('; ') : undefined,
+  };
+}
+
+async function runPipelineFailurePolicyTest(
+  fixture: BehavioralFixture,
+  file: string,
+): Promise<BehavioralResult> {
+  const { input, expected } = fixture.test;
+  const pipeline = input.pipeline as Pipeline;
+  const failStage = input.failStage as string | null;
+
+  // Track which stages were reached
+  const reachedStages: string[] = [];
+
+  // Build a minimal agent for each stage
+  const agentMap = new Map<string, AgentRole>();
+  for (const stage of pipeline.spec.stages) {
+    if (!stage.agent) continue;
+    const role: AgentRole = {
+      apiVersion: 'ai-sdlc.io/v1alpha1',
+      kind: 'AgentRole',
+      metadata: { name: stage.agent },
+      spec: {
+        role: stage.agent,
+        goal: `Execute ${stage.name}`,
+        tools: [],
+      },
+    };
+    agentMap.set(stage.agent, role);
+  }
+
+  const reconciler = createPipelineReconciler({
+    resolveAgent: (name: string) => agentMap.get(name),
+    taskFn: async (agent: AgentRole) => {
+      const stage = pipeline.spec.stages.find((s) => s.agent === agent.metadata.name);
+      if (stage) reachedStages.push(stage.name);
+      if (failStage && stage?.name === failStage) {
+        throw new Error(`Stage "${failStage}" failed`);
+      }
+      return { ok: true };
+    },
+  });
+
+  await reconciler(pipeline);
+
+  const checks: string[] = [];
+
+  // Check expected phase
+  if (expected.phase !== undefined && pipeline.status?.phase !== expected.phase) {
+    checks.push(`phase: expected ${String(expected.phase)}, got ${String(pipeline.status?.phase)}`);
+  }
+
+  // Check reached stages
+  if (expected.reachedStages !== undefined) {
+    const expectedReached = expected.reachedStages as string[];
+    for (const s of expectedReached) {
+      if (!reachedStages.includes(s)) {
+        checks.push(`expected stage "${s}" to be reached but it was not`);
+      }
+    }
+  }
+
+  // Check skipped stages
+  if (expected.skippedStages !== undefined) {
+    const expectedSkipped = expected.skippedStages as string[];
+    for (const s of expectedSkipped) {
+      if (reachedStages.includes(s)) {
+        checks.push(`expected stage "${s}" to be skipped but it was reached`);
+      }
+    }
+  }
+
+  // Check stageAttempts incremented
+  if (expected.stageAttemptsIncremented !== undefined) {
+    const attempts = pipeline.status?.stageAttempts;
+    if (failStage && attempts && attempts[failStage] !== undefined) {
+      const incremented = attempts[failStage] > 0;
+      if (incremented !== expected.stageAttemptsIncremented) {
+        checks.push(
+          `stageAttemptsIncremented: expected ${String(expected.stageAttemptsIncremented)}, got ${String(incremented)}`,
+        );
+      }
+    }
+  }
+
+  // Check maxAttemptsBeforeFail
+  if (expected.maxAttemptsBeforeFail !== undefined) {
+    const attempts = pipeline.status?.stageAttempts;
+    if (failStage && attempts) {
+      const actual = attempts[failStage];
+      if (actual !== expected.maxAttemptsBeforeFail) {
+        checks.push(
+          `maxAttemptsBeforeFail: expected ${String(expected.maxAttemptsBeforeFail)}, got ${String(actual)}`,
+        );
       }
     }
   }

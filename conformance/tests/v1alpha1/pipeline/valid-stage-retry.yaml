@@ -1,0 +1,17 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: retry-pipeline
+spec:
+  triggers:
+    - event: push
+  providers:
+    ci:
+      type: github
+  stages:
+    - name: build
+      agent: builder
+      onFailure:
+        strategy: retry
+        maxRetries: 3
+        retryDelay: PT30S

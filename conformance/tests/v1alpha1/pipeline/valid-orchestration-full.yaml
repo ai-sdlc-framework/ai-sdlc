@@ -1,25 +1,29 @@
 apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
 metadata:
-  name: dogfood-pipeline
+  name: orchestrated-pipeline
+  namespace: team-alpha
   labels:
-    ai-sdlc.io/component: dogfood
+    ai-sdlc.io/rfc: '0002'
 spec:
   triggers:
-    - event: issue.labeled
+    - event: issue.assigned
       filter:
         labels:
           - ai-eligible
   providers:
-    github:
+    issueTracker:
+      type: linear
+      config:
+        teamId: ENG
+    sourceControl:
       type: github
       config:
-        org: ai-sdlc-framework
-        repo: ai-sdlc
+        org: acme
   stages:
     - name: validate-issue
       qualityGates:
-        - dogfood-quality-gates
+        - input-validation
       onFailure:
         strategy: abort
         notification: gate-failure
@@ -34,21 +38,31 @@ spec:
         revokeOnComplete: true
       onFailure:
         strategy: retry
-        maxRetries: 2
+        maxRetries: 3
         retryDelay: PT1M
         notification: agent-failure
     - name: review
+      agent: reviewer-agent
+      qualityGates:
+        - human-approval
       approval:
         required: true
+        tierOverride: peer-review
         blocking: true
         timeout: PT24H
-        onTimeout: abort
+        onTimeout: escalate
+      onFailure:
+        strategy: pause
+    - name: deploy
+      agent: deploy-agent
+      onFailure:
+        strategy: continue
   routing:
     complexityThresholds:
-      ai-with-review:
+      low:
         min: 1
         max: 3
-        strategy: ai-with-review
+        strategy: fully-autonomous
   branching:
     pattern: 'ai-sdlc/issue-{issueNumber}'
     targetBranch: main
@@ -72,10 +86,12 @@ spec:
         title: 'AI-SDLC: Agent Failed'
         body: 'Error during {stageName}: {details}'
       pr-created:
-        target: issue
+        target: both
         title: 'AI-SDLC: PR Created'
         body: 'Pull request: {prUrl}'
-      fix-ci-limit:
-        target: pr
-        title: 'AI-SDLC: Retry Limit Reached'
-        body: 'Max fix attempts reached. Manual intervention needed.'
+status:
+  phase: Running
+  activeStage: code
+  stageAttempts:
+    validate-issue: 1
+    code: 2

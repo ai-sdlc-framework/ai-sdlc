@@ -49,6 +49,82 @@ describe('PipelineBuilder', () => {
     const result = builder.addStage({ name: 's' }).addTrigger({ event: 'e' });
     expect(result).toBe(builder);
   });
+
+  it('withBranching sets branching config', () => {
+    const pipeline = new PipelineBuilder('p')
+      .withBranching({
+        pattern: 'ai-sdlc/issue-{issueNumber}',
+        targetBranch: 'main',
+        cleanup: 'on-merge',
+      })
+      .build();
+    expect(pipeline.spec.branching).toEqual({
+      pattern: 'ai-sdlc/issue-{issueNumber}',
+      targetBranch: 'main',
+      cleanup: 'on-merge',
+    });
+  });
+
+  it('withPullRequest sets pull request config', () => {
+    const pipeline = new PipelineBuilder('p')
+      .withPullRequest({ titleTemplate: 'fix: {issueTitle}', includeProvenance: true })
+      .build();
+    expect(pipeline.spec.pullRequest).toEqual({
+      titleTemplate: 'fix: {issueTitle}',
+      includeProvenance: true,
+    });
+  });
+
+  it('withNotifications sets notifications config', () => {
+    const pipeline = new PipelineBuilder('p')
+      .withNotifications({
+        templates: {
+          'gate-failure': { target: 'issue', title: 'Gate Failed', body: '{details}' },
+        },
+      })
+      .build();
+    expect(pipeline.spec.notifications?.templates['gate-failure'].target).toBe('issue');
+  });
+
+  it('builds stage with onFailure policy', () => {
+    const pipeline = new PipelineBuilder('p')
+      .addStage({
+        name: 'build',
+        agent: 'builder',
+        onFailure: { strategy: 'retry', maxRetries: 3, retryDelay: 'PT1M' },
+      })
+      .build();
+    expect(pipeline.spec.stages[0].onFailure).toEqual({
+      strategy: 'retry',
+      maxRetries: 3,
+      retryDelay: 'PT1M',
+    });
+  });
+
+  it('builds stage with credentials policy', () => {
+    const pipeline = new PipelineBuilder('p')
+      .addStage({
+        name: 'code',
+        credentials: { scope: ['repo:read', 'repo:write'], ttl: 'PT15M', revokeOnComplete: true },
+      })
+      .build();
+    expect(pipeline.spec.stages[0].credentials?.scope).toEqual(['repo:read', 'repo:write']);
+  });
+
+  it('builds stage with approval policy', () => {
+    const pipeline = new PipelineBuilder('p')
+      .addStage({
+        name: 'review',
+        approval: { required: true, blocking: true, timeout: 'PT24H', onTimeout: 'abort' },
+      })
+      .build();
+    expect(pipeline.spec.stages[0].approval).toEqual({
+      required: true,
+      blocking: true,
+      timeout: 'PT24H',
+      onTimeout: 'abort',
+    });
+  });
 });
 
 describe('AgentRoleBuilder', () => {

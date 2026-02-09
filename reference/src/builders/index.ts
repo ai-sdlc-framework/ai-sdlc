@@ -18,6 +18,9 @@ import type {
   Trigger,
   Provider,
   Routing,
+  BranchingConfig,
+  PullRequestConfig,
+  NotificationsConfig,
   AgentConstraints,
   Handoff,
   Skill,
@@ -62,6 +65,9 @@ export class PipelineBuilder {
   private _triggers: Trigger[] = [];
   private _providers: Record<string, Provider> = {};
   private _routing?: Routing;
+  private _branching?: BranchingConfig;
+  private _pullRequest?: PullRequestConfig;
+  private _notifications?: NotificationsConfig;
 
   constructor(name: string) {
     this._metadata = baseMetadata(name);
@@ -97,6 +103,21 @@ export class PipelineBuilder {
     return this;
   }
 
+  withBranching(config: BranchingConfig): this {
+    this._branching = config;
+    return this;
+  }
+
+  withPullRequest(config: PullRequestConfig): this {
+    this._pullRequest = config;
+    return this;
+  }
+
+  withNotifications(config: NotificationsConfig): this {
+    this._notifications = config;
+    return this;
+  }
+
   build(): Pipeline {
     const spec: PipelineSpec = {
       stages: this._stages,
@@ -104,6 +125,9 @@ export class PipelineBuilder {
       providers: this._providers,
     };
     if (this._routing) spec.routing = this._routing;
+    if (this._branching) spec.branching = this._branching;
+    if (this._pullRequest) spec.pullRequest = this._pullRequest;
+    if (this._notifications) spec.notifications = this._notifications;
 
     return {
       apiVersion: API_VERSION,

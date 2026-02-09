@@ -1,0 +1,16 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: invalid-retry
+spec:
+  triggers:
+    - event: push
+  providers:
+    ci:
+      type: github
+  stages:
+    - name: build
+      agent: builder
+      onFailure:
+        strategy: retry
+        # Missing maxRetries — MUST fail validation when strategy is retry

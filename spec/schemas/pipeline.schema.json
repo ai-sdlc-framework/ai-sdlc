@@ -95,6 +95,19 @@
                 "type": "array",
                 "description": "References to QualityGate resource names.",
                 "items": { "type": "string" }
+              },
+              "onFailure": {
+                "$ref": "#/$defs/FailurePolicy"
+              },
+              "timeout": {
+                "type": "string",
+                "description": "Maximum stage duration as an ISO 8601 duration (e.g., PT30M)."
+              },
+              "credentials": {
+                "$ref": "#/$defs/CredentialPolicy"
+              },
+              "approval": {
+                "$ref": "#/$defs/ApprovalPolicy"
               }
             },
             "additionalProperties": false
@@ -134,6 +147,15 @@
             }
           },
           "additionalProperties": false
+        },
+        "branching": {
+          "$ref": "#/$defs/BranchingConfig"
+        },
+        "pullRequest": {
+          "$ref": "#/$defs/PullRequestConfig"
+        },
+        "notifications": {
+          "$ref": "#/$defs/NotificationsConfig"
         }
       },
       "additionalProperties": false
@@ -155,10 +177,217 @@
           "items": {
             "$ref": "common.schema.json#/$defs/condition"
           }
+        },
+        "stageAttempts": {
+          "type": "object",
+          "description": "Per-stage execution attempt counts.",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "pendingApproval": {
+          "$ref": "#/$defs/ApprovalStatus"
         }
       },
       "additionalProperties": false
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "FailurePolicy": {
+      "type": "object",
+      "description": "Defines how a stage failure is handled.",
+      "required": ["strategy"],
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["abort", "retry", "pause", "continue"],
+          "description": "The failure handling strategy."
+        },
+        "maxRetries": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 10,
+          "description": "Maximum retry attempts (required when strategy is retry)."
+        },
+        "retryDelay": {
+          "type": "string",
+          "description": "Delay between retries as an ISO 8601 duration (e.g., PT1M)."
+        },
+        "notification": {
+          "type": "string",
+          "description": "Name of a notification template to send on failure."
+        }
+      },
+      "if": {
+        "properties": { "strategy": { "const": "retry" } }
+      },
+      "then": {
+        "required": ["maxRetries"]
+      },
+      "additionalProperties": false
+    },
+    "CredentialPolicy": {
+      "type": "object",
+      "description": "JIT credential scope and lifetime for a stage.",
+      "required": ["scope"],
+      "properties": {
+        "scope": {
+          "type": "array",
+          "description": "Permission scopes required by the stage.",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "ttl": {
+          "type": "string",
+          "description": "Credential time-to-live as an ISO 8601 duration.",
+          "default": "PT10M"
+        },
+        "revokeOnComplete": {
+          "type": "boolean",
+          "description": "Whether to revoke credentials when the stage completes.",
+          "default": true
+        }
+      },
+      "additionalProperties": false
+    },
+    "ApprovalPolicy": {
+      "type": "object",
+      "description": "Approval requirements before a stage executes.",
+      "required": ["required"],
+      "properties": {
+        "required": {
+          "type": "boolean",
+          "description": "Whether approval is required for this stage."
+        },
+        "tierOverride": {
+          "type": "string",
+          "enum": ["auto", "peer-review", "team-lead", "security-review"],
+          "description": "Override the automatically determined approval tier."
+        },
+        "blocking": {
+          "type": "boolean",
+          "description": "Whether the stage blocks until approval is granted.",
+          "default": true
+        },
+        "timeout": {
+          "type": "string",
+          "description": "Maximum time to wait for approval as an ISO 8601 duration."
+        },
+        "onTimeout": {
+          "type": "string",
+          "enum": ["abort", "escalate", "auto-approve"],
+          "description": "Action to take when the approval timeout expires."
+        }
+      },
+      "additionalProperties": false
+    },
+    "BranchingConfig": {
+      "type": "object",
+      "description": "Branch naming, target, and cleanup policy.",
+      "required": ["pattern"],
+      "properties": {
+        "pattern": {
+          "type": "string",
+          "description": "Branch name pattern with placeholders (e.g., ai-sdlc/issue-{issueNumber})."
+        },
+        "targetBranch": {
+          "type": "string",
+          "description": "Target branch for pull requests.",
+          "default": "main"
+        },
+        "cleanup": {
+          "type": "string",
+          "enum": ["on-merge", "on-close", "manual"],
+          "description": "When to delete the feature branch."
+        }
+      },
+      "additionalProperties": false
+    },
+    "PullRequestConfig": {
+      "type": "object",
+      "description": "Pull request creation conventions.",
+      "properties": {
+        "titleTemplate": {
+          "type": "string",
+          "description": "PR title template with placeholders (e.g., fix: {issueTitle} (#{issueNumber}))."
+        },
+        "descriptionSections": {
+          "type": "array",
+          "description": "Sections to include in the PR description.",
+          "items": { "type": "string" }
+        },
+        "includeProvenance": {
+          "type": "boolean",
+          "description": "Whether to include AI provenance metadata in the PR.",
+          "default": true
+        },
+        "closeKeyword": {
+          "type": "string",
+          "description": "Keyword used to auto-close the linked issue (e.g., Closes, Fixes)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "NotificationsConfig": {
+      "type": "object",
+      "description": "Named notification templates for pipeline events.",
+      "properties": {
+        "templates": {
+          "type": "object",
+          "description": "Map of template names to notification templates.",
+          "additionalProperties": {
+            "$ref": "#/$defs/NotificationTemplate"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "NotificationTemplate": {
+      "type": "object",
+      "description": "A templated notification message for pipeline events.",
+      "required": ["target", "title"],
+      "properties": {
+        "target": {
+          "type": "string",
+          "enum": ["issue", "pr", "both"],
+          "description": "Where to post the notification."
+        },
+        "title": {
+          "type": "string",
+          "description": "Notification title template."
+        },
+        "body": {
+          "type": "string",
+          "description": "Notification body template with placeholders."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ApprovalStatus": {
+      "type": "object",
+      "description": "Status of a pending approval request.",
+      "required": ["stage", "tier", "requestedAt"],
+      "properties": {
+        "stage": {
+          "type": "string",
+          "description": "The stage awaiting approval."
+        },
+        "tier": {
+          "type": "string",
+          "description": "The approval tier required."
+        },
+        "requestedAt": {
+          "type": "string",
+          "description": "ISO 8601 timestamp when approval was requested."
+        },
+        "timeoutAt": {
+          "type": "string",
+          "description": "ISO 8601 timestamp when the approval times out."
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

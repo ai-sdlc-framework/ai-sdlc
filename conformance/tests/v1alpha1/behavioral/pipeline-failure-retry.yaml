@@ -1,0 +1,35 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Stage failure with retry strategy increments stageAttempts'
+metadata:
+  conformanceLevel: core
+test:
+  type: pipeline-failure-policy
+  input:
+    pipeline:
+      apiVersion: ai-sdlc.io/v1alpha1
+      kind: Pipeline
+      metadata:
+        name: retry-test
+      spec:
+        triggers:
+          - event: push
+        providers:
+          ci:
+            type: github
+        stages:
+          - name: build
+            agent: builder
+            onFailure:
+              strategy: retry
+              maxRetries: 3
+              retryDelay: PT30S
+      status:
+        phase: Running
+        activeStage: build
+        stageAttempts:
+          build: 0
+    failStage: build
+  expected:
+    stageAttemptsIncremented: true
+    maxAttemptsBeforeFail: 3

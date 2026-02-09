@@ -11,6 +11,8 @@ import {
   validateAndAuditOutput,
   evaluatePipelineCompliance,
   authorizeFilesChanged,
+  interpolateBranchPattern,
+  interpolatePRTitle,
 } from './shared.js';
 import type { AutonomyPolicy, AuditLog, MetricStore } from '@ai-sdlc/reference';
 
@@ -270,6 +272,39 @@ describe('evaluatePipelineCompliance()', () => {
     const avgWithout =
       reportsWithout.reduce((s, r) => s + r.coveragePercent, 0) / reportsWithout.length;
     expect(avgWith).toBeGreaterThanOrEqual(avgWithout);
+  });
+});
+
+describe('interpolateBranchPattern()', () => {
+  it('interpolates pattern with variables', () => {
+    expect(interpolateBranchPattern('ai-sdlc/issue-{issueNumber}', { issueNumber: '42' })).toBe(
+      'ai-sdlc/issue-42',
+    );
+  });
+
+  it('uses default pattern when none provided', () => {
+    expect(interpolateBranchPattern(undefined, { issueNumber: '7' })).toBe('ai-sdlc/issue-7');
+  });
+
+  it('leaves unknown placeholders intact', () => {
+    expect(interpolateBranchPattern('feat/{unknown}', {})).toBe('feat/{unknown}');
+  });
+});
+
+describe('interpolatePRTitle()', () => {
+  it('interpolates template with variables', () => {
+    expect(
+      interpolatePRTitle('fix: {issueTitle} (#{issueNumber})', {
+        issueTitle: 'Fix bug',
+        issueNumber: '42',
+      }),
+    ).toBe('fix: Fix bug (#42)');
+  });
+
+  it('uses default template when none provided', () => {
+    expect(interpolatePRTitle(undefined, { issueTitle: 'Add feature', issueNumber: '10' })).toBe(
+      'fix: Add feature (#10)',
+    );
   });
 });
 
