@@ -5,6 +5,19 @@
  */
 
 import { execFile } from 'node:child_process';
+import { join } from 'node:path';
+import {
+  createAuditLog,
+  createFileSink,
+  evaluateDemotion,
+  withSpan,
+  getMeter,
+  SPAN_NAMES,
+  METRIC_NAMES,
+  ATTRIBUTE_KEYS,
+  type AuditLog,
+  type AgentMetrics,
+} from '@ai-sdlc/reference';
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
 import { validateAgentOutput } from './validate-agent-output.js';
 import { createLogger, type Logger } from './logger.js';
@@ -41,6 +54,8 @@ export interface FixCIOptions {
   _prComments?: string[];
   /** Inject CI logs for testing (bypasses `gh` CLI call). */
   _ciLogs?: string;
+  /** Inject a custom audit log (for testing). */
+  auditLog?: AuditLog;
 }
 
 /**
@@ -145,6 +160,8 @@ export async function executeFixCI(
   const workDir = options.workDir ?? (await resolveRepoRoot());
   const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
   const log = options.logger ?? createLogger();
+  const auditLog =
+    options.auditLog ?? createAuditLog(createFileSink(join(workDir, '.ai-sdlc', 'audit.jsonl')));
 
   // 1. Load config
   log.stage('load-config');
@@ -158,6 +175,10 @@ export async function executeFixCI(
     throw new Error('No AutonomyPolicy resource found in .ai-sdlc/');
   }
 
+  // Capture narrowed types for use in closures
+  const agentRole = config.agentRole;
+  const autonomyPolicy = config.autonomyPolicy;
+
   // 2. Count retry attempts
   log.stage('check-retries');
   const comments = options._prComments ?? (await fetchPRComments(prNumber));
@@ -167,6 +188,13 @@ export async function executeFixCI(
 
   if (attempts >= MAX_FIX_ATTEMPTS) {
     log.info(`Fix-CI retry limit reached (${MAX_FIX_ATTEMPTS}). Commenting and stopping.`);
+    auditLog.record({
+      actor: 'system',
+      action: 'evaluate',
+      resource: `pr#${prNumber}`,
+      decision: 'denied',
+      details: { reason: 'retry-limit-reached', attempts, max: MAX_FIX_ATTEMPTS },
+    });
     await commentOnPR(
       prNumber,
       `## AI-SDLC: Fix-CI Retry Limit Reached\n\nThis PR has reached the maximum number of automated fix attempts (${MAX_FIX_ATTEMPTS}). Manual intervention is needed.`,
@@ -186,76 +214,167 @@ export async function executeFixCI(
     throw new Error(`Branch "${currentBranch}" does not match ai-sdlc/issue-N pattern`);
   }
 
-  // 5. Invoke agent with CI error context
+  // 5. Resolve autonomy level and merge blocked paths
+  const currentLevel = autonomyPolicy.spec.levels.find((l) => l.level <= 1);
+  if (!currentLevel) {
+    throw new Error('No autonomy level 0 or 1 found in policy');
+  }
+
+  // 6. Invoke agent with CI error context
   log.stage('agent');
   const runner = options.runner ?? new GitHubActionsRunner();
-  const constraints = config.agentRole.spec.constraints ?? {
+  const constraints = agentRole.spec.constraints ?? {
     maxFilesPerChange: 15,
     requireTests: true,
     blockedPaths: [],
   };
 
+  // Merge autonomy level blocked paths with agent role constraints
+  const autonomyBlocked = currentLevel.guardrails.blockedPaths ?? [];
+  const agentBlocked = constraints.blockedPaths ?? [];
+  const mergedBlockedPaths = [...new Set([...agentBlocked, ...autonomyBlocked])];
+
   // Fetch issue title/body from GitHub for full context
   const issueData = await fetchIssueData(issueNumber);
+  const meter = getMeter();
 
-  const result = await runner.run({
-    issueNumber,
-    issueTitle: issueData.title,
-    issueBody: issueData.body,
-    workDir,
-    branch: currentBranch,
-    constraints: {
-      maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
-      requireTests: constraints.requireTests ?? true,
-      blockedPaths: constraints.blockedPaths ?? [],
+  const result = await withSpan(
+    SPAN_NAMES.AGENT_TASK,
+    {
+      [ATTRIBUTE_KEYS.AGENT]: agentRole.metadata.name,
+      [ATTRIBUTE_KEYS.RESOURCE_NAME]: `pr#${prNumber}`,
     },
-    ciErrors: ciLogs,
-  });
+    async () => {
+      const r = await runner.run({
+        issueNumber,
+        issueTitle: issueData.title,
+        issueBody: issueData.body,
+        workDir,
+        branch: currentBranch,
+        constraints: {
+          maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
+          requireTests: constraints.requireTests ?? true,
+          blockedPaths: mergedBlockedPaths,
+        },
+        ciErrors: ciLogs,
+      });
 
-  if (!result.success) {
-    log.stageEnd('agent');
-    await commentOnPR(
-      prNumber,
-      `## AI-SDLC: Fix-CI Agent Failed\n\n${result.error ?? 'Unknown error'}\n\n${RETRY_MARKER}`,
-    );
-    throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${result.error}`);
-  }
-  log.stageEnd('agent');
+      if (!r.success) {
+        log.stageEnd('agent');
+        auditLog.record({
+          actor: 'system',
+          action: 'execute',
+          resource: `agent/${agentRole.metadata.name}`,
+          decision: 'denied',
+          details: { error: r.error },
+        });
+        meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
 
-  // 6. Validate agent output against guardrails
+        // Evaluate demotion on agent failure
+        const agentMetrics: AgentMetrics = {
+          name: agentRole.metadata.name,
+          currentLevel: currentLevel.level,
+          totalTasksCompleted: 0,
+          metrics: {},
+          approvals: [],
+        };
+        const demotion = evaluateDemotion(autonomyPolicy, agentMetrics, 'failed-test');
+        log.info(
+          `Demotion evaluation: ${demotion.demoted ? `demoted from ${demotion.fromLevel} to ${demotion.toLevel}` : 'no demotion'}`,
+        );
+        auditLog.record({
+          actor: 'system',
+          action: 'evaluate',
+          resource: `agent/${agentRole.metadata.name}`,
+          policy: 'demotion',
+          decision: demotion.demoted ? 'denied' : 'allowed',
+          details: {
+            trigger: demotion.trigger,
+            fromLevel: demotion.fromLevel,
+            toLevel: demotion.toLevel,
+          },
+        });
+
+        await commentOnPR(
+          prNumber,
+          `## AI-SDLC: Fix-CI Agent Failed\n\n${r.error ?? 'Unknown error'}\n\n${RETRY_MARKER}`,
+        );
+        throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${r.error}`);
+      }
+      log.stageEnd('agent');
+
+      auditLog.record({
+        actor: 'system',
+        action: 'execute',
+        resource: `agent/${agentRole.metadata.name}`,
+        decision: 'allowed',
+        details: { filesChanged: r.filesChanged.length },
+      });
+      meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
+
+      return r;
+    },
+  );
+
+  // 7. Validate agent output against guardrails
   log.stage('validate-output');
-  const currentLevel = config.autonomyPolicy.spec.levels.find((l) => l.level <= 1);
-  if (!currentLevel) {
-    throw new Error('No autonomy level 0 or 1 found in policy');
-  }
-
-  const validation = await validateAgentOutput({
-    filesChanged: result.filesChanged,
-    workDir,
-    constraints: {
-      maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
-      requireTests: constraints.requireTests ?? true,
-      blockedPaths: constraints.blockedPaths ?? [],
+  await withSpan(
+    SPAN_NAMES.PIPELINE_STAGE,
+    {
+      [ATTRIBUTE_KEYS.STAGE]: 'validate-output',
     },
-    guardrails: { maxLinesPerPR: currentLevel.guardrails.maxLinesPerPR },
-  });
-  log.stageEnd('validate-output');
+    async () => {
+      const validation = await validateAgentOutput({
+        filesChanged: result.filesChanged,
+        workDir,
+        constraints: {
+          maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
+          requireTests: constraints.requireTests ?? true,
+          blockedPaths: mergedBlockedPaths,
+        },
+        guardrails: { maxLinesPerPR: currentLevel.guardrails.maxLinesPerPR },
+      });
+      log.stageEnd('validate-output');
 
-  if (!validation.passed) {
-    const violationList = validation.violations
-      .map((v) => `- **${v.rule}**: ${v.message}`)
-      .join('\n');
-    await commentOnPR(
-      prNumber,
-      `## AI-SDLC: Fix-CI Guardrail Violations\n\n${violationList}\n\n${RETRY_MARKER}`,
-    );
-    throw new Error('Fix-CI agent output failed guardrail validation');
-  }
+      if (!validation.passed) {
+        auditLog.record({
+          actor: 'system',
+          action: 'check',
+          resource: 'agent-output',
+          decision: 'denied',
+          details: { violations: validation.violations.map((v) => v.rule) },
+        });
+        const violationList = validation.violations
+          .map((v) => `- **${v.rule}**: ${v.message}`)
+          .join('\n');
+        await commentOnPR(
+          prNumber,
+          `## AI-SDLC: Fix-CI Guardrail Violations\n\n${violationList}\n\n${RETRY_MARKER}`,
+        );
+        throw new Error('Fix-CI agent output failed guardrail validation');
+      }
+
+      auditLog.record({
+        actor: 'system',
+        action: 'check',
+        resource: 'agent-output',
+        decision: 'allowed',
+      });
+    },
+  );
 
   // 7. Push to the same branch (CI re-runs automatically)
   log.stage('push');
   await exec('git', ['push', 'origin', currentBranch], { cwd: workDir });
   log.stageEnd('push');
+
+  auditLog.record({
+    actor: 'system',
+    action: 'create',
+    resource: `push/${currentBranch}`,
+    decision: 'allowed',
+    details: { prNumber, attempt: attempts + 1 },
+  });
 
   // 8. Comment on PR with success details
   await commentOnPR(

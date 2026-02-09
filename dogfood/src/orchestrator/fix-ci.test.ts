@@ -10,6 +10,7 @@ import {
 } from './fix-ci.js';
 import type { AgentRunner, AgentResult } from '../runner/types.js';
 import type { Logger } from './logger.js';
+import type { AuditLog } from '@ai-sdlc/reference';
 
 // Mock child_process — covers git and gh calls
 vi.mock('node:child_process', () => ({
@@ -46,6 +47,19 @@ function makeMockRunner(result?: Partial<AgentResult>): AgentRunner {
       summary: 'Fixed CI failure',
       ...result,
     }),
+  };
+}
+
+function makeMockAuditLog(): AuditLog {
+  return {
+    record: vi.fn().mockImplementation((entry) => ({
+      id: 'test-id',
+      timestamp: new Date().toISOString(),
+      ...entry,
+    })),
+    entries: vi.fn().mockReturnValue([]),
+    query: vi.fn().mockReturnValue([]),
+    verifyIntegrity: vi.fn().mockReturnValue({ valid: true }),
   };
 }
 
@@ -95,6 +109,7 @@ describe('executeFixCI()', () => {
 
   it('full success path — agent called with ciErrors, push happens', async () => {
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
 
     await executeFixCI(100, 5555, {
       configDir: CONFIG_DIR,
@@ -103,6 +118,7 @@ describe('executeFixCI()', () => {
       logger: makeSilentLogger(),
       _prComments: [],
       _ciLogs: 'Error: lint failed\n  src/foo.ts(10,5): error TS2345',
+      auditLog,
     });
 
     expect(runner.run).toHaveBeenCalledWith(
@@ -115,6 +131,7 @@ describe('executeFixCI()', () => {
 
   it('aborts at max retries without calling runner', async () => {
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
     const markers = Array.from({ length: MAX_FIX_ATTEMPTS }, () => `text\n${RETRY_MARKER}`);
 
     await executeFixCI(100, 5555, {
@@ -124,6 +141,7 @@ describe('executeFixCI()', () => {
       logger: makeSilentLogger(),
       _prComments: markers,
       _ciLogs: 'some error',
+      auditLog,
     });
 
     // Should return gracefully, not throw
@@ -136,6 +154,7 @@ describe('executeFixCI()', () => {
       filesChanged: [],
       error: 'Compilation failed',
     });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executeFixCI(100, 5555, {
@@ -145,6 +164,7 @@ describe('executeFixCI()', () => {
         logger: makeSilentLogger(),
         _prComments: [],
         _ciLogs: 'some error',
+        auditLog,
       }),
     ).rejects.toThrow('Fix-CI agent failed');
   });
@@ -153,6 +173,7 @@ describe('executeFixCI()', () => {
     const runner = makeMockRunner({
       filesChanged: ['.github/workflows/ci.yml', 'src/fix.test.ts'],
     });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executeFixCI(100, 5555, {
@@ -162,10 +183,84 @@ describe('executeFixCI()', () => {
         logger: makeSilentLogger(),
         _prComments: [],
         _ciLogs: 'some error',
+        auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
   });
 
+  it('records audit entry for retry limit reached', async () => {
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const markers = Array.from({ length: MAX_FIX_ATTEMPTS }, () => `text\n${RETRY_MARKER}`);
+
+    await executeFixCI(100, 5555, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      runner,
+      logger: makeSilentLogger(),
+      _prComments: markers,
+      _ciLogs: 'some error',
+      auditLog,
+    });
+
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'evaluate',
+        decision: 'denied',
+        details: expect.objectContaining({ reason: 'retry-limit-reached' }),
+      }),
+    );
+  });
+
+  it('evaluates demotion on agent failure', async () => {
+    const runner = makeMockRunner({
+      success: false,
+      filesChanged: [],
+      error: 'Test failed',
+    });
+    const auditLog = makeMockAuditLog();
+
+    await expect(
+      executeFixCI(100, 5555, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        runner,
+        logger: makeSilentLogger(),
+        _prComments: [],
+        _ciLogs: 'some error',
+        auditLog,
+      }),
+    ).rejects.toThrow('Fix-CI agent failed');
+
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'evaluate',
+        policy: 'demotion',
+        details: expect.objectContaining({ trigger: 'failed-test' }),
+      }),
+    );
+  });
+
+  it('increments task success counter on successful fix', async () => {
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    await executeFixCI(100, 5555, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      runner,
+      logger: makeSilentLogger(),
+      _prComments: [],
+      _ciLogs: 'Error: lint failed',
+      auditLog,
+    });
+
+    // getMeter() returns a no-op meter without SDK, so we just verify
+    // the pipeline completes without error when counter.add() is called
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  // This test must be last — it overrides the global execFile mock
   it('throws for non-matching branch pattern', async () => {
     // Override the mock to return a non-matching branch
     const { execFile } = await import('node:child_process');
@@ -189,6 +284,7 @@ describe('executeFixCI()', () => {
     );
 
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executeFixCI(100, 5555, {
@@ -198,6 +294,7 @@ describe('executeFixCI()', () => {
         logger: makeSilentLogger(),
         _prComments: [],
         _ciLogs: 'some error',
+        auditLog,
       }),
     ).rejects.toThrow('does not match ai-sdlc/issue-N pattern');
   });

@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolve } from 'node:path';
 import { executePipeline } from './execute.js';
 import type { AgentRunner, AgentResult } from '../runner/types.js';
-import type { IssueTracker, SourceControl, Issue, PullRequest } from '@ai-sdlc/reference';
+import type { IssueTracker, SourceControl, Issue, PullRequest, AuditLog } from '@ai-sdlc/reference';
 import type { Logger } from './logger.js';
 
 // Mock child_process.execFile used by executePipeline for git checkout/push
@@ -107,6 +107,19 @@ function makeMockRunner(result?: Partial<AgentResult>): AgentRunner {
   };
 }
 
+function makeMockAuditLog(): AuditLog {
+  return {
+    record: vi.fn().mockImplementation((entry) => ({
+      id: 'test-id',
+      timestamp: new Date().toISOString(),
+      ...entry,
+    })),
+    entries: vi.fn().mockReturnValue([]),
+    query: vi.fn().mockReturnValue([]),
+    verifyIntegrity: vi.fn().mockReturnValue({ valid: true }),
+  };
+}
+
 describe('E2E: executePipeline()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -118,6 +131,7 @@ describe('E2E: executePipeline()', () => {
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
 
     await executePipeline(42, {
       configDir: CONFIG_DIR,
@@ -126,6 +140,7 @@ describe('E2E: executePipeline()', () => {
       sourceControl: sc,
       runner,
       logger: makeSilentLogger(),
+      auditLog,
     });
 
     expect(tracker.getIssue).toHaveBeenCalledWith('42');
@@ -145,6 +160,7 @@ describe('E2E: executePipeline()', () => {
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -154,6 +170,7 @@ describe('E2E: executePipeline()', () => {
         sourceControl: sc,
         runner,
         logger: makeSilentLogger(),
+        auditLog,
       }),
     ).rejects.toThrow();
 
@@ -170,6 +187,7 @@ describe('E2E: executePipeline()', () => {
     const runner = makeMockRunner({
       filesChanged: ['.ai-sdlc/pipeline.yaml', 'src/fix.test.ts'],
     });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -179,6 +197,7 @@ describe('E2E: executePipeline()', () => {
         sourceControl: sc,
         runner,
         logger: makeSilentLogger(),
+        auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
 
@@ -194,6 +213,7 @@ describe('E2E: executePipeline()', () => {
     const files = Array.from({ length: 20 }, (_, i) => `src/file${i}.ts`);
     files.push('src/file.test.ts');
     const runner = makeMockRunner({ filesChanged: files });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -203,6 +223,7 @@ describe('E2E: executePipeline()', () => {
         sourceControl: sc,
         runner,
         logger: makeSilentLogger(),
+        auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
 
@@ -215,6 +236,7 @@ describe('E2E: executePipeline()', () => {
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner({ filesChanged: ['src/fix.ts'] });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -224,6 +246,7 @@ describe('E2E: executePipeline()', () => {
         sourceControl: sc,
         runner,
         logger: makeSilentLogger(),
+        auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
 

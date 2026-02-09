@@ -49,7 +49,7 @@ The framework sits above the emerging agent standards stack as the **orchestrati
 ├─────────────────────────────────────────────────────────────────┤
 │                        ADAPTER LAYER                            │
 │  Terraform-style provider contracts per integration category    │
-│  IssueTracker | SourceControl | CIPipeline | CodeAnalysis |    │
+│  IssueTracker | SourceControl | CIPipeline | CodeAnalysis |     │
 │  Messenger | DeploymentTarget                                   │
 ├─────────────────────────────────────────────────────────────────┤
 │                        POLICY LAYER                             │
@@ -64,8 +64,8 @@ The framework sits above the emerging agent standards stack as the **orchestrati
 └─────────────────────────────────────────────────────────────────┘
          ▼               ▼                ▼              ▼
     ┌─────────┐   ┌──────────┐   ┌────────────┐   ┌──────────┐
-    │  Linear  │   │  GitHub  │   │  SonarQube │   │  Slack   │
-    │  Jira    │   │  GitLab  │   │  Semgrep   │   │  Teams   │
+    │  Linear │   │  GitHub  │   │  SonarQube │   │  Slack   │
+    │  Jira   │   │  GitLab  │   │  Semgrep   │   │  Teams   │
     └─────────┘   └──────────┘   └────────────┘   └──────────┘
 ```
 

@@ -2,7 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { resolve } from 'node:path';
 import { executePipeline } from './execute.js';
 import type { AgentRunner, AgentResult } from '../runner/types.js';
-import type { IssueTracker, SourceControl, Issue, PullRequest } from '@ai-sdlc/reference';
+import type { IssueTracker, SourceControl, Issue, PullRequest, AuditLog } from '@ai-sdlc/reference';
+import type { Logger } from './logger.js';
 
 // Mock child_process.execFile used by executePipeline for git checkout/push
 vi.mock('node:child_process', () => ({
@@ -88,6 +89,29 @@ function makeMockRunner(result?: Partial<AgentResult>): AgentRunner {
   };
 }
 
+function makeMockAuditLog(): AuditLog {
+  return {
+    record: vi.fn().mockImplementation((entry) => ({
+      id: 'test-id',
+      timestamp: new Date().toISOString(),
+      ...entry,
+    })),
+    entries: vi.fn().mockReturnValue([]),
+    query: vi.fn().mockReturnValue([]),
+    verifyIntegrity: vi.fn().mockReturnValue({ valid: true }),
+  };
+}
+
+function makeSilentLogger(): Logger {
+  return {
+    stage: vi.fn(),
+    stageEnd: vi.fn(),
+    info: vi.fn(),
+    error: vi.fn(),
+    summary: vi.fn(),
+  };
+}
+
 describe('executePipeline()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -100,6 +124,7 @@ describe('executePipeline()', () => {
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
 
     await executePipeline(42, {
       configDir: CONFIG_DIR,
@@ -107,6 +132,7 @@ describe('executePipeline()', () => {
       tracker,
       sourceControl: sc,
       runner,
+      auditLog,
     });
 
     expect(tracker.getIssue).toHaveBeenCalledWith('42');
@@ -133,6 +159,7 @@ describe('executePipeline()', () => {
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -141,6 +168,7 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
+        auditLog,
       }),
     ).rejects.toThrow('failed quality gate validation');
 
@@ -158,6 +186,7 @@ describe('executePipeline()', () => {
       filesChanged: [],
       error: 'Compilation failed',
     });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -166,6 +195,7 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
+        auditLog,
       }),
     ).rejects.toThrow('Agent failed');
   });
@@ -175,6 +205,7 @@ describe('executePipeline()', () => {
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
 
     await executePipeline(42, {
       configDir: CONFIG_DIR,
@@ -182,6 +213,7 @@ describe('executePipeline()', () => {
       tracker,
       sourceControl: sc,
       runner,
+      auditLog,
     });
 
     expect(runner.run).toHaveBeenCalledWith(
@@ -202,6 +234,7 @@ describe('executePipeline()', () => {
     const runner = makeMockRunner({
       filesChanged: ['.github/workflows/ci.yml', 'src/fix.test.ts'],
     });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -210,6 +243,7 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
+        auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
   });
@@ -221,6 +255,7 @@ describe('executePipeline()', () => {
     const files = Array.from({ length: 20 }, (_, i) => `src/file${i}.ts`);
     files.push('src/file.test.ts');
     const runner = makeMockRunner({ filesChanged: files });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -229,6 +264,7 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
+        auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
   });
@@ -238,6 +274,7 @@ describe('executePipeline()', () => {
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner({ filesChanged: ['src/fix.ts'] });
+    const auditLog = makeMockAuditLog();
 
     await expect(
       executePipeline(42, {
@@ -246,27 +283,184 @@ describe('executePipeline()', () => {
         tracker,
         sourceControl: sc,
         runner,
+        auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
   });
 
-  it('rejects issues with complexity exceeding max', async () => {
+  it('allows issues at complexity boundary (3 = fully-autonomous)', async () => {
     const issue = makeIssue({
       description: '## Description\ncomplex\n\n## Acceptance Criteria\n- ok\n\n### Complexity\n3',
     });
     const tracker = makeMockTracker(issue);
     const sc = makeMockSourceControl();
     const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
 
-    // complexity 3 is at the boundary — should pass
+    // complexity 3 routes as 'fully-autonomous' — should pass
     await executePipeline(42, {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
       sourceControl: sc,
       runner,
+      auditLog,
     });
 
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('records audit entry on gate validation pass', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+    });
+
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'evaluate',
+        resource: 'issue#42',
+        decision: 'allowed',
+      }),
+    );
+  });
+
+  it('records audit entry on gate validation deny', async () => {
+    const issue = makeIssue({
+      description: '## Description\ntest\n\n### Complexity\n5',
+    });
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    await expect(
+      executePipeline(42, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        tracker,
+        sourceControl: sc,
+        runner,
+        auditLog,
+      }),
+    ).rejects.toThrow();
+
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'evaluate',
+        decision: 'denied',
+      }),
+    );
+  });
+
+  it('uses routeByComplexity to determine routing strategy', async () => {
+    const issue = makeIssue(); // complexity 2 → 'fully-autonomous'
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+    });
+
+    // Should have recorded routing decision
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'route',
+        resource: 'issue#42',
+        decision: 'allowed',
+        details: expect.objectContaining({ score: 2, strategy: 'fully-autonomous' }),
+      }),
+    );
+  });
+
+  it('merges autonomy level blocked paths with agent constraints', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+    });
+
+    // Both agent role and autonomy policy have .github/workflows/** and .ai-sdlc/**
+    // Merged + deduped should still include both
+    expect(runner.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        constraints: expect.objectContaining({
+          blockedPaths: expect.arrayContaining(['.github/workflows/**', '.ai-sdlc/**']),
+        }),
+      }),
+    );
+  });
+
+  it('evaluates promotion eligibility after success', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+    });
+
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'evaluate',
+        policy: 'promotion',
+      }),
+    );
+  });
+
+  it('increments gate pass counter on successful validation', async () => {
+    const issue = makeIssue();
+    const tracker = makeMockTracker(issue);
+    const sc = makeMockSourceControl();
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const logger = makeSilentLogger();
+
+    await executePipeline(42, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      tracker,
+      sourceControl: sc,
+      runner,
+      auditLog,
+      logger,
+    });
+
+    // getMeter() returns a no-op meter without SDK, so we just verify
+    // the pipeline completes without error when counter.add() is called
     expect(runner.run).toHaveBeenCalled();
   });
 });
