@@ -3,17 +3,13 @@
  *
  * Flow:
  *   load config -> fetch issue -> validate -> check autonomy ->
- *   create branch -> invoke agent -> push -> create PR -> comment
+ *   create branch -> invoke agent -> authorize -> validate -> push -> create PR -> comment
  */
 
 import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-import { join } from 'node:path';
 import {
   createGitHubIssueTracker,
   createGitHubSourceControl,
-  createAuditLog,
-  createFileSink,
   routeByComplexity,
   evaluatePromotion,
   withSpan,
@@ -25,15 +21,55 @@ import {
   type SourceControl,
   type AuditLog,
   type AgentMetrics,
+  type MetricStore,
+  type AgentMemory,
+  type ExpressionEvaluator,
+  type LLMEvaluator,
 } from '@ai-sdlc/reference';
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
 import { validateIssue, parseComplexity } from './validate-issue.js';
-import { validateAgentOutput } from './validate-agent-output.js';
 import { createLogger, type Logger } from './logger.js';
 import type { AgentRunner } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
+import {
+  getGitHubConfig,
+  resolveRepoRoot,
+  createDefaultAuditLog,
+  resolveAutonomyLevel,
+  resolveConstraints,
+  isAutonomousStrategy,
+  recordMetric,
+  validateAndAuditOutput,
+  evaluatePipelineCompliance,
+  authorizeFilesChanged,
+} from './shared.js';
 
-const execFileAsync = promisify(execFile);
+function execFileAsync(
+  cmd: string,
+  args: string[],
+  opts?: { cwd?: string },
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    execFile(cmd, args, opts ?? {}, (err, stdout, stderr) => {
+      if (err) reject(err);
+      else resolve({ stdout, stderr });
+    });
+  });
+}
+
+// ── Types ────────────────────────────────────────────────────────────
+
+export interface PipelineResult {
+  prUrl: string;
+  filesChanged: string[];
+  promotionEligible: boolean;
+}
+
+export interface PromotionResult {
+  eligible: boolean;
+  fromLevel: number;
+  toLevel: number;
+}
 
 export interface ExecuteOptions {
   /** Override the config directory (defaults to `.ai-sdlc`). */
@@ -50,35 +86,16 @@ export interface ExecuteOptions {
   logger?: Logger;
   /** Inject a custom audit log (for testing). */
   auditLog?: AuditLog;
-}
-
-async function commentOnIssue(
-  _tracker: IssueTracker,
-  issueId: string,
-  body: string,
-): Promise<void> {
-  // The IssueTracker interface doesn't expose comments, so we use the
-  // GitHub API directly via GITHUB_TOKEN.
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) return;
-
-  const org = process.env.GITHUB_REPOSITORY_OWNER ?? 'ai-sdlc-framework';
-  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'ai-sdlc';
-
-  const url = `https://api.github.com/repos/${org}/${repo}/issues/${issueId}/comments`;
-  await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ body }),
-  });
-}
-
-async function resolveRepoRoot(): Promise<string> {
-  const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel']);
-  return stdout.trim();
+  /** In-process metric store for testable telemetry. */
+  metricStore?: MetricStore;
+  /** Agent memory for long-term/episodic recall. */
+  memory?: AgentMemory;
+  /** Optional expression evaluator for expression gate rules. */
+  expressionEvaluator?: ExpressionEvaluator;
+  /** Optional LLM evaluator for LLM gate rules. */
+  llmEvaluator?: LLMEvaluator;
+  /** Callback invoked when promotion eligibility is evaluated. */
+  promotionCallback?: (result: PromotionResult) => void | Promise<void>;
 }
 
 /**
@@ -87,12 +104,12 @@ async function resolveRepoRoot(): Promise<string> {
 export async function executePipeline(
   issueNumber: number,
   options: ExecuteOptions = {},
-): Promise<void> {
+): Promise<PipelineResult> {
   const workDir = options.workDir ?? (await resolveRepoRoot());
   const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
   const log = options.logger ?? createLogger();
-  const auditLog =
-    options.auditLog ?? createAuditLog(createFileSink(join(workDir, '.ai-sdlc', 'audit.jsonl')));
+  const auditLog = options.auditLog ?? createDefaultAuditLog(workDir);
+  const metricStore = options.metricStore;
 
   // 1. Load .ai-sdlc/ config
   log.stage('load-config');
@@ -115,11 +132,8 @@ export async function executePipeline(
   const autonomyPolicy = config.autonomyPolicy;
 
   // 2. Create adapters (or use injected ones)
-  const ghConfig = {
-    org: process.env.GITHUB_REPOSITORY_OWNER ?? 'ai-sdlc-framework',
-    repo: process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'ai-sdlc',
-    token: { secretRef: 'github-token' },
-  };
+  const { org, repo } = getGitHubConfig();
+  const ghConfig = { org, repo, token: { secretRef: 'github-token' } };
 
   const tracker = options.tracker ?? createGitHubIssueTracker(ghConfig);
   const sc = options.sourceControl ?? createGitHubSourceControl(ghConfig);
@@ -127,6 +141,15 @@ export async function executePipeline(
   // 3. Fetch issue and validate
   log.stage('validate-issue');
   const issue = await tracker.getIssue(String(issueNumber));
+
+  // Store issue context in working memory if provided
+  if (options.memory) {
+    options.memory.working.set('currentIssue', {
+      number: issueNumber,
+      title: issue.title,
+      description: issue.description,
+    });
+  }
 
   const meter = getMeter();
 
@@ -157,9 +180,9 @@ export async function executePipeline(
         });
 
         meter.createCounter(METRIC_NAMES.GATE_FAIL_TOTAL).add(1);
+        recordMetric(metricStore, METRIC_NAMES.GATE_FAIL_TOTAL, 1);
 
-        await commentOnIssue(
-          tracker,
+        await tracker.addComment(
           String(issueNumber),
           `## AI-SDLC: Issue Validation Failed\n\nThis issue did not pass quality gate checks:\n\n${failures}`,
         );
@@ -175,6 +198,7 @@ export async function executePipeline(
       });
 
       meter.createCounter(METRIC_NAMES.GATE_PASS_TOTAL).add(1);
+      recordMetric(metricStore, METRIC_NAMES.GATE_PASS_TOTAL, 1);
     },
   );
 
@@ -186,14 +210,12 @@ export async function executePipeline(
     actor: 'system',
     action: 'route',
     resource: `issue#${issueNumber}`,
-    decision:
-      strategy === 'fully-autonomous' || strategy === 'ai-with-review' ? 'allowed' : 'denied',
+    decision: isAutonomousStrategy(strategy) ? 'allowed' : 'denied',
     details: { score: complexity, strategy },
   });
 
-  if (strategy === 'human-led' || strategy === 'ai-assisted') {
-    await commentOnIssue(
-      tracker,
+  if (!isAutonomousStrategy(strategy)) {
+    await tracker.addComment(
       String(issueNumber),
       `## AI-SDLC: Complexity Too High\n\nIssue complexity (${complexity}) routed as "${strategy}" — requires human involvement.`,
     );
@@ -201,11 +223,8 @@ export async function executePipeline(
   }
 
   // 6. Check autonomy level allows coding
-  const currentLevel = autonomyPolicy.spec.levels.find((l) => l.level <= 1);
+  const currentLevel = resolveAutonomyLevel(autonomyPolicy);
   log.stageEnd('validate-issue');
-  if (!currentLevel) {
-    throw new Error('No autonomy level 0 or 1 found in policy');
-  }
 
   // 7. Create branch and checkout locally
   const branchName = `ai-sdlc/issue-${issueNumber}`;
@@ -213,19 +232,12 @@ export async function executePipeline(
   await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir });
   await execFileAsync('git', ['checkout', branchName], { cwd: workDir });
 
+  // 8. Resolve agent constraints
+  const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
+
   // 9. Invoke agent
   log.stage('agent');
   const runner = options.runner ?? new GitHubActionsRunner();
-  const constraints = agentRole.spec.constraints ?? {
-    maxFilesPerChange: 15,
-    requireTests: true,
-    blockedPaths: [],
-  };
-
-  // Merge autonomy level blocked paths with agent role constraints
-  const autonomyBlocked = currentLevel.guardrails.blockedPaths ?? [];
-  const agentBlocked = constraints.blockedPaths ?? [];
-  const mergedBlockedPaths = [...new Set([...agentBlocked, ...autonomyBlocked])];
 
   const result = await withSpan(
     SPAN_NAMES.AGENT_TASK,
@@ -241,9 +253,9 @@ export async function executePipeline(
         workDir,
         branch: branchName,
         constraints: {
-          maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
-          requireTests: constraints.requireTests ?? true,
-          blockedPaths: mergedBlockedPaths,
+          maxFilesPerChange: resolved.maxFiles,
+          requireTests: resolved.requireTests,
+          blockedPaths: resolved.blockedPaths,
         },
       });
 
@@ -257,8 +269,8 @@ export async function executePipeline(
           details: { error: r.error },
         });
         meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
-        await commentOnIssue(
-          tracker,
+        recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
+        await tracker.addComment(
           String(issueNumber),
           `## AI-SDLC: Agent Failed\n\n${r.error ?? 'Unknown error'}`,
         );
@@ -274,65 +286,57 @@ export async function executePipeline(
         details: { filesChanged: r.filesChanged.length },
       });
       meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
+      recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
 
       return r;
     },
   );
 
-  // 10. Validate agent output against guardrails
-  log.stage('validate-output');
+  // 10. ABAC authorization check (if write permissions are defined)
+  if (currentLevel.permissions.write.length > 0) {
+    authorizeFilesChanged(
+      result.filesChanged,
+      currentLevel.permissions,
+      agentRole.spec.constraints,
+      auditLog,
+      agentRole.metadata.name,
+    );
+  }
+
+  // 11. Validate agent output against guardrails
   await withSpan(
     SPAN_NAMES.PIPELINE_STAGE,
     {
       [ATTRIBUTE_KEYS.STAGE]: 'validate-output',
     },
     async () => {
-      const validation = await validateAgentOutput({
+      await validateAndAuditOutput({
         filesChanged: result.filesChanged,
         workDir,
         constraints: {
-          maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
-          requireTests: constraints.requireTests ?? true,
-          blockedPaths: mergedBlockedPaths,
+          maxFilesPerChange: resolved.maxFiles,
+          requireTests: resolved.requireTests,
+          blockedPaths: resolved.blockedPaths,
         },
         guardrails: { maxLinesPerPR: currentLevel.guardrails.maxLinesPerPR },
-      });
-      log.stageEnd('validate-output');
-
-      if (!validation.passed) {
-        auditLog.record({
-          actor: 'system',
-          action: 'check',
-          resource: 'agent-output',
-          decision: 'denied',
-          details: { violations: validation.violations.map((v) => v.rule) },
-        });
-        const violationList = validation.violations
-          .map((v) => `- **${v.rule}**: ${v.message}`)
-          .join('\n');
-        await commentOnIssue(
-          tracker,
-          String(issueNumber),
-          `## AI-SDLC: Guardrail Violations\n\n${violationList}`,
-        );
-        throw new Error('Agent output failed guardrail validation');
-      }
-
-      auditLog.record({
-        actor: 'system',
-        action: 'check',
-        resource: 'agent-output',
-        decision: 'allowed',
+        auditLog,
+        log,
+        onViolation: async (violationList) => {
+          await tracker.addComment(
+            String(issueNumber),
+            `## AI-SDLC: Guardrail Violations\n\n${violationList}`,
+          );
+        },
       });
     },
   );
 
-  // 11. Push branch
+  // 12. Push branch
   log.stage('push');
   await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
   log.stageEnd('push');
 
-  // 12. Create PR
+  // 13. Create PR
   log.stage('create-pr');
   const pr = await withSpan(
     SPAN_NAMES.PIPELINE_STAGE,
@@ -374,14 +378,13 @@ export async function executePipeline(
     },
   );
 
-  // 13. Comment on issue with success
-  await commentOnIssue(
-    tracker,
+  // 14. Comment on issue with success
+  await tracker.addComment(
     String(issueNumber),
     `## AI-SDLC: PR Created\n\nPull request created: ${pr.url}\n\nFiles changed: ${result.filesChanged.length}\n\nPlease review and merge.`,
   );
 
-  // 14. Evaluate promotion eligibility (observational only)
+  // 15. Evaluate promotion eligibility (observational only)
   const agentMetrics: AgentMetrics = {
     name: agentRole.metadata.name,
     currentLevel: currentLevel.level,
@@ -406,5 +409,47 @@ export async function executePipeline(
     },
   });
 
+  if (options.promotionCallback) {
+    await options.promotionCallback({
+      eligible: promotion.eligible,
+      fromLevel: promotion.fromLevel,
+      toLevel: promotion.toLevel,
+    });
+  }
+
+  // 16. Compliance reporting
+  const complianceReports = evaluatePipelineCompliance(!!options.memory);
+  const avgCoverage =
+    complianceReports.reduce((s, r) => s + r.coveragePercent, 0) / complianceReports.length;
+  log.info(`Compliance coverage: ${avgCoverage.toFixed(1)}%`);
+  auditLog.record({
+    actor: 'system',
+    action: 'evaluate',
+    resource: 'compliance',
+    decision: 'allowed',
+    details: { averageCoverage: avgCoverage, frameworks: complianceReports.length },
+  });
+
+  // 17. Record episodic memory
+  if (options.memory) {
+    options.memory.episodic.append({
+      key: 'pipeline-execution',
+      value: {
+        issueNumber,
+        prUrl: pr.url,
+        filesChanged: result.filesChanged.length,
+        outcome: 'success',
+      },
+      metadata: { summary: `Completed issue #${issueNumber}: ${issue.title}` },
+    });
+    options.memory.working.clear();
+  }
+
   log.summary();
+
+  return {
+    prUrl: pr.url,
+    filesChanged: result.filesChanged,
+    promotionEligible: promotion.eligible,
+  };
 }

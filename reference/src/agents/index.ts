@@ -28,6 +28,8 @@ export {
 
 export {
   createAgentMemory,
+  createFileLongTermMemory,
+  createFileEpisodicMemory,
   type MemoryTier,
   type MemoryEntry,
   type WorkingMemory,

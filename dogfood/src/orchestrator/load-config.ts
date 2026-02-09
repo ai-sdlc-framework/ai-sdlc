@@ -4,16 +4,19 @@
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { resolve, join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
   validateResource,
+  createAdapterRegistry,
+  scanLocalAdapters,
   type AnyResource,
   type Pipeline,
   type AgentRole,
   type QualityGate,
   type AutonomyPolicy,
   type AdapterBinding,
+  type AdapterRegistry,
   type ResourceKind,
 } from '@ai-sdlc/reference';
 
@@ -23,6 +26,7 @@ export interface AiSdlcConfig {
   qualityGate?: QualityGate;
   autonomyPolicy?: AutonomyPolicy;
   adapterBinding?: AdapterBinding;
+  adapterRegistry?: AdapterRegistry;
 }
 
 const KIND_KEY: Record<ResourceKind, keyof AiSdlcConfig> = {
@@ -62,4 +66,21 @@ export function loadConfig(configDir: string): AiSdlcConfig {
   }
 
   return config;
+}
+
+/**
+ * Async variant of loadConfig that also scans for local adapter plugins.
+ */
+export async function loadConfigAsync(configDir: string): Promise<AiSdlcConfig> {
+  const config = loadConfig(configDir);
+  const registry = createAdapterRegistry();
+
+  try {
+    const scan = await scanLocalAdapters({ basePath: join(configDir, 'adapters') });
+    for (const m of scan.adapters) registry.register(m);
+  } catch {
+    /* no adapters dir — fine */
+  }
+
+  return { ...config, adapterRegistry: registry };
 }

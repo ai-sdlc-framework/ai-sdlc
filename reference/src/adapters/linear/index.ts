@@ -161,6 +161,14 @@ export function createLinearIssueTracker(
       return mapLinearIssue(issue as unknown as LinearIssueNode);
     },
 
+    async addComment(_id: string, _body: string): Promise<void> {
+      // Stub — Linear comment API not yet integrated
+    },
+
+    async getComments(_id: string): Promise<Array<{ body: string }>> {
+      return [];
+    },
+
     watchIssues(_filter: IssueFilter): EventStream<IssueEvent> {
       return createStubEventStream();
     },

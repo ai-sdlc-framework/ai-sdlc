@@ -5,34 +5,43 @@
  */
 
 import { execFile } from 'node:child_process';
-import { join } from 'node:path';
 import {
-  createAuditLog,
-  createFileSink,
   evaluateDemotion,
   withSpan,
   getMeter,
   SPAN_NAMES,
   METRIC_NAMES,
   ATTRIBUTE_KEYS,
+  type IssueTracker,
   type AuditLog,
   type AgentMetrics,
+  type MetricStore,
+  type AgentMemory,
 } from '@ai-sdlc/reference';
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
-import { validateAgentOutput } from './validate-agent-output.js';
 import { createLogger, type Logger } from './logger.js';
 import type { AgentRunner } from '../runner/types.js';
 import { GitHubActionsRunner } from '../runner/github-actions.js';
+import {
+  extractIssueNumber,
+  resolveRepoRoot,
+  createDefaultAuditLog,
+  resolveAutonomyLevel,
+  resolveConstraints,
+  recordMetric,
+  validateAndAuditOutput,
+  authorizeFilesChanged,
+} from './shared.js';
 
-function exec(
+function execFileAsync(
   cmd: string,
   args: string[],
   opts?: { cwd?: string; timeout?: number },
-): Promise<string> {
+): Promise<{ stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    execFile(cmd, args, opts ?? {}, (err, stdout) => {
+    execFile(cmd, args, opts ?? {}, (err, stdout, stderr) => {
       if (err) reject(err);
-      else resolve(stdout.trim());
+      else resolve({ stdout, stderr });
     });
   });
 }
@@ -50,12 +59,18 @@ export interface FixCIOptions {
   runner?: AgentRunner;
   /** Inject a custom logger (for testing). */
   logger?: Logger;
-  /** Inject PR comments for testing (bypasses GitHub API call). */
+  /** Inject PR comments for testing (bypasses IssueTracker call). */
   _prComments?: string[];
   /** Inject CI logs for testing (bypasses `gh` CLI call). */
   _ciLogs?: string;
   /** Inject a custom audit log (for testing). */
   auditLog?: AuditLog;
+  /** Inject a custom issue tracker (for testing). */
+  tracker?: IssueTracker;
+  /** In-process metric store for testable telemetry. */
+  metricStore?: MetricStore;
+  /** Agent memory for episodic recall. */
+  memory?: AgentMemory;
 }
 
 /**
@@ -65,7 +80,6 @@ export interface FixCIOptions {
 export function countRetryAttempts(comments: string[]): number {
   let count = 0;
   for (const body of comments) {
-    // Count each occurrence of the marker in each comment
     const matches = body.match(
       new RegExp(RETRY_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g'),
     );
@@ -85,7 +99,7 @@ export async function fetchCILogs(runId: number, injectedLogs?: string): Promise
     return truncateLogs(injectedLogs);
   }
 
-  const stdout = await exec('gh', ['run', 'view', String(runId), '--log-failed'], {
+  const { stdout } = await execFileAsync('gh', ['run', 'view', String(runId), '--log-failed'], {
     timeout: 30_000,
   });
   return truncateLogs(stdout);
@@ -97,53 +111,6 @@ function truncateLogs(logs: string): string {
     return logs;
   }
   return lines.slice(-MAX_LOG_LINES).join('\n');
-}
-
-async function fetchPRComments(prNumber: number): Promise<string[]> {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) return [];
-
-  const org = process.env.GITHUB_REPOSITORY_OWNER ?? 'ai-sdlc-framework';
-  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'ai-sdlc';
-
-  const url = `https://api.github.com/repos/${org}/${repo}/issues/${prNumber}/comments?per_page=100`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-    },
-  });
-
-  if (!res.ok) return [];
-  const data = (await res.json()) as Array<{ body?: string }>;
-  return data.map((c) => c.body ?? '');
-}
-
-async function commentOnPR(prNumber: number, body: string): Promise<void> {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) return;
-
-  const org = process.env.GITHUB_REPOSITORY_OWNER ?? 'ai-sdlc-framework';
-  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'ai-sdlc';
-
-  const url = `https://api.github.com/repos/${org}/${repo}/issues/${prNumber}/comments`;
-  await fetch(url, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ body }),
-  });
-}
-
-async function resolveRepoRoot(): Promise<string> {
-  return exec('git', ['rev-parse', '--show-toplevel']);
-}
-
-function extractIssueNumber(branch: string): number | null {
-  const match = branch.match(/^ai-sdlc\/issue-(\d+)$/);
-  return match ? Number(match[1]) : null;
 }
 
 /**
@@ -160,8 +127,8 @@ export async function executeFixCI(
   const workDir = options.workDir ?? (await resolveRepoRoot());
   const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
   const log = options.logger ?? createLogger();
-  const auditLog =
-    options.auditLog ?? createAuditLog(createFileSink(join(workDir, '.ai-sdlc', 'audit.jsonl')));
+  const auditLog = options.auditLog ?? createDefaultAuditLog(workDir);
+  const metricStore = options.metricStore;
 
   // 1. Load config
   log.stage('load-config');
@@ -175,16 +142,30 @@ export async function executeFixCI(
     throw new Error('No AutonomyPolicy resource found in .ai-sdlc/');
   }
 
-  // Capture narrowed types for use in closures
   const agentRole = config.agentRole;
   const autonomyPolicy = config.autonomyPolicy;
 
-  // 2. Count retry attempts
+  // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
-  const comments = options._prComments ?? (await fetchPRComments(prNumber));
+  let comments: string[];
+  if (options._prComments !== undefined) {
+    comments = options._prComments;
+  } else if (options.tracker) {
+    const issueComments = await options.tracker.getComments(String(prNumber));
+    comments = issueComments.map((c) => c.body);
+  } else {
+    comments = [];
+  }
   const attempts = countRetryAttempts(comments);
   log.info(`Fix-CI attempt ${attempts + 1} of ${MAX_FIX_ATTEMPTS}`);
   log.stageEnd('check-retries');
+
+  // Helper to add a comment (via tracker or no-op)
+  const addComment = async (body: string): Promise<void> => {
+    if (options.tracker) {
+      await options.tracker.addComment(String(prNumber), body);
+    }
+  };
 
   if (attempts >= MAX_FIX_ATTEMPTS) {
     log.info(`Fix-CI retry limit reached (${MAX_FIX_ATTEMPTS}). Commenting and stopping.`);
@@ -195,8 +176,7 @@ export async function executeFixCI(
       decision: 'denied',
       details: { reason: 'retry-limit-reached', attempts, max: MAX_FIX_ATTEMPTS },
     });
-    await commentOnPR(
-      prNumber,
+    await addComment(
       `## AI-SDLC: Fix-CI Retry Limit Reached\n\nThis PR has reached the maximum number of automated fix attempts (${MAX_FIX_ATTEMPTS}). Manual intervention is needed.`,
     );
     return;
@@ -208,35 +188,41 @@ export async function executeFixCI(
   log.stageEnd('fetch-logs');
 
   // 4. Determine branch and issue number
-  const currentBranch = await exec('git', ['branch', '--show-current'], { cwd: workDir });
+  const { stdout: branchStdout } = await execFileAsync('git', ['branch', '--show-current'], {
+    cwd: workDir,
+  });
+  const currentBranch = branchStdout.trim();
   const issueNumber = extractIssueNumber(currentBranch);
   if (issueNumber === null) {
     throw new Error(`Branch "${currentBranch}" does not match ai-sdlc/issue-N pattern`);
   }
 
-  // 5. Resolve autonomy level and merge blocked paths
-  const currentLevel = autonomyPolicy.spec.levels.find((l) => l.level <= 1);
-  if (!currentLevel) {
-    throw new Error('No autonomy level 0 or 1 found in policy');
+  // 5. Resolve autonomy level and constraints
+  const currentLevel = resolveAutonomyLevel(autonomyPolicy);
+  const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
+
+  // 6. Fetch issue data (via tracker if available)
+  let issueTitle = `Issue #${issueNumber}`;
+  let issueBody = '';
+  if (options.tracker) {
+    const issueData = await options.tracker.getIssue(String(issueNumber));
+    issueTitle = issueData.title;
+    issueBody = issueData.description ?? '';
   }
 
-  // 6. Invoke agent with CI error context
+  // Query episodic memory for previous fix-CI attempts
+  if (options.memory) {
+    const previousAttempts = options.memory.episodic.search('fix-ci-execution');
+    if (previousAttempts.length > 0) {
+      log.info(`Found ${previousAttempts.length} previous fix-CI episodes in memory`);
+    }
+  }
+
+  const meter = getMeter();
+
+  // 7. Invoke agent with CI error context
   log.stage('agent');
   const runner = options.runner ?? new GitHubActionsRunner();
-  const constraints = agentRole.spec.constraints ?? {
-    maxFilesPerChange: 15,
-    requireTests: true,
-    blockedPaths: [],
-  };
-
-  // Merge autonomy level blocked paths with agent role constraints
-  const autonomyBlocked = currentLevel.guardrails.blockedPaths ?? [];
-  const agentBlocked = constraints.blockedPaths ?? [];
-  const mergedBlockedPaths = [...new Set([...agentBlocked, ...autonomyBlocked])];
-
-  // Fetch issue title/body from GitHub for full context
-  const issueData = await fetchIssueData(issueNumber);
-  const meter = getMeter();
 
   const result = await withSpan(
     SPAN_NAMES.AGENT_TASK,
@@ -247,14 +233,14 @@ export async function executeFixCI(
     async () => {
       const r = await runner.run({
         issueNumber,
-        issueTitle: issueData.title,
-        issueBody: issueData.body,
+        issueTitle,
+        issueBody,
         workDir,
         branch: currentBranch,
         constraints: {
-          maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
-          requireTests: constraints.requireTests ?? true,
-          blockedPaths: mergedBlockedPaths,
+          maxFilesPerChange: resolved.maxFiles,
+          requireTests: resolved.requireTests,
+          blockedPaths: resolved.blockedPaths,
         },
         ciErrors: ciLogs,
       });
@@ -269,6 +255,7 @@ export async function executeFixCI(
           details: { error: r.error },
         });
         meter.createCounter(METRIC_NAMES.TASK_FAILURE_TOTAL).add(1);
+        recordMetric(metricStore, METRIC_NAMES.TASK_FAILURE_TOTAL, 1);
 
         // Evaluate demotion on agent failure
         const agentMetrics: AgentMetrics = {
@@ -295,8 +282,7 @@ export async function executeFixCI(
           },
         });
 
-        await commentOnPR(
-          prNumber,
+        await addComment(
           `## AI-SDLC: Fix-CI Agent Failed\n\n${r.error ?? 'Unknown error'}\n\n${RETRY_MARKER}`,
         );
         throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${r.error}`);
@@ -311,61 +297,53 @@ export async function executeFixCI(
         details: { filesChanged: r.filesChanged.length },
       });
       meter.createCounter(METRIC_NAMES.TASK_SUCCESS_TOTAL).add(1);
+      recordMetric(metricStore, METRIC_NAMES.TASK_SUCCESS_TOTAL, 1);
 
       return r;
     },
   );
 
-  // 7. Validate agent output against guardrails
-  log.stage('validate-output');
+  // 8. ABAC authorization check (if write permissions are defined)
+  if (currentLevel.permissions.write.length > 0) {
+    authorizeFilesChanged(
+      result.filesChanged,
+      currentLevel.permissions,
+      agentRole.spec.constraints,
+      auditLog,
+      agentRole.metadata.name,
+    );
+  }
+
+  // 9. Validate agent output against guardrails
   await withSpan(
     SPAN_NAMES.PIPELINE_STAGE,
     {
       [ATTRIBUTE_KEYS.STAGE]: 'validate-output',
     },
     async () => {
-      const validation = await validateAgentOutput({
+      await validateAndAuditOutput({
         filesChanged: result.filesChanged,
         workDir,
         constraints: {
-          maxFilesPerChange: constraints.maxFilesPerChange ?? 15,
-          requireTests: constraints.requireTests ?? true,
-          blockedPaths: mergedBlockedPaths,
+          maxFilesPerChange: resolved.maxFiles,
+          requireTests: resolved.requireTests,
+          blockedPaths: resolved.blockedPaths,
         },
         guardrails: { maxLinesPerPR: currentLevel.guardrails.maxLinesPerPR },
-      });
-      log.stageEnd('validate-output');
-
-      if (!validation.passed) {
-        auditLog.record({
-          actor: 'system',
-          action: 'check',
-          resource: 'agent-output',
-          decision: 'denied',
-          details: { violations: validation.violations.map((v) => v.rule) },
-        });
-        const violationList = validation.violations
-          .map((v) => `- **${v.rule}**: ${v.message}`)
-          .join('\n');
-        await commentOnPR(
-          prNumber,
-          `## AI-SDLC: Fix-CI Guardrail Violations\n\n${violationList}\n\n${RETRY_MARKER}`,
-        );
-        throw new Error('Fix-CI agent output failed guardrail validation');
-      }
-
-      auditLog.record({
-        actor: 'system',
-        action: 'check',
-        resource: 'agent-output',
-        decision: 'allowed',
+        auditLog,
+        log,
+        onViolation: async (violationList) => {
+          await addComment(
+            `## AI-SDLC: Fix-CI Guardrail Violations\n\n${violationList}\n\n${RETRY_MARKER}`,
+          );
+        },
       });
     },
   );
 
-  // 7. Push to the same branch (CI re-runs automatically)
+  // 10. Push to the same branch (CI re-runs automatically)
   log.stage('push');
-  await exec('git', ['push', 'origin', currentBranch], { cwd: workDir });
+  await execFileAsync('git', ['push', 'origin', currentBranch], { cwd: workDir });
   log.stageEnd('push');
 
   auditLog.record({
@@ -376,9 +354,8 @@ export async function executeFixCI(
     details: { prNumber, attempt: attempts + 1 },
   });
 
-  // 8. Comment on PR with success details
-  await commentOnPR(
-    prNumber,
+  // 11. Comment on PR with success details
+  await addComment(
     [
       '## AI-SDLC: Fix-CI Applied',
       '',
@@ -391,30 +368,19 @@ export async function executeFixCI(
     ].join('\n'),
   );
 
+  // 12. Record episodic memory
+  if (options.memory) {
+    options.memory.episodic.append({
+      key: 'fix-ci-execution',
+      value: {
+        prNumber,
+        issueNumber,
+        filesChanged: result.filesChanged.length,
+        outcome: 'success',
+      },
+      metadata: { summary: `Fix-CI for PR #${prNumber} (attempt ${attempts + 1})` },
+    });
+  }
+
   log.summary();
-}
-
-async function fetchIssueData(issueNumber: number): Promise<{ title: string; body: string }> {
-  const token = process.env.GITHUB_TOKEN;
-  if (!token) {
-    return { title: `Issue #${issueNumber}`, body: '' };
-  }
-
-  const org = process.env.GITHUB_REPOSITORY_OWNER ?? 'ai-sdlc-framework';
-  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'ai-sdlc';
-
-  const url = `https://api.github.com/repos/${org}/${repo}/issues/${issueNumber}`;
-  const res = await fetch(url, {
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/vnd.github+json',
-    },
-  });
-
-  if (!res.ok) {
-    return { title: `Issue #${issueNumber}`, body: '' };
-  }
-
-  const data = (await res.json()) as { title?: string; body?: string };
-  return { title: data.title ?? `Issue #${issueNumber}`, body: data.body ?? '' };
 }

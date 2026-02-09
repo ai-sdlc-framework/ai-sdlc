@@ -4,6 +4,8 @@
  * Codespaces / devcontainers by implementing this interface.
  */
 
+import type { AgentMemory } from '@ai-sdlc/reference';
+
 export interface AgentContext {
   issueNumber: number;
   issueTitle: string;
@@ -17,6 +19,8 @@ export interface AgentContext {
   };
   /** CI failure logs, populated only during fix-CI retries. */
   ciErrors?: string;
+  /** Agent memory for long-term/episodic recall. */
+  memory?: AgentMemory;
 }
 
 export interface AgentResult {

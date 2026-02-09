@@ -11,6 +11,7 @@ import { resolveSecret } from '../resolve-secret.js';
 import type {
   SourceControl,
   IssueTracker,
+  IssueComment,
   CIPipeline,
   Issue,
   IssueFilter,
@@ -155,6 +156,23 @@ export function createGitHubIssueTracker(config: GitHubConfig): IssueTracker {
         state: state as 'open' | 'closed',
       });
       return mapGitHubIssue(data);
+    },
+
+    async addComment(id: string, body: string): Promise<void> {
+      await octokit.issues.createComment({
+        ...ownerRepo,
+        issue_number: Number(id),
+        body,
+      });
+    },
+
+    async getComments(id: string): Promise<IssueComment[]> {
+      const { data } = await octokit.issues.listComments({
+        ...ownerRepo,
+        issue_number: Number(id),
+        per_page: 100,
+      });
+      return data.map((c) => ({ body: c.body ?? '' }));
     },
 
     watchIssues(_filter: IssueFilter): EventStream<IssueEvent> {

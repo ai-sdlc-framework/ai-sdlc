@@ -63,6 +63,8 @@ function makeMockTracker(issue: Issue): IssueTracker {
     createIssue: vi.fn(),
     updateIssue: vi.fn(),
     transitionIssue: vi.fn(),
+    addComment: vi.fn(),
+    getComments: vi.fn().mockResolvedValue([]),
     watchIssues: vi.fn().mockReturnValue({
       async *[Symbol.asyncIterator]() {
         /* stub */

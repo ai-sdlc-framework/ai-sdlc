@@ -50,12 +50,18 @@ export interface IssueEvent {
   timestamp: string;
 }
 
+export interface IssueComment {
+  body: string;
+}
+
 export interface IssueTracker {
   listIssues(filter: IssueFilter): Promise<Issue[]>;
   getIssue(id: string): Promise<Issue>;
   createIssue(input: CreateIssueInput): Promise<Issue>;
   updateIssue(id: string, input: UpdateIssueInput): Promise<Issue>;
   transitionIssue(id: string, transition: string): Promise<Issue>;
+  addComment(id: string, body: string): Promise<void>;
+  getComments(id: string): Promise<IssueComment[]>;
   watchIssues(filter: IssueFilter): EventStream<IssueEvent>;
 }
 

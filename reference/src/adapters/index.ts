@@ -1,5 +1,6 @@
 export type {
   IssueTracker,
+  IssueComment,
   SourceControl,
   CIPipeline,
   CodeAnalysis,

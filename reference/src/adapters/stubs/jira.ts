@@ -20,6 +20,7 @@ export interface StubJiraAdapter extends IssueTracker {
 
 export function createStubJira(): StubJiraAdapter {
   const issues = new Map<string, Issue>();
+  const comments = new Map<string, string[]>();
   let nextId = 1;
 
   return {
@@ -69,6 +70,17 @@ export function createStubJira(): StubJiraAdapter {
       if (!issue) throw new Error(`Issue "${id}" not found`);
       issue.status = transition;
       return issue;
+    },
+
+    async addComment(id: string, body: string): Promise<void> {
+      if (!issues.has(id)) throw new Error(`Issue "${id}" not found`);
+      const existing = comments.get(id) ?? [];
+      existing.push(body);
+      comments.set(id, existing);
+    },
+
+    async getComments(id: string): Promise<Array<{ body: string }>> {
+      return (comments.get(id) ?? []).map((body) => ({ body }));
     },
 
     watchIssues(_filter: IssueFilter): EventStream<IssueEvent> {

@@ -12,11 +12,12 @@ import type { AgentRunner, AgentResult } from '../runner/types.js';
 import type { Logger } from './logger.js';
 import type { AuditLog } from '@ai-sdlc/reference';
 
-// Mock child_process — covers git and gh calls
+// Mock child_process — covers git and gh calls.
+// fix-ci.ts wraps execFile in a callback-based promise, so the mock
+// must call the callback (4th arg) with (err, stdout, stderr).
 vi.mock('node:child_process', () => ({
   execFile: vi.fn((_cmd: string, args: string[], _opts: unknown, cb?: unknown) => {
     if (typeof cb === 'function') {
-      // Return branch name for `git branch --show-current`
       if (args?.[0] === 'branch' && args?.[1] === '--show-current') {
         (cb as (err: null, stdout: string, stderr: string) => void)(null, 'ai-sdlc/issue-42\n', '');
       } else {
