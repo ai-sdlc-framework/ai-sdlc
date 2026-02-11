@@ -28,11 +28,16 @@ import {
   createInMemoryMemoryStore,
   createInProcessEventBus,
   createStubSandbox,
+  // Docker sandbox
+  createDockerSandbox,
   // Webhook bridge (used in function body)
   createWebhookBridge,
   // Git resolver (used in function bodies)
   createStubGitAdapterFetcher,
+  createGitAdapterFetcher,
   resolveGitAdapter,
+  // GitHub CI adapter
+  createGitHubCIPipeline,
   // Types (used in function signatures)
   type AdapterRegistry,
   type AdapterMetadata,
@@ -47,6 +52,8 @@ import {
   type SecretStore,
   type MemoryStore,
   type EventBus,
+  type DockerSandboxConfig,
+  type CIPipeline,
 } from '@ai-sdlc/reference';
 
 /**
@@ -110,6 +117,21 @@ export function createPipelineAdapterRegistry(): AdapterRegistry {
   registry.register(stubMeta('stub-sandbox', 'Stub Sandbox', 'Sandbox@v1', 'stub'), () =>
     createStubSandbox(),
   );
+  registry.register(stubMeta('docker-sandbox', 'Docker Sandbox', 'Sandbox@v1', 'docker'), () => {
+    const exec = async (cmd: string) => {
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
+      const execAsync = promisify(execFile);
+      const [bin, ...args] = cmd.split(' ');
+      const { stdout } = await execAsync(bin, args);
+      return stdout;
+    };
+    const config: DockerSandboxConfig = {
+      image: process.env.AI_SDLC_DOCKER_IMAGE ?? 'node:20-slim',
+      network: process.env.AI_SDLC_DOCKER_NETWORK,
+    };
+    return createDockerSandbox(exec, config);
+  });
   registry.register(
     stubMeta('env-secret-store', 'Environment Secret Store', 'SecretStore@v1', 'env'),
     () => createEnvSecretStore(),
@@ -165,8 +187,10 @@ export function resolveInfrastructure(
 
   // Resolve from registry — factories are guaranteed present when using
   // createPipelineAdapterRegistry(), but we guard for custom registries.
+  const sandboxProvider =
+    process.env.AI_SDLC_SANDBOX_PROVIDER === 'docker' ? 'docker-sandbox' : 'stub-sandbox';
   const sandbox =
-    (registry.getFactory('stub-sandbox')?.() as Sandbox | undefined) ?? createStubSandbox();
+    (registry.getFactory(sandboxProvider)?.() as Sandbox | undefined) ?? createStubSandbox();
   const secretStore =
     (registry.getFactory('env-secret-store')?.() as SecretStore | undefined) ??
     createEnvSecretStore();
@@ -188,13 +212,24 @@ export function createPipelineWebhookBridge(): WebhookBridge<unknown> {
 }
 
 /**
+ * Create a pipeline adapter fetcher.
+ * Returns the real git fetcher unless `AI_SDLC_ADAPTER_FETCH=stub`.
+ */
+export function createPipelineAdapterFetcher(): GitAdapterFetcher {
+  if (process.env.AI_SDLC_ADAPTER_FETCH === 'stub') {
+    return createStubGitAdapterFetcher(new Map());
+  }
+  return createGitAdapterFetcher();
+}
+
+/**
  * Resolve a git-based adapter reference and fetch its metadata.
  */
 export async function resolveAdapterFromGit(
   ref: string,
   fetcher?: GitAdapterFetcher,
 ): Promise<GitResolveResult> {
-  const actualFetcher = fetcher ?? createStubGitAdapterFetcher(new Map());
+  const actualFetcher = fetcher ?? createPipelineAdapterFetcher();
   return resolveGitAdapter(ref, actualFetcher);
 }
 
@@ -205,10 +240,26 @@ export async function scanPipelineAdapters(options: ScanOptions): Promise<ScanRe
   return scanLocalAdapters(options);
 }
 
+/**
+ * Create a GitHub Actions CI adapter for the pipeline.
+ * Requires `GITHUB_REPOSITORY_OWNER` and `GITHUB_REPOSITORY` env vars.
+ */
+export function createPipelineCIAdapter(): CIPipeline {
+  const org = process.env.GITHUB_REPOSITORY_OWNER ?? 'ai-sdlc-framework';
+  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'ai-sdlc';
+  return createGitHubCIPipeline({
+    org,
+    repo,
+    token: { secretRef: 'github-token' },
+    workflowFile: process.env.AI_SDLC_WORKFLOW_FILE ?? 'ci.yml',
+  });
+}
+
 // Direct re-exports (passthrough)
 export {
   // Core adapters
   createGitHubCIPipeline,
+  createDockerSandbox,
   createLinearIssueTracker,
   resolveSecret,
   // Registry & scanner
@@ -295,4 +346,6 @@ export type {
   MemoryStore,
   InMemoryMemoryStore,
   InProcessEventBus,
+  DockerSandboxConfig,
+  BuildStatus,
 } from '@ai-sdlc/reference';

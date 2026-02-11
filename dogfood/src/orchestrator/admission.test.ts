@@ -1,5 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { createPipelineAdmission, admitIssueResource } from './admission.js';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  createPipelineAdmission,
+  admitIssueResource,
+  createPipelineAuthenticator,
+  authenticateRequest,
+  validatePipelineResources,
+} from './admission.js';
 import type { QualityGate, AnyResource, AuthorizationHook } from '@ai-sdlc/reference';
 
 function makeQualityGate(overrides: Partial<QualityGate['spec']> = {}): QualityGate {
@@ -209,5 +215,115 @@ describe('Admission pipeline', () => {
       overrideJustification: 'hotfix needed',
     });
     expect(result.admitted).toBe(true);
+  });
+});
+
+describe('createPipelineAuthenticator()', () => {
+  let savedToken: string | undefined;
+  let savedActor: string | undefined;
+
+  beforeEach(() => {
+    savedToken = process.env.GITHUB_TOKEN;
+    savedActor = process.env.GITHUB_ACTOR;
+  });
+
+  afterEach(() => {
+    if (savedToken === undefined) delete process.env.GITHUB_TOKEN;
+    else process.env.GITHUB_TOKEN = savedToken;
+    if (savedActor === undefined) delete process.env.GITHUB_ACTOR;
+    else process.env.GITHUB_ACTOR = savedActor;
+  });
+
+  it('creates always-authenticator when no token/actor set', async () => {
+    delete process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_ACTOR;
+    const auth = createPipelineAuthenticator();
+    const result = await auth.authenticate('any-token');
+    expect(result.success).toBe(true);
+    expect(result.identity!.actor).toBe('ai-sdlc-pipeline');
+  });
+
+  it('creates token-authenticator when GITHUB_TOKEN and GITHUB_ACTOR set', async () => {
+    process.env.GITHUB_TOKEN = 'ghp_test_token_123';
+    process.env.GITHUB_ACTOR = 'ci-bot';
+    const auth = createPipelineAuthenticator();
+
+    // Valid token
+    const valid = await auth.authenticate('ghp_test_token_123');
+    expect(valid.success).toBe(true);
+    expect(valid.identity!.actor).toBe('ci-bot');
+    expect(valid.identity!.actorType).toBe('bot');
+
+    // Invalid token
+    const invalid = await auth.authenticate('wrong-token');
+    expect(invalid.success).toBe(false);
+    expect(invalid.reason).toContain('Invalid');
+  });
+
+  it('falls back to always-auth when only token set (no actor)', async () => {
+    process.env.GITHUB_TOKEN = 'ghp_test';
+    delete process.env.GITHUB_ACTOR;
+    const auth = createPipelineAuthenticator();
+    const result = await auth.authenticate('anything');
+    expect(result.success).toBe(true);
+    expect(result.identity!.actor).toBe('ai-sdlc-pipeline');
+  });
+});
+
+describe('authenticateRequest()', () => {
+  it('delegates to the provided authenticator', async () => {
+    const auth = createPipelineAuthenticator();
+    const result = await authenticateRequest(auth, 'test-token');
+    expect(result.success).toBe(true);
+  });
+});
+
+describe('validatePipelineResources()', () => {
+  it('validates a valid Pipeline resource', () => {
+    const pipeline = {
+      apiVersion: 'ai-sdlc.io/v1alpha1',
+      kind: 'Pipeline',
+      metadata: { name: 'test' },
+      spec: {
+        triggers: [{ event: 'issue.opened' }],
+        providers: { issueTracker: { type: 'github' } },
+        stages: [{ name: 'validate', agent: 'validator' }],
+      },
+    };
+    const results = validatePipelineResources([{ kind: 'Pipeline', data: pipeline }]);
+    expect(results).toHaveLength(1);
+    expect(results[0].valid).toBe(true);
+  });
+
+  it('reports errors for invalid resource', () => {
+    const invalid = { apiVersion: 'wrong', kind: 'Pipeline' };
+    const results = validatePipelineResources([{ kind: 'Pipeline', data: invalid }]);
+    expect(results).toHaveLength(1);
+    expect(results[0].valid).toBe(false);
+    expect(results[0].errors!.length).toBeGreaterThan(0);
+  });
+
+  it('validates multiple resources at once', () => {
+    const pipeline = {
+      apiVersion: 'ai-sdlc.io/v1alpha1',
+      kind: 'Pipeline',
+      metadata: { name: 'test' },
+      spec: {
+        triggers: [{ event: 'push' }],
+        providers: {},
+        stages: [{ name: 'code' }],
+      },
+    };
+    const agentRole = {
+      apiVersion: 'ai-sdlc.io/v1alpha1',
+      kind: 'AgentRole',
+      metadata: { name: 'coder' },
+      spec: { capabilities: ['code'], constraints: {} },
+    };
+    const results = validatePipelineResources([
+      { kind: 'Pipeline', data: pipeline },
+      { kind: 'AgentRole', data: agentRole },
+    ]);
+    expect(results).toHaveLength(2);
   });
 });

@@ -6,11 +6,13 @@
 import {
   admitResource,
   createAlwaysAuthenticator,
+  createTokenAuthenticator,
   createLabelInjector,
   createMetadataEnricher,
   createReviewerAssigner,
   applyMutatingGates,
   enforce,
+  validate,
   type AdmissionPipeline,
   type AdmissionRequest,
   type AdmissionResult,
@@ -19,6 +21,11 @@ import {
   type EvaluationContext,
   type AuthorizationHook,
   type MutatingGate,
+  type AuthIdentity,
+  type Authenticator,
+  type AuthenticationResult,
+  type ResourceKind,
+  type ValidationResult,
 } from '@ai-sdlc/reference';
 
 export interface PipelineAdmissionConfig {
@@ -29,6 +36,61 @@ export interface PipelineAdmissionConfig {
   annotations?: Record<string, string>;
   reviewers?: string[];
   reviewerMinComplexity?: number;
+  /** Override the authenticator (defaults to token-based when GITHUB_TOKEN is set). */
+  authenticator?: Authenticator;
+}
+
+const DEFAULT_PIPELINE_IDENTITY: AuthIdentity = {
+  actor: 'ai-sdlc-pipeline',
+  actorType: 'ai-agent',
+  roles: ['pipeline-executor'],
+  groups: ['ai-agents'],
+  scopes: ['repo:read', 'repo:write'],
+};
+
+/**
+ * Create a pipeline authenticator.
+ * When `GITHUB_TOKEN` is set, uses token-based authentication with an
+ * identity derived from `GITHUB_ACTOR`. Falls back to always-authenticator
+ * for local dev and test environments.
+ */
+export function createPipelineAuthenticator(): Authenticator {
+  const token = process.env.GITHUB_TOKEN;
+  const actor = process.env.GITHUB_ACTOR;
+
+  if (token && actor) {
+    const identity: AuthIdentity = {
+      actor,
+      actorType: 'bot',
+      roles: ['pipeline-executor'],
+      groups: ['github-actions'],
+      scopes: ['repo:read', 'repo:write'],
+    };
+    const tokenMap = new Map<string, AuthIdentity>([[token, identity]]);
+    return createTokenAuthenticator(tokenMap);
+  }
+
+  return createAlwaysAuthenticator(DEFAULT_PIPELINE_IDENTITY);
+}
+
+/**
+ * Authenticate a request token against the pipeline authenticator.
+ */
+export async function authenticateRequest(
+  authenticator: Authenticator,
+  token: string,
+): Promise<AuthenticationResult> {
+  return authenticator.authenticate(token);
+}
+
+/**
+ * Validate pipeline resources (Pipeline, AgentRole, etc.) against JSON Schemas.
+ * Returns validation results for each resource.
+ */
+export function validatePipelineResources(
+  resources: Array<{ kind: ResourceKind; data: unknown }>,
+): ValidationResult[] {
+  return resources.map(({ kind, data }) => validate(kind, data));
 }
 
 /**
@@ -53,14 +115,10 @@ export function createPipelineAdmission(config: PipelineAdmissionConfig): Admiss
     mutatingGates.push(createReviewerAssigner(() => reviewerList));
   }
 
+  const authenticator = config.authenticator ?? createPipelineAuthenticator();
+
   return {
-    authenticator: createAlwaysAuthenticator({
-      actor: 'ai-sdlc-pipeline',
-      actorType: 'ai-agent',
-      roles: ['pipeline-executor'],
-      groups: ['ai-agents'],
-      scopes: ['repo:read', 'repo:write'],
-    }),
+    authenticator,
     authorizer: config.authorizer,
     mutatingGates: mutatingGates.length > 0 ? mutatingGates : undefined,
     qualityGate: config.qualityGate,
@@ -88,4 +146,12 @@ export async function admitIssueResource(
 }
 
 export { admitResource, applyMutatingGates, enforce };
-export type { AdmissionPipeline, AdmissionResult, AdmissionRequest };
+export type {
+  AdmissionPipeline,
+  AdmissionResult,
+  AdmissionRequest,
+  Authenticator,
+  AuthIdentity,
+  AuthenticationResult,
+  ValidationResult,
+};

@@ -22,6 +22,9 @@ import {
   type AgentMemory,
   type ComplianceCoverageReport,
   type SecretStore,
+  type AuthorizationHook,
+  type AuthorizationContext,
+  type AuthorizationResult,
 } from '@ai-sdlc/reference';
 import {
   DEFAULT_GITHUB_ORG,
@@ -315,3 +318,76 @@ export function authorizeFilesChanged(
     }
   }
 }
+
+// ── Authorization middleware chains ──────────────────────────────────
+
+/**
+ * Create an ABAC permission-check hook wrapping the existing authorize().
+ */
+export function createAbacPermissionHook(
+  permissions: Permissions,
+  constraints: AgentConstraints | undefined,
+): AuthorizationHook {
+  return (ctx: AuthorizationContext): AuthorizationResult => {
+    return authorize(permissions, constraints, ctx.action, ctx.target);
+  };
+}
+
+/**
+ * Create a blocked-paths guardrail hook.
+ */
+export function createBlockedPathsHook(blockedPaths: string[]): AuthorizationHook {
+  return (ctx: AuthorizationContext): AuthorizationResult => {
+    for (const pattern of blockedPaths) {
+      const regex = new RegExp(
+        '^' +
+          pattern
+            .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+            .replace(/\*\*/g, '{{GLOBSTAR}}')
+            .replace(/\*/g, '[^/]*')
+            .replace(/\{\{GLOBSTAR\}\}/g, '.*') +
+          '$',
+      );
+      if (regex.test(ctx.target)) {
+        return {
+          allowed: false,
+          reason: `Target "${ctx.target}" matches blocked path "${pattern}"`,
+          layer: 'constraints',
+        };
+      }
+    }
+    return { allowed: true };
+  };
+}
+
+/**
+ * Create an audit logging hook that records authorization decisions.
+ */
+export function createAuditLoggingHook(auditLog: AuditLog): AuthorizationHook {
+  return (ctx: AuthorizationContext): AuthorizationResult => {
+    auditLog.record({
+      actor: ctx.agent,
+      action: ctx.action,
+      resource: ctx.target,
+      decision: 'allowed',
+      details: { hook: 'audit-logging' },
+    });
+    return { allowed: true };
+  };
+}
+
+/**
+ * Compose multiple AuthorizationHook functions into a chain.
+ * Hooks are executed in order; the first denial short-circuits.
+ */
+export function createPipelineAuthorizationChain(hooks: AuthorizationHook[]): AuthorizationHook {
+  return (ctx: AuthorizationContext): AuthorizationResult => {
+    for (const hook of hooks) {
+      const result = hook(ctx);
+      if (!result.allowed) return result;
+    }
+    return { allowed: true };
+  };
+}
+
+export type { AuthorizationHook, AuthorizationContext, AuthorizationResult };

@@ -44,6 +44,49 @@ export function listSupportedFrameworks(): readonly RegulatoryFramework[] {
   return [...REGULATORY_FRAMEWORKS];
 }
 
+/**
+ * Detailed compliance report for a single framework.
+ */
+export interface DetailedFrameworkReport {
+  framework: RegulatoryFramework;
+  coveragePercent: number;
+  gaps: string[];
+  coveredControls: string[];
+}
+
+/**
+ * Generate a detailed compliance report for each of the 6 regulatory frameworks.
+ */
+export function generateDetailedComplianceReport(
+  implementedControls: ReadonlySet<string>,
+): DetailedFrameworkReport[] {
+  const frameworks = listSupportedFrameworks();
+  return frameworks.map((framework) => {
+    const report = checkCompliance(implementedControls, framework);
+    const mappings = getMappingsForFramework(framework);
+    const requiredControls = mappings.map((m) => m.controlId);
+    const covered = requiredControls.filter((c) => implementedControls.has(c));
+    const gaps = requiredControls.filter((c) => !implementedControls.has(c));
+    return {
+      framework,
+      coveragePercent: report.coveragePercent,
+      gaps,
+      coveredControls: covered,
+    };
+  });
+}
+
+/**
+ * Get compliance gaps (missing controls) for a specific framework.
+ */
+export function getComplianceGaps(
+  framework: RegulatoryFramework,
+  implementedControls: ReadonlySet<string>,
+): string[] {
+  const mappings = getMappingsForFramework(framework);
+  return mappings.map((m) => m.controlId).filter((c) => !implementedControls.has(c));
+}
+
 // Direct re-exports (passthrough)
 export {
   checkCompliance,
