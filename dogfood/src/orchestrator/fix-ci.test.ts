@@ -10,7 +10,7 @@ import {
 } from './fix-ci.js';
 import type { AgentRunner, AgentResult } from '../runner/types.js';
 import type { Logger } from './logger.js';
-import type { AuditLog } from '@ai-sdlc/reference';
+import type { AuditLog, CIPipeline, BuildStatus } from '@ai-sdlc/reference';
 import { createPipelineSecurity } from './security.js';
 
 // Mock child_process — covers git and gh calls.
@@ -100,6 +100,40 @@ describe('fetchCILogs()', () => {
     expect(resultLines.length).toBe(MAX_LOG_LINES);
     expect(resultLines[0]).toBe(`line ${200 - MAX_LOG_LINES + 1}`);
     expect(resultLines[resultLines.length - 1]).toBe('line 200');
+  });
+
+  it('uses CIPipeline adapter when provided (no injected logs)', async () => {
+    const mockCI: CIPipeline = {
+      triggerBuild: vi.fn(),
+      getBuildStatus: vi.fn().mockResolvedValue({
+        id: '999',
+        status: 'failed',
+        startedAt: '2025-01-01T00:00:00Z',
+        completedAt: '2025-01-01T00:05:00Z',
+      } satisfies BuildStatus),
+      getTestResults: vi.fn(),
+      getCoverageReport: vi.fn(),
+      watchBuildEvents: vi.fn(),
+    };
+
+    const result = await fetchCILogs(999, undefined, mockCI);
+    expect(mockCI.getBuildStatus).toHaveBeenCalledWith('999');
+    expect(result).toContain('failed');
+    expect(result).toContain('999');
+  });
+
+  it('prefers injected logs over CI adapter', async () => {
+    const mockCI: CIPipeline = {
+      triggerBuild: vi.fn(),
+      getBuildStatus: vi.fn(),
+      getTestResults: vi.fn(),
+      getCoverageReport: vi.fn(),
+      watchBuildEvents: vi.fn(),
+    };
+
+    const result = await fetchCILogs(999, 'injected error logs', mockCI);
+    expect(result).toBe('injected error logs');
+    expect(mockCI.getBuildStatus).not.toHaveBeenCalled();
   });
 });
 
@@ -349,6 +383,40 @@ describe('executeFixCI()', () => {
 
     // Credentials should still be revoked in the finally block
     expect(revokeSpy).toHaveBeenCalled();
+  });
+
+  it('uses CIPipeline adapter when provided', async () => {
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const mockCIAdapter: CIPipeline = {
+      triggerBuild: vi.fn(),
+      getBuildStatus: vi.fn().mockResolvedValue({
+        id: '5555',
+        status: 'failed',
+        startedAt: '2025-01-01T00:00:00Z',
+        completedAt: '2025-01-01T00:05:00Z',
+      } satisfies BuildStatus),
+      getTestResults: vi.fn(),
+      getCoverageReport: vi.fn(),
+      watchBuildEvents: vi.fn(),
+    };
+
+    await executeFixCI(100, 5555, {
+      configDir: CONFIG_DIR,
+      workDir: '/tmp/test-repo',
+      runner,
+      logger: makeSilentLogger(),
+      _prComments: [],
+      auditLog,
+      ciAdapter: mockCIAdapter,
+    });
+
+    expect(mockCIAdapter.getBuildStatus).toHaveBeenCalledWith('5555');
+    expect(runner.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ciErrors: expect.stringContaining('failed'),
+      }),
+    );
   });
 
   // This test must be last — it overrides the global execFile mock

@@ -18,6 +18,7 @@ import {
   type MetricStore,
   type AgentMemory,
   type SecretStore,
+  type CIPipeline,
 } from '@ai-sdlc/reference';
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
 import { createLogger, type Logger } from './logger.js';
@@ -84,6 +85,8 @@ export interface FixCIOptions {
   useStructuredLogger?: boolean;
   /** Secret store adapter for resolving credentials (defaults to process.env). */
   secretStore?: SecretStore;
+  /** CI pipeline adapter for fetching logs (falls back to `gh` CLI). */
+  ciAdapter?: CIPipeline;
 }
 
 /**
@@ -105,11 +108,26 @@ export function countRetryAttempts(comments: string[]): number {
 
 /**
  * Fetch CI failure logs for a given workflow run ID.
+ * When a `CIPipeline` adapter is provided, uses it instead of shelling out to `gh`.
  * Truncates to the last MAX_LOG_LINES lines.
  */
-export async function fetchCILogs(runId: number, injectedLogs?: string): Promise<string> {
+export async function fetchCILogs(
+  runId: number,
+  injectedLogs?: string,
+  ciAdapter?: CIPipeline,
+): Promise<string> {
   if (injectedLogs !== undefined) {
     return truncateLogs(injectedLogs);
+  }
+
+  if (ciAdapter) {
+    const status = await ciAdapter.getBuildStatus(String(runId));
+    const lines = [
+      `Build ${status.id}: ${status.status}`,
+      status.startedAt ? `Started: ${status.startedAt}` : '',
+      status.completedAt ? `Completed: ${status.completedAt}` : '',
+    ].filter(Boolean);
+    return truncateLogs(lines.join('\n'));
   }
 
   const { stdout } = await execFileAsync('gh', ['run', 'view', String(runId), '--log-failed'], {
@@ -231,7 +249,7 @@ export async function executeFixCI(
 
   // 3. Fetch CI logs
   log.stage('fetch-logs');
-  const ciLogs = await fetchCILogs(runId, options._ciLogs);
+  const ciLogs = await fetchCILogs(runId, options._ciLogs, options.ciAdapter);
   log.stageEnd('fetch-logs');
 
   // 4. Determine branch and issue number

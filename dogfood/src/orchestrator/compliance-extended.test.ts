@@ -4,6 +4,8 @@ import {
   getControlCatalog,
   getFrameworkMappings,
   listSupportedFrameworks,
+  generateDetailedComplianceReport,
+  getComplianceGaps,
   // Re-exports
   checkCompliance,
   checkAllFrameworks,
@@ -121,6 +123,80 @@ describe('Extended compliance', () => {
 
     it('REGULATORY_FRAMEWORKS is defined', () => {
       expect(REGULATORY_FRAMEWORKS).toBeDefined();
+    });
+  });
+
+  describe('generateDetailedComplianceReport()', () => {
+    it('generates reports for all 6 frameworks', () => {
+      const controls = getAllControlIds();
+      const reports = generateDetailedComplianceReport(controls);
+      expect(reports).toHaveLength(6);
+      for (const report of reports) {
+        expect(report).toHaveProperty('framework');
+        expect(report).toHaveProperty('coveragePercent');
+        expect(report).toHaveProperty('gaps');
+        expect(report).toHaveProperty('coveredControls');
+        expect(Array.isArray(report.gaps)).toBe(true);
+        expect(Array.isArray(report.coveredControls)).toBe(true);
+      }
+    });
+
+    it('reports 100% coverage when all controls implemented', () => {
+      const controls = getAllControlIds();
+      const reports = generateDetailedComplianceReport(controls);
+      for (const report of reports) {
+        expect(report.coveragePercent).toBe(100);
+        expect(report.gaps).toHaveLength(0);
+      }
+    });
+
+    it('reports 0% coverage and all gaps when no controls implemented', () => {
+      const reports = generateDetailedComplianceReport(new Set());
+      for (const report of reports) {
+        expect(report.coveragePercent).toBe(0);
+        expect(report.coveredControls).toHaveLength(0);
+        expect(report.gaps.length).toBeGreaterThan(0);
+      }
+    });
+
+    it('reports partial coverage correctly', () => {
+      const partial = new Set(['quality-gates', 'audit-logging']);
+      const reports = generateDetailedComplianceReport(partial);
+      for (const report of reports) {
+        expect(report.coveragePercent).toBeGreaterThanOrEqual(0);
+        expect(report.coveragePercent).toBeLessThanOrEqual(100);
+        // Covered controls should be a subset of implemented
+        for (const c of report.coveredControls) {
+          expect(partial.has(c)).toBe(true);
+        }
+      }
+    });
+  });
+
+  describe('getComplianceGaps()', () => {
+    it('returns empty array when all controls implemented', () => {
+      const controls = getAllControlIds();
+      const gaps = getComplianceGaps('eu-ai-act', controls);
+      expect(gaps).toHaveLength(0);
+    });
+
+    it('returns all mapped controls as gaps when none implemented', () => {
+      const gaps = getComplianceGaps('eu-ai-act', new Set());
+      expect(gaps.length).toBeGreaterThan(0);
+    });
+
+    it('returns only missing controls', () => {
+      const partial = new Set(['quality-gates']);
+      const gaps = getComplianceGaps('eu-ai-act', partial);
+      expect(gaps).not.toContain('quality-gates');
+    });
+
+    it('works for each framework', () => {
+      const frameworks = listSupportedFrameworks();
+      for (const fw of frameworks) {
+        const gaps = getComplianceGaps(fw, new Set());
+        expect(Array.isArray(gaps)).toBe(true);
+      }
     });
   });
 });

@@ -1,10 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   createPipelineAdapterRegistry,
   createPipelineWebhookBridge,
   resolveAdapterFromGit,
+  createPipelineAdapterFetcher,
+  createPipelineCIAdapter,
+  resolveInfrastructure,
   // Re-exports
   createGitHubCIPipeline,
+  createDockerSandbox,
   createLinearIssueTracker,
   resolveSecret,
   createAdapterRegistry,
@@ -166,6 +170,94 @@ describe('Adapter ecosystem', () => {
 
     it('createLinearIssueTracker is exported', () => {
       expect(typeof createLinearIssueTracker).toBe('function');
+    });
+
+    it('createDockerSandbox is exported', () => {
+      expect(typeof createDockerSandbox).toBe('function');
+    });
+  });
+
+  describe('Docker sandbox registration', () => {
+    it('registers docker-sandbox in the registry', () => {
+      const registry = createPipelineAdapterRegistry();
+      expect(registry.has('docker-sandbox')).toBe(true);
+    });
+
+    it('lists docker-sandbox alongside stub-sandbox', () => {
+      const registry = createPipelineAdapterRegistry();
+      const adapters = registry.list();
+      const names = adapters.map((a) => a.name);
+      expect(names).toContain('stub-sandbox');
+      expect(names).toContain('docker-sandbox');
+    });
+  });
+
+  describe('env-driven sandbox provider selection', () => {
+    let savedProvider: string | undefined;
+
+    beforeEach(() => {
+      savedProvider = process.env.AI_SDLC_SANDBOX_PROVIDER;
+    });
+
+    afterEach(() => {
+      if (savedProvider === undefined) delete process.env.AI_SDLC_SANDBOX_PROVIDER;
+      else process.env.AI_SDLC_SANDBOX_PROVIDER = savedProvider;
+    });
+
+    it('resolves stub sandbox by default', () => {
+      delete process.env.AI_SDLC_SANDBOX_PROVIDER;
+      const registry = createPipelineAdapterRegistry();
+      const infra = resolveInfrastructure(registry, { workDir: '/tmp/test' });
+      expect(infra.sandbox).toBeDefined();
+      expect(typeof infra.sandbox.isolate).toBe('function');
+    });
+  });
+
+  describe('createPipelineAdapterFetcher()', () => {
+    let savedFetch: string | undefined;
+
+    beforeEach(() => {
+      savedFetch = process.env.AI_SDLC_ADAPTER_FETCH;
+    });
+
+    afterEach(() => {
+      if (savedFetch === undefined) delete process.env.AI_SDLC_ADAPTER_FETCH;
+      else process.env.AI_SDLC_ADAPTER_FETCH = savedFetch;
+    });
+
+    it('returns stub fetcher when AI_SDLC_ADAPTER_FETCH=stub', () => {
+      process.env.AI_SDLC_ADAPTER_FETCH = 'stub';
+      const fetcher = createPipelineAdapterFetcher();
+      expect(typeof fetcher.fetch).toBe('function');
+    });
+
+    it('returns real fetcher when AI_SDLC_ADAPTER_FETCH is not stub', () => {
+      delete process.env.AI_SDLC_ADAPTER_FETCH;
+      const fetcher = createPipelineAdapterFetcher();
+      expect(typeof fetcher.fetch).toBe('function');
+    });
+  });
+
+  describe('createPipelineCIAdapter()', () => {
+    let savedToken: string | undefined;
+
+    beforeEach(() => {
+      savedToken = process.env.GITHUB_TOKEN;
+      process.env.GITHUB_TOKEN = 'ghp_test_token_for_ci_adapter';
+    });
+
+    afterEach(() => {
+      if (savedToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = savedToken;
+    });
+
+    it('creates a CIPipeline adapter', () => {
+      const ci = createPipelineCIAdapter();
+      expect(ci).toBeDefined();
+      expect(typeof ci.triggerBuild).toBe('function');
+      expect(typeof ci.getBuildStatus).toBe('function');
+      expect(typeof ci.getTestResults).toBe('function');
+      expect(typeof ci.getCoverageReport).toBe('function');
     });
   });
 });

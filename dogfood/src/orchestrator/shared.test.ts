@@ -13,8 +13,12 @@ import {
   authorizeFilesChanged,
   interpolateBranchPattern,
   interpolatePRTitle,
+  createPipelineAuthorizationChain,
+  createAbacPermissionHook,
+  createBlockedPathsHook,
+  createAuditLoggingHook,
 } from './shared.js';
-import type { AutonomyPolicy, AuditLog, MetricStore } from '@ai-sdlc/reference';
+import type { AutonomyPolicy, AuditLog, MetricStore, AuthorizationHook } from '@ai-sdlc/reference';
 
 // ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -347,5 +351,127 @@ describe('authorizeFilesChanged()', () => {
         'test-agent',
       ),
     ).toThrow('Authorization denied');
+  });
+});
+
+describe('createPipelineAuthorizationChain()', () => {
+  it('allows when all hooks pass', () => {
+    const allowAll: AuthorizationHook = () => ({ allowed: true });
+    const chain = createPipelineAuthorizationChain([allowAll, allowAll]);
+    const result = chain({ agent: 'test', action: 'write', target: 'src/foo.ts' });
+    expect(result.allowed).toBe(true);
+  });
+
+  it('denies on first failing hook (short-circuits)', () => {
+    const allow: AuthorizationHook = () => ({ allowed: true });
+    const deny: AuthorizationHook = () => ({
+      allowed: false,
+      reason: 'denied by hook',
+      layer: 'permissions',
+    });
+    const shouldNotRun = vi.fn(() => ({ allowed: true })) as AuthorizationHook;
+
+    const chain = createPipelineAuthorizationChain([allow, deny, shouldNotRun]);
+    const result = chain({ agent: 'test', action: 'write', target: 'src/foo.ts' });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toBe('denied by hook');
+    expect(shouldNotRun).not.toHaveBeenCalled();
+  });
+
+  it('preserves hook execution order', () => {
+    const order: number[] = [];
+    const hook1: AuthorizationHook = () => {
+      order.push(1);
+      return { allowed: true };
+    };
+    const hook2: AuthorizationHook = () => {
+      order.push(2);
+      return { allowed: true };
+    };
+    const hook3: AuthorizationHook = () => {
+      order.push(3);
+      return { allowed: true };
+    };
+
+    const chain = createPipelineAuthorizationChain([hook1, hook2, hook3]);
+    chain({ agent: 'test', action: 'write', target: 'src/foo.ts' });
+    expect(order).toEqual([1, 2, 3]);
+  });
+
+  it('works with empty hook list', () => {
+    const chain = createPipelineAuthorizationChain([]);
+    const result = chain({ agent: 'test', action: 'write', target: 'src/foo.ts' });
+    expect(result.allowed).toBe(true);
+  });
+});
+
+describe('createAbacPermissionHook()', () => {
+  it('allows when permissions match', () => {
+    const hook = createAbacPermissionHook(
+      { read: ['**'], write: ['src/**'], execute: [] },
+      undefined,
+    );
+    const result = hook({ agent: 'test', action: 'write', target: 'src/foo.ts' });
+    expect(result.allowed).toBe(true);
+  });
+
+  it('denies when permissions do not match', () => {
+    const hook = createAbacPermissionHook(
+      { read: ['**'], write: ['src/**'], execute: [] },
+      undefined,
+    );
+    const result = hook({ agent: 'test', action: 'write', target: '.github/ci.yml' });
+    expect(result.allowed).toBe(false);
+  });
+});
+
+describe('createBlockedPathsHook()', () => {
+  it('allows non-blocked paths', () => {
+    const hook = createBlockedPathsHook(['.github/**']);
+    const result = hook({ agent: 'test', action: 'write', target: 'src/foo.ts' });
+    expect(result.allowed).toBe(true);
+  });
+
+  it('denies blocked paths', () => {
+    const hook = createBlockedPathsHook(['.github/**', '.ai-sdlc/**']);
+    const result = hook({ agent: 'test', action: 'write', target: '.github/workflows/ci.yml' });
+    expect(result.allowed).toBe(false);
+    expect(result.reason).toContain('.github');
+  });
+});
+
+describe('createAuditLoggingHook()', () => {
+  it('records audit entry and always allows', () => {
+    const auditLog = makeMockAuditLog();
+    const hook = createAuditLoggingHook(auditLog);
+    const result = hook({ agent: 'test-agent', action: 'write', target: 'src/foo.ts' });
+    expect(result.allowed).toBe(true);
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: 'test-agent',
+        action: 'write',
+        resource: 'src/foo.ts',
+        decision: 'allowed',
+      }),
+    );
+  });
+});
+
+describe('authorization chain composition', () => {
+  it('composes ABAC + blocked-paths + audit into a working chain', () => {
+    const auditLog = makeMockAuditLog();
+    const chain = createPipelineAuthorizationChain([
+      createAbacPermissionHook({ read: ['**'], write: ['src/**'], execute: [] }, undefined),
+      createBlockedPathsHook(['.github/**']),
+      createAuditLoggingHook(auditLog),
+    ]);
+
+    // Allowed path
+    const allowed = chain({ agent: 'coder', action: 'write', target: 'src/index.ts' });
+    expect(allowed.allowed).toBe(true);
+
+    // Blocked by ABAC (no write permission)
+    const deniedAbac = chain({ agent: 'coder', action: 'write', target: '.env' });
+    expect(deniedAbac.allowed).toBe(false);
   });
 });

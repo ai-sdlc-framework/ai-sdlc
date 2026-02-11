@@ -13,6 +13,7 @@ export type {
   IssueFilter,
   PullRequest,
   CommitStatus,
+  BuildStatus,
   TestResults,
   CoverageReport,
   Finding,

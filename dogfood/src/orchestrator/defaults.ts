@@ -9,6 +9,7 @@
  */
 
 import type { NetworkPolicy, SandboxConstraints } from '@ai-sdlc/reference';
+import { parseDuration } from '@ai-sdlc/reference';
 
 // ── LLM Model ────────────────────────────────────────────────────────
 
@@ -39,7 +40,9 @@ export const DEFAULT_CONFIG_DIR_NAME = process.env.AI_SDLC_CONFIG_DIR ?? '.ai-sd
 export const DEFAULT_SANDBOX_MEMORY_MB = 512;
 export const DEFAULT_SANDBOX_CPU_PERCENT = 80;
 export const DEFAULT_SANDBOX_NETWORK_POLICY: NetworkPolicy = 'egress-only';
-export const DEFAULT_SANDBOX_TIMEOUT_MS = 1_800_000; // 30 minutes
+export const DEFAULT_SANDBOX_TIMEOUT_MS = process.env.AI_SDLC_SANDBOX_TIMEOUT
+  ? parseDuration(process.env.AI_SDLC_SANDBOX_TIMEOUT) || 1_800_000
+  : 1_800_000; // 30 minutes
 
 /** Build a SandboxConstraints object from defaults, optionally overriding timeout and workDir. */
 export function defaultSandboxConstraints(workDir: string, timeoutMs?: number): SandboxConstraints {
@@ -54,7 +57,9 @@ export function defaultSandboxConstraints(workDir: string, timeoutMs?: number): 
 
 // ── Runner ───────────────────────────────────────────────────────────
 
-export const DEFAULT_RUNNER_TIMEOUT_MS = 300_000; // 5 minutes
+export const DEFAULT_RUNNER_TIMEOUT_MS = process.env.AI_SDLC_RUNNER_TIMEOUT
+  ? parseDuration(process.env.AI_SDLC_RUNNER_TIMEOUT) || 300_000
+  : 300_000; // 5 minutes
 export const DEFAULT_ALLOWED_TOOLS = 'Edit,Write,Read,Glob,Grep,Bash';
 
 // ── Agent constraints ────────────────────────────────────────────────
@@ -67,11 +72,15 @@ export const DEFAULT_BLOCKED_PATHS = ['.github/workflows/**', `${DEFAULT_CONFIG_
 
 export const DEFAULT_MAX_FIX_ATTEMPTS = 2;
 export const DEFAULT_MAX_LOG_LINES = 150;
-export const DEFAULT_GH_CLI_TIMEOUT_MS = 30_000;
+export const DEFAULT_GH_CLI_TIMEOUT_MS = process.env.AI_SDLC_GH_CLI_TIMEOUT
+  ? parseDuration(process.env.AI_SDLC_GH_CLI_TIMEOUT) || 30_000
+  : 30_000;
 
 // ── JIT credentials ──────────────────────────────────────────────────
 
-export const DEFAULT_JIT_TTL_MS = 600_000; // 10 minutes
+export const DEFAULT_JIT_TTL_MS = process.env.AI_SDLC_JIT_TTL
+  ? parseDuration(process.env.AI_SDLC_JIT_TTL) || 600_000
+  : 600_000; // 10 minutes
 export const DEFAULT_JIT_SCOPE = ['repo:read', 'repo:write'];
 
 // ── Branch naming ────────────────────────────────────────────────────
