@@ -39,6 +39,9 @@ export interface AuditFilter {
 
 export interface AuditSink {
   write(entry: AuditEntry): void | Promise<void>;
+  query?(filter: AuditFilter): Promise<readonly AuditEntry[]>;
+  rotate?(): Promise<void>;
+  close?(): Promise<void>;
 }
 
 export interface IntegrityResult {

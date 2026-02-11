@@ -3,6 +3,11 @@
  * Each interface defines the methods an adapter MUST provide.
  */
 
+import type { AuditSink } from '../audit/types.js';
+import type { Sandbox } from '../security/interfaces.js';
+import type { SecretStore } from '../security/interfaces.js';
+import type { MemoryStore } from '../agents/memory/types.js';
+
 // ── Shared Types ──────────────────────────────────────────────────────
 
 /** An async event stream for watch operations. */
@@ -301,6 +306,15 @@ export interface DeploymentTarget {
   watchDeploymentEvents(filter: DeployFilter): EventStream<DeployEvent>;
 }
 
+// ── EventBus ─────────────────────────────────────────────────────────
+
+export interface EventBus {
+  /** Publish an event to a topic. */
+  publish(topic: string, payload: unknown): Promise<void>;
+  /** Subscribe to a topic. Returns an unsubscribe function. */
+  subscribe(topic: string, handler: (payload: unknown) => void): () => void;
+}
+
 // ── Adapter Map ───────────────────────────────────────────────────────
 
 export interface AdapterInterfaces {
@@ -310,4 +324,9 @@ export interface AdapterInterfaces {
   CodeAnalysis: CodeAnalysis;
   Messenger: Messenger;
   DeploymentTarget: DeploymentTarget;
+  AuditSink: AuditSink;
+  Sandbox: Sandbox;
+  SecretStore: SecretStore;
+  MemoryStore: MemoryStore;
+  EventBus: EventBus;
 }

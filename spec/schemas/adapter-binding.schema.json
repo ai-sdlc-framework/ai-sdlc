@@ -28,7 +28,12 @@
             "CIPipeline",
             "CodeAnalysis",
             "Messenger",
-            "DeploymentTarget"
+            "DeploymentTarget",
+            "AuditSink",
+            "Sandbox",
+            "SecretStore",
+            "MemoryStore",
+            "EventBus"
           ],
           "description": "The abstract contract name."
         },

@@ -6,6 +6,11 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { AgentRunner, AgentContext, AgentResult } from './types.js';
+import {
+  DEFAULT_MODEL,
+  DEFAULT_ALLOWED_TOOLS,
+  DEFAULT_RUNNER_TIMEOUT_MS,
+} from '../orchestrator/defaults.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -79,8 +84,7 @@ async function gitExec(workDir: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-const DEFAULT_ALLOWED_TOOLS = 'Edit,Write,Read,Glob,Grep,Bash';
-const DEFAULT_TIMEOUT_MS = 300_000;
+// Defaults imported from ../orchestrator/defaults.js
 
 interface RunClaudeOptions {
   allowedTools?: string[];
@@ -89,10 +93,10 @@ interface RunClaudeOptions {
 
 function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Promise<string> {
   const tools = opts?.allowedTools?.join(',') ?? DEFAULT_ALLOWED_TOOLS;
-  const timeoutMs = opts?.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const timeoutMs = opts?.timeoutMs ?? DEFAULT_RUNNER_TIMEOUT_MS;
 
   return new Promise((resolve, reject) => {
-    const model = process.env.AI_SDLC_MODEL ?? 'claude-sonnet-4-5-20250929';
+    const model = process.env.AI_SDLC_MODEL ?? DEFAULT_MODEL;
     const child = spawn('claude', ['-p', '--model', model, '--allowedTools', tools], {
       cwd: workDir,
       stdio: ['pipe', 'pipe', 'pipe'],

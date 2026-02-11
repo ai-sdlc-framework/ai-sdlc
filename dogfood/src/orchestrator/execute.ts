@@ -26,6 +26,7 @@ import {
   type ExpressionEvaluator,
   type LLMEvaluator,
   type Issue,
+  type SecretStore,
 } from '@ai-sdlc/reference';
 import { loadConfigAsync, type AiSdlcConfig } from './load-config.js';
 import { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
@@ -110,6 +111,11 @@ import {
   scanPipelineAdapters,
 } from './adapters.js';
 import {
+  defaultSandboxConstraints,
+  DEFAULT_CONFIG_DIR_NAME,
+  NOTIFICATION_TITLES,
+} from './defaults.js';
+import {
   checkFrameworkCompliance,
   getControlCatalog,
   getFrameworkMappings,
@@ -175,6 +181,8 @@ export interface ExecuteOptions {
   auditFilePath?: string;
   /** Admission pipeline for pre-execution resource validation. */
   admission?: AdmissionPipeline;
+  /** Secret store adapter for resolving credentials (defaults to process.env). */
+  secretStore?: SecretStore;
 }
 
 /**
@@ -185,7 +193,7 @@ export async function executePipeline(
   options: ExecuteOptions = {},
 ): Promise<PipelineResult> {
   const workDir = options.workDir ?? (await resolveRepoRoot());
-  const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
+  const configDir = options.configDir ?? `${workDir}/${DEFAULT_CONFIG_DIR_NAME}`;
   const log =
     options.logger ??
     (options.useStructuredLogger ? createStructuredConsoleLogger() : createLogger());
@@ -242,7 +250,7 @@ export async function executePipeline(
   }
 
   // 2. Create adapters (or use injected ones)
-  const { org, repo } = getGitHubConfig();
+  const { org, repo } = getGitHubConfig(options.secretStore);
   const ghConfig = { org, repo, token: { secretRef: 'github-token' } };
 
   const tracker = options.tracker ?? createGitHubIssueTracker(ghConfig);
@@ -377,7 +385,7 @@ async function executePipelineBody(
           : `This issue did not pass quality gate checks:\n\n${failures}`;
         const gateFailTitle = gateFailTpl
           ? renderTemplate(gateFailTpl, { details: failures }).title
-          : 'AI-SDLC: Issue Validation Failed';
+          : NOTIFICATION_TITLES.issueValidationFailed;
         await tracker.addComment(String(issueNumber), `## ${gateFailTitle}\n\n${gateFailBody}`);
         throw new Error(`Issue #${issueNumber} failed quality gate validation`);
       }
@@ -412,7 +420,7 @@ async function executePipelineBody(
     const complexityComment = complexityTpl
       ? renderTemplate(complexityTpl, { score: String(complexity), strategy })
       : {
-          title: 'AI-SDLC: Complexity Too High',
+          title: NOTIFICATION_TITLES.complexityTooHigh,
           body: `Issue complexity (${complexity}) routed as "${strategy}" — requires human involvement.`,
         };
     await tracker.addComment(
@@ -461,14 +469,11 @@ async function executePipelineBody(
   let result;
   try {
     if (options.security) {
-      const timeoutMs = codeStage?.timeout ? parseDuration(codeStage.timeout) : 1_800_000;
-      sandboxId = await options.security.sandbox.isolate(`issue-${issueNumber}`, {
-        maxMemoryMb: 512,
-        maxCpuPercent: 80,
-        networkPolicy: 'egress-only',
-        timeoutMs,
-        allowedPaths: [workDir],
-      });
+      const timeoutMs = codeStage?.timeout ? parseDuration(codeStage.timeout) : undefined;
+      sandboxId = await options.security.sandbox.isolate(
+        `issue-${issueNumber}`,
+        defaultSandboxConstraints(workDir, timeoutMs),
+      );
     }
 
     // Issue JIT credentials before agent execution
@@ -530,7 +535,7 @@ async function executePipelineBody(
         const errorDetail = typeof err === 'string' ? err : 'Unknown error';
         const agentFailComment = agentFailTpl
           ? renderTemplate(agentFailTpl, { stageName: 'code', details: errorDetail })
-          : { title: 'AI-SDLC: Agent Failed', body: errorDetail };
+          : { title: NOTIFICATION_TITLES.agentFailed, body: errorDetail };
         await tracker.addComment(
           String(issueNumber),
           `## ${agentFailComment.title}\n\n${agentFailComment.body}`,
@@ -594,7 +599,7 @@ async function executePipelineBody(
         onViolation: async (violationList) => {
           await tracker.addComment(
             String(issueNumber),
-            `## AI-SDLC: Guardrail Violations\n\n${violationList}`,
+            `## ${NOTIFICATION_TITLES.guardrailViolations}\n\n${violationList}`,
           );
         },
       });
@@ -705,7 +710,7 @@ async function executePipelineBody(
         prUrl: pr.url,
         issueNumber: String(issueNumber),
       })
-    : { title: 'AI-SDLC: PR Created', body: `Pull request created: ${pr.url}` };
+    : { title: NOTIFICATION_TITLES.prCreated, body: `Pull request created: ${pr.url}` };
   await tracker.addComment(
     String(issueNumber),
     `## ${prCreatedComment.title}\n\n${prCreatedComment.body}`,

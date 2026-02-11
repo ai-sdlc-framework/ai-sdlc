@@ -27,6 +27,19 @@ export interface Sandbox {
   getStatus(sandboxId: string): Promise<SandboxStatus>;
 }
 
+// ── Secret Store ─────────────────────────────────────────────────────
+
+export interface SecretStore {
+  /** Resolve a secret by name. Returns undefined if not found. */
+  get(name: string): string | undefined;
+  /** Resolve a secret by name. Throws if not found. */
+  getRequired(name: string): string;
+  /** Store a secret (optional — read-only stores may omit). */
+  set?(name: string, value: string, ttl?: number): Promise<void>;
+  /** Delete a secret (optional — read-only stores may omit). */
+  delete?(name: string): Promise<void>;
+}
+
 // ── JIT Credential Issuing ───────────────────────────────────────────
 
 export interface JITCredential {

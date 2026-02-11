@@ -64,3 +64,15 @@ export interface AgentMemory {
   shared: SharedMemory;
   episodic: EpisodicMemory;
 }
+
+/** Persistence backend for agent memory tiers. */
+export interface MemoryStore {
+  /** Read a value by key. Returns undefined if not found. */
+  read(key: string): Promise<unknown | undefined>;
+  /** Write a value by key. */
+  write(key: string, value: unknown): Promise<void>;
+  /** Delete a value by key. */
+  delete(key: string): Promise<void>;
+  /** List keys, optionally filtered by prefix. */
+  list(prefix?: string): Promise<string[]>;
+}

@@ -24,6 +24,10 @@ A standalone module implementing one or more [interface contracts](#interface-co
 
 A [resource](#resource) of kind `AdapterBinding` that declares a tool integration as a swappable provider behind a uniform [interface contract](#interface-contract). See [spec.md](spec.md#55-adapterbinding).
 
+### Agent Memory {#agent-memory}
+
+The five-tier memory model for AI agents: working (ephemeral), short-term (TTL-based), long-term (persistent), shared (cross-agent), and episodic (append-only event history). The storage backend is abstracted by the [MemoryStore](#memory-store) infrastructure adapter. See [agents.md](agents.md).
+
 ### Agent Card {#agent-card}
 
 An A2A-compatible discovery document published at `/.well-known/agent.json` describing an agent's name, capabilities, [skills](#skill), version, and security schemes. See [agents.md](agents.md#agent-discovery).
@@ -76,6 +80,10 @@ Automatic reduction of an agent's [autonomy level](#autonomy-level) triggered by
 
 A stage-level configuration that defines how a [Pipeline](#pipeline) handles stage failures. Strategies include `abort` (stop the pipeline), `retry` (re-execute up to a limit), `pause` (suspend for manual intervention), and `continue` (proceed to the next stage). See [spec.md](spec.md#failure-policy-object).
 
+### EventBus {#event-bus}
+
+An [infrastructure adapter](#infrastructure-adapter) interface for event publication and subscription. Abstracts the event delivery mechanism (e.g., in-process `EventEmitter`, NATS, Kafka, cloud pub/sub) behind a topic-based publish/subscribe API. See [adapters.md](adapters.md#35-eventbus).
+
 ### Enforcement Level {#enforcement-level}
 
 The strictness of a [quality gate](#quality-gate): `advisory` (warning only), `soft-mandatory` (must pass unless overridden), or `hard-mandatory` (must pass, no override). See [policy.md](policy.md#enforcement-levels).
@@ -84,9 +92,13 @@ The strictness of a [quality gate](#quality-gate): `advisory` (warning only), `s
 
 A versioned JSON Schema defining the required data structure for inter-agent transitions. Every agent transition produces a typed, validated, auditable artifact conforming to its handoff contract. See [agents.md](agents.md#handoff-contracts).
 
+### Infrastructure Adapter {#infrastructure-adapter}
+
+An [adapter](#adapter) that abstracts a runtime infrastructure concern (audit storage, sandboxing, secret management, memory persistence, event delivery) rather than an external SDLC tool. Infrastructure adapters use the same `AdapterBinding` resource model as SDLC adapters. The five infrastructure interfaces are: [AuditSink](adapters.md#31-auditsink), [Sandbox](adapters.md#32-sandbox), [SecretStore](#secret-store), [MemoryStore](#memory-store), [EventBus](#event-bus). See [adapters.md](adapters.md#3-infrastructure-adapters).
+
 ### Interface Contract {#interface-contract}
 
-A typed API definition for an integration category (e.g., IssueTracker, SourceControl, CIPipeline, CodeAnalysis, Messenger, DeploymentTarget). Each [adapter](#adapter) implements one or more interface contracts. See [adapters.md](adapters.md#interface-contracts).
+A typed API definition for an integration category. SDLC interfaces: IssueTracker, SourceControl, CIPipeline, CodeAnalysis, Messenger, DeploymentTarget. Infrastructure interfaces: AuditSink, Sandbox, SecretStore, MemoryStore, EventBus. Each [adapter](#adapter) implements one or more interface contracts. See [adapters.md](adapters.md#2-interface-contracts).
 
 ### Label {#label}
 
@@ -95,6 +107,10 @@ A key-value pair in a resource's [metadata](#metadata) used for identification, 
 ### MCP (Model Context Protocol) {#mcp}
 
 A protocol for connecting AI agents to external tools and data sources, originally developed by Anthropic and governed under the Linux Foundation's AAIF. AI-SDLC [adapters](#adapter) can wrap MCP servers. See [adapters.md](adapters.md).
+
+### MemoryStore {#memory-store}
+
+An [infrastructure adapter](#infrastructure-adapter) interface providing a key-value persistence backend for the five-tier [agent memory](#agent-memory) model. Abstracts the storage mechanism (e.g., JSON files, Redis, DynamoDB) behind a simple read/write/delete/list API. See [adapters.md](adapters.md#34-memorystore).
 
 ### Metadata {#metadata}
 
@@ -143,6 +159,10 @@ The pattern used by [AgentRole](#agent-role) resources to define an agent's iden
 ### Routing Strategy {#routing-strategy}
 
 The method by which tasks are assigned to agents based on [complexity score](#complexity-score). Four strategies are defined: `fully-autonomous`, `ai-with-review`, `ai-assisted`, and `human-led`. See [autonomy.md](autonomy.md#complexity-based-task-routing).
+
+### SecretStore {#secret-store}
+
+An [infrastructure adapter](#infrastructure-adapter) interface for secret resolution and management. Abstracts the secret storage mechanism (e.g., environment variables, HashiCorp Vault, AWS Secrets Manager) behind a get/set API. See [adapters.md](adapters.md#33-secretstore).
 
 ### Secret Reference {#secret-reference}
 

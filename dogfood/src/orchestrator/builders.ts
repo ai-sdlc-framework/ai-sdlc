@@ -21,6 +21,17 @@ import {
   type DistributionBuildResult,
   type BuildDistributionOptions,
 } from '@ai-sdlc/reference';
+import {
+  DEFAULT_COMPLEXITY_THRESHOLDS,
+  DEFAULT_MAX_FILES_PER_CHANGE,
+  DEFAULT_REQUIRE_TESTS,
+  DEFAULT_BLOCKED_PATHS,
+  DEFAULT_MAX_LINES_PER_PR,
+  DEFAULT_GITHUB_ORG,
+  DEFAULT_GITHUB_REPO,
+  DEFAULT_GITHUB_REPOSITORY,
+  DEFAULT_CONFIG_DIR_NAME,
+} from './defaults.js';
 
 /**
  * Create the default dogfood pipeline resource using the fluent builder.
@@ -52,12 +63,7 @@ export function buildDogfoodPipeline() {
       config: {},
     })
     .withRouting({
-      complexityThresholds: {
-        'fully-autonomous': { min: 1, max: 3, strategy: 'fully-autonomous' },
-        'ai-with-review': { min: 4, max: 5, strategy: 'ai-with-review' },
-        'ai-assisted': { min: 6, max: 8, strategy: 'ai-assisted' },
-        'human-led': { min: 9, max: 10, strategy: 'human-led' },
-      },
+      complexityThresholds: DEFAULT_COMPLEXITY_THRESHOLDS,
     })
     .build();
 }
@@ -75,9 +81,9 @@ export function buildDogfoodAgentRole() {
     .backstory('Expert developer working on the ai-sdlc framework')
     .tools(['Edit', 'Write', 'Read', 'Glob', 'Grep', 'Bash'])
     .withConstraints({
-      maxFilesPerChange: 15,
-      requireTests: true,
-      blockedPaths: ['.github/workflows/**', '.ai-sdlc/**'],
+      maxFilesPerChange: DEFAULT_MAX_FILES_PER_CHANGE,
+      requireTests: DEFAULT_REQUIRE_TESTS,
+      blockedPaths: DEFAULT_BLOCKED_PATHS,
     })
     .addHandoff({
       target: 'review-agent',
@@ -113,7 +119,7 @@ export function buildDogfoodQualityGate() {
       rule: { metric: 'has-acceptance-criteria', operator: '>=', threshold: 1 },
     })
     .withScope({
-      repositories: ['ai-sdlc-framework/ai-sdlc'],
+      repositories: [DEFAULT_GITHUB_REPOSITORY],
       authorTypes: ['ai-agent'],
     })
     .build();
@@ -131,8 +137,8 @@ export function buildDogfoodAutonomyPolicy() {
       permissions: { read: ['**'], write: [], execute: [] },
       guardrails: {
         requireApproval: 'all',
-        maxLinesPerPR: 100,
-        blockedPaths: ['.github/**', '.ai-sdlc/**'],
+        maxLinesPerPR: DEFAULT_MAX_LINES_PER_PR.level0,
+        blockedPaths: ['.github/**', `${DEFAULT_CONFIG_DIR_NAME}/**`],
       },
       monitoring: 'continuous',
     })
@@ -142,8 +148,8 @@ export function buildDogfoodAutonomyPolicy() {
       permissions: { read: ['**'], write: ['src/**'], execute: ['test'] },
       guardrails: {
         requireApproval: 'security-critical-only',
-        maxLinesPerPR: 300,
-        blockedPaths: ['.github/workflows/**', '.ai-sdlc/**'],
+        maxLinesPerPR: DEFAULT_MAX_LINES_PER_PR.level1,
+        blockedPaths: DEFAULT_BLOCKED_PATHS,
       },
       monitoring: 'real-time-notification',
     })
@@ -153,8 +159,8 @@ export function buildDogfoodAutonomyPolicy() {
       permissions: { read: ['**'], write: ['src/**', 'test/**'], execute: ['test', 'lint'] },
       guardrails: {
         requireApproval: 'none',
-        maxLinesPerPR: 500,
-        blockedPaths: ['.github/workflows/**', '.ai-sdlc/**'],
+        maxLinesPerPR: DEFAULT_MAX_LINES_PER_PR.level2,
+        blockedPaths: DEFAULT_BLOCKED_PATHS,
       },
       monitoring: 'audit-log',
     })
@@ -177,8 +183,8 @@ export function buildDogfoodAutonomyPolicy() {
 export function buildDogfoodAdapterBinding() {
   return new AdapterBindingBuilder('github-adapter', 'IssueTracker', 'github', '1.0.0')
     .label('managed-by', 'ai-sdlc')
-    .source('github:ai-sdlc-framework/ai-sdlc')
-    .config({ org: 'ai-sdlc-framework', repo: 'ai-sdlc' })
+    .source(`github:${DEFAULT_GITHUB_REPOSITORY}`)
+    .config({ org: DEFAULT_GITHUB_ORG, repo: DEFAULT_GITHUB_REPO })
     .withHealthCheck({ interval: '60s', timeout: '10s' })
     .build();
 }

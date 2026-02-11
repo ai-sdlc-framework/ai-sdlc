@@ -21,7 +21,18 @@ import {
   type MetricStore,
   type AgentMemory,
   type ComplianceCoverageReport,
+  type SecretStore,
 } from '@ai-sdlc/reference';
+import {
+  DEFAULT_GITHUB_ORG,
+  DEFAULT_GITHUB_REPO,
+  DEFAULT_CONFIG_DIR_NAME,
+  DEFAULT_MAX_FILES_PER_CHANGE,
+  DEFAULT_REQUIRE_TESTS,
+  DEFAULT_BRANCH_TEMPLATE,
+  DEFAULT_BRANCH_PATTERN,
+  DEFAULT_PR_TITLE_TEMPLATE,
+} from './defaults.js';
 
 export function execFileAsync(
   cmd: string,
@@ -54,7 +65,7 @@ export function interpolateBranchPattern(
   pattern: string | undefined,
   vars: Record<string, string>,
 ): string {
-  return interpolate(pattern ?? 'ai-sdlc/issue-{issueNumber}', vars);
+  return interpolate(pattern ?? DEFAULT_BRANCH_TEMPLATE, vars);
 }
 
 /**
@@ -65,12 +76,12 @@ export function interpolatePRTitle(
   template: string | undefined,
   vars: Record<string, string>,
 ): string {
-  return interpolate(template ?? 'fix: {issueTitle} (#{issueNumber})', vars);
+  return interpolate(template ?? DEFAULT_PR_TITLE_TEMPLATE, vars);
 }
 
 // ── Branch pattern ───────────────────────────────────────────────────
 
-export const BRANCH_PATTERN = /^ai-sdlc\/issue-(\d+)$/;
+export const BRANCH_PATTERN = DEFAULT_BRANCH_PATTERN;
 
 /**
  * Extract the issue number from an `ai-sdlc/issue-N` branch name.
@@ -91,11 +102,15 @@ export interface GitHubEnvConfig {
 
 /**
  * Read GitHub org/repo/token from standard environment variables.
+ * Accepts an optional SecretStore to resolve the token through the
+ * adapter system instead of reading process.env directly.
  */
-export function getGitHubConfig(): GitHubEnvConfig {
-  const org = process.env.GITHUB_REPOSITORY_OWNER ?? 'ai-sdlc-framework';
-  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? 'ai-sdlc';
-  const token = process.env.GITHUB_TOKEN || undefined;
+export function getGitHubConfig(secretStore?: SecretStore): GitHubEnvConfig {
+  const org = process.env.GITHUB_REPOSITORY_OWNER ?? DEFAULT_GITHUB_ORG;
+  const repo = process.env.GITHUB_REPOSITORY?.split('/')[1] ?? DEFAULT_GITHUB_REPO;
+  const token = secretStore
+    ? secretStore.get('github-token')
+    : process.env.GITHUB_TOKEN || undefined;
   return { org, repo, token };
 }
 
@@ -115,7 +130,7 @@ export async function resolveRepoRoot(): Promise<string> {
  * Create the default JSONL-backed audit log for a work directory.
  */
 export function createDefaultAuditLog(workDir: string): AuditLog {
-  return createAuditLog(createFileSink(join(workDir, '.ai-sdlc', 'audit.jsonl')));
+  return createAuditLog(createFileSink(join(workDir, DEFAULT_CONFIG_DIR_NAME, 'audit.jsonl')));
 }
 
 // ── Autonomy helpers ─────────────────────────────────────────────────
@@ -153,8 +168,8 @@ export function resolveConstraints(
   autonomyLevel: AutonomyLevel,
 ): { maxFiles: number; requireTests: boolean; blockedPaths: string[] } {
   const constraints = agentConstraints ?? {
-    maxFilesPerChange: 15,
-    requireTests: true,
+    maxFilesPerChange: DEFAULT_MAX_FILES_PER_CHANGE,
+    requireTests: DEFAULT_REQUIRE_TESTS,
     blockedPaths: [],
   };
   return {
@@ -247,10 +262,11 @@ export async function validateAndAuditOutput(params: ValidateAndAuditParams): Pr
  */
 export function createPipelineMemory(workDir: string): AgentMemory {
   const base = createAgentMemory();
+  const memDir = join(workDir, DEFAULT_CONFIG_DIR_NAME, 'memory');
   return {
     ...base,
-    longTerm: createFileLongTermMemory(join(workDir, '.ai-sdlc', 'memory', 'long-term.json')),
-    episodic: createFileEpisodicMemory(join(workDir, '.ai-sdlc', 'memory', 'episodes.json')),
+    longTerm: createFileLongTermMemory(join(memDir, 'long-term.json')),
+    episodic: createFileEpisodicMemory(join(memDir, 'episodes.json')),
   };
 }
 

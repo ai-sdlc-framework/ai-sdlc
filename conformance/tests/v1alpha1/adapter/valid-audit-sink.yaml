@@ -1,0 +1,16 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: s3-audit-sink
+spec:
+  interface: AuditSink
+  type: s3
+  version: '1.0.0'
+  source: 'registry.ai-sdlc.io/adapters/s3-audit'
+  config:
+    bucket: ai-sdlc-audit-logs
+    region: us-east-1
+    prefix: audit/
+  healthCheck:
+    interval: 120s
+    timeout: 10s

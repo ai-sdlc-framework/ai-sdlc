@@ -6,6 +6,7 @@ export type {
   CodeAnalysis,
   Messenger,
   DeploymentTarget,
+  EventBus,
   AdapterInterfaces,
   EventStream,
   Issue,
@@ -103,3 +104,6 @@ export {
   type GitAdapterFetcher,
   type GitResolveResult,
 } from './git-resolver.js';
+
+// In-process EventBus
+export { createInProcessEventBus, type InProcessEventBus } from './in-process-event-bus.js';

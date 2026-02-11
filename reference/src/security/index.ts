@@ -3,6 +3,7 @@ export type {
   SandboxConstraints,
   SandboxStatus,
   Sandbox,
+  SecretStore,
   JITCredential,
   JITCredentialIssuer,
   KillSwitch,
@@ -37,3 +38,7 @@ export {
   type SecretEncryptor,
   type GitHubJITConfig,
 } from './github-jit.js';
+
+export { createEnvSecretStore } from './env-secret-store.js';
+
+export { createDockerSandbox, type ShellExec, type DockerSandboxConfig } from './docker-sandbox.js';

@@ -12,10 +12,11 @@
 
 1. [Introduction](#1-introduction)
 2. [Interface Contracts](#2-interface-contracts)
-3. [Adapter Registration](#3-adapter-registration)
-4. [Adapter Discovery](#4-adapter-discovery)
-5. [Configuration and Secret Handling](#5-configuration-and-secret-handling)
-6. [Custom Distribution Builder](#6-custom-distribution-builder)
+3. [Infrastructure Adapters](#3-infrastructure-adapters)
+4. [Adapter Registration](#4-adapter-registration)
+5. [Adapter Discovery](#5-adapter-discovery)
+6. [Configuration and Secret Handling](#6-configuration-and-secret-handling)
+7. [Custom Distribution Builder](#7-custom-distribution-builder)
 
 ---
 
@@ -200,7 +201,81 @@ watchDeploymentEvents(filter: DeployFilter): EventStream<DeployEvent>
 
 ---
 
-## 3. Adapter Registration
+## 3. Infrastructure Adapters
+
+<!-- Source: PRD Sections 9, 13, 15 -->
+
+In addition to the six SDLC interface contracts above, the adapter layer defines five **infrastructure adapter** interfaces for runtime concerns. These follow the same `AdapterBinding` resource model and adapter registry — the distinction is informative, not structural.
+
+SDLC adapters integrate with external development tools (issue trackers, source control, CI systems). Infrastructure adapters abstract runtime concerns (audit storage, sandboxing, secret management, memory persistence, event delivery) so that deployments can swap backends without modifying pipeline definitions.
+
+### 3.1 AuditSink
+
+Adapters for audit log storage, querying, and lifecycle management.
+
+```
+write(entry: AuditEntry): void
+query?(filter: AuditFilter): AuditEntry[]
+rotate?(): void
+close?(): void
+```
+
+An adapter MUST implement `write()`. The `query()`, `rotate()`, and `close()` methods are OPTIONAL — backends that do not support querying or rotation MAY omit them.
+
+**AuditEntry:** See [spec.md](spec.md#audit-entry) for the full audit entry schema including tamper-evident hash chain fields.
+
+### 3.2 Sandbox
+
+Adapters for agent task isolation (e.g., Docker, Firecracker, GitHub Codespaces).
+
+```
+isolate(taskId: string, constraints: SandboxConstraints): string
+destroy(sandboxId: string): void
+getStatus(sandboxId: string): SandboxStatus
+```
+
+All three methods are MUST-implement. `SandboxConstraints` includes `maxMemoryMb`, `maxCpuPercent`, `networkPolicy`, `timeoutMs`, and `allowedPaths`. `SandboxStatus` is one of: `idle`, `running`, `terminated`, `error`.
+
+### 3.3 SecretStore
+
+Adapters for secret resolution and management (e.g., environment variables, Vault, AWS Secrets Manager).
+
+```
+get(name: string): string | undefined
+getRequired(name: string): string
+set?(name: string, value: string, ttl?: number): void
+delete?(name: string): void
+```
+
+An adapter MUST implement `get()` and `getRequired()`. The `set()` and `delete()` methods are OPTIONAL — read-only stores (e.g., environment variables) MAY omit them. `getRequired()` MUST throw when the secret is not found.
+
+### 3.4 MemoryStore
+
+Persistence backend for the five-tier [agent memory](glossary.md#agent-memory) model. The tier interfaces (`WorkingMemory`, `LongTermMemory`, etc.) remain unchanged — `MemoryStore` is the storage layer underneath them.
+
+```
+read(key: string): unknown | undefined
+write(key: string, value: unknown): void
+delete(key: string): void
+list(prefix?: string): string[]
+```
+
+All four methods are MUST-implement. This is a simple key-value interface that can be backed by files, Redis, DynamoDB, or any other storage system.
+
+### 3.5 EventBus
+
+Adapters for event publication and subscription (e.g., in-process `EventEmitter`, NATS, Kafka, cloud pub/sub).
+
+```
+publish(topic: string, payload: unknown): void
+subscribe(topic: string, handler: (payload: unknown) => void): Unsubscribe
+```
+
+Both methods are MUST-implement. `subscribe()` returns an unsubscribe function. Implementations SHOULD deliver events asynchronously.
+
+---
+
+## 4. Adapter Registration
 
 <!-- Source: PRD Section 9.2 -->
 
@@ -238,13 +313,13 @@ dependencies:
 
 ---
 
-## 4. Adapter Discovery
+## 5. Adapter Discovery
 
 <!-- Source: PRD Section 9.3 -->
 
 Adapters MUST be discoverable from one of three sources:
 
-### 4.1 Registry
+### 5.1 Registry
 
 The primary discovery mechanism. Adapters are published to a registry and referenced by name and version:
 
@@ -254,7 +329,7 @@ registry.ai-sdlc.io/adapters/<name>@<version>
 
 Implementations MUST resolve registry references to their metadata and download the adapter.
 
-### 4.2 Local Directory
+### 5.2 Local Directory
 
 For development and testing, adapters MAY be loaded from a local directory:
 
@@ -264,7 +339,7 @@ For development and testing, adapters MAY be loaded from a local directory:
 
 The directory MUST contain a valid `metadata.yaml` file.
 
-### 4.3 Git Reference
+### 5.3 Git Reference
 
 Adapters MAY be referenced by git repository and version tag:
 
@@ -276,11 +351,11 @@ Implementations SHOULD cache git-referenced adapters locally after initial resol
 
 ---
 
-## 5. Configuration and Secret Handling
+## 6. Configuration and Secret Handling
 
 Adapter configuration is declared in the [AdapterBinding](spec.md#55-adapterbinding) resource's `spec.config` field. This field is an open object (`additionalProperties: true`) to accommodate adapter-specific configuration.
 
-### 5.1 Secret References
+### 6.1 Secret References
 
 Sensitive configuration values (API keys, tokens) MUST NOT be embedded directly in resource definitions. Instead, they MUST use the [secret reference](glossary.md#secret-reference) pattern:
 
@@ -293,13 +368,13 @@ config:
 
 Implementations MUST resolve `secretRef` values at runtime from a configured secret store. The secret resolution mechanism is implementation-defined but MUST support at least environment variables.
 
-### 5.2 Configuration Validation
+### 6.2 Configuration Validation
 
 Adapters SHOULD provide a JSON Schema for their `config` object. When provided, implementations SHOULD validate adapter configuration against this schema during resource admission.
 
 ---
 
-## 6. Custom Distribution Builder
+## 7. Custom Distribution Builder
 
 <!-- Source: PRD Section 9.4 -->
 

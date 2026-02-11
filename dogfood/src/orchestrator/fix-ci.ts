@@ -17,6 +17,7 @@ import {
   type AgentMetrics,
   type MetricStore,
   type AgentMemory,
+  type SecretStore,
 } from '@ai-sdlc/reference';
 import { loadConfig, type AiSdlcConfig } from './load-config.js';
 import { createLogger, type Logger } from './logger.js';
@@ -43,9 +44,17 @@ import {
   revokeAgentCredentials,
   type SecurityContext,
 } from './security.js';
+import {
+  DEFAULT_MAX_FIX_ATTEMPTS,
+  DEFAULT_MAX_LOG_LINES,
+  DEFAULT_GH_CLI_TIMEOUT_MS,
+  DEFAULT_CONFIG_DIR_NAME,
+  defaultSandboxConstraints,
+  NOTIFICATION_TITLES,
+} from './defaults.js';
 
-export const MAX_FIX_ATTEMPTS = 2;
-export const MAX_LOG_LINES = 150;
+export const MAX_FIX_ATTEMPTS = DEFAULT_MAX_FIX_ATTEMPTS;
+export const MAX_LOG_LINES = DEFAULT_MAX_LOG_LINES;
 export const RETRY_MARKER = '<!-- ai-sdlc-fix-ci-attempt -->';
 
 export interface FixCIOptions {
@@ -73,6 +82,8 @@ export interface FixCIOptions {
   security?: SecurityContext;
   /** Use the reference structured logger instead of the plain console logger. */
   useStructuredLogger?: boolean;
+  /** Secret store adapter for resolving credentials (defaults to process.env). */
+  secretStore?: SecretStore;
 }
 
 /**
@@ -102,7 +113,7 @@ export async function fetchCILogs(runId: number, injectedLogs?: string): Promise
   }
 
   const { stdout } = await execFileAsync('gh', ['run', 'view', String(runId), '--log-failed'], {
-    timeout: 30_000,
+    timeout: DEFAULT_GH_CLI_TIMEOUT_MS,
   });
   return truncateLogs(stdout);
 }
@@ -127,7 +138,7 @@ export async function executeFixCI(
   options: FixCIOptions = {},
 ): Promise<void> {
   const workDir = options.workDir ?? (await resolveRepoRoot());
-  const configDir = options.configDir ?? `${workDir}/.ai-sdlc`;
+  const configDir = options.configDir ?? `${workDir}/${DEFAULT_CONFIG_DIR_NAME}`;
   const log =
     options.logger ??
     (options.useStructuredLogger ? createStructuredConsoleLogger() : createLogger());
@@ -166,7 +177,7 @@ export async function executeFixCI(
   let _tracker: IssueTracker | undefined = options.tracker;
   function getTracker(): IssueTracker {
     if (!_tracker) {
-      const { org, repo } = getGitHubConfig();
+      const { org, repo } = getGitHubConfig(options.secretStore);
       const ghConfig = { org, repo, token: { secretRef: 'github-token' } };
       _tracker = createGitHubIssueTracker(ghConfig);
     }
@@ -211,7 +222,7 @@ export async function executeFixCI(
           max: String(maxFixAttempts),
         })
       : {
-          title: 'AI-SDLC: Fix-CI Retry Limit Reached',
+          title: NOTIFICATION_TITLES.fixCIRetryLimit,
           body: `This PR has reached the maximum number of automated fix attempts (${maxFixAttempts}). Manual intervention is needed.`,
         };
     await addComment(`## ${limitComment.title}\n\n${limitComment.body}`);
@@ -272,14 +283,11 @@ export async function executeFixCI(
     let result;
     try {
       if (options.security) {
-        const timeoutMs = codeStage?.timeout ? parseDuration(codeStage.timeout) : 1_800_000;
-        sandboxId = await options.security.sandbox.isolate(`issue-${issueNumber}`, {
-          maxMemoryMb: 512,
-          maxCpuPercent: 80,
-          networkPolicy: 'egress-only',
-          timeoutMs,
-          allowedPaths: [workDir],
-        });
+        const timeoutMs = codeStage?.timeout ? parseDuration(codeStage.timeout) : undefined;
+        sandboxId = await options.security.sandbox.isolate(
+          `issue-${issueNumber}`,
+          defaultSandboxConstraints(workDir, timeoutMs),
+        );
       }
 
       // Issue JIT credentials before agent execution
@@ -350,7 +358,7 @@ export async function executeFixCI(
               const errorDetail = r.error ?? 'Unknown error';
               const agentFailComment = agentFailTpl
                 ? renderTemplate(agentFailTpl, { stageName: 'fix-ci', details: errorDetail })
-                : { title: 'AI-SDLC: Fix-CI Agent Failed', body: errorDetail };
+                : { title: NOTIFICATION_TITLES.fixCIAgentFailed, body: errorDetail };
               await addComment(
                 `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}`,
               );
@@ -415,7 +423,7 @@ export async function executeFixCI(
           log,
           onViolation: async (violationList) => {
             await addComment(
-              `## AI-SDLC: Fix-CI Guardrail Violations\n\n${violationList}\n\n${RETRY_MARKER}`,
+              `## ${NOTIFICATION_TITLES.fixCIGuardrailViolations}\n\n${violationList}\n\n${RETRY_MARKER}`,
             );
           },
         });
@@ -444,7 +452,7 @@ export async function executeFixCI(
           branch: currentBranch,
         })
       : {
-          title: 'AI-SDLC: Fix-CI Applied',
+          title: NOTIFICATION_TITLES.fixCIApplied,
           body: `Attempt ${attempts + 1} of ${maxFixAttempts} — pushed fixes to \`${currentBranch}\`.`,
         };
     await addComment(

@@ -8,6 +8,7 @@ import { executeFixCI } from './orchestrator/fix-ci.js';
 import { createPipelineSecurity } from './orchestrator/security.js';
 import { createPipelineMetricStore } from './orchestrator/instrumented.js';
 import { createPipelineMemory, resolveRepoRoot } from './orchestrator/shared.js';
+import { createPipelineAdapterRegistry, resolveInfrastructure } from './orchestrator/adapters.js';
 
 function parseArgs(argv: string[]): { prNumber: number; runId: number } {
   const prIdx = argv.indexOf('--pr');
@@ -41,7 +42,9 @@ async function main(): Promise<void> {
   const { prNumber, runId } = parseArgs(process.argv);
 
   const workDir = await resolveRepoRoot();
-  const security = createPipelineSecurity();
+  const registry = createPipelineAdapterRegistry();
+  const infra = resolveInfrastructure(registry, { workDir });
+  const security = createPipelineSecurity({ sandbox: infra.sandbox });
   const metricStore = createPipelineMetricStore();
   const memory = createPipelineMemory(workDir);
 
@@ -50,6 +53,8 @@ async function main(): Promise<void> {
       security,
       metricStore,
       memory,
+      auditLog: infra.auditLog,
+      secretStore: infra.secretStore,
       useStructuredLogger: true,
       workDir,
     });

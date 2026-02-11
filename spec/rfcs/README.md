@@ -102,3 +102,4 @@ RFC-NNNN-short-title.md
 | --- | --- | --- |
 | [RFC-0001](RFC-0001-template.md) | Template | — |
 | [RFC-0002](RFC-0002-pipeline-orchestration.md) | Pipeline Orchestration Policy | Draft |
+| [RFC-0003](RFC-0003-infrastructure-adapters.md) | Infrastructure Provider Adapters | Draft |

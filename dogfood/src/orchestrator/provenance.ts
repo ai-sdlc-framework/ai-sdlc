@@ -13,6 +13,7 @@ import {
   type ReviewDecision,
 } from '@ai-sdlc/reference';
 import { createHash } from 'node:crypto';
+import { DEFAULT_MODEL } from './defaults.js';
 
 /**
  * Create a provenance record for a pipeline execution.
@@ -28,7 +29,7 @@ export function createPipelineProvenance(opts: {
     : 'no-prompt';
 
   return createProvenance({
-    model: opts.model ?? 'claude-opus-4-6',
+    model: opts.model ?? DEFAULT_MODEL,
     tool: opts.tool ?? 'claude-code',
     promptHash,
     humanReviewer: opts.humanReviewer,

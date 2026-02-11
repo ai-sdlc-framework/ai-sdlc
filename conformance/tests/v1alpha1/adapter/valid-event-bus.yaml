@@ -1,0 +1,13 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: nats-event-bus
+spec:
+  interface: EventBus
+  type: nats
+  version: '1.0.0'
+  source: 'registry.ai-sdlc.io/adapters/nats'
+  config:
+    servers:
+      - nats://nats.example.com:4222
+    subject: ai-sdlc.events

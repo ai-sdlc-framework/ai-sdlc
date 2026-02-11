@@ -4,6 +4,8 @@
  * into the dogfood pipeline.
  */
 
+import { join } from 'node:path';
+import { DEFAULT_CONFIG_DIR_NAME } from './defaults.js';
 import {
   // Registry & scanner (used in function bodies)
   createAdapterRegistry,
@@ -18,6 +20,14 @@ import {
   createStubBitbucket,
   createStubSonarQube,
   createStubSemgrep,
+  // Infrastructure adapter stubs
+  createInMemoryAuditSink,
+  createFileSink,
+  createAuditLog,
+  createEnvSecretStore,
+  createInMemoryMemoryStore,
+  createInProcessEventBus,
+  createStubSandbox,
   // Webhook bridge (used in function body)
   createWebhookBridge,
   // Git resolver (used in function bodies)
@@ -31,6 +41,12 @@ import {
   type WebhookBridge,
   type GitAdapterFetcher,
   type GitResolveResult,
+  type AuditLog,
+  type AuditSink,
+  type Sandbox,
+  type SecretStore,
+  type MemoryStore,
+  type EventBus,
 } from '@ai-sdlc/reference';
 
 /**
@@ -83,7 +99,85 @@ export function createPipelineAdapterRegistry(): AdapterRegistry {
     createStubSemgrep(),
   );
 
+  // Infrastructure adapter stubs
+  registry.register(
+    stubMeta('memory-audit-sink', 'In-Memory Audit Sink', 'AuditSink@v1', 'memory'),
+    () => createInMemoryAuditSink(),
+  );
+  // file-audit-sink is registered metadata-only; the actual file path is
+  // determined at resolution time by resolveInfrastructure().
+  registry.register(stubMeta('file-audit-sink', 'File Audit Sink', 'AuditSink@v1', 'file'));
+  registry.register(stubMeta('stub-sandbox', 'Stub Sandbox', 'Sandbox@v1', 'stub'), () =>
+    createStubSandbox(),
+  );
+  registry.register(
+    stubMeta('env-secret-store', 'Environment Secret Store', 'SecretStore@v1', 'env'),
+    () => createEnvSecretStore(),
+  );
+  registry.register(
+    stubMeta('memory-store', 'In-Memory Memory Store', 'MemoryStore@v1', 'memory'),
+    () => createInMemoryMemoryStore(),
+  );
+  registry.register(
+    stubMeta('in-process-event-bus', 'In-Process Event Bus', 'EventBus@v1', 'in-process'),
+    () => createInProcessEventBus(),
+  );
+
   return registry;
+}
+
+// ── Infrastructure resolution ────────────────────────────────────────
+
+export interface InfrastructureConfig {
+  /** Working directory for file-based adapters (audit log, memory). */
+  workDir: string;
+  /** Override the audit log file path (defaults to `<workDir>/.ai-sdlc/audit.jsonl`). */
+  auditFilePath?: string;
+}
+
+/**
+ * Resolved infrastructure adapters, ready for use by orchestrators.
+ */
+export interface InfrastructureContext {
+  auditLog: AuditLog;
+  auditSink: AuditSink;
+  sandbox: Sandbox;
+  secretStore: SecretStore;
+  memoryStore: MemoryStore;
+  eventBus: EventBus;
+}
+
+/**
+ * Resolve all infrastructure adapters from the registry.
+ *
+ * AuditSink is created with a config-dependent file path (the registry
+ * `file-audit-sink` entry is metadata-only since the path is deployment-
+ * specific).  All other adapters are resolved from the registry.
+ */
+export function resolveInfrastructure(
+  registry: AdapterRegistry,
+  config: InfrastructureConfig,
+): InfrastructureContext {
+  const auditFilePath =
+    config.auditFilePath ?? join(config.workDir, DEFAULT_CONFIG_DIR_NAME, 'audit.jsonl');
+  const auditSink = createFileSink(auditFilePath);
+  const auditLog = createAuditLog(auditSink);
+
+  // Resolve from registry — factories are guaranteed present when using
+  // createPipelineAdapterRegistry(), but we guard for custom registries.
+  const sandbox =
+    (registry.getFactory('stub-sandbox')?.() as Sandbox | undefined) ?? createStubSandbox();
+  const secretStore =
+    (registry.getFactory('env-secret-store')?.() as SecretStore | undefined) ??
+    createEnvSecretStore();
+  const memoryStore =
+    (registry.getFactory('memory-store')?.() as MemoryStore | undefined) ??
+    createInMemoryMemoryStore();
+  const eventBus =
+    (registry.getFactory('in-process-event-bus')?.() as EventBus | undefined) ??
+    createInProcessEventBus();
+
+  return { auditLog, auditSink, sandbox, secretStore, memoryStore, eventBus };
 }
 
 /**
@@ -132,6 +226,13 @@ export {
   createStubBitbucket,
   createStubSonarQube,
   createStubSemgrep,
+  // Infrastructure adapter stubs
+  createInMemoryAuditSink,
+  createFileSink,
+  createEnvSecretStore,
+  createInMemoryMemoryStore,
+  createInProcessEventBus,
+  createStubSandbox,
   // Webhook bridge
   createWebhookBridge,
   // Git resolver
@@ -159,6 +260,7 @@ export type {
   CodeAnalysis,
   Messenger,
   DeploymentTarget,
+  EventBus,
   IssueTracker,
   LinearClientLike,
   IssueComment,
@@ -184,4 +286,13 @@ export type {
   StubSonarQubeAdapter,
   StubSemgrepConfig,
   StubSemgrepAdapter,
+  // Infrastructure adapter types
+  AuditSink,
+  AuditLog,
+  InMemoryAuditSink,
+  SecretStore,
+  Sandbox,
+  MemoryStore,
+  InMemoryMemoryStore,
+  InProcessEventBus,
 } from '@ai-sdlc/reference';

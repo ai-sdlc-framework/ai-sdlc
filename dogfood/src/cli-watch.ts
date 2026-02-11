@@ -10,6 +10,8 @@ import { createPipelineSecurity } from './orchestrator/security.js';
 import { createPipelineMetricStore } from './orchestrator/instrumented.js';
 import { createPipelineMemory, resolveRepoRoot } from './orchestrator/shared.js';
 import { loadConfig } from './orchestrator/load-config.js';
+import { createPipelineAdapterRegistry, resolveInfrastructure } from './orchestrator/adapters.js';
+import { DEFAULT_CONFIG_DIR_NAME } from './orchestrator/defaults.js';
 
 function parseArgs(argv: string[]): { issueNumbers: number[] } {
   const issues: number[] = [];
@@ -35,18 +37,20 @@ async function main(): Promise<void> {
   const { issueNumbers } = parseArgs(process.argv);
 
   const workDir = await resolveRepoRoot();
-  const configDir = join(workDir, '.ai-sdlc');
+  const configDir = join(workDir, DEFAULT_CONFIG_DIR_NAME);
   const config = loadConfig(configDir);
 
   if (!config.pipeline) {
-    console.error('No Pipeline resource found in .ai-sdlc/');
+    console.error(`No Pipeline resource found in ${DEFAULT_CONFIG_DIR_NAME}/`);
     process.exit(1);
   }
 
-  const security = createPipelineSecurity();
+  const registry = createPipelineAdapterRegistry();
+  const auditFilePath = join(configDir, 'audit.jsonl');
+  const infra = resolveInfrastructure(registry, { workDir, auditFilePath });
+  const security = createPipelineSecurity({ sandbox: infra.sandbox });
   const metricStore = createPipelineMetricStore();
   const memory = createPipelineMemory(workDir);
-  const auditFilePath = join(configDir, 'audit.jsonl');
 
   const handle = startWatch({
     metricStore,
@@ -54,6 +58,8 @@ async function main(): Promise<void> {
       security,
       metricStore,
       memory,
+      auditLog: infra.auditLog,
+      secretStore: infra.secretStore,
       useStructuredLogger: true,
       includeProvenance: true,
       useDefaultEvaluators: true,

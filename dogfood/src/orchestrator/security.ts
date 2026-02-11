@@ -33,6 +33,7 @@ import {
   type ApprovalStatus,
   type ApprovalClassificationInput,
 } from '@ai-sdlc/reference';
+import { DEFAULT_JIT_TTL_MS, DEFAULT_JIT_SCOPE } from './defaults.js';
 
 export interface SecurityContext {
   sandbox: Sandbox;
@@ -71,8 +72,8 @@ export async function checkKillSwitch(security: SecurityContext): Promise<void> 
 export async function issueAgentCredentials(
   security: SecurityContext,
   agentId: string,
-  scope: string[] = ['repo:read', 'repo:write'],
-  ttlMs: number = 600_000,
+  scope: string[] = DEFAULT_JIT_SCOPE,
+  ttlMs: number = DEFAULT_JIT_TTL_MS,
 ): Promise<JITCredential> {
   return security.jitCredentials.issue(agentId, scope, ttlMs);
 }

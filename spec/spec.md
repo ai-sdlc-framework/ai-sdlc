@@ -866,7 +866,7 @@ An [AdapterBinding](glossary.md#adapter-binding) declares a tool integration as 
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `interface` | string | MUST | The abstract contract name (e.g., `IssueTracker`, `SourceControl`, `CIPipeline`, `CodeAnalysis`, `Messenger`, `DeploymentTarget`). |
+| `interface` | string | MUST | The abstract contract name. SDLC interfaces: `IssueTracker`, `SourceControl`, `CIPipeline`, `CodeAnalysis`, `Messenger`, `DeploymentTarget`. Infrastructure interfaces: `AuditSink`, `Sandbox`, `SecretStore`, `MemoryStore`, `EventBus`. See [adapters.md](adapters.md). |
 | `type` | string | MUST | The concrete implementation (e.g., `linear`, `github`, `jira`). |
 | `version` | string | MUST | Adapter version (SemVer). |
 | `source` | string | MAY | Location of the adapter (registry URI, local path, or git reference). |

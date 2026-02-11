@@ -1,0 +1,12 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: redis-memory
+spec:
+  interface: MemoryStore
+  type: redis
+  version: '1.0.0'
+  config:
+    host: redis.example.com
+    port: 6379
+    keyPrefix: 'ai-sdlc:memory:'

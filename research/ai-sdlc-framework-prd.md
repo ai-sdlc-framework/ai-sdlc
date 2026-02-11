@@ -146,11 +146,11 @@ The framework is organized into four layers, following OpenTelemetry's proven se
 │                      SPECIFICATION LAYER                        │
 │  Resource types (Pipeline, AgentRole, QualityGate,              │
 │  AutonomyPolicy, AdapterBinding) with OpenAPI v3 schemas        │
-│  Version: v1alpha1 → v1beta1 → v1                              │
+│  Version: v1alpha1 → v1beta1 → v1                               │
 ├─────────────────────────────────────────────────────────────────┤
 │                        ADAPTER LAYER                            │
 │  Terraform-style provider contracts per integration category    │
-│  IssueTracker | SourceControl | CIPipeline | CodeAnalysis |    │
+│  IssueTracker | SourceControl | CIPipeline | CodeAnalysis |     │
 │  Messenger | DeploymentTarget                                   │
 ├─────────────────────────────────────────────────────────────────┤
 │                        POLICY LAYER                             │
@@ -165,8 +165,8 @@ The framework is organized into four layers, following OpenTelemetry's proven se
 └─────────────────────────────────────────────────────────────────┘
          ▼               ▼                ▼              ▼
     ┌─────────┐   ┌──────────┐   ┌────────────┐   ┌──────────┐
-    │  Linear  │   │  GitHub  │   │  SonarQube │   │  Slack   │
-    │  Jira    │   │  GitLab  │   │  Semgrep   │   │  Teams   │
+    │  Linear │   │  GitHub  │   │  SonarQube │   │  Slack   │
+    │  Jira   │   │  GitLab  │   │  Semgrep   │   │  Teams   │
     └─────────┘   └──────────┘   └────────────┘   └──────────┘
 ```
 

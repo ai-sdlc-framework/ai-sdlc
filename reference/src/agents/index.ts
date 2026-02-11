@@ -30,6 +30,7 @@ export {
   createAgentMemory,
   createFileLongTermMemory,
   createFileEpisodicMemory,
+  createInMemoryMemoryStore,
   type MemoryTier,
   type MemoryEntry,
   type WorkingMemory,
@@ -38,6 +39,8 @@ export {
   type SharedMemory,
   type EpisodicMemory,
   type AgentMemory,
+  type MemoryStore,
+  type InMemoryMemoryStore,
 } from './memory/index.js';
 
 export {

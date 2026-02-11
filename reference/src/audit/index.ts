@@ -6,3 +6,4 @@ export {
   verifyFileIntegrity,
   rotateAuditFile,
 } from './file-sink.js';
+export { createInMemoryAuditSink, type InMemoryAuditSink } from './memory-sink.js';

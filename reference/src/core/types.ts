@@ -385,7 +385,12 @@ export type AdapterInterface =
   | 'CIPipeline'
   | 'CodeAnalysis'
   | 'Messenger'
-  | 'DeploymentTarget';
+  | 'DeploymentTarget'
+  | 'AuditSink'
+  | 'Sandbox'
+  | 'SecretStore'
+  | 'MemoryStore'
+  | 'EventBus';
 
 export interface HealthCheck {
   interval?: Duration;

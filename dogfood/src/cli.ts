@@ -11,6 +11,8 @@ import { createPipelineMetricStore } from './orchestrator/instrumented.js';
 import { createPipelineMemory, resolveRepoRoot } from './orchestrator/shared.js';
 import { createPipelineAdmission } from './orchestrator/admission.js';
 import { loadConfig } from './orchestrator/load-config.js';
+import { createPipelineAdapterRegistry, resolveInfrastructure } from './orchestrator/adapters.js';
+import { DEFAULT_CONFIG_DIR_NAME } from './orchestrator/defaults.js';
 
 function parseArgs(argv: string[]): { issueNumber: number } {
   const idx = argv.indexOf('--issue');
@@ -30,13 +32,15 @@ async function main(): Promise<void> {
   const { issueNumber } = parseArgs(process.argv);
 
   const workDir = await resolveRepoRoot();
-  const configDir = join(workDir, '.ai-sdlc');
+  const configDir = join(workDir, DEFAULT_CONFIG_DIR_NAME);
   const config = loadConfig(configDir);
 
-  const security = createPipelineSecurity();
+  const registry = createPipelineAdapterRegistry();
+  const auditFilePath = join(configDir, 'audit.jsonl');
+  const infra = resolveInfrastructure(registry, { workDir, auditFilePath });
+  const security = createPipelineSecurity({ sandbox: infra.sandbox });
   const metricStore = createPipelineMetricStore();
   const memory = createPipelineMemory(workDir);
-  const auditFilePath = join(configDir, 'audit.jsonl');
 
   const admission = config.qualityGate
     ? createPipelineAdmission({
@@ -60,6 +64,8 @@ async function main(): Promise<void> {
       security,
       metricStore,
       memory,
+      auditLog: infra.auditLog,
+      secretStore: infra.secretStore,
       useStructuredLogger: true,
       includeProvenance: true,
       useDefaultEvaluators: true,

@@ -17,6 +17,7 @@ import {
   type LLMEvaluator,
   type LLMEvaluationRule,
 } from '@ai-sdlc/reference';
+import { DEFAULT_GITHUB_REPOSITORY } from './defaults.js';
 
 /**
  * Build an EvaluationContext from an issue, mapping issue metadata
@@ -36,7 +37,7 @@ function buildEvaluationContext(issue: Issue): EvaluationContext {
 
   return {
     authorType: 'ai-agent',
-    repository: 'ai-sdlc-framework/ai-sdlc',
+    repository: DEFAULT_GITHUB_REPOSITORY,
     metrics: {
       'description-length': hasDescription,
       'has-acceptance-criteria': hasAcceptanceCriteria,
