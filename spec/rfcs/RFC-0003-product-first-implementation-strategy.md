@@ -1,4 +1,4 @@
-# RFC-0003: Product-First Implementation Strategy
+# RFC-0003: AI-SDLC Orchestrator — Product Strategy
 
 **Status:** Draft
 **Author:** AI-SDLC Contributors
@@ -10,617 +10,871 @@
 
 ## Summary
 
-This RFC proposes a fundamental shift in how AI-SDLC reaches adoption: from a **spec-first** approach (publish specification, wait for implementors) to a **product-first** approach (ship runnable governance products, extract the spec from what works). Concretely, we propose building two complementary products — an **MCP Governance Server** and a **GitHub Governance App** — that deliver immediate value to teams using AI coding agents, while the spec evolves as the configuration format and interoperability contract behind these products.
+This RFC redefines what AI-SDLC ships as a product. Rather than a governance specification that waits for implementations, or governance sidecars (MCP servers, GitHub Apps) that tell agents "no," we propose shipping the **orchestrator itself**: a runtime that takes issues as input and drives them through the complete software development lifecycle — with AI agents doing the work and humans in the loop at the right moments.
 
-This RFC also reframes the SDK strategy. Rather than building standalone Python and Go SDKs as spec implementations, we position them as **client libraries** for the MCP Governance Server and **building blocks** for custom reconcilers, giving them a concrete purpose and immediate users.
+The core insight: **AI agents can build small greenfield projects, but software falls apart as it grows.** Technical debt compounds, complexity overwhelms context windows, and developer velocity collapses. The AI-SDLC Orchestrator solves this by encoding the institutional knowledge and process discipline that mature engineering organizations develop over time — and applying it progressively as the codebase grows.
+
+The product operates on a spectrum from **mostly human-run** (AI assists, humans decide) to **fully autonomous** (agents run the entire SDLC, humans audit). Teams start wherever they're comfortable and the system adapts as trust is earned.
 
 ## Motivation
 
-### The spec-first path is slow
+### AI projects start strong but collapse at scale
 
-Successful infrastructure specifications follow a predictable timeline: 2-3 years from first draft to meaningful adoption. CloudEvents (CNCF) took 3 years to reach 1.0. OpenTelemetry took 4 years from merger to stable traces+metrics+logs. OPA took 2 years from sandbox to incubation. AI-SDLC cannot afford this timeline — the AI coding agent governance gap is acute *now*:
+Every team building with AI coding agents encounters the same trajectory:
 
-- **85%** of developers use AI coding tools, but only **20%** of companies have governance (GitHub 2025)
-- **45%** of AI-generated code has security flaws (Veracode 2025)
-- **75%** of tech leaders cite governance as their primary deployment challenge (Gartner 2025)
-- Every **25%** increase in AI adoption correlates with **7.2%** drop in system stability (Google DORA)
+1. **Greenfield euphoria** (weeks 1-4): AI agents generate code quickly. Simple project, few files, everything fits in context. Velocity is high.
+2. **Complexity creep** (weeks 5-12): The codebase grows. Agents start losing context. Architectural decisions made in week 2 are invisible to agents in week 8. Duplicate patterns emerge. Inconsistencies accumulate.
+3. **Technical debt spiral** (weeks 12+): Agents go down wrong paths because they can't see the full picture. Fixes introduce new bugs. Refactoring drops (from 25% to 10% of work — Gitclear 2024). Code churn spikes (5.5% to 7.9%). Developer velocity that was "10x" is now slower than writing by hand.
 
-By the time a spec-first AI-SDLC reaches v1.0, vendor-specific solutions (GitHub Copilot policies, Snyk AI governance, Qodo quality gates) will have fragmented the market.
+**The data confirms this:**
+- Experienced developers using AI tools are **19% slower** despite believing they're 20% faster — a 39 percentage-point perception gap (METR 2025)
+- Every **25% increase** in AI adoption = **7.2% drop** in system stability (Google DORA)
+- Code churn jumped from **5.5% to 7.9%** — AI agents write code that gets rewritten faster (Gitclear 2024)
+- Only **3%** of developers express high trust in AI output (Stack Overflow, Dec 2025)
 
-### The AAIF is the kingmaker — and has a governance gap
+The root cause isn't that AI agents write bad code. It's that **nobody orchestrates how they work as the codebase grows**. A human engineering organization naturally develops institutional knowledge: coding standards, architectural patterns, review processes, deployment procedures. These emerge organically and scale with complexity. AI agents have none of this unless someone builds it.
 
-The Agentic AI Foundation (AAIF), formed under the Linux Foundation in December 2025, houses the three emerging agent infrastructure standards:
+### The missing product: a programmable engineering organization
 
-| AAIF Project | What it solves | Status |
+The market has:
+
+| What exists | What it does | What it doesn't do |
 |---|---|---|
-| **MCP** (Anthropic) | How agents connect to tools | 97M+ monthly SDK downloads, 10,000+ servers |
-| **A2A** (Google) | How agents communicate with each other | Active development, enterprise adoption |
-| **AGENTS.md** (OpenAI) | What agents should do per-project | 60,000+ repos, adopted by Cursor/Copilot/Codex/Devin |
+| **AI coding agents** (Claude Code, Copilot, Cursor, Devin) | Write code from prompts | Manage complexity, maintain context, enforce process |
+| **CI/CD pipelines** (GitHub Actions, Argo, Tekton) | Build, test, deploy | Orchestrate the *full* SDLC; know nothing about AI agents |
+| **Agent frameworks** (LangChain, CrewAI, AutoGen) | Wire agents together | Understand software engineering; manage codebase growth |
+| **Code quality tools** (SonarQube, Snyk, CodeRabbit) | Scan for issues | Orchestrate; route tasks; manage autonomy |
+| **Project management** (Jira, Linear, GitHub Issues) | Track work | Execute work; enforce quality; close the loop |
 
-The glaring gap:
+Nobody provides the thing in the middle: **a system that takes an issue, understands the codebase, routes the task to the right combination of agents and humans, enforces quality at every stage, and grows its process foundations as the software grows.**
 
-| Missing layer | What it would solve |
-|---|---|
-| **???** | What agents are *allowed* to do, and under what policy |
+That's what the AI-SDLC Orchestrator is.
 
-AGENTS.md is advisory — it tells agents what conventions to follow, but cannot enforce quality gates, block merges, manage autonomy levels, or orchestrate workflows. MCP provides connectivity, not authorization. A2A provides communication, not governance.
+### The orchestrator already exists — in the dogfood
 
-AI-SDLC is the natural occupant of this governance layer. But approaching the AAIF with a draft specification and no users is a weak position. Approaching with a **working MCP server used by hundreds of teams** is a fundamentally different conversation.
+The `dogfood/src/orchestrator/` directory contains **~8,700 lines across 50 TypeScript files** implementing exactly this end-to-end flow. It:
 
-### Products win, then standardize
+1. Receives a trigger (issue assigned, labeled `ai-eligible`)
+2. Fetches and validates the issue against quality gates
+3. Routes by complexity (autonomous / AI-with-review / AI-assisted / human-led)
+4. Checks the agent's autonomy level and constraints
+5. Creates a branch, sets up the working environment
+6. Issues JIT credentials, sandboxes the agent
+7. Invokes the agent with context, constraints, and tools
+8. Validates the output against guardrails (ABAC, file limits, blocked paths)
+9. Creates a PR with provenance metadata
+10. Evaluates promotion eligibility based on accumulated performance
+11. Records everything in an immutable audit trail
 
-The pattern is consistent across cloud-native infrastructure:
-
-| Product shipped first | Standard extracted later |
-|---|---|
-| Docker (containers) | OCI (image + runtime spec) |
-| etcd (KV store) | Kubernetes storage interface |
-| Prometheus (metrics) | OpenMetrics (exposition format) |
-| Envoy (proxy) | xDS (control plane API) |
-| Terraform (IaC) | HCL (config language), provider protocol |
-| Istio (service mesh) | SMI / GAMMA (mesh APIs) |
-
-In every case, the specification succeeded *because* it described something that already worked in production. The spec became the **interoperability contract** between multiple implementations, not the starting point for the first implementation.
+Of these 11 steps, only 2 are driven by the spec's Pipeline resource definition — the other 9 are hardcoded orchestration logic (documented as the "600-line gap" in RFC-0002). **The dogfood IS the product. It just needs to be packaged as one.**
 
 ## Goals
 
-- Ship two runnable governance products that deliver value in < 5 minutes of setup
-- Achieve 500+ GitHub stars and 50+ actively governed repositories within 6 months
-- Position AI-SDLC as the de facto governance layer for the AAIF stack
-- Reframe SDKs (Python, Go) around concrete product use cases rather than abstract spec conformance
-- Maintain the spec as the authoritative configuration format, validated by real-world usage
-- Create an adoption funnel: free product users -> spec contributors -> AAIF proposal
+- Ship the AI-SDLC Orchestrator as a runnable product that teams can deploy to automate their SDLC
+- Support the full spectrum: mostly-human (AI assists) through fully-autonomous (agents run everything)
+- Solve the "AI projects fall apart at scale" problem through progressive SDLC foundations
+- Deliver the orchestrator as the primary product; governance emerges from orchestration, not the reverse
+- Enable teams to go from "install" to "first AI-driven PR merged" in under 30 minutes
+- Grow organically: start with a single repo and agent, scale to multi-repo organizations with agent fleets
 
 ## Non-Goals
 
-- Replacing the specification with ad-hoc product design — the spec remains the source of truth for resource semantics
-- Building a commercial SaaS platform — both products are open-source (Apache 2.0)
-- Supporting every AI coding agent on day one — start with the top 3-5 by MCP adoption
-- Achieving AAIF membership before products are proven — contribute from a position of traction
-- Abandoning the TypeScript reference implementation — it becomes the runtime engine for the products
+- Building yet another AI coding agent — we orchestrate existing agents, not replace them
+- Replacing CI/CD systems — we orchestrate the stages *before* and *around* CI/CD, not the build/test/deploy mechanics
+- Requiring Kubernetes — the orchestrator runs as a standalone process; Kubernetes is an optional deployment target
+- Mandating full autonomy — teams that want human-in-the-loop for every PR should feel first-class
+- Competing with the AAIF — the orchestrator consumes MCP, A2A, and AGENTS.md; it doesn't replace them
 
 ## Proposal
 
-### Architecture Overview
+### What the AI-SDLC Orchestrator Is
+
+The orchestrator is a **long-running process** that manages the software development lifecycle for one or more repositories. It watches for work (issues, events), routes that work through a declared pipeline of stages, assigns AI agents and/or human reviewers at each stage, enforces quality gates, and continuously learns which agents can be trusted with what.
+
+Think of it as a **programmable engineering team lead**: it understands the process, knows the codebase, assigns the work, reviews the output, and grows the team's maturity over time.
 
 ```
-                    ┌─────────────────────────────────────────────┐
-                    │              AI Coding Agents                │
-                    │   (Claude Code, Copilot, Cursor, Devin...)  │
-                    └──────────┬──────────────────┬───────────────┘
-                               │ MCP              │ Git push / PR
-                               ▼                  ▼
-                    ┌──────────────────┐  ┌──────────────────────┐
-                    │  MCP Governance  │  │  GitHub Governance   │
-                    │     Server       │  │       App            │
-                    │                  │  │                      │
-                    │  "Am I allowed   │  │  "Can this PR        │
-                    │   to do this?"   │  │   merge?"            │
-                    └────────┬─────────┘  └──────────┬───────────┘
-                             │                       │
-                             ▼                       ▼
-                    ┌─────────────────────────────────────────────┐
-                    │           AI-SDLC Policy Engine              │
-                    │                                             │
-                    │  ┌───────────┐ ┌──────────┐ ┌───────────┐  │
-                    │  │ Quality   │ │ Autonomy │ │ Adapter   │  │
-                    │  │ Gates     │ │ Ledger   │ │ Registry  │  │
-                    │  └───────────┘ └──────────┘ └───────────┘  │
-                    │                                             │
-                    │  Configured via:  .ai-sdlc/policy.yaml     │
-                    │  (AI-SDLC spec resource definitions)        │
-                    └─────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                       AI-SDLC Orchestrator                           │
+│                                                                      │
+│  ┌─────────┐    ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
+│  │ Trigger  │───▶│  Route &  │───▶│  Execute  │───▶│  Validate &  │  │
+│  │ Watch    │    │  Assign   │    │  Stage    │    │  Promote     │  │
+│  └─────────┘    └───────────┘    └───────────┘    └──────────────┘  │
+│       │              │                │                   │          │
+│       ▼              ▼                ▼                   ▼          │
+│  ┌─────────┐    ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
+│  │ Issue    │    │ Complexity│    │ Agent     │    │ Quality      │  │
+│  │ Tracker  │    │ Analysis  │    │ Runtime   │    │ Gates        │  │
+│  │ Adapter  │    │ + Routing │    │ (sandbox, │    │ + Autonomy   │  │
+│  │          │    │           │    │  creds,   │    │   Ledger     │  │
+│  │ Linear   │    │ Codebase  │    │  context) │    │              │  │
+│  │ Jira     │    │ State     │    │           │    │ Promotion/   │  │
+│  │ GitHub   │    │ Store     │    │ Claude    │    │ Demotion     │  │
+│  └─────────┘    └───────────┘    │ Copilot   │    └──────────────┘  │
+│                                  │ Cursor    │                      │
+│                                  │ Devin     │                      │
+│                                  │ Any MCP   │                      │
+│                                  └───────────┘                      │
+│                                                                      │
+│  Configured via: .ai-sdlc/pipeline.yaml                              │
+│  Codebase state: .ai-sdlc/state/ (autonomy ledger, episodic memory) │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-### Product 1: MCP Governance Server
+### The Orchestration Loop
 
-An MCP server that any MCP-compatible AI coding agent can connect to. The server exposes governance as **tools** that agents query during their workflow.
-
-#### MCP Tools Exposed
-
-| Tool Name | Description | Input | Output |
-|---|---|---|---|
-| `check_permission` | Check if an action is allowed at the agent's current autonomy level | `{ action, resource, context }` | `{ allowed, reason, requiredLevel }` |
-| `get_autonomy_level` | Get the agent's current autonomy level and what it permits | `{ agentId }` | `{ level, permissions, restrictions }` |
-| `evaluate_gate` | Evaluate a quality gate against provided evidence | `{ gate, evidence }` | `{ passed, failures[], advisory[] }` |
-| `get_policy` | Retrieve the active policy for a repository/context | `{ repo, stage? }` | `{ policy }` (AI-SDLC resource) |
-| `record_action` | Record an agent action for audit and autonomy tracking | `{ action, outcome, metadata }` | `{ recorded, autonomyImpact }` |
-| `request_approval` | Request human approval for a gated action | `{ action, reason, evidence }` | `{ approvalId, status }` |
-
-#### How Agents Use It
-
-An AI coding agent with MCP support (Claude Code, Copilot, Cursor, etc.) connects to the governance server as an MCP server. The agent can then query governance before taking actions:
+The orchestrator implements a continuous reconciliation loop — not a one-shot CI pipeline:
 
 ```
-Agent: "I want to merge this PR with 200 lines changed across 8 files."
+forever {
+  1. WATCH    — Listen for triggers (issue.assigned, pr.review_submitted,
+                ci.failed, schedule.daily)
 
-→ check_permission({ action: "merge_pr", resource: "PR #42",
-    context: { linesChanged: 200, filesChanged: 8 }})
+  2. ASSESS   — For each triggered item:
+                a. Fetch the issue/task details from the issue tracker
+                b. Analyze codebase complexity (files, dependencies, architecture)
+                c. Score task complexity (1-10)
+                d. Determine routing strategy based on complexity + policy
 
-← { allowed: false,
-    reason: "Agent at Level 1 (Junior). PRs over 100 lines require
-             Level 2+ or human approval.",
-    requiredLevel: 2,
-    override: { type: "human_approval", approvers: ["@tech-lead"] }}
+  3. PLAN     — Build an execution plan:
+                a. Select pipeline stages from the declared Pipeline resource
+                b. Resolve which agent(s) or human(s) handle each stage
+                c. Check autonomy levels — can this agent do this task?
+                d. Determine approval requirements
+
+  4. EXECUTE  — For each stage in the plan:
+                a. Set up the environment (branch, sandbox, JIT credentials)
+                b. Provide context to the agent (issue, codebase state,
+                   architectural decisions, prior learnings)
+                c. Run the agent within constraints (file limits, blocked paths,
+                   time limits)
+                d. Handle failures per the stage's failure policy
+                   (retry / pause / escalate / abort)
+
+  5. VALIDATE — After agent execution:
+                a. Run quality gates (tests, coverage, security, lint)
+                b. Check guardrails (files changed within limits, no blocked
+                   paths touched)
+                c. Verify output matches task requirements
+
+  6. DELIVER  — If all gates pass:
+                a. Create/update PR with provenance
+                b. Request human review if required by autonomy level
+                c. Auto-merge if autonomous and all gates pass
+                d. Deploy if pipeline includes deployment stages
+
+  7. LEARN    — After completion:
+                a. Record outcome in the autonomy ledger
+                b. Update agent's performance metrics
+                c. Evaluate promotion/demotion criteria
+                d. Store episodic memory for future context
+                e. Update codebase complexity profile
+
+  8. RECONCILE — Continuously:
+                a. Detect drift (policy changed, gates added, thresholds raised)
+                b. Re-evaluate in-flight work against updated policy
+                c. Grow process foundations as codebase complexity increases
+}
 ```
 
-#### Configuration
+### How It Solves "AI Projects Fall Apart at Scale"
 
-The server reads `.ai-sdlc/policy.yaml` from the repository root. This file uses standard AI-SDLC resource definitions:
+The core problem is that as software grows, AI agents lose the context and process discipline that keeps codebases healthy. The orchestrator addresses this at four levels:
+
+#### Level 1: Context Management
+
+Agents fail at scale because they can't see the full picture. The orchestrator maintains persistent codebase state that agents can't:
 
 ```yaml
-# .ai-sdlc/policy.yaml
-apiVersion: ai-sdlc.io/v1alpha1
-resources:
-  - kind: AutonomyPolicy
-    metadata:
-      name: default
-    spec:
-      defaultLevel: 1
-      levels:
-        - level: 0
-          name: observer
-          permissions: [read]
-        - level: 1
-          name: junior
-          permissions: [read, write, create_pr]
-          guardrails:
-            maxLinesPerPR: 100
-            requireTests: true
-            blockedPaths: ["**/security/**", "**/infrastructure/**"]
-        - level: 2
-          name: senior
-          permissions: [read, write, create_pr, merge]
-          guardrails:
-            maxLinesPerPR: 500
-            requireTests: true
-        - level: 3
-          name: principal
-          permissions: [read, write, create_pr, merge, configure]
-      promotionCriteria:
-        "1-to-2":
-          minPRsApproved: 20
-          approvalRate: 0.90
-          minTimeAtLevel: P14D
-          zeroSecurityIncidents: true
-        "2-to-3":
-          minPRsApproved: 50
-          approvalRate: 0.95
-          minTimeAtLevel: P30D
-          zeroSecurityIncidents: true
-      demotionTriggers:
-        - event: security_incident
-          severity: critical
-          demoteTo: 0
-        - event: rollback_rate_exceeded
-          threshold: 0.05
-          demoteTo: 1
-
-  - kind: QualityGate
-    metadata:
-      name: pr-checks
-    spec:
-      gates:
-        - name: test-coverage
-          enforcement: hard-mandatory
-          rule: "coverage >= 80"
-        - name: security-scan
-          enforcement: hard-mandatory
-          rule: "critical_findings == 0"
-        - name: lint-clean
-          enforcement: soft-mandatory
-          rule: "lint_errors == 0"
-        - name: ai-attribution
-          enforcement: advisory
-          rule: "provenance.model != null"
+# .ai-sdlc/state/codebase-profile.yaml (maintained by orchestrator)
+codebaseComplexity:
+  score: 6.2              # Updated after every PR merge
+  files: 847
+  modules: 12
+  dependencies: 94
+  architecturalPatterns:
+    - pattern: "hexagonal"
+      confidence: 0.89
+      description: "Ports and adapters pattern in src/domain/, src/adapters/"
+    - pattern: "event-driven"
+      confidence: 0.73
+      description: "Event bus in src/events/, consumers in src/handlers/"
+  hotspots:                # Files with highest churn + complexity
+    - path: "src/auth/session-manager.ts"
+      churnRate: 0.14
+      complexity: 8
+      lastModified: "2026-02-10"
+      note: "Frequent source of regressions. Route changes here to Level 2+."
+  conventions:
+    naming: "camelCase for functions, PascalCase for types, kebab-case for files"
+    testing: "Co-located test files (*. test.ts), integration tests in __tests__/"
+    imports: "Absolute imports from src/, no circular dependencies"
 ```
 
-#### Runtime
+When an agent starts a task, the orchestrator injects this context. The agent doesn't need to rediscover the architecture, naming conventions, or known trouble spots — the orchestrator remembers.
 
-- Built on the existing TypeScript reference implementation (`reference/src/`)
-- Runs as a standalone process or Docker container
-- Maintains an **autonomy ledger** (SQLite for local, PostgreSQL for team) tracking agent actions and autonomy level transitions
-- Emits OpenTelemetry spans for every governance decision
+#### Level 2: Progressive Process Foundations
 
-### Product 2: GitHub Governance App
+The orchestrator doesn't apply the same process to a 50-file project and a 5,000-file project. Process scales with complexity:
 
-A GitHub App that enforces AI-SDLC policies at the platform level — even if agents ignore the MCP server.
-
-#### Core Features
-
-| Feature | Mechanism |
+| Codebase Complexity | Process Foundations Applied |
 |---|---|
-| **PR Quality Gates** | GitHub Check Runs that block merge when gates fail |
-| **AI Detection** | Identify AI-generated PRs via git trailers, Copilot metadata, agent signatures |
-| **Autonomy Enforcement** | Track agent autonomy levels; block actions that exceed current level |
-| **Governance Dashboard** | Repository-level view of gate pass rates, autonomy levels, intervention rates |
-| **Auto-labeling** | Label PRs with `ai-generated`, `autonomy-level-N`, `gate-passed`/`gate-failed` |
-| **Override Workflow** | Allow authorized humans to override soft-mandatory gates with audit trail |
+| **Low** (1-3: <100 files, simple architecture) | Basic linting, test coverage gate, single agent can handle most tasks autonomously |
+| **Medium** (4-6: 100-1000 files, emerging patterns) | Architecture conformance checks, dependency validation, mandatory PR review for cross-module changes, agent context includes module boundaries |
+| **High** (7-8: 1000+ files, established architecture) | Architectural review for structural changes, hotspot-aware routing (changes to high-churn files get extra scrutiny), multi-agent decomposition for large tasks, human architect involved in design decisions |
+| **Critical** (9-10: large-scale, multi-service) | Architecture review board, change impact analysis across services, staged rollouts, human-led design with AI implementation support |
 
-#### How It Works
+This is the key differentiator: **the SDLC process grows with the software.** A startup with 10 files doesn't need an architecture review board. A system with 10,000 files does. The orchestrator manages this transition automatically based on the codebase complexity profile.
 
-1. Team installs the GitHub App on their repository
-2. App reads `.ai-sdlc/policy.yaml` from the repo (same file as MCP server)
-3. On every PR event (opened, synchronized, review_submitted):
-   - Evaluates quality gates as Check Runs
-   - Checks autonomy level constraints
-   - Posts status summary as a PR comment
-   - Blocks merge if hard-mandatory gates fail
-4. Dashboard available at `github.com/apps/ai-sdlc/dashboard/{owner}/{repo}`
+#### Level 3: Intelligent Task Routing
 
-#### Check Run Example
+Not every task should go to the same agent with the same constraints. The orchestrator routes based on what the task *actually requires*:
 
 ```
-AI-SDLC Governance                              ❌ Failed
+Issue #247: "Add created_at timestamp to User model"
+  → Complexity: 2 (single file, single field, migration)
+  → Route: Fully autonomous (Level 1 agent can handle)
+  → Process: implement → test → auto-merge
+  → Estimated time: 5 minutes
 
-Quality Gates:
-  ✅ test-coverage: 84% (threshold: 80%)        hard-mandatory  PASSED
-  ❌ security-scan: 2 critical findings          hard-mandatory  FAILED
-  ✅ lint-clean: 0 errors                        soft-mandatory  PASSED
-  ⚠️  ai-attribution: missing provenance block   advisory        WARNING
+Issue #248: "Refactor authentication to support OAuth2 + SAML"
+  → Complexity: 8 (cross-cutting, security-critical, 15+ files)
+  → Route: AI-assisted with human architect
+  → Process: design review → decompose into sub-tasks → implement
+             (parallel agents) → security scan → human review → staged merge
+  → Human involvement: architect reviews design, security lead reviews implementation
+  → Estimated time: 2-3 days with human cycles
 
-Autonomy Check:
-  Agent: claude-code (Level 1 — Junior)
-  PR size: 247 lines across 12 files
-  ❌ Exceeds Level 1 guardrail: maxLinesPerPR (100)
-  → Requires Level 2+ or human approval override
-
-Action Required:
-  • Fix 2 critical security findings
-  • Request autonomy override from @tech-lead OR reduce PR scope
+Issue #249: "Migrate from PostgreSQL to CockroachDB"
+  → Complexity: 10 (infrastructure, data migration, entire system affected)
+  → Route: Human-led with AI support
+  → Process: human designs migration plan → AI generates migration scripts
+             → human reviews → staged execution with rollback plan
+  → Human involvement: leads the entire effort; AI assists with boilerplate
 ```
 
-#### Defense in Depth
+The routing isn't static. As agents prove themselves (promotion criteria met), they earn the right to handle higher-complexity tasks with less oversight.
 
-The MCP server and GitHub App provide two complementary enforcement points:
+#### Level 4: Earned Autonomy Over Time
 
-| Scenario | MCP Server (agent-side) | GitHub App (platform-side) |
+The orchestrator tracks every agent's performance and progressively grants or restricts autonomy:
+
+```
+Agent: claude-code-team-alpha
+  Current Level: 2 (Senior)
+  Time at Level: 6 weeks
+  Tasks Completed: 47
+  PR Approval Rate: 94%
+  Rollback Rate: 0.8%
+  Security Incidents: 0
+
+  Promotion to Level 3 requires:
+    ✅ pr-approval-rate >= 0.95  (actual: 0.94 — close but not yet)
+    ✅ rollback-rate <= 0.01     (actual: 0.008)
+    ✅ zero security incidents    (actual: 0)
+    ✅ min 50 tasks at level     (actual: 47 — 3 more needed)
+    ✅ min 8 weeks at level      (actual: 6 weeks — 2 more needed)
+
+  Status: On track for promotion in ~2 weeks
+```
+
+This is the "programmable engineering organization" — it mimics how a real engineering org builds trust in new team members. Junior developers start with small tasks, earn autonomy through demonstrated competence, and get more responsibility over time. The orchestrator does the same for AI agents.
+
+### The Human-AI Spectrum
+
+The orchestrator supports the full spectrum of human involvement, configured per-team:
+
+```yaml
+# .ai-sdlc/pipeline.yaml
+
+# Example 1: Mostly human, AI assists
+# (Early adoption — team is cautious)
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: human-led
+spec:
+  triggers:
+    - event: issue.labeled
+      filter: { labels: ["ai-assist"] }
+  routing:
+    complexityThresholds:
+      low:      { min: 1, max: 3, strategy: "ai-with-review" }
+      medium:   { min: 4, max: 6, strategy: "ai-assisted" }
+      high:     { min: 7, max: 10, strategy: "human-led" }
+  stages:
+    - name: implement
+      agent: code-agent
+      approval:
+        required: true
+        blocking: true        # Human must approve before agent starts
+    - name: review
+      agent: review-agent
+      approval:
+        required: true        # Human must also review the review
+    - name: merge
+      approval:
+        required: true        # Human clicks merge
+```
+
+```yaml
+# Example 2: Mostly autonomous, humans audit
+# (Mature adoption — agents have earned trust)
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: autonomous
+spec:
+  triggers:
+    - event: issue.assigned
+      filter: { labels: ["ai-eligible"] }
+  routing:
+    complexityThresholds:
+      low:      { min: 1, max: 3, strategy: "fully-autonomous" }
+      medium:   { min: 4, max: 6, strategy: "ai-with-review" }
+      high:     { min: 7, max: 8, strategy: "ai-assisted" }
+      critical: { min: 9, max: 10, strategy: "human-led" }
+  stages:
+    - name: implement
+      agent: code-agent
+    - name: validate
+      qualityGates: [tests, coverage, security, architecture]
+    - name: review
+      agent: review-agent
+    - name: merge
+      # Auto-merge if all gates pass and complexity <= 3
+      # Otherwise, request human review
+    - name: deploy
+      approval:
+        required: true         # Always human-approved deploys (for now)
+```
+
+```yaml
+# Example 3: Fully autonomous software organization
+# (Future state — high trust, comprehensive gates)
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: fully-autonomous
+spec:
+  triggers:
+    - event: issue.created       # Agents even triage incoming issues
+  routing:
+    complexityThresholds:
+      low:      { min: 1, max: 6, strategy: "fully-autonomous" }
+      medium:   { min: 7, max: 8, strategy: "ai-with-review" }
+      high:     { min: 9, max: 10, strategy: "ai-assisted" }
+  stages:
+    - name: triage
+      agent: triage-agent        # AI triages, assigns complexity, labels
+    - name: design
+      agent: architect-agent     # AI designs approach for complex tasks
+    - name: decompose
+      agent: architect-agent     # Break into sub-tasks if complexity > 5
+    - name: implement
+      agent: code-agent
+      orchestration: parallel    # Multiple agents for decomposed sub-tasks
+    - name: validate
+      qualityGates: [tests, coverage, security, architecture, performance]
+    - name: review
+      agent: review-agent
+    - name: merge
+    - name: deploy
+      qualityGates: [staging-tests, canary-metrics]
+    - name: monitor
+      agent: monitor-agent       # Watch production metrics post-deploy
+      onFailure:
+        strategy: rollback       # Auto-rollback if metrics degrade
+```
+
+### How Teams Adopt It
+
+#### Day 1: Install and connect
+
+```bash
+# Install the orchestrator
+npm install -g @ai-sdlc/orchestrator
+
+# Initialize in your repository
+ai-sdlc init
+
+# This creates:
+# .ai-sdlc/
+#   pipeline.yaml      ← Your SDLC pipeline definition
+#   agents.yaml        ← Agent roles and constraints
+#   gates.yaml         ← Quality gate definitions
+#   autonomy.yaml      ← Autonomy levels and promotion criteria
+```
+
+The `init` command detects the project's language, framework, and existing CI setup, then generates a starter configuration:
+
+```
+Detected: TypeScript + React + Jest + GitHub Actions
+Generated pipeline with:
+  - Stages: validate → implement → test → review → merge
+  - Quality gates: jest coverage (80%), eslint (0 errors), npm audit (0 critical)
+  - Autonomy: Starting at Level 1 (all PRs require human review)
+  - Agent: claude-code (default, configurable)
+
+Ready. Label any issue with "ai-eligible" to start.
+```
+
+#### Week 1: First AI-driven PRs
+
+The team labels a few simple issues as `ai-eligible`. The orchestrator:
+1. Picks up the issue
+2. Creates a branch
+3. Invokes the configured agent with full context (issue, codebase profile, conventions)
+4. Runs quality gates
+5. Creates a PR and requests human review
+6. Human reviews, provides feedback, merges
+
+The team sees: AI did the work, but I'm in full control.
+
+#### Month 1: Process foundations emerge
+
+After 20-30 PRs, the orchestrator has built up:
+- An autonomy ledger showing agent performance metrics
+- A codebase profile tracking complexity growth
+- Episodic memory of what worked and what didn't
+- Suggested gate threshold adjustments based on actual data
+
+The team sees: "Our agent has a 92% approval rate. The orchestrator is suggesting we can auto-merge simple PRs (complexity 1-3) now."
+
+#### Month 3: Scaling with the codebase
+
+The codebase has grown from 200 to 800 files. The orchestrator has automatically:
+- Raised complexity thresholds (more tasks now score "medium" instead of "low")
+- Added architecture conformance checks (detected a hexagonal pattern, now enforces it)
+- Introduced hotspot-aware routing (changes to `session-manager.ts` get extra review)
+- Promoted the primary agent to Level 2 (can now merge low-complexity PRs without human approval)
+
+The team sees: the process grew with the software, and I didn't have to configure anything.
+
+#### Month 6+: Running an AI software organization
+
+The team now has multiple agents at various autonomy levels, handling 60-70% of issues end-to-end. Humans focus on architecture decisions, complex features, and the occasional override. The orchestrator handles everything else.
+
+### Architecture
+
+#### Core Components
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                 AI-SDLC Orchestrator                     │
+│                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │  Trigger      │  │  Pipeline    │  │  Agent       │  │
+│  │  Watcher      │  │  Controller  │  │  Runtime     │  │
+│  │              │  │              │  │              │  │
+│  │  Webhook     │  │  Stage       │  │  Sandbox     │  │
+│  │  listener,   │  │  sequencing, │  │  management, │  │
+│  │  polling,    │  │  routing,    │  │  JIT creds,  │  │
+│  │  scheduling  │  │  assignment  │  │  context     │  │
+│  │              │  │              │  │  injection   │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
+│         │                 │                 │          │
+│         ▼                 ▼                 ▼          │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │              Reconciliation Engine                  │ │
+│  │                                                    │ │
+│  │  Desired state (Pipeline YAML)                     │ │
+│  │  vs.                                               │ │
+│  │  Observed state (adapter events, CI results,       │ │
+│  │                   agent output, human feedback)     │ │
+│  │  →                                                 │ │
+│  │  Actions (invoke agent, create PR, request review, │ │
+│  │           enforce gate, promote/demote agent)       │ │
+│  └────────────────────────────────────────────────────┘ │
+│         │                 │                 │          │
+│         ▼                 ▼                 ▼          │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │  Codebase    │  │  Autonomy    │  │  Quality     │  │
+│  │  State       │  │  Ledger      │  │  Gate        │  │
+│  │  Store       │  │              │  │  Engine      │  │
+│  │              │  │  Performance │  │              │  │
+│  │  Complexity  │  │  tracking,   │  │  Evaluation, │  │
+│  │  profile,    │  │  promotion/  │  │  enforcement │  │
+│  │  conventions,│  │  demotion,   │  │  levels,     │  │
+│  │  hotspots,   │  │  per-agent   │  │  overrides   │  │
+│  │  episodic    │  │  per-repo    │  │              │  │
+│  │  memory      │  │  history     │  │              │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+│                                                         │
+│  ┌────────────────────────────────────────────────────┐ │
+│  │                  Adapter Layer                      │ │
+│  │                                                    │ │
+│  │  IssueTracker    SourceControl    CIPipeline       │ │
+│  │  (Linear,Jira,   (GitHub,GitLab,  (GH Actions,    │ │
+│  │   GH Issues)      Bitbucket)      GitLab CI)      │ │
+│  │                                                    │ │
+│  │  CodeAnalysis    Messenger        DeployTarget     │ │
+│  │  (SonarQube,     (Slack,Teams)    (k8s,Vercel,    │ │
+│  │   Semgrep)                         Fly.io)        │ │
+│  └────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────┘
+```
+
+#### The Codebase State Store
+
+This is what makes the orchestrator fundamentally different from a CI/CD pipeline. It maintains **persistent, evolving knowledge about the codebase**:
+
+| State | What it tracks | Why it matters |
 |---|---|---|
-| Agent checks before acting | Blocks action preemptively | N/A (hasn't reached platform yet) |
-| Agent ignores MCP server | N/A (bypassed) | Blocks merge at PR level |
-| Agent has no MCP support | N/A (not connected) | Still enforces via Check Runs |
-| Both connected | Pre-flight check + merge-time enforcement | Full governance |
+| **Complexity Profile** | File count, module structure, dependency graph, architectural patterns, overall complexity score | Determines routing strategy, gate thresholds, and process foundations |
+| **Conventions** | Naming patterns, import style, test structure, directory layout | Injected as context so agents follow established patterns |
+| **Hotspots** | Files with high churn + high complexity | Changes to hotspots get extra scrutiny, higher-level review |
+| **Episodic Memory** | What happened in past pipeline executions — successes, failures, regressions | Agents learn from history: "Last time we changed auth, tests in payments broke" |
+| **Architecture Decisions** | Detected and declared architectural patterns | Agents are constrained to conform: "This is a hexagonal architecture — don't import adapters from domain" |
 
-This means governance works even with agents that don't support MCP, providing a backstop for all AI-generated code.
+The state store is updated after every pipeline execution and is used to provide context to agents, inform routing decisions, and adjust process foundations.
 
-### SDK Reframing
+#### Agent Invocation Model
 
-The Python and Go SDKs shift from "abstract spec implementations" to concrete product-oriented roles:
+The orchestrator is **agent-agnostic**. It invokes agents through a standard interface:
+
+```typescript
+interface AgentRunner {
+  run(task: AgentTask): Promise<AgentResult>;
+}
+
+interface AgentTask {
+  // What to do
+  issue: Issue;
+  instructions: string;
+
+  // Constraints
+  constraints: {
+    maxFiles: number;
+    maxLines: number;
+    blockedPaths: string[];
+    requiredTests: boolean;
+    timeout: string;            // ISO 8601 duration
+  };
+
+  // Context (from codebase state store)
+  context: {
+    codebaseProfile: CodebaseProfile;
+    conventions: Convention[];
+    relevantHistory: EpisodicEntry[];
+    architecturalPatterns: Pattern[];
+    hotspots: Hotspot[];
+  };
+
+  // Environment
+  environment: {
+    workDir: string;
+    branch: string;
+    credentials: JITCredential;
+    sandbox?: SandboxConfig;
+  };
+}
+
+interface AgentResult {
+  success: boolean;
+  filesChanged: string[];
+  summary: string;
+  testResults?: TestResults;
+}
+```
+
+Concrete agent runners implement this interface for specific agents:
+- `ClaudeCodeRunner` — invokes Claude Code via CLI or API
+- `CopilotRunner` — invokes GitHub Copilot Workspace
+- `CursorRunner` — invokes Cursor's agent mode
+- `CustomRunner` — invokes any agent via a configurable command
+
+This means the orchestrator works with whatever AI coding agents the team already uses.
+
+### SDK Roles in the Orchestrator Model
+
+The SDKs serve concrete purposes in this architecture:
+
+#### TypeScript SDK
+
+Powers the orchestrator itself. The existing reference implementation (`reference/src/`) and dogfood (`dogfood/src/orchestrator/`) become the orchestrator runtime.
 
 #### Python SDK: `ai-sdlc-python`
 
-| Previous plan | New purpose |
-|---|---|
-| Pydantic models from schemas | **Same** — still generated from JSON Schemas |
-| Schema validation | **Same** — still uses jsonschema |
-| Adapter interface protocols | **Client library for MCP Governance Server** |
-| Policy enforcement engine | **Embeddable policy evaluator** for Python-based agents and CI tools |
+Two primary use cases:
 
-**Primary users:** Teams building custom AI agents in Python (LangChain, CrewAI, AutoGen) that need to query governance before taking actions.
+1. **Custom agent runners** — Teams building agents in Python (LangChain, CrewAI, AutoGen) implement the `AgentRunner` interface to plug their agents into the orchestrator
 
-**Key deliverable:** A Python client that wraps the MCP governance tools:
+2. **Embeddable policy evaluator** — Python-based CI tools and scripts can evaluate AI-SDLC quality gates locally:
 
 ```python
-from ai_sdlc import GovernanceClient
+from ai_sdlc import PolicyEvaluator, load_pipeline
 
-gov = GovernanceClient(server="localhost:3000", agent_id="my-agent")
+pipeline = load_pipeline(".ai-sdlc/pipeline.yaml")
+evaluator = PolicyEvaluator(pipeline)
 
-# Check before acting
-decision = await gov.check_permission(
-    action="merge_pr",
-    resource="PR #42",
-    context={"lines_changed": 200}
+result = evaluator.evaluate_gates(
+    stage="validate",
+    evidence={"coverage": 0.84, "lint_errors": 0, "critical_findings": 0}
 )
 
-if not decision.allowed:
-    print(f"Blocked: {decision.reason}")
-    if decision.override:
-        approval = await gov.request_approval(
-            action="merge_pr",
-            reason="Large but well-tested refactor",
-            evidence={"coverage": 0.92, "tests_passed": True}
-        )
+for gate in result.failed:
+    print(f"FAILED: {gate.name} ({gate.enforcement}): {gate.reason}")
 ```
 
 #### Go SDK: `ai-sdlc-go`
 
-| Previous plan | New purpose |
-|---|---|
-| Go structs from schemas | **Same** — still generated from JSON Schemas |
-| Schema validation | **Same** — still uses gojsonschema |
-| Adapter interfaces | **Same** — Go interfaces for adapter contracts |
-| Reconciliation loop library | **Kubernetes operator for AI-SDLC governance** |
+Two primary use cases:
 
-**Primary users:** Platform engineering teams running Kubernetes who want governance-as-infrastructure.
+1. **Kubernetes-native deployment** — A controller-runtime operator that runs the orchestrator as a Kubernetes controller, reconciling AI-SDLC resources as CRDs. For platform engineering teams that want governance-as-infrastructure.
 
-**Key deliverable:** A controller-runtime compatible operator that reconciles AI-SDLC resources as Kubernetes CRDs:
+2. **High-performance adapter implementations** — Go adapters for performance-critical integrations (high-throughput webhook processing, git operations at scale).
 
-```go
-// AI-SDLC resources become Kubernetes CRDs
-// kubectl apply -f autonomy-policy.yaml
-
-type AutonomyPolicyReconciler struct {
-    client.Client
-    Scheme *runtime.Scheme
-    Ledger autonomy.Ledger
-}
-
-func (r *AutonomyPolicyReconciler) Reconcile(ctx context.Context,
-    req ctrl.Request) (ctrl.Result, error) {
-    // Fetch the AutonomyPolicy resource
-    // Compare declared state vs actual agent behavior
-    // Promote/demote agents based on criteria
-    // Requeue for continuous reconciliation
-}
-```
-
-### Repo Structure Changes
+### Repo Structure
 
 ```
 ai-sdlc/
 ├── spec/                        # UNCHANGED — authoritative specification
+│   ├── spec.md                  # Core resource model
+│   ├── agents.md                # Agent orchestration spec
+│   ├── autonomy.md              # Progressive autonomy spec
+│   ├── policy.md                # Quality gate enforcement spec
+│   ├── adapters.md              # Adapter interface contracts
 │   ├── schemas/                 # JSON Schemas (source of truth)
-│   └── rfcs/                    # Enhancement proposals (including this one)
+│   └── rfcs/                    # Enhancement proposals
 │
-├── reference/                   # EVOLVED — becomes the policy engine core
-│   └── src/
-│       ├── core/                # Resource types, validation
-│       ├── policy/              # Gate evaluation engine
-│       ├── autonomy/            # Autonomy ledger and level management
-│       └── adapters/            # Adapter interface implementations
+├── orchestrator/                # THE PRODUCT — AI-SDLC Orchestrator
+│   ├── src/
+│   │   ├── core/                # Pipeline controller, reconciliation engine
+│   │   ├── triggers/            # Webhook listener, polling, scheduling
+│   │   ├── routing/             # Complexity analysis, task routing
+│   │   ├── agents/              # Agent runner interface + concrete runners
+│   │   ├── gates/               # Quality gate evaluation engine
+│   │   ├── autonomy/            # Autonomy ledger, promotion/demotion
+│   │   ├── state/               # Codebase state store (complexity, conventions,
+│   │   │                        #   hotspots, episodic memory)
+│   │   ├── adapters/            # Issue tracker, source control, CI, etc.
+│   │   ├── security/            # Sandbox, JIT credentials, ABAC
+│   │   └── telemetry/           # OpenTelemetry integration
+│   ├── bin/
+│   │   └── ai-sdlc.ts           # CLI entry point
+│   ├── Dockerfile
+│   └── package.json
 │
-├── products/                    # NEW — runnable governance products
-│   ├── mcp-server/              # MCP Governance Server
-│   │   ├── src/
-│   │   │   ├── server.ts        # MCP server setup (stdio + SSE transport)
-│   │   │   ├── tools/           # MCP tool implementations
-│   │   │   │   ├── check-permission.ts
-│   │   │   │   ├── get-autonomy-level.ts
-│   │   │   │   ├── evaluate-gate.ts
-│   │   │   │   ├── get-policy.ts
-│   │   │   │   ├── record-action.ts
-│   │   │   │   └── request-approval.ts
-│   │   │   ├── ledger/          # Autonomy ledger (SQLite/PostgreSQL)
-│   │   │   └── config/          # Policy file loader (.ai-sdlc/policy.yaml)
-│   │   ├── Dockerfile
-│   │   └── package.json
-│   │
-│   └── github-app/              # GitHub Governance App
-│       ├── src/
-│       │   ├── app.ts           # Probot/Octokit app setup
-│       │   ├── checks/          # Check Run implementations
-│       │   ├── detection/       # AI-generated PR detection
-│       │   ├── dashboard/       # Governance dashboard UI
-│       │   └── webhooks/        # GitHub webhook handlers
-│       ├── Dockerfile
-│       └── package.json
-│
-├── sdk-typescript/              # EVOLVED — powers products + standalone use
-├── sdk-python/                  # EVOLVED — MCP client + embeddable evaluator
-├── sdk-go/                      # EVOLVED — Kubernetes operator + CRDs
+├── sdk-typescript/              # TypeScript SDK (shared types + validation)
+├── sdk-python/                  # Python SDK (agent runners + policy evaluator)
+├── sdk-go/                      # Go SDK (K8s operator + Go adapters)
 │
 ├── conformance/                 # UNCHANGED — language-agnostic test suite
-└── contrib/                     # UNCHANGED — community adapters
+├── contrib/                     # UNCHANGED — community adapters
+└── docs/                        # Updated for orchestrator-first onboarding
 ```
 
 ## Design Details
 
 ### Schema Changes
 
-No changes to the core JSON Schemas. The `.ai-sdlc/policy.yaml` format uses existing resource definitions composed into a single multi-resource file (similar to Kubernetes multi-resource YAML). A thin wrapper schema is introduced:
+No changes to core resource schemas. The orchestrator consumes existing AI-SDLC resources (Pipeline, AgentRole, QualityGate, AutonomyPolicy, AdapterBinding) as its configuration format.
+
+One new schema is introduced for the codebase state store:
 
 ```json
 {
-  "$id": "https://ai-sdlc.io/schemas/policy-file.schema.json",
+  "$id": "https://ai-sdlc.io/schemas/codebase-state.schema.json",
   "type": "object",
   "properties": {
-    "apiVersion": {
-      "type": "string",
-      "const": "ai-sdlc.io/v1alpha1"
+    "complexity": {
+      "type": "object",
+      "properties": {
+        "score": { "type": "number", "minimum": 1, "maximum": 10 },
+        "files": { "type": "integer" },
+        "modules": { "type": "integer" },
+        "dependencies": { "type": "integer" }
+      }
     },
-    "resources": {
+    "architecturalPatterns": {
       "type": "array",
       "items": {
-        "oneOf": [
-          { "$ref": "pipeline.schema.json" },
-          { "$ref": "quality-gate.schema.json" },
-          { "$ref": "autonomy-policy.schema.json" },
-          { "$ref": "agent-role.schema.json" },
-          { "$ref": "adapter-binding.schema.json" }
-        ]
+        "type": "object",
+        "properties": {
+          "pattern": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "description": { "type": "string" }
+        }
+      }
+    },
+    "hotspots": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "churnRate": { "type": "number" },
+          "complexity": { "type": "number" },
+          "lastModified": { "type": "string", "format": "date-time" }
+        }
+      }
+    },
+    "conventions": {
+      "type": "object",
+      "properties": {
+        "naming": { "type": "string" },
+        "testing": { "type": "string" },
+        "imports": { "type": "string" }
       }
     }
-  },
-  "required": ["apiVersion", "resources"]
+  }
 }
 ```
 
 ### Behavioral Changes
 
-#### MCP Server Governance Loop
+#### Reconciliation Engine
 
-The MCP server implements a simplified reconciliation cycle:
+The existing reconciliation loop (`reference/src/reconciler/loop.ts`) is extended to be the orchestrator's core execution engine. The key behavioral changes:
 
-1. **Load** — Read `.ai-sdlc/policy.yaml` on startup, watch for changes
-2. **Evaluate** — On each tool call, evaluate the request against loaded policy
-3. **Decide** — Return allow/deny/override-required with structured reasoning
-4. **Record** — Append decision to the autonomy ledger
-5. **Reconcile** — Periodically evaluate autonomy promotion/demotion criteria against the ledger
+1. **Long-running** — The reconciliation loop runs continuously (not invoked per-event). It maintains a work queue and processes items as they arrive.
 
-#### GitHub App Enforcement Flow
+2. **Multi-resource** — A single reconciliation cycle may involve Pipeline, AgentRole, QualityGate, and AutonomyPolicy resources simultaneously.
 
-1. **Webhook** — Receive PR event from GitHub
-2. **Detect** — Classify PR as AI-generated or human-authored
-3. **Load** — Fetch `.ai-sdlc/policy.yaml` from the PR's base branch
-4. **Evaluate** — Run quality gates and autonomy checks
-5. **Report** — Create/update Check Runs and PR comments
-6. **Enforce** — Set Check Run conclusion (success/failure) to gate merge
+3. **State-aware** — The reconciler reads from and writes to the codebase state store, making decisions based on accumulated knowledge, not just the current event.
 
-#### Autonomy Ledger Schema
+4. **Agent-invoking** — The reconciler directly invokes agent runners as part of stage execution, rather than delegating to an external system.
 
-The autonomy ledger is a persistent store tracking agent behavior over time:
+#### Codebase State Updates
 
-```sql
--- Core tables for the autonomy ledger
-CREATE TABLE agents (
-  id          TEXT PRIMARY KEY,
-  repo        TEXT NOT NULL,
-  level       INTEGER NOT NULL DEFAULT 1,
-  promoted_at TIMESTAMP,
-  demoted_at  TIMESTAMP
-);
+The codebase state store is updated at three points:
 
-CREATE TABLE actions (
-  id          TEXT PRIMARY KEY,
-  agent_id    TEXT REFERENCES agents(id),
-  action      TEXT NOT NULL,
-  outcome     TEXT NOT NULL,  -- 'allowed', 'denied', 'overridden'
-  timestamp   TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-  metadata    JSONB
-);
+1. **Post-merge** — After a PR is merged, the orchestrator re-analyzes the codebase to update complexity scores, detect new patterns, and identify new hotspots.
 
-CREATE TABLE level_transitions (
-  id          TEXT PRIMARY KEY,
-  agent_id    TEXT REFERENCES agents(id),
-  from_level  INTEGER NOT NULL,
-  to_level    INTEGER NOT NULL,
-  reason      TEXT NOT NULL,
-  timestamp   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-);
-```
+2. **Post-failure** — When a pipeline fails, the failure context is recorded in episodic memory so future agent invocations can learn from it.
+
+3. **Scheduled** — A daily reconciliation pass updates the full complexity profile, even without new events. This catches drift (e.g., manually added files, dependency updates).
 
 ### Migration Path
 
-This is not a breaking change to the specification. It is an additive change to the project structure:
+The orchestrator is a new product built from existing components:
 
-- Existing spec documents remain unchanged and authoritative
-- The TypeScript reference implementation is refactored into the policy engine consumed by both products, but its public API does not change
-- The `.ai-sdlc/policy.yaml` convention is new but uses existing resource schemas
-- SDKs gain new functionality but retain their planned feature sets
+- `reference/src/` provides the resource model, validation, and reconciliation primitives
+- `dogfood/src/orchestrator/` provides the proven end-to-end flow (~8,700 lines)
+- The migration is a **refactoring**, not a rewrite — extracting the dogfood into a distributable package with a clean public API
+
+Existing spec documents and schemas are unchanged.
 
 ## Backward Compatibility
 
 - **Spec:** No changes. All existing resources validate identically.
-- **Reference implementation:** Internal refactoring only. Public types and validation functions unchanged.
-- **SDK plans:** Additive. All previously planned features (Pydantic models, Go structs, schema validation) are retained. New features (MCP client, Kubernetes operator) are added.
-- **Conformance tests:** Unchanged. Products must pass the same conformance suite.
+- **Reference implementation:** Refactored into the orchestrator's core library. Public types unchanged.
+- **Conformance tests:** Unchanged. The orchestrator must pass the same conformance suite.
+- **Dogfood:** The dogfood becomes the orchestrator's test/demo environment.
 
 ## Alternatives Considered
 
-### Alternative 1: Spec-First, Products Later
+### Alternative 1: Governance Sidecars (MCP Server + GitHub App)
 
-Continue the current approach: finalize spec v1alpha1, publish it, build reference implementation, then hope for community-built products.
+Build an MCP Governance Server that agents query ("am I allowed to do this?") and a GitHub App that enforces gates as Check Runs.
 
-**Rejected because:** The governance gap is urgent and the competitive window is narrow. Vendor-specific solutions (GitHub Copilot policies, Snyk AI governance, Qodo quality gates) are shipping now. By the time a spec-first approach reaches adoption, the market will have fragmented into incompatible vendor silos. The AAIF is actively seeking governance solutions — arriving with a spec and no users is weaker than arriving with a product and traction.
+**Rejected because:** This approach treats governance as a checkpoint alongside the SDLC, not as the orchestration of it. An MCP server that says "no" doesn't solve the core problem — AI projects falling apart at scale due to complexity, context loss, and missing process foundations. Governance sidecars don't route tasks, don't manage context, don't grow process, and don't orchestrate the end-to-end lifecycle. They're traffic cops, not team leads.
 
-### Alternative 2: CLI Wrapper Only
+That said, the orchestrator *could* expose an MCP interface and GitHub Checks as secondary integration points in the future. The orchestrator is the primary product; sidecars are potential features of it.
 
-Build a CLI tool (`ai-sdlc run --agent ... --policy ...`) that wraps agent commands with governance, without an MCP server or GitHub App.
+### Alternative 2: Spec-First, Orchestrator Later
 
-**Rejected because:** A CLI wrapper requires agents to be launched through it, which is impractical for IDE-integrated agents (Copilot, Cursor, Windsurf). The MCP approach meets agents where they already are — as a server they connect to using an existing protocol. The GitHub App meets code where it already is — as a check on the platform where PRs are reviewed.
+Continue perfecting the specification, then build the orchestrator from the spec.
 
-### Alternative 3: MCP Server Only, No GitHub App
+**Rejected because:** The dogfood already proves the orchestrator works end-to-end. Waiting for spec completion before packaging it as a product loses the window. The spec continues to evolve (RFC-0002 is bringing 600 lines of dogfood logic into the spec), and the orchestrator provides real-world validation of spec decisions. Product and spec co-evolve.
 
-Ship only the MCP Governance Server and rely on agents to respect governance decisions.
+### Alternative 3: Plugin for Existing CI/CD
 
-**Rejected because:** Agent compliance cannot be assumed. An agent that doesn't support MCP, or one that ignores the governance server's response, would bypass all governance. The GitHub App provides a platform-level backstop that enforces governance regardless of agent behavior. Defense in depth is a core security principle.
+Build the orchestrator as a GitHub Actions workflow, Argo Workflow template, or Tekton pipeline.
 
-### Alternative 4: GitHub App Only, No MCP Server
+**Rejected because:** CI/CD systems orchestrate build/test/deploy — they don't understand issues, agents, autonomy levels, codebase complexity, or SDLC-wide workflows. Fitting the orchestrator into CI/CD requires fighting the platform's assumptions (stateless runs, no persistent state, no agent management). The orchestrator needs to be a first-class runtime with its own state, not a workflow crammed into YAML steps.
 
-Ship only the GitHub App and enforce governance at merge time.
+### Alternative 4: Agent Framework Extension
 
-**Rejected because:** Merge-time enforcement is too late. An agent that spends 30 minutes writing code only to have it blocked at merge time wastes significant compute and time. The MCP server enables pre-flight checks — agents can ask "am I allowed to do this?" before starting, avoiding wasted effort. Additionally, an MCP server is agent-agnostic and platform-agnostic, supporting future expansion to GitLab, Bitbucket, etc.
+Build the orchestrator as a LangChain/CrewAI/AutoGen extension.
 
-### Alternative 5: Build on Eclipse LMOS/ADL
+**Rejected because:** Agent frameworks orchestrate agent conversations and tool use. They don't understand the SDLC — branching, PRs, quality gates, deployment, autonomy. The orchestrator is agent-framework-agnostic: it invokes agents through a standard interface, regardless of whether they're built with LangChain, raw API calls, or CLI tools. Tying to one framework limits adoption.
 
-Contribute SDLC-specific extensions to the Eclipse LMOS Agent Definition Language rather than building standalone products.
+### Alternative 5: SaaS Platform
 
-**Rejected because:** Eclipse LMOS is architecturally focused on general enterprise agent orchestration (customer service, sales, routing). Its runtime model (Kubernetes/Istio-based multi-agent routing) is over-engineered for the SDLC governance use case, where most teams need simple policy evaluation, not agent routing meshes. Building on LMOS would inherit unnecessary complexity and tie the project to Eclipse Foundation governance and release cadence. However, we should monitor LMOS/ADL evolution and consider interoperability where beneficial.
+Build a hosted SaaS platform where teams connect their repos and agents.
 
-### Alternative 6: Contribute Directly to AAIF Without Products
-
-Submit the AI-SDLC specification to the AAIF as a governance standard proposal.
-
-**Rejected because:** The AAIF founding projects (MCP, A2A, AGENTS.md) all entered with significant existing adoption. MCP had 97M+ monthly SDK downloads; AGENTS.md had 60,000+ repos. Proposing a draft spec with no users would not meet the foundation's bar. The product-first strategy builds the traction needed to make an AAIF contribution credible.
+**Rejected because:** Premature. A SaaS platform requires infrastructure investment, security certification, and ongoing operations before validating product-market fit. The orchestrator should first prove itself as an open-source, self-hosted tool. A hosted offering can follow once the product is validated. Additionally, many enterprises (the target adopters) require self-hosted governance for compliance reasons.
 
 ## Implementation Plan
 
-### Phase 0: Foundation (Weeks 1-4)
+### Phase 0: Extract and Package (Weeks 1-4)
 
-- [ ] Refactor `reference/src/` into a standalone policy engine package
-- [ ] Define `.ai-sdlc/policy.yaml` multi-resource file format
-- [ ] Add `policy-file.schema.json` wrapper schema
-- [ ] Create `products/` directory structure
-- [ ] Implement autonomy ledger with SQLite backend
+- [ ] Extract dogfood orchestration logic into `orchestrator/` package
+- [ ] Define clean public API boundaries (AgentRunner interface, configuration loading, CLI)
+- [ ] Implement `ai-sdlc init` command (project detection, starter config generation)
+- [ ] Implement `ai-sdlc run` command (single pipeline execution for testing)
+- [ ] Implement `ai-sdlc start` command (long-running orchestrator daemon)
+- [ ] SQLite-backed autonomy ledger and codebase state store
+- [ ] Basic ClaudeCodeRunner implementation
 
-### Phase 1: MCP Governance Server (Weeks 3-8)
+### Phase 1: Context and Routing (Weeks 3-8)
 
-- [ ] Scaffold MCP server with stdio + SSE transports
-- [ ] Implement `check_permission` tool
-- [ ] Implement `get_autonomy_level` tool
-- [ ] Implement `evaluate_gate` tool
-- [ ] Implement `get_policy` tool
-- [ ] Implement `record_action` tool
-- [ ] Implement `request_approval` tool
-- [ ] Policy file watcher (reload on change)
-- [ ] Docker container packaging
-- [ ] Integration test with Claude Code as MCP client
-- [ ] Documentation: "Add governance to your AI agent in 5 minutes"
+- [ ] Codebase complexity analyzer (file count, module structure, dependency graph)
+- [ ] Architectural pattern detection (heuristic-based, not LLM-dependent)
+- [ ] Hotspot identification (git log analysis for churn + complexity)
+- [ ] Convention detection (naming patterns, test structure, import style)
+- [ ] Context injection into agent tasks
+- [ ] Complexity-based task routing with configurable thresholds
 
-### Phase 2: GitHub Governance App (Weeks 5-10)
+### Phase 2: Progressive Foundations (Weeks 6-12)
 
-- [ ] Scaffold GitHub App with Probot/Octokit
-- [ ] PR webhook handler (opened, synchronize, review_submitted)
-- [ ] AI-generated PR detection (git trailers, metadata, heuristics)
-- [ ] Quality gate evaluation as Check Runs
-- [ ] Autonomy level enforcement
-- [ ] PR comment with governance summary
-- [ ] Soft-mandatory override workflow (authorized human approval)
-- [ ] Basic dashboard (gate pass rates, autonomy levels per repo)
-- [ ] GitHub Marketplace listing
-- [ ] Documentation: "Add governance to your GitHub repo in 2 minutes"
+- [ ] Progressive gate threshold adjustment based on codebase complexity
+- [ ] Automatic process escalation as complexity grows
+- [ ] Episodic memory — record successes, failures, regressions
+- [ ] Agent context enrichment from episodic memory
+- [ ] Autonomy promotion/demotion with full metrics tracking
+- [ ] Dashboard: codebase complexity over time, agent autonomy trajectory, gate pass rates
 
-### Phase 3: SDK Evolution (Weeks 8-14)
+### Phase 3: Multi-Agent and Scale (Weeks 10-16)
 
-- [ ] Python SDK: MCP governance client library
-- [ ] Python SDK: Embeddable policy evaluator (for LangChain/CrewAI/AutoGen agents)
-- [ ] Go SDK: Kubernetes CRD definitions for AI-SDLC resources
-- [ ] Go SDK: Controller-runtime reconciler for AutonomyPolicy
-- [ ] Conformance test harness updates for all SDKs
+- [ ] Parallel agent execution for decomposed tasks
+- [ ] Handoff contract validation between agents
+- [ ] Multi-repo orchestration (monorepo and polyrepo)
+- [ ] Additional agent runners (Copilot, Cursor, Devin, custom)
+- [ ] Python SDK: custom agent runner interface + policy evaluator
+- [ ] Go SDK: Kubernetes operator for orchestrator deployment
 
-### Phase 4: AAIF Contribution (Week 16+)
+### Phase 4: Production Hardening (Weeks 14-20)
 
-- [ ] Compile adoption metrics (installs, governed repos, active agents)
-- [ ] Draft AAIF contribution proposal
-- [ ] Present at AAIF community meeting
-- [ ] Submit governance layer specification for AAIF consideration
+- [ ] GitHub adapter (full webhook integration, Check Runs, PR management)
+- [ ] GitLab adapter (merge requests, CI integration)
+- [ ] Linear / Jira adapters (issue tracking)
+- [ ] Deployment stage support (Kubernetes, Vercel, Fly.io)
+- [ ] Staged rollout with canary monitoring
+- [ ] Production-grade audit trail with integrity verification
 
 ## Open Questions
 
-1. **MCP server hosting model** — Should we offer a hosted (cloud) version of the MCP server for teams that don't want to self-host, or start local-only? A hosted version accelerates adoption but introduces operational complexity and trust concerns (governance decisions flowing through a third-party server).
+1. **Orchestrator hosting model** — Should the orchestrator run as a local daemon (developer laptop), a team server (shared VM), or a cloud service? Each has different implications for state management, webhook delivery, and agent invocation. The likely answer is "all three, progressively" — but the initial target matters for development priorities.
 
-2. **Autonomy ledger federation** — When an agent operates across multiple repositories, should autonomy levels be per-repo or global? Per-repo is safer (agent earns trust per codebase) but creates fragmented autonomy states. Global requires a federated ledger across repos.
+2. **Codebase analysis depth** — How deep should the complexity analyzer go? Simple metrics (file count, LOC) are cheap but imprecise. Full dependency graph analysis is precise but expensive. AST-level pattern detection is powerful but language-specific. Start simple and add depth as users demand it?
 
-3. **AI detection accuracy** — Reliably detecting whether a PR is AI-generated is non-trivial. Git trailers and Copilot metadata cover some cases, but agents that don't self-identify create blind spots. Should the GitHub App require explicit AI attribution (via `.ai-sdlc` provenance) or attempt heuristic detection?
+3. **Agent credential model** — How does the orchestrator authenticate as agents? For Claude Code, it needs API keys. For Copilot, it needs GitHub tokens. Should credentials be per-agent in the config, per-execution via a vault, or delegated to the host environment?
 
-4. **Policy file location convention** — Is `.ai-sdlc/policy.yaml` the right convention? Alternatives include `ai-sdlc.yaml` (root-level, like `.eslintrc`), `.github/ai-sdlc.yaml` (GitHub-specific), or `GOVERNANCE.yaml` (generic). The chosen convention affects discoverability and ecosystem alignment.
+4. **Failure recovery** — When the orchestrator itself crashes mid-pipeline, how does it resume? The reconciliation loop is designed for this (level-triggered, idempotent), but the agent execution state (partially modified working directory) needs careful handling.
 
-5. **AGENTS.md integration** — Should the MCP server or GitHub App auto-generate an `AGENTS.md` file from the policy? This would bridge the AAIF ecosystem: teams define policy in `.ai-sdlc/policy.yaml`, and the product generates a conforming `AGENTS.md` that tells agents about the governance rules in a format they already understand.
+5. **Multi-tenant isolation** — When orchestrating multiple repos, how is state isolated? Per-repo SQLite databases? A shared PostgreSQL with row-level security? This affects both security and operational complexity.
 
-6. **Pricing and sustainability** — If the GitHub App is free and open-source, what is the sustainability model? Options include: (a) fully community-funded via AAIF/CNCF, (b) open-core with a paid enterprise tier (SSO, audit exports, multi-repo dashboards), (c) hosted service with a free tier.
+6. **Feedback loop to spec** — As the orchestrator evolves, how do we feed learnings back into the spec? The dogfood already revealed the 600-line gap (RFC-0002). The orchestrator will reveal more. Should there be a formal process for "orchestrator found a spec gap" → RFC?
+
+7. **License and sustainability** — The orchestrator is Apache 2.0. Is there a commercial model (enterprise features, hosted service, support) to sustain development? Or is this purely community/foundation-funded?
 
 ## References
 
-- [MCP Specification](https://modelcontextprotocol.io/) — Model Context Protocol, the connectivity layer for AI agents
-- [A2A Protocol](https://github.com/google/A2A) — Agent-to-Agent Protocol for inter-agent communication
-- [AGENTS.md](https://github.com/anthropics/agents-md) — Per-project agent instruction format
-- [Agentic AI Foundation (AAIF)](https://www.linuxfoundation.org/press/linux-foundation-announces-the-formation-of-the-agentic-ai-foundation) — Linux Foundation initiative housing MCP, A2A, AGENTS.md
-- [Eclipse LMOS / ADL](https://eclipse.dev/lmos/) — Agent Definition Language for enterprise agent orchestration
-- [Agentgateway](https://agentgateway.dev/) — AI-native proxy for MCP/A2A traffic with RBAC
-- [OPA (Open Policy Agent)](https://www.openpolicyagent.org/) — General-purpose policy engine
-- [Sonatype: The Last Mile Problem](https://www.sonatype.com/blog/the-last-mile-problem-ai-can-write-code-but-only-policy-can-ship-it) — Governance as the bottleneck for AI-generated code
-- [Qodo 2.0](https://www.qodo.ai/) — AI code review with quality gates
-- [GitHub Copilot Enterprise Policies](https://docs.github.com/en/copilot/concepts/policies) — Vendor-specific governance for Copilot
 - [AI-SDLC spec.md](../spec.md) — Core resource model specification
+- [AI-SDLC agents.md](../agents.md) — Agent orchestration patterns
+- [AI-SDLC autonomy.md](../autonomy.md) — Progressive autonomy system
+- [AI-SDLC policy.md](../policy.md) — Quality gate enforcement
+- [AI-SDLC adapters.md](../adapters.md) — Adapter interface contracts
+- [RFC-0002: Pipeline Orchestration Policy](./RFC-0002-pipeline-orchestration.md) — The "600-line gap" between spec and dogfood
 - [AI-SDLC Foundation Research](../../research/ai-sdlc-foundation-research.md) — 10-domain market analysis
-- [RFC-0002: Pipeline Orchestration Policy](./RFC-0002-pipeline-orchestration.md) — Prior RFC extending Pipeline resource
+- [AI-SDLC PRD](../../research/ai-sdlc-framework-prd.md) — Product requirements document
+- [METR 2025: AI Tools Slow Down Experienced Developers](https://metr.org/) — Evidence for the productivity paradox
+- [Gitclear 2024: Code Quality in the AI Era](https://www.gitclear.com/) — Evidence for rising code churn
+- [Google DORA: AI Adoption and System Stability](https://dora.dev/) — Evidence for stability regression
+- [MCP Specification](https://modelcontextprotocol.io/) — Agent-tool connectivity (consumed by orchestrator)
+- [A2A Protocol](https://github.com/google/A2A) — Agent-agent communication (consumed by orchestrator)
+- [AGENTS.md](https://github.com/anthropics/agents-md) — Per-project agent instructions (generated by orchestrator)
