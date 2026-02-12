@@ -3,7 +3,7 @@
 **Status:** Draft
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-11
-**Updated:** 2026-02-11
+**Updated:** 2026-02-12
 **Target Spec Version:** v1alpha1
 
 ---
@@ -846,21 +846,330 @@ Build a hosted SaaS platform where teams connect their repos and agents.
 - [ ] Staged rollout with canary monitoring
 - [ ] Production-grade audit trail with integrity verification
 
-## Open Questions
+## Resolved Design Decisions
 
-1. **Orchestrator hosting model** — Should the orchestrator run as a local daemon (developer laptop), a team server (shared VM), or a cloud service? Each has different implications for state management, webhook delivery, and agent invocation. The likely answer is "all three, progressively" — but the initial target matters for development priorities.
+The following questions were raised during RFC drafting and have been resolved through discussion.
 
-2. **Codebase analysis depth** — How deep should the complexity analyzer go? Simple metrics (file count, LOC) are cheap but imprecise. Full dependency graph analysis is precise but expensive. AST-level pattern detection is powerful but language-specific. Start simple and add depth as users demand it?
+### 1. Orchestrator Hosting Model
 
-3. **Agent credential model** — How does the orchestrator authenticate as agents? For Claude Code, it needs API keys. For Copilot, it needs GitHub tokens. Should credentials be per-agent in the config, per-execution via a vault, or delegated to the host environment?
+**Decision:** All three deployment models, with CI/CD as the initial target.
 
-4. **Failure recovery** — When the orchestrator itself crashes mid-pipeline, how does it resume? The reconciliation loop is designed for this (level-triggered, idempotent), but the agent execution state (partially modified working directory) needs careful handling.
+| Phase | Hosting Model | Use Case |
+|---|---|---|
+| **Phase 0 (now)** | CI/CD Actions (GitHub Actions, GitLab CI) | Triggered per-event, stateless execution with external state store. Lowest barrier to entry — teams already have CI/CD. |
+| **Phase 1** | Team server / VM | Long-running daemon with local state. Enables webhook-driven real-time orchestration. For teams outgrowing CI/CD trigger latency. |
+| **Phase 2** | Cloud service | Managed orchestrator-as-a-service. Zero ops. Multi-repo, multi-org. The commercial offering (see Appendix A). |
 
-5. **Multi-tenant isolation** — When orchestrating multiple repos, how is state isolated? Per-repo SQLite databases? A shared PostgreSQL with row-level security? This affects both security and operational complexity.
+The CI/CD model works today because the reconciliation loop can run as a triggered job — each invocation reads desired state, observes current state, diffs, acts, and exits. State is persisted externally (SQLite file in repo artifacts, or cloud-backed store). The long-running daemon and cloud service follow once the core orchestration logic is proven.
 
-6. **Feedback loop to spec** — As the orchestrator evolves, how do we feed learnings back into the spec? The dogfood already revealed the 600-line gap (RFC-0002). The orchestrator will reveal more. Should there be a formal process for "orchestrator found a spec gap" → RFC?
+### 2. Codebase Analysis Depth
 
-7. **License and sustainability** — The orchestrator is Apache 2.0. Is there a commercial model (enterprise features, hosted service, support) to sustain development? Or is this purely community/foundation-funded?
+**Decision:** Deep nightly analysis with incremental per-pipeline diffs.
+
+Having a thorough understanding of the codebase is critical to the orchestrator's value proposition — it's what enables intelligent routing, context injection, and progressive process foundations. The cost of deep analysis is easily amortized as a scheduled job.
+
+**Nightly deep analysis** (full pass, 2-5 minutes for a 5,000-file codebase):
+- Parse full AST for every file (language-specific: TypeScript compiler API, Python `ast` module, Go `go/parser`)
+- Build the complete dependency graph (imports, exports, cross-module references)
+- Compute cyclomatic complexity per function
+- Detect architectural patterns (hexagonal, layered, event-driven) by analyzing import directions
+- Identify hotspots (correlate `git log --stat` churn data with complexity scores)
+- Map module boundaries and their public interfaces
+- Detect circular dependencies, orphaned code, coupling metrics
+- Detect **architectural drift** ("three months ago this was cleanly hexagonal, but 15 recent PRs introduced direct adapter-to-adapter imports")
+
+**Per-pipeline incremental diff** (seconds):
+- `git diff` against the base branch to identify changed files
+- Walk only the changed files' dependency subgraph (what imports them, what they import)
+- Recompute complexity only for changed modules
+- Flag if changes cross module boundaries (raise complexity score)
+- Check if changes touch hotspots (route to higher scrutiny)
+
+The nightly analysis output is stored in `.ai-sdlc/state/codebase-profile.yaml` and cached. The per-pipeline diff is a lightweight overlay that adjusts scores based on the specific changes being made.
+
+### 3. Agent Credential Model
+
+**Decision:** Layered credential chain with fallback, rotation, and provider failover.
+
+The credential model supports three authentication methods in a priority chain:
+
+```yaml
+# .ai-sdlc/agents.yaml
+agents:
+  - name: code-agent
+    provider: anthropic
+    credentials:
+      # Primary: user's OAuth token (for human-initiated work)
+      # The agent acts on behalf of the user who triggered the pipeline
+      primary:
+        type: oauth
+        provider: anthropic
+        scopes: ["code:write", "code:read"]
+
+      # Fallback chain (tried in order if primary fails)
+      fallback:
+        # Fallback 1: Org API key (for autonomous work)
+        - type: api-key
+          keyRef: ANTHROPIC_API_KEY_PRIMARY
+
+        # Fallback 2: Backup key (if primary exposed/rotated)
+        - type: api-key
+          keyRef: ANTHROPIC_API_KEY_SECONDARY
+
+        # Fallback 3: Different provider entirely (graceful degradation)
+        - type: api-key
+          provider: openai
+          keyRef: OPENAI_API_KEY
+          model: gpt-4o
+
+      # Key rotation: array of pre-provisioned keys for instant rotation
+      rotation:
+        keys:
+          - ANTHROPIC_API_KEY_PRIMARY
+          - ANTHROPIC_API_KEY_SECONDARY
+          - ANTHROPIC_API_KEY_TERTIARY
+        activeSlot: 0
+        rotateOnFailure: true    # Auto-advance to next slot on auth failure
+        notifyOnRotation: ["#ops-channel"]
+```
+
+**Semantics:**
+- **OAuth primary:** When a human triggers a pipeline (labels an issue, assigns it), the agent uses the triggering user's OAuth subscription. The agent acts *on behalf of* the human.
+- **API key fallback:** When the pipeline is triggered autonomously (scheduled, event-driven with no human initiator), the agent uses the organization's API key.
+- **Provider failover:** If all keys for the primary provider fail (outage, rate limit), the orchestrator falls back to a different model/provider. The pipeline continues with degraded capability rather than failing entirely.
+- **Instant rotation:** Pre-provisioned key array means a compromised key can be disabled immediately. The orchestrator advances `activeSlot` and notifies ops. No downtime.
+
+### 4. Failure Recovery
+
+**Decision:** Reset to branch point and restart from the beginning.
+
+When the orchestrator crashes mid-pipeline while an agent has made modifications to the working directory, the safest recovery is a **clean restart**:
+
+```
+On orchestrator crash recovery:
+  1. Detect in-flight pipelines (status: Running, no heartbeat in >5 minutes)
+  2. For each in-flight pipeline:
+     a. git reset --hard to the branch creation point
+        (or delete the working branch entirely)
+     b. Set pipeline status to "Failed (orchestrator crash, restarting)"
+     c. Re-enqueue the original issue for fresh execution
+  3. Resume the reconciliation loop from clean state
+```
+
+**Rationale:** Trying to resume from a partially modified working directory risks subtle corruption — incomplete refactors, half-applied changes, inconsistent state. The lost work is AI-generated code that can be regenerated deterministically (same issue, same context, same agent). The token cost of re-execution is trivial compared to the risk of shipping corrupted code.
+
+The reconciliation model makes this natural: the loop is **level-triggered** (based on state, not events). When the orchestrator restarts, it observes "this issue is assigned and has no completed pipeline" and starts fresh. No special recovery logic needed — the normal loop handles it.
+
+### 5. Multi-Repo Architecture Awareness
+
+**Decision:** One orchestrator per organization, with cross-repo architectural reasoning.
+
+The framing of "multi-tenant isolation" was incorrect. The correct model is: **one orchestrator per organization**, managing multiple repos that are architecturally related (e.g., microservice backends). The repos aren't isolated tenants — they're parts of a system that need to reason about each other.
+
+**Per-repo state** (isolated):
+- Codebase complexity profile
+- Autonomy ledger (per-agent, per-repo)
+- Episodic memory
+- Conventions and hotspots
+
+**Cross-repo state** (organizational):
+```yaml
+# .ai-sdlc/org-state/service-map.yaml
+# Maintained by nightly analysis across all repos
+services:
+  user-service:
+    repo: acme/user-service
+    apis:
+      - type: rest
+        spec: openapi.yaml
+        endpoints: ["/users/*"]
+      - type: grpc
+        spec: user.proto
+    events:
+      publishes: [user.created, user.updated, user.deleted]
+      subscribes: []
+    dependencies:
+      - service: auth-service
+        type: runtime
+        interface: "JWT validation"
+
+  auth-service:
+    repo: acme/auth-service
+    apis:
+      - type: rest
+        spec: openapi.yaml
+        endpoints: ["/auth/*", "/oauth/*"]
+    dependencies:
+      - service: user-service
+        type: runtime
+        interface: "GET /users/{id}"
+
+  notification-service:
+    repo: acme/notification-service
+    events:
+      subscribes: [user.created, order.completed]
+    dependencies:
+      - service: user-service
+        type: runtime
+        interface: "GET /users/{id} (contact info)"
+```
+
+**How this affects orchestration:**
+
+When Issue #248 says "add email verification to User model," the orchestrator:
+1. Identifies `user-service` as the primary repo
+2. Looks up the service map: `user-service` has 3 downstream dependents (`auth-service`, `notification-service`, `api-gateway`)
+3. Scores the issue *higher complexity* because changes cascade across services
+4. Decomposes into coordinated sub-tasks per repo with the right ordering
+5. Ensures API contract changes don't break consumers (validates OpenAPI/proto compatibility)
+6. Routes the cross-service coordination to a higher autonomy level or human architect
+
+Storage model: per-repo SQLite databases for isolated state, plus an org-level state directory for the service map and cross-repo metrics. No shared database needed — the orchestrator reads all state directly.
+
+### 6. Self-Evolving Spec Process
+
+**Decision:** Formal "orchestrator found a spec gap" → RFC process.
+
+The dogfood already demonstrated this pattern: ~600 lines of hardcoded orchestration logic in `execute.ts` became RFC-0002. The orchestrator will continue to reveal spec gaps as it encounters real-world scenarios the spec doesn't cover.
+
+**Process:**
+
+1. **Detection** — During orchestration, if the engine encounters a decision that should be declarative but isn't (must be hardcoded), it logs a `spec-gap` event with context.
+
+2. **Triage** — Spec gaps are reviewed weekly. Gaps that affect portability (two orchestrator implementations would behave differently) or correctness (the gap leads to surprising behavior) are flagged for RFC.
+
+3. **RFC** — A new RFC is drafted with:
+   - The orchestrator scenario that revealed the gap
+   - The hardcoded behavior currently in the orchestrator
+   - The proposed spec extension to make it declarative
+   - Conformance test cases derived from real pipeline executions
+
+4. **Merge back** — Once the RFC is accepted, the orchestrator replaces its hardcoded logic with spec-driven configuration, and the conformance test suite is updated.
+
+This creates a **self-evolving specification**: the orchestrator discovers what the spec should say, and the spec makes the orchestrator more portable and correct. The spec and product co-evolve through real-world usage, not theoretical design.
+
+### 7. Commercial Model
+
+**Decision:** Open-core with a managed cloud service and enterprise tier.
+
+See **Appendix A: Commercial Strategy** below for the full analysis.
+
+---
+
+## Appendix A: Commercial Strategy
+
+### Market Context
+
+The AI developer tooling market is experiencing explosive growth:
+- AI captured **$211 billion** in venture funding in 2025 (85% YoY increase)
+- Cursor (Anysphere) went from $0 to **$1B+ ARR** in ~24 months, valued at **$29.3B**
+- Cognition (Devin + Windsurf) raised $400M at a **$10.2B** valuation
+- The AI governance market is projected to grow from **$309M (2025)** to **$4.8B (2034)** at 35.7% CAGR
+
+No one is monetizing the AI SDLC orchestration layer yet. Cursor, Copilot, and Devin monetize *code generation*. SonarQube and Snyk monetize *code scanning*. Jira and Linear monetize *project tracking*. Nobody monetizes the orchestration of AI agents through the full SDLC — the layer that coordinates all of these.
+
+### Pricing Model: Open-Core + Managed Cloud
+
+The model follows the pattern proven by GitLab, Grafana Labs, Temporal, and Akuity: an open-source core that teams can self-host freely, with a managed cloud service and enterprise features for organizations that need them.
+
+#### Community Edition (Free, Apache 2.0)
+
+Everything needed to run the orchestrator for a single team:
+
+| Feature | Included |
+|---|---|
+| Full orchestration engine | Pipeline execution, stage management, agent invocation |
+| All agent runners | Claude Code, Copilot, Cursor, Devin, custom |
+| Quality gate engine | Advisory, soft-mandatory, hard-mandatory enforcement |
+| Autonomy system | Levels 0-3, promotion/demotion, full metrics |
+| Codebase analysis | Nightly deep analysis, per-pipeline diffs |
+| Context injection | Conventions, hotspots, architectural patterns |
+| Adapter ecosystem | GitHub, GitLab, Linear, Jira, SonarQube, Semgrep |
+| SQLite state store | Autonomy ledger, episodic memory, codebase profile |
+| CLI tools | `ai-sdlc init`, `ai-sdlc run`, `ai-sdlc start` |
+| OpenTelemetry | Traces, metrics, logs for all orchestration decisions |
+| Single-repo | One repository per orchestrator instance |
+
+**Why this is generous:** The community edition must be genuinely useful — not a crippled trial. Teams should be able to run their entire SDLC with the free edition. This builds adoption, community, and the contributor pipeline. The paid tiers monetize scale, operations, and enterprise requirements — not core functionality.
+
+#### Team Cloud ($49/active-agent/month)
+
+Managed orchestrator-as-a-service for teams scaling beyond a single repo:
+
+| Feature | Added over Community |
+|---|---|
+| Managed hosting | Zero-ops orchestrator, always-on, webhook-driven |
+| Multi-repo | Up to 25 repos per organization |
+| Cross-repo service map | Architectural reasoning across microservices |
+| PostgreSQL state store | Durable, backed up, queryable |
+| Dashboard | Codebase complexity trends, autonomy trajectories, gate pass rates, agent performance |
+| Slack/Teams notifications | Pipeline events, promotion alerts, gate failures |
+| Team management | Invite members, assign roles, manage agents |
+| 99.9% SLA | On the orchestration service |
+
+**Pricing rationale:** "Active agent" = an agent that executed at least one pipeline stage in the billing period. This aligns cost with value — teams pay for agents that are doing work, not idle seats. At $49/active-agent/month, a team with 3 active agents pays $147/month. This is comparable to 3 Cursor Pro seats ($60/month) but delivers orchestration value on top of the coding agents the team already pays for.
+
+#### Enterprise ($199/active-agent/month, annual commitment)
+
+For organizations with compliance, security, and scale requirements:
+
+| Feature | Added over Team Cloud |
+|---|---|
+| Unlimited repos | No repo limit per organization |
+| SSO/SAML | Okta, Azure AD, Google Workspace integration |
+| Audit export | Immutable audit trail export to SIEM (Splunk, Datadog, ELK) |
+| Compliance reporting | ISO 42001, NIST AI RMF, EU AI Act mapped reports |
+| Custom quality gates | Rego/CEL policy evaluation, LLM-based gate evaluation |
+| Private deployment | VPC, on-prem, air-gapped options |
+| IP indemnity | Legal coverage for AI-generated code orchestrated through the platform |
+| Priority support | 4-hour SLA for critical issues, dedicated CSM |
+| Advanced analytics | Cost-per-task, model usage optimization, ROI dashboards |
+| Custom agent runners | Dedicated engineering support for proprietary agent integrations |
+| Organization-level autonomy | Cross-repo agent autonomy with organizational policies |
+
+**Pricing rationale:** $199/active-agent/month for an enterprise with 10 active agents = $23,880/year. This is a fraction of what enterprises pay for comparable developer infrastructure:
+- GitLab Ultimate + Duo Enterprise: $138/user/month (per human developer)
+- Snyk Enterprise (50 devs): ~$35K-47K/year
+- SonarQube Enterprise (5M LOC): ~$35K/year
+- DataRobot Enterprise: $15K-20K/month
+
+The AI-SDLC Orchestrator replaces orchestration logic that would otherwise require significant custom engineering (the dogfood is 8,700 lines — that's months of senior engineering time).
+
+#### Professional Services
+
+| Service | Model |
+|---|---|
+| **Implementation** | Fixed-price engagement to configure orchestrator for org's SDLC |
+| **Training** | Per-seat training for engineering teams on orchestrator configuration and agent management |
+| **Custom adapters** | Time-and-materials development of proprietary tool integrations |
+| **Architecture review** | Periodic assessment of orchestrator configuration and agent performance |
+
+### Revenue Trajectory (Projection)
+
+| Period | Community Users | Team Cloud | Enterprise | Est. ARR |
+|---|---|---|---|---|
+| Month 6 | 500 repos | 10 orgs (30 agents) | 0 | $18K |
+| Month 12 | 2,000 repos | 50 orgs (200 agents) | 5 orgs (50 agents) | $237K |
+| Month 18 | 5,000 repos | 150 orgs (700 agents) | 20 orgs (250 agents) | $1.0M |
+| Month 24 | 10,000 repos | 400 orgs (2,000 agents) | 50 orgs (800 agents) | $3.1M |
+
+### What Differentiates Free from Paid
+
+The dividing line follows the GitLab "buyer-based" model:
+
+- **Free features** target the **individual developer or small team** — they want to orchestrate their SDLC, and the free edition does everything they need.
+- **Team Cloud features** target the **engineering manager** — they want multi-repo visibility, dashboards, and managed ops so they don't have to run infrastructure.
+- **Enterprise features** target the **VP of Engineering / CISO** — they need compliance, audit trails, SSO, IP indemnity, and SLAs to satisfy their procurement and legal teams.
+
+The core orchestration engine never becomes paid. Governance gates, autonomy management, context injection, and agent orchestration remain free forever. The commercial value is in **operational convenience, organizational scale, and enterprise compliance** — not in gating the technology that makes AI-driven SDLC work.
+
+## Open Questions (Remaining)
+
+1. **License choice for orchestrator** — Apache 2.0 is maximally permissive but allows competitors to offer a hosted service without contributing back. Should the orchestrator use BSL (like HashiCorp) or AGPL (like Grafana) to protect the commercial cloud offering? Apache 2.0 builds faster community adoption but risks a "free-rider" managed service from a cloud provider. The spec remains Apache 2.0 regardless.
+
+2. **Agent compute cost attribution** — When the orchestrator invokes agents, who pays for the compute? The orchestrator itself is lightweight, but the agents it invokes consume API credits (Anthropic, OpenAI) or compute (self-hosted models). Should the orchestrator track and report per-pipeline agent costs? This would be valuable for the "cost per task" metric but requires integration with billing APIs.
+
+3. **AAIF contribution timing** — At what point does the orchestrator have enough traction to propose the spec as a governance layer for the AAIF? The target should be quantifiable (e.g., 1,000+ governed repos, 5+ enterprise customers, multiple agent runners proven in production).
 
 ## References
 
