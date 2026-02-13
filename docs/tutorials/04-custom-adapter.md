@@ -304,6 +304,107 @@ status:
 
 ---
 
+## Step 5: Register with the Adapter Registry
+
+The SDK provides an adapter registry for managing adapter factories:
+
+```typescript
+import {
+  createAdapterRegistry,
+  validateAdapterMetadata,
+  AdapterBindingBuilder,
+} from "@ai-sdlc/reference";
+import { createJiraIssueTracker } from "./jira-adapter.js";
+
+// Create a registry
+const registry = createAdapterRegistry();
+
+// Register the Jira adapter
+registry.register(
+  {
+    name: "jira",
+    interface: "IssueTracker",
+    type: "jira",
+    version: "1.0.0",
+    stability: "stable",
+    description: "Jira Cloud issue tracker adapter",
+  },
+  (config) => createJiraIssueTracker(config as any),
+);
+
+// Look up and instantiate
+const factory = registry.get("IssueTracker", "jira");
+if (factory) {
+  const tracker = factory({
+    projectKey: "ENG",
+    baseUrl: "https://mycompany.atlassian.net",
+    apiToken: process.env.JIRA_API_TOKEN!,
+  });
+  const issues = await tracker.listIssues({ status: "In Progress" });
+  console.log(`Found ${issues.length} issues`);
+}
+
+// List all registered adapters
+const adapters = registry.list("IssueTracker");
+console.log("Registered IssueTracker adapters:", adapters.map(a => a.name));
+```
+
+## Step 6: Use the Webhook Bridge
+
+For adapters that receive events via webhooks (like Jira), use the webhook bridge:
+
+```typescript
+import { createWebhookBridge } from "@ai-sdlc/reference";
+
+const bridge = createWebhookBridge();
+
+// Register a transformer for Jira webhook payloads
+bridge.transform("jira:issue_updated", (payload: any) => ({
+  type: "updated",
+  issue: {
+    id: payload.issue.key,
+    title: payload.issue.fields.summary,
+    status: payload.issue.fields.status.name,
+    url: `${payload.issue.self.split("/rest")[0]}/browse/${payload.issue.key}`,
+  },
+  timestamp: new Date().toISOString(),
+}));
+
+// Subscribe to transformed events
+bridge.on("jira:issue_updated", (event) => {
+  console.log("Issue updated:", event);
+});
+
+// When a webhook arrives, emit the raw payload
+bridge.emit("jira:issue_updated", webhookPayload);
+```
+
+## Step 7: Build the AdapterBinding with the SDK
+
+```typescript
+import { AdapterBindingBuilder, validateResource } from "@ai-sdlc/reference";
+
+const binding = new AdapterBindingBuilder(
+  "jira-issue-tracker",
+  "IssueTracker",
+  "jira",
+  "1.0.0",
+)
+  .label("adapter", "jira")
+  .label("interface", "issue-tracker")
+  .source("registry.ai-sdlc.io/adapters/jira@1.0.0")
+  .config({
+    projectKey: "ENG",
+    baseUrl: "https://mycompany.atlassian.net",
+    apiToken: { secretRef: "jira-api-token" },
+  })
+  .withHealthCheck({ interval: "60s", timeout: "10s" })
+  .build();
+
+const result = validateResource(binding);
+console.log(result.valid); // true
+```
+
 ## Validation
 
 Validate your AdapterBinding YAML against the schema to catch errors before

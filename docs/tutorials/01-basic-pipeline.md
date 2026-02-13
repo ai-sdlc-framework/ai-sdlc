@@ -158,9 +158,62 @@ The four routing strategies determine how much human involvement is needed:
 
 Complexity scores are assigned per task by your implementation (static analysis, AI evaluation, or manual assignment). The pipeline routes the task to the appropriate strategy automatically.
 
-## Step 4: Validate the Pipeline
+## Step 4: Build the Pipeline with the SDK
 
-Use the reference implementation to validate your pipeline YAML against the JSON Schema.
+Instead of writing YAML by hand, you can use the `PipelineBuilder` for type-safe construction:
+
+```typescript
+import { PipelineBuilder, validateResource, routeByComplexity } from "@ai-sdlc/reference";
+
+const pipeline = new PipelineBuilder("my-first-pipeline")
+  .label("team", "alpha")
+  .label("environment", "production")
+  .addTrigger({ event: "issue.assigned", filter: { labels: ["ai-eligible"] } })
+  .addProvider("issueTracker", { type: "linear", config: { teamId: "ENG" } })
+  .addProvider("sourceControl", { type: "github", config: { org: "my-org" } })
+  .addStage({
+    name: "implement",
+    agent: "code-agent",
+    qualityGates: ["test-coverage", "security-scan"],
+  })
+  .addStage({
+    name: "review",
+    agent: "reviewer-agent",
+    qualityGates: ["human-approval"],
+  })
+  .withRouting({
+    complexityThresholds: {
+      low: { min: 1, max: 3, strategy: "fully-autonomous" },
+      medium: { min: 4, max: 6, strategy: "ai-with-review" },
+      high: { min: 7, max: 8, strategy: "ai-assisted" },
+      critical: { min: 9, max: 10, strategy: "human-led" },
+    },
+  })
+  .build();
+
+// Validate the built resource
+const result = validateResource(pipeline);
+console.log(result.valid); // true
+console.log(pipeline.metadata.name); // "my-first-pipeline"
+console.log(pipeline.spec.stages.length); // 2
+```
+
+You can also use the `routeByComplexity` function to programmatically determine routing:
+
+```typescript
+const routing = routeByComplexity({
+  linesChanged: 50,
+  filesChanged: 3,
+  hasTests: true,
+  hasMigration: false,
+});
+console.log(routing.strategy); // e.g., "fully-autonomous"
+console.log(routing.score); // numeric complexity score
+```
+
+## Step 5: Validate from YAML
+
+You can also validate YAML files against the JSON Schema:
 
 ```typescript
 import { readFileSync } from "fs";
@@ -170,13 +223,13 @@ import { validate } from "@ai-sdlc/reference";
 const raw = readFileSync("pipelines/my-first-pipeline.yaml", "utf-8");
 const pipeline = parse(raw);
 
-const result = validate(pipeline);
+const result = validate("Pipeline", pipeline);
 
 if (result.valid) {
   console.log("Pipeline is valid.");
 } else {
   console.error("Validation errors:");
-  for (const error of result.errors) {
+  for (const error of result.errors!) {
     console.error(`  - ${error.path}: ${error.message}`);
   }
 }
@@ -197,7 +250,8 @@ In this tutorial, you built a Pipeline resource step by step:
 1. **Minimal pipeline** -- A single trigger, provider, and stage to get started.
 2. **Multi-stage pipeline** -- Added a review stage with quality gate references.
 3. **Complexity routing** -- Configured four routing tiers so tasks are handled appropriately based on their complexity score.
-4. **Validation** -- Used the reference implementation to verify the pipeline conforms to the AI-SDLC schema.
+4. **Builder API** -- Used `PipelineBuilder` for type-safe construction with `routeByComplexity()`.
+5. **Validation** -- Used the reference implementation to verify the pipeline conforms to the AI-SDLC schema.
 
 Pipelines are the backbone of the AI-SDLC Framework. They connect triggers to agents, enforce quality through gates, and route work based on complexity -- all declared as YAML configuration.
 
