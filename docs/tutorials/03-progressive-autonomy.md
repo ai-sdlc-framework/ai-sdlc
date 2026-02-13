@@ -226,7 +226,120 @@ Each trigger defines:
 | `rollback-rate-exceeds-5-percent` | Drop one level | 2 weeks | Performance degradation warrants reduced autonomy |
 | `unauthorized-access-attempt` | Reset to Level 0 | 4 weeks | Trust boundary violations are severe |
 
-## Step 5: Validate the AutonomyPolicy
+## Step 5: Build and Evaluate with the SDK
+
+Use the `AutonomyPolicyBuilder` for type-safe construction:
+
+```typescript
+import {
+  AutonomyPolicyBuilder,
+  evaluatePromotion,
+  evaluateDemotion,
+  parseDuration,
+} from "@ai-sdlc/reference";
+
+// Build the policy
+const policy = new AutonomyPolicyBuilder("standard-progression")
+  .addLevel({
+    level: 0,
+    name: "Intern",
+    permissions: { read: ["*"], write: [], execute: [] },
+    guardrails: { requireApproval: "all" },
+    monitoring: "continuous",
+    minimumDuration: "2w",
+  })
+  .addLevel({
+    level: 1,
+    name: "Junior",
+    permissions: { read: ["*"], write: ["draft-pr", "comment"], execute: ["test-suite"] },
+    guardrails: { requireApproval: "all", maxLinesPerPR: 200 },
+    monitoring: "continuous",
+    minimumDuration: "4w",
+  })
+  .addLevel({
+    level: 2,
+    name: "Senior",
+    permissions: { read: ["*"], write: ["branch", "pr", "comment"], execute: ["test-suite", "lint", "build"] },
+    guardrails: { requireApproval: "security-critical-only", maxLinesPerPR: 500 },
+    monitoring: "real-time-notification",
+    minimumDuration: "8w",
+  })
+  .addPromotionCriteria("0-to-1", {
+    minimumTasks: 20,
+    conditions: [
+      { metric: "recommendation-acceptance-rate", operator: ">=", threshold: 0.90 },
+      { metric: "security-incidents", operator: "==", threshold: 0 },
+    ],
+    requiredApprovals: ["engineering-manager"],
+  })
+  .addPromotionCriteria("1-to-2", {
+    minimumTasks: 50,
+    conditions: [
+      { metric: "pr-approval-rate", operator: ">=", threshold: 0.90 },
+      { metric: "rollback-rate", operator: "<=", threshold: 0.02 },
+    ],
+    requiredApprovals: ["engineering-manager", "security-lead"],
+  })
+  .addDemotionTrigger({
+    trigger: "critical-security-incident",
+    action: "demote-to-0",
+    cooldown: "4w",
+  })
+  .addDemotionTrigger({
+    trigger: "rollback-rate-exceeds-5-percent",
+    action: "demote-one-level",
+    cooldown: "2w",
+  })
+  .build();
+
+// Evaluate promotion eligibility
+const promotionResult = evaluatePromotion(policy, {
+  name: "code-agent",
+  currentLevel: 0,
+  totalTasksCompleted: 25,
+  metrics: {
+    "recommendation-acceptance-rate": 0.95,
+    "security-incidents": 0,
+  },
+  approvals: ["engineering-manager"],
+  promotedAt: new Date(Date.now() - parseDuration("3w")), // 3 weeks ago
+});
+
+if (promotionResult.eligible) {
+  console.log(`Promote from level ${promotionResult.fromLevel} to ${promotionResult.toLevel}`);
+} else {
+  console.log("Not eligible:", promotionResult.unmetConditions);
+}
+
+// Evaluate demotion
+const demotionResult = evaluateDemotion(policy, {
+  name: "code-agent",
+  currentLevel: 2,
+  totalTasksCompleted: 80,
+  metrics: {},
+  approvals: [],
+}, "critical-security-incident");
+
+if (demotionResult.demoted) {
+  console.log(`Demoted from level ${demotionResult.fromLevel} to ${demotionResult.toLevel}`);
+  console.log(`Trigger: ${demotionResult.trigger}`);
+}
+```
+
+### Duration Parsing
+
+The `parseDuration` utility converts duration strings to milliseconds:
+
+```typescript
+import { parseDuration } from "@ai-sdlc/reference";
+
+parseDuration("2w");   // 1_209_600_000 (2 weeks)
+parseDuration("4w");   // 2_419_200_000 (4 weeks)
+parseDuration("300s"); // 300_000 (5 minutes)
+parseDuration("P1D");  // 86_400_000 (1 day, ISO 8601)
+```
+
+## Step 6: Validate from YAML
 
 Validate the complete resource against the JSON Schema:
 
@@ -238,13 +351,13 @@ import { validate } from "@ai-sdlc/reference";
 const raw = readFileSync("policies/standard-progression.yaml", "utf-8");
 const policy = parse(raw);
 
-const result = validate(policy);
+const result = validate("AutonomyPolicy", policy);
 
 if (result.valid) {
   console.log("AutonomyPolicy is valid.");
 } else {
   console.error("Validation errors:");
-  for (const error of result.errors) {
+  for (const error of result.errors!) {
     console.error(`  - ${error.path}: ${error.message}`);
   }
 }

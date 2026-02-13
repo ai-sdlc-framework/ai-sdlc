@@ -218,9 +218,100 @@ The `implement` stage references `ai-code-standards`, which bundles test coverag
 
 All gates within a referenced QualityGate must pass (or be overridden, for soft-mandatory gates) before the stage completes. A single hard-mandatory failure blocks the entire stage.
 
-## Step 6: Validate the Quality Gates
+## Step 6: Build and Enforce Gates with the SDK
 
-Validate each QualityGate resource against the schema:
+Instead of writing YAML, use the `QualityGateBuilder` and `enforce()` for programmatic gate evaluation:
+
+```typescript
+import { QualityGateBuilder, enforce } from "@ai-sdlc/reference";
+
+// Build the gate resource
+const gate = new QualityGateBuilder("ai-code-standards")
+  .withScope({
+    repositories: ["org/service-*"],
+    authorTypes: ["ai-agent"],
+  })
+  .addGate({
+    name: "test-coverage",
+    enforcement: "soft-mandatory",
+    rule: { metric: "line-coverage", operator: ">=", threshold: 80 },
+    override: { requiredRole: "engineering-manager", requiresJustification: true },
+  })
+  .addGate({
+    name: "security-scan",
+    enforcement: "hard-mandatory",
+    rule: { tool: "semgrep", maxSeverity: "medium", rulesets: ["owasp-top-10"] },
+  })
+  .addGate({
+    name: "human-review",
+    enforcement: "soft-mandatory",
+    rule: { minimumReviewers: 2, aiAuthorRequiresExtraReviewer: true },
+    override: { requiredRole: "engineering-manager", requiresJustification: true },
+  })
+  .withEvaluation({
+    pipeline: "pre-merge",
+    timeout: "300s",
+    retryPolicy: { maxRetries: 3, backoff: "exponential" },
+  })
+  .build();
+
+// Enforce the gate against actual metrics
+const result = enforce(gate, {
+  authorType: "ai-agent",
+  repository: "org/service-api",
+  metrics: { "line-coverage": 85 },
+  toolResults: {
+    semgrep: { findings: [] },
+  },
+  reviewerCount: 3, // 2 base + 1 extra for AI author
+});
+
+console.log("Allowed:", result.allowed); // true
+for (const r of result.results) {
+  console.log(`  ${r.gate}: ${r.verdict}`);
+}
+// test-coverage: pass
+// security-scan: pass
+// human-review: pass
+```
+
+### Expression Rules
+
+You can also use expression-based rules for dynamic evaluation:
+
+```typescript
+import { evaluateExpressionRule, createSimpleExpressionEvaluator } from "@ai-sdlc/reference";
+
+const verdict = evaluateExpressionRule(
+  { expression: "metrics['line-coverage'] >= 80" },
+  {
+    authorType: "ai-agent",
+    repository: "org/repo",
+    metrics: { "line-coverage": 92 },
+  },
+);
+console.log(verdict.passed); // true
+```
+
+### Mutating Gates
+
+Mutating gates transform resources before enforcement:
+
+```typescript
+import { createLabelInjector, createMetadataEnricher, applyMutatingGates } from "@ai-sdlc/reference";
+
+const gates = [
+  createLabelInjector({ "managed-by": "ai-sdlc", team: "platform" }),
+  createMetadataEnricher({ "ai-sdlc.io/generated": "true" }),
+];
+
+const mutated = applyMutatingGates(pipeline, gates, { timestamp: new Date().toISOString() });
+console.log(mutated.metadata.labels); // includes 'managed-by' and 'team'
+```
+
+## Step 7: Validate from YAML
+
+Validate each QualityGate YAML file against the schema:
 
 ```typescript
 import { readFileSync } from "fs";
@@ -236,13 +327,13 @@ const files = [
 for (const file of files) {
   const raw = readFileSync(file, "utf-8");
   const gate = parse(raw);
-  const result = validate(gate);
+  const result = validate("QualityGate", gate);
 
   if (result.valid) {
     console.log(`${file}: valid`);
   } else {
     console.error(`${file}: invalid`);
-    for (const error of result.errors) {
+    for (const error of result.errors!) {
       console.error(`  - ${error.path}: ${error.message}`);
     }
   }

@@ -286,6 +286,127 @@ the spec for detailed characteristics and selection guidance.
 
 ---
 
+## Step 6: Execute Orchestration Programmatically
+
+Use the SDK to build agents, create plans, and execute orchestrations:
+
+```typescript
+import {
+  AgentRoleBuilder,
+  sequential,
+  parallel,
+  hierarchical,
+  executeOrchestration,
+  validateHandoff,
+  createAgentMemory,
+} from "@ai-sdlc/reference";
+
+// Build agent roles
+const codeAgent = new AgentRoleBuilder(
+  "implement-agent",
+  "Senior Software Engineer",
+  "Implement features with thorough test coverage",
+)
+  .tools(["code-editor", "terminal", "test-runner", "git-client"])
+  .addHandoff({
+    target: "review-agent",
+    trigger: "implementation complete",
+    contract: {
+      schema: "./contracts/impl-to-review.json",
+      requiredFields: ["prUrl", "testResults", "changeSummary"],
+    },
+  })
+  .build();
+
+const reviewAgent = new AgentRoleBuilder(
+  "review-agent",
+  "Code Reviewer",
+  "Review code for quality and security issues",
+)
+  .tools(["code-editor", "file-search"])
+  .addHandoff({
+    target: "deploy-agent",
+    trigger: "review approved",
+    contract: { requiredFields: ["prUrl", "approvalStatus"] },
+  })
+  .build();
+
+const deployAgent = new AgentRoleBuilder(
+  "deploy-agent",
+  "Deployment Engineer",
+  "Deploy approved changes to staging and production",
+)
+  .tools(["terminal", "deploy-cli"])
+  .build();
+
+// Create a sequential plan
+const plan = sequential([codeAgent, reviewAgent, deployAgent]);
+
+// Set up the agent map
+const agents = new Map([
+  ["implement-agent", codeAgent],
+  ["review-agent", reviewAgent],
+  ["deploy-agent", deployAgent],
+]);
+
+// Execute with a mock task function
+const result = await executeOrchestration(plan, agents, async (agent, input) => {
+  console.log(`Executing ${agent.metadata.name} with input:`, input);
+
+  if (agent.metadata.name === "implement-agent") {
+    return {
+      prUrl: "https://github.com/org/repo/pull/42",
+      testResults: { passed: 100, failed: 0, skipped: 2 },
+      changeSummary: "Added user authentication",
+    };
+  }
+  if (agent.metadata.name === "review-agent") {
+    return { prUrl: (input as any).prUrl, approvalStatus: "approved" };
+  }
+  return { deployed: true, environment: "staging" };
+});
+
+console.log("Success:", result.success);
+for (const step of result.stepResults) {
+  console.log(`  ${step.agent}: ${step.state}`);
+}
+```
+
+### Validate Handoffs
+
+Check that handoff payloads meet contract requirements:
+
+```typescript
+const handoffPayload = {
+  prUrl: "https://github.com/org/repo/pull/42",
+  testResults: { passed: 100, failed: 0 },
+  changeSummary: "Added auth",
+};
+
+const error = validateHandoff(codeAgent, reviewAgent, handoffPayload);
+if (error) {
+  console.error(`Handoff failed: ${error.message}`);
+} else {
+  console.log("Handoff valid");
+}
+```
+
+### Agent Memory
+
+Agents can use multi-tier memory for context persistence:
+
+```typescript
+const memory = createAgentMemory({
+  agentName: "implement-agent",
+});
+
+// Working memory (current task context)
+memory.working.set("currentIssue", { id: "ISS-42", title: "Add auth" });
+
+// Short-term memory (recent context)
+memory.shortTerm.store({ key: "recentPR", value: { url: "..." }, timestamp: new Date().toISOString() });
+```
+
 ## Validation
 
 Validate each AgentRole resource against the schema:
@@ -324,6 +445,7 @@ In this tutorial you:
 3. Declared **skills** so agents can be discovered via A2A-compatible Agent Cards.
 4. Wired three agents into a **Pipeline** with sequential stage execution and quality gates.
 5. Reviewed the five **orchestration patterns** -- sequential, parallel, router, hierarchical, and collaborative -- and when to apply each.
+6. Used the SDK to **execute orchestration programmatically** with mock tasks and handoff validation.
 
 ---
 

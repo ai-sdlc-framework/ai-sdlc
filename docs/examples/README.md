@@ -1,28 +1,44 @@
 # Examples
 
-Complete working examples demonstrating AI-SDLC configurations.
+Complete working examples demonstrating AI-SDLC SDK usage.
 
-## Available Examples
+## TypeScript Examples
 
 | Example | Description |
-| --- | --- |
+|---|---|
+| [builder-examples.ts](builder-examples.ts) | All 5 resource builders with validation |
+| [gate-enforcement.ts](gate-enforcement.ts) | Programmatic quality gate evaluation with override and failure scenarios |
+| [adapter-implementation.ts](adapter-implementation.ts) | Custom adapter from scratch, registry, webhook bridge, EventBus |
+| [orchestration-patterns.ts](orchestration-patterns.ts) | All 5 orchestration patterns with execution and handoff validation |
+
+## YAML Examples
+
+| Example | Description |
+|---|---|
 | [complete-pipeline.yaml](complete-pipeline.yaml) | Full pipeline with all resource types configured together |
 
 ## Running Examples
 
-Validate any example against the schemas:
+The TypeScript examples can be run directly:
+
+```bash
+npx tsx docs/examples/builder-examples.ts
+npx tsx docs/examples/gate-enforcement.ts
+npx tsx docs/examples/adapter-implementation.ts
+npx tsx docs/examples/orchestration-patterns.ts
+```
+
+## Type Checking
+
+Verify examples compile without errors:
+
+```bash
+cd docs/examples
+npx tsc --noEmit
+```
+
+Or validate YAML examples against the schemas:
 
 ```bash
 pnpm --filter @ai-sdlc/reference validate-schemas
-```
-
-Or use the TypeScript API:
-
-```typescript
-import { validateResource } from '@ai-sdlc/reference';
-import { parse } from 'yaml';
-import { readFileSync } from 'fs';
-
-const docs = parse(readFileSync('complete-pipeline.yaml', 'utf-8'));
-// Validate each document in a multi-document YAML
 ```
