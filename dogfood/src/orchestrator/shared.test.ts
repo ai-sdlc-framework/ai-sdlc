@@ -17,6 +17,7 @@ import {
   createAbacPermissionHook,
   createBlockedPathsHook,
   createAuditLoggingHook,
+  parseDuration,
 } from './shared.js';
 import type { AutonomyPolicy, AuditLog, MetricStore, AuthorizationHook } from '@ai-sdlc/reference';
 
@@ -473,5 +474,53 @@ describe('authorization chain composition', () => {
     // Blocked by ABAC (no write permission)
     const deniedAbac = chain({ agent: 'coder', action: 'write', target: '.env' });
     expect(deniedAbac.allowed).toBe(false);
+  });
+});
+
+describe('parseDuration()', () => {
+  it('parses seconds correctly', () => {
+    expect(parseDuration('30s')).toBe(30000);
+    expect(parseDuration('1s')).toBe(1000);
+    expect(parseDuration('60s')).toBe(60000);
+  });
+
+  it('parses minutes correctly', () => {
+    expect(parseDuration('5m')).toBe(300000);
+    expect(parseDuration('1m')).toBe(60000);
+    expect(parseDuration('30m')).toBe(1800000);
+  });
+
+  it('parses hours correctly', () => {
+    expect(parseDuration('2h')).toBe(7200000);
+    expect(parseDuration('1h')).toBe(3600000);
+    expect(parseDuration('24h')).toBe(86400000);
+  });
+
+  it('parses days correctly', () => {
+    expect(parseDuration('1d')).toBe(86400000);
+    expect(parseDuration('2d')).toBe(172800000);
+    expect(parseDuration('7d')).toBe(604800000);
+  });
+
+  it('throws on invalid format', () => {
+    expect(() => parseDuration('invalid')).toThrow('Invalid duration format');
+    expect(() => parseDuration('30')).toThrow('Invalid duration format');
+    expect(() => parseDuration('30ms')).toThrow('Invalid duration format');
+    expect(() => parseDuration('30x')).toThrow('Invalid duration format');
+    expect(() => parseDuration('s30')).toThrow('Invalid duration format');
+  });
+
+  it('throws on zero or negative values', () => {
+    expect(() => parseDuration('0s')).toThrow('Invalid duration format');
+    expect(() => parseDuration('0m')).toThrow('Invalid duration format');
+  });
+
+  it('throws on non-integer values', () => {
+    expect(() => parseDuration('1.5h')).toThrow('Invalid duration format');
+    expect(() => parseDuration('2.5m')).toThrow('Invalid duration format');
+  });
+
+  it('throws on empty string', () => {
+    expect(() => parseDuration('')).toThrow('Invalid duration format');
   });
 });
