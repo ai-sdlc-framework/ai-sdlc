@@ -391,3 +391,37 @@ export function createPipelineAuthorizationChain(hooks: AuthorizationHook[]): Au
 }
 
 export type { AuthorizationHook, AuthorizationContext, AuthorizationResult };
+
+// ── Duration parsing ─────────────────────────────────────────────────
+
+/**
+ * Parse a shorthand duration string (e.g., "30s", "5m", "2h", "1d") to milliseconds.
+ * Supports formats: Ns (seconds), Nm (minutes), Nh (hours), Nd (days) where N is a positive integer.
+ * @throws Error for invalid/unsupported formats
+ */
+export function parseDuration(input: string): number {
+  const match = input.match(/^(\d+)(s|m|h|d)$/);
+  if (!match) {
+    throw new Error(`Invalid duration format: ${input}`);
+  }
+
+  const value = parseInt(match[1], 10);
+  const unit = match[2];
+
+  if (value <= 0) {
+    throw new Error(`Invalid duration format: ${input}`);
+  }
+
+  switch (unit) {
+    case 's':
+      return value * 1000;
+    case 'm':
+      return value * 60 * 1000;
+    case 'h':
+      return value * 60 * 60 * 1000;
+    case 'd':
+      return value * 24 * 60 * 60 * 1000;
+    default:
+      throw new Error(`Invalid duration format: ${input}`);
+  }
+}

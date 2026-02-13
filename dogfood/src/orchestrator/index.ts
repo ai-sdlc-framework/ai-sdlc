@@ -171,6 +171,9 @@ export {
   validateResourceSchema,
 } from './telemetry-extended.js';
 
+// Shared utilities
+export { parseDuration } from './shared.js';
+
 // Comprehensive type re-exports
 export type {
   ApiVersion,
