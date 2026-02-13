@@ -136,7 +136,7 @@ export async function admitIssueResource(
 ): Promise<AdmissionResult> {
   const request: AdmissionRequest = {
     resource,
-    token: 'pipeline-token',
+    token: process.env.GITHUB_TOKEN || 'pipeline-token',
     action: 'write',
     target: resource.metadata.name,
     overrideRole: opts?.overrideRole,
