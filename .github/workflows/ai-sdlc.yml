@@ -50,14 +50,18 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: pnpm --filter @ai-sdlc/dogfood execute --issue ${{ github.event.issue.number }}
 
+      - name: Collect pipeline artifacts
+        if: always()
+        run: |
+          mkdir -p .ai-sdlc
+          cp /tmp/ai-sdlc-diagnostics-audit.jsonl .ai-sdlc/diagnostics-audit.jsonl 2>/dev/null || true
+
       - name: Upload pipeline artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ai-sdlc-run-issue-${{ github.event.issue.number }}
-          path: |
-            .ai-sdlc/audit.jsonl
-            /tmp/ai-sdlc-diagnostics-audit.jsonl
+          path: .ai-sdlc/
           if-no-files-found: ignore
           retention-days: 30
 
