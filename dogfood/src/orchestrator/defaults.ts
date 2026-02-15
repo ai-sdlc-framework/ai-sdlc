@@ -58,8 +58,8 @@ export function defaultSandboxConstraints(workDir: string, timeoutMs?: number): 
 // ── Runner ───────────────────────────────────────────────────────────
 
 export const DEFAULT_RUNNER_TIMEOUT_MS = process.env.AI_SDLC_RUNNER_TIMEOUT
-  ? parseDuration(process.env.AI_SDLC_RUNNER_TIMEOUT) || 300_000
-  : 300_000; // 5 minutes
+  ? parseDuration(process.env.AI_SDLC_RUNNER_TIMEOUT) || 900_000
+  : 900_000; // 15 minutes
 export const DEFAULT_ALLOWED_TOOLS = 'Edit,Write,Read,Glob,Grep,Bash';
 
 // ── Agent constraints ────────────────────────────────────────────────
