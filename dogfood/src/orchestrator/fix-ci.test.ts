@@ -453,56 +453,52 @@ describe('executeFixCI()', () => {
     );
   });
 
-  it(
-    'applies exponential backoff when retryDelay is configured',
-    async () => {
-      const runner = makeMockRunner();
-      const auditLog = makeMockAuditLog();
-      const markers = [RETRY_MARKER]; // One previous attempt
+  it('applies exponential backoff when retryDelay is configured', async () => {
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    const markers = [RETRY_MARKER]; // One previous attempt
 
-      // Mock setTimeout to avoid waiting
-      const realSetTimeout = global.setTimeout;
-      const timeoutSpy = vi.fn((cb, _delay) => {
-        // Execute callback immediately instead of waiting
-        if (typeof cb === 'function') {
-          cb();
-        }
-        return 0 as unknown as NodeJS.Timeout;
-      });
-      global.setTimeout = timeoutSpy as unknown as typeof setTimeout;
-
-      try {
-        await executeFixCI(100, 5555, {
-          configDir: CONFIG_DIR,
-          workDir: '/tmp/test-repo',
-          runner,
-          logger: makeSilentLogger(),
-          _prComments: markers,
-          _ciLogs: 'some error',
-          auditLog,
-        });
-
-        // Should have called setTimeout with the correct backoff (baseDelay * 2^1 = 60000 * 2 = 120000ms)
-        expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 120000);
-
-        // Should have logged the backoff to the audit log
-        expect(auditLog.record).toHaveBeenCalledWith(
-          expect.objectContaining({
-            action: 'execute',
-            details: expect.objectContaining({
-              action: 'retry-backoff',
-              attempt: 2,
-              baseDelayMs: 60000,
-              backoffMs: 120000,
-            }),
-          }),
-        );
-      } finally {
-        global.setTimeout = realSetTimeout;
+    // Mock setTimeout to avoid waiting
+    const realSetTimeout = global.setTimeout;
+    const timeoutSpy = vi.fn((cb, _delay) => {
+      // Execute callback immediately instead of waiting
+      if (typeof cb === 'function') {
+        cb();
       }
-    },
-    10000,
-  );
+      return 0 as unknown as NodeJS.Timeout;
+    });
+    global.setTimeout = timeoutSpy as unknown as typeof setTimeout;
+
+    try {
+      await executeFixCI(100, 5555, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        runner,
+        logger: makeSilentLogger(),
+        _prComments: markers,
+        _ciLogs: 'some error',
+        auditLog,
+      });
+
+      // Should have called setTimeout with the correct backoff (baseDelay * 2^1 = 60000 * 2 = 120000ms)
+      expect(timeoutSpy).toHaveBeenCalledWith(expect.any(Function), 120000);
+
+      // Should have logged the backoff to the audit log
+      expect(auditLog.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'execute',
+          details: expect.objectContaining({
+            action: 'retry-backoff',
+            attempt: 2,
+            baseDelayMs: 60000,
+            backoffMs: 120000,
+          }),
+        }),
+      );
+    } finally {
+      global.setTimeout = realSetTimeout;
+    }
+  }, 10000);
 
   it('does not apply backoff on first attempt (attempts = 0)', async () => {
     const runner = makeMockRunner();
@@ -525,53 +521,49 @@ describe('executeFixCI()', () => {
     expect(backoffCalls).toHaveLength(0);
   });
 
-  it(
-    'caps backoff at MAX_BACKOFF_MS',
-    async () => {
-      const runner = makeMockRunner();
-      const auditLog = makeMockAuditLog();
-      // Create 1 previous attempt (next attempt would be 2, which is allowed with maxRetries=2)
-      // We'll use attempt 2 which gives baseDelay * 2^2 = 60000 * 4 = 240000ms (under the cap)
-      const markers = [RETRY_MARKER];
+  it('caps backoff at MAX_BACKOFF_MS', async () => {
+    const runner = makeMockRunner();
+    const auditLog = makeMockAuditLog();
+    // Create 1 previous attempt (next attempt would be 2, which is allowed with maxRetries=2)
+    // We'll use attempt 2 which gives baseDelay * 2^2 = 60000 * 4 = 240000ms (under the cap)
+    const markers = [RETRY_MARKER];
 
-      // Mock setTimeout to avoid waiting
-      const realSetTimeout = global.setTimeout;
-      const timeoutSpy = vi.fn((cb, _delay) => {
-        if (typeof cb === 'function') {
-          cb();
-        }
-        return 0 as unknown as NodeJS.Timeout;
-      });
-      global.setTimeout = timeoutSpy as unknown as typeof setTimeout;
-
-      try {
-        await executeFixCI(100, 5555, {
-          configDir: CONFIG_DIR,
-          workDir: '/tmp/test-repo',
-          runner,
-          logger: makeSilentLogger(),
-          _prComments: markers,
-          _ciLogs: 'some error',
-          auditLog,
-        });
-
-        // With 1 previous attempt, the next attempt is 2, giving baseDelay * 2^1 = 120000ms
-        expect(auditLog.record).toHaveBeenCalledWith(
-          expect.objectContaining({
-            action: 'execute',
-            details: expect.objectContaining({
-              action: 'retry-backoff',
-              attempt: 2,
-              backoffMs: 120000,
-            }),
-          }),
-        );
-      } finally {
-        global.setTimeout = realSetTimeout;
+    // Mock setTimeout to avoid waiting
+    const realSetTimeout = global.setTimeout;
+    const timeoutSpy = vi.fn((cb, _delay) => {
+      if (typeof cb === 'function') {
+        cb();
       }
-    },
-    10000,
-  );
+      return 0 as unknown as NodeJS.Timeout;
+    });
+    global.setTimeout = timeoutSpy as unknown as typeof setTimeout;
+
+    try {
+      await executeFixCI(100, 5555, {
+        configDir: CONFIG_DIR,
+        workDir: '/tmp/test-repo',
+        runner,
+        logger: makeSilentLogger(),
+        _prComments: markers,
+        _ciLogs: 'some error',
+        auditLog,
+      });
+
+      // With 1 previous attempt, the next attempt is 2, giving baseDelay * 2^1 = 120000ms
+      expect(auditLog.record).toHaveBeenCalledWith(
+        expect.objectContaining({
+          action: 'execute',
+          details: expect.objectContaining({
+            action: 'retry-backoff',
+            attempt: 2,
+            backoffMs: 120000,
+          }),
+        }),
+      );
+    } finally {
+      global.setTimeout = realSetTimeout;
+    }
+  }, 10000);
 
   it('verifies backoff calculation caps at MAX_BACKOFF_MS for high attempts', () => {
     // Test the calculateBackoff function directly with a high attempt number
