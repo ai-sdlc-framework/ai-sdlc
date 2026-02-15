@@ -57,6 +57,7 @@ import {
 export const MAX_FIX_ATTEMPTS = DEFAULT_MAX_FIX_ATTEMPTS;
 export const MAX_LOG_LINES = DEFAULT_MAX_LOG_LINES;
 export const RETRY_MARKER = '<!-- ai-sdlc-fix-ci-attempt -->';
+export const MAX_BACKOFF_MS = 5 * 60 * 1000; // 5 minutes
 
 export interface FixCIOptions {
   /** Override the config directory (defaults to `.ai-sdlc`). */
@@ -104,6 +105,15 @@ export function countRetryAttempts(comments: string[]): number {
     }
   }
   return count;
+}
+
+/**
+ * Calculate exponential backoff delay for retry attempts.
+ * Formula: baseDelay * 2^attempt, capped at MAX_BACKOFF_MS.
+ */
+export function calculateBackoff(baseDelayMs: number, attempt: number): number {
+  const exponentialDelay = baseDelayMs * Math.pow(2, attempt);
+  return Math.min(exponentialDelay, MAX_BACKOFF_MS);
 }
 
 /**
@@ -186,6 +196,8 @@ export async function executeFixCI(
   // Derive max fix attempts from pipeline config (code stage onFailure.maxRetries)
   const codeStage = config.pipeline?.spec.stages.find((s) => s.name === 'code');
   const maxFixAttempts = codeStage?.onFailure?.maxRetries ?? MAX_FIX_ATTEMPTS;
+  const retryDelayStr = codeStage?.onFailure?.retryDelay;
+  const baseRetryDelayMs = retryDelayStr ? parseDuration(retryDelayStr) : 0;
 
   // Notification templates
   const notifTemplates = config.pipeline?.spec.notifications?.templates;
@@ -245,6 +257,25 @@ export async function executeFixCI(
         };
     await addComment(`## ${limitComment.title}\n\n${limitComment.body}`);
     return;
+  }
+
+  // Apply exponential backoff if this is a retry (attempts > 0) and retryDelay is configured
+  if (attempts > 0 && baseRetryDelayMs > 0) {
+    const backoffMs = calculateBackoff(baseRetryDelayMs, attempts);
+    log.info(`Applying exponential backoff: ${backoffMs}ms (attempt ${attempts + 1})`);
+    auditLog.record({
+      actor: 'system',
+      action: 'execute',
+      resource: `pr#${prNumber}`,
+      decision: 'allowed',
+      details: {
+        action: 'retry-backoff',
+        attempt: attempts + 1,
+        baseDelayMs: baseRetryDelayMs,
+        backoffMs,
+      },
+    });
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
   }
 
   // 3. Fetch CI logs
