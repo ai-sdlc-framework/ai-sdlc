@@ -1,0 +1,216 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/autonomy-policy.schema.json",
+  "title": "AI-SDLC AutonomyPolicy",
+  "description": "Declares progressive autonomy levels with quantitative promotion criteria and automatic demotion triggers.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "AutonomyPolicy"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["levels", "promotionCriteria", "demotionTriggers"],
+      "properties": {
+        "levels": {
+          "type": "array",
+          "description": "Ordered list of autonomy levels.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["level", "name", "permissions", "guardrails", "monitoring"],
+            "properties": {
+              "level": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3,
+                "description": "Level number (0-3)."
+              },
+              "name": {
+                "type": "string",
+                "description": "Human-readable name (e.g., Intern, Junior, Senior, Principal)."
+              },
+              "description": {
+                "type": "string",
+                "description": "Description of the level's scope."
+              },
+              "permissions": {
+                "type": "object",
+                "description": "What the agent is allowed to do.",
+                "required": ["read", "write", "execute"],
+                "properties": {
+                  "read": {
+                    "type": "array",
+                    "description": "Read permission scopes (glob patterns).",
+                    "items": { "type": "string" }
+                  },
+                  "write": {
+                    "type": "array",
+                    "description": "Write permission scopes (action names or glob patterns).",
+                    "items": { "type": "string" }
+                  },
+                  "execute": {
+                    "type": "array",
+                    "description": "Execute permission scopes (action names).",
+                    "items": { "type": "string" }
+                  }
+                },
+                "additionalProperties": false
+              },
+              "guardrails": {
+                "type": "object",
+                "description": "Operational constraints.",
+                "required": ["requireApproval"],
+                "properties": {
+                  "requireApproval": {
+                    "type": "string",
+                    "enum": ["all", "security-critical-only", "architecture-changes-only", "none"],
+                    "description": "Approval requirement level."
+                  },
+                  "maxLinesPerPR": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum lines changed per pull request."
+                  },
+                  "blockedPaths": {
+                    "type": "array",
+                    "description": "Glob patterns for paths the agent must not modify.",
+                    "items": { "type": "string" }
+                  },
+                  "transactionLimit": {
+                    "type": "string",
+                    "description": "Maximum cost/resource budget per time period."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "monitoring": {
+                "type": "string",
+                "enum": ["continuous", "real-time-notification", "audit-log"],
+                "description": "Monitoring intensity."
+              },
+              "minimumDuration": {
+                "type": ["string", "null"],
+                "description": "Minimum time at this level before promotion. Null for no minimum.",
+                "pattern": "^\\d+[smhdw]$"
+              }
+            },
+            "additionalProperties": false
+          }
+        },
+        "promotionCriteria": {
+          "type": "object",
+          "description": "Promotion criteria keyed by transition (e.g., 0-to-1, 1-to-2, 2-to-3).",
+          "patternProperties": {
+            "^\\d+-to-\\d+$": {
+              "type": "object",
+              "required": ["minimumTasks", "conditions", "requiredApprovals"],
+              "properties": {
+                "minimumTasks": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "Minimum tasks completed at current level."
+                },
+                "conditions": {
+                  "type": "array",
+                  "description": "Metric thresholds that must be met.",
+                  "items": {
+                    "$ref": "common.schema.json#/$defs/metricCondition"
+                  }
+                },
+                "requiredApprovals": {
+                  "type": "array",
+                  "description": "Roles that must approve the promotion.",
+                  "items": { "type": "string" },
+                  "minItems": 1
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "demotionTriggers": {
+          "type": "array",
+          "description": "Conditions that cause automatic demotion.",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["trigger", "action", "cooldown"],
+            "properties": {
+              "trigger": {
+                "type": "string",
+                "description": "The event that triggers demotion."
+              },
+              "action": {
+                "type": "string",
+                "enum": ["demote-to-0", "demote-one-level"],
+                "description": "The demotion action."
+              },
+              "cooldown": {
+                "type": "string",
+                "description": "Time before re-promotion is possible.",
+                "pattern": "^\\d+[smhdw]$"
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "status": {
+      "type": "object",
+      "properties": {
+        "agents": {
+          "type": "array",
+          "description": "Per-agent autonomy status.",
+          "items": {
+            "type": "object",
+            "required": ["name", "currentLevel"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "description": "Agent name (reference to AgentRole)."
+              },
+              "currentLevel": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 3,
+                "description": "Current autonomy level."
+              },
+              "promotedAt": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the agent was last promoted."
+              },
+              "nextEvaluationAt": {
+                "type": "string",
+                "format": "date-time",
+                "description": "When the next promotion evaluation occurs."
+              },
+              "metrics": {
+                "type": "object",
+                "description": "Current metric values for promotion evaluation.",
+                "additionalProperties": {
+                  "type": "number"
+                }
+              }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

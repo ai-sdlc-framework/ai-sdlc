@@ -1,21 +1,59 @@
-# @ai-sdlc/sdk-go
+# AI-SDLC Go SDK
 
-Go SDK for the AI-SDLC Framework.
+Go SDK for the [AI-SDLC Framework](https://ai-sdlc.io) — declarative governance for AI agents in software development lifecycles.
 
-## Status
+## Installation
 
-**Planned** — This package is a placeholder. Contributions welcome.
+```bash
+go get github.com/ai-sdlc-framework/ai-sdlc/sdk-go
+```
 
-## Planned Features
+## Requirements
 
-- Go structs generated from AI-SDLC JSON Schemas
-- Schema validation via `gojsonschema`
-- Adapter interfaces (Go interfaces)
-- Reconciliation loop library (controller-runtime compatible)
+- Go 1.22+
 
-## Contributing
+## Quick Start
 
-See the [contributing guide](../CONTRIBUTING.md) for how to get involved.
+```go
+package main
+
+import (
+    "fmt"
+    aisdlc "github.com/ai-sdlc-framework/ai-sdlc/sdk-go"
+    "github.com/ai-sdlc-framework/ai-sdlc/sdk-go/builders"
+)
+
+func main() {
+    fmt.Println("AI-SDLC Go SDK version:", aisdlc.Version)
+
+    // Build a pipeline resource
+    pipeline, err := builders.NewPipelineBuilder("my-pipeline").
+        AddTrigger("issue.assigned", nil).
+        AddProvider("issueTracker", "linear", nil).
+        AddStage("plan", "planner-agent", nil).
+        Build()
+    if err != nil {
+        panic(err)
+    }
+    fmt.Println("Pipeline:", pipeline.Metadata.Name)
+}
+```
+
+## Modules
+
+| Package | Description |
+|---------|-------------|
+| `core` | Resource types, validation, comparison, provenance |
+| `builders` | Fluent builders for all 5 resource types |
+| `policy` | Enforcement, autonomy, complexity, authorization |
+| `adapters` | Adapter interfaces, registry, event bus |
+| `agents` | Orchestration, discovery, memory |
+| `reconciler` | Reconciliation loop and diff engine |
+| `telemetry` | OpenTelemetry conventions and instrumentation |
+| `audit` | Audit logging with hash-chained entries |
+| `security` | Sandbox, JIT credentials, kill switch, approvals |
+| `compliance` | Regulatory framework compliance checking |
+| `metrics` | Metric store and instrumentation helpers |
 
 ## License
 
