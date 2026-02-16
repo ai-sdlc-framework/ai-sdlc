@@ -746,6 +746,182 @@ The MCP session tracker is configured per-project in the standard MCP settings f
 
 When a developer clones a repo with this configuration, their AI tool automatically connects to the MCP session tracker. No workflow change required.
 
+### Interface Design
+
+The orchestrator serves four distinct personas with different information needs, decision cadences, and workflow contexts. Rather than building a single UI, the interface is **layered** — each layer targets the personas that need it, and every layer builds on the one below it.
+
+#### Personas
+
+| Persona | Core question | Decision cadence | Primary interface |
+|---|---|---|---|
+| **Individual developer** | "What's the agent doing on my issue? Why did the gate fail?" | Real-time, per-task | CLI + platform integration (PR comments, check statuses) |
+| **Tech lead / senior engineer** | "Are tasks routing correctly? What's the complexity distribution? Which agents need attention?" | Daily | CLI summary + TUI dashboard |
+| **Engineering manager** | "How's autonomy trending? What's the cost per task? Are we getting ROI?" | Weekly / monthly | Web dashboard with trends and reports |
+| **Platform / DevOps engineer** | "Is the orchestrator healthy? Are pipelines stalling? Do routing thresholds need tuning?" | Operational / on-alert | CLI + existing observability tools (Grafana, Datadog) |
+
+#### Layer 1: CLI (Community Edition)
+
+The CLI is the orchestrator's native interface — its `kubectl`. Every persona uses it; the developer and platform engineer live in it.
+
+**Task tracking commands:**
+
+```bash
+ai-sdlc status                      # Summary: active pipelines, recent completions, agent status
+ai-sdlc status ISSUE-142            # Pipeline progress for a specific issue
+ai-sdlc log ISSUE-142               # Full execution trace (stages, gates, agent invocations)
+ai-sdlc gates ISSUE-142             # Gate results: what passed, what failed, why
+ai-sdlc diff ISSUE-142              # What changed: files modified, complexity delta
+```
+
+**Orchestrator inspection commands:**
+
+```bash
+ai-sdlc agents                      # Agent roster: autonomy levels, recent performance, promotion proximity
+ai-sdlc agents claude-senior        # Detailed view of a specific agent's history
+ai-sdlc routing --last 7d           # Task routing distribution (autonomous / ai-with-review / human-led)
+ai-sdlc complexity                  # Current codebase complexity profile and hotspot map
+ai-sdlc cost --last 7d              # Cost summary: per-pipeline, per-agent, budget utilization
+```
+
+**Operational commands:**
+
+```bash
+ai-sdlc health                      # Orchestrator health: state store, adapters, agent runners
+ai-sdlc pipelines --active          # Currently executing pipelines with stage progress
+ai-sdlc config validate             # Validate pipeline, gate, and autonomy configuration
+ai-sdlc metrics                     # OpenTelemetry export endpoint status
+```
+
+**TUI mode:**
+
+```bash
+ai-sdlc dashboard                   # Live terminal dashboard (like k9s or lazygit)
+```
+
+The TUI dashboard provides a real-time view with panels for:
+- Active pipelines with stage progress bars
+- Recent completions with pass/fail status
+- Agent autonomy levels with promotion/demotion indicators
+- Gate failure feed
+- Cost burn rate
+
+Design principle: **the CLI is an operational interface, not just a setup tool.** Developers should never need to leave their terminal to understand what the orchestrator is doing or why it made a decision.
+
+#### Layer 2: Platform Integration (Community Edition)
+
+Most developers should not need to learn the CLI at all. The orchestrator surfaces information where developers already work:
+
+**Pull request comments** — Every PR created by the orchestrator includes a structured summary:
+
+```markdown
+## AI-SDLC Orchestrator Summary
+
+| Field | Value |
+|---|---|
+| Issue | ISSUE-142: Add user avatar upload |
+| Complexity | 4/10 (moderate) |
+| Routing | AI-with-review |
+| Agent | claude-senior (Level 2) |
+| Cost | $0.47 (budget: $5.00) |
+| Gates passed | 6/6 |
+
+### Quality Gates
+✅ Lint — 0 violations
+✅ Type check — clean
+✅ Test coverage — 87% (threshold: 80%)
+✅ Security scan — no findings
+✅ Complexity delta — +0.3 (threshold: +2.0)
+✅ Convention adherence — consistent with existing patterns
+
+### Provenance
+Agent: claude-code v1.2 | Model: claude-sonnet-4-5-20250929 | Duration: 4m 12s
+Files: 3 modified, 1 created | Lines: +142 / -18
+```
+
+**Check runs** — Quality gate results appear as native GitHub/GitLab check statuses on the PR. Each gate maps to a separate check, providing fine-grained pass/fail visibility without requiring the developer to read the full comment.
+
+**Issue comments** — As the pipeline progresses, the orchestrator posts stage transitions on the source issue:
+
+```
+🔄 Pipeline started — Complexity: 4/10, routing to AI-with-review
+📋 Planning complete — 2 subtasks identified
+🤖 Implementation in progress — agent: claude-senior
+✅ All gates passed — PR #287 created, awaiting human review
+```
+
+**Notifications** (Team Cloud) — Pipeline events, gate failures, and promotion alerts delivered to Slack or Microsoft Teams channels. Configurable by event type and severity.
+
+#### Layer 3: Web Dashboard (Team Cloud / Enterprise)
+
+The web dashboard answers **strategic questions** for engineering managers and leadership. It is deliberately a paid feature because it targets the persona who controls the budget and needs the ROI story. Developers get everything they need through CLI and platform integrations in the free tier.
+
+**Org-level overview:**
+- Active pipelines across all repos with real-time stage progress
+- Agent fleet status: autonomy levels, utilization, health
+- Cost burn rate with budget tracking and forecasts
+
+**Autonomy trajectory:**
+- Graph: agent trust levels over time (when did each agent get promoted/demoted?)
+- Promotion proximity: which agents are close to leveling up?
+- Demotion events: what triggered them and what was the recovery?
+
+**Codebase health:**
+- Complexity trends over time (is the codebase getting harder to work with?)
+- Hotspot map: which areas of the code are changing most frequently?
+- Convention drift: are new contributions following established patterns?
+- Architectural dependency graph with change-frequency overlay
+
+**Cost analytics** (integrates with RFC-0004):
+- Per-pipeline, per-agent, per-repo cost attribution
+- Model usage breakdown (which models are being used for what?)
+- Budget utilization with burn-rate projection
+- Cost-per-task trend (are we getting more efficient over time?)
+
+**ROI metrics:**
+- Time-to-merge comparison: agent-driven vs human-driven tasks
+- Rework rate: how often do agent PRs require revision?
+- Gate pass rate trends: are agents improving?
+- Developer velocity impact: issues closed per week, before and after orchestrator adoption
+
+**Audit trail:**
+- Searchable history of all orchestrator decisions with full provenance
+- Filter by agent, repo, time range, outcome, cost
+- Exportable for compliance reporting (Enterprise tier adds SIEM export)
+
+#### Layer 4: Observability Export (Community Edition)
+
+The orchestrator emits all metrics, traces, and logs via OpenTelemetry. Teams with existing observability stacks should be able to build their own dashboards from orchestrator telemetry without needing the paid web dashboard.
+
+**What's exported:**
+- All 13 cost metrics from RFC-0004
+- Pipeline execution traces (each stage as a span, gates as child spans)
+- Agent invocation traces (model, tokens, duration, cost)
+- Autonomy events (promotions, demotions, threshold changes)
+- Codebase analysis results (complexity scores, hotspot changes)
+
+**Integration targets:**
+- Prometheus / Grafana (metrics + dashboards)
+- Datadog, New Relic (APM-style pipeline monitoring)
+- Splunk, ELK (audit trail and log analysis)
+- Custom dashboards via OTLP endpoint
+
+This ensures the Community edition is genuinely useful for teams that already have observability infrastructure. The paid web dashboard adds value through pre-built views, cross-repo aggregation, and trend analysis — not through data access gating.
+
+#### Interface Tier Summary
+
+| Interface | Community (Free) | Team Cloud | Enterprise |
+|---|---|---|---|
+| CLI (all commands) | ✅ | ✅ | ✅ |
+| TUI dashboard | ✅ | ✅ | ✅ |
+| PR comments + check runs | ✅ | ✅ | ✅ |
+| Issue stage comments | ✅ | ✅ | ✅ |
+| OpenTelemetry export | ✅ | ✅ | ✅ |
+| Slack / Teams notifications | — | ✅ | ✅ |
+| Web dashboard | — | ✅ | ✅ |
+| Advanced analytics + ROI | — | — | ✅ |
+| SIEM audit export | — | — | ✅ |
+| Compliance reporting | — | — | ✅ |
+
 ### SDK Roles in the Orchestrator Model
 
 The SDKs serve concrete purposes in this architecture:
@@ -813,7 +989,19 @@ ai-sdlc/
 │   │   └── telemetry/           # OpenTelemetry integration
 │   ├── bin/
 │   │   └── ai-sdlc.ts           # CLI entry point
+│   ├── cli/
+│   │   ├── commands/            # CLI command handlers (status, agents, routing, cost)
+│   │   ├── formatters/          # Output formatters (table, JSON, minimal)
+│   │   └── tui/                 # TUI dashboard (terminal UI panels, keybindings)
 │   ├── Dockerfile
+│   └── package.json
+│
+├── dashboard/                   # Web dashboard (Team Cloud / Enterprise)
+│   ├── src/
+│   │   ├── pages/               # Overview, autonomy, codebase health, cost, audit
+│   │   ├── components/          # Charts, pipeline views, agent cards, gate results
+│   │   ├── api/                 # Dashboard API routes (reads from orchestrator state)
+│   │   └── hooks/               # Data fetching, real-time subscriptions
 │   └── package.json
 │
 ├── mcp-session-tracker/         # MCP server for human-directed AI usage tracking
@@ -974,8 +1162,13 @@ Build a hosted SaaS platform where teams connect their repos and agents.
 - [ ] Implement `ai-sdlc init` command (project detection, starter config generation)
 - [ ] Implement `ai-sdlc run` command (single pipeline execution for testing)
 - [ ] Implement `ai-sdlc start` command (long-running orchestrator daemon)
+- [ ] Implement `ai-sdlc status` command (pipeline progress, gate results)
+- [ ] Implement `ai-sdlc health` command (orchestrator health check)
+- [ ] CLI output formatters (table, JSON, minimal) for all commands
 - [ ] SQLite-backed autonomy ledger and codebase state store
 - [ ] Basic ClaudeCodeRunner implementation
+- [ ] PR comment generation (structured orchestrator summary on agent-created PRs)
+- [ ] Issue comment updates (stage transition notifications on source issues)
 
 ### Phase 1: Context and Routing (Weeks 3-8)
 
@@ -985,6 +1178,10 @@ Build a hosted SaaS platform where teams connect their repos and agents.
 - [ ] Convention detection (naming patterns, test structure, import style)
 - [ ] Context injection into agent tasks
 - [ ] Complexity-based task routing with configurable thresholds
+- [ ] Implement `ai-sdlc agents` command (roster, autonomy levels, performance)
+- [ ] Implement `ai-sdlc routing` command (task routing distribution)
+- [ ] Implement `ai-sdlc complexity` command (codebase complexity profile)
+- [ ] Check run integration (quality gate results as GitHub/GitLab check statuses)
 
 ### Phase 2: Progressive Foundations (Weeks 6-12)
 
@@ -993,7 +1190,9 @@ Build a hosted SaaS platform where teams connect their repos and agents.
 - [ ] Episodic memory — record successes, failures, regressions
 - [ ] Agent context enrichment from episodic memory
 - [ ] Autonomy promotion/demotion with full metrics tracking
-- [ ] Dashboard: codebase complexity over time, agent autonomy trajectory, gate pass rates
+- [ ] Implement `ai-sdlc cost` command (per-pipeline, per-agent cost summary)
+- [ ] TUI dashboard (`ai-sdlc dashboard`) — active pipelines, agent status, gate feed, cost burn rate
+- [ ] OpenTelemetry export for all orchestrator metrics, traces, and autonomy events
 
 ### Phase 3: Multi-Agent and Scale (Weeks 10-16)
 
@@ -1003,6 +1202,8 @@ Build a hosted SaaS platform where teams connect their repos and agents.
 - [ ] Additional agent runners (Copilot, Cursor, Devin, custom)
 - [ ] Python SDK: custom agent runner interface + policy evaluator
 - [ ] Go SDK: Kubernetes operator for orchestrator deployment
+- [ ] Web dashboard: org overview, autonomy trajectory, codebase health (Team Cloud)
+- [ ] Slack / Teams notification integration (Team Cloud)
 
 ### Phase 4: Production Hardening (Weeks 14-20)
 
@@ -1012,6 +1213,9 @@ Build a hosted SaaS platform where teams connect their repos and agents.
 - [ ] Deployment stage support (Kubernetes, Vercel, Fly.io)
 - [ ] Staged rollout with canary monitoring
 - [ ] Production-grade audit trail with integrity verification
+- [ ] Web dashboard: advanced analytics, cost optimization, ROI dashboards (Enterprise)
+- [ ] SIEM audit export integration (Splunk, Datadog, ELK) (Enterprise)
+- [ ] Compliance reporting views (ISO 42001, NIST AI RMF, EU AI Act) (Enterprise)
 
 ## Resolved Design Decisions
 
