@@ -587,6 +587,165 @@ Concrete agent runners implement this interface for specific agents:
 
 This means the orchestrator works with whatever AI coding agents the team already uses.
 
+### Human-Directed AI Usage: The MCP Session Tracker
+
+The orchestrator controls agent execution when *it* invokes the agent. But most AI-assisted development today happens in a developer's IDE — a developer opens Claude Code, Copilot, or Cursor and works directly, bypassing the orchestrator entirely. This creates a **shadow IT blind spot**: no cost tracking, no quality gates, no attribution, no audit trail.
+
+The solution is an **MCP Session Tracker** — an MCP server that runs alongside human-directed AI tool sessions, acting as a telemetry and context bridge between the developer's IDE and the orchestrator.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                      Developer's IDE                          │
+│                                                              │
+│  ┌──────────────┐          ┌───────────────────────────────┐ │
+│  │  Claude Code  │◄──MCP──►│  AI-SDLC Session Tracker      │ │
+│  │  (or Copilot, │         │  (MCP Server)                 │ │
+│  │   Cursor)     │         │                               │ │
+│  └──────┬───────┘         │  • Links session to issue     │ │
+│         │                  │  • Injects codebase context   │ │
+│         │ writes code      │  • Tracks tokens/cost         │ │
+│         ▼                  │  • Records file changes       │ │
+│  ┌──────────────┐         │  • Enforces soft guardrails   │ │
+│  │  Working Dir  │         └──────────┬────────────────────┘ │
+│  └──────────────┘                    │                       │
+└──────────────────────────────────────┼───────────────────────┘
+                                       │ Reports to
+                                       ▼
+                              ┌──────────────────┐
+                              │  AI-SDLC          │
+                              │  Orchestrator     │
+                              │                  │
+                              │  • Cost ledger   │
+                              │  • Autonomy      │
+                              │  • Audit trail   │
+                              │  • Metrics       │
+                              └──────────────────┘
+```
+
+#### Why This Prevents Shadow IT
+
+Shadow IT isn't prevented by blocking — it's prevented by making the governed path **more valuable** than the ungoverned path. The MCP server gives developers something they *want*:
+
+| What the developer gets | What the organization gets |
+|---|---|
+| Codebase context injected automatically (architecture, conventions, hotspots — no re-explaining to the agent) | Usage tracking across all AI tools |
+| Issue context pre-loaded (no copy-pasting issue descriptions) | Cost attribution per developer, per task, per team |
+| Episodic memory ("last time someone changed auth, payments tests broke") | Audit trail for compliance |
+| Hotspot warnings before touching dangerous files | Quality gate data even for IDE-originated PRs |
+| Budget visibility ("you've used $50 of your $200 this week") | Budget enforcement before it's too late |
+| Conventions auto-loaded (agent follows project patterns without prompting) | Shadow IT visibility — know who's using what |
+
+The developer's agent is **better** with the MCP server connected than without it. That's the adoption lever.
+
+#### MCP Tools Exposed
+
+| MCP Tool | When Called | What It Does |
+|---|---|---|
+| `session_start` | When the AI tool starts a session | Registers session with orchestrator, loads codebase context, links to assigned issue |
+| `get_context` | When agent starts working on a task | Returns codebase profile, conventions, hotspots, architectural patterns, relevant episodic memory |
+| `check_task` | When agent is about to make changes | Identifies which issue the developer is working on, checks autonomy level, returns applicable constraints |
+| `track_usage` | After each model API call | Records token counts, model used, cost, timestamps |
+| `check_file` | Before modifying a file | Checks if the file is a hotspot, blocked path, or crosses module boundaries — returns advisory warnings |
+| `session_end` | When session closes | Finalizes cost receipt, submits usage report to orchestrator |
+
+#### MCP Resources Exposed
+
+| MCP Resource | Content |
+|---|---|
+| `ai-sdlc://context/codebase-profile` | Current codebase complexity, modules, patterns |
+| `ai-sdlc://context/conventions` | Naming, testing, import conventions |
+| `ai-sdlc://context/hotspots` | High-churn, high-complexity files with advisory notes |
+| `ai-sdlc://context/my-tasks` | Issues assigned to this developer |
+| `ai-sdlc://context/budget` | Team's remaining budget, developer's personal usage |
+| `ai-sdlc://context/history` | Relevant episodic memory for the current task |
+
+#### Session-to-Issue Linking
+
+The MCP server determines which issue the developer is working on through multiple signals:
+
+1. **Branch name** — If the developer is on branch `ai-sdlc/issue-247`, the MCP server parses the issue number. The orchestrator's branch naming convention makes this reliable.
+2. **Explicit declaration** — The developer tells the AI tool "I'm working on issue #247" and the MCP server captures this from the conversation context.
+3. **Git context** — The MCP server reads recent commits, checks which issues are assigned to this developer, and infers based on file overlap.
+4. **Unattributed** — If no issue can be determined, the session is tracked under the developer's identity with a flag for manual attribution later.
+
+#### Two Data Channels Into the Orchestrator
+
+The orchestrator receives development activity through two complementary channels:
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│                    AI-SDLC Orchestrator                        │
+│                                                              │
+│  ┌──────────────────────────┐  ┌───────────────────────────┐ │
+│  │ Channel 1:               │  │ Channel 2:                │ │
+│  │ Orchestrated Pipelines   │  │ Human-Directed Sessions   │ │
+│  │ (automated)              │  │ (MCP Session Tracker)     │ │
+│  │                          │  │                           │ │
+│  │ Full control:            │  │ Observability + context:  │ │
+│  │ • Invokes agents         │  │ • Tracks usage            │ │
+│  │ • Enforces gates         │  │ • Provides context        │ │
+│  │ • Circuit breakers       │  │ • Records costs           │ │
+│  │ • Cost limits            │  │ • Advisory guardrails     │ │
+│  │ • Auto-merge             │  │ • Links to issues         │ │
+│  └──────────────────────────┘  └───────────────────────────┘ │
+│                                                              │
+│  Unified: cost ledger, autonomy tracking, audit trail,       │
+│           metrics, codebase state, episodic memory            │
+└──────────────────────────────────────────────────────────────┘
+```
+
+- **Channel 1 (orchestrated):** Full control — the orchestrator invokes agents, enforces everything, manages the pipeline end-to-end.
+- **Channel 2 (human-directed):** Observability + context — the MCP server tracks what developers do with AI tools and feeds it back to the same cost ledger, autonomy tracking, and audit trail.
+
+Both channels produce the same data artifacts (cost receipts, provenance metadata, usage metrics), enabling a **unified view** of all AI-assisted development regardless of how it was initiated:
+
+```
+Development Activity Report — February 2026
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+                     Orchestrated    Human+AI (IDE)    Total
+                     (automated)     (MCP tracked)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Issues completed          34              18            52
+Token cost            $420.00         $890.00     $1,310.00
+Human review hrs          12               —            12
+PRs merged                34              18            52
+Avg cost/issue        $12.35          $49.44        $25.19
+Gate pass rate           94%             71%           85%
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Insight: Human+AI sessions cost 4x more per issue than
+orchestrated pipelines. Primary drivers: no model selection
+optimization, longer exploratory sessions, no circuit breaker.
+
+Recommendation: Enable cost-aware model selection for IDE
+sessions. Move high-volume task types to orchestrated pipeline.
+```
+
+This data is invaluable for engineering leadership: it answers "should we invest more in orchestrated pipelines (cheaper, more governed) or in better IDE tooling (more flexible, more expensive)?" and "which developers would benefit most from moving their workflow to the orchestrator?"
+
+#### Configuration
+
+The MCP session tracker is configured per-project in the standard MCP settings format:
+
+```json
+// .mcp.json (or IDE-specific MCP config)
+{
+  "mcpServers": {
+    "ai-sdlc": {
+      "command": "npx",
+      "args": ["@ai-sdlc/mcp-session-tracker"],
+      "env": {
+        "AI_SDLC_ORCHESTRATOR_URL": "https://orchestrator.acme.com",
+        "AI_SDLC_PROJECT": "acme/user-service"
+      }
+    }
+  }
+}
+```
+
+When a developer clones a repo with this configuration, their AI tool automatically connects to the MCP session tracker. No workflow change required.
+
 ### SDK Roles in the Orchestrator Model
 
 The SDKs serve concrete purposes in this architecture:
@@ -655,6 +814,14 @@ ai-sdlc/
 │   ├── bin/
 │   │   └── ai-sdlc.ts           # CLI entry point
 │   ├── Dockerfile
+│   └── package.json
+│
+├── mcp-session-tracker/         # MCP server for human-directed AI usage tracking
+│   ├── src/
+│   │   ├── tools/               # MCP tool handlers (start/end session, log action)
+│   │   ├── resources/           # MCP resource providers (active sessions, metrics)
+│   │   ├── linking/             # Session-to-issue linking logic
+│   │   └── telemetry/           # OpenTelemetry export (traces, cost events)
 │   └── package.json
 │
 ├── sdk-typescript/              # TypeScript SDK (shared types + validation)
