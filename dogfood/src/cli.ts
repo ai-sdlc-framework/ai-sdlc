@@ -5,14 +5,18 @@
  */
 
 import { join } from 'node:path';
-import { executePipeline } from './orchestrator/execute.js';
-import { createPipelineSecurity } from './orchestrator/security.js';
-import { createPipelineMetricStore } from './orchestrator/instrumented.js';
-import { createPipelineMemory, resolveRepoRoot } from './orchestrator/shared.js';
-import { createPipelineAdmission } from './orchestrator/admission.js';
-import { loadConfig } from './orchestrator/load-config.js';
-import { createPipelineAdapterRegistry, resolveInfrastructure } from './orchestrator/adapters.js';
-import { DEFAULT_CONFIG_DIR_NAME } from './orchestrator/defaults.js';
+import {
+  executePipeline,
+  createPipelineSecurity,
+  createPipelineMetricStore,
+  createPipelineMemory,
+  resolveRepoRoot,
+  createPipelineAdmission,
+  loadConfig,
+  createPipelineAdapterRegistry,
+  resolveInfrastructure,
+  DEFAULT_CONFIG_DIR_NAME,
+} from '@ai-sdlc/orchestrator';
 
 function parseArgs(argv: string[]): { issueNumber: number } {
   const idx = argv.indexOf('--issue');

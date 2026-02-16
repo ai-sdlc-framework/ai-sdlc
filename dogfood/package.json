@@ -27,6 +27,7 @@
     "watch": "tsx src/cli-watch.ts"
   },
   "dependencies": {
+    "@ai-sdlc/orchestrator": "workspace:*",
     "@ai-sdlc/reference": "workspace:*",
     "yaml": "^2.7.0"
   },

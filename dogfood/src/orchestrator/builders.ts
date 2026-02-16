@@ -27,11 +27,13 @@ import {
   DEFAULT_REQUIRE_TESTS,
   DEFAULT_BLOCKED_PATHS,
   DEFAULT_MAX_LINES_PER_PR,
-  DEFAULT_GITHUB_ORG,
-  DEFAULT_GITHUB_REPO,
-  DEFAULT_GITHUB_REPOSITORY,
   DEFAULT_CONFIG_DIR_NAME,
-} from './defaults.js';
+} from '@ai-sdlc/orchestrator';
+
+// Dogfood-specific defaults (the orchestrator generalized these to empty strings)
+const DEFAULT_GITHUB_ORG = 'ai-sdlc-framework';
+const DEFAULT_GITHUB_REPO = 'ai-sdlc';
+const DEFAULT_GITHUB_REPOSITORY = `${DEFAULT_GITHUB_ORG}/${DEFAULT_GITHUB_REPO}`;
 
 /**
  * Create the default dogfood pipeline resource using the fluent builder.

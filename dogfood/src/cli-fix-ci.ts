@@ -4,11 +4,15 @@
  * Usage: pnpm --filter @ai-sdlc/dogfood fix-ci --pr 42 --run-id 12345
  */
 
-import { executeFixCI } from './orchestrator/fix-ci.js';
-import { createPipelineSecurity } from './orchestrator/security.js';
-import { createPipelineMetricStore } from './orchestrator/instrumented.js';
-import { createPipelineMemory, resolveRepoRoot } from './orchestrator/shared.js';
-import { createPipelineAdapterRegistry, resolveInfrastructure } from './orchestrator/adapters.js';
+import {
+  executeFixCI,
+  createPipelineSecurity,
+  createPipelineMetricStore,
+  createPipelineMemory,
+  resolveRepoRoot,
+  createPipelineAdapterRegistry,
+  resolveInfrastructure,
+} from '@ai-sdlc/orchestrator';
 
 function parseArgs(argv: string[]): { prNumber: number; runId: number } {
   const prIdx = argv.indexOf('--pr');

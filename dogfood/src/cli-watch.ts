@@ -5,13 +5,17 @@
  */
 
 import { join } from 'node:path';
-import { startWatch } from './orchestrator/watch.js';
-import { createPipelineSecurity } from './orchestrator/security.js';
-import { createPipelineMetricStore } from './orchestrator/instrumented.js';
-import { createPipelineMemory, resolveRepoRoot } from './orchestrator/shared.js';
-import { loadConfig } from './orchestrator/load-config.js';
-import { createPipelineAdapterRegistry, resolveInfrastructure } from './orchestrator/adapters.js';
-import { DEFAULT_CONFIG_DIR_NAME } from './orchestrator/defaults.js';
+import {
+  startWatch,
+  createPipelineSecurity,
+  createPipelineMetricStore,
+  createPipelineMemory,
+  resolveRepoRoot,
+  loadConfig,
+  createPipelineAdapterRegistry,
+  resolveInfrastructure,
+  DEFAULT_CONFIG_DIR_NAME,
+} from '@ai-sdlc/orchestrator';
 
 function parseArgs(argv: string[]): { issueNumbers: number[] } {
   const issues: number[] = [];

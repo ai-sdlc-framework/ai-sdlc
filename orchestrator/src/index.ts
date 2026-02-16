@@ -1,28 +1,24 @@
-// Re-export everything from the orchestrator package
+// ── Core orchestration ───────────────────────────────────────────────
+
+export { loadConfig, loadConfigAsync, type AiSdlcConfig } from './config.js';
+export { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
 export {
-  // Core orchestration
-  loadConfig,
-  loadConfigAsync,
-  type AiSdlcConfig,
-  validateIssue,
-  validateIssueWithExtensions,
-  parseComplexity,
   executePipeline,
   type ExecuteOptions,
   type PipelineResult,
   type PromotionResult,
+} from './execute.js';
+export {
   validateAgentOutput,
   type ValidationContext,
   type ValidationResult,
   type ValidationViolation,
-  createLogger,
-  type Logger,
-  executeFixCI,
-  countRetryAttempts,
-  fetchCILogs,
-  type FixCIOptions,
+} from './validate-agent-output.js';
+export { createLogger, type Logger } from './logger.js';
+export { executeFixCI, countRetryAttempts, fetchCILogs, type FixCIOptions } from './fix-ci.js';
 
-  // Shared utilities
+// Shared utilities
+export {
   getGitHubConfig,
   resolveRepoRoot,
   createDefaultAuditLog,
@@ -37,13 +33,50 @@ export {
   authorizeFilesChanged,
   extractIssueNumber,
   BRANCH_PATTERN,
+  createAbacPermissionHook,
+  createBlockedPathsHook,
+  createAuditLoggingHook,
+  createPipelineAuthorizationChain,
   type GitHubEnvConfig,
   type ValidateAndAuditParams,
+} from './shared.js';
 
-  // Defaults
+// Defaults
+export {
+  DEFAULT_MODEL,
+  DEFAULT_GITHUB_ORG,
+  DEFAULT_GITHUB_REPO,
+  DEFAULT_GITHUB_REPOSITORY,
   DEFAULT_CONFIG_DIR_NAME,
+  DEFAULT_SANDBOX_MEMORY_MB,
+  DEFAULT_SANDBOX_CPU_PERCENT,
+  DEFAULT_SANDBOX_NETWORK_POLICY,
+  DEFAULT_SANDBOX_TIMEOUT_MS,
+  defaultSandboxConstraints,
+  DEFAULT_RUNNER_TIMEOUT_MS,
+  DEFAULT_ALLOWED_TOOLS,
+  DEFAULT_MAX_FILES_PER_CHANGE,
+  DEFAULT_REQUIRE_TESTS,
+  DEFAULT_BLOCKED_PATHS,
+  DEFAULT_MAX_FIX_ATTEMPTS,
+  DEFAULT_MAX_LOG_LINES,
+  DEFAULT_GH_CLI_TIMEOUT_MS,
+  DEFAULT_JIT_TTL_MS,
+  DEFAULT_JIT_SCOPE,
+  DEFAULT_BRANCH_TEMPLATE,
+  DEFAULT_BRANCH_PATTERN,
+  DEFAULT_PR_TITLE_TEMPLATE,
+  DEFAULT_PR_FOOTER,
+  DEFAULT_COMPLEXITY_THRESHOLDS,
+  DEFAULT_MAX_LINES_PER_PR,
+  NOTIFICATION_TITLES,
+} from './defaults.js';
 
-  // Security subsystem
+// Notifications
+export { renderTemplate } from './notifications.js';
+
+// Security subsystem
+export {
   createPipelineSecurity,
   checkKillSwitch,
   issueAgentCredentials,
@@ -56,8 +89,10 @@ export {
   createGitHubSandboxProvider,
   createGitHubJITProvider,
   type SecurityContext,
+} from './security.js';
 
-  // Provenance tracking
+// Provenance tracking
+export {
   createPipelineProvenance,
   attachProvenanceToPR,
   validatePipelineProvenance,
@@ -66,47 +101,48 @@ export {
   PROVENANCE_ANNOTATION_PREFIX,
   type ProvenanceRecord,
   type ReviewDecision,
+} from './provenance.js';
 
-  // Admission pipeline
+// Admission pipeline
+export {
   createPipelineAdmission,
   admitIssueResource,
   type PipelineAdmissionConfig,
   type AdmissionPipeline,
   type AdmissionResult,
+} from './admission.js';
 
-  // Metrics instrumentation
+// Metrics instrumentation
+export {
   createPipelineMetricStore,
   createInstrumentedEnforcement,
   createInstrumentedAutonomy,
   createInstrumentedExecutor,
   STANDARD_METRICS,
   instrumentExecutor,
+} from './instrumented.js';
 
-  // Agent discovery
+// Agent discovery
+export {
   createPipelineDiscovery,
   findMatchingAgent,
   resolveAgentForIssue,
   matchAgentBySkill,
   createStubAgentCardFetcher,
   createPipelineAgentCardFetcher,
+} from './discovery.js';
 
-  // Structured logging
+// Structured logging
+export {
   createStructuredConsoleLogger,
   createStructuredBufferLogger,
+} from './structured-logger.js';
 
-  // Watch mode
-  startWatch,
-  type WatchOptions,
-  type WatchHandle,
+// Watch mode
+export { startWatch, type WatchOptions, type WatchHandle } from './watch.js';
 
-  // Runners
-  GitHubActionsRunner,
-  ClaudeCodeRunner,
-  type AgentRunner,
-  type AgentContext,
-  type AgentResult,
-
-  // Agent orchestration
+// Agent orchestration
+export {
   createPipelineOrchestration,
   executePipelineOrchestration,
   validatePipelineHandoffs,
@@ -117,8 +153,10 @@ export {
   swarm,
   validateHandoff,
   simpleSchemaValidate,
+} from './orchestration.js';
 
-  // Policy evaluators
+// Policy evaluators
+export {
   createPipelineRegoEvaluator,
   createPipelineCELEvaluator,
   createPipelineABACHook,
@@ -127,52 +165,65 @@ export {
   evaluatePipelineGate,
   scorePipelineComplexity,
   evaluatePipelineComplexityRouting,
+} from './policy-evaluators.js';
 
-  // Adapter ecosystem
+// Adapter ecosystem
+export {
   createPipelineAdapterRegistry,
   createPipelineWebhookBridge,
   resolveAdapterFromGit,
   resolveInfrastructure,
   scanPipelineAdapters,
+} from './adapters.js';
 
-  // Reconcilers — expose generalized names + backward-compat aliases
+// Reconcilers (generalized names)
+export {
   createPipelineReconciler,
   createGateReconciler,
   createAutonomyReconciler,
   hasResourceChanged,
   fingerprintResource,
+} from './reconcilers.js';
 
-  // Extended audit
+// Extended audit
+export {
   createFileAuditLog,
   verifyAuditIntegrity,
   loadAuditEntries,
   rotateAuditLog,
   computeAuditHash,
+} from './audit-extended.js';
 
-  // Extended compliance
+// Extended compliance
+export {
   checkFrameworkCompliance,
   getControlCatalog,
   getFrameworkMappings,
   listSupportedFrameworks,
+} from './compliance-extended.js';
 
-  // Extended telemetry
+// Extended telemetry
+export {
   createSilentLogger,
   withPipelineSpanSync,
   getPipelineTracer,
   validateResourceSchema,
+} from './telemetry-extended.js';
 
-  // Orchestrator class & state store
-  Orchestrator,
-  type OrchestratorConfig,
-  StateStore,
-} from '@ai-sdlc/orchestrator';
-
-// Backward-compatible reconciler aliases (dogfood used createDogfood* prefix)
+// Runners
 export {
-  createPipelineReconciler as createDogfoodPipelineReconciler,
-  createGateReconciler as createDogfoodGateReconciler,
-  createAutonomyReconciler as createDogfoodAutonomyReconciler,
-} from '@ai-sdlc/orchestrator';
+  ClaudeCodeRunner,
+  ClaudeCodeRunner as GitHubActionsRunner,
+  type AgentRunner,
+  type AgentContext,
+  type AgentResult,
+} from './runners/index.js';
+
+// State store
+export { StateStore } from './state/index.js';
+
+// Orchestrator class
+export { Orchestrator, type OrchestratorConfig } from './orchestrator.js';
 
 // Comprehensive type re-exports
 export type {
@@ -224,7 +275,7 @@ export type {
   Guardrails,
   MonitoringLevel,
   AutonomyLevel,
-  PromotionCriteria as CorePromotionCriteria,
+  PromotionCriteria,
   DemotionTrigger,
   AgentAutonomyStatus,
   AutonomyPolicySpec,
@@ -263,21 +314,4 @@ export type {
   LongTermMemory,
   SharedMemory,
   EpisodicMemory,
-} from '@ai-sdlc/orchestrator';
-
-// Resource builders (dogfood-specific — stay in this package)
-export {
-  buildDogfoodPipeline,
-  buildDogfoodAgentRole,
-  buildDogfoodQualityGate,
-  buildDogfoodAutonomyPolicy,
-  buildDogfoodAdapterBinding,
-  PipelineBuilder,
-  AgentRoleBuilder,
-  QualityGateBuilder,
-  AutonomyPolicyBuilder,
-  AdapterBindingBuilder,
-  parseBuilderManifest,
-  validateBuilderManifest,
-  API_VERSION,
-} from './orchestrator/builders.js';
+} from './types.js';

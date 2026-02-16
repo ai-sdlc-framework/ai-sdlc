@@ -1,5 +1,5 @@
 /**
- * GitHub Actions runner — invokes Claude Code CLI in --print mode
+ * Claude Code runner — invokes Claude Code CLI in --print mode
  * and collects the result via git diff.
  */
 
@@ -10,7 +10,7 @@ import {
   DEFAULT_MODEL,
   DEFAULT_ALLOWED_TOOLS,
   DEFAULT_RUNNER_TIMEOUT_MS,
-} from '@ai-sdlc/orchestrator';
+} from '../defaults.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -84,8 +84,6 @@ async function gitExec(workDir: string, args: string[]): Promise<string> {
   return stdout.trim();
 }
 
-// Defaults imported from ../orchestrator/defaults.js
-
 interface RunClaudeOptions {
   allowedTools?: string[];
   timeoutMs?: number;
@@ -128,7 +126,7 @@ function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Pr
   });
 }
 
-export class GitHubActionsRunner implements AgentRunner {
+export class ClaudeCodeRunner implements AgentRunner {
   async run(ctx: AgentContext): Promise<AgentResult> {
     const prompt = buildPrompt(ctx);
 
@@ -185,3 +183,6 @@ export class GitHubActionsRunner implements AgentRunner {
     }
   }
 }
+
+/** @deprecated Use ClaudeCodeRunner instead */
+export const GitHubActionsRunner = ClaudeCodeRunner;

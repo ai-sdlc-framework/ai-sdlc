@@ -2,4 +2,5 @@ packages:
   - reference
   - conformance/runner
   - sdk-typescript
+  - orchestrator
   - dogfood
