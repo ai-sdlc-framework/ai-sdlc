@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ai-sdlc"
+version = "0.1.0"
+description = "Python SDK for the AI-SDLC Framework"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+keywords = ["ai", "sdlc", "agents", "quality-gates", "pipelines"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+]
+dependencies = [
+  "pydantic>=2.0,<3",
+  "jsonschema>=4.20",
+  "PyYAML>=6.0",
+  "opentelemetry-api>=1.20",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=7",
+  "pytest-asyncio>=0.21",
+  "mypy>=1.8",
+  "ruff>=0.4",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ai_sdlc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+strict = true
+python_version = "3.11"
+plugins = ["pydantic.mypy"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 99
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM", "TC"]
+ignore = ["SIM118"]

@@ -35,3 +35,16 @@ pnpm-debug.log*
 
 # Package manager
 .pnpm-store/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.whl
+.venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+build/
+*.pyz
