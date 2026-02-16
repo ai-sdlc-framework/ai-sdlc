@@ -14,6 +14,8 @@ import type {
   PipelineRun,
   PipelineRunStatus,
   Convention,
+  HotspotRecord,
+  RoutingDecision,
 } from './types.js';
 
 export class StateStore {
@@ -71,8 +73,8 @@ export class StateStore {
 
   saveComplexityProfile(profile: ComplexityProfile): number {
     const stmt = this.db.prepare(`
-      INSERT INTO complexity_profile (repo_path, score, files_count, modules_count, dependency_count, raw_data)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO complexity_profile (repo_path, score, files_count, modules_count, dependency_count, raw_data, architectural_patterns, hotspots, module_graph, conventions_data)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       profile.repoPath,
@@ -81,6 +83,10 @@ export class StateStore {
       profile.modulesCount ?? null,
       profile.dependencyCount ?? null,
       profile.rawData ?? null,
+      profile.architecturalPatterns ?? null,
+      profile.hotspots ?? null,
+      profile.moduleGraph ?? null,
+      profile.conventionsData ?? null,
     );
     return Number(result.lastInsertRowid);
   }
@@ -104,6 +110,10 @@ export class StateStore {
       dependencyCount: row.dependency_count as number | undefined,
       analyzedAt: row.analyzed_at as string | undefined,
       rawData: row.raw_data as string | undefined,
+      architecturalPatterns: row.architectural_patterns as string | undefined,
+      hotspots: row.hotspots as string | undefined,
+      moduleGraph: row.module_graph as string | undefined,
+      conventionsData: row.conventions_data as string | undefined,
     };
   }
 
@@ -311,6 +321,96 @@ export class StateStore {
       examples: row.examples as string | undefined,
       detectedAt: row.detected_at as string | undefined,
     };
+  }
+
+  // ── Hotspots ───────────────────────────────────────────────────
+
+  saveHotspot(record: HotspotRecord): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO hotspots (repo_path, file_path, churn_rate, complexity, commit_count, last_modified, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      record.repoPath,
+      record.filePath,
+      record.churnRate,
+      record.complexity,
+      record.commitCount ?? null,
+      record.lastModified ?? null,
+      record.note ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getHotspots(repoPath: string, limit = 20): HotspotRecord[] {
+    const rows = this.db
+      .prepare(
+        'SELECT * FROM hotspots WHERE repo_path = ? ORDER BY churn_rate DESC, complexity DESC LIMIT ?',
+      )
+      .all(repoPath, limit) as Record<string, unknown>[];
+    return rows.map((r) => this.mapHotspot(r));
+  }
+
+  private mapHotspot(row: Record<string, unknown>): HotspotRecord {
+    return {
+      id: row.id as number,
+      repoPath: row.repo_path as string,
+      filePath: row.file_path as string,
+      churnRate: row.churn_rate as number,
+      complexity: row.complexity as number,
+      commitCount: row.commit_count as number | undefined,
+      lastModified: row.last_modified as string | undefined,
+      note: row.note as string | undefined,
+      analyzedAt: row.analyzed_at as string | undefined,
+    };
+  }
+
+  // ── Routing History ───────────────────────────────────────────
+
+  saveRoutingDecision(decision: RoutingDecision): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO routing_history (issue_number, task_complexity, codebase_complexity, routing_strategy, agent_name, reason)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      decision.issueNumber ?? null,
+      decision.taskComplexity,
+      decision.codebaseComplexity,
+      decision.routingStrategy,
+      decision.agentName ?? null,
+      decision.reason ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getRoutingHistory(limit = 50): RoutingDecision[] {
+    const rows = this.db
+      .prepare('SELECT * FROM routing_history ORDER BY decided_at DESC LIMIT ?')
+      .all(limit) as Record<string, unknown>[];
+    return rows.map((r) => this.mapRoutingDecision(r));
+  }
+
+  private mapRoutingDecision(row: Record<string, unknown>): RoutingDecision {
+    return {
+      id: row.id as number,
+      issueNumber: row.issue_number as number | undefined,
+      taskComplexity: row.task_complexity as number,
+      codebaseComplexity: row.codebase_complexity as number,
+      routingStrategy: row.routing_strategy as string,
+      agentName: row.agent_name as string | undefined,
+      reason: row.reason as string | undefined,
+      decidedAt: row.decided_at as string | undefined,
+    };
+  }
+
+  // ── Codebase Profile (full) ───────────────────────────────────
+
+  /**
+   * Save a full codebase profile with JSON-serialized analysis data.
+   * Also saves individual hotspot records.
+   */
+  saveCodebaseProfile(profile: ComplexityProfile): number {
+    return this.saveComplexityProfile(profile);
   }
 
   // ── Utilities ────────────────────────────────────────────────────

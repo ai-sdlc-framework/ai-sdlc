@@ -14,6 +14,18 @@ export function formatMinimal(data: Record<string, unknown>): string {
       const ok = data.configValid && (data.errors as string[]).length === 0;
       return ok ? 'OK' : `UNHEALTHY: ${(data.errors as string[]).join('; ')}`;
     }
+    case 'agents': {
+      const agents = data.agents as unknown[];
+      return `Agents: ${agents.length}`;
+    }
+    case 'routing': {
+      const history = data.history as unknown[];
+      return `Routing decisions: ${history.length} (last ${data.duration ?? '30d'})`;
+    }
+    case 'complexity': {
+      const profile = data.profile as Record<string, unknown>;
+      return `Complexity: ${profile.score}/10 | ${profile.filesCount} files | ${profile.modulesCount} modules`;
+    }
     default:
       return JSON.stringify(data);
   }

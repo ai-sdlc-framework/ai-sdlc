@@ -133,4 +133,58 @@ describe('orchestrator barrel exports', () => {
   it('exports renderTemplate', () => {
     expect(barrel.renderTemplate).toBeTypeOf('function');
   });
+
+  // Analysis module
+  it('exports analyzeCodebase', () => {
+    expect(barrel.analyzeCodebase).toBeTypeOf('function');
+  });
+  it('exports buildCodebaseContext', () => {
+    expect(barrel.buildCodebaseContext).toBeTypeOf('function');
+  });
+  it('exports formatContextForPrompt', () => {
+    expect(barrel.formatContextForPrompt).toBeTypeOf('function');
+  });
+  it('exports walkFiles', () => {
+    expect(barrel.walkFiles).toBeTypeOf('function');
+  });
+  it('exports detectModules', () => {
+    expect(barrel.detectModules).toBeTypeOf('function');
+  });
+  it('exports parseImports', () => {
+    expect(barrel.parseImports).toBeTypeOf('function');
+  });
+  it('exports buildModuleGraph', () => {
+    expect(barrel.buildModuleGraph).toBeTypeOf('function');
+  });
+  it('exports detectConventions', () => {
+    expect(barrel.detectConventions).toBeTypeOf('function');
+  });
+  it('exports detectPatterns', () => {
+    expect(barrel.detectPatterns).toBeTypeOf('function');
+  });
+  it('exports analyzeHotspots', () => {
+    expect(barrel.analyzeHotspots).toBeTypeOf('function');
+  });
+  it('exports computeComplexityScore', () => {
+    expect(barrel.computeComplexityScore).toBeTypeOf('function');
+  });
+
+  // Check runs
+  it('exports createCheckRun', () => {
+    expect(barrel.createCheckRun).toBeTypeOf('function');
+  });
+  it('exports reportGateCheckRuns', () => {
+    expect(barrel.reportGateCheckRuns).toBeTypeOf('function');
+  });
+
+  // Analysis defaults
+  it('exports DEFAULT_ANALYSIS_INCLUDE', () => {
+    expect(barrel.DEFAULT_ANALYSIS_INCLUDE).toBeInstanceOf(Array);
+  });
+  it('exports DEFAULT_GIT_HISTORY_DAYS', () => {
+    expect(barrel.DEFAULT_GIT_HISTORY_DAYS).toBeTypeOf('number');
+  });
+  it('exports DEFAULT_HOTSPOT_THRESHOLD', () => {
+    expect(barrel.DEFAULT_HOTSPOT_THRESHOLD).toBeTypeOf('number');
+  });
 });

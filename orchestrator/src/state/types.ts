@@ -11,6 +11,14 @@ export interface ComplexityProfile {
   dependencyCount?: number;
   analyzedAt?: string;
   rawData?: string;
+  /** JSON-serialized architectural patterns. */
+  architecturalPatterns?: string;
+  /** JSON-serialized hotspot data. */
+  hotspots?: string;
+  /** JSON-serialized module dependency graph. */
+  moduleGraph?: string;
+  /** JSON-serialized convention data. */
+  conventionsData?: string;
 }
 
 export interface EpisodicRecord {
@@ -60,4 +68,27 @@ export interface Convention {
   confidence?: number;
   examples?: string;
   detectedAt?: string;
+}
+
+export interface HotspotRecord {
+  id?: number;
+  repoPath: string;
+  filePath: string;
+  churnRate: number;
+  complexity: number;
+  commitCount?: number;
+  lastModified?: string;
+  note?: string;
+  analyzedAt?: string;
+}
+
+export interface RoutingDecision {
+  id?: number;
+  issueNumber?: number;
+  taskComplexity: number;
+  codebaseComplexity: number;
+  routingStrategy: string;
+  agentName?: string;
+  reason?: string;
+  decidedAt?: string;
 }

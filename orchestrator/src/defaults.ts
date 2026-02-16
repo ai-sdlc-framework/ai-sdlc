@@ -116,6 +116,18 @@ export const DEFAULT_MAX_LINES_PER_PR = {
 
 // ── Notification titles ──────────────────────────────────────────────
 
+// ── Codebase analysis ───────────────────────────────────────────
+
+export const DEFAULT_ANALYSIS_INCLUDE = ['**/*.ts', '**/*.tsx', '**/*.js', '**/*.jsx'];
+export const DEFAULT_ANALYSIS_EXCLUDE = [
+  'node_modules/**', '.git/**', 'dist/**', 'build/**', 'coverage/**',
+  '**/*.d.ts', '**/*.min.js', '**/*.map',
+];
+export const DEFAULT_GIT_HISTORY_DAYS = 90;
+export const DEFAULT_HOTSPOT_THRESHOLD = 0.3;
+
+// ── Notification titles ──────────────────────────────────────────
+
 export const NOTIFICATION_TITLES = {
   issueValidationFailed: 'AI-SDLC: Issue Validation Failed',
   complexityTooHigh: 'AI-SDLC: Complexity Too High',

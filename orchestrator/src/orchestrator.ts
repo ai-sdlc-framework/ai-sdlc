@@ -11,6 +11,10 @@ import { StateStore } from './state/index.js';
 import { createLogger, type Logger } from './logger.js';
 import type { SecurityContext } from './security.js';
 import type { AgentRunner } from './runners/types.js';
+import { analyzeCodebase } from './analysis/analyzer.js';
+import { buildCodebaseContext } from './analysis/context-builder.js';
+import type { CodebaseProfile, CodebaseContext } from './analysis/types.js';
+import type { AutonomyLedgerEntry, RoutingDecision } from './state/types.js';
 
 export interface OrchestratorConfig {
   /** Path to the .ai-sdlc config directory. */
@@ -186,6 +190,111 @@ export class Orchestrator {
     }
 
     return { configValid, stateStoreConnected, errors };
+  }
+
+  /**
+   * Analyze the codebase and return a CodebaseProfile.
+   * Caches the result in the state store if available.
+   */
+  async analyze(options?: { force?: boolean }): Promise<CodebaseProfile> {
+    const workDir = this.config.workDir ?? process.cwd();
+
+    // Check cache (24h) unless forced
+    if (!options?.force && this._state) {
+      const cached = this._state.getLatestComplexityProfile(workDir);
+      if (cached?.analyzedAt) {
+        const age = Date.now() - new Date(cached.analyzedAt).getTime();
+        if (age < 24 * 60 * 60 * 1000 && cached.architecturalPatterns) {
+          // Return reconstructed profile from cached data
+          return {
+            repoPath: cached.repoPath,
+            score: cached.score,
+            filesCount: cached.filesCount ?? 0,
+            modulesCount: cached.modulesCount ?? 0,
+            dependencyCount: cached.dependencyCount ?? 0,
+            modules: [],
+            moduleGraph: cached.moduleGraph ? JSON.parse(cached.moduleGraph) : { modules: [], edges: [], externalDependencies: [], cycles: [] },
+            architecturalPatterns: cached.architecturalPatterns ? JSON.parse(cached.architecturalPatterns) : [],
+            hotspots: cached.hotspots ? JSON.parse(cached.hotspots) : [],
+            conventions: cached.conventionsData ? JSON.parse(cached.conventionsData) : [],
+            analyzedAt: cached.analyzedAt,
+          };
+        }
+      }
+    }
+
+    const profile = await analyzeCodebase({ repoPath: workDir });
+
+    // Persist to state store
+    if (this._state) {
+      this._state.saveCodebaseProfile({
+        repoPath: profile.repoPath,
+        score: profile.score,
+        filesCount: profile.filesCount,
+        modulesCount: profile.modulesCount,
+        dependencyCount: profile.dependencyCount,
+        architecturalPatterns: JSON.stringify(profile.architecturalPatterns),
+        hotspots: JSON.stringify(profile.hotspots),
+        moduleGraph: JSON.stringify(profile.moduleGraph),
+        conventionsData: JSON.stringify(profile.conventions),
+      });
+
+      // Save individual hotspot records
+      for (const hotspot of profile.hotspots) {
+        this._state.saveHotspot({
+          repoPath: workDir,
+          filePath: hotspot.filePath,
+          churnRate: hotspot.churnRate,
+          complexity: hotspot.complexity,
+          commitCount: hotspot.commitCount,
+        });
+      }
+    }
+
+    return profile;
+  }
+
+  /**
+   * Get agent roster with autonomy levels and performance.
+   */
+  async agents(): Promise<AutonomyLedgerEntry[]> {
+    if (!this._state) return [];
+    // Get all agents from the autonomy ledger
+    // Since we don't have a listAll method, we'll query known agents
+    const entries: AutonomyLedgerEntry[] = [];
+    const rows = this._state['db']
+      .prepare('SELECT * FROM autonomy_ledger ORDER BY agent_name')
+      .all() as Record<string, unknown>[];
+    for (const row of rows) {
+      entries.push({
+        id: row.id as number,
+        agentName: row.agent_name as string,
+        currentLevel: row.current_level as number,
+        totalTasks: row.total_tasks as number,
+        successCount: row.success_count as number,
+        failureCount: row.failure_count as number,
+        lastTaskAt: row.last_task_at as string | undefined,
+        metrics: row.metrics as string | undefined,
+      });
+    }
+    return entries;
+  }
+
+  /**
+   * Get routing decision history.
+   */
+  async routing(options?: { limit?: number }): Promise<RoutingDecision[]> {
+    if (!this._state) return [];
+    return this._state.getRoutingHistory(options?.limit ?? 50);
+  }
+
+  /**
+   * Get codebase complexity profile as CodebaseContext.
+   */
+  async complexity(options?: { analyze?: boolean }): Promise<{ profile: CodebaseProfile; context: CodebaseContext }> {
+    const profile = await this.analyze({ force: options?.analyze });
+    const context = buildCodebaseContext(profile);
+    return { profile, context };
   }
 
   /**

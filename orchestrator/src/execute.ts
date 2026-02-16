@@ -130,6 +130,7 @@ import {
 } from './telemetry-extended.js';
 import { createPipelineMemory } from './shared.js';
 import { hasResourceChanged, fingerprintResource } from './reconcilers.js';
+import type { CodebaseContext } from './analysis/types.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -186,6 +187,8 @@ export interface ExecuteOptions {
   secretStore?: SecretStore;
   /** Custom PR footer text. Defaults to AI-SDLC attribution link. */
   prFooter?: string;
+  /** Codebase context from analysis for agent prompt injection. */
+  codebaseContext?: CodebaseContext;
 }
 
 /**
@@ -512,6 +515,8 @@ async function executePipelineBody(
                   requireTests: resolved.requireTests,
                   blockedPaths: resolved.blockedPaths,
                 },
+                memory: options.memory,
+                codebaseContext: options.codebaseContext,
               }),
           );
         },

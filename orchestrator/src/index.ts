@@ -69,6 +69,10 @@ export {
   DEFAULT_PR_FOOTER,
   DEFAULT_COMPLEXITY_THRESHOLDS,
   DEFAULT_MAX_LINES_PER_PR,
+  DEFAULT_ANALYSIS_INCLUDE,
+  DEFAULT_ANALYSIS_EXCLUDE,
+  DEFAULT_GIT_HISTORY_DAYS,
+  DEFAULT_HOTSPOT_THRESHOLD,
   NOTIFICATION_TITLES,
 } from './defaults.js';
 
@@ -221,6 +225,38 @@ export {
 
 // State store
 export { StateStore } from './state/index.js';
+export type { HotspotRecord, RoutingDecision } from './state/index.js';
+
+// Codebase analysis
+export {
+  walkFiles,
+  detectModules,
+  parseImports,
+  buildModuleGraph,
+  detectConventions,
+  detectPatterns,
+  analyzeHotspots,
+  computeComplexityScore,
+  analyzeCodebase,
+  buildCodebaseContext,
+  formatContextForPrompt,
+} from './analysis/index.js';
+export type {
+  CodebaseProfile,
+  CodebaseContext,
+  Hotspot,
+  ArchitecturalPattern,
+  DetectedConvention,
+  ModuleInfo,
+  ModuleGraph,
+  DependencyEdge,
+  AnalyzerOptions,
+  FileInfo,
+  ImportStatement,
+} from './analysis/index.js';
+
+// Check runs
+export { createCheckRun, updateCheckRun, reportGateCheckRuns } from './check-runs.js';
 
 // Orchestrator class
 export { Orchestrator, type OrchestratorConfig } from './orchestrator.js';

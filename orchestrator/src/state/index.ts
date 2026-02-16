@@ -1,5 +1,5 @@
 export { StateStore } from './store.js';
-export { CURRENT_SCHEMA_VERSION, SCHEMA_DDL, MIGRATIONS } from './schema.js';
+export { CURRENT_SCHEMA_VERSION, SCHEMA_DDL, MIGRATION_V2, MIGRATIONS } from './schema.js';
 export type {
   ComplexityProfile,
   EpisodicRecord,
@@ -7,4 +7,6 @@ export type {
   PipelineRun,
   PipelineRunStatus,
   Convention,
+  HotspotRecord,
+  RoutingDecision,
 } from './types.js';

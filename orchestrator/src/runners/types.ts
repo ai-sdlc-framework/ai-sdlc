@@ -5,6 +5,7 @@
  */
 
 import type { AgentMemory } from '@ai-sdlc/reference';
+import type { CodebaseContext } from '../analysis/types.js';
 
 export interface AgentContext {
   issueNumber: number;
@@ -25,6 +26,8 @@ export interface AgentContext {
   allowedTools?: string[];
   /** Timeout in milliseconds for the agent subprocess (default 300000). */
   timeoutMs?: number;
+  /** Codebase context for intelligent agent prompting. */
+  codebaseContext?: CodebaseContext;
 }
 
 export interface AgentResult {

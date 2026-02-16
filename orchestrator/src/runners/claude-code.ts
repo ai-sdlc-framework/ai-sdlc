@@ -11,6 +11,7 @@ import {
   DEFAULT_ALLOWED_TOOLS,
   DEFAULT_RUNNER_TIMEOUT_MS,
 } from '../defaults.js';
+import { formatContextForPrompt } from '../analysis/context-builder.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -74,6 +75,11 @@ export function buildPrompt(ctx: AgentContext): string {
         lines.push(`- ${summary}`);
       }
     }
+  }
+
+  // Append codebase context if available
+  if (ctx.codebaseContext) {
+    lines.push('', formatContextForPrompt(ctx.codebaseContext));
   }
 
   return lines.join('\n');

@@ -9,6 +9,9 @@ import { runCommand } from './commands/run.js';
 import { startCommand } from './commands/start.js';
 import { statusCommand } from './commands/status.js';
 import { healthCommand } from './commands/health.js';
+import { agentsCommand } from './commands/agents.js';
+import { routingCommand } from './commands/routing.js';
+import { complexityCommand } from './commands/complexity.js';
 
 const program = new Command();
 
@@ -25,5 +28,8 @@ program.addCommand(runCommand);
 program.addCommand(startCommand);
 program.addCommand(statusCommand);
 program.addCommand(healthCommand);
+program.addCommand(agentsCommand);
+program.addCommand(routingCommand);
+program.addCommand(complexityCommand);
 
 program.parse();
