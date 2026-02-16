@@ -4,3 +4,4 @@ packages:
   - sdk-typescript
   - orchestrator
   - dogfood
+  - dashboard

@@ -150,3 +150,14 @@ export interface AutonomyEvent {
   unmetConditions?: string;
   createdAt?: string;
 }
+
+export interface HandoffEvent {
+  id?: number;
+  runId: string;
+  fromAgent: string;
+  toAgent: string;
+  payloadHash?: string;
+  validationResult: string;
+  errorMessage?: string;
+  createdAt?: string;
+}

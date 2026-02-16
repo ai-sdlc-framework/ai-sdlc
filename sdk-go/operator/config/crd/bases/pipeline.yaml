@@ -1,0 +1,233 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: pipelineresources.ai-sdlc.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+spec:
+  group: ai-sdlc.io
+  names:
+    kind: PipelineResource
+    listKind: PipelineResourceList
+    plural: pipelineresources
+    singular: pipelineresource
+    shortNames:
+      - pipe
+      - pipeline
+    categories:
+      - ai-sdlc
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Phase
+          type: string
+          jsonPath: .status.phase
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [triggers, providers, stages]
+              properties:
+                triggers:
+                  type: array
+                  items:
+                    type: object
+                    required: [event]
+                    properties:
+                      event:
+                        type: string
+                      filter:
+                        type: object
+                        properties:
+                          labels:
+                            type: array
+                            items:
+                              type: string
+                          branches:
+                            type: array
+                            items:
+                              type: string
+                          paths:
+                            type: array
+                            items:
+                              type: string
+                providers:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    required: [type]
+                    properties:
+                      type:
+                        type: string
+                      config:
+                        type: object
+                        x-kubernetes-preserve-unknown-fields: true
+                stages:
+                  type: array
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name:
+                        type: string
+                      agent:
+                        type: string
+                      qualityGates:
+                        type: array
+                        items:
+                          type: string
+                      timeout:
+                        type: string
+                      onFailure:
+                        type: object
+                        required: [strategy]
+                        properties:
+                          strategy:
+                            type: string
+                            enum: [abort, retry, pause, continue]
+                          maxRetries:
+                            type: integer
+                          retryDelay:
+                            type: string
+                          notification:
+                            type: string
+                      credentials:
+                        type: object
+                        required: [scope]
+                        properties:
+                          scope:
+                            type: array
+                            items:
+                              type: string
+                          ttl:
+                            type: string
+                          revokeOnComplete:
+                            type: boolean
+                      approval:
+                        type: object
+                        required: [required]
+                        properties:
+                          required:
+                            type: boolean
+                          tierOverride:
+                            type: string
+                          blocking:
+                            type: boolean
+                          timeout:
+                            type: string
+                          onTimeout:
+                            type: string
+                            enum: [abort, escalate, auto-approve]
+                routing:
+                  type: object
+                  properties:
+                    complexityThresholds:
+                      type: object
+                      additionalProperties:
+                        type: object
+                        required: [min, max, strategy]
+                        properties:
+                          min:
+                            type: integer
+                          max:
+                            type: integer
+                          strategy:
+                            type: string
+                branching:
+                  type: object
+                  required: [pattern]
+                  properties:
+                    pattern:
+                      type: string
+                    targetBranch:
+                      type: string
+                    cleanup:
+                      type: string
+                pullRequest:
+                  type: object
+                  properties:
+                    titleTemplate:
+                      type: string
+                    descriptionSections:
+                      type: array
+                      items:
+                        type: string
+                    includeProvenance:
+                      type: boolean
+                    closeKeyword:
+                      type: string
+                notifications:
+                  type: object
+                  properties:
+                    templates:
+                      type: object
+                      additionalProperties:
+                        type: object
+                        required: [target, title]
+                        properties:
+                          target:
+                            type: string
+                          title:
+                            type: string
+                          body:
+                            type: string
+            status:
+              type: object
+              properties:
+                phase:
+                  type: string
+                  enum: [Pending, Running, Succeeded, Failed, Suspended]
+                activeStage:
+                  type: string
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type:
+                        type: string
+                      status:
+                        type: string
+                        enum: ["True", "False", "Unknown"]
+                      reason:
+                        type: string
+                      message:
+                        type: string
+                      lastTransitionTime:
+                        type: string
+                      lastEvaluated:
+                        type: string
+                stageAttempts:
+                  type: object
+                  additionalProperties:
+                    type: integer
+                pendingApproval:
+                  type: object
+                  required: [stage, tier, requestedAt]
+                  properties:
+                    stage:
+                      type: string
+                    tier:
+                      type: string
+                    requestedAt:
+                      type: string
+                    timeoutAt:
+                      type: string

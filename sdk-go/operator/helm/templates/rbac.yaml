@@ -1,0 +1,50 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "ai-sdlc-operator.fullname" . }}
+  labels:
+    app.kubernetes.io/name: {{ include "ai-sdlc-operator.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+rules:
+  - apiGroups: ["ai-sdlc.io"]
+    resources:
+      - pipelineresources
+      - agentroleresources
+      - qualitygateresources
+      - autonomypolicyresources
+      - adapterbindingresources
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["ai-sdlc.io"]
+    resources:
+      - pipelineresources/status
+      - agentroleresources/status
+      - qualitygateresources/status
+      - autonomypolicyresources/status
+      - adapterbindingresources/status
+    verbs: [get, update, patch]
+  - apiGroups: ["ai-sdlc.io"]
+    resources:
+      - pipelineresources/finalizers
+    verbs: [update]
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "ai-sdlc-operator.fullname" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "ai-sdlc-operator.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "ai-sdlc-operator.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}

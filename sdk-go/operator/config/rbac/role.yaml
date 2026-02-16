@@ -1,0 +1,40 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ai-sdlc-operator-role
+rules:
+  # AI-SDLC custom resources
+  - apiGroups: ["ai-sdlc.io"]
+    resources:
+      - pipelineresources
+      - agentroleresources
+      - qualitygateresources
+      - autonomypolicyresources
+      - adapterbindingresources
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["ai-sdlc.io"]
+    resources:
+      - pipelineresources/status
+      - agentroleresources/status
+      - qualitygateresources/status
+      - autonomypolicyresources/status
+      - adapterbindingresources/status
+    verbs: [get, update, patch]
+  - apiGroups: ["ai-sdlc.io"]
+    resources:
+      - pipelineresources/finalizers
+      - agentroleresources/finalizers
+      - qualitygateresources/finalizers
+      - autonomypolicyresources/finalizers
+      - adapterbindingresources/finalizers
+    verbs: [update]
+  # Core resources needed for operation
+  - apiGroups: [""]
+    resources: [events]
+    verbs: [create, patch]
+  - apiGroups: [""]
+    resources: [configmaps]
+    verbs: [get, list, watch, create, update, patch, delete]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: [leases]
+    verbs: [get, list, watch, create, update, patch, delete]

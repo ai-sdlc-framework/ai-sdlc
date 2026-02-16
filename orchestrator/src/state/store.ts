@@ -19,6 +19,7 @@ import type {
   CostLedgerEntry,
   GateThresholdOverride,
   AutonomyEvent,
+  HandoffEvent,
 } from './types.js';
 
 export class StateStore {
@@ -645,7 +646,49 @@ export class StateStore {
     return this.saveComplexityProfile(profile);
   }
 
+  // ── Handoff Events ──────────────────────────────────────────────
+
+  saveHandoffEvent(event: Omit<HandoffEvent, 'id' | 'createdAt'>): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO handoff_events (run_id, from_agent, to_agent, payload_hash, validation_result, error_message)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      event.runId,
+      event.fromAgent,
+      event.toAgent,
+      event.payloadHash ?? null,
+      event.validationResult,
+      event.errorMessage ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getHandoffEvents(runId?: string, limit = 100): HandoffEvent[] {
+    const sql = runId
+      ? 'SELECT * FROM handoff_events WHERE run_id = ? ORDER BY created_at DESC LIMIT ?'
+      : 'SELECT * FROM handoff_events ORDER BY created_at DESC LIMIT ?';
+    const rows = (
+      runId ? this.db.prepare(sql).all(runId, limit) : this.db.prepare(sql).all(limit)
+    ) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      runId: r.run_id as string,
+      fromAgent: r.from_agent as string,
+      toAgent: r.to_agent as string,
+      payloadHash: r.payload_hash as string | undefined,
+      validationResult: r.validation_result as string,
+      errorMessage: r.error_message as string | undefined,
+      createdAt: r.created_at as string | undefined,
+    }));
+  }
+
   // ── Utilities ────────────────────────────────────────────────────
+
+  /** Expose the underlying database for direct queries (e.g. dashboard). */
+  getDatabase(): BetterSqlite3.Database {
+    return this.db;
+  }
 
   close(): void {
     this.db.close();

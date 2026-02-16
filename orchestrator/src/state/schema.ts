@@ -2,7 +2,7 @@
  * SQLite DDL and migrations for the state store.
  */
 
-export const CURRENT_SCHEMA_VERSION = 3;
+export const CURRENT_SCHEMA_VERSION = 4;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -175,6 +175,21 @@ ALTER TABLE pipeline_runs ADD COLUMN agent_name TEXT;
 ALTER TABLE pipeline_runs ADD COLUMN complexity_score INTEGER;
 `;
 
+export const MIGRATION_V4 = `
+-- Handoff audit trail
+CREATE TABLE IF NOT EXISTS handoff_events (
+  id INTEGER PRIMARY KEY,
+  run_id TEXT NOT NULL,
+  from_agent TEXT NOT NULL,
+  to_agent TEXT NOT NULL,
+  payload_hash TEXT,
+  validation_result TEXT NOT NULL,
+  error_message TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_handoff_events_run ON handoff_events(run_id);
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -187,5 +202,9 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 3,
     sql: MIGRATION_V3,
+  },
+  {
+    version: 4,
+    sql: MIGRATION_V4,
   },
 ];

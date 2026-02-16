@@ -1,0 +1,139 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: agentroleresources.ai-sdlc.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+spec:
+  group: ai-sdlc.io
+  names:
+    kind: AgentRoleResource
+    listKind: AgentRoleResourceList
+    plural: agentroleresources
+    singular: agentroleresource
+    shortNames:
+      - agent
+      - agentrole
+    categories:
+      - ai-sdlc
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Role
+          type: string
+          jsonPath: .spec.role
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [role, goal, tools]
+              properties:
+                role:
+                  type: string
+                goal:
+                  type: string
+                backstory:
+                  type: string
+                tools:
+                  type: array
+                  items:
+                    type: string
+                constraints:
+                  type: object
+                  properties:
+                    maxFilesPerChange:
+                      type: integer
+                    requireTests:
+                      type: boolean
+                    allowedLanguages:
+                      type: array
+                      items:
+                        type: string
+                    blockedPaths:
+                      type: array
+                      items:
+                        type: string
+                handoffs:
+                  type: array
+                  items:
+                    type: object
+                    required: [target, trigger]
+                    properties:
+                      target:
+                        type: string
+                      trigger:
+                        type: string
+                      contract:
+                        type: object
+                        required: [schema]
+                        properties:
+                          schema:
+                            type: string
+                          requiredFields:
+                            type: array
+                            items:
+                              type: string
+                skills:
+                  type: array
+                  items:
+                    type: object
+                    required: [id, description]
+                    properties:
+                      id:
+                        type: string
+                      description:
+                        type: string
+                      tags:
+                        type: array
+                        items:
+                          type: string
+                      examples:
+                        type: array
+                        items:
+                          type: object
+                          required: [input, output]
+                          properties:
+                            input:
+                              type: string
+                            output:
+                              type: string
+                agentCard:
+                  type: object
+                  required: [endpoint, version]
+                  properties:
+                    endpoint:
+                      type: string
+                    version:
+                      type: string
+                    securitySchemes:
+                      type: array
+                      items:
+                        type: string
+            status:
+              type: object
+              properties:
+                autonomyLevel:
+                  type: integer
+                totalTasksCompleted:
+                  type: integer
+                approvalRate:
+                  type: number
+                lastActive:
+                  type: string

@@ -223,13 +223,36 @@ export {
 export {
   ClaudeCodeRunner,
   ClaudeCodeRunner as GitHubActionsRunner,
+  GenericLLMRunner,
+  CopilotStubRunner,
+  CursorStubRunner,
+  DevinStubRunner,
+  RunnerRegistry,
+  createRunnerRegistry,
   type AgentRunner,
   type AgentContext,
   type AgentResult,
+  type GenericLLMConfig,
+  type RegisteredRunner,
 } from './runners/index.js';
 
 // Runners (additional type)
 export type { TokenUsage } from './runners/index.js';
+
+// Notifications
+export {
+  SlackMessenger,
+  TeamsMessenger,
+  NotificationRouter,
+} from './notifications/index.js';
+export type {
+  SlackConfig,
+  TeamsConfig,
+  PipelineEvent,
+  PipelineEventType,
+  NotificationRoute,
+  NotificationTemplate,
+} from './notifications/index.js';
 
 // State store
 export { StateStore } from './state/index.js';
@@ -240,6 +263,7 @@ export type {
   GateThresholdOverride,
   AutonomyEvent,
   AutonomyEventType,
+  HandoffEvent,
 } from './state/index.js';
 
 // Progressive gates
@@ -323,6 +347,40 @@ export type {
 
 // Check runs
 export { createCheckRun, updateCheckRun, reportGateCheckRuns } from './check-runs.js';
+
+// Multi-repo orchestration
+export {
+  detectMonorepoLayout,
+  detectWorkspace,
+  buildServiceMap,
+  detectCycles,
+  topologicalOrder,
+  getTransitiveDependents,
+  analyzeImpact,
+  formatImpactSummary,
+  getAffectedBuildOrder,
+} from './multi-repo/index.js';
+export type {
+  ServiceNode,
+  ServiceMap,
+  ServiceEdge,
+  MonorepoLayout,
+  WorkspaceConfig,
+  WorkspacePackage,
+  ImpactResult,
+} from './multi-repo/index.js';
+
+// Task decomposition
+export {
+  decomposeTask,
+  validateTaskGraph,
+  getExecutionLayers,
+} from './task-decomposer.js';
+export type { SubTask, TaskGraph, DecompositionContext, DecompositionOptions } from './task-decomposer.js';
+
+// Handoff execution
+export { HandoffExecutor } from './handoff-executor.js';
+export type { HandoffPayload, HandoffResult, HandoffExecutorOptions } from './handoff-executor.js';
 
 // Orchestrator class
 export { Orchestrator, type OrchestratorConfig } from './orchestrator.js';

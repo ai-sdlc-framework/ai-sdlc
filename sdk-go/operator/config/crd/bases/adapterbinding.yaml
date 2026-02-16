@@ -1,0 +1,91 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: adapterbindingresources.ai-sdlc.io
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.17.0
+spec:
+  group: ai-sdlc.io
+  names:
+    kind: AdapterBindingResource
+    listKind: AdapterBindingResourceList
+    plural: adapterbindingresources
+    singular: adapterbindingresource
+    shortNames:
+      - ab
+      - adapterbinding
+    categories:
+      - ai-sdlc
+  scope: Namespaced
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      additionalPrinterColumns:
+        - name: Interface
+          type: string
+          jsonPath: .spec.interface
+        - name: Type
+          type: string
+          jsonPath: .spec.type
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required: [interface, type, version]
+              properties:
+                interface:
+                  type: string
+                  enum:
+                    - IssueTracker
+                    - SourceControl
+                    - CIPipeline
+                    - CodeAnalysis
+                    - Messenger
+                    - DeploymentTarget
+                    - AuditSink
+                    - Sandbox
+                    - SecretStore
+                    - MemoryStore
+                    - EventBus
+                type:
+                  type: string
+                version:
+                  type: string
+                source:
+                  type: string
+                config:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                healthCheck:
+                  type: object
+                  properties:
+                    interval:
+                      type: string
+                    timeout:
+                      type: string
+            status:
+              type: object
+              properties:
+                connected:
+                  type: boolean
+                lastHealthCheck:
+                  type: string
+                adapterVersion:
+                  type: string
+                specVersionSupported:
+                  type: string

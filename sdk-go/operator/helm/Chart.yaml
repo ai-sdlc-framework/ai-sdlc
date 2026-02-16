@@ -1,0 +1,16 @@
+apiVersion: v2
+name: ai-sdlc-operator
+description: Kubernetes operator for the AI-SDLC Framework
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - ai-sdlc
+  - sdlc
+  - ai-agent
+  - operator
+home: https://ai-sdlc.io
+sources:
+  - https://github.com/ai-sdlc-framework/ai-sdlc
+maintainers:
+  - name: AI-SDLC Framework

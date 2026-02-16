@@ -1,5 +1,5 @@
 export { StateStore } from './store.js';
-export { CURRENT_SCHEMA_VERSION, SCHEMA_DDL, MIGRATION_V2, MIGRATION_V3, MIGRATIONS } from './schema.js';
+export { CURRENT_SCHEMA_VERSION, SCHEMA_DDL, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATIONS } from './schema.js';
 export type {
   ComplexityProfile,
   EpisodicRecord,
@@ -13,4 +13,5 @@ export type {
   GateThresholdOverride,
   AutonomyEvent,
   AutonomyEventType,
+  HandoffEvent,
 } from './types.js';
