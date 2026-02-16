@@ -21,8 +21,8 @@ describe('SPAN_NAMES', () => {
     expect(SPAN_NAMES.HANDOFF).toBe('ai_sdlc.handoff');
   });
 
-  it('has exactly 5 span names', () => {
-    expect(Object.keys(SPAN_NAMES)).toHaveLength(5);
+  it('has exactly 7 span names', () => {
+    expect(Object.keys(SPAN_NAMES)).toHaveLength(7);
   });
 });
 
@@ -33,8 +33,8 @@ describe('METRIC_NAMES', () => {
     }
   });
 
-  it('has exactly 21 metric names', () => {
-    expect(Object.keys(METRIC_NAMES)).toHaveLength(21);
+  it('has exactly 26 metric names', () => {
+    expect(Object.keys(METRIC_NAMES)).toHaveLength(26);
   });
 
   it('contains gauge, counter, and histogram metrics', () => {
@@ -60,8 +60,8 @@ describe('ATTRIBUTE_KEYS', () => {
     }
   });
 
-  it('has exactly 8 attribute keys', () => {
-    expect(Object.keys(ATTRIBUTE_KEYS)).toHaveLength(8);
+  it('has exactly 13 attribute keys', () => {
+    expect(Object.keys(ATTRIBUTE_KEYS)).toHaveLength(13);
   });
 
   it('has no duplicate values', () => {

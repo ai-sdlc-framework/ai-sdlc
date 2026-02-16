@@ -16,6 +16,9 @@ import type {
   Convention,
   HotspotRecord,
   RoutingDecision,
+  CostLedgerEntry,
+  GateThresholdOverride,
+  AutonomyEvent,
 } from './types.js';
 
 export class StateStore {
@@ -121,8 +124,9 @@ export class StateStore {
 
   saveEpisodicRecord(record: EpisodicRecord): number {
     const stmt = this.db.prepare(`
-      INSERT INTO episodic_memory (issue_number, pr_number, pipeline_type, outcome, duration_ms, files_changed, error_message, metadata)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO episodic_memory (issue_number, pr_number, pipeline_type, outcome, duration_ms, files_changed, error_message, metadata,
+        agent_name, complexity_score, routing_strategy, gate_pass_count, gate_fail_count, cost_usd, is_regression, related_episodes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       record.issueNumber ?? null,
@@ -133,6 +137,14 @@ export class StateStore {
       record.filesChanged ?? null,
       record.errorMessage ?? null,
       record.metadata ?? null,
+      record.agentName ?? null,
+      record.complexityScore ?? null,
+      record.routingStrategy ?? null,
+      record.gatePassCount ?? null,
+      record.gateFailCount ?? null,
+      record.costUsd ?? null,
+      record.isRegression ?? 0,
+      record.relatedEpisodes ?? null,
     );
     return Number(result.lastInsertRowid);
   }
@@ -159,6 +171,14 @@ export class StateStore {
       errorMessage: row.error_message as string | undefined,
       metadata: row.metadata as string | undefined,
       createdAt: row.created_at as string | undefined,
+      agentName: row.agent_name as string | undefined,
+      complexityScore: row.complexity_score as number | undefined,
+      routingStrategy: row.routing_strategy as string | undefined,
+      gatePassCount: row.gate_pass_count as number | undefined,
+      gateFailCount: row.gate_fail_count as number | undefined,
+      costUsd: row.cost_usd as number | undefined,
+      isRegression: row.is_regression as number | undefined,
+      relatedEpisodes: row.related_episodes as string | undefined,
     };
   }
 
@@ -174,15 +194,22 @@ export class StateStore {
   upsertAutonomyLedger(entry: AutonomyLedgerEntry): void {
     this.db
       .prepare(
-        `INSERT INTO autonomy_ledger (agent_name, current_level, total_tasks, success_count, failure_count, last_task_at, metrics)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO autonomy_ledger (agent_name, current_level, total_tasks, success_count, failure_count, last_task_at, metrics,
+          pr_approval_rate, rollback_count, security_incidents, promoted_at, demoted_at, time_at_level_ms)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(agent_name) DO UPDATE SET
            current_level = excluded.current_level,
            total_tasks = excluded.total_tasks,
            success_count = excluded.success_count,
            failure_count = excluded.failure_count,
            last_task_at = excluded.last_task_at,
-           metrics = excluded.metrics`,
+           metrics = excluded.metrics,
+           pr_approval_rate = excluded.pr_approval_rate,
+           rollback_count = excluded.rollback_count,
+           security_incidents = excluded.security_incidents,
+           promoted_at = excluded.promoted_at,
+           demoted_at = excluded.demoted_at,
+           time_at_level_ms = excluded.time_at_level_ms`,
       )
       .run(
         entry.agentName,
@@ -192,7 +219,20 @@ export class StateStore {
         entry.failureCount,
         entry.lastTaskAt ?? null,
         entry.metrics ?? null,
+        entry.prApprovalRate ?? 0,
+        entry.rollbackCount ?? 0,
+        entry.securityIncidents ?? 0,
+        entry.promotedAt ?? null,
+        entry.demotedAt ?? null,
+        entry.timeAtLevelMs ?? 0,
       );
+  }
+
+  getAllAutonomyLedgerEntries(): AutonomyLedgerEntry[] {
+    const rows = this.db
+      .prepare('SELECT * FROM autonomy_ledger ORDER BY agent_name')
+      .all() as Record<string, unknown>[];
+    return rows.map((r) => this.mapAutonomyLedger(r));
   }
 
   private mapAutonomyLedger(row: Record<string, unknown>): AutonomyLedgerEntry {
@@ -205,6 +245,12 @@ export class StateStore {
       failureCount: row.failure_count as number,
       lastTaskAt: row.last_task_at as string | undefined,
       metrics: row.metrics as string | undefined,
+      prApprovalRate: row.pr_approval_rate as number | undefined,
+      rollbackCount: row.rollback_count as number | undefined,
+      securityIncidents: row.security_incidents as number | undefined,
+      promotedAt: row.promoted_at as string | undefined,
+      demotedAt: row.demoted_at as string | undefined,
+      timeAtLevelMs: row.time_at_level_ms as number | undefined,
     };
   }
 
@@ -212,8 +258,9 @@ export class StateStore {
 
   savePipelineRun(run: PipelineRun): number {
     const stmt = this.db.prepare(`
-      INSERT INTO pipeline_runs (run_id, issue_number, pr_number, pipeline_type, status, current_stage, result, gate_results)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO pipeline_runs (run_id, issue_number, pr_number, pipeline_type, status, current_stage, result, gate_results,
+        cost_usd, tokens_used, model, agent_name, complexity_score)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       run.runId,
@@ -224,6 +271,11 @@ export class StateStore {
       run.currentStage ?? null,
       run.result ?? null,
       run.gateResults ?? null,
+      run.costUsd ?? 0,
+      run.tokensUsed ?? 0,
+      run.model ?? null,
+      run.agentName ?? null,
+      run.complexityScore ?? null,
     );
     return Number(result.lastInsertRowid);
   }
@@ -283,6 +335,11 @@ export class StateStore {
       completedAt: row.completed_at as string | undefined,
       result: row.result as string | undefined,
       gateResults: row.gate_results as string | undefined,
+      costUsd: row.cost_usd as number | undefined,
+      tokensUsed: row.tokens_used as number | undefined,
+      model: row.model as string | undefined,
+      agentName: row.agent_name as string | undefined,
+      complexityScore: row.complexity_score as number | undefined,
     };
   }
 
@@ -401,6 +458,181 @@ export class StateStore {
       reason: row.reason as string | undefined,
       decidedAt: row.decided_at as string | undefined,
     };
+  }
+
+  // ── Cost Ledger ────────────────────────────────────────────────
+
+  saveCostEntry(entry: CostLedgerEntry): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO cost_ledger (run_id, agent_name, pipeline_type, model, input_tokens, output_tokens, total_tokens, cost_usd, issue_number, pr_number)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      entry.runId,
+      entry.agentName,
+      entry.pipelineType,
+      entry.model ?? null,
+      entry.inputTokens ?? 0,
+      entry.outputTokens ?? 0,
+      entry.totalTokens ?? 0,
+      entry.costUsd ?? 0,
+      entry.issueNumber ?? null,
+      entry.prNumber ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getCostEntries(opts?: { runId?: string; agentName?: string; since?: string; limit?: number }): CostLedgerEntry[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts?.runId) { conditions.push('run_id = ?'); params.push(opts.runId); }
+    if (opts?.agentName) { conditions.push('agent_name = ?'); params.push(opts.agentName); }
+    if (opts?.since) { conditions.push('created_at >= ?'); params.push(opts.since); }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 1000;
+    const sql = `SELECT * FROM cost_ledger ${where} ORDER BY created_at DESC LIMIT ?`;
+    params.push(limit);
+
+    const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return rows.map((r) => this.mapCostEntry(r));
+  }
+
+  getCostSummary(since?: string): { totalCostUsd: number; totalTokens: number; entryCount: number } {
+    const where = since ? 'WHERE created_at >= ?' : '';
+    const sql = `SELECT COALESCE(SUM(cost_usd), 0) as total_cost, COALESCE(SUM(total_tokens), 0) as total_tokens, COUNT(*) as entry_count FROM cost_ledger ${where}`;
+    const row = (since
+      ? this.db.prepare(sql).get(since)
+      : this.db.prepare(sql).get()) as Record<string, unknown>;
+    return {
+      totalCostUsd: row.total_cost as number,
+      totalTokens: row.total_tokens as number,
+      entryCount: row.entry_count as number,
+    };
+  }
+
+  private mapCostEntry(row: Record<string, unknown>): CostLedgerEntry {
+    return {
+      id: row.id as number,
+      runId: row.run_id as string,
+      agentName: row.agent_name as string,
+      pipelineType: row.pipeline_type as string,
+      model: row.model as string | undefined,
+      inputTokens: row.input_tokens as number | undefined,
+      outputTokens: row.output_tokens as number | undefined,
+      totalTokens: row.total_tokens as number | undefined,
+      costUsd: row.cost_usd as number | undefined,
+      issueNumber: row.issue_number as number | undefined,
+      prNumber: row.pr_number as number | undefined,
+      createdAt: row.created_at as string | undefined,
+    };
+  }
+
+  // ── Gate Threshold Overrides ──────────────────────────────────
+
+  saveGateThresholdOverride(override: GateThresholdOverride): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO gate_threshold_overrides (gate_name, complexity_band, enforcement_level, threshold_overrides, active)
+      VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(gate_name, complexity_band) DO UPDATE SET
+        enforcement_level = excluded.enforcement_level,
+        threshold_overrides = excluded.threshold_overrides,
+        active = excluded.active
+    `);
+    const result = stmt.run(
+      override.gateName,
+      override.complexityBand,
+      override.enforcementLevel,
+      override.thresholdOverrides ?? null,
+      override.active ?? 1,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getGateThresholdOverrides(gateName?: string, complexityBand?: string): GateThresholdOverride[] {
+    const conditions: string[] = ['active = 1'];
+    const params: unknown[] = [];
+
+    if (gateName) { conditions.push('gate_name = ?'); params.push(gateName); }
+    if (complexityBand) { conditions.push('complexity_band = ?'); params.push(complexityBand); }
+
+    const sql = `SELECT * FROM gate_threshold_overrides WHERE ${conditions.join(' AND ')} ORDER BY gate_name`;
+    const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      gateName: r.gate_name as string,
+      complexityBand: r.complexity_band as string,
+      enforcementLevel: r.enforcement_level as string,
+      thresholdOverrides: r.threshold_overrides as string | undefined,
+      active: r.active as number | undefined,
+      createdAt: r.created_at as string | undefined,
+    }));
+  }
+
+  // ── Autonomy Events ───────────────────────────────────────────
+
+  saveAutonomyEvent(event: AutonomyEvent): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO autonomy_events (agent_name, event_type, from_level, to_level, trigger, metrics_snapshot, unmet_conditions)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      event.agentName,
+      event.eventType,
+      event.fromLevel,
+      event.toLevel,
+      event.trigger ?? null,
+      event.metricsSnapshot ?? null,
+      event.unmetConditions ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getAutonomyEvents(agentName?: string, limit = 100): AutonomyEvent[] {
+    const sql = agentName
+      ? 'SELECT * FROM autonomy_events WHERE agent_name = ? ORDER BY created_at DESC LIMIT ?'
+      : 'SELECT * FROM autonomy_events ORDER BY created_at DESC LIMIT ?';
+    const rows = (
+      agentName ? this.db.prepare(sql).all(agentName, limit) : this.db.prepare(sql).all(limit)
+    ) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      agentName: r.agent_name as string,
+      eventType: r.event_type as AutonomyEvent['eventType'],
+      fromLevel: r.from_level as number,
+      toLevel: r.to_level as number,
+      trigger: r.trigger as string | undefined,
+      metricsSnapshot: r.metrics_snapshot as string | undefined,
+      unmetConditions: r.unmet_conditions as string | undefined,
+      createdAt: r.created_at as string | undefined,
+    }));
+  }
+
+  // ── Episodic Search ───────────────────────────────────────────
+
+  searchEpisodicRecords(opts: {
+    agentName?: string;
+    outcome?: string;
+    since?: string;
+    files?: string;
+    limit?: number;
+  }): EpisodicRecord[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+
+    if (opts.agentName) { conditions.push('agent_name = ?'); params.push(opts.agentName); }
+    if (opts.outcome) { conditions.push('outcome = ?'); params.push(opts.outcome); }
+    if (opts.since) { conditions.push('created_at >= ?'); params.push(opts.since); }
+    if (opts.files) { conditions.push('metadata LIKE ?'); params.push(`%${opts.files}%`); }
+
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts.limit ?? 50;
+    const sql = `SELECT * FROM episodic_memory ${where} ORDER BY created_at DESC LIMIT ?`;
+    params.push(limit);
+
+    const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
+    return rows.map((r) => this.mapEpisodicRecord(r));
   }
 
   // ── Codebase Profile (full) ───────────────────────────────────

@@ -5,7 +5,7 @@
 
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { AgentRunner, AgentContext, AgentResult } from './types.js';
+import type { AgentRunner, AgentContext, AgentResult, TokenUsage } from './types.js';
 import {
   DEFAULT_MODEL,
   DEFAULT_ALLOWED_TOOLS,
@@ -77,6 +77,11 @@ export function buildPrompt(ctx: AgentContext): string {
     }
   }
 
+  // Append episodic context if available
+  if (ctx.episodicContext) {
+    lines.push('', ctx.episodicContext);
+  }
+
   // Append codebase context if available
   if (ctx.codebaseContext) {
     lines.push('', formatContextForPrompt(ctx.codebaseContext));
@@ -95,7 +100,13 @@ interface RunClaudeOptions {
   timeoutMs?: number;
 }
 
-function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Promise<string> {
+interface RunClaudeResult {
+  stdout: string;
+  stderr: string;
+  model: string;
+}
+
+function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Promise<RunClaudeResult> {
   const tools = opts?.allowedTools?.join(',') ?? DEFAULT_ALLOWED_TOOLS;
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_RUNNER_TIMEOUT_MS;
 
@@ -116,10 +127,10 @@ function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Pr
 
     child.on('close', (code) => {
       const stdout = Buffer.concat(chunks).toString('utf-8');
+      const stderr = Buffer.concat(errChunks).toString('utf-8');
       if (code === 0) {
-        resolve(stdout);
+        resolve({ stdout, stderr, model });
       } else {
-        const stderr = Buffer.concat(errChunks).toString('utf-8');
         reject(new Error(`claude exited with code ${code}: ${stderr || stdout}`));
       }
     });
@@ -132,16 +143,51 @@ function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Pr
   });
 }
 
+/**
+ * Parse token usage from Claude CLI stderr output.
+ * Claude Code CLI outputs token info to stderr in various formats.
+ */
+export function parseTokenUsage(stderr: string, model: string): TokenUsage | undefined {
+  // Try to match patterns like "Input tokens: 1234" / "Output tokens: 5678"
+  const inputMatch = stderr.match(/input[\s_-]*tokens?[:\s]+(\d[\d,]*)/i);
+  const outputMatch = stderr.match(/output[\s_-]*tokens?[:\s]+(\d[\d,]*)/i);
+
+  if (inputMatch || outputMatch) {
+    return {
+      inputTokens: inputMatch ? parseInt(inputMatch[1].replace(/,/g, ''), 10) : 0,
+      outputTokens: outputMatch ? parseInt(outputMatch[1].replace(/,/g, ''), 10) : 0,
+      model,
+    };
+  }
+
+  // Try to match total tokens pattern
+  const totalMatch = stderr.match(/total[\s_-]*tokens?[:\s]+(\d[\d,]*)/i);
+  if (totalMatch) {
+    const total = parseInt(totalMatch[1].replace(/,/g, ''), 10);
+    // Estimate 70% input / 30% output split
+    return {
+      inputTokens: Math.round(total * 0.7),
+      outputTokens: Math.round(total * 0.3),
+      model,
+    };
+  }
+
+  return undefined;
+}
+
 export class ClaudeCodeRunner implements AgentRunner {
   async run(ctx: AgentContext): Promise<AgentResult> {
     const prompt = buildPrompt(ctx);
 
     try {
       // Invoke Claude Code CLI in print mode, sending prompt via stdin
-      const stdout = await runClaude(prompt, ctx.workDir, {
+      const result = await runClaude(prompt, ctx.workDir, {
         allowedTools: ctx.allowedTools,
         timeoutMs: ctx.timeoutMs,
       });
+
+      // Parse token usage from stderr
+      const tokenUsage = parseTokenUsage(result.stderr, result.model);
 
       // Collect changed files
       const diffOutput = await gitExec(ctx.workDir, ['diff', '--name-only']);
@@ -162,6 +208,7 @@ export class ClaudeCodeRunner implements AgentRunner {
           filesChanged: [],
           summary: 'Agent made no changes',
           error: 'No files were modified',
+          tokenUsage,
         };
       }
 
@@ -176,7 +223,8 @@ export class ClaudeCodeRunner implements AgentRunner {
       return {
         success: true,
         filesChanged,
-        summary: stdout.slice(0, 2000),
+        summary: result.stdout.slice(0, 2000),
+        tokenUsage,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

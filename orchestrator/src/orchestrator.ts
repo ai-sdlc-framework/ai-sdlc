@@ -15,6 +15,8 @@ import { analyzeCodebase } from './analysis/analyzer.js';
 import { buildCodebaseContext } from './analysis/context-builder.js';
 import type { CodebaseProfile, CodebaseContext } from './analysis/types.js';
 import type { AutonomyLedgerEntry, RoutingDecision } from './state/types.js';
+import { AutonomyTracker } from './autonomy-tracker.js';
+import { CostTracker, type CostSummary, type BudgetStatus } from './cost-tracker.js';
 
 export interface OrchestratorConfig {
   /** Path to the .ai-sdlc config directory. */
@@ -51,6 +53,8 @@ export class Orchestrator {
   private config: OrchestratorConfig;
   private _state?: StateStore;
   private log: Logger;
+  private _autonomyTracker?: AutonomyTracker;
+  private _costTracker?: CostTracker;
 
   constructor(config: OrchestratorConfig) {
     this.config = config;
@@ -58,6 +62,8 @@ export class Orchestrator {
 
     if (config.statePath) {
       this._state = StateStore.open(config.statePath);
+      this._autonomyTracker = new AutonomyTracker(this._state);
+      this._costTracker = new CostTracker(this._state);
     }
   }
 
@@ -86,6 +92,9 @@ export class Orchestrator {
         runner: this.config.runner,
         security: this.config.security,
         logger: this.log,
+        autonomyTracker: this._autonomyTracker,
+        costTracker: this._costTracker,
+        stateStore: this._state,
         ...overrides,
       });
 
@@ -259,25 +268,7 @@ export class Orchestrator {
    */
   async agents(): Promise<AutonomyLedgerEntry[]> {
     if (!this._state) return [];
-    // Get all agents from the autonomy ledger
-    // Since we don't have a listAll method, we'll query known agents
-    const entries: AutonomyLedgerEntry[] = [];
-    const rows = this._state['db']
-      .prepare('SELECT * FROM autonomy_ledger ORDER BY agent_name')
-      .all() as Record<string, unknown>[];
-    for (const row of rows) {
-      entries.push({
-        id: row.id as number,
-        agentName: row.agent_name as string,
-        currentLevel: row.current_level as number,
-        totalTasks: row.total_tasks as number,
-        successCount: row.success_count as number,
-        failureCount: row.failure_count as number,
-        lastTaskAt: row.last_task_at as string | undefined,
-        metrics: row.metrics as string | undefined,
-      });
-    }
-    return entries;
+    return this._state.getAllAutonomyLedgerEntries();
   }
 
   /**
@@ -295,6 +286,68 @@ export class Orchestrator {
     const profile = await this.analyze({ force: options?.analyze });
     const context = buildCodebaseContext(profile);
     return { profile, context };
+  }
+
+  /**
+   * Get cost summary and budget status.
+   */
+  async cost(opts?: { since?: string; budget?: number }): Promise<{ summary: CostSummary; budget: BudgetStatus }> {
+    if (!this._costTracker) {
+      return {
+        summary: {
+          totalCostUsd: 0, totalTokens: 0, totalInputTokens: 0, totalOutputTokens: 0,
+          entryCount: 0, avgCostPerRun: 0, avgTokensPerRun: 0,
+          costByAgent: {}, costByModel: {},
+        },
+        budget: {
+          budgetUsd: 0, spentUsd: 0, remainingUsd: 0,
+          utilizationPercent: 0, overBudget: false, projectedMonthlyUsd: 0,
+        },
+      };
+    }
+    return {
+      summary: this._costTracker.getCostSummary(opts?.since),
+      budget: this._costTracker.getBudgetStatus(opts?.budget, opts?.since),
+    };
+  }
+
+  /**
+   * Get dashboard data snapshot for TUI rendering.
+   */
+  async dashboard(): Promise<{
+    runs: Array<{ runId: string; status: string; startedAt?: string }>;
+    agents: AutonomyLedgerEntry[];
+    costSummary: CostSummary;
+    budgetStatus: BudgetStatus;
+  }> {
+    const runs = this._state ? this._state.getPipelineRuns(undefined, 10).map((r) => ({
+      runId: r.runId,
+      status: r.status,
+      startedAt: r.startedAt,
+    })) : [];
+    const agents = this._state ? this._state.getAllAutonomyLedgerEntries() : [];
+    const costData = await this.cost();
+
+    return {
+      runs,
+      agents,
+      costSummary: costData.summary,
+      budgetStatus: costData.budget,
+    };
+  }
+
+  /**
+   * Access the autonomy tracker.
+   */
+  get autonomyTracker(): AutonomyTracker | undefined {
+    return this._autonomyTracker;
+  }
+
+  /**
+   * Access the cost tracker.
+   */
+  get costTracker(): CostTracker | undefined {
+    return this._costTracker;
   }
 
   /**

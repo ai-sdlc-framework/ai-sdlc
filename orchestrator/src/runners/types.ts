@@ -28,6 +28,14 @@ export interface AgentContext {
   timeoutMs?: number;
   /** Codebase context for intelligent agent prompting. */
   codebaseContext?: CodebaseContext;
+  /** Enriched episodic context from prior runs. */
+  episodicContext?: string;
+}
+
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+  model: string;
 }
 
 export interface AgentResult {
@@ -35,6 +43,8 @@ export interface AgentResult {
   filesChanged: string[];
   summary: string;
   error?: string;
+  /** Token usage parsed from the agent subprocess. */
+  tokenUsage?: TokenUsage;
 }
 
 export interface AgentRunner {

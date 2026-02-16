@@ -12,6 +12,8 @@ import { healthCommand } from './commands/health.js';
 import { agentsCommand } from './commands/agents.js';
 import { routingCommand } from './commands/routing.js';
 import { complexityCommand } from './commands/complexity.js';
+import { costCommand } from './commands/cost.js';
+import { dashboardCommand } from './commands/dashboard.js';
 
 const program = new Command();
 
@@ -31,5 +33,7 @@ program.addCommand(healthCommand);
 program.addCommand(agentsCommand);
 program.addCommand(routingCommand);
 program.addCommand(complexityCommand);
+program.addCommand(costCommand);
+program.addCommand(dashboardCommand);
 
 program.parse();

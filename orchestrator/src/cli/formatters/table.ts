@@ -156,6 +156,44 @@ export function formatTable(data: Record<string, unknown>): string {
       }
       break;
     }
+    case 'cost': {
+      const summary = data.summary as Record<string, unknown>;
+      const budget = data.budget as Record<string, unknown>;
+      const period = data.period as string ?? 'all-time';
+      lines.push(`Cost Summary (${period})`);
+      lines.push('─'.repeat(50));
+      lines.push(`Total Cost:     $${(summary.totalCostUsd as number).toFixed(2)}`);
+      lines.push(`Total Tokens:   ${summary.totalTokens}`);
+      lines.push(`Runs:           ${summary.entryCount}`);
+      lines.push(`Avg Cost/Run:   $${(summary.avgCostPerRun as number).toFixed(4)}`);
+      lines.push('');
+      lines.push('Budget Status');
+      lines.push('─'.repeat(50));
+      lines.push(`Budget:         $${budget.budgetUsd}`);
+      lines.push(`Spent:          $${(budget.spentUsd as number).toFixed(2)}`);
+      lines.push(`Remaining:      $${(budget.remainingUsd as number).toFixed(2)}`);
+      lines.push(`Utilization:    ${(budget.utilizationPercent as number).toFixed(1)}%`);
+      if (budget.overBudget) {
+        lines.push('  ** OVER BUDGET **');
+      }
+
+      const costByAgent = summary.costByAgent as Record<string, number> | undefined;
+      if (costByAgent && Object.keys(costByAgent).length > 0) {
+        lines.push('');
+        lines.push('Cost by Agent');
+        lines.push('─'.repeat(50));
+        lines.push('Agent'.padEnd(20) + 'Cost');
+        for (const [agent, cost] of Object.entries(costByAgent)) {
+          lines.push(agent.padEnd(20) + `$${cost.toFixed(4)}`);
+        }
+      }
+
+      if (data.agent && data.filteredCost !== undefined) {
+        lines.push('');
+        lines.push(`Filtered (${data.agent}): $${(data.filteredCost as number).toFixed(4)}`);
+      }
+      break;
+    }
     default: {
       // Generic key-value output
       for (const [key, value] of Object.entries(data)) {

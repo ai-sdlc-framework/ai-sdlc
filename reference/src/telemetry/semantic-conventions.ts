@@ -15,6 +15,10 @@ export const SPAN_NAMES = {
   RECONCILIATION_CYCLE: 'ai_sdlc.reconciliation.cycle',
   /** An agent-to-agent handoff. */
   HANDOFF: 'ai_sdlc.handoff',
+  /** A full pipeline run. */
+  PIPELINE_RUN: 'ai_sdlc.pipeline.run',
+  /** Cost tracking span. */
+  COST_TRACKING: 'ai_sdlc.cost.tracking',
 } as const;
 
 /** Standard metric names for AI-SDLC instrumentation. */
@@ -61,6 +65,16 @@ export const METRIC_NAMES = {
   LLM_EVAL_SCORE: 'ai_sdlc.llm_eval.score',
   /** Duration of expression evaluation in milliseconds (histogram). */
   EXPRESSION_EVAL_DURATION_MS: 'ai_sdlc.expression_eval.duration_ms',
+  /** Total cost in USD (counter). */
+  COST_USD_TOTAL: 'ai_sdlc.cost.usd.total',
+  /** Total input tokens consumed (counter). */
+  INPUT_TOKENS_TOTAL: 'ai_sdlc.tokens.input.total',
+  /** Total output tokens consumed (counter). */
+  OUTPUT_TOKENS_TOTAL: 'ai_sdlc.tokens.output.total',
+  /** Total tokens consumed (counter). */
+  TOKENS_TOTAL: 'ai_sdlc.tokens.total',
+  /** Cost per task in USD (histogram). */
+  COST_PER_TASK_USD: 'ai_sdlc.cost.per_task_usd',
 } as const;
 
 /** Standard attribute keys for spans and metrics. */
@@ -81,6 +95,16 @@ export const ATTRIBUTE_KEYS = {
   RESOURCE_KIND: 'ai_sdlc.resource.kind',
   /** Resource name. */
   RESOURCE_NAME: 'ai_sdlc.resource.name',
+  /** LLM model name. */
+  MODEL: 'ai_sdlc.model',
+  /** Cost in USD. */
+  COST_USD: 'ai_sdlc.cost_usd',
+  /** Token count. */
+  TOKENS: 'ai_sdlc.tokens',
+  /** Complexity band (trivial, standard, complex, critical). */
+  COMPLEXITY_BAND: 'ai_sdlc.complexity_band',
+  /** Run ID. */
+  RUN_ID: 'ai_sdlc.run_id',
 } as const;
 
 /** The common prefix used by all AI-SDLC semantic conventions. */

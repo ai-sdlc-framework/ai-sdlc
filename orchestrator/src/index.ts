@@ -74,7 +74,12 @@ export {
   DEFAULT_GIT_HISTORY_DAYS,
   DEFAULT_HOTSPOT_THRESHOLD,
   NOTIFICATION_TITLES,
+  DEFAULT_MODEL_COSTS,
+  DEFAULT_COST_BUDGET_USD,
+  DEFAULT_DASHBOARD_REFRESH_MS,
+  PROGRESSIVE_GATE_PROFILES,
 } from './defaults.js';
+export type { ComplexityBand, GateProfile } from './defaults.js';
 
 // Notifications
 export { renderTemplate } from './notifications.js';
@@ -223,9 +228,70 @@ export {
   type AgentResult,
 } from './runners/index.js';
 
+// Runners (additional type)
+export type { TokenUsage } from './runners/index.js';
+
 // State store
 export { StateStore } from './state/index.js';
-export type { HotspotRecord, RoutingDecision } from './state/index.js';
+export type {
+  HotspotRecord,
+  RoutingDecision,
+  CostLedgerEntry,
+  GateThresholdOverride,
+  AutonomyEvent,
+  AutonomyEventType,
+} from './state/index.js';
+
+// Progressive gates
+export {
+  getComplexityBand,
+  getGateProfile,
+  adjustEnforcement,
+  adjustGateForComplexity,
+  adjustGatesForComplexity,
+  computeGateAdjustments,
+} from './progressive-gates.js';
+export type { AdjustedGate, GateAdjustment } from './progressive-gates.js';
+
+// Process escalation
+export {
+  evaluateProcessEscalation,
+  isSignificantEscalation,
+  formatEscalationSummary,
+} from './process-escalation.js';
+export type { EscalationAction, EscalationResult, EscalationActionType } from './process-escalation.js';
+
+// Enhanced episodic memory
+export {
+  createEnhancedEpisodicMemory,
+  detectRegressions,
+  extractEpisodicPatterns,
+} from './episodic-enhanced.js';
+export type { EnhancedEpisodicInput, RegressionInfo, FailurePattern, EpisodicSummary } from './episodic-enhanced.js';
+
+// Context enrichment
+export {
+  findRelevantEpisodes,
+  formatEpisodicContext,
+  enrichAgentContext,
+} from './context-enrichment.js';
+export type { EpisodeSearchCriteria, ScoredEpisode } from './context-enrichment.js';
+
+// Autonomy tracker
+export { AutonomyTracker } from './autonomy-tracker.js';
+export type { AgentPerformanceMetrics, PromotionEvaluation, DemotionEvaluation, PromotionProximity } from './autonomy-tracker.js';
+
+// Cost tracker
+export { CostTracker } from './cost-tracker.js';
+export type { CostSummary, BudgetStatus, CostTimeSeriesPoint } from './cost-tracker.js';
+
+// OTel bridge
+export { createOTelBridge, isOTelAvailable } from './otel-exporter.js';
+export type { OTelBridge, OTelBridgeOptions, OTelSpanHandle } from './otel-exporter.js';
+
+// Dashboard renderer
+export { renderDashboardFrame } from './cli/dashboard-renderer.js';
+export type { DashboardData } from './cli/dashboard-renderer.js';
 
 // Codebase analysis
 export {

@@ -26,6 +26,11 @@ export function formatMinimal(data: Record<string, unknown>): string {
       const profile = data.profile as Record<string, unknown>;
       return `Complexity: ${profile.score}/10 | ${profile.filesCount} files | ${profile.modulesCount} modules`;
     }
+    case 'cost': {
+      const summary = data.summary as Record<string, unknown>;
+      const budget = data.budget as Record<string, unknown>;
+      return `Cost: $${(summary.totalCostUsd as number).toFixed(2)} | Budget: ${(budget.utilizationPercent as number).toFixed(0)}% used | Runs: ${summary.entryCount}`;
+    }
     default:
       return JSON.stringify(data);
   }

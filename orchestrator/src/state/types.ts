@@ -32,6 +32,14 @@ export interface EpisodicRecord {
   errorMessage?: string;
   metadata?: string;
   createdAt?: string;
+  agentName?: string;
+  complexityScore?: number;
+  routingStrategy?: string;
+  gatePassCount?: number;
+  gateFailCount?: number;
+  costUsd?: number;
+  isRegression?: number;
+  relatedEpisodes?: string;
 }
 
 export interface AutonomyLedgerEntry {
@@ -43,6 +51,12 @@ export interface AutonomyLedgerEntry {
   failureCount: number;
   lastTaskAt?: string;
   metrics?: string;
+  prApprovalRate?: number;
+  rollbackCount?: number;
+  securityIncidents?: number;
+  promotedAt?: string;
+  demotedAt?: string;
+  timeAtLevelMs?: number;
 }
 
 export type PipelineRunStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
@@ -59,6 +73,11 @@ export interface PipelineRun {
   completedAt?: string;
   result?: string;
   gateResults?: string;
+  costUsd?: number;
+  tokensUsed?: number;
+  model?: string;
+  agentName?: string;
+  complexityScore?: number;
 }
 
 export interface Convention {
@@ -91,4 +110,43 @@ export interface RoutingDecision {
   agentName?: string;
   reason?: string;
   decidedAt?: string;
+}
+
+export interface CostLedgerEntry {
+  id?: number;
+  runId: string;
+  agentName: string;
+  pipelineType: string;
+  model?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  costUsd?: number;
+  issueNumber?: number;
+  prNumber?: number;
+  createdAt?: string;
+}
+
+export interface GateThresholdOverride {
+  id?: number;
+  gateName: string;
+  complexityBand: string;
+  enforcementLevel: string;
+  thresholdOverrides?: string;
+  active?: number;
+  createdAt?: string;
+}
+
+export type AutonomyEventType = 'promotion' | 'demotion' | 'evaluation' | 'reset';
+
+export interface AutonomyEvent {
+  id?: number;
+  agentName: string;
+  eventType: AutonomyEventType;
+  fromLevel: number;
+  toLevel: number;
+  trigger?: string;
+  metricsSnapshot?: string;
+  unmetConditions?: string;
+  createdAt?: string;
 }

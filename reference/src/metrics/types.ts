@@ -203,4 +203,36 @@ export const STANDARD_METRICS: readonly MetricDefinition[] = [
     description: 'Number of agents discovered via A2A protocol',
     unit: 'count',
   },
+
+  // Cost & Token metrics (Phase 2)
+  {
+    name: 'total-cost-usd',
+    category: 'economic-efficiency',
+    description: 'Total cost in USD across all agent runs',
+    unit: 'usd',
+  },
+  {
+    name: 'total-input-tokens',
+    category: 'economic-efficiency',
+    description: 'Total input tokens consumed across all runs',
+    unit: 'count',
+  },
+  {
+    name: 'total-output-tokens',
+    category: 'economic-efficiency',
+    description: 'Total output tokens consumed across all runs',
+    unit: 'count',
+  },
+  {
+    name: 'cost-per-run',
+    category: 'economic-efficiency',
+    description: 'Average cost per pipeline run',
+    unit: 'usd',
+  },
+  {
+    name: 'tokens-per-run',
+    category: 'economic-efficiency',
+    description: 'Average tokens used per pipeline run',
+    unit: 'count',
+  },
 ] as const;

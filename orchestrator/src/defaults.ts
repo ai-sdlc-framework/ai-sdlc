@@ -128,6 +128,84 @@ export const DEFAULT_HOTSPOT_THRESHOLD = 0.3;
 
 // ── Notification titles ──────────────────────────────────────────
 
+// ── Model cost mapping ──────────────────────────────────────────
+
+/** Cost per million tokens for known models (input/output). */
+export const DEFAULT_MODEL_COSTS: Record<string, { inputPer1M: number; outputPer1M: number }> = {
+  'claude-opus-4-6': { inputPer1M: 15.0, outputPer1M: 75.0 },
+  'claude-sonnet-4-5-20250929': { inputPer1M: 3.0, outputPer1M: 15.0 },
+  'claude-haiku-4-5-20251001': { inputPer1M: 0.80, outputPer1M: 4.0 },
+  'claude-sonnet-4-20250514': { inputPer1M: 3.0, outputPer1M: 15.0 },
+  'claude-3-5-haiku-20241022': { inputPer1M: 1.0, outputPer1M: 5.0 },
+};
+
+/** Default monthly cost budget in USD. */
+export const DEFAULT_COST_BUDGET_USD = 500;
+
+/** Dashboard refresh interval in milliseconds. */
+export const DEFAULT_DASHBOARD_REFRESH_MS = 2_000;
+
+// ── Progressive gate profiles ──────────────────────────────────
+
+export type ComplexityBand = 'trivial' | 'standard' | 'complex' | 'critical';
+
+export interface GateProfile {
+  band: ComplexityBand;
+  minScore: number;
+  maxScore: number;
+  defaultEnforcement: string;
+  testCoverageThreshold: number;
+  reviewRequired: boolean;
+  securityScanRequired: boolean;
+  documentationRequired: boolean;
+}
+
+/** Static gate profiles per complexity band (RFC 217-228). */
+export const PROGRESSIVE_GATE_PROFILES: readonly GateProfile[] = [
+  {
+    band: 'trivial',
+    minScore: 1,
+    maxScore: 3,
+    defaultEnforcement: 'advisory',
+    testCoverageThreshold: 60,
+    reviewRequired: false,
+    securityScanRequired: false,
+    documentationRequired: false,
+  },
+  {
+    band: 'standard',
+    minScore: 4,
+    maxScore: 6,
+    defaultEnforcement: 'soft-mandatory',
+    testCoverageThreshold: 75,
+    reviewRequired: true,
+    securityScanRequired: false,
+    documentationRequired: false,
+  },
+  {
+    band: 'complex',
+    minScore: 7,
+    maxScore: 8,
+    defaultEnforcement: 'hard-mandatory',
+    testCoverageThreshold: 85,
+    reviewRequired: true,
+    securityScanRequired: true,
+    documentationRequired: true,
+  },
+  {
+    band: 'critical',
+    minScore: 9,
+    maxScore: 10,
+    defaultEnforcement: 'hard-mandatory',
+    testCoverageThreshold: 90,
+    reviewRequired: true,
+    securityScanRequired: true,
+    documentationRequired: true,
+  },
+] as const;
+
+// ── Notification titles ──────────────────────────────────────────
+
 export const NOTIFICATION_TITLES = {
   issueValidationFailed: 'AI-SDLC: Issue Validation Failed',
   complexityTooHigh: 'AI-SDLC: Complexity Too High',

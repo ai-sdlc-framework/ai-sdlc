@@ -131,6 +131,10 @@ import {
 import { createPipelineMemory } from './shared.js';
 import { hasResourceChanged, fingerprintResource } from './reconcilers.js';
 import type { CodebaseContext } from './analysis/types.js';
+import type { AutonomyTracker } from './autonomy-tracker.js';
+import type { CostTracker } from './cost-tracker.js';
+import type { StateStore } from './state/store.js';
+import { enrichAgentContext } from './context-enrichment.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -189,6 +193,12 @@ export interface ExecuteOptions {
   prFooter?: string;
   /** Codebase context from analysis for agent prompt injection. */
   codebaseContext?: CodebaseContext;
+  /** AutonomyTracker for real metric-based promotion/demotion. */
+  autonomyTracker?: AutonomyTracker;
+  /** CostTracker for recording LLM usage costs. */
+  costTracker?: CostTracker;
+  /** StateStore for episodic context enrichment. */
+  stateStore?: StateStore;
 }
 
 /**
@@ -493,6 +503,15 @@ async function executePipelineBody(
       const effectiveAgent = resolvedAgent ?? agentRole;
       const plan = createPipelineOrchestration([effectiveAgent], 'sequential');
 
+      // Enrich agent context with episodic memory
+      const episodicContext = options.stateStore
+        ? enrichAgentContext(options.stateStore, {
+            issueNumber,
+            agentName: effectiveAgent.metadata.name,
+            files: result ? (result as AgentResult).filesChanged : undefined,
+          })
+        : undefined;
+
       const orchestrationResult = await executePipelineOrchestration(
         plan,
         [effectiveAgent],
@@ -517,6 +536,7 @@ async function executePipelineBody(
                 },
                 memory: options.memory,
                 codebaseContext: options.codebaseContext,
+                episodicContext,
               }),
           );
         },
@@ -725,16 +745,49 @@ async function executePipelineBody(
     `## ${prCreatedComment.title}\n\n${prCreatedComment.body}`,
   );
 
+  // 14b. Record cost from agent result
+  if (options.costTracker && result.tokenUsage) {
+    options.costTracker.recordCost({
+      runId: `run-${Date.now()}-${issueNumber}`,
+      agentName: agentRole.metadata.name,
+      pipelineType: 'execute',
+      model: result.tokenUsage.model,
+      inputTokens: result.tokenUsage.inputTokens,
+      outputTokens: result.tokenUsage.outputTokens,
+      issueNumber,
+    });
+  }
+
+  // 14c. Record task outcome in autonomy tracker
+  if (options.autonomyTracker) {
+    options.autonomyTracker.recordTaskOutcome(agentRole.metadata.name, result.success);
+  }
+
   // 15. Evaluate promotion eligibility (with optional instrumented autonomy)
   const instrumentedAutonomy = metricStore ? createInstrumentedAutonomy(metricStore) : undefined;
-  const agentMetrics: AgentMetrics = {
-    name: agentRole.metadata.name,
-    currentLevel: currentLevel.level,
-    totalTasksCompleted: 1,
-    metrics: {},
-    approvals: [],
-  };
-  const promotion = evaluatePromotion(autonomyPolicy, agentMetrics);
+
+  // Use real metrics from AutonomyTracker when available
+  let promotion;
+  if (options.autonomyTracker) {
+    promotion = options.autonomyTracker.evaluateAndPersistPromotion(agentRole.metadata.name);
+  } else {
+    // Fallback to reference evaluatePromotion for backwards compatibility
+    const agentMetrics: AgentMetrics = {
+      name: agentRole.metadata.name,
+      currentLevel: currentLevel.level,
+      totalTasksCompleted: 1,
+      metrics: {},
+      approvals: [],
+    };
+    const refPromotion = evaluatePromotion(autonomyPolicy, agentMetrics);
+    promotion = {
+      eligible: refPromotion.eligible,
+      fromLevel: refPromotion.fromLevel,
+      toLevel: refPromotion.toLevel,
+      unmetConditions: refPromotion.unmetConditions,
+    };
+  }
+
   if (instrumentedAutonomy && promotion.eligible) {
     instrumentedAutonomy.onPromotion(
       agentRole.metadata.name,
