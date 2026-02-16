@@ -38,11 +38,15 @@ import type {
   BuildFilter,
   BuildEvent,
 } from '../interfaces.js';
+import type { GitHubWebhookBridges } from './webhooks.js';
+import { transformIssueEvent, transformPREvent, transformBuildEvent } from './webhooks.js';
 
 export type GitHubConfig = {
   org: string;
   repo?: string;
   token?: { secretRef: string };
+  /** Optional webhook bridges for live event streaming. */
+  webhookBridges?: GitHubWebhookBridges;
 };
 
 // ── Internal helpers ──────────────────────────────────────────────────
@@ -176,6 +180,9 @@ export function createGitHubIssueTracker(config: GitHubConfig): IssueTracker {
     },
 
     watchIssues(_filter: IssueFilter): EventStream<IssueEvent> {
+      if (config.webhookBridges?.issues) {
+        return config.webhookBridges.issues.stream();
+      }
       return createStubEventStream();
     },
   };
@@ -292,6 +299,9 @@ export function createGitHubSourceControl(config: GitHubConfig): SourceControl {
     },
 
     watchPREvents(_filter: PRFilter): EventStream<PREvent> {
+      if (config.webhookBridges?.pullRequests) {
+        return config.webhookBridges.pullRequests.stream();
+      }
       return createStubEventStream();
     },
   };
@@ -405,6 +415,9 @@ export function createGitHubCIPipeline(
     },
 
     watchBuildEvents(_filter: BuildFilter): EventStream<BuildEvent> {
+      if (config.webhookBridges?.builds) {
+        return config.webhookBridges.builds.stream();
+      }
       return createStubEventStream();
     },
   };

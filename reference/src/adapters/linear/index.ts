@@ -31,6 +31,8 @@ export interface LinearClientLike {
   updateIssue(id: string, input: Record<string, unknown>): Promise<unknown>;
   issueLabels(): Promise<{ nodes: { id: string; name: string }[] }>;
   team(id: string): Promise<{ states(): Promise<{ nodes: { id: string; name: string }[] }> }>;
+  createComment?(input: Record<string, unknown>): Promise<unknown>;
+  comments?(params: { filter: unknown }): Promise<{ nodes: Array<{ body: string }> }>;
 }
 
 interface LinearIssueNode {
@@ -161,11 +163,17 @@ export function createLinearIssueTracker(
       return mapLinearIssue(issue as unknown as LinearIssueNode);
     },
 
-    async addComment(_id: string, _body: string): Promise<void> {
-      // Stub — Linear comment API not yet integrated
+    async addComment(id: string, body: string): Promise<void> {
+      if (client.createComment) {
+        await client.createComment({ issueId: id, body });
+      }
     },
 
-    async getComments(_id: string): Promise<Array<{ body: string }>> {
+    async getComments(id: string): Promise<Array<{ body: string }>> {
+      if (client.comments) {
+        const result = await client.comments({ filter: { issue: { id: { eq: id } } } });
+        return result.nodes.map((c) => ({ body: c.body }));
+      }
       return [];
     },
 

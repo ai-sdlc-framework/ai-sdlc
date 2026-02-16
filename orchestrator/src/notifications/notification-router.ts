@@ -22,7 +22,13 @@ export type PipelineEventType =
   | 'approval-required'
   | 'promotion'
   | 'demotion'
-  | 'cost-alert';
+  | 'cost-alert'
+  | 'deploy-start'
+  | 'deploy-complete'
+  | 'deploy-failed'
+  | 'rollout-progressing'
+  | 'rollout-complete'
+  | 'rollout-rollback';
 
 export interface PipelineEvent {
   type: PipelineEventType;
@@ -108,6 +114,30 @@ const DEFAULT_TEMPLATES: Record<PipelineEventType, NotificationTemplate> = {
   'cost-alert': {
     title: 'Cost Alert',
     body: 'Budget utilization at {utilization}% ({spent}/{budget} USD)',
+  },
+  'deploy-start': {
+    title: 'Deployment Started',
+    body: 'Deploying {version} to {environment} via {target}',
+  },
+  'deploy-complete': {
+    title: 'Deployment Complete',
+    body: 'Version {version} deployed to {environment}. URL: {url}',
+  },
+  'deploy-failed': {
+    title: 'Deployment Failed',
+    body: 'Deployment of {version} to {environment} failed: {error}',
+  },
+  'rollout-progressing': {
+    title: 'Rollout Progressing',
+    body: 'Rollout at {weightPercent}% (step {step}). Error rate: {errorRate}%, P95: {latencyP95}ms',
+  },
+  'rollout-complete': {
+    title: 'Rollout Complete',
+    body: 'Rollout of {version} to {environment} completed at 100%',
+  },
+  'rollout-rollback': {
+    title: 'Rollout Rolled Back',
+    body: 'Rollout of {version} to {environment} rolled back: {reason}',
   },
 };
 
@@ -237,10 +267,12 @@ export class NotificationRouter {
       case 'pipeline-failed':
       case 'agent-failed':
       case 'gate-failure':
+      case 'deploy-failed':
         return 'error';
       case 'approval-required':
       case 'demotion':
       case 'cost-alert':
+      case 'rollout-rollback':
         return 'warning';
       default:
         return 'info';

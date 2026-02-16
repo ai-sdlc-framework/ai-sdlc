@@ -20,6 +20,10 @@ import type {
   GateThresholdOverride,
   AutonomyEvent,
   HandoffEvent,
+  DeploymentRecord,
+  DeploymentRecordState,
+  RolloutStepRecord,
+  AuditEntryRecord,
 } from './types.js';
 
 export class StateStore {
@@ -681,6 +685,186 @@ export class StateStore {
       errorMessage: r.error_message as string | undefined,
       createdAt: r.created_at as string | undefined,
     }));
+  }
+
+  // ── Deployments ─────────────────────────────────────────────────
+
+  saveDeployment(record: Omit<DeploymentRecord, 'id'>): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO deployments (deployment_id, target_name, provider, version, environment, state, url, error, started_at, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      record.deploymentId,
+      record.targetName,
+      record.provider,
+      record.version,
+      record.environment,
+      record.state,
+      record.url ?? null,
+      record.error ?? null,
+      record.startedAt ?? null,
+      record.completedAt ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  updateDeployment(deploymentId: string, update: { state: DeploymentRecordState; url?: string; error?: string; completedAt?: string }): void {
+    this.db.prepare(`
+      UPDATE deployments SET state = ?, url = COALESCE(?, url), error = COALESCE(?, error), completed_at = COALESCE(?, completed_at)
+      WHERE deployment_id = ?
+    `).run(
+      update.state,
+      update.url ?? null,
+      update.error ?? null,
+      update.completedAt ?? null,
+      deploymentId,
+    );
+  }
+
+  getDeployment(deploymentId: string): DeploymentRecord | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM deployments WHERE deployment_id = ?')
+      .get(deploymentId) as Record<string, unknown> | undefined;
+    return row ? this.mapDeployment(row) : undefined;
+  }
+
+  getDeployments(opts?: { targetName?: string; environment?: string; limit?: number }): DeploymentRecord[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.targetName) { conditions.push('target_name = ?'); params.push(opts.targetName); }
+    if (opts?.environment) { conditions.push('environment = ?'); params.push(opts.environment); }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 50;
+    params.push(limit);
+    const rows = this.db
+      .prepare(`SELECT * FROM deployments ${where} ORDER BY started_at DESC LIMIT ?`)
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => this.mapDeployment(r));
+  }
+
+  private mapDeployment(row: Record<string, unknown>): DeploymentRecord {
+    return {
+      id: row.id as number,
+      deploymentId: row.deployment_id as string,
+      targetName: row.target_name as string,
+      provider: row.provider as string,
+      version: row.version as string,
+      environment: row.environment as string,
+      state: row.state as DeploymentRecordState,
+      url: row.url as string | undefined,
+      error: row.error as string | undefined,
+      startedAt: row.started_at as string | undefined,
+      completedAt: row.completed_at as string | undefined,
+    };
+  }
+
+  // ── Rollout Steps ──────────────────────────────────────────────
+
+  saveRolloutStep(record: Omit<RolloutStepRecord, 'id'>): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO rollout_steps (deployment_id, step_number, weight_percent, state, metrics_snapshot, started_at, completed_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      record.deploymentId,
+      record.stepNumber,
+      record.weightPercent,
+      record.state,
+      record.metricsSnapshot ?? null,
+      record.startedAt ?? null,
+      record.completedAt ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getRolloutSteps(deploymentId: string): RolloutStepRecord[] {
+    const rows = this.db
+      .prepare('SELECT * FROM rollout_steps WHERE deployment_id = ? ORDER BY step_number')
+      .all(deploymentId) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      deploymentId: r.deployment_id as string,
+      stepNumber: r.step_number as number,
+      weightPercent: r.weight_percent as number,
+      state: r.state as string,
+      metricsSnapshot: r.metrics_snapshot as string | undefined,
+      startedAt: r.started_at as string | undefined,
+      completedAt: r.completed_at as string | undefined,
+    }));
+  }
+
+  // ── Audit Entries ──────────────────────────────────────────────
+
+  saveAuditEntry(record: Omit<AuditEntryRecord, 'id'>): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO audit_entries (entry_id, actor, action, resource_type, resource_id, detail, hash, previous_hash, signature, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, COALESCE(?, datetime('now')))
+    `);
+    const result = stmt.run(
+      record.entryId,
+      record.actor,
+      record.action,
+      record.resourceType ?? null,
+      record.resourceId ?? null,
+      record.detail ?? null,
+      record.hash ?? null,
+      record.previousHash ?? null,
+      record.signature ?? null,
+      record.createdAt ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  queryAuditEntries(opts?: {
+    actor?: string;
+    action?: string;
+    resourceType?: string;
+    resourceId?: string;
+    since?: string;
+    until?: string;
+    limit?: number;
+    offset?: number;
+  }): AuditEntryRecord[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.actor) { conditions.push('actor = ?'); params.push(opts.actor); }
+    if (opts?.action) { conditions.push('action = ?'); params.push(opts.action); }
+    if (opts?.resourceType) { conditions.push('resource_type = ?'); params.push(opts.resourceType); }
+    if (opts?.resourceId) { conditions.push('resource_id = ?'); params.push(opts.resourceId); }
+    if (opts?.since) { conditions.push('created_at >= ?'); params.push(opts.since); }
+    if (opts?.until) { conditions.push('created_at <= ?'); params.push(opts.until); }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 100;
+    const offset = opts?.offset ?? 0;
+    params.push(limit, offset);
+    const rows = this.db
+      .prepare(`SELECT * FROM audit_entries ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => this.mapAuditEntry(r));
+  }
+
+  getAuditEntry(entryId: string): AuditEntryRecord | undefined {
+    const row = this.db
+      .prepare('SELECT * FROM audit_entries WHERE entry_id = ?')
+      .get(entryId) as Record<string, unknown> | undefined;
+    return row ? this.mapAuditEntry(row) : undefined;
+  }
+
+  private mapAuditEntry(row: Record<string, unknown>): AuditEntryRecord {
+    return {
+      id: row.id as number,
+      entryId: row.entry_id as string,
+      actor: row.actor as string,
+      action: row.action as string,
+      resourceType: row.resource_type as string | undefined,
+      resourceId: row.resource_id as string | undefined,
+      detail: row.detail as string | undefined,
+      hash: row.hash as string | undefined,
+      previousHash: row.previous_hash as string | undefined,
+      signature: row.signature as string | undefined,
+      createdAt: row.created_at as string | undefined,
+    };
   }
 
   // ── Utilities ────────────────────────────────────────────────────

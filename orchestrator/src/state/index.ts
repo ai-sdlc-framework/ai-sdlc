@@ -1,5 +1,5 @@
 export { StateStore } from './store.js';
-export { CURRENT_SCHEMA_VERSION, SCHEMA_DDL, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATIONS } from './schema.js';
+export { CURRENT_SCHEMA_VERSION, SCHEMA_DDL, MIGRATION_V2, MIGRATION_V3, MIGRATION_V4, MIGRATION_V5, MIGRATIONS } from './schema.js';
 export type {
   ComplexityProfile,
   EpisodicRecord,
@@ -14,4 +14,8 @@ export type {
   AutonomyEvent,
   AutonomyEventType,
   HandoffEvent,
+  DeploymentRecord,
+  DeploymentRecordState,
+  RolloutStepRecord,
+  AuditEntryRecord,
 } from './types.js';

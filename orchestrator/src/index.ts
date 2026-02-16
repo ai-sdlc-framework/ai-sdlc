@@ -264,7 +264,44 @@ export type {
   AutonomyEvent,
   AutonomyEventType,
   HandoffEvent,
+  DeploymentRecord,
+  DeploymentRecordState,
+  RolloutStepRecord,
+  AuditEntryRecord,
 } from './state/index.js';
+
+// Deployment targets
+export {
+  createKubernetesTarget,
+  createVercelTarget,
+  createFlyioTarget,
+  createHttpMetricsCollector,
+  createStubMetricsCollector,
+  RolloutController,
+} from './deploy/index.js';
+export type {
+  DeploymentTargetConfig,
+  HealthCheckConfig,
+  DeploymentState,
+  DeploymentResult,
+  DeploymentTarget,
+  ExecFn,
+  FetchFn,
+  KubernetesConfig,
+  VercelConfig,
+  FlyioConfig,
+  CanaryStep,
+  CanaryConfig,
+  BlueGreenConfig,
+  RollingConfig,
+  RolloutStrategy,
+  RolloutPhase,
+  RolloutStatus,
+  RolloutMetrics,
+  MetricsSource,
+  RolloutControllerConfig,
+  HttpMetricsConfig,
+} from './deploy/index.js';
 
 // Progressive gates
 export {
@@ -382,8 +419,25 @@ export type { SubTask, TaskGraph, DecompositionContext, DecompositionOptions } f
 export { HandoffExecutor } from './handoff-executor.js';
 export type { HandoffPayload, HandoffResult, HandoffExecutorOptions } from './handoff-executor.js';
 
+// Webhook manager
+export {
+  createWebhookManager,
+  type WebhookManager,
+  type WebhookManagerConfig,
+  type WebhookBridges,
+} from './webhook-manager.js';
+
+// Audit modules
+export { createSqliteAuditSink } from './audit-sqlite-sink.js';
+export { createAuditScheduler } from './audit-scheduler.js';
+export type { AuditSchedulerConfig, AuditScheduler } from './audit-scheduler.js';
+export { exportAuditEntries, generateComplianceReport } from './audit-export.js';
+export type { ExportFormat, ExportOptions, ComplianceReportOptions, ComplianceReport } from './audit-export.js';
+export { archiveEntries, loadArchivedEntries, verifyArchiveContinuity } from './audit-archival.js';
+export type { ArchiveManifest, ArchivalOptions } from './audit-archival.js';
+
 // Orchestrator class
-export { Orchestrator, type OrchestratorConfig } from './orchestrator.js';
+export { Orchestrator, type OrchestratorConfig, type WebhookConfig } from './orchestrator.js';
 
 // Comprehensive type re-exports
 export type {

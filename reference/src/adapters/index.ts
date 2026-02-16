@@ -14,7 +14,13 @@ export type {
   EventStream,
   Issue,
   IssueFilter,
+  IssueEvent,
   PullRequest,
+  PREvent,
+  PRFilter,
+  Build,
+  BuildEvent,
+  BuildFilter,
   CommitStatus,
   BuildStatus,
   TestResults,
@@ -22,6 +28,20 @@ export type {
   Finding,
   SeveritySummary,
   DeploymentStatus,
+  Deployment,
+  DeployInput,
+  DeployEvent,
+  DeployFilter,
+  CreateBranchInput,
+  Branch,
+  CreatePRInput,
+  MergeStrategy,
+  MergeResult,
+  FileContent,
+  ChangedFile,
+  CreateIssueInput,
+  UpdateIssueInput,
+  TriggerBuildInput,
 } from './interfaces.js';
 
 export {
@@ -97,6 +117,25 @@ export {
   type WebhookTransformer,
 } from './webhook-bridge.js';
 
+// Webhook server
+export {
+  createWebhookServer,
+  type WebhookServer,
+  type WebhookServerConfig,
+  type WebhookProviderConfig,
+} from './webhook-server.js';
+
+// GitHub webhooks
+export {
+  verifyGitHubSignature,
+  transformIssueEvent,
+  transformPREvent,
+  transformBuildEvent,
+  createGitHubWebhookProvider,
+  type GitHubWebhookConfig,
+  type GitHubWebhookBridges,
+} from './github/webhooks.js';
+
 // Git-based adapter resolver
 export {
   parseGitAdapterRef,
@@ -108,6 +147,45 @@ export {
   type GitAdapterFetcher,
   type GitResolveResult,
 } from './git-resolver.js';
+
+// GitLab production adapters
+export {
+  createGitLabSourceControl,
+  createGitLabCIPipeline,
+  type GitLabConfig,
+  type HttpClient as GitLabHttpClient,
+} from './gitlab/index.js';
+
+export {
+  verifyGitLabToken,
+  transformGitLabIssueEvent,
+  transformGitLabMREvent,
+  transformGitLabPipelineEvent,
+  createGitLabWebhookProvider,
+  type GitLabWebhookConfig,
+} from './gitlab/webhooks.js';
+
+// Jira production adapter
+export {
+  createJiraIssueTracker,
+  type JiraConfig,
+  type HttpClient as JiraHttpClient,
+} from './jira/index.js';
+
+export {
+  verifyJiraWebhook,
+  transformJiraIssueEvent,
+  createJiraWebhookProvider,
+  type JiraWebhookConfig,
+} from './jira/webhooks.js';
+
+// Linear webhooks
+export {
+  verifyLinearSignature,
+  transformLinearIssueEvent,
+  createLinearWebhookProvider,
+  type LinearWebhookConfig,
+} from './linear/webhooks.js';
 
 // In-process EventBus
 export { createInProcessEventBus, type InProcessEventBus } from './in-process-event-bus.js';

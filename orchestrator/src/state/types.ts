@@ -161,3 +161,44 @@ export interface HandoffEvent {
   errorMessage?: string;
   createdAt?: string;
 }
+
+export type DeploymentRecordState = 'pending' | 'deploying' | 'healthy' | 'unhealthy' | 'rolled-back' | 'failed';
+
+export interface DeploymentRecord {
+  id?: number;
+  deploymentId: string;
+  targetName: string;
+  provider: string;
+  version: string;
+  environment: string;
+  state: DeploymentRecordState;
+  url?: string;
+  error?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface RolloutStepRecord {
+  id?: number;
+  deploymentId: string;
+  stepNumber: number;
+  weightPercent: number;
+  state: string;
+  metricsSnapshot?: string;
+  startedAt?: string;
+  completedAt?: string;
+}
+
+export interface AuditEntryRecord {
+  id?: number;
+  entryId: string;
+  actor: string;
+  action: string;
+  resourceType?: string;
+  resourceId?: string;
+  detail?: string;
+  hash?: string;
+  previousHash?: string;
+  signature?: string;
+  createdAt?: string;
+}

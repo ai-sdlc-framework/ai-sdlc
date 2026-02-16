@@ -18,6 +18,21 @@ import type { AutonomyLedgerEntry, RoutingDecision } from './state/types.js';
 import { AutonomyTracker } from './autonomy-tracker.js';
 import { CostTracker, type CostSummary, type BudgetStatus } from './cost-tracker.js';
 
+export interface WebhookConfig {
+  /** Port to listen on for webhooks. */
+  port: number;
+  /** Host to bind to (defaults to '0.0.0.0'). */
+  host?: string;
+  /** GitHub webhook secret. */
+  githubSecret?: string;
+  /** GitLab webhook secret token. */
+  gitlabSecretToken?: string;
+  /** Jira webhook secret. */
+  jiraSecret?: string;
+  /** Linear webhook signing secret. */
+  linearSigningSecret?: string;
+}
+
 export interface OrchestratorConfig {
   /** Path to the .ai-sdlc config directory. */
   configDir?: string;
@@ -31,6 +46,8 @@ export interface OrchestratorConfig {
   runner?: AgentRunner;
   /** Custom logger. */
   logger?: Logger;
+  /** Webhook server configuration. */
+  webhooks?: WebhookConfig;
 }
 
 export interface StatusResult {

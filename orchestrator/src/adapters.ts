@@ -38,6 +38,20 @@ import {
   resolveGitAdapter,
   // GitHub CI adapter
   createGitHubCIPipeline,
+  // Production adapters
+  createGitLabSourceControl,
+  createGitLabCIPipeline,
+  createJiraIssueTracker,
+  // Webhook server
+  createWebhookServer,
+  // Webhook providers
+  createGitHubWebhookProvider,
+  verifyGitHubSignature,
+  createGitLabWebhookProvider,
+  verifyGitLabToken,
+  createJiraWebhookProvider,
+  createLinearWebhookProvider,
+  verifyLinearSignature,
   // Types (used in function signatures)
   type AdapterRegistry,
   type AdapterMetadata,
@@ -262,6 +276,20 @@ export {
   createDockerSandbox,
   createLinearIssueTracker,
   resolveSecret,
+  // Production adapters
+  createGitLabSourceControl,
+  createGitLabCIPipeline,
+  createJiraIssueTracker,
+  // Webhook server
+  createWebhookServer,
+  // Webhook providers
+  createGitHubWebhookProvider,
+  verifyGitHubSignature,
+  createGitLabWebhookProvider,
+  verifyGitLabToken,
+  createJiraWebhookProvider,
+  createLinearWebhookProvider,
+  verifyLinearSignature,
   // Registry & scanner
   createAdapterRegistry,
   validateAdapterMetadata,
@@ -348,4 +376,14 @@ export type {
   InProcessEventBus,
   DockerSandboxConfig,
   BuildStatus,
+  GitLabConfig,
+  JiraConfig,
+  WebhookServer,
+  WebhookServerConfig,
+  WebhookProviderConfig,
+  GitHubWebhookConfig,
+  GitHubWebhookBridges,
+  GitLabWebhookConfig,
+  JiraWebhookConfig,
+  LinearWebhookConfig,
 } from '@ai-sdlc/reference';

@@ -2,7 +2,7 @@
  * SQLite DDL and migrations for the state store.
  */
 
-export const CURRENT_SCHEMA_VERSION = 4;
+export const CURRENT_SCHEMA_VERSION = 5;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -190,6 +190,58 @@ CREATE TABLE IF NOT EXISTS handoff_events (
 CREATE INDEX IF NOT EXISTS idx_handoff_events_run ON handoff_events(run_id);
 `;
 
+export const MIGRATION_V5 = `
+-- Deployment records
+CREATE TABLE IF NOT EXISTS deployments (
+  id INTEGER PRIMARY KEY,
+  deployment_id TEXT NOT NULL UNIQUE,
+  target_name TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  version TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  state TEXT NOT NULL,
+  url TEXT,
+  error TEXT,
+  started_at TEXT DEFAULT (datetime('now')),
+  completed_at TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_deployments_target ON deployments(target_name);
+CREATE INDEX IF NOT EXISTS idx_deployments_env ON deployments(environment);
+
+-- Rollout step records
+CREATE TABLE IF NOT EXISTS rollout_steps (
+  id INTEGER PRIMARY KEY,
+  deployment_id TEXT NOT NULL,
+  step_number INTEGER NOT NULL,
+  weight_percent INTEGER NOT NULL,
+  state TEXT NOT NULL,
+  metrics_snapshot TEXT,
+  started_at TEXT DEFAULT (datetime('now')),
+  completed_at TEXT,
+  FOREIGN KEY (deployment_id) REFERENCES deployments(deployment_id)
+);
+CREATE INDEX IF NOT EXISTS idx_rollout_steps_deployment ON rollout_steps(deployment_id);
+
+-- Audit entries (indexed, queryable)
+CREATE TABLE IF NOT EXISTS audit_entries (
+  id INTEGER PRIMARY KEY,
+  entry_id TEXT NOT NULL UNIQUE,
+  actor TEXT NOT NULL,
+  action TEXT NOT NULL,
+  resource_type TEXT,
+  resource_id TEXT,
+  detail TEXT,
+  hash TEXT,
+  previous_hash TEXT,
+  signature TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_audit_entries_actor ON audit_entries(actor);
+CREATE INDEX IF NOT EXISTS idx_audit_entries_action ON audit_entries(action);
+CREATE INDEX IF NOT EXISTS idx_audit_entries_resource ON audit_entries(resource_type, resource_id);
+CREATE INDEX IF NOT EXISTS idx_audit_entries_created ON audit_entries(created_at);
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -206,5 +258,9 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 4,
     sql: MIGRATION_V4,
+  },
+  {
+    version: 5,
+    sql: MIGRATION_V5,
   },
 ];
