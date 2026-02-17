@@ -10,6 +10,7 @@ import { SessionManager } from './session.js';
 import { registerAllTools } from './tools/index.js';
 import { registerAllResources } from './resources/index.js';
 import type { ServerDeps } from './types.js';
+import type { McpAdvisorPlugin } from './plugin.js';
 
 export interface CreateServerOptions {
   /** Path to SQLite database. Defaults to AI_SDLC_DB env var or '.ai-sdlc/state.db'. */
@@ -18,9 +19,11 @@ export interface CreateServerOptions {
   db?: InstanceType<typeof Database>;
   /** Repository path. Defaults to cwd. */
   repoPath?: string;
+  /** Plugins to register additional tools/resources. */
+  plugins?: McpAdvisorPlugin[];
 }
 
-export function createMcpServer(opts?: CreateServerOptions): { server: McpServer; deps: ServerDeps } {
+export async function createMcpServer(opts?: CreateServerOptions): Promise<{ server: McpServer; deps: ServerDeps }> {
   const db = opts?.db ?? new Database(opts?.dbPath ?? process.env['AI_SDLC_DB'] ?? '.ai-sdlc/state.db');
   const store = StateStore.open(db);
   const costTracker = new CostTracker(store);
@@ -36,6 +39,13 @@ export function createMcpServer(opts?: CreateServerOptions): { server: McpServer
 
   registerAllTools(server, deps);
   registerAllResources(server, deps);
+
+  // Register plugins
+  if (opts?.plugins) {
+    for (const plugin of opts.plugins) {
+      await plugin.register(server, deps);
+    }
+  }
 
   return { server, deps };
 }

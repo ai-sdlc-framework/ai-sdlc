@@ -18,6 +18,7 @@ import type { CodebaseProfile, CodebaseContext } from './analysis/types.js';
 import type { AutonomyLedgerEntry, RoutingDecision } from './state/types.js';
 import { AutonomyTracker } from './autonomy-tracker.js';
 import { CostTracker, type CostSummary, type BudgetStatus } from './cost-tracker.js';
+import type { OrchestratorPlugin } from './plugin.js';
 
 export interface WebhookConfig {
   /** Port to listen on for webhooks. */
@@ -49,6 +50,8 @@ export interface OrchestratorConfig {
   logger?: Logger;
   /** Webhook server configuration. */
   webhooks?: WebhookConfig;
+  /** Plugins to hook into the pipeline lifecycle. */
+  plugins?: OrchestratorPlugin[];
 }
 
 export interface StatusResult {
@@ -73,15 +76,33 @@ export class Orchestrator {
   private log: Logger;
   private _autonomyTracker?: AutonomyTracker;
   private _costTracker?: CostTracker;
+  private plugins: OrchestratorPlugin[];
+  private _pluginsInitialized: Promise<void>;
 
   constructor(config: OrchestratorConfig) {
     this.config = config;
     this.log = config.logger ?? createLogger();
+    this.plugins = config.plugins ?? [];
 
     if (config.statePath) {
       this._state = StateStore.open(config.statePath);
       this._autonomyTracker = new AutonomyTracker(this._state);
       this._costTracker = new CostTracker(this._state);
+    }
+
+    // Initialize plugins with shared context
+    this._pluginsInitialized = this._initPlugins();
+  }
+
+  private async _initPlugins(): Promise<void> {
+    const ctx = {
+      store: this._state,
+      costTracker: this._costTracker,
+      autonomyTracker: this._autonomyTracker,
+      log: this.log,
+    };
+    for (const plugin of this.plugins) {
+      await plugin.initialize?.(ctx);
     }
   }
 
@@ -102,6 +123,16 @@ export class Orchestrator {
         currentStage: 'init',
       });
     }
+
+    // Ensure plugins are initialized before running
+    await this._pluginsInitialized;
+
+    // Notify plugins before run
+    for (const plugin of this.plugins) {
+      await plugin.beforeRun?.({ runId, issueNumber, startedAt });
+    }
+
+    const runStart = Date.now();
 
     try {
       const result = await executePipeline(issueNumber, {
@@ -133,6 +164,12 @@ export class Orchestrator {
         });
       }
 
+      // Notify plugins after successful run
+      const durationMs = Date.now() - runStart;
+      for (const plugin of this.plugins) {
+        await plugin.afterRun?.({ runId, issueNumber, result, durationMs });
+      }
+
       return result;
     } catch (err) {
       // Record failure in state store
@@ -149,6 +186,14 @@ export class Orchestrator {
           errorMessage: err instanceof Error ? err.message : String(err),
         });
       }
+
+      // Notify plugins on error
+      const errorDurationMs = Date.now() - runStart;
+      const error = err instanceof Error ? err : new Error(String(err));
+      for (const plugin of this.plugins) {
+        await plugin.onError?.({ runId, issueNumber, error, durationMs: errorDurationMs });
+      }
+
       throw err;
     }
   }
@@ -376,9 +421,12 @@ export class Orchestrator {
   }
 
   /**
-   * Clean up resources.
+   * Clean up resources. Calls shutdown() on all plugins.
    */
-  close(): void {
+  async close(): Promise<void> {
+    for (const plugin of this.plugins) {
+      await plugin.shutdown?.();
+    }
     this._state?.close();
   }
 }

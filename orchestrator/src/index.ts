@@ -455,6 +455,15 @@ export type { ArchiveManifest, ArchivalOptions } from './audit-archival.js';
 // Orchestrator class
 export { Orchestrator, type OrchestratorConfig, type WebhookConfig } from './orchestrator.js';
 
+// Plugin interface
+export type {
+  OrchestratorPlugin,
+  PluginContext,
+  BeforeRunEvent,
+  AfterRunEvent,
+  RunErrorEvent,
+} from './plugin.js';
+
 // Comprehensive type re-exports
 export type {
   ApiVersion,

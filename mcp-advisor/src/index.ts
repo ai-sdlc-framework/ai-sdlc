@@ -10,6 +10,9 @@ export { resolveIssue, type IssueResolution } from './issue-linker.js';
 // Shared types
 export type { ServerDeps } from './types.js';
 
+// Plugin interface
+export type { McpAdvisorPlugin } from './plugin.js';
+
 // Tool handlers (for direct testing / programmatic use)
 export { handleSessionStart } from './tools/session-start.js';
 export { handleGetContext } from './tools/get-context.js';

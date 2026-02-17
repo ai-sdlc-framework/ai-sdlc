@@ -3,5 +3,5 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { createMcpServer } from './server.js';
 
-const { server } = createMcpServer();
+const { server } = await createMcpServer();
 await server.connect(new StdioServerTransport());
