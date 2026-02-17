@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { RunnerRegistry, createRunnerRegistry } from './runner-registry.js';
 import { ClaudeCodeRunner } from './claude-code.js';
+import { CopilotRunner } from './copilot.js';
+import { CursorRunner } from './cursor.js';
+import { CodexRunner } from './codex.js';
 import type { AgentRunner, AgentContext, AgentResult } from './types.js';
 
 class MockRunner implements AgentRunner {
@@ -79,19 +82,68 @@ describe('RunnerRegistry', () => {
       expect(registry.has('generic-llm')).toBe(true);
     });
 
-    it('registers stub runners as unavailable', () => {
+    it('copilot unavailable without GH_TOKEN', () => {
       const registry = new RunnerRegistry();
       registry.discoverFromEnv({});
 
-      expect(registry.has('copilot')).toBe(false); // not available
-      expect(registry.has('cursor')).toBe(false);
-      expect(registry.has('devin')).toBe(false);
+      expect(registry.has('copilot')).toBe(false);
+      expect(registry.get('copilot')).toBeUndefined();
+    });
 
-      // But they're registered (listed)
+    it('copilot available with GH_TOKEN', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ GH_TOKEN: 'ghp_test123' });
+
+      expect(registry.has('copilot')).toBe(true);
+      expect(registry.get('copilot')).toBeInstanceOf(CopilotRunner);
+    });
+
+    it('copilot available with GITHUB_TOKEN (alternative)', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ GITHUB_TOKEN: 'ghp_test456' });
+
+      expect(registry.has('copilot')).toBe(true);
+      expect(registry.get('copilot')).toBeInstanceOf(CopilotRunner);
+    });
+
+    it('cursor unavailable without CURSOR_API_KEY', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({});
+
+      expect(registry.has('cursor')).toBe(false);
+      expect(registry.get('cursor')).toBeUndefined();
+    });
+
+    it('cursor available with CURSOR_API_KEY', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ CURSOR_API_KEY: 'cur_test123' });
+
+      expect(registry.has('cursor')).toBe(true);
+      expect(registry.get('cursor')).toBeInstanceOf(CursorRunner);
+    });
+
+    it('codex unavailable without CODEX_API_KEY', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({});
+
+      expect(registry.has('codex')).toBe(false);
+      expect(registry.get('codex')).toBeUndefined();
+    });
+
+    it('codex available with CODEX_API_KEY', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({ CODEX_API_KEY: 'cdx_test123' });
+
+      expect(registry.has('codex')).toBe(true);
+      expect(registry.get('codex')).toBeInstanceOf(CodexRunner);
+    });
+
+    it('devin is not registered at all', () => {
+      const registry = new RunnerRegistry();
+      registry.discoverFromEnv({});
+
       const all = registry.list();
-      expect(all.some((r) => r.name === 'copilot')).toBe(true);
-      expect(all.some((r) => r.name === 'cursor')).toBe(true);
-      expect(all.some((r) => r.name === 'devin')).toBe(true);
+      expect(all.some((r) => r.name === 'devin')).toBe(false);
     });
 
     it('listAvailable filters out unavailable runners', () => {

@@ -103,6 +103,11 @@ export const DEFAULT_ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages'
 export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
 export const DEFAULT_GENERIC_LLM_MODEL = 'default';
 
+// ── CLI runner model overrides ────────────────────────────────────────
+export const DEFAULT_COPILOT_MODEL: string | undefined = process.env.AI_SDLC_COPILOT_MODEL;
+export const DEFAULT_CURSOR_MODEL: string | undefined = process.env.AI_SDLC_CURSOR_MODEL;
+export const DEFAULT_CODEX_MODEL: string | undefined = process.env.AI_SDLC_CODEX_MODEL;
+
 // ── Generic LLM defaults ───────────────────────────────────────────
 
 export const DEFAULT_LLM_TIMEOUT_MS = 120_000;
