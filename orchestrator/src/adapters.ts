@@ -5,7 +5,7 @@
  */
 
 import { join } from 'node:path';
-import { DEFAULT_CONFIG_DIR_NAME } from './defaults.js';
+import { DEFAULT_CONFIG_DIR_NAME, DEFAULT_DOCKER_IMAGE, DEFAULT_WORKFLOW_FILE } from './defaults.js';
 import {
   // Registry & scanner (used in function bodies)
   createAdapterRegistry,
@@ -141,7 +141,7 @@ export function createPipelineAdapterRegistry(): AdapterRegistry {
       return stdout;
     };
     const config: DockerSandboxConfig = {
-      image: process.env.AI_SDLC_DOCKER_IMAGE ?? 'node:20-slim',
+      image: process.env.AI_SDLC_DOCKER_IMAGE ?? DEFAULT_DOCKER_IMAGE,
       network: process.env.AI_SDLC_DOCKER_NETWORK,
     };
     return createDockerSandbox(exec, config);
@@ -265,7 +265,7 @@ export function createPipelineCIAdapter(): CIPipeline {
     org,
     repo,
     token: { secretRef: 'github-token' },
-    workflowFile: process.env.AI_SDLC_WORKFLOW_FILE ?? 'ci.yml',
+    workflowFile: process.env.AI_SDLC_WORKFLOW_FILE ?? DEFAULT_WORKFLOW_FILE,
   });
 }
 

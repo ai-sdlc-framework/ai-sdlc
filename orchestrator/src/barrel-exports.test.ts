@@ -187,4 +187,54 @@ describe('orchestrator barrel exports', () => {
   it('exports DEFAULT_HOTSPOT_THRESHOLD', () => {
     expect(barrel.DEFAULT_HOTSPOT_THRESHOLD).toBeTypeOf('number');
   });
+
+  // New defaults (Sprint 1)
+  it('exports DEFAULT_LINT_COMMAND', () => {
+    expect('DEFAULT_LINT_COMMAND' in barrel).toBe(true);
+  });
+  it('exports DEFAULT_FORMAT_COMMAND', () => {
+    expect('DEFAULT_FORMAT_COMMAND' in barrel).toBe(true);
+  });
+  it('exports DEFAULT_COMMIT_MESSAGE_TEMPLATE', () => {
+    expect(barrel.DEFAULT_COMMIT_MESSAGE_TEMPLATE).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_COMMIT_CO_AUTHOR', () => {
+    expect(barrel.DEFAULT_COMMIT_CO_AUTHOR).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_OPENAI_API_URL', () => {
+    expect(barrel.DEFAULT_OPENAI_API_URL).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_OPENAI_MODEL', () => {
+    expect(barrel.DEFAULT_OPENAI_MODEL).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_ANTHROPIC_API_URL', () => {
+    expect(barrel.DEFAULT_ANTHROPIC_API_URL).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_ANTHROPIC_MODEL', () => {
+    expect(barrel.DEFAULT_ANTHROPIC_MODEL).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_GENERIC_LLM_MODEL', () => {
+    expect(barrel.DEFAULT_GENERIC_LLM_MODEL).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_LLM_TIMEOUT_MS', () => {
+    expect(barrel.DEFAULT_LLM_TIMEOUT_MS).toBeTypeOf('number');
+  });
+  it('exports DEFAULT_LLM_MAX_TOKENS', () => {
+    expect(barrel.DEFAULT_LLM_MAX_TOKENS).toBeTypeOf('number');
+  });
+  it('exports DEFAULT_LLM_SYSTEM_PROMPT', () => {
+    expect(barrel.DEFAULT_LLM_SYSTEM_PROMPT).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_DOCKER_IMAGE', () => {
+    expect(barrel.DEFAULT_DOCKER_IMAGE).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_WORKFLOW_FILE', () => {
+    expect(barrel.DEFAULT_WORKFLOW_FILE).toBeTypeOf('string');
+  });
+  it('exports DEFAULT_LABEL_TO_SKILL_MAP', () => {
+    expect(barrel.DEFAULT_LABEL_TO_SKILL_MAP).toBeTypeOf('object');
+  });
+  it('exports DEFAULT_ANALYSIS_CACHE_TTL_MS', () => {
+    expect(barrel.DEFAULT_ANALYSIS_CACHE_TTL_MS).toBeTypeOf('number');
+  });
 });

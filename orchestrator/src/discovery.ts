@@ -13,6 +13,7 @@ import {
   type AgentCardFetcher,
   type A2AAgentCard,
 } from '@ai-sdlc/reference';
+import { DEFAULT_LABEL_TO_SKILL_MAP } from './defaults.js';
 
 /**
  * Create a pipeline-scoped agent discovery service.
@@ -41,15 +42,7 @@ export function resolveAgentForIssue(
   discovery: AgentDiscovery,
   labels: string[],
 ): AgentRole | undefined {
-  const labelToSkill: Record<string, string> = {
-    bug: 'debugging',
-    feature: 'implementation',
-    docs: 'documentation',
-    test: 'testing',
-    refactor: 'refactoring',
-    security: 'security-analysis',
-    performance: 'optimization',
-  };
+  const labelToSkill = DEFAULT_LABEL_TO_SKILL_MAP;
 
   for (const label of labels) {
     const skill = labelToSkill[label.toLowerCase()];

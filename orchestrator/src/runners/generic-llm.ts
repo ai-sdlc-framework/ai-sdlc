@@ -6,6 +6,11 @@
  */
 
 import type { AgentRunner, AgentContext, AgentResult, TokenUsage } from './types.js';
+import {
+  DEFAULT_LLM_TIMEOUT_MS,
+  DEFAULT_LLM_MAX_TOKENS,
+  DEFAULT_LLM_SYSTEM_PROMPT,
+} from '../defaults.js';
 
 export interface GenericLLMConfig {
   /** API endpoint URL (e.g., https://api.openai.com/v1/chat/completions). */
@@ -90,7 +95,7 @@ export class GenericLLMRunner implements AgentRunner {
     } else {
       messages.push({
         role: 'system',
-        content: 'You are a software engineering agent. Implement code changes as instructed.',
+        content: DEFAULT_LLM_SYSTEM_PROMPT,
       });
     }
 
@@ -118,7 +123,7 @@ export class GenericLLMRunner implements AgentRunner {
     const controller = new AbortController();
     const timeout = setTimeout(
       () => controller.abort(),
-      this.config.timeoutMs ?? 120_000,
+      this.config.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS,
     );
 
     try {
@@ -131,7 +136,7 @@ export class GenericLLMRunner implements AgentRunner {
         body: JSON.stringify({
           model: this.config.model,
           messages,
-          max_tokens: this.config.maxTokens ?? 4096,
+          max_tokens: this.config.maxTokens ?? DEFAULT_LLM_MAX_TOKENS,
         }),
         signal: controller.signal,
       });

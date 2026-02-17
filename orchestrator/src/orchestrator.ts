@@ -13,6 +13,7 @@ import type { SecurityContext } from './security.js';
 import type { AgentRunner } from './runners/types.js';
 import { analyzeCodebase } from './analysis/analyzer.js';
 import { buildCodebaseContext } from './analysis/context-builder.js';
+import { DEFAULT_ANALYSIS_CACHE_TTL_MS } from './defaults.js';
 import type { CodebaseProfile, CodebaseContext } from './analysis/types.js';
 import type { AutonomyLedgerEntry, RoutingDecision } from './state/types.js';
 import { AutonomyTracker } from './autonomy-tracker.js';
@@ -230,7 +231,7 @@ export class Orchestrator {
       const cached = this._state.getLatestComplexityProfile(workDir);
       if (cached?.analyzedAt) {
         const age = Date.now() - new Date(cached.analyzedAt).getTime();
-        if (age < 24 * 60 * 60 * 1000 && cached.architecturalPatterns) {
+        if (age < DEFAULT_ANALYSIS_CACHE_TTL_MS && cached.architecturalPatterns) {
           // Return reconstructed profile from cached data
           return {
             repoPath: cached.repoPath,

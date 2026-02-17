@@ -68,6 +68,71 @@ export const DEFAULT_MAX_FILES_PER_CHANGE = 15;
 export const DEFAULT_REQUIRE_TESTS = true;
 export const DEFAULT_BLOCKED_PATHS = ['.github/workflows/**', `${DEFAULT_CONFIG_DIR_NAME}/**`];
 
+// ── Agent prompt commands ────────────────────────────────────────────
+
+/**
+ * Lint command injected into agent prompts.
+ * Undefined by default — users opt in via AI_SDLC_LINT_COMMAND env var
+ * or by passing `lintCommand` in AgentContext.
+ */
+export const DEFAULT_LINT_COMMAND: string | undefined =
+  process.env.AI_SDLC_LINT_COMMAND ?? undefined;
+
+/**
+ * Format command injected into agent prompts.
+ * Undefined by default — users opt in via AI_SDLC_FORMAT_COMMAND env var
+ * or by passing `formatCommand` in AgentContext.
+ */
+export const DEFAULT_FORMAT_COMMAND: string | undefined =
+  process.env.AI_SDLC_FORMAT_COMMAND ?? undefined;
+
+// ── Commit message ──────────────────────────────────────────────────
+
+export const DEFAULT_COMMIT_MESSAGE_TEMPLATE =
+  process.env.AI_SDLC_COMMIT_MESSAGE_TEMPLATE ??
+  'fix: resolve issue #{issueNumber}\n\n{issueTitle}';
+
+export const DEFAULT_COMMIT_CO_AUTHOR =
+  process.env.AI_SDLC_COMMIT_CO_AUTHOR ?? 'Claude <noreply@anthropic.com>';
+
+// ── Runner registry API defaults ────────────────────────────────────
+
+export const DEFAULT_OPENAI_API_URL = 'https://api.openai.com/v1/chat/completions';
+export const DEFAULT_OPENAI_MODEL = 'gpt-4';
+export const DEFAULT_ANTHROPIC_API_URL = 'https://api.anthropic.com/v1/messages';
+export const DEFAULT_ANTHROPIC_MODEL = 'claude-sonnet-4-5-20250929';
+export const DEFAULT_GENERIC_LLM_MODEL = 'default';
+
+// ── Generic LLM defaults ───────────────────────────────────────────
+
+export const DEFAULT_LLM_TIMEOUT_MS = 120_000;
+export const DEFAULT_LLM_MAX_TOKENS = 4096;
+export const DEFAULT_LLM_SYSTEM_PROMPT =
+  'You are a software engineering agent. Implement code changes as instructed.';
+
+// ── Docker / CI adapter defaults ────────────────────────────────────
+
+export const DEFAULT_DOCKER_IMAGE = 'node:20-slim';
+export const DEFAULT_WORKFLOW_FILE = 'ci.yml';
+
+// ── Discovery ───────────────────────────────────────────────────────
+
+export const DEFAULT_LABEL_TO_SKILL_MAP: Record<string, string> = {
+  bug: 'debugging',
+  feature: 'implementation',
+  docs: 'documentation',
+  test: 'testing',
+  refactor: 'refactoring',
+  security: 'security-analysis',
+  performance: 'optimization',
+};
+
+// ── Analysis cache ──────────────────────────────────────────────────
+
+export const DEFAULT_ANALYSIS_CACHE_TTL_MS = process.env.AI_SDLC_ANALYSIS_CACHE_TTL
+  ? Number(process.env.AI_SDLC_ANALYSIS_CACHE_TTL)
+  : 86_400_000; // 24 hours
+
 // ── Fix-CI ───────────────────────────────────────────────────────────
 
 export const DEFAULT_MAX_FIX_ATTEMPTS = 2;

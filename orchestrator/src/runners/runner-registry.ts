@@ -10,6 +10,13 @@ import { GenericLLMRunner, type GenericLLMConfig } from './generic-llm.js';
 import { CopilotStubRunner } from './copilot-stub.js';
 import { CursorStubRunner } from './cursor-stub.js';
 import { DevinStubRunner } from './devin-stub.js';
+import {
+  DEFAULT_OPENAI_API_URL,
+  DEFAULT_OPENAI_MODEL,
+  DEFAULT_ANTHROPIC_API_URL,
+  DEFAULT_ANTHROPIC_MODEL,
+  DEFAULT_GENERIC_LLM_MODEL,
+} from '../defaults.js';
 
 export interface RegisteredRunner {
   name: string;
@@ -94,9 +101,9 @@ export class RunnerRegistry {
       this.runners.set('openai', {
         name: 'openai',
         runner: new GenericLLMRunner({
-          apiUrl: env.OPENAI_API_URL ?? 'https://api.openai.com/v1/chat/completions',
+          apiUrl: env.OPENAI_API_URL ?? DEFAULT_OPENAI_API_URL,
           apiKey: openaiKey,
-          model: env.OPENAI_MODEL ?? 'gpt-4',
+          model: env.OPENAI_MODEL ?? DEFAULT_OPENAI_MODEL,
         }),
         available: true,
         source: 'env',
@@ -109,9 +116,9 @@ export class RunnerRegistry {
       this.runners.set('anthropic', {
         name: 'anthropic',
         runner: new GenericLLMRunner({
-          apiUrl: env.ANTHROPIC_API_URL ?? 'https://api.anthropic.com/v1/messages',
+          apiUrl: env.ANTHROPIC_API_URL ?? DEFAULT_ANTHROPIC_API_URL,
           apiKey: anthropicKey,
-          model: env.ANTHROPIC_MODEL ?? 'claude-sonnet-4-5-20250929',
+          model: env.ANTHROPIC_MODEL ?? DEFAULT_ANTHROPIC_MODEL,
         }),
         available: true,
         source: 'env',
@@ -127,7 +134,7 @@ export class RunnerRegistry {
         runner: new GenericLLMRunner({
           apiUrl: genericUrl,
           apiKey: genericKey,
-          model: env.LLM_MODEL ?? 'default',
+          model: env.LLM_MODEL ?? DEFAULT_GENERIC_LLM_MODEL,
         }),
         available: true,
         source: 'env',

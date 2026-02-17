@@ -30,6 +30,14 @@ export interface AgentContext {
   codebaseContext?: CodebaseContext;
   /** Enriched episodic context from prior runs. */
   episodicContext?: string;
+  /** Lint command for agent prompt (e.g., `npm run lint`). */
+  lintCommand?: string;
+  /** Format command for agent prompt (e.g., `npm run format`). */
+  formatCommand?: string;
+  /** Commit message template with `{issueNumber}` and `{issueTitle}` placeholders. */
+  commitMessageTemplate?: string;
+  /** Co-author line for commits. */
+  commitCoAuthor?: string;
 }
 
 export interface TokenUsage {

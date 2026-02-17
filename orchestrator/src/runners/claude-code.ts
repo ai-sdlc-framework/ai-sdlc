@@ -10,12 +10,19 @@ import {
   DEFAULT_MODEL,
   DEFAULT_ALLOWED_TOOLS,
   DEFAULT_RUNNER_TIMEOUT_MS,
+  DEFAULT_LINT_COMMAND,
+  DEFAULT_FORMAT_COMMAND,
+  DEFAULT_COMMIT_MESSAGE_TEMPLATE,
+  DEFAULT_COMMIT_CO_AUTHOR,
 } from '../defaults.js';
 import { formatContextForPrompt } from '../analysis/context-builder.js';
 
 const execFileAsync = promisify(execFile);
 
 export function buildPrompt(ctx: AgentContext): string {
+  const lintCmd = ctx.lintCommand ?? DEFAULT_LINT_COMMAND;
+  const fmtCmd = ctx.formatCommand ?? DEFAULT_FORMAT_COMMAND;
+
   const lines = [
     `You are fixing issue #${ctx.issueNumber}: ${ctx.issueTitle}`,
     '',
@@ -25,6 +32,7 @@ export function buildPrompt(ctx: AgentContext): string {
   ];
 
   if (ctx.ciErrors) {
+    let step = 0;
     lines.push(
       '## CI Failure Logs',
       '',
@@ -33,24 +41,43 @@ export function buildPrompt(ctx: AgentContext): string {
       '```',
       '',
       '## Instructions',
-      '1. Analyze the CI failure logs above to identify the root cause.',
-      '2. Read the relevant source files to understand the context.',
-      '3. Fix the errors that caused CI to fail.',
-      '4. If the failure is a formatting/prettier error, run `pnpm format` to auto-fix it.',
-      '5. After making ANY code changes, always run `pnpm lint` and `pnpm format` to catch issues before committing.',
-      '6. Write or update tests if needed to cover your fix.',
-      '7. Do NOT modify files matching the blocked paths below.',
-      `8. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+      `${++step}. Analyze the CI failure logs above to identify the root cause.`,
+      `${++step}. Read the relevant source files to understand the context.`,
+      `${++step}. Fix the errors that caused CI to fail.`,
+    );
+    if (fmtCmd) {
+      lines.push(`${++step}. If the failure is a formatting/prettier error, run \`${fmtCmd}\` to auto-fix it.`);
+    }
+    if (lintCmd && fmtCmd) {
+      lines.push(`${++step}. After making ANY code changes, always run \`${lintCmd}\` and \`${fmtCmd}\` to catch issues before committing.`);
+    } else if (lintCmd) {
+      lines.push(`${++step}. After making ANY code changes, always run \`${lintCmd}\` to catch issues before committing.`);
+    } else if (fmtCmd) {
+      lines.push(`${++step}. After making ANY code changes, always run \`${fmtCmd}\` to catch issues before committing.`);
+    }
+    lines.push(
+      `${++step}. Write or update tests if needed to cover your fix.`,
+      `${++step}. Do NOT modify files matching the blocked paths below.`,
+      `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   } else {
+    let step = 0;
     lines.push(
       '## Instructions',
-      '1. Read the relevant source files to understand the codebase.',
-      '2. Implement the fix or feature described in the issue.',
-      '3. Write or update tests to cover your changes.',
-      '4. After making code changes, run `pnpm lint` and `pnpm format` to ensure CI will pass.',
-      '5. Do NOT modify files matching the blocked paths below.',
-      `6. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+      `${++step}. Read the relevant source files to understand the codebase.`,
+      `${++step}. Implement the fix or feature described in the issue.`,
+      `${++step}. Write or update tests to cover your changes.`,
+    );
+    if (lintCmd && fmtCmd) {
+      lines.push(`${++step}. After making code changes, run \`${lintCmd}\` and \`${fmtCmd}\` to ensure CI will pass.`);
+    } else if (lintCmd) {
+      lines.push(`${++step}. After making code changes, run \`${lintCmd}\` to ensure CI will pass.`);
+    } else if (fmtCmd) {
+      lines.push(`${++step}. After making code changes, run \`${fmtCmd}\` to ensure CI will pass.`);
+    }
+    lines.push(
+      `${++step}. Do NOT modify files matching the blocked paths below.`,
+      `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   }
 
@@ -214,10 +241,15 @@ export class ClaudeCodeRunner implements AgentRunner {
 
       // Stage and commit
       await gitExec(ctx.workDir, ['add', '-A']);
+      const tmpl = ctx.commitMessageTemplate ?? DEFAULT_COMMIT_MESSAGE_TEMPLATE;
+      const coAuthor = ctx.commitCoAuthor ?? DEFAULT_COMMIT_CO_AUTHOR;
+      const commitMsg = tmpl
+        .replace(/\{issueNumber\}/g, String(ctx.issueNumber))
+        .replace(/\{issueTitle\}/g, ctx.issueTitle);
       await gitExec(ctx.workDir, [
         'commit',
         '-m',
-        `fix: resolve issue #${ctx.issueNumber}\n\n${ctx.issueTitle}\n\nCo-Authored-By: Claude <noreply@anthropic.com>`,
+        `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`,
       ]);
 
       return {
