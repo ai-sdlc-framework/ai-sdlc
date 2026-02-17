@@ -5,3 +5,4 @@ packages:
   - orchestrator
   - dogfood
   - dashboard
+  - mcp-advisor
