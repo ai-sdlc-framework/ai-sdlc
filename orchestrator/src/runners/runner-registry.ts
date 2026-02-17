@@ -7,9 +7,9 @@
 import type { AgentRunner } from './types.js';
 import { ClaudeCodeRunner } from './claude-code.js';
 import { GenericLLMRunner, type GenericLLMConfig } from './generic-llm.js';
-import { CopilotStubRunner } from './copilot-stub.js';
-import { CursorStubRunner } from './cursor-stub.js';
-import { DevinStubRunner } from './devin-stub.js';
+import { CopilotRunner } from './copilot.js';
+import { CursorRunner } from './cursor.js';
+import { CodexRunner } from './codex.js';
 import {
   DEFAULT_OPENAI_API_URL,
   DEFAULT_OPENAI_MODEL,
@@ -141,29 +141,36 @@ export class RunnerRegistry {
       });
     }
 
-    // Register stub runners (always available but return errors)
-    if (!this.runners.has('copilot')) {
+    // GitHub Copilot CLI runner — available when GH_TOKEN or GITHUB_TOKEN is set
+    const ghToken = env.GH_TOKEN ?? env.GITHUB_TOKEN;
+    if (ghToken && !this.runners.has('copilot')) {
       this.runners.set('copilot', {
         name: 'copilot',
-        runner: new CopilotStubRunner(),
-        available: false,
-        source: 'built-in',
+        runner: new CopilotRunner(),
+        available: true,
+        source: 'env',
       });
     }
-    if (!this.runners.has('cursor')) {
+
+    // Cursor CLI runner — available when CURSOR_API_KEY is set
+    const cursorKey = env.CURSOR_API_KEY;
+    if (cursorKey && !this.runners.has('cursor')) {
       this.runners.set('cursor', {
         name: 'cursor',
-        runner: new CursorStubRunner(),
-        available: false,
-        source: 'built-in',
+        runner: new CursorRunner(),
+        available: true,
+        source: 'env',
       });
     }
-    if (!this.runners.has('devin')) {
-      this.runners.set('devin', {
-        name: 'devin',
-        runner: new DevinStubRunner(),
-        available: false,
-        source: 'built-in',
+
+    // Codex CLI runner — available when CODEX_API_KEY is set
+    const codexKey = env.CODEX_API_KEY;
+    if (codexKey && !this.runners.has('codex')) {
+      this.runners.set('codex', {
+        name: 'codex',
+        runner: new CodexRunner(),
+        available: true,
+        source: 'env',
       });
     }
   }
