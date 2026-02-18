@@ -4,122 +4,176 @@
 [![Spec Version](https://img.shields.io/badge/spec-v1alpha1-orange.svg)](#versioning)
 [![Status: Draft](https://img.shields.io/badge/status-draft-yellow.svg)](#status)
 
-**The open, vendor-neutral governance specification for AI-augmented software development lifecycles.**
+**An open-source orchestrator that drives AI coding agents through the full software development lifecycle — with quality gates, progressive autonomy, and codebase-aware context at every step.**
 
-The AI-SDLC Framework defines how human engineers and AI coding agents collaborate across the full SDLC — from issue triage through code generation, review, testing, and deployment — with predictable, auditable, enterprise-grade outcomes.
+The AI-SDLC Framework takes issues as input and routes them through a declared pipeline of stages, assigning AI agents and/or human reviewers at each stage, enforcing quality gates, and continuously learning which agents can be trusted with what.
 
 ---
 
 ## The Problem
 
-85% of developers use AI coding tools and 41% of GitHub code is AI-generated, yet only 1 in 5 companies has mature governance for AI agents. The result:
+AI agents can build small greenfield projects, but software falls apart as it grows. Technical debt compounds, complexity overwhelms context windows, and developer velocity collapses:
 
-- **Security**: AI-generated code introduces security flaws in 45% of test cases
-- **Quality decline**: Refactoring dropped from 25% to 10% of changes; code churn rose from 5.5% to 7.9%
-- **Productivity paradox**: Experienced developers using AI tools are 19% slower on mature codebases, despite believing they are 20% faster
-- **Review bottleneck**: PRs merged increased 98%, but review time increased 91%
+- **Productivity paradox**: Experienced developers using AI tools are 19% slower on mature codebases, despite believing they are 20% faster (METR 2025)
+- **Quality decline**: Refactoring dropped from 25% to 10% of changes; code churn rose from 5.5% to 7.9% (Gitclear 2024)
+- **Stability regression**: Every 25% increase in AI adoption correlates with 7.2% drop in system stability (Google DORA)
+- **Trust gap**: Only 3% of developers express high trust in AI output (Stack Overflow 2025)
 
-The AI-SDLC Framework closes this governance gap.
+The root cause isn't that AI agents write bad code. It's that **nobody orchestrates how they work as the codebase grows.**
 
 ## How It Works
 
-```
-Declare desired SDLC state in YAML
-  → Observe actual development activity via adapters
-    → Diff against policy
-      → Reconcile — continuously.
-```
+The orchestrator implements a continuous reconciliation loop:
 
-The framework sits above the emerging agent standards stack as the **orchestration and governance layer**:
-
-| Protocol       | Scope                           | Relationship to AI-SDLC                   |
-| -------------- | ------------------------------- | ----------------------------------------- |
-| **MCP**        | Agent-to-tool integration       | AI-SDLC adapters can wrap MCP servers     |
-| **A2A**        | Agent-to-agent communication    | AI-SDLC agents publish A2A Agent Cards    |
-| **AGENTS.md**  | Per-project agent instructions  | AI-SDLC policies generate AGENTS.md files |
-| **AI-SDLC**    | SDLC orchestration & governance | The orchestration layer above all three   |
+```
+1. WATCH    — Listen for triggers (issue assigned, CI failed, schedule)
+2. ASSESS   — Analyze codebase complexity, score task complexity (1-10)
+3. ROUTE    — Select strategy: fully-autonomous / AI-with-review / human-led
+4. EXECUTE  — Invoke agent with context, constraints, and sandbox
+5. VALIDATE — Run quality gates (tests, coverage, security, lint)
+6. DELIVER  — Create PR with provenance, request review if required
+7. LEARN    — Record outcome, update autonomy level, store episodic memory
+```
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                      SPECIFICATION LAYER                        │
-│  Resource types: Pipeline, AgentRole, QualityGate,              │
-│  AutonomyPolicy, AdapterBinding — with JSON Schema validation   │
-├─────────────────────────────────────────────────────────────────┤
-│                        ADAPTER LAYER                            │
-│  Terraform-style provider contracts per integration category    │
-│  IssueTracker | SourceControl | CIPipeline | CodeAnalysis |     │
-│  Messenger | DeploymentTarget                                   │
-├─────────────────────────────────────────────────────────────────┤
-│                        POLICY LAYER                             │
-│  OPA/Gatekeeper template/instance separation                    │
-│  Sentinel 3-tier enforcement (advisory|soft-mandatory|hard)     │
-│  CSA ATF progressive autonomy levels                            │
-├─────────────────────────────────────────────────────────────────┤
-│                        RUNTIME LAYER                            │
-│  Kubernetes controller reconciliation loop                      │
-│  Declarative agent roles | Workflow graphs                      │
-│  A2A-compatible Agent Cards for discovery                       │
-└─────────────────────────────────────────────────────────────────┘
-         ▼               ▼                ▼              ▼
-    ┌─────────┐   ┌──────────┐   ┌────────────┐   ┌──────────┐
-    │  Linear │   │  GitHub  │   │  SonarQube │   │  Slack   │
-    │  Jira   │   │  GitLab  │   │  Semgrep   │   │  Teams   │
-    └─────────┘   └──────────┘   └────────────┘   └──────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                       AI-SDLC Orchestrator                           │
+│                                                                      │
+│  ┌─────────┐    ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
+│  │ Trigger  │───▶│  Route &  │───▶│  Execute  │───▶│  Validate &  │  │
+│  │ Watch    │    │  Assign   │    │  Stage    │    │  Promote     │  │
+│  └─────────┘    └───────────┘    └───────────┘    └──────────────┘  │
+│       │              │                │                   │          │
+│       ▼              ▼                ▼                   ▼          │
+│  ┌─────────┐    ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
+│  │ Issue    │    │ Complexity│    │ Agent     │    │ Quality      │  │
+│  │ Tracker  │    │ Analysis  │    │ Runtime   │    │ Gates        │  │
+│  │ Adapter  │    │ + Routing │    │ (sandbox, │    │ + Autonomy   │  │
+│  │          │    │           │    │  creds,   │    │   Ledger     │  │
+│  │ Linear   │    │ Codebase  │    │  context) │    │              │  │
+│  │ Jira     │    │ State     │    │           │    │ Promotion/   │  │
+│  │ GitHub   │    │ Store     │    │ Claude    │    │ Demotion     │  │
+│  └─────────┘    └───────────┘    │ Copilot   │    └──────────────┘  │
+│                                  │ Cursor    │                      │
+│                                  │ Codex     │                      │
+│                                  │ Any LLM   │                      │
+│                                  └───────────┘                      │
+│                                                                      │
+│  Configured via: .ai-sdlc/pipeline.yaml                              │
+│  Codebase state: .ai-sdlc/state/ (autonomy ledger, episodic memory) │
+└──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Specification Documents
+## Quick Start
 
-| Document | Type | Status | Description |
-| --- | --- | --- | --- |
-| [spec.md](spec/spec.md) | Normative | Draft | Core resource model, validation rules, reconciliation semantics |
-| [primer.md](spec/primer.md) | Informative | Draft | Concepts, architecture rationale, getting started |
-| [adapters.md](spec/adapters.md) | Normative | Draft | Adapter interface contracts, registration, discovery |
-| [policy.md](spec/policy.md) | Normative | Draft | Quality gate schema, enforcement levels, evaluation |
-| [autonomy.md](spec/autonomy.md) | Normative | Draft | Autonomy levels, promotion criteria, demotion triggers |
-| [agents.md](spec/agents.md) | Normative | Draft | Agent roles, handoff contracts, orchestration |
-| [metrics.md](spec/metrics.md) | Normative | Draft | Metric definitions, observability conventions |
-| [glossary.md](spec/glossary.md) | Informative | Draft | Term definitions |
+```bash
+# Install the orchestrator
+npm install -g @ai-sdlc/orchestrator
 
-## Core Resource Types
+# Initialize in your repository
+ai-sdlc init
 
-The framework defines five declarative resource types following the Kubernetes `spec/status` pattern:
+# Run a pipeline for a single issue
+ai-sdlc run --issue 42
 
-- **[Pipeline](spec/spec.md#51-pipeline)** — SDLC workflow from trigger through delivery
-- **[AgentRole](spec/spec.md#52-agentrole)** — AI agent identity, capabilities, and constraints
-- **[QualityGate](spec/spec.md#53-qualitygate)** — Policy rules with graduated enforcement
-- **[AutonomyPolicy](spec/spec.md#54-autonomypolicy)** — Progressive autonomy with earned trust
-- **[AdapterBinding](spec/spec.md#55-adapterbinding)** — Tool integrations as swappable providers
+# Or start the long-running orchestrator
+ai-sdlc start
+```
 
-## JSON Schemas
+The `init` command detects your project's language, framework, and CI setup, then generates starter configuration in `.ai-sdlc/`.
 
-All resource types have formal [JSON Schema (draft 2020-12)](spec/schemas/) definitions enabling IDE autocompletion, CI validation, and programmatic tooling.
+## Agent Runners
 
-## Versioning
+The orchestrator is **agent-agnostic**. It invokes AI coding agents through a standard `AgentRunner` interface:
 
-The specification follows Kubernetes-style API maturity:
+| Runner | CLI Command | Auth Env Var | Description |
+|---|---|---|---|
+| **ClaudeCodeRunner** | `claude -p` | `ANTHROPIC_API_KEY` | Claude Code CLI in `--print` mode |
+| **CopilotRunner** | `copilot -p --yolo` | `GH_TOKEN` / `GITHUB_TOKEN` | GitHub Copilot CLI in autonomous mode |
+| **CursorRunner** | `cursor-agent --print` | `CURSOR_API_KEY` | Cursor CLI with stream-json output |
+| **CodexRunner** | `codex exec -` | `CODEX_API_KEY` | OpenAI Codex CLI via stdin |
+| **GenericLLMRunner** | HTTP API | `OPENAI_API_KEY` / `LLM_API_KEY` | Any OpenAI-compatible API endpoint |
 
-| Stage | Format | Stability |
-| --- | --- | --- |
-| Alpha | `v1alpha1` | No stability guarantee |
-| Beta | `v1beta1` | 9 months support after deprecation |
-| GA | `v1` | 12 months support after deprecation |
+Runners are auto-discovered from environment variables. Set the auth token and the runner becomes available:
 
-**Current version: `v1alpha1`**
+```bash
+export GH_TOKEN=ghp_...           # Enables CopilotRunner
+export CURSOR_API_KEY=cur_...     # Enables CursorRunner
+export CODEX_API_KEY=cdx_...      # Enables CodexRunner
+```
+
+All runners follow the same pattern: build prompt with codebase context, spawn the CLI, collect output, run `git diff` for changed files, stage and commit.
+
+## CLI Commands
+
+| Command | Description |
+|---|---|
+| `ai-sdlc init` | Scaffold `.ai-sdlc/` config for your project |
+| `ai-sdlc run --issue N` | Run pipeline for a single issue |
+| `ai-sdlc start` | Start long-running orchestrator (watch mode) |
+| `ai-sdlc status [ISSUE]` | Pipeline progress and recent runs |
+| `ai-sdlc health` | Orchestrator health check |
+| `ai-sdlc agents [NAME]` | Agent roster with autonomy levels |
+| `ai-sdlc routing --last 7d` | Task routing distribution |
+| `ai-sdlc complexity` | Codebase complexity profile |
+| `ai-sdlc cost --last 7d` | Cost summary by agent and pipeline |
+| `ai-sdlc dashboard` | Live TUI dashboard |
+
+## Codebase Intelligence
+
+The orchestrator maintains persistent knowledge about your codebase that agents can't:
+
+- **Complexity analysis** — File count, module structure, dependency graph, overall complexity score (1-10)
+- **Architectural patterns** — Detects hexagonal, layered, event-driven patterns and enforces conformance
+- **Hotspot identification** — Git history analysis for high-churn, high-complexity files that get extra scrutiny
+- **Convention detection** — Naming patterns, test structure, import style injected as agent context
+- **Episodic memory** — Records successes, failures, and regressions so agents learn from history
+
+## Progressive Autonomy
+
+Agents earn trust through demonstrated competence:
+
+| Level | Name | Capabilities |
+|---|---|---|
+| 0 | Intern | Read-only, suggestions only |
+| 1 | Junior | Can make changes, all PRs require human review |
+| 2 | Senior | Can auto-merge low-complexity PRs |
+| 3 | Principal | Can handle complex tasks with minimal oversight |
+
+Promotion requires meeting quantitative criteria (PR approval rate, rollback rate, security incidents) plus time-at-level minimums. Demotion is immediate on security incidents.
+
+## Specification
+
+The orchestrator is built on a formal specification with five declarative resource types:
+
+| Document | Description |
+|---|---|
+| [spec.md](spec/spec.md) | Core resource model (Pipeline, AgentRole, QualityGate, AutonomyPolicy, AdapterBinding) |
+| [policy.md](spec/policy.md) | Quality gate enforcement levels and evaluation |
+| [autonomy.md](spec/autonomy.md) | Progressive autonomy with earned trust |
+| [agents.md](spec/agents.md) | Agent roles, handoff contracts, orchestration |
+| [adapters.md](spec/adapters.md) | Adapter interface contracts |
+| [metrics.md](spec/metrics.md) | Metric definitions and observability |
+| [primer.md](spec/primer.md) | Conceptual introduction |
+
+All resource types have [JSON Schema (draft 2020-12)](spec/schemas/) definitions.
 
 ## Packages
 
 | Package | Path | Description |
-| --- | --- | --- |
-| `spec/` | [`spec/`](spec/) | Formal specification and JSON schemas |
-| `@ai-sdlc/reference` | [`reference/`](reference/) | TypeScript reference implementation |
+|---|---|---|
+| `@ai-sdlc/orchestrator` | [`orchestrator/`](orchestrator/) | The orchestrator runtime — CLI, runners, analysis, state store |
+| `@ai-sdlc/mcp-advisor` | [`mcp-advisor/`](mcp-advisor/) | MCP server for human-directed AI usage tracking |
+| `@ai-sdlc/reference` | [`reference/`](reference/) | TypeScript reference implementation of the spec |
 | `@ai-sdlc/conformance` | [`conformance/`](conformance/) | Language-agnostic conformance test suite |
-| `@ai-sdlc/sdk` | [`sdk-typescript/`](sdk-typescript/) | TypeScript SDK |
-| `sdk-python` | [`sdk-python/`](sdk-python/) | Python SDK (planned) |
-| `sdk-go` | [`sdk-go/`](sdk-go/) | Go SDK (planned) |
-| `contrib/` | [`contrib/`](contrib/) | Community adapters and plugins |
+| `dashboard/` | [`dashboard/`](dashboard/) | Web dashboard (Next.js) for cost, autonomy, and codebase views |
+| `sdk-python` | [`sdk-python/`](sdk-python/) | Python SDK |
+| `sdk-go` | [`sdk-go/`](sdk-go/) | Go SDK |
+| `spec/` | [`spec/`](spec/) | Formal specification and JSON schemas |
 | `docs/` | [`docs/`](docs/) | User-facing documentation |
+| `contrib/` | [`contrib/`](contrib/) | Community adapters and plugins |
 
 ## Development Setup
 
@@ -139,9 +193,21 @@ pnpm test
 pnpm validate-schemas
 ```
 
+## Versioning
+
+The specification follows Kubernetes-style API maturity:
+
+| Stage | Format | Stability |
+|---|---|---|
+| Alpha | `v1alpha1` | No stability guarantee |
+| Beta | `v1beta1` | 9 months support after deprecation |
+| GA | `v1` | 12 months support after deprecation |
+
+**Current version: `v1alpha1`**
+
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute to the specification.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute.
 
 Changes to normative spec documents require the [RFC process](spec/rfcs/README.md).
 

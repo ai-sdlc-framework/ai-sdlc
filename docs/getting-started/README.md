@@ -4,11 +4,13 @@ Get up and running with the AI-SDLC Framework.
 
 ## What is AI-SDLC?
 
-AI-SDLC is a declarative framework for governing AI agents in software development workflows. It provides:
+AI-SDLC is an orchestrator that drives AI coding agents through the full software development lifecycle. It provides:
 
-- **Structured pipelines** that orchestrate agent actions through defined stages
+- **Agent-agnostic orchestration** — works with Claude Code, GitHub Copilot, Cursor, OpenAI Codex, or any LLM API
+- **Structured pipelines** that route tasks through defined stages based on complexity
 - **Quality gates** with three-tier enforcement (advisory, soft-mandatory, hard-mandatory)
 - **Progressive autonomy** where agents earn trust through demonstrated reliability
+- **Codebase intelligence** — complexity analysis, pattern detection, hotspot identification, episodic memory
 - **Adapter contracts** that decouple your pipeline from specific tools
 - **Tamper-evident audit logging** for every action taken
 
@@ -45,6 +47,37 @@ The framework is built on five resource types organized in a four-layer model:
 
 ## Installation
 
+### Orchestrator (CLI)
+
+```bash
+npm install -g @ai-sdlc/orchestrator
+
+# Initialize in your repository
+ai-sdlc init
+
+# Run a pipeline for a single issue
+ai-sdlc run --issue 42
+```
+
+### Agent runners
+
+The orchestrator auto-discovers available runners from environment variables:
+
+```bash
+# Claude Code (always available as default runner)
+# Copilot — set GH_TOKEN or GITHUB_TOKEN
+export GH_TOKEN=ghp_...
+
+# Cursor — set CURSOR_API_KEY
+export CURSOR_API_KEY=cur_...
+
+# Codex — set CODEX_API_KEY
+export CODEX_API_KEY=cdx_...
+
+# Any OpenAI-compatible API — set OPENAI_API_KEY or LLM_API_KEY + LLM_API_URL
+export OPENAI_API_KEY=sk-...
+```
+
 ### For SDK users
 
 ```bash
@@ -59,7 +92,7 @@ pnpm add @ai-sdlc/reference
 git clone https://github.com/ai-sdlc-framework/ai-sdlc.git
 cd ai-sdlc
 pnpm install
-pnpm --filter @ai-sdlc/reference build
+pnpm build
 ```
 
 ## Core Concepts
@@ -185,8 +218,9 @@ pnpm test
 
 ## Next Steps
 
+- **[Runners Reference](../api-reference/runners.md)** -- All supported agent runners and configuration
 - **[Tutorials](../tutorials/)** -- Step-by-step walkthroughs for pipelines, gates, autonomy, adapters, and orchestration
-- **[API Reference](../api-reference/)** -- Complete SDK reference with all types and functions
+- **[API Reference](../api-reference/)** -- Complete SDK and orchestrator reference
 - **[Architecture](../architecture.md)** -- Package structure, data flow, and design patterns
 - **[Troubleshooting](../troubleshooting.md)** -- Common issues and solutions
 - **[Primer](../../spec/primer.md)** -- Conceptual introduction to the framework

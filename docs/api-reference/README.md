@@ -1,10 +1,18 @@
 # API Reference
 
-Complete reference for the AI-SDLC SDK (`@ai-sdlc/reference`).
+Complete reference for the AI-SDLC packages.
 
-## Architecture
+## Orchestrator (`@ai-sdlc/orchestrator`)
 
-The SDK is structured as a single package with 12 modules. The root entry re-exports everything, but you can import from specific modules for clarity:
+The orchestrator runtime — CLI, agent runners, codebase analysis, and state store.
+
+| Module | Description |
+|---|---|
+| [Runners](runners.md) | Agent runners (Claude Code, Copilot, Cursor, Codex, GenericLLM) and runner registry |
+
+## SDK (`@ai-sdlc/reference`)
+
+The TypeScript reference implementation, structured as a single package with 12 modules:
 
 ```
 @ai-sdlc/reference
@@ -31,19 +39,20 @@ import { validate, enforce, PipelineBuilder } from '@ai-sdlc/reference';
 
 ## Module Reference
 
-| Module | Description | Key Exports |
-|---|---|---|
-| [Core](core.md) | Types, validation, provenance | `validate`, `validateResource`, `createProvenance`, `API_VERSION` |
-| [Builders](builders.md) | Fluent resource construction | `PipelineBuilder`, `AgentRoleBuilder`, `QualityGateBuilder`, `AutonomyPolicyBuilder`, `AdapterBindingBuilder` |
-| [Policy](policy.md) | Enforcement and authorization | `enforce`, `evaluatePromotion`, `authorize`, `admitResource`, `parseDuration` |
-| [Adapters](adapters.md) | External tool integrations | `IssueTracker`, `SourceControl`, `CIPipeline`, `createAdapterRegistry` |
-| [Agents](agents.md) | Multi-agent orchestration | `sequential`, `parallel`, `executeOrchestration`, `validateHandoff` |
-| [Reconciler](reconciler.md) | Controller loop pattern | `ReconcilerLoop`, `reconcileOnce`, `resourceFingerprint` |
-| [Audit](audit.md) | Tamper-evident audit logging | `createAuditLog`, `createFileSink`, `computeEntryHash` |
-| [Metrics](metrics.md) | Metric collection and querying | `createMetricStore`, `STANDARD_METRICS` |
-| [Telemetry](telemetry.md) | OpenTelemetry + structured logging | `withSpan`, `createConsoleLogger`, `createBufferLogger` |
-| [Security](security.md) | Enterprise security primitives | `Sandbox`, `KillSwitch`, `JITCredentialIssuer`, `ApprovalWorkflow` |
-| [Compliance](compliance.md) | Regulatory framework coverage | `checkCompliance`, `checkAllFrameworks`, `getAllControlIds` |
+| Module | Package | Description | Key Exports |
+|---|---|---|---|
+| [Runners](runners.md) | `@ai-sdlc/orchestrator` | Agent runners and registry | `ClaudeCodeRunner`, `CopilotRunner`, `CursorRunner`, `CodexRunner`, `GenericLLMRunner`, `RunnerRegistry`, `createRunnerRegistry` |
+| [Core](core.md) | `@ai-sdlc/reference` | Types, validation, provenance | `validate`, `validateResource`, `createProvenance`, `API_VERSION` |
+| [Builders](builders.md) | `@ai-sdlc/reference` | Fluent resource construction | `PipelineBuilder`, `AgentRoleBuilder`, `QualityGateBuilder`, `AutonomyPolicyBuilder`, `AdapterBindingBuilder` |
+| [Policy](policy.md) | `@ai-sdlc/reference` | Enforcement and authorization | `enforce`, `evaluatePromotion`, `authorize`, `admitResource`, `parseDuration` |
+| [Adapters](adapters.md) | `@ai-sdlc/reference` | External tool integrations | `IssueTracker`, `SourceControl`, `CIPipeline`, `createAdapterRegistry` |
+| [Agents](agents.md) | `@ai-sdlc/reference` | Multi-agent orchestration | `sequential`, `parallel`, `executeOrchestration`, `validateHandoff` |
+| [Reconciler](reconciler.md) | `@ai-sdlc/reference` | Controller loop pattern | `ReconcilerLoop`, `reconcileOnce`, `resourceFingerprint` |
+| [Audit](audit.md) | `@ai-sdlc/reference` | Tamper-evident audit logging | `createAuditLog`, `createFileSink`, `computeEntryHash` |
+| [Metrics](metrics.md) | `@ai-sdlc/reference` | Metric collection and querying | `createMetricStore`, `STANDARD_METRICS` |
+| [Telemetry](telemetry.md) | `@ai-sdlc/reference` | OpenTelemetry + structured logging | `withSpan`, `createConsoleLogger`, `createBufferLogger` |
+| [Security](security.md) | `@ai-sdlc/reference` | Enterprise security primitives | `Sandbox`, `KillSwitch`, `JITCredentialIssuer`, `ApprovalWorkflow` |
+| [Compliance](compliance.md) | `@ai-sdlc/reference` | Regulatory framework coverage | `checkCompliance`, `checkAllFrameworks`, `getAllControlIds` |
 
 ## Resource Types
 

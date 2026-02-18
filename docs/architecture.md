@@ -1,10 +1,10 @@
 # Architecture
 
-Technical architecture of the AI-SDLC Framework reference implementation.
+Technical architecture of the AI-SDLC Framework.
 
 ## Package Structure
 
-The repository is a pnpm monorepo with three packages:
+The repository is a pnpm monorepo:
 
 ```
 ai-sdlc/
@@ -17,12 +17,34 @@ ai-sdlc/
 │   ├── glossary.md          # Term definitions
 │   ├── primer.md            # Conceptual introduction
 │   └── schemas/             # JSON Schema (draft 2020-12) definitions
-│       ├── common.schema.json
-│       ├── pipeline.schema.json
-│       ├── agent-role.schema.json
-│       ├── quality-gate.schema.json
-│       ├── autonomy-policy.schema.json
-│       └── adapter-binding.schema.json
+│
+├── orchestrator/            # @ai-sdlc/orchestrator — THE PRODUCT
+│   └── src/
+│       ├── cli/             # CLI commands (init, run, start, status, health,
+│       │                    #   agents, routing, complexity, cost, dashboard)
+│       ├── runners/         # Agent runners (Claude Code, Copilot, Cursor,
+│       │                    #   Codex, GenericLLM) + runner registry
+│       ├── analysis/        # Codebase analysis (complexity, patterns,
+│       │                    #   hotspots, conventions, context builder)
+│       ├── state/           # SQLite state store (autonomy ledger, episodic
+│       │                    #   memory, cost ledger, pipeline runs)
+│       ├── multi-repo/      # Multi-repo support (monorepo detection,
+│       │                    #   service map, impact analysis)
+│       ├── deploy/          # Deployment targets (Kubernetes, Vercel, Fly.io)
+│       │                    #   + rollout controller (canary, blue-green)
+│       └── notifications/   # Slack + Teams messengers, notification router
+│
+├── mcp-advisor/             # @ai-sdlc/mcp-advisor — MCP session tracker
+│   └── src/
+│       ├── tools/           # MCP tools (session, context, usage, file check)
+│       ├── resources/       # MCP resources (budget, conventions, hotspots)
+│       └── linking/         # Session-to-issue linking
+│
+├── dashboard/               # Web dashboard (Next.js)
+│   └── src/
+│       ├── pages/           # Cost, autonomy, audit, codebase, runs
+│       └── api/             # REST API routes
+│
 ├── reference/               # @ai-sdlc/reference — SDK implementation
 │   └── src/
 │       ├── core/            # Types, validation, provenance, comparison
@@ -36,14 +58,11 @@ ai-sdlc/
 │       ├── telemetry/       # OpenTelemetry tracing, structured logging
 │       ├── security/        # Sandbox, JIT credentials, kill switch, approvals
 │       └── compliance/      # Regulatory framework mappings, checker
+│
 ├── conformance/             # Conformance test suite
-│   └── runner/
-│       └── src/             # Schema conformance + SDK integration tests
-├── dogfood/                 # Self-hosted pipeline (eats own dog food)
-│   └── src/
-│       ├── orchestrator/    # Pipeline orchestration implementation
-│       ├── runner/          # Stage execution
-│       └── resources/       # YAML resource definitions
+├── sdk-python/              # Python SDK
+├── sdk-go/                  # Go SDK
+├── contrib/                 # Community adapters and plugins
 └── docs/                    # User-facing documentation (this directory)
 ```
 
