@@ -40,7 +40,7 @@ The market has:
 
 | What exists | What it does | What it doesn't do |
 |---|---|---|
-| **AI coding agents** (Claude Code, Copilot, Cursor, Devin) | Write code from prompts | Manage complexity, maintain context, enforce process |
+| **AI coding agents** (Claude Code, Copilot, Cursor, Codex) | Write code from prompts | Manage complexity, maintain context, enforce process |
 | **CI/CD pipelines** (GitHub Actions, Argo, Tekton) | Build, test, deploy | Orchestrate the *full* SDLC; know nothing about AI agents |
 | **Agent frameworks** (LangChain, CrewAI, AutoGen) | Wire agents together | Understand software engineering; manage codebase growth |
 | **Code quality tools** (SonarQube, Snyk, CodeRabbit) | Scan for issues | Orchestrate; route tasks; manage autonomy |
@@ -113,7 +113,7 @@ Think of it as a **programmable engineering team lead**: it understands the proc
 │  │ GitHub   │    │ Store     │    │ Claude    │    │ Demotion     │  │
 │  └─────────┘    └───────────┘    │ Copilot   │    └──────────────┘  │
 │                                  │ Cursor    │                      │
-│                                  │ Devin     │                      │
+│                                  │ Codex     │                      │
 │                                  │ Any MCP   │                      │
 │                                  └───────────┘                      │
 │                                                                      │
@@ -580,10 +580,11 @@ interface AgentResult {
 ```
 
 Concrete agent runners implement this interface for specific agents:
-- `ClaudeCodeRunner` — invokes Claude Code via CLI or API
-- `CopilotRunner` — invokes GitHub Copilot Workspace
-- `CursorRunner` — invokes Cursor's agent mode
-- `CustomRunner` — invokes any agent via a configurable command
+- `ClaudeCodeRunner` — invokes Claude Code CLI in `--print` mode
+- `CopilotRunner` — invokes GitHub Copilot CLI in `--yolo` mode
+- `CursorRunner` — invokes Cursor CLI (`cursor-agent`) with stream-json output
+- `CodexRunner` — invokes OpenAI Codex CLI (`codex exec`) via stdin
+- `GenericLLMRunner` — invokes any OpenAI-compatible API endpoint
 
 This means the orchestrator works with whatever AI coding agents the team already uses.
 
@@ -1199,7 +1200,7 @@ Build a hosted SaaS platform where teams connect their repos and agents.
 - [ ] Parallel agent execution for decomposed tasks
 - [ ] Handoff contract validation between agents
 - [ ] Multi-repo orchestration (monorepo and polyrepo)
-- [ ] Additional agent runners (Copilot, Cursor, Devin, custom)
+- [x] Additional agent runners (Copilot, Cursor, Codex, custom)
 - [ ] Python SDK: custom agent runner interface + policy evaluator
 - [ ] Go SDK: Kubernetes operator for orchestrator deployment
 - [ ] Web dashboard: org overview, autonomy trajectory, codebase health (Team Cloud)
@@ -1437,7 +1438,7 @@ The AI developer tooling market is experiencing explosive growth:
 - Cognition (Devin + Windsurf) raised $400M at a **$10.2B** valuation
 - The AI governance market is projected to grow from **$309M (2025)** to **$4.8B (2034)** at 35.7% CAGR
 
-No one is monetizing the AI SDLC orchestration layer yet. Cursor, Copilot, and Devin monetize *code generation*. SonarQube and Snyk monetize *code scanning*. Jira and Linear monetize *project tracking*. Nobody monetizes the orchestration of AI agents through the full SDLC — the layer that coordinates all of these.
+No one is monetizing the AI SDLC orchestration layer yet. Cursor, Copilot, and Codex monetize *code generation*. SonarQube and Snyk monetize *code scanning*. Jira and Linear monetize *project tracking*. Nobody monetizes the orchestration of AI agents through the full SDLC — the layer that coordinates all of these.
 
 ### Pricing Model: Open-Core + Managed Cloud
 
@@ -1450,7 +1451,7 @@ Everything needed to run the orchestrator for a single team:
 | Feature | Included |
 |---|---|
 | Full orchestration engine | Pipeline execution, stage management, agent invocation |
-| All agent runners | Claude Code, Copilot, Cursor, Devin, custom |
+| All agent runners | Claude Code, Copilot, Cursor, Codex, custom |
 | Quality gate engine | Advisory, soft-mandatory, hard-mandatory enforcement |
 | Autonomy system | Levels 0-3, promotion/demotion, full metrics |
 | Codebase analysis | Nightly deep analysis, per-pipeline diffs |
