@@ -164,6 +164,9 @@
             }
           },
           "additionalProperties": false
+        },
+        "modelSelection": {
+          "$ref": "#/$defs/ModelSelection"
         }
       },
       "additionalProperties": false
@@ -197,5 +200,76 @@
       "additionalProperties": false
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "ModelRule": {
+      "type": "object",
+      "description": "A rule mapping complexity ranges to model identifiers.",
+      "required": ["complexity", "model"],
+      "properties": {
+        "complexity": {
+          "type": "array",
+          "description": "Complexity score range [min, max] (inclusive).",
+          "items": { "type": "integer", "minimum": 1, "maximum": 10 },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "model": {
+          "type": "string",
+          "description": "Model identifier to use for this complexity range."
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Human-readable rationale for this model assignment."
+        }
+      },
+      "additionalProperties": false
+    },
+    "BudgetPressureRule": {
+      "type": "object",
+      "description": "A rule that downshifts model selection when budget pressure exceeds a threshold.",
+      "required": ["above", "downshift"],
+      "properties": {
+        "above": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Budget consumption ratio (0-1) above which this rule activates."
+        },
+        "downshift": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of positions to shift down in the model selection rules."
+        },
+        "notify": {
+          "type": "array",
+          "description": "Notification targets when this rule activates.",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    },
+    "ModelSelection": {
+      "type": "object",
+      "description": "Cost-aware model selection configuration for an agent. See RFC-0004.",
+      "properties": {
+        "rules": {
+          "type": "array",
+          "description": "Ordered list of complexity-to-model mapping rules.",
+          "items": { "$ref": "#/$defs/ModelRule" }
+        },
+        "budgetPressure": {
+          "type": "array",
+          "description": "Budget pressure rules for automatic model downshift.",
+          "items": { "$ref": "#/$defs/BudgetPressureRule" }
+        },
+        "fallbackChain": {
+          "type": "array",
+          "description": "Ordered list of fallback model identifiers.",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  }
 }

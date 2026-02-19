@@ -464,6 +464,9 @@ export type {
   RunErrorEvent,
 } from './plugin.js';
 
+// Cost governance plugin
+export { CostGovernancePlugin } from './cost-governance.js';
+
 // Comprehensive type re-exports
 export type {
   ApiVersion,

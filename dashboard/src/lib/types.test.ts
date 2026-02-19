@@ -31,6 +31,30 @@ describe('Dashboard types', () => {
       timeSeries: [{ date: '2026-01-01', costUsd: 1.0, runs: 2 }],
     };
     expect(cost.byAgent).toHaveLength(1);
+    expect(cost.byModel).toBeUndefined();
+    expect(cost.budget).toBeUndefined();
+  });
+
+  it('CostSummaryResponse supports optional byModel and budget', () => {
+    const cost: CostSummaryResponse = {
+      totalCostUsd: 10.0,
+      totalTokens: 200000,
+      runCount: 20,
+      byAgent: [{ agentName: 'dev', costUsd: 10.0, runs: 20 }],
+      timeSeries: [],
+      byModel: [{ model: 'claude-sonnet-4-5-20250929', costUsd: 8.0, runs: 15 }],
+      budget: {
+        budgetUsd: 500,
+        spentUsd: 10.0,
+        remainingUsd: 490,
+        utilizationPercent: 2,
+        overBudget: false,
+        projectedMonthlyUsd: 50,
+      },
+    };
+    expect(cost.byModel).toHaveLength(1);
+    expect(cost.budget?.overBudget).toBe(false);
+    expect(cost.budget?.remainingUsd).toBe(490);
   });
 
   it('HealthResponse has correct shape', () => {

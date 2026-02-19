@@ -156,6 +156,9 @@
         },
         "notifications": {
           "$ref": "#/$defs/NotificationsConfig"
+        },
+        "costPolicy": {
+          "$ref": "#/$defs/CostPolicy"
         }
       },
       "additionalProperties": false
@@ -188,6 +191,9 @@
         },
         "pendingApproval": {
           "$ref": "#/$defs/ApprovalStatus"
+        },
+        "cost": {
+          "$ref": "#/$defs/CostStatus"
         }
       },
       "additionalProperties": false
@@ -385,6 +391,252 @@
         "timeoutAt": {
           "type": "string",
           "description": "ISO 8601 timestamp when the approval times out."
+        }
+      },
+      "additionalProperties": false
+    },
+    "CostThreshold": {
+      "type": "object",
+      "description": "A cost threshold with an associated action.",
+      "required": ["amount", "currency", "action"],
+      "properties": {
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cost amount."
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency code (e.g., USD)."
+        },
+        "action": {
+          "type": "string",
+          "enum": ["notify", "require-approval", "abort"],
+          "description": "Action to take when the threshold is reached."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExecutionCostLimit": {
+      "type": "object",
+      "description": "Per-execution cost limits with soft and hard thresholds.",
+      "properties": {
+        "softLimit": {
+          "$ref": "#/$defs/CostThreshold"
+        },
+        "hardLimit": {
+          "$ref": "#/$defs/CostThreshold"
+        }
+      },
+      "additionalProperties": false
+    },
+    "StageCostLimit": {
+      "type": "object",
+      "description": "Cost limits for a pipeline stage.",
+      "properties": {
+        "tokenLimit": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum tokens allowed for this stage."
+        },
+        "timeLimit": {
+          "type": "string",
+          "description": "Maximum duration as an ISO 8601 duration (e.g., PT30M)."
+        },
+        "costLimit": {
+          "$ref": "#/$defs/CostThreshold"
+        }
+      },
+      "additionalProperties": false
+    },
+    "StageCostPolicy": {
+      "type": "object",
+      "description": "Per-stage cost policy with defaults and per-stage overrides.",
+      "properties": {
+        "defaults": {
+          "$ref": "#/$defs/StageCostLimit"
+        },
+        "overrides": {
+          "type": "object",
+          "description": "Per-stage cost limit overrides, keyed by stage name.",
+          "additionalProperties": {
+            "$ref": "#/$defs/StageCostLimit"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "BudgetAlert": {
+      "type": "object",
+      "description": "An alert triggered when budget consumption reaches a threshold.",
+      "required": ["threshold", "action"],
+      "properties": {
+        "threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Budget consumption ratio (0-1) that triggers this alert."
+        },
+        "action": {
+          "type": "string",
+          "enum": ["notify", "require-approval", "block"],
+          "description": "Action to take when the threshold is reached."
+        },
+        "targets": {
+          "type": "array",
+          "description": "Notification targets (e.g., channel names, email addresses).",
+          "items": { "type": "string" }
+        },
+        "approver": {
+          "type": "string",
+          "description": "Role or identity required to approve continued spending."
+        },
+        "message": {
+          "type": "string",
+          "description": "Custom alert message."
+        }
+      },
+      "additionalProperties": false
+    },
+    "BudgetPolicy": {
+      "type": "object",
+      "description": "Rolling budget constraints for cost governance.",
+      "required": ["period", "amount", "currency"],
+      "properties": {
+        "period": {
+          "type": "string",
+          "enum": ["day", "week", "month", "quarter"],
+          "description": "Budget period."
+        },
+        "amount": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Budget amount."
+        },
+        "currency": {
+          "type": "string",
+          "description": "Currency code (e.g., USD)."
+        },
+        "alerts": {
+          "type": "array",
+          "description": "Budget consumption alerts.",
+          "items": {
+            "$ref": "#/$defs/BudgetAlert"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "AttributionPolicy": {
+      "type": "object",
+      "description": "Cost attribution configuration for chargeback and analysis.",
+      "required": ["dimensions"],
+      "properties": {
+        "dimensions": {
+          "type": "array",
+          "description": "Dimensions to track for cost attribution (e.g., agent, model, stage, repository, team).",
+          "items": { "type": "string" },
+          "minItems": 1
+        },
+        "chargeback": {
+          "type": "string",
+          "enum": ["per-repository", "per-team", "per-agent", "proportional"],
+          "description": "Chargeback allocation strategy."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ModelPricing": {
+      "type": "object",
+      "description": "Pricing information for a specific model.",
+      "required": ["inputPerMTok", "outputPerMTok"],
+      "properties": {
+        "inputPerMTok": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cost per million input tokens."
+        },
+        "outputPerMTok": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cost per million output tokens."
+        },
+        "cacheReadPerMTok": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Cost per million cache read tokens."
+        }
+      },
+      "additionalProperties": false
+    },
+    "ModelPricingConfig": {
+      "type": "object",
+      "description": "Model pricing configuration.",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": ["config", "api"],
+          "description": "How model pricing is obtained."
+        },
+        "models": {
+          "type": "object",
+          "description": "Per-model pricing overrides, keyed by model identifier.",
+          "additionalProperties": {
+            "$ref": "#/$defs/ModelPricing"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "CostPolicy": {
+      "type": "object",
+      "description": "Cost governance policy declaring cost boundaries at per-execution, per-stage, and budget levels. See RFC-0004.",
+      "properties": {
+        "perExecution": {
+          "$ref": "#/$defs/ExecutionCostLimit"
+        },
+        "perStage": {
+          "$ref": "#/$defs/StageCostPolicy"
+        },
+        "budget": {
+          "$ref": "#/$defs/BudgetPolicy"
+        },
+        "attribution": {
+          "$ref": "#/$defs/AttributionPolicy"
+        },
+        "modelPricing": {
+          "$ref": "#/$defs/ModelPricingConfig"
+        }
+      },
+      "additionalProperties": false
+    },
+    "CostStatus": {
+      "type": "object",
+      "description": "Observed cost status for a pipeline.",
+      "properties": {
+        "currentSpend": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Current spend in the budget period."
+        },
+        "budgetRemaining": {
+          "type": "number",
+          "description": "Remaining budget in the current period."
+        },
+        "projectedMonthEnd": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Projected spend at end of current period (linear extrapolation)."
+        },
+        "lastUpdated": {
+          "type": "string",
+          "description": "ISO 8601 timestamp of last cost status update."
+        },
+        "activeAlerts": {
+          "type": "array",
+          "description": "Currently active budget alert descriptions.",
+          "items": { "type": "string" }
         }
       },
       "additionalProperties": false

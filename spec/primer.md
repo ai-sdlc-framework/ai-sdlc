@@ -63,7 +63,7 @@ The consequences are quantified:
 - No standardized framework for AI-augmented SDLC governance
 - No agent orchestration standard for enterprise pipelines
 - No code attribution system for AI-generated vs. human-written code
-- No cross-tool cost management dashboard
+- No cross-tool cost management — solved by the CostPolicy extension (RFC-0004) that provides per-execution limits, budget enforcement, cost-aware model selection, and real-time circuit breakers
 - No industry-wide metrics for AI agent reliability
 - 66.4% of enterprise implementations now use multi-agent architectures with no standard governing interaction
 
@@ -299,6 +299,47 @@ spec:
       action: demote-to-0
       cooldown: "4w"
 ```
+
+### Step 5: Add Cost Controls (optional)
+
+Add a cost policy to govern AI spending:
+
+```yaml
+# Step 5: Add Cost Controls (optional)
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: cost-governed
+  namespace: my-team
+spec:
+  costPolicy:
+    perExecution:
+      hardLimit:
+        amount: 50
+        currency: USD
+        action: abort
+    budget:
+      period: month
+      amount: 500
+      currency: USD
+      alerts:
+        - threshold: 0.90
+          action: notify
+          targets: ["#dev"]
+  triggers:
+    - event: issue.assigned
+  providers:
+    sourceControl:
+      type: github
+      config: { org: "my-org" }
+  stages:
+    - name: implement
+      agent: code-agent
+    - name: review
+      qualityGates: [basic-review]
+```
+
+Cost policies are entirely optional and can be added to any existing pipeline. Start with a `hardLimit` to prevent runaway costs, then add `budget` constraints and alerts as you gain visibility into spending patterns.
 
 ---
 

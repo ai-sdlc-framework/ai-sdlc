@@ -469,8 +469,8 @@ export class StateStore {
 
   saveCostEntry(entry: CostLedgerEntry): number {
     const stmt = this.db.prepare(`
-      INSERT INTO cost_ledger (run_id, agent_name, pipeline_type, model, input_tokens, output_tokens, total_tokens, cost_usd, issue_number, pr_number)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO cost_ledger (run_id, agent_name, pipeline_type, model, input_tokens, output_tokens, total_tokens, cost_usd, issue_number, pr_number, stage_name, cache_read_tokens)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       entry.runId,
@@ -483,6 +483,8 @@ export class StateStore {
       entry.costUsd ?? 0,
       entry.issueNumber ?? null,
       entry.prNumber ?? null,
+      entry.stageName ?? null,
+      entry.cacheReadTokens ?? 0,
     );
     return Number(result.lastInsertRowid);
   }
@@ -530,6 +532,8 @@ export class StateStore {
       costUsd: row.cost_usd as number | undefined,
       issueNumber: row.issue_number as number | undefined,
       prNumber: row.pr_number as number | undefined,
+      stageName: row.stage_name as string | undefined,
+      cacheReadTokens: row.cache_read_tokens as number | undefined,
       createdAt: row.created_at as string | undefined,
     };
   }

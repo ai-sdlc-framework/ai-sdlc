@@ -1,0 +1,22 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: cost-limit-only
+  namespace: team-alpha
+spec:
+  triggers:
+    - event: issue.assigned
+  providers:
+    sourceControl:
+      type: github
+      config:
+        org: acme-corp
+  stages:
+    - name: implement
+      agent: code-agent
+  costPolicy:
+    perExecution:
+      hardLimit:
+        amount: 50
+        currency: USD
+        action: abort

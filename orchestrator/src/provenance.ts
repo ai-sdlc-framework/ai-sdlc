@@ -11,6 +11,7 @@ import {
   PROVENANCE_ANNOTATION_PREFIX,
   type ProvenanceRecord,
   type ReviewDecision,
+  type CostReceipt,
 } from '@ai-sdlc/reference';
 import { createHash } from 'node:crypto';
 import { DEFAULT_MODEL } from './defaults.js';
@@ -23,6 +24,7 @@ export function createPipelineProvenance(opts: {
   tool?: string;
   promptText?: string;
   humanReviewer?: string;
+  cost?: CostReceipt;
 }): ProvenanceRecord {
   const promptHash = opts.promptText
     ? createHash('sha256').update(opts.promptText).digest('hex').slice(0, 16)
@@ -33,6 +35,7 @@ export function createPipelineProvenance(opts: {
     tool: opts.tool ?? 'claude-code',
     promptHash,
     humanReviewer: opts.humanReviewer,
+    cost: opts.cost,
   });
 }
 
@@ -53,6 +56,14 @@ export function attachProvenanceToPR(provenance: ProvenanceRecord): string {
 
   if (provenance.humanReviewer) {
     lines.push(`- **Reviewer**: ${provenance.humanReviewer}`);
+  }
+
+  if (provenance.cost) {
+    const exec = provenance.cost.execution;
+    const costLine = exec
+      ? `- **Cost**: $${provenance.cost.totalCost.toFixed(4)} (${exec.inputTokens.toLocaleString()} in / ${exec.outputTokens.toLocaleString()} out)`
+      : `- **Cost**: $${provenance.cost.totalCost.toFixed(4)}`;
+    lines.push(costLine);
   }
 
   lines.push('', '<!-- provenance-annotations');

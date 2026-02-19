@@ -1,0 +1,93 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: cost-governed-delivery
+  namespace: team-alpha
+  labels:
+    team.example.com/tier: production
+  annotations:
+    ai-sdlc.io/rfc: "0004"
+spec:
+  triggers:
+    - event: issue.assigned
+      filter:
+        labels:
+          - ai-eligible
+  providers:
+    sourceControl:
+      type: github
+      config:
+        org: acme-corp
+  stages:
+    - name: implement
+      agent: code-agent
+    - name: review
+      qualityGates:
+        - cost-review
+  costPolicy:
+    perExecution:
+      softLimit:
+        amount: 25
+        currency: USD
+        action: notify
+      hardLimit:
+        amount: 50
+        currency: USD
+        action: abort
+    perStage:
+      defaults:
+        tokenLimit: 100000
+        timeLimit: PT30M
+        costLimit:
+          amount: 10
+          currency: USD
+          action: notify
+      overrides:
+        implement:
+          tokenLimit: 200000
+          costLimit:
+            amount: 25
+            currency: USD
+            action: require-approval
+    budget:
+      period: month
+      amount: 500
+      currency: USD
+      alerts:
+        - threshold: 0.75
+          action: notify
+          targets:
+            - "#dev-costs"
+          message: "Budget 75% consumed"
+        - threshold: 0.90
+          action: require-approval
+          approver: engineering-manager
+        - threshold: 1.0
+          action: block
+    attribution:
+      dimensions:
+        - agent
+        - model
+        - stage
+        - repository
+      chargeback: per-team
+    modelPricing:
+      source: config
+      models:
+        claude-sonnet-4-5-20250929:
+          inputPerMTok: 3
+          outputPerMTok: 15
+          cacheReadPerMTok: 0.3
+        claude-haiku-3-5:
+          inputPerMTok: 0.25
+          outputPerMTok: 1.25
+status:
+  phase: Running
+  activeStage: implement
+  cost:
+    currentSpend: 127.50
+    budgetRemaining: 372.50
+    projectedMonthEnd: 425.00
+    lastUpdated: "2026-02-18T10:00:00Z"
+    activeAlerts:
+      - "Budget 75% consumed"

@@ -10,11 +10,13 @@ import type { CostTracker } from './cost-tracker.js';
 import type { AutonomyTracker } from './autonomy-tracker.js';
 import type { Logger } from './logger.js';
 import type { PipelineResult } from './execute.js';
+import type { NotificationRouter } from './notifications/notification-router.js';
 
 export interface PluginContext {
   store?: StateStore;
   costTracker?: CostTracker;
   autonomyTracker?: AutonomyTracker;
+  notificationRouter?: NotificationRouter;
   log: Logger;
 }
 

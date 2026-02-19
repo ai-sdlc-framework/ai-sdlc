@@ -21,10 +21,12 @@ import type {
   BranchingConfig,
   PullRequestConfig,
   NotificationsConfig,
+  CostPolicy,
   AgentConstraints,
   Handoff,
   Skill,
   AgentCard,
+  ModelSelection,
   Gate,
   GateScope,
   Evaluation,
@@ -68,6 +70,7 @@ export class PipelineBuilder {
   private _branching?: BranchingConfig;
   private _pullRequest?: PullRequestConfig;
   private _notifications?: NotificationsConfig;
+  private _costPolicy?: CostPolicy;
 
   constructor(name: string) {
     this._metadata = baseMetadata(name);
@@ -118,6 +121,11 @@ export class PipelineBuilder {
     return this;
   }
 
+  withCostPolicy(costPolicy: CostPolicy): this {
+    this._costPolicy = costPolicy;
+    return this;
+  }
+
   build(): Pipeline {
     const spec: PipelineSpec = {
       stages: this._stages,
@@ -128,6 +136,7 @@ export class PipelineBuilder {
     if (this._branching) spec.branching = this._branching;
     if (this._pullRequest) spec.pullRequest = this._pullRequest;
     if (this._notifications) spec.notifications = this._notifications;
+    if (this._costPolicy) spec.costPolicy = this._costPolicy;
 
     return {
       apiVersion: API_VERSION,
@@ -150,6 +159,7 @@ export class AgentRoleBuilder {
   private _handoffs: Handoff[] = [];
   private _skills: Skill[] = [];
   private _agentCard?: AgentCard;
+  private _modelSelection?: ModelSelection;
 
   constructor(name: string, role: string, goal: string) {
     this._metadata = baseMetadata(name);
@@ -202,6 +212,11 @@ export class AgentRoleBuilder {
     return this;
   }
 
+  withModelSelection(modelSelection: ModelSelection): this {
+    this._modelSelection = modelSelection;
+    return this;
+  }
+
   build(): AgentRole {
     const spec: AgentRoleSpec = {
       role: this._role,
@@ -213,6 +228,7 @@ export class AgentRoleBuilder {
     if (this._handoffs.length > 0) spec.handoffs = this._handoffs;
     if (this._skills.length > 0) spec.skills = this._skills;
     if (this._agentCard) spec.agentCard = this._agentCard;
+    if (this._modelSelection) spec.modelSelection = this._modelSelection;
 
     return {
       apiVersion: API_VERSION,

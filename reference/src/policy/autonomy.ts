@@ -3,7 +3,7 @@
  * Implements the autonomy level transitions from spec/policy.md.
  */
 
-import type { AutonomyPolicy, DemotionTrigger, Duration } from '../core/types.js';
+import type { AutonomyPolicy, DemotionTrigger, DemotionTriggerCondition, Duration } from '../core/types.js';
 import { compareMetric } from '../core/compare.js';
 
 /** Default cooldown after demotion: 1 hour. */
@@ -150,6 +150,30 @@ export function evaluatePromotion(policy: AutonomyPolicy, agent: AgentMetrics): 
   };
 }
 
+export interface DemotionConditionContext {
+  metrics: Record<string, number>;
+  /** Per-metric history for window evaluation (most recent first). */
+  metricHistory?: Record<string, number[]>;
+}
+
+/**
+ * Evaluate a demotion trigger condition against observed metrics.
+ */
+export function evaluateDemotionCondition(
+  condition: DemotionTriggerCondition,
+  ctx: DemotionConditionContext,
+): boolean {
+  if (condition.window && ctx.metricHistory) {
+    const history = ctx.metricHistory[condition.metric];
+    if (!history || history.length < condition.window) return false;
+    const windowValues = history.slice(0, condition.window);
+    return windowValues.every(v => compareMetric(v, condition.operator, condition.threshold));
+  }
+  const actual = ctx.metrics[condition.metric];
+  if (actual === undefined) return false;
+  return compareMetric(actual, condition.operator, condition.threshold);
+}
+
 /**
  * Evaluate whether an agent should be demoted based on a trigger event.
  */
@@ -157,6 +181,7 @@ export function evaluateDemotion(
   policy: AutonomyPolicy,
   agent: AgentMetrics,
   activeTrigger: string,
+  conditionCtx?: DemotionConditionContext,
 ): DemotionResult {
   const fromLevel = agent.currentLevel;
   const match = policy.spec.demotionTriggers.find(
@@ -165,6 +190,13 @@ export function evaluateDemotion(
 
   if (!match) {
     return { demoted: false, fromLevel, toLevel: fromLevel };
+  }
+
+  // If the trigger has a condition, evaluate it
+  if (match.condition) {
+    if (!conditionCtx || !evaluateDemotionCondition(match.condition, conditionCtx)) {
+      return { demoted: false, fromLevel, toLevel: fromLevel };
+    }
   }
 
   let toLevel: number;

@@ -124,6 +124,8 @@ export interface CostLedgerEntry {
   costUsd?: number;
   issueNumber?: number;
   prNumber?: number;
+  stageName?: string;
+  cacheReadTokens?: number;
   createdAt?: string;
 }
 

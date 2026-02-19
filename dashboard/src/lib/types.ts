@@ -29,6 +29,15 @@ export interface CostSummaryResponse {
   runCount: number;
   byAgent: Array<{ agentName: string; costUsd: number; runs: number }>;
   timeSeries: Array<{ date: string; costUsd: number; runs: number }>;
+  byModel?: Array<{ model: string; costUsd: number; runs: number }>;
+  budget?: {
+    budgetUsd: number;
+    spentUsd: number;
+    remainingUsd: number;
+    utilizationPercent: number;
+    overBudget: boolean;
+    projectedMonthlyUsd: number;
+  };
 }
 
 export interface HealthResponse {

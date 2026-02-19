@@ -1,5 +1,5 @@
 /**
- * Cost analytics page — summary, time series, by-agent breakdown.
+ * Cost analytics page — summary, time series, by-agent breakdown, budget gauge.
  */
 
 export const dynamic = 'force-dynamic';
@@ -29,6 +29,13 @@ function getCostData() {
     )
     .all() as Array<Record<string, unknown>>;
 
+  const byModel = store.getDatabase()
+    .prepare(
+      `SELECT model, COALESCE(SUM(cost_usd), 0) as cost_usd, COUNT(*) as runs
+       FROM cost_ledger WHERE model IS NOT NULL GROUP BY model ORDER BY cost_usd DESC`,
+    )
+    .all() as Array<Record<string, unknown>>;
+
   const timeSeries = store.getDatabase()
     .prepare(
       `SELECT DATE(created_at) as date,
@@ -41,14 +48,47 @@ function getCostData() {
     )
     .all() as Array<Record<string, unknown>>;
 
-  return { totals, byAgent, timeSeries };
+  return { totals, byAgent, byModel, timeSeries };
+}
+
+function BudgetGauge({ spent, budget }: { spent: number; budget: number }) {
+  const pct = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0;
+  const overBudget = spent > budget;
+  const barColor = overBudget ? '#ef4444' : pct > 80 ? '#f59e0b' : '#22c55e';
+
+  return (
+    <div style={{ marginBottom: 24 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, fontSize: 14 }}>
+        <span>Budget: ${spent.toFixed(2)} / ${budget.toFixed(2)}</span>
+        <span style={{ color: barColor }}>{pct.toFixed(1)}%</span>
+      </div>
+      <div style={{
+        width: '100%', height: 8, backgroundColor: '#e2e8f0', borderRadius: 4, overflow: 'hidden',
+      }}>
+        <div style={{
+          width: `${pct}%`, height: '100%', backgroundColor: barColor, borderRadius: 4,
+          transition: 'width 0.3s ease',
+        }} />
+      </div>
+      {overBudget && (
+        <p style={{ color: '#ef4444', fontSize: 12, marginTop: 4 }}>
+          Over budget by ${(spent - budget).toFixed(2)}
+        </p>
+      )}
+    </div>
+  );
 }
 
 export default function CostPage() {
-  const { totals, byAgent, timeSeries } = getCostData();
+  const { totals, byAgent, byModel, timeSeries } = getCostData();
 
-  const barData: BarChartDatum[] = byAgent.map((r) => ({
+  const agentBarData: BarChartDatum[] = byAgent.map((r) => ({
     label: (r.agent_name as string).slice(0, 10),
+    value: r.cost_usd as number,
+  }));
+
+  const modelBarData: BarChartDatum[] = byModel.map((r) => ({
+    label: (r.model as string).replace('claude-', '').slice(0, 12),
     value: r.cost_usd as number,
   }));
 
@@ -58,32 +98,46 @@ export default function CostPage() {
   }));
 
   const avgCost = totals.run_count > 0 ? totals.total_cost / totals.run_count : 0;
+  const budgetUsd = 500;
 
   return (
     <div>
-      <Header title="Cost Analytics" subtitle="Token usage and cost tracking" />
+      <Header title="Cost Analytics" subtitle="Token usage, cost tracking, and budget" />
+
+      <BudgetGauge spent={totals.total_cost} budget={budgetUsd} />
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 24, flexWrap: 'wrap' }}>
         <StatCard label="Total Cost" value={`$${totals.total_cost.toFixed(2)}`} />
         <StatCard label="Total Tokens" value={totals.total_tokens.toLocaleString()} />
         <StatCard label="Total Runs" value={totals.run_count} />
         <StatCard label="Avg Cost/Run" value={`$${avgCost.toFixed(3)}`} />
+        <StatCard label="Budget Remaining" value={`$${Math.max(0, budgetUsd - totals.total_cost).toFixed(2)}`} />
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         <section>
           <h2 style={{ fontSize: 16, marginBottom: 12 }}>Cost by Agent</h2>
-          {barData.length === 0
+          {agentBarData.length === 0
             ? <p style={{ color: '#94a3b8' }}>No cost data yet.</p>
-            : <BarChart data={barData} width={500} height={250} />
+            : <BarChart data={agentBarData} width={500} height={250} />
           }
         </section>
 
         <section>
+          <h2 style={{ fontSize: 16, marginBottom: 12 }}>Cost by Model</h2>
+          {modelBarData.length === 0
+            ? <p style={{ color: '#94a3b8' }}>No cost data yet.</p>
+            : <BarChart data={modelBarData} width={500} height={250} />
+          }
+        </section>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 24, marginTop: 24 }}>
+        <section>
           <h2 style={{ fontSize: 16, marginBottom: 12 }}>Daily Cost (30d)</h2>
           {lineData.length === 0
             ? <p style={{ color: '#94a3b8' }}>No cost data yet.</p>
-            : <LineChart data={lineData} width={500} height={250} />
+            : <LineChart data={lineData} width={1024} height={250} />
           }
         </section>
       </div>

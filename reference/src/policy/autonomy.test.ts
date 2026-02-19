@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { evaluatePromotion, evaluateDemotion } from './autonomy.js';
-import type { AgentMetrics } from './autonomy.js';
+import { evaluatePromotion, evaluateDemotion, evaluateDemotionCondition } from './autonomy.js';
+import type { AgentMetrics, DemotionConditionContext } from './autonomy.js';
 import type { AutonomyPolicy } from '../core/types.js';
 import { API_VERSION } from '../core/types.js';
 
@@ -160,5 +160,94 @@ describe('evaluateDemotion()', () => {
     const result = evaluateDemotion(makePolicy(), agent, 'unknown-event');
     expect(result.demoted).toBe(false);
     expect(result.toLevel).toBe(1);
+  });
+
+  describe('condition-based demotion', () => {
+    function makePolicyWithCondition(): AutonomyPolicy {
+      const policy = makePolicy();
+      policy.spec.demotionTriggers.push({
+        trigger: 'cost-overrun',
+        action: 'demote-one-level',
+        cooldown: '1d',
+        condition: {
+          metric: 'budget-utilization',
+          operator: '>=',
+          threshold: 0.9,
+        },
+      });
+      return policy;
+    }
+
+    it('demotes when condition is met', () => {
+      const agent = makeAgent({ currentLevel: 2 });
+      const conditionCtx: DemotionConditionContext = {
+        metrics: { 'budget-utilization': 0.95 },
+      };
+      const result = evaluateDemotion(makePolicyWithCondition(), agent, 'cost-overrun', conditionCtx);
+      expect(result.demoted).toBe(true);
+      expect(result.toLevel).toBe(1);
+    });
+
+    it('does not demote when condition is not met', () => {
+      const agent = makeAgent({ currentLevel: 2 });
+      const conditionCtx: DemotionConditionContext = {
+        metrics: { 'budget-utilization': 0.5 },
+      };
+      const result = evaluateDemotion(makePolicyWithCondition(), agent, 'cost-overrun', conditionCtx);
+      expect(result.demoted).toBe(false);
+      expect(result.toLevel).toBe(2);
+    });
+
+    it('does not demote when conditionCtx is not provided', () => {
+      const agent = makeAgent({ currentLevel: 2 });
+      const result = evaluateDemotion(makePolicyWithCondition(), agent, 'cost-overrun');
+      expect(result.demoted).toBe(false);
+      expect(result.toLevel).toBe(2);
+    });
+
+    it('checks window of consecutive values', () => {
+      const policy = makePolicy();
+      policy.spec.demotionTriggers.push({
+        trigger: 'sustained-overrun',
+        action: 'demote-one-level',
+        cooldown: '1d',
+        condition: {
+          metric: 'cost-per-run',
+          operator: '>',
+          threshold: 5,
+          window: 3,
+        },
+      });
+
+      const agent = makeAgent({ currentLevel: 2 });
+
+      // All 3 values exceed threshold → demote
+      const ctx1: DemotionConditionContext = {
+        metrics: { 'cost-per-run': 10 },
+        metricHistory: { 'cost-per-run': [8, 7, 6] },
+      };
+      expect(evaluateDemotion(policy, agent, 'sustained-overrun', ctx1).demoted).toBe(true);
+
+      // Only 2 of 3 values exceed → no demote
+      const ctx2: DemotionConditionContext = {
+        metrics: { 'cost-per-run': 10 },
+        metricHistory: { 'cost-per-run': [8, 3, 6] },
+      };
+      expect(evaluateDemotion(policy, agent, 'sustained-overrun', ctx2).demoted).toBe(false);
+
+      // Not enough history → no demote
+      const ctx3: DemotionConditionContext = {
+        metrics: { 'cost-per-run': 10 },
+        metricHistory: { 'cost-per-run': [8, 7] },
+      };
+      expect(evaluateDemotion(policy, agent, 'sustained-overrun', ctx3).demoted).toBe(false);
+    });
+
+    it('trigger without condition still works (backward compatible)', () => {
+      const agent = makeAgent({ currentLevel: 2 });
+      const result = evaluateDemotion(makePolicy(), agent, 'security-incident');
+      expect(result.demoted).toBe(true);
+      expect(result.toLevel).toBe(0);
+    });
   });
 });

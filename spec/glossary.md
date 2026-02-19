@@ -52,9 +52,21 @@ A numbered tier (0-3) defining the permissions, guardrails, and monitoring inten
 
 A [resource](#resource) of kind `AutonomyPolicy` that declares progressive [autonomy levels](#autonomy-level) with quantitative [promotion criteria](#promotion) and automatic [demotion triggers](#demotion). See [spec.md](spec.md#54-autonomypolicy).
 
+### Budget Policy {#budget-policy}
+
+A [Pipeline](#pipeline)-level configuration that declares rolling budget constraints (period, amount, alerts) for cost governance. See RFC-0004.
+
+### Budget Pressure {#budget-pressure}
+
+A [model selection](#model-selection) mechanism that automatically routes agents to cheaper models as budget consumption increases. See RFC-0004.
+
 ### Branching Config {#branching-config}
 
 A [Pipeline](#pipeline)-level configuration that declares branch naming patterns, target branches, and cleanup policy for feature branches created during pipeline execution. See [spec.md](spec.md#branching-config-object).
+
+### Circuit Breaker {#circuit-breaker}
+
+A real-time cost monitoring loop that interrupts agent execution when a cost limit is reached. See RFC-0004.
 
 ### Complexity Score {#complexity-score}
 
@@ -67,6 +79,18 @@ A structured status entry in a resource's `status.conditions` array. Each condit
 ### Credential Policy {#credential-policy}
 
 A stage-level configuration that specifies JIT (just-in-time) credential scope, time-to-live, and revocation behavior for a [Pipeline](#pipeline) stage. Credentials are scoped to the minimum permissions needed and automatically revoked on stage completion. See [spec.md](spec.md#credential-policy-object).
+
+### Cost Attribution {#cost-attribution}
+
+The process of tracking costs across dimensions (agent, model, stage, repository, complexity, team) for chargeback and analysis. See RFC-0004.
+
+### Cost Policy {#cost-policy}
+
+An optional [Pipeline](#pipeline)-level configuration that declares cost boundaries at per-execution, per-stage, and budget levels. See RFC-0004.
+
+### Cost Receipt {#cost-receipt}
+
+An extension to [provenance](#provenance) metadata that records the total cost breakdown (token cost, cache savings, compute, human review) for an AI-generated artifact. See RFC-0004.
 
 ### Conformance Level {#conformance-level}
 
@@ -103,6 +127,10 @@ A typed API definition for an integration category. SDLC interfaces: IssueTracke
 ### Label {#label}
 
 A key-value pair in a resource's [metadata](#metadata) used for identification, selection, and filtering. Labels enable resource queries and policy targeting. See [spec.md](spec.md#3-metadata-object).
+
+### Model Selection {#model-selection}
+
+An [AgentRole](#agent-role)-level configuration that routes tasks to different models based on [complexity score](#complexity-score) and [budget pressure](#budget-pressure). See RFC-0004.
 
 ### MCP (Model Context Protocol) {#mcp}
 
@@ -175,3 +203,7 @@ A declared capability of an [Agent Role](#agent-role) with an ID, description, t
 ### Spec/Status Split {#spec-status-split}
 
 The separation of user intent (`spec`) from system-observed reality (`status`) in every [resource](#resource). `spec` represents desired state; `status` represents what the system observes. Controllers continuously reconcile the gap. See [spec.md](spec.md#4-the-specstatus-split).
+
+### Transaction Limit {#transaction-limit}
+
+A guardrail field in [AutonomyPolicy](#autonomy-policy) that specifies maximum cost per time period. See autonomy-policy.schema.json.

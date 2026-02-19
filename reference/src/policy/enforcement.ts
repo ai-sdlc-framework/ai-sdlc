@@ -11,6 +11,7 @@ import type {
   ReviewerRule,
   DocumentationRule,
   ProvenanceRule,
+  CostRule,
 } from '../core/types.js';
 import { compareMetric, exceedsSeverity } from '../core/compare.js';
 
@@ -114,6 +115,18 @@ function evaluateRule(rule: Gate['rule'], ctx: EvaluationContext): RuleResult {
       return { passed: false, message: 'Code changes require documentation updates' };
     }
     return { passed: true };
+  }
+
+  // Cost-based rule
+  if ('cost' in rule) {
+    const costRule = rule as CostRule;
+    const actual = ctx.metrics[costRule.cost.metric];
+    if (actual === undefined) {
+      return { passed: false, message: `Cost metric "${costRule.cost.metric}" not available` };
+    }
+    return {
+      passed: compareMetric(actual, costRule.cost.operator, costRule.cost.threshold),
+    };
   }
 
   // Provenance-based rule

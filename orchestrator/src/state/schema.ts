@@ -2,7 +2,7 @@
  * SQLite DDL and migrations for the state store.
  */
 
-export const CURRENT_SCHEMA_VERSION = 5;
+export const CURRENT_SCHEMA_VERSION = 6;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -242,6 +242,12 @@ CREATE INDEX IF NOT EXISTS idx_audit_entries_resource ON audit_entries(resource_
 CREATE INDEX IF NOT EXISTS idx_audit_entries_created ON audit_entries(created_at);
 `;
 
+export const MIGRATION_V6 = `
+-- Cost governance: add stage_name and cache_read_tokens to cost_ledger
+ALTER TABLE cost_ledger ADD COLUMN stage_name TEXT;
+ALTER TABLE cost_ledger ADD COLUMN cache_read_tokens INTEGER DEFAULT 0;
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -262,5 +268,9 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 5,
     sql: MIGRATION_V5,
+  },
+  {
+    version: 6,
+    sql: MIGRATION_V6,
   },
 ];

@@ -49,13 +49,18 @@ function buildEvaluationContext(issue: Issue): EvaluationContext {
 /**
  * Validate an issue against the loaded QualityGate resource.
  * An optional enforceFn can be provided (e.g. instrumented enforcement).
+ * Extra metrics (e.g. cost metrics) are merged into the evaluation context.
  */
 export function validateIssue(
   issue: Issue,
   qualityGate: QualityGate,
   enforceFn?: typeof enforce,
+  extraMetrics?: Record<string, number>,
 ): EnforcementResult {
   const ctx = buildEvaluationContext(issue);
+  if (extraMetrics) {
+    Object.assign(ctx.metrics, extraMetrics);
+  }
   return (enforceFn ?? enforce)(qualityGate, ctx);
 }
 

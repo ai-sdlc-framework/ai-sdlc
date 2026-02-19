@@ -1,0 +1,41 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: QualityGate
+metadata:
+  name: cost-governance-gate
+  namespace: team-alpha
+  labels:
+    team.example.com/tier: production
+  annotations:
+    ai-sdlc.io/rfc: "0004"
+spec:
+  scope:
+    authorTypes:
+      - ai-agent
+  gates:
+    - name: budget-remaining
+      enforcement: hard-mandatory
+      rule:
+        cost:
+          metric: budget-remaining-percent
+          operator: ">="
+          threshold: 0.1
+    - name: cost-per-line
+      enforcement: advisory
+      rule:
+        cost:
+          metric: cost-per-line
+          operator: "<="
+          threshold: 0.50
+    - name: retry-waste
+      enforcement: soft-mandatory
+      rule:
+        cost:
+          metric: retry-cost-ratio
+          operator: "<="
+          threshold: 0.20
+      override:
+        requiredRole: engineering-manager
+        requiresJustification: true
+  evaluation:
+    pipeline: pre-merge
+    timeout: 30s

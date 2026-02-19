@@ -125,6 +125,7 @@ async function gitExec(workDir: string, args: string[]): Promise<string> {
 interface RunClaudeOptions {
   allowedTools?: string[];
   timeoutMs?: number;
+  model?: string;
 }
 
 interface RunClaudeResult {
@@ -138,7 +139,7 @@ function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Pr
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_RUNNER_TIMEOUT_MS;
 
   return new Promise((resolve, reject) => {
-    const model = process.env.AI_SDLC_MODEL ?? DEFAULT_MODEL;
+    const model = opts?.model ?? process.env.AI_SDLC_MODEL ?? DEFAULT_MODEL;
     const child = spawn('claude', ['-p', '--model', model, '--allowedTools', tools], {
       cwd: workDir,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -180,9 +181,11 @@ export function parseTokenUsage(stderr: string, model: string): TokenUsage | und
   const outputMatch = stderr.match(/output[\s_-]*tokens?[:\s]+(\d[\d,]*)/i);
 
   if (inputMatch || outputMatch) {
+    const cacheMatch = stderr.match(/cache[\s_-]*(?:read|hit)[\s_-]*tokens?[:\s]+(\d[\d,]*)/i);
     return {
       inputTokens: inputMatch ? parseInt(inputMatch[1].replace(/,/g, ''), 10) : 0,
       outputTokens: outputMatch ? parseInt(outputMatch[1].replace(/,/g, ''), 10) : 0,
+      cacheReadTokens: cacheMatch ? parseInt(cacheMatch[1].replace(/,/g, ''), 10) : undefined,
       model,
     };
   }
@@ -211,6 +214,7 @@ export class ClaudeCodeRunner implements AgentRunner {
       const result = await runClaude(prompt, ctx.workDir, {
         allowedTools: ctx.allowedTools,
         timeoutMs: ctx.timeoutMs,
+        model: ctx.model,
       });
 
       // Parse token usage from stderr

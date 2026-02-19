@@ -19,6 +19,7 @@ import type { AutonomyLedgerEntry, RoutingDecision } from './state/types.js';
 import { AutonomyTracker } from './autonomy-tracker.js';
 import { CostTracker, type CostSummary, type BudgetStatus } from './cost-tracker.js';
 import type { OrchestratorPlugin } from './plugin.js';
+import { CostGovernancePlugin } from './cost-governance.js';
 
 export interface WebhookConfig {
   /** Port to listen on for webhooks. */
@@ -126,6 +127,27 @@ export class Orchestrator {
 
     // Ensure plugins are initialized before running
     await this._pluginsInitialized;
+
+    // Auto-register cost governance plugin if costPolicy is present and not already registered
+    try {
+      const configDir = this.config.configDir ?? `${this.config.workDir ?? '.'}/.ai-sdlc`;
+      const earlyConfig = loadConfig(configDir);
+      if (
+        earlyConfig.pipeline?.spec.costPolicy &&
+        !this.plugins.some((p) => p.name === 'cost-governance')
+      ) {
+        const costPlugin = new CostGovernancePlugin(earlyConfig.pipeline.spec.costPolicy);
+        await costPlugin.initialize({
+          store: this._state,
+          costTracker: this._costTracker,
+          autonomyTracker: this._autonomyTracker,
+          log: this.log,
+        });
+        this.plugins.push(costPlugin);
+      }
+    } catch {
+      // Config load may fail here; executePipeline will report it properly
+    }
 
     // Notify plugins before run
     for (const plugin of this.plugins) {

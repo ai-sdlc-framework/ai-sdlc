@@ -12,6 +12,7 @@ import {
   routeByComplexity,
   evaluatePromotion,
   evaluateComplexity,
+  selectModel,
   withSpan,
   getMeter,
   SPAN_NAMES,
@@ -27,6 +28,7 @@ import {
   type LLMEvaluator,
   type Issue,
   type SecretStore,
+  type CostReceipt,
 } from '@ai-sdlc/reference';
 import { loadConfigAsync, type AiSdlcConfig } from './config.js';
 import { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
@@ -132,7 +134,7 @@ import { createPipelineMemory } from './shared.js';
 import { hasResourceChanged, fingerprintResource } from './reconcilers.js';
 import type { CodebaseContext } from './analysis/types.js';
 import type { AutonomyTracker } from './autonomy-tracker.js';
-import type { CostTracker } from './cost-tracker.js';
+import { CostTracker } from './cost-tracker.js';
 import type { StateStore } from './state/store.js';
 import { enrichAgentContext } from './context-enrichment.js';
 
@@ -361,6 +363,18 @@ async function executePipelineBody(
   const _instrumentedExec = metricStore ? createInstrumentedExecutor(metricStore) : undefined;
 
   // 4. Validate issue against quality gates
+  // Compute cost metrics from CostTracker if available
+  const costMetrics: Record<string, number> = {};
+  if (options.costTracker && config.pipeline?.spec.costPolicy?.budget) {
+    const budget = options.costTracker.getBudgetStatus(
+      config.pipeline.spec.costPolicy.budget.amount,
+    );
+    costMetrics['budget-remaining-percent'] = budget.budgetUsd > 0
+      ? budget.remainingUsd / budget.budgetUsd
+      : 1;
+    costMetrics['total-execution-cost'] = budget.spentUsd;
+  }
+
   await withSpan(
     SPAN_NAMES.GATE_EVALUATION,
     {
@@ -374,7 +388,7 @@ async function executePipelineBody(
               expressionEvaluator: options.expressionEvaluator,
               llmEvaluator: options.llmEvaluator,
             })
-          : validateIssue(issue, qualityGate, instrumentedEnforce);
+          : validateIssue(issue, qualityGate, instrumentedEnforce, costMetrics);
       if (!enforcement.allowed) {
         const failures = enforcement.results
           .filter((r) => r.verdict === 'fail')
@@ -475,6 +489,22 @@ async function executePipelineBody(
   // 8. Resolve agent constraints
   const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
 
+  // 8b. Model selection: choose model based on complexity and budget pressure
+  let selectedModel: string | undefined;
+  if (agentRole.spec.modelSelection && options.costTracker) {
+    const budgetStatus = options.costTracker.getBudgetStatus(
+      config.pipeline?.spec.costPolicy?.budget?.amount,
+    );
+    const modelResult = selectModel(agentRole.spec.modelSelection, {
+      complexity: complexity / 10, // normalize 1-10 to 0-1 range
+      budgetUtilization: budgetStatus.utilizationPercent / 100,
+    });
+    if (modelResult) {
+      selectedModel = modelResult.model;
+      log.info(`Model selected: ${modelResult.model} (${modelResult.reason})`);
+    }
+  }
+
   // 9. Invoke agent (with sandbox + JIT credential lifecycle when security is provided)
   log.stage('agent');
   const runner = options.runner ?? new ClaudeCodeRunner();
@@ -534,6 +564,7 @@ async function executePipelineBody(
                   requireTests: resolved.requireTests,
                   blockedPaths: resolved.blockedPaths,
                 },
+                model: selectedModel,
                 memory: options.memory,
                 codebaseContext: options.codebaseContext,
                 episodicContext,
@@ -671,6 +702,27 @@ async function executePipelineBody(
   await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
   log.stageEnd('push');
 
+  // 12b. Compute cost receipt for provenance (before PR creation)
+  let costReceipt: CostReceipt | undefined;
+  if (result.tokenUsage) {
+    const tu = result.tokenUsage;
+    const totalCostUsd = CostTracker.computeCost(
+      tu.inputTokens, tu.outputTokens, tu.model, tu.cacheReadTokens,
+    );
+    costReceipt = {
+      totalCost: totalCostUsd,
+      currency: 'USD',
+      breakdown: {
+        tokenCost: totalCostUsd,
+      },
+      execution: {
+        inputTokens: tu.inputTokens,
+        outputTokens: tu.outputTokens,
+        cacheReadTokens: tu.cacheReadTokens,
+      },
+    };
+  }
+
   // 13. Create PR (with optional provenance, reading config from pipeline)
   const prConfig = config.pipeline?.spec.pullRequest;
   const shouldIncludeProvenance =
@@ -678,7 +730,10 @@ async function executePipelineBody(
 
   let provenanceBlock = '';
   if (shouldIncludeProvenance) {
-    const provenance = createPipelineProvenance({ promptText: issue.description });
+    const provenance = createPipelineProvenance({
+      promptText: issue.description,
+      cost: costReceipt,
+    });
     provenanceBlock = '\n\n' + attachProvenanceToPR(provenance);
   }
 
@@ -747,13 +802,16 @@ async function executePipelineBody(
 
   // 14b. Record cost from agent result
   if (options.costTracker && result.tokenUsage) {
+    const tu = result.tokenUsage;
     options.costTracker.recordCost({
       runId: `run-${Date.now()}-${issueNumber}`,
       agentName: agentRole.metadata.name,
       pipelineType: 'execute',
-      model: result.tokenUsage.model,
-      inputTokens: result.tokenUsage.inputTokens,
-      outputTokens: result.tokenUsage.outputTokens,
+      model: tu.model,
+      inputTokens: tu.inputTokens,
+      outputTokens: tu.outputTokens,
+      cacheReadTokens: tu.cacheReadTokens,
+      stageName: 'code',
       issueNumber,
     });
   }

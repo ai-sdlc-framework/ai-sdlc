@@ -200,13 +200,13 @@ export const DEFAULT_HOTSPOT_THRESHOLD = 0.3;
 
 // ── Model cost mapping ──────────────────────────────────────────
 
-/** Cost per million tokens for known models (input/output). */
-export const DEFAULT_MODEL_COSTS: Record<string, { inputPer1M: number; outputPer1M: number }> = {
-  'claude-opus-4-6': { inputPer1M: 15.0, outputPer1M: 75.0 },
-  'claude-sonnet-4-5-20250929': { inputPer1M: 3.0, outputPer1M: 15.0 },
-  'claude-haiku-4-5-20251001': { inputPer1M: 0.80, outputPer1M: 4.0 },
-  'claude-sonnet-4-20250514': { inputPer1M: 3.0, outputPer1M: 15.0 },
-  'claude-3-5-haiku-20241022': { inputPer1M: 1.0, outputPer1M: 5.0 },
+/** Cost per million tokens for known models (input/output/cache-read). */
+export const DEFAULT_MODEL_COSTS: Record<string, { inputPer1M: number; outputPer1M: number; cacheReadPer1M: number }> = {
+  'claude-opus-4-6': { inputPer1M: 15.0, outputPer1M: 75.0, cacheReadPer1M: 1.5 },
+  'claude-sonnet-4-5-20250929': { inputPer1M: 3.0, outputPer1M: 15.0, cacheReadPer1M: 0.3 },
+  'claude-haiku-4-5-20251001': { inputPer1M: 0.80, outputPer1M: 4.0, cacheReadPer1M: 0.08 },
+  'claude-sonnet-4-20250514': { inputPer1M: 3.0, outputPer1M: 15.0, cacheReadPer1M: 0.3 },
+  'claude-3-5-haiku-20241022': { inputPer1M: 1.0, outputPer1M: 5.0, cacheReadPer1M: 0.1 },
 };
 
 /** Default monthly cost budget in USD. */

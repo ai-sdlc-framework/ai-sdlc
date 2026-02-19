@@ -10,9 +10,11 @@ export {
 export {
   evaluatePromotion,
   evaluateDemotion,
+  evaluateDemotionCondition,
   type AgentMetrics,
   type PromotionResult,
   type DemotionResult,
+  type DemotionConditionContext,
 } from './autonomy.js';
 
 export {
@@ -85,3 +87,9 @@ export { createRegoEvaluator } from './rego-evaluator.js';
 export { createCELEvaluator } from './cel-evaluator.js';
 
 export { createABACAuthorizationHook, type ABACPolicy, type ABACContext } from './abac.js';
+
+export {
+  selectModel,
+  type ModelSelectionContext,
+  type ModelSelectionResult,
+} from './model-selection.js';

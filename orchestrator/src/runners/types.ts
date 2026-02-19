@@ -26,6 +26,8 @@ export interface AgentContext {
   allowedTools?: string[];
   /** Timeout in milliseconds for the agent subprocess (default 300000). */
   timeoutMs?: number;
+  /** Override the default model for this agent invocation. */
+  model?: string;
   /** Codebase context for intelligent agent prompting. */
   codebaseContext?: CodebaseContext;
   /** Enriched episodic context from prior runs. */
@@ -43,6 +45,7 @@ export interface AgentContext {
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
+  cacheReadTokens?: number;
   model: string;
 }
 

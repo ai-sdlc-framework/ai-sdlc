@@ -159,6 +159,36 @@
                 "type": "string",
                 "description": "Time before re-promotion is possible.",
                 "pattern": "^\\d+[smhdw]$"
+              },
+              "condition": {
+                "type": "object",
+                "description": "Quantitative condition for this demotion trigger.",
+                "required": ["metric", "operator", "threshold"],
+                "properties": {
+                  "metric": {
+                    "type": "string",
+                    "description": "The metric to evaluate."
+                  },
+                  "operator": {
+                    "type": "string",
+                    "enum": [">=", "<=", "==", "!=", ">", "<"],
+                    "description": "Comparison operator."
+                  },
+                  "threshold": {
+                    "type": "number",
+                    "description": "The threshold value."
+                  },
+                  "window": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Number of consecutive executions to evaluate."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "notification": {
+                "type": "string",
+                "description": "Notification template name to send when this trigger fires."
               }
             },
             "additionalProperties": false

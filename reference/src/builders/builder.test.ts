@@ -125,6 +125,60 @@ describe('PipelineBuilder', () => {
       onTimeout: 'abort',
     });
   });
+
+  it('withCostPolicy sets cost policy', () => {
+    const pipeline = new PipelineBuilder('p')
+      .withCostPolicy({
+        perExecution: {
+          hardLimit: { amount: 50, currency: 'USD', action: 'abort' },
+        },
+        budget: {
+          period: 'month',
+          amount: 500,
+          currency: 'USD',
+          alerts: [{ threshold: 0.9, action: 'notify', targets: ['#dev'] }],
+        },
+      })
+      .build();
+    expect(pipeline.spec.costPolicy?.perExecution?.hardLimit?.amount).toBe(50);
+    expect(pipeline.spec.costPolicy?.budget?.period).toBe('month');
+    expect(pipeline.spec.costPolicy?.budget?.alerts).toHaveLength(1);
+  });
+
+  it('withCostPolicy full configuration', () => {
+    const pipeline = new PipelineBuilder('p')
+      .withCostPolicy({
+        perExecution: {
+          softLimit: { amount: 25, currency: 'USD', action: 'notify' },
+          hardLimit: { amount: 50, currency: 'USD', action: 'abort' },
+        },
+        perStage: {
+          defaults: { tokenLimit: 100000, costLimit: { amount: 10, currency: 'USD', action: 'notify' } },
+          overrides: {
+            implement: { tokenLimit: 200000 },
+          },
+        },
+        budget: {
+          period: 'month',
+          amount: 500,
+          currency: 'USD',
+        },
+        attribution: {
+          dimensions: ['agent', 'model', 'stage'],
+          chargeback: 'per-team',
+        },
+        modelPricing: {
+          source: 'config',
+          models: {
+            'claude-sonnet-4-5-20250929': { inputPerMTok: 3, outputPerMTok: 15 },
+          },
+        },
+      })
+      .build();
+    expect(pipeline.spec.costPolicy?.perStage?.overrides?.['implement']?.tokenLimit).toBe(200000);
+    expect(pipeline.spec.costPolicy?.attribution?.chargeback).toBe('per-team');
+    expect(pipeline.spec.costPolicy?.modelPricing?.source).toBe('config');
+  });
 });
 
 describe('AgentRoleBuilder', () => {
@@ -160,6 +214,26 @@ describe('AgentRoleBuilder', () => {
     const role = new AgentRoleBuilder('a', 'r', 'g').addTool('git').addTool('npm').build();
     expect(role.spec.tools).toEqual(['git', 'npm']);
   });
+
+  it('withModelSelection sets model selection config', () => {
+    const role = new AgentRoleBuilder('coder', 'developer', 'Write code')
+      .addTool('code_editor')
+      .withModelSelection({
+        rules: [
+          { complexity: [1, 3], model: 'claude-haiku-3-5', rationale: 'Simple tasks' },
+          { complexity: [4, 7], model: 'claude-sonnet-4-5-20250929', rationale: 'Medium complexity' },
+          { complexity: [8, 10], model: 'claude-opus-4-6', rationale: 'Complex tasks' },
+        ],
+        budgetPressure: [
+          { above: 0.8, downshift: 1, notify: ['#cost-alerts'] },
+        ],
+        fallbackChain: ['claude-sonnet-4-5-20250929', 'claude-haiku-3-5'],
+      })
+      .build();
+    expect(role.spec.modelSelection?.rules).toHaveLength(3);
+    expect(role.spec.modelSelection?.budgetPressure?.[0].above).toBe(0.8);
+    expect(role.spec.modelSelection?.fallbackChain).toEqual(['claude-sonnet-4-5-20250929', 'claude-haiku-3-5']);
+  });
 });
 
 describe('QualityGateBuilder', () => {
@@ -167,6 +241,26 @@ describe('QualityGateBuilder', () => {
     const gate = new QualityGateBuilder('coverage-gate').build();
     expect(gate.kind).toBe('QualityGate');
     expect(gate.spec.gates).toEqual([]);
+  });
+
+  it('builds quality gate with cost-based rule', () => {
+    const gate = new QualityGateBuilder('cost-gate')
+      .addGate({
+        name: 'budget-check',
+        enforcement: 'hard-mandatory',
+        rule: {
+          cost: {
+            metric: 'budget-remaining-percent',
+            operator: '>=',
+            threshold: 0.1,
+          },
+        },
+      })
+      .build();
+    expect(gate.spec.gates).toHaveLength(1);
+    expect(gate.spec.gates[0].name).toBe('budget-check');
+    const rule = gate.spec.gates[0].rule as { cost: { metric: string } };
+    expect(rule.cost.metric).toBe('budget-remaining-percent');
   });
 
   it('builds full quality gate', () => {
@@ -198,6 +292,34 @@ describe('AutonomyPolicyBuilder', () => {
     expect(policy.kind).toBe('AutonomyPolicy');
     expect(policy.spec.levels).toEqual([]);
     expect(policy.spec.demotionTriggers).toEqual([]);
+  });
+
+  it('builds autonomy policy with cost-based demotion trigger', () => {
+    const policy = new AutonomyPolicyBuilder('cost-aware')
+      .addLevel({
+        level: 0,
+        name: 'Supervised',
+        permissions: { read: ['**'], write: [], execute: [] },
+        guardrails: { requireApproval: 'all' },
+        monitoring: 'continuous',
+      })
+      .addDemotionTrigger({
+        trigger: 'cost-overrun',
+        action: 'demote-one-level',
+        cooldown: '24h',
+        condition: {
+          metric: 'ai_sdlc.cost.budget_consumed',
+          operator: '>=',
+          threshold: 1.0,
+          window: 3,
+        },
+        notification: 'cost-alert',
+      })
+      .build();
+    expect(policy.spec.demotionTriggers).toHaveLength(1);
+    expect(policy.spec.demotionTriggers[0].condition?.metric).toBe('ai_sdlc.cost.budget_consumed');
+    expect(policy.spec.demotionTriggers[0].condition?.window).toBe(3);
+    expect(policy.spec.demotionTriggers[0].notification).toBe('cost-alert');
   });
 
   it('builds full autonomy policy', () => {

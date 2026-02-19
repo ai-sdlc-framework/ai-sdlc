@@ -55,6 +55,122 @@ export interface Resource<K extends ResourceKind, S, St = unknown> {
   status?: St;
 }
 
+// ── Cost Governance Types (RFC-0004) ──────────────────────────────────
+
+export interface CostThreshold {
+  amount: number;
+  currency: string;
+  action: 'notify' | 'require-approval' | 'abort';
+}
+
+export interface StageCostLimit {
+  tokenLimit?: number;
+  timeLimit?: string;
+  costLimit?: CostThreshold;
+}
+
+export interface BudgetAlert {
+  threshold: number;
+  action: 'notify' | 'require-approval' | 'block';
+  targets?: string[];
+  approver?: string;
+  message?: string;
+}
+
+export interface BudgetPolicy {
+  period: 'day' | 'week' | 'month' | 'quarter';
+  amount: number;
+  currency: string;
+  alerts?: BudgetAlert[];
+}
+
+export interface AttributionPolicy {
+  dimensions: string[];
+  chargeback?: 'per-repository' | 'per-team' | 'per-agent' | 'proportional';
+}
+
+export interface ModelPricing {
+  inputPerMTok: number;
+  outputPerMTok: number;
+  cacheReadPerMTok?: number;
+}
+
+export interface ModelPricingConfig {
+  source: 'config' | 'api';
+  models?: Record<string, ModelPricing>;
+}
+
+export interface CostPolicy {
+  perExecution?: {
+    softLimit?: CostThreshold;
+    hardLimit?: CostThreshold;
+  };
+  perStage?: {
+    defaults?: StageCostLimit;
+    overrides?: Record<string, StageCostLimit>;
+  };
+  budget?: BudgetPolicy;
+  attribution?: AttributionPolicy;
+  modelPricing?: ModelPricingConfig;
+}
+
+export interface ModelRule {
+  complexity: [number, number];
+  model: string;
+  rationale?: string;
+}
+
+export interface BudgetPressureRule {
+  above: number;
+  downshift: number;
+  notify?: string[];
+}
+
+export interface ModelSelection {
+  rules?: ModelRule[];
+  budgetPressure?: BudgetPressureRule[];
+  fallbackChain?: string[];
+}
+
+export interface CostRule {
+  cost: {
+    metric: string;
+    operator: '>=' | '<=' | '==' | '!=' | '>' | '<';
+    threshold: number;
+  };
+}
+
+export interface CostBreakdown {
+  tokenCost: number;
+  cacheSavings?: number;
+  computeCost?: number;
+  humanReviewCost?: number;
+}
+
+export interface ExecutionCostDetail {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens?: number;
+  modelCalls?: number;
+  wallClockSeconds?: number;
+  retryCount?: number;
+}
+
+export interface CostReceipt {
+  totalCost: number;
+  currency: string;
+  breakdown: CostBreakdown;
+  execution?: ExecutionCostDetail;
+}
+
+export interface CostStatus {
+  currentSpend?: number;
+  budgetRemaining?: number;
+  projectedMonthEnd?: number;
+  lastUpdated?: string;
+  activeAlerts?: string[];
+}
+
 // ── Pipeline ──────────────────────────────────────────────────────────
 
 export interface TriggerFilter {
@@ -149,6 +265,7 @@ export interface PipelineSpec {
   branching?: BranchingConfig;
   pullRequest?: PullRequestConfig;
   notifications?: NotificationsConfig;
+  costPolicy?: CostPolicy;
 }
 
 export type PipelinePhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Suspended';
@@ -166,6 +283,7 @@ export interface PipelineStatus {
   conditions?: Condition[];
   stageAttempts?: Record<string, number>;
   pendingApproval?: PipelineApprovalStatus;
+  cost?: CostStatus;
 }
 
 export type Pipeline = Resource<'Pipeline', PipelineSpec, PipelineStatus>;
@@ -217,6 +335,7 @@ export interface AgentRoleSpec {
   handoffs?: Handoff[];
   skills?: Skill[];
   agentCard?: AgentCard;
+  modelSelection?: ModelSelection;
 }
 
 export interface AgentRoleStatus {
@@ -271,7 +390,8 @@ export type GateRule =
   | ReviewerRule
   | DocumentationRule
   | ProvenanceRule
-  | ExpressionRule;
+  | ExpressionRule
+  | CostRule;
 
 export type EnforcementLevel = 'advisory' | 'soft-mandatory' | 'hard-mandatory';
 
@@ -350,10 +470,19 @@ export interface PromotionCriteria {
   requiredApprovals: string[];
 }
 
+export interface DemotionTriggerCondition {
+  metric: string;
+  operator: '>=' | '<=' | '==' | '!=' | '>' | '<';
+  threshold: number;
+  window?: number;
+}
+
 export interface DemotionTrigger {
   trigger: string;
   action: 'demote-to-0' | 'demote-one-level';
   cooldown: Duration;
+  condition?: DemotionTriggerCondition;
+  notification?: string;
 }
 
 export interface AgentAutonomyStatus {

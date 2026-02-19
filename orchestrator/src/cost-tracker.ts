@@ -48,14 +48,17 @@ export class CostTracker {
     inputTokens: number,
     outputTokens: number,
     model: string,
+    cacheReadTokens = 0,
   ): number {
     const costs = DEFAULT_MODEL_COSTS[model];
     if (!costs) {
       // Fallback: use sonnet pricing
-      const fallback = DEFAULT_MODEL_COSTS['claude-sonnet-4-5-20250929'] ?? { inputPer1M: 3, outputPer1M: 15 };
-      return (inputTokens * fallback.inputPer1M + outputTokens * fallback.outputPer1M) / 1_000_000;
+      const fallback = DEFAULT_MODEL_COSTS['claude-sonnet-4-5-20250929'] ?? { inputPer1M: 3, outputPer1M: 15, cacheReadPer1M: 0.3 };
+      return (inputTokens * fallback.inputPer1M + outputTokens * fallback.outputPer1M +
+        cacheReadTokens * (fallback.cacheReadPer1M ?? 0)) / 1_000_000;
     }
-    return (inputTokens * costs.inputPer1M + outputTokens * costs.outputPer1M) / 1_000_000;
+    return (inputTokens * costs.inputPer1M + outputTokens * costs.outputPer1M +
+      cacheReadTokens * (costs.cacheReadPer1M ?? 0)) / 1_000_000;
   }
 
   /**
@@ -69,6 +72,7 @@ export class CostTracker {
         entry.inputTokens ?? 0,
         entry.outputTokens ?? 0,
         entry.model,
+        entry.cacheReadTokens ?? 0,
       );
     }
 
@@ -164,6 +168,26 @@ export class CostTracker {
       result[entry.agentName].costUsd += entry.costUsd ?? 0;
       result[entry.agentName].tokens += entry.totalTokens ?? 0;
       result[entry.agentName].runs += 1;
+    }
+
+    return result;
+  }
+
+  /**
+   * Get cost breakdown by pipeline stage.
+   */
+  getCostByStage(since?: string): Record<string, { costUsd: number; tokens: number; runs: number }> {
+    const entries = this.store.getCostEntries({ since });
+    const result: Record<string, { costUsd: number; tokens: number; runs: number }> = {};
+
+    for (const entry of entries) {
+      const stage = entry.stageName ?? 'unknown';
+      if (!result[stage]) {
+        result[stage] = { costUsd: 0, tokens: 0, runs: 0 };
+      }
+      result[stage].costUsd += entry.costUsd ?? 0;
+      result[stage].tokens += entry.totalTokens ?? 0;
+      result[stage].runs += 1;
     }
 
     return result;

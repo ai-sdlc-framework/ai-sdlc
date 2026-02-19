@@ -92,11 +92,28 @@ Metrics measuring the cost-effectiveness of AI agent usage.
 | `ai_sdlc.cost.model_usage_mix` | Model usage mix | Gauge | Ratio (0-1) | Percentage of tasks using each model tier (cheap vs. expensive) |
 | `ai_sdlc.cost.cache_hit_rate` | Cache hit rate | Gauge | Ratio (0-1) | Cache hits / total requests to AI services |
 | `ai_sdlc.cost.tco_per_feature` | TCO per feature | Histogram | USD | Total cost of ownership per feature delivered |
+| `ai_sdlc.cost.tokens.input` | Input tokens | Counter | tokens | Total input tokens consumed |
+| `ai_sdlc.cost.tokens.output` | Output tokens | Counter | tokens | Total output tokens generated |
+| `ai_sdlc.cost.tokens.cache_read` | Cache read tokens | Counter | tokens | Total tokens served from cache |
+| `ai_sdlc.cost.token_cost` | Token cost | Histogram | USD | Cost attributed to token usage per execution |
+| `ai_sdlc.cost.human_review_cost` | Human review cost | Histogram | USD | Cost of human review time (configurable hourly rate per reviewer role) |
+| `ai_sdlc.cost.compute_cost` | Compute cost | Histogram | USD | Non-token compute cost per execution (e.g., sandbox, CI) |
+| `ai_sdlc.cost.cache_savings` | Cache savings | Counter | USD | Cumulative cost savings from cache hits (credited to benefiting agent) |
+| `ai_sdlc.cost.budget_consumed` | Budget consumed | Gauge | Ratio (0-1) | Fraction of budget consumed in current period |
+| `ai_sdlc.cost.budget_remaining` | Budget remaining | Gauge | USD | Remaining budget in current period |
+| `ai_sdlc.cost.cost_per_line` | Cost per line | Histogram | USD/line | Cost per line of code produced |
+| `ai_sdlc.cost.cost_vs_estimate` | Cost vs estimate | Histogram | Ratio | Actual cost / estimated cost |
+| `ai_sdlc.cost.retry_waste` | Retry waste | Counter | USD | Cumulative cost of failed attempts that were retried |
+| `ai_sdlc.cost.circuit_breaker_saves` | Circuit breaker saves | Counter | USD | Estimated cost saved by circuit breaker interruptions |
 
 **Dimensions:**
 - `model` — Model identifier
 - `agent` — Agent name
 - `team` — Team/namespace
+- `stage` — Pipeline stage name
+- `complexity` — Complexity tier (low, medium, high, critical)
+- `repository` — Repository identifier
+- `outcome` — Execution outcome (success, failure, aborted)
 
 ### 2.5 Autonomy Trajectory
 
@@ -189,6 +206,36 @@ Every AI-generated artifact MUST record [provenance](glossary.md#provenance) met
 | `timestamp` | string (date-time) | MUST | ISO 8601 generation time. |
 | `humanReviewer` | string | MAY | Identity of the human who reviewed the artifact. |
 | `reviewDecision` | string | MAY | One of: `approved`, `rejected`, `revised`. |
+| `cost` | CostReceipt | MAY | Cost breakdown for this artifact. See RFC-0004. |
+
+#### CostReceipt Fields
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `totalCost` | number | MUST | Total cost of producing this artifact. |
+| `currency` | string | MUST | Currency code (e.g., USD). |
+| `breakdown` | CostBreakdown | MUST | Itemized cost breakdown. |
+| `execution` | ExecutionCostDetail | MAY | Detailed execution metrics. |
+
+#### CostBreakdown Fields
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `tokenCost` | number | MUST | Cost attributed to token usage. |
+| `cacheSavings` | number | MAY | Cost saved via cache hits. |
+| `computeCost` | number | MAY | Non-token compute cost. |
+| `humanReviewCost` | number | MAY | Cost of human review time. |
+
+#### ExecutionCostDetail Fields
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `inputTokens` | number | MUST | Total input tokens consumed. |
+| `outputTokens` | number | MUST | Total output tokens generated. |
+| `cacheReadTokens` | number | MAY | Tokens served from cache. |
+| `modelCalls` | number | MAY | Number of model API calls. |
+| `wallClockSeconds` | number | MAY | Wall clock execution time in seconds. |
+| `retryCount` | number | MAY | Number of retried attempts. |
 
 ### 4.2 Storage
 

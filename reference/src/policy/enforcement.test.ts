@@ -300,6 +300,59 @@ describe('evaluateGate()', () => {
     });
   });
 
+  describe('cost-based rules', () => {
+    function makeCostGate(overrides: Partial<Gate> = {}): Gate {
+      return {
+        name: 'cost-gate',
+        enforcement: 'hard-mandatory',
+        rule: { cost: { metric: 'total-execution-cost', operator: '<=', threshold: 10 } },
+        ...overrides,
+      };
+    }
+
+    it('passes when cost metric meets threshold', () => {
+      const ctx = makeCtx({ metrics: { 'total-execution-cost': 5 } });
+      expect(evaluateGate(makeCostGate(), ctx).verdict).toBe('pass');
+    });
+
+    it('fails when cost metric exceeds threshold', () => {
+      const ctx = makeCtx({ metrics: { 'total-execution-cost': 15 } });
+      const result = evaluateGate(makeCostGate(), ctx);
+      expect(result.verdict).toBe('fail');
+    });
+
+    it('fails when cost metric not available', () => {
+      const result = evaluateGate(makeCostGate(), makeCtx());
+      expect(result.verdict).toBe('fail');
+      expect(result.message).toContain('not available');
+    });
+
+    it('works with all 6 operators via cost rule path', () => {
+      const operators = [
+        { op: '>=', value: 10, threshold: 10, expected: 'pass' },
+        { op: '>=', value: 9, threshold: 10, expected: 'fail' },
+        { op: '<=', value: 10, threshold: 10, expected: 'pass' },
+        { op: '<=', value: 11, threshold: 10, expected: 'fail' },
+        { op: '==', value: 10, threshold: 10, expected: 'pass' },
+        { op: '==', value: 11, threshold: 10, expected: 'fail' },
+        { op: '!=', value: 11, threshold: 10, expected: 'pass' },
+        { op: '!=', value: 10, threshold: 10, expected: 'fail' },
+        { op: '>', value: 11, threshold: 10, expected: 'pass' },
+        { op: '>', value: 10, threshold: 10, expected: 'fail' },
+        { op: '<', value: 9, threshold: 10, expected: 'pass' },
+        { op: '<', value: 10, threshold: 10, expected: 'fail' },
+      ] as const;
+
+      for (const { op, value, threshold, expected } of operators) {
+        const gate = makeCostGate({
+          rule: { cost: { metric: 'x', operator: op, threshold } },
+        });
+        const result = evaluateGate(gate, makeCtx({ metrics: { x: value } }));
+        expect(result.verdict).toBe(expected);
+      }
+    });
+  });
+
   describe('override fix — works for non-metric rules', () => {
     it('allows override for tool rule soft-mandatory gate', () => {
       const gate: Gate = {

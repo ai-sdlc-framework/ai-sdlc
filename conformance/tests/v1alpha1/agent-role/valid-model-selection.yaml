@@ -1,0 +1,45 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AgentRole
+metadata:
+  name: cost-aware-engineer
+  namespace: team-alpha
+  labels:
+    team.example.com/role: backend
+  annotations:
+    ai-sdlc.io/rfc: "0004"
+spec:
+  role: Software Engineer
+  goal: Implement features with cost-efficient model selection
+  tools:
+    - code-editor
+    - terminal
+    - test-runner
+  constraints:
+    maxFilesPerChange: 15
+    requireTests: true
+  modelSelection:
+    rules:
+      - complexity: [1, 3]
+        model: claude-haiku-3-5
+        rationale: Simple tasks use the cheapest capable model
+      - complexity: [4, 7]
+        model: claude-sonnet-4-5-20250929
+        rationale: Medium complexity balances cost and capability
+      - complexity: [8, 10]
+        model: claude-opus-4-6
+        rationale: Complex tasks justify the most capable model
+    budgetPressure:
+      - above: 0.75
+        downshift: 1
+        notify:
+          - "#cost-alerts"
+      - above: 0.90
+        downshift: 2
+    fallbackChain:
+      - claude-sonnet-4-5-20250929
+      - claude-haiku-3-5
+status:
+  autonomyLevel: 2
+  totalTasksCompleted: 84
+  approvalRate: 0.92
+  lastActive: "2026-02-18T09:00:00Z"
