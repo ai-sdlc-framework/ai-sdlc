@@ -41,13 +41,13 @@ The orchestrator implements a continuous reconciliation loop:
 ┌──────────────────────────────────────────────────────────────────────┐
 │                       AI-SDLC Orchestrator                           │
 │                                                                      │
-│  ┌─────────┐    ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
+│  ┌──────────┐    ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
 │  │ Trigger  │───▶│  Route &  │───▶│  Execute  │───▶│  Validate &  │  │
 │  │ Watch    │    │  Assign   │    │  Stage    │    │  Promote     │  │
-│  └─────────┘    └───────────┘    └───────────┘    └──────────────┘  │
+│  └──────────┘    └───────────┘    └───────────┘    └──────────────┘  │
 │       │              │                │                   │          │
 │       ▼              ▼                ▼                   ▼          │
-│  ┌─────────┐    ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
+│  ┌──────────┐    ┌───────────┐    ┌───────────┐    ┌──────────────┐  │
 │  │ Issue    │    │ Complexity│    │ Agent     │    │ Quality      │  │
 │  │ Tracker  │    │ Analysis  │    │ Runtime   │    │ Gates        │  │
 │  │ Adapter  │    │ + Routing │    │ (sandbox, │    │ + Autonomy   │  │
@@ -55,14 +55,14 @@ The orchestrator implements a continuous reconciliation loop:
 │  │ Linear   │    │ Codebase  │    │  context) │    │              │  │
 │  │ Jira     │    │ State     │    │           │    │ Promotion/   │  │
 │  │ GitHub   │    │ Store     │    │ Claude    │    │ Demotion     │  │
-│  └─────────┘    └───────────┘    │ Copilot   │    └──────────────┘  │
-│                                  │ Cursor    │                      │
-│                                  │ Codex     │                      │
-│                                  │ Any LLM   │                      │
-│                                  └───────────┘                      │
+│  └──────────┘    └───────────┘    │ Copilot   │    └──────────────┘  │
+│                                   │ Cursor    │                      │
+│                                   │ Codex     │                      │
+│                                   │ Any LLM   │                      │
+│                                   └───────────┘                      │
 │                                                                      │
 │  Configured via: .ai-sdlc/pipeline.yaml                              │
-│  Codebase state: .ai-sdlc/state/ (autonomy ledger, episodic memory) │
+│  Codebase state: .ai-sdlc/state/ (autonomy ledger, episodic memory)  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
