@@ -6,7 +6,7 @@ metadata:
   labels:
     team.example.com/role: backend
   annotations:
-    ai-sdlc.io/rfc: "0004"
+    ai-sdlc.io/rfc: '0004'
 spec:
   role: Software Engineer
   goal: Implement features with cost-efficient model selection
@@ -32,7 +32,7 @@ spec:
       - above: 0.75
         downshift: 1
         notify:
-          - "#cost-alerts"
+          - '#cost-alerts'
       - above: 0.90
         downshift: 2
     fallbackChain:
@@ -42,4 +42,4 @@ status:
   autonomyLevel: 2
   totalTasksCompleted: 84
   approvalRate: 0.92
-  lastActive: "2026-02-18T09:00:00Z"
+  lastActive: '2026-02-18T09:00:00Z'

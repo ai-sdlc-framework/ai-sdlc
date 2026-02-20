@@ -139,7 +139,9 @@ describe('createCostReconciler', () => {
 
   it('returns error on exception', async () => {
     const reconciler = createCostReconciler({
-      getCurrentSpend: () => { throw new Error('db failure'); },
+      getCurrentSpend: () => {
+        throw new Error('db failure');
+      },
       getProjectedSpend: () => 0,
     });
 

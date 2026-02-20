@@ -9,12 +9,7 @@ interface SparklineProps {
   color?: string;
 }
 
-export function Sparkline({
-  values,
-  width = 80,
-  height = 24,
-  color = '#3b82f6',
-}: SparklineProps) {
+export function Sparkline({ values, width = 80, height = 24, color = '#3b82f6' }: SparklineProps) {
   if (values.length < 2) return <svg width={width} height={height} />;
 
   const max = Math.max(...values, 1);

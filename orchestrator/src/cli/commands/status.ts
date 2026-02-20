@@ -21,11 +21,13 @@ export const statusCommand = new Command('status')
 
     try {
       const result = await orchestrator.status(opts.issue);
-      console.log(formatOutput(format, {
-        type: 'status',
-        pipeline: result.config.pipeline?.metadata.name ?? 'none',
-        recentRuns: result.recentRuns,
-      }));
+      console.log(
+        formatOutput(format, {
+          type: 'status',
+          pipeline: result.config.pipeline?.metadata.name ?? 'none',
+          recentRuns: result.recentRuns,
+        }),
+      );
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;

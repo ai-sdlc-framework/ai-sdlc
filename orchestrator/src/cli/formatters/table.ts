@@ -28,9 +28,9 @@ export function formatTable(data: Record<string, unknown>): string {
         for (const run of runs) {
           lines.push(
             String(run.runId ?? '').padEnd(30) +
-            String(run.issueNumber ? `#${run.issueNumber}` : '-').padEnd(10) +
-            String(run.status ?? '').padEnd(12) +
-            String(run.startedAt ?? '-'),
+              String(run.issueNumber ? `#${run.issueNumber}` : '-').padEnd(10) +
+              String(run.status ?? '').padEnd(12) +
+              String(run.startedAt ?? '-'),
           );
         }
       }
@@ -60,32 +60,30 @@ export function formatTable(data: Record<string, unknown>): string {
       } else {
         lines.push(
           'Agent'.padEnd(20) +
-          'Level'.padEnd(7) +
-          'Tasks'.padEnd(7) +
-          'Success'.padEnd(9) +
-          'Last Task',
+            'Level'.padEnd(7) +
+            'Tasks'.padEnd(7) +
+            'Success'.padEnd(9) +
+            'Last Task',
         );
         lines.push('─'.repeat(70));
         for (const agent of agents) {
           const total = agent.totalTasks as number;
           const success = agent.successCount as number;
           const pct = total > 0 ? `${Math.round((success / total) * 100)}%` : '-';
-          const lastTask = agent.lastTaskAt
-            ? (agent.lastTaskAt as string).split('T')[0]
-            : '-';
+          const lastTask = agent.lastTaskAt ? (agent.lastTaskAt as string).split('T')[0] : '-';
           lines.push(
             String(agent.agentName ?? '').padEnd(20) +
-            String(agent.currentLevel ?? 0).padEnd(7) +
-            String(total).padEnd(7) +
-            pct.padEnd(9) +
-            lastTask,
+              String(agent.currentLevel ?? 0).padEnd(7) +
+              String(total).padEnd(7) +
+              pct.padEnd(9) +
+              lastTask,
           );
         }
       }
       break;
     }
     case 'routing': {
-      const duration = data.duration as string ?? '30d';
+      const duration = (data.duration as string) ?? '30d';
       lines.push(`Routing Distribution (last ${duration})`);
       lines.push('─'.repeat(50));
       const history = data.history as Array<Record<string, unknown>>;
@@ -106,18 +104,14 @@ export function formatTable(data: Record<string, unknown>): string {
         const sorted = [...groups.entries()].sort((a, b) => b[1] - a[1]);
         for (const [strategy, count] of sorted) {
           const pct = `${Math.round((count / total) * 100)}%`;
-          lines.push(
-            strategy.padEnd(20) +
-            String(count).padEnd(8) +
-            pct,
-          );
+          lines.push(strategy.padEnd(20) + String(count).padEnd(8) + pct);
         }
       }
       break;
     }
     case 'complexity': {
       const profile = data.profile as Record<string, unknown>;
-      const context = data.context as Record<string, unknown>;
+      const _context = data.context as Record<string, unknown>;
       lines.push('Codebase Complexity Profile');
       lines.push('─'.repeat(50));
       lines.push(
@@ -159,7 +153,7 @@ export function formatTable(data: Record<string, unknown>): string {
     case 'cost': {
       const summary = data.summary as Record<string, unknown>;
       const budget = data.budget as Record<string, unknown>;
-      const period = data.period as string ?? 'all-time';
+      const period = (data.period as string) ?? 'all-time';
       lines.push(`Cost Summary (${period})`);
       lines.push('─'.repeat(50));
       lines.push(`Total Cost:     $${(summary.totalCostUsd as number).toFixed(2)}`);

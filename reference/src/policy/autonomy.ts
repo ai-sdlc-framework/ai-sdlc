@@ -3,7 +3,12 @@
  * Implements the autonomy level transitions from spec/policy.md.
  */
 
-import type { AutonomyPolicy, DemotionTrigger, DemotionTriggerCondition, Duration } from '../core/types.js';
+import type {
+  AutonomyPolicy,
+  DemotionTrigger,
+  DemotionTriggerCondition,
+  Duration,
+} from '../core/types.js';
 import { compareMetric } from '../core/compare.js';
 
 /** Default cooldown after demotion: 1 hour. */
@@ -167,7 +172,7 @@ export function evaluateDemotionCondition(
     const history = ctx.metricHistory[condition.metric];
     if (!history || history.length < condition.window) return false;
     const windowValues = history.slice(0, condition.window);
-    return windowValues.every(v => compareMetric(v, condition.operator, condition.threshold));
+    return windowValues.every((v) => compareMetric(v, condition.operator, condition.threshold));
   }
   const actual = ctx.metrics[condition.metric];
   if (actual === undefined) return false;

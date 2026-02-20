@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { NotificationRouter, type PipelineEvent, type NotificationRoute } from './notification-router.js';
+import { NotificationRouter } from './notification-router.js';
 import type { Messenger } from '@ai-sdlc/reference';
 
 function makeMockMessenger(): Messenger & {
@@ -66,7 +66,10 @@ describe('NotificationRouter', () => {
     expect(messenger.sendNotification).not.toHaveBeenCalled();
 
     // Warning events should pass
-    await router.dispatch({ type: 'cost-alert', data: { utilization: 80, spent: 80, budget: 100 } });
+    await router.dispatch({
+      type: 'cost-alert',
+      data: { utilization: 80, spent: 80, budget: 100 },
+    });
     expect(messenger.sendNotification).toHaveBeenCalledTimes(1);
   });
 

@@ -5,7 +5,7 @@
  * to one or more Messenger implementations with filtering and template rendering.
  */
 
-import type { Messenger, NotificationInput, ThreadInput } from '@ai-sdlc/reference';
+import type { Messenger } from '@ai-sdlc/reference';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -103,11 +103,11 @@ const DEFAULT_TEMPLATES: Record<PipelineEventType, NotificationTemplate> = {
     title: 'Approval Required',
     body: 'Issue #{issueNumber} requires approval (tier: {tier})',
   },
-  'promotion': {
+  promotion: {
     title: 'Agent Promoted',
     body: 'Agent {agentName} promoted from level {fromLevel} to {toLevel}',
   },
-  'demotion': {
+  demotion: {
     title: 'Agent Demoted',
     body: 'Agent {agentName} demoted from level {fromLevel} to {toLevel}: {reason}',
   },
@@ -219,7 +219,10 @@ export class NotificationRouter {
   }
 
   private async sendToRoute(route: NotificationRoute, event: PipelineEvent): Promise<void> {
-    const template = this.templates.get(event.type) ?? { title: event.type, body: JSON.stringify(event.data) };
+    const template = this.templates.get(event.type) ?? {
+      title: event.type,
+      body: JSON.stringify(event.data),
+    };
     const rendered = this.renderTemplate(template, event.data);
     const severity = event.severity ?? this.defaultSeverity(event.type);
 

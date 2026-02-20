@@ -5,7 +5,7 @@
  * Implements the modelSelection spec from agent-role.schema.json.
  */
 
-import type { ModelSelection, ModelRule, BudgetPressureRule } from '../core/types.js';
+import type { ModelSelection } from '../core/types.js';
 
 export interface ModelSelectionContext {
   /** Task complexity score (0–1 range). */
@@ -76,7 +76,8 @@ export function selectModel(
       model: rule.model,
       reason: downshifted
         ? `Downshifted from higher tier due to budget pressure (${(ctx.budgetUtilization * 100).toFixed(0)}% utilized)`
-        : rule.rationale ?? `Complexity ${ctx.complexity} matched range [${rule.complexity[0]}, ${rule.complexity[1]}]`,
+        : (rule.rationale ??
+          `Complexity ${ctx.complexity} matched range [${rule.complexity[0]}, ${rule.complexity[1]}]`),
       downshifted,
       notifyTargets: notifyTargets.length > 0 ? notifyTargets : undefined,
     };

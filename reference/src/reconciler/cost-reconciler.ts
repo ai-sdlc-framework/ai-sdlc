@@ -5,7 +5,7 @@
  * Follows the createAutonomyReconciler() pattern.
  */
 
-import type { Pipeline, BudgetAlert } from '../core/types.js';
+import type { Pipeline } from '../core/types.js';
 import type { ReconcileResult } from './types.js';
 
 export interface CostReconcilerDeps {

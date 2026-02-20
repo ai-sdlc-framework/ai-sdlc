@@ -23,7 +23,9 @@ describe('handleCheckTask', () => {
   it('returns advisory when no issue is linked', () => {
     const result = handleCheckTask(deps, {});
     expect(result.issueNumber).toBeNull();
-    expect(result.advisoryNotes).toContain('No issue linked to this session — work will be unattributed.');
+    expect(result.advisoryNotes).toContain(
+      'No issue linked to this session — work will be unattributed.',
+    );
   });
 
   it('uses explicit issue number', () => {

@@ -25,7 +25,11 @@ function isSnakeCase(name: string): boolean {
 
 type NamingStyle = 'camelCase' | 'PascalCase' | 'kebab-case' | 'snake_case' | 'mixed';
 
-function detectFileNamingStyle(files: FileInfo[]): { style: NamingStyle; confidence: number; examples: string[] } {
+function detectFileNamingStyle(files: FileInfo[]): {
+  style: NamingStyle;
+  confidence: number;
+  examples: string[];
+} {
   const counts: Record<NamingStyle, number> = {
     camelCase: 0,
     PascalCase: 0,
@@ -42,8 +46,10 @@ function detectFileNamingStyle(files: FileInfo[]): { style: NamingStyle; confide
   };
 
   for (const file of files) {
-    const name = basename(file.relativePath, extname(file.relativePath))
-      .replace(/\.(test|spec|stories|d)$/, ''); // Strip test/spec suffixes
+    const name = basename(file.relativePath, extname(file.relativePath)).replace(
+      /\.(test|spec|stories|d)$/,
+      '',
+    ); // Strip test/spec suffixes
 
     if (!name || name === 'index') continue;
 
@@ -80,7 +86,11 @@ function detectFileNamingStyle(files: FileInfo[]): { style: NamingStyle; confide
 
 type TestStyle = 'co-located' | '__tests__' | 'test-directory' | 'mixed';
 
-function detectTestingStyle(files: FileInfo[]): { style: TestStyle; confidence: number; examples: string[] } {
+function detectTestingStyle(files: FileInfo[]): {
+  style: TestStyle;
+  confidence: number;
+  examples: string[];
+} {
   let coLocated = 0;
   let testsDir = 0;
   let testDir = 0;
@@ -93,7 +103,9 @@ function detectTestingStyle(files: FileInfo[]): { style: TestStyle; confidence: 
 
   const testFiles = files.filter((f) => {
     const name = basename(f.relativePath);
-    return name.includes('.test.') || name.includes('.spec.') || f.relativePath.includes('__tests__');
+    return (
+      name.includes('.test.') || name.includes('.spec.') || f.relativePath.includes('__tests__')
+    );
   });
 
   for (const file of testFiles) {
@@ -101,7 +113,12 @@ function detectTestingStyle(files: FileInfo[]): { style: TestStyle; confidence: 
     if (dir.includes('__tests__')) {
       testsDir++;
       if (examples.__tests__.length < 3) examples.__tests__.push(file.relativePath);
-    } else if (dir === 'test' || dir === 'tests' || dir.startsWith('test/') || dir.startsWith('tests/')) {
+    } else if (
+      dir === 'test' ||
+      dir === 'tests' ||
+      dir.startsWith('test/') ||
+      dir.startsWith('tests/')
+    ) {
       testDir++;
       if (examples['test-directory'].length < 3) examples['test-directory'].push(file.relativePath);
     } else {
@@ -173,13 +190,14 @@ export function detectConventions(files: FileInfo[]): DetectedConvention[] {
   // Testing convention
   const testing = detectTestingStyle(files);
   if (testing.confidence > 0) {
-    const desc = testing.style === 'co-located'
-      ? 'Co-located test files (*.test.ts)'
-      : testing.style === '__tests__'
-        ? 'Test files in __tests__/ directories'
-        : testing.style === 'test-directory'
-          ? 'Test files in test/ directory'
-          : 'Mixed test file placement';
+    const desc =
+      testing.style === 'co-located'
+        ? 'Co-located test files (*.test.ts)'
+        : testing.style === '__tests__'
+          ? 'Test files in __tests__/ directories'
+          : testing.style === 'test-directory'
+            ? 'Test files in test/ directory'
+            : 'Mixed test file placement';
     conventions.push({
       category: 'testing',
       pattern: desc,

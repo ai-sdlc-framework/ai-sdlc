@@ -10,7 +10,7 @@ import {
 import type { ServerDeps } from '../types.js';
 
 const SECTION_NAMES = ['profile', 'conventions', 'hotspots', 'patterns', 'history'] as const;
-type Section = typeof SECTION_NAMES[number];
+type Section = (typeof SECTION_NAMES)[number];
 
 export interface GetContextResult {
   markdown: string;
@@ -21,9 +21,7 @@ export function handleGetContext(
   deps: ServerDeps,
   input: { sessionId?: string; sections?: Section[] },
 ): GetContextResult {
-  const session = input.sessionId
-    ? deps.sessions.get(input.sessionId)
-    : deps.sessions.getActive();
+  const session = input.sessionId ? deps.sessions.get(input.sessionId) : deps.sessions.getActive();
 
   const requestedSections = input.sections ?? [...SECTION_NAMES];
   const parts: string[] = [];
@@ -33,10 +31,18 @@ export function handleGetContext(
     const profile = deps.store.getLatestComplexityProfile(deps.repoPath);
     if (profile) {
       // Parse raw data if available to reconstruct CodebaseProfile
-      const rawData = (profile.rawData ? safeJsonParse(profile.rawData) : undefined) as Record<string, unknown> | undefined;
-      const hotspots = (profile.hotspots ? safeJsonParse(profile.hotspots) : []) as CodebaseProfile['hotspots'];
-      const patterns = (profile.architecturalPatterns ? safeJsonParse(profile.architecturalPatterns) : []) as CodebaseProfile['architecturalPatterns'];
-      const conventions = (profile.conventionsData ? safeJsonParse(profile.conventionsData) : []) as CodebaseProfile['conventions'];
+      const rawData = (profile.rawData ? safeJsonParse(profile.rawData) : undefined) as
+        | Record<string, unknown>
+        | undefined;
+      const hotspots = (
+        profile.hotspots ? safeJsonParse(profile.hotspots) : []
+      ) as CodebaseProfile['hotspots'];
+      const patterns = (
+        profile.architecturalPatterns ? safeJsonParse(profile.architecturalPatterns) : []
+      ) as CodebaseProfile['architecturalPatterns'];
+      const conventions = (
+        profile.conventionsData ? safeJsonParse(profile.conventionsData) : []
+      ) as CodebaseProfile['conventions'];
 
       const codebaseProfile: CodebaseProfile = {
         repoPath: profile.repoPath,
@@ -45,7 +51,12 @@ export function handleGetContext(
         modulesCount: profile.modulesCount ?? 0,
         dependencyCount: profile.dependencyCount ?? 0,
         modules: (rawData?.modules ?? []) as CodebaseProfile['modules'],
-        moduleGraph: (rawData?.moduleGraph ?? { modules: [], edges: [], externalDependencies: [], cycles: [] }) as CodebaseProfile['moduleGraph'],
+        moduleGraph: (rawData?.moduleGraph ?? {
+          modules: [],
+          edges: [],
+          externalDependencies: [],
+          cycles: [],
+        }) as CodebaseProfile['moduleGraph'],
         architecturalPatterns: patterns,
         hotspots,
         conventions,
@@ -106,7 +117,9 @@ export function registerGetContext(server: McpServer, deps: ServerDeps): void {
     },
     async ({ sessionId, sections }) => {
       const result = handleGetContext(deps, { sessionId, sections });
-      return { content: [{ type: 'text' as const, text: result.markdown || 'No context available.' }] };
+      return {
+        content: [{ type: 'text' as const, text: result.markdown || 'No context available.' }],
+      };
     },
   );
 }

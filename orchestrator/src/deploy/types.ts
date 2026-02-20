@@ -22,7 +22,13 @@ export interface HealthCheckConfig {
   healthyThreshold?: number;
 }
 
-export type DeploymentState = 'pending' | 'deploying' | 'healthy' | 'unhealthy' | 'rolled-back' | 'failed';
+export type DeploymentState =
+  | 'pending'
+  | 'deploying'
+  | 'healthy'
+  | 'unhealthy'
+  | 'rolled-back'
+  | 'failed';
 
 export interface DeploymentResult {
   id: string;

@@ -16,13 +16,15 @@ export function RunCard({ run }: { run: RunSummary }) {
   const statusColor = statusColors[run.status] ?? '#64748b';
 
   return (
-    <div style={{
-      padding: 12,
-      border: '1px solid #e2e8f0',
-      borderRadius: 8,
-      borderLeft: `3px solid ${statusColor}`,
-      marginBottom: 8,
-    }}>
+    <div
+      style={{
+        padding: 12,
+        border: '1px solid #e2e8f0',
+        borderRadius: 8,
+        borderLeft: `3px solid ${statusColor}`,
+        marginBottom: 8,
+      }}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <span style={{ fontWeight: 600, fontSize: 14 }}>{run.runId.slice(0, 8)}</span>
@@ -32,9 +34,7 @@ export function RunCard({ run }: { run: RunSummary }) {
             </span>
           )}
         </div>
-        <span style={{ fontSize: 12, color: statusColor, fontWeight: 500 }}>
-          {run.status}
-        </span>
+        <span style={{ fontSize: 12, color: statusColor, fontWeight: 500 }}>{run.status}</span>
       </div>
       <div style={{ marginTop: 4, fontSize: 12, color: '#64748b' }}>
         {run.pipelineType}

@@ -5,9 +5,24 @@ import type { AuditEntry } from '@ai-sdlc/reference';
 
 function makeEntries(): AuditEntry[] {
   const log = createAuditLog();
-  log.record({ actor: 'agent-1', action: 'execute', resource: 'pipeline/build', decision: 'allowed' });
-  log.record({ actor: 'agent-2', action: 'deploy', resource: 'pipeline/deploy', decision: 'allowed' });
-  log.record({ actor: 'admin', action: 'override', resource: 'gate/quality', decision: 'overridden' });
+  log.record({
+    actor: 'agent-1',
+    action: 'execute',
+    resource: 'pipeline/build',
+    decision: 'allowed',
+  });
+  log.record({
+    actor: 'agent-2',
+    action: 'deploy',
+    resource: 'pipeline/deploy',
+    decision: 'allowed',
+  });
+  log.record({
+    actor: 'admin',
+    action: 'override',
+    resource: 'gate/quality',
+    decision: 'overridden',
+  });
   return [...log.entries()];
 }
 
@@ -89,9 +104,24 @@ describe('exportAuditEntries', () => {
 describe('generateComplianceReport', () => {
   it('generates a compliance report', () => {
     const auditLog = createAuditLog();
-    auditLog.record({ actor: 'agent-1', action: 'execute', resource: 'pipeline/build', decision: 'allowed' });
-    auditLog.record({ actor: 'agent-2', action: 'deploy', resource: 'pipeline/deploy', decision: 'allowed' });
-    auditLog.record({ actor: 'admin', action: 'override', resource: 'gate/quality', decision: 'overridden' });
+    auditLog.record({
+      actor: 'agent-1',
+      action: 'execute',
+      resource: 'pipeline/build',
+      decision: 'allowed',
+    });
+    auditLog.record({
+      actor: 'agent-2',
+      action: 'deploy',
+      resource: 'pipeline/deploy',
+      decision: 'allowed',
+    });
+    auditLog.record({
+      actor: 'admin',
+      action: 'override',
+      resource: 'gate/quality',
+      decision: 'overridden',
+    });
 
     const report = generateComplianceReport({
       title: 'Q1 Audit Report',

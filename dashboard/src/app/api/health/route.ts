@@ -9,11 +9,13 @@ import type { HealthResponse } from '@/lib/types';
 export async function GET(): Promise<NextResponse<HealthResponse>> {
   const store = getStateStore();
 
-  const totals = store.getDatabase()
+  const totals = store
+    .getDatabase()
     .prepare(`SELECT COUNT(*) as total FROM pipeline_runs`)
     .get() as Record<string, number>;
 
-  const last24h = store.getDatabase()
+  const last24h = store
+    .getDatabase()
     .prepare(
       `SELECT COUNT(*) as total,
               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
@@ -22,7 +24,8 @@ export async function GET(): Promise<NextResponse<HealthResponse>> {
     )
     .get() as Record<string, number>;
 
-  const agents = store.getDatabase()
+  const agents = store
+    .getDatabase()
     .prepare(`SELECT COUNT(*) as count FROM autonomy_ledger`)
     .get() as Record<string, number>;
 

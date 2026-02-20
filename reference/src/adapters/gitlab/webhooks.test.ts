@@ -25,8 +25,13 @@ describe('transformGitLabIssueEvent', () => {
   const basePayload = {
     event_type: 'issue',
     object_attributes: {
-      iid: 10, title: 'Bug', description: 'desc', state: 'opened', action: 'open',
-      url: 'https://gitlab.com/issues/10', labels: [{ title: 'bug' }],
+      iid: 10,
+      title: 'Bug',
+      description: 'desc',
+      state: 'opened',
+      action: 'open',
+      url: 'https://gitlab.com/issues/10',
+      labels: [{ title: 'bug' }],
     },
     assignees: [{ username: 'dev1' }],
   };
@@ -59,10 +64,12 @@ describe('transformGitLabIssueEvent', () => {
   });
 
   it('returns null for unknown action', () => {
-    expect(transformGitLabIssueEvent({
-      ...basePayload,
-      object_attributes: { ...basePayload.object_attributes, action: 'label' },
-    })).toBeNull();
+    expect(
+      transformGitLabIssueEvent({
+        ...basePayload,
+        object_attributes: { ...basePayload.object_attributes, action: 'label' },
+      }),
+    ).toBeNull();
   });
 });
 
@@ -70,8 +77,15 @@ describe('transformGitLabMREvent', () => {
   const basePayload = {
     event_type: 'merge_request',
     object_attributes: {
-      iid: 5, title: 'MR', description: 'd', source_branch: 'feat', target_branch: 'main',
-      state: 'opened', action: 'open', url: 'https://gitlab.com/mr/5', author_id: 1,
+      iid: 5,
+      title: 'MR',
+      description: 'd',
+      source_branch: 'feat',
+      target_branch: 'main',
+      state: 'opened',
+      action: 'open',
+      url: 'https://gitlab.com/mr/5',
+      author_id: 1,
     },
     user: { username: 'dev1' },
   };
@@ -122,10 +136,12 @@ describe('transformGitLabPipelineEvent', () => {
   });
 
   it('returns null for running pipeline', () => {
-    expect(transformGitLabPipelineEvent({
-      object_kind: 'pipeline',
-      object_attributes: { id: 202, status: 'running', ref: 'main' },
-    })).toBeNull();
+    expect(
+      transformGitLabPipelineEvent({
+        object_kind: 'pipeline',
+        object_attributes: { id: 202, status: 'running', ref: 'main' },
+      }),
+    ).toBeNull();
   });
 
   it('returns null for non-pipeline event', () => {

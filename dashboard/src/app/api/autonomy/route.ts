@@ -28,7 +28,8 @@ export interface AutonomyResponse {
 export async function GET(): Promise<NextResponse<AutonomyResponse>> {
   const store = getStateStore();
 
-  const agents = store.getDatabase()
+  const agents = store
+    .getDatabase()
     .prepare(
       `SELECT agent_name, current_level, total_tasks, success_count,
               failure_count, pr_approval_rate, rollback_count, time_at_level_ms
@@ -36,7 +37,8 @@ export async function GET(): Promise<NextResponse<AutonomyResponse>> {
     )
     .all() as Array<Record<string, unknown>>;
 
-  const events = store.getDatabase()
+  const events = store
+    .getDatabase()
     .prepare(
       `SELECT agent_name, event_type, from_level, to_level, trigger, created_at
        FROM autonomy_events ORDER BY created_at DESC LIMIT 100`,

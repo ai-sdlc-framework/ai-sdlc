@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { HandoffExecutor } from './handoff-executor.js';
 import type { AgentRole, StepResult, Handoff } from '@ai-sdlc/reference';
+import type { StateStore } from './state/store.js';
 
 function makeAgent(name: string, handoffs?: AgentRole['spec']['handoffs']): AgentRole {
   return {
@@ -56,7 +57,7 @@ describe('HandoffExecutor', () => {
       const step = makeStepResult({ summary: 'All good' });
 
       const executor = new HandoffExecutor({
-        stateStore: mockStore as any,
+        stateStore: mockStore as unknown as StateStore,
         runId: 'test-run-1',
       });
       const result = executor.executeHandoff(from, to, step);
@@ -79,7 +80,7 @@ describe('HandoffExecutor', () => {
       const to = makeAgent('agent-b');
       const step = makeStepResult({ summary: 'partial' });
 
-      const executor = new HandoffExecutor({ stateStore: mockStore as any });
+      const executor = new HandoffExecutor({ stateStore: mockStore as unknown as StateStore });
       const result = executor.executeHandoff(from, to, step);
 
       expect(result.success).toBe(false);
@@ -92,7 +93,7 @@ describe('HandoffExecutor', () => {
       const to = makeAgent('agent-b');
       const step = makeStepResult({ data: 1 });
 
-      const executor = new HandoffExecutor({ stateStore: mockStore as any });
+      const executor = new HandoffExecutor({ stateStore: mockStore as unknown as StateStore });
       const result = executor.executeHandoff(from, to, step);
 
       expect(result.success).toBe(false);
@@ -111,7 +112,7 @@ describe('HandoffExecutor', () => {
       const step = makeStepResult({ result: 'ok' });
 
       const executor = new HandoffExecutor({
-        stateStore: mockStore as any,
+        stateStore: mockStore as unknown as StateStore,
         runId: 'audit-run',
       });
       executor.executeHandoff(from, to, step);
@@ -131,7 +132,7 @@ describe('HandoffExecutor', () => {
       const to = makeAgent('agent-b');
       const step = makeStepResult({});
 
-      const executor = new HandoffExecutor({ stateStore: mockStore as any });
+      const executor = new HandoffExecutor({ stateStore: mockStore as unknown as StateStore });
       executor.executeHandoff(from, to, step);
 
       expect(mockStore.saveHandoffEvent).toHaveBeenCalledWith(
@@ -153,7 +154,7 @@ describe('HandoffExecutor', () => {
       const to = makeAgent('agent-b');
       const step = makeStepResult(null);
 
-      const executor = new HandoffExecutor({ stateStore: mockStore as any });
+      const executor = new HandoffExecutor({ stateStore: mockStore as unknown as StateStore });
       const result = executor.executeHandoff(from, to, step);
       expect(result.success).toBe(true);
     });
@@ -178,16 +179,25 @@ describe('HandoffExecutor', () => {
   describe('executeChain', () => {
     it('chains handoffs through multiple agents', () => {
       const agents = [
-        makeAgent('a', [{ target: 'b', trigger: 'on-complete', contract: { requiredFields: [], schema: '' } } as Handoff]),
-        makeAgent('b', [{ target: 'c', trigger: 'on-complete', contract: { requiredFields: [], schema: '' } } as Handoff]),
+        makeAgent('a', [
+          {
+            target: 'b',
+            trigger: 'on-complete',
+            contract: { requiredFields: [], schema: '' },
+          } as Handoff,
+        ]),
+        makeAgent('b', [
+          {
+            target: 'c',
+            trigger: 'on-complete',
+            contract: { requiredFields: [], schema: '' },
+          } as Handoff,
+        ]),
         makeAgent('c'),
       ];
-      const steps = [
-        makeStepResult({ stage: 1 }, 'a'),
-        makeStepResult({ stage: 2 }, 'b'),
-      ];
+      const steps = [makeStepResult({ stage: 1 }, 'a'), makeStepResult({ stage: 2 }, 'b')];
 
-      const executor = new HandoffExecutor({ stateStore: mockStore as any });
+      const executor = new HandoffExecutor({ stateStore: mockStore as unknown as StateStore });
       const results = executor.executeChain(agents, steps);
 
       expect(results).toHaveLength(2);
@@ -198,15 +208,18 @@ describe('HandoffExecutor', () => {
     it('stops chain on first failure', () => {
       const agents = [
         makeAgent('a'), // no handoff to b
-        makeAgent('b', [{ target: 'c', trigger: 'on-complete', contract: { requiredFields: [], schema: '' } } as Handoff]),
+        makeAgent('b', [
+          {
+            target: 'c',
+            trigger: 'on-complete',
+            contract: { requiredFields: [], schema: '' },
+          } as Handoff,
+        ]),
         makeAgent('c'),
       ];
-      const steps = [
-        makeStepResult({ stage: 1 }, 'a'),
-        makeStepResult({ stage: 2 }, 'b'),
-      ];
+      const steps = [makeStepResult({ stage: 1 }, 'a'), makeStepResult({ stage: 2 }, 'b')];
 
-      const executor = new HandoffExecutor({ stateStore: mockStore as any });
+      const executor = new HandoffExecutor({ stateStore: mockStore as unknown as StateStore });
       const results = executor.executeChain(agents, steps);
 
       expect(results).toHaveLength(1);
@@ -216,7 +229,7 @@ describe('HandoffExecutor', () => {
     it('handles missing step result', () => {
       const agents = [makeAgent('a'), makeAgent('b')];
 
-      const executor = new HandoffExecutor({ stateStore: mockStore as any });
+      const executor = new HandoffExecutor({ stateStore: mockStore as unknown as StateStore });
       const results = executor.executeChain(agents, []);
 
       expect(results).toHaveLength(1);
@@ -238,10 +251,7 @@ describe('HandoffExecutor', () => {
 
     it('reports schema validation errors', () => {
       const executor = new HandoffExecutor();
-      const result = executor.validatePayload(
-        { type: 'object', required: ['name'] },
-        {},
-      );
+      const result = executor.validatePayload({ type: 'object', required: ['name'] }, {});
       expect(result.valid).toBe(false);
       expect(result.errors.length).toBeGreaterThan(0);
     });
@@ -249,10 +259,15 @@ describe('HandoffExecutor', () => {
 
   describe('getHandoffEvents', () => {
     it('returns events from state store', () => {
-      const events = [{ id: 1, runId: 'r1', fromAgent: 'a', toAgent: 'b', validationResult: 'valid' }];
+      const events = [
+        { id: 1, runId: 'r1', fromAgent: 'a', toAgent: 'b', validationResult: 'valid' },
+      ];
       mockStore.getHandoffEvents.mockReturnValue(events);
 
-      const executor = new HandoffExecutor({ stateStore: mockStore as any, runId: 'r1' });
+      const executor = new HandoffExecutor({
+        stateStore: mockStore as unknown as StateStore,
+        runId: 'r1',
+      });
       const result = executor.getHandoffEvents();
 
       expect(result).toEqual(events);

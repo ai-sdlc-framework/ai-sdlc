@@ -118,9 +118,15 @@ describe('episodic-enhanced', () => {
 
     it('summarize returns meaningful summary', () => {
       const mem = createEnhancedEpisodicMemory(store);
-      mem.record({ pipelineType: 'execute', outcome: 'success', durationMs: 1000, costUsd: 0.10 });
-      mem.record({ pipelineType: 'execute', outcome: 'success', durationMs: 2000, costUsd: 0.20 });
-      mem.record({ pipelineType: 'execute', outcome: 'failure', durationMs: 500, costUsd: 0.05, errorMessage: 'test failed' });
+      mem.record({ pipelineType: 'execute', outcome: 'success', durationMs: 1000, costUsd: 0.1 });
+      mem.record({ pipelineType: 'execute', outcome: 'success', durationMs: 2000, costUsd: 0.2 });
+      mem.record({
+        pipelineType: 'execute',
+        outcome: 'failure',
+        durationMs: 500,
+        costUsd: 0.05,
+        errorMessage: 'test failed',
+      });
 
       const summary = mem.summarize();
       expect(summary.totalEpisodes).toBe(3);
@@ -160,8 +166,16 @@ describe('episodic-enhanced', () => {
   describe('extractEpisodicPatterns', () => {
     it('groups failures by error pattern', () => {
       const mem = createEnhancedEpisodicMemory(store);
-      mem.record({ pipelineType: 'execute', outcome: 'failure', errorMessage: 'lint error: no-unused-vars' });
-      mem.record({ pipelineType: 'execute', outcome: 'failure', errorMessage: 'lint error: no-unused-vars' });
+      mem.record({
+        pipelineType: 'execute',
+        outcome: 'failure',
+        errorMessage: 'lint error: no-unused-vars',
+      });
+      mem.record({
+        pipelineType: 'execute',
+        outcome: 'failure',
+        errorMessage: 'lint error: no-unused-vars',
+      });
       mem.record({ pipelineType: 'execute', outcome: 'failure', errorMessage: 'test timeout' });
 
       const patterns = extractEpisodicPatterns(store);

@@ -46,8 +46,10 @@ export function createFlyioTarget(
         if (config.useCliMode && exec) {
           const { stdout } = await exec('flyctl', [
             'deploy',
-            '--app', config.appName,
-            '--image', version,
+            '--app',
+            config.appName,
+            '--image',
+            version,
             '--now',
           ]);
           result.url = extractFlyUrl(stdout, config.appName);
@@ -57,7 +59,10 @@ export function createFlyioTarget(
             headers: headers(),
           });
           if (!listRes.ok) throw new Error(`Fly.io list machines failed: ${listRes.status}`);
-          const machines = (await listRes.json()) as Array<{ id: string; config: Record<string, unknown> }>;
+          const machines = (await listRes.json()) as Array<{
+            id: string;
+            config: Record<string, unknown>;
+          }>;
 
           for (const machine of machines) {
             const updateRes = await httpFetch(
@@ -70,7 +75,8 @@ export function createFlyioTarget(
                 }),
               },
             );
-            if (!updateRes.ok) throw new Error(`Fly.io update machine ${machine.id} failed: ${updateRes.status}`);
+            if (!updateRes.ok)
+              throw new Error(`Fly.io update machine ${machine.id} failed: ${updateRes.status}`);
           }
           result.url = `https://${config.appName}.fly.dev`;
         }
@@ -105,9 +111,7 @@ export function createFlyioTarget(
 
       try {
         if (config.useCliMode && exec) {
-          await exec('flyctl', [
-            'releases', '--app', config.appName, '--json',
-          ]);
+          await exec('flyctl', ['releases', '--app', config.appName, '--json']);
           // In CLI mode, trigger a rollback by deploying the previous image
           await exec('flyctl', ['deploy', '--app', config.appName, '--strategy', 'rolling']);
         } else {

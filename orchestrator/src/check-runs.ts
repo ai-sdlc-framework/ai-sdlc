@@ -39,7 +39,9 @@ async function ghApiCall(
 /**
  * Create a GitHub Check Run for a gate result.
  */
-export async function createCheckRun(input: CheckRunInput): Promise<{ success: boolean; error?: string }> {
+export async function createCheckRun(
+  input: CheckRunInput,
+): Promise<{ success: boolean; error?: string }> {
   const body: Record<string, unknown> = {
     name: input.name,
     head_sha: input.headSha,
@@ -87,9 +89,8 @@ export async function reportGateCheckRuns(
   gateResults: GateResult[],
 ): Promise<void> {
   for (const result of gateResults) {
-    const conclusion = result.verdict === 'pass' ? 'success'
-      : result.verdict === 'fail' ? 'failure'
-        : 'neutral';
+    const conclusion =
+      result.verdict === 'pass' ? 'success' : result.verdict === 'fail' ? 'failure' : 'neutral';
 
     await createCheckRun({
       name: `AI-SDLC: ${result.gate}`,

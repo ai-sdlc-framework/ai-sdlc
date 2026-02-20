@@ -52,27 +52,23 @@ export class StateStore {
   private migrate(): void {
     // Check current schema version
     try {
-      const row = this.db
-        .prepare('SELECT MAX(version) as v FROM schema_version')
-        .get() as { v: number | null } | undefined;
+      const row = this.db.prepare('SELECT MAX(version) as v FROM schema_version').get() as
+        | { v: number | null }
+        | undefined;
       const current = row?.v ?? 0;
       if (current >= CURRENT_SCHEMA_VERSION) return;
 
       for (const migration of MIGRATIONS) {
         if (migration.version > (current ?? 0)) {
           this.db.exec(migration.sql);
-          this.db
-            .prepare('INSERT INTO schema_version (version) VALUES (?)')
-            .run(migration.version);
+          this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migration.version);
         }
       }
     } catch {
       // Table doesn't exist yet — run all migrations
       for (const migration of MIGRATIONS) {
         this.db.exec(migration.sql);
-        this.db
-          .prepare('INSERT INTO schema_version (version) VALUES (?)')
-          .run(migration.version);
+        this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migration.version);
       }
     }
   }
@@ -301,19 +297,21 @@ export class StateStore {
          result = COALESCE(?, result),
          gate_results = COALESCE(?, gate_results)
          WHERE run_id = ?`;
-    this.db.prepare(sql).run(
-      status,
-      opts?.currentStage ?? null,
-      opts?.result ?? null,
-      opts?.gateResults ?? null,
-      runId,
-    );
+    this.db
+      .prepare(sql)
+      .run(
+        status,
+        opts?.currentStage ?? null,
+        opts?.result ?? null,
+        opts?.gateResults ?? null,
+        runId,
+      );
   }
 
   getPipelineRun(runId: string): PipelineRun | undefined {
-    const row = this.db
-      .prepare('SELECT * FROM pipeline_runs WHERE run_id = ?')
-      .get(runId) as Record<string, unknown> | undefined;
+    const row = this.db.prepare('SELECT * FROM pipeline_runs WHERE run_id = ?').get(runId) as
+      | Record<string, unknown>
+      | undefined;
     return row ? this.mapPipelineRun(row) : undefined;
   }
 
@@ -489,13 +487,27 @@ export class StateStore {
     return Number(result.lastInsertRowid);
   }
 
-  getCostEntries(opts?: { runId?: string; agentName?: string; since?: string; limit?: number }): CostLedgerEntry[] {
+  getCostEntries(opts?: {
+    runId?: string;
+    agentName?: string;
+    since?: string;
+    limit?: number;
+  }): CostLedgerEntry[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
-    if (opts?.runId) { conditions.push('run_id = ?'); params.push(opts.runId); }
-    if (opts?.agentName) { conditions.push('agent_name = ?'); params.push(opts.agentName); }
-    if (opts?.since) { conditions.push('created_at >= ?'); params.push(opts.since); }
+    if (opts?.runId) {
+      conditions.push('run_id = ?');
+      params.push(opts.runId);
+    }
+    if (opts?.agentName) {
+      conditions.push('agent_name = ?');
+      params.push(opts.agentName);
+    }
+    if (opts?.since) {
+      conditions.push('created_at >= ?');
+      params.push(opts.since);
+    }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = opts?.limit ?? 1000;
@@ -506,12 +518,17 @@ export class StateStore {
     return rows.map((r) => this.mapCostEntry(r));
   }
 
-  getCostSummary(since?: string): { totalCostUsd: number; totalTokens: number; entryCount: number } {
+  getCostSummary(since?: string): {
+    totalCostUsd: number;
+    totalTokens: number;
+    entryCount: number;
+  } {
     const where = since ? 'WHERE created_at >= ?' : '';
     const sql = `SELECT COALESCE(SUM(cost_usd), 0) as total_cost, COALESCE(SUM(total_tokens), 0) as total_tokens, COUNT(*) as entry_count FROM cost_ledger ${where}`;
-    const row = (since
-      ? this.db.prepare(sql).get(since)
-      : this.db.prepare(sql).get()) as Record<string, unknown>;
+    const row = (since ? this.db.prepare(sql).get(since) : this.db.prepare(sql).get()) as Record<
+      string,
+      unknown
+    >;
     return {
       totalCostUsd: row.total_cost as number,
       totalTokens: row.total_tokens as number,
@@ -563,8 +580,14 @@ export class StateStore {
     const conditions: string[] = ['active = 1'];
     const params: unknown[] = [];
 
-    if (gateName) { conditions.push('gate_name = ?'); params.push(gateName); }
-    if (complexityBand) { conditions.push('complexity_band = ?'); params.push(complexityBand); }
+    if (gateName) {
+      conditions.push('gate_name = ?');
+      params.push(gateName);
+    }
+    if (complexityBand) {
+      conditions.push('complexity_band = ?');
+      params.push(complexityBand);
+    }
 
     const sql = `SELECT * FROM gate_threshold_overrides WHERE ${conditions.join(' AND ')} ORDER BY gate_name`;
     const rows = this.db.prepare(sql).all(...params) as Record<string, unknown>[];
@@ -630,10 +653,22 @@ export class StateStore {
     const conditions: string[] = [];
     const params: unknown[] = [];
 
-    if (opts.agentName) { conditions.push('agent_name = ?'); params.push(opts.agentName); }
-    if (opts.outcome) { conditions.push('outcome = ?'); params.push(opts.outcome); }
-    if (opts.since) { conditions.push('created_at >= ?'); params.push(opts.since); }
-    if (opts.files) { conditions.push('metadata LIKE ?'); params.push(`%${opts.files}%`); }
+    if (opts.agentName) {
+      conditions.push('agent_name = ?');
+      params.push(opts.agentName);
+    }
+    if (opts.outcome) {
+      conditions.push('outcome = ?');
+      params.push(opts.outcome);
+    }
+    if (opts.since) {
+      conditions.push('created_at >= ?');
+      params.push(opts.since);
+    }
+    if (opts.files) {
+      conditions.push('metadata LIKE ?');
+      params.push(`%${opts.files}%`);
+    }
 
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = opts.limit ?? 50;
@@ -713,17 +748,24 @@ export class StateStore {
     return Number(result.lastInsertRowid);
   }
 
-  updateDeployment(deploymentId: string, update: { state: DeploymentRecordState; url?: string; error?: string; completedAt?: string }): void {
-    this.db.prepare(`
+  updateDeployment(
+    deploymentId: string,
+    update: { state: DeploymentRecordState; url?: string; error?: string; completedAt?: string },
+  ): void {
+    this.db
+      .prepare(
+        `
       UPDATE deployments SET state = ?, url = COALESCE(?, url), error = COALESCE(?, error), completed_at = COALESCE(?, completed_at)
       WHERE deployment_id = ?
-    `).run(
-      update.state,
-      update.url ?? null,
-      update.error ?? null,
-      update.completedAt ?? null,
-      deploymentId,
-    );
+    `,
+      )
+      .run(
+        update.state,
+        update.url ?? null,
+        update.error ?? null,
+        update.completedAt ?? null,
+        deploymentId,
+      );
   }
 
   getDeployment(deploymentId: string): DeploymentRecord | undefined {
@@ -733,11 +775,21 @@ export class StateStore {
     return row ? this.mapDeployment(row) : undefined;
   }
 
-  getDeployments(opts?: { targetName?: string; environment?: string; limit?: number }): DeploymentRecord[] {
+  getDeployments(opts?: {
+    targetName?: string;
+    environment?: string;
+    limit?: number;
+  }): DeploymentRecord[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
-    if (opts?.targetName) { conditions.push('target_name = ?'); params.push(opts.targetName); }
-    if (opts?.environment) { conditions.push('environment = ?'); params.push(opts.environment); }
+    if (opts?.targetName) {
+      conditions.push('target_name = ?');
+      params.push(opts.targetName);
+    }
+    if (opts?.environment) {
+      conditions.push('environment = ?');
+      params.push(opts.environment);
+    }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = opts?.limit ?? 50;
     params.push(limit);
@@ -832,12 +884,30 @@ export class StateStore {
   }): AuditEntryRecord[] {
     const conditions: string[] = [];
     const params: unknown[] = [];
-    if (opts?.actor) { conditions.push('actor = ?'); params.push(opts.actor); }
-    if (opts?.action) { conditions.push('action = ?'); params.push(opts.action); }
-    if (opts?.resourceType) { conditions.push('resource_type = ?'); params.push(opts.resourceType); }
-    if (opts?.resourceId) { conditions.push('resource_id = ?'); params.push(opts.resourceId); }
-    if (opts?.since) { conditions.push('created_at >= ?'); params.push(opts.since); }
-    if (opts?.until) { conditions.push('created_at <= ?'); params.push(opts.until); }
+    if (opts?.actor) {
+      conditions.push('actor = ?');
+      params.push(opts.actor);
+    }
+    if (opts?.action) {
+      conditions.push('action = ?');
+      params.push(opts.action);
+    }
+    if (opts?.resourceType) {
+      conditions.push('resource_type = ?');
+      params.push(opts.resourceType);
+    }
+    if (opts?.resourceId) {
+      conditions.push('resource_id = ?');
+      params.push(opts.resourceId);
+    }
+    if (opts?.since) {
+      conditions.push('created_at >= ?');
+      params.push(opts.since);
+    }
+    if (opts?.until) {
+      conditions.push('created_at <= ?');
+      params.push(opts.until);
+    }
     const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
     const limit = opts?.limit ?? 100;
     const offset = opts?.offset ?? 0;
@@ -849,9 +919,9 @@ export class StateStore {
   }
 
   getAuditEntry(entryId: string): AuditEntryRecord | undefined {
-    const row = this.db
-      .prepare('SELECT * FROM audit_entries WHERE entry_id = ?')
-      .get(entryId) as Record<string, unknown> | undefined;
+    const row = this.db.prepare('SELECT * FROM audit_entries WHERE entry_id = ?').get(entryId) as
+      | Record<string, unknown>
+      | undefined;
     return row ? this.mapAuditEntry(row) : undefined;
   }
 

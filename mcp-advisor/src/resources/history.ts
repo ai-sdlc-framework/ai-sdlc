@@ -12,11 +12,13 @@ export function registerHistoryResource(server: McpServer, deps: ServerDeps): vo
       const issueNumber = activeSession?.linkedIssue ?? undefined;
       const episodes = findRelevantEpisodes(deps.store, { issueNumber });
       return {
-        contents: [{
-          uri: 'ai-sdlc://context/history',
-          text: JSON.stringify(episodes, null, 2),
-          mimeType: 'application/json',
-        }],
+        contents: [
+          {
+            uri: 'ai-sdlc://context/history',
+            text: JSON.stringify(episodes, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
       };
     },
   );

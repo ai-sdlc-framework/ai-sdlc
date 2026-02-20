@@ -80,7 +80,9 @@ describe('CostGovernancePlugin', () => {
 
       plugin.initialize({ costTracker, log });
 
-      await expect(plugin.beforeRun(makeEvent())).rejects.toThrow('Cost governance: budget exceeded');
+      await expect(plugin.beforeRun(makeEvent())).rejects.toThrow(
+        'Cost governance: budget exceeded',
+      );
     });
 
     it('does not throw when budget is within limits', async () => {
@@ -113,9 +115,7 @@ describe('CostGovernancePlugin', () => {
       plugin.initialize({ costTracker, log });
       await plugin.beforeRun(makeEvent());
 
-      expect(log.info).toHaveBeenCalledWith(
-        expect.stringContaining('Approval required'),
-      );
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('Approval required'));
     });
 
     it('does nothing when no cost tracker is available', async () => {
@@ -160,9 +160,7 @@ describe('CostGovernancePlugin', () => {
       plugin.initialize({ costTracker, log, notificationRouter });
       await plugin.beforeRun(makeEvent());
 
-      expect(log.info).toHaveBeenCalledWith(
-        expect.stringContaining('soft limit reached'),
-      );
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('soft limit reached'));
       expect(notificationRouter.dispatch).toHaveBeenCalledWith(
         expect.objectContaining({
           type: 'cost-alert',
@@ -218,9 +216,7 @@ describe('CostGovernancePlugin', () => {
 
       // 90% utilization crosses 80% but not 95%
       expect(log.info).toHaveBeenCalledTimes(1);
-      expect(log.info).toHaveBeenCalledWith(
-        expect.stringContaining('80% budget consumed'),
-      );
+      expect(log.info).toHaveBeenCalledWith(expect.stringContaining('80% budget consumed'));
     });
 
     it('logs multiple alerts when multiple thresholds crossed', async () => {
@@ -257,9 +253,7 @@ describe('CostGovernancePlugin', () => {
           period: 'month',
           amount: 100,
           currency: 'USD',
-          alerts: [
-            { threshold: 0.8, action: 'notify' },
-          ],
+          alerts: [{ threshold: 0.8, action: 'notify' }],
         },
       };
       const plugin = new CostGovernancePlugin(policy);

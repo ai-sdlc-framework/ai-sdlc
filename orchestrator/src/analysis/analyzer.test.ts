@@ -20,7 +20,10 @@ describe('analyzer (facade)', () => {
     await mkdir(join(tmpDir, 'src'), { recursive: true });
     await writeFile(join(tmpDir, 'src', 'index.ts'), `export { foo } from './foo.js';\n`);
     await writeFile(join(tmpDir, 'src', 'foo.ts'), `export function foo() { return 42; }\n`);
-    await writeFile(join(tmpDir, 'src', 'bar.ts'), `import { foo } from './foo.js';\nconsole.log(foo());\n`);
+    await writeFile(
+      join(tmpDir, 'src', 'bar.ts'),
+      `import { foo } from './foo.js';\nconsole.log(foo());\n`,
+    );
 
     const profile = await analyzeCodebase({
       repoPath: tmpDir,

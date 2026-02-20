@@ -2,11 +2,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { RolloutController } from './rollout-controller.js';
 import { createStubMetricsCollector } from './metrics-collector.js';
 import type { DeploymentTarget, DeploymentResult } from './types.js';
-import type { CanaryConfig, BlueGreenConfig, RollingConfig, RolloutStatus } from './rollout-types.js';
+import type { CanaryConfig, BlueGreenConfig, RollingConfig } from './rollout-types.js';
 
 function createMockTarget(deployResult?: Partial<DeploymentResult>): DeploymentTarget {
   return {
-    deploy: vi.fn(async (version, env) => ({
+    deploy: vi.fn(async (version, _env) => ({
       id: `deploy-${Date.now()}`,
       state: 'healthy' as const,
       version,

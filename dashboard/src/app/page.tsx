@@ -14,11 +14,13 @@ import type { RunSummary, AgentSummary, HealthResponse } from '@/lib/types';
 function getHealth(): HealthResponse {
   const store = getStateStore();
 
-  const totals = store.getDatabase()
+  const totals = store
+    .getDatabase()
     .prepare(`SELECT COUNT(*) as total FROM pipeline_runs`)
     .get() as Record<string, number>;
 
-  const last24h = store.getDatabase()
+  const last24h = store
+    .getDatabase()
     .prepare(
       `SELECT COUNT(*) as total,
               SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
@@ -27,7 +29,8 @@ function getHealth(): HealthResponse {
     )
     .get() as Record<string, number>;
 
-  const agents = store.getDatabase()
+  const agents = store
+    .getDatabase()
     .prepare(`SELECT COUNT(*) as count FROM autonomy_ledger`)
     .get() as Record<string, number>;
 
@@ -50,7 +53,8 @@ function getHealth(): HealthResponse {
 
 function getRecentRuns(limit = 10): RunSummary[] {
   const store = getStateStore();
-  const rows = store.getDatabase()
+  const rows = store
+    .getDatabase()
     .prepare(
       `SELECT run_id, issue_number, pr_number, pipeline_type, status,
               agent_name, cost_usd, tokens_used, started_at, completed_at
@@ -74,7 +78,8 @@ function getRecentRuns(limit = 10): RunSummary[] {
 
 function getAgents(): AgentSummary[] {
   const store = getStateStore();
-  const rows = store.getDatabase()
+  const rows = store
+    .getDatabase()
     .prepare(
       `SELECT agent_name, current_level, total_tasks, success_count, failure_count, last_task_at
        FROM autonomy_ledger ORDER BY agent_name`,
@@ -99,9 +104,8 @@ export default function OverviewPage() {
   const runs = getRecentRuns();
   const agents = getAgents();
 
-  const statusColor = health.status === 'healthy' ? '#16a34a'
-    : health.status === 'degraded' ? '#d97706'
-    : '#dc2626';
+  const statusColor =
+    health.status === 'healthy' ? '#16a34a' : health.status === 'degraded' ? '#d97706' : '#dc2626';
 
   return (
     <div>
@@ -122,18 +126,20 @@ export default function OverviewPage() {
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 24 }}>
         <section>
           <h2 style={{ fontSize: 16, marginBottom: 12 }}>Recent Runs</h2>
-          {runs.length === 0
-            ? <p style={{ color: '#94a3b8' }}>No pipeline runs yet.</p>
-            : runs.map((r) => <RunCard key={r.runId} run={r} />)
-          }
+          {runs.length === 0 ? (
+            <p style={{ color: '#94a3b8' }}>No pipeline runs yet.</p>
+          ) : (
+            runs.map((r) => <RunCard key={r.runId} run={r} />)
+          )}
         </section>
 
         <section>
           <h2 style={{ fontSize: 16, marginBottom: 12 }}>Agent Roster</h2>
-          {agents.length === 0
-            ? <p style={{ color: '#94a3b8' }}>No agents registered.</p>
-            : agents.map((a) => <AgentCard key={a.agentName} agent={a} />)
-          }
+          {agents.length === 0 ? (
+            <p style={{ color: '#94a3b8' }}>No agents registered.</p>
+          ) : (
+            agents.map((a) => <AgentCard key={a.agentName} agent={a} />)
+          )}
         </section>
       </div>
     </div>

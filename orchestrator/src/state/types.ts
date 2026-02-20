@@ -164,7 +164,13 @@ export interface HandoffEvent {
   createdAt?: string;
 }
 
-export type DeploymentRecordState = 'pending' | 'deploying' | 'healthy' | 'unhealthy' | 'rolled-back' | 'failed';
+export type DeploymentRecordState =
+  | 'pending'
+  | 'deploying'
+  | 'healthy'
+  | 'unhealthy'
+  | 'rolled-back'
+  | 'failed';
 
 export interface DeploymentRecord {
   id?: number;

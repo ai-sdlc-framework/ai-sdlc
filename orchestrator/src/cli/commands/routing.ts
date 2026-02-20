@@ -32,15 +32,18 @@ export const routingCommand = new Command('routing')
         cutoff = Date.now() - ms;
       }
 
-      const filtered = cutoff > 0
-        ? history.filter((h) => h.decidedAt && new Date(h.decidedAt).getTime() >= cutoff)
-        : history;
+      const filtered =
+        cutoff > 0
+          ? history.filter((h) => h.decidedAt && new Date(h.decidedAt).getTime() >= cutoff)
+          : history;
 
-      console.log(formatOutput(format, {
-        type: 'routing',
-        duration: opts.last,
-        history: filtered,
-      }));
+      console.log(
+        formatOutput(format, {
+          type: 'routing',
+          duration: opts.last,
+          history: filtered,
+        }),
+      );
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;

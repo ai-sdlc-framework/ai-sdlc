@@ -13,6 +13,8 @@ export default tseslint.config(
       'sdk-go/',
       'sdk-python/',
       '**/dist/',
+      '**/.next/',
+      'dashboard/next-env.d.ts',
     ],
   },
   eslint.configs.recommended,
@@ -21,7 +23,12 @@ export default tseslint.config(
     languageOptions: {
       parserOptions: {
         projectService: {
-          allowDefaultProject: ['eslint.config.mjs'],
+          allowDefaultProject: [
+            'eslint.config.mjs',
+            'orchestrator/vitest.config.ts',
+            'dashboard/next.config.mjs',
+            'mcp-advisor/vitest.config.ts',
+          ],
         },
       },
     },

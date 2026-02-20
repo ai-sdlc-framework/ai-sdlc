@@ -59,7 +59,7 @@ describe('dashboard-renderer', () => {
       },
     ],
     costSummary: {
-      totalCostUsd: 12.50,
+      totalCostUsd: 12.5,
       totalTokens: 1500000,
       totalInputTokens: 1000000,
       totalOutputTokens: 500000,
@@ -71,11 +71,11 @@ describe('dashboard-renderer', () => {
     },
     budgetStatus: {
       budgetUsd: 500,
-      spentUsd: 12.50,
-      remainingUsd: 487.50,
+      spentUsd: 12.5,
+      remainingUsd: 487.5,
       utilizationPercent: 2.5,
       overBudget: false,
-      projectedMonthlyUsd: 37.50,
+      projectedMonthlyUsd: 37.5,
     },
   };
 

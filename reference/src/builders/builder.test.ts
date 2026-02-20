@@ -153,7 +153,10 @@ describe('PipelineBuilder', () => {
           hardLimit: { amount: 50, currency: 'USD', action: 'abort' },
         },
         perStage: {
-          defaults: { tokenLimit: 100000, costLimit: { amount: 10, currency: 'USD', action: 'notify' } },
+          defaults: {
+            tokenLimit: 100000,
+            costLimit: { amount: 10, currency: 'USD', action: 'notify' },
+          },
           overrides: {
             implement: { tokenLimit: 200000 },
           },
@@ -221,18 +224,23 @@ describe('AgentRoleBuilder', () => {
       .withModelSelection({
         rules: [
           { complexity: [1, 3], model: 'claude-haiku-3-5', rationale: 'Simple tasks' },
-          { complexity: [4, 7], model: 'claude-sonnet-4-5-20250929', rationale: 'Medium complexity' },
+          {
+            complexity: [4, 7],
+            model: 'claude-sonnet-4-5-20250929',
+            rationale: 'Medium complexity',
+          },
           { complexity: [8, 10], model: 'claude-opus-4-6', rationale: 'Complex tasks' },
         ],
-        budgetPressure: [
-          { above: 0.8, downshift: 1, notify: ['#cost-alerts'] },
-        ],
+        budgetPressure: [{ above: 0.8, downshift: 1, notify: ['#cost-alerts'] }],
         fallbackChain: ['claude-sonnet-4-5-20250929', 'claude-haiku-3-5'],
       })
       .build();
     expect(role.spec.modelSelection?.rules).toHaveLength(3);
     expect(role.spec.modelSelection?.budgetPressure?.[0].above).toBe(0.8);
-    expect(role.spec.modelSelection?.fallbackChain).toEqual(['claude-sonnet-4-5-20250929', 'claude-haiku-3-5']);
+    expect(role.spec.modelSelection?.fallbackChain).toEqual([
+      'claude-sonnet-4-5-20250929',
+      'claude-haiku-3-5',
+    ]);
   });
 });
 

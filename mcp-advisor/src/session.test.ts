@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { SessionManager, type SessionState } from './session.js';
+import { SessionManager } from './session.js';
 
 describe('SessionManager', () => {
   let mgr: SessionManager;
@@ -40,9 +40,24 @@ describe('SessionManager', () => {
 
   it('accumulates usage entries', () => {
     const s = mgr.create({ developer: 'a', tool: 'claude-code' });
-    mgr.addUsage(s.sessionId, { model: 'claude-opus-4-6', inputTokens: 1000, outputTokens: 500, costUsd: 0.05 });
-    mgr.addUsage(s.sessionId, { model: 'claude-opus-4-6', inputTokens: 2000, outputTokens: 1000, costUsd: 0.10 });
-    mgr.addUsage(s.sessionId, { model: 'claude-haiku-4-5-20251001', inputTokens: 500, outputTokens: 200, costUsd: 0.01 });
+    mgr.addUsage(s.sessionId, {
+      model: 'claude-opus-4-6',
+      inputTokens: 1000,
+      outputTokens: 500,
+      costUsd: 0.05,
+    });
+    mgr.addUsage(s.sessionId, {
+      model: 'claude-opus-4-6',
+      inputTokens: 2000,
+      outputTokens: 1000,
+      costUsd: 0.1,
+    });
+    mgr.addUsage(s.sessionId, {
+      model: 'claude-haiku-4-5-20251001',
+      inputTokens: 500,
+      outputTokens: 200,
+      costUsd: 0.01,
+    });
 
     expect(s.accumulatedCost.totalInputTokens).toBe(3500);
     expect(s.accumulatedCost.totalOutputTokens).toBe(1700);

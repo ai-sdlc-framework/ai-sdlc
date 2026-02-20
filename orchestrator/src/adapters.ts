@@ -5,7 +5,11 @@
  */
 
 import { join } from 'node:path';
-import { DEFAULT_CONFIG_DIR_NAME, DEFAULT_DOCKER_IMAGE, DEFAULT_WORKFLOW_FILE } from './defaults.js';
+import {
+  DEFAULT_CONFIG_DIR_NAME,
+  DEFAULT_DOCKER_IMAGE,
+  DEFAULT_WORKFLOW_FILE,
+} from './defaults.js';
 import {
   // Registry & scanner (used in function bodies)
   createAdapterRegistry,
@@ -38,20 +42,6 @@ import {
   resolveGitAdapter,
   // GitHub CI adapter
   createGitHubCIPipeline,
-  // Production adapters
-  createGitLabSourceControl,
-  createGitLabCIPipeline,
-  createJiraIssueTracker,
-  // Webhook server
-  createWebhookServer,
-  // Webhook providers
-  createGitHubWebhookProvider,
-  verifyGitHubSignature,
-  createGitLabWebhookProvider,
-  verifyGitLabToken,
-  createJiraWebhookProvider,
-  createLinearWebhookProvider,
-  verifyLinearSignature,
   // Types (used in function signatures)
   type AdapterRegistry,
   type AdapterMetadata,

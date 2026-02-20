@@ -31,12 +31,12 @@ function normalize(value: number, midpoint: number): number {
  * Compute overall codebase complexity score on a 1-10 scale.
  */
 export function computeComplexityScore(inputs: ComplexityInputs): number {
-  const fileScore = normalize(inputs.filesCount, 200);       // 200 files ≈ 0.5
-  const moduleScore = normalize(inputs.modulesCount, 10);     // 10 modules ≈ 0.5
-  const depScore = normalize(inputs.dependencyCount, 50);     // 50 deps ≈ 0.5
-  const complexityScore = inputs.avgFileComplexity / 10;       // Already 0-1 range (1-10 / 10)
-  const cycleScore = normalize(inputs.cycleCount, 2);         // 2 cycles ≈ 0.5
-  const hotspotScore = normalize(inputs.hotspotCount, 5);     // 5 hotspots ≈ 0.5
+  const fileScore = normalize(inputs.filesCount, 200); // 200 files ≈ 0.5
+  const moduleScore = normalize(inputs.modulesCount, 10); // 10 modules ≈ 0.5
+  const depScore = normalize(inputs.dependencyCount, 50); // 50 deps ≈ 0.5
+  const complexityScore = inputs.avgFileComplexity / 10; // Already 0-1 range (1-10 / 10)
+  const cycleScore = normalize(inputs.cycleCount, 2); // 2 cycles ≈ 0.5
+  const hotspotScore = normalize(inputs.hotspotCount, 5); // 5 hotspots ≈ 0.5
 
   const weighted =
     fileScore * 0.2 +

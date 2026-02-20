@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { computeFileComplexity, analyzeHotspots } from './hotspot-analyzer.js';
 import type { FileInfo, ImportStatement } from './types.js';
 
@@ -54,13 +54,13 @@ describe('hotspot-analyzer', () => {
     // a repo path that won't be a git directory (falls back to empty churn)
 
     it('identifies high-complexity files as hotspots even without churn', async () => {
-      const files = [
-        makeFile('small.ts', 10),
-        makeFile('large.ts', 800),
-      ];
+      const files = [makeFile('small.ts', 10), makeFile('large.ts', 800)];
       const importsByFile = new Map<string, ImportStatement[]>();
       importsByFile.set('small.ts', [makeImport('./a')]);
-      importsByFile.set('large.ts', Array.from({ length: 40 }, (_, i) => makeImport(`./dep${i}`)));
+      importsByFile.set(
+        'large.ts',
+        Array.from({ length: 40 }, (_, i) => makeImport(`./dep${i}`)),
+      );
 
       const hotspots = await analyzeHotspots('/nonexistent-repo', files, importsByFile, {
         threshold: 0.3,
@@ -73,10 +73,7 @@ describe('hotspot-analyzer', () => {
     });
 
     it('returns empty when all files are simple', async () => {
-      const files = [
-        makeFile('a.ts', 10),
-        makeFile('b.ts', 15),
-      ];
+      const files = [makeFile('a.ts', 10), makeFile('b.ts', 15)];
       const importsByFile = new Map<string, ImportStatement[]>();
       importsByFile.set('a.ts', []);
       importsByFile.set('b.ts', [makeImport('./a')]);
@@ -89,13 +86,16 @@ describe('hotspot-analyzer', () => {
     });
 
     it('sorts hotspots by composite score descending', async () => {
-      const files = [
-        makeFile('medium.ts', 200),
-        makeFile('large.ts', 600),
-      ];
+      const files = [makeFile('medium.ts', 200), makeFile('large.ts', 600)];
       const importsByFile = new Map<string, ImportStatement[]>();
-      importsByFile.set('medium.ts', Array.from({ length: 10 }, (_, i) => makeImport(`./d${i}`)));
-      importsByFile.set('large.ts', Array.from({ length: 30 }, (_, i) => makeImport(`./d${i}`)));
+      importsByFile.set(
+        'medium.ts',
+        Array.from({ length: 10 }, (_, i) => makeImport(`./d${i}`)),
+      );
+      importsByFile.set(
+        'large.ts',
+        Array.from({ length: 30 }, (_, i) => makeImport(`./d${i}`)),
+      );
 
       const hotspots = await analyzeHotspots('/nonexistent-repo', files, importsByFile, {
         threshold: 0.1,

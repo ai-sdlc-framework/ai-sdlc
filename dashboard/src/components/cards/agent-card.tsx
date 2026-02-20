@@ -11,21 +11,25 @@ export function AgentCard({ agent }: { agent: AgentSummary }) {
   const successPct = (agent.successRate * 100).toFixed(0);
 
   return (
-    <div style={{
-      padding: 12,
-      border: '1px solid #e2e8f0',
-      borderRadius: 8,
-      marginBottom: 8,
-    }}>
+    <div
+      style={{
+        padding: 12,
+        border: '1px solid #e2e8f0',
+        borderRadius: 8,
+        marginBottom: 8,
+      }}
+    >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <span style={{ fontWeight: 600, fontSize: 14 }}>{agent.agentName}</span>
-        <span style={{
-          fontSize: 11,
-          padding: '2px 6px',
-          borderRadius: 4,
-          backgroundColor: '#eff6ff',
-          color: '#1d4ed8',
-        }}>
+        <span
+          style={{
+            fontSize: 11,
+            padding: '2px 6px',
+            borderRadius: 4,
+            backgroundColor: '#eff6ff',
+            color: '#1d4ed8',
+          }}
+        >
           {levelLabel}
         </span>
       </div>

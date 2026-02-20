@@ -59,11 +59,7 @@ export class HandoffExecutor {
    * Execute a handoff from one agent to another, validating the payload
    * against the handoff contract and recording an audit event.
    */
-  executeHandoff(
-    fromAgent: AgentRole,
-    toAgent: AgentRole,
-    stepResult: StepResult,
-  ): HandoffResult {
+  executeHandoff(fromAgent: AgentRole, toAgent: AgentRole, stepResult: StepResult): HandoffResult {
     const payload = this.extractPayload(stepResult);
     const payloadHash = this.hashPayload(payload);
 
@@ -108,10 +104,7 @@ export class HandoffExecutor {
    * Execute a chain of handoffs through a sequence of agents.
    * Each agent's output becomes the next agent's input.
    */
-  executeChain(
-    agents: AgentRole[],
-    stepResults: StepResult[],
-  ): HandoffResult[] {
+  executeChain(agents: AgentRole[], stepResults: StepResult[]): HandoffResult[] {
     const results: HandoffResult[] = [];
 
     for (let i = 0; i < agents.length - 1; i++) {

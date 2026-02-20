@@ -70,13 +70,8 @@ describe('FlyioTarget', () => {
     });
 
     it('uses custom API base URL', async () => {
-      const fetch = mockFetch([
-        { ok: true, status: 200, body: [] },
-      ]);
-      const target = createFlyioTarget(
-        { ...baseConfig, apiBase: 'https://custom.api' },
-        { fetch },
-      );
+      const fetch = mockFetch([{ ok: true, status: 200, body: [] }]);
+      const target = createFlyioTarget({ ...baseConfig, apiBase: 'https://custom.api' }, { fetch });
 
       await target.deploy('v1', 'production');
 
@@ -85,9 +80,7 @@ describe('FlyioTarget', () => {
     });
 
     it('includes authorization header', async () => {
-      const fetch = mockFetch([
-        { ok: true, status: 200, body: [] },
-      ]);
+      const fetch = mockFetch([{ ok: true, status: 200, body: [] }]);
       const target = createFlyioTarget(baseConfig, { fetch });
 
       await target.deploy('v1', 'production');
@@ -112,8 +105,8 @@ describe('FlyioTarget', () => {
 
     it('handles rollback API failure', async () => {
       const fetch = mockFetch([
-        { ok: true, status: 200, body: [] },  // deploy
-        { ok: false, status: 503 },           // rollback fails
+        { ok: true, status: 200, body: [] }, // deploy
+        { ok: false, status: 503 }, // rollback fails
       ]);
       const target = createFlyioTarget(baseConfig, { fetch });
 
@@ -127,10 +120,7 @@ describe('FlyioTarget', () => {
   describe('CLI mode', () => {
     it('deploys via flyctl deploy', async () => {
       const exec = mockExec('https://my-fly-app.fly.dev deployed successfully');
-      const target = createFlyioTarget(
-        { ...baseConfig, useCliMode: true },
-        { exec },
-      );
+      const target = createFlyioTarget({ ...baseConfig, useCliMode: true }, { exec });
 
       const result = await target.deploy('registry/app:v3', 'production');
 
@@ -148,10 +138,7 @@ describe('FlyioTarget', () => {
 
     it('extracts URL from flyctl output', async () => {
       const exec = mockExec('==> Deploying image\nhttps://my-fly-app.fly.dev\n==> done');
-      const target = createFlyioTarget(
-        { ...baseConfig, useCliMode: true },
-        { exec },
-      );
+      const target = createFlyioTarget({ ...baseConfig, useCliMode: true }, { exec });
 
       const result = await target.deploy('v1', 'production');
 
@@ -160,10 +147,7 @@ describe('FlyioTarget', () => {
 
     it('falls back to default URL when none in output', async () => {
       const exec = mockExec('deployed successfully');
-      const target = createFlyioTarget(
-        { ...baseConfig, useCliMode: true },
-        { exec },
-      );
+      const target = createFlyioTarget({ ...baseConfig, useCliMode: true }, { exec });
 
       const result = await target.deploy('v1', 'production');
 
@@ -174,10 +158,7 @@ describe('FlyioTarget', () => {
       const exec = vi.fn(async () => {
         throw new Error('flyctl: command not found');
       });
-      const target = createFlyioTarget(
-        { ...baseConfig, useCliMode: true },
-        { exec },
-      );
+      const target = createFlyioTarget({ ...baseConfig, useCliMode: true }, { exec });
 
       const result = await target.deploy('v1', 'production');
 
@@ -187,10 +168,7 @@ describe('FlyioTarget', () => {
 
     it('rollback via flyctl', async () => {
       const exec = mockExec();
-      const target = createFlyioTarget(
-        { ...baseConfig, useCliMode: true },
-        { exec },
-      );
+      const target = createFlyioTarget({ ...baseConfig, useCliMode: true }, { exec });
 
       const deployed = await target.deploy('v1', 'production');
       (exec as ReturnType<typeof vi.fn>).mockClear();

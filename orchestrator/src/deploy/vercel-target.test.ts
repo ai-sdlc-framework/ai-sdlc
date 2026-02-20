@@ -18,11 +18,13 @@ describe('VercelTarget', () => {
 
   describe('deploy', () => {
     it('deploys via Vercel API', async () => {
-      const fetch = mockFetch([{
-        ok: true,
-        status: 200,
-        body: { id: 'dpl_abc', url: 'my-app-abc.vercel.app', readyState: 'READY' },
-      }]);
+      const fetch = mockFetch([
+        {
+          ok: true,
+          status: 200,
+          body: { id: 'dpl_abc', url: 'my-app-abc.vercel.app', readyState: 'READY' },
+        },
+      ]);
       const target = createVercelTarget(baseConfig, { fetch });
 
       const result = await target.deploy('main', 'production');
@@ -39,11 +41,13 @@ describe('VercelTarget', () => {
     });
 
     it('uses preview target for non-production', async () => {
-      const fetch = mockFetch([{
-        ok: true,
-        status: 200,
-        body: { id: 'dpl_def', readyState: 'BUILDING' },
-      }]);
+      const fetch = mockFetch([
+        {
+          ok: true,
+          status: 200,
+          body: { id: 'dpl_def', readyState: 'BUILDING' },
+        },
+      ]);
       const target = createVercelTarget(baseConfig, { fetch });
 
       const result = await target.deploy('feature-branch', 'staging');
@@ -54,11 +58,13 @@ describe('VercelTarget', () => {
     });
 
     it('includes teamId when configured', async () => {
-      const fetch = mockFetch([{
-        ok: true,
-        status: 200,
-        body: { id: 'dpl_team', readyState: 'READY' },
-      }]);
+      const fetch = mockFetch([
+        {
+          ok: true,
+          status: 200,
+          body: { id: 'dpl_team', readyState: 'READY' },
+        },
+      ]);
       const target = createVercelTarget({ ...baseConfig, teamId: 'team_xyz' }, { fetch });
 
       await target.deploy('main', 'production');
@@ -87,11 +93,13 @@ describe('VercelTarget', () => {
       ];
 
       for (const { readyState, expected } of states) {
-        const fetch = mockFetch([{
-          ok: true,
-          status: 200,
-          body: { id: 'dpl_test', readyState },
-        }]);
+        const fetch = mockFetch([
+          {
+            ok: true,
+            status: 200,
+            body: { id: 'dpl_test', readyState },
+          },
+        ]);
         const target = createVercelTarget(baseConfig, { fetch });
         const result = await target.deploy('main', 'production');
         expect(result.state).toBe(expected);
@@ -102,8 +110,16 @@ describe('VercelTarget', () => {
   describe('getStatus', () => {
     it('fetches status from Vercel API', async () => {
       const fetch = mockFetch([
-        { ok: true, status: 200, body: { id: 'dpl_abc', url: 'app.vercel.app', readyState: 'READY' } },
-        { ok: true, status: 200, body: { readyState: 'READY', url: 'app.vercel.app', meta: { version: 'v2' } } },
+        {
+          ok: true,
+          status: 200,
+          body: { id: 'dpl_abc', url: 'app.vercel.app', readyState: 'READY' },
+        },
+        {
+          ok: true,
+          status: 200,
+          body: { readyState: 'READY', url: 'app.vercel.app', meta: { version: 'v2' } },
+        },
       ]);
       const target = createVercelTarget(baseConfig, { fetch });
 
@@ -116,7 +132,11 @@ describe('VercelTarget', () => {
 
     it('falls back to cached on API error', async () => {
       const fetch = mockFetch([
-        { ok: true, status: 200, body: { id: 'dpl_cached', readyState: 'READY', url: 'cached.vercel.app' } },
+        {
+          ok: true,
+          status: 200,
+          body: { id: 'dpl_cached', readyState: 'READY', url: 'cached.vercel.app' },
+        },
         { ok: false, status: 500 },
       ]);
       const target = createVercelTarget(baseConfig, { fetch });

@@ -6,7 +6,7 @@
 import { executePipeline, type ExecuteOptions, type PipelineResult } from './execute.js';
 import { startWatch, type WatchOptions, type WatchHandle } from './watch.js';
 import { executeFixCI, type FixCIOptions } from './fix-ci.js';
-import { loadConfig, loadConfigAsync, type AiSdlcConfig } from './config.js';
+import { loadConfig, type AiSdlcConfig } from './config.js';
 import { StateStore } from './state/index.js';
 import { createLogger, type Logger } from './logger.js';
 import type { SecurityContext } from './security.js';
@@ -307,8 +307,12 @@ export class Orchestrator {
             modulesCount: cached.modulesCount ?? 0,
             dependencyCount: cached.dependencyCount ?? 0,
             modules: [],
-            moduleGraph: cached.moduleGraph ? JSON.parse(cached.moduleGraph) : { modules: [], edges: [], externalDependencies: [], cycles: [] },
-            architecturalPatterns: cached.architecturalPatterns ? JSON.parse(cached.architecturalPatterns) : [],
+            moduleGraph: cached.moduleGraph
+              ? JSON.parse(cached.moduleGraph)
+              : { modules: [], edges: [], externalDependencies: [], cycles: [] },
+            architecturalPatterns: cached.architecturalPatterns
+              ? JSON.parse(cached.architecturalPatterns)
+              : [],
             hotspots: cached.hotspots ? JSON.parse(cached.hotspots) : [],
             conventions: cached.conventionsData ? JSON.parse(cached.conventionsData) : [],
             analyzedAt: cached.analyzedAt,
@@ -367,7 +371,9 @@ export class Orchestrator {
   /**
    * Get codebase complexity profile as CodebaseContext.
    */
-  async complexity(options?: { analyze?: boolean }): Promise<{ profile: CodebaseProfile; context: CodebaseContext }> {
+  async complexity(options?: {
+    analyze?: boolean;
+  }): Promise<{ profile: CodebaseProfile; context: CodebaseContext }> {
     const profile = await this.analyze({ force: options?.analyze });
     const context = buildCodebaseContext(profile);
     return { profile, context };
@@ -376,17 +382,30 @@ export class Orchestrator {
   /**
    * Get cost summary and budget status.
    */
-  async cost(opts?: { since?: string; budget?: number }): Promise<{ summary: CostSummary; budget: BudgetStatus }> {
+  async cost(opts?: {
+    since?: string;
+    budget?: number;
+  }): Promise<{ summary: CostSummary; budget: BudgetStatus }> {
     if (!this._costTracker) {
       return {
         summary: {
-          totalCostUsd: 0, totalTokens: 0, totalInputTokens: 0, totalOutputTokens: 0,
-          entryCount: 0, avgCostPerRun: 0, avgTokensPerRun: 0,
-          costByAgent: {}, costByModel: {},
+          totalCostUsd: 0,
+          totalTokens: 0,
+          totalInputTokens: 0,
+          totalOutputTokens: 0,
+          entryCount: 0,
+          avgCostPerRun: 0,
+          avgTokensPerRun: 0,
+          costByAgent: {},
+          costByModel: {},
         },
         budget: {
-          budgetUsd: 0, spentUsd: 0, remainingUsd: 0,
-          utilizationPercent: 0, overBudget: false, projectedMonthlyUsd: 0,
+          budgetUsd: 0,
+          spentUsd: 0,
+          remainingUsd: 0,
+          utilizationPercent: 0,
+          overBudget: false,
+          projectedMonthlyUsd: 0,
         },
       };
     }
@@ -405,11 +424,13 @@ export class Orchestrator {
     costSummary: CostSummary;
     budgetStatus: BudgetStatus;
   }> {
-    const runs = this._state ? this._state.getPipelineRuns(undefined, 10).map((r) => ({
-      runId: r.runId,
-      status: r.status,
-      startedAt: r.startedAt,
-    })) : [];
+    const runs = this._state
+      ? this._state.getPipelineRuns(undefined, 10).map((r) => ({
+          runId: r.runId,
+          status: r.status,
+          startedAt: r.startedAt,
+        }))
+      : [];
     const agents = this._state ? this._state.getAllAutonomyLedgerEntries() : [];
     const costData = await this.cost();
 

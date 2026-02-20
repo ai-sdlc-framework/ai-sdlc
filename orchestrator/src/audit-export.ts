@@ -43,7 +43,9 @@ export interface ComplianceReport {
 export function exportAuditEntries(entries: readonly AuditEntry[], options: ExportOptions): string {
   const includeIntegrity = options.includeIntegrity ?? true;
 
-  const filtered = options.filter ? entries.filter((e) => matchesFilter(e, options.filter!)) : entries;
+  const filtered = options.filter
+    ? entries.filter((e) => matchesFilter(e, options.filter!))
+    : entries;
 
   switch (options.format) {
     case 'json':
@@ -54,9 +56,7 @@ export function exportAuditEntries(entries: readonly AuditEntry[], options: Expo
       );
 
     case 'jsonl':
-      return filtered
-        .map((e) => JSON.stringify(formatEntry(e, includeIntegrity)))
-        .join('\n');
+      return filtered.map((e) => JSON.stringify(formatEntry(e, includeIntegrity))).join('\n');
 
     case 'csv': {
       const headers = includeIntegrity

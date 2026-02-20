@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { SlackMessenger } from './slack-messenger.js';
 
-function mockSlackAPI(response: { ok: boolean; ts?: string; channel?: string; error?: string }): void {
+function mockSlackAPI(response: {
+  ok: boolean;
+  ts?: string;
+  channel?: string;
+  error?: string;
+}): void {
   vi.spyOn(globalThis, 'fetch').mockResolvedValue({
     ok: true,
     json: () => Promise.resolve(response),

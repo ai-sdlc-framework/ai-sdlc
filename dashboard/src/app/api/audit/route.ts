@@ -49,11 +49,13 @@ export async function GET(request: Request): Promise<NextResponse<AuditResponse>
     whereClause = `WHERE ${conditions.join(' AND ')}`;
   }
 
-  const countRow = store.getDatabase()
+  const countRow = store
+    .getDatabase()
     .prepare(`SELECT COUNT(*) as total FROM pipeline_runs ${whereClause}`)
     .get(...params) as Record<string, number>;
 
-  const rows = store.getDatabase()
+  const rows = store
+    .getDatabase()
     .prepare(
       `SELECT id, run_id, issue_number, pipeline_type, status,
               agent_name, cost_usd, started_at, completed_at, gate_results

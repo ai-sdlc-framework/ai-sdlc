@@ -2,7 +2,7 @@
  * Types for staged rollout strategies (canary, blue-green, rolling).
  */
 
-import type { DeploymentResult, DeploymentTarget } from './types.js';
+import type { DeploymentTarget } from './types.js';
 
 // ── Strategy configurations ─────────────────────────────────────────
 
@@ -43,7 +43,14 @@ export type RolloutStrategy = CanaryConfig | BlueGreenConfig | RollingConfig;
 
 // ── Rollout status ──────────────────────────────────────────────────
 
-export type RolloutPhase = 'pending' | 'progressing' | 'soaking' | 'paused' | 'completed' | 'rolled-back' | 'failed';
+export type RolloutPhase =
+  | 'pending'
+  | 'progressing'
+  | 'soaking'
+  | 'paused'
+  | 'completed'
+  | 'rolled-back'
+  | 'failed';
 
 export interface RolloutStatus {
   /** Unique rollout identifier. */

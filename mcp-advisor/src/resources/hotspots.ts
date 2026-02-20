@@ -9,11 +9,13 @@ export function registerHotspotsResource(server: McpServer, deps: ServerDeps): v
     async () => {
       const hotspots = deps.store.getHotspots(deps.repoPath, 20);
       return {
-        contents: [{
-          uri: 'ai-sdlc://context/hotspots',
-          text: JSON.stringify(hotspots, null, 2),
-          mimeType: 'application/json',
-        }],
+        contents: [
+          {
+            uri: 'ai-sdlc://context/hotspots',
+            text: JSON.stringify(hotspots, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
       };
     },
   );

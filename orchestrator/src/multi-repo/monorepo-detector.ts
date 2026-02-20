@@ -30,7 +30,9 @@ export function detectMonorepoLayout(rootPath: string): MonorepoLayout {
         }
         return 'npm-workspaces';
       }
-    } catch { /* not valid JSON */ }
+    } catch {
+      /* not valid JSON */
+    }
   }
 
   // go.work
@@ -46,7 +48,9 @@ export function detectMonorepoLayout(rootPath: string): MonorepoLayout {
       if (content.includes('[workspace]')) {
         return 'cargo-workspace';
       }
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
 
   return 'single-repo';
@@ -198,7 +202,9 @@ function detectSinglePackage(rootPath: string): WorkspacePackage {
     try {
       const pkg = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
       name = pkg.name ?? name;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   return { name, path: rootPath, relativePath: '.' };
 }
@@ -231,9 +237,13 @@ function expandGlobPatterns(rootPath: string, patterns: string[]): WorkspacePack
                 packages.push({ name, path: fullPath, relativePath });
               }
             }
-          } catch { /* skip unreadable entries */ }
+          } catch {
+            /* skip unreadable entries */
+          }
         }
-      } catch { /* skip unreadable dirs */ }
+      } catch {
+        /* skip unreadable dirs */
+      }
     } else {
       // Direct directory reference
       const fullPath = resolve(rootPath, pattern);
@@ -256,7 +266,9 @@ function readPackageName(dirPath: string): string | undefined {
   if (existsSync(pkgJsonPath)) {
     try {
       return JSON.parse(readFileSync(pkgJsonPath, 'utf-8')).name;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
   }
   return undefined;
 }

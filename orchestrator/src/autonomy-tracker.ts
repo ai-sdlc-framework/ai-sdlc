@@ -7,7 +7,7 @@
  */
 
 import type { StateStore } from './state/store.js';
-import type { AutonomyLedgerEntry, AutonomyEvent } from './state/types.js';
+import type { AutonomyLedgerEntry } from './state/types.js';
 
 export interface AgentPerformanceMetrics {
   totalTasks: number;
@@ -78,7 +78,13 @@ export class AutonomyTracker {
   recordTaskOutcome(
     agentName: string,
     success: boolean,
-    opts?: { durationMs?: number; costUsd?: number; prApproved?: boolean; rollback?: boolean; securityIncident?: boolean },
+    opts?: {
+      durationMs?: number;
+      costUsd?: number;
+      prApproved?: boolean;
+      rollback?: boolean;
+      securityIncident?: boolean;
+    },
   ): void {
     const existing = this.store.getAutonomyLedger(agentName);
     const now = new Date().toISOString();
@@ -102,7 +108,9 @@ export class AutonomyTracker {
     // Update PR approval rate (running average)
     if (opts?.prApproved !== undefined) {
       const totalPRs = entry.totalTasks;
-      const prevApproved = Math.round((existing?.prApprovalRate ?? 0) * ((existing?.totalTasks ?? 0)));
+      const prevApproved = Math.round(
+        (existing?.prApprovalRate ?? 0) * (existing?.totalTasks ?? 0),
+      );
       const newApproved = prevApproved + (opts.prApproved ? 1 : 0);
       entry.prApprovalRate = totalPRs > 0 ? newApproved / totalPRs : 0;
     }
@@ -138,22 +146,21 @@ export class AutonomyTracker {
     }
 
     // Get recent pipeline runs for duration/cost stats
-    const runs = this.store.getPipelineRuns(undefined, 100)
+    const runs = this.store
+      .getPipelineRuns(undefined, 100)
       .filter((r) => r.agentName === agentName);
 
     const durations = runs
       .filter((r) => r.startedAt && r.completedAt)
       .map((r) => new Date(r.completedAt!).getTime() - new Date(r.startedAt!).getTime());
 
-    const costs = runs
-      .filter((r) => r.costUsd != null && r.costUsd > 0)
-      .map((r) => r.costUsd!);
+    const costs = runs.filter((r) => r.costUsd != null && r.costUsd > 0).map((r) => r.costUsd!);
 
     // Count recent failures (last 7 days)
     const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-    const recentFailures = runs
-      .filter((r) => r.status === 'failed' && r.startedAt && r.startedAt >= sevenDaysAgo)
-      .length;
+    const recentFailures = runs.filter(
+      (r) => r.status === 'failed' && r.startedAt && r.startedAt >= sevenDaysAgo,
+    ).length;
 
     return {
       totalTasks: ledger.totalTasks,
@@ -163,7 +170,8 @@ export class AutonomyTracker {
       prApprovalRate: ledger.prApprovalRate ?? 0,
       rollbackCount: ledger.rollbackCount ?? 0,
       securityIncidents: ledger.securityIncidents ?? 0,
-      avgDurationMs: durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
+      avgDurationMs:
+        durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
       avgCostUsd: costs.length > 0 ? costs.reduce((a, b) => a + b, 0) / costs.length : 0,
       recentFailures,
       timeAtLevelMs: ledger.timeAtLevelMs ?? 0,
@@ -200,7 +208,9 @@ export class AutonomyTracker {
     // Check success rate
     const rateThreshold = PROMOTION_SUCCESS_RATE[currentLevel] ?? 0.9;
     if (metrics.successRate < rateThreshold) {
-      unmetConditions.push(`Need ${Math.round(rateThreshold * 100)}% success rate, have ${Math.round(metrics.successRate * 100)}%`);
+      unmetConditions.push(
+        `Need ${Math.round(rateThreshold * 100)}% success rate, have ${Math.round(metrics.successRate * 100)}%`,
+      );
     }
 
     // Check no recent security incidents

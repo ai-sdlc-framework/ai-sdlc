@@ -14,9 +14,7 @@ export function handleTrackUsage(
   deps: ServerDeps,
   input: { sessionId?: string; model: string; inputTokens: number; outputTokens: number },
 ): TrackUsageResult {
-  const session = input.sessionId
-    ? deps.sessions.get(input.sessionId)
-    : deps.sessions.getActive();
+  const session = input.sessionId ? deps.sessions.get(input.sessionId) : deps.sessions.getActive();
 
   const costUsd = CostTracker.computeCost(input.inputTokens, input.outputTokens, input.model);
 

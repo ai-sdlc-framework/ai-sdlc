@@ -349,9 +349,7 @@ describe('cost command', () => {
     const program = wrapCommand(costCommand);
     await program.parseAsync(['cost', '--budget', '200'], { from: 'user' });
 
-    expect(mockCost).toHaveBeenCalledWith(
-      expect.objectContaining({ budget: 200 }),
-    );
+    expect(mockCost).toHaveBeenCalledWith(expect.objectContaining({ budget: 200 }));
   });
 });
 
@@ -373,10 +371,7 @@ describe('dashboard command', () => {
     const program = wrapCommand(dashboardCommand);
 
     // Dashboard starts an interval and never resolves
-    void program.parseAsync(
-      ['dashboard', '--refresh', '50'],
-      { from: 'user' },
-    );
+    void program.parseAsync(['dashboard', '--refresh', '50'], { from: 'user' });
 
     // Wait for initial render
     await new Promise((r) => setTimeout(r, 150));
@@ -400,8 +395,6 @@ describe('start command', () => {
     await program.parseAsync(['start'], { from: 'user' });
 
     expect(mockStart).toHaveBeenCalled();
-    expect(consoleSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Watch mode started'),
-    );
+    expect(consoleSpy).toHaveBeenCalledWith(expect.stringContaining('Watch mode started'));
   });
 });

@@ -42,7 +42,12 @@ describe('Full session lifecycle integration', () => {
       modulesCount: 8,
       dependencyCount: 25,
       architecturalPatterns: JSON.stringify([
-        { name: 'Modular Monolith', confidence: 0.9, description: 'Module boundaries', evidence: [] },
+        {
+          name: 'Modular Monolith',
+          confidence: 0.9,
+          description: 'Module boundaries',
+          evidence: [],
+        },
       ]),
       hotspots: JSON.stringify([
         { filePath: 'src/core/engine.ts', churnRate: 0.85, complexity: 9, commitCount: 50 },
@@ -73,7 +78,10 @@ describe('Full session lifecycle integration', () => {
 
   it('session_start → get_context → check_task → track_usage ×2 → check_file → session_end', async () => {
     // 1. session_start
-    const startResult = await handleSessionStart(deps, { developer: 'integration-tester', tool: 'claude-code' });
+    const startResult = await handleSessionStart(deps, {
+      developer: 'integration-tester',
+      tool: 'claude-code',
+    });
     expect(startResult.sessionId).toBeTruthy();
     expect(startResult.linkedIssue).toBe(42);
     expect(startResult.linkMethod).toBe('branch');

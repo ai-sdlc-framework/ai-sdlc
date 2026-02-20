@@ -5,7 +5,7 @@
 
 import { createGzip, createGunzip } from 'node:zlib';
 import { createReadStream, createWriteStream, existsSync } from 'node:fs';
-import { readFile, writeFile, unlink } from 'node:fs/promises';
+import { writeFile, unlink } from 'node:fs/promises';
 import { pipeline } from 'node:stream/promises';
 import type { AuditEntry } from '@ai-sdlc/reference';
 
@@ -60,11 +60,7 @@ export async function archiveEntries(
   await writeFile(tmpPath, jsonl, 'utf-8');
 
   // Gzip the file
-  await pipeline(
-    createReadStream(tmpPath),
-    createGzip(),
-    createWriteStream(archivePath),
-  );
+  await pipeline(createReadStream(tmpPath), createGzip(), createWriteStream(archivePath));
   await unlink(tmpPath);
 
   const manifest: ArchiveManifest = {
@@ -88,21 +84,20 @@ export async function loadArchivedEntries(archivePath: string): Promise<AuditEnt
   if (!existsSync(archivePath)) return [];
 
   const chunks: Buffer[] = [];
-  await pipeline(
-    createReadStream(archivePath),
-    createGunzip(),
-    async function* collect(source) {
-      for await (const chunk of source) {
-        chunks.push(Buffer.from(chunk));
-      }
-      yield Buffer.alloc(0);
-    },
-  );
+  await pipeline(createReadStream(archivePath), createGunzip(), async function* collect(source) {
+    for await (const chunk of source) {
+      chunks.push(Buffer.from(chunk));
+    }
+    yield Buffer.alloc(0);
+  });
 
   const content = Buffer.concat(chunks).toString('utf-8');
   if (!content.trim()) return [];
 
-  return content.split('\n').filter(Boolean).map((line) => JSON.parse(line) as AuditEntry);
+  return content
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => JSON.parse(line) as AuditEntry);
 }
 
 /**

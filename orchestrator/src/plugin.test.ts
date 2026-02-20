@@ -2,8 +2,14 @@
  * Orchestrator plugin lifecycle tests.
  */
 
-import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
-import type { OrchestratorPlugin, PluginContext, BeforeRunEvent, AfterRunEvent, RunErrorEvent } from './plugin.js';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type {
+  OrchestratorPlugin,
+  PluginContext,
+  BeforeRunEvent,
+  AfterRunEvent,
+  RunErrorEvent,
+} from './plugin.js';
 import type { PipelineResult } from './execute.js';
 
 // Mock executePipeline to avoid real adapter/runner setup
@@ -61,7 +67,9 @@ describe('Orchestrator plugins', () => {
 
   it('beforeRun() is called before pipeline execution', async () => {
     const callOrder: string[] = [];
-    const beforeFn = vi.fn<AnyFn>(() => { callOrder.push('beforeRun'); });
+    const beforeFn = vi.fn<AnyFn>(() => {
+      callOrder.push('beforeRun');
+    });
     const plugin: OrchestratorPlugin = { name: 'test', beforeRun: beforeFn };
     mockExecute.mockImplementation(async () => {
       callOrder.push('execute');
@@ -134,7 +142,9 @@ describe('Orchestrator plugins', () => {
   it('plugin throwing in beforeRun() aborts the run', async () => {
     const plugin: OrchestratorPlugin = {
       name: 'blocker',
-      beforeRun: vi.fn(() => { throw new Error('blocked by policy'); }),
+      beforeRun: vi.fn(() => {
+        throw new Error('blocked by policy');
+      }),
     };
 
     const orch = new Orchestrator({ plugins: [plugin] });
@@ -150,11 +160,15 @@ describe('Orchestrator plugins', () => {
     const order: string[] = [];
     const pluginA: OrchestratorPlugin = {
       name: 'plugin-a',
-      beforeRun: vi.fn(() => { order.push('a'); }),
+      beforeRun: vi.fn(() => {
+        order.push('a');
+      }),
     };
     const pluginB: OrchestratorPlugin = {
       name: 'plugin-b',
-      beforeRun: vi.fn(() => { order.push('b'); }),
+      beforeRun: vi.fn(() => {
+        order.push('b');
+      }),
     };
 
     const orch = new Orchestrator({ plugins: [pluginA, pluginB] });

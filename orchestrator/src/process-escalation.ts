@@ -6,7 +6,7 @@
  */
 
 import type { Gate } from '@ai-sdlc/reference';
-import { getComplexityBand, type AdjustedGate } from './progressive-gates.js';
+import { getComplexityBand } from './progressive-gates.js';
 import type { ComplexityBand } from './defaults.js';
 
 export type EscalationActionType =
@@ -39,11 +39,16 @@ export interface EscalationResult {
  */
 function bandOrd(band: ComplexityBand): number {
   switch (band) {
-    case 'trivial': return 0;
-    case 'standard': return 1;
-    case 'complex': return 2;
-    case 'critical': return 3;
-    default: return 1;
+    case 'trivial':
+      return 0;
+    case 'standard':
+      return 1;
+    case 'complex':
+      return 2;
+    case 'critical':
+      return 3;
+    default:
+      return 1;
   }
 }
 
@@ -159,7 +164,8 @@ export function formatEscalationSummary(result: EscalationResult): string {
     return `No escalation: band remains ${result.fromBand}`;
   }
 
-  const direction = bandOrd(result.toBand) > bandOrd(result.fromBand) ? 'escalated' : 'de-escalated';
+  const direction =
+    bandOrd(result.toBand) > bandOrd(result.fromBand) ? 'escalated' : 'de-escalated';
   const actionSummary = result.actions
     .filter((a) => a.type !== 'notify')
     .map((a) => `${a.type}${a.gateName ? ` (${a.gateName})` : ''}`)

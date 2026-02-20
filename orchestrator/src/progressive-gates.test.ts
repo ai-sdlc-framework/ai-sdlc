@@ -117,14 +117,16 @@ describe('progressive-gates', () => {
 
     it('applies overrides from the database', () => {
       const gate = makeGate('security', 'advisory');
-      const overrides = [{
-        id: 1,
-        gateName: 'security',
-        complexityBand: 'trivial',
-        enforcementLevel: 'hard-mandatory',
-        thresholdOverrides: JSON.stringify({ testCoverageThreshold: 99 }),
-        active: 1,
-      }];
+      const overrides = [
+        {
+          id: 1,
+          gateName: 'security',
+          complexityBand: 'trivial',
+          enforcementLevel: 'hard-mandatory',
+          thresholdOverrides: JSON.stringify({ testCoverageThreshold: 99 }),
+          active: 1,
+        },
+      ];
       const adjusted = adjustGateForComplexity(1, gate, overrides);
       expect(adjusted.enforcement).toBe('hard-mandatory');
       expect(adjusted.adjustedThresholds?.testCoverageThreshold).toBe(99);
@@ -151,10 +153,7 @@ describe('progressive-gates', () => {
 
   describe('computeGateAdjustments', () => {
     it('computes adjustment report', () => {
-      const gates = [
-        makeGate('test-coverage', 'soft-mandatory'),
-        makeGate('lint', 'advisory'),
-      ];
+      const gates = [makeGate('test-coverage', 'soft-mandatory'), makeGate('lint', 'advisory')];
       const adjustments = computeGateAdjustments(9, gates);
       expect(adjustments).toHaveLength(2);
       expect(adjustments[0].originalEnforcement).toBe('soft-mandatory');

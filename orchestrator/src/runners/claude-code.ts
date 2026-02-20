@@ -46,14 +46,22 @@ export function buildPrompt(ctx: AgentContext): string {
       `${++step}. Fix the errors that caused CI to fail.`,
     );
     if (fmtCmd) {
-      lines.push(`${++step}. If the failure is a formatting/prettier error, run \`${fmtCmd}\` to auto-fix it.`);
+      lines.push(
+        `${++step}. If the failure is a formatting/prettier error, run \`${fmtCmd}\` to auto-fix it.`,
+      );
     }
     if (lintCmd && fmtCmd) {
-      lines.push(`${++step}. After making ANY code changes, always run \`${lintCmd}\` and \`${fmtCmd}\` to catch issues before committing.`);
+      lines.push(
+        `${++step}. After making ANY code changes, always run \`${lintCmd}\` and \`${fmtCmd}\` to catch issues before committing.`,
+      );
     } else if (lintCmd) {
-      lines.push(`${++step}. After making ANY code changes, always run \`${lintCmd}\` to catch issues before committing.`);
+      lines.push(
+        `${++step}. After making ANY code changes, always run \`${lintCmd}\` to catch issues before committing.`,
+      );
     } else if (fmtCmd) {
-      lines.push(`${++step}. After making ANY code changes, always run \`${fmtCmd}\` to catch issues before committing.`);
+      lines.push(
+        `${++step}. After making ANY code changes, always run \`${fmtCmd}\` to catch issues before committing.`,
+      );
     }
     lines.push(
       `${++step}. Write or update tests if needed to cover your fix.`,
@@ -69,9 +77,13 @@ export function buildPrompt(ctx: AgentContext): string {
       `${++step}. Write or update tests to cover your changes.`,
     );
     if (lintCmd && fmtCmd) {
-      lines.push(`${++step}. After making code changes, run \`${lintCmd}\` and \`${fmtCmd}\` to ensure CI will pass.`);
+      lines.push(
+        `${++step}. After making code changes, run \`${lintCmd}\` and \`${fmtCmd}\` to ensure CI will pass.`,
+      );
     } else if (lintCmd) {
-      lines.push(`${++step}. After making code changes, run \`${lintCmd}\` to ensure CI will pass.`);
+      lines.push(
+        `${++step}. After making code changes, run \`${lintCmd}\` to ensure CI will pass.`,
+      );
     } else if (fmtCmd) {
       lines.push(`${++step}. After making code changes, run \`${fmtCmd}\` to ensure CI will pass.`);
     }
@@ -134,7 +146,11 @@ interface RunClaudeResult {
   model: string;
 }
 
-function runClaude(prompt: string, workDir: string, opts?: RunClaudeOptions): Promise<RunClaudeResult> {
+function runClaude(
+  prompt: string,
+  workDir: string,
+  opts?: RunClaudeOptions,
+): Promise<RunClaudeResult> {
   const tools = opts?.allowedTools?.join(',') ?? DEFAULT_ALLOWED_TOOLS;
   const timeoutMs = opts?.timeoutMs ?? DEFAULT_RUNNER_TIMEOUT_MS;
 
@@ -250,11 +266,7 @@ export class ClaudeCodeRunner implements AgentRunner {
       const commitMsg = tmpl
         .replace(/\{issueNumber\}/g, String(ctx.issueNumber))
         .replace(/\{issueTitle\}/g, ctx.issueTitle);
-      await gitExec(ctx.workDir, [
-        'commit',
-        '-m',
-        `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`,
-      ]);
+      await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
 
       return {
         success: true,

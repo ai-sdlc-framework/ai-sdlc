@@ -11,7 +11,8 @@ export async function GET(request: Request): Promise<NextResponse<RunSummary[]>>
   const limit = Math.min(Number(url.searchParams.get('limit') ?? '50'), 200);
 
   const store = getStateStore();
-  const rows = store.getDatabase()
+  const rows = store
+    .getDatabase()
     .prepare(
       `SELECT run_id, issue_number, pr_number, pipeline_type, status,
               agent_name, cost_usd, tokens_used, started_at, completed_at

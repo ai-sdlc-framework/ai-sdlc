@@ -131,13 +131,7 @@ export function ModuleGraph({ nodes, edges, width = 600, height = 400 }: ModuleG
         return (
           <g key={node.id}>
             <circle cx={pos.x} cy={pos.y} r={16} fill={color} opacity={0.8} />
-            <text
-              x={pos.x}
-              y={pos.y + 28}
-              textAnchor="middle"
-              fontSize={10}
-              fill="#334155"
-            >
+            <text x={pos.x} y={pos.y + 28} textAnchor="middle" fontSize={10} fill="#334155">
               {node.label}
             </text>
           </g>

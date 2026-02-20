@@ -11,11 +11,13 @@ export function registerBudgetResource(server: McpServer, deps: ServerDeps): voi
       const costByAgent = deps.costTracker.getCostByAgent();
       const data = { budgetStatus, costByAgent };
       return {
-        contents: [{
-          uri: 'ai-sdlc://context/budget',
-          text: JSON.stringify(data, null, 2),
-          mimeType: 'application/json',
-        }],
+        contents: [
+          {
+            uri: 'ai-sdlc://context/budget',
+            text: JSON.stringify(data, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
       };
     },
   );

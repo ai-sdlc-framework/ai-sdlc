@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { GenericLLMRunner, type ChatCompletionResponse } from './generic-llm.js';
 import type { AgentContext } from './types.js';
 
@@ -88,7 +88,7 @@ describe('GenericLLMRunner', () => {
   });
 
   it('handles API errors', async () => {
-    mockFetchResponse({ id: '', choices: [] } as any, 500);
+    mockFetchResponse({ id: '', choices: [] } as ChatCompletionResponse, 500);
 
     const runner = new GenericLLMRunner({
       apiUrl: 'https://api.example.com/v1/chat/completions',

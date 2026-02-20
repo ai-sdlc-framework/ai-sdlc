@@ -61,7 +61,7 @@ export function computeFileComplexity(lineCount: number, importCount: number): n
 
   // Normalize to 1-10 using a logarithmic scale
   // ~50 lines + 5 imports ≈ 3, ~200 lines + 20 imports ≈ 5, ~500+ lines + 30+ imports ≈ 8+
-  const normalized = Math.log2(raw + 1) / Math.log2(500) * 10;
+  const normalized = (Math.log2(raw + 1) / Math.log2(500)) * 10;
   return Math.max(1, Math.min(10, Math.round(normalized)));
 }
 

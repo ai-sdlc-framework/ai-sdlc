@@ -15,7 +15,8 @@ const levelLabels = ['Supervised', 'Assisted', 'Semi-Autonomous', 'Autonomous', 
 function getAutonomyData() {
   const store = getStateStore();
 
-  const agents = store.getDatabase()
+  const agents = store
+    .getDatabase()
     .prepare(
       `SELECT agent_name, current_level, total_tasks, success_count,
               failure_count, pr_approval_rate, rollback_count, time_at_level_ms
@@ -23,7 +24,8 @@ function getAutonomyData() {
     )
     .all() as Array<Record<string, unknown>>;
 
-  const events = store.getDatabase()
+  const events = store
+    .getDatabase()
     .prepare(
       `SELECT agent_name, event_type, from_level, to_level, trigger, created_at
        FROM autonomy_events ORDER BY created_at DESC LIMIT 50`,
@@ -36,9 +38,10 @@ function getAutonomyData() {
 export default function AutonomyPage() {
   const { agents, events } = getAutonomyData();
 
-  const avgLevel = agents.length > 0
-    ? agents.reduce((sum, a) => sum + (a.current_level as number), 0) / agents.length
-    : 0;
+  const avgLevel =
+    agents.length > 0
+      ? agents.reduce((sum, a) => sum + (a.current_level as number), 0) / agents.length
+      : 0;
 
   const promotions = events.filter((e) => e.event_type === 'promotion').length;
   const demotions = events.filter((e) => e.event_type === 'demotion').length;

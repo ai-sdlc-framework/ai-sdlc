@@ -53,12 +53,24 @@ export class CostTracker {
     const costs = DEFAULT_MODEL_COSTS[model];
     if (!costs) {
       // Fallback: use sonnet pricing
-      const fallback = DEFAULT_MODEL_COSTS['claude-sonnet-4-5-20250929'] ?? { inputPer1M: 3, outputPer1M: 15, cacheReadPer1M: 0.3 };
-      return (inputTokens * fallback.inputPer1M + outputTokens * fallback.outputPer1M +
-        cacheReadTokens * (fallback.cacheReadPer1M ?? 0)) / 1_000_000;
+      const fallback = DEFAULT_MODEL_COSTS['claude-sonnet-4-5-20250929'] ?? {
+        inputPer1M: 3,
+        outputPer1M: 15,
+        cacheReadPer1M: 0.3,
+      };
+      return (
+        (inputTokens * fallback.inputPer1M +
+          outputTokens * fallback.outputPer1M +
+          cacheReadTokens * (fallback.cacheReadPer1M ?? 0)) /
+        1_000_000
+      );
     }
-    return (inputTokens * costs.inputPer1M + outputTokens * costs.outputPer1M +
-      cacheReadTokens * (costs.cacheReadPer1M ?? 0)) / 1_000_000;
+    return (
+      (inputTokens * costs.inputPer1M +
+        outputTokens * costs.outputPer1M +
+        cacheReadTokens * (costs.cacheReadPer1M ?? 0)) /
+      1_000_000
+    );
   }
 
   /**
@@ -79,7 +91,7 @@ export class CostTracker {
     return this.store.saveCostEntry({
       ...entry,
       costUsd,
-      totalTokens: entry.totalTokens ?? ((entry.inputTokens ?? 0) + (entry.outputTokens ?? 0)),
+      totalTokens: entry.totalTokens ?? (entry.inputTokens ?? 0) + (entry.outputTokens ?? 0),
     });
   }
 
@@ -137,7 +149,8 @@ export class CostTracker {
       if (oldest.createdAt && newest.createdAt) {
         const daySpan = Math.max(
           1,
-          (new Date(newest.createdAt).getTime() - new Date(oldest.createdAt).getTime()) / (24 * 60 * 60 * 1000),
+          (new Date(newest.createdAt).getTime() - new Date(oldest.createdAt).getTime()) /
+            (24 * 60 * 60 * 1000),
         );
         const dailyRate = summary.totalCostUsd / daySpan;
         projectedMonthlyUsd = dailyRate * 30;
@@ -157,7 +170,9 @@ export class CostTracker {
   /**
    * Get cost breakdown by agent.
    */
-  getCostByAgent(since?: string): Record<string, { costUsd: number; tokens: number; runs: number }> {
+  getCostByAgent(
+    since?: string,
+  ): Record<string, { costUsd: number; tokens: number; runs: number }> {
     const entries = this.store.getCostEntries({ since });
     const result: Record<string, { costUsd: number; tokens: number; runs: number }> = {};
 
@@ -176,7 +191,9 @@ export class CostTracker {
   /**
    * Get cost breakdown by pipeline stage.
    */
-  getCostByStage(since?: string): Record<string, { costUsd: number; tokens: number; runs: number }> {
+  getCostByStage(
+    since?: string,
+  ): Record<string, { costUsd: number; tokens: number; runs: number }> {
     const entries = this.store.getCostEntries({ since });
     const result: Record<string, { costUsd: number; tokens: number; runs: number }> = {};
 
@@ -196,7 +213,10 @@ export class CostTracker {
   /**
    * Get cost time series at a given granularity.
    */
-  getCostTimeSeries(granularity: 'day' | 'week' | 'month' = 'day', since?: string): CostTimeSeriesPoint[] {
+  getCostTimeSeries(
+    granularity: 'day' | 'week' | 'month' = 'day',
+    since?: string,
+  ): CostTimeSeriesPoint[] {
     const entries = this.store.getCostEntries({ since, limit: 10000 });
     const buckets = new Map<string, CostTimeSeriesPoint>();
 

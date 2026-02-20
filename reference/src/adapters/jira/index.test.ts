@@ -29,7 +29,8 @@ const sampleIssue = {
   fields: {
     summary: 'Fix bug',
     description: {
-      type: 'doc', version: 1,
+      type: 'doc',
+      version: 1,
       content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Bug description' }] }],
     },
     status: { name: 'To Do' },
@@ -40,9 +41,9 @@ const sampleIssue = {
 
 describe('createJiraIssueTracker', () => {
   it('listIssues builds JQL and returns issues', async () => {
-    const client = createMockClient(new Map([
-      ['GET /rest/api/3/search', { status: 200, body: { issues: [sampleIssue] } }],
-    ]));
+    const client = createMockClient(
+      new Map([['GET /rest/api/3/search', { status: 200, body: { issues: [sampleIssue] } }]]),
+    );
     const tracker = createJiraIssueTracker(baseConfig, client);
     const issues = await tracker.listIssues({ status: 'To Do' });
     expect(issues).toHaveLength(1);
@@ -53,9 +54,9 @@ describe('createJiraIssueTracker', () => {
   });
 
   it('getIssue fetches single issue', async () => {
-    const client = createMockClient(new Map([
-      ['GET /rest/api/3/issue/TEST-1', { status: 200, body: sampleIssue }],
-    ]));
+    const client = createMockClient(
+      new Map([['GET /rest/api/3/issue/TEST-1', { status: 200, body: sampleIssue }]]),
+    );
     const tracker = createJiraIssueTracker(baseConfig, client);
     const issue = await tracker.getIssue('TEST-1');
     expect(issue.id).toBe('TEST-1');
@@ -68,14 +69,25 @@ describe('createJiraIssueTracker', () => {
     const client: HttpClient = async (url, init) => {
       if (init?.method === 'POST' && url.includes('/issue')) {
         sentBody = init.body as string;
-        return { ok: true, status: 201, json: async () => ({ key: 'TEST-2' }) } as unknown as Response;
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({ key: 'TEST-2' }),
+        } as unknown as Response;
       }
       // getIssue follow-up
       return {
-        ok: true, status: 200,
+        ok: true,
+        status: 200,
         json: async () => ({
           key: 'TEST-2',
-          fields: { summary: 'New task', description: null, status: { name: 'To Do' }, labels: [], assignee: null },
+          fields: {
+            summary: 'New task',
+            description: null,
+            status: { name: 'To Do' },
+            labels: [],
+            assignee: null,
+          },
         }),
       } as unknown as Response;
     };
@@ -94,8 +106,18 @@ describe('createJiraIssueTracker', () => {
         return { ok: true, status: 204, json: async () => ({}) } as unknown as Response;
       }
       return {
-        ok: true, status: 200,
-        json: async () => ({ key: 'TEST-1', fields: { summary: 'Updated', description: null, status: { name: 'To Do' }, labels: [], assignee: null } }),
+        ok: true,
+        status: 200,
+        json: async () => ({
+          key: 'TEST-1',
+          fields: {
+            summary: 'Updated',
+            description: null,
+            status: { name: 'To Do' },
+            labels: [],
+            assignee: null,
+          },
+        }),
       } as unknown as Response;
     };
     const tracker = createJiraIssueTracker(baseConfig, client);
@@ -109,8 +131,14 @@ describe('createJiraIssueTracker', () => {
     const client: HttpClient = async (url, init) => {
       if (url.includes('/transitions') && !init?.method) {
         return {
-          ok: true, status: 200,
-          json: async () => ({ transitions: [{ id: '31', name: 'Done' }, { id: '21', name: 'In Progress' }] }),
+          ok: true,
+          status: 200,
+          json: async () => ({
+            transitions: [
+              { id: '31', name: 'Done' },
+              { id: '21', name: 'In Progress' },
+            ],
+          }),
         } as unknown as Response;
       }
       if (url.includes('/transitions') && init?.method === 'POST') {
@@ -118,8 +146,18 @@ describe('createJiraIssueTracker', () => {
         return { ok: true, status: 204, json: async () => ({}) } as unknown as Response;
       }
       return {
-        ok: true, status: 200,
-        json: async () => ({ key: 'TEST-1', fields: { summary: 'Fix bug', description: null, status: { name: 'Done' }, labels: [], assignee: null } }),
+        ok: true,
+        status: 200,
+        json: async () => ({
+          key: 'TEST-1',
+          fields: {
+            summary: 'Fix bug',
+            description: null,
+            status: { name: 'Done' },
+            labels: [],
+            assignee: null,
+          },
+        }),
       } as unknown as Response;
     };
     const tracker = createJiraIssueTracker(baseConfig, client);
@@ -130,10 +168,12 @@ describe('createJiraIssueTracker', () => {
   });
 
   it('transitionIssue throws for unavailable transition', async () => {
-    const client: HttpClient = async () => ({
-      ok: true, status: 200,
-      json: async () => ({ transitions: [{ id: '31', name: 'Done' }] }),
-    } as unknown as Response);
+    const client: HttpClient = async () =>
+      ({
+        ok: true,
+        status: 200,
+        json: async () => ({ transitions: [{ id: '31', name: 'Done' }] }),
+      }) as unknown as Response;
     const tracker = createJiraIssueTracker(baseConfig, client);
     await expect(tracker.transitionIssue('TEST-1', 'Nonexistent')).rejects.toThrow('not available');
   });
@@ -151,21 +191,29 @@ describe('createJiraIssueTracker', () => {
   });
 
   it('getComments extracts text from ADF', async () => {
-    const client = createMockClient(new Map([
-      ['GET /rest/api/3/issue/TEST-1/comment', {
-        status: 200,
-        body: {
-          comments: [
-            {
-              body: {
-                type: 'doc', version: 1,
-                content: [{ type: 'paragraph', content: [{ type: 'text', text: 'Comment text' }] }],
-              },
+    const client = createMockClient(
+      new Map([
+        [
+          'GET /rest/api/3/issue/TEST-1/comment',
+          {
+            status: 200,
+            body: {
+              comments: [
+                {
+                  body: {
+                    type: 'doc',
+                    version: 1,
+                    content: [
+                      { type: 'paragraph', content: [{ type: 'text', text: 'Comment text' }] },
+                    ],
+                  },
+                },
+              ],
             },
-          ],
-        },
-      }],
-    ]));
+          },
+        ],
+      ]),
+    );
     const tracker = createJiraIssueTracker(baseConfig, client);
     const comments = await tracker.getComments('TEST-1');
     expect(comments).toHaveLength(1);
@@ -184,15 +232,20 @@ describe('createJiraIssueTracker', () => {
   });
 
   it('throws on API failure', async () => {
-    const client = createMockClient(new Map([
-      ['GET /rest/api/3/issue/TEST-999', { status: 404, body: { errorMessages: ['Not found'] } }],
-    ]));
+    const client = createMockClient(
+      new Map([
+        ['GET /rest/api/3/issue/TEST-999', { status: 404, body: { errorMessages: ['Not found'] } }],
+      ]),
+    );
     const tracker = createJiraIssueTracker(baseConfig, client);
     await expect(tracker.getIssue('TEST-999')).rejects.toThrow('Jira getIssue failed: 404');
   });
 
   it('watchIssues returns empty stream', () => {
-    const tracker = createJiraIssueTracker(baseConfig, async () => ({ ok: true } as unknown as Response));
+    const tracker = createJiraIssueTracker(
+      baseConfig,
+      async () => ({ ok: true }) as unknown as Response,
+    );
     const stream = tracker.watchIssues({});
     expect(stream[Symbol.asyncIterator]).toBeDefined();
   });

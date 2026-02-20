@@ -2,7 +2,14 @@
 export { createMcpServer, type CreateServerOptions } from './server.js';
 
 // Session management
-export { SessionManager, type SessionState, type IssueLinkMethod, type UsageEntry, type AccumulatedCost, type CreateSessionOpts } from './session.js';
+export {
+  SessionManager,
+  type SessionState,
+  type IssueLinkMethod,
+  type UsageEntry,
+  type AccumulatedCost,
+  type CreateSessionOpts,
+} from './session.js';
 
 // Issue linker
 export { resolveIssue, type IssueResolution } from './issue-linker.js';

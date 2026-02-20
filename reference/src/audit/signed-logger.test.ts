@@ -6,7 +6,6 @@ import {
   type SigningKey,
   type SignedAuditEntry,
 } from './signed-logger.js';
-import { computeEntryHash } from './logger.js';
 import type { AuditEntry } from './types.js';
 
 const testKey: SigningKey = { id: 'key-1', secret: 'test-secret-key-123' };
@@ -42,8 +41,18 @@ describe('SignedAuditLog', () => {
     const log = createSignedAuditLog(testKey);
 
     log.record({ actor: 'agent-1', action: 'build', resource: 'pipeline/ci', decision: 'allowed' });
-    log.record({ actor: 'agent-2', action: 'deploy', resource: 'pipeline/cd', decision: 'allowed' });
-    log.record({ actor: 'admin', action: 'override', resource: 'gate/quality', decision: 'overridden' });
+    log.record({
+      actor: 'agent-2',
+      action: 'deploy',
+      resource: 'pipeline/cd',
+      decision: 'allowed',
+    });
+    log.record({
+      actor: 'admin',
+      action: 'override',
+      resource: 'gate/quality',
+      decision: 'overridden',
+    });
 
     const result = log.verifyIntegrity();
 

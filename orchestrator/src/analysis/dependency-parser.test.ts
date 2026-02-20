@@ -19,11 +19,14 @@ describe('dependency-parser', () => {
   describe('parseImports', () => {
     it('parses ES import statements', async () => {
       const filePath = join(tmpDir, 'test.ts');
-      await writeFile(filePath, `
+      await writeFile(
+        filePath,
+        `
 import { foo } from './utils.js';
 import type { Bar } from '../types.js';
 import express from 'express';
-`);
+`,
+      );
 
       const imports = await parseImports(filePath);
       expect(imports).toHaveLength(3);
@@ -37,11 +40,14 @@ import express from 'express';
 
     it('parses export-from statements', async () => {
       const filePath = join(tmpDir, 'index.ts');
-      await writeFile(filePath, `
+      await writeFile(
+        filePath,
+        `
 export { foo } from './foo.js';
 export type { Bar } from './bar.js';
 export * from './baz.js';
-`);
+`,
+      );
 
       const imports = await parseImports(filePath);
       expect(imports).toHaveLength(3);
@@ -50,10 +56,13 @@ export * from './baz.js';
 
     it('parses require statements', async () => {
       const filePath = join(tmpDir, 'test.js');
-      await writeFile(filePath, `
+      await writeFile(
+        filePath,
+        `
 const fs = require('node:fs');
 const util = require('./util.js');
-`);
+`,
+      );
 
       const imports = await parseImports(filePath);
       expect(imports).toHaveLength(2);
@@ -75,10 +84,13 @@ const util = require('./util.js');
 
     it('deduplicates same specifier', async () => {
       const filePath = join(tmpDir, 'test.ts');
-      await writeFile(filePath, `
+      await writeFile(
+        filePath,
+        `
 import { a } from './foo.js';
 export { b } from './foo.js';
-`);
+`,
+      );
 
       const imports = await parseImports(filePath);
       expect(imports).toHaveLength(1);

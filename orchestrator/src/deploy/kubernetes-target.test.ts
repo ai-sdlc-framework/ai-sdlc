@@ -71,10 +71,7 @@ describe('KubernetesTarget', () => {
 
     it('omits authorization when no token', async () => {
       const fetch = mockFetch([{ ok: true, status: 200 }]);
-      const target = createKubernetesTarget(
-        { ...baseConfig, token: undefined },
-        { fetch },
-      );
+      const target = createKubernetesTarget({ ...baseConfig, token: undefined }, { fetch });
 
       await target.deploy('v1.0.0', 'production');
 
@@ -98,7 +95,7 @@ describe('KubernetesTarget', () => {
 
     it('handles rollback API failure', async () => {
       const fetch = mockFetch([
-        { ok: true, status: 200 },  // deploy
+        { ok: true, status: 200 }, // deploy
         { ok: false, status: 503 }, // rollback fails
       ]);
       const target = createKubernetesTarget(baseConfig, { fetch });
@@ -114,10 +111,7 @@ describe('KubernetesTarget', () => {
   describe('CLI mode', () => {
     it('deploys via kubectl set image + rollout status', async () => {
       const exec = mockExec();
-      const target = createKubernetesTarget(
-        { ...baseConfig, useCliMode: true },
-        { exec },
-      );
+      const target = createKubernetesTarget({ ...baseConfig, useCliMode: true }, { exec });
 
       const result = await target.deploy('v1.2.3', 'production');
 
@@ -135,10 +129,7 @@ describe('KubernetesTarget', () => {
       const exec = vi.fn(async () => {
         throw new Error('kubectl not found');
       });
-      const target = createKubernetesTarget(
-        { ...baseConfig, useCliMode: true },
-        { exec },
-      );
+      const target = createKubernetesTarget({ ...baseConfig, useCliMode: true }, { exec });
 
       const result = await target.deploy('v1.0.0', 'production');
 
@@ -148,10 +139,7 @@ describe('KubernetesTarget', () => {
 
     it('rollback via kubectl rollout undo', async () => {
       const exec = mockExec();
-      const target = createKubernetesTarget(
-        { ...baseConfig, useCliMode: true },
-        { exec },
-      );
+      const target = createKubernetesTarget({ ...baseConfig, useCliMode: true }, { exec });
 
       const deployed = await target.deploy('v2.0.0', 'production');
       (exec as ReturnType<typeof vi.fn>).mockClear();

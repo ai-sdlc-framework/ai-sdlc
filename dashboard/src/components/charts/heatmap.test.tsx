@@ -18,9 +18,7 @@ describe('Heatmap', () => {
   });
 
   it('truncates long labels', () => {
-    const data: HeatmapCell[] = [
-      { label: 'very-long-file-name-that-exceeds-limit.ts', value: 7 },
-    ];
+    const data: HeatmapCell[] = [{ label: 'very-long-file-name-that-exceeds-limit.ts', value: 7 }];
     const result = Heatmap({ data });
     expect(result).toBeTruthy();
   });

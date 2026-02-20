@@ -57,7 +57,12 @@ describe('handleGetContext', () => {
       modulesCount: 5,
       dependencyCount: 20,
       architecturalPatterns: JSON.stringify([
-        { name: 'Modular Monolith', confidence: 0.85, description: 'Well-defined module boundaries', evidence: [] },
+        {
+          name: 'Modular Monolith',
+          confidence: 0.85,
+          description: 'Well-defined module boundaries',
+          evidence: [],
+        },
       ]),
       hotspots: JSON.stringify([]),
       conventionsData: JSON.stringify([]),

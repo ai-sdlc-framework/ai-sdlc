@@ -60,11 +60,15 @@ describe('McpAdvisorPlugin', () => {
 
     const pluginA: McpAdvisorPlugin = {
       name: 'alpha',
-      register: vi.fn(() => { order.push('alpha'); }),
+      register: vi.fn(() => {
+        order.push('alpha');
+      }),
     };
     const pluginB: McpAdvisorPlugin = {
       name: 'beta',
-      register: vi.fn(() => { order.push('beta'); }),
+      register: vi.fn(() => {
+        order.push('beta');
+      }),
     };
 
     await createMcpServer({ db: makeDb(), plugins: [pluginA, pluginB] });

@@ -9,11 +9,13 @@ export function registerMyTasksResource(server: McpServer, deps: ServerDeps): vo
     async () => {
       const runs = deps.store.getPipelineRuns(undefined, 50);
       return {
-        contents: [{
-          uri: 'ai-sdlc://context/my-tasks',
-          text: JSON.stringify(runs, null, 2),
-          mimeType: 'application/json',
-        }],
+        contents: [
+          {
+            uri: 'ai-sdlc://context/my-tasks',
+            text: JSON.stringify(runs, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
       };
     },
   );

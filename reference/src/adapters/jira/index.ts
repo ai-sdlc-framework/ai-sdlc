@@ -101,7 +101,7 @@ function mapJiraIssue(data: Record<string, unknown>, baseUrl: string): Issue {
     id: data.key as string,
     title: (fields.summary as string) ?? '',
     description: fromADF(fields.description),
-    status: ((fields.status as Record<string, string>)?.name) ?? 'unknown',
+    status: (fields.status as Record<string, string>)?.name ?? 'unknown',
     labels: (fields.labels as string[]) ?? [],
     assignee: (fields.assignee as Record<string, string>)?.displayName,
     url: `${baseUrl}/browse/${data.key}`,
@@ -127,10 +127,14 @@ export function createJiraIssueTracker(
   return {
     async listIssues(filter: IssueFilter): Promise<Issue[]> {
       const jql = buildJQL(config, filter);
-      const res = await client(apiUrl(config, `/search?jql=${encodeURIComponent(jql)}&maxResults=100`));
+      const res = await client(
+        apiUrl(config, `/search?jql=${encodeURIComponent(jql)}&maxResults=100`),
+      );
       if (!res.ok) throw new Error(`Jira listIssues failed: ${res.status}`);
       const data = await res.json();
-      return (data.issues ?? []).map((i: Record<string, unknown>) => mapJiraIssue(i, config.baseUrl));
+      return (data.issues ?? []).map((i: Record<string, unknown>) =>
+        mapJiraIssue(i, config.baseUrl),
+      );
     },
 
     async getIssue(id: string): Promise<Issue> {
@@ -180,9 +184,7 @@ export function createJiraIssueTracker(
       if (!transRes.ok) throw new Error(`Jira getTransitions failed: ${transRes.status}`);
       const transData = await transRes.json();
       const transitions = transData.transitions as Array<{ id: string; name: string }>;
-      const target = transitions.find(
-        (t) => t.name.toLowerCase() === transition.toLowerCase(),
-      );
+      const target = transitions.find((t) => t.name.toLowerCase() === transition.toLowerCase());
       if (!target) {
         throw new Error(`Transition "${transition}" not available for issue ${id}`);
       }

@@ -1,4 +1,7 @@
 dist/
+.next/
 pnpm-lock.yaml
 spec/schemas/
+sdk-go/
+sdk-python/
 *.md

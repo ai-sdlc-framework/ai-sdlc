@@ -256,11 +256,7 @@ export {
 export type { TokenUsage } from './runners/index.js';
 
 // Notifications
-export {
-  SlackMessenger,
-  TeamsMessenger,
-  NotificationRouter,
-} from './notifications/index.js';
+export { SlackMessenger, TeamsMessenger, NotificationRouter } from './notifications/index.js';
 export type {
   SlackConfig,
   TeamsConfig,
@@ -336,7 +332,11 @@ export {
   isSignificantEscalation,
   formatEscalationSummary,
 } from './process-escalation.js';
-export type { EscalationAction, EscalationResult, EscalationActionType } from './process-escalation.js';
+export type {
+  EscalationAction,
+  EscalationResult,
+  EscalationActionType,
+} from './process-escalation.js';
 
 // Enhanced episodic memory
 export {
@@ -344,7 +344,12 @@ export {
   detectRegressions,
   extractEpisodicPatterns,
 } from './episodic-enhanced.js';
-export type { EnhancedEpisodicInput, RegressionInfo, FailurePattern, EpisodicSummary } from './episodic-enhanced.js';
+export type {
+  EnhancedEpisodicInput,
+  RegressionInfo,
+  FailurePattern,
+  EpisodicSummary,
+} from './episodic-enhanced.js';
 
 // Context enrichment
 export {
@@ -356,7 +361,12 @@ export type { EpisodeSearchCriteria, ScoredEpisode } from './context-enrichment.
 
 // Autonomy tracker
 export { AutonomyTracker } from './autonomy-tracker.js';
-export type { AgentPerformanceMetrics, PromotionEvaluation, DemotionEvaluation, PromotionProximity } from './autonomy-tracker.js';
+export type {
+  AgentPerformanceMetrics,
+  PromotionEvaluation,
+  DemotionEvaluation,
+  PromotionProximity,
+} from './autonomy-tracker.js';
 
 // Cost tracker
 export { CostTracker } from './cost-tracker.js';
@@ -424,12 +434,13 @@ export type {
 } from './multi-repo/index.js';
 
 // Task decomposition
-export {
-  decomposeTask,
-  validateTaskGraph,
-  getExecutionLayers,
+export { decomposeTask, validateTaskGraph, getExecutionLayers } from './task-decomposer.js';
+export type {
+  SubTask,
+  TaskGraph,
+  DecompositionContext,
+  DecompositionOptions,
 } from './task-decomposer.js';
-export type { SubTask, TaskGraph, DecompositionContext, DecompositionOptions } from './task-decomposer.js';
 
 // Handoff execution
 export { HandoffExecutor } from './handoff-executor.js';
@@ -448,7 +459,12 @@ export { createSqliteAuditSink } from './audit-sqlite-sink.js';
 export { createAuditScheduler } from './audit-scheduler.js';
 export type { AuditSchedulerConfig, AuditScheduler } from './audit-scheduler.js';
 export { exportAuditEntries, generateComplianceReport } from './audit-export.js';
-export type { ExportFormat, ExportOptions, ComplianceReportOptions, ComplianceReport } from './audit-export.js';
+export type {
+  ExportFormat,
+  ExportOptions,
+  ComplianceReportOptions,
+  ComplianceReport,
+} from './audit-export.js';
 export { archiveEntries, loadArchivedEntries, verifyArchiveContinuity } from './audit-archival.js';
 export type { ArchiveManifest, ArchivalOptions } from './audit-archival.js';
 

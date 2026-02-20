@@ -6,7 +6,7 @@
 
 import type { AgentRunner } from './types.js';
 import { ClaudeCodeRunner } from './claude-code.js';
-import { GenericLLMRunner, type GenericLLMConfig } from './generic-llm.js';
+import { GenericLLMRunner } from './generic-llm.js';
 import { CopilotRunner } from './copilot.js';
 import { CursorRunner } from './cursor.js';
 import { CodexRunner } from './codex.js';

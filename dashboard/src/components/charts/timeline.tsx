@@ -56,13 +56,7 @@ export function Timeline({ events, width = 600, height = 120 }: TimelineProps) {
               >
                 L{event.fromLevel}→L{event.toLevel}
               </text>
-              <text
-                x={x}
-                y={chartH + 10}
-                textAnchor="middle"
-                fontSize={8}
-                fill="#94a3b8"
-              >
+              <text x={x} y={chartH + 10} textAnchor="middle" fontSize={8} fill="#94a3b8">
                 {event.label}
               </text>
             </g>

@@ -1,9 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { createMetricStore } from '@ai-sdlc/reference';
-import {
-  createOTelBridge,
-  isOTelAvailable,
-} from './otel-exporter.js';
+import { createOTelBridge, isOTelAvailable } from './otel-exporter.js';
 
 describe('otel-exporter', () => {
   let metricStore: ReturnType<typeof createMetricStore>;
@@ -21,7 +18,12 @@ describe('otel-exporter', () => {
 
     it('delegates record to underlying store', () => {
       const bridge = createOTelBridge(metricStore);
-      bridge.register({ name: 'test-metric', category: 'task-effectiveness', description: 'test', unit: 'count' });
+      bridge.register({
+        name: 'test-metric',
+        category: 'task-effectiveness',
+        description: 'test',
+        unit: 'count',
+      });
       const point = bridge.record({ metric: 'test-metric', value: 42 });
       expect(point.value).toBe(42);
       expect(metricStore.current('test-metric')).toBe(42);
@@ -29,7 +31,12 @@ describe('otel-exporter', () => {
 
     it('delegates query/summarize to underlying store', () => {
       const bridge = createOTelBridge(metricStore);
-      bridge.register({ name: 'm1', category: 'task-effectiveness', description: '', unit: 'count' });
+      bridge.register({
+        name: 'm1',
+        category: 'task-effectiveness',
+        description: '',
+        unit: 'count',
+      });
       bridge.record({ metric: 'm1', value: 10 });
       bridge.record({ metric: 'm1', value: 20 });
 
@@ -43,7 +50,12 @@ describe('otel-exporter', () => {
 
     it('delegates snapshot and definitions', () => {
       const bridge = createOTelBridge(metricStore);
-      bridge.register({ name: 'm1', category: 'task-effectiveness', description: '', unit: 'count' });
+      bridge.register({
+        name: 'm1',
+        category: 'task-effectiveness',
+        description: '',
+        unit: 'count',
+      });
       bridge.record({ metric: 'm1', value: 5 });
 
       const snap = bridge.snapshot();
@@ -72,7 +84,12 @@ describe('otel-exporter', () => {
 
     it('forwards records to OTel (no-op SDK)', () => {
       const bridge = createOTelBridge(metricStore, { forceEnable: true });
-      bridge.register({ name: 'test-total', category: 'task-effectiveness', description: '', unit: 'count' });
+      bridge.register({
+        name: 'test-total',
+        category: 'task-effectiveness',
+        description: '',
+        unit: 'count',
+      });
       // Should not throw even with no-op OTel SDK
       const point = bridge.record({ metric: 'test-total', value: 1 });
       expect(point.value).toBe(1);

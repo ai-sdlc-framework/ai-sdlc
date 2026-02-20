@@ -15,7 +15,9 @@ describe('verifyJiraWebhook', () => {
   });
 
   it('falls back to header verification', () => {
-    expect(verifyJiraWebhook('my-secret', { 'x-jira-webhook-secret': 'my-secret' }, Buffer.alloc(0))).toBe(true);
+    expect(
+      verifyJiraWebhook('my-secret', { 'x-jira-webhook-secret': 'my-secret' }, Buffer.alloc(0)),
+    ).toBe(true);
   });
 
   it('rejects when no secret provided', () => {
@@ -56,10 +58,12 @@ describe('transformJiraIssueEvent', () => {
   });
 
   it('returns null for unknown event types', () => {
-    expect(transformJiraIssueEvent({
-      ...basePayload,
-      webhookEvent: 'jira:issue_deleted',
-    })).toBeNull();
+    expect(
+      transformJiraIssueEvent({
+        ...basePayload,
+        webhookEvent: 'jira:issue_deleted',
+      }),
+    ).toBeNull();
   });
 
   it('returns null for missing issue', () => {

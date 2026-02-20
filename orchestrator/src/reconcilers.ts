@@ -29,9 +29,7 @@ import {
 /**
  * Create a pipeline reconciler that watches for pipeline resource changes.
  */
-export function createPipelineReconciler(
-  deps: PipelineReconcilerDeps,
-): ReconcilerFn<Pipeline> {
+export function createPipelineReconciler(deps: PipelineReconcilerDeps): ReconcilerFn<Pipeline> {
   return _createPipelineReconciler(deps);
 }
 

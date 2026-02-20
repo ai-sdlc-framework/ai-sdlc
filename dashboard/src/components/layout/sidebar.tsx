@@ -12,16 +12,16 @@ const navItems = [
 
 export function Sidebar({ currentPath }: { currentPath: string }) {
   return (
-    <nav style={{
-      width: 200,
-      minHeight: '100vh',
-      borderRight: '1px solid #e2e8f0',
-      padding: '16px 0',
-      backgroundColor: '#f8fafc',
-    }}>
-      <div style={{ padding: '0 16px 16px', fontWeight: 700, fontSize: 16 }}>
-        AI-SDLC
-      </div>
+    <nav
+      style={{
+        width: 200,
+        minHeight: '100vh',
+        borderRight: '1px solid #e2e8f0',
+        padding: '16px 0',
+        backgroundColor: '#f8fafc',
+      }}
+    >
+      <div style={{ padding: '0 16px 16px', fontWeight: 700, fontSize: 16 }}>AI-SDLC</div>
       <ul style={{ listStyle: 'none', margin: 0, padding: 0 }}>
         {navItems.map((item) => (
           <li key={item.href}>

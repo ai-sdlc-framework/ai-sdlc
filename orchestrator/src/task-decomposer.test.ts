@@ -18,7 +18,10 @@ function makeContext(overrides: Partial<DecompositionContext> = {}): Decompositi
   };
 }
 
-function makeModuleGraph(modules: ModuleInfo[], edges: { from: string; to: string }[] = []): ModuleGraph {
+function makeModuleGraph(
+  modules: ModuleInfo[],
+  edges: { from: string; to: string }[] = [],
+): ModuleGraph {
   return {
     modules,
     edges: edges.map((e) => ({ ...e, importCount: 1 })),
@@ -208,8 +211,24 @@ describe('validateTaskGraph', () => {
       complexity: 7,
       decomposed: true,
       subtasks: [
-        { id: 'a', title: 'A', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: ['b'] },
-        { id: 'b', title: 'B', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: ['a'] },
+        {
+          id: 'a',
+          title: 'A',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: ['b'],
+        },
+        {
+          id: 'b',
+          title: 'B',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: ['a'],
+        },
       ],
     };
     const errors = validateTaskGraph(graph);
@@ -225,8 +244,24 @@ describe('getExecutionLayers', () => {
       complexity: 7,
       decomposed: true,
       subtasks: [
-        { id: 'a', title: 'A', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: [] },
-        { id: 'b', title: 'B', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: [] },
+        {
+          id: 'a',
+          title: 'A',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: [],
+        },
+        {
+          id: 'b',
+          title: 'B',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: [],
+        },
       ],
     };
     const layers = getExecutionLayers(graph);
@@ -241,9 +276,33 @@ describe('getExecutionLayers', () => {
       complexity: 7,
       decomposed: true,
       subtasks: [
-        { id: 'a', title: 'A', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: [] },
-        { id: 'b', title: 'B', description: '', filePatterns: [], concern: 'test', estimatedComplexity: 1, dependsOn: ['a'] },
-        { id: 'c', title: 'C', description: '', filePatterns: [], concern: 'docs', estimatedComplexity: 1, dependsOn: ['b'] },
+        {
+          id: 'a',
+          title: 'A',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: [],
+        },
+        {
+          id: 'b',
+          title: 'B',
+          description: '',
+          filePatterns: [],
+          concern: 'test',
+          estimatedComplexity: 1,
+          dependsOn: ['a'],
+        },
+        {
+          id: 'c',
+          title: 'C',
+          description: '',
+          filePatterns: [],
+          concern: 'docs',
+          estimatedComplexity: 1,
+          dependsOn: ['b'],
+        },
       ],
     };
     const layers = getExecutionLayers(graph);
@@ -260,10 +319,42 @@ describe('getExecutionLayers', () => {
       complexity: 7,
       decomposed: true,
       subtasks: [
-        { id: 'a', title: 'A', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: [] },
-        { id: 'b', title: 'B', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: ['a'] },
-        { id: 'c', title: 'C', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: ['a'] },
-        { id: 'd', title: 'D', description: '', filePatterns: [], concern: 'code', estimatedComplexity: 1, dependsOn: ['b', 'c'] },
+        {
+          id: 'a',
+          title: 'A',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: [],
+        },
+        {
+          id: 'b',
+          title: 'B',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: ['a'],
+        },
+        {
+          id: 'c',
+          title: 'C',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: ['a'],
+        },
+        {
+          id: 'd',
+          title: 'D',
+          description: '',
+          filePatterns: [],
+          concern: 'code',
+          estimatedComplexity: 1,
+          dependsOn: ['b', 'c'],
+        },
       ],
     };
     const layers = getExecutionLayers(graph);

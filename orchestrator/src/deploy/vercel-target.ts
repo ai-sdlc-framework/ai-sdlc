@@ -78,7 +78,11 @@ export function createVercelTarget(
           const cached = deployments.get(id);
           return cached ?? { id, state: 'pending', version: 'unknown', startedAt: '' };
         }
-        const data = (await res.json()) as { readyState: string; url?: string; meta?: { version?: string } };
+        const data = (await res.json()) as {
+          readyState: string;
+          url?: string;
+          meta?: { version?: string };
+        };
         return {
           id,
           state: mapVercelState(data.readyState),

@@ -199,15 +199,14 @@ function discoverDependencies(
         edges.push({ from: pkg.name, to: dep, type: 'dev' });
       }
     }
-  } catch { /* ignore bad JSON */ }
+  } catch {
+    /* ignore bad JSON */
+  }
 
   return edges;
 }
 
-function discoverGoDependencies(
-  pkg: WorkspacePackage,
-  workspaceNames: Set<string>,
-): ServiceEdge[] {
+function discoverGoDependencies(pkg: WorkspacePackage, workspaceNames: Set<string>): ServiceEdge[] {
   const edges: ServiceEdge[] = [];
   const goModPath = join(pkg.path, 'go.mod');
   if (!existsSync(goModPath)) return edges;
@@ -219,7 +218,9 @@ function discoverGoDependencies(
         edges.push({ from: pkg.name, to: name, type: 'workspace' });
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   return edges;
 }
@@ -239,7 +240,9 @@ function discoverCargoDependencies(
         edges.push({ from: pkg.name, to: name, type: 'workspace' });
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   return edges;
 }

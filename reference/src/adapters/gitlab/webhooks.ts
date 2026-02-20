@@ -125,7 +125,12 @@ export function transformGitLabMREvent(payload: unknown): PREvent | null {
     description: p.object_attributes.description,
     sourceBranch: p.object_attributes.source_branch,
     targetBranch: p.object_attributes.target_branch,
-    status: p.object_attributes.state === 'merged' ? 'merged' : p.object_attributes.state === 'closed' ? 'closed' : 'open',
+    status:
+      p.object_attributes.state === 'merged'
+        ? 'merged'
+        : p.object_attributes.state === 'closed'
+          ? 'closed'
+          : 'open',
     author: p.user?.username ?? '',
     url: p.object_attributes.url,
   };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { evaluatePromotion, evaluateDemotion, evaluateDemotionCondition } from './autonomy.js';
+import { evaluatePromotion, evaluateDemotion } from './autonomy.js';
 import type { AgentMetrics, DemotionConditionContext } from './autonomy.js';
 import type { AutonomyPolicy } from '../core/types.js';
 import { API_VERSION } from '../core/types.js';
@@ -183,7 +183,12 @@ describe('evaluateDemotion()', () => {
       const conditionCtx: DemotionConditionContext = {
         metrics: { 'budget-utilization': 0.95 },
       };
-      const result = evaluateDemotion(makePolicyWithCondition(), agent, 'cost-overrun', conditionCtx);
+      const result = evaluateDemotion(
+        makePolicyWithCondition(),
+        agent,
+        'cost-overrun',
+        conditionCtx,
+      );
       expect(result.demoted).toBe(true);
       expect(result.toLevel).toBe(1);
     });
@@ -193,7 +198,12 @@ describe('evaluateDemotion()', () => {
       const conditionCtx: DemotionConditionContext = {
         metrics: { 'budget-utilization': 0.5 },
       };
-      const result = evaluateDemotion(makePolicyWithCondition(), agent, 'cost-overrun', conditionCtx);
+      const result = evaluateDemotion(
+        makePolicyWithCondition(),
+        agent,
+        'cost-overrun',
+        conditionCtx,
+      );
       expect(result.demoted).toBe(false);
       expect(result.toLevel).toBe(2);
     });

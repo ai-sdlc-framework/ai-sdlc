@@ -125,11 +125,12 @@ export function decomposeTask(
     const concerns = classifyConcerns(ctx.issueBody, ctx.affectedFiles);
     for (const concern of concerns) {
       if (subtasks.length >= maxSubtasks) break;
-      const deps = concern.concern === 'test'
-        ? subtasks.filter((s) => s.concern === 'code').map((s) => s.id)
-        : concern.concern === 'docs'
-          ? subtasks.filter((s) => s.concern === 'code' || s.concern === 'test').map((s) => s.id)
-          : [];
+      const deps =
+        concern.concern === 'test'
+          ? subtasks.filter((s) => s.concern === 'code').map((s) => s.id)
+          : concern.concern === 'docs'
+            ? subtasks.filter((s) => s.concern === 'code' || s.concern === 'test').map((s) => s.id)
+            : [];
       subtasks.push({
         id: nextId(),
         ...concern,
@@ -218,7 +219,7 @@ export function getExecutionLayers(graph: TaskGraph): SubTask[][] {
 
   while (remaining.size > 0) {
     const layer: SubTask[] = [];
-    for (const [id, task] of remaining) {
+    for (const [_id, task] of remaining) {
       if (task.dependsOn.every((dep) => completed.has(dep))) {
         layer.push(task);
       }

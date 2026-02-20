@@ -91,7 +91,7 @@ describe('CostTracker', () => {
         model: 'claude-sonnet-4-5-20250929',
         inputTokens: 1000,
         outputTokens: 500,
-        costUsd: 0.10,
+        costUsd: 0.1,
       });
       tracker.recordCost({
         runId: 'run-2',
@@ -100,17 +100,17 @@ describe('CostTracker', () => {
         model: 'claude-opus-4-6',
         inputTokens: 2000,
         outputTokens: 1000,
-        costUsd: 0.50,
+        costUsd: 0.5,
       });
 
       const summary = tracker.getCostSummary();
-      expect(summary.totalCostUsd).toBeCloseTo(0.60, 2);
+      expect(summary.totalCostUsd).toBeCloseTo(0.6, 2);
       expect(summary.entryCount).toBe(2);
-      expect(summary.avgCostPerRun).toBeCloseTo(0.30, 2);
-      expect(summary.costByAgent['agent-a']).toBeCloseTo(0.10, 2);
-      expect(summary.costByAgent['agent-b']).toBeCloseTo(0.50, 2);
-      expect(summary.costByModel['claude-sonnet-4-5-20250929']).toBeCloseTo(0.10, 2);
-      expect(summary.costByModel['claude-opus-4-6']).toBeCloseTo(0.50, 2);
+      expect(summary.avgCostPerRun).toBeCloseTo(0.3, 2);
+      expect(summary.costByAgent['agent-a']).toBeCloseTo(0.1, 2);
+      expect(summary.costByAgent['agent-b']).toBeCloseTo(0.5, 2);
+      expect(summary.costByModel['claude-sonnet-4-5-20250929']).toBeCloseTo(0.1, 2);
+      expect(summary.costByModel['claude-opus-4-6']).toBeCloseTo(0.5, 2);
     });
   });
 
@@ -152,9 +152,27 @@ describe('CostTracker', () => {
 
   describe('getCostByAgent', () => {
     it('returns cost breakdown by agent', () => {
-      tracker.recordCost({ runId: 'r1', agentName: 'agent-a', pipelineType: 'execute', costUsd: 1.0, totalTokens: 1000 });
-      tracker.recordCost({ runId: 'r2', agentName: 'agent-a', pipelineType: 'execute', costUsd: 2.0, totalTokens: 2000 });
-      tracker.recordCost({ runId: 'r3', agentName: 'agent-b', pipelineType: 'execute', costUsd: 0.5, totalTokens: 500 });
+      tracker.recordCost({
+        runId: 'r1',
+        agentName: 'agent-a',
+        pipelineType: 'execute',
+        costUsd: 1.0,
+        totalTokens: 1000,
+      });
+      tracker.recordCost({
+        runId: 'r2',
+        agentName: 'agent-a',
+        pipelineType: 'execute',
+        costUsd: 2.0,
+        totalTokens: 2000,
+      });
+      tracker.recordCost({
+        runId: 'r3',
+        agentName: 'agent-b',
+        pipelineType: 'execute',
+        costUsd: 0.5,
+        totalTokens: 500,
+      });
 
       const byAgent = tracker.getCostByAgent();
       expect(byAgent['agent-a'].costUsd).toBeCloseTo(3.0, 2);

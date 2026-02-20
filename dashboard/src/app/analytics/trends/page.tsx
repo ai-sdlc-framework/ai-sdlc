@@ -13,8 +13,8 @@ export default async function TrendAnalysisPage() {
       <div style={{ padding: 24 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Trend Analysis</h1>
         <p style={{ color: '#64748b' }}>
-          This is an enterprise feature. Install{' '}
-          <code>@ai-sdlc-enterprise/dashboard</code> to enable trend analysis.
+          This is an enterprise feature. Install <code>@ai-sdlc-enterprise/dashboard</code> to
+          enable trend analysis.
         </p>
       </div>
     );

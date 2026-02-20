@@ -21,13 +21,15 @@ export const runCommand = new Command('run')
 
     try {
       const result = await orchestrator.run(opts.issue);
-      console.log(formatOutput(format, {
-        type: 'run',
-        issueNumber: opts.issue,
-        prUrl: result.prUrl,
-        filesChanged: result.filesChanged.length,
-        promotionEligible: result.promotionEligible,
-      }));
+      console.log(
+        formatOutput(format, {
+          type: 'run',
+          issueNumber: opts.issue,
+          prUrl: result.prUrl,
+          filesChanged: result.filesChanged.length,
+          promotionEligible: result.promotionEligible,
+        }),
+      );
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;

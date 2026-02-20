@@ -64,10 +64,7 @@ describe('pattern-detector', () => {
       makeFile('src/handlers/order-handler.ts'),
       makeFile('src/emitters/event-bus.ts'),
     ];
-    const modules = [
-      makeModule('events', 'src/events'),
-      makeModule('handlers', 'src/handlers'),
-    ];
+    const modules = [makeModule('events', 'src/events'), makeModule('handlers', 'src/handlers')];
 
     const patterns = detectPatterns(files, modules);
     const eventDriven = patterns.find((p) => p.name === 'event-driven');
@@ -105,11 +102,7 @@ describe('pattern-detector', () => {
   });
 
   it('returns empty for flat codebase with no patterns', () => {
-    const files = [
-      makeFile('src/app.ts'),
-      makeFile('src/utils.ts'),
-      makeFile('src/config.ts'),
-    ];
+    const files = [makeFile('src/app.ts'), makeFile('src/utils.ts'), makeFile('src/config.ts')];
 
     const patterns = detectPatterns(files, []);
     expect(patterns).toHaveLength(0);
@@ -141,14 +134,8 @@ describe('pattern-detector', () => {
   });
 
   it('includes evidence in detected patterns', () => {
-    const files = [
-      makeFile('src/adapters/rest-adapter.ts'),
-      makeFile('src/ports/user-port.ts'),
-    ];
-    const modules = [
-      makeModule('adapters', 'src/adapters'),
-      makeModule('ports', 'src/ports'),
-    ];
+    const files = [makeFile('src/adapters/rest-adapter.ts'), makeFile('src/ports/user-port.ts')];
+    const modules = [makeModule('adapters', 'src/adapters'), makeModule('ports', 'src/ports')];
 
     const patterns = detectPatterns(files, modules);
     const hexagonal = patterns.find((p) => p.name === 'hexagonal');

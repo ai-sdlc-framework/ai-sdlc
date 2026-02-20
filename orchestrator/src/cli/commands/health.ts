@@ -20,12 +20,14 @@ export const healthCommand = new Command('health')
 
     try {
       const result = await orchestrator.health();
-      console.log(formatOutput(format, {
-        type: 'health',
-        configValid: result.configValid,
-        stateStoreConnected: result.stateStoreConnected,
-        errors: result.errors,
-      }));
+      console.log(
+        formatOutput(format, {
+          type: 'health',
+          configValid: result.configValid,
+          stateStoreConnected: result.stateStoreConnected,
+          errors: result.errors,
+        }),
+      );
       if (result.errors.length > 0) {
         process.exitCode = 1;
       }

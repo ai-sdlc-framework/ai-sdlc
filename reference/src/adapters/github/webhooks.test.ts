@@ -165,7 +165,12 @@ describe('transformBuildEvent', () => {
   it('maps workflow_run.completed (success) to completed', () => {
     const event = transformBuildEvent({
       action: 'completed',
-      workflow_run: { id: 1001, conclusion: 'success', html_url: 'https://example.com', status: 'completed' },
+      workflow_run: {
+        id: 1001,
+        conclusion: 'success',
+        html_url: 'https://example.com',
+        status: 'completed',
+      },
     });
     expect(event!.type).toBe('completed');
     expect(event!.build.id).toBe('1001');
@@ -174,7 +179,12 @@ describe('transformBuildEvent', () => {
   it('maps workflow_run.completed (failure) to failed', () => {
     const event = transformBuildEvent({
       action: 'completed',
-      workflow_run: { id: 1002, conclusion: 'failure', html_url: 'https://example.com', status: 'completed' },
+      workflow_run: {
+        id: 1002,
+        conclusion: 'failure',
+        html_url: 'https://example.com',
+        status: 'completed',
+      },
     });
     expect(event!.type).toBe('failed');
   });
@@ -182,7 +192,12 @@ describe('transformBuildEvent', () => {
   it('maps check_run.completed to completed', () => {
     const event = transformBuildEvent({
       action: 'completed',
-      check_run: { id: 2001, conclusion: 'success', html_url: 'https://example.com', status: 'completed' },
+      check_run: {
+        id: 2001,
+        conclusion: 'success',
+        html_url: 'https://example.com',
+        status: 'completed',
+      },
     });
     expect(event!.type).toBe('completed');
     expect(event!.build.id).toBe('2001');
@@ -213,12 +228,12 @@ describe('createGitHubWebhookProvider', () => {
       return transformIssueEvent(p);
     });
 
-    const provider = createGitHubWebhookProvider(
-      { secret: 'test' },
-      { issues: bridge },
-    );
+    const provider = createGitHubWebhookProvider({ secret: 'test' }, { issues: bridge });
 
-    const payload = { action: 'opened', issue: { number: 1, title: 'T', body: '', state: 'open', labels: [], html_url: '' } };
+    const payload = {
+      action: 'opened',
+      issue: { number: 1, title: 'T', body: '', state: 'open', labels: [], html_url: '' },
+    };
     provider.onEvent({ 'x-github-event': 'issues' }, payload);
 
     expect(received).toHaveLength(1);
@@ -232,14 +247,21 @@ describe('createGitHubWebhookProvider', () => {
       return transformPREvent(p);
     });
 
-    const provider = createGitHubWebhookProvider(
-      { secret: 'test' },
-      { pullRequests: bridge },
-    );
+    const provider = createGitHubWebhookProvider({ secret: 'test' }, { pullRequests: bridge });
 
     const payload = {
       action: 'opened',
-      pull_request: { number: 1, title: 'PR', body: '', head: { ref: 'b' }, base: { ref: 'main' }, state: 'open', merged: false, user: { login: 'u' }, html_url: '' },
+      pull_request: {
+        number: 1,
+        title: 'PR',
+        body: '',
+        head: { ref: 'b' },
+        base: { ref: 'main' },
+        state: 'open',
+        merged: false,
+        user: { login: 'u' },
+        html_url: '',
+      },
     };
     provider.onEvent({ 'x-github-event': 'pull_request' }, payload);
 
@@ -254,15 +276,15 @@ describe('createGitHubWebhookProvider', () => {
       return transformBuildEvent(p);
     });
 
-    const provider = createGitHubWebhookProvider(
-      { secret: 'test' },
-      { builds: bridge },
-    );
+    const provider = createGitHubWebhookProvider({ secret: 'test' }, { builds: bridge });
 
-    provider.onEvent({ 'x-github-event': 'workflow_run' }, {
-      action: 'completed',
-      workflow_run: { id: 1, conclusion: 'success', html_url: '', status: 'completed' },
-    });
+    provider.onEvent(
+      { 'x-github-event': 'workflow_run' },
+      {
+        action: 'completed',
+        workflow_run: { id: 1, conclusion: 'success', html_url: '', status: 'completed' },
+      },
+    );
 
     expect(received).toHaveLength(1);
     bridge.close();

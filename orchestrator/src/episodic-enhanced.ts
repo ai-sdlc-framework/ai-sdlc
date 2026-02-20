@@ -75,9 +75,10 @@ export function createEnhancedEpisodicMemory(store: StateStore) {
         gateFailCount: input.gateFailCount,
         costUsd: input.costUsd,
         isRegression: regression.isRegression ? 1 : 0,
-        relatedEpisodes: regression.relatedEpisodeIds.length > 0
-          ? JSON.stringify(regression.relatedEpisodeIds)
-          : undefined,
+        relatedEpisodes:
+          regression.relatedEpisodeIds.length > 0
+            ? JSON.stringify(regression.relatedEpisodeIds)
+            : undefined,
       });
 
       return { id, regression };
@@ -123,10 +124,7 @@ export function createEnhancedEpisodicMemory(store: StateStore) {
  * Detect if a new record represents a regression:
  * Same files failed before with the same error pattern within 7 days.
  */
-export function detectRegressions(
-  store: StateStore,
-  input: EnhancedEpisodicInput,
-): RegressionInfo {
+export function detectRegressions(store: StateStore, input: EnhancedEpisodicInput): RegressionInfo {
   if (input.outcome === 'success') {
     return { isRegression: false, relatedEpisodeIds: [] };
   }
@@ -241,8 +239,7 @@ export function extractEpisodicPatterns(store: StateStore, limit = 100): Failure
     }
   }
 
-  return [...patternMap.values()]
-    .sort((a, b) => b.count - a.count);
+  return [...patternMap.values()].sort((a, b) => b.count - a.count);
 }
 
 /**
@@ -273,12 +270,9 @@ function summarizeEpisodes(store: StateStore, since?: string): EpisodicSummary {
   return {
     totalEpisodes: total,
     successRate: total > 0 ? successes / total : 0,
-    avgDurationMs: durations.length > 0
-      ? durations.reduce((a, b) => a + b, 0) / durations.length
-      : 0,
-    avgCostUsd: costs.length > 0
-      ? costs.reduce((a, b) => a + b, 0) / costs.length
-      : 0,
+    avgDurationMs:
+      durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : 0,
+    avgCostUsd: costs.length > 0 ? costs.reduce((a, b) => a + b, 0) / costs.length : 0,
     regressionCount: regressions,
     topFailurePatterns: patterns.slice(0, 5),
   };

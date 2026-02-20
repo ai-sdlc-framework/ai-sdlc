@@ -9,11 +9,13 @@ export function registerConventionsResource(server: McpServer, deps: ServerDeps)
     async () => {
       const conventions = deps.store.getConventions();
       return {
-        contents: [{
-          uri: 'ai-sdlc://context/conventions',
-          text: JSON.stringify(conventions, null, 2),
-          mimeType: 'application/json',
-        }],
+        contents: [
+          {
+            uri: 'ai-sdlc://context/conventions',
+            text: JSON.stringify(conventions, null, 2),
+            mimeType: 'application/json',
+          },
+        ],
       };
     },
   );

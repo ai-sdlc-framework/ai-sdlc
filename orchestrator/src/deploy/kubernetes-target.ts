@@ -55,15 +55,19 @@ export function createKubernetesTarget(
       try {
         if (config.useCliMode && exec) {
           await exec('kubectl', [
-            'set', 'image',
+            'set',
+            'image',
             `deployment/${config.deploymentName}`,
             `${config.containerName}=${image}`,
-            '-n', config.namespace,
+            '-n',
+            config.namespace,
           ]);
           await exec('kubectl', [
-            'rollout', 'status',
+            'rollout',
+            'status',
             `deployment/${config.deploymentName}`,
-            '-n', config.namespace,
+            '-n',
+            config.namespace,
             '--timeout=120s',
           ]);
         } else {
@@ -115,14 +119,22 @@ export function createKubernetesTarget(
       try {
         if (config.useCliMode && exec) {
           await exec('kubectl', [
-            'rollout', 'undo',
+            'rollout',
+            'undo',
             `deployment/${config.deploymentName}`,
-            '-n', config.namespace,
+            '-n',
+            config.namespace,
           ]);
         } else {
           const res = await httpFetch(
             apiUrl(`/deployments/${config.deploymentName}`) + '?dryRun=false',
-            { method: 'PATCH', headers: headers(), body: JSON.stringify({ spec: { template: { metadata: { annotations: { 'ai-sdlc/rollback': 'true' } } } } }) },
+            {
+              method: 'PATCH',
+              headers: headers(),
+              body: JSON.stringify({
+                spec: { template: { metadata: { annotations: { 'ai-sdlc/rollback': 'true' } } } },
+              }),
+            },
           );
           if (!res.ok) throw new Error(`K8s rollback API error: ${res.status}`);
         }

@@ -38,16 +38,12 @@ export function AuditTable({ entries }: { entries: AuditEntry[] }) {
             <td style={{ padding: '8px 12px' }}>{entry.pipelineType}</td>
             <td style={{ padding: '8px 12px' }}>{entry.agentName ?? '-'}</td>
             <td style={{ padding: '8px 12px' }}>
-              <span style={{ color: statusColors[entry.status] ?? '#64748b' }}>
-                {entry.status}
-              </span>
+              <span style={{ color: statusColors[entry.status] ?? '#64748b' }}>{entry.status}</span>
             </td>
             <td style={{ textAlign: 'right', padding: '8px 12px' }}>
               {entry.costUsd != null ? `$${entry.costUsd.toFixed(3)}` : '-'}
             </td>
-            <td style={{ padding: '8px 12px', fontSize: 12 }}>
-              {entry.startedAt ?? '-'}
-            </td>
+            <td style={{ padding: '8px 12px', fontSize: 12 }}>{entry.startedAt ?? '-'}</td>
           </tr>
         ))}
         {entries.length === 0 && (

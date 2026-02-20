@@ -52,27 +52,20 @@ function boxSeparator(width: number): string {
 
 // ── Panel renderers ─────────────────────────────────────────────
 
-export function renderPipelinePanel(
-  runs: DashboardData['runs'],
-  width: number,
-): string[] {
+export function renderPipelinePanel(runs: DashboardData['runs'], width: number): string[] {
   const lines: string[] = [];
   lines.push(boxTop(width, 'Active Pipelines'));
 
   if (runs.length === 0) {
     lines.push(boxLine('No recent runs.', width));
   } else {
-    lines.push(boxLine(
-      'Run ID'.padEnd(24) + 'Status'.padEnd(12) + 'Started',
-      width,
-    ));
+    lines.push(boxLine('Run ID'.padEnd(24) + 'Status'.padEnd(12) + 'Started', width));
     lines.push(boxSeparator(width));
     for (const run of runs.slice(0, 5)) {
       const started = run.startedAt?.split('T')[1]?.slice(0, 8) ?? '-';
-      lines.push(boxLine(
-        run.runId.slice(0, 22).padEnd(24) + run.status.padEnd(12) + started,
-        width,
-      ));
+      lines.push(
+        boxLine(run.runId.slice(0, 22).padEnd(24) + run.status.padEnd(12) + started, width),
+      );
     }
   }
 
@@ -80,34 +73,36 @@ export function renderPipelinePanel(
   return lines;
 }
 
-export function renderAgentPanel(
-  agents: DashboardData['agents'],
-  width: number,
-): string[] {
+export function renderAgentPanel(agents: DashboardData['agents'], width: number): string[] {
   const lines: string[] = [];
   lines.push(boxTop(width, 'Agents'));
 
   if (agents.length === 0) {
     lines.push(boxLine('No agents registered.', width));
   } else {
-    lines.push(boxLine(
-      'Agent'.padEnd(18) + 'Lvl'.padEnd(5) + 'Tasks'.padEnd(8) + 'Rate'.padEnd(8) + 'Last',
-      width,
-    ));
+    lines.push(
+      boxLine(
+        'Agent'.padEnd(18) + 'Lvl'.padEnd(5) + 'Tasks'.padEnd(8) + 'Rate'.padEnd(8) + 'Last',
+        width,
+      ),
+    );
     lines.push(boxSeparator(width));
     for (const agent of agents.slice(0, 5)) {
-      const rate = agent.totalTasks > 0
-        ? `${Math.round((agent.successCount / agent.totalTasks) * 100)}%`
-        : '-';
+      const rate =
+        agent.totalTasks > 0
+          ? `${Math.round((agent.successCount / agent.totalTasks) * 100)}%`
+          : '-';
       const last = agent.lastTaskAt?.split('T')[0] ?? '-';
-      lines.push(boxLine(
-        agent.agentName.slice(0, 16).padEnd(18) +
-        String(agent.currentLevel).padEnd(5) +
-        String(agent.totalTasks).padEnd(8) +
-        rate.padEnd(8) +
-        last,
-        width,
-      ));
+      lines.push(
+        boxLine(
+          agent.agentName.slice(0, 16).padEnd(18) +
+            String(agent.currentLevel).padEnd(5) +
+            String(agent.totalTasks).padEnd(8) +
+            rate.padEnd(8) +
+            last,
+          width,
+        ),
+      );
     }
   }
 
@@ -123,14 +118,18 @@ export function renderCostPanel(
   const lines: string[] = [];
   lines.push(boxTop(width, 'Cost'));
 
-  lines.push(boxLine(
-    `Total: $${summary.totalCostUsd.toFixed(2)}  |  Tokens: ${formatNumber(summary.totalTokens)}  |  Runs: ${summary.entryCount}`,
-    width,
-  ));
-  lines.push(boxLine(
-    `Avg/run: $${summary.avgCostPerRun.toFixed(4)}  |  Budget: $${budget.budgetUsd} (${budget.utilizationPercent.toFixed(0)}% used)`,
-    width,
-  ));
+  lines.push(
+    boxLine(
+      `Total: $${summary.totalCostUsd.toFixed(2)}  |  Tokens: ${formatNumber(summary.totalTokens)}  |  Runs: ${summary.entryCount}`,
+      width,
+    ),
+  );
+  lines.push(
+    boxLine(
+      `Avg/run: $${summary.avgCostPerRun.toFixed(4)}  |  Budget: $${budget.budgetUsd} (${budget.utilizationPercent.toFixed(0)}% used)`,
+      width,
+    ),
+  );
 
   // Budget bar
   const barWidth = Math.max(10, width - 20);
@@ -153,19 +152,12 @@ export function renderCostPanel(
 
 export function renderHeaderPanel(width: number): string[] {
   const now = new Date().toLocaleString();
-  return [
-    boxTop(width, 'AI-SDLC Dashboard'),
-    boxLine(`Updated: ${now}`, width),
-    boxBottom(width),
-  ];
+  return [boxTop(width, 'AI-SDLC Dashboard'), boxLine(`Updated: ${now}`, width), boxBottom(width)];
 }
 
 // ── Composer ─────────────────────────────────────────────────────
 
-export function renderDashboardFrame(
-  data: DashboardData,
-  width: number,
-): string {
+export function renderDashboardFrame(data: DashboardData, width: number): string {
   const panelWidth = Math.max(40, width);
   const allLines: string[] = [];
 

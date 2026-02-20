@@ -135,10 +135,7 @@ describe('convention-detector', () => {
     });
 
     it('handles no test files', () => {
-      const files: FileInfo[] = [
-        makeFile('src/service.ts'),
-        makeFile('src/handler.ts'),
-      ];
+      const files: FileInfo[] = [makeFile('src/service.ts'), makeFile('src/handler.ts')];
 
       const conventions = detectConventions(files);
       const testing = conventions.find((c) => c.category === 'testing');
@@ -168,10 +165,7 @@ describe('convention-detector', () => {
     });
 
     it('detects relative imports without barrels', () => {
-      const files: FileInfo[] = [
-        makeFile('src/a.ts'),
-        makeFile('src/b.ts'),
-      ];
+      const files: FileInfo[] = [makeFile('src/a.ts'), makeFile('src/b.ts')];
 
       const conventions = detectConventions(files);
       const imports = conventions.find((c) => c.category === 'imports');

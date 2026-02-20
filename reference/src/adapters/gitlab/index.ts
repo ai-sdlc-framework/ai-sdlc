@@ -114,7 +114,9 @@ export function createGitLabSourceControl(
 
     async getFileContents(path: string, ref: string): Promise<FileContent> {
       const encodedPath = encodeURIComponent(path);
-      const res = await client(apiUrl(config, `/repository/files/${encodedPath}?ref=${encodeURIComponent(ref)}`));
+      const res = await client(
+        apiUrl(config, `/repository/files/${encodedPath}?ref=${encodeURIComponent(ref)}`),
+      );
       if (!res.ok) throw new Error(`GitLab getFileContents failed: ${res.status}`);
       const data = await res.json();
       const content = Buffer.from(data.content, 'base64').toString('utf-8');
@@ -127,7 +129,13 @@ export function createGitLabSourceControl(
       const data = await res.json();
       return (data.changes ?? []).map((c: Record<string, unknown>) => ({
         path: (c.new_path ?? c.old_path) as string,
-        status: c.new_file ? 'added' : c.deleted_file ? 'deleted' : c.renamed_file ? 'renamed' : 'modified',
+        status: c.new_file
+          ? 'added'
+          : c.deleted_file
+            ? 'deleted'
+            : c.renamed_file
+              ? 'renamed'
+              : 'modified',
         additions: typeof c.additions === 'number' ? c.additions : 0,
         deletions: typeof c.deletions === 'number' ? c.deletions : 0,
       }));

@@ -72,10 +72,16 @@ export function provenanceToAnnotations(provenance: ProvenanceRecord): Record<st
     annotations[`${PROVENANCE_ANNOTATION_PREFIX}cost-total`] = String(provenance.cost.totalCost);
     annotations[`${PROVENANCE_ANNOTATION_PREFIX}cost-currency`] = provenance.cost.currency;
     if (provenance.cost.execution) {
-      annotations[`${PROVENANCE_ANNOTATION_PREFIX}cost-input-tokens`] = String(provenance.cost.execution.inputTokens);
-      annotations[`${PROVENANCE_ANNOTATION_PREFIX}cost-output-tokens`] = String(provenance.cost.execution.outputTokens);
+      annotations[`${PROVENANCE_ANNOTATION_PREFIX}cost-input-tokens`] = String(
+        provenance.cost.execution.inputTokens,
+      );
+      annotations[`${PROVENANCE_ANNOTATION_PREFIX}cost-output-tokens`] = String(
+        provenance.cost.execution.outputTokens,
+      );
       if (provenance.cost.execution.cacheReadTokens != null) {
-        annotations[`${PROVENANCE_ANNOTATION_PREFIX}cost-cache-read-tokens`] = String(provenance.cost.execution.cacheReadTokens);
+        annotations[`${PROVENANCE_ANNOTATION_PREFIX}cost-cache-read-tokens`] = String(
+          provenance.cost.execution.cacheReadTokens,
+        );
       }
     }
   }
@@ -113,11 +119,13 @@ export function provenanceFromAnnotations(
       totalCost: parseFloat(costTotal),
       currency: get('cost-currency') ?? 'USD',
       breakdown: { tokenCost: parseFloat(costTotal) },
-      execution: inputTokens ? {
-        inputTokens: parseInt(inputTokens, 10),
-        outputTokens: parseInt(outputTokens ?? '0', 10),
-        cacheReadTokens: cacheReadTokens ? parseInt(cacheReadTokens, 10) : undefined,
-      } : undefined,
+      execution: inputTokens
+        ? {
+            inputTokens: parseInt(inputTokens, 10),
+            outputTokens: parseInt(outputTokens ?? '0', 10),
+            cacheReadTokens: cacheReadTokens ? parseInt(cacheReadTokens, 10) : undefined,
+          }
+        : undefined,
     };
   }
 

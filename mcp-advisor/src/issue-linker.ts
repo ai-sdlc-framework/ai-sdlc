@@ -9,7 +9,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { extractIssueNumber, BRANCH_PATTERN } from '@ai-sdlc/orchestrator';
+import { extractIssueNumber } from '@ai-sdlc/orchestrator';
 import type { IssueLinkMethod } from './session.js';
 
 const execFileAsync = promisify(execFile);
@@ -31,7 +31,9 @@ const COMMIT_ISSUE_PATTERN = /(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+#(\d+)
  */
 async function getCurrentBranch(repoPath: string): Promise<string | null> {
   try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: repoPath });
+    const { stdout } = await execFileAsync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+      cwd: repoPath,
+    });
     return stdout.trim() || null;
   } catch {
     return null;

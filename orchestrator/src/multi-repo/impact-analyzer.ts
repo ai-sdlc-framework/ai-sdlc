@@ -13,10 +13,7 @@ import { getTransitiveDependents } from './service-map-builder.js';
 /**
  * Analyze the impact of changed files across a service map.
  */
-export function analyzeImpact(
-  serviceMap: ServiceMap,
-  changedFiles: string[],
-): ImpactResult {
+export function analyzeImpact(serviceMap: ServiceMap, changedFiles: string[]): ImpactResult {
   const directlyAffected = new Set<string>();
 
   // Normalize changed files to relative paths from root
@@ -85,17 +82,17 @@ export function formatImpactSummary(impact: ImpactResult): string {
  * Determine the recommended build order for affected services.
  * Returns services in dependency order (leaf dependencies first).
  */
-export function getAffectedBuildOrder(
-  serviceMap: ServiceMap,
-  impact: ImpactResult,
-): string[] {
+export function getAffectedBuildOrder(serviceMap: ServiceMap, impact: ImpactResult): string[] {
   const affected = new Set(impact.allAffected);
   const result: string[] = [];
   const visited = new Set<string>();
 
   const adjacency = new Map<string, string[]>();
   for (const node of serviceMap.services) {
-    adjacency.set(node.name, node.dependencies.filter((d) => affected.has(d)));
+    adjacency.set(
+      node.name,
+      node.dependencies.filter((d) => affected.has(d)),
+    );
   }
 
   function visit(name: string): void {

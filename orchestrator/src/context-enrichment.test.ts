@@ -82,7 +82,12 @@ describe('context-enrichment', () => {
     it('respects limit', () => {
       const mem = createEnhancedEpisodicMemory(store);
       for (let i = 0; i < 20; i++) {
-        mem.record({ pipelineType: 'execute', outcome: 'failure', agentName: 'agent', errorMessage: `err-${i}` });
+        mem.record({
+          pipelineType: 'execute',
+          outcome: 'failure',
+          agentName: 'agent',
+          errorMessage: `err-${i}`,
+        });
       }
 
       const results = findRelevantEpisodes(store, { agentName: 'agent' }, 5);
@@ -146,7 +151,12 @@ describe('context-enrichment', () => {
     it('limits to 5 episodes', () => {
       const mem = createEnhancedEpisodicMemory(store);
       for (let i = 0; i < 10; i++) {
-        mem.record({ pipelineType: 'execute', outcome: 'failure', agentName: 'agent', errorMessage: `error ${i}` });
+        mem.record({
+          pipelineType: 'execute',
+          outcome: 'failure',
+          agentName: 'agent',
+          errorMessage: `error ${i}`,
+        });
       }
 
       const episodes = findRelevantEpisodes(store, { agentName: 'agent' }, 10);

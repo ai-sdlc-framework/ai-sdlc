@@ -7,8 +7,6 @@
  */
 
 import {
-  METRIC_NAMES,
-  SPAN_NAMES,
   ATTRIBUTE_KEYS,
   type MetricStore,
   type MetricDataPoint,
@@ -16,7 +14,6 @@ import {
   type MetricQuery,
   type MetricSummary,
   getMeter,
-  withSpan,
 } from '@ai-sdlc/reference';
 
 export interface OTelBridgeOptions {
@@ -75,7 +72,11 @@ export function createOTelBridge(
     return h;
   }
 
-  function forwardToOTel(point: { metric: string; value: number; labels?: Record<string, string> }): void {
+  function forwardToOTel(point: {
+    metric: string;
+    value: number;
+    labels?: Record<string, string>;
+  }): void {
     if (!enabled) return;
 
     const { metric, value, labels } = point;
@@ -144,7 +145,7 @@ export function createOTelBridge(
 
       // Since withSpan is async, we track spans manually
       const handle: OTelSpanHandle = {
-        end(status?: 'ok' | 'error') {
+        end(_status?: 'ok' | 'error') {
           activeSpans.delete(runId);
           endFn?.();
         },

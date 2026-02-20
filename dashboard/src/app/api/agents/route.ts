@@ -8,7 +8,8 @@ import type { AgentSummary } from '@/lib/types';
 
 export async function GET(): Promise<NextResponse<AgentSummary[]>> {
   const store = getStateStore();
-  const rows = store.getDatabase()
+  const rows = store
+    .getDatabase()
     .prepare(
       `SELECT agent_name, current_level, total_tasks, success_count, failure_count, last_task_at
        FROM autonomy_ledger ORDER BY agent_name`,

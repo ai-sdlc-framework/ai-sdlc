@@ -22,11 +22,13 @@ export const complexityCommand = new Command('complexity')
 
     try {
       const { profile, context } = await orchestrator.complexity({ analyze: opts.analyze });
-      console.log(formatOutput(format, {
-        type: 'complexity',
-        profile,
-        context,
-      }));
+      console.log(
+        formatOutput(format, {
+          type: 'complexity',
+          profile,
+          context,
+        }),
+      );
     } catch (err) {
       console.error(err instanceof Error ? err.message : String(err));
       process.exitCode = 1;

@@ -4,7 +4,7 @@
  */
 
 import { readFile } from 'node:fs/promises';
-import { dirname, relative, resolve, posix } from 'node:path';
+import { dirname, relative, resolve } from 'node:path';
 import type { ImportStatement, ModuleInfo, ModuleGraph, DependencyEdge } from './types.js';
 
 // Matches: import ... from 'specifier'  |  import 'specifier'
@@ -30,7 +30,6 @@ export async function parseImports(filePath: string): Promise<ImportStatement[]>
   }
 
   const imports: ImportStatement[] = [];
-  const lines = content.split('\n');
 
   // Track which specifiers we've already seen to avoid duplicates from re-exports
   const seen = new Set<string>();

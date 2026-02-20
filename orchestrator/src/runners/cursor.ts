@@ -85,32 +85,34 @@ export class CursorRunner implements AgentRunner {
         args.push('-m', DEFAULT_CURSOR_MODEL);
       }
 
-      const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-        const child = spawn('cursor-agent', args, {
-          cwd: ctx.workDir,
-          stdio: ['ignore', 'pipe', 'pipe'],
-          env: { ...process.env },
-          timeout: timeoutMs,
-        });
+      const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
+        (resolve, reject) => {
+          const child = spawn('cursor-agent', args, {
+            cwd: ctx.workDir,
+            stdio: ['ignore', 'pipe', 'pipe'],
+            env: { ...process.env },
+            timeout: timeoutMs,
+          });
 
-        const chunks: Buffer[] = [];
-        const errChunks: Buffer[] = [];
+          const chunks: Buffer[] = [];
+          const errChunks: Buffer[] = [];
 
-        child.stdout.on('data', (data: Buffer) => chunks.push(data));
-        child.stderr.on('data', (data: Buffer) => errChunks.push(data));
+          child.stdout.on('data', (data: Buffer) => chunks.push(data));
+          child.stderr.on('data', (data: Buffer) => errChunks.push(data));
 
-        child.on('close', (code) => {
-          const out = Buffer.concat(chunks).toString('utf-8');
-          const err = Buffer.concat(errChunks).toString('utf-8');
-          if (code === 0) {
-            resolve({ stdout: out, stderr: err });
-          } else {
-            reject(new Error(`cursor-agent exited with code ${code}: ${err || out}`));
-          }
-        });
+          child.on('close', (code) => {
+            const out = Buffer.concat(chunks).toString('utf-8');
+            const err = Buffer.concat(errChunks).toString('utf-8');
+            if (code === 0) {
+              resolve({ stdout: out, stderr: err });
+            } else {
+              reject(new Error(`cursor-agent exited with code ${code}: ${err || out}`));
+            }
+          });
 
-        child.on('error', reject);
-      });
+          child.on('error', reject);
+        },
+      );
 
       const tokenUsage = parseTokenUsage(stderr, model);
       const summary = parseStreamJson(stdout);
@@ -145,11 +147,7 @@ export class CursorRunner implements AgentRunner {
       const commitMsg = tmpl
         .replace(/\{issueNumber\}/g, String(ctx.issueNumber))
         .replace(/\{issueTitle\}/g, ctx.issueTitle);
-      await gitExec(ctx.workDir, [
-        'commit',
-        '-m',
-        `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`,
-      ]);
+      await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
 
       return {
         success: true,

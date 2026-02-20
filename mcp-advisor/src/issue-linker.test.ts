@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { resolveIssue, type IssueResolution } from './issue-linker.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { resolveIssue } from './issue-linker.js';
 import { execFile } from 'node:child_process';
 
 vi.mock('node:child_process', () => ({
@@ -11,8 +11,10 @@ const mockExecFile = vi.mocked(execFile);
 function mockExec(stdout: string) {
   mockExecFile.mockImplementation((_cmd, _args, _opts, cb?: unknown) => {
     // promisify wraps execFile — the callback is the last arg
-    const callback = (typeof _opts === 'function' ? _opts : cb) as
-      (err: Error | null, result: { stdout: string; stderr: string }) => void;
+    const callback = (typeof _opts === 'function' ? _opts : cb) as (
+      err: Error | null,
+      result: { stdout: string; stderr: string },
+    ) => void;
     callback(null, { stdout, stderr: '' });
     return undefined as never;
   });
@@ -21,8 +23,10 @@ function mockExec(stdout: string) {
 function mockExecSequence(outputs: string[]) {
   let callIndex = 0;
   mockExecFile.mockImplementation((_cmd, _args, _opts, cb?: unknown) => {
-    const callback = (typeof _opts === 'function' ? _opts : cb) as
-      (err: Error | null, result: { stdout: string; stderr: string }) => void;
+    const callback = (typeof _opts === 'function' ? _opts : cb) as (
+      err: Error | null,
+      result: { stdout: string; stderr: string },
+    ) => void;
     const stdout = outputs[callIndex] ?? '';
     callIndex++;
     callback(null, { stdout, stderr: '' });
@@ -32,8 +36,10 @@ function mockExecSequence(outputs: string[]) {
 
 function mockExecFail() {
   mockExecFile.mockImplementation((_cmd, _args, _opts, cb?: unknown) => {
-    const callback = (typeof _opts === 'function' ? _opts : cb) as
-      (err: Error | null, result: { stdout: string; stderr: string }) => void;
+    const callback = (typeof _opts === 'function' ? _opts : cb) as (
+      err: Error | null,
+      result: { stdout: string; stderr: string },
+    ) => void;
     callback(new Error('git not available'), { stdout: '', stderr: '' });
     return undefined as never;
   });
@@ -70,7 +76,7 @@ describe('resolveIssue', () => {
 
   it('falls back to git context when no branch or explicit', async () => {
     mockExecSequence([
-      'main\n',                              // rev-parse --abbrev-ref HEAD
+      'main\n', // rev-parse --abbrev-ref HEAD
       'abc1234 fixes #55\ndef5678 update\n', // git log --oneline -20
     ]);
     const result = await resolveIssue('/repo');
@@ -78,10 +84,7 @@ describe('resolveIssue', () => {
   });
 
   it('picks most-referenced issue from git log', async () => {
-    mockExecSequence([
-      'main\n',
-      'a fix #10\nb fix #20\nc ref #20\nd fix #10\ne fix #10\n',
-    ]);
+    mockExecSequence(['main\n', 'a fix #10\nb fix #20\nc ref #20\nd fix #10\ne fix #10\n']);
     const result = await resolveIssue('/repo');
     expect(result.issueNumber).toBe(10);
     expect(result.method).toBe('git-context');

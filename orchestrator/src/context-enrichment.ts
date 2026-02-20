@@ -54,7 +54,9 @@ export function findRelevantEpisodes(
       try {
         const parsed = JSON.parse(ep.metadata);
         const epFiles: string[] = parsed.filesChanged ?? parsed.files ?? [];
-        const overlap = criteria.files.filter((f) => epFiles.some((ef: string) => ef.includes(f) || f.includes(ef)));
+        const overlap = criteria.files.filter((f) =>
+          epFiles.some((ef: string) => ef.includes(f) || f.includes(ef)),
+        );
         score += overlap.length * 3;
       } catch {
         // metadata not JSON
@@ -100,9 +102,7 @@ export function findRelevantEpisodes(
     }
   }
 
-  return scored
-    .sort((a, b) => b.relevanceScore - a.relevanceScore)
-    .slice(0, limit);
+  return scored.sort((a, b) => b.relevanceScore - a.relevanceScore).slice(0, limit);
 }
 
 /**
@@ -115,7 +115,7 @@ export function formatEpisodicContext(episodes: ScoredEpisode[]): string {
 
   const lines = ['## Episodic Memory (relevant history)', ''];
 
-  for (const { episode, relevanceScore } of episodes.slice(0, 5)) {
+  for (const { episode } of episodes.slice(0, 5)) {
     const outcome = episode.outcome === 'success' ? 'SUCCESS' : 'FAILURE';
     const date = episode.createdAt?.split('T')[0] ?? 'unknown';
     const agent = episode.agentName ? ` (${episode.agentName})` : '';
@@ -132,7 +132,9 @@ export function formatEpisodicContext(episodes: ScoredEpisode[]): string {
     }
 
     if (episode.gatePassCount != null || episode.gateFailCount != null) {
-      lines.push(`Gates: ${episode.gatePassCount ?? 0} passed, ${episode.gateFailCount ?? 0} failed`);
+      lines.push(
+        `Gates: ${episode.gatePassCount ?? 0} passed, ${episode.gateFailCount ?? 0} failed`,
+      );
     }
 
     if (episode.costUsd != null) {
@@ -145,7 +147,9 @@ export function formatEpisodicContext(episodes: ScoredEpisode[]): string {
         const parsed = JSON.parse(episode.metadata);
         const files: string[] = parsed.filesChanged ?? parsed.files ?? [];
         if (files.length > 0) {
-          lines.push(`Files: ${files.slice(0, 5).join(', ')}${files.length > 5 ? ` (+${files.length - 5} more)` : ''}`);
+          lines.push(
+            `Files: ${files.slice(0, 5).join(', ')}${files.length > 5 ? ` (+${files.length - 5} more)` : ''}`,
+          );
         }
       } catch {
         // not JSON
@@ -161,10 +165,7 @@ export function formatEpisodicContext(episodes: ScoredEpisode[]): string {
 /**
  * Top-level enrichment: find relevant episodes and format them.
  */
-export function enrichAgentContext(
-  store: StateStore,
-  criteria: EpisodeSearchCriteria,
-): string {
+export function enrichAgentContext(store: StateStore, criteria: EpisodeSearchCriteria): string {
   const episodes = findRelevantEpisodes(store, criteria);
   return formatEpisodicContext(episodes);
 }

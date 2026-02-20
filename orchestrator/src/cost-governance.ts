@@ -6,12 +6,7 @@
  */
 
 import type { CostPolicy } from '@ai-sdlc/reference';
-import type {
-  OrchestratorPlugin,
-  PluginContext,
-  BeforeRunEvent,
-  AfterRunEvent,
-} from './plugin.js';
+import type { OrchestratorPlugin, PluginContext, BeforeRunEvent, AfterRunEvent } from './plugin.js';
 import type { CostTracker } from './cost-tracker.js';
 import type { Logger } from './logger.js';
 import type { NotificationRouter } from './notifications/notification-router.js';
@@ -70,7 +65,10 @@ export class CostGovernancePlugin implements OrchestratorPlugin {
         );
       }
 
-      if (budget.overBudget && this.costPolicy.perExecution.hardLimit.action === 'require-approval') {
+      if (
+        budget.overBudget &&
+        this.costPolicy.perExecution.hardLimit.action === 'require-approval'
+      ) {
         this.log.info(
           `Cost governance: budget exceeded ($${budget.spentUsd.toFixed(2)} / $${budget.budgetUsd.toFixed(2)}). Approval required.`,
         );

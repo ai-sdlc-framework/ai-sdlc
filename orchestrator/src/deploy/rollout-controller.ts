@@ -7,7 +7,6 @@ import type {
   RolloutControllerConfig,
   RolloutStatus,
   RolloutPhase,
-  RolloutMetrics,
   CanaryConfig,
   BlueGreenConfig,
 } from './rollout-types.js';

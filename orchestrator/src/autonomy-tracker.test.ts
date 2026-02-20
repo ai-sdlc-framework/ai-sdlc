@@ -216,7 +216,9 @@ describe('AutonomyTracker', () => {
       expect(proximity.nextLevel).toBe(1);
       expect(proximity.conditionProgress).toHaveLength(4);
 
-      const tasksCondition = proximity.conditionProgress.find((c) => c.condition === 'Tasks completed');
+      const tasksCondition = proximity.conditionProgress.find(
+        (c) => c.condition === 'Tasks completed',
+      );
       expect(tasksCondition).toBeDefined();
       expect(tasksCondition!.current).toBe(2);
       expect(tasksCondition!.required).toBe(3);

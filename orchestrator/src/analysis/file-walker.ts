@@ -3,14 +3,29 @@
  * A module boundary is a directory containing index.ts, index.js, or package.json.
  */
 
-import { readdir, stat, readFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import { join, relative, extname, basename } from 'node:path';
 import type { FileInfo, ModuleInfo } from './types.js';
 
 const CODE_EXTENSIONS = new Set([
-  '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.py', '.go', '.rs', '.java', '.rb', '.php',
-  '.c', '.cpp', '.h', '.hpp', '.cs', '.swift',
+  '.ts',
+  '.tsx',
+  '.js',
+  '.jsx',
+  '.mjs',
+  '.cjs',
+  '.py',
+  '.go',
+  '.rs',
+  '.java',
+  '.rb',
+  '.php',
+  '.c',
+  '.cpp',
+  '.h',
+  '.hpp',
+  '.cs',
+  '.swift',
 ]);
 
 const MODULE_MARKERS = ['index.ts', 'index.js', 'index.mjs', 'package.json'];
@@ -28,7 +43,10 @@ function matchesGlob(filePath: string, patterns: string[]): boolean {
       .replace(/\*\*/g, '{{GLOBSTAR}}')
       .replace(/\*/g, '[^/]*')
       .replace(/\{\{GLOBSTAR\}\}/g, '.*');
-    if (new RegExp(`^${regex}$`).test(filePath) || new RegExp(`^${regex}$`).test(basename(filePath))) {
+    if (
+      new RegExp(`^${regex}$`).test(filePath) ||
+      new RegExp(`^${regex}$`).test(basename(filePath))
+    ) {
       return true;
     }
   }
@@ -53,7 +71,13 @@ async function countLines(filePath: string): Promise<number> {
  * Walk the filesystem starting from rootDir, collecting file info.
  */
 export async function walkFiles(rootDir: string, options?: WalkOptions): Promise<FileInfo[]> {
-  const exclude = options?.exclude ?? ['node_modules/**', '.git/**', 'dist/**', 'build/**', 'coverage/**'];
+  const exclude = options?.exclude ?? [
+    'node_modules/**',
+    '.git/**',
+    'dist/**',
+    'build/**',
+    'coverage/**',
+  ];
   const files: FileInfo[] = [];
 
   async function walk(dir: string): Promise<void> {
@@ -97,7 +121,13 @@ export async function walkFiles(rootDir: string, options?: WalkOptions): Promise
  * Detect module boundaries — directories that contain a module marker file.
  */
 export async function detectModules(rootDir: string, options?: WalkOptions): Promise<ModuleInfo[]> {
-  const exclude = options?.exclude ?? ['node_modules/**', '.git/**', 'dist/**', 'build/**', 'coverage/**'];
+  const exclude = options?.exclude ?? [
+    'node_modules/**',
+    '.git/**',
+    'dist/**',
+    'build/**',
+    'coverage/**',
+  ];
   const modules: ModuleInfo[] = [];
 
   async function walk(dir: string): Promise<void> {

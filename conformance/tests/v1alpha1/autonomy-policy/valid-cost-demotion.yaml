@@ -6,51 +6,51 @@ metadata:
   labels:
     team.example.com/tier: production
   annotations:
-    ai-sdlc.io/rfc: "0004"
+    ai-sdlc.io/rfc: '0004'
 spec:
   levels:
     - level: 0
       name: Observer
       description: Read-only access, all actions require approval
       permissions:
-        read: ["**"]
+        read: ['**']
         write: []
         execute: []
       guardrails:
         requireApproval: all
-        transactionLimit: "$10/day"
+        transactionLimit: '$10/day'
       monitoring: continuous
       minimumDuration: null
     - level: 1
       name: Junior
       permissions:
-        read: ["**"]
-        write: ["src/**"]
-        execute: ["test-suite"]
+        read: ['**']
+        write: ['src/**']
+        execute: ['test-suite']
       guardrails:
         requireApproval: all
         maxLinesPerPR: 200
-        transactionLimit: "$50/day"
+        transactionLimit: '$50/day'
       monitoring: continuous
-      minimumDuration: "4w"
+      minimumDuration: '4w'
     - level: 2
       name: Senior
       permissions:
-        read: ["**"]
-        write: ["src/**", "tests/**"]
-        execute: ["test-suite", "lint", "build"]
+        read: ['**']
+        write: ['src/**', 'tests/**']
+        execute: ['test-suite', 'lint', 'build']
       guardrails:
         requireApproval: security-critical-only
         maxLinesPerPR: 500
-        transactionLimit: "$100/day"
+        transactionLimit: '$100/day'
       monitoring: real-time-notification
-      minimumDuration: "8w"
+      minimumDuration: '8w'
   promotionCriteria:
     0-to-1:
       minimumTasks: 10
       conditions:
         - metric: pr-approval-rate
-          operator: ">="
+          operator: '>='
           threshold: 0.90
       requiredApprovals:
         - tech-lead
@@ -58,10 +58,10 @@ spec:
       minimumTasks: 50
       conditions:
         - metric: pr-approval-rate
-          operator: ">="
+          operator: '>='
           threshold: 0.95
         - metric: ai_sdlc.cost.cost_vs_estimate
-          operator: "<="
+          operator: '<='
           threshold: 1.5
       requiredApprovals:
         - engineering-manager
@@ -74,7 +74,7 @@ spec:
       cooldown: 1w
       condition:
         metric: ai_sdlc.cost.budget_consumed
-        operator: ">="
+        operator: '>='
         threshold: 1.0
         window: 3
       notification: cost-overrun-alert
@@ -83,6 +83,6 @@ spec:
       cooldown: 2w
       condition:
         metric: ai_sdlc.cost.retry_waste
-        operator: ">="
+        operator: '>='
         threshold: 50
       notification: retry-waste-alert

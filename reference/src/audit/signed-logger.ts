@@ -6,8 +6,8 @@
  */
 
 import { createHmac } from 'node:crypto';
-import type { AuditEntry, AuditLog, AuditSink, IntegrityResult } from './types.js';
-import { createAuditLog, computeEntryHash } from './logger.js';
+import type { AuditEntry, AuditSink, IntegrityResult } from './types.js';
+import { createAuditLog } from './logger.js';
 
 export interface SigningKey {
   /** Unique key identifier. */
@@ -71,10 +71,7 @@ export function verifySignature(entry: SignedAuditEntry, key: SigningKey): boole
 /**
  * Create a signed audit log that adds HMAC signatures to every entry.
  */
-export function createSignedAuditLog(
-  initialKey: SigningKey,
-  sink?: AuditSink,
-): SignedAuditLog {
+export function createSignedAuditLog(initialKey: SigningKey, sink?: AuditSink): SignedAuditLog {
   const inner = createAuditLog(sink);
   let currentKey = initialKey;
   const signedEntries: SignedAuditEntry[] = [];

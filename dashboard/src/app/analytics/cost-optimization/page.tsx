@@ -13,8 +13,8 @@ export default async function CostOptimizationPage() {
       <div style={{ padding: 24 }}>
         <h1 style={{ fontSize: 20, fontWeight: 700, marginBottom: 8 }}>Cost Optimization</h1>
         <p style={{ color: '#64748b' }}>
-          This is an enterprise feature. Install{' '}
-          <code>@ai-sdlc-enterprise/dashboard</code> to enable cost optimization analytics.
+          This is an enterprise feature. Install <code>@ai-sdlc-enterprise/dashboard</code> to
+          enable cost optimization analytics.
         </p>
       </div>
     );

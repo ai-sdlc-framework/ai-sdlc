@@ -6,11 +6,7 @@
  */
 
 import type { Gate, EnforcementLevel } from '@ai-sdlc/reference';
-import {
-  PROGRESSIVE_GATE_PROFILES,
-  type ComplexityBand,
-  type GateProfile,
-} from './defaults.js';
+import { PROGRESSIVE_GATE_PROFILES, type ComplexityBand, type GateProfile } from './defaults.js';
 import type { StateStore } from './state/store.js';
 import type { GateThresholdOverride } from './state/types.js';
 
@@ -54,10 +50,14 @@ export function getGateProfile(score: number): GateProfile {
  */
 function enforcementOrd(level: EnforcementLevel): number {
   switch (level) {
-    case 'advisory': return 0;
-    case 'soft-mandatory': return 1;
-    case 'hard-mandatory': return 2;
-    default: return 1;
+    case 'advisory':
+      return 0;
+    case 'soft-mandatory':
+      return 1;
+    case 'hard-mandatory':
+      return 2;
+    default:
+      return 1;
   }
 }
 
@@ -118,9 +118,7 @@ export function adjustGateForComplexity(
   const band = profile.band;
 
   // Check for DB override first
-  const override = overrides?.find(
-    (o) => o.gateName === gate.name && o.complexityBand === band,
-  );
+  const override = overrides?.find((o) => o.gateName === gate.name && o.complexityBand === band);
 
   let adjustedEnforcement: EnforcementLevel;
   let adjustedThresholds: Record<string, unknown>;

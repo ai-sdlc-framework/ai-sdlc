@@ -30,47 +30,57 @@ describe('buildPrompt', () => {
   });
 
   it('includes lint/format when ctx.lintCommand and ctx.formatCommand set', () => {
-    const prompt = buildPrompt(makeCtx({
-      lintCommand: 'npm run lint',
-      formatCommand: 'npm run format',
-    }));
+    const prompt = buildPrompt(
+      makeCtx({
+        lintCommand: 'npm run lint',
+        formatCommand: 'npm run format',
+      }),
+    );
     expect(prompt).toContain('`npm run lint`');
     expect(prompt).toContain('`npm run format`');
   });
 
   it('includes lint/format in CI error branch when commands set', () => {
-    const prompt = buildPrompt(makeCtx({
-      lintCommand: 'pnpm lint',
-      formatCommand: 'pnpm format',
-      ciErrors: 'Error: test failed',
-    }));
+    const prompt = buildPrompt(
+      makeCtx({
+        lintCommand: 'pnpm lint',
+        formatCommand: 'pnpm format',
+        ciErrors: 'Error: test failed',
+      }),
+    );
     expect(prompt).toContain('CI Failure Logs');
     expect(prompt).toContain('`pnpm lint`');
     expect(prompt).toContain('`pnpm format`');
   });
 
   it('includes only lintCommand when formatCommand is not set', () => {
-    const prompt = buildPrompt(makeCtx({
-      lintCommand: 'eslint .',
-    }));
+    const prompt = buildPrompt(
+      makeCtx({
+        lintCommand: 'eslint .',
+      }),
+    );
     expect(prompt).toContain('`eslint .`');
     expect(prompt).not.toContain('format');
   });
 
   it('includes only formatCommand when lintCommand is not set', () => {
-    const prompt = buildPrompt(makeCtx({
-      formatCommand: 'prettier --write .',
-    }));
+    const prompt = buildPrompt(
+      makeCtx({
+        formatCommand: 'prettier --write .',
+      }),
+    );
     expect(prompt).toContain('`prettier --write .`');
     // Should not mention lint
     expect(prompt).not.toMatch(/run `.*lint/);
   });
 
   it('uses dynamic step numbering (steps adjust when instructions omitted)', () => {
-    const promptWithCmds = buildPrompt(makeCtx({
-      lintCommand: 'npm run lint',
-      formatCommand: 'npm run format',
-    }));
+    const promptWithCmds = buildPrompt(
+      makeCtx({
+        lintCommand: 'npm run lint',
+        formatCommand: 'npm run format',
+      }),
+    );
     const promptWithout = buildPrompt(makeCtx());
 
     // With commands: should have more steps
@@ -80,10 +90,12 @@ describe('buildPrompt', () => {
   });
 
   it('CI branch with only lintCommand omits format instructions', () => {
-    const prompt = buildPrompt(makeCtx({
-      lintCommand: 'eslint .',
-      ciErrors: 'lint error',
-    }));
+    const prompt = buildPrompt(
+      makeCtx({
+        lintCommand: 'eslint .',
+        ciErrors: 'lint error',
+      }),
+    );
     expect(prompt).toContain('`eslint .`');
     // Should not have the "If the failure is a formatting/prettier error" step
     expect(prompt).not.toContain('formatting/prettier');
@@ -92,10 +104,7 @@ describe('buildPrompt', () => {
 
 describe('parseTokenUsage', () => {
   it('parses input/output token counts', () => {
-    const result = parseTokenUsage(
-      'Input tokens: 1,234\nOutput tokens: 5,678',
-      'test-model',
-    );
+    const result = parseTokenUsage('Input tokens: 1,234\nOutput tokens: 5,678', 'test-model');
     expect(result).toEqual({
       inputTokens: 1234,
       outputTokens: 5678,

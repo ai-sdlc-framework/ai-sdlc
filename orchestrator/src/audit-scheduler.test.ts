@@ -2,8 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAuditScheduler } from './audit-scheduler.js';
 import { createAuditLog } from '@ai-sdlc/reference';
 
-beforeEach(() => { vi.useFakeTimers(); });
-afterEach(() => { vi.useRealTimers(); });
+beforeEach(() => {
+  vi.useFakeTimers();
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('AuditScheduler', () => {
   it('starts and stops cleanly', () => {

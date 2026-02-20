@@ -369,9 +369,8 @@ async function executePipelineBody(
     const budget = options.costTracker.getBudgetStatus(
       config.pipeline.spec.costPolicy.budget.amount,
     );
-    costMetrics['budget-remaining-percent'] = budget.budgetUsd > 0
-      ? budget.remainingUsd / budget.budgetUsd
-      : 1;
+    costMetrics['budget-remaining-percent'] =
+      budget.budgetUsd > 0 ? budget.remainingUsd / budget.budgetUsd : 1;
     costMetrics['total-execution-cost'] = budget.spentUsd;
   }
 
@@ -707,7 +706,10 @@ async function executePipelineBody(
   if (result.tokenUsage) {
     const tu = result.tokenUsage;
     const totalCostUsd = CostTracker.computeCost(
-      tu.inputTokens, tu.outputTokens, tu.model, tu.cacheReadTokens,
+      tu.inputTokens,
+      tu.outputTokens,
+      tu.model,
+      tu.cacheReadTokens,
     );
     costReceipt = {
       totalCost: totalCostUsd,
@@ -758,11 +760,7 @@ async function executePipelineBody(
         if (section === 'closes') parts.push('', `${closeKeyword} #${issueNumber}`);
       }
       const footer = options.prFooter ?? DEFAULT_PR_FOOTER;
-      parts.push(
-        '',
-        '---',
-        footer,
-      );
+      parts.push('', '---', footer);
       if (provenanceBlock) parts.push(provenanceBlock);
 
       const prResult = await sc.createPR({

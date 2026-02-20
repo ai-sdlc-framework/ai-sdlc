@@ -6,9 +6,20 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "bin": { "ai-sdlc-mcp-advisor": "dist/bin.js" },
-  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
-  "scripts": { "build": "tsc", "clean": "rm -rf dist *.tsbuildinfo", "test": "vitest run" },
+  "bin": {
+    "ai-sdlc-mcp-advisor": "dist/bin.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run"
+  },
   "dependencies": {
     "@ai-sdlc/orchestrator": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.26.0",

@@ -94,36 +94,38 @@ export class CodexRunner implements AgentRunner {
         args.push('-m', DEFAULT_CODEX_MODEL);
       }
 
-      const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>((resolve, reject) => {
-        const child = spawn('codex', args, {
-          cwd: ctx.workDir,
-          stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env },
-          timeout: timeoutMs,
-        });
+      const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
+        (resolve, reject) => {
+          const child = spawn('codex', args, {
+            cwd: ctx.workDir,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            env: { ...process.env },
+            timeout: timeoutMs,
+          });
 
-        const chunks: Buffer[] = [];
-        const errChunks: Buffer[] = [];
+          const chunks: Buffer[] = [];
+          const errChunks: Buffer[] = [];
 
-        child.stdout.on('data', (data: Buffer) => chunks.push(data));
-        child.stderr.on('data', (data: Buffer) => errChunks.push(data));
+          child.stdout.on('data', (data: Buffer) => chunks.push(data));
+          child.stderr.on('data', (data: Buffer) => errChunks.push(data));
 
-        child.on('close', (code) => {
-          const out = Buffer.concat(chunks).toString('utf-8');
-          const err = Buffer.concat(errChunks).toString('utf-8');
-          if (code === 0) {
-            resolve({ stdout: out, stderr: err });
-          } else {
-            reject(new Error(`codex exited with code ${code}: ${err || out}`));
-          }
-        });
+          child.on('close', (code) => {
+            const out = Buffer.concat(chunks).toString('utf-8');
+            const err = Buffer.concat(errChunks).toString('utf-8');
+            if (code === 0) {
+              resolve({ stdout: out, stderr: err });
+            } else {
+              reject(new Error(`codex exited with code ${code}: ${err || out}`));
+            }
+          });
 
-        child.on('error', reject);
+          child.on('error', reject);
 
-        // Send prompt via stdin and close it
-        child.stdin.write(prompt);
-        child.stdin.end();
-      });
+          // Send prompt via stdin and close it
+          child.stdin.write(prompt);
+          child.stdin.end();
+        },
+      );
 
       const tokenUsage = parseTokenUsage(stderr, model);
 
@@ -157,11 +159,7 @@ export class CodexRunner implements AgentRunner {
       const commitMsg = tmpl
         .replace(/\{issueNumber\}/g, String(ctx.issueNumber))
         .replace(/\{issueTitle\}/g, ctx.issueTitle);
-      await gitExec(ctx.workDir, [
-        'commit',
-        '-m',
-        `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`,
-      ]);
+      await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
 
       return {
         success: true,

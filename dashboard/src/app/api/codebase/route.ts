@@ -26,14 +26,16 @@ export interface CodebaseResponse {
 export async function GET(): Promise<NextResponse<CodebaseResponse>> {
   const store = getStateStore();
 
-  const profiles = store.getDatabase()
+  const profiles = store
+    .getDatabase()
     .prepare(
       `SELECT repo_path, score, files_count, modules_count, dependency_count, analyzed_at
        FROM complexity_profiles ORDER BY analyzed_at DESC LIMIT 10`,
     )
     .all() as Array<Record<string, unknown>>;
 
-  const hotspots = store.getDatabase()
+  const hotspots = store
+    .getDatabase()
     .prepare(
       `SELECT file_path, churn_rate, complexity, commit_count, last_modified
        FROM hotspots ORDER BY churn_rate DESC LIMIT 50`,

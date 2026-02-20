@@ -31,8 +31,18 @@ function makeProfile(overrides?: Partial<CodebaseProfile>): CodebaseProfile {
     ],
     conventions: [
       { category: 'naming', pattern: 'kebab-case for file names', confidence: 0.85, examples: [] },
-      { category: 'testing', pattern: 'Co-located test files (*.test.ts)', confidence: 0.9, examples: [] },
-      { category: 'imports', pattern: 'Relative imports, barrel re-exports via index.ts', confidence: 0.8, examples: [] },
+      {
+        category: 'testing',
+        pattern: 'Co-located test files (*.test.ts)',
+        confidence: 0.9,
+        examples: [],
+      },
+      {
+        category: 'imports',
+        pattern: 'Relative imports, barrel re-exports via index.ts',
+        confidence: 0.8,
+        examples: [],
+      },
     ],
     analyzedAt: '2026-02-14T10:00:00.000Z',
     ...overrides,

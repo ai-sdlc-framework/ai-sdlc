@@ -46,7 +46,9 @@ describe('process-escalation', () => {
     it('adds security gate when escalating to complex without one', () => {
       const gates = [makeGate('lint'), makeGate('test')];
       const result = evaluateProcessEscalation(3, 8, gates);
-      expect(result.actions.some((a) => a.type === 'add-gate' && a.gateName === 'security-scan')).toBe(true);
+      expect(
+        result.actions.some((a) => a.type === 'add-gate' && a.gateName === 'security-scan'),
+      ).toBe(true);
     });
 
     it('does not add security gate if one exists', () => {

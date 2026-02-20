@@ -23,8 +23,11 @@ export interface CreateServerOptions {
   plugins?: McpAdvisorPlugin[];
 }
 
-export async function createMcpServer(opts?: CreateServerOptions): Promise<{ server: McpServer; deps: ServerDeps }> {
-  const db = opts?.db ?? new Database(opts?.dbPath ?? process.env['AI_SDLC_DB'] ?? '.ai-sdlc/state.db');
+export async function createMcpServer(
+  opts?: CreateServerOptions,
+): Promise<{ server: McpServer; deps: ServerDeps }> {
+  const db =
+    opts?.db ?? new Database(opts?.dbPath ?? process.env['AI_SDLC_DB'] ?? '.ai-sdlc/state.db');
   const store = StateStore.open(db);
   const costTracker = new CostTracker(store);
   const sessions = new SessionManager();

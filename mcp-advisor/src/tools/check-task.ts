@@ -14,9 +14,7 @@ export function handleCheckTask(
   deps: ServerDeps,
   input: { sessionId?: string; issueNumber?: number },
 ): CheckTaskResult {
-  const session = input.sessionId
-    ? deps.sessions.get(input.sessionId)
-    : deps.sessions.getActive();
+  const session = input.sessionId ? deps.sessions.get(input.sessionId) : deps.sessions.getActive();
 
   const issueNumber = input.issueNumber ?? session?.linkedIssue ?? null;
 
@@ -24,14 +22,14 @@ export function handleCheckTask(
   const constraints: string[] = [];
 
   // Look up pipeline runs for the issue
-  const runs = issueNumber != null
-    ? deps.store.getPipelineRuns(issueNumber, 10)
-    : [];
+  const runs = issueNumber != null ? deps.store.getPipelineRuns(issueNumber, 10) : [];
 
   if (runs.length > 0) {
     const latest = runs[0];
     if (latest.status === 'running') {
-      advisoryNotes.push(`Pipeline run ${latest.runId} is currently running (stage: ${latest.currentStage ?? 'unknown'})`);
+      advisoryNotes.push(
+        `Pipeline run ${latest.runId} is currently running (stage: ${latest.currentStage ?? 'unknown'})`,
+      );
     }
     if (latest.status === 'failed') {
       advisoryNotes.push(`Last pipeline run failed: ${latest.result ?? 'no details'}`);
@@ -44,7 +42,9 @@ export function handleCheckTask(
   if (ledger) {
     autonomyLevel = ledger.currentLevel;
     if (ledger.currentLevel <= 1) {
-      advisoryNotes.push('Low autonomy level — consider requesting human review for significant changes.');
+      advisoryNotes.push(
+        'Low autonomy level — consider requesting human review for significant changes.',
+      );
     }
   }
 

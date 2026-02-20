@@ -39,7 +39,6 @@ import type {
   BuildEvent,
 } from '../interfaces.js';
 import type { GitHubWebhookBridges } from './webhooks.js';
-import { transformIssueEvent, transformPREvent, transformBuildEvent } from './webhooks.js';
 
 export type GitHubConfig = {
   org: string;

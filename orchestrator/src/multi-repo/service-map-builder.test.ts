@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildServiceMap, detectCycles, topologicalOrder, getTransitiveDependents } from './service-map-builder.js';
+import {
+  buildServiceMap,
+  detectCycles,
+  topologicalOrder,
+  getTransitiveDependents,
+} from './service-map-builder.js';
 import { detectWorkspace } from './monorepo-detector.js';
 import type { ServiceMap, WorkspaceConfig } from './types.js';
 

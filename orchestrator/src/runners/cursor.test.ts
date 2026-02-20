@@ -47,10 +47,7 @@ describe('CursorRunner', () => {
 
   describe('parseTokenUsage', () => {
     it('parses input/output token counts', () => {
-      const result = parseTokenUsage(
-        'Input tokens: 2,500\nOutput tokens: 800',
-        'cursor-model',
-      );
+      const result = parseTokenUsage('Input tokens: 2,500\nOutput tokens: 800', 'cursor-model');
       expect(result).toEqual({
         inputTokens: 2500,
         outputTokens: 800,

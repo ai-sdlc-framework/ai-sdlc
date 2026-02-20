@@ -6,7 +6,7 @@ metadata:
   labels:
     team.example.com/tier: production
   annotations:
-    ai-sdlc.io/rfc: "0004"
+    ai-sdlc.io/rfc: '0004'
 spec:
   triggers:
     - event: issue.assigned
@@ -57,8 +57,8 @@ spec:
         - threshold: 0.75
           action: notify
           targets:
-            - "#dev-costs"
-          message: "Budget 75% consumed"
+            - '#dev-costs'
+          message: 'Budget 75% consumed'
         - threshold: 0.90
           action: require-approval
           approver: engineering-manager
@@ -88,6 +88,6 @@ status:
     currentSpend: 127.50
     budgetRemaining: 372.50
     projectedMonthEnd: 425.00
-    lastUpdated: "2026-02-18T10:00:00Z"
+    lastUpdated: '2026-02-18T10:00:00Z'
     activeAlerts:
-      - "Budget 75% consumed"
+      - 'Budget 75% consumed'

@@ -6,7 +6,7 @@ metadata:
   labels:
     team.example.com/tier: production
   annotations:
-    ai-sdlc.io/rfc: "0004"
+    ai-sdlc.io/rfc: '0004'
 spec:
   scope:
     authorTypes:
@@ -17,21 +17,21 @@ spec:
       rule:
         cost:
           metric: budget-remaining-percent
-          operator: ">="
+          operator: '>='
           threshold: 0.1
     - name: cost-per-line
       enforcement: advisory
       rule:
         cost:
           metric: cost-per-line
-          operator: "<="
+          operator: '<='
           threshold: 0.50
     - name: retry-waste
       enforcement: soft-mandatory
       rule:
         cost:
           metric: retry-cost-ratio
-          operator: "<="
+          operator: '<='
           threshold: 0.20
       override:
         requiredRole: engineering-manager

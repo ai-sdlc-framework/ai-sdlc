@@ -1,24 +1,33 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createCheckRun, updateCheckRun, reportGateCheckRuns, type GateResult } from './check-runs.js';
+import { describe, it, expect, vi } from 'vitest';
+import {
+  createCheckRun,
+  updateCheckRun,
+  reportGateCheckRuns,
+  type GateResult,
+} from './check-runs.js';
 
 // Mock child_process.execFile to avoid actual gh CLI calls
 vi.mock('node:child_process', () => ({
-  execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
-    // If called with callback style (promisify wraps it)
-    if (cb) cb(null, { stdout: '{}', stderr: '' });
-    return { stdout: '', stderr: '' };
-  }),
+  execFile: vi.fn(
+    (_cmd: string, _args: string[], _opts: unknown, cb?: (...args: unknown[]) => void) => {
+      // If called with callback style (promisify wraps it)
+      if (cb) cb(null, { stdout: '{}', stderr: '' });
+      return { stdout: '', stderr: '' };
+    },
+  ),
 }));
 
 vi.mock('node:util', () => ({
-  promisify: (fn: Function) => async (...args: unknown[]) => {
-    return new Promise((resolve, reject) => {
-      fn(...args, (err: Error | null, result: unknown) => {
-        if (err) reject(err);
-        else resolve(result);
+  promisify:
+    (fn: (...args: unknown[]) => void) =>
+    async (...args: unknown[]) => {
+      return new Promise((resolve, reject) => {
+        fn(...args, (err: Error | null, result: unknown) => {
+          if (err) reject(err);
+          else resolve(result);
+        });
       });
-    });
-  },
+    },
 }));
 
 describe('check-runs', () => {

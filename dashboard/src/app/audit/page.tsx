@@ -13,7 +13,8 @@ import { getStateStore } from '@/lib/state';
 function getAuditData() {
   const store = getStateStore();
 
-  const entries = store.getDatabase()
+  const entries = store
+    .getDatabase()
     .prepare(
       `SELECT id, run_id, issue_number, pipeline_type, status,
               agent_name, cost_usd, started_at, completed_at, gate_results
@@ -21,7 +22,8 @@ function getAuditData() {
     )
     .all() as Array<Record<string, unknown>>;
 
-  const stats = store.getDatabase()
+  const stats = store
+    .getDatabase()
     .prepare(
       `SELECT COUNT(*) as total,
               SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,

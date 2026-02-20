@@ -29,10 +29,7 @@ describe('CopilotRunner', () => {
 
   describe('parseTokenUsage', () => {
     it('parses input/output token counts', () => {
-      const result = parseTokenUsage(
-        'Input tokens: 1,234\nOutput tokens: 5,678',
-        'copilot-model',
-      );
+      const result = parseTokenUsage('Input tokens: 1,234\nOutput tokens: 5,678', 'copilot-model');
       expect(result).toEqual({
         inputTokens: 1234,
         outputTokens: 5678,

@@ -15,7 +15,9 @@ function buildArchitectureSummary(profile: CodebaseProfile): string {
   const lines: string[] = [];
   for (const pattern of profile.architecturalPatterns.slice(0, 3)) {
     const pct = Math.round(pattern.confidence * 100);
-    lines.push(`This codebase uses a ${pattern.name} architecture (${pct}% confidence). ${pattern.description}.`);
+    lines.push(
+      `This codebase uses a ${pattern.name} architecture (${pct}% confidence). ${pattern.description}.`,
+    );
   }
   return lines.join(' ');
 }

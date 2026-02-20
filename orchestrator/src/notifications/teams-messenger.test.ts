@@ -13,7 +13,11 @@ describe('TeamsMessenger', () => {
     } as Response);
 
     const messenger = new TeamsMessenger({ webhookUrl: 'https://teams.example.com/webhook' });
-    await messenger.sendNotification({ channel: '#general', message: 'Pipeline done', severity: 'info' });
+    await messenger.sendNotification({
+      channel: '#general',
+      message: 'Pipeline done',
+      severity: 'info',
+    });
 
     expect(fetchSpy).toHaveBeenCalledWith(
       'https://teams.example.com/webhook',
