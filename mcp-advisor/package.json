@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "description": "MCP server bridging human-directed AI sessions with the AI-SDLC orchestrator",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ai-sdlc-framework/ai-sdlc.git",
+    "directory": "mcp-advisor"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": ["dist", "!dist/**/*.test.*", "!dist/**/*.map"],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

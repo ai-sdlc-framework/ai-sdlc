@@ -58,7 +58,7 @@
                 "description": "The enforcement level."
               },
               "rule": {
-                "description": "The evaluation rule. One of: metric-based, tool-based, reviewer-based, documentation-based, or provenance-based.",
+                "description": "The evaluation rule. One of: metric-based, tool-based, reviewer-based, documentation-based, provenance-based, or cost-based.",
                 "oneOf": [
                   {
                     "type": "object",
@@ -144,6 +144,44 @@
                       "requireHumanReview": {
                         "type": "boolean",
                         "description": "Whether a human review record is required."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "title": "Cost-based rule",
+                    "required": ["cost"],
+                    "properties": {
+                      "cost": {
+                        "type": "object",
+                        "required": ["metric", "operator", "threshold"],
+                        "properties": {
+                          "metric": {
+                            "type": "string",
+                            "enum": [
+                              "total-execution-cost",
+                              "token-cost",
+                              "cost-per-line",
+                              "cost-per-file",
+                              "budget-remaining-percent",
+                              "cost-vs-estimate",
+                              "attribution-complete",
+                              "retry-cost-ratio"
+                            ],
+                            "description": "The cost metric to evaluate."
+                          },
+                          "operator": {
+                            "type": "string",
+                            "enum": [">=", "<=", "==", "!=", ">", "<"],
+                            "description": "Comparison operator."
+                          },
+                          "threshold": {
+                            "type": "number",
+                            "description": "The threshold value."
+                          }
+                        },
+                        "additionalProperties": false
                       }
                     },
                     "additionalProperties": false

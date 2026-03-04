@@ -3,6 +3,16 @@
   "version": "0.1.0",
   "description": "Conformance test runner for AI-SDLC implementations",
   "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ai-sdlc-framework/ai-sdlc.git",
+    "directory": "conformance/runner"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "files": ["dist", "!dist/**/*.test.*", "!dist/**/*.map"],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
