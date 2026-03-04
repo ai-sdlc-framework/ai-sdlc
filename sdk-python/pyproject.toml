@@ -9,6 +9,9 @@ description = "Python SDK for the AI-SDLC Framework"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
+authors = [
+  { name = "AI-SDLC Framework" },
+]
 keywords = ["ai", "sdlc", "agents", "quality-gates", "pipelines"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -24,6 +27,11 @@ dependencies = [
   "PyYAML>=6.0",
   "opentelemetry-api>=1.20",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ai-sdlc-framework/ai-sdlc"
+Repository = "https://github.com/ai-sdlc-framework/ai-sdlc/tree/main/sdk-python"
+Issues = "https://github.com/ai-sdlc-framework/ai-sdlc/issues"
 
 [project.optional-dependencies]
 dev = [
