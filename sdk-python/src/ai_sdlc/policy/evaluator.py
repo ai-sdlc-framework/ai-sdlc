@@ -7,13 +7,8 @@ complexity, expression, and admission evaluators.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
-from ai_sdlc.policy.enforcement import (
-    EvaluationContext,
-    GateResult,
-    evaluate_gate,
-)
 from ai_sdlc.policy.autonomy import (
     AgentMetrics,
     PromotionResult,
@@ -24,7 +19,14 @@ from ai_sdlc.policy.complexity import (
     ComplexityResult,
     evaluate_complexity,
 )
-from ai_sdlc.core.types import AutonomyPolicy, QualityGate
+from ai_sdlc.policy.enforcement import (
+    EvaluationContext,
+    GateResult,
+    evaluate_gate,
+)
+
+if TYPE_CHECKING:
+    from ai_sdlc.core.types import AutonomyPolicy, QualityGate
 
 
 @dataclass

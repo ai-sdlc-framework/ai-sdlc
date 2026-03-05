@@ -7,7 +7,6 @@ from environment variables.
 from __future__ import annotations
 
 import os
-from typing import Any
 
 from ai_sdlc.agents.runner import AgentRunner, NoopRunner, SubprocessRunner
 

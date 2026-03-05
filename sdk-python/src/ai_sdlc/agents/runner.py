@@ -7,7 +7,6 @@ interface, plus a SubprocessRunner for executing external CLI agents.
 from __future__ import annotations
 
 import asyncio
-import json
 import re
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
@@ -119,7 +118,7 @@ class SubprocessRunner:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return AgentResult(
                 output="",
                 exit_code=1,
