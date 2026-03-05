@@ -383,6 +383,70 @@ describe('dashboard command', () => {
   });
 });
 
+// ── validate ─────────────────────────────────────────────────────────
+
+const mockValidateConfigFiles = vi.fn();
+
+vi.mock('../../validate-config.js', () => ({
+  validateConfigFiles: (...args: unknown[]) => mockValidateConfigFiles(...args),
+}));
+
+describe('validate command', () => {
+  it('shows validation results for all files', async () => {
+    mockValidateConfigFiles.mockReturnValue([
+      { file: 'pipeline.yaml', kind: 'Pipeline', valid: true, errors: [] },
+      {
+        file: 'quality-gate.yaml',
+        kind: 'QualityGate',
+        valid: false,
+        errors: [
+          {
+            path: '/spec/gates/0/rule',
+            message: 'Value must match exactly one of the allowed variants',
+          },
+        ],
+      },
+    ]);
+
+    const { validateCommand } = await import('./validate.js');
+    const program = wrapCommand(validateCommand);
+    await program.parseAsync(['validate'], { from: 'user' });
+
+    expect(mockValidateConfigFiles).toHaveBeenCalled();
+    expect(consoleSpy).toHaveBeenCalled();
+    expect(process.exitCode).toBe(1);
+  });
+
+  it('passes --file filter', async () => {
+    mockValidateConfigFiles.mockReturnValue([
+      { file: 'pipeline.yaml', kind: 'Pipeline', valid: true, errors: [] },
+    ]);
+
+    const { validateCommand } = await import('./validate.js');
+    const program = wrapCommand(validateCommand);
+    await program.parseAsync(['validate', '--file', 'pipeline.yaml'], { from: 'user' });
+
+    expect(mockValidateConfigFiles).toHaveBeenCalledWith(
+      expect.any(String),
+      'pipeline.yaml',
+    );
+    expect(process.exitCode).toBeUndefined();
+  });
+
+  it('exits 0 when all files are valid', async () => {
+    mockValidateConfigFiles.mockReturnValue([
+      { file: 'pipeline.yaml', kind: 'Pipeline', valid: true, errors: [] },
+      { file: 'autonomy-policy.yaml', kind: 'AutonomyPolicy', valid: true, errors: [] },
+    ]);
+
+    const { validateCommand } = await import('./validate.js');
+    const program = wrapCommand(validateCommand);
+    await program.parseAsync(['validate'], { from: 'user' });
+
+    expect(process.exitCode).toBeUndefined();
+  });
+});
+
 // ── start ────────────────────────────────────────────────────────────
 
 describe('start command', () => {

@@ -2,10 +2,11 @@
  * MCP server factory — creates and wires the advisor server.
  */
 
+import { join } from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import Database from 'better-sqlite3';
 import { StateStore } from '@ai-sdlc/orchestrator/state';
-import { CostTracker } from '@ai-sdlc/orchestrator';
+import { CostTracker, loadConfig, type AiSdlcConfig } from '@ai-sdlc/orchestrator';
 import { SessionManager } from './session.js';
 import { registerAllTools } from './tools/index.js';
 import { registerAllResources } from './resources/index.js';
@@ -33,7 +34,15 @@ export async function createMcpServer(
   const sessions = new SessionManager();
   const repoPath = opts?.repoPath ?? process.cwd();
 
-  const deps: ServerDeps = { store, costTracker, sessions, repoPath };
+  // Load AI-SDLC config (best-effort — tools work in degraded mode without it)
+  let config: AiSdlcConfig | undefined;
+  try {
+    config = loadConfig(join(repoPath, '.ai-sdlc'));
+  } catch {
+    // Config not available or invalid
+  }
+
+  const deps: ServerDeps = { store, costTracker, sessions, repoPath, config };
 
   const server = new McpServer({
     name: 'ai-sdlc-advisor',

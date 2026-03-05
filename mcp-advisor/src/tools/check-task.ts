@@ -52,6 +52,27 @@ export function handleCheckTask(
     advisoryNotes.push('No issue linked to this session — work will be unattributed.');
   }
 
+  // Populate constraints from AI-SDLC config
+  if (deps.config?.autonomyPolicy) {
+    const policy = deps.config.autonomyPolicy;
+    const level = policy.spec.levels.find((l) => l.level === (autonomyLevel ?? 0));
+    if (level) {
+      if (level.guardrails.blockedPaths?.length) {
+        constraints.push(`Blocked paths: ${level.guardrails.blockedPaths.join(', ')}`);
+      }
+      if (level.guardrails.maxLinesPerPR) {
+        constraints.push(`Max lines per PR: ${level.guardrails.maxLinesPerPR}`);
+      }
+      constraints.push(`Approval required: ${level.guardrails.requireApproval}`);
+    }
+  }
+
+  if (deps.config?.qualityGate) {
+    for (const gate of deps.config.qualityGate.spec.gates) {
+      constraints.push(`Quality gate: ${gate.name} (${gate.enforcement})`);
+    }
+  }
+
   return {
     issueNumber,
     autonomyLevel,

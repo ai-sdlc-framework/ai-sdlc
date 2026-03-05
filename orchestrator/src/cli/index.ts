@@ -14,6 +14,7 @@ import { routingCommand } from './commands/routing.js';
 import { complexityCommand } from './commands/complexity.js';
 import { costCommand } from './commands/cost.js';
 import { dashboardCommand } from './commands/dashboard.js';
+import { validateCommand } from './commands/validate.js';
 
 const program = new Command();
 
@@ -35,5 +36,6 @@ program.addCommand(routingCommand);
 program.addCommand(complexityCommand);
 program.addCommand(costCommand);
 program.addCommand(dashboardCommand);
+program.addCommand(validateCommand);
 
 program.parse();

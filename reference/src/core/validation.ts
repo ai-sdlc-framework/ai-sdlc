@@ -75,6 +75,63 @@ function getValidator(kind: ResourceKind): ValidatorFn {
 }
 
 /**
+ * Collapse noisy AJV errors — especially oneOf branch failures — into
+ * a concise list.  AJV reports individual branch errors (schemaPath
+ * contains `/oneOf/0/`, `/oneOf/1/`, …) AND a summary `keyword:
+ * 'oneOf'` error.  We keep the summary and drop the per-branch noise.
+ */
+export function formatValidationErrors(
+  rawErrors: Array<{
+    instancePath: string;
+    message?: string;
+    keyword: string;
+    params?: Record<string, unknown>;
+    schemaPath: string;
+  }>,
+): ValidationError[] {
+  const errors: ValidationError[] = [];
+
+  for (const err of rawErrors) {
+    // Skip individual oneOf branch failures — they have schemaPath containing "/oneOf/"
+    if (err.schemaPath.includes('/oneOf/') && err.keyword !== 'oneOf') {
+      continue;
+    }
+
+    // For the summary "oneOf" error itself, provide a clearer message
+    if (err.keyword === 'oneOf') {
+      errors.push({
+        path: err.instancePath || '/',
+        message:
+          'Value must match exactly one of the allowed variants (check the schema for valid shapes)',
+        keyword: 'oneOf',
+      });
+      continue;
+    }
+
+    // Similarly collapse anyOf branch noise
+    if (err.schemaPath.includes('/anyOf/') && err.keyword !== 'anyOf') {
+      continue;
+    }
+    if (err.keyword === 'anyOf') {
+      errors.push({
+        path: err.instancePath || '/',
+        message: 'Value must match at least one of the allowed variants',
+        keyword: 'anyOf',
+      });
+      continue;
+    }
+
+    errors.push({
+      path: err.instancePath || '/',
+      message: err.message ?? 'Unknown validation error',
+      keyword: err.keyword,
+    });
+  }
+
+  return errors;
+}
+
+/**
  * Validate a resource document against its JSON Schema.
  */
 export function validate<T extends AnyResource = AnyResource>(
@@ -88,13 +145,7 @@ export function validate<T extends AnyResource = AnyResource>(
     return { valid: true, data: data as T };
   }
 
-  const errors: ValidationError[] = (validator.errors ?? []).map(
-    (err: { instancePath: string; message?: string; keyword: string }) => ({
-      path: err.instancePath || '/',
-      message: err.message ?? 'Unknown validation error',
-      keyword: err.keyword,
-    }),
-  );
+  const errors = formatValidationErrors(validator.errors ?? []);
 
   return { valid: false, errors };
 }

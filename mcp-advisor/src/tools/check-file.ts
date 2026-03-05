@@ -17,7 +17,7 @@ export function handleCheckFile(
   const warnings: string[] = [];
   let isHotspot = false;
   let isBlocked = false;
-  const crossesModuleBoundary = false;
+  let crossesModuleBoundary = false;
 
   // Check hotspots
   const hotspots = deps.store.getHotspots(deps.repoPath, 100);
@@ -40,6 +40,46 @@ export function handleCheckFile(
       if (blockedPaths.some((bp) => input.filePath.startsWith(bp) || input.filePath.includes(bp))) {
         isBlocked = true;
         warnings.push('This file is in a blocked path. Modifications may be restricted by policy.');
+      }
+    } catch {
+      // raw data not parseable
+    }
+  }
+
+  // Check blocked paths from autonomy policy config
+  if (deps.config?.autonomyPolicy) {
+    const policy = deps.config.autonomyPolicy;
+    // Check all levels' blocked paths
+    for (const level of policy.spec.levels) {
+      const blockedPaths = level.guardrails.blockedPaths ?? [];
+      for (const bp of blockedPaths) {
+        const base = bp.replace(/\/?\*\*$/, '');
+        if (input.filePath === base || input.filePath.startsWith(base.endsWith('/') ? base : `${base}/`)) {
+          isBlocked = true;
+          crossesModuleBoundary = true;
+          warnings.push(
+            `File matches blocked path "${bp}" per autonomy policy (level ${level.level}).`,
+          );
+          break;
+        }
+      }
+    }
+  }
+
+  // Check module graph from complexity profile
+  const profile2 = deps.store.getLatestComplexityProfile(deps.repoPath);
+  if (profile2?.rawData) {
+    try {
+      const raw = JSON.parse(profile2.rawData);
+      if (raw.moduleGraph?.modules) {
+        const fileModule = (
+          raw.moduleGraph.modules as Array<{ path: string; name?: string }>
+        ).find((m) => input.filePath.startsWith(m.path));
+        if (fileModule) {
+          warnings.push(
+            `File is in module "${fileModule.name ?? fileModule.path}". Cross-module changes need extra review.`,
+          );
+        }
       }
     } catch {
       // raw data not parseable

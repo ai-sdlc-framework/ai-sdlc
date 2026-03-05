@@ -137,6 +137,7 @@ import type { AutonomyTracker } from './autonomy-tracker.js';
 import { CostTracker } from './cost-tracker.js';
 import type { StateStore } from './state/store.js';
 import { enrichAgentContext } from './context-enrichment.js';
+import { reportGateCheckRuns } from './check-runs.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -664,7 +665,46 @@ async function executePipelineBody(
     },
   );
 
-  // 11b. Post-agent complexity evaluation (non-blocking)
+  // 11b. Evaluate quality gates and report as GitHub Check Runs
+  if (qualityGate.spec.gates.length > 0) {
+    try {
+      const { stdout: headSha } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: workDir,
+      });
+      const gateResults = qualityGate.spec.gates.map((gate) => {
+        const evalResult = evaluatePipelineGate(gate, {
+          authorType: 'ai-agent',
+          repository: '',
+          metrics: costMetrics,
+        });
+        return {
+          gate: evalResult.gate,
+          verdict: evalResult.verdict === 'override' ? ('pass' as const) : evalResult.verdict,
+          message: evalResult.message,
+        };
+      });
+
+      // Report to GitHub Check Runs (best-effort, non-blocking)
+      await reportGateCheckRuns(headSha.trim(), gateResults).catch(() => {
+        log.info('Failed to report gate check runs to GitHub (non-blocking)');
+      });
+
+      auditLog.record({
+        actor: 'system',
+        action: 'evaluate',
+        resource: `issue#${issueNumber}`,
+        policy: 'post-agent-gates',
+        decision: gateResults.every((g) => g.verdict === 'pass') ? 'allowed' : 'denied',
+        details: {
+          gates: gateResults.map((g) => ({ gate: g.gate, verdict: g.verdict })),
+        },
+      });
+    } catch {
+      log.info('Post-agent gate evaluation skipped');
+    }
+  }
+
+  // 11c. Post-agent complexity evaluation (non-blocking)
   try {
     const { stdout: diffStat } = await execFileAsync('git', ['diff', '--stat', 'HEAD~1'], {
       cwd: workDir,

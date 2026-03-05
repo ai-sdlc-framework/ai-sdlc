@@ -65,7 +65,7 @@ export function buildPrompt(ctx: AgentContext): string {
     }
     lines.push(
       `${++step}. Write or update tests if needed to cover your fix.`,
-      `${++step}. Do NOT modify files matching the blocked paths below.`,
+      `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
       `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   } else {
@@ -88,17 +88,17 @@ export function buildPrompt(ctx: AgentContext): string {
       lines.push(`${++step}. After making code changes, run \`${fmtCmd}\` to ensure CI will pass.`);
     }
     lines.push(
-      `${++step}. Do NOT modify files matching the blocked paths below.`,
+      `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
       `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
   }
 
   lines.push(
     '',
-    '## Constraints',
+    '## Constraints (enforced — violations will be automatically rejected)',
     `- Maximum files to change: ${ctx.constraints.maxFilesPerChange}`,
     `- Tests required: ${ctx.constraints.requireTests}`,
-    `- Blocked paths (do NOT modify): ${ctx.constraints.blockedPaths.join(', ') || 'none'}`,
+    `- Blocked paths (NEVER modify — changes will be rejected): ${ctx.constraints.blockedPaths.join(', ') || 'none'}`,
   );
 
   // Append relevant episodic memory if available

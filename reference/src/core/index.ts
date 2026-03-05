@@ -3,6 +3,7 @@ export { compareMetric, exceedsSeverity } from './compare.js';
 export {
   validate,
   validateResource,
+  formatValidationErrors,
   type ValidationResult,
   type ValidationError,
 } from './validation.js';

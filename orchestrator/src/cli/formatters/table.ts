@@ -188,6 +188,28 @@ export function formatTable(data: Record<string, unknown>): string {
       }
       break;
     }
+    case 'validate': {
+      const configDir = data.configDir as string;
+      lines.push(`Validation Results (${configDir})`);
+      lines.push('─'.repeat(50));
+      const results = data.results as Array<Record<string, unknown>>;
+      if (results.length === 0) {
+        lines.push('No YAML files found.');
+      } else {
+        for (const r of results) {
+          const status = r.valid ? 'VALID' : 'INVALID';
+          const kindStr = r.kind ? String(r.kind).padEnd(16) : '(unknown)'.padEnd(16);
+          lines.push(`  ${String(r.file).padEnd(28)} ${kindStr} ${status}`);
+          if (!r.valid) {
+            const errors = r.errors as Array<{ path: string; message: string }>;
+            for (const e of errors) {
+              lines.push(`    ${e.path}: ${e.message}`);
+            }
+          }
+        }
+      }
+      break;
+    }
     default: {
       // Generic key-value output
       for (const [key, value] of Object.entries(data)) {

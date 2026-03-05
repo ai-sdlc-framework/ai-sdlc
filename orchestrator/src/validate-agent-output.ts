@@ -22,6 +22,7 @@ export interface ValidationContext {
 export interface ValidationViolation {
   rule: string;
   message: string;
+  severity: 'error' | 'warning';
 }
 
 export interface ValidationResult {
@@ -64,7 +65,8 @@ export async function validateAgentOutput(ctx: ValidationContext): Promise<Valid
       if (matchesBlockedPath(file, pattern)) {
         violations.push({
           rule: 'blocked-path',
-          message: `File \`${file}\` matches blocked path \`${pattern}\``,
+          message: `File \`${file}\` matches blocked path \`${pattern}\` — this change will be rejected. Remove modifications to this file.`,
+          severity: 'error',
         });
       }
     }
@@ -74,7 +76,8 @@ export async function validateAgentOutput(ctx: ValidationContext): Promise<Valid
   if (ctx.filesChanged.length > ctx.constraints.maxFilesPerChange) {
     violations.push({
       rule: 'max-files',
-      message: `Changed ${ctx.filesChanged.length} files (max ${ctx.constraints.maxFilesPerChange})`,
+      message: `Changed ${ctx.filesChanged.length} files (max ${ctx.constraints.maxFilesPerChange}). Split this change into smaller PRs.`,
+      severity: 'warning',
     });
   }
 
@@ -90,7 +93,8 @@ export async function validateAgentOutput(ctx: ValidationContext): Promise<Valid
     if (totalLines > ctx.guardrails.maxLinesPerPR) {
       violations.push({
         rule: 'max-lines',
-        message: `Changed ${totalLines} lines (max ${ctx.guardrails.maxLinesPerPR})`,
+        message: `Changed ${totalLines} lines (max ${ctx.guardrails.maxLinesPerPR}). Consider breaking this into smaller incremental changes.`,
+        severity: 'warning',
       });
     }
   }
@@ -101,7 +105,8 @@ export async function validateAgentOutput(ctx: ValidationContext): Promise<Valid
     if (!hasTestFile) {
       violations.push({
         rule: 'require-tests',
-        message: 'No test file found in changed files',
+        message: 'No test file found in changed files. Add or update tests to cover your changes.',
+        severity: 'error',
       });
     }
   }

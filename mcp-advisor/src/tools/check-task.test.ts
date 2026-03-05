@@ -67,4 +67,68 @@ describe('handleCheckTask', () => {
     const result = handleCheckTask(deps, { sessionId: session.sessionId });
     expect(result.issueNumber).toBe(55);
   });
+
+  it('populates constraints from autonomy policy config', () => {
+    deps.config = {
+      autonomyPolicy: {
+        apiVersion: 'ai-sdlc.io/v1alpha1',
+        kind: 'AutonomyPolicy' as const,
+        metadata: { name: 'test' },
+        spec: {
+          levels: [
+            {
+              level: 0,
+              name: 'supervised',
+              permissions: { read: ['**'], write: [] },
+              guardrails: {
+                requireApproval: true,
+                blockedPaths: ['.github/**', 'infra/**'],
+                maxLinesPerPR: 500,
+              },
+            },
+          ],
+          promotion: { criteria: [] },
+        },
+      } as ServerDeps['config'] extends { autonomyPolicy?: infer T } ? T : never,
+    };
+
+    const result = handleCheckTask(deps, { issueNumber: 1 });
+    expect(result.constraints).toContain('Blocked paths: .github/**, infra/**');
+    expect(result.constraints).toContain('Max lines per PR: 500');
+    expect(result.constraints).toContain('Approval required: true');
+  });
+
+  it('populates constraints from quality gate config', () => {
+    deps.config = {
+      qualityGate: {
+        apiVersion: 'ai-sdlc.io/v1alpha1',
+        kind: 'QualityGate' as const,
+        metadata: { name: 'test-gate' },
+        spec: {
+          gates: [
+            {
+              name: 'coverage',
+              enforcement: 'required',
+              rule: { metric: 'coverage', operator: '>=', threshold: 80 },
+            },
+            {
+              name: 'review',
+              enforcement: 'advisory',
+              rule: { reviewer: { minApprovals: 1 } },
+            },
+          ],
+        },
+      } as ServerDeps['config'] extends { qualityGate?: infer T } ? T : never,
+    };
+
+    const result = handleCheckTask(deps, { issueNumber: 1 });
+    expect(result.constraints).toContain('Quality gate: coverage (required)');
+    expect(result.constraints).toContain('Quality gate: review (advisory)');
+  });
+
+  it('returns empty constraints when no config is loaded', () => {
+    // No config set on deps
+    const result = handleCheckTask(deps, { issueNumber: 1 });
+    expect(result.constraints).toEqual([]);
+  });
 });

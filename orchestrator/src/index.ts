@@ -15,6 +15,7 @@ export {
   type ValidationViolation,
 } from './validate-agent-output.js';
 export { createLogger, type Logger } from './logger.js';
+export { validateConfigFiles, type FileValidationResult } from './validate-config.js';
 export { executeFixCI, countRetryAttempts, fetchCILogs, type FixCIOptions } from './fix-ci.js';
 
 // Shared utilities
