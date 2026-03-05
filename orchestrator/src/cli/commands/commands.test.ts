@@ -426,10 +426,7 @@ describe('validate command', () => {
     const program = wrapCommand(validateCommand);
     await program.parseAsync(['validate', '--file', 'pipeline.yaml'], { from: 'user' });
 
-    expect(mockValidateConfigFiles).toHaveBeenCalledWith(
-      expect.any(String),
-      'pipeline.yaml',
-    );
+    expect(mockValidateConfigFiles).toHaveBeenCalledWith(expect.any(String), 'pipeline.yaml');
     expect(process.exitCode).toBeUndefined();
   });
 

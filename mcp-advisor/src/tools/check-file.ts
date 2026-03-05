@@ -54,7 +54,10 @@ export function handleCheckFile(
       const blockedPaths = level.guardrails.blockedPaths ?? [];
       for (const bp of blockedPaths) {
         const base = bp.replace(/\/?\*\*$/, '');
-        if (input.filePath === base || input.filePath.startsWith(base.endsWith('/') ? base : `${base}/`)) {
+        if (
+          input.filePath === base ||
+          input.filePath.startsWith(base.endsWith('/') ? base : `${base}/`)
+        ) {
           isBlocked = true;
           crossesModuleBoundary = true;
           warnings.push(
@@ -72,9 +75,9 @@ export function handleCheckFile(
     try {
       const raw = JSON.parse(profile2.rawData);
       if (raw.moduleGraph?.modules) {
-        const fileModule = (
-          raw.moduleGraph.modules as Array<{ path: string; name?: string }>
-        ).find((m) => input.filePath.startsWith(m.path));
+        const fileModule = (raw.moduleGraph.modules as Array<{ path: string; name?: string }>).find(
+          (m) => input.filePath.startsWith(m.path),
+        );
         if (fileModule) {
           warnings.push(
             `File is in module "${fileModule.name ?? fileModule.path}". Cross-module changes need extra review.`,

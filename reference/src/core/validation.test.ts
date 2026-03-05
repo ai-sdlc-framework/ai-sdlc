@@ -107,13 +107,48 @@ describe('validateResource()', () => {
 describe('formatValidationErrors()', () => {
   it('collapses oneOf branch errors into a single message', () => {
     const rawErrors = [
-      { instancePath: '/spec/gates/0/rule', message: "must have required property 'metric'", keyword: 'required', schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/0/required' },
-      { instancePath: '/spec/gates/0/rule', message: "must have required property 'tool'", keyword: 'required', schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/1/required' },
-      { instancePath: '/spec/gates/0/rule', message: "must have required property 'reviewer'", keyword: 'required', schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/2/required' },
-      { instancePath: '/spec/gates/0/rule', message: "must have required property 'docs'", keyword: 'required', schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/3/required' },
-      { instancePath: '/spec/gates/0/rule', message: "must have required property 'provenance'", keyword: 'required', schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/4/required' },
-      { instancePath: '/spec/gates/0/rule', message: "must have required property 'expression'", keyword: 'required', schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/5/required' },
-      { instancePath: '/spec/gates/0/rule', message: 'must match exactly one schema in oneOf', keyword: 'oneOf', schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf' },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: "must have required property 'metric'",
+        keyword: 'required',
+        schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/0/required',
+      },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: "must have required property 'tool'",
+        keyword: 'required',
+        schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/1/required',
+      },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: "must have required property 'reviewer'",
+        keyword: 'required',
+        schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/2/required',
+      },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: "must have required property 'docs'",
+        keyword: 'required',
+        schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/3/required',
+      },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: "must have required property 'provenance'",
+        keyword: 'required',
+        schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/4/required',
+      },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: "must have required property 'expression'",
+        keyword: 'required',
+        schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf/5/required',
+      },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: 'must match exactly one schema in oneOf',
+        keyword: 'oneOf',
+        schemaPath: '#/properties/spec/properties/gates/items/properties/rule/oneOf',
+      },
     ];
 
     const result = formatValidationErrors(rawErrors);
@@ -125,8 +160,18 @@ describe('formatValidationErrors()', () => {
 
   it('passes through non-oneOf errors unchanged', () => {
     const rawErrors = [
-      { instancePath: '/metadata/name', message: 'must be string', keyword: 'type', schemaPath: '#/properties/metadata/properties/name/type' },
-      { instancePath: '/spec', message: "must have required property 'stages'", keyword: 'required', schemaPath: '#/properties/spec/required' },
+      {
+        instancePath: '/metadata/name',
+        message: 'must be string',
+        keyword: 'type',
+        schemaPath: '#/properties/metadata/properties/name/type',
+      },
+      {
+        instancePath: '/spec',
+        message: "must have required property 'stages'",
+        keyword: 'required',
+        schemaPath: '#/properties/spec/required',
+      },
     ];
 
     const result = formatValidationErrors(rawErrors);
@@ -141,9 +186,24 @@ describe('formatValidationErrors()', () => {
 
   it('handles mixed oneOf and non-oneOf errors', () => {
     const rawErrors = [
-      { instancePath: '/metadata/name', message: 'must be string', keyword: 'type', schemaPath: '#/properties/metadata/properties/name/type' },
-      { instancePath: '/spec/gates/0/rule', message: "must have required property 'metric'", keyword: 'required', schemaPath: '#/oneOf/0/required' },
-      { instancePath: '/spec/gates/0/rule', message: 'must match exactly one schema in oneOf', keyword: 'oneOf', schemaPath: '#/oneOf' },
+      {
+        instancePath: '/metadata/name',
+        message: 'must be string',
+        keyword: 'type',
+        schemaPath: '#/properties/metadata/properties/name/type',
+      },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: "must have required property 'metric'",
+        keyword: 'required',
+        schemaPath: '#/oneOf/0/required',
+      },
+      {
+        instancePath: '/spec/gates/0/rule',
+        message: 'must match exactly one schema in oneOf',
+        keyword: 'oneOf',
+        schemaPath: '#/oneOf',
+      },
     ];
 
     const result = formatValidationErrors(rawErrors);
