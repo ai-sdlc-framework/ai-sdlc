@@ -106,7 +106,7 @@ class PolicyEvaluator:
                             details=gr.message,
                         )
                         result.gate_evaluations.append(evaluation)
-                        if gr.verdict == "fail" and gr.enforcement != "warn":
+                        if gr.verdict == "fail" and gr.enforcement != "advisory":
                             result.gates_passed = False
             except Exception as exc:
                 result.warnings.append(f"Gate evaluation error: {exc}")

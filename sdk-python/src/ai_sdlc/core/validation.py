@@ -72,7 +72,7 @@ def _get_validator(kind: str) -> jsonschema.Validator:
         raise ValueError(f"Unknown resource kind: {kind}")
     schema = _load_schema(schema_file)
     validator_cls = jsonschema.validators.validator_for(schema)
-    return validator_cls(schema, registry=_get_registry())  # type: ignore[arg-type]
+    return validator_cls(schema, registry=_get_registry())
 
 
 def validate(kind: ResourceKind, data: Any) -> ValidationResult:
