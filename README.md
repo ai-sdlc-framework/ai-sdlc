@@ -182,12 +182,13 @@ All resource types have [JSON Schema (draft 2020-12)](spec/schemas/) definitions
 | Package | Path | Description |
 |---|---|---|
 | `@ai-sdlc/orchestrator` | [`orchestrator/`](orchestrator/) | The orchestrator runtime — CLI, runners, analysis, state store |
-| `@ai-sdlc/mcp-advisor` | [`mcp-advisor/`](mcp-advisor/) | MCP server for human-directed AI usage tracking |
+| `@ai-sdlc/sdk` | [`sdk-typescript/`](sdk-typescript/) | TypeScript SDK |
+| `ai-sdlc-framework` | [`sdk-python/`](sdk-python/) | Python SDK (`pip install ai-sdlc-framework`) |
+| `github.com/ai-sdlc-framework/ai-sdlc/sdk-go` | [`sdk-go/`](sdk-go/) | Go SDK |
 | `@ai-sdlc/reference` | [`reference/`](reference/) | TypeScript reference implementation of the spec |
 | `@ai-sdlc/conformance` | [`conformance/`](conformance/) | Language-agnostic conformance test suite |
+| `@ai-sdlc/mcp-advisor` | [`mcp-advisor/`](mcp-advisor/) | MCP server for human-directed AI usage tracking |
 | `dashboard/` | [`dashboard/`](dashboard/) | Web dashboard (Next.js) for cost, autonomy, and codebase views |
-| `sdk-python` | [`sdk-python/`](sdk-python/) | Python SDK |
-| `sdk-go` | [`sdk-go/`](sdk-go/) | Go SDK |
 | `spec/` | [`spec/`](spec/) | Formal specification and JSON schemas |
 | `docs/` | [`docs/`](docs/) | User-facing documentation |
 | `contrib/` | [`contrib/`](contrib/) | Community adapters and plugins |
