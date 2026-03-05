@@ -1,26 +1,22 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      package:
-        description: Package to release
-        required: true
-        type: choice
-        options:
-          - '@ai-sdlc/reference'
-          - '@ai-sdlc/sdk'
-          - '@ai-sdlc/conformance'
-      dry-run:
-        description: Dry run (skip publish)
-        required: false
-        type: boolean
-        default: true
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false # Never cancel in-progress releases
 
 jobs:
   release:
-    name: Release ${{ inputs.package }}
+    name: Release
     runs-on: ubuntu-latest
+    if: github.repository == 'ai-sdlc-framework/ai-sdlc'
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -28,11 +24,21 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+          registry-url: 'https://registry.npmjs.org'
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
-      - name: Publish (placeholder)
-        run: |
-          echo "Would publish ${{ inputs.package }}"
-          echo "Dry run: ${{ inputs.dry-run }}"
-          echo "Publishing is not yet configured — this is a placeholder."
+
+      - name: Create Release PR or Publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: pnpm changeset version
+          publish: pnpm changeset publish
+          title: 'chore: version packages'
+          commit: 'chore: version packages'
+          createGithubReleases: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
