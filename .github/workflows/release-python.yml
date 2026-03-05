@@ -1,0 +1,40 @@
+name: Release Python SDK
+
+on:
+  push:
+    tags: ['sdk-python/v*']
+
+jobs:
+  release:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    if: github.repository == 'ai-sdlc-framework/ai-sdlc'
+    permissions:
+      contents: write
+      id-token: write # PyPI trusted publishing (OIDC)
+    defaults:
+      run:
+        working-directory: sdk-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -e '.[dev]'
+      - run: pytest
+      - name: Build package
+        run: pip install build && python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk-python/dist/
+      - name: Extract version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#sdk-python/v}" >> "$GITHUB_OUTPUT"
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: "Python SDK v${{ steps.version.outputs.version }}"
+          generate_release_notes: true
+          files: sdk-python/dist/*
