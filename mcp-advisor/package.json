@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/mcp-advisor",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server bridging human-directed AI sessions with the AI-SDLC orchestrator",
   "license": "Apache-2.0",
   "repository": {
@@ -12,7 +12,11 @@
     "access": "public",
     "registry": "https://registry.npmjs.org/"
   },
-  "files": ["dist", "!dist/**/*.test.*", "!dist/**/*.map"],
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map"
+  ],
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
