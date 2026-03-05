@@ -11,22 +11,29 @@ kind: Pipeline
 metadata:
   name: default
 spec:
-  stages:
-    - name: validate
-      type: gate
-    - name: code
-      type: agent
-      timeout: 30m
-      onFailure:
-        action: retry
-        maxRetries: 2
-    - name: review
-      type: gate
   triggers:
     - event: issue.labeled
-      filters:
-        - field: label
-          value: ai-sdlc
+      filter:
+        labels:
+          - ai-eligible
+  providers:
+    sourceControl:
+      type: github
+      config:
+        org: your-org
+  stages:
+    - name: validate
+      qualityGates:
+        - default-gates
+    - name: code
+      agent: default-agent
+      timeout: PT30M
+      onFailure:
+        strategy: retry
+        maxRetries: 2
+    - name: review
+      qualityGates:
+        - default-gates
 `;
 
 const AGENT_ROLE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
@@ -56,19 +63,28 @@ kind: QualityGate
 metadata:
   name: default-gates
 spec:
+  scope:
+    authorTypes:
+      - ai-agent
   gates:
     - name: has-description
+      enforcement: hard-mandatory
       rule:
         metric: description-length
-        operator: gt
-        threshold: 0
-      enforcement: mandatory
+        operator: '>='
+        threshold: 1
     - name: has-acceptance-criteria
+      enforcement: soft-mandatory
       rule:
         metric: has-acceptance-criteria
-        operator: gte
+        operator: '>='
         threshold: 1
-      enforcement: warning
+      override:
+        requiredRole: tech-lead
+        requiresJustification: true
+  evaluation:
+    pipeline: pre-merge
+    timeout: 30s
 `;
 
 const AUTONOMY_POLICY_YAML = `apiVersion: ai-sdlc.io/v1alpha1
@@ -78,22 +94,48 @@ metadata:
 spec:
   levels:
     - level: 0
-      name: supervised
+      name: Supervised
+      description: All actions require human approval
       permissions:
-        read: ["**"]
-        write: ["src/**", "test/**", "tests/**"]
-        execute: []
+        read: ['**']
+        write: ['src/**', 'test/**', 'tests/**']
+        execute: ['test-suite']
       guardrails:
+        requireApproval: all
         maxLinesPerPR: 300
         blockedPaths:
           - .github/workflows/**
           - .ai-sdlc/**
+      monitoring: continuous
+      minimumDuration: null
+    - level: 1
+      name: Assisted
+      description: Routine changes are autonomous, complex changes need review
+      permissions:
+        read: ['**']
+        write: ['src/**', 'test/**', 'tests/**', 'docs/**']
+        execute: ['test-suite', 'lint', 'build']
+      guardrails:
+        requireApproval: security-critical-only
+        maxLinesPerPR: 500
+      monitoring: real-time-notification
+      minimumDuration: 4w
   promotionCriteria:
-    - metric: tasks-completed
-      threshold: 10
+    '0-to-1':
+      minimumTasks: 10
+      conditions:
+        - metric: pr-approval-rate
+          operator: '>='
+          threshold: 0.90
+      requiredApprovals:
+        - tech-lead
   demotionTriggers:
-    - trigger: failed-test
-      threshold: 3
+    - trigger: critical-security-incident
+      action: demote-to-0
+      cooldown: 4w
+    - trigger: test-failure-rate-exceeds-threshold
+      action: demote-one-level
+      cooldown: 2w
 `;
 
 export const initCommand = new Command('init')
@@ -132,5 +174,13 @@ export const initCommand = new Command('init')
       }
     }
 
+    // Create state directory for SQLite store
+    const stateDir = join(configDir, 'state');
+    if (!existsSync(stateDir)) {
+      mkdirSync(stateDir, { recursive: true });
+      console.log(`  created state/`);
+    }
+
     console.log(`\nAI-SDLC config initialized in ${configDir}/`);
+    console.log(`Run 'ai-sdlc health' to verify your configuration.`);
   });
