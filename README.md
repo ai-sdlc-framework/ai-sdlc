@@ -1,10 +1,27 @@
+<div align="center">
+
 # AI-SDLC Framework
 
-[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Spec Version](https://img.shields.io/badge/spec-v1alpha1-orange.svg)](#versioning)
-[![Status: Draft](https://img.shields.io/badge/status-draft-yellow.svg)](#status)
+**Declarative governance for AI-augmented software development lifecycles**
 
-**An open-source orchestrator that drives AI coding agents through the full software development lifecycle — with quality gates, progressive autonomy, and codebase-aware context at every step.**
+[![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![CI](https://github.com/ai-sdlc-framework/ai-sdlc/actions/workflows/ci.yml/badge.svg)](https://github.com/ai-sdlc-framework/ai-sdlc/actions/workflows/ci.yml)
+[![Spec Version](https://img.shields.io/badge/spec-v1alpha1-orange.svg)](#versioning)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776ab.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![Go](https://img.shields.io/badge/Go-1.24+-00add8.svg?logo=go&logoColor=white)](https://go.dev/)
+[![Tests](https://img.shields.io/badge/tests-293_files-brightgreen.svg)](#development-setup)
+[![JSON Schemas](https://img.shields.io/badge/schemas-6_resources-purple.svg)](spec/schemas/)
+[![Docs](https://img.shields.io/badge/docs-ai--sdlc.io-0a0a0a.svg)](https://ai-sdlc.io/docs)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
+
+[Documentation](https://ai-sdlc.io/docs) | [Specification](https://ai-sdlc.io/docs/spec/spec) | [Getting Started](https://ai-sdlc.io/docs/getting-started) | [Contributing](CONTRIBUTING.md)
+
+</div>
+
+---
+
+An open-source orchestrator that drives AI coding agents through the full software development lifecycle — with quality gates, progressive autonomy, and codebase-aware context at every step.
 
 The AI-SDLC Framework takes issues as input and routes them through a declared pipeline of stages, assigning AI agents and/or human reviewers at each stage, enforcing quality gates, and continuously learning which agents can be trusted with what.
 
@@ -207,9 +224,9 @@ The specification follows Kubernetes-style API maturity:
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute.
+We welcome contributions of all kinds — bug reports, feature requests, documentation improvements, and code.
 
-Changes to normative spec documents require the [RFC process](spec/rfcs/README.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for how to contribute. Changes to normative spec documents require the [RFC process](spec/rfcs/README.md).
 
 ## Governance
 
@@ -217,8 +234,18 @@ See [GOVERNANCE.md](GOVERNANCE.md) for project roles, decision making, and SIG s
 
 ## License
 
-This project is licensed under [Apache 2.0](LICENSE).
+This project is licensed under [Apache 2.0](LICENSE) — use it freely in commercial and open-source projects.
 
 ## Code of Conduct
 
 This project follows the [Contributor Covenant v2.1](CODE_OF_CONDUCT.md).
+
+---
+
+<div align="center">
+
+**[Website](https://ai-sdlc.io)** | **[Documentation](https://ai-sdlc.io/docs)** | **[Specification](https://ai-sdlc.io/docs/spec/spec)** | **[Pricing](https://ai-sdlc.io/pricing)**
+
+If you find this project useful, please consider giving it a star.
+
+</div>
