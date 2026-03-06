@@ -20,13 +20,29 @@
     "validate-schemas": "pnpm -C reference validate-schemas",
     "changeset": "changeset",
     "version-packages": "changeset version",
-    "release": "changeset publish"
+    "release": "changeset publish",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,mjs}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{json,yml,yaml}": [
+      "prettier --write"
+    ],
+    "*.py": [
+      "ruff format",
+      "ruff check --fix"
+    ]
   },
   "devDependencies": {
     "@changesets/cli": "^2.29.0",
     "@eslint/js": "^9.39.2",
     "eslint": "^9.39.2",
     "eslint-config-prettier": "^10.1.8",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.2",
     "prettier": "^3.8.1",
     "typescript-eslint": "^8.54.0"
   }
