@@ -14,9 +14,8 @@ const OUTPUT = resolve(__dirname, '../src/core/generated-schemas.ts');
 function toCamelCase(filename: string): string {
   // "agent-role.schema.json" → "agentRoleSchema"
   return (
-    filename
-      .replace('.schema.json', '')
-      .replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()) + 'Schema'
+    filename.replace('.schema.json', '').replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()) +
+    'Schema'
   );
 }
 
@@ -30,9 +29,7 @@ const mapEntries: string[] = [];
 for (const file of files) {
   const content = readFileSync(resolve(SCHEMA_DIR, file), 'utf-8');
   const varName = toCamelCase(file);
-  exports.push(
-    `export const ${varName} = ${content.trimEnd()} as const;\n`,
-  );
+  exports.push(`export const ${varName} = ${content.trimEnd()} as const;\n`);
   mapEntries.push(`  '${file}': ${varName},`);
 }
 
