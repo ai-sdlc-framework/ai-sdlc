@@ -1,9 +1,9 @@
 {
-  "reference": "0.1.2",
-  "conformance/runner": "0.1.2",
-  "sdk-typescript": "0.1.2",
-  "orchestrator": "0.1.2",
-  "mcp-advisor": "0.1.2",
-  "sdk-python": "0.1.0",
-  "sdk-go": "0.0.0"
+  "reference": "0.2.0",
+  "conformance/runner": "0.2.0",
+  "sdk-typescript": "0.2.0",
+  "orchestrator": "0.2.0",
+  "mcp-advisor": "0.2.0",
+  "sdk-python": "0.1.1",
+  "sdk-go": "0.1.0"
 }
