@@ -144,6 +144,70 @@ pnpm test
 pnpm validate-schemas
 ```
 
+## Commit Messages
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/) enforced by [commitlint](https://commitlint.js.org/). Every commit message must follow this format:
+
+```
+<type>(<scope>): <description>
+
+[optional body]
+
+[optional footer(s)]
+```
+
+### Types
+
+| Type | Purpose |
+|------|---------|
+| `feat` | New feature |
+| `fix` | Bug fix |
+| `docs` | Documentation only |
+| `style` | Formatting, missing semicolons, etc. |
+| `refactor` | Code change that neither fixes a bug nor adds a feature |
+| `perf` | Performance improvement |
+| `test` | Adding or updating tests |
+| `chore` | Build process, tooling, dependencies |
+| `ci` | CI configuration |
+| `revert` | Reverts a previous commit |
+
+### Scopes
+
+Scopes are optional but encouraged. Allowed scopes: `reference`, `conformance`, `sdk`, `sdk-typescript`, `orchestrator`, `mcp-advisor`, `sdk-python`, `sdk-go`, `dashboard`, `dogfood`, `deps`, `ci`, `spec`, `docs`.
+
+### Examples
+
+```bash
+feat(reference): add pipeline validation endpoint
+fix(sdk-typescript): handle null stage metadata
+chore(deps): bump eslint to v9
+docs: update contributing guide
+```
+
+### Breaking Changes
+
+Add `!` after the type/scope, or include a `BREAKING CHANGE:` footer:
+
+```bash
+feat(sdk)!: rename Pipeline to Workflow
+# or
+feat(sdk): rename Pipeline to Workflow
+
+BREAKING CHANGE: Pipeline class has been renamed to Workflow.
+```
+
+## Versioning & Releases
+
+This project uses [release-please](https://github.com/googleapis/release-please) to automate versioning and changelogs. **You do not need to manually bump versions or write changelog entries.**
+
+How it works:
+
+1. Write commits using conventional commit format (enforced by the commit-msg hook)
+2. When commits land on `main`, release-please automatically creates or updates a **Release PR** that accumulates version bumps and changelog entries
+3. When a maintainer merges the Release PR, packages are published to npm/PyPI automatically
+
+Only `feat`, `fix`, `perf`, and `revert` commits appear in changelogs. Other types (`chore`, `refactor`, `test`, `ci`, `docs`) are processed for version bumps but hidden from changelogs.
+
 ### Working with specific packages
 
 ```bash

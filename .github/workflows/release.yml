@@ -9,14 +9,37 @@ concurrency:
   cancel-in-progress: false # Never cancel in-progress releases
 
 jobs:
-  release:
-    name: Release
+  release-please:
+    name: Release Please
     runs-on: ubuntu-latest
     if: github.repository == 'ai-sdlc-framework/ai-sdlc'
     permissions:
       contents: write
       pull-requests: write
-      id-token: write
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+      reference--release_created: ${{ steps.release.outputs['reference--release_created'] }}
+      sdk-typescript--release_created: ${{ steps.release.outputs['sdk-typescript--release_created'] }}
+      orchestrator--release_created: ${{ steps.release.outputs['orchestrator--release_created'] }}
+      mcp-advisor--release_created: ${{ steps.release.outputs['mcp-advisor--release_created'] }}
+      conformance-runner--release_created: ${{ steps.release.outputs['conformance/runner--release_created'] }}
+      sdk-python--release_created: ${{ steps.release.outputs['sdk-python--release_created'] }}
+      sdk-python--tag_name: ${{ steps.release.outputs['sdk-python--tag_name'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  publish-npm:
+    name: Publish npm packages
+    needs: release-please
+    if: needs.release-please.outputs.releases_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # npm provenance
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -28,17 +51,31 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test
-
-      - name: Create Release PR or Publish
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: pnpm changeset version
-          publish: pnpm changeset publish
-          title: 'chore: version packages'
-          commit: 'chore: version packages'
-          createGithubReleases: true
+      - run: pnpm -r publish --no-git-checks
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  publish-pypi:
+    name: Publish Python SDK to PyPI
+    needs: release-please
+    if: needs.release-please.outputs['sdk-python--release_created'] == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # PyPI trusted publishing (OIDC)
+    defaults:
+      run:
+        working-directory: sdk-python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install -e '.[dev]'
+      - run: pytest
+      - name: Build package
+        run: pip install build && python -m build
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: sdk-python/dist/
