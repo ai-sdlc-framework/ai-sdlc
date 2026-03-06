@@ -5,17 +5,12 @@
 
 import _Ajv2020 from 'ajv/dist/2020.js';
 import _addFormats from 'ajv-formats';
-import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { commonSchema, SCHEMAS } from './generated-schemas.js';
 import type { ResourceKind, AnyResource } from './types.js';
 
 // Handle CJS default export interop
 const Ajv2020 = _Ajv2020 as unknown as typeof _Ajv2020.default;
 const addFormats = _addFormats as unknown as typeof _addFormats.default;
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SCHEMA_DIR = resolve(__dirname, '../../../spec/schemas');
 
 export interface ValidationResult<T = AnyResource> {
   valid: boolean;
@@ -51,10 +46,7 @@ function getAjv(): AjvInstance {
     });
     addFormats(ajvInstance);
 
-    // Load common schema first
-    const commonSchema = JSON.parse(
-      readFileSync(resolve(SCHEMA_DIR, 'common.schema.json'), 'utf-8'),
-    );
+    // Load common schema from inline generated module
     ajvInstance.addSchema(commonSchema);
   }
   return ajvInstance;
@@ -67,7 +59,10 @@ function getValidator(kind: ResourceKind): ValidatorFn {
     if (!schemaFile) {
       throw new Error(`Unknown resource kind: ${kind}`);
     }
-    const schema = JSON.parse(readFileSync(resolve(SCHEMA_DIR, schemaFile), 'utf-8'));
+    const schema = SCHEMAS[schemaFile];
+    if (!schema) {
+      throw new Error(`Schema not found for: ${schemaFile}`);
+    }
     validator = getAjv().compile(schema);
     validators.set(kind, validator);
   }

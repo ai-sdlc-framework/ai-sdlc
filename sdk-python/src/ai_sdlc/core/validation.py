@@ -3,17 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import jsonschema
 import jsonschema.validators
 from referencing import Registry, Resource
 
+from ._generated_schemas import SCHEMAS
+
 if TYPE_CHECKING:
     from .types import ResourceKind
-
-_SCHEMA_DIR = Path(__file__).resolve().parent.parent.parent.parent.parent / "spec" / "schemas"
 
 SCHEMA_FILES: dict[str, str] = {
     "Pipeline": "pipeline.schema.json",
@@ -38,19 +37,10 @@ class ValidationResult:
     errors: list[ValidationError] = field(default_factory=list)
 
 
-def _load_schema(filename: str) -> dict[str, Any]:
-    import json
-
-    return json.loads((_SCHEMA_DIR / filename).read_text())  # type: ignore[no-any-return]
-
-
 def _build_registry() -> Registry[dict[str, Any]]:
     """Build a referencing.Registry with all schemas pre-loaded."""
-    import json
-
     resources: list[tuple[str, Resource[dict[str, Any]]]] = []
-    for p in _SCHEMA_DIR.glob("*.schema.json"):
-        schema = json.loads(p.read_text())
+    for schema in SCHEMAS.values():
         schema_id = schema.get("$id", "")
         resources.append((schema_id, Resource.from_contents(schema)))
     return Registry[dict[str, Any]]().with_resources(resources)
@@ -70,7 +60,9 @@ def _get_validator(kind: str) -> jsonschema.Validator:
     schema_file = SCHEMA_FILES.get(kind)
     if not schema_file:
         raise ValueError(f"Unknown resource kind: {kind}")
-    schema = _load_schema(schema_file)
+    schema = SCHEMAS.get(schema_file)
+    if not schema:
+        raise ValueError(f"Schema not found for: {schema_file}")
     validator_cls = jsonschema.validators.validator_for(schema)
     return validator_cls(schema, registry=_get_registry())  # type: ignore[arg-type]
 
