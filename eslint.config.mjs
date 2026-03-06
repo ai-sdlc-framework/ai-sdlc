@@ -15,6 +15,7 @@ export default tseslint.config(
       '**/dist/',
       '**/.next/',
       'dashboard/next-env.d.ts',
+      '**/scripts/',
     ],
   },
   eslint.configs.recommended,
