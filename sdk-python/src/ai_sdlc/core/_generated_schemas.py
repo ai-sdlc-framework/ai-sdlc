@@ -5,2019 +5,1280 @@ from __future__ import annotations
 
 from typing import Any
 
-adapter_binding_schema: dict[str, Any] = {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-sdlc.io/schemas/v1alpha1/adapter-binding.schema.json",
-  "title": "AI-SDLC AdapterBinding",
-  "description": "Declares a tool integration as a swappable provider behind a uniform interface contract.",
-  "type": "object",
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
-  "properties": {
-    "apiVersion": {
-      "$ref": "common.schema.json#/$defs/apiVersion"
-    },
-    "kind": {
-      "type": "string",
-      "const": "AdapterBinding"
-    },
-    "metadata": {
-      "$ref": "common.schema.json#/$defs/metadata"
-    },
-    "spec": {
-      "type": "object",
-      "required": [
-        "interface",
-        "type",
-        "version"
-      ],
-      "properties": {
-        "interface": {
-          "type": "string",
-          "enum": [
-            "IssueTracker",
-            "SourceControl",
-            "CIPipeline",
-            "CodeAnalysis",
-            "Messenger",
-            "DeploymentTarget",
-            "AuditSink",
-            "Sandbox",
-            "SecretStore",
-            "MemoryStore",
-            "EventBus"
-          ],
-          "description": "The abstract contract name."
-        },
-        "type": {
-          "type": "string",
-          "description": "The concrete implementation (e.g., linear, github, jira)."
-        },
-        "version": {
-          "type": "string",
-          "description": "Adapter version (SemVer).",
-          "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
-        },
-        "source": {
-          "type": "string",
-          "description": "Location of the adapter (registry URI, local path, or git reference)."
-        },
-        "config": {
-          "type": "object",
-          "description": "Adapter-specific configuration. This field permits additional properties.",
-          "additionalProperties": true
-        },
-        "healthCheck": {
-          "type": "object",
-          "description": "Health check configuration.",
-          "properties": {
-            "interval": {
-              "type": "string",
-              "description": "Time between health checks.",
-              "pattern": "^\\d+[smhdw]$"
-            },
-            "timeout": {
-              "type": "string",
-              "description": "Maximum time to wait for a health check response.",
-              "pattern": "^\\d+[smhdw]$"
-            }
-          },
-          "additionalProperties": false
-        }
-      },
-      "additionalProperties": false
-    },
-    "status": {
-      "type": "object",
-      "properties": {
-        "connected": {
-          "type": "boolean",
-          "description": "Whether the adapter is currently connected."
-        },
-        "lastHealthCheck": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Timestamp of the last successful health check."
-        },
-        "adapterVersion": {
-          "type": "string",
-          "description": "The running adapter version."
-        },
-        "specVersionSupported": {
-          "type": "string",
-          "description": "The spec version the adapter supports."
-        }
-      },
-      "additionalProperties": false
-    }
-  },
-  "additionalProperties": false
-}
+adapter_binding_schema: dict[str, Any] = {'$id': 'https://ai-sdlc.io/schemas/v1alpha1/adapter-binding.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Declares a tool integration as a swappable provider behind a uniform interface contract.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'AdapterBinding', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'config': {'additionalProperties': True,
+                                                   'description': 'Adapter-specific configuration. This field permits '
+                                                                  'additional properties.',
+                                                   'type': 'object'},
+                                        'healthCheck': {'additionalProperties': False,
+                                                        'description': 'Health check configuration.',
+                                                        'properties': {'interval': {'description': 'Time between '
+                                                                                                   'health checks.',
+                                                                                    'pattern': '^\\d+[smhdw]$',
+                                                                                    'type': 'string'},
+                                                                       'timeout': {'description': 'Maximum time to '
+                                                                                                  'wait for a health '
+                                                                                                  'check response.',
+                                                                                   'pattern': '^\\d+[smhdw]$',
+                                                                                   'type': 'string'}},
+                                                        'type': 'object'},
+                                        'interface': {'description': 'The abstract contract name.',
+                                                      'enum': ['IssueTracker',
+                                                               'SourceControl',
+                                                               'CIPipeline',
+                                                               'CodeAnalysis',
+                                                               'Messenger',
+                                                               'DeploymentTarget',
+                                                               'AuditSink',
+                                                               'Sandbox',
+                                                               'SecretStore',
+                                                               'MemoryStore',
+                                                               'EventBus'],
+                                                      'type': 'string'},
+                                        'source': {'description': 'Location of the adapter (registry URI, local path, '
+                                                                  'or git reference).',
+                                                   'type': 'string'},
+                                        'type': {'description': 'The concrete implementation (e.g., linear, github, '
+                                                                'jira).',
+                                                 'type': 'string'},
+                                        'version': {'description': 'Adapter version (SemVer).',
+                                                    'pattern': '^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$',
+                                                    'type': 'string'}},
+                         'required': ['interface', 'type', 'version'],
+                         'type': 'object'},
+                'status': {'additionalProperties': False,
+                           'properties': {'adapterVersion': {'description': 'The running adapter version.',
+                                                             'type': 'string'},
+                                          'connected': {'description': 'Whether the adapter is currently connected.',
+                                                        'type': 'boolean'},
+                                          'lastHealthCheck': {'description': 'Timestamp of the last successful health '
+                                                                             'check.',
+                                                              'format': 'date-time',
+                                                              'type': 'string'},
+                                          'specVersionSupported': {'description': 'The spec version the adapter '
+                                                                                  'supports.',
+                                                                   'type': 'string'}},
+                           'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'metadata', 'spec'],
+ 'title': 'AI-SDLC AdapterBinding',
+ 'type': 'object'}
 
-agent_role_schema: dict[str, Any] = {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-sdlc.io/schemas/v1alpha1/agent-role.schema.json",
-  "title": "AI-SDLC AgentRole",
-  "description": "Declares an AI agent's identity, capabilities, constraints, and handoff behavior.",
-  "type": "object",
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
-  "properties": {
-    "apiVersion": {
-      "$ref": "common.schema.json#/$defs/apiVersion"
-    },
-    "kind": {
-      "type": "string",
-      "const": "AgentRole"
-    },
-    "metadata": {
-      "$ref": "common.schema.json#/$defs/metadata"
-    },
-    "spec": {
-      "type": "object",
-      "required": [
-        "role",
-        "goal",
-        "tools"
-      ],
-      "properties": {
-        "role": {
-          "type": "string",
-          "description": "The agent's role title (e.g., 'Senior Software Engineer')."
-        },
-        "goal": {
-          "type": "string",
-          "description": "What the agent aims to achieve."
-        },
-        "backstory": {
-          "type": "string",
-          "description": "Context for the agent's persona and expertise."
-        },
-        "tools": {
-          "type": "array",
-          "description": "Tool identifiers the agent is permitted to use.",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1
-        },
-        "constraints": {
-          "type": "object",
-          "description": "Operational limits on the agent.",
-          "properties": {
-            "maxFilesPerChange": {
-              "type": "integer",
-              "minimum": 1,
-              "description": "Maximum files the agent may modify in a single change."
-            },
-            "requireTests": {
-              "type": "boolean",
-              "description": "Whether the agent must include tests with code changes."
-            },
-            "allowedLanguages": {
-              "type": "array",
-              "description": "Programming languages the agent may produce.",
-              "items": {
-                "type": "string"
-              }
-            },
-            "blockedPaths": {
-              "type": "array",
-              "description": "Glob patterns for paths the agent must not modify.",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "additionalProperties": false
-        },
-        "handoffs": {
-          "type": "array",
-          "description": "Transitions to other agents.",
-          "items": {
-            "type": "object",
-            "required": [
-              "target",
-              "trigger"
-            ],
-            "properties": {
-              "target": {
-                "type": "string",
-                "description": "Name of the target AgentRole resource."
-              },
-              "trigger": {
-                "type": "string",
-                "description": "Condition that initiates the handoff."
-              },
-              "contract": {
-                "type": "object",
-                "description": "Reference to a handoff contract.",
-                "required": [
-                  "schema"
-                ],
-                "properties": {
-                  "schema": {
-                    "type": "string",
-                    "description": "URI or path to the JSON Schema defining the handoff data structure."
-                  },
-                  "requiredFields": {
-                    "type": "array",
-                    "description": "Fields that must be present in the handoff payload.",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "skills": {
-          "type": "array",
-          "description": "Declared capabilities for discovery.",
-          "items": {
-            "type": "object",
-            "required": [
-              "id",
-              "description"
-            ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "description": "Unique skill identifier."
-              },
-              "description": {
-                "type": "string",
-                "description": "Human-readable description of the skill."
-              },
-              "tags": {
-                "type": "array",
-                "description": "Tags for categorization and discovery.",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "examples": {
-                "type": "array",
-                "description": "Input/output examples.",
-                "items": {
-                  "type": "object",
-                  "required": [
-                    "input",
-                    "output"
-                  ],
-                  "properties": {
-                    "input": {
-                      "type": "string",
-                      "description": "Example input."
-                    },
-                    "output": {
-                      "type": "string",
-                      "description": "Expected output description."
-                    }
-                  },
-                  "additionalProperties": false
-                }
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "agentCard": {
-          "type": "object",
-          "description": "A2A-compatible discovery information.",
-          "required": [
-            "endpoint",
-            "version"
-          ],
-          "properties": {
-            "endpoint": {
-              "type": "string",
-              "format": "uri",
-              "description": "The agent's service endpoint."
-            },
-            "version": {
-              "type": "string",
-              "description": "Agent card version."
-            },
-            "securitySchemes": {
-              "type": "array",
-              "description": "Supported authentication methods.",
-              "items": {
-                "type": "string"
-              }
-            }
-          },
-          "additionalProperties": false
-        },
-        "modelSelection": {
-          "$ref": "#/$defs/ModelSelection"
-        }
-      },
-      "additionalProperties": false
-    },
-    "status": {
-      "type": "object",
-      "properties": {
-        "autonomyLevel": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 3,
-          "description": "Current autonomy level (0-3)."
-        },
-        "totalTasksCompleted": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Cumulative tasks completed."
-        },
-        "approvalRate": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Ratio of approved tasks (0.0-1.0)."
-        },
-        "lastActive": {
-          "type": "string",
-          "format": "date-time",
-          "description": "Timestamp of last activity."
-        }
-      },
-      "additionalProperties": false
-    }
-  },
-  "additionalProperties": false,
-  "$defs": {
-    "ModelRule": {
-      "type": "object",
-      "description": "A rule mapping complexity ranges to model identifiers.",
-      "required": [
-        "complexity",
-        "model"
-      ],
-      "properties": {
-        "complexity": {
-          "type": "array",
-          "description": "Complexity score range [min, max] (inclusive).",
-          "items": {
-            "type": "integer",
-            "minimum": 1,
-            "maximum": 10
-          },
-          "minItems": 2,
-          "maxItems": 2
-        },
-        "model": {
-          "type": "string",
-          "description": "Model identifier to use for this complexity range."
-        },
-        "rationale": {
-          "type": "string",
-          "description": "Human-readable rationale for this model assignment."
-        }
-      },
-      "additionalProperties": false
-    },
-    "BudgetPressureRule": {
-      "type": "object",
-      "description": "A rule that downshifts model selection when budget pressure exceeds a threshold.",
-      "required": [
-        "above",
-        "downshift"
-      ],
-      "properties": {
-        "above": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Budget consumption ratio (0-1) above which this rule activates."
-        },
-        "downshift": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Number of positions to shift down in the model selection rules."
-        },
-        "notify": {
-          "type": "array",
-          "description": "Notification targets when this rule activates.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "ModelSelection": {
-      "type": "object",
-      "description": "Cost-aware model selection configuration for an agent. See RFC-0004.",
-      "properties": {
-        "rules": {
-          "type": "array",
-          "description": "Ordered list of complexity-to-model mapping rules.",
-          "items": {
-            "$ref": "#/$defs/ModelRule"
-          }
-        },
-        "budgetPressure": {
-          "type": "array",
-          "description": "Budget pressure rules for automatic model downshift.",
-          "items": {
-            "$ref": "#/$defs/BudgetPressureRule"
-          }
-        },
-        "fallbackChain": {
-          "type": "array",
-          "description": "Ordered list of fallback model identifiers.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false
-    }
-  }
-}
+agent_role_schema: dict[str, Any] = {'$defs': {'BudgetPressureRule': {'additionalProperties': False,
+                                  'description': 'A rule that downshifts model selection when budget pressure exceeds '
+                                                 'a threshold.',
+                                  'properties': {'above': {'description': 'Budget consumption ratio (0-1) above which '
+                                                                          'this rule activates.',
+                                                           'maximum': 1,
+                                                           'minimum': 0,
+                                                           'type': 'number'},
+                                                 'downshift': {'description': 'Number of positions to shift down in '
+                                                                              'the model selection rules.',
+                                                               'minimum': 1,
+                                                               'type': 'integer'},
+                                                 'notify': {'description': 'Notification targets when this rule '
+                                                                           'activates.',
+                                                            'items': {'type': 'string'},
+                                                            'type': 'array'}},
+                                  'required': ['above', 'downshift'],
+                                  'type': 'object'},
+           'ModelRule': {'additionalProperties': False,
+                         'description': 'A rule mapping complexity ranges to model identifiers.',
+                         'properties': {'complexity': {'description': 'Complexity score range [min, max] (inclusive).',
+                                                       'items': {'maximum': 10, 'minimum': 1, 'type': 'integer'},
+                                                       'maxItems': 2,
+                                                       'minItems': 2,
+                                                       'type': 'array'},
+                                        'model': {'description': 'Model identifier to use for this complexity range.',
+                                                  'type': 'string'},
+                                        'rationale': {'description': 'Human-readable rationale for this model '
+                                                                     'assignment.',
+                                                      'type': 'string'}},
+                         'required': ['complexity', 'model'],
+                         'type': 'object'},
+           'ModelSelection': {'additionalProperties': False,
+                              'description': 'Cost-aware model selection configuration for an agent. See RFC-0004.',
+                              'properties': {'budgetPressure': {'description': 'Budget pressure rules for automatic '
+                                                                               'model downshift.',
+                                                                'items': {'$ref': '#/$defs/BudgetPressureRule'},
+                                                                'type': 'array'},
+                                             'fallbackChain': {'description': 'Ordered list of fallback model '
+                                                                              'identifiers.',
+                                                               'items': {'type': 'string'},
+                                                               'type': 'array'},
+                                             'rules': {'description': 'Ordered list of complexity-to-model mapping '
+                                                                      'rules.',
+                                                       'items': {'$ref': '#/$defs/ModelRule'},
+                                                       'type': 'array'}},
+                              'type': 'object'}},
+ '$id': 'https://ai-sdlc.io/schemas/v1alpha1/agent-role.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': "Declares an AI agent's identity, capabilities, constraints, and handoff behavior.",
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'AgentRole', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'agentCard': {'additionalProperties': False,
+                                                      'description': 'A2A-compatible discovery information.',
+                                                      'properties': {'endpoint': {'description': "The agent's service "
+                                                                                                 'endpoint.',
+                                                                                  'format': 'uri',
+                                                                                  'type': 'string'},
+                                                                     'securitySchemes': {'description': 'Supported '
+                                                                                                        'authentication '
+                                                                                                        'methods.',
+                                                                                         'items': {'type': 'string'},
+                                                                                         'type': 'array'},
+                                                                     'version': {'description': 'Agent card version.',
+                                                                                 'type': 'string'}},
+                                                      'required': ['endpoint', 'version'],
+                                                      'type': 'object'},
+                                        'backstory': {'description': "Context for the agent's persona and expertise.",
+                                                      'type': 'string'},
+                                        'constraints': {'additionalProperties': False,
+                                                        'description': 'Operational limits on the agent.',
+                                                        'properties': {'allowedLanguages': {'description': 'Programming '
+                                                                                                           'languages '
+                                                                                                           'the agent '
+                                                                                                           'may '
+                                                                                                           'produce.',
+                                                                                            'items': {'type': 'string'},
+                                                                                            'type': 'array'},
+                                                                       'blockedPaths': {'description': 'Glob patterns '
+                                                                                                       'for paths the '
+                                                                                                       'agent must not '
+                                                                                                       'modify.',
+                                                                                        'items': {'type': 'string'},
+                                                                                        'type': 'array'},
+                                                                       'maxFilesPerChange': {'description': 'Maximum '
+                                                                                                            'files the '
+                                                                                                            'agent may '
+                                                                                                            'modify in '
+                                                                                                            'a single '
+                                                                                                            'change.',
+                                                                                             'minimum': 1,
+                                                                                             'type': 'integer'},
+                                                                       'requireTests': {'description': 'Whether the '
+                                                                                                       'agent must '
+                                                                                                       'include tests '
+                                                                                                       'with code '
+                                                                                                       'changes.',
+                                                                                        'type': 'boolean'}},
+                                                        'type': 'object'},
+                                        'goal': {'description': 'What the agent aims to achieve.', 'type': 'string'},
+                                        'handoffs': {'description': 'Transitions to other agents.',
+                                                     'items': {'additionalProperties': False,
+                                                               'properties': {'contract': {'additionalProperties': False,
+                                                                                           'description': 'Reference '
+                                                                                                          'to a '
+                                                                                                          'handoff '
+                                                                                                          'contract.',
+                                                                                           'properties': {'requiredFields': {'description': 'Fields '
+                                                                                                                                            'that '
+                                                                                                                                            'must '
+                                                                                                                                            'be '
+                                                                                                                                            'present '
+                                                                                                                                            'in '
+                                                                                                                                            'the '
+                                                                                                                                            'handoff '
+                                                                                                                                            'payload.',
+                                                                                                                             'items': {'type': 'string'},
+                                                                                                                             'type': 'array'},
+                                                                                                          'schema': {'description': 'URI '
+                                                                                                                                    'or '
+                                                                                                                                    'path '
+                                                                                                                                    'to '
+                                                                                                                                    'the '
+                                                                                                                                    'JSON '
+                                                                                                                                    'Schema '
+                                                                                                                                    'defining '
+                                                                                                                                    'the '
+                                                                                                                                    'handoff '
+                                                                                                                                    'data '
+                                                                                                                                    'structure.',
+                                                                                                                     'type': 'string'}},
+                                                                                           'required': ['schema'],
+                                                                                           'type': 'object'},
+                                                                              'target': {'description': 'Name of the '
+                                                                                                        'target '
+                                                                                                        'AgentRole '
+                                                                                                        'resource.',
+                                                                                         'type': 'string'},
+                                                                              'trigger': {'description': 'Condition '
+                                                                                                         'that '
+                                                                                                         'initiates '
+                                                                                                         'the handoff.',
+                                                                                          'type': 'string'}},
+                                                               'required': ['target', 'trigger'],
+                                                               'type': 'object'},
+                                                     'type': 'array'},
+                                        'modelSelection': {'$ref': '#/$defs/ModelSelection'},
+                                        'role': {'description': "The agent's role title (e.g., 'Senior Software "
+                                                                "Engineer').",
+                                                 'type': 'string'},
+                                        'skills': {'description': 'Declared capabilities for discovery.',
+                                                   'items': {'additionalProperties': False,
+                                                             'properties': {'description': {'description': 'Human-readable '
+                                                                                                           'description '
+                                                                                                           'of the '
+                                                                                                           'skill.',
+                                                                                            'type': 'string'},
+                                                                            'examples': {'description': 'Input/output '
+                                                                                                        'examples.',
+                                                                                         'items': {'additionalProperties': False,
+                                                                                                   'properties': {'input': {'description': 'Example '
+                                                                                                                                           'input.',
+                                                                                                                            'type': 'string'},
+                                                                                                                  'output': {'description': 'Expected '
+                                                                                                                                            'output '
+                                                                                                                                            'description.',
+                                                                                                                             'type': 'string'}},
+                                                                                                   'required': ['input',
+                                                                                                                'output'],
+                                                                                                   'type': 'object'},
+                                                                                         'type': 'array'},
+                                                                            'id': {'description': 'Unique skill '
+                                                                                                  'identifier.',
+                                                                                   'type': 'string'},
+                                                                            'tags': {'description': 'Tags for '
+                                                                                                    'categorization '
+                                                                                                    'and discovery.',
+                                                                                     'items': {'type': 'string'},
+                                                                                     'type': 'array'}},
+                                                             'required': ['id', 'description'],
+                                                             'type': 'object'},
+                                                   'type': 'array'},
+                                        'tools': {'description': 'Tool identifiers the agent is permitted to use.',
+                                                  'items': {'type': 'string'},
+                                                  'minItems': 1,
+                                                  'type': 'array'}},
+                         'required': ['role', 'goal', 'tools'],
+                         'type': 'object'},
+                'status': {'additionalProperties': False,
+                           'properties': {'approvalRate': {'description': 'Ratio of approved tasks (0.0-1.0).',
+                                                           'maximum': 1,
+                                                           'minimum': 0,
+                                                           'type': 'number'},
+                                          'autonomyLevel': {'description': 'Current autonomy level (0-3).',
+                                                            'maximum': 3,
+                                                            'minimum': 0,
+                                                            'type': 'integer'},
+                                          'lastActive': {'description': 'Timestamp of last activity.',
+                                                         'format': 'date-time',
+                                                         'type': 'string'},
+                                          'totalTasksCompleted': {'description': 'Cumulative tasks completed.',
+                                                                  'minimum': 0,
+                                                                  'type': 'integer'}},
+                           'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'metadata', 'spec'],
+ 'title': 'AI-SDLC AgentRole',
+ 'type': 'object'}
 
-autonomy_policy_schema: dict[str, Any] = {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-sdlc.io/schemas/v1alpha1/autonomy-policy.schema.json",
-  "title": "AI-SDLC AutonomyPolicy",
-  "description": "Declares progressive autonomy levels with quantitative promotion criteria and automatic demotion triggers.",
-  "type": "object",
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
-  "properties": {
-    "apiVersion": {
-      "$ref": "common.schema.json#/$defs/apiVersion"
-    },
-    "kind": {
-      "type": "string",
-      "const": "AutonomyPolicy"
-    },
-    "metadata": {
-      "$ref": "common.schema.json#/$defs/metadata"
-    },
-    "spec": {
-      "type": "object",
-      "required": [
-        "levels",
-        "promotionCriteria",
-        "demotionTriggers"
-      ],
-      "properties": {
-        "levels": {
-          "type": "array",
-          "description": "Ordered list of autonomy levels.",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "level",
-              "name",
-              "permissions",
-              "guardrails",
-              "monitoring"
-            ],
-            "properties": {
-              "level": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 3,
-                "description": "Level number (0-3)."
-              },
-              "name": {
-                "type": "string",
-                "description": "Human-readable name (e.g., Intern, Junior, Senior, Principal)."
-              },
-              "description": {
-                "type": "string",
-                "description": "Description of the level's scope."
-              },
-              "permissions": {
-                "type": "object",
-                "description": "What the agent is allowed to do.",
-                "required": [
-                  "read",
-                  "write",
-                  "execute"
-                ],
-                "properties": {
-                  "read": {
-                    "type": "array",
-                    "description": "Read permission scopes (glob patterns).",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "write": {
-                    "type": "array",
-                    "description": "Write permission scopes (action names or glob patterns).",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "execute": {
-                    "type": "array",
-                    "description": "Execute permission scopes (action names).",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "additionalProperties": false
-              },
-              "guardrails": {
-                "type": "object",
-                "description": "Operational constraints.",
-                "required": [
-                  "requireApproval"
-                ],
-                "properties": {
-                  "requireApproval": {
-                    "type": "string",
-                    "enum": [
-                      "all",
-                      "security-critical-only",
-                      "architecture-changes-only",
-                      "none"
-                    ],
-                    "description": "Approval requirement level."
-                  },
-                  "maxLinesPerPR": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Maximum lines changed per pull request."
-                  },
-                  "blockedPaths": {
-                    "type": "array",
-                    "description": "Glob patterns for paths the agent must not modify.",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "transactionLimit": {
-                    "type": "string",
-                    "description": "Maximum cost/resource budget per time period."
-                  }
-                },
-                "additionalProperties": false
-              },
-              "monitoring": {
-                "type": "string",
-                "enum": [
-                  "continuous",
-                  "real-time-notification",
-                  "audit-log"
-                ],
-                "description": "Monitoring intensity."
-              },
-              "minimumDuration": {
-                "type": [
-                  "string",
-                  "null"
-                ],
-                "description": "Minimum time at this level before promotion. Null for no minimum.",
-                "pattern": "^\\d+[smhdw]$"
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "promotionCriteria": {
-          "type": "object",
-          "description": "Promotion criteria keyed by transition (e.g., 0-to-1, 1-to-2, 2-to-3).",
-          "patternProperties": {
-            "^\\d+-to-\\d+$": {
-              "type": "object",
-              "required": [
-                "minimumTasks",
-                "conditions",
-                "requiredApprovals"
-              ],
-              "properties": {
-                "minimumTasks": {
-                  "type": "integer",
-                  "minimum": 1,
-                  "description": "Minimum tasks completed at current level."
-                },
-                "conditions": {
-                  "type": "array",
-                  "description": "Metric thresholds that must be met.",
-                  "items": {
-                    "$ref": "common.schema.json#/$defs/metricCondition"
-                  }
-                },
-                "requiredApprovals": {
-                  "type": "array",
-                  "description": "Roles that must approve the promotion.",
-                  "items": {
-                    "type": "string"
-                  },
-                  "minItems": 1
-                }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": false
-        },
-        "demotionTriggers": {
-          "type": "array",
-          "description": "Conditions that cause automatic demotion.",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "trigger",
-              "action",
-              "cooldown"
-            ],
-            "properties": {
-              "trigger": {
-                "type": "string",
-                "description": "The event that triggers demotion."
-              },
-              "action": {
-                "type": "string",
-                "enum": [
-                  "demote-to-0",
-                  "demote-one-level"
-                ],
-                "description": "The demotion action."
-              },
-              "cooldown": {
-                "type": "string",
-                "description": "Time before re-promotion is possible.",
-                "pattern": "^\\d+[smhdw]$"
-              },
-              "condition": {
-                "type": "object",
-                "description": "Quantitative condition for this demotion trigger.",
-                "required": [
-                  "metric",
-                  "operator",
-                  "threshold"
-                ],
-                "properties": {
-                  "metric": {
-                    "type": "string",
-                    "description": "The metric to evaluate."
-                  },
-                  "operator": {
-                    "type": "string",
-                    "enum": [
-                      ">=",
-                      "<=",
-                      "==",
-                      "!=",
-                      ">",
-                      "<"
-                    ],
-                    "description": "Comparison operator."
-                  },
-                  "threshold": {
-                    "type": "number",
-                    "description": "The threshold value."
-                  },
-                  "window": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "description": "Number of consecutive executions to evaluate."
-                  }
-                },
-                "additionalProperties": false
-              },
-              "notification": {
-                "type": "string",
-                "description": "Notification template name to send when this trigger fires."
-              }
-            },
-            "additionalProperties": false
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "status": {
-      "type": "object",
-      "properties": {
-        "agents": {
-          "type": "array",
-          "description": "Per-agent autonomy status.",
-          "items": {
-            "type": "object",
-            "required": [
-              "name",
-              "currentLevel"
-            ],
-            "properties": {
-              "name": {
-                "type": "string",
-                "description": "Agent name (reference to AgentRole)."
-              },
-              "currentLevel": {
-                "type": "integer",
-                "minimum": 0,
-                "maximum": 3,
-                "description": "Current autonomy level."
-              },
-              "promotedAt": {
-                "type": "string",
-                "format": "date-time",
-                "description": "When the agent was last promoted."
-              },
-              "nextEvaluationAt": {
-                "type": "string",
-                "format": "date-time",
-                "description": "When the next promotion evaluation occurs."
-              },
-              "metrics": {
-                "type": "object",
-                "description": "Current metric values for promotion evaluation.",
-                "additionalProperties": {
-                  "type": "number"
-                }
-              }
-            },
-            "additionalProperties": false
-          }
-        }
-      },
-      "additionalProperties": false
-    }
-  },
-  "additionalProperties": false
-}
+autonomy_policy_schema: dict[str, Any] = {'$id': 'https://ai-sdlc.io/schemas/v1alpha1/autonomy-policy.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Declares progressive autonomy levels with quantitative promotion criteria and automatic demotion '
+                'triggers.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'AutonomyPolicy', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'demotionTriggers': {'description': 'Conditions that cause automatic demotion.',
+                                                             'items': {'additionalProperties': False,
+                                                                       'properties': {'action': {'description': 'The '
+                                                                                                                'demotion '
+                                                                                                                'action.',
+                                                                                                 'enum': ['demote-to-0',
+                                                                                                          'demote-one-level'],
+                                                                                                 'type': 'string'},
+                                                                                      'condition': {'additionalProperties': False,
+                                                                                                    'description': 'Quantitative '
+                                                                                                                   'condition '
+                                                                                                                   'for '
+                                                                                                                   'this '
+                                                                                                                   'demotion '
+                                                                                                                   'trigger.',
+                                                                                                    'properties': {'metric': {'description': 'The '
+                                                                                                                                             'metric '
+                                                                                                                                             'to '
+                                                                                                                                             'evaluate.',
+                                                                                                                              'type': 'string'},
+                                                                                                                   'operator': {'description': 'Comparison '
+                                                                                                                                               'operator.',
+                                                                                                                                'enum': ['>=',
+                                                                                                                                         '<=',
+                                                                                                                                         '==',
+                                                                                                                                         '!=',
+                                                                                                                                         '>',
+                                                                                                                                         '<'],
+                                                                                                                                'type': 'string'},
+                                                                                                                   'threshold': {'description': 'The '
+                                                                                                                                                'threshold '
+                                                                                                                                                'value.',
+                                                                                                                                 'type': 'number'},
+                                                                                                                   'window': {'description': 'Number '
+                                                                                                                                             'of '
+                                                                                                                                             'consecutive '
+                                                                                                                                             'executions '
+                                                                                                                                             'to '
+                                                                                                                                             'evaluate.',
+                                                                                                                              'minimum': 1,
+                                                                                                                              'type': 'integer'}},
+                                                                                                    'required': ['metric',
+                                                                                                                 'operator',
+                                                                                                                 'threshold'],
+                                                                                                    'type': 'object'},
+                                                                                      'cooldown': {'description': 'Time '
+                                                                                                                  'before '
+                                                                                                                  're-promotion '
+                                                                                                                  'is '
+                                                                                                                  'possible.',
+                                                                                                   'pattern': '^\\d+[smhdw]$',
+                                                                                                   'type': 'string'},
+                                                                                      'notification': {'description': 'Notification '
+                                                                                                                      'template '
+                                                                                                                      'name '
+                                                                                                                      'to '
+                                                                                                                      'send '
+                                                                                                                      'when '
+                                                                                                                      'this '
+                                                                                                                      'trigger '
+                                                                                                                      'fires.',
+                                                                                                       'type': 'string'},
+                                                                                      'trigger': {'description': 'The '
+                                                                                                                 'event '
+                                                                                                                 'that '
+                                                                                                                 'triggers '
+                                                                                                                 'demotion.',
+                                                                                                  'type': 'string'}},
+                                                                       'required': ['trigger', 'action', 'cooldown'],
+                                                                       'type': 'object'},
+                                                             'minItems': 1,
+                                                             'type': 'array'},
+                                        'levels': {'description': 'Ordered list of autonomy levels.',
+                                                   'items': {'additionalProperties': False,
+                                                             'properties': {'description': {'description': 'Description '
+                                                                                                           'of the '
+                                                                                                           "level's "
+                                                                                                           'scope.',
+                                                                                            'type': 'string'},
+                                                                            'guardrails': {'additionalProperties': False,
+                                                                                           'description': 'Operational '
+                                                                                                          'constraints.',
+                                                                                           'properties': {'blockedPaths': {'description': 'Glob '
+                                                                                                                                          'patterns '
+                                                                                                                                          'for '
+                                                                                                                                          'paths '
+                                                                                                                                          'the '
+                                                                                                                                          'agent '
+                                                                                                                                          'must '
+                                                                                                                                          'not '
+                                                                                                                                          'modify.',
+                                                                                                                           'items': {'type': 'string'},
+                                                                                                                           'type': 'array'},
+                                                                                                          'maxLinesPerPR': {'description': 'Maximum '
+                                                                                                                                           'lines '
+                                                                                                                                           'changed '
+                                                                                                                                           'per '
+                                                                                                                                           'pull '
+                                                                                                                                           'request.',
+                                                                                                                            'minimum': 1,
+                                                                                                                            'type': 'integer'},
+                                                                                                          'requireApproval': {'description': 'Approval '
+                                                                                                                                             'requirement '
+                                                                                                                                             'level.',
+                                                                                                                              'enum': ['all',
+                                                                                                                                       'security-critical-only',
+                                                                                                                                       'architecture-changes-only',
+                                                                                                                                       'none'],
+                                                                                                                              'type': 'string'},
+                                                                                                          'transactionLimit': {'description': 'Maximum '
+                                                                                                                                              'cost/resource '
+                                                                                                                                              'budget '
+                                                                                                                                              'per '
+                                                                                                                                              'time '
+                                                                                                                                              'period.',
+                                                                                                                               'type': 'string'}},
+                                                                                           'required': ['requireApproval'],
+                                                                                           'type': 'object'},
+                                                                            'level': {'description': 'Level number '
+                                                                                                     '(0-3).',
+                                                                                      'maximum': 3,
+                                                                                      'minimum': 0,
+                                                                                      'type': 'integer'},
+                                                                            'minimumDuration': {'description': 'Minimum '
+                                                                                                               'time '
+                                                                                                               'at '
+                                                                                                               'this '
+                                                                                                               'level '
+                                                                                                               'before '
+                                                                                                               'promotion. '
+                                                                                                               'Null '
+                                                                                                               'for no '
+                                                                                                               'minimum.',
+                                                                                                'pattern': '^\\d+[smhdw]$',
+                                                                                                'type': ['string',
+                                                                                                         'null']},
+                                                                            'monitoring': {'description': 'Monitoring '
+                                                                                                          'intensity.',
+                                                                                           'enum': ['continuous',
+                                                                                                    'real-time-notification',
+                                                                                                    'audit-log'],
+                                                                                           'type': 'string'},
+                                                                            'name': {'description': 'Human-readable '
+                                                                                                    'name (e.g., '
+                                                                                                    'Intern, Junior, '
+                                                                                                    'Senior, '
+                                                                                                    'Principal).',
+                                                                                     'type': 'string'},
+                                                                            'permissions': {'additionalProperties': False,
+                                                                                            'description': 'What the '
+                                                                                                           'agent is '
+                                                                                                           'allowed to '
+                                                                                                           'do.',
+                                                                                            'properties': {'execute': {'description': 'Execute '
+                                                                                                                                      'permission '
+                                                                                                                                      'scopes '
+                                                                                                                                      '(action '
+                                                                                                                                      'names).',
+                                                                                                                       'items': {'type': 'string'},
+                                                                                                                       'type': 'array'},
+                                                                                                           'read': {'description': 'Read '
+                                                                                                                                   'permission '
+                                                                                                                                   'scopes '
+                                                                                                                                   '(glob '
+                                                                                                                                   'patterns).',
+                                                                                                                    'items': {'type': 'string'},
+                                                                                                                    'type': 'array'},
+                                                                                                           'write': {'description': 'Write '
+                                                                                                                                    'permission '
+                                                                                                                                    'scopes '
+                                                                                                                                    '(action '
+                                                                                                                                    'names '
+                                                                                                                                    'or '
+                                                                                                                                    'glob '
+                                                                                                                                    'patterns).',
+                                                                                                                     'items': {'type': 'string'},
+                                                                                                                     'type': 'array'}},
+                                                                                            'required': ['read',
+                                                                                                         'write',
+                                                                                                         'execute'],
+                                                                                            'type': 'object'}},
+                                                             'required': ['level',
+                                                                          'name',
+                                                                          'permissions',
+                                                                          'guardrails',
+                                                                          'monitoring'],
+                                                             'type': 'object'},
+                                                   'minItems': 1,
+                                                   'type': 'array'},
+                                        'promotionCriteria': {'additionalProperties': False,
+                                                              'description': 'Promotion criteria keyed by transition '
+                                                                             '(e.g., 0-to-1, 1-to-2, 2-to-3).',
+                                                              'patternProperties': {'^\\d+-to-\\d+$': {'additionalProperties': False,
+                                                                                                       'properties': {'conditions': {'description': 'Metric '
+                                                                                                                                                    'thresholds '
+                                                                                                                                                    'that '
+                                                                                                                                                    'must '
+                                                                                                                                                    'be '
+                                                                                                                                                    'met.',
+                                                                                                                                     'items': {'$ref': 'common.schema.json#/$defs/metricCondition'},
+                                                                                                                                     'type': 'array'},
+                                                                                                                      'minimumTasks': {'description': 'Minimum '
+                                                                                                                                                      'tasks '
+                                                                                                                                                      'completed '
+                                                                                                                                                      'at '
+                                                                                                                                                      'current '
+                                                                                                                                                      'level.',
+                                                                                                                                       'minimum': 1,
+                                                                                                                                       'type': 'integer'},
+                                                                                                                      'requiredApprovals': {'description': 'Roles '
+                                                                                                                                                           'that '
+                                                                                                                                                           'must '
+                                                                                                                                                           'approve '
+                                                                                                                                                           'the '
+                                                                                                                                                           'promotion.',
+                                                                                                                                            'items': {'type': 'string'},
+                                                                                                                                            'minItems': 1,
+                                                                                                                                            'type': 'array'}},
+                                                                                                       'required': ['minimumTasks',
+                                                                                                                    'conditions',
+                                                                                                                    'requiredApprovals'],
+                                                                                                       'type': 'object'}},
+                                                              'type': 'object'}},
+                         'required': ['levels', 'promotionCriteria', 'demotionTriggers'],
+                         'type': 'object'},
+                'status': {'additionalProperties': False,
+                           'properties': {'agents': {'description': 'Per-agent autonomy status.',
+                                                     'items': {'additionalProperties': False,
+                                                               'properties': {'currentLevel': {'description': 'Current '
+                                                                                                              'autonomy '
+                                                                                                              'level.',
+                                                                                               'maximum': 3,
+                                                                                               'minimum': 0,
+                                                                                               'type': 'integer'},
+                                                                              'metrics': {'additionalProperties': {'type': 'number'},
+                                                                                          'description': 'Current '
+                                                                                                         'metric '
+                                                                                                         'values for '
+                                                                                                         'promotion '
+                                                                                                         'evaluation.',
+                                                                                          'type': 'object'},
+                                                                              'name': {'description': 'Agent name '
+                                                                                                      '(reference to '
+                                                                                                      'AgentRole).',
+                                                                                       'type': 'string'},
+                                                                              'nextEvaluationAt': {'description': 'When '
+                                                                                                                  'the '
+                                                                                                                  'next '
+                                                                                                                  'promotion '
+                                                                                                                  'evaluation '
+                                                                                                                  'occurs.',
+                                                                                                   'format': 'date-time',
+                                                                                                   'type': 'string'},
+                                                                              'promotedAt': {'description': 'When the '
+                                                                                                            'agent was '
+                                                                                                            'last '
+                                                                                                            'promoted.',
+                                                                                             'format': 'date-time',
+                                                                                             'type': 'string'}},
+                                                               'required': ['name', 'currentLevel'],
+                                                               'type': 'object'},
+                                                     'type': 'array'}},
+                           'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'metadata', 'spec'],
+ 'title': 'AI-SDLC AutonomyPolicy',
+ 'type': 'object'}
 
-common_schema: dict[str, Any] = {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-sdlc.io/schemas/v1alpha1/common.schema.json",
-  "title": "AI-SDLC Common Definitions",
-  "description": "Shared type definitions for AI-SDLC Framework resources.",
-  "$defs": {
-    "apiVersion": {
-      "type": "string",
-      "const": "ai-sdlc.io/v1alpha1",
-      "description": "The API version of the resource."
-    },
-    "metadata": {
-      "type": "object",
-      "description": "Identifying information for the resource.",
-      "required": [
-        "name"
-      ],
-      "properties": {
-        "name": {
-          "type": "string",
-          "description": "A unique identifier within the namespace. DNS-label format.",
-          "pattern": "^[a-z][a-z0-9-]*$",
-          "maxLength": 253
-        },
-        "namespace": {
-          "type": "string",
-          "description": "The scoping unit, typically a team or project identifier.",
-          "pattern": "^[a-z][a-z0-9-]*$",
-          "maxLength": 253
-        },
-        "labels": {
-          "type": "object",
-          "description": "Arbitrary key-value pairs for selection and filtering.",
-          "additionalProperties": {
-            "type": "string"
-          }
-        },
-        "annotations": {
-          "type": "object",
-          "description": "Non-identifying key-value pairs for tooling and operational metadata.",
-          "additionalProperties": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "condition": {
-      "type": "object",
-      "description": "A structured status entry representing an aspect of a resource's observed state.",
-      "required": [
-        "type",
-        "status"
-      ],
-      "properties": {
-        "type": {
-          "type": "string",
-          "description": "The aspect of state this condition represents."
-        },
-        "status": {
-          "type": "string",
-          "enum": [
-            "True",
-            "False",
-            "Unknown"
-          ],
-          "description": "The status of the condition."
-        },
-        "reason": {
-          "type": "string",
-          "description": "A machine-readable reason code for the current status."
-        },
-        "message": {
-          "type": "string",
-          "description": "A human-readable description of the current status."
-        },
-        "lastTransitionTime": {
-          "type": "string",
-          "format": "date-time",
-          "description": "When the condition last transitioned from one status to another."
-        },
-        "lastEvaluated": {
-          "type": "string",
-          "format": "date-time",
-          "description": "When the condition was last evaluated."
-        }
-      },
-      "additionalProperties": false
-    },
-    "secretRef": {
-      "type": "object",
-      "description": "A reference to a secret value resolved at runtime.",
-      "required": [
-        "secretRef"
-      ],
-      "properties": {
-        "secretRef": {
-          "type": "string",
-          "description": "The name or key of the secret to reference."
-        }
-      },
-      "additionalProperties": false
-    },
-    "duration": {
-      "type": "string",
-      "description": "A duration value. Shorthand (e.g., 60s, 5m, 2h, 1d, 2w) or ISO 8601.",
-      "pattern": "^(\\d+[smhdw]|P(?:\\d+Y)?(?:\\d+M)?(?:\\d+D)?(?:T(?:\\d+H)?(?:\\d+M)?(?:\\d+S)?)?)$"
-    },
-    "metricCondition": {
-      "type": "object",
-      "description": "A metric threshold condition for evaluation.",
-      "required": [
-        "metric",
-        "operator",
-        "threshold"
-      ],
-      "properties": {
-        "metric": {
-          "type": "string",
-          "description": "The metric to evaluate."
-        },
-        "operator": {
-          "type": "string",
-          "enum": [
-            ">=",
-            "<=",
-            "==",
-            "!=",
-            ">",
-            "<"
-          ],
-          "description": "Comparison operator."
-        },
-        "threshold": {
-          "type": "number",
-          "description": "The threshold value."
-        }
-      },
-      "additionalProperties": false
-    }
-  }
-}
+common_schema: dict[str, Any] = {'$defs': {'apiVersion': {'const': 'ai-sdlc.io/v1alpha1',
+                          'description': 'The API version of the resource.',
+                          'type': 'string'},
+           'condition': {'additionalProperties': False,
+                         'description': "A structured status entry representing an aspect of a resource's observed "
+                                        'state.',
+                         'properties': {'lastEvaluated': {'description': 'When the condition was last evaluated.',
+                                                          'format': 'date-time',
+                                                          'type': 'string'},
+                                        'lastTransitionTime': {'description': 'When the condition last transitioned '
+                                                                              'from one status to another.',
+                                                               'format': 'date-time',
+                                                               'type': 'string'},
+                                        'message': {'description': 'A human-readable description of the current '
+                                                                   'status.',
+                                                    'type': 'string'},
+                                        'reason': {'description': 'A machine-readable reason code for the current '
+                                                                  'status.',
+                                                   'type': 'string'},
+                                        'status': {'description': 'The status of the condition.',
+                                                   'enum': ['True', 'False', 'Unknown'],
+                                                   'type': 'string'},
+                                        'type': {'description': 'The aspect of state this condition represents.',
+                                                 'type': 'string'}},
+                         'required': ['type', 'status'],
+                         'type': 'object'},
+           'duration': {'description': 'A duration value. Shorthand (e.g., 60s, 5m, 2h, 1d, 2w) or ISO 8601.',
+                        'pattern': '^(\\d+[smhdw]|P(?:\\d+Y)?(?:\\d+M)?(?:\\d+D)?(?:T(?:\\d+H)?(?:\\d+M)?(?:\\d+S)?)?)$',
+                        'type': 'string'},
+           'metadata': {'additionalProperties': False,
+                        'description': 'Identifying information for the resource.',
+                        'properties': {'annotations': {'additionalProperties': {'type': 'string'},
+                                                       'description': 'Non-identifying key-value pairs for tooling and '
+                                                                      'operational metadata.',
+                                                       'type': 'object'},
+                                       'labels': {'additionalProperties': {'type': 'string'},
+                                                  'description': 'Arbitrary key-value pairs for selection and '
+                                                                 'filtering.',
+                                                  'type': 'object'},
+                                       'name': {'description': 'A unique identifier within the namespace. DNS-label '
+                                                               'format.',
+                                                'maxLength': 253,
+                                                'pattern': '^[a-z][a-z0-9-]*$',
+                                                'type': 'string'},
+                                       'namespace': {'description': 'The scoping unit, typically a team or project '
+                                                                    'identifier.',
+                                                     'maxLength': 253,
+                                                     'pattern': '^[a-z][a-z0-9-]*$',
+                                                     'type': 'string'}},
+                        'required': ['name'],
+                        'type': 'object'},
+           'metricCondition': {'additionalProperties': False,
+                               'description': 'A metric threshold condition for evaluation.',
+                               'properties': {'metric': {'description': 'The metric to evaluate.', 'type': 'string'},
+                                              'operator': {'description': 'Comparison operator.',
+                                                           'enum': ['>=', '<=', '==', '!=', '>', '<'],
+                                                           'type': 'string'},
+                                              'threshold': {'description': 'The threshold value.', 'type': 'number'}},
+                               'required': ['metric', 'operator', 'threshold'],
+                               'type': 'object'},
+           'secretRef': {'additionalProperties': False,
+                         'description': 'A reference to a secret value resolved at runtime.',
+                         'properties': {'secretRef': {'description': 'The name or key of the secret to reference.',
+                                                      'type': 'string'}},
+                         'required': ['secretRef'],
+                         'type': 'object'}},
+ '$id': 'https://ai-sdlc.io/schemas/v1alpha1/common.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'description': 'Shared type definitions for AI-SDLC Framework resources.',
+ 'title': 'AI-SDLC Common Definitions'}
 
-pipeline_schema: dict[str, Any] = {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-sdlc.io/schemas/v1alpha1/pipeline.schema.json",
-  "title": "AI-SDLC Pipeline",
-  "description": "Defines a complete SDLC workflow from trigger through delivery.",
-  "type": "object",
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
-  "properties": {
-    "apiVersion": {
-      "$ref": "common.schema.json#/$defs/apiVersion"
-    },
-    "kind": {
-      "type": "string",
-      "const": "Pipeline"
-    },
-    "metadata": {
-      "$ref": "common.schema.json#/$defs/metadata"
-    },
-    "spec": {
-      "type": "object",
-      "required": [
-        "triggers",
-        "providers",
-        "stages"
-      ],
-      "properties": {
-        "triggers": {
-          "type": "array",
-          "description": "Events that initiate the pipeline.",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "event"
-            ],
-            "properties": {
-              "event": {
-                "type": "string",
-                "description": "The event type that triggers the pipeline (e.g., issue.assigned, pr.opened)."
-              },
-              "filter": {
-                "type": "object",
-                "description": "Conditions that must match for the trigger to fire.",
-                "properties": {
-                  "labels": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "branches": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "paths": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  }
-                },
-                "additionalProperties": true
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "providers": {
-          "type": "object",
-          "description": "Tool integrations used by the pipeline, keyed by interface category.",
-          "additionalProperties": {
-            "type": "object",
-            "required": [
-              "type"
-            ],
-            "properties": {
-              "type": {
-                "type": "string",
-                "description": "The adapter type (e.g., linear, github, jira)."
-              },
-              "config": {
-                "type": "object",
-                "description": "Adapter-specific configuration.",
-                "additionalProperties": true
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "stages": {
-          "type": "array",
-          "description": "Ordered list of execution stages.",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "name"
-            ],
-            "properties": {
-              "name": {
-                "type": "string",
-                "description": "Unique name within the pipeline."
-              },
-              "agent": {
-                "type": "string",
-                "description": "Reference to an AgentRole resource name."
-              },
-              "qualityGates": {
-                "type": "array",
-                "description": "References to QualityGate resource names.",
-                "items": {
-                  "type": "string"
-                }
-              },
-              "onFailure": {
-                "$ref": "#/$defs/FailurePolicy"
-              },
-              "timeout": {
-                "type": "string",
-                "description": "Maximum stage duration as an ISO 8601 duration (e.g., PT30M)."
-              },
-              "credentials": {
-                "$ref": "#/$defs/CredentialPolicy"
-              },
-              "approval": {
-                "$ref": "#/$defs/ApprovalPolicy"
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "routing": {
-          "type": "object",
-          "description": "Complexity-based task routing configuration.",
-          "properties": {
-            "complexityThresholds": {
-              "type": "object",
-              "description": "Named complexity tiers with score ranges and strategies.",
-              "additionalProperties": {
-                "type": "object",
-                "required": [
-                  "min",
-                  "max",
-                  "strategy"
-                ],
-                "properties": {
-                  "min": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 10,
-                    "description": "Minimum complexity score (inclusive)."
-                  },
-                  "max": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 10,
-                    "description": "Maximum complexity score (inclusive)."
-                  },
-                  "strategy": {
-                    "type": "string",
-                    "enum": [
-                      "fully-autonomous",
-                      "ai-with-review",
-                      "ai-assisted",
-                      "human-led"
-                    ],
-                    "description": "The routing strategy for this complexity tier."
-                  }
-                },
-                "additionalProperties": false
-              }
-            }
-          },
-          "additionalProperties": false
-        },
-        "branching": {
-          "$ref": "#/$defs/BranchingConfig"
-        },
-        "pullRequest": {
-          "$ref": "#/$defs/PullRequestConfig"
-        },
-        "notifications": {
-          "$ref": "#/$defs/NotificationsConfig"
-        },
-        "costPolicy": {
-          "$ref": "#/$defs/CostPolicy"
-        }
-      },
-      "additionalProperties": false
-    },
-    "status": {
-      "type": "object",
-      "properties": {
-        "phase": {
-          "type": "string",
-          "enum": [
-            "Pending",
-            "Running",
-            "Succeeded",
-            "Failed",
-            "Suspended"
-          ],
-          "description": "Current pipeline phase."
-        },
-        "activeStage": {
-          "type": "string",
-          "description": "Name of the currently executing stage."
-        },
-        "conditions": {
-          "type": "array",
-          "items": {
-            "$ref": "common.schema.json#/$defs/condition"
-          }
-        },
-        "stageAttempts": {
-          "type": "object",
-          "description": "Per-stage execution attempt counts.",
-          "additionalProperties": {
-            "type": "integer",
-            "minimum": 0
-          }
-        },
-        "pendingApproval": {
-          "$ref": "#/$defs/ApprovalStatus"
-        },
-        "cost": {
-          "$ref": "#/$defs/CostStatus"
-        }
-      },
-      "additionalProperties": false
-    }
-  },
-  "additionalProperties": false,
-  "$defs": {
-    "FailurePolicy": {
-      "type": "object",
-      "description": "Defines how a stage failure is handled.",
-      "required": [
-        "strategy"
-      ],
-      "properties": {
-        "strategy": {
-          "type": "string",
-          "enum": [
-            "abort",
-            "retry",
-            "pause",
-            "continue"
-          ],
-          "description": "The failure handling strategy."
-        },
-        "maxRetries": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 10,
-          "description": "Maximum retry attempts (required when strategy is retry)."
-        },
-        "retryDelay": {
-          "type": "string",
-          "description": "Delay between retries as an ISO 8601 duration (e.g., PT1M)."
-        },
-        "notification": {
-          "type": "string",
-          "description": "Name of a notification template to send on failure."
-        }
-      },
-      "if": {
-        "properties": {
-          "strategy": {
-            "const": "retry"
-          }
-        }
-      },
-      "then": {
-        "required": [
-          "maxRetries"
-        ]
-      },
-      "additionalProperties": false
-    },
-    "CredentialPolicy": {
-      "type": "object",
-      "description": "JIT credential scope and lifetime for a stage.",
-      "required": [
-        "scope"
-      ],
-      "properties": {
-        "scope": {
-          "type": "array",
-          "description": "Permission scopes required by the stage.",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1
-        },
-        "ttl": {
-          "type": "string",
-          "description": "Credential time-to-live as an ISO 8601 duration.",
-          "default": "PT10M"
-        },
-        "revokeOnComplete": {
-          "type": "boolean",
-          "description": "Whether to revoke credentials when the stage completes.",
-          "default": true
-        }
-      },
-      "additionalProperties": false
-    },
-    "ApprovalPolicy": {
-      "type": "object",
-      "description": "Approval requirements before a stage executes.",
-      "required": [
-        "required"
-      ],
-      "properties": {
-        "required": {
-          "type": "boolean",
-          "description": "Whether approval is required for this stage."
-        },
-        "tierOverride": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "peer-review",
-            "team-lead",
-            "security-review"
-          ],
-          "description": "Override the automatically determined approval tier."
-        },
-        "blocking": {
-          "type": "boolean",
-          "description": "Whether the stage blocks until approval is granted.",
-          "default": true
-        },
-        "timeout": {
-          "type": "string",
-          "description": "Maximum time to wait for approval as an ISO 8601 duration."
-        },
-        "onTimeout": {
-          "type": "string",
-          "enum": [
-            "abort",
-            "escalate",
-            "auto-approve"
-          ],
-          "description": "Action to take when the approval timeout expires."
-        }
-      },
-      "additionalProperties": false
-    },
-    "BranchingConfig": {
-      "type": "object",
-      "description": "Branch naming, target, and cleanup policy.",
-      "required": [
-        "pattern"
-      ],
-      "properties": {
-        "pattern": {
-          "type": "string",
-          "description": "Branch name pattern with placeholders (e.g., ai-sdlc/issue-{issueNumber})."
-        },
-        "targetBranch": {
-          "type": "string",
-          "description": "Target branch for pull requests.",
-          "default": "main"
-        },
-        "cleanup": {
-          "type": "string",
-          "enum": [
-            "on-merge",
-            "on-close",
-            "manual"
-          ],
-          "description": "When to delete the feature branch."
-        }
-      },
-      "additionalProperties": false
-    },
-    "PullRequestConfig": {
-      "type": "object",
-      "description": "Pull request creation conventions.",
-      "properties": {
-        "titleTemplate": {
-          "type": "string",
-          "description": "PR title template with placeholders (e.g., fix: {issueTitle} (#{issueNumber}))."
-        },
-        "descriptionSections": {
-          "type": "array",
-          "description": "Sections to include in the PR description.",
-          "items": {
-            "type": "string"
-          }
-        },
-        "includeProvenance": {
-          "type": "boolean",
-          "description": "Whether to include AI provenance metadata in the PR.",
-          "default": true
-        },
-        "closeKeyword": {
-          "type": "string",
-          "description": "Keyword used to auto-close the linked issue (e.g., Closes, Fixes)."
-        }
-      },
-      "additionalProperties": false
-    },
-    "NotificationsConfig": {
-      "type": "object",
-      "description": "Named notification templates for pipeline events.",
-      "properties": {
-        "templates": {
-          "type": "object",
-          "description": "Map of template names to notification templates.",
-          "additionalProperties": {
-            "$ref": "#/$defs/NotificationTemplate"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "NotificationTemplate": {
-      "type": "object",
-      "description": "A templated notification message for pipeline events.",
-      "required": [
-        "target",
-        "title"
-      ],
-      "properties": {
-        "target": {
-          "type": "string",
-          "enum": [
-            "issue",
-            "pr",
-            "both"
-          ],
-          "description": "Where to post the notification."
-        },
-        "title": {
-          "type": "string",
-          "description": "Notification title template."
-        },
-        "body": {
-          "type": "string",
-          "description": "Notification body template with placeholders."
-        }
-      },
-      "additionalProperties": false
-    },
-    "ApprovalStatus": {
-      "type": "object",
-      "description": "Status of a pending approval request.",
-      "required": [
-        "stage",
-        "tier",
-        "requestedAt"
-      ],
-      "properties": {
-        "stage": {
-          "type": "string",
-          "description": "The stage awaiting approval."
-        },
-        "tier": {
-          "type": "string",
-          "description": "The approval tier required."
-        },
-        "requestedAt": {
-          "type": "string",
-          "description": "ISO 8601 timestamp when approval was requested."
-        },
-        "timeoutAt": {
-          "type": "string",
-          "description": "ISO 8601 timestamp when the approval times out."
-        }
-      },
-      "additionalProperties": false
-    },
-    "CostThreshold": {
-      "type": "object",
-      "description": "A cost threshold with an associated action.",
-      "required": [
-        "amount",
-        "currency",
-        "action"
-      ],
-      "properties": {
-        "amount": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Cost amount."
-        },
-        "currency": {
-          "type": "string",
-          "description": "Currency code (e.g., USD)."
-        },
-        "action": {
-          "type": "string",
-          "enum": [
-            "notify",
-            "require-approval",
-            "abort"
-          ],
-          "description": "Action to take when the threshold is reached."
-        }
-      },
-      "additionalProperties": false
-    },
-    "ExecutionCostLimit": {
-      "type": "object",
-      "description": "Per-execution cost limits with soft and hard thresholds.",
-      "properties": {
-        "softLimit": {
-          "$ref": "#/$defs/CostThreshold"
-        },
-        "hardLimit": {
-          "$ref": "#/$defs/CostThreshold"
-        }
-      },
-      "additionalProperties": false
-    },
-    "StageCostLimit": {
-      "type": "object",
-      "description": "Cost limits for a pipeline stage.",
-      "properties": {
-        "tokenLimit": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Maximum tokens allowed for this stage."
-        },
-        "timeLimit": {
-          "type": "string",
-          "description": "Maximum duration as an ISO 8601 duration (e.g., PT30M)."
-        },
-        "costLimit": {
-          "$ref": "#/$defs/CostThreshold"
-        }
-      },
-      "additionalProperties": false
-    },
-    "StageCostPolicy": {
-      "type": "object",
-      "description": "Per-stage cost policy with defaults and per-stage overrides.",
-      "properties": {
-        "defaults": {
-          "$ref": "#/$defs/StageCostLimit"
-        },
-        "overrides": {
-          "type": "object",
-          "description": "Per-stage cost limit overrides, keyed by stage name.",
-          "additionalProperties": {
-            "$ref": "#/$defs/StageCostLimit"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "BudgetAlert": {
-      "type": "object",
-      "description": "An alert triggered when budget consumption reaches a threshold.",
-      "required": [
-        "threshold",
-        "action"
-      ],
-      "properties": {
-        "threshold": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "description": "Budget consumption ratio (0-1) that triggers this alert."
-        },
-        "action": {
-          "type": "string",
-          "enum": [
-            "notify",
-            "require-approval",
-            "block"
-          ],
-          "description": "Action to take when the threshold is reached."
-        },
-        "targets": {
-          "type": "array",
-          "description": "Notification targets (e.g., channel names, email addresses).",
-          "items": {
-            "type": "string"
-          }
-        },
-        "approver": {
-          "type": "string",
-          "description": "Role or identity required to approve continued spending."
-        },
-        "message": {
-          "type": "string",
-          "description": "Custom alert message."
-        }
-      },
-      "additionalProperties": false
-    },
-    "BudgetPolicy": {
-      "type": "object",
-      "description": "Rolling budget constraints for cost governance.",
-      "required": [
-        "period",
-        "amount",
-        "currency"
-      ],
-      "properties": {
-        "period": {
-          "type": "string",
-          "enum": [
-            "day",
-            "week",
-            "month",
-            "quarter"
-          ],
-          "description": "Budget period."
-        },
-        "amount": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Budget amount."
-        },
-        "currency": {
-          "type": "string",
-          "description": "Currency code (e.g., USD)."
-        },
-        "alerts": {
-          "type": "array",
-          "description": "Budget consumption alerts.",
-          "items": {
-            "$ref": "#/$defs/BudgetAlert"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "AttributionPolicy": {
-      "type": "object",
-      "description": "Cost attribution configuration for chargeback and analysis.",
-      "required": [
-        "dimensions"
-      ],
-      "properties": {
-        "dimensions": {
-          "type": "array",
-          "description": "Dimensions to track for cost attribution (e.g., agent, model, stage, repository, team).",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1
-        },
-        "chargeback": {
-          "type": "string",
-          "enum": [
-            "per-repository",
-            "per-team",
-            "per-agent",
-            "proportional"
-          ],
-          "description": "Chargeback allocation strategy."
-        }
-      },
-      "additionalProperties": false
-    },
-    "ModelPricing": {
-      "type": "object",
-      "description": "Pricing information for a specific model.",
-      "required": [
-        "inputPerMTok",
-        "outputPerMTok"
-      ],
-      "properties": {
-        "inputPerMTok": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Cost per million input tokens."
-        },
-        "outputPerMTok": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Cost per million output tokens."
-        },
-        "cacheReadPerMTok": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Cost per million cache read tokens."
-        }
-      },
-      "additionalProperties": false
-    },
-    "ModelPricingConfig": {
-      "type": "object",
-      "description": "Model pricing configuration.",
-      "required": [
-        "source"
-      ],
-      "properties": {
-        "source": {
-          "type": "string",
-          "enum": [
-            "config",
-            "api"
-          ],
-          "description": "How model pricing is obtained."
-        },
-        "models": {
-          "type": "object",
-          "description": "Per-model pricing overrides, keyed by model identifier.",
-          "additionalProperties": {
-            "$ref": "#/$defs/ModelPricing"
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "CostPolicy": {
-      "type": "object",
-      "description": "Cost governance policy declaring cost boundaries at per-execution, per-stage, and budget levels. See RFC-0004.",
-      "properties": {
-        "perExecution": {
-          "$ref": "#/$defs/ExecutionCostLimit"
-        },
-        "perStage": {
-          "$ref": "#/$defs/StageCostPolicy"
-        },
-        "budget": {
-          "$ref": "#/$defs/BudgetPolicy"
-        },
-        "attribution": {
-          "$ref": "#/$defs/AttributionPolicy"
-        },
-        "modelPricing": {
-          "$ref": "#/$defs/ModelPricingConfig"
-        }
-      },
-      "additionalProperties": false
-    },
-    "CostStatus": {
-      "type": "object",
-      "description": "Observed cost status for a pipeline.",
-      "properties": {
-        "currentSpend": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Current spend in the budget period."
-        },
-        "budgetRemaining": {
-          "type": "number",
-          "description": "Remaining budget in the current period."
-        },
-        "projectedMonthEnd": {
-          "type": "number",
-          "minimum": 0,
-          "description": "Projected spend at end of current period (linear extrapolation)."
-        },
-        "lastUpdated": {
-          "type": "string",
-          "description": "ISO 8601 timestamp of last cost status update."
-        },
-        "activeAlerts": {
-          "type": "array",
-          "description": "Currently active budget alert descriptions.",
-          "items": {
-            "type": "string"
-          }
-        }
-      },
-      "additionalProperties": false
-    }
-  }
-}
+pipeline_schema: dict[str, Any] = {'$defs': {'ApprovalPolicy': {'additionalProperties': False,
+                              'description': 'Approval requirements before a stage executes.',
+                              'properties': {'blocking': {'default': True,
+                                                          'description': 'Whether the stage blocks until approval is '
+                                                                         'granted.',
+                                                          'type': 'boolean'},
+                                             'onTimeout': {'description': 'Action to take when the approval timeout '
+                                                                          'expires.',
+                                                           'enum': ['abort', 'escalate', 'auto-approve'],
+                                                           'type': 'string'},
+                                             'required': {'description': 'Whether approval is required for this stage.',
+                                                          'type': 'boolean'},
+                                             'tierOverride': {'description': 'Override the automatically determined '
+                                                                             'approval tier.',
+                                                              'enum': ['auto',
+                                                                       'peer-review',
+                                                                       'team-lead',
+                                                                       'security-review'],
+                                                              'type': 'string'},
+                                             'timeout': {'description': 'Maximum time to wait for approval as an ISO '
+                                                                        '8601 duration.',
+                                                         'type': 'string'}},
+                              'required': ['required'],
+                              'type': 'object'},
+           'ApprovalStatus': {'additionalProperties': False,
+                              'description': 'Status of a pending approval request.',
+                              'properties': {'requestedAt': {'description': 'ISO 8601 timestamp when approval was '
+                                                                            'requested.',
+                                                             'type': 'string'},
+                                             'stage': {'description': 'The stage awaiting approval.', 'type': 'string'},
+                                             'tier': {'description': 'The approval tier required.', 'type': 'string'},
+                                             'timeoutAt': {'description': 'ISO 8601 timestamp when the approval times '
+                                                                          'out.',
+                                                           'type': 'string'}},
+                              'required': ['stage', 'tier', 'requestedAt'],
+                              'type': 'object'},
+           'AttributionPolicy': {'additionalProperties': False,
+                                 'description': 'Cost attribution configuration for chargeback and analysis.',
+                                 'properties': {'chargeback': {'description': 'Chargeback allocation strategy.',
+                                                               'enum': ['per-repository',
+                                                                        'per-team',
+                                                                        'per-agent',
+                                                                        'proportional'],
+                                                               'type': 'string'},
+                                                'dimensions': {'description': 'Dimensions to track for cost '
+                                                                              'attribution (e.g., agent, model, stage, '
+                                                                              'repository, team).',
+                                                               'items': {'type': 'string'},
+                                                               'minItems': 1,
+                                                               'type': 'array'}},
+                                 'required': ['dimensions'],
+                                 'type': 'object'},
+           'BranchingConfig': {'additionalProperties': False,
+                               'description': 'Branch naming, target, and cleanup policy.',
+                               'properties': {'cleanup': {'description': 'When to delete the feature branch.',
+                                                          'enum': ['on-merge', 'on-close', 'manual'],
+                                                          'type': 'string'},
+                                              'pattern': {'description': 'Branch name pattern with placeholders (e.g., '
+                                                                         'ai-sdlc/issue-{issueNumber}).',
+                                                          'type': 'string'},
+                                              'targetBranch': {'default': 'main',
+                                                               'description': 'Target branch for pull requests.',
+                                                               'type': 'string'}},
+                               'required': ['pattern'],
+                               'type': 'object'},
+           'BudgetAlert': {'additionalProperties': False,
+                           'description': 'An alert triggered when budget consumption reaches a threshold.',
+                           'properties': {'action': {'description': 'Action to take when the threshold is reached.',
+                                                     'enum': ['notify', 'require-approval', 'block'],
+                                                     'type': 'string'},
+                                          'approver': {'description': 'Role or identity required to approve continued '
+                                                                      'spending.',
+                                                       'type': 'string'},
+                                          'message': {'description': 'Custom alert message.', 'type': 'string'},
+                                          'targets': {'description': 'Notification targets (e.g., channel names, email '
+                                                                     'addresses).',
+                                                      'items': {'type': 'string'},
+                                                      'type': 'array'},
+                                          'threshold': {'description': 'Budget consumption ratio (0-1) that triggers '
+                                                                       'this alert.',
+                                                        'maximum': 1,
+                                                        'minimum': 0,
+                                                        'type': 'number'}},
+                           'required': ['threshold', 'action'],
+                           'type': 'object'},
+           'BudgetPolicy': {'additionalProperties': False,
+                            'description': 'Rolling budget constraints for cost governance.',
+                            'properties': {'alerts': {'description': 'Budget consumption alerts.',
+                                                      'items': {'$ref': '#/$defs/BudgetAlert'},
+                                                      'type': 'array'},
+                                           'amount': {'description': 'Budget amount.', 'minimum': 0, 'type': 'number'},
+                                           'currency': {'description': 'Currency code (e.g., USD).', 'type': 'string'},
+                                           'period': {'description': 'Budget period.',
+                                                      'enum': ['day', 'week', 'month', 'quarter'],
+                                                      'type': 'string'}},
+                            'required': ['period', 'amount', 'currency'],
+                            'type': 'object'},
+           'CostPolicy': {'additionalProperties': False,
+                          'description': 'Cost governance policy declaring cost boundaries at per-execution, '
+                                         'per-stage, and budget levels. See RFC-0004.',
+                          'properties': {'attribution': {'$ref': '#/$defs/AttributionPolicy'},
+                                         'budget': {'$ref': '#/$defs/BudgetPolicy'},
+                                         'modelPricing': {'$ref': '#/$defs/ModelPricingConfig'},
+                                         'perExecution': {'$ref': '#/$defs/ExecutionCostLimit'},
+                                         'perStage': {'$ref': '#/$defs/StageCostPolicy'}},
+                          'type': 'object'},
+           'CostStatus': {'additionalProperties': False,
+                          'description': 'Observed cost status for a pipeline.',
+                          'properties': {'activeAlerts': {'description': 'Currently active budget alert descriptions.',
+                                                          'items': {'type': 'string'},
+                                                          'type': 'array'},
+                                         'budgetRemaining': {'description': 'Remaining budget in the current period.',
+                                                             'type': 'number'},
+                                         'currentSpend': {'description': 'Current spend in the budget period.',
+                                                          'minimum': 0,
+                                                          'type': 'number'},
+                                         'lastUpdated': {'description': 'ISO 8601 timestamp of last cost status '
+                                                                        'update.',
+                                                         'type': 'string'},
+                                         'projectedMonthEnd': {'description': 'Projected spend at end of current '
+                                                                              'period (linear extrapolation).',
+                                                               'minimum': 0,
+                                                               'type': 'number'}},
+                          'type': 'object'},
+           'CostThreshold': {'additionalProperties': False,
+                             'description': 'A cost threshold with an associated action.',
+                             'properties': {'action': {'description': 'Action to take when the threshold is reached.',
+                                                       'enum': ['notify', 'require-approval', 'abort'],
+                                                       'type': 'string'},
+                                            'amount': {'description': 'Cost amount.', 'minimum': 0, 'type': 'number'},
+                                            'currency': {'description': 'Currency code (e.g., USD).',
+                                                         'type': 'string'}},
+                             'required': ['amount', 'currency', 'action'],
+                             'type': 'object'},
+           'CredentialPolicy': {'additionalProperties': False,
+                                'description': 'JIT credential scope and lifetime for a stage.',
+                                'properties': {'revokeOnComplete': {'default': True,
+                                                                    'description': 'Whether to revoke credentials when '
+                                                                                   'the stage completes.',
+                                                                    'type': 'boolean'},
+                                               'scope': {'description': 'Permission scopes required by the stage.',
+                                                         'items': {'type': 'string'},
+                                                         'minItems': 1,
+                                                         'type': 'array'},
+                                               'ttl': {'default': 'PT10M',
+                                                       'description': 'Credential time-to-live as an ISO 8601 '
+                                                                      'duration.',
+                                                       'type': 'string'}},
+                                'required': ['scope'],
+                                'type': 'object'},
+           'ExecutionCostLimit': {'additionalProperties': False,
+                                  'description': 'Per-execution cost limits with soft and hard thresholds.',
+                                  'properties': {'hardLimit': {'$ref': '#/$defs/CostThreshold'},
+                                                 'softLimit': {'$ref': '#/$defs/CostThreshold'}},
+                                  'type': 'object'},
+           'FailurePolicy': {'additionalProperties': False,
+                             'description': 'Defines how a stage failure is handled.',
+                             'if': {'properties': {'strategy': {'const': 'retry'}}},
+                             'properties': {'maxRetries': {'description': 'Maximum retry attempts (required when '
+                                                                          'strategy is retry).',
+                                                           'maximum': 10,
+                                                           'minimum': 1,
+                                                           'type': 'integer'},
+                                            'notification': {'description': 'Name of a notification template to send '
+                                                                            'on failure.',
+                                                             'type': 'string'},
+                                            'retryDelay': {'description': 'Delay between retries as an ISO 8601 '
+                                                                          'duration (e.g., PT1M).',
+                                                           'type': 'string'},
+                                            'strategy': {'description': 'The failure handling strategy.',
+                                                         'enum': ['abort', 'retry', 'pause', 'continue'],
+                                                         'type': 'string'}},
+                             'required': ['strategy'],
+                             'then': {'required': ['maxRetries']},
+                             'type': 'object'},
+           'ModelPricing': {'additionalProperties': False,
+                            'description': 'Pricing information for a specific model.',
+                            'properties': {'cacheReadPerMTok': {'description': 'Cost per million cache read tokens.',
+                                                                'minimum': 0,
+                                                                'type': 'number'},
+                                           'inputPerMTok': {'description': 'Cost per million input tokens.',
+                                                            'minimum': 0,
+                                                            'type': 'number'},
+                                           'outputPerMTok': {'description': 'Cost per million output tokens.',
+                                                             'minimum': 0,
+                                                             'type': 'number'}},
+                            'required': ['inputPerMTok', 'outputPerMTok'],
+                            'type': 'object'},
+           'ModelPricingConfig': {'additionalProperties': False,
+                                  'description': 'Model pricing configuration.',
+                                  'properties': {'models': {'additionalProperties': {'$ref': '#/$defs/ModelPricing'},
+                                                            'description': 'Per-model pricing overrides, keyed by '
+                                                                           'model identifier.',
+                                                            'type': 'object'},
+                                                 'source': {'description': 'How model pricing is obtained.',
+                                                            'enum': ['config', 'api'],
+                                                            'type': 'string'}},
+                                  'required': ['source'],
+                                  'type': 'object'},
+           'NotificationTemplate': {'additionalProperties': False,
+                                    'description': 'A templated notification message for pipeline events.',
+                                    'properties': {'body': {'description': 'Notification body template with '
+                                                                           'placeholders.',
+                                                            'type': 'string'},
+                                                   'target': {'description': 'Where to post the notification.',
+                                                              'enum': ['issue', 'pr', 'both'],
+                                                              'type': 'string'},
+                                                   'title': {'description': 'Notification title template.',
+                                                             'type': 'string'}},
+                                    'required': ['target', 'title'],
+                                    'type': 'object'},
+           'NotificationsConfig': {'additionalProperties': False,
+                                   'description': 'Named notification templates for pipeline events.',
+                                   'properties': {'templates': {'additionalProperties': {'$ref': '#/$defs/NotificationTemplate'},
+                                                                'description': 'Map of template names to notification '
+                                                                               'templates.',
+                                                                'type': 'object'}},
+                                   'type': 'object'},
+           'PullRequestConfig': {'additionalProperties': False,
+                                 'description': 'Pull request creation conventions.',
+                                 'properties': {'closeKeyword': {'description': 'Keyword used to auto-close the linked '
+                                                                                'issue (e.g., Closes, Fixes).',
+                                                                 'type': 'string'},
+                                                'descriptionSections': {'description': 'Sections to include in the PR '
+                                                                                       'description.',
+                                                                        'items': {'type': 'string'},
+                                                                        'type': 'array'},
+                                                'includeProvenance': {'default': True,
+                                                                      'description': 'Whether to include AI provenance '
+                                                                                     'metadata in the PR.',
+                                                                      'type': 'boolean'},
+                                                'titleTemplate': {'description': 'PR title template with placeholders '
+                                                                                 '(e.g., fix: {issueTitle} '
+                                                                                 '(#{issueNumber})).',
+                                                                  'type': 'string'}},
+                                 'type': 'object'},
+           'StageCostLimit': {'additionalProperties': False,
+                              'description': 'Cost limits for a pipeline stage.',
+                              'properties': {'costLimit': {'$ref': '#/$defs/CostThreshold'},
+                                             'timeLimit': {'description': 'Maximum duration as an ISO 8601 duration '
+                                                                          '(e.g., PT30M).',
+                                                           'type': 'string'},
+                                             'tokenLimit': {'description': 'Maximum tokens allowed for this stage.',
+                                                            'minimum': 1,
+                                                            'type': 'integer'}},
+                              'type': 'object'},
+           'StageCostPolicy': {'additionalProperties': False,
+                               'description': 'Per-stage cost policy with defaults and per-stage overrides.',
+                               'properties': {'defaults': {'$ref': '#/$defs/StageCostLimit'},
+                                              'overrides': {'additionalProperties': {'$ref': '#/$defs/StageCostLimit'},
+                                                            'description': 'Per-stage cost limit overrides, keyed by '
+                                                                           'stage name.',
+                                                            'type': 'object'}},
+                               'type': 'object'}},
+ '$id': 'https://ai-sdlc.io/schemas/v1alpha1/pipeline.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Defines a complete SDLC workflow from trigger through delivery.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'Pipeline', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'branching': {'$ref': '#/$defs/BranchingConfig'},
+                                        'costPolicy': {'$ref': '#/$defs/CostPolicy'},
+                                        'notifications': {'$ref': '#/$defs/NotificationsConfig'},
+                                        'providers': {'additionalProperties': {'additionalProperties': False,
+                                                                               'properties': {'config': {'additionalProperties': True,
+                                                                                                         'description': 'Adapter-specific '
+                                                                                                                        'configuration.',
+                                                                                                         'type': 'object'},
+                                                                                              'type': {'description': 'The '
+                                                                                                                      'adapter '
+                                                                                                                      'type '
+                                                                                                                      '(e.g., '
+                                                                                                                      'linear, '
+                                                                                                                      'github, '
+                                                                                                                      'jira).',
+                                                                                                       'type': 'string'}},
+                                                                               'required': ['type'],
+                                                                               'type': 'object'},
+                                                      'description': 'Tool integrations used by the pipeline, keyed by '
+                                                                     'interface category.',
+                                                      'type': 'object'},
+                                        'pullRequest': {'$ref': '#/$defs/PullRequestConfig'},
+                                        'routing': {'additionalProperties': False,
+                                                    'description': 'Complexity-based task routing configuration.',
+                                                    'properties': {'complexityThresholds': {'additionalProperties': {'additionalProperties': False,
+                                                                                                                     'properties': {'max': {'description': 'Maximum '
+                                                                                                                                                           'complexity '
+                                                                                                                                                           'score '
+                                                                                                                                                           '(inclusive).',
+                                                                                                                                            'maximum': 10,
+                                                                                                                                            'minimum': 1,
+                                                                                                                                            'type': 'integer'},
+                                                                                                                                    'min': {'description': 'Minimum '
+                                                                                                                                                           'complexity '
+                                                                                                                                                           'score '
+                                                                                                                                                           '(inclusive).',
+                                                                                                                                            'maximum': 10,
+                                                                                                                                            'minimum': 1,
+                                                                                                                                            'type': 'integer'},
+                                                                                                                                    'strategy': {'description': 'The '
+                                                                                                                                                                'routing '
+                                                                                                                                                                'strategy '
+                                                                                                                                                                'for '
+                                                                                                                                                                'this '
+                                                                                                                                                                'complexity '
+                                                                                                                                                                'tier.',
+                                                                                                                                                 'enum': ['fully-autonomous',
+                                                                                                                                                          'ai-with-review',
+                                                                                                                                                          'ai-assisted',
+                                                                                                                                                          'human-led'],
+                                                                                                                                                 'type': 'string'}},
+                                                                                                                     'required': ['min',
+                                                                                                                                  'max',
+                                                                                                                                  'strategy'],
+                                                                                                                     'type': 'object'},
+                                                                                            'description': 'Named '
+                                                                                                           'complexity '
+                                                                                                           'tiers with '
+                                                                                                           'score '
+                                                                                                           'ranges and '
+                                                                                                           'strategies.',
+                                                                                            'type': 'object'}},
+                                                    'type': 'object'},
+                                        'stages': {'description': 'Ordered list of execution stages.',
+                                                   'items': {'additionalProperties': False,
+                                                             'properties': {'agent': {'description': 'Reference to an '
+                                                                                                     'AgentRole '
+                                                                                                     'resource name.',
+                                                                                      'type': 'string'},
+                                                                            'approval': {'$ref': '#/$defs/ApprovalPolicy'},
+                                                                            'credentials': {'$ref': '#/$defs/CredentialPolicy'},
+                                                                            'name': {'description': 'Unique name '
+                                                                                                    'within the '
+                                                                                                    'pipeline.',
+                                                                                     'type': 'string'},
+                                                                            'onFailure': {'$ref': '#/$defs/FailurePolicy'},
+                                                                            'qualityGates': {'description': 'References '
+                                                                                                            'to '
+                                                                                                            'QualityGate '
+                                                                                                            'resource '
+                                                                                                            'names.',
+                                                                                             'items': {'type': 'string'},
+                                                                                             'type': 'array'},
+                                                                            'timeout': {'description': 'Maximum stage '
+                                                                                                       'duration as an '
+                                                                                                       'ISO 8601 '
+                                                                                                       'duration '
+                                                                                                       '(e.g., PT30M).',
+                                                                                        'type': 'string'}},
+                                                             'required': ['name'],
+                                                             'type': 'object'},
+                                                   'minItems': 1,
+                                                   'type': 'array'},
+                                        'triggers': {'description': 'Events that initiate the pipeline.',
+                                                     'items': {'additionalProperties': False,
+                                                               'properties': {'event': {'description': 'The event type '
+                                                                                                       'that triggers '
+                                                                                                       'the pipeline '
+                                                                                                       '(e.g., '
+                                                                                                       'issue.assigned, '
+                                                                                                       'pr.opened).',
+                                                                                        'type': 'string'},
+                                                                              'filter': {'additionalProperties': True,
+                                                                                         'description': 'Conditions '
+                                                                                                        'that must '
+                                                                                                        'match for the '
+                                                                                                        'trigger to '
+                                                                                                        'fire.',
+                                                                                         'properties': {'branches': {'items': {'type': 'string'},
+                                                                                                                     'type': 'array'},
+                                                                                                        'labels': {'items': {'type': 'string'},
+                                                                                                                   'type': 'array'},
+                                                                                                        'paths': {'items': {'type': 'string'},
+                                                                                                                  'type': 'array'}},
+                                                                                         'type': 'object'}},
+                                                               'required': ['event'],
+                                                               'type': 'object'},
+                                                     'minItems': 1,
+                                                     'type': 'array'}},
+                         'required': ['triggers', 'providers', 'stages'],
+                         'type': 'object'},
+                'status': {'additionalProperties': False,
+                           'properties': {'activeStage': {'description': 'Name of the currently executing stage.',
+                                                          'type': 'string'},
+                                          'conditions': {'items': {'$ref': 'common.schema.json#/$defs/condition'},
+                                                         'type': 'array'},
+                                          'cost': {'$ref': '#/$defs/CostStatus'},
+                                          'pendingApproval': {'$ref': '#/$defs/ApprovalStatus'},
+                                          'phase': {'description': 'Current pipeline phase.',
+                                                    'enum': ['Pending', 'Running', 'Succeeded', 'Failed', 'Suspended'],
+                                                    'type': 'string'},
+                                          'stageAttempts': {'additionalProperties': {'minimum': 0, 'type': 'integer'},
+                                                            'description': 'Per-stage execution attempt counts.',
+                                                            'type': 'object'}},
+                           'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'metadata', 'spec'],
+ 'title': 'AI-SDLC Pipeline',
+ 'type': 'object'}
 
-quality_gate_schema: dict[str, Any] = {
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-sdlc.io/schemas/v1alpha1/quality-gate.schema.json",
-  "title": "AI-SDLC QualityGate",
-  "description": "Defines policy rules with graduated enforcement levels.",
-  "type": "object",
-  "required": [
-    "apiVersion",
-    "kind",
-    "metadata",
-    "spec"
-  ],
-  "properties": {
-    "apiVersion": {
-      "$ref": "common.schema.json#/$defs/apiVersion"
-    },
-    "kind": {
-      "type": "string",
-      "const": "QualityGate"
-    },
-    "metadata": {
-      "$ref": "common.schema.json#/$defs/metadata"
-    },
-    "spec": {
-      "type": "object",
-      "required": [
-        "gates"
-      ],
-      "properties": {
-        "scope": {
-          "type": "object",
-          "description": "Targeting criteria for the gate.",
-          "properties": {
-            "repositories": {
-              "type": "array",
-              "description": "Repository patterns to match (glob).",
-              "items": {
-                "type": "string"
-              }
-            },
-            "authorTypes": {
-              "type": "array",
-              "description": "Author types to target (e.g., ai-agent, human).",
-              "items": {
-                "type": "string",
-                "enum": [
-                  "ai-agent",
-                  "human",
-                  "bot",
-                  "service-account"
-                ]
-              }
-            }
-          },
-          "additionalProperties": false
-        },
-        "gates": {
-          "type": "array",
-          "description": "Individual gate rules.",
-          "minItems": 1,
-          "items": {
-            "type": "object",
-            "required": [
-              "name",
-              "enforcement",
-              "rule"
-            ],
-            "properties": {
-              "name": {
-                "type": "string",
-                "description": "Unique gate name within the QualityGate."
-              },
-              "enforcement": {
-                "type": "string",
-                "enum": [
-                  "advisory",
-                  "soft-mandatory",
-                  "hard-mandatory"
-                ],
-                "description": "The enforcement level."
-              },
-              "rule": {
-                "description": "The evaluation rule. One of: metric-based, tool-based, reviewer-based, documentation-based, provenance-based, or cost-based.",
-                "oneOf": [
-                  {
-                    "type": "object",
-                    "title": "Metric-based rule",
-                    "required": [
-                      "metric",
-                      "operator",
-                      "threshold"
-                    ],
-                    "properties": {
-                      "metric": {
-                        "type": "string",
-                        "description": "The metric to evaluate."
-                      },
-                      "operator": {
-                        "type": "string",
-                        "enum": [
-                          ">=",
-                          "<=",
-                          "==",
-                          "!=",
-                          ">",
-                          "<"
-                        ],
-                        "description": "Comparison operator."
-                      },
-                      "threshold": {
-                        "type": "number",
-                        "description": "The threshold value."
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "title": "Tool-based rule",
-                    "required": [
-                      "tool"
-                    ],
-                    "properties": {
-                      "tool": {
-                        "type": "string",
-                        "description": "The analysis tool to run."
-                      },
-                      "maxSeverity": {
-                        "type": "string",
-                        "enum": [
-                          "low",
-                          "medium",
-                          "high",
-                          "critical"
-                        ],
-                        "description": "Maximum allowed finding severity."
-                      },
-                      "rulesets": {
-                        "type": "array",
-                        "description": "Rulesets to enable.",
-                        "items": {
-                          "type": "string"
-                        }
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "title": "Reviewer-based rule",
-                    "required": [
-                      "minimumReviewers"
-                    ],
-                    "properties": {
-                      "minimumReviewers": {
-                        "type": "integer",
-                        "minimum": 1,
-                        "description": "Minimum number of required reviewers."
-                      },
-                      "aiAuthorRequiresExtraReviewer": {
-                        "type": "boolean",
-                        "description": "Whether AI-authored code requires an additional reviewer."
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "title": "Documentation-based rule",
-                    "required": [
-                      "changedFilesRequireDocUpdate"
-                    ],
-                    "properties": {
-                      "changedFilesRequireDocUpdate": {
-                        "type": "boolean",
-                        "description": "Whether changed files require documentation updates."
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "title": "Provenance-based rule",
-                    "required": [
-                      "requireAttribution"
-                    ],
-                    "properties": {
-                      "requireAttribution": {
-                        "type": "boolean",
-                        "description": "Whether AI-generated code requires provenance attribution."
-                      },
-                      "requireHumanReview": {
-                        "type": "boolean",
-                        "description": "Whether a human review record is required."
-                      }
-                    },
-                    "additionalProperties": false
-                  },
-                  {
-                    "type": "object",
-                    "title": "Cost-based rule",
-                    "required": [
-                      "cost"
-                    ],
-                    "properties": {
-                      "cost": {
-                        "type": "object",
-                        "required": [
-                          "metric",
-                          "operator",
-                          "threshold"
-                        ],
-                        "properties": {
-                          "metric": {
-                            "type": "string",
-                            "enum": [
-                              "total-execution-cost",
-                              "token-cost",
-                              "cost-per-line",
-                              "cost-per-file",
-                              "budget-remaining-percent",
-                              "cost-vs-estimate",
-                              "attribution-complete",
-                              "retry-cost-ratio"
-                            ],
-                            "description": "The cost metric to evaluate."
-                          },
-                          "operator": {
-                            "type": "string",
-                            "enum": [
-                              ">=",
-                              "<=",
-                              "==",
-                              "!=",
-                              ">",
-                              "<"
-                            ],
-                            "description": "Comparison operator."
-                          },
-                          "threshold": {
-                            "type": "number",
-                            "description": "The threshold value."
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    },
-                    "additionalProperties": false
-                  }
-                ]
-              },
-              "override": {
-                "type": "object",
-                "description": "Override configuration. Only valid for soft-mandatory enforcement.",
-                "required": [
-                  "requiredRole"
-                ],
-                "properties": {
-                  "requiredRole": {
-                    "type": "string",
-                    "description": "The role authorized to override."
-                  },
-                  "requiresJustification": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Whether a justification text is required."
-                  }
-                },
-                "additionalProperties": false
-              }
-            },
-            "additionalProperties": false
-          }
-        },
-        "evaluation": {
-          "type": "object",
-          "description": "When and how to evaluate.",
-          "properties": {
-            "pipeline": {
-              "type": "string",
-              "enum": [
-                "pre-merge",
-                "post-merge",
-                "continuous"
-              ],
-              "description": "When to evaluate."
-            },
-            "timeout": {
-              "type": "string",
-              "description": "Maximum evaluation duration.",
-              "pattern": "^\\d+[smhdw]$"
-            },
-            "retryPolicy": {
-              "type": "object",
-              "description": "Retry configuration for failed evaluations.",
-              "properties": {
-                "maxRetries": {
-                  "type": "integer",
-                  "minimum": 0,
-                  "description": "Maximum number of retries."
-                },
-                "backoff": {
-                  "type": "string",
-                  "enum": [
-                    "linear",
-                    "exponential"
-                  ],
-                  "description": "Backoff strategy."
-                }
-              },
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": false
-        }
-      },
-      "additionalProperties": false
-    },
-    "status": {
-      "type": "object",
-      "properties": {
-        "compliant": {
-          "type": "boolean",
-          "description": "Whether all gates are currently passing."
-        },
-        "conditions": {
-          "type": "array",
-          "items": {
-            "$ref": "common.schema.json#/$defs/condition"
-          }
-        }
-      },
-      "additionalProperties": false
-    }
-  },
-  "additionalProperties": false
-}
+quality_gate_schema: dict[str, Any] = {'$id': 'https://ai-sdlc.io/schemas/v1alpha1/quality-gate.schema.json',
+ '$schema': 'https://json-schema.org/draft/2020-12/schema',
+ 'additionalProperties': False,
+ 'description': 'Defines policy rules with graduated enforcement levels.',
+ 'properties': {'apiVersion': {'$ref': 'common.schema.json#/$defs/apiVersion'},
+                'kind': {'const': 'QualityGate', 'type': 'string'},
+                'metadata': {'$ref': 'common.schema.json#/$defs/metadata'},
+                'spec': {'additionalProperties': False,
+                         'properties': {'evaluation': {'additionalProperties': False,
+                                                       'description': 'When and how to evaluate.',
+                                                       'properties': {'pipeline': {'description': 'When to evaluate.',
+                                                                                   'enum': ['pre-merge',
+                                                                                            'post-merge',
+                                                                                            'continuous'],
+                                                                                   'type': 'string'},
+                                                                      'retryPolicy': {'additionalProperties': False,
+                                                                                      'description': 'Retry '
+                                                                                                     'configuration '
+                                                                                                     'for failed '
+                                                                                                     'evaluations.',
+                                                                                      'properties': {'backoff': {'description': 'Backoff '
+                                                                                                                                'strategy.',
+                                                                                                                 'enum': ['linear',
+                                                                                                                          'exponential'],
+                                                                                                                 'type': 'string'},
+                                                                                                     'maxRetries': {'description': 'Maximum '
+                                                                                                                                   'number '
+                                                                                                                                   'of '
+                                                                                                                                   'retries.',
+                                                                                                                    'minimum': 0,
+                                                                                                                    'type': 'integer'}},
+                                                                                      'type': 'object'},
+                                                                      'timeout': {'description': 'Maximum evaluation '
+                                                                                                 'duration.',
+                                                                                  'pattern': '^\\d+[smhdw]$',
+                                                                                  'type': 'string'}},
+                                                       'type': 'object'},
+                                        'gates': {'description': 'Individual gate rules.',
+                                                  'items': {'additionalProperties': False,
+                                                            'properties': {'enforcement': {'description': 'The '
+                                                                                                          'enforcement '
+                                                                                                          'level.',
+                                                                                           'enum': ['advisory',
+                                                                                                    'soft-mandatory',
+                                                                                                    'hard-mandatory'],
+                                                                                           'type': 'string'},
+                                                                           'name': {'description': 'Unique gate name '
+                                                                                                   'within the '
+                                                                                                   'QualityGate.',
+                                                                                    'type': 'string'},
+                                                                           'override': {'additionalProperties': False,
+                                                                                        'description': 'Override '
+                                                                                                       'configuration. '
+                                                                                                       'Only valid for '
+                                                                                                       'soft-mandatory '
+                                                                                                       'enforcement.',
+                                                                                        'properties': {'requiredRole': {'description': 'The '
+                                                                                                                                       'role '
+                                                                                                                                       'authorized '
+                                                                                                                                       'to '
+                                                                                                                                       'override.',
+                                                                                                                        'type': 'string'},
+                                                                                                       'requiresJustification': {'default': True,
+                                                                                                                                 'description': 'Whether '
+                                                                                                                                                'a '
+                                                                                                                                                'justification '
+                                                                                                                                                'text '
+                                                                                                                                                'is '
+                                                                                                                                                'required.',
+                                                                                                                                 'type': 'boolean'}},
+                                                                                        'required': ['requiredRole'],
+                                                                                        'type': 'object'},
+                                                                           'rule': {'description': 'The evaluation '
+                                                                                                   'rule. One of: '
+                                                                                                   'metric-based, '
+                                                                                                   'tool-based, '
+                                                                                                   'reviewer-based, '
+                                                                                                   'documentation-based, '
+                                                                                                   'provenance-based, '
+                                                                                                   'or cost-based.',
+                                                                                    'oneOf': [{'additionalProperties': False,
+                                                                                               'properties': {'metric': {'description': 'The '
+                                                                                                                                        'metric '
+                                                                                                                                        'to '
+                                                                                                                                        'evaluate.',
+                                                                                                                         'type': 'string'},
+                                                                                                              'operator': {'description': 'Comparison '
+                                                                                                                                          'operator.',
+                                                                                                                           'enum': ['>=',
+                                                                                                                                    '<=',
+                                                                                                                                    '==',
+                                                                                                                                    '!=',
+                                                                                                                                    '>',
+                                                                                                                                    '<'],
+                                                                                                                           'type': 'string'},
+                                                                                                              'threshold': {'description': 'The '
+                                                                                                                                           'threshold '
+                                                                                                                                           'value.',
+                                                                                                                            'type': 'number'}},
+                                                                                               'required': ['metric',
+                                                                                                            'operator',
+                                                                                                            'threshold'],
+                                                                                               'title': 'Metric-based '
+                                                                                                        'rule',
+                                                                                               'type': 'object'},
+                                                                                              {'additionalProperties': False,
+                                                                                               'properties': {'maxSeverity': {'description': 'Maximum '
+                                                                                                                                             'allowed '
+                                                                                                                                             'finding '
+                                                                                                                                             'severity.',
+                                                                                                                              'enum': ['low',
+                                                                                                                                       'medium',
+                                                                                                                                       'high',
+                                                                                                                                       'critical'],
+                                                                                                                              'type': 'string'},
+                                                                                                              'rulesets': {'description': 'Rulesets '
+                                                                                                                                          'to '
+                                                                                                                                          'enable.',
+                                                                                                                           'items': {'type': 'string'},
+                                                                                                                           'type': 'array'},
+                                                                                                              'tool': {'description': 'The '
+                                                                                                                                      'analysis '
+                                                                                                                                      'tool '
+                                                                                                                                      'to '
+                                                                                                                                      'run.',
+                                                                                                                       'type': 'string'}},
+                                                                                               'required': ['tool'],
+                                                                                               'title': 'Tool-based '
+                                                                                                        'rule',
+                                                                                               'type': 'object'},
+                                                                                              {'additionalProperties': False,
+                                                                                               'properties': {'aiAuthorRequiresExtraReviewer': {'description': 'Whether '
+                                                                                                                                                               'AI-authored '
+                                                                                                                                                               'code '
+                                                                                                                                                               'requires '
+                                                                                                                                                               'an '
+                                                                                                                                                               'additional '
+                                                                                                                                                               'reviewer.',
+                                                                                                                                                'type': 'boolean'},
+                                                                                                              'minimumReviewers': {'description': 'Minimum '
+                                                                                                                                                  'number '
+                                                                                                                                                  'of '
+                                                                                                                                                  'required '
+                                                                                                                                                  'reviewers.',
+                                                                                                                                   'minimum': 1,
+                                                                                                                                   'type': 'integer'}},
+                                                                                               'required': ['minimumReviewers'],
+                                                                                               'title': 'Reviewer-based '
+                                                                                                        'rule',
+                                                                                               'type': 'object'},
+                                                                                              {'additionalProperties': False,
+                                                                                               'properties': {'changedFilesRequireDocUpdate': {'description': 'Whether '
+                                                                                                                                                              'changed '
+                                                                                                                                                              'files '
+                                                                                                                                                              'require '
+                                                                                                                                                              'documentation '
+                                                                                                                                                              'updates.',
+                                                                                                                                               'type': 'boolean'}},
+                                                                                               'required': ['changedFilesRequireDocUpdate'],
+                                                                                               'title': 'Documentation-based '
+                                                                                                        'rule',
+                                                                                               'type': 'object'},
+                                                                                              {'additionalProperties': False,
+                                                                                               'properties': {'requireAttribution': {'description': 'Whether '
+                                                                                                                                                    'AI-generated '
+                                                                                                                                                    'code '
+                                                                                                                                                    'requires '
+                                                                                                                                                    'provenance '
+                                                                                                                                                    'attribution.',
+                                                                                                                                     'type': 'boolean'},
+                                                                                                              'requireHumanReview': {'description': 'Whether '
+                                                                                                                                                    'a '
+                                                                                                                                                    'human '
+                                                                                                                                                    'review '
+                                                                                                                                                    'record '
+                                                                                                                                                    'is '
+                                                                                                                                                    'required.',
+                                                                                                                                     'type': 'boolean'}},
+                                                                                               'required': ['requireAttribution'],
+                                                                                               'title': 'Provenance-based '
+                                                                                                        'rule',
+                                                                                               'type': 'object'},
+                                                                                              {'additionalProperties': False,
+                                                                                               'properties': {'cost': {'additionalProperties': False,
+                                                                                                                       'properties': {'metric': {'description': 'The '
+                                                                                                                                                                'cost '
+                                                                                                                                                                'metric '
+                                                                                                                                                                'to '
+                                                                                                                                                                'evaluate.',
+                                                                                                                                                 'enum': ['total-execution-cost',
+                                                                                                                                                          'token-cost',
+                                                                                                                                                          'cost-per-line',
+                                                                                                                                                          'cost-per-file',
+                                                                                                                                                          'budget-remaining-percent',
+                                                                                                                                                          'cost-vs-estimate',
+                                                                                                                                                          'attribution-complete',
+                                                                                                                                                          'retry-cost-ratio'],
+                                                                                                                                                 'type': 'string'},
+                                                                                                                                      'operator': {'description': 'Comparison '
+                                                                                                                                                                  'operator.',
+                                                                                                                                                   'enum': ['>=',
+                                                                                                                                                            '<=',
+                                                                                                                                                            '==',
+                                                                                                                                                            '!=',
+                                                                                                                                                            '>',
+                                                                                                                                                            '<'],
+                                                                                                                                                   'type': 'string'},
+                                                                                                                                      'threshold': {'description': 'The '
+                                                                                                                                                                   'threshold '
+                                                                                                                                                                   'value.',
+                                                                                                                                                    'type': 'number'}},
+                                                                                                                       'required': ['metric',
+                                                                                                                                    'operator',
+                                                                                                                                    'threshold'],
+                                                                                                                       'type': 'object'}},
+                                                                                               'required': ['cost'],
+                                                                                               'title': 'Cost-based '
+                                                                                                        'rule',
+                                                                                               'type': 'object'}]}},
+                                                            'required': ['name', 'enforcement', 'rule'],
+                                                            'type': 'object'},
+                                                  'minItems': 1,
+                                                  'type': 'array'},
+                                        'scope': {'additionalProperties': False,
+                                                  'description': 'Targeting criteria for the gate.',
+                                                  'properties': {'authorTypes': {'description': 'Author types to '
+                                                                                                'target (e.g., '
+                                                                                                'ai-agent, human).',
+                                                                                 'items': {'enum': ['ai-agent',
+                                                                                                    'human',
+                                                                                                    'bot',
+                                                                                                    'service-account'],
+                                                                                           'type': 'string'},
+                                                                                 'type': 'array'},
+                                                                 'repositories': {'description': 'Repository patterns '
+                                                                                                 'to match (glob).',
+                                                                                  'items': {'type': 'string'},
+                                                                                  'type': 'array'}},
+                                                  'type': 'object'}},
+                         'required': ['gates'],
+                         'type': 'object'},
+                'status': {'additionalProperties': False,
+                           'properties': {'compliant': {'description': 'Whether all gates are currently passing.',
+                                                        'type': 'boolean'},
+                                          'conditions': {'items': {'$ref': 'common.schema.json#/$defs/condition'},
+                                                         'type': 'array'}},
+                           'type': 'object'}},
+ 'required': ['apiVersion', 'kind', 'metadata', 'spec'],
+ 'title': 'AI-SDLC QualityGate',
+ 'type': 'object'}
 
 SCHEMAS: dict[str, dict[str, Any]] = {
     "adapter-binding.schema.json": adapter_binding_schema,

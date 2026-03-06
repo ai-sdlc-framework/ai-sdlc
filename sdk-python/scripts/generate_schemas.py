@@ -5,6 +5,7 @@ src/ai_sdlc/core/_generated_schemas.py so schemas are inlined at build time.
 """
 
 import json
+import pprint
 import re
 import textwrap
 from pathlib import Path
@@ -41,7 +42,7 @@ def main() -> None:
         content = json.loads(f.read_text())
         var_name = to_snake_case(f.name)
         var_names.append(var_name)
-        lines.append(f"{var_name}: dict[str, Any] = {json.dumps(content, indent=2)}")
+        lines.append(f"{var_name}: dict[str, Any] = {pprint.pformat(content, width=120)}")
         lines.append("")
         map_entries.append(f'    "{f.name}": {var_name},')
 
