@@ -1,0 +1,62 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "separate-pull-requests": false,
+  "changelog-sections": [
+    { "type": "feat", "section": "Features" },
+    { "type": "fix", "section": "Bug Fixes" },
+    { "type": "perf", "section": "Performance Improvements" },
+    { "type": "revert", "section": "Reverts" },
+    { "type": "chore", "section": "Miscellaneous", "hidden": true },
+    { "type": "refactor", "section": "Code Refactoring", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "ci", "section": "CI", "hidden": true },
+    { "type": "docs", "section": "Documentation", "hidden": true }
+  ],
+  "plugins": [
+    {
+      "type": "node-workspace",
+      "updatePeerDependencies": true
+    },
+    {
+      "type": "linked-versions",
+      "groupName": "node-packages",
+      "components": [
+        "reference",
+        "conformance/runner",
+        "sdk-typescript",
+        "orchestrator",
+        "mcp-advisor"
+      ]
+    }
+  ],
+  "packages": {
+    "reference": {
+      "release-type": "node",
+      "component": "reference"
+    },
+    "conformance/runner": {
+      "release-type": "node",
+      "component": "conformance/runner"
+    },
+    "sdk-typescript": {
+      "release-type": "node",
+      "component": "sdk-typescript"
+    },
+    "orchestrator": {
+      "release-type": "node",
+      "component": "orchestrator"
+    },
+    "mcp-advisor": {
+      "release-type": "node",
+      "component": "mcp-advisor"
+    },
+    "sdk-python": {
+      "release-type": "python",
+      "component": "sdk-python"
+    },
+    "sdk-go": {
+      "release-type": "go",
+      "component": "sdk-go"
+    }
+  }
+}

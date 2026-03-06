@@ -1,0 +1,9 @@
+{
+  "reference": "0.1.2",
+  "conformance/runner": "0.1.2",
+  "sdk-typescript": "0.1.2",
+  "orchestrator": "0.1.2",
+  "mcp-advisor": "0.1.2",
+  "sdk-python": "0.1.0",
+  "sdk-go": "0.0.0"
+}

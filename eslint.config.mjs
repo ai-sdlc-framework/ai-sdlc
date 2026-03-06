@@ -26,6 +26,7 @@ export default tseslint.config(
         projectService: {
           allowDefaultProject: [
             'eslint.config.mjs',
+            'commitlint.config.mjs',
             'orchestrator/vitest.config.ts',
             'dashboard/next.config.mjs',
             'mcp-advisor/vitest.config.ts',
