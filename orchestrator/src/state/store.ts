@@ -5,6 +5,7 @@
  * optional — the orchestrator works without it.
  */
 
+import { createRequire } from 'node:module';
 import type BetterSqlite3 from 'better-sqlite3';
 import { CURRENT_SCHEMA_VERSION, MIGRATIONS } from './schema.js';
 import type {
@@ -40,8 +41,8 @@ export class StateStore {
   static open(pathOrDb: string | BetterSqlite3.Database): StateStore {
     if (typeof pathOrDb === 'string') {
       // Dynamic require to keep better-sqlite3 optional at import time
-      // eslint-disable-next-line @typescript-eslint/no-require-imports
-      const SqliteConstructor = require('better-sqlite3') as typeof BetterSqlite3;
+      const esmRequire = createRequire(import.meta.url);
+      const SqliteConstructor = esmRequire('better-sqlite3') as typeof BetterSqlite3;
       const db = new SqliteConstructor(pathOrDb);
       db.pragma('journal_mode = WAL');
       return new StateStore(db);
