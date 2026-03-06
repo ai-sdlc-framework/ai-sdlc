@@ -27,6 +27,8 @@
     }
   },
   "scripts": {
+    "generate-schemas": "tsx scripts/generate-schemas.ts",
+    "prebuild": "pnpm generate-schemas",
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo",
     "lint": "eslint src/",
