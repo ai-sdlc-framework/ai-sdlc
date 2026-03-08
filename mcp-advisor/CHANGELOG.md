@@ -1,5 +1,19 @@
 # @ai-sdlc/mcp-advisor
 
+## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.3.0...mcp-advisor-v0.4.0) (2026-03-08)
+
+
+### Features
+
+* add Backlog.md IssueTracker adapter ([3b1e11c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3b1e11cb4022680fa8cd9e1e24719e57b607bffe))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/orchestrator bumped to 0.4.0
+
 ## [0.3.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.2.0...mcp-advisor-v0.3.0) (2026-03-08)
 
 
