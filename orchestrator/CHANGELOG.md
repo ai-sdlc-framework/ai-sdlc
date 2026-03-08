@@ -1,5 +1,19 @@
 # @ai-sdlc/orchestrator
 
+## [0.3.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.2.0...orchestrator-v0.3.0) (2026-03-08)
+
+
+### Features
+
+* auto-detect coding agents, workspace support, and MCP setup during init ([7d224db](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7d224db1c07035763863298173133ff87354d847))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.3.0
+
 ## [0.2.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.1.2...orchestrator-v0.2.0) (2026-03-06)
 
 

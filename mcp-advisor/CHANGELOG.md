@@ -1,5 +1,21 @@
 # @ai-sdlc/mcp-advisor
 
+## [0.3.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.2.0...mcp-advisor-v0.3.0) (2026-03-08)
+
+
+### Features
+
+* add version check — notify users when [@ai-sdlc](https://github.com/ai-sdlc) packages have updates ([d2c4f22](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d2c4f22ac0ea3ee5dac9e0ae2fc41bc7380bd14a))
+* auto-detect coding agents, workspace support, and MCP setup during init ([7d224db](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7d224db1c07035763863298173133ff87354d847))
+* auto-update [@ai-sdlc](https://github.com/ai-sdlc) project dependencies on session start ([0979286](https://github.com/ai-sdlc-framework/ai-sdlc/commit/097928625dfe5422a6d449599bf2df089ed75bdb))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/orchestrator bumped to 0.3.0
+
 ## [0.2.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.1.2...mcp-advisor-v0.2.0) (2026-03-06)
 
 
