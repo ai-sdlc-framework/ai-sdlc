@@ -10,7 +10,7 @@ export interface SessionStartResult {
   linkedIssue: number | null;
   linkMethod: string | null;
   project: string;
-  updateAvailable?: string;
+  updateNotice?: string;
 }
 
 export async function handleSessionStart(
@@ -40,17 +40,23 @@ export async function handleSessionStart(
     }),
   });
 
-  // Check for package updates (non-blocking, cached)
-  let updateAvailable: string | undefined;
+  // Check for package updates and auto-update project deps (non-blocking, cached)
+  let updateNotice: string | undefined;
   try {
-    const versionCheck = await checkForUpdatesCached();
-    if (versionCheck.hasUpdates) {
-      const outdated = versionCheck.updates
-        .filter((u) => u.updateAvailable)
-        .map((u) => `${u.package} ${u.current} → ${u.latest}`)
-        .join(', ');
-      updateAvailable = `Update available: ${outdated}. Run: ${versionCheck.updateCommand}`;
+    const projectDirs = deps.workspace ? deps.workspace.repos.map((r) => r.path) : [deps.repoPath];
+
+    const versionCheck = await checkForUpdatesCached({ projectDirs });
+
+    const notices: string[] = [];
+    if (versionCheck.autoUpdated.length > 0) {
+      notices.push(`Auto-updated: ${versionCheck.autoUpdated.join(', ')}`);
     }
+    if (versionCheck.serverUpdateAvailable) {
+      notices.push(
+        `MCP server update: ${versionCheck.serverVersion} → ${versionCheck.serverLatest}. Restart to apply.`,
+      );
+    }
+    if (notices.length > 0) updateNotice = notices.join('. ');
   } catch {
     // Version check is best-effort
   }
@@ -61,7 +67,7 @@ export async function handleSessionStart(
     linkMethod: resolution.method,
     project: session.project,
   };
-  if (updateAvailable) result.updateAvailable = updateAvailable;
+  if (updateNotice) result.updateNotice = updateNotice;
 
   return result;
 }

@@ -15,5 +15,5 @@ export function registerAllResources(server: McpServer, deps: ServerDeps): void 
   registerMyTasksResource(server, deps);
   registerBudgetResource(server, deps);
   registerHistoryResource(server, deps);
-  registerUpdatesResource(server);
+  registerUpdatesResource(server, deps);
 }
