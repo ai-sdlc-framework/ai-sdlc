@@ -6,6 +6,7 @@ import { registerHotspotsResource } from './hotspots.js';
 import { registerMyTasksResource } from './my-tasks.js';
 import { registerBudgetResource } from './budget.js';
 import { registerHistoryResource } from './history.js';
+import { registerUpdatesResource } from './updates.js';
 
 export function registerAllResources(server: McpServer, deps: ServerDeps): void {
   registerCodebaseProfileResource(server, deps);
@@ -14,4 +15,5 @@ export function registerAllResources(server: McpServer, deps: ServerDeps): void 
   registerMyTasksResource(server, deps);
   registerBudgetResource(server, deps);
   registerHistoryResource(server, deps);
+  registerUpdatesResource(server);
 }

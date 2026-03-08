@@ -3,12 +3,14 @@ import { z } from 'zod';
 import type { ServerDeps } from '../types.js';
 import { resolveIssue } from '../issue-linker.js';
 import { randomUUID } from 'node:crypto';
+import { checkForUpdatesCached } from '../version-check.js';
 
 export interface SessionStartResult {
   sessionId: string;
   linkedIssue: number | null;
   linkMethod: string | null;
   project: string;
+  updateAvailable?: string;
 }
 
 export async function handleSessionStart(
@@ -38,12 +40,30 @@ export async function handleSessionStart(
     }),
   });
 
-  return {
+  // Check for package updates (non-blocking, cached)
+  let updateAvailable: string | undefined;
+  try {
+    const versionCheck = await checkForUpdatesCached();
+    if (versionCheck.hasUpdates) {
+      const outdated = versionCheck.updates
+        .filter((u) => u.updateAvailable)
+        .map((u) => `${u.package} ${u.current} → ${u.latest}`)
+        .join(', ');
+      updateAvailable = `Update available: ${outdated}. Run: ${versionCheck.updateCommand}`;
+    }
+  } catch {
+    // Version check is best-effort
+  }
+
+  const result: SessionStartResult = {
     sessionId: session.sessionId,
     linkedIssue: resolution.issueNumber,
     linkMethod: resolution.method,
     project: session.project,
   };
+  if (updateAvailable) result.updateAvailable = updateAvailable;
+
+  return result;
 }
 
 export function registerSessionStart(server: McpServer, deps: ServerDeps): void {
