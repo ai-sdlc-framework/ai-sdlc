@@ -124,7 +124,7 @@ describe('init command', () => {
     // Commander caches parsed options on the same instance.
     // Reset options to clear any --dry-run from prior test.
     cmd.setOptionValue('dryRun', undefined);
-    await cmd.parseAsync([], { from: 'user' });
+    await cmd.parseAsync(['--skip-mcp'], { from: 'user' });
 
     expect(mockMkdirSync).toHaveBeenCalled();
     expect(mockWriteFileSync).toHaveBeenCalledTimes(4);
@@ -135,7 +135,7 @@ describe('init command', () => {
 
     const cmd = await getInitProgram();
     cmd.setOptionValue('dryRun', undefined);
-    await cmd.parseAsync([], { from: 'user' });
+    await cmd.parseAsync(['--skip-mcp'], { from: 'user' });
 
     expect(mockWriteFileSync).not.toHaveBeenCalled();
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');

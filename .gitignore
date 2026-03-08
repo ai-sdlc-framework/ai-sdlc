@@ -33,6 +33,8 @@ pnpm-debug.log*
 
 # AI-SDLC runtime artifacts
 .ai-sdlc/audit.jsonl
+.ai-sdlc/state.db
+.ai-sdlc/state/
 
 # Package manager
 .pnpm-store/

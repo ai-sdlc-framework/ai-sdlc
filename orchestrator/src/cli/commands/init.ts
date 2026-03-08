@@ -3,8 +3,10 @@
  */
 
 import { Command } from 'commander';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
+import { join, basename } from 'node:path';
+import { detectAgents, installMcpServer } from './mcp-setup.js';
+import { detectWorkspace, generateWorkspaceYaml, type WorkspaceRepo } from './workspace-detect.js';
 
 const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
@@ -138,49 +140,166 @@ spec:
       cooldown: 2w
 `;
 
+const GITIGNORE_ENTRIES = [
+  '# AI-SDLC runtime artifacts',
+  '.ai-sdlc/state.db',
+  '.ai-sdlc/state/',
+  '.ai-sdlc/audit.jsonl',
+];
+
+/** Ensure .gitignore includes AI-SDLC runtime artifact entries. */
+function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = ''): void {
+  const gitignorePath = join(projectDir, '.gitignore');
+  const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
+
+  const missing = GITIGNORE_ENTRIES.filter((entry) => !existing.includes(entry));
+  if (missing.length === 0) return;
+
+  if (dryRun) {
+    console.log(`${prefix}  Would update .gitignore`);
+    return;
+  }
+
+  const block = '\n' + missing.join('\n') + '\n';
+  appendFileSync(gitignorePath, block, 'utf-8');
+  console.log(`${prefix}  updated .gitignore`);
+}
+
+/** Initialize a single project directory with AI-SDLC config files. */
+function initProject(
+  projectDir: string,
+  configDirName: string,
+  dryRun: boolean,
+  prefix: string = '',
+): void {
+  const configDir = join(projectDir, configDirName);
+
+  const files = [
+    { name: 'pipeline.yaml', content: PIPELINE_YAML },
+    { name: 'agent-role.yaml', content: AGENT_ROLE_YAML },
+    { name: 'quality-gate.yaml', content: QUALITY_GATE_YAML },
+    { name: 'autonomy-policy.yaml', content: AUTONOMY_POLICY_YAML },
+  ];
+
+  if (dryRun) {
+    console.log(`${prefix}Would create ${configDir}/`);
+    for (const f of files) {
+      console.log(`${prefix}  ${f.name}`);
+    }
+    ensureGitignore(projectDir, true, prefix);
+    return;
+  }
+
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true });
+  }
+
+  for (const f of files) {
+    const path = join(configDir, f.name);
+    if (existsSync(path)) {
+      console.log(`${prefix}  skip ${f.name} (already exists)`);
+    } else {
+      writeFileSync(path, f.content, 'utf-8');
+      console.log(`${prefix}  created ${f.name}`);
+    }
+  }
+
+  ensureGitignore(projectDir, false, prefix);
+}
+
+/** Initialize the workspace root with workspace.yaml. */
+function initWorkspaceRoot(
+  workspacePath: string,
+  repos: WorkspaceRepo[],
+  configDirName: string,
+  dryRun: boolean,
+): void {
+  const configDir = join(workspacePath, configDirName);
+  const workspaceFile = join(configDir, 'workspace.yaml');
+  const workspaceName = basename(workspacePath);
+  const yaml = generateWorkspaceYaml(workspaceName, repos);
+
+  if (dryRun) {
+    console.log(`Would create ${configDir}/`);
+    console.log(`  workspace.yaml`);
+    return;
+  }
+
+  if (!existsSync(configDir)) {
+    mkdirSync(configDir, { recursive: true });
+  }
+
+  if (existsSync(workspaceFile)) {
+    console.log(`  skip workspace.yaml (already exists)`);
+  } else {
+    writeFileSync(workspaceFile, yaml, 'utf-8');
+    console.log(`  created workspace.yaml`);
+  }
+}
+
 export const initCommand = new Command('init')
   .description('Initialize AI-SDLC configuration in the current project')
   .option('--dry-run', 'Show what would be created without writing files')
+  .option('--skip-mcp', 'Skip MCP server auto-configuration')
   .option('-d, --dir <path>', 'Config directory name', '.ai-sdlc')
   .action(async (opts) => {
-    const configDir = join(process.cwd(), opts.dir ?? '.ai-sdlc');
+    const projectDir = process.cwd();
+    const configDirName = opts.dir ?? '.ai-sdlc';
+    const dryRun = !!opts.dryRun;
 
-    const files = [
-      { name: 'pipeline.yaml', content: PIPELINE_YAML },
-      { name: 'agent-role.yaml', content: AGENT_ROLE_YAML },
-      { name: 'quality-gate.yaml', content: QUALITY_GATE_YAML },
-      { name: 'autonomy-policy.yaml', content: AUTONOMY_POLICY_YAML },
-    ];
+    // Detect workspace (multi-repo parent directory)
+    const workspace = detectWorkspace(projectDir);
 
-    if (opts.dryRun) {
-      console.log(`Would create ${configDir}/`);
-      for (const f of files) {
-        console.log(`  ${f.name}`);
+    if (workspace.isWorkspace) {
+      console.log(`Workspace detected with ${workspace.repos.length} repositories:`);
+      for (const repo of workspace.repos) {
+        console.log(`  ${repo.name} (${repo.path})`);
       }
-      return;
-    }
+      console.log('');
 
-    if (!existsSync(configDir)) {
-      mkdirSync(configDir, { recursive: true });
-    }
+      // Initialize workspace root with workspace.yaml
+      initWorkspaceRoot(projectDir, workspace.repos, configDirName, dryRun);
 
-    for (const f of files) {
-      const path = join(configDir, f.name);
-      if (existsSync(path)) {
-        console.log(`  skip ${f.name} (already exists)`);
-      } else {
-        writeFileSync(path, f.content, 'utf-8');
-        console.log(`  created ${f.name}`);
+      // Cascade into each child repo
+      for (const repo of workspace.repos) {
+        console.log(`\n${repo.name}/`);
+        initProject(repo.absPath, configDirName, dryRun, '  ');
       }
-    }
 
-    // Create state directory for SQLite store
-    const stateDir = join(configDir, 'state');
-    if (!existsSync(stateDir)) {
-      mkdirSync(stateDir, { recursive: true });
-      console.log(`  created state/`);
-    }
+      // MCP setup at workspace root (serves all repos)
+      if (!opts.skipMcp) {
+        const agents = detectAgents(projectDir, { isWorkspace: true });
 
-    console.log(`\nAI-SDLC config initialized in ${configDir}/`);
-    console.log(`Run 'ai-sdlc health' to verify your configuration.`);
+        console.log(`\nMCP server setup (workspace root):`);
+        console.log(`  detected ${agents.map((a) => a.name).join(', ')}`);
+
+        for (const agent of agents) {
+          const status = installMcpServer(projectDir, agent, dryRun);
+          const pad = status === 'merged' ? ' ' : '';
+          console.log(`  ${status}${pad} ${agent.configPath} (${agent.name})`);
+        }
+      }
+
+      console.log(`\nAI-SDLC workspace initialized in ${projectDir}/`);
+      console.log(`Run 'ai-sdlc health' to verify your configuration.`);
+    } else {
+      // Single-repo mode (original behavior)
+      initProject(projectDir, configDirName, dryRun);
+
+      if (!opts.skipMcp) {
+        const agents = detectAgents(projectDir);
+
+        console.log(`\nMCP server setup:`);
+        console.log(`  detected ${agents.map((a) => a.name).join(', ')}`);
+
+        for (const agent of agents) {
+          const status = installMcpServer(projectDir, agent, dryRun);
+          const pad = status === 'merged' ? ' ' : '';
+          console.log(`  ${status}${pad} ${agent.configPath} (${agent.name})`);
+        }
+      }
+
+      console.log(`\nAI-SDLC config initialized in ${join(projectDir, configDirName)}/`);
+      console.log(`Run 'ai-sdlc health' to verify your configuration.`);
+    }
   });
