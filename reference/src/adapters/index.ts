@@ -194,5 +194,12 @@ export {
   type LinearWebhookConfig,
 } from './linear/webhooks.js';
 
+// Composite issue tracker
+export {
+  createCompositeIssueTracker,
+  type CompositeIssueTrackerConfig,
+  type BackendRoute,
+} from './composite-issue-tracker.js';
+
 // In-process EventBus
 export { createInProcessEventBus, type InProcessEventBus } from './in-process-event-bus.js';

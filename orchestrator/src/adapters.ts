@@ -309,6 +309,8 @@ export {
   createInMemoryMemoryStore,
   createInProcessEventBus,
   createStubSandbox,
+  // Composite issue tracker
+  createCompositeIssueTracker,
   // Webhook bridge
   createWebhookBridge,
   // Git resolver
@@ -385,4 +387,6 @@ export type {
   GitLabWebhookConfig,
   JiraWebhookConfig,
   LinearWebhookConfig,
+  CompositeIssueTrackerConfig,
+  BackendRoute,
 } from '@ai-sdlc/reference';
