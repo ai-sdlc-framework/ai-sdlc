@@ -23,6 +23,9 @@ export interface IssueResolution {
 /** Loose pattern for branch names like `issue-42`, `issue_42`, `issue#42`. */
 const LOOSE_BRANCH_PATTERN = /issue[- _]?#?(\d+)/i;
 
+/** Pattern for Backlog.md task IDs like `proj-42` in branch names. */
+const BACKLOG_TASK_PATTERN = /(?:^|[/_-])([a-z]+-(\d+))(?:$|[/_-])/i;
+
 /** Pattern for `#N` or `fixes #N` in commit messages. */
 const COMMIT_ISSUE_PATTERN = /(?:fix(?:es|ed)?|close[sd]?|resolve[sd]?)\s+#(\d+)|#(\d+)/gi;
 
@@ -93,6 +96,10 @@ export async function resolveIssue(
     const loose = branch.match(LOOSE_BRANCH_PATTERN);
     if (loose) {
       return { issueNumber: parseInt(loose[1], 10), method: 'branch', confidence: 0.8 };
+    }
+    const backlogMatch = branch.match(BACKLOG_TASK_PATTERN);
+    if (backlogMatch) {
+      return { issueNumber: parseInt(backlogMatch[2], 10), method: 'branch', confidence: 0.8 };
     }
   }
 

@@ -172,6 +172,13 @@ export {
   type HttpClient as JiraHttpClient,
 } from './jira/index.js';
 
+// Backlog.md adapter
+export {
+  createBacklogMdIssueTracker,
+  type BacklogMdConfig,
+  type BacklogFs,
+} from './backlog-md/index.js';
+
 export {
   verifyJiraWebhook,
   transformJiraIssueEvent,
