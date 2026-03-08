@@ -1,0 +1,13 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: backlog-md-adapter
+  labels:
+    ai-sdlc.io/component: dogfood
+spec:
+  interface: IssueTracker
+  type: backlog-md
+  version: 0.1.0
+  config:
+    backlogDir: ./backlog
+    taskPrefix: AISDLC

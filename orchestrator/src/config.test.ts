@@ -24,9 +24,15 @@ describe('loadConfig()', () => {
     expect(config.autonomyPolicy!.kind).toBe('AutonomyPolicy');
     expect(config.autonomyPolicy!.spec.levels).toHaveLength(2);
 
+    expect(config.adapterBindings).toBeDefined();
+    expect(config.adapterBindings!.length).toBeGreaterThanOrEqual(2);
+    const types = config.adapterBindings!.map((b) => b.spec.type);
+    expect(types).toContain('github');
+    expect(types).toContain('backlog-md');
+
+    // Backward compat: adapterBinding is the first binding
     expect(config.adapterBinding).toBeDefined();
     expect(config.adapterBinding!.kind).toBe('AdapterBinding');
-    expect(config.adapterBinding!.spec.type).toBe('github');
   });
 
   it('returns correct pipeline triggers', () => {
@@ -78,5 +84,6 @@ describe('loadConfig()', () => {
     expect(config.qualityGate).toBeUndefined();
     expect(config.autonomyPolicy).toBeUndefined();
     expect(config.adapterBinding).toBeUndefined();
+    expect(config.adapterBindings).toBeUndefined();
   });
 });

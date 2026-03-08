@@ -28,16 +28,19 @@ export interface AiSdlcConfig {
   agentRole?: AgentRole;
   qualityGate?: QualityGate;
   autonomyPolicy?: AutonomyPolicy;
+  /** @deprecated Use `adapterBindings` instead. Returns the first binding if any exist. */
   adapterBinding?: AdapterBinding;
+  /** All AdapterBinding resources found in the config directory. */
+  adapterBindings?: AdapterBinding[];
   adapterRegistry?: AdapterRegistry;
 }
 
-const KIND_KEY: Record<ResourceKind, keyof AiSdlcConfig> = {
+/** Resource kinds that allow only a single instance. */
+const KIND_KEY: Record<Exclude<ResourceKind, 'AdapterBinding'>, keyof AiSdlcConfig> = {
   Pipeline: 'pipeline',
   AgentRole: 'agentRole',
   QualityGate: 'qualityGate',
   AutonomyPolicy: 'autonomyPolicy',
-  AdapterBinding: 'adapterBinding',
 };
 
 /**
@@ -69,11 +72,20 @@ export function loadConfig(configDir: string): AiSdlcConfig {
     }
 
     const resource = result.data as AnyResource;
-    const key = KIND_KEY[resource.kind];
-    if (key) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      (config as any)[key] = resource;
+    if (resource.kind === 'AdapterBinding') {
+      (config.adapterBindings ??= []).push(resource as AdapterBinding);
+    } else {
+      const key = KIND_KEY[resource.kind];
+      if (key) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (config as any)[key] = resource;
+      }
     }
+  }
+
+  // Backward compat: set adapterBinding to the first binding
+  if (config.adapterBindings?.length) {
+    config.adapterBinding = config.adapterBindings[0];
   }
 
   return config;

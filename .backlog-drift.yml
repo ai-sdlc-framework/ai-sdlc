@@ -1,0 +1,30 @@
+# Drift detection settings
+structural:
+  enabled: true
+  check_dead_refs: true
+  check_dependency_state: true
+  check_stale_completions: true
+  check_orphaned_tasks: true
+  stale_completion_days: 14
+
+semantic:
+  enabled: false
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+
+# Hook behavior
+hook:
+  mode: warn
+  structural_only: true
+  semantic_on_commit: false
+
+# What to check
+scope:
+  statuses:
+    - To Do
+    - In Progress
+    - Review
+  check_completed: true
+  check_archived: false
+  ignore_tasks: []
+  ignore_refs: []
