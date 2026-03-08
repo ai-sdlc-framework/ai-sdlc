@@ -34,6 +34,8 @@ import {
   createStubSandbox,
   // Docker sandbox
   createDockerSandbox,
+  // Backlog.md adapter
+  createBacklogMdIssueTracker,
   // Webhook bridge (used in function body)
   createWebhookBridge,
   // Git resolver (used in function bodies)
@@ -108,6 +110,9 @@ export function createPipelineAdapterRegistry(): AdapterRegistry {
   );
   registry.register(stubMeta('semgrep-stub', 'Semgrep', 'CodeAnalysis', 'semgrep'), () =>
     createStubSemgrep(),
+  );
+  registry.register(stubMeta('backlog-md', 'Backlog.md', 'IssueTracker', 'backlog-md'), () =>
+    createBacklogMdIssueTracker({ backlogDir: process.env.AI_SDLC_BACKLOG_DIR ?? './backlog' }),
   );
 
   // Infrastructure adapter stubs
@@ -270,6 +275,8 @@ export {
   createGitLabSourceControl,
   createGitLabCIPipeline,
   createJiraIssueTracker,
+  // Backlog.md adapter
+  createBacklogMdIssueTracker,
   // Webhook server
   createWebhookServer,
   // Webhook providers
@@ -368,6 +375,8 @@ export type {
   BuildStatus,
   GitLabConfig,
   JiraConfig,
+  BacklogMdConfig,
+  BacklogFs,
   WebhookServer,
   WebhookServerConfig,
   WebhookProviderConfig,

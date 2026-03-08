@@ -1,0 +1,9 @@
+name: backlog-md
+displayName: 'Backlog.md Issue Tracker'
+description: 'Local-first markdown-based issue tracker adapter for Backlog.md'
+version: '0.1.0'
+stability: alpha
+interfaces:
+  - IssueTracker@v1
+owner: ai-sdlc
+specVersions: ['v1alpha1']
