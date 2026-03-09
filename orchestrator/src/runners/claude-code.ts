@@ -221,6 +221,28 @@ export function parseTokenUsage(stderr: string, model: string): TokenUsage | und
   return undefined;
 }
 
+/**
+ * Run lint --fix and format commands (best-effort) so pre-commit hooks pass.
+ */
+async function runAutoFix(workDir: string, lintCmd?: string, fmtCmd?: string): Promise<void> {
+  if (fmtCmd) {
+    try {
+      const [bin, ...args] = fmtCmd.split(' ');
+      await execFileAsync(bin, args, { cwd: workDir });
+    } catch {
+      // Format failures are non-fatal — the commit hook will catch remaining issues
+    }
+  }
+  if (lintCmd) {
+    try {
+      const [bin, ...args] = lintCmd.split(' ');
+      await execFileAsync(bin, args, { cwd: workDir });
+    } catch {
+      // Lint --fix failures are non-fatal
+    }
+  }
+}
+
 export class ClaudeCodeRunner implements AgentRunner {
   async run(ctx: AgentContext): Promise<AgentResult> {
     const prompt = buildPrompt(ctx);
@@ -259,14 +281,31 @@ export class ClaudeCodeRunner implements AgentRunner {
         };
       }
 
-      // Stage and commit
+      // Stage, lint/format, and commit
       await gitExec(ctx.workDir, ['add', '-A']);
+
+      // Run lint and format before committing to avoid pre-commit hook failures
+      const lintCmd = ctx.lintCommand ?? DEFAULT_LINT_COMMAND;
+      const fmtCmd = ctx.formatCommand ?? DEFAULT_FORMAT_COMMAND;
+      await runAutoFix(ctx.workDir, lintCmd, fmtCmd);
+
+      // Re-stage after auto-fix may have modified files
+      await gitExec(ctx.workDir, ['add', '-A']);
+
       const tmpl = ctx.commitMessageTemplate ?? DEFAULT_COMMIT_MESSAGE_TEMPLATE;
       const coAuthor = ctx.commitCoAuthor ?? DEFAULT_COMMIT_CO_AUTHOR;
       const commitMsg = tmpl
         .replace(/\{issueNumber\}/g, ctx.issueId)
         .replace(/\{issueTitle\}/g, ctx.issueTitle);
-      await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
+
+      try {
+        await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
+      } catch {
+        // Pre-commit hook may have auto-fixed files — re-stage and retry once
+        await runAutoFix(ctx.workDir, lintCmd, fmtCmd);
+        await gitExec(ctx.workDir, ['add', '-A']);
+        await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
+      }
 
       return {
         success: true,
