@@ -2,7 +2,7 @@
  * SQLite DDL and migrations for the state store.
  */
 
-export const CURRENT_SCHEMA_VERSION = 6;
+export const CURRENT_SCHEMA_VERSION = 7;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -248,6 +248,14 @@ ALTER TABLE cost_ledger ADD COLUMN stage_name TEXT;
 ALTER TABLE cost_ledger ADD COLUMN cache_read_tokens INTEGER DEFAULT 0;
 `;
 
+export const MIGRATION_V7 = `
+-- String issue IDs
+ALTER TABLE pipeline_runs ADD COLUMN issue_id TEXT;
+ALTER TABLE episodic_memory ADD COLUMN issue_id TEXT;
+ALTER TABLE cost_ledger ADD COLUMN issue_id TEXT;
+ALTER TABLE routing_history ADD COLUMN issue_id TEXT;
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -272,5 +280,9 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 6,
     sql: MIGRATION_V6,
+  },
+  {
+    version: 7,
+    sql: MIGRATION_V7,
   },
 ];

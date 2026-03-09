@@ -28,7 +28,7 @@ import { ClaudeCodeRunner } from './runners/claude-code.js';
 import {
   execFileAsync,
   getGitHubConfig,
-  extractIssueNumber,
+  extractIssueId,
   resolveRepoRoot,
   createDefaultAuditLog,
   resolveAutonomyLevel,
@@ -36,6 +36,7 @@ import {
   recordMetric,
   validateAndAuditOutput,
   authorizeFilesChanged,
+  issueIdToNumber,
 } from './shared.js';
 import { renderTemplate } from './notifications.js';
 import { parseDuration } from './policy-evaluators.js';
@@ -257,27 +258,28 @@ export async function executeFixCI(
     cwd: workDir,
   });
   const currentBranch = branchStdout.trim();
-  const issueNumber = extractIssueNumber(currentBranch);
-  if (issueNumber === null) {
-    throw new Error(`Branch "${currentBranch}" does not match ai-sdlc/issue-N pattern`);
+  const issueId = extractIssueId(currentBranch);
+  if (issueId === null) {
+    throw new Error(`Branch "${currentBranch}" does not match ai-sdlc/issue-<id> pattern`);
   }
+  const issueNumber = issueIdToNumber(issueId);
 
   // 5. Resolve autonomy level and constraints
   const currentLevel = resolveAutonomyLevel(autonomyPolicy);
   const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
 
   // 6. Fetch issue data (via tracker when available)
-  let issueTitle = `Issue #${issueNumber}`;
+  let issueTitle = `Issue ${issueId}`;
   let issueBody = '';
   if (trackerAvailable) {
-    const issueData = await getTracker().getIssue(String(issueNumber));
+    const issueData = await getTracker().getIssue(issueId);
     issueTitle = issueData.title;
     issueBody = issueData.description ?? '';
   }
 
   // Store issue context in working memory
   if (options.memory) {
-    options.memory.working.set('currentIssue', { prNumber, issueNumber, currentBranch });
+    options.memory.working.set('currentIssue', { prNumber, issueId, currentBranch });
   }
 
   // Query episodic memory for previous fix-CI attempts
@@ -303,7 +305,7 @@ export async function executeFixCI(
       if (options.security) {
         const timeoutMs = codeStage?.timeout ? parseDuration(codeStage.timeout) : undefined;
         sandboxId = await options.security.sandbox.isolate(
-          `issue-${issueNumber}`,
+          `issue-${issueId}`,
           defaultSandboxConstraints(workDir, timeoutMs),
         );
       }
@@ -322,7 +324,8 @@ export async function executeFixCI(
           },
           async () => {
             const r = await runner.run({
-              issueNumber,
+              issueId,
+              issueNumber: issueNumber ?? undefined,
               issueTitle,
               issueBody,
               workDir,
@@ -492,7 +495,7 @@ export async function executeFixCI(
         key: 'fix-ci-execution',
         value: {
           prNumber,
-          issueNumber,
+          issueId,
           filesChanged: result.filesChanged.length,
           outcome: 'success',
         },
@@ -507,7 +510,7 @@ export async function executeFixCI(
         key: 'fix-ci-execution',
         value: {
           prNumber,
-          issueNumber,
+          issueId,
           outcome: 'failure',
           error: err instanceof Error ? err.message : String(err),
         },

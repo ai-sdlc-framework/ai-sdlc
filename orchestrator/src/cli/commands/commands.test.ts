@@ -157,7 +157,7 @@ describe('run command', () => {
     const program = wrapCommand(runCommand);
     await program.parseAsync(['run', '-i', '42'], { from: 'user' });
 
-    expect(mockRun).toHaveBeenCalledWith(42);
+    expect(mockRun).toHaveBeenCalledWith('42');
     expect(consoleSpy).toHaveBeenCalled();
     expect(mockClose).toHaveBeenCalled();
   });

@@ -52,7 +52,7 @@ describe('Orchestrator plugins', () => {
     const orch = new Orchestrator({ plugins: [plugin] });
 
     // run() awaits _pluginsInitialized, so trigger it
-    await orch.run(1);
+    await orch.run('1');
 
     expect(initFn).toHaveBeenCalledOnce();
     const ctx = initFn.mock.calls[0][0] as PluginContext;
@@ -77,11 +77,11 @@ describe('Orchestrator plugins', () => {
     });
 
     const orch = new Orchestrator({ plugins: [plugin] });
-    await orch.run(42);
+    await orch.run('42');
 
     expect(beforeFn).toHaveBeenCalledOnce();
     const event = beforeFn.mock.calls[0][0] as BeforeRunEvent;
-    expect(event.issueNumber).toBe(42);
+    expect(event.issueId).toBe('42');
     expect(event.runId).toMatch(/^run-/);
     expect(event.startedAt).toBeTruthy();
 
@@ -96,11 +96,11 @@ describe('Orchestrator plugins', () => {
     mockExecute.mockResolvedValue(result);
 
     const orch = new Orchestrator({ plugins: [plugin] });
-    await orch.run(10);
+    await orch.run('10');
 
     expect(afterFn).toHaveBeenCalledOnce();
     const event = afterFn.mock.calls[0][0] as AfterRunEvent;
-    expect(event.issueNumber).toBe(10);
+    expect(event.issueId).toBe('10');
     expect(event.result).toBe(result);
     expect(typeof event.durationMs).toBe('number');
     expect(event.durationMs).toBeGreaterThanOrEqual(0);
@@ -116,11 +116,11 @@ describe('Orchestrator plugins', () => {
     mockExecute.mockRejectedValue(boom);
 
     const orch = new Orchestrator({ plugins: [plugin] });
-    await expect(orch.run(7)).rejects.toThrow('pipeline failed');
+    await expect(orch.run('7')).rejects.toThrow('pipeline failed');
 
     expect(errorFn).toHaveBeenCalledOnce();
     const event = errorFn.mock.calls[0][0] as RunErrorEvent;
-    expect(event.issueNumber).toBe(7);
+    expect(event.issueId).toBe('7');
     expect(event.error).toBe(boom);
     expect(typeof event.durationMs).toBe('number');
 
@@ -148,7 +148,7 @@ describe('Orchestrator plugins', () => {
     };
 
     const orch = new Orchestrator({ plugins: [plugin] });
-    await expect(orch.run(1)).rejects.toThrow('blocked by policy');
+    await expect(orch.run('1')).rejects.toThrow('blocked by policy');
 
     // executePipeline should never be called
     expect(mockExecute).not.toHaveBeenCalled();
@@ -172,7 +172,7 @@ describe('Orchestrator plugins', () => {
     };
 
     const orch = new Orchestrator({ plugins: [pluginA, pluginB] });
-    await orch.run(1);
+    await orch.run('1');
 
     expect(order).toEqual(['a', 'b']);
     await orch.close();
@@ -184,7 +184,7 @@ describe('Orchestrator plugins', () => {
 
     const orch = new Orchestrator({ plugins: [minimal] });
     // Should not throw
-    const result = await orch.run(1);
+    const result = await orch.run('1');
     expect(result).toEqual(makeResult());
     await orch.close();
   });

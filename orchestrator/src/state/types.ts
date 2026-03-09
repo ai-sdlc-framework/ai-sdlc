@@ -23,6 +23,7 @@ export interface ComplexityProfile {
 
 export interface EpisodicRecord {
   id?: number;
+  issueId?: string;
   issueNumber?: number;
   prNumber?: number;
   pipelineType: string;
@@ -64,6 +65,7 @@ export type PipelineRunStatus = 'pending' | 'running' | 'completed' | 'failed' |
 export interface PipelineRun {
   id?: number;
   runId: string;
+  issueId?: string;
   issueNumber?: number;
   prNumber?: number;
   pipelineType: string;
@@ -103,6 +105,7 @@ export interface HotspotRecord {
 
 export interface RoutingDecision {
   id?: number;
+  issueId?: string;
   issueNumber?: number;
   taskComplexity: number;
   codebaseComplexity: number;
@@ -122,6 +125,7 @@ export interface CostLedgerEntry {
   outputTokens?: number;
   totalTokens?: number;
   costUsd?: number;
+  issueId?: string;
   issueNumber?: number;
   prNumber?: number;
   stageName?: string;

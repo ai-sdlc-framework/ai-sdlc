@@ -45,7 +45,7 @@ export interface WatchOptions {
 
 export interface WatchHandle {
   /** Enqueue a pipeline resource for reconciliation. */
-  enqueue(pipeline: Pipeline, issueNumber: number): void;
+  enqueue(pipeline: Pipeline, issueId: string): void;
   /** Enqueue a quality gate resource for reconciliation. */
   enqueueGate(gate: QualityGate): void;
   /** Enqueue an autonomy policy resource for reconciliation. */
@@ -63,7 +63,7 @@ export interface WatchHandle {
  */
 export function startWatch(options: WatchOptions = {}): WatchHandle {
   const cache = createResourceCache();
-  const issueMap = new Map<string, number>();
+  const issueMap = new Map<string, string>();
 
   // H2: Build specialized reconcilers for each resource kind
   const _pipelineReconciler = createPipelineReconciler({
@@ -85,15 +85,15 @@ export function startWatch(options: WatchOptions = {}): WatchHandle {
     switch (resource.kind) {
       case 'Pipeline': {
         const pipeline = resource as Pipeline;
-        const issueNumber = issueMap.get(pipeline.metadata.name);
-        if (!issueNumber) {
+        const issueId = issueMap.get(pipeline.metadata.name);
+        if (!issueId) {
           return {
             type: 'error' as const,
-            error: new Error(`No issue number for pipeline ${pipeline.metadata.name}`),
+            error: new Error(`No issue ID for pipeline ${pipeline.metadata.name}`),
           };
         }
         try {
-          await executePipeline(issueNumber, {
+          await executePipeline(issueId, {
             ...options.executeOptions,
           });
           const result: ReconcileResult = { type: 'success' as const };
@@ -127,8 +127,8 @@ export function startWatch(options: WatchOptions = {}): WatchHandle {
   loop.start();
 
   return {
-    enqueue(pipeline: Pipeline, issueNumber: number): void {
-      issueMap.set(pipeline.metadata.name, issueNumber);
+    enqueue(pipeline: Pipeline, issueId: string): void {
+      issueMap.set(pipeline.metadata.name, issueId);
       if (cache.shouldReconcile(pipeline)) {
         loop.enqueue(pipeline);
       }

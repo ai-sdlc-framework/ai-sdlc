@@ -100,7 +100,7 @@ export class GenericLLMRunner implements AgentRunner {
     }
 
     const userContent = [
-      `Issue #${ctx.issueNumber}: ${ctx.issueTitle}`,
+      `Issue ${/^\d+$/.test(ctx.issueId) ? '#' : ''}${ctx.issueId}: ${ctx.issueTitle}`,
       '',
       ctx.issueBody,
       '',

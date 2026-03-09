@@ -4,6 +4,7 @@ import type { AgentContext } from './types.js';
 
 function makeCtx(overrides?: Partial<AgentContext>): AgentContext {
   return {
+    issueId: '42',
     issueNumber: 42,
     issueTitle: 'Fix the widget',
     issueBody: 'The widget is broken.',

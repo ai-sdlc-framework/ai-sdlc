@@ -95,6 +95,16 @@ export function extractIssueNumber(branch: string): number | null {
   return match ? Number(match[1]) : null;
 }
 
+/**
+ * Extract the issue ID from an `ai-sdlc/issue-<id>` branch name.
+ * Supports both numeric ("42") and string ("AISDLC-3") IDs.
+ * Returns null if the branch doesn't match.
+ */
+export function extractIssueId(branch: string): string | null {
+  const match = branch.match(/^ai-sdlc\/issue-(.+)$/);
+  return match ? match[1] : null;
+}
+
 // ── GitHub config ────────────────────────────────────────────────────
 
 export interface GitHubEnvConfig {
@@ -394,3 +404,24 @@ export function createPipelineAuthorizationChain(hooks: AuthorizationHook[]): Au
 }
 
 export type { AuthorizationHook, AuthorizationContext, AuthorizationResult };
+
+// ── Issue ID helpers ─────────────────────────────────────────────────
+
+/**
+ * Try to parse a numeric issue number from a string issue ID.
+ * Returns `null` for non-numeric IDs like "AISDLC-3".
+ */
+export function issueIdToNumber(issueId: string): number | null {
+  const n = Number(issueId);
+  return Number.isInteger(n) && n > 0 ? n : null;
+}
+
+/**
+ * Format an issue reference for PR close keywords.
+ * Numeric IDs get a `#` prefix (e.g., "#42").
+ * String IDs are used as-is (e.g., "AISDLC-3").
+ */
+export function formatIssueRef(issueId: string): string {
+  const n = issueIdToNumber(issueId);
+  return n !== null ? `#${n}` : issueId;
+}

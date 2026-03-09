@@ -8,7 +8,7 @@ import { formatOutput } from '../formatters/index.js';
 
 export const runCommand = new Command('run')
   .description('Run the AI-SDLC pipeline for a specific issue')
-  .requiredOption('-i, --issue <number>', 'Issue number to process', parseInt)
+  .requiredOption('-i, --issue <id>', 'Issue ID to process')
   .option('--state <path>', 'SQLite state database path')
   .action(async (opts, cmd) => {
     const globalOpts = cmd.parent?.opts() ?? {};
@@ -24,7 +24,7 @@ export const runCommand = new Command('run')
       console.log(
         formatOutput(format, {
           type: 'run',
-          issueNumber: opts.issue,
+          issueId: opts.issue,
           prUrl: result.prUrl,
           filesChanged: result.filesChanged.length,
           promotionEligible: result.promotionEligible,

@@ -18,22 +18,22 @@ import {
   DEFAULT_CONFIG_DIR_NAME,
 } from '@ai-sdlc/orchestrator';
 
-function parseArgs(argv: string[]): { issueNumber: number } {
+function parseArgs(argv: string[]): { issueId: string } {
   const idx = argv.indexOf('--issue');
   if (idx === -1 || idx + 1 >= argv.length) {
-    console.error('Usage: execute --issue <number>');
+    console.error('Usage: execute --issue <id>');
     process.exit(1);
   }
-  const issueNumber = Number(argv[idx + 1]);
-  if (!Number.isInteger(issueNumber) || issueNumber <= 0) {
-    console.error(`Invalid issue number: ${argv[idx + 1]}`);
+  const issueId = argv[idx + 1].trim();
+  if (!issueId) {
+    console.error(`Invalid issue ID: ${argv[idx + 1]}`);
     process.exit(1);
   }
-  return { issueNumber };
+  return { issueId };
 }
 
 async function main(): Promise<void> {
-  const { issueNumber } = parseArgs(process.argv);
+  const { issueId } = parseArgs(process.argv);
 
   const workDir = await resolveRepoRoot();
   const configDir = join(workDir, DEFAULT_CONFIG_DIR_NAME);
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
     : undefined;
 
   try {
-    await executePipeline(issueNumber, {
+    await executePipeline(issueId, {
       security,
       metricStore,
       memory,

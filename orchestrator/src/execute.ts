@@ -7,7 +7,6 @@
  */
 
 import {
-  createGitHubIssueTracker,
   createGitHubSourceControl,
   routeByComplexity,
   evaluatePromotion,
@@ -53,6 +52,8 @@ import {
   authorizeFilesChanged,
   interpolateBranchPattern,
   interpolatePRTitle,
+  issueIdToNumber,
+  formatIssueRef,
 } from './shared.js';
 import {
   checkKillSwitch,
@@ -111,6 +112,7 @@ import {
   createPipelineWebhookBridge,
   resolveAdapterFromGit,
   scanPipelineAdapters,
+  resolveIssueTrackerFromConfig,
 } from './adapters.js';
 import {
   defaultSandboxConstraints,
@@ -205,10 +207,10 @@ export interface ExecuteOptions {
 }
 
 /**
- * Execute the full AI-SDLC pipeline for a given issue number.
+ * Execute the full AI-SDLC pipeline for a given issue ID.
  */
 export async function executePipeline(
-  issueNumber: number,
+  issueId: string,
   options: ExecuteOptions = {},
 ): Promise<PipelineResult> {
   const workDir = options.workDir ?? (await resolveRepoRoot());
@@ -272,17 +274,17 @@ export async function executePipeline(
   const { org, repo } = getGitHubConfig(options.secretStore);
   const ghConfig = { org, repo, token: { secretRef: 'github-token' } };
 
-  const tracker = options.tracker ?? createGitHubIssueTracker(ghConfig);
+  const tracker = options.tracker ?? resolveIssueTrackerFromConfig(config, ghConfig);
   const sc = options.sourceControl ?? createGitHubSourceControl(ghConfig);
 
   // 3. Fetch issue
   log.stage('validate-issue');
-  const issue = await tracker.getIssue(String(issueNumber));
+  const issue = await tracker.getIssue(issueId);
 
   // Store issue context in working memory if provided
   if (options.memory) {
     options.memory.working.set('currentIssue', {
-      number: issueNumber,
+      issueId,
       title: issue.title,
       description: issue.description,
     });
@@ -291,7 +293,7 @@ export async function executePipeline(
   // Wrap pipeline body in try/catch to record failure episodes
   try {
     return await executePipelineBody(
-      issueNumber,
+      issueId,
       issue,
       config,
       qualityGate,
@@ -311,11 +313,11 @@ export async function executePipeline(
       options.memory.episodic.append({
         key: 'pipeline-execution',
         value: {
-          issueNumber,
+          issueId,
           outcome: 'failure',
           error: err instanceof Error ? err.message : String(err),
         },
-        metadata: { summary: `Failed issue #${issueNumber}: ${issue.title}` },
+        metadata: { summary: `Failed issue ${formatIssueRef(issueId)}: ${issue.title}` },
       });
       options.memory.working.clear();
     }
@@ -324,7 +326,7 @@ export async function executePipeline(
 }
 
 async function executePipelineBody(
-  issueNumber: number,
+  issueId: string,
   issue: Issue,
   config: AiSdlcConfig,
   qualityGate: NonNullable<AiSdlcConfig['qualityGate']>,
@@ -338,6 +340,7 @@ async function executePipelineBody(
   log: Logger,
   workDir: string,
 ): Promise<PipelineResult> {
+  const issueNumber = issueIdToNumber(issueId);
   const meter = getMeter();
 
   // Discovery: register agent and resolve by issue labels
@@ -398,7 +401,7 @@ async function executePipelineBody(
         auditLog.record({
           actor: 'system',
           action: 'evaluate',
-          resource: `issue#${issueNumber}`,
+          resource: `issue#${issueId}`,
           policy: qualityGate.metadata.name,
           decision: 'denied',
           details: {
@@ -416,14 +419,14 @@ async function executePipelineBody(
         const gateFailTitle = gateFailTpl
           ? renderTemplate(gateFailTpl, { details: failures }).title
           : NOTIFICATION_TITLES.issueValidationFailed;
-        await tracker.addComment(String(issueNumber), `## ${gateFailTitle}\n\n${gateFailBody}`);
-        throw new Error(`Issue #${issueNumber} failed quality gate validation`);
+        await tracker.addComment(issueId, `## ${gateFailTitle}\n\n${gateFailBody}`);
+        throw new Error(`Issue ${formatIssueRef(issueId)} failed quality gate validation`);
       }
 
       auditLog.record({
         actor: 'system',
         action: 'evaluate',
-        resource: `issue#${issueNumber}`,
+        resource: `issue#${issueId}`,
         policy: qualityGate.metadata.name,
         decision: 'allowed',
       });
@@ -440,7 +443,7 @@ async function executePipelineBody(
   auditLog.record({
     actor: 'system',
     action: 'route',
-    resource: `issue#${issueNumber}`,
+    resource: `issue#${issueId}`,
     decision: isAutonomousStrategy(strategy) ? 'allowed' : 'denied',
     details: { score: complexity, strategy },
   });
@@ -453,11 +456,10 @@ async function executePipelineBody(
           title: NOTIFICATION_TITLES.complexityTooHigh,
           body: `Issue complexity (${complexity}) routed as "${strategy}" — requires human involvement.`,
         };
-    await tracker.addComment(
-      String(issueNumber),
-      `## ${complexityComment.title}\n\n${complexityComment.body}`,
+    await tracker.addComment(issueId, `## ${complexityComment.title}\n\n${complexityComment.body}`);
+    throw new Error(
+      `Issue ${formatIssueRef(issueId)} complexity ${complexity} routed as "${strategy}"`,
     );
-    throw new Error(`Issue #${issueNumber} complexity ${complexity} routed as "${strategy}"`);
   }
 
   // Approval workflow check (after routing, before agent)
@@ -466,11 +468,11 @@ async function executePipelineBody(
       options.security,
       complexity,
       agentRole.metadata.name,
-      `Execute pipeline for issue #${issueNumber}`,
+      `Execute pipeline for issue ${formatIssueRef(issueId)}`,
     );
     if (approval.status === 'pending') {
       throw new Error(
-        `Issue #${issueNumber} requires approval (tier: ${approval.tier}) — status is pending`,
+        `Issue ${formatIssueRef(issueId)} requires approval (tier: ${approval.tier}) — status is pending`,
       );
     }
   }
@@ -480,7 +482,7 @@ async function executePipelineBody(
   log.stageEnd('validate-issue');
 
   // 7. Create branch and checkout locally (read pattern from pipeline config)
-  const branchVars = { issueNumber: String(issueNumber), issueTitle: issue.title };
+  const branchVars = { issueNumber: issueId, issueTitle: issue.title };
   const branchName = interpolateBranchPattern(config.pipeline?.spec.branching?.pattern, branchVars);
   await sc.createBranch({ name: branchName });
   await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir });
@@ -517,7 +519,7 @@ async function executePipelineBody(
     if (options.security) {
       const timeoutMs = codeStage?.timeout ? parseDuration(codeStage.timeout) : undefined;
       sandboxId = await options.security.sandbox.isolate(
-        `issue-${issueNumber}`,
+        `issue-${issueId}`,
         defaultSandboxConstraints(workDir, timeoutMs),
       );
     }
@@ -536,7 +538,7 @@ async function executePipelineBody(
       // Enrich agent context with episodic memory
       const episodicContext = options.stateStore
         ? enrichAgentContext(options.stateStore, {
-            issueNumber,
+            issueNumber: issueNumber ?? undefined,
             agentName: effectiveAgent.metadata.name,
             files: result ? (result as AgentResult).filesChanged : undefined,
           })
@@ -550,11 +552,12 @@ async function executePipelineBody(
             SPAN_NAMES.AGENT_TASK,
             {
               [ATTRIBUTE_KEYS.AGENT]: agent.metadata.name,
-              [ATTRIBUTE_KEYS.RESOURCE_NAME]: `issue#${issueNumber}`,
+              [ATTRIBUTE_KEYS.RESOURCE_NAME]: `issue#${issueId}`,
             },
             () =>
               runner.run({
-                issueNumber,
+                issueId,
+                issueNumber: issueNumber ?? undefined,
                 issueTitle: issue.title,
                 issueBody: issue.description ?? '',
                 workDir,
@@ -596,10 +599,10 @@ async function executePipelineBody(
           ? renderTemplate(agentFailTpl, { stageName: 'code', details: errorDetail })
           : { title: NOTIFICATION_TITLES.agentFailed, body: errorDetail };
         await tracker.addComment(
-          String(issueNumber),
+          issueId,
           `## ${agentFailComment.title}\n\n${agentFailComment.body}`,
         );
-        throw new Error(`Agent failed on issue #${issueNumber}: ${err}`);
+        throw new Error(`Agent failed on issue ${formatIssueRef(issueId)}: ${err}`);
       }
       result = stepOutput;
       log.stageEnd('agent');
@@ -657,7 +660,7 @@ async function executePipelineBody(
         log,
         onViolation: async (violationList) => {
           await tracker.addComment(
-            String(issueNumber),
+            issueId,
             `## ${NOTIFICATION_TITLES.guardrailViolations}\n\n${violationList}`,
           );
         },
@@ -692,7 +695,7 @@ async function executePipelineBody(
       auditLog.record({
         actor: 'system',
         action: 'evaluate',
-        resource: `issue#${issueNumber}`,
+        resource: `issue#${issueId}`,
         policy: 'post-agent-gates',
         decision: gateResults.every((g) => g.verdict === 'pass') ? 'allowed' : 'denied',
         details: {
@@ -720,7 +723,7 @@ async function executePipelineBody(
     auditLog.record({
       actor: 'system',
       action: 'evaluate',
-      resource: `issue#${issueNumber}`,
+      resource: `issue#${issueId}`,
       policy: 'post-agent-complexity',
       decision: 'allowed',
       details: {
@@ -779,7 +782,7 @@ async function executePipelineBody(
     provenanceBlock = '\n\n' + attachProvenanceToPR(provenance);
   }
 
-  const prVars = { issueNumber: String(issueNumber), issueTitle: issue.title };
+  const prVars = { issueNumber: issueId, issueTitle: issue.title };
   const prTitle = interpolatePRTitle(prConfig?.titleTemplate, prVars);
   const closeKeyword = prConfig?.closeKeyword ?? 'Closes';
   const targetBranch = config.pipeline?.spec.branching?.targetBranch ?? 'main';
@@ -797,7 +800,7 @@ async function executePipelineBody(
         if (section === 'summary') parts.push('## Summary', '', result.summary);
         if (section === 'changes')
           parts.push('## Changes', '', result.filesChanged.map((f) => `- \`${f}\``).join('\n'));
-        if (section === 'closes') parts.push('', `${closeKeyword} #${issueNumber}`);
+        if (section === 'closes') parts.push('', `${closeKeyword} ${formatIssueRef(issueId)}`);
       }
       const footer = options.prFooter ?? DEFAULT_PR_FOOTER;
       parts.push('', '---', footer);
@@ -817,7 +820,7 @@ async function executePipelineBody(
         action: 'create',
         resource: 'pull-request',
         decision: 'allowed',
-        details: { prUrl: prResult.url, issueNumber },
+        details: { prUrl: prResult.url, issueId },
       });
 
       return prResult;
@@ -830,19 +833,16 @@ async function executePipelineBody(
   const prCreatedComment = prCreatedTemplate
     ? renderTemplate(prCreatedTemplate, {
         prUrl: pr.url,
-        issueNumber: String(issueNumber),
+        issueNumber: issueId,
       })
     : { title: NOTIFICATION_TITLES.prCreated, body: `Pull request created: ${pr.url}` };
-  await tracker.addComment(
-    String(issueNumber),
-    `## ${prCreatedComment.title}\n\n${prCreatedComment.body}`,
-  );
+  await tracker.addComment(issueId, `## ${prCreatedComment.title}\n\n${prCreatedComment.body}`);
 
   // 14b. Record cost from agent result
   if (options.costTracker && result.tokenUsage) {
     const tu = result.tokenUsage;
     options.costTracker.recordCost({
-      runId: `run-${Date.now()}-${issueNumber}`,
+      runId: `run-${Date.now()}-${issueId}`,
       agentName: agentRole.metadata.name,
       pipelineType: 'execute',
       model: tu.model,
@@ -850,7 +850,7 @@ async function executePipelineBody(
       outputTokens: tu.outputTokens,
       cacheReadTokens: tu.cacheReadTokens,
       stageName: 'code',
-      issueNumber,
+      issueNumber: issueNumber ?? undefined,
     });
   }
 
@@ -953,12 +953,12 @@ async function executePipelineBody(
     options.memory.episodic.append({
       key: 'pipeline-execution',
       value: {
-        issueNumber,
+        issueId,
         prUrl: pr.url,
         filesChanged: result.filesChanged.length,
         outcome: 'success',
       },
-      metadata: { summary: `Completed issue #${issueNumber}: ${issue.title}` },
+      metadata: { summary: `Completed issue ${formatIssueRef(issueId)}: ${issue.title}` },
     });
     options.memory.working.clear();
   }

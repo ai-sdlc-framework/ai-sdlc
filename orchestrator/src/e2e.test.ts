@@ -135,7 +135,7 @@ describe('E2E: executePipeline()', () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -165,7 +165,7 @@ describe('E2E: executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -192,7 +192,7 @@ describe('E2E: executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -218,7 +218,7 @@ describe('E2E: executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -241,7 +241,7 @@ describe('E2E: executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,

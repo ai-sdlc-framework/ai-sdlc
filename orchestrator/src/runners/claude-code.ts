@@ -24,7 +24,7 @@ export function buildPrompt(ctx: AgentContext): string {
   const fmtCmd = ctx.formatCommand ?? DEFAULT_FORMAT_COMMAND;
 
   const lines = [
-    `You are fixing issue #${ctx.issueNumber}: ${ctx.issueTitle}`,
+    `You are fixing issue ${/^\d+$/.test(ctx.issueId) ? '#' : ''}${ctx.issueId}: ${ctx.issueTitle}`,
     '',
     '## Issue Description',
     ctx.issueBody,
@@ -103,7 +103,7 @@ export function buildPrompt(ctx: AgentContext): string {
 
   // Append relevant episodic memory if available
   if (ctx.memory) {
-    const episodes = ctx.memory.episodic.search(`issue-${ctx.issueNumber}`);
+    const episodes = ctx.memory.episodic.search(`issue-${ctx.issueId}`);
     if (episodes.length > 0) {
       lines.push('', '## Previous Context');
       for (const ep of episodes.slice(0, 5)) {
@@ -264,7 +264,7 @@ export class ClaudeCodeRunner implements AgentRunner {
       const tmpl = ctx.commitMessageTemplate ?? DEFAULT_COMMIT_MESSAGE_TEMPLATE;
       const coAuthor = ctx.commitCoAuthor ?? DEFAULT_COMMIT_CO_AUTHOR;
       const commitMsg = tmpl
-        .replace(/\{issueNumber\}/g, String(ctx.issueNumber))
+        .replace(/\{issueNumber\}/g, ctx.issueId)
         .replace(/\{issueTitle\}/g, ctx.issueTitle);
       await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
 

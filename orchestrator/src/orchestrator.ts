@@ -11,6 +11,7 @@ import { StateStore } from './state/index.js';
 import { createLogger, type Logger } from './logger.js';
 import type { SecurityContext } from './security.js';
 import type { AgentRunner } from './runners/types.js';
+import { issueIdToNumber } from './shared.js';
 import { analyzeCodebase } from './analysis/analyzer.js';
 import { buildCodebaseContext } from './analysis/context-builder.js';
 import { DEFAULT_ANALYSIS_CACHE_TTL_MS } from './defaults.js';
@@ -110,15 +111,17 @@ export class Orchestrator {
   /**
    * Run the full pipeline for a single issue.
    */
-  async run(issueNumber: number, overrides?: Partial<ExecuteOptions>): Promise<PipelineResult> {
-    const runId = `run-${Date.now()}-${issueNumber}`;
+  async run(issueId: string, overrides?: Partial<ExecuteOptions>): Promise<PipelineResult> {
+    const issueNumber = issueIdToNumber(issueId);
+    const runId = `run-${Date.now()}-${issueId}`;
     const startedAt = new Date().toISOString();
 
     // Record pipeline start in state store
     if (this._state) {
       this._state.savePipelineRun({
         runId,
-        issueNumber,
+        issueId,
+        issueNumber: issueNumber ?? undefined,
         pipelineType: 'execute',
         status: 'running',
         currentStage: 'init',
@@ -151,13 +154,18 @@ export class Orchestrator {
 
     // Notify plugins before run
     for (const plugin of this.plugins) {
-      await plugin.beforeRun?.({ runId, issueNumber, startedAt });
+      await plugin.beforeRun?.({
+        runId,
+        issueId,
+        issueNumber: issueNumber ?? undefined,
+        startedAt,
+      });
     }
 
     const runStart = Date.now();
 
     try {
-      const result = await executePipeline(issueNumber, {
+      const result = await executePipeline(issueId, {
         configDir: this.config.configDir,
         workDir: this.config.workDir,
         runner: this.config.runner,
@@ -179,7 +187,8 @@ export class Orchestrator {
           }),
         });
         this._state.saveEpisodicRecord({
-          issueNumber,
+          issueId,
+          issueNumber: issueNumber ?? undefined,
           pipelineType: 'execute',
           outcome: 'success',
           filesChanged: result.filesChanged.length,
@@ -189,7 +198,13 @@ export class Orchestrator {
       // Notify plugins after successful run
       const durationMs = Date.now() - runStart;
       for (const plugin of this.plugins) {
-        await plugin.afterRun?.({ runId, issueNumber, result, durationMs });
+        await plugin.afterRun?.({
+          runId,
+          issueId,
+          issueNumber: issueNumber ?? undefined,
+          result,
+          durationMs,
+        });
       }
 
       return result;
@@ -202,7 +217,8 @@ export class Orchestrator {
           }),
         });
         this._state.saveEpisodicRecord({
-          issueNumber,
+          issueId,
+          issueNumber: issueNumber ?? undefined,
           pipelineType: 'execute',
           outcome: 'failure',
           errorMessage: err instanceof Error ? err.message : String(err),
@@ -213,7 +229,13 @@ export class Orchestrator {
       const errorDurationMs = Date.now() - runStart;
       const error = err instanceof Error ? err : new Error(String(err));
       for (const plugin of this.plugins) {
-        await plugin.onError?.({ runId, issueNumber, error, durationMs: errorDurationMs });
+        await plugin.onError?.({
+          runId,
+          issueId,
+          issueNumber: issueNumber ?? undefined,
+          error,
+          durationMs: errorDurationMs,
+        });
       }
 
       throw err;

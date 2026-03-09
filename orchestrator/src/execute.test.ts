@@ -136,7 +136,7 @@ describe('executePipeline()', () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -172,7 +172,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -199,7 +199,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -217,7 +217,7 @@ describe('executePipeline()', () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -247,7 +247,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -268,7 +268,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -287,7 +287,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -308,7 +308,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     // complexity 3 routes as 'fully-autonomous' — should pass
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -327,7 +327,7 @@ describe('executePipeline()', () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -355,7 +355,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -380,7 +380,7 @@ describe('executePipeline()', () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -407,7 +407,7 @@ describe('executePipeline()', () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -434,7 +434,7 @@ describe('executePipeline()', () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -459,7 +459,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
     const logger = makeSilentLogger();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -487,7 +487,7 @@ describe('executePipeline()', () => {
       validate: vi.fn().mockReturnValue({ valid: true }),
     };
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -509,7 +509,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     // Should complete without error when useStructuredLogger is set
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -530,7 +530,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
     const security = createPipelineSecurity();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -556,7 +556,7 @@ describe('executePipeline()', () => {
     await security.killSwitch.activate('emergency shutdown');
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -581,7 +581,7 @@ describe('executePipeline()', () => {
     const issueSpy = vi.spyOn(security.jitCredentials, 'issue');
     const revokeSpy = vi.spyOn(security.jitCredentials, 'revoke');
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -606,7 +606,7 @@ describe('executePipeline()', () => {
     const revokeSpy = vi.spyOn(security.jitCredentials, 'revoke');
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -631,7 +631,7 @@ describe('executePipeline()', () => {
 
     const submitSpy = vi.spyOn(security.approvalWorkflow, 'submit');
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -664,7 +664,7 @@ describe('executePipeline()', () => {
     });
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -685,7 +685,7 @@ describe('executePipeline()', () => {
     const runner = makeMockRunner();
     const auditLog = makeMockAuditLog();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -711,7 +711,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
 
     // Should complete without error — auto-created evaluators take effect
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -732,7 +732,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
     const logger = makeSilentLogger();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -755,7 +755,7 @@ describe('executePipeline()', () => {
     const { createMetricStore } = await import('@ai-sdlc/reference');
     const metricStore = createMetricStore();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -777,7 +777,7 @@ describe('executePipeline()', () => {
     const auditLog = makeMockAuditLog();
     const logger = makeSilentLogger();
 
-    await executePipeline(42, {
+    await executePipeline('42', {
       configDir: CONFIG_DIR,
       workDir: '/tmp/test-repo',
       tracker,
@@ -843,7 +843,7 @@ describe('executePipeline()', () => {
     };
 
     await expect(
-      executePipeline(42, {
+      executePipeline('42', {
         configDir: CONFIG_DIR,
         workDir: '/tmp/test-repo',
         tracker,
@@ -859,7 +859,7 @@ describe('executePipeline()', () => {
       expect.objectContaining({
         key: 'pipeline-execution',
         value: expect.objectContaining({
-          issueNumber: 42,
+          issueId: '42',
           outcome: 'failure',
         }),
       }),

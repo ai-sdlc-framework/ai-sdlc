@@ -22,20 +22,26 @@ export interface PluginContext {
 
 export interface BeforeRunEvent {
   runId: string;
-  issueNumber: number;
+  issueId: string;
+  /** @deprecated Use `issueId` instead. */
+  issueNumber?: number;
   startedAt: string;
 }
 
 export interface AfterRunEvent {
   runId: string;
-  issueNumber: number;
+  issueId: string;
+  /** @deprecated Use `issueId` instead. */
+  issueNumber?: number;
   result: PipelineResult;
   durationMs: number;
 }
 
 export interface RunErrorEvent {
   runId: string;
-  issueNumber: number;
+  issueId: string;
+  /** @deprecated Use `issueId` instead. */
+  issueNumber?: number;
   error: Error;
   durationMs: number;
 }

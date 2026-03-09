@@ -17,28 +17,28 @@ import {
   DEFAULT_CONFIG_DIR_NAME,
 } from '@ai-sdlc/orchestrator';
 
-function parseArgs(argv: string[]): { issueNumbers: number[] } {
-  const issues: number[] = [];
+function parseArgs(argv: string[]): { issueIds: string[] } {
+  const issues: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === '--issue' && i + 1 < argv.length) {
-      const n = Number(argv[i + 1]);
-      if (!Number.isInteger(n) || n <= 0) {
-        console.error(`Invalid issue number: ${argv[i + 1]}`);
+      const id = argv[i + 1].trim();
+      if (!id) {
+        console.error(`Invalid issue ID: ${argv[i + 1]}`);
         process.exit(1);
       }
-      issues.push(n);
+      issues.push(id);
       i++; // skip the value
     }
   }
   if (issues.length === 0) {
-    console.error('Usage: watch --issue <number> [--issue <number> ...]');
+    console.error('Usage: watch --issue <id> [--issue <id> ...]');
     process.exit(1);
   }
-  return { issueNumbers: issues };
+  return { issueIds: issues };
 }
 
 async function main(): Promise<void> {
-  const { issueNumbers } = parseArgs(process.argv);
+  const { issueIds } = parseArgs(process.argv);
 
   const workDir = await resolveRepoRoot();
   const configDir = join(workDir, DEFAULT_CONFIG_DIR_NAME);
@@ -81,9 +81,9 @@ async function main(): Promise<void> {
   });
 
   // Enqueue each issue
-  for (const issueNumber of issueNumbers) {
-    handle.enqueue(config.pipeline, issueNumber);
-    console.log(`[watch] Enqueued issue #${issueNumber}`);
+  for (const issueId of issueIds) {
+    handle.enqueue(config.pipeline, issueId);
+    console.log(`[watch] Enqueued issue ${issueId}`);
   }
 
   // Poll until the queue drains

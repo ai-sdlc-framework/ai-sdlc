@@ -455,6 +455,6 @@ describe('executeFixCI()', () => {
         _ciLogs: 'some error',
         auditLog,
       }),
-    ).rejects.toThrow('does not match ai-sdlc/issue-N pattern');
+    ).rejects.toThrow('does not match ai-sdlc/issue-<id> pattern');
   });
 });

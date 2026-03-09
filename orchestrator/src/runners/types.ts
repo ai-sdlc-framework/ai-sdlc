@@ -8,7 +8,9 @@ import type { AgentMemory } from '@ai-sdlc/reference';
 import type { CodebaseContext } from '../analysis/types.js';
 
 export interface AgentContext {
-  issueNumber: number;
+  issueId: string;
+  /** @deprecated Use `issueId` instead. Populated for numeric IDs only. */
+  issueNumber?: number;
   issueTitle: string;
   issueBody: string;
   workDir: string;

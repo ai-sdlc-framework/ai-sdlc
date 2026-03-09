@@ -4,6 +4,7 @@ import type { AgentContext } from './types.js';
 
 function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
+    issueId: '42',
     issueNumber: 42,
     issueTitle: 'Fix bug',
     issueBody: 'Fix the flaky test',

@@ -157,7 +157,7 @@ export class CodexRunner implements AgentRunner {
       const tmpl = ctx.commitMessageTemplate ?? DEFAULT_COMMIT_MESSAGE_TEMPLATE;
       const coAuthor = ctx.commitCoAuthor ?? DEFAULT_COMMIT_CO_AUTHOR;
       const commitMsg = tmpl
-        .replace(/\{issueNumber\}/g, String(ctx.issueNumber))
+        .replace(/\{issueNumber\}/g, ctx.issueId)
         .replace(/\{issueTitle\}/g, ctx.issueTitle);
       await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
 

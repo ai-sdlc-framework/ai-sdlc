@@ -33,6 +33,9 @@ export {
   evaluatePipelineCompliance,
   authorizeFilesChanged,
   extractIssueNumber,
+  extractIssueId,
+  issueIdToNumber,
+  formatIssueRef,
   BRANCH_PATTERN,
   createAbacPermissionHook,
   createBlockedPathsHook,
@@ -199,6 +202,7 @@ export {
   createPipelineWebhookBridge,
   resolveAdapterFromGit,
   resolveInfrastructure,
+  resolveIssueTrackerFromConfig,
   scanPipelineAdapters,
 } from './adapters.js';
 

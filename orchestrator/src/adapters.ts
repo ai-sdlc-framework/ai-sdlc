@@ -10,6 +10,8 @@ import {
   DEFAULT_DOCKER_IMAGE,
   DEFAULT_WORKFLOW_FILE,
 } from './defaults.js';
+import type { AiSdlcConfig } from './config.js';
+
 import {
   // Registry & scanner (used in function bodies)
   createAdapterRegistry,
@@ -44,7 +46,17 @@ import {
   resolveGitAdapter,
   // GitHub CI adapter
   createGitHubCIPipeline,
+  // GitHub issue tracker
+  createGitHubIssueTracker,
+  // Composite issue tracker
+  createCompositeIssueTracker,
+  // Production adapters (for resolveIssueTrackerFromConfig)
+  createJiraIssueTracker,
+  createLinearIssueTracker,
   // Types (used in function signatures)
+  type IssueTracker,
+  type BackendRoute,
+  type JiraConfig,
   type AdapterRegistry,
   type AdapterMetadata,
   type ScanOptions,
@@ -262,6 +274,74 @@ export function createPipelineCIAdapter(): CIPipeline {
     token: { secretRef: 'github-token' },
     workflowFile: process.env.AI_SDLC_WORKFLOW_FILE ?? DEFAULT_WORKFLOW_FILE,
   });
+}
+
+// ── Issue tracker resolution from config ────────────────────────────
+
+/**
+ * Resolve an IssueTracker from the adapterBindings in config.
+ *
+ * - 0 bindings → falls back to GitHub IssueTracker
+ * - 1 binding → returns that tracker directly
+ * - N bindings → wraps in CompositeIssueTracker
+ */
+export function resolveIssueTrackerFromConfig(
+  config: AiSdlcConfig,
+  fallbackGitHubConfig: { org: string; repo: string; token: { secretRef: string } },
+): IssueTracker {
+  const bindings = (config.adapterBindings ?? []).filter(
+    (b) => b.spec.interface === 'IssueTracker',
+  );
+
+  if (bindings.length === 0) {
+    return createGitHubIssueTracker(fallbackGitHubConfig);
+  }
+
+  const backends: BackendRoute[] = bindings.map((binding) => {
+    const cfg = binding.spec.config ?? {};
+    switch (binding.spec.type) {
+      case 'backlog-md':
+        return {
+          prefix: (cfg.taskPrefix as string) ?? 'AISDLC',
+          adapter: createBacklogMdIssueTracker({
+            backlogDir: (cfg.backlogDir as string) ?? './backlog',
+            taskPrefix: cfg.taskPrefix as string | undefined,
+          }),
+        };
+      case 'github':
+        return {
+          prefix: null,
+          adapter: createGitHubIssueTracker({
+            org: (cfg.org as string) ?? fallbackGitHubConfig.org,
+            repo: (cfg.repo as string) ?? fallbackGitHubConfig.repo,
+            token: fallbackGitHubConfig.token,
+          }),
+        };
+      case 'jira':
+        return {
+          prefix: (cfg.projectKey as string) ?? null,
+          adapter: createJiraIssueTracker(cfg as unknown as JiraConfig),
+        };
+      case 'linear':
+        return {
+          prefix: (cfg.teamKey as string) ?? null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          adapter: createLinearIssueTracker(cfg as any),
+        };
+      default:
+        // Unknown type — fall back to GitHub
+        return {
+          prefix: null,
+          adapter: createGitHubIssueTracker(fallbackGitHubConfig),
+        };
+    }
+  });
+
+  if (backends.length === 1) {
+    return backends[0].adapter;
+  }
+
+  return createCompositeIssueTracker({ backends });
 }
 
 // Direct re-exports (passthrough)

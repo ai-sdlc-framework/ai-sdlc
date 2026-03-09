@@ -126,11 +126,12 @@ export class StateStore {
 
   saveEpisodicRecord(record: EpisodicRecord): number {
     const stmt = this.db.prepare(`
-      INSERT INTO episodic_memory (issue_number, pr_number, pipeline_type, outcome, duration_ms, files_changed, error_message, metadata,
+      INSERT INTO episodic_memory (issue_id, issue_number, pr_number, pipeline_type, outcome, duration_ms, files_changed, error_message, metadata,
         agent_name, complexity_score, routing_strategy, gate_pass_count, gate_fail_count, cost_usd, is_regression, related_episodes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
+      record.issueId ?? null,
       record.issueNumber ?? null,
       record.prNumber ?? null,
       record.pipelineType,
@@ -164,6 +165,7 @@ export class StateStore {
   private mapEpisodicRecord(row: Record<string, unknown>): EpisodicRecord {
     return {
       id: row.id as number,
+      issueId: row.issue_id as string | undefined,
       issueNumber: row.issue_number as number | undefined,
       prNumber: row.pr_number as number | undefined,
       pipelineType: row.pipeline_type as string,
@@ -260,12 +262,13 @@ export class StateStore {
 
   savePipelineRun(run: PipelineRun): number {
     const stmt = this.db.prepare(`
-      INSERT INTO pipeline_runs (run_id, issue_number, pr_number, pipeline_type, status, current_stage, result, gate_results,
+      INSERT INTO pipeline_runs (run_id, issue_id, issue_number, pr_number, pipeline_type, status, current_stage, result, gate_results,
         cost_usd, tokens_used, model, agent_name, complexity_score)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       run.runId,
+      run.issueId ?? null,
       run.issueNumber ?? null,
       run.prNumber ?? null,
       run.pipelineType,
@@ -330,6 +333,7 @@ export class StateStore {
     return {
       id: row.id as number,
       runId: row.run_id as string,
+      issueId: row.issue_id as string | undefined,
       issueNumber: row.issue_number as number | undefined,
       prNumber: row.pr_number as number | undefined,
       pipelineType: row.pipeline_type as string,
@@ -430,10 +434,11 @@ export class StateStore {
 
   saveRoutingDecision(decision: RoutingDecision): number {
     const stmt = this.db.prepare(`
-      INSERT INTO routing_history (issue_number, task_complexity, codebase_complexity, routing_strategy, agent_name, reason)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO routing_history (issue_id, issue_number, task_complexity, codebase_complexity, routing_strategy, agent_name, reason)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
+      decision.issueId ?? null,
       decision.issueNumber ?? null,
       decision.taskComplexity,
       decision.codebaseComplexity,
@@ -454,6 +459,7 @@ export class StateStore {
   private mapRoutingDecision(row: Record<string, unknown>): RoutingDecision {
     return {
       id: row.id as number,
+      issueId: row.issue_id as string | undefined,
       issueNumber: row.issue_number as number | undefined,
       taskComplexity: row.task_complexity as number,
       codebaseComplexity: row.codebase_complexity as number,
@@ -468,8 +474,8 @@ export class StateStore {
 
   saveCostEntry(entry: CostLedgerEntry): number {
     const stmt = this.db.prepare(`
-      INSERT INTO cost_ledger (run_id, agent_name, pipeline_type, model, input_tokens, output_tokens, total_tokens, cost_usd, issue_number, pr_number, stage_name, cache_read_tokens)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO cost_ledger (run_id, agent_name, pipeline_type, model, input_tokens, output_tokens, total_tokens, cost_usd, issue_id, issue_number, pr_number, stage_name, cache_read_tokens)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       entry.runId,
@@ -480,6 +486,7 @@ export class StateStore {
       entry.outputTokens ?? 0,
       entry.totalTokens ?? 0,
       entry.costUsd ?? 0,
+      entry.issueId ?? null,
       entry.issueNumber ?? null,
       entry.prNumber ?? null,
       entry.stageName ?? null,
@@ -548,6 +555,7 @@ export class StateStore {
       outputTokens: row.output_tokens as number | undefined,
       totalTokens: row.total_tokens as number | undefined,
       costUsd: row.cost_usd as number | undefined,
+      issueId: row.issue_id as string | undefined,
       issueNumber: row.issue_number as number | undefined,
       prNumber: row.pr_number as number | undefined,
       stageName: row.stage_name as string | undefined,

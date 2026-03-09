@@ -44,7 +44,7 @@ describe('startWatch()', () => {
     });
 
     const pipeline = makePipeline('test-pipeline');
-    handle.enqueue(pipeline, 42);
+    handle.enqueue(pipeline, '42');
 
     // The item should be processing (active) or queued
     // Since the loop is running, it may immediately start processing
@@ -57,9 +57,9 @@ describe('startWatch()', () => {
     });
 
     const pipeline = makePipeline('test-pipeline');
-    handle.enqueue(pipeline, 42);
+    handle.enqueue(pipeline, '42');
     // Same spec — should not add a second queue entry
-    handle.enqueue(pipeline, 42);
+    handle.enqueue(pipeline, '42');
 
     handle.stop();
   });
@@ -72,7 +72,7 @@ describe('startWatch()', () => {
     });
 
     const pipeline = makePipeline('callback-test');
-    handle.enqueue(pipeline, 42);
+    handle.enqueue(pipeline, '42');
 
     // Give the async reconciliation a tick to complete
     await new Promise((resolve) => setTimeout(resolve, 50));

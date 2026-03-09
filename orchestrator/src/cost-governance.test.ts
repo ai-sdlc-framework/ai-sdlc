@@ -46,6 +46,7 @@ function makeNotificationRouter(): NotificationRouter {
 function makeEvent() {
   return {
     runId: 'run-1',
+    issueId: '42',
     issueNumber: 42,
     startedAt: new Date().toISOString(),
   };
@@ -209,6 +210,7 @@ describe('CostGovernancePlugin', () => {
 
       await plugin.afterRun({
         runId: 'run-1',
+        issueId: '42',
         issueNumber: 42,
         result: { prUrl: 'url', filesChanged: [], promotionEligible: false },
         durationMs: 1000,
@@ -239,6 +241,7 @@ describe('CostGovernancePlugin', () => {
 
       await plugin.afterRun({
         runId: 'run-1',
+        issueId: '42',
         issueNumber: 42,
         result: { prUrl: 'url', filesChanged: [], promotionEligible: false },
         durationMs: 1000,
@@ -265,6 +268,7 @@ describe('CostGovernancePlugin', () => {
 
       await plugin.afterRun({
         runId: 'run-1',
+        issueId: '42',
         issueNumber: 42,
         result: { prUrl: 'url', filesChanged: [], promotionEligible: false },
         durationMs: 1000,
@@ -294,6 +298,7 @@ describe('CostGovernancePlugin', () => {
 
       await plugin.afterRun({
         runId: 'run-1',
+        issueId: '42',
         issueNumber: 42,
         result: { prUrl: 'url', filesChanged: [], promotionEligible: false },
         durationMs: 1000,
