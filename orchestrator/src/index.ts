@@ -17,6 +17,7 @@ export {
 export { createLogger, type Logger } from './logger.js';
 export { validateConfigFiles, type FileValidationResult } from './validate-config.js';
 export { executeFixCI, countRetryAttempts, fetchCILogs, type FixCIOptions } from './fix-ci.js';
+export { executeTriage, type TriageOptions, type TriageResult } from './triage.js';
 
 // Shared utilities
 export {
@@ -250,11 +251,14 @@ export {
   CodexRunner,
   RunnerRegistry,
   createRunnerRegistry,
+  SecurityTriageRunner,
   type AgentRunner,
   type AgentContext,
   type AgentResult,
   type GenericLLMConfig,
   type RegisteredRunner,
+  type SecurityTriageConfig,
+  type TriageVerdict,
 } from './runners/index.js';
 
 // Runners (additional type)

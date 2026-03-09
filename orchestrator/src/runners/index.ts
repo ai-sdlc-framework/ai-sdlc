@@ -9,3 +9,9 @@ export { CopilotRunner } from './copilot.js';
 export { CursorRunner } from './cursor.js';
 export { CodexRunner } from './codex.js';
 export { RunnerRegistry, createRunnerRegistry, type RegisteredRunner } from './runner-registry.js';
+export {
+  SecurityTriageRunner,
+  type SecurityTriageConfig,
+  type TriageVerdict,
+  TRIAGE_SYSTEM_PROMPT,
+} from './security-triage.js';
