@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "ai-sdlc": {
+      "command": "npx",
+      "args": ["-y", "@ai-sdlc/mcp-advisor"]
+    }
+  }
+}
