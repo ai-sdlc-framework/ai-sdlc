@@ -52,13 +52,35 @@ jobs:
     permissions:
       issues: write
     steps:
-      - name: Parse verdict and post comment
+      - name: Validate and post verdict
         uses: actions/github-script@v7
         env:
           VERDICT_JSON: ${{ needs.analyze.outputs.verdict }}
         with:
           script: |
-            const verdict = JSON.parse(process.env.VERDICT_JSON);
+            // ── Schema validation ─────────────────────────────────────
+            // Reject malformed output from Job 1 — defense against
+            // output injection or LLM response manipulation.
+            let verdict;
+            try {
+              verdict = JSON.parse(process.env.VERDICT_JSON || '');
+            } catch {
+              core.setFailed('Verdict output is not valid JSON — rejecting as suspicious');
+              verdict = { safe: false, riskScore: 8, findings: ['Verdict output failed JSON parsing'], rationale: 'Malformed triage output', sanitizedDescription: '' };
+            }
+
+            // Verify expected fields and types
+            if (typeof verdict.safe !== 'boolean' ||
+                typeof verdict.riskScore !== 'number' ||
+                !Array.isArray(verdict.findings) ||
+                typeof verdict.rationale !== 'string') {
+              core.warning('Verdict schema mismatch — overriding to suspicious');
+              verdict = { safe: false, riskScore: 8, findings: ['Verdict output has unexpected schema'], rationale: 'Triage output did not match expected structure', sanitizedDescription: '' };
+            }
+
+            // Clamp risk score to valid range
+            verdict.riskScore = Math.max(0, Math.min(10, verdict.riskScore));
+
             const threshold = 6;
             const rejected = verdict.riskScore >= threshold;
             const icon = rejected ? '🚨' : verdict.riskScore >= 3 ? '⚠️' : '✅';
