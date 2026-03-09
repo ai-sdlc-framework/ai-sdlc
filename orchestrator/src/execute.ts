@@ -114,6 +114,8 @@ import {
   scanPipelineAdapters,
   resolveIssueTrackerFromConfig,
 } from './adapters.js';
+import { existsSync, readFileSync, appendFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   defaultSandboxConstraints,
   DEFAULT_CONFIG_DIR_NAME,
@@ -508,6 +510,10 @@ async function executePipelineBody(
       log.info(`Model selected: ${modelResult.model} (${modelResult.reason})`);
     }
   }
+
+  // 8b. Ensure .gitignore covers runtime artifacts so the agent doesn't
+  //     re-add entries on every run.
+  ensureRuntimeGitignore(workDir);
 
   // 9. Invoke agent (with sandbox + JIT credential lifecycle when security is provided)
   log.stage('agent');
@@ -1103,5 +1109,31 @@ function runPipelineDiagnostics(input: DiagnosticsInput): void {
     void loadAuditEntries(auditPath).catch(() => {});
     // Note: rotateAuditLog intentionally omitted — it truncates the file,
     // which would empty it before artifact upload can capture the contents.
+  }
+}
+
+// ── Gitignore helper ─────────────────────────────────────────────────
+
+const RUNTIME_GITIGNORE_ENTRIES = [
+  '# AI-SDLC runtime artifacts',
+  '.ai-sdlc/state.db',
+  '.ai-sdlc/state/',
+  '.ai-sdlc/audit.jsonl',
+];
+
+/**
+ * Ensure .gitignore in the working directory covers AI-SDLC runtime artifacts.
+ * Without this the agent sees untracked runtime files and appends duplicate
+ * gitignore entries on every run.
+ */
+function ensureRuntimeGitignore(workDir: string): void {
+  try {
+    const gitignorePath = join(workDir, '.gitignore');
+    const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
+    const missing = RUNTIME_GITIGNORE_ENTRIES.filter((entry) => !existing.includes(entry));
+    if (missing.length === 0) return;
+    appendFileSync(gitignorePath, '\n' + missing.join('\n') + '\n', 'utf-8');
+  } catch {
+    // Best-effort — workDir may not exist yet in tests or dry-run scenarios
   }
 }
