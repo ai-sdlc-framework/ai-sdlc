@@ -4,15 +4,17 @@ on:
   issues:
     types: [labeled]
 
-permissions:
-  contents: read
-  issues: write
-
 jobs:
-  triage:
-    name: Security Triage
+  # ── Job 1: Analyze ─────────────────────────────────────────────────
+  # Has ANTHROPIC_API_KEY only. No GitHub write access.
+  # Even if the LLM response is compromised, this job cannot touch the repo.
+  analyze:
+    name: Analyze Issue
     runs-on: ubuntu-latest
     if: github.event.label.name == 'security-triage'
+    permissions: {} # No permissions — fully sandboxed
+    outputs:
+      verdict: ${{ steps.triage.outputs.verdict }}
     steps:
       - uses: actions/checkout@v4
 
@@ -27,16 +29,100 @@ jobs:
 
       - run: pnpm build
 
-      - name: Run security triage
+      - name: Run triage analysis
+        id: triage
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: pnpm --filter @ai-sdlc/dogfood triage --issue ${{ github.event.issue.number }}
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          VERDICT=$(pnpm --filter @ai-sdlc/dogfood triage \
+            --title "$ISSUE_TITLE" \
+            --body "$ISSUE_BODY" \
+            --dry-run 2>/dev/null | tail -1)
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
 
-      - name: Comment on failure
-        if: failure()
+  # ── Job 2: Report ──────────────────────────────────────────────────
+  # Has GITHUB_TOKEN only. No Anthropic key. Cannot call any LLM.
+  # Posts the verdict comment and applies labels.
+  report:
+    name: Post Results
+    runs-on: ubuntu-latest
+    needs: analyze
+    permissions:
+      issues: write
+    steps:
+      - name: Parse verdict and post comment
+        uses: actions/github-script@v7
+        env:
+          VERDICT_JSON: ${{ needs.analyze.outputs.verdict }}
+        with:
+          script: |
+            const verdict = JSON.parse(process.env.VERDICT_JSON);
+            const threshold = 6;
+            const rejected = verdict.riskScore >= threshold;
+            const icon = rejected ? '🚨' : verdict.riskScore >= 3 ? '⚠️' : '✅';
+            const status = rejected ? 'REJECTED' : 'PASSED';
+
+            let body = `## ${icon} Security Triage: ${status}\n\n`;
+            body += `**Risk Score:** ${verdict.riskScore}/10\n`;
+            body += `**Safe:** ${verdict.safe}\n\n`;
+
+            if (verdict.findings && verdict.findings.length > 0) {
+              body += `### Findings\n\n`;
+              for (const f of verdict.findings) {
+                body += `- ${f}\n`;
+              }
+              body += '\n';
+            }
+
+            body += `### Rationale\n\n${verdict.rationale}\n\n`;
+
+            if (rejected) {
+              body += '---\n';
+              body += '> This issue has been automatically rejected due to a high risk score.\n';
+              body += '> A maintainer may override this by removing the `security-rejected` label\n';
+              body += '> and manually applying `ai-ready` after review.\n';
+            } else {
+              body += '---\n';
+              body += '> This issue passed automated security triage.\n';
+              body += '> A maintainer must still manually apply the `ai-ready` label to enable AI processing.\n';
+            }
+
+            body += '\n*Analyzed by [AI-SDLC Security Triage](https://github.com/ai-sdlc-framework/ai-sdlc)*';
+
+            // Post comment
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body
+            });
+
+            // Apply label
+            const label = rejected ? 'security-rejected' : 'triage-passed';
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+            });
+            const currentLabels = issue.data.labels
+              .map(l => typeof l === 'string' ? l : l.name)
+              .filter(l => l && l !== 'security-rejected' && l !== 'triage-passed');
+            currentLabels.push(label);
+
+            await github.rest.issues.setLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              labels: currentLabels
+            });
+
+            core.info(`Applied label: ${label}`);
+            core.info(`Risk score: ${verdict.riskScore}/10, Rejected: ${rejected}`);
+
+      - name: Comment on analyze failure
+        if: needs.analyze.result == 'failure'
         uses: actions/github-script@v7
         with:
           script: |

@@ -1,32 +1,85 @@
 #!/usr/bin/env node
 /**
  * CLI entry point for the security triage pipeline.
- * Usage: pnpm --filter @ai-sdlc/dogfood triage --issue 42
+ *
+ * Modes:
+ *   Full:     triage --issue 42
+ *   Analyze:  triage --title "..." --body "..." --dry-run
+ *             Outputs verdict JSON to stdout (no tracker needed).
  */
 
 import { executeTriage } from '@ai-sdlc/orchestrator';
 import { resolveRepoRoot } from '@ai-sdlc/orchestrator';
 
-function parseArgs(argv: string[]): { issueId: string } {
-  const idx = argv.indexOf('--issue');
-  if (idx === -1 || idx + 1 >= argv.length) {
+interface TriageArgs {
+  issueId?: string;
+  title?: string;
+  body?: string;
+  dryRun: boolean;
+}
+
+function getArg(argv: string[], flag: string): string | undefined {
+  const idx = argv.indexOf(flag);
+  if (idx === -1 || idx + 1 >= argv.length) return undefined;
+  return argv[idx + 1];
+}
+
+function parseArgs(argv: string[]): TriageArgs {
+  const issueId = getArg(argv, '--issue')?.trim();
+  const title = getArg(argv, '--title');
+  const body = getArg(argv, '--body');
+  const dryRun = argv.includes('--dry-run');
+
+  if (!issueId && !title) {
     console.error('Usage: triage --issue <id>');
+    console.error('       triage --title "..." --body "..." --dry-run');
     process.exit(1);
   }
-  const issueId = argv[idx + 1].trim();
-  if (!issueId) {
-    console.error(`Invalid issue ID: ${argv[idx + 1]}`);
-    process.exit(1);
-  }
-  return { issueId };
+
+  return { issueId, title, body, dryRun };
 }
 
 async function main(): Promise<void> {
-  const { issueId } = parseArgs(process.argv);
+  const args = parseArgs(process.argv);
   const workDir = await resolveRepoRoot();
 
+  // Analyze-only mode: pass title/body directly, skip tracker
+  if (args.title) {
+    const { SecurityTriageRunner } = await import('@ai-sdlc/orchestrator');
+    const runner = new SecurityTriageRunner();
+    const result = await runner.run({
+      issueId: args.issueId ?? '0',
+      issueTitle: args.title,
+      issueBody: args.body ?? '',
+      workDir,
+      branch: 'main',
+      constraints: { maxFilesPerChange: 0, requireTests: false, blockedPaths: ['**/*'] },
+    });
+
+    if (!result.success) {
+      // Output error verdict as JSON so the report job can handle it
+      const errorVerdict = {
+        safe: false,
+        riskScore: 7,
+        findings: ['Triage pipeline error — treating as suspicious'],
+        sanitizedDescription: '',
+        rationale: result.error ?? 'Unknown error',
+      };
+      console.log(JSON.stringify(errorVerdict));
+      process.exit(1);
+    }
+
+    // Output raw verdict JSON to stdout for the report job
+    console.log(result.summary);
+    return;
+  }
+
+  // Full mode: fetch issue from tracker, post comment, apply label
   try {
-    const result = await executeTriage(issueId, { workDir });
+    const result = await executeTriage(args.issueId!, {
+      workDir,
+      dryRun: args.dryRun,
+    });
 
     console.log('\n── Security Triage Result ──');
     console.log(`Issue:      ${result.issueId}`);
