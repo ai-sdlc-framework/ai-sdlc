@@ -420,7 +420,9 @@ async function executePipelineBody(
           ? renderTemplate(gateFailTpl, { details: failures }).title
           : NOTIFICATION_TITLES.issueValidationFailed;
         await tracker.addComment(issueId, `## ${gateFailTitle}\n\n${gateFailBody}`);
-        throw new Error(`Issue ${formatIssueRef(issueId)} failed quality gate validation`);
+        throw new Error(
+          `Issue ${formatIssueRef(issueId)} failed quality gate validation:\n${failures}`,
+        );
       }
 
       auditLog.record({
