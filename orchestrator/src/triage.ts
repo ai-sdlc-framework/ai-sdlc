@@ -8,10 +8,12 @@
  * must review the triage analysis and manually apply `ai-ready`.
  */
 
+import { join } from 'node:path';
 import type { IssueTracker } from '@ai-sdlc/reference';
 import { loadConfigAsync, type AiSdlcConfig } from './config.js';
 import { resolveIssueTrackerFromConfig } from './adapters.js';
 import { getGitHubConfig } from './shared.js';
+import { DEFAULT_CONFIG_DIR_NAME } from './defaults.js';
 import {
   SecurityTriageRunner,
   type SecurityTriageConfig,
@@ -113,7 +115,8 @@ export async function executeTriage(
   if (options.tracker) {
     tracker = options.tracker;
   } else {
-    const config: AiSdlcConfig = await loadConfigAsync(workDir);
+    const configDir = join(workDir, DEFAULT_CONFIG_DIR_NAME);
+    const config: AiSdlcConfig = await loadConfigAsync(configDir);
     const ghConfig = getGitHubConfig();
     tracker = resolveIssueTrackerFromConfig(config, {
       org: ghConfig.org,
