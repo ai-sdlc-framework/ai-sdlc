@@ -92,15 +92,31 @@ function serializeTask(frontmatter: TaskFrontmatter, body: string): string {
 }
 
 function mapToIssue(frontmatter: TaskFrontmatter, body: string, filePath: string): Issue {
+  const desc = extractDescription(body);
+  const ac = extractAcceptanceCriteria(body);
+  const fullDescription = ac ? `${desc}\n\n## Acceptance Criteria\n${ac}` : desc;
   return {
     id: frontmatter.id,
     title: frontmatter.title,
-    description: extractDescription(body),
+    description: fullDescription,
     status: frontmatter.status,
     labels: frontmatter.labels ?? [],
     assignee: Array.isArray(frontmatter.assignee) ? frontmatter.assignee[0] : frontmatter.assignee,
     url: `file://${filePath}`,
   };
+}
+
+function extractAcceptanceCriteria(body: string): string {
+  const acBegin = '<!-- AC:BEGIN -->';
+  const acEnd = '<!-- AC:END -->';
+  const beginIdx = body.indexOf(acBegin);
+  const endIdx = body.indexOf(acEnd);
+  if (beginIdx !== -1 && endIdx !== -1) {
+    return body.slice(beginIdx + acBegin.length, endIdx).trim();
+  }
+  // Fall back to ## Acceptance Criteria section
+  const acMatch = body.match(/## Acceptance Criteria\s*\n([\s\S]*?)(?=\n## |\n<!-- |$)/);
+  return acMatch ? acMatch[1].trim() : '';
 }
 
 function extractDescription(body: string): string {

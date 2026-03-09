@@ -6,6 +6,7 @@ import {
   createPipelineAdapterFetcher,
   createPipelineCIAdapter,
   resolveInfrastructure,
+  resolveIssueTrackerFromConfig,
   // Re-exports
   createGitHubCIPipeline,
   createDockerSandbox,
@@ -28,6 +29,8 @@ import {
   buildRawUrl,
   createStubGitAdapterFetcher,
 } from './adapters.js';
+import type { AiSdlcConfig } from './config.js';
+import type { AdapterBinding } from '@ai-sdlc/reference';
 
 describe('Adapter ecosystem', () => {
   describe('createPipelineAdapterRegistry()', () => {
@@ -268,6 +271,224 @@ describe('Adapter ecosystem', () => {
       expect(typeof ci.getBuildStatus).toBe('function');
       expect(typeof ci.getTestResults).toBe('function');
       expect(typeof ci.getCoverageReport).toBe('function');
+    });
+  });
+
+  describe('resolveIssueTrackerFromConfig()', () => {
+    let savedGithubToken: string | undefined;
+
+    beforeEach(() => {
+      savedGithubToken = process.env.GITHUB_TOKEN;
+      process.env.GITHUB_TOKEN = 'ghp_test_token_for_tracker';
+    });
+
+    afterEach(() => {
+      if (savedGithubToken === undefined) delete process.env.GITHUB_TOKEN;
+      else process.env.GITHUB_TOKEN = savedGithubToken;
+    });
+
+    const fallbackConfig = {
+      org: 'test-org',
+      repo: 'test-repo',
+      token: { secretRef: 'github-token' },
+    };
+
+    const createBinding = (
+      type: string,
+      config?: Record<string, unknown>,
+      name?: string,
+    ): AdapterBinding => ({
+      apiVersion: 'ai-sdlc.io/v1alpha1',
+      kind: 'AdapterBinding',
+      metadata: { name: name ?? `${type}-binding` },
+      spec: {
+        interface: 'IssueTracker',
+        type,
+        version: '1.0.0',
+        config,
+      },
+    });
+
+    it('returns GitHub tracker when no bindings exist', () => {
+      const config: AiSdlcConfig = {};
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
+      expect(typeof tracker.listIssues).toBe('function');
+    });
+
+    it('returns GitHub tracker when adapterBindings is empty array', () => {
+      const config: AiSdlcConfig = { adapterBindings: [] };
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
+    });
+
+    it('returns BacklogMd tracker for single backlog-md binding', () => {
+      const config: AiSdlcConfig = {
+        adapterBindings: [
+          createBinding('backlog-md', { backlogDir: './backlog', taskPrefix: 'AISDLC' }),
+        ],
+      };
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
+    });
+
+    it('returns GitHub tracker for single github binding', () => {
+      const config: AiSdlcConfig = {
+        adapterBindings: [createBinding('github', { org: 'my-org', repo: 'my-repo' })],
+      };
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
+    });
+
+    it('returns Jira tracker for single jira binding', () => {
+      const savedJiraToken = process.env.JIRA_TOKEN;
+      process.env.JIRA_TOKEN = 'jira_test_token';
+
+      try {
+        const config: AiSdlcConfig = {
+          adapterBindings: [
+            createBinding('jira', {
+              host: 'https://example.atlassian.net',
+              email: 'test@example.com',
+              token: { secretRef: 'jira-token' },
+              projectKey: 'PROJ',
+            }),
+          ],
+        };
+        const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+        expect(tracker).toBeDefined();
+        expect(typeof tracker.getIssue).toBe('function');
+      } finally {
+        if (savedJiraToken === undefined) delete process.env.JIRA_TOKEN;
+        else process.env.JIRA_TOKEN = savedJiraToken;
+      }
+    });
+
+    it('returns Linear tracker for single linear binding', () => {
+      const savedLinearKey = process.env.LINEAR_API_KEY;
+      process.env.LINEAR_API_KEY = 'lin_api_test_key_for_test';
+
+      try {
+        const config: AiSdlcConfig = {
+          adapterBindings: [
+            createBinding('linear', {
+              apiKey: { secretRef: 'linear-api-key' },
+              teamKey: 'ENG',
+            }),
+          ],
+        };
+        const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+        expect(tracker).toBeDefined();
+        expect(typeof tracker.getIssue).toBe('function');
+      } finally {
+        if (savedLinearKey === undefined) delete process.env.LINEAR_API_KEY;
+        else process.env.LINEAR_API_KEY = savedLinearKey;
+      }
+    });
+
+    it('returns GitHub tracker for single unknown type binding', () => {
+      const config: AiSdlcConfig = {
+        adapterBindings: [createBinding('unknown-tracker-type')],
+      };
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
+    });
+
+    it('returns CompositeIssueTracker for multiple bindings', () => {
+      const config: AiSdlcConfig = {
+        adapterBindings: [
+          createBinding('backlog-md', { backlogDir: './backlog', taskPrefix: 'AISDLC' }),
+          createBinding('github', { org: 'my-org', repo: 'my-repo' }),
+        ],
+      };
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
+      expect(typeof tracker.listIssues).toBe('function');
+    });
+
+    it('returns CompositeIssueTracker for three bindings', () => {
+      const savedJiraToken = process.env.JIRA_TOKEN;
+      process.env.JIRA_TOKEN = 'jira_test_token';
+
+      try {
+        const config: AiSdlcConfig = {
+          adapterBindings: [
+            createBinding('backlog-md', { backlogDir: './backlog', taskPrefix: 'AISDLC' }),
+            createBinding('github', { org: 'my-org', repo: 'my-repo' }),
+            createBinding('jira', {
+              host: 'https://example.atlassian.net',
+              email: 'test@example.com',
+              token: { secretRef: 'jira-token' },
+              projectKey: 'PROJ',
+            }),
+          ],
+        };
+        const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+        expect(tracker).toBeDefined();
+        expect(typeof tracker.getIssue).toBe('function');
+      } finally {
+        if (savedJiraToken === undefined) delete process.env.JIRA_TOKEN;
+        else process.env.JIRA_TOKEN = savedJiraToken;
+      }
+    });
+
+    it('filters out non-IssueTracker bindings', () => {
+      const config: AiSdlcConfig = {
+        adapterBindings: [
+          {
+            apiVersion: 'ai-sdlc.io/v1alpha1',
+            kind: 'AdapterBinding',
+            metadata: { name: 'ci-binding' },
+            spec: {
+              interface: 'CIPipeline',
+              type: 'github-actions',
+              version: '1.0.0',
+            },
+          },
+        ],
+      };
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      // Should fall back to GitHub since no IssueTracker bindings
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
+    });
+
+    it('uses fallback config for github binding when config is incomplete', () => {
+      const config: AiSdlcConfig = {
+        adapterBindings: [
+          createBinding('github', {}), // Empty config
+        ],
+      };
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
+    });
+
+    it('uses default backlogDir for backlog-md when not specified', () => {
+      const config: AiSdlcConfig = {
+        adapterBindings: [createBinding('backlog-md', {})],
+      };
+      const tracker = resolveIssueTrackerFromConfig(config, fallbackConfig);
+
+      expect(tracker).toBeDefined();
+      expect(typeof tracker.getIssue).toBe('function');
     });
   });
 });

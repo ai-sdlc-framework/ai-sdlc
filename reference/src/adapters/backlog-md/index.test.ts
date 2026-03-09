@@ -111,7 +111,8 @@ describe('createBacklogMdIssueTracker', () => {
     expect(issues[0]).toEqual({
       id: 'PROJ-1',
       title: 'Fix the login bug',
-      description: 'The login form throws an error when submitting empty fields.',
+      description:
+        'The login form throws an error when submitting empty fields.\n\n## Acceptance Criteria\n- [ ] #1 Fix validation',
       status: 'In Progress',
       labels: ['bug', 'auth'],
       assignee: 'alice',
