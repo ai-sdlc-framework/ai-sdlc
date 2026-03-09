@@ -2,6 +2,9 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   BRANCH_PATTERN,
   extractIssueNumber,
+  extractIssueId,
+  issueIdToNumber,
+  formatIssueRef,
   getGitHubConfig,
   resolveAutonomyLevel,
   mergeBlockedPaths,
@@ -90,6 +93,92 @@ describe('extractIssueNumber()', () => {
 
   it('returns null for partial match', () => {
     expect(extractIssueNumber('ai-sdlc/issue-')).toBeNull();
+  });
+});
+
+describe('extractIssueId()', () => {
+  it('extracts numeric issue ID from branch name', () => {
+    expect(extractIssueId('ai-sdlc/issue-42')).toBe('42');
+  });
+
+  it('extracts string issue ID from branch name', () => {
+    expect(extractIssueId('ai-sdlc/issue-AISDLC-3')).toBe('AISDLC-3');
+  });
+
+  it('extracts alphanumeric issue ID', () => {
+    expect(extractIssueId('ai-sdlc/issue-PROJECT-123')).toBe('PROJECT-123');
+  });
+
+  it('returns null for non-matching branch', () => {
+    expect(extractIssueId('feature/something')).toBeNull();
+  });
+
+  it('returns null for partial match', () => {
+    expect(extractIssueId('ai-sdlc/issue-')).toBeNull();
+  });
+
+  it('returns null for branch without issue prefix', () => {
+    expect(extractIssueId('ai-sdlc/feature-42')).toBeNull();
+  });
+});
+
+describe('issueIdToNumber()', () => {
+  it('returns number for numeric string', () => {
+    expect(issueIdToNumber('42')).toBe(42);
+  });
+
+  it('returns number for numeric string with leading zeros', () => {
+    expect(issueIdToNumber('007')).toBe(7);
+  });
+
+  it('returns null for non-numeric string', () => {
+    expect(issueIdToNumber('AISDLC-3')).toBeNull();
+  });
+
+  it('returns null for alphanumeric string', () => {
+    expect(issueIdToNumber('PROJECT-123')).toBeNull();
+  });
+
+  it('returns null for negative number', () => {
+    expect(issueIdToNumber('-42')).toBeNull();
+  });
+
+  it('returns null for zero', () => {
+    expect(issueIdToNumber('0')).toBeNull();
+  });
+
+  it('returns null for decimal number', () => {
+    expect(issueIdToNumber('42.5')).toBeNull();
+  });
+
+  it('returns null for empty string', () => {
+    expect(issueIdToNumber('')).toBeNull();
+  });
+});
+
+describe('formatIssueRef()', () => {
+  it('formats numeric ID with # prefix', () => {
+    expect(formatIssueRef('42')).toBe('#42');
+  });
+
+  it('formats string ID without modification', () => {
+    expect(formatIssueRef('AISDLC-3')).toBe('AISDLC-3');
+  });
+
+  it('formats alphanumeric ID without modification', () => {
+    expect(formatIssueRef('PROJECT-123')).toBe('PROJECT-123');
+  });
+
+  it('formats large numeric ID with # prefix', () => {
+    expect(formatIssueRef('9999')).toBe('#9999');
+  });
+
+  it('formats single digit numeric ID with # prefix', () => {
+    expect(formatIssueRef('1')).toBe('#1');
+  });
+
+  it('formats non-numeric ID without # prefix', () => {
+    expect(formatIssueRef('JIRA-42')).toBe('JIRA-42');
   });
 });
 
