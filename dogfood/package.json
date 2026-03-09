@@ -24,6 +24,7 @@
     "test:watch": "vitest",
     "execute": "tsx src/cli.ts",
     "fix-ci": "tsx src/cli-fix-ci.ts",
+    "triage": "tsx src/cli-triage.ts",
     "watch": "tsx src/cli-watch.ts"
   },
   "dependencies": {
