@@ -1,5 +1,29 @@
 # @ai-sdlc/orchestrator
 
+## [0.5.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.4.0...orchestrator-v0.5.0) (2026-03-09)
+
+
+### Features
+
+* add composite IssueTracker adapter for multi-backend routing ([0cf6a12](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0cf6a12cdb21a0592ff448156ea452c8c3ce3e55))
+* add security triage pipeline and backlog-drift hooks ([8859bf5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8859bf57a3096ffab98786a6f0d5ddbdf4b4ccfd))
+* support multiple AdapterBinding resources per repo ([5a0b39e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5a0b39e56dfb4f24be3c1b726b36201cb6cdad42))
+* support string issue IDs and config-driven tracker resolution ([56f3c95](https://github.com/ai-sdlc-framework/ai-sdlc/commit/56f3c95326da253a914f54613a3240147911b25c))
+
+
+### Bug Fixes
+
+* Add formatIssueRef and issueIdToNumber unit tests (#AISDLC-4) ([#24](https://github.com/ai-sdlc-framework/ai-sdlc/issues/24)) ([5f5f0cb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5f5f0cb3135ac2977780bb099a6ee106e9e316e9))
+* backlog adapter, runner lint/format, and gitignore dedup ([#25](https://github.com/ai-sdlc-framework/ai-sdlc/issues/25)) ([ae44805](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ae4480566181b3f715a7365bccff13968fc883ea))
+* use config dir path for triage config loading ([eaa3a7f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/eaa3a7fdca49ad2959243b0ce52ddf1309a15944))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.5.0
+
 ## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.3.0...orchestrator-v0.4.0) (2026-03-08)
 
 
