@@ -1,5 +1,19 @@
 # @ai-sdlc/conformance
 
+## [0.5.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.4.0...conformance/runner-v0.5.0) (2026-03-17)
+
+
+### Features
+
+* add test coverage reporting with Codecov ([f31137a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f31137a52f3c6ec317c68eef50403e05b2b1c19e))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.5.0
+
 ## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.3.0...conformance/runner-v0.4.0) (2026-03-08)
 
 

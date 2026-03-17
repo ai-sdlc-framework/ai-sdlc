@@ -1,5 +1,24 @@
 # @ai-sdlc/mcp-advisor
 
+## [0.5.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.4.0...mcp-advisor-v0.5.0) (2026-03-17)
+
+
+### Features
+
+* add test coverage reporting with Codecov ([f31137a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f31137a52f3c6ec317c68eef50403e05b2b1c19e))
+
+
+### Bug Fixes
+
+* resolve TypeScript build errors in test files ([c3cb763](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c3cb763c0c8635ccc243ceb04aadffc9c2ba57a0))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/orchestrator bumped to 0.5.0
+
 ## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/mcp-advisor-v0.3.0...mcp-advisor-v0.4.0) (2026-03-08)
 
 
