@@ -131,4 +131,39 @@ describe('handleCheckTask', () => {
     const result = handleCheckTask(deps, { issueNumber: 1 });
     expect(result.constraints).toEqual([]);
   });
+
+  it('reports running pipeline status with current stage', () => {
+    deps.store.savePipelineRun({
+      runId: 'run-2',
+      issueNumber: 20,
+      pipelineType: 'execute',
+      status: 'running',
+      currentStage: 'lint',
+    });
+
+    const result = handleCheckTask(deps, { issueNumber: 20 });
+    expect(result.advisoryNotes.some((n) => n.includes('currently running'))).toBe(true);
+    expect(result.advisoryNotes.some((n) => n.includes('lint'))).toBe(true);
+  });
+
+  it('reports running pipeline with unknown stage when currentStage is missing', () => {
+    deps.store.savePipelineRun({
+      runId: 'run-3',
+      issueNumber: 30,
+      pipelineType: 'execute',
+      status: 'running',
+    });
+
+    const result = handleCheckTask(deps, { issueNumber: 30 });
+    expect(result.advisoryNotes.some((n) => n.includes('unknown'))).toBe(true);
+  });
+
+  it('uses active session linked issue when no explicit input', () => {
+    const session = deps.sessions.create({ developer: 'b', tool: 'claude-code' });
+    deps.sessions.linkIssue(session.sessionId, 77, 'explicit');
+
+    // No sessionId or issueNumber in input — should fall back to active session
+    const result = handleCheckTask(deps, {});
+    expect(result.issueNumber).toBe(77);
+  });
 });

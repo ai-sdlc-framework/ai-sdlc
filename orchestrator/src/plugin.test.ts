@@ -189,3 +189,118 @@ describe('Orchestrator plugins', () => {
     await orch.close();
   });
 });
+
+/**
+ * Type-level tests — verify the plugin interfaces compile correctly
+ * with representative values and have expected shapes.
+ */
+describe('Plugin type shapes', () => {
+  it('PluginContext requires only log, all others optional', () => {
+    const log = {
+      stage: () => {},
+      stageEnd: () => {},
+      info: () => {},
+      error: () => {},
+      summary: () => {},
+    };
+    const ctx: PluginContext = { log };
+    expect(ctx.log).toBeDefined();
+    expect(ctx.store).toBeUndefined();
+    expect(ctx.costTracker).toBeUndefined();
+    expect(ctx.autonomyTracker).toBeUndefined();
+    expect(ctx.notificationRouter).toBeUndefined();
+  });
+
+  it('BeforeRunEvent has required fields', () => {
+    const event: BeforeRunEvent = {
+      runId: 'run-1',
+      issueId: 'ISSUE-42',
+      startedAt: '2026-03-17T00:00:00Z',
+    };
+    expect(event.runId).toBe('run-1');
+    expect(event.issueId).toBe('ISSUE-42');
+    expect(event.startedAt).toBe('2026-03-17T00:00:00Z');
+    expect(event.issueNumber).toBeUndefined();
+  });
+
+  it('AfterRunEvent carries result and durationMs', () => {
+    const event: AfterRunEvent = {
+      runId: 'run-2',
+      issueId: 'ISSUE-10',
+      result: {
+        prUrl: 'https://example.com/pr/1',
+        filesChanged: ['a.ts'],
+        promotionEligible: true,
+      },
+      durationMs: 5000,
+    };
+    expect(event.result.prUrl).toBe('https://example.com/pr/1');
+    expect(event.durationMs).toBe(5000);
+  });
+
+  it('RunErrorEvent carries error and durationMs', () => {
+    const event: RunErrorEvent = {
+      runId: 'run-3',
+      issueId: 'ISSUE-20',
+      error: new Error('boom'),
+      durationMs: 3000,
+    };
+    expect(event.error.message).toBe('boom');
+    expect(event.durationMs).toBe(3000);
+  });
+
+  it('OrchestratorPlugin requires only name', () => {
+    const plugin: OrchestratorPlugin = { name: 'minimal' };
+    expect(plugin.name).toBe('minimal');
+    expect(plugin.initialize).toBeUndefined();
+    expect(plugin.beforeRun).toBeUndefined();
+    expect(plugin.afterRun).toBeUndefined();
+    expect(plugin.onError).toBeUndefined();
+    expect(plugin.shutdown).toBeUndefined();
+  });
+
+  it('OrchestratorPlugin hooks accept sync and async signatures', () => {
+    const syncPlugin: OrchestratorPlugin = {
+      name: 'sync',
+      initialize: () => {},
+      beforeRun: () => {},
+      afterRun: () => {},
+      onError: () => {},
+      shutdown: () => {},
+    };
+    expect(syncPlugin.name).toBe('sync');
+
+    const asyncPlugin: OrchestratorPlugin = {
+      name: 'async',
+      initialize: async () => {},
+      beforeRun: async () => {},
+      afterRun: async () => {},
+      onError: async () => {},
+      shutdown: async () => {},
+    };
+    expect(asyncPlugin.name).toBe('async');
+  });
+
+  it('deprecated issueNumber is optional on all event types', () => {
+    const before: BeforeRunEvent = { runId: 'r', issueId: 'i', issueNumber: 7, startedAt: '' };
+    expect(before.issueNumber).toBe(7);
+
+    const after: AfterRunEvent = {
+      runId: 'r',
+      issueId: 'i',
+      issueNumber: 8,
+      result: { prUrl: '', filesChanged: [], promotionEligible: false },
+      durationMs: 0,
+    };
+    expect(after.issueNumber).toBe(8);
+
+    const err: RunErrorEvent = {
+      runId: 'r',
+      issueId: 'i',
+      issueNumber: 9,
+      error: new Error('x'),
+      durationMs: 0,
+    };
+    expect(err.issueNumber).toBe(9);
+  });
+});

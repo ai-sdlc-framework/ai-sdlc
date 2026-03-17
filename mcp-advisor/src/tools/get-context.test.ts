@@ -87,4 +87,109 @@ describe('handleGetContext', () => {
     expect(result.markdown).toContain('Conventions');
     expect(result.markdown).not.toContain('Hotspots');
   });
+
+  it('uses session linked issue for history', () => {
+    const session = deps.sessions.create({ developer: 'alice', tool: 'claude-code' });
+    deps.sessions.linkIssue(session.sessionId, 42, 'branch');
+
+    deps.store.saveEpisodicRecord({
+      issueNumber: 42,
+      pipelineType: 'interactive',
+      outcome: 'completed',
+      agentName: 'alice',
+    });
+
+    const result = handleGetContext(deps, { sessionId: session.sessionId, sections: ['history'] });
+    expect(result.sections).toContain('history');
+  });
+
+  it('returns all sections when none specified', () => {
+    const result = handleGetContext(deps, {});
+    expect(result.sections).toContain('profile');
+    expect(result.sections).toContain('conventions');
+    expect(result.sections).toContain('hotspots');
+    expect(result.sections).toContain('patterns');
+    expect(result.sections).toContain('history');
+  });
+
+  it('handles profile with rawData containing modules and moduleGraph', () => {
+    deps.store.saveComplexityProfile({
+      repoPath: '/test/repo',
+      score: 6,
+      filesCount: 80,
+      modulesCount: 4,
+      dependencyCount: 15,
+      rawData: JSON.stringify({
+        modules: [{ name: 'core', path: 'src/core' }],
+        moduleGraph: {
+          modules: [{ path: 'src/core' }],
+          edges: [],
+          externalDependencies: [],
+          cycles: [],
+        },
+      }),
+      architecturalPatterns: JSON.stringify([]),
+      hotspots: JSON.stringify([]),
+      conventionsData: JSON.stringify([]),
+    });
+
+    const result = handleGetContext(deps, { sections: ['profile'] });
+    expect(result.markdown).toContain('Codebase Context');
+  });
+
+  it('handles profile with invalid JSON in rawData', () => {
+    deps.store.saveComplexityProfile({
+      repoPath: '/test/repo',
+      score: 5,
+      filesCount: 50,
+      modulesCount: 3,
+      dependencyCount: 10,
+      rawData: 'NOT JSON',
+      architecturalPatterns: JSON.stringify([]),
+      hotspots: JSON.stringify([]),
+      conventionsData: JSON.stringify([]),
+    });
+
+    // Should not throw
+    const result = handleGetContext(deps, { sections: ['profile'] });
+    expect(result.markdown).toBeTruthy();
+  });
+
+  it('handles profile with missing optional fields gracefully', () => {
+    deps.store.saveComplexityProfile({
+      repoPath: '/test/repo',
+      score: 5,
+      filesCount: 50,
+      modulesCount: 3,
+      dependencyCount: 10,
+      // No architecturalPatterns, hotspots, or conventionsData
+    });
+
+    // Should still produce profile context without crashing
+    const result = handleGetContext(deps, { sections: ['profile'] });
+    expect(result.markdown).toContain('Codebase Context');
+  });
+
+  it('includes patterns section when requested', () => {
+    deps.store.saveComplexityProfile({
+      repoPath: '/test/repo',
+      score: 7,
+      filesCount: 100,
+      modulesCount: 5,
+      dependencyCount: 20,
+      architecturalPatterns: JSON.stringify([
+        {
+          name: 'Layered Architecture',
+          confidence: 0.9,
+          description: 'Clear layer separation',
+          evidence: [],
+        },
+      ]),
+      hotspots: JSON.stringify([]),
+      conventionsData: JSON.stringify([]),
+    });
+
+    const result = handleGetContext(deps, { sections: ['patterns'] });
+    expect(result.markdown).toContain('Layered Architecture');
+  });
 });

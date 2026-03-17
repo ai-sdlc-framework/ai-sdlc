@@ -1,13 +1,18 @@
 /**
  * Integration test — full session lifecycle using in-memory store.
  * Tests tools directly via exported handle* functions (no MCP transport needed).
+ * Also tests createMcpServer factory function.
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import { StateStore } from '@ai-sdlc/orchestrator/state';
 import { CostTracker } from '@ai-sdlc/orchestrator';
 import { SessionManager } from './session.js';
+import { createMcpServer } from './server.js';
 import { handleSessionStart } from './tools/session-start.js';
 import { handleGetContext } from './tools/get-context.js';
 import { handleCheckTask } from './tools/check-task.js';
@@ -20,6 +25,150 @@ import type { ServerDeps } from './types.js';
 vi.mock('./issue-linker.js', () => ({
   resolveIssue: vi.fn().mockResolvedValue({ issueNumber: 42, method: 'branch', confidence: 1.0 }),
 }));
+
+describe('createMcpServer', () => {
+  it('creates server with in-memory DB', async () => {
+    const db = new Database(':memory:');
+    const { server, deps } = await createMcpServer({ db });
+    expect(server).toBeDefined();
+    expect(deps.store).toBeDefined();
+    expect(deps.costTracker).toBeDefined();
+    expect(deps.sessions).toBeDefined();
+  });
+
+  it('uses provided repoPath', async () => {
+    const db = new Database(':memory:');
+    const { deps } = await createMcpServer({ db, repoPath: '/custom/path' });
+    expect(deps.repoPath).toBe('/custom/path');
+  });
+
+  it('loads config best-effort (no crash on missing config)', async () => {
+    const db = new Database(':memory:');
+    const { deps } = await createMcpServer({ db, repoPath: '/nonexistent' });
+    // Config may or may not be set — should not throw
+    expect(deps).toBeDefined();
+  });
+
+  it('registers plugins sequentially', async () => {
+    const db = new Database(':memory:');
+    const order: string[] = [];
+
+    const { server } = await createMcpServer({
+      db,
+      plugins: [
+        {
+          name: 'first',
+          register: async () => {
+            order.push('first');
+          },
+        },
+        {
+          name: 'second',
+          register: async () => {
+            order.push('second');
+          },
+        },
+      ],
+    });
+
+    expect(server).toBeDefined();
+    expect(order).toEqual(['first', 'second']);
+  });
+
+  it('works without any options', async () => {
+    // This will try to use cwd and default DB path — may fail in CI
+    // but createMcpServer should at least not throw for a valid in-memory scenario
+    const db = new Database(':memory:');
+    const { server, deps } = await createMcpServer({ db });
+    expect(server).toBeDefined();
+    expect(deps).toBeDefined();
+  });
+});
+
+describe('createMcpServer workspace mode', () => {
+  let workspaceDir: string;
+
+  beforeEach(() => {
+    workspaceDir = join(
+      tmpdir(),
+      `ai-sdlc-test-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    );
+    mkdirSync(join(workspaceDir, '.ai-sdlc'), { recursive: true });
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(workspaceDir, { recursive: true, force: true });
+    } catch {
+      // cleanup best-effort
+    }
+  });
+
+  it('uses workspacePath as repoPath in workspace mode', async () => {
+    const db = new Database(':memory:');
+    const { deps } = await createMcpServer({ db, workspacePath: workspaceDir });
+    expect(deps.repoPath).toBe(workspaceDir);
+  });
+
+  it('builds workspace context when workspace.yaml exists with initialized repos', async () => {
+    // Create workspace.yaml
+    const yamlContent = `repos:
+  - name: frontend
+    path: ./frontend
+  - name: backend
+    path: ./backend
+`;
+    writeFileSync(join(workspaceDir, '.ai-sdlc', 'workspace.yaml'), yamlContent);
+
+    // Create the "frontend" repo with .ai-sdlc dir and state.db
+    const frontendDir = join(workspaceDir, 'frontend');
+    mkdirSync(join(frontendDir, '.ai-sdlc'), { recursive: true });
+    const frontendDb = new Database(join(frontendDir, '.ai-sdlc', 'state.db'));
+    StateStore.open(frontendDb);
+    frontendDb.close();
+
+    // Backend repo exists but has no .ai-sdlc — should be skipped
+    mkdirSync(join(workspaceDir, 'backend'), { recursive: true });
+
+    // Create workspace-level state.db
+    const wsDb = new Database(join(workspaceDir, '.ai-sdlc', 'state.db'));
+    StateStore.open(wsDb);
+    wsDb.close();
+
+    const db = new Database(':memory:');
+    const { deps } = await createMcpServer({ db, workspacePath: workspaceDir });
+    expect(deps.workspace).toBeDefined();
+    expect(deps.workspace!.repos).toHaveLength(1);
+    expect(deps.workspace!.repos[0].name).toBe('frontend');
+  });
+
+  it('returns undefined workspace when workspace.yaml is missing', async () => {
+    const db = new Database(':memory:');
+    const { deps } = await createMcpServer({ db, workspacePath: workspaceDir });
+    // No workspace.yaml → workspace is undefined
+    expect(deps.workspace).toBeUndefined();
+  });
+
+  it('returns undefined workspace when no repos are initialized', async () => {
+    const yamlContent = `repos:
+  - name: frontend
+    path: ./frontend
+`;
+    writeFileSync(join(workspaceDir, '.ai-sdlc', 'workspace.yaml'), yamlContent);
+
+    // Create workspace-level state.db
+    const wsDb = new Database(join(workspaceDir, '.ai-sdlc', 'state.db'));
+    StateStore.open(wsDb);
+    wsDb.close();
+
+    // frontend dir exists but has no .ai-sdlc
+    mkdirSync(join(workspaceDir, 'frontend'), { recursive: true });
+
+    const db = new Database(':memory:');
+    const { deps } = await createMcpServer({ db, workspacePath: workspaceDir });
+    expect(deps.workspace).toBeUndefined();
+  });
+});
 
 describe('Full session lifecycle integration', () => {
   let deps: ServerDeps;

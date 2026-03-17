@@ -12,6 +12,8 @@ import {
   AdapterBindingBuilder,
   parseBuilderManifest,
   validateBuilderManifest,
+  parsePipelineManifest,
+  buildPipelineDistribution,
   API_VERSION,
 } from './builders.js';
 
@@ -193,6 +195,99 @@ output:
 `);
       const result = validateBuilderManifest(manifest);
       expect(typeof result.valid).toBe('boolean');
+    });
+  });
+
+  describe('parsePipelineManifest()', () => {
+    it('parses a valid manifest YAML and returns the manifest object', () => {
+      const yaml = `
+spec_version: "1.0"
+adapters:
+  - name: test-adapter
+    version: "1.0.0"
+    source: "local:./adapters/test"
+output:
+  name: test-dist
+  version: "1.0.0"
+  format: yaml
+  directory: ./out
+`;
+      const manifest = parsePipelineManifest(yaml);
+      expect(manifest.spec_version).toBe('1.0');
+      expect(manifest.adapters).toHaveLength(1);
+      expect(manifest.adapters[0].name).toBe('test-adapter');
+    });
+
+    it('throws when the manifest is invalid (no adapters)', () => {
+      const yaml = `
+spec_version: "1.0"
+adapters: []
+output:
+  name: test
+  version: "1.0.0"
+  format: yaml
+  directory: ./out
+`;
+      expect(() => parsePipelineManifest(yaml)).toThrow('Invalid manifest');
+    });
+
+    it('throws when the manifest is missing spec_version', () => {
+      const yaml = `
+adapters:
+  - name: a
+    version: "1.0.0"
+    source: "local:./a"
+output:
+  name: test
+  version: "1.0.0"
+  format: yaml
+  directory: ./out
+`;
+      // parseBuilderManifest throws directly for missing spec_version
+      expect(() => parsePipelineManifest(yaml)).toThrow();
+    });
+  });
+
+  describe('buildPipelineDistribution()', () => {
+    it('builds a distribution from a valid manifest', async () => {
+      const yaml = `
+spec_version: "1.0"
+adapters:
+  - name: test-adapter
+    version: "1.0.0"
+    source: "local:./adapters/test"
+output:
+  name: test-dist
+  version: "1.0.0"
+  format: yaml
+  directory: ./out
+`;
+      const manifest = parsePipelineManifest(yaml);
+      const result = await buildPipelineDistribution(manifest);
+      expect(result).toBeDefined();
+      expect(typeof result.valid).toBe('boolean');
+    });
+
+    it('returns a result object with expected shape', async () => {
+      const yaml = `
+spec_version: "1.0"
+adapters:
+  - name: my-adapter
+    version: "2.0.0"
+    source: "local:./adapters/my"
+output:
+  name: my-dist
+  version: "2.0.0"
+  format: yaml
+  directory: ./dist
+`;
+      const manifest = parsePipelineManifest(yaml);
+      const result = await buildPipelineDistribution(manifest, {});
+      expect(result).toHaveProperty('valid');
+      expect(result).toHaveProperty('manifest');
+      expect(result).toHaveProperty('resolved');
+      expect(result).toHaveProperty('errors');
+      expect(result).toHaveProperty('warnings');
     });
   });
 });

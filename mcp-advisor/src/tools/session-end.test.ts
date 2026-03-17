@@ -73,4 +73,19 @@ describe('handleSessionEnd', () => {
     handleSessionEnd(deps, { sessionId: session.sessionId });
     expect(deps.sessions.getActive()).toBeUndefined();
   });
+
+  it('returns null when given non-existent session ID', () => {
+    const result = handleSessionEnd(deps, { sessionId: 'non-existent-id' });
+    expect(result).toBeNull();
+  });
+
+  it('uses active session when no sessionId provided', () => {
+    const session = deps.sessions.create({ developer: 'eve', tool: 'claude-code' });
+    deps.sessions.linkIssue(session.sessionId, 99, 'explicit');
+
+    const result = handleSessionEnd(deps, { summary: 'Done' });
+    expect(result).not.toBeNull();
+    expect(result!.sessionId).toBe(session.sessionId);
+    expect(result!.linkedIssue).toBe(99);
+  });
 });
