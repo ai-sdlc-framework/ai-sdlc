@@ -59,22 +59,20 @@ describe('SecurityTriageRunner', () => {
 
   it('uses config apiKey over env var', async () => {
     delete process.env.ANTHROPIC_API_KEY;
-    const fetchSpy = vi
-      .spyOn(globalThis, 'fetch')
-      .mockResolvedValue(
-        new Response(
-          JSON.stringify(
-            makeApiResponse({
-              safe: true,
-              riskScore: 0,
-              findings: [],
-              sanitizedDescription: 'test',
-              rationale: 'Clean issue',
-            }),
-          ),
-          { status: 200 },
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify(
+          makeApiResponse({
+            safe: true,
+            riskScore: 0,
+            findings: [],
+            sanitizedDescription: 'test',
+            rationale: 'Clean issue',
+          }),
         ),
-      );
+        { status: 200 },
+      ),
+    );
 
     const runner = new SecurityTriageRunner({ apiKey: 'config-key' });
     const result = await runner.run(makeContext());
