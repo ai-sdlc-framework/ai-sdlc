@@ -10,7 +10,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.x-3178c6.svg?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![Python](https://img.shields.io/badge/Python-3.11+-3776ab.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Go](https://img.shields.io/badge/Go-1.24+-00add8.svg?logo=go&logoColor=white)](https://go.dev/)
-[![Coverage](https://codecov.io/gh/ai-sdlc-framework/ai-sdlc/graph/badge.svg)](https://codecov.io/gh/ai-sdlc-framework/ai-sdlc)
+[![Coverage](https://codecov.io/gh/ai-sdlc-framework/ai-sdlc/branch/main/graph/badge.svg)](https://codecov.io/gh/ai-sdlc-framework/ai-sdlc)
 [![JSON Schemas](https://img.shields.io/badge/schemas-6_resources-purple.svg)](spec/schemas/)
 [![Docs](https://img.shields.io/badge/docs-ai--sdlc.io-0a0a0a.svg)](https://ai-sdlc.io/docs)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
