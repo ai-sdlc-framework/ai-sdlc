@@ -1,4 +1,5 @@
 pnpm exec lint-staged
+pnpm typecheck
 
 # >>> backlog-drift pre-commit hook >>>
 npx backlog-drift hook-run 2>&1
