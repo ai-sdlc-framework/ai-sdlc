@@ -100,6 +100,26 @@ jobs:
         working-directory: sdk-go/operator
         run: go test ./... -v -count=1
 
+  coverage:
+    name: Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test:coverage
+      - uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: .
+          flags: typescript
+          fail_ci_if_error: false
+
   integration:
     name: Integration Tests
     runs-on: ubuntu-latest

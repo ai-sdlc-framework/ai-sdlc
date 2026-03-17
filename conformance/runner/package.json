@@ -24,13 +24,15 @@
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo",
     "lint": "eslint src/",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
     "yaml": "^2.7.0"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "^3.0.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }
