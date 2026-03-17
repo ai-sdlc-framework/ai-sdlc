@@ -10,6 +10,7 @@
   },
   "packageManager": "pnpm@9.15.4",
   "scripts": {
+    "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
     "test": "pnpm -r test",
     "test:coverage": "pnpm -r test:coverage",

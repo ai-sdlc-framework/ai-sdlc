@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-const mockAll = vi.fn(() => {
+const mockAll = vi.fn((): Record<string, unknown>[] => {
   return [];
 });
 
