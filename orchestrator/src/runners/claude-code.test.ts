@@ -92,6 +92,7 @@ function setupGitExec(
 ) {
   let commitAttempt = 0;
 
+  // @ts-expect-error -- partial mock for test
   execFileMock.mockImplementation((_cmd: unknown, args: unknown, _opts: unknown, cb?: unknown) => {
     const callback =
       typeof _opts === 'function' ? _opts : (cb as ((...a: unknown[]) => void) | undefined);
@@ -266,7 +267,7 @@ describe('ClaudeCodeRunner', () => {
               remove: vi.fn(),
               all: vi.fn(),
             },
-          } as AgentContext['memory'],
+          } as unknown as AgentContext['memory'],
         }),
       );
       expect(prompt).toContain('## Previous Context');
@@ -284,7 +285,7 @@ describe('ClaudeCodeRunner', () => {
               remove: vi.fn(),
               all: vi.fn(),
             },
-          } as AgentContext['memory'],
+          } as unknown as AgentContext['memory'],
         }),
       );
       expect(prompt).toContain('issue-42-data');
@@ -300,7 +301,7 @@ describe('ClaudeCodeRunner', () => {
               remove: vi.fn(),
               all: vi.fn(),
             },
-          } as AgentContext['memory'],
+          } as unknown as AgentContext['memory'],
         }),
       );
       expect(prompt).not.toContain('## Previous Context');
@@ -613,6 +614,7 @@ describe('ClaudeCodeRunner', () => {
 
       // Override execFile to fail on lint/format but succeed on git
       execFileMock.mockImplementation(
+        // @ts-expect-error -- partial mock for test
         (_cmd: unknown, args: unknown, _opts: unknown, cb?: unknown) => {
           const callback =
             typeof _opts === 'function' ? _opts : (cb as ((...a: unknown[]) => void) | undefined);

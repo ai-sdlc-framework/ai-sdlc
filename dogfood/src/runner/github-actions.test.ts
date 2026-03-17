@@ -14,16 +14,17 @@ vi.mock('node:child_process', () => {
 
 // Helper to create a mock child process
 function createMockChild(exitCode: number, stdoutData: string, stderrData: string = '') {
-  const child = new EventEmitter() as unknown as ChildProcess & {
+  const stdout = new EventEmitter();
+  const stderr = new EventEmitter();
+  const stdin = { write: vi.fn(), end: vi.fn() };
+  const child = Object.assign(new EventEmitter(), {
+    stdout,
+    stderr,
+    stdin,
+  }) as unknown as ChildProcess & {
     stdout: EventEmitter;
     stderr: EventEmitter;
     stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
-  };
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
-  child.stdin = {
-    write: vi.fn(),
-    end: vi.fn(),
   };
 
   process.nextTick(() => {
@@ -40,16 +41,17 @@ function createMockChild(exitCode: number, stdoutData: string, stderrData: strin
 }
 
 function createErrorChild() {
-  const child = new EventEmitter() as unknown as ChildProcess & {
+  const stdout = new EventEmitter();
+  const stderr = new EventEmitter();
+  const stdin = { write: vi.fn(), end: vi.fn() };
+  const child = Object.assign(new EventEmitter(), {
+    stdout,
+    stderr,
+    stdin,
+  }) as unknown as ChildProcess & {
     stdout: EventEmitter;
     stderr: EventEmitter;
     stdin: { write: ReturnType<typeof vi.fn>; end: ReturnType<typeof vi.fn> };
-  };
-  child.stdout = new EventEmitter();
-  child.stderr = new EventEmitter();
-  child.stdin = {
-    write: vi.fn(),
-    end: vi.fn(),
   };
 
   process.nextTick(() => {

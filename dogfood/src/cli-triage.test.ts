@@ -37,7 +37,8 @@ describe('cli-triage.ts', () => {
 
   beforeEach(() => {
     originalArgv = process.argv;
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as unknown as () => never);
+    // @ts-expect-error -- mock process.exit for test
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.resetModules();
@@ -182,8 +183,8 @@ describe('cli-triage.ts', () => {
     await import('./cli-triage.js');
     await new Promise((r) => setTimeout(r, 50));
 
-    const logCalls = logSpy.mock.calls.flat();
-    expect(logCalls.some((c: string) => c.includes('Security Triage Result'))).toBe(true);
-    expect(logCalls.some((c: string) => c.includes('triage:low'))).toBe(true);
+    const logCalls = logSpy.mock.calls.flat() as string[];
+    expect(logCalls.some((c) => c.includes('Security Triage Result'))).toBe(true);
+    expect(logCalls.some((c) => c.includes('triage:low'))).toBe(true);
   });
 });

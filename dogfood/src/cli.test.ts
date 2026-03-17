@@ -25,7 +25,8 @@ describe('cli.ts', () => {
 
   beforeEach(() => {
     originalArgv = process.argv;
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as unknown as () => never);
+    // @ts-expect-error -- mock process.exit for test
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.resetModules();
   });
@@ -89,6 +90,7 @@ describe('cli.ts', () => {
   it('creates admission when qualityGate config is present', async () => {
     const { loadConfig, createPipelineAdmission } = await import('@ai-sdlc/orchestrator');
     vi.mocked(loadConfig).mockReturnValueOnce({
+      // @ts-expect-error -- partial mock for test
       qualityGate: { spec: { gates: [] } },
     });
 

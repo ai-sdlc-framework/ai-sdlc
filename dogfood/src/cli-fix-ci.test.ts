@@ -22,7 +22,8 @@ describe('cli-fix-ci.ts', () => {
 
   beforeEach(() => {
     originalArgv = process.argv;
-    exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => {}) as unknown as () => never);
+    // @ts-expect-error -- mock process.exit for test
+    exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.resetModules();
   });

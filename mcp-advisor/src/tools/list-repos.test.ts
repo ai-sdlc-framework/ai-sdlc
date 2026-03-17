@@ -37,7 +37,7 @@ describe('handleListRepos', () => {
         metadata: { name: 'test' },
         spec: { levels: [], promotion: { criteria: [] } },
       },
-    } as ServerDeps['config'];
+    } as unknown as ServerDeps['config'];
 
     const result = handleListRepos(deps);
     expect(result.repos[0].hasConfig).toBe(true);
@@ -68,7 +68,7 @@ describe('handleListRepos', () => {
               metadata: { name: 'test' },
               spec: { levels: [], promotion: { criteria: [] } },
             },
-          } as ServerDeps['config'],
+          } as unknown as ServerDeps['config'],
         },
       ],
       sharedStore: store2,

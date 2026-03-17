@@ -77,6 +77,7 @@ function setupSpawnError(err: Error) {
 }
 
 function setupGitExec(changedFiles: string[], untrackedFiles: string[] = []) {
+  // @ts-expect-error -- partial mock for test
   execFileMock.mockImplementation((_cmd: unknown, args: unknown, _opts: unknown, cb?: unknown) => {
     const callback =
       typeof _opts === 'function' ? _opts : (cb as ((...a: unknown[]) => void) | undefined);

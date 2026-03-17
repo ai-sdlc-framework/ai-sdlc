@@ -214,7 +214,9 @@ describe('Orchestrator', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockExecute.mockResolvedValue(makeResult());
-    mockLoadConfig.mockReturnValue({ version: '0.1.0' } as ReturnType<typeof loadConfig>);
+    mockLoadConfig.mockReturnValue({ version: '0.1.0' } as unknown as ReturnType<
+      typeof loadConfig
+    >);
   });
 
   // ── Constructor ────────────────────────────────────────────────────
@@ -229,7 +231,9 @@ describe('Orchestrator', () => {
 
     it('creates with statePath — opens state store and creates trackers', () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/state.db', logger: makeSilentLogger() });
 
@@ -292,7 +296,9 @@ describe('Orchestrator', () => {
 
     it('records pipeline run in state store on start', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       await orch.run('42');
@@ -311,7 +317,9 @@ describe('Orchestrator', () => {
 
     it('records success in state store on completion', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
       mockExecute.mockResolvedValue(
         makeResult({ prUrl: 'pr-url', filesChanged: ['a.ts', 'b.ts'] }),
       );
@@ -339,7 +347,9 @@ describe('Orchestrator', () => {
 
     it('records failure in state store on error', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
       mockExecute.mockRejectedValue(new Error('pipeline boom'));
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
@@ -365,7 +375,9 @@ describe('Orchestrator', () => {
 
     it('records failure for non-Error thrown values', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
       mockExecute.mockRejectedValue('string error');
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
@@ -382,7 +394,9 @@ describe('Orchestrator', () => {
 
     it('handles non-numeric issueId gracefully', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       await orch.run('AISDLC-3');
@@ -403,7 +417,7 @@ describe('Orchestrator', () => {
             costPolicy: { budget: { period: 'month', amount: 100, currency: 'USD' } },
           },
         },
-      } as ReturnType<typeof loadConfig>);
+      } as unknown as ReturnType<typeof loadConfig>);
 
       const orch = new Orchestrator({ logger: makeSilentLogger() });
       await orch.run('1');
@@ -419,7 +433,7 @@ describe('Orchestrator', () => {
             costPolicy: { budget: { period: 'month', amount: 100, currency: 'USD' } },
           },
         },
-      } as ReturnType<typeof loadConfig>);
+      } as unknown as ReturnType<typeof loadConfig>);
 
       const existingPlugin: OrchestratorPlugin = { name: 'cost-governance' };
       const orch = new Orchestrator({ plugins: [existingPlugin], logger: makeSilentLogger() });
@@ -529,7 +543,7 @@ describe('Orchestrator', () => {
   describe('start()', () => {
     it('calls startWatch with runner and security from config', async () => {
       const mockHandle = { stop: vi.fn(), enqueue: vi.fn(), queueSize: 0, activeCount: 0 };
-      mockStartWatch.mockReturnValue(mockHandle as ReturnType<typeof startWatch>);
+      mockStartWatch.mockReturnValue(mockHandle as unknown as ReturnType<typeof startWatch>);
 
       const runner = { run: vi.fn() };
       const security = {} as SecurityContext;
@@ -552,7 +566,7 @@ describe('Orchestrator', () => {
 
     it('passes additional options through', async () => {
       const mockHandle = { stop: vi.fn(), enqueue: vi.fn(), queueSize: 0, activeCount: 0 };
-      mockStartWatch.mockReturnValue(mockHandle as ReturnType<typeof startWatch>);
+      mockStartWatch.mockReturnValue(mockHandle as unknown as ReturnType<typeof startWatch>);
 
       const orch = new Orchestrator({ logger: makeSilentLogger() });
       await orch.start({ reconcilerConfig: { periodicIntervalMs: 30000 } });
@@ -626,7 +640,7 @@ describe('Orchestrator', () => {
   describe('status()', () => {
     it('returns config and empty runs when no state store', async () => {
       const config = { version: '0.1.0', pipeline: {} };
-      mockLoadConfig.mockReturnValue(config as ReturnType<typeof loadConfig>);
+      mockLoadConfig.mockReturnValue(config as unknown as ReturnType<typeof loadConfig>);
 
       const orch = new Orchestrator({ logger: makeSilentLogger() });
       const status = await orch.status();
@@ -655,7 +669,9 @@ describe('Orchestrator', () => {
         },
       ];
       mockStore.getPipelineRuns.mockReturnValue(runs);
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       const status = await orch.status();
@@ -673,7 +689,9 @@ describe('Orchestrator', () => {
     it('filters by issue number', async () => {
       const mockStore = makeMockStateStore();
       mockStore.getPipelineRuns.mockReturnValue([]);
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       await orch.status(42);
@@ -711,7 +729,9 @@ describe('Orchestrator', () => {
 
   describe('health()', () => {
     it('returns healthy result when config is valid', async () => {
-      mockLoadConfig.mockReturnValue({ version: '0.1.0' } as ReturnType<typeof loadConfig>);
+      mockLoadConfig.mockReturnValue({ version: '0.1.0' } as unknown as ReturnType<
+        typeof loadConfig
+      >);
 
       const orch = new Orchestrator({ logger: makeSilentLogger() });
       const result = await orch.health();
@@ -724,7 +744,9 @@ describe('Orchestrator', () => {
 
     it('reports state store connected when statePath is provided', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       const result = await orch.health();
@@ -796,7 +818,9 @@ describe('Orchestrator', () => {
 
     it('persists profile to state store', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
       const profile = makeProfile();
       mockAnalyzeCodebase.mockResolvedValue(profile);
 
@@ -819,7 +843,9 @@ describe('Orchestrator', () => {
 
     it('saves hotspot records to state store', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
       const profile = makeProfile({
         hotspots: [
           { filePath: 'a.ts', churnRate: 3, complexity: 5, commitCount: 10 },
@@ -847,7 +873,9 @@ describe('Orchestrator', () => {
 
     it('returns cached profile when fresh', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const cached = {
         repoPath: '/myrepo',
@@ -884,7 +912,9 @@ describe('Orchestrator', () => {
 
     it('ignores stale cache and re-analyzes', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const staleDate = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(); // 25h ago
       const cached = {
@@ -923,7 +953,9 @@ describe('Orchestrator', () => {
 
     it('re-analyzes when force is true', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const cached = {
         repoPath: '/myrepo',
@@ -950,7 +982,9 @@ describe('Orchestrator', () => {
 
     it('handles cached profile with missing optional fields', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const cached = {
         repoPath: '/myrepo',
@@ -984,7 +1018,9 @@ describe('Orchestrator', () => {
 
     it('skips cache when no analyzedAt', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const cached = {
         repoPath: '/myrepo',
@@ -1010,7 +1046,9 @@ describe('Orchestrator', () => {
 
     it('skips cache when no architecturalPatterns', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const cached = {
         repoPath: '/myrepo',
@@ -1058,7 +1096,9 @@ describe('Orchestrator', () => {
         },
       ];
       mockStore.getAllAutonomyLedgerEntries.mockReturnValue(entries);
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       const result = await orch.agents();
@@ -1089,7 +1129,9 @@ describe('Orchestrator', () => {
         },
       ];
       mockStore.getRoutingHistory.mockReturnValue(decisions);
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       const result = await orch.routing();
@@ -1102,7 +1144,9 @@ describe('Orchestrator', () => {
     it('passes custom limit', async () => {
       const mockStore = makeMockStateStore();
       mockStore.getRoutingHistory.mockReturnValue([]);
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       await orch.routing({ limit: 10 });
@@ -1161,7 +1205,9 @@ describe('Orchestrator', () => {
 
     it('returns cost summary from tracker', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
 
@@ -1181,7 +1227,9 @@ describe('Orchestrator', () => {
 
     it('passes since and budget options', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
 
@@ -1227,7 +1275,9 @@ describe('Orchestrator', () => {
       ];
       mockStore.getPipelineRuns.mockReturnValue(runs);
       mockStore.getAllAutonomyLedgerEntries.mockReturnValue(agents);
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
 
@@ -1267,21 +1317,27 @@ describe('Orchestrator', () => {
 
     it('autonomyTracker returns tracker with state store', () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       expect(orch.autonomyTracker).toBeDefined();
     });
 
     it('costTracker returns tracker with state store', () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       expect(orch.costTracker).toBeDefined();
     });
 
     it('state returns store with state store', () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       expect(orch.state).toBe(mockStore);
     });
@@ -1301,7 +1357,9 @@ describe('Orchestrator', () => {
 
     it('closes state store', async () => {
       const mockStore = makeMockStateStore();
-      mockStateStoreOpen.mockReturnValue(mockStore as ReturnType<typeof StateStore.open>);
+      mockStateStoreOpen.mockReturnValue(
+        mockStore as unknown as ReturnType<typeof StateStore.open>,
+      );
 
       const orch = new Orchestrator({ statePath: '/tmp/test.db', logger: makeSilentLogger() });
       await orch.close();
