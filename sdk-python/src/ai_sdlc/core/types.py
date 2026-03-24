@@ -125,9 +125,7 @@ class Stage(BaseModel):
     approval: ApprovalPolicy | None = None
 
 
-RoutingStrategy = Literal[
-    "fully-autonomous", "ai-with-review", "ai-assisted", "human-led"
-]
+RoutingStrategy = Literal["fully-autonomous", "ai-with-review", "ai-assisted", "human-led"]
 
 
 class ComplexityThreshold(BaseModel):
@@ -171,6 +169,75 @@ class NotificationsConfig(BaseModel):
     templates: dict[str, NotificationTemplate] | None = None
 
 
+class PriorityDimensionConfig(BaseModel):
+    model_config = _CC
+    min: float | None = Field(None, description="Minimum bound for this dimension.")
+    max: float | None = Field(None, description="Maximum bound for this dimension.")
+
+
+class PriorityHumanCurveWeights(BaseModel):
+    model_config = _CC
+    explicit: float | None = Field(
+        None, ge=0, le=1, description="Weight for explicit priority signal."
+    )
+    consensus: float | None = Field(
+        None, ge=0, le=1, description="Weight for team consensus signal."
+    )
+    decision: float | None = Field(
+        None, ge=0, le=1, description="Weight for meeting decision signal."
+    )
+
+
+class PriorityDimensionsConfig(BaseModel):
+    model_config = _CC
+    market_force: PriorityDimensionConfig | None = Field(
+        None, alias="marketForce", description="Market force dimension bounds."
+    )
+    human_curve_weights: PriorityHumanCurveWeights | None = Field(
+        None, alias="humanCurveWeights", description="Human curve sub-component weights."
+    )
+
+
+class PriorityCalibrationConfig(BaseModel):
+    model_config = _CC
+    enabled: bool | None = Field(None, description="Whether automatic calibration is enabled.")
+    lookback_period: str | None = Field(
+        None, alias="lookbackPeriod", description="ISO 8601 duration for calibration lookback."
+    )
+
+
+class PriorityAdaptersConfig(BaseModel):
+    model_config = _CC
+    support_channel: str | None = Field(
+        None, alias="supportChannel", description="SupportChannel adapter binding name."
+    )
+    crm: str | None = Field(None, description="CrmProvider adapter binding name.")
+    analytics: str | None = Field(None, description="AnalyticsProvider adapter binding name.")
+
+
+class PriorityPolicy(BaseModel):
+    model_config = _CC
+    enabled: bool | None = Field(None, description="Whether priority scoring is enabled.")
+    minimum_score: float | None = Field(
+        None, alias="minimumScore", ge=0, description="Minimum composite score to enqueue."
+    )
+    minimum_confidence: float | None = Field(
+        None, alias="minimumConfidence", ge=0, le=1, description="Minimum confidence threshold."
+    )
+    soul_purpose: str | None = Field(
+        None, alias="soulPurpose", description="Product soul purpose statement."
+    )
+    dimensions: PriorityDimensionsConfig | None = Field(
+        None, description="Per-dimension configuration."
+    )
+    calibration: PriorityCalibrationConfig | None = Field(
+        None, description="Calibration loop configuration."
+    )
+    adapters: PriorityAdaptersConfig | None = Field(
+        None, description="Adapter references for signal ingestion."
+    )
+
+
 class PipelineSpec(BaseModel):
     model_config = _CC
     triggers: list[Trigger]
@@ -180,6 +247,7 @@ class PipelineSpec(BaseModel):
     branching: BranchingConfig | None = None
     pull_request: PullRequestConfig | None = Field(None, alias="pullRequest")
     notifications: NotificationsConfig | None = None
+    priority_policy: PriorityPolicy | None = Field(None, alias="priorityPolicy")
 
 
 PipelinePhase = Literal["Pending", "Running", "Succeeded", "Failed", "Suspended"]
@@ -199,16 +267,12 @@ class PipelineStatus(BaseModel):
     active_stage: str | None = Field(None, alias="activeStage")
     conditions: list[Condition] | None = None
     stage_attempts: dict[str, int] | None = Field(None, alias="stageAttempts")
-    pending_approval: PipelineApprovalStatus | None = Field(
-        None, alias="pendingApproval"
-    )
+    pending_approval: PipelineApprovalStatus | None = Field(None, alias="pendingApproval")
 
 
 class Pipeline(BaseModel):
     model_config = _CC
-    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(
-        API_VERSION, alias="apiVersion"
-    )
+    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(API_VERSION, alias="apiVersion")
     kind: Literal["Pipeline"] = "Pipeline"
     metadata: Metadata
     spec: PipelineSpec
@@ -282,9 +346,7 @@ class AgentRoleStatus(BaseModel):
 
 class AgentRole(BaseModel):
     model_config = _CC
-    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(
-        API_VERSION, alias="apiVersion"
-    )
+    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(API_VERSION, alias="apiVersion")
     kind: Literal["AgentRole"] = "AgentRole"
     metadata: Metadata
     spec: AgentRoleSpec
@@ -328,9 +390,7 @@ class ReviewerRule(BaseModel):
 
 class DocumentationRule(BaseModel):
     model_config = _CC
-    changed_files_require_doc_update: bool = Field(
-        alias="changedFilesRequireDocUpdate"
-    )
+    changed_files_require_doc_update: bool = Field(alias="changedFilesRequireDocUpdate")
 
 
 class ProvenanceRule(BaseModel):
@@ -345,12 +405,7 @@ class ExpressionRule(BaseModel):
 
 
 GateRule = (
-    MetricRule
-    | ToolRule
-    | ReviewerRule
-    | DocumentationRule
-    | ProvenanceRule
-    | ExpressionRule
+    MetricRule | ToolRule | ReviewerRule | DocumentationRule | ProvenanceRule | ExpressionRule
 )
 
 EnforcementLevel = Literal["advisory", "soft-mandatory", "hard-mandatory"]
@@ -398,9 +453,7 @@ class QualityGateStatus(BaseModel):
 
 class QualityGate(BaseModel):
     model_config = _CC
-    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(
-        API_VERSION, alias="apiVersion"
-    )
+    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(API_VERSION, alias="apiVersion")
     kind: Literal["QualityGate"] = "QualityGate"
     metadata: Metadata
     spec: QualityGateSpec
@@ -409,9 +462,7 @@ class QualityGate(BaseModel):
 
 # ── AutonomyPolicy ───────────────────────────────────────────────────
 
-ApprovalRequirement = Literal[
-    "all", "security-critical-only", "architecture-changes-only", "none"
-]
+ApprovalRequirement = Literal["all", "security-critical-only", "architecture-changes-only", "none"]
 
 MonitoringLevel = Literal["continuous", "real-time-notification", "audit-log"]
 
@@ -469,9 +520,7 @@ class AgentAutonomyStatus(BaseModel):
 class AutonomyPolicySpec(BaseModel):
     model_config = _CC
     levels: list[AutonomyLevel]
-    promotion_criteria: dict[str, PromotionCriteria] = Field(
-        alias="promotionCriteria"
-    )
+    promotion_criteria: dict[str, PromotionCriteria] = Field(alias="promotionCriteria")
     demotion_triggers: list[DemotionTrigger] = Field(alias="demotionTriggers")
 
 
@@ -482,9 +531,7 @@ class AutonomyPolicyStatus(BaseModel):
 
 class AutonomyPolicy(BaseModel):
     model_config = _CC
-    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(
-        API_VERSION, alias="apiVersion"
-    )
+    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(API_VERSION, alias="apiVersion")
     kind: Literal["AutonomyPolicy"] = "AutonomyPolicy"
     metadata: Metadata
     spec: AutonomyPolicySpec
@@ -534,9 +581,7 @@ class AdapterBindingStatus(BaseModel):
 
 class AdapterBinding(BaseModel):
     model_config = _CC
-    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(
-        API_VERSION, alias="apiVersion"
-    )
+    api_version: Literal["ai-sdlc.io/v1alpha1"] = Field(API_VERSION, alias="apiVersion")
     kind: Literal["AdapterBinding"] = "AdapterBinding"
     metadata: Metadata
     spec: AdapterBindingSpec

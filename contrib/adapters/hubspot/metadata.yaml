@@ -1,0 +1,9 @@
+name: hubspot
+displayName: 'HubSpot'
+description: 'CrmProvider adapter for HubSpot'
+version: '0.1.0'
+stability: alpha
+interfaces:
+  - CrmProvider@v1
+owner: community
+specVersions: ['v1alpha1']

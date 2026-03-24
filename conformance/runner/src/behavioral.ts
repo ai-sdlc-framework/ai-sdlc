@@ -23,6 +23,8 @@ import type {
   ComplexityInput,
   OrchestrationPlan,
 } from '@ai-sdlc/reference';
+import { computePriority } from '@ai-sdlc/orchestrator';
+import type { PriorityInput, PriorityConfig } from '@ai-sdlc/orchestrator';
 
 export interface BehavioralFixture {
   kind: 'BehavioralTest';
@@ -74,6 +76,8 @@ export function runBehavioralTest(fixture: BehavioralFixture, file: string): Beh
       return runHandoffValidationTest(fixture, file);
     case 'complexity-routing':
       return runComplexityRoutingTest(fixture, file);
+    case 'priority-scoring':
+      return runPriorityScoringTest(fixture, file);
     case 'orchestration-error':
     case 'pipeline-failure-policy':
       // Sync fallback — caller should use runBehavioralTestAsync for these types
@@ -216,6 +220,82 @@ function runComplexityRoutingTest(fixture: BehavioralFixture, file: string): Beh
   }
   if (expected.strategy !== undefined && strategy !== expected.strategy) {
     checks.push(`strategy: expected ${String(expected.strategy)}, got ${strategy}`);
+  }
+
+  return {
+    file,
+    description: fixture.description,
+    passed: checks.length === 0,
+    message: checks.length > 0 ? checks.join('; ') : undefined,
+  };
+}
+
+function runPriorityScoringTest(fixture: BehavioralFixture, file: string): BehavioralResult {
+  const { input, expected } = fixture.test;
+  const priorityInput = input.priorityInput as PriorityInput;
+  const config = (input.config ?? {}) as PriorityConfig;
+  const score = computePriority(priorityInput, config);
+
+  const checks: string[] = [];
+
+  // Check composite value
+  if (expected.composite !== undefined && score.composite !== expected.composite) {
+    checks.push(
+      `composite: expected ${String(expected.composite)}, got ${String(score.composite)}`,
+    );
+  }
+  if (expected.compositeMin !== undefined && score.composite < (expected.compositeMin as number)) {
+    checks.push(`composite ${score.composite} below minimum ${String(expected.compositeMin)}`);
+  }
+  if (expected.compositeFinite !== undefined) {
+    const isFinite = Number.isFinite(score.composite);
+    if (isFinite !== expected.compositeFinite) {
+      checks.push(
+        `compositeFinite: expected ${String(expected.compositeFinite)}, got ${String(isFinite)}`,
+      );
+    }
+  }
+  if (expected.compositeInfinity !== undefined) {
+    const isInf = score.composite === Infinity;
+    if (isInf !== expected.compositeInfinity) {
+      checks.push(
+        `compositeInfinity: expected ${String(expected.compositeInfinity)}, got ${String(isInf)}`,
+      );
+    }
+  }
+
+  // Check confidence
+  if (expected.confidence !== undefined && score.confidence !== expected.confidence) {
+    checks.push(
+      `confidence: expected ${String(expected.confidence)}, got ${String(score.confidence)}`,
+    );
+  }
+  if (
+    expected.confidenceMin !== undefined &&
+    score.confidence < (expected.confidenceMin as number)
+  ) {
+    checks.push(`confidence ${score.confidence} below minimum ${String(expected.confidenceMin)}`);
+  }
+
+  // Check override presence
+  if (expected.hasOverride !== undefined) {
+    const hasOverride = score.override !== undefined;
+    if (hasOverride !== expected.hasOverride) {
+      checks.push(
+        `hasOverride: expected ${String(expected.hasOverride)}, got ${String(hasOverride)}`,
+      );
+    }
+  }
+
+  // Check dimension bounds
+  if (expected.dimensionBounds) {
+    const bounds = expected.dimensionBounds as Record<string, [number, number]>;
+    for (const [dim, [min, max]] of Object.entries(bounds)) {
+      const val = score.dimensions[dim as keyof typeof score.dimensions] as number;
+      if (val < min || val > max) {
+        checks.push(`${dim}: ${val} out of bounds [${min}, ${max}]`);
+      }
+    }
   }
 
   return {

@@ -25,6 +25,7 @@ import type {
   DeploymentRecordState,
   RolloutStepRecord,
   AuditEntryRecord,
+  PriorityCalibrationSample,
 } from './types.js';
 
 export class StateStore {
@@ -127,8 +128,9 @@ export class StateStore {
   saveEpisodicRecord(record: EpisodicRecord): number {
     const stmt = this.db.prepare(`
       INSERT INTO episodic_memory (issue_id, issue_number, pr_number, pipeline_type, outcome, duration_ms, files_changed, error_message, metadata,
-        agent_name, complexity_score, routing_strategy, gate_pass_count, gate_fail_count, cost_usd, is_regression, related_episodes)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        agent_name, complexity_score, routing_strategy, gate_pass_count, gate_fail_count, cost_usd, is_regression, related_episodes,
+        priority_composite, priority_confidence)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       record.issueId ?? null,
@@ -148,6 +150,8 @@ export class StateStore {
       record.costUsd ?? null,
       record.isRegression ?? 0,
       record.relatedEpisodes ?? null,
+      record.priorityComposite ?? null,
+      record.priorityConfidence ?? null,
     );
     return Number(result.lastInsertRowid);
   }
@@ -183,6 +187,8 @@ export class StateStore {
       costUsd: row.cost_usd as number | undefined,
       isRegression: row.is_regression as number | undefined,
       relatedEpisodes: row.related_episodes as string | undefined,
+      priorityComposite: row.priority_composite as number | undefined,
+      priorityConfidence: row.priority_confidence as number | undefined,
     };
   }
 
@@ -948,6 +954,87 @@ export class StateStore {
       signature: row.signature as string | undefined,
       createdAt: row.created_at as string | undefined,
     };
+  }
+
+  // ── Priority Calibration ──────────────────────────────────────────
+
+  savePrioritySample(sample: PriorityCalibrationSample): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO priority_calibration (issue_id, priority_composite, priority_confidence, priority_dimensions, actual_complexity, files_changed, outcome)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      sample.issueId,
+      sample.priorityComposite,
+      sample.priorityConfidence,
+      sample.priorityDimensions ?? null,
+      sample.actualComplexity ?? null,
+      sample.filesChanged ?? null,
+      sample.outcome ?? null,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getPrioritySamples(opts?: { since?: string; limit?: number }): PriorityCalibrationSample[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.since) {
+      conditions.push('sampled_at >= ?');
+      params.push(opts.since);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 500;
+    params.push(limit);
+    const rows = this.db
+      .prepare(`SELECT * FROM priority_calibration ${where} ORDER BY sampled_at DESC LIMIT ?`)
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      issueId: r.issue_id as string,
+      priorityComposite: r.priority_composite as number,
+      priorityConfidence: r.priority_confidence as number,
+      priorityDimensions: r.priority_dimensions as string | undefined,
+      actualComplexity: r.actual_complexity as number | undefined,
+      filesChanged: r.files_changed as number | undefined,
+      outcome: r.outcome as string | undefined,
+      sampledAt: r.sampled_at as string | undefined,
+    }));
+  }
+
+  /**
+   * Compute a calibration coefficient from historical priority samples.
+   * Returns 1.0 when no data is available.
+   * When data exists, compares predicted priority ordering with actual outcomes
+   * and adjusts the coefficient to correct systematic over/under-scoring.
+   */
+  computeCalibrationCoefficient(opts?: { since?: string }): number {
+    const samples = this.getPrioritySamples({ since: opts?.since });
+    if (samples.length === 0) return 1.0;
+
+    // Filter to samples that have both predicted priority and actual outcome
+    const scored = samples.filter((s) => s.outcome === 'success' || s.outcome === 'failure');
+    if (scored.length === 0) return 1.0;
+
+    // Compute average composite for successes vs failures
+    const successes = scored.filter((s) => s.outcome === 'success');
+    const failures = scored.filter((s) => s.outcome === 'failure');
+
+    if (successes.length === 0 || failures.length === 0) return 1.0;
+
+    const avgSuccess =
+      successes.reduce((sum, s) => sum + s.priorityComposite, 0) / successes.length;
+    const avgFailure = failures.reduce((sum, s) => sum + s.priorityComposite, 0) / failures.length;
+
+    // If high-priority items are failing more than low-priority ones,
+    // reduce the coefficient to dampen over-scoring; otherwise increase.
+    // The ratio is clamped to [0.7, 1.3] per PPA spec.
+    if (avgSuccess === 0 && avgFailure === 0) return 1.0;
+
+    const ratio = avgSuccess > 0 ? avgFailure / avgSuccess : 1.0;
+    // ratio > 1 means failures had higher scores → over-scoring → reduce
+    // ratio < 1 means successes had higher scores → well-calibrated or under → increase slightly
+    const coefficient = 1.0 / Math.max(ratio, 0.01);
+    return Math.min(1.3, Math.max(0.7, coefficient));
   }
 
   // ── Utilities ────────────────────────────────────────────────────

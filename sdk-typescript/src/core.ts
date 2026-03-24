@@ -34,6 +34,11 @@ export {
   type AdapterInterface,
   type HealthCheck,
   type GateRule,
+  type PriorityPolicy,
+  type PriorityDimensionConfig,
+  type PriorityDimensionsConfig,
+  type PriorityCalibrationConfig,
+  type PriorityAdaptersConfig,
   API_VERSION,
 
   // Validation

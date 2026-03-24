@@ -142,6 +142,7 @@ import { CostTracker } from './cost-tracker.js';
 import type { StateStore } from './state/store.js';
 import { enrichAgentContext } from './context-enrichment.js';
 import { reportGateCheckRuns } from './check-runs.js';
+import type { PriorityScore } from './priority.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -206,6 +207,8 @@ export interface ExecuteOptions {
   costTracker?: CostTracker;
   /** StateStore for episodic context enrichment. */
   stateStore?: StateStore;
+  /** Priority score from PPA scoring (set by watch loop or caller). */
+  priorityScore?: PriorityScore;
 }
 
 /**
@@ -788,7 +791,12 @@ async function executePipelineBody(
       promptText: issue.description,
       cost: costReceipt,
     });
-    provenanceBlock = '\n\n' + attachProvenanceToPR(provenance);
+    let provenanceText = attachProvenanceToPR(provenance);
+    // Include priority score in provenance section when available
+    if (options.priorityScore) {
+      provenanceText += `\n- **Priority Score**: ${options.priorityScore.composite.toFixed(4)} (confidence: ${options.priorityScore.confidence.toFixed(2)})`;
+    }
+    provenanceBlock = '\n\n' + provenanceText;
   }
 
   const prVars = { issueNumber: issueId, issueTitle: issue.title };
@@ -959,17 +967,35 @@ async function executePipelineBody(
 
   // 17. Record episodic memory (success)
   if (options.memory) {
+    const episodicValue: Record<string, unknown> = {
+      issueId,
+      prUrl: pr.url,
+      filesChanged: result.filesChanged.length,
+      outcome: 'success',
+    };
+    if (options.priorityScore) {
+      episodicValue.priorityComposite = options.priorityScore.composite;
+      episodicValue.priorityConfidence = options.priorityScore.confidence;
+    }
     options.memory.episodic.append({
       key: 'pipeline-execution',
-      value: {
-        issueId,
-        prUrl: pr.url,
-        filesChanged: result.filesChanged.length,
-        outcome: 'success',
-      },
+      value: episodicValue,
       metadata: { summary: `Completed issue ${formatIssueRef(issueId)}: ${issue.title}` },
     });
     options.memory.working.clear();
+  }
+
+  // 17b. Record priority calibration sample for feedback loop
+  if (options.stateStore && options.priorityScore) {
+    options.stateStore.savePrioritySample({
+      issueId,
+      priorityComposite: options.priorityScore.composite,
+      priorityConfidence: options.priorityScore.confidence,
+      priorityDimensions: JSON.stringify(options.priorityScore.dimensions),
+      actualComplexity: complexity,
+      filesChanged: result.filesChanged.length,
+      outcome: 'success',
+    });
   }
 
   // 18. Audit integrity verification (non-blocking)

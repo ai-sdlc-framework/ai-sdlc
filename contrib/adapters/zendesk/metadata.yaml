@@ -1,0 +1,9 @@
+name: zendesk
+displayName: 'Zendesk'
+description: 'SupportChannel adapter for Zendesk'
+version: '0.1.0'
+stability: alpha
+interfaces:
+  - SupportChannel@v1
+owner: community
+specVersions: ['v1alpha1']

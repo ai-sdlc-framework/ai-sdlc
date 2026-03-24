@@ -171,6 +171,15 @@ export {
 // Watch mode
 export { startWatch, type WatchOptions, type WatchHandle } from './watch.js';
 
+// Priority scoring (PPA)
+export {
+  computePriority,
+  rankWorkItems,
+  type PriorityScore,
+  type PriorityInput,
+  type PriorityConfig,
+} from './priority.js';
+
 // Agent orchestration
 export {
   createPipelineOrchestration,
@@ -289,6 +298,7 @@ export type {
   DeploymentRecordState,
   RolloutStepRecord,
   AuditEntryRecord,
+  PriorityCalibrationSample,
 } from './state/index.js';
 
 // Deployment targets

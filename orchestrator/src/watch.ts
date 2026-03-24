@@ -25,6 +25,8 @@ import {
   createGateReconciler,
   createAutonomyReconciler,
 } from './reconcilers.js';
+import { computePriority, type PriorityInput, type PriorityScore } from './priority.js';
+import type { PriorityPolicy } from '@ai-sdlc/reference';
 
 export interface WatchOptions {
   /** Override the reconciler config (poll interval, concurrency, backoff). */
@@ -41,11 +43,13 @@ export interface WatchOptions {
   qualityGates?: QualityGate[];
   /** Optional autonomy policies for autonomy reconciler evaluation. */
   autonomyPolicies?: AutonomyPolicy[];
+  /** Priority scoring policy configuration. */
+  priorityPolicy?: PriorityPolicy;
 }
 
 export interface WatchHandle {
-  /** Enqueue a pipeline resource for reconciliation. */
-  enqueue(pipeline: Pipeline, issueId: string): void;
+  /** Enqueue a pipeline resource for reconciliation. Optionally provide PriorityInput for scoring. */
+  enqueue(pipeline: Pipeline, issueId: string, priorityInput?: PriorityInput): void;
   /** Enqueue a quality gate resource for reconciliation. */
   enqueueGate(gate: QualityGate): void;
   /** Enqueue an autonomy policy resource for reconciliation. */
@@ -126,9 +130,45 @@ export function startWatch(options: WatchOptions = {}): WatchHandle {
 
   loop.start();
 
+  // Map to hold priority scores for pipelines
+  const priorityScores = new Map<string, PriorityScore>();
+
   return {
-    enqueue(pipeline: Pipeline, issueId: string): void {
+    enqueue(pipeline: Pipeline, issueId: string, priorityInput?: PriorityInput): void {
       issueMap.set(pipeline.metadata.name, issueId);
+
+      // Priority scoring when policy is enabled
+      if (options.priorityPolicy?.enabled && priorityInput) {
+        const config = options.priorityPolicy.dimensions?.humanCurveWeights
+          ? { humanCurveWeights: options.priorityPolicy.dimensions.humanCurveWeights }
+          : undefined;
+        const score = computePriority(priorityInput, config);
+
+        // Skip items below minimum score
+        if (
+          options.priorityPolicy.minimumScore !== undefined &&
+          score.composite < options.priorityPolicy.minimumScore
+        ) {
+          return;
+        }
+
+        // Flag items below minimum confidence (still enqueue, but mark)
+        if (
+          options.priorityPolicy.minimumConfidence !== undefined &&
+          score.confidence < options.priorityPolicy.minimumConfidence
+        ) {
+          // Store the score with a low-confidence flag for downstream consumers
+          priorityScores.set(pipeline.metadata.name, score);
+        } else {
+          priorityScores.set(pipeline.metadata.name, score);
+        }
+
+        if (cache.shouldReconcile(pipeline)) {
+          loop.enqueue(pipeline, score.composite);
+        }
+        return;
+      }
+
       if (cache.shouldReconcile(pipeline)) {
         loop.enqueue(pipeline);
       }

@@ -208,7 +208,9 @@ type PipelineSpec struct {
 	Routing       *RoutingConfig       `json:"routing,omitempty" yaml:"routing,omitempty"`
 	Branching     *BranchingConfig     `json:"branching,omitempty" yaml:"branching,omitempty"`
 	PullRequest   *PullRequestConfig   `json:"pullRequest,omitempty" yaml:"pullRequest,omitempty"`
-	Notifications *NotificationsConfig `json:"notifications,omitempty" yaml:"notifications,omitempty"`
+	Notifications  *NotificationsConfig `json:"notifications,omitempty" yaml:"notifications,omitempty"`
+	CostPolicy     *CostPolicy          `json:"costPolicy,omitempty" yaml:"costPolicy,omitempty"`
+	PriorityPolicy *PriorityPolicy      `json:"priorityPolicy,omitempty" yaml:"priorityPolicy,omitempty"`
 }
 
 // PipelineStatus is the observed state of a Pipeline.
@@ -218,6 +220,135 @@ type PipelineStatus struct {
 	Conditions      []Condition    `json:"conditions,omitempty" yaml:"conditions,omitempty"`
 	StageAttempts   map[string]int `json:"stageAttempts,omitempty" yaml:"stageAttempts,omitempty"`
 	PendingApproval *ApprovalStatus `json:"pendingApproval,omitempty" yaml:"pendingApproval,omitempty"`
+	Cost            *CostStatus     `json:"cost,omitempty" yaml:"cost,omitempty"`
+}
+
+// ── Cost Governance Types (RFC-0004) ─────────────────────────────
+
+// CostThreshold is a cost threshold with an associated action.
+type CostThreshold struct {
+	Amount   float64 `json:"amount" yaml:"amount"`
+	Currency string  `json:"currency" yaml:"currency"`
+	Action   string  `json:"action" yaml:"action"`
+}
+
+// ExecutionCostLimit defines per-execution cost limits with soft and hard thresholds.
+type ExecutionCostLimit struct {
+	SoftLimit *CostThreshold `json:"softLimit,omitempty" yaml:"softLimit,omitempty"`
+	HardLimit *CostThreshold `json:"hardLimit,omitempty" yaml:"hardLimit,omitempty"`
+}
+
+// StageCostLimit defines cost limits for a pipeline stage.
+type StageCostLimit struct {
+	TokenLimit *int           `json:"tokenLimit,omitempty" yaml:"tokenLimit,omitempty"`
+	TimeLimit  string         `json:"timeLimit,omitempty" yaml:"timeLimit,omitempty"`
+	CostLimit  *CostThreshold `json:"costLimit,omitempty" yaml:"costLimit,omitempty"`
+}
+
+// StageCostPolicy defines per-stage cost policy with defaults and per-stage overrides.
+type StageCostPolicy struct {
+	Defaults  *StageCostLimit            `json:"defaults,omitempty" yaml:"defaults,omitempty"`
+	Overrides map[string]*StageCostLimit `json:"overrides,omitempty" yaml:"overrides,omitempty"`
+}
+
+// BudgetAlert is an alert triggered when budget consumption reaches a threshold.
+type BudgetAlert struct {
+	Threshold float64  `json:"threshold" yaml:"threshold"`
+	Action    string   `json:"action" yaml:"action"`
+	Targets   []string `json:"targets,omitempty" yaml:"targets,omitempty"`
+	Approver  string   `json:"approver,omitempty" yaml:"approver,omitempty"`
+	Message   string   `json:"message,omitempty" yaml:"message,omitempty"`
+}
+
+// BudgetPolicy defines rolling budget constraints for cost governance.
+type BudgetPolicy struct {
+	Period   string        `json:"period" yaml:"period"`
+	Amount   float64       `json:"amount" yaml:"amount"`
+	Currency string        `json:"currency" yaml:"currency"`
+	Alerts   []BudgetAlert `json:"alerts,omitempty" yaml:"alerts,omitempty"`
+}
+
+// AttributionPolicy defines cost attribution configuration for chargeback and analysis.
+type AttributionPolicy struct {
+	Dimensions []string `json:"dimensions" yaml:"dimensions"`
+	Chargeback string   `json:"chargeback,omitempty" yaml:"chargeback,omitempty"`
+}
+
+// ModelPricing defines pricing information for a specific model.
+type ModelPricing struct {
+	InputPerMTok     float64  `json:"inputPerMTok" yaml:"inputPerMTok"`
+	OutputPerMTok    float64  `json:"outputPerMTok" yaml:"outputPerMTok"`
+	CacheReadPerMTok *float64 `json:"cacheReadPerMTok,omitempty" yaml:"cacheReadPerMTok,omitempty"`
+}
+
+// ModelPricingConfig defines model pricing configuration.
+type ModelPricingConfig struct {
+	Source string                  `json:"source" yaml:"source"`
+	Models map[string]*ModelPricing `json:"models,omitempty" yaml:"models,omitempty"`
+}
+
+// CostPolicy defines cost governance policy declaring cost boundaries at per-execution,
+// per-stage, and budget levels.
+type CostPolicy struct {
+	PerExecution *ExecutionCostLimit `json:"perExecution,omitempty" yaml:"perExecution,omitempty"`
+	PerStage     *StageCostPolicy    `json:"perStage,omitempty" yaml:"perStage,omitempty"`
+	Budget       *BudgetPolicy       `json:"budget,omitempty" yaml:"budget,omitempty"`
+	Attribution  *AttributionPolicy  `json:"attribution,omitempty" yaml:"attribution,omitempty"`
+	ModelPricing *ModelPricingConfig  `json:"modelPricing,omitempty" yaml:"modelPricing,omitempty"`
+}
+
+// CostStatus is the observed cost status for a pipeline.
+type CostStatus struct {
+	CurrentSpend      *float64 `json:"currentSpend,omitempty" yaml:"currentSpend,omitempty"`
+	BudgetRemaining   *float64 `json:"budgetRemaining,omitempty" yaml:"budgetRemaining,omitempty"`
+	ProjectedMonthEnd *float64 `json:"projectedMonthEnd,omitempty" yaml:"projectedMonthEnd,omitempty"`
+	LastUpdated       string   `json:"lastUpdated,omitempty" yaml:"lastUpdated,omitempty"`
+	ActiveAlerts      []string `json:"activeAlerts,omitempty" yaml:"activeAlerts,omitempty"`
+}
+
+// ── Priority Scoring Types (RFC-0005) ────────────────────────────
+
+// PriorityDimensionConfig defines configuration for a single PPA dimension.
+type PriorityDimensionConfig struct {
+	Min *float64 `json:"min,omitempty" yaml:"min,omitempty"`
+	Max *float64 `json:"max,omitempty" yaml:"max,omitempty"`
+}
+
+// PriorityHumanCurveWeights defines weights for human curve sub-components.
+type PriorityHumanCurveWeights struct {
+	Explicit  *float64 `json:"explicit,omitempty" yaml:"explicit,omitempty"`
+	Consensus *float64 `json:"consensus,omitempty" yaml:"consensus,omitempty"`
+	Decision  *float64 `json:"decision,omitempty" yaml:"decision,omitempty"`
+}
+
+// PriorityDimensionsConfig defines per-dimension configuration for priority scoring.
+type PriorityDimensionsConfig struct {
+	MarketForce       *PriorityDimensionConfig   `json:"marketForce,omitempty" yaml:"marketForce,omitempty"`
+	HumanCurveWeights *PriorityHumanCurveWeights `json:"humanCurveWeights,omitempty" yaml:"humanCurveWeights,omitempty"`
+}
+
+// PriorityCalibrationConfig defines calibration loop configuration for priority scoring.
+type PriorityCalibrationConfig struct {
+	Enabled        *bool  `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	LookbackPeriod string `json:"lookbackPeriod,omitempty" yaml:"lookbackPeriod,omitempty"`
+}
+
+// PriorityAdaptersConfig defines adapter references for priority signal ingestion.
+type PriorityAdaptersConfig struct {
+	SupportChannel string `json:"supportChannel,omitempty" yaml:"supportChannel,omitempty"`
+	Crm            string `json:"crm,omitempty" yaml:"crm,omitempty"`
+	Analytics      string `json:"analytics,omitempty" yaml:"analytics,omitempty"`
+}
+
+// PriorityPolicy defines priority scoring policy using the Product Priority Algorithm (PPA).
+type PriorityPolicy struct {
+	Enabled           *bool                      `json:"enabled,omitempty" yaml:"enabled,omitempty"`
+	MinimumScore      *float64                   `json:"minimumScore,omitempty" yaml:"minimumScore,omitempty"`
+	MinimumConfidence *float64                   `json:"minimumConfidence,omitempty" yaml:"minimumConfidence,omitempty"`
+	SoulPurpose       string                     `json:"soulPurpose,omitempty" yaml:"soulPurpose,omitempty"`
+	Dimensions        *PriorityDimensionsConfig  `json:"dimensions,omitempty" yaml:"dimensions,omitempty"`
+	Calibration       *PriorityCalibrationConfig `json:"calibration,omitempty" yaml:"calibration,omitempty"`
+	Adapters          *PriorityAdaptersConfig    `json:"adapters,omitempty" yaml:"adapters,omitempty"`
 }
 
 // Pipeline defines a complete SDLC workflow from trigger through delivery.

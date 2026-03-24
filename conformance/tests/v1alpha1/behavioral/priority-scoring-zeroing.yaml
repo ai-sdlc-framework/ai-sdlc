@@ -1,0 +1,19 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Zero soul alignment zeroes the composite score (multiplicative veto)'
+metadata:
+  conformanceLevel: core
+test:
+  type: priority-scoring
+  input:
+    priorityInput:
+      itemId: 'ISS-3'
+      title: 'Off-mission feature'
+      description: 'This feature does not align with product mission'
+      soulAlignment: 0.0
+      customerRequestCount: 10
+      demandSignal: 0.9
+      complexity: 2
+    config: {}
+  expected:
+    composite: 0

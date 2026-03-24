@@ -31,6 +31,7 @@ from ..core.types import (
     NotificationsConfig,
     Pipeline,
     PipelineSpec,
+    PriorityPolicy,
     PromotionCriteria,
     Provider,
     PullRequestConfig,
@@ -60,6 +61,7 @@ class PipelineBuilder:
         self._branching: BranchingConfig | None = None
         self._pull_request: PullRequestConfig | None = None
         self._notifications: NotificationsConfig | None = None
+        self._priority_policy: PriorityPolicy | None = None
 
     def label(self, key: str, value: str) -> Self:
         if self._metadata.labels is None:
@@ -74,9 +76,7 @@ class PipelineBuilder:
         return self
 
     def add_stage(self, stage: Stage | dict[str, Any]) -> Self:
-        self._stages.append(
-            stage if isinstance(stage, Stage) else Stage.model_validate(stage)
-        )
+        self._stages.append(stage if isinstance(stage, Stage) else Stage.model_validate(stage))
         return self
 
     def add_trigger(self, trigger: Trigger | dict[str, Any]) -> Self:
@@ -87,9 +87,7 @@ class PipelineBuilder:
 
     def add_provider(self, name: str, provider: Provider | dict[str, Any]) -> Self:
         self._providers[name] = (
-            provider
-            if isinstance(provider, Provider)
-            else Provider.model_validate(provider)
+            provider if isinstance(provider, Provider) else Provider.model_validate(provider)
         )
         return self
 
@@ -123,6 +121,12 @@ class PipelineBuilder:
         )
         return self
 
+    def with_priority_policy(self, policy: PriorityPolicy | dict[str, Any]) -> Self:
+        self._priority_policy = (
+            policy if isinstance(policy, PriorityPolicy) else PriorityPolicy.model_validate(policy)
+        )
+        return self
+
     def build(self) -> Pipeline:
         spec = PipelineSpec(
             stages=self._stages,
@@ -137,6 +141,8 @@ class PipelineBuilder:
             spec.pull_request = self._pull_request
         if self._notifications:
             spec.notifications = self._notifications
+        if self._priority_policy:
+            spec.priority_policy = self._priority_policy
 
         return Pipeline(
             apiVersion=API_VERSION,
@@ -195,22 +201,16 @@ class AgentRoleBuilder:
 
     def add_handoff(self, handoff: Handoff | dict[str, Any]) -> Self:
         self._handoffs.append(
-            handoff
-            if isinstance(handoff, Handoff)
-            else Handoff.model_validate(handoff)
+            handoff if isinstance(handoff, Handoff) else Handoff.model_validate(handoff)
         )
         return self
 
     def add_skill(self, skill: Skill | dict[str, Any]) -> Self:
-        self._skills.append(
-            skill if isinstance(skill, Skill) else Skill.model_validate(skill)
-        )
+        self._skills.append(skill if isinstance(skill, Skill) else Skill.model_validate(skill))
         return self
 
     def with_agent_card(self, card: AgentCard | dict[str, Any]) -> Self:
-        self._agent_card = (
-            card if isinstance(card, AgentCard) else AgentCard.model_validate(card)
-        )
+        self._agent_card = card if isinstance(card, AgentCard) else AgentCard.model_validate(card)
         return self
 
     def build(self) -> AgentRole:
@@ -257,15 +257,11 @@ class QualityGateBuilder:
         return self
 
     def add_gate(self, gate: Gate | dict[str, Any]) -> Self:
-        self._gates.append(
-            gate if isinstance(gate, Gate) else Gate.model_validate(gate)
-        )
+        self._gates.append(gate if isinstance(gate, Gate) else Gate.model_validate(gate))
         return self
 
     def with_scope(self, scope: GateScope | dict[str, Any]) -> Self:
-        self._scope = (
-            scope if isinstance(scope, GateScope) else GateScope.model_validate(scope)
-        )
+        self._scope = scope if isinstance(scope, GateScope) else GateScope.model_validate(scope)
         return self
 
     def with_evaluation(self, evaluation: Evaluation | dict[str, Any]) -> Self:
@@ -315,9 +311,7 @@ class AutonomyPolicyBuilder:
 
     def add_level(self, level: AutonomyLevel | dict[str, Any]) -> Self:
         self._levels.append(
-            level
-            if isinstance(level, AutonomyLevel)
-            else AutonomyLevel.model_validate(level)
+            level if isinstance(level, AutonomyLevel) else AutonomyLevel.model_validate(level)
         )
         return self
 
@@ -331,9 +325,7 @@ class AutonomyPolicyBuilder:
         )
         return self
 
-    def add_demotion_trigger(
-        self, trigger: DemotionTrigger | dict[str, Any]
-    ) -> Self:
+    def add_demotion_trigger(self, trigger: DemotionTrigger | dict[str, Any]) -> Self:
         self._demotion_triggers.append(
             trigger
             if isinstance(trigger, DemotionTrigger)
@@ -358,9 +350,7 @@ class AutonomyPolicyBuilder:
 
 
 class AdapterBindingBuilder:
-    def __init__(
-        self, name: str, iface: AdapterInterface, type_: str, version: str
-    ) -> None:
+    def __init__(self, name: str, iface: AdapterInterface, type_: str, version: str) -> None:
         self._metadata = _base_metadata(name)
         self._interface = iface
         self._type = type_

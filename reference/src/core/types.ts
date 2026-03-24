@@ -114,6 +114,39 @@ export interface CostPolicy {
   modelPricing?: ModelPricingConfig;
 }
 
+// ── Priority Scoring Types (RFC-0005) ─────────────────────────────
+
+export interface PriorityDimensionConfig {
+  min?: number;
+  max?: number;
+}
+
+export interface PriorityDimensionsConfig {
+  marketForce?: PriorityDimensionConfig;
+  humanCurveWeights?: { explicit?: number; consensus?: number; decision?: number };
+}
+
+export interface PriorityCalibrationConfig {
+  enabled?: boolean;
+  lookbackPeriod?: string;
+}
+
+export interface PriorityAdaptersConfig {
+  supportChannel?: string;
+  crm?: string;
+  analytics?: string;
+}
+
+export interface PriorityPolicy {
+  enabled?: boolean;
+  minimumScore?: number;
+  minimumConfidence?: number;
+  soulPurpose?: string;
+  dimensions?: PriorityDimensionsConfig;
+  calibration?: PriorityCalibrationConfig;
+  adapters?: PriorityAdaptersConfig;
+}
+
 export interface ModelRule {
   complexity: [number, number];
   model: string;
@@ -266,6 +299,7 @@ export interface PipelineSpec {
   pullRequest?: PullRequestConfig;
   notifications?: NotificationsConfig;
   costPolicy?: CostPolicy;
+  priorityPolicy?: PriorityPolicy;
 }
 
 export type PipelinePhase = 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Suspended';

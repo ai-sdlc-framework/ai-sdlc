@@ -24,6 +24,7 @@
 7. [Schema Validation](#7-schema-validation)
 8. [Versioning](#8-versioning)
 9. [Reconciliation Semantics](#9-reconciliation-semantics)
+   - 9b. [Priority Policy Semantics](#9b-priority-policy-semantics-rfc-0005)
 10. [Extensibility](#10-extensibility)
 11. [Conformance Levels](#11-conformance-levels)
 
@@ -1042,6 +1043,61 @@ Each reconciliation cycle MUST return one of:
 | **Error** | Requeue with exponential backoff |
 | **Explicit Requeue** | Immediate retry |
 | **Delayed Requeue** | Check again after specified duration |
+
+---
+
+## 9b. Priority Policy Semantics (RFC-0005)
+
+### 9b.1 Overview
+
+The **Priority Policy** enables autonomous work item prioritization using the Product Priority Algorithm (PPA). When `priorityPolicy.enabled` is `true`, the reconciliation loop scores each incoming work item before enqueueing it for execution.
+
+### 9b.2 Composite Formula
+
+The composite priority score is a multiplicative product of seven dimensions:
+
+```
+P(w) = Sα(w) × Dπ(w) × Mφ(w) × Eρ(w) × (1 − Eτ(w)) × (1 + HC(w)) × Cκ(w)
+```
+
+| Symbol | Dimension | Range | Description |
+| --- | --- | --- | --- |
+| Sα | Soul Alignment | [0, 1] | How well the item aligns with the product's soul purpose |
+| Dπ | Demand Pressure | [0, 1.5] | Customer requests, demand signals, bug severity, builder conviction |
+| Mφ | Market Force | [0.5, 3.0] | Technology inflection, competitive pressure, regulatory urgency |
+| Eρ | Execution Reality | [0, 1] | Inverse complexity, budget headroom, dependency clearance |
+| Eτ | Entropy Tax | [0, 1] | Competitive drift and market divergence (higher = less relevant) |
+| HC | Human Curve | [-1, 1] | Explicit priority, team consensus, meeting decisions (via tanh) |
+| Cκ | Calibration | [0.7, 1.3] | Operator-tuned or auto-calibrated coefficient |
+
+A zero value in any multiplicative dimension (Sα, Dπ, Eρ) vetoes the work item entirely.
+
+### 9b.3 Dimension Ranges
+
+Implementations MUST clamp each dimension to its specified range. The `dimensions` field in the Priority Policy allows operators to override the default bounds for `marketForce` and the weights for `humanCurveWeights`.
+
+### 9b.4 Override Behavior
+
+When `PriorityInput.override` is `true`, the composite score MUST be `Infinity`, confidence MUST be `1.0`, and the `override` field on the score MUST contain the reason and optional expiry. Override items always sort first in ranking.
+
+### 9b.5 Minimum Thresholds
+
+- `minimumScore`: Items with a composite score below this value MUST be silently skipped (not enqueued).
+- `minimumConfidence`: Items with a confidence below this value SHOULD be flagged for manual review but MAY still be enqueued.
+
+### 9b.6 Calibration Loop
+
+When `calibration.enabled` is `true`, implementations SHOULD record each pipeline execution outcome as a calibration sample (predicted priority + actual outcome). The `computeCalibrationCoefficient()` function uses these samples to adjust Cκ, correcting for systematic over- or under-scoring. The `lookbackPeriod` controls how far back to look for samples.
+
+### 9b.7 Adapter Integration
+
+The `adapters` field references `AdapterBinding` names for three PPA signal sources:
+
+- `supportChannel` → `SupportChannel` interface (customer ticket data for Demand Pressure)
+- `crm` → `CrmProvider` interface (account health, escalations for Market Force)
+- `analytics` → `AnalyticsProvider` interface (feature usage, retention for Soul Alignment)
+
+These adapters are optional; when absent, the algorithm uses default values (0.5) for the corresponding input signals.
 
 ---
 
