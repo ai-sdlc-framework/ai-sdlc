@@ -140,19 +140,15 @@ spec:
       cooldown: 2w
 `;
 
-const GITIGNORE_ENTRIES = [
-  '# AI-SDLC runtime artifacts',
-  '.ai-sdlc/state.db',
-  '.ai-sdlc/state/',
-  '.ai-sdlc/audit.jsonl',
-];
+const GITIGNORE_PATHS = ['.ai-sdlc/state.db', '.ai-sdlc/state/', '.ai-sdlc/audit.jsonl'];
 
 /** Ensure .gitignore includes AI-SDLC runtime artifact entries. */
 function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = ''): void {
   const gitignorePath = join(projectDir, '.gitignore');
   const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
 
-  const missing = GITIGNORE_ENTRIES.filter((entry) => !existing.includes(entry));
+  // Only check path entries (not comments) to avoid duplicate blocks
+  const missing = GITIGNORE_PATHS.filter((entry) => !existing.includes(entry));
   if (missing.length === 0) return;
 
   if (dryRun) {
@@ -160,7 +156,7 @@ function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = '
     return;
   }
 
-  const block = '\n' + missing.join('\n') + '\n';
+  const block = '\n# AI-SDLC runtime artifacts\n' + missing.join('\n') + '\n';
   appendFileSync(gitignorePath, block, 'utf-8');
   console.log(`${prefix}  updated .gitignore`);
 }
