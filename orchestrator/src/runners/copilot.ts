@@ -58,14 +58,25 @@ export class CopilotRunner implements AgentRunner {
     const model = DEFAULT_COPILOT_MODEL ?? 'copilot-default';
 
     try {
-      const args = ['-p', prompt, '--yolo'];
+      const copilotArgs = ['-p', prompt, '--yolo'];
       if (DEFAULT_COPILOT_MODEL) {
-        args.push('--model', DEFAULT_COPILOT_MODEL);
+        copilotArgs.push('--model', DEFAULT_COPILOT_MODEL);
+      }
+
+      // When running inside an OpenShell sandbox, prefix with sandbox connect
+      let cmd: string;
+      let args: string[];
+      if (ctx.sandboxId) {
+        cmd = 'openshell';
+        args = ['sandbox', 'connect', ctx.sandboxId, '--', 'copilot', ...copilotArgs];
+      } else {
+        cmd = 'copilot';
+        args = copilotArgs;
       }
 
       const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
         (resolve, reject) => {
-          const child = spawn('copilot', args, {
+          const child = spawn(cmd, args, {
             cwd: ctx.workDir,
             stdio: ['ignore', 'pipe', 'pipe'],
             env: { ...process.env },

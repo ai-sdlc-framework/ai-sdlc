@@ -89,14 +89,25 @@ export class CodexRunner implements AgentRunner {
     const model = DEFAULT_CODEX_MODEL ?? 'codex-default';
 
     try {
-      const args = ['exec', '-', '--full-auto', '--json'];
+      const codexArgs = ['exec', '-', '--full-auto', '--json'];
       if (DEFAULT_CODEX_MODEL) {
-        args.push('-m', DEFAULT_CODEX_MODEL);
+        codexArgs.push('-m', DEFAULT_CODEX_MODEL);
+      }
+
+      // When running inside an OpenShell sandbox, prefix with sandbox connect
+      let cmd: string;
+      let args: string[];
+      if (ctx.sandboxId) {
+        cmd = 'openshell';
+        args = ['sandbox', 'connect', ctx.sandboxId, '--', 'codex', ...codexArgs];
+      } else {
+        cmd = 'codex';
+        args = codexArgs;
       }
 
       const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
         (resolve, reject) => {
-          const child = spawn('codex', args, {
+          const child = spawn(cmd, args, {
             cwd: ctx.workDir,
             stdio: ['pipe', 'pipe', 'pipe'],
             env: { ...process.env },

@@ -36,6 +36,9 @@ import {
   createStubSandbox,
   // Docker sandbox
   createDockerSandbox,
+  // OpenShell sandbox
+  createOpenShellSandbox,
+  type OpenShellSandboxConfig,
   // Backlog.md adapter
   createBacklogMdIssueTracker,
   // Webhook bridge (used in function body)
@@ -154,6 +157,27 @@ export function createPipelineAdapterRegistry(): AdapterRegistry {
     return createDockerSandbox(exec, config);
   });
   registry.register(
+    stubMeta('openshell-sandbox', 'OpenShell Sandbox', 'Sandbox@v1', 'openshell'),
+    () => {
+      const exec = async (cmd: string) => {
+        const { exec: cpExec } = await import('node:child_process');
+        const { promisify } = await import('node:util');
+        const execAsync = promisify(cpExec);
+        const { stdout } = await execAsync(cmd);
+        return stdout;
+      };
+      const config: OpenShellSandboxConfig = {
+        workDir: process.env.AI_SDLC_WORK_DIR,
+        binaryPath: process.env.AI_SDLC_OPENSHELL_BIN,
+        autoProviders: [
+          { name: 'claude', type: 'claude' },
+          { name: 'github', type: 'github' },
+        ],
+      };
+      return createOpenShellSandbox(exec, config);
+    },
+  );
+  registry.register(
     stubMeta('env-secret-store', 'Environment Secret Store', 'SecretStore@v1', 'env'),
     () => createEnvSecretStore(),
   );
@@ -208,8 +232,13 @@ export function resolveInfrastructure(
 
   // Resolve from registry — factories are guaranteed present when using
   // createPipelineAdapterRegistry(), but we guard for custom registries.
+  const sandboxEnv = process.env.AI_SDLC_SANDBOX_PROVIDER;
   const sandboxProvider =
-    process.env.AI_SDLC_SANDBOX_PROVIDER === 'docker' ? 'docker-sandbox' : 'stub-sandbox';
+    sandboxEnv === 'openshell'
+      ? 'openshell-sandbox'
+      : sandboxEnv === 'docker'
+        ? 'docker-sandbox'
+        : 'stub-sandbox';
   const sandbox =
     (registry.getFactory(sandboxProvider)?.() as Sandbox | undefined) ?? createStubSandbox();
   const secretStore =
