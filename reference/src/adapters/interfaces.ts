@@ -306,6 +306,74 @@ export interface DeploymentTarget {
   watchDeploymentEvents(filter: DeployFilter): EventStream<DeployEvent>;
 }
 
+// ── SupportChannel ───────────────────────────────────────────────────
+
+export interface SupportTicket {
+  id: string;
+  subject: string;
+  description?: string;
+  status: string;
+  priority: string;
+  customerTier?: string;
+  tags?: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupportTicketFilter {
+  status?: string;
+  priority?: string;
+  tags?: string[];
+  since?: string;
+}
+
+export interface SupportChannel {
+  listTickets(filter: SupportTicketFilter): Promise<SupportTicket[]>;
+  getTicket(id: string): Promise<SupportTicket>;
+  getFeatureRequestCount(featureTag: string, since?: string): Promise<number>;
+  watchTickets(
+    filter: SupportTicketFilter,
+  ): EventStream<{ type: 'created' | 'updated'; ticket: SupportTicket; timestamp: string }>;
+}
+
+// ── CrmProvider ──────────────────────────────────────────────────────
+
+export interface CrmAccount {
+  id: string;
+  name: string;
+  tier: string;
+  contractValue?: number;
+  healthScore?: number;
+  churnRisk?: number;
+}
+
+export interface CrmProvider {
+  getAccount(id: string): Promise<CrmAccount>;
+  listAccounts(filter?: { tier?: string; minHealthScore?: number }): Promise<CrmAccount[]>;
+  getEscalations(
+    since?: string,
+  ): Promise<{ accountId: string; reason: string; severity: string; createdAt: string }[]>;
+  getFeatureRequests(
+    accountId?: string,
+  ): Promise<{ feature: string; accountId: string; priority: string; requestedAt: string }[]>;
+}
+
+// ── AnalyticsProvider ────────────────────────────────────────────────
+
+export interface FeatureUsage {
+  feature: string;
+  activeUsers: number;
+  totalEvents: number;
+  period: string;
+}
+
+export interface AnalyticsProvider {
+  getFeatureUsage(feature: string, period?: string): Promise<FeatureUsage>;
+  getActiveUsers(period?: string): Promise<number>;
+  getRetentionRate(cohort?: string, period?: string): Promise<number>;
+  getNpsScore(period?: string): Promise<number | undefined>;
+}
+
 // ── EventBus ─────────────────────────────────────────────────────────
 
 export interface EventBus {
@@ -329,4 +397,7 @@ export interface AdapterInterfaces {
   SecretStore: SecretStore;
   MemoryStore: MemoryStore;
   EventBus: EventBus;
+  SupportChannel: SupportChannel;
+  CrmProvider: CrmProvider;
+  AnalyticsProvider: AnalyticsProvider;
 }

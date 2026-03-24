@@ -213,6 +213,140 @@ describe('ReconcilerLoop', () => {
     loop.stop();
   });
 
+  it('processes higher priority items first', async () => {
+    const order: string[] = [];
+    const reconciler: ReconcilerFn = vi.fn(async (resource) => {
+      order.push(resource.metadata.name);
+      return { type: 'success' as const };
+    });
+
+    const loop = new ReconcilerLoop(reconciler, { maxConcurrency: 1 });
+    loop.enqueue(makeResource('low'), 1);
+    loop.enqueue(makeResource('high'), 10);
+    loop.enqueue(makeResource('mid'), 5);
+    loop.start();
+
+    // Process first item
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[0]).toBe('high');
+
+    // Process second item
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[1]).toBe('mid');
+
+    // Process third item
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[2]).toBe('low');
+
+    loop.stop();
+  });
+
+  it('items without priority are treated as priority 0', async () => {
+    const order: string[] = [];
+    const reconciler: ReconcilerFn = vi.fn(async (resource) => {
+      order.push(resource.metadata.name);
+      return { type: 'success' as const };
+    });
+
+    const loop = new ReconcilerLoop(reconciler, { maxConcurrency: 1 });
+    loop.enqueue(makeResource('no-priority'));
+    loop.enqueue(makeResource('has-priority'), 5);
+    loop.start();
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[0]).toBe('has-priority');
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[1]).toBe('no-priority');
+
+    loop.stop();
+  });
+
+  it('priority is preserved across requeue', async () => {
+    let calls = 0;
+    const order: string[] = [];
+    const reconciler: ReconcilerFn = vi.fn(async (resource) => {
+      calls++;
+      order.push(resource.metadata.name);
+      if (resource.metadata.name === 'high' && calls === 1) {
+        return { type: 'requeue' as const };
+      }
+      return { type: 'success' as const };
+    });
+
+    const loop = new ReconcilerLoop(reconciler, { maxConcurrency: 1 });
+    loop.enqueue(makeResource('low'), 1);
+    loop.enqueue(makeResource('high'), 10);
+    loop.start();
+
+    // First: high (priority 10)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[0]).toBe('high');
+
+    // high requeued with same priority, low still in queue with priority 1
+    // high (10) should still beat low (1)
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[1]).toBe('high');
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[2]).toBe('low');
+
+    loop.stop();
+  });
+
+  it('periodic re-enqueue preserves last known priority', async () => {
+    const order: string[] = [];
+    const reconciler: ReconcilerFn = vi.fn(async (resource) => {
+      order.push(resource.metadata.name);
+      return { type: 'success' as const };
+    });
+
+    const loop = new ReconcilerLoop(reconciler, {
+      maxConcurrency: 1,
+      periodicIntervalMs: 1000,
+    });
+    loop.enqueue(makeResource('low'), 1);
+    loop.enqueue(makeResource('high'), 10);
+    loop.start();
+
+    // Drain the initial queue
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order).toEqual(['high', 'low']);
+
+    // After periodic interval, both re-enqueue preserving priority
+    order.length = 0;
+    await vi.advanceTimersByTimeAsync(1100);
+    // high should be processed first again
+    expect(order[0]).toBe('high');
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[1]).toBe('low');
+
+    loop.stop();
+  });
+
+  it('negative priority items are processed after default (0) items', async () => {
+    const order: string[] = [];
+    const reconciler: ReconcilerFn = vi.fn(async (resource) => {
+      order.push(resource.metadata.name);
+      return { type: 'success' as const };
+    });
+
+    const loop = new ReconcilerLoop(reconciler, { maxConcurrency: 1 });
+    loop.enqueue(makeResource('negative'), -5);
+    loop.enqueue(makeResource('default'));
+    loop.start();
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[0]).toBe('default');
+
+    await vi.advanceTimersByTimeAsync(0);
+    expect(order[1]).toBe('negative');
+
+    loop.stop();
+  });
+
   it('backoff resets on success after errors', async () => {
     let calls = 0;
     const reconciler: ReconcilerFn = vi.fn(async () => {

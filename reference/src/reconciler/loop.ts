@@ -11,6 +11,8 @@ import { reconcileOnce, calculateBackoff } from './index.js';
 interface QueueItem {
   resource: AnyResource;
   attempt: number;
+  /** Optional priority. Higher values are processed first. */
+  priority?: number;
 }
 
 export class ReconcilerLoop {
@@ -19,6 +21,7 @@ export class ReconcilerLoop {
   private readonly queue = new Map<string, QueueItem>();
   private readonly active = new Set<string>();
   private readonly knownResources = new Map<string, AnyResource>();
+  private readonly knownPriorities = new Map<string, number>();
   private periodicTimer: ReturnType<typeof setInterval> | null = null;
   private running = false;
 
@@ -30,11 +33,15 @@ export class ReconcilerLoop {
   /**
    * Enqueue a resource for reconciliation. Deduplicates by metadata.name.
    * If the resource is already active or queued, this is a no-op.
+   * @param priority Optional priority (higher = processed first).
    */
-  enqueue(resource: AnyResource): void {
+  enqueue(resource: AnyResource, priority?: number): void {
     const name = resource.metadata.name;
+    if (priority !== undefined) {
+      this.knownPriorities.set(name, priority);
+    }
     if (this.active.has(name) || this.queue.has(name)) return;
-    this.queue.set(name, { resource, attempt: 0 });
+    this.queue.set(name, { resource, attempt: 0, priority });
     this.knownResources.set(name, resource);
     if (this.running) {
       this.processQueue();
@@ -50,7 +57,8 @@ export class ReconcilerLoop {
     this.periodicTimer = setInterval(() => {
       for (const [name, resource] of this.knownResources) {
         if (!this.active.has(name) && !this.queue.has(name)) {
-          this.queue.set(name, { resource, attempt: 0 });
+          const priority = this.knownPriorities.get(name);
+          this.queue.set(name, { resource, attempt: 0, priority });
         }
       }
       this.processQueue();
@@ -82,7 +90,9 @@ export class ReconcilerLoop {
     const available = this.config.maxConcurrency - this.active.size;
     if (available <= 0) return;
 
-    const entries = Array.from(this.queue.entries()).slice(0, available);
+    const entries = Array.from(this.queue.entries())
+      .sort(([, a], [, b]) => (b.priority ?? 0) - (a.priority ?? 0))
+      .slice(0, available);
 
     for (const [name, item] of entries) {
       this.queue.delete(name);
@@ -103,6 +113,7 @@ export class ReconcilerLoop {
       switch (result.type) {
         case 'success':
           // Reset attempt counter — periodic timer will re-enqueue later
+          this.processQueue();
           break;
 
         case 'error': {
@@ -110,21 +121,25 @@ export class ReconcilerLoop {
           const delay = calculateBackoff(nextAttempt, this.config);
           setTimeout(() => {
             if (!this.running) return;
-            this.queue.set(name, { resource: item.resource, attempt: nextAttempt });
+            this.queue.set(name, {
+              resource: item.resource,
+              attempt: nextAttempt,
+              priority: item.priority,
+            });
             this.processQueue();
           }, delay);
           break;
         }
 
         case 'requeue':
-          this.queue.set(name, { resource: item.resource, attempt: 0 });
+          this.queue.set(name, { resource: item.resource, attempt: 0, priority: item.priority });
           this.processQueue();
           break;
 
         case 'requeue-after':
           setTimeout(() => {
             if (!this.running) return;
-            this.queue.set(name, { resource: item.resource, attempt: 0 });
+            this.queue.set(name, { resource: item.resource, attempt: 0, priority: item.priority });
             this.processQueue();
           }, result.delayMs);
           break;
