@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/conformance",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Conformance test runner for AI-SDLC implementations",
   "license": "Apache-2.0",
   "repository": {
