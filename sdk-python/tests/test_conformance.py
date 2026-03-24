@@ -28,9 +28,7 @@ def _collect_schema_fixtures() -> list[tuple[str, dict[str, Any], bool]]:
         for f in sorted(kind_dir.glob("*.yaml")):
             data = yaml.safe_load(f.read_text())
             expected_valid = f.stem.startswith("valid")
-            fixtures.append(
-                (f.relative_to(_CONFORMANCE_DIR).as_posix(), data, expected_valid)
-            )
+            fixtures.append((f.relative_to(_CONFORMANCE_DIR).as_posix(), data, expected_valid))
     return fixtures
 
 
@@ -42,9 +40,7 @@ _SCHEMA_FIXTURES = _collect_schema_fixtures()
     _SCHEMA_FIXTURES,
     ids=[f[0] for f in _SCHEMA_FIXTURES],
 )
-def test_schema_conformance(
-    fixture_path: str, data: dict[str, Any], expected_valid: bool
-) -> None:
+def test_schema_conformance(fixture_path: str, data: dict[str, Any], expected_valid: bool) -> None:
     result = validate_resource(data)
     assert result.valid == expected_valid, (
         f"Fixture {fixture_path}: expected valid={expected_valid}, "
@@ -183,9 +179,7 @@ def _run_orchestration_error(test: dict[str, Any]) -> dict[str, Any]:
             raise RuntimeError(f"Agent {fail_agent} failed")
         return "ok"
 
-    result = asyncio.run(
-        execute_orchestration(plan, agents, task_fn)
-    )
+    result = asyncio.run(execute_orchestration(plan, agents, task_fn))
     failed_agents = [s.agent for s in result.step_results if s.state == "failed"]
     return {"success": result.success, "failedAgents": failed_agents}
 
@@ -259,6 +253,11 @@ def _run_pipeline_failure_policy(test: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _run_priority_scoring(test: dict[str, Any]) -> dict[str, Any]:
+    """PPA priority scoring — requires orchestrator; skip in SDK-only tests."""
+    pytest.skip("priority-scoring requires @ai-sdlc/orchestrator (Node.js)")
+
+
 _BEHAVIORAL_HANDLERS: dict[str, Any] = {
     "quality-gate-evaluation": _run_quality_gate_evaluation,
     "autonomy-promotion": _run_autonomy_promotion,
@@ -267,6 +266,7 @@ _BEHAVIORAL_HANDLERS: dict[str, Any] = {
     "orchestration-error": _run_orchestration_error,
     "handoff-validation": _run_handoff_validation,
     "pipeline-failure-policy": _run_pipeline_failure_policy,
+    "priority-scoring": _run_priority_scoring,
 }
 
 
@@ -275,9 +275,7 @@ _BEHAVIORAL_HANDLERS: dict[str, Any] = {
     _BEHAVIORAL_FIXTURES,
     ids=[f[0] for f in _BEHAVIORAL_FIXTURES],
 )
-def test_behavioral_conformance(
-    fixture_name: str, fixture_data: dict[str, Any]
-) -> None:
+def test_behavioral_conformance(fixture_name: str, fixture_data: dict[str, Any]) -> None:
     test = fixture_data["test"]
     test_type = test["type"]
     expected = test["expected"]
