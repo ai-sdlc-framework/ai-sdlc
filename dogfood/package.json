@@ -26,7 +26,8 @@
     "execute": "tsx src/cli.ts",
     "fix-ci": "tsx src/cli-fix-ci.ts",
     "triage": "tsx src/cli-triage.ts",
-    "watch": "tsx src/cli-watch.ts"
+    "watch": "tsx src/cli-watch.ts",
+    "ppa-score": "tsx scripts/ppa-score.ts"
   },
   "dependencies": {
     "@ai-sdlc/orchestrator": "workspace:*",
