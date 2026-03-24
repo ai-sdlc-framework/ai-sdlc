@@ -13,6 +13,8 @@ import {
   createStubApprovalWorkflow,
   createGitHubSandbox,
   createGitHubJITCredentialIssuer,
+  createOpenShellSandbox,
+  isOpenShellAvailable,
   classifyApprovalTier,
   compareTiers,
   type Sandbox,
@@ -32,6 +34,8 @@ import {
   type SandboxStatus,
   type ApprovalStatus,
   type ApprovalClassificationInput,
+  type OpenShellSandboxConfig,
+  type ShellExec,
 } from '@ai-sdlc/reference';
 import { DEFAULT_JIT_TTL_MS, DEFAULT_JIT_SCOPE } from './defaults.js';
 
@@ -128,7 +132,29 @@ export function createGitHubJITProvider(
   return createGitHubJITCredentialIssuer(client, config);
 }
 
-export { classifyApprovalTier, compareTiers, createGitHubSandbox, createGitHubJITCredentialIssuer };
+/**
+ * Create an OpenShell-backed sandbox provider.
+ * Falls back to stub sandbox if OpenShell CLI is not available.
+ */
+export async function createOpenShellSandboxProvider(
+  exec: ShellExec,
+  config?: OpenShellSandboxConfig,
+): Promise<Sandbox> {
+  const available = await isOpenShellAvailable(exec);
+  if (!available) {
+    return createStubSandbox();
+  }
+  return createOpenShellSandbox(exec, config);
+}
+
+export {
+  classifyApprovalTier,
+  compareTiers,
+  createGitHubSandbox,
+  createGitHubJITCredentialIssuer,
+  createOpenShellSandbox,
+  isOpenShellAvailable,
+};
 export type {
   ApprovalTier,
   ApprovalRequest,
@@ -143,4 +169,6 @@ export type {
   SandboxStatus,
   ApprovalStatus,
   ApprovalClassificationInput,
+  OpenShellSandboxConfig,
+  ShellExec,
 };

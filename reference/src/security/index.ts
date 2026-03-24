@@ -42,3 +42,20 @@ export {
 export { createEnvSecretStore } from './env-secret-store.js';
 
 export { createDockerSandbox, type ShellExec, type DockerSandboxConfig } from './docker-sandbox.js';
+
+export {
+  createOpenShellSandbox,
+  isOpenShellAvailable,
+  buildSandboxExecPrefix,
+  type OpenShellSandboxConfig,
+} from './openshell-sandbox.js';
+
+export {
+  generateOpenShellPolicy,
+  serializePolicy,
+  type OpenShellPolicy,
+  type OpenShellFilesystemPolicy,
+  type OpenShellNetworkPolicy,
+  type OpenShellEndpoint,
+  type PolicyGenerationOptions,
+} from './openshell-policy.js';
