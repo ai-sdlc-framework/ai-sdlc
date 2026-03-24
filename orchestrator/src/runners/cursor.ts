@@ -80,14 +80,25 @@ export class CursorRunner implements AgentRunner {
     const model = DEFAULT_CURSOR_MODEL ?? 'cursor-default';
 
     try {
-      const args = ['--print', prompt, '--force', '--output-format=stream-json'];
+      const cursorArgs = ['--print', prompt, '--force', '--output-format=stream-json'];
       if (DEFAULT_CURSOR_MODEL) {
-        args.push('-m', DEFAULT_CURSOR_MODEL);
+        cursorArgs.push('-m', DEFAULT_CURSOR_MODEL);
+      }
+
+      // When running inside an OpenShell sandbox, prefix with sandbox connect
+      let cmd: string;
+      let args: string[];
+      if (ctx.sandboxId) {
+        cmd = 'openshell';
+        args = ['sandbox', 'connect', ctx.sandboxId, '--', 'cursor-agent', ...cursorArgs];
+      } else {
+        cmd = 'cursor-agent';
+        args = cursorArgs;
       }
 
       const { stdout, stderr } = await new Promise<{ stdout: string; stderr: string }>(
         (resolve, reject) => {
-          const child = spawn('cursor-agent', args, {
+          const child = spawn(cmd, args, {
             cwd: ctx.workDir,
             stdio: ['ignore', 'pipe', 'pipe'],
             env: { ...process.env },
