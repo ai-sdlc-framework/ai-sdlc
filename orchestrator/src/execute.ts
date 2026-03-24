@@ -579,6 +579,7 @@ async function executePipelineBody(
                 memory: options.memory,
                 codebaseContext: options.codebaseContext,
                 episodicContext,
+                sandboxId,
               }),
           );
         },

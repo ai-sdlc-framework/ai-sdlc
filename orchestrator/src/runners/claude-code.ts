@@ -138,6 +138,8 @@ interface RunClaudeOptions {
   allowedTools?: string[];
   timeoutMs?: number;
   model?: string;
+  /** When set, spawns claude inside this OpenShell sandbox. */
+  sandboxId?: string;
 }
 
 interface RunClaudeResult {
@@ -156,7 +158,20 @@ function runClaude(
 
   return new Promise((resolve, reject) => {
     const model = opts?.model ?? process.env.AI_SDLC_MODEL ?? DEFAULT_MODEL;
-    const child = spawn('claude', ['-p', '--model', model, '--allowedTools', tools], {
+    const claudeArgs = ['-p', '--model', model, '--allowedTools', tools];
+
+    // When running inside an OpenShell sandbox, prefix with sandbox connect
+    let cmd: string;
+    let args: string[];
+    if (opts?.sandboxId) {
+      cmd = 'openshell';
+      args = ['sandbox', 'connect', opts.sandboxId, '--', 'claude', ...claudeArgs];
+    } else {
+      cmd = 'claude';
+      args = claudeArgs;
+    }
+
+    const child = spawn(cmd, args, {
       cwd: workDir,
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env },
@@ -253,6 +268,7 @@ export class ClaudeCodeRunner implements AgentRunner {
         allowedTools: ctx.allowedTools,
         timeoutMs: ctx.timeoutMs,
         model: ctx.model,
+        sandboxId: ctx.sandboxId,
       });
 
       // Parse token usage from stderr
