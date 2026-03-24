@@ -29,6 +29,7 @@
   },
   "dependencies": {
     "@ai-sdlc/reference": "workspace:*",
+    "@ai-sdlc/orchestrator": "workspace:*",
     "yaml": "^2.7.0"
   },
   "devDependencies": {

@@ -26,4 +26,5 @@ export type {
   DeploymentRecordState,
   RolloutStepRecord,
   AuditEntryRecord,
+  PriorityCalibrationSample,
 } from './types.js';

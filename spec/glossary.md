@@ -152,6 +152,14 @@ A templated message for [Pipeline](#pipeline) events such as gate failures, agen
 
 A scoping unit within the [metadata](#metadata) of a [resource](#resource), typically corresponding to a team or project. Resource names must be unique within a namespace.
 
+### Priority Policy {#priority-policy}
+
+An optional [Pipeline](#pipeline)-level configuration that enables the Product Priority Algorithm (PPA) for autonomous work item prioritization. Declares minimum score/confidence thresholds, soul purpose statement, dimension configuration, calibration settings, and adapter references for external signal ingestion. See RFC-0005.
+
+### Priority Score {#priority-score}
+
+A composite numeric value produced by the Product Priority Algorithm (PPA). Computed as the multiplicative product of seven dimensions: Soul Alignment (Sα), Demand Pressure (Dπ), Market Force (Mφ), Execution Reality (Eρ), Entropy Tax (Eτ), Human Curve (HC), and Calibration (Cκ). A zero in any dimension vetoes the work item. See RFC-0005.
+
 ### Pipeline {#pipeline}
 
 A [resource](#resource) of kind `Pipeline` that defines a complete SDLC workflow from trigger through delivery, including stages, agent assignments, [quality gates](#quality-gate), and [routing](#routing-strategy) rules. See [spec.md](spec.md#51-pipeline).

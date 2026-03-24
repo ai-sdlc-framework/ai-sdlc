@@ -1,0 +1,9 @@
+name: amplitude
+displayName: 'Amplitude'
+description: 'AnalyticsProvider adapter for Amplitude'
+version: '0.1.0'
+stability: alpha
+interfaces:
+  - AnalyticsProvider@v1
+owner: community
+specVersions: ['v1alpha1']

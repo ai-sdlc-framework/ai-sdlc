@@ -1,0 +1,19 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Override flag produces Infinity composite and confidence 1.0'
+metadata:
+  conformanceLevel: core
+test:
+  type: priority-scoring
+  input:
+    priorityInput:
+      itemId: 'ISS-2'
+      title: 'Critical hotfix'
+      description: 'Production is down'
+      override: true
+      overrideReason: 'Production incident'
+    config: {}
+  expected:
+    compositeInfinity: true
+    confidence: 1.0
+    hasOverride: true

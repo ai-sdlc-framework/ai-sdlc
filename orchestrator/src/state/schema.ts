@@ -2,7 +2,7 @@
  * SQLite DDL and migrations for the state store.
  */
 
-export const CURRENT_SCHEMA_VERSION = 7;
+export const CURRENT_SCHEMA_VERSION = 8;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -256,6 +256,27 @@ ALTER TABLE cost_ledger ADD COLUMN issue_id TEXT;
 ALTER TABLE routing_history ADD COLUMN issue_id TEXT;
 `;
 
+export const MIGRATION_V8 = `
+-- Priority calibration table (RFC-0005 PPA)
+CREATE TABLE IF NOT EXISTS priority_calibration (
+  id INTEGER PRIMARY KEY,
+  issue_id TEXT NOT NULL,
+  priority_composite REAL NOT NULL,
+  priority_confidence REAL NOT NULL,
+  priority_dimensions TEXT,
+  actual_complexity INTEGER,
+  files_changed INTEGER,
+  outcome TEXT,
+  sampled_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_priority_calibration_issue ON priority_calibration(issue_id);
+CREATE INDEX IF NOT EXISTS idx_priority_calibration_sampled ON priority_calibration(sampled_at);
+
+-- Extend episodic_memory with priority columns
+ALTER TABLE episodic_memory ADD COLUMN priority_composite REAL;
+ALTER TABLE episodic_memory ADD COLUMN priority_confidence REAL;
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -284,5 +305,9 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 7,
     sql: MIGRATION_V7,
+  },
+  {
+    version: 8,
+    sql: MIGRATION_V8,
   },
 ];

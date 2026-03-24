@@ -38,6 +38,9 @@ importers:
 
   conformance/runner:
     dependencies:
+      '@ai-sdlc/orchestrator':
+        specifier: workspace:*
+        version: link:../../orchestrator
       '@ai-sdlc/reference':
         specifier: workspace:*
         version: link:../../reference

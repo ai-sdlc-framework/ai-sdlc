@@ -1,0 +1,21 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Basic priority scoring with default inputs produces a positive composite score'
+metadata:
+  conformanceLevel: core
+test:
+  type: priority-scoring
+  input:
+    priorityInput:
+      itemId: 'ISS-1'
+      title: 'Add dark mode support'
+      description: 'Users want dark mode for better night-time readability'
+      soulAlignment: 0.8
+      customerRequestCount: 5
+      demandSignal: 0.6
+      complexity: 3
+    config: {}
+  expected:
+    compositeMin: 0
+    compositeFinite: true
+    confidenceMin: 0.1

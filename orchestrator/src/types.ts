@@ -68,6 +68,12 @@ export type {
   AdapterBinding,
   AnyResource,
   ResourceKind,
+  // Priority scoring (RFC-0005)
+  PriorityPolicy,
+  PriorityDimensionConfig,
+  PriorityDimensionsConfig,
+  PriorityCalibrationConfig,
+  PriorityAdaptersConfig,
   // Validation (note: ValidationResult is not re-exported to avoid conflict with orchestrator's own)
   ValidationError,
 } from '@ai-sdlc/reference';

@@ -1,0 +1,9 @@
+name: salesforce
+displayName: 'Salesforce'
+description: 'CrmProvider adapter for Salesforce'
+version: '0.1.0'
+stability: alpha
+interfaces:
+  - CrmProvider@v1
+owner: community
+specVersions: ['v1alpha1']

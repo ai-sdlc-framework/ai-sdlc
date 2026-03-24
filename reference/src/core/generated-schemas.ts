@@ -917,6 +917,9 @@ export const pipelineSchema = {
         costPolicy: {
           $ref: '#/$defs/CostPolicy',
         },
+        priorityPolicy: {
+          $ref: '#/$defs/PriorityPolicy',
+        },
       },
       additionalProperties: false,
     },
@@ -1367,6 +1370,128 @@ export const pipelineSchema = {
         },
         modelPricing: {
           $ref: '#/$defs/ModelPricingConfig',
+        },
+      },
+      additionalProperties: false,
+    },
+    PriorityDimensionConfig: {
+      type: 'object',
+      description: 'Configuration for a single PPA dimension.',
+      properties: {
+        min: {
+          type: 'number',
+          description: 'Minimum bound for this dimension.',
+        },
+        max: {
+          type: 'number',
+          description: 'Maximum bound for this dimension.',
+        },
+      },
+      additionalProperties: false,
+    },
+    PriorityDimensionsConfig: {
+      type: 'object',
+      description: 'Per-dimension configuration for priority scoring.',
+      properties: {
+        marketForce: {
+          $ref: '#/$defs/PriorityDimensionConfig',
+        },
+        humanCurveWeights: {
+          type: 'object',
+          description: 'Weights for human curve sub-components.',
+          properties: {
+            explicit: {
+              type: 'number',
+              minimum: 0,
+              maximum: 1,
+              description: 'Weight for explicit priority signal.',
+            },
+            consensus: {
+              type: 'number',
+              minimum: 0,
+              maximum: 1,
+              description: 'Weight for team consensus signal.',
+            },
+            decision: {
+              type: 'number',
+              minimum: 0,
+              maximum: 1,
+              description: 'Weight for meeting decision signal.',
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
+    PriorityCalibrationConfig: {
+      type: 'object',
+      description: 'Calibration loop configuration for priority scoring.',
+      properties: {
+        enabled: {
+          type: 'boolean',
+          description: 'Whether automatic calibration is enabled.',
+          default: false,
+        },
+        lookbackPeriod: {
+          type: 'string',
+          description: 'ISO 8601 duration for calibration lookback window (e.g., P30D).',
+        },
+      },
+      additionalProperties: false,
+    },
+    PriorityAdaptersConfig: {
+      type: 'object',
+      description: 'Adapter references for priority signal ingestion.',
+      properties: {
+        supportChannel: {
+          type: 'string',
+          description: 'Name of the SupportChannel adapter binding.',
+        },
+        crm: {
+          type: 'string',
+          description: 'Name of the CrmProvider adapter binding.',
+        },
+        analytics: {
+          type: 'string',
+          description: 'Name of the AnalyticsProvider adapter binding.',
+        },
+      },
+      additionalProperties: false,
+    },
+    PriorityPolicy: {
+      type: 'object',
+      description:
+        'Priority scoring policy using the Product Priority Algorithm (PPA). See RFC-0005.',
+      properties: {
+        enabled: {
+          type: 'boolean',
+          description: 'Whether priority scoring is enabled.',
+          default: false,
+        },
+        minimumScore: {
+          type: 'number',
+          minimum: 0,
+          description: 'Minimum composite score required to enqueue a work item.',
+        },
+        minimumConfidence: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description: 'Minimum confidence threshold; items below this are flagged for review.',
+        },
+        soulPurpose: {
+          type: 'string',
+          description: 'Product soul purpose statement used for soul alignment scoring.',
+        },
+        dimensions: {
+          $ref: '#/$defs/PriorityDimensionsConfig',
+        },
+        calibration: {
+          $ref: '#/$defs/PriorityCalibrationConfig',
+        },
+        adapters: {
+          $ref: '#/$defs/PriorityAdaptersConfig',
         },
       },
       additionalProperties: false,

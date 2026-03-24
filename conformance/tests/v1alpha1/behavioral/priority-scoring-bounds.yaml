@@ -1,0 +1,38 @@
+kind: BehavioralTest
+apiVersion: ai-sdlc.io/v1alpha1
+description: 'Dimension values stay within their specified bounds'
+metadata:
+  conformanceLevel: core
+test:
+  type: priority-scoring
+  input:
+    priorityInput:
+      itemId: 'ISS-4'
+      title: 'Feature with extreme inputs'
+      description: 'All dimensions at maximum values'
+      soulAlignment: 1.0
+      customerRequestCount: 100
+      demandSignal: 1.0
+      bugSeverity: 5
+      builderConviction: 1.0
+      techInflection: 1.0
+      competitivePressure: 1.0
+      regulatoryUrgency: 1.0
+      complexity: 1
+      budgetUtilization: 0
+      dependencyClearance: 1.0
+      competitiveDrift: 0
+      marketDivergence: 0
+      explicitPriority: 1.0
+      teamConsensus: 1.0
+      meetingDecision: 1.0
+    config: {}
+  expected:
+    dimensionBounds:
+      soulAlignment: [0, 1]
+      demandPressure: [0, 1.5]
+      marketForce: [0.5, 3.0]
+      executionReality: [0, 1]
+      entropyTax: [0, 1]
+      humanCurve: [-1, 1]
+      calibration: [0.7, 1.3]

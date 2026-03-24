@@ -41,6 +41,8 @@ export interface EpisodicRecord {
   costUsd?: number;
   isRegression?: number;
   relatedEpisodes?: string;
+  priorityComposite?: number;
+  priorityConfidence?: number;
 }
 
 export interface AutonomyLedgerEntry {
@@ -166,6 +168,18 @@ export interface HandoffEvent {
   validationResult: string;
   errorMessage?: string;
   createdAt?: string;
+}
+
+export interface PriorityCalibrationSample {
+  id?: number;
+  issueId: string;
+  priorityComposite: number;
+  priorityConfidence: number;
+  priorityDimensions?: string;
+  actualComplexity?: number;
+  filesChanged?: number;
+  outcome?: string;
+  sampledAt?: string;
 }
 
 export type DeploymentRecordState =

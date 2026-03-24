@@ -1275,6 +1275,152 @@ describe('Audit Entries', () => {
   });
 });
 
+// ── Priority Calibration ────────────────────────────────────────────
+
+describe('Priority Calibration', () => {
+  it('saves and retrieves priority samples', () => {
+    const id = store.savePrioritySample({
+      issueId: 'ISS-1',
+      priorityComposite: 0.85,
+      priorityConfidence: 0.7,
+      priorityDimensions: '{"soulAlignment":0.9}',
+      actualComplexity: 5,
+      filesChanged: 3,
+      outcome: 'success',
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const samples = store.getPrioritySamples();
+    expect(samples).toHaveLength(1);
+    expect(samples[0].issueId).toBe('ISS-1');
+    expect(samples[0].priorityComposite).toBe(0.85);
+    expect(samples[0].priorityConfidence).toBe(0.7);
+    expect(samples[0].priorityDimensions).toBe('{"soulAlignment":0.9}');
+    expect(samples[0].actualComplexity).toBe(5);
+    expect(samples[0].filesChanged).toBe(3);
+    expect(samples[0].outcome).toBe('success');
+    expect(samples[0].sampledAt).toBeDefined();
+  });
+
+  it('getPrioritySamples filters by since', () => {
+    store.savePrioritySample({
+      issueId: 'ISS-1',
+      priorityComposite: 0.5,
+      priorityConfidence: 0.6,
+    });
+    // Far-future since returns nothing
+    const empty = store.getPrioritySamples({ since: '2099-01-01' });
+    expect(empty).toHaveLength(0);
+
+    // Far-past since returns all
+    const all = store.getPrioritySamples({ since: '2000-01-01' });
+    expect(all).toHaveLength(1);
+  });
+
+  it('getPrioritySamples respects limit', () => {
+    for (let i = 0; i < 5; i++) {
+      store.savePrioritySample({
+        issueId: `ISS-${i}`,
+        priorityComposite: i * 0.1,
+        priorityConfidence: 0.5,
+      });
+    }
+    const limited = store.getPrioritySamples({ limit: 2 });
+    expect(limited).toHaveLength(2);
+  });
+
+  it('computeCalibrationCoefficient returns 1.0 with no data', () => {
+    const coeff = store.computeCalibrationCoefficient();
+    expect(coeff).toBe(1.0);
+  });
+
+  it('computeCalibrationCoefficient returns 1.0 with no outcome data', () => {
+    store.savePrioritySample({
+      issueId: 'ISS-1',
+      priorityComposite: 0.8,
+      priorityConfidence: 0.9,
+      // no outcome
+    });
+    const coeff = store.computeCalibrationCoefficient();
+    expect(coeff).toBe(1.0);
+  });
+
+  it('computeCalibrationCoefficient adjusts with calibration samples', () => {
+    // Successes with higher priority than failures → well-calibrated
+    store.savePrioritySample({
+      issueId: 'ISS-1',
+      priorityComposite: 0.9,
+      priorityConfidence: 0.8,
+      outcome: 'success',
+    });
+    store.savePrioritySample({
+      issueId: 'ISS-2',
+      priorityComposite: 0.8,
+      priorityConfidence: 0.7,
+      outcome: 'success',
+    });
+    store.savePrioritySample({
+      issueId: 'ISS-3',
+      priorityComposite: 0.3,
+      priorityConfidence: 0.5,
+      outcome: 'failure',
+    });
+    store.savePrioritySample({
+      issueId: 'ISS-4',
+      priorityComposite: 0.2,
+      priorityConfidence: 0.4,
+      outcome: 'failure',
+    });
+
+    const coeff = store.computeCalibrationCoefficient();
+    // Successes avg = 0.85, failures avg = 0.25
+    // ratio = 0.25/0.85 ≈ 0.294 → coefficient = 1/0.294 ≈ 3.4 → clamped to 1.3
+    expect(coeff).toBeGreaterThanOrEqual(0.7);
+    expect(coeff).toBeLessThanOrEqual(1.3);
+    // With successes scoring higher than failures, coefficient should be >= 1.0
+    expect(coeff).toBe(1.3);
+  });
+
+  it('computeCalibrationCoefficient reduces when high-priority items fail', () => {
+    // Failures with higher priority than successes → over-scoring
+    store.savePrioritySample({
+      issueId: 'ISS-1',
+      priorityComposite: 0.3,
+      priorityConfidence: 0.6,
+      outcome: 'success',
+    });
+    store.savePrioritySample({
+      issueId: 'ISS-2',
+      priorityComposite: 0.9,
+      priorityConfidence: 0.8,
+      outcome: 'failure',
+    });
+
+    const coeff = store.computeCalibrationCoefficient();
+    // Failures avg = 0.9, successes avg = 0.3
+    // ratio = 0.9/0.3 = 3.0 → coefficient = 1/3.0 ≈ 0.33 → clamped to 0.7
+    expect(coeff).toBe(0.7);
+  });
+});
+
+// ── Episodic Memory with Priority ───────────────────────────────────
+
+describe('Episodic Memory with Priority', () => {
+  it('saves and retrieves priority fields on episodic records', () => {
+    store.saveEpisodicRecord({
+      pipelineType: 'build',
+      outcome: 'success',
+      priorityComposite: 0.75,
+      priorityConfidence: 0.6,
+    });
+
+    const records = store.getEpisodicRecords();
+    expect(records).toHaveLength(1);
+    expect(records[0].priorityComposite).toBe(0.75);
+    expect(records[0].priorityConfidence).toBe(0.6);
+  });
+});
+
 // ── Utilities ──────────────────────────────────────────────────────
 
 describe('Utilities', () => {

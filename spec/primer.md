@@ -341,6 +341,50 @@ spec:
 
 Cost policies are entirely optional and can be added to any existing pipeline. Start with a `hardLimit` to prevent runaway costs, then add `budget` constraints and alerts as you gain visibility into spending patterns.
 
+### Step 6: Configure Priority Scoring (optional)
+
+Add a priority policy to automatically rank work items using the Product Priority Algorithm (PPA):
+
+```yaml
+# Step 6: Configure Priority Scoring (optional)
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: prioritized-delivery
+  namespace: my-team
+spec:
+  priorityPolicy:
+    enabled: true
+    minimumScore: 0.1
+    minimumConfidence: 0.3
+    soulPurpose: "Empower developers to ship reliable software faster"
+    dimensions:
+      humanCurveWeights:
+        explicit: 0.5
+        consensus: 0.3
+        decision: 0.2
+    calibration:
+      enabled: true
+      lookbackPeriod: P30D
+    adapters:
+      supportChannel: zendesk-support
+      crm: hubspot-crm
+      analytics: posthog-analytics
+  triggers:
+    - event: issue.assigned
+  providers:
+    sourceControl:
+      type: github
+      config: { org: "my-org" }
+  stages:
+    - name: implement
+      agent: code-agent
+    - name: review
+      qualityGates: [basic-review]
+```
+
+The PPA composite score is the multiplicative product of seven dimensions: Soul Alignment, Demand Pressure, Market Force, Execution Reality, Entropy Tax, Human Curve, and Calibration. A zero in any dimension vetoes the work item. Items below `minimumScore` are skipped; items below `minimumConfidence` are flagged for manual review.
+
 ---
 
 ## 8. Pipeline Orchestration
