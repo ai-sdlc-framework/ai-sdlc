@@ -273,6 +273,88 @@ subscribe(topic: string, handler: (payload: unknown) => void): Unsubscribe
 
 Both methods are MUST-implement. `subscribe()` returns an unsubscribe function. Implementations SHOULD deliver events asynchronously.
 
+### 3.6 SupportChannel
+
+Adapters for customer support ticket systems (e.g., Zendesk, Intercom). Used by the [Priority Policy](spec.md#9b-priority-policy-semantics-rfc-0005) to feed Demand Pressure signals into the Product Priority Algorithm.
+
+```
+listTickets(filter: SupportTicketFilter): SupportTicket[]
+getTicket(id: string): SupportTicket
+getFeatureRequestCount(featureTag: string, since?: string): number
+watchTickets(filter: SupportTicketFilter): EventStream<SupportTicketEvent>
+```
+
+**SupportTicket:**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | MUST | Unique ticket identifier. |
+| `subject` | string | MUST | Ticket subject line. |
+| `description` | string | MAY | Ticket body text. |
+| `status` | string | MUST | Current ticket status. |
+| `priority` | string | MUST | Ticket priority level. |
+| `customerTier` | string | MAY | Customer tier (e.g., enterprise, startup). |
+| `tags` | array[string] | MAY | Ticket tags for categorization. |
+| `createdAt` | string | MUST | ISO 8601 creation timestamp. |
+| `updatedAt` | string | MUST | ISO 8601 last update timestamp. |
+
+**SupportTicketFilter:**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `status` | string | MAY | Filter by ticket status. |
+| `priority` | string | MAY | Filter by priority level. |
+| `tags` | array[string] | MAY | Filter by tags. |
+| `since` | string | MAY | Only tickets created/updated after this ISO 8601 timestamp. |
+
+All four methods are MUST-implement.
+
+### 3.7 CrmProvider
+
+Adapters for customer relationship management systems (e.g., HubSpot, Salesforce). Used by the Priority Policy to feed Market Force and Demand Pressure signals.
+
+```
+getAccount(id: string): CrmAccount
+listAccounts(filter?: AccountFilter): CrmAccount[]
+getEscalations(since?: string): Escalation[]
+getFeatureRequests(accountId?: string): FeatureRequest[]
+```
+
+**CrmAccount:**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `id` | string | MUST | Unique account identifier. |
+| `name` | string | MUST | Account name. |
+| `tier` | string | MUST | Account tier (e.g., enterprise, growth). |
+| `contractValue` | number | MAY | Annual contract value. |
+| `healthScore` | number | MAY | Account health score [0, 100]. |
+| `churnRisk` | number | MAY | Churn risk score [0, 1]. |
+
+All four methods are MUST-implement.
+
+### 3.8 AnalyticsProvider
+
+Adapters for product analytics platforms (e.g., PostHog, Amplitude). Used by the Priority Policy to feed Soul Alignment and Demand Pressure signals.
+
+```
+getFeatureUsage(feature: string, period?: string): FeatureUsage
+getActiveUsers(period?: string): number
+getRetentionRate(cohort?: string, period?: string): number
+getNpsScore(period?: string): number | undefined
+```
+
+**FeatureUsage:**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `feature` | string | MUST | Feature identifier. |
+| `activeUsers` | number | MUST | Number of active users in the period. |
+| `totalEvents` | number | MUST | Total event count in the period. |
+| `period` | string | MUST | The time period for the data. |
+
+All four methods are MUST-implement. `getNpsScore()` MAY return `undefined` if NPS data is not available.
+
 ---
 
 ## 4. Adapter Registration

@@ -20,6 +20,10 @@ A protocol for inter-agent communication, task delegation, and capability discov
 
 A standalone module implementing one or more [interface contracts](#interface-contract) for a specific tool. For example, a Linear adapter implements the [IssueTracker](#interface-contract) interface. Adapters are registered via `metadata.yaml` and discovered from a registry, local directory, or git reference. See [adapters.md](adapters.md).
 
+### AnalyticsProvider {#analytics-provider}
+
+An [adapter](#adapter) interface for product analytics platforms (e.g., PostHog, Amplitude). Provides feature usage, active user counts, retention rates, and NPS scores. Used by the [Priority Policy](#priority-policy) to feed Soul Alignment and Demand Pressure signals into the Product Priority Algorithm. See [adapters.md](adapters.md#38-analyticsprovider).
+
 ### Adapter Binding {#adapter-binding}
 
 A [resource](#resource) of kind `AdapterBinding` that declares a tool integration as a swappable provider behind a uniform [interface contract](#interface-contract). See [spec.md](spec.md#55-adapterbinding).
@@ -80,6 +84,10 @@ A structured status entry in a resource's `status.conditions` array. Each condit
 
 A stage-level configuration that specifies JIT (just-in-time) credential scope, time-to-live, and revocation behavior for a [Pipeline](#pipeline) stage. Credentials are scoped to the minimum permissions needed and automatically revoked on stage completion. See [spec.md](spec.md#credential-policy-object).
 
+### CrmProvider {#crm-provider}
+
+An [adapter](#adapter) interface for customer relationship management systems (e.g., HubSpot, Salesforce). Provides account data, escalations, and feature requests. Used by the [Priority Policy](#priority-policy) to feed Market Force and Demand Pressure signals into the Product Priority Algorithm. See [adapters.md](adapters.md#37-crmprovider).
+
 ### Cost Attribution {#cost-attribution}
 
 The process of tracking costs across dimensions (agent, model, stage, repository, complexity, team) for chargeback and analysis. See RFC-0004.
@@ -122,7 +130,7 @@ An [adapter](#adapter) that abstracts a runtime infrastructure concern (audit st
 
 ### Interface Contract {#interface-contract}
 
-A typed API definition for an integration category. SDLC interfaces: IssueTracker, SourceControl, CIPipeline, CodeAnalysis, Messenger, DeploymentTarget. Infrastructure interfaces: AuditSink, Sandbox, SecretStore, MemoryStore, EventBus. Each [adapter](#adapter) implements one or more interface contracts. See [adapters.md](adapters.md#2-interface-contracts).
+A typed API definition for an integration category. SDLC interfaces: IssueTracker, SourceControl, CIPipeline, CodeAnalysis, Messenger, DeploymentTarget. Infrastructure interfaces: AuditSink, Sandbox, SecretStore, MemoryStore, EventBus. Priority signal interfaces: [SupportChannel](#support-channel), [CrmProvider](#crm-provider), [AnalyticsProvider](#analytics-provider). Each [adapter](#adapter) implements one or more interface contracts. See [adapters.md](adapters.md#2-interface-contracts).
 
 ### Label {#label}
 
@@ -207,6 +215,10 @@ A `secretRef` object used in resource specs to reference sensitive values (API k
 ### Skill {#skill}
 
 A declared capability of an [Agent Role](#agent-role) with an ID, description, tags, and examples. Skills enable [Agent Card](#agent-card) discovery and task routing. See [agents.md](agents.md#agent-role-schema).
+
+### SupportChannel {#support-channel}
+
+An [adapter](#adapter) interface for customer support ticket systems (e.g., Zendesk, Intercom). Provides ticket listings, feature request counts, and real-time ticket event streams. Used by the [Priority Policy](#priority-policy) to feed Demand Pressure signals into the Product Priority Algorithm. See [adapters.md](adapters.md#36-supportchannel).
 
 ### Spec/Status Split {#spec-status-split}
 
