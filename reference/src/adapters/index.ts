@@ -42,6 +42,13 @@ export type {
   CreateIssueInput,
   UpdateIssueInput,
   TriggerBuildInput,
+  SupportTicket,
+  SupportTicketFilter,
+  SupportChannel,
+  CrmAccount,
+  CrmProvider,
+  FeatureUsage,
+  AnalyticsProvider,
 } from './interfaces.js';
 
 export {
