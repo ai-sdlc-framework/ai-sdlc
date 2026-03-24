@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.2.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.1.1...sdk-go-v0.2.0) (2026-03-24)
+
+
+### Features
+
+* integrate Product Priority Algorithm (PPA) across all SDKs (AISDLC-7) ([bc4a32d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bc4a32df4de65eb9c853b33e85aac56690092ecf))
+
 ## [0.1.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-go-v0.1.0...sdk-go-v0.1.1) (2026-03-08)
 
 

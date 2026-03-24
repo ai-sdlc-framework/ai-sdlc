@@ -1,5 +1,21 @@
 # @ai-sdlc/conformance
 
+## [0.5.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.4.0...conformance/runner-v0.5.0) (2026-03-24)
+
+
+### Features
+
+* add test coverage reporting with Codecov ([f31137a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f31137a52f3c6ec317c68eef50403e05b2b1c19e))
+* integrate Product Priority Algorithm (PPA) across all SDKs (AISDLC-7) ([bc4a32d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bc4a32df4de65eb9c853b33e85aac56690092ecf))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.5.0
+    * @ai-sdlc/orchestrator bumped to 0.5.0
+
 ## [0.4.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.3.0...conformance/runner-v0.4.0) (2026-03-08)
 
 

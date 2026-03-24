@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "ai-sdlc-framework"
-version = "0.1.1"
+version = "0.2.0"
 description = "Python SDK for the AI-SDLC Framework"
 readme = "README.md"
 requires-python = ">=3.11"

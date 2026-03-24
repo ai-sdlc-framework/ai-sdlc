@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.2.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python-v0.1.1...sdk-python-v0.2.0) (2026-03-24)
+
+
+### Features
+
+* integrate Product Priority Algorithm (PPA) across all SDKs (AISDLC-7) ([bc4a32d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bc4a32df4de65eb9c853b33e85aac56690092ecf))
+
+
+### Bug Fixes
+
+* skip priority-scoring conformance tests in Python SDK ([8a6b0ac](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8a6b0acfa84b7a4547110afd1287582dfe60b2f6))
+
 ## [0.1.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-python/v0.1.0...sdk-python-v0.1.1) (2026-03-06)
 
 
