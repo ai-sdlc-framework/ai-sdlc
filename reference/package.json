@@ -27,7 +27,7 @@
     }
   },
   "scripts": {
-    "generate-schemas": "tsx scripts/generate-schemas.ts",
+    "generate-schemas": "tsx scripts/generate-schemas.ts && prettier --write src/core/generated-schemas.ts",
     "prebuild": "pnpm generate-schemas",
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo",
