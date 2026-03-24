@@ -48,6 +48,7 @@ export {
   isOpenShellAvailable,
   buildSandboxExecPrefix,
   type OpenShellSandboxConfig,
+  type ProviderCredential,
 } from './openshell-sandbox.js';
 
 export {

@@ -79,6 +79,8 @@ export interface PolicyGenerationOptions {
     string,
     { host: string; port: number; access?: 'read-only' | 'read-write' | 'full' }[]
   >;
+  /** Autonomy level (0 = most restricted, higher = more access). */
+  autonomyLevel?: number;
 }
 
 // ── Network Policy Mapping ─────────────────────────────────────────
@@ -146,6 +148,7 @@ export function generateOpenShellPolicy(options: PolicyGenerationOptions): OpenS
     extraReadOnlyPaths,
     extraReadWritePaths,
     networkEndpoints,
+    autonomyLevel,
   } = options;
 
   const readOnly = [...DEFAULT_READ_ONLY_PATHS, ...(extraReadOnlyPaths ?? [])];
@@ -163,6 +166,14 @@ export function generateOpenShellPolicy(options: PolicyGenerationOptions): OpenS
     readWrite.push(workDir);
   }
 
+  // Autonomy level adjustments:
+  // Level 0 (Observer): hard Landlock, no network
+  // Level 1 (Junior): best-effort Landlock, egress-only
+  // Level 2+: best-effort Landlock, configured network
+  const level = autonomyLevel ?? 0;
+  const landdockCompat = level === 0 ? 'hard_requirement' : 'best_effort';
+  const effectiveNetworkPolicy = level === 0 ? 'none' : constraints.networkPolicy;
+
   return {
     version: 1,
     filesystem_policy: {
@@ -171,13 +182,13 @@ export function generateOpenShellPolicy(options: PolicyGenerationOptions): OpenS
       read_write: readWrite,
     },
     landlock: {
-      compatibility: 'best_effort',
+      compatibility: landdockCompat,
     },
     process: {
       run_as_user: 'sandbox',
       run_as_group: 'sandbox',
     },
-    network_policies: mapNetworkPolicy(constraints.networkPolicy, networkEndpoints),
+    network_policies: mapNetworkPolicy(effectiveNetworkPolicy as NetworkPolicy, networkEndpoints),
   };
 }
 

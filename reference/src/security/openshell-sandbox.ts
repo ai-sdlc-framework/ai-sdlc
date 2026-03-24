@@ -18,6 +18,18 @@ import {
 /** Function that executes a shell command and returns stdout. */
 export type ShellExec = (command: string) => Promise<string>;
 
+/** Credential to auto-create as an OpenShell provider before sandbox creation. */
+export interface ProviderCredential {
+  /** Provider name (e.g., 'claude', 'github'). */
+  name: string;
+  /** Provider type: 'claude' | 'github' | 'openai' | 'nvidia' | 'generic'. */
+  type: string;
+  /** If true, auto-discover from current shell environment. */
+  fromExisting?: boolean;
+  /** Explicit key=value pairs (only used when fromExisting is false). */
+  credentials?: Record<string, string>;
+}
+
 export interface OpenShellSandboxConfig {
   /** Paths the agent is blocked from accessing (from AgentRole.spec.constraints.blockedPaths). */
   blockedPaths?: string[];
@@ -27,6 +39,8 @@ export interface OpenShellSandboxConfig {
   networkEndpoints?: PolicyGenerationOptions['networkEndpoints'];
   /** OpenShell providers to attach (credential names). */
   providers?: string[];
+  /** Credentials to auto-create as OpenShell providers before sandbox creation. */
+  autoProviders?: ProviderCredential[];
   /** Path to openshell binary (defaults to 'openshell'). */
   binaryPath?: string;
 }
@@ -74,11 +88,33 @@ export function createOpenShellSandbox(
       const policyPath = `/tmp/${sandboxName}-policy.yaml`;
       await exec(`cat > ${policyPath} << 'POLICY_EOF'\n${policyYaml}POLICY_EOF`);
 
+      // Auto-create credential providers if configured
+      const providerNames = [...(config.providers ?? [])];
+      for (const ap of config.autoProviders ?? []) {
+        try {
+          if (ap.fromExisting !== false) {
+            await exec(
+              `${bin} provider create --name ${ap.name} --type ${ap.type} --from-existing`,
+            );
+          } else if (ap.credentials) {
+            const credArgs = Object.entries(ap.credentials)
+              .map(([k, v]) => `--credential ${k}=${v}`)
+              .join(' ');
+            await exec(`${bin} provider create --name ${ap.name} --type ${ap.type} ${credArgs}`);
+          }
+          if (!providerNames.includes(ap.name)) {
+            providerNames.push(ap.name);
+          }
+        } catch {
+          // Provider may already exist — continue
+        }
+      }
+
       // Build sandbox create command
       const args = [`sandbox create`, `--name ${sandboxName}`, `--policy ${policyPath}`, `--keep`];
 
       // Attach credential providers
-      for (const provider of config.providers ?? []) {
+      for (const provider of providerNames) {
         args.push(`--provider ${provider}`);
       }
 

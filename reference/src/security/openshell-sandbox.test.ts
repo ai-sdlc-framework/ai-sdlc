@@ -99,6 +99,81 @@ describe('createOpenShellSandbox', () => {
       expect(createCall![0]).toMatch(/^\/opt\/openshell\/bin\/openshell/);
     });
 
+    it('auto-creates providers from autoProviders config', async () => {
+      const sandbox = createOpenShellSandbox(exec, {
+        autoProviders: [
+          { name: 'my-claude', type: 'claude' },
+          { name: 'my-github', type: 'github', fromExisting: true },
+        ],
+      });
+      await sandbox.isolate('task-1', makeConstraints());
+
+      const providerCalls = exec.mock.calls.filter(
+        (c: string[]) => typeof c[0] === 'string' && c[0].includes('provider create'),
+      );
+      expect(providerCalls).toHaveLength(2);
+      expect(providerCalls[0][0]).toContain('--name my-claude');
+      expect(providerCalls[0][0]).toContain('--type claude');
+      expect(providerCalls[0][0]).toContain('--from-existing');
+      expect(providerCalls[1][0]).toContain('--name my-github');
+
+      // Providers should be attached to sandbox
+      const createCall = exec.mock.calls.find(
+        (c: string[]) => typeof c[0] === 'string' && c[0].includes('sandbox create'),
+      );
+      expect(createCall![0]).toContain('--provider my-claude');
+      expect(createCall![0]).toContain('--provider my-github');
+    });
+
+    it('auto-creates providers with explicit credentials', async () => {
+      const sandbox = createOpenShellSandbox(exec, {
+        autoProviders: [
+          {
+            name: 'custom',
+            type: 'generic',
+            fromExisting: false,
+            credentials: { API_KEY: 'sk-123' },
+          },
+        ],
+      });
+      await sandbox.isolate('task-1', makeConstraints());
+
+      const providerCall = exec.mock.calls.find(
+        (c: string[]) => typeof c[0] === 'string' && c[0].includes('provider create'),
+      );
+      expect(providerCall![0]).toContain('--credential API_KEY=sk-123');
+      expect(providerCall![0]).not.toContain('--from-existing');
+    });
+
+    it('continues if provider already exists', async () => {
+      exec
+        .mockResolvedValueOnce('') // write policy file
+        .mockRejectedValueOnce(new Error('provider already exists')) // provider create fails
+        .mockResolvedValue(''); // rest succeed (sandbox create, rm)
+
+      const sandbox = createOpenShellSandbox(exec, {
+        autoProviders: [{ name: 'my-claude', type: 'claude' }],
+      });
+
+      // Should not throw
+      const id = await sandbox.isolate('task-1', makeConstraints());
+      expect(id).toMatch(/^aisdlc-task-1-/);
+    });
+
+    it('deduplicates provider names between providers and autoProviders', async () => {
+      const sandbox = createOpenShellSandbox(exec, {
+        providers: ['my-claude'],
+        autoProviders: [{ name: 'my-claude', type: 'claude' }],
+      });
+      await sandbox.isolate('task-1', makeConstraints());
+
+      const createCall = exec.mock.calls.find(
+        (c: string[]) => typeof c[0] === 'string' && c[0].includes('sandbox create'),
+      );
+      const providerMatches = createCall![0].match(/--provider my-claude/g);
+      expect(providerMatches).toHaveLength(1);
+    });
+
     it('cleans up temp policy file', async () => {
       const sandbox = createOpenShellSandbox(exec);
       await sandbox.isolate('task-1', makeConstraints());

@@ -37,6 +37,12 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
+      - name: Install NVIDIA OpenShell
+        run: |
+          curl -LsSf https://raw.githubusercontent.com/NVIDIA/OpenShell/main/install.sh | sh
+          echo "$HOME/.local/bin" >> $GITHUB_PATH
+        continue-on-error: true
+
       - name: Configure git
         run: |
           git config user.name "ai-sdlc[bot]"

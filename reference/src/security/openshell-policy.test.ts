@@ -14,7 +14,7 @@ function makeConstraints(overrides?: Partial<SandboxConstraints>): SandboxConstr
 }
 
 describe('generateOpenShellPolicy', () => {
-  it('generates a valid policy with defaults', () => {
+  it('generates a valid policy with defaults (level 0)', () => {
     const policy = generateOpenShellPolicy({ constraints: makeConstraints() });
 
     expect(policy.version).toBe(1);
@@ -23,9 +23,11 @@ describe('generateOpenShellPolicy', () => {
     expect(policy.filesystem_policy.read_only).toContain('/etc');
     expect(policy.filesystem_policy.read_write).toContain('/tmp');
     expect(policy.filesystem_policy.read_write).toContain('/sandbox');
-    expect(policy.landlock.compatibility).toBe('best_effort');
+    expect(policy.landlock.compatibility).toBe('hard_requirement');
     expect(policy.process.run_as_user).toBe('sandbox');
     expect(policy.process.run_as_group).toBe('sandbox');
+    // Level 0 has no network
+    expect(Object.keys(policy.network_policies)).toHaveLength(0);
   });
 
   it('includes workDir in read_write when specified', () => {
@@ -79,6 +81,7 @@ describe('generateOpenShellPolicy', () => {
   it('generates DNS + configured endpoints for egress-only', () => {
     const policy = generateOpenShellPolicy({
       constraints: makeConstraints({ networkPolicy: 'egress-only' }),
+      autonomyLevel: 1,
       networkEndpoints: {
         github_api: [{ host: 'api.github.com', port: 443, access: 'read-only' }],
       },
@@ -94,6 +97,7 @@ describe('generateOpenShellPolicy', () => {
   it('defaults endpoint access to "full" for networkPolicy "full"', () => {
     const policy = generateOpenShellPolicy({
       constraints: makeConstraints({ networkPolicy: 'full' }),
+      autonomyLevel: 2,
       networkEndpoints: {
         api: [{ host: 'example.com', port: 443 }],
       },
@@ -105,6 +109,7 @@ describe('generateOpenShellPolicy', () => {
   it('defaults endpoint access to "read-write" for egress-only', () => {
     const policy = generateOpenShellPolicy({
       constraints: makeConstraints({ networkPolicy: 'egress-only' }),
+      autonomyLevel: 1,
       networkEndpoints: {
         api: [{ host: 'example.com', port: 443 }],
       },
@@ -116,10 +121,59 @@ describe('generateOpenShellPolicy', () => {
   it('includes DNS policy for egress-only without custom endpoints', () => {
     const policy = generateOpenShellPolicy({
       constraints: makeConstraints({ networkPolicy: 'egress-only' }),
+      autonomyLevel: 1,
     });
 
     expect(policy.network_policies['dns']).toBeDefined();
     expect(Object.keys(policy.network_policies)).toHaveLength(1);
+  });
+
+  describe('autonomy level adjustments', () => {
+    it('level 0 uses hard_requirement Landlock and no network', () => {
+      const policy = generateOpenShellPolicy({
+        constraints: makeConstraints({ networkPolicy: 'egress-only' }),
+        autonomyLevel: 0,
+      });
+
+      expect(policy.landlock.compatibility).toBe('hard_requirement');
+      expect(Object.keys(policy.network_policies)).toHaveLength(0);
+    });
+
+    it('level 1 uses best_effort Landlock and configured network', () => {
+      const policy = generateOpenShellPolicy({
+        constraints: makeConstraints({ networkPolicy: 'egress-only' }),
+        autonomyLevel: 1,
+        networkEndpoints: {
+          github: [{ host: 'api.github.com', port: 443 }],
+        },
+      });
+
+      expect(policy.landlock.compatibility).toBe('best_effort');
+      expect(policy.network_policies['github']).toBeDefined();
+      expect(policy.network_policies['dns']).toBeDefined();
+    });
+
+    it('level 2+ uses best_effort Landlock and full configured network', () => {
+      const policy = generateOpenShellPolicy({
+        constraints: makeConstraints({ networkPolicy: 'full' }),
+        autonomyLevel: 3,
+        networkEndpoints: {
+          api: [{ host: 'example.com', port: 443 }],
+        },
+      });
+
+      expect(policy.landlock.compatibility).toBe('best_effort');
+      expect(policy.network_policies['api'].endpoints[0].access).toBe('full');
+    });
+
+    it('defaults to level 0 when autonomyLevel is not specified', () => {
+      const policy = generateOpenShellPolicy({
+        constraints: makeConstraints({ networkPolicy: 'egress-only' }),
+      });
+
+      expect(policy.landlock.compatibility).toBe('hard_requirement');
+      expect(Object.keys(policy.network_policies)).toHaveLength(0);
+    });
   });
 });
 
@@ -127,6 +181,7 @@ describe('serializePolicy', () => {
   it('serializes a policy to valid YAML-like string', () => {
     const policy = generateOpenShellPolicy({
       constraints: makeConstraints(),
+      autonomyLevel: 1,
       workDir: '/workspace',
     });
 
@@ -146,6 +201,7 @@ describe('serializePolicy', () => {
   it('includes network_policies section when present', () => {
     const policy = generateOpenShellPolicy({
       constraints: makeConstraints({ networkPolicy: 'egress-only' }),
+      autonomyLevel: 1,
       networkEndpoints: {
         github: [{ host: 'api.github.com', port: 443, access: 'read-only' }],
       },
