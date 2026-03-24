@@ -43,6 +43,19 @@ spec:
         blocking: true
         timeout: PT24H
         onTimeout: abort
+  priorityPolicy:
+    enabled: true
+    minimumScore: 0.05
+    minimumConfidence: 0.2
+    soulPurpose: 'Provide the open, vendor-neutral governance specification that enables enterprises to adopt AI coding agents with confidence, auditability, and predictability'
+    dimensions:
+      humanCurveWeights:
+        explicit: 0.5
+        consensus: 0.3
+        decision: 0.2
+    calibration:
+      enabled: true
+      lookbackPeriod: P30D
   routing:
     complexityThresholds:
       ai-with-review:
