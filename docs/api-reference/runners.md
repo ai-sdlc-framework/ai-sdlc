@@ -150,6 +150,24 @@ const registry = new RunnerRegistry();
 registry.register('my-agent', new MyCustomRunner());
 ```
 
+## OpenShell Sandbox Integration
+
+When the `sandboxId` field is set on `AgentContext`, CLI-based runners execute the agent inside an [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox. The runner prefixes the spawn command with `openshell sandbox connect <id> --`, so instead of:
+
+```
+claude -p --model claude-sonnet-4-5-20250929 --allowedTools Edit,Write,...
+```
+
+it becomes:
+
+```
+openshell sandbox connect aisdlc-issue-42-1711316400 -- claude -p --model claude-sonnet-4-5-20250929 --allowedTools Edit,Write,...
+```
+
+This provides kernel-level isolation (Landlock filesystem policies, seccomp syscall filtering, network policy enforcement) without any changes to the agent itself. The orchestrator's `executePipeline()` automatically passes `sandboxId` when a `SecurityContext` with an OpenShell sandbox is configured.
+
+See [Security > OpenShell](./security.md#createopenshellsandboxexec-config) for setup details.
+
 ## Common Pattern
 
 All CLI-based runners (Claude Code, Copilot, Cursor, Codex) follow the same subprocess pattern:
