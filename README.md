@@ -11,6 +11,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11+-3776ab.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![Go](https://img.shields.io/badge/Go-1.24+-00add8.svg?logo=go&logoColor=white)](https://go.dev/)
 [![Coverage](https://codecov.io/gh/ai-sdlc-framework/ai-sdlc/branch/main/graph/badge.svg)](https://codecov.io/gh/ai-sdlc-framework/ai-sdlc)
+[![OpenShell](https://img.shields.io/badge/sandbox-NVIDIA_OpenShell-76b900.svg?logo=nvidia&logoColor=white)](https://github.com/NVIDIA/OpenShell)
 [![JSON Schemas](https://img.shields.io/badge/schemas-6_resources-purple.svg)](spec/schemas/)
 [![Docs](https://img.shields.io/badge/docs-ai--sdlc.io-0a0a0a.svg)](https://ai-sdlc.io/docs)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -112,6 +113,8 @@ The orchestrator is **agent-agnostic**. It invokes AI coding agents through a st
 | **CursorRunner** | `cursor-agent --print` | `CURSOR_API_KEY` | Cursor CLI with stream-json output |
 | **CodexRunner** | `codex exec -` | `CODEX_API_KEY` | OpenAI Codex CLI via stdin |
 | **GenericLLMRunner** | HTTP API | `OPENAI_API_KEY` / `LLM_API_KEY` | Any OpenAI-compatible API endpoint |
+
+All runners support [NVIDIA OpenShell](https://github.com/NVIDIA/OpenShell) sandbox isolation. When configured, agents execute inside kernel-level sandboxes with Landlock filesystem policies, seccomp syscall filtering, and network policy enforcement — without any changes to the agent itself.
 
 Runners are auto-discovered from environment variables. Set the auth token and the runner becomes available:
 
