@@ -42,6 +42,8 @@ export interface AgentContext {
   commitMessageTemplate?: string;
   /** Co-author line for commits. */
   commitCoAuthor?: string;
+  /** OpenShell sandbox ID — when set, the runner spawns the agent inside this sandbox. */
+  sandboxId?: string;
 }
 
 export interface TokenUsage {
