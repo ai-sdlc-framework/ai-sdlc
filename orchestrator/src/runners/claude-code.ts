@@ -160,12 +160,15 @@ function runClaude(
     const model = opts?.model ?? process.env.AI_SDLC_MODEL ?? DEFAULT_MODEL;
     const claudeArgs = ['-p', '--model', model, '--allowedTools', tools];
 
-    // When running inside an OpenShell sandbox, prefix with sandbox connect
+    // When running inside an OpenShell sandbox, prefix with sandbox connect.
+    // Only use openshell when the provider is explicitly set — the stub sandbox
+    // also returns a sandboxId but doesn't have a real openshell process.
+    const useOpenShell = opts?.sandboxId && process.env.AI_SDLC_SANDBOX_PROVIDER === 'openshell';
     let cmd: string;
     let args: string[];
-    if (opts?.sandboxId) {
+    if (useOpenShell) {
       cmd = 'openshell';
-      args = ['sandbox', 'connect', opts.sandboxId, '--', 'claude', ...claudeArgs];
+      args = ['sandbox', 'connect', opts.sandboxId!, '--', 'claude', ...claudeArgs];
     } else {
       cmd = 'claude';
       args = claudeArgs;
