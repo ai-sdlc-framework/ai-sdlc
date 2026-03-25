@@ -29,17 +29,39 @@ jobs:
 
       - run: pnpm build
 
+      - name: Write issue body to file
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: printf '%s' "$ISSUE_BODY" > /tmp/issue-body.txt
+
       - name: Run triage analysis
         id: triage
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ISSUE_TITLE: ${{ github.event.issue.title }}
-          ISSUE_BODY: ${{ github.event.issue.body }}
         run: |
+          # Run triage with --body-file to avoid shell quoting issues
+          set +e
           VERDICT=$(pnpm --filter @ai-sdlc/dogfood triage \
             --title "$ISSUE_TITLE" \
-            --body "$ISSUE_BODY" \
-            --dry-run 2>/dev/null | tail -1)
+            --body-file /tmp/issue-body.txt \
+            --dry-run 2>/tmp/triage-stderr.txt | tail -1)
+          EXIT_CODE=$?
+          set -e
+
+          # Log stderr for debugging (won't leak to verdict)
+          if [ -s /tmp/triage-stderr.txt ]; then
+            echo "::group::Triage stderr"
+            cat /tmp/triage-stderr.txt
+            echo "::endgroup::"
+          fi
+
+          # If command failed and no verdict captured, create error verdict
+          if [ $EXIT_CODE -ne 0 ] && [ -z "$VERDICT" ]; then
+            echo "::warning::Triage command exited with code $EXIT_CODE"
+            VERDICT='{"safe":false,"riskScore":7,"findings":["Triage runner exited with code '"$EXIT_CODE"'"],"rationale":"Triage pipeline error — treating as suspicious","sanitizedDescription":""}'
+          fi
+
           echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
 
   # ── Job 2: Report ──────────────────────────────────────────────────

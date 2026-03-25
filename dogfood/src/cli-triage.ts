@@ -8,6 +8,7 @@
  *             Outputs verdict JSON to stdout (no tracker needed).
  */
 
+import { readFileSync } from 'node:fs';
 import { executeTriage } from '@ai-sdlc/orchestrator';
 import { resolveRepoRoot } from '@ai-sdlc/orchestrator';
 
@@ -26,13 +27,22 @@ function getArg(argv: string[], flag: string): string | undefined {
 
 function parseArgs(argv: string[]): TriageArgs {
   const issueId = getArg(argv, '--issue')?.trim();
-  const title = getArg(argv, '--title');
-  const body = getArg(argv, '--body');
+  const title = getArg(argv, '--title') ?? process.env.ISSUE_TITLE;
+  const bodyArg = getArg(argv, '--body');
+  const bodyFile = getArg(argv, '--body-file');
   const dryRun = argv.includes('--dry-run');
+
+  // Read body from file if --body-file is provided (avoids shell quoting issues)
+  let body = bodyArg ?? process.env.ISSUE_BODY;
+  if (bodyFile) {
+    body = readFileSync(bodyFile, 'utf-8');
+  }
 
   if (!issueId && !title) {
     console.error('Usage: triage --issue <id>');
     console.error('       triage --title "..." --body "..." --dry-run');
+    console.error('       triage --title "..." --body-file /path/to/body.txt --dry-run');
+    console.error('       ISSUE_TITLE="..." ISSUE_BODY="..." triage --dry-run');
     process.exit(1);
   }
 
