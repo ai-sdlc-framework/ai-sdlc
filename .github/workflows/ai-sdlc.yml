@@ -54,6 +54,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          AI_SDLC_SANDBOX_PROVIDER: openshell
         run: pnpm --filter @ai-sdlc/dogfood execute --issue ${{ github.event.issue.number }}
 
       - name: Collect pipeline artifacts
