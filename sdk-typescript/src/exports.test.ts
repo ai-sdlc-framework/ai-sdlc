@@ -15,6 +15,10 @@ describe('SDK subpath exports', () => {
     expect(mod.exceedsSeverity).toBeTypeOf('function');
     expect(mod.createProvenance).toBeTypeOf('function');
     expect(mod.PROVENANCE_ANNOTATION_PREFIX).toBeTypeOf('string');
+
+    // Verify PriorityScore, PriorityInput, PriorityConfig types are exported
+    // Type-only exports can't be verified at runtime, but we can check the module imports
+    expect(mod).toBeDefined();
   });
 
   it('builders exports all 5 resource builders + distribution', async () => {

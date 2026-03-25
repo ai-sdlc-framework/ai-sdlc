@@ -39,6 +39,9 @@ export {
   type PriorityDimensionsConfig,
   type PriorityCalibrationConfig,
   type PriorityAdaptersConfig,
+  type PriorityScore,
+  type PriorityInput,
+  type PriorityConfig,
   API_VERSION,
 
   // Validation

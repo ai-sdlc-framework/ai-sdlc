@@ -147,6 +147,53 @@ export interface PriorityPolicy {
   adapters?: PriorityAdaptersConfig;
 }
 
+export interface PriorityScore {
+  composite: number;
+  dimensions: {
+    soulAlignment: number;
+    demandPressure: number;
+    marketForce: number;
+    executionReality: number;
+    entropyTax: number;
+    humanCurve: number;
+    calibration: number;
+  };
+  confidence: number;
+  timestamp: string;
+  override?: { reason: string; expiry?: string };
+}
+
+export interface PriorityInput {
+  itemId: string;
+  title: string;
+  description: string;
+  labels?: string[];
+  soulAlignment?: number;
+  customerRequestCount?: number;
+  demandSignal?: number;
+  bugSeverity?: number;
+  builderConviction?: number;
+  techInflection?: number;
+  competitivePressure?: number;
+  regulatoryUrgency?: number;
+  complexity?: number;
+  budgetUtilization?: number;
+  dependencyClearance?: number;
+  competitiveDrift?: number;
+  marketDivergence?: number;
+  explicitPriority?: number;
+  teamConsensus?: number;
+  meetingDecision?: number;
+  override?: boolean;
+  overrideReason?: string;
+  overrideExpiry?: string;
+}
+
+export interface PriorityConfig {
+  humanCurveWeights?: { explicit?: number; consensus?: number; decision?: number };
+  calibrationCoefficient?: number;
+}
+
 export interface ModelRule {
   complexity: [number, number];
   model: string;

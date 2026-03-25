@@ -11,91 +11,11 @@
  * RFC reference: PPA section (priority scoring).
  */
 
-// ── Types ───────────────────────────────────────────────────────────
+import type { PriorityScore, PriorityInput, PriorityConfig } from '@ai-sdlc/reference';
 
-export interface PriorityScore {
-  composite: number;
-  dimensions: {
-    soulAlignment: number; // Sα  [0, 1]
-    demandPressure: number; // Dπ  [0, 1.5]
-    marketForce: number; // Mφ  [0.5, 3.0] (bounded, not [0.025, 45])
-    executionReality: number; // Eρ  [0, 1]
-    entropyTax: number; // Eτ  [0, 1]
-    humanCurve: number; // HC  [-1, 1]
-    calibration: number; // Cκ  [0.7, 1.3]
-  };
-  confidence: number; // [0, 1]
-  timestamp: string;
-  /** Present when the score was produced via override. */
-  override?: { reason: string; expiry?: string };
-}
+// ── Re-export types ─────────────────────────────────────────────────
 
-export interface PriorityInput {
-  /** Work item identifier */
-  itemId: string;
-  /** Work item title and description for semantic analysis */
-  title: string;
-  description: string;
-  /** Labels/tags on the work item */
-  labels?: string[];
-
-  // Soul Alignment inputs
-  /** Pre-computed soul alignment score, or undefined to skip */
-  soulAlignment?: number;
-
-  // Demand Pressure inputs
-  /** Number of customer requests for this feature */
-  customerRequestCount?: number;
-  /** Recency-weighted demand signal [0, 1] */
-  demandSignal?: number;
-  /** Bug severity if this is a bug (1-5, 5=critical) */
-  bugSeverity?: number;
-  /** Builder conviction / roadmap priority [0, 1] */
-  builderConviction?: number;
-
-  // Market Force inputs
-  /** Technology inflection relevance [0, 1] */
-  techInflection?: number;
-  /** Competitive pressure relevance [0, 1] */
-  competitivePressure?: number;
-  /** Regulatory urgency [0, 1] */
-  regulatoryUrgency?: number;
-
-  // Execution Reality inputs (from AI-SDLC)
-  /** Task complexity from parseComplexity() (1-10) */
-  complexity?: number;
-  /** Budget utilization percent from CostTracker */
-  budgetUtilization?: number;
-  /** Are dependencies clear? [0, 1] */
-  dependencyClearance?: number;
-
-  // Entropy Tax inputs
-  /** Competitive drift score [0, 1] */
-  competitiveDrift?: number;
-  /** Market divergence [0, 1] */
-  marketDivergence?: number;
-
-  // Human Curve inputs
-  /** Explicit priority from backlog tool [0, 1] */
-  explicitPriority?: number;
-  /** Team consensus signal (votes, watchers) [0, 1] */
-  teamConsensus?: number;
-  /** Meeting decision weight [0, 1] */
-  meetingDecision?: number;
-  /** Override flag — if true, bypasses algorithm */
-  override?: boolean;
-  /** Override reason (required when override=true) */
-  overrideReason?: string;
-  /** Override expiry ISO timestamp */
-  overrideExpiry?: string;
-}
-
-export interface PriorityConfig {
-  /** Weights for human curve sub-components */
-  humanCurveWeights?: { explicit?: number; consensus?: number; decision?: number };
-  /** Calibration coefficient (default 1.0) */
-  calibrationCoefficient?: number;
-}
+export type { PriorityScore, PriorityInput, PriorityConfig };
 
 // ── Constants ───────────────────────────────────────────────────────
 
