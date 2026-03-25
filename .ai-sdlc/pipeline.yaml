@@ -25,7 +25,7 @@ spec:
         notification: gate-failure
     - name: code
       agent: coding-agent
-      timeout: PT30M
+      timeout: PT10M
       credentials:
         scope:
           - repo:read

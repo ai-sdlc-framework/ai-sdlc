@@ -171,6 +171,12 @@ function runClaude(
       args = claudeArgs;
     }
 
+    const startTime = Date.now();
+    const logPrefix = `[ai-sdlc:runner]`;
+    process.stderr.write(`${logPrefix} spawning: ${cmd} ${args.join(' ')}\n`);
+    process.stderr.write(`${logPrefix} workDir: ${workDir}\n`);
+    process.stderr.write(`${logPrefix} timeout: ${timeoutMs}ms\n`);
+
     const child = spawn(cmd, args, {
       cwd: workDir,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -178,15 +184,43 @@ function runClaude(
       timeout: timeoutMs,
     });
 
+    process.stderr.write(`${logPrefix} pid: ${child.pid}\n`);
+
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
+    let lastActivity = Date.now();
 
-    child.stdout.on('data', (data: Buffer) => chunks.push(data));
-    child.stderr.on('data', (data: Buffer) => errChunks.push(data));
+    child.stdout.on('data', (data: Buffer) => {
+      chunks.push(data);
+      lastActivity = Date.now();
+    });
+
+    child.stderr.on('data', (data: Buffer) => {
+      errChunks.push(data);
+      lastActivity = Date.now();
+      // Stream stderr to parent for real-time observability in CI
+      process.stderr.write(data);
+    });
+
+    // Heartbeat: log progress every 30s so CI knows the process is alive
+    const heartbeat = setInterval(() => {
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
+      const idle = Math.round((Date.now() - lastActivity) / 1000);
+      const stdoutBytes = chunks.reduce((n, c) => n + c.length, 0);
+      const stderrBytes = errChunks.reduce((n, c) => n + c.length, 0);
+      process.stderr.write(
+        `${logPrefix} heartbeat: ${elapsed}s elapsed, ${idle}s since last output, stdout=${stdoutBytes}B stderr=${stderrBytes}B\n`,
+      );
+    }, 30_000);
 
     child.on('close', (code) => {
+      clearInterval(heartbeat);
+      const elapsed = Math.round((Date.now() - startTime) / 1000);
       const stdout = Buffer.concat(chunks).toString('utf-8');
       const stderr = Buffer.concat(errChunks).toString('utf-8');
+      process.stderr.write(
+        `${logPrefix} exited: code=${code} elapsed=${elapsed}s stdout=${stdout.length}B stderr=${stderr.length}B\n`,
+      );
       if (code === 0) {
         resolve({ stdout, stderr, model });
       } else {
@@ -194,7 +228,11 @@ function runClaude(
       }
     });
 
-    child.on('error', reject);
+    child.on('error', (err) => {
+      clearInterval(heartbeat);
+      process.stderr.write(`${logPrefix} spawn error: ${err.message}\n`);
+      reject(err);
+    });
 
     // Send prompt via stdin and close it
     child.stdin.write(prompt);
