@@ -13,10 +13,45 @@ permissions:
   pull-requests: write
 
 jobs:
+  # ── Gate: require security triage before agent execution ──────────
+  triage-gate:
+    name: Triage Gate
+    runs-on: ubuntu-latest
+    if: github.event.label.name == 'ai-eligible'
+    outputs:
+      approved: ${{ steps.check.outputs.approved }}
+    steps:
+      - name: Check for triage-passed label
+        id: check
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+            });
+            const labels = issue.data.labels.map(l => typeof l === 'string' ? l : l.name);
+            const passed = labels.includes('triage-passed');
+
+            if (!passed) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                body: '## AI-SDLC: Blocked by Security Triage\n\nThis issue must pass security triage before the AI agent can work on it.\n\n1. Add the `security-triage` label to trigger analysis\n2. Wait for the triage to pass\n3. Re-apply the `ai-eligible` label after triage passes\n\nCurrent labels: ' + labels.join(', ')
+              });
+            }
+
+            core.setOutput('approved', passed ? 'true' : 'false');
+            core.info(`Triage gate: ${passed ? 'PASSED' : 'BLOCKED'} (labels: ${labels.join(', ')})`);
+
+  # ── Agent pipeline (only runs after triage gate passes) ───────────
   agent:
     name: AI Agent Pipeline
     runs-on: ubuntu-latest
-    if: github.event.label.name == 'ai-eligible'
+    needs: triage-gate
+    if: needs.triage-gate.outputs.approved == 'true'
     steps:
       - uses: actions/checkout@v4
         with:
