@@ -75,16 +75,14 @@ describe('createOpenShellSandbox', () => {
       expect(createCall![0]).toContain('--provider my-github');
     });
 
-    it('uploads workDir when specified', async () => {
+    it('does not upload workDir (uses process-level isolation)', async () => {
       const sandbox = createOpenShellSandbox(exec, { workDir: '/my/repo' });
       await sandbox.isolate('task-1', makeConstraints());
 
       const uploadCall = exec.mock.calls.find(
         (c: string[]) => typeof c[0] === 'string' && c[0].includes('sandbox upload'),
       );
-      expect(uploadCall).toBeTruthy();
-      expect(uploadCall![0]).toContain('/my/repo');
-      expect(uploadCall![0]).toContain('/sandbox/workdir');
+      expect(uploadCall).toBeUndefined();
     });
 
     it('uses custom binary path', async () => {
@@ -199,7 +197,7 @@ describe('createOpenShellSandbox', () => {
       expect(deleteCall).toBeTruthy();
     });
 
-    it('downloads workDir contents before deletion', async () => {
+    it('does not download workDir on destroy (process-level isolation)', async () => {
       const sandbox = createOpenShellSandbox(exec, { workDir: '/my/repo' });
       const id = await sandbox.isolate('task-1', makeConstraints());
 
@@ -208,9 +206,7 @@ describe('createOpenShellSandbox', () => {
       const downloadCall = exec.mock.calls.find(
         (c: string[]) => typeof c[0] === 'string' && c[0].includes('sandbox download'),
       );
-      expect(downloadCall).toBeTruthy();
-      expect(downloadCall![0]).toContain('/sandbox/workdir');
-      expect(downloadCall![0]).toContain('/my/repo');
+      expect(downloadCall).toBeUndefined();
     });
 
     it('throws for unknown sandbox ID', async () => {

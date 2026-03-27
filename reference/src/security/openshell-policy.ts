@@ -177,7 +177,7 @@ export function generateOpenShellPolicy(options: PolicyGenerationOptions): OpenS
   return {
     version: 1,
     filesystem_policy: {
-      include_workdir: !!workDir,
+      include_workdir: false,
       read_only: readOnly,
       read_write: readWrite,
     },

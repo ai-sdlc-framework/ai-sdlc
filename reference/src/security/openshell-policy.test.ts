@@ -36,7 +36,7 @@ describe('generateOpenShellPolicy', () => {
       workDir: '/home/runner/work/repo',
     });
 
-    expect(policy.filesystem_policy.include_workdir).toBe(true);
+    expect(policy.filesystem_policy.include_workdir).toBe(false);
     expect(policy.filesystem_policy.read_write).toContain('/home/runner/work/repo');
   });
 
@@ -189,7 +189,7 @@ describe('serializePolicy', () => {
 
     expect(yaml).toContain('version: 1');
     expect(yaml).toContain('filesystem_policy:');
-    expect(yaml).toContain('include_workdir: true');
+    expect(yaml).toContain('include_workdir: false');
     expect(yaml).toContain('  - /usr');
     expect(yaml).toContain('  - /workspace');
     expect(yaml).toContain('landlock:');

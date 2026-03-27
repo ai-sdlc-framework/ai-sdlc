@@ -122,10 +122,9 @@ export function createOpenShellSandbox(
       args.push('-- sleep infinity');
       await exec(`${bin} ${args.join(' ')}`);
 
-      // Upload working directory if specified
-      if (config.workDir) {
-        await exec(`${bin} sandbox upload ${sandboxName} ${config.workDir} /sandbox/workdir`);
-      }
+      // Process-level isolation: the agent runs on the host filesystem
+      // with Landlock restricting access to allowed paths (incl. workDir).
+      // No upload/download needed — avoids copying the entire workdir.
 
       sandboxes.set(sandboxId, sandboxName);
 
@@ -139,13 +138,6 @@ export function createOpenShellSandbox(
       const name = sandboxes.get(sandboxId);
       if (!name) {
         throw new Error(`Sandbox "${sandboxId}" not found`);
-      }
-
-      // Download results if workDir was specified
-      if (config.workDir) {
-        await exec(`${bin} sandbox download ${name} /sandbox/workdir ${config.workDir}`).catch(
-          () => {},
-        );
       }
 
       await exec(`${bin} sandbox delete ${name}`);
