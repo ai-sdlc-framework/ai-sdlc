@@ -4,6 +4,8 @@ import {
   executeFixReview,
   countRetryAttempts,
   fetchReviewFindings,
+  validatePrNumber,
+  sanitizeBranchName,
   RETRY_MARKER,
   MAX_REVIEW_FIX_ATTEMPTS,
 } from './fix-review.js';
@@ -76,6 +78,52 @@ function makeMockAuditLog(): AuditLog {
   };
 }
 
+describe('validatePrNumber()', () => {
+  it('accepts positive integers', () => {
+    expect(() => validatePrNumber(1)).not.toThrow();
+    expect(() => validatePrNumber(42)).not.toThrow();
+    expect(() => validatePrNumber(999999)).not.toThrow();
+  });
+
+  it('rejects zero', () => {
+    expect(() => validatePrNumber(0)).toThrow(/Invalid PR number.*must be a positive integer/);
+  });
+
+  it('rejects negative numbers', () => {
+    expect(() => validatePrNumber(-1)).toThrow(/Invalid PR number.*must be a positive integer/);
+    expect(() => validatePrNumber(-42)).toThrow(/Invalid PR number.*must be a positive integer/);
+  });
+
+  it('rejects non-integers', () => {
+    expect(() => validatePrNumber(3.14)).toThrow(/Invalid PR number.*must be a positive integer/);
+    expect(() => validatePrNumber(NaN)).toThrow(/Invalid PR number.*must be a positive integer/);
+  });
+});
+
+describe('sanitizeBranchName()', () => {
+  it('accepts valid branch names', () => {
+    expect(sanitizeBranchName('main')).toBe('main');
+    expect(sanitizeBranchName('ai-sdlc/issue-42')).toBe('ai-sdlc/issue-42');
+    expect(sanitizeBranchName('feature/FOO-123')).toBe('feature/FOO-123');
+    expect(sanitizeBranchName('fix_bug.v2')).toBe('fix_bug.v2');
+  });
+
+  it('rejects branches with spaces', () => {
+    expect(() => sanitizeBranchName('my branch')).toThrow(/Invalid branch name/);
+  });
+
+  it('rejects branches with special characters', () => {
+    expect(() => sanitizeBranchName('branch;rm -rf /')).toThrow(/Invalid branch name/);
+    expect(() => sanitizeBranchName('branch`whoami`')).toThrow(/Invalid branch name/);
+    expect(() => sanitizeBranchName('branch$VAR')).toThrow(/Invalid branch name/);
+    expect(() => sanitizeBranchName('branch&& echo hack')).toThrow(/Invalid branch name/);
+  });
+
+  it('rejects branches with newlines', () => {
+    expect(() => sanitizeBranchName('branch\nmalicious')).toThrow(/Invalid branch name/);
+  });
+});
+
 describe('countRetryAttempts()', () => {
   it('returns 0 with no markers', () => {
     const comments = ['This is a normal comment', 'Another comment'];
@@ -109,6 +157,12 @@ describe('fetchReviewFindings()', () => {
     expect(result).toContain('Please add tests for the new feature');
     expect(result).toContain('### Review by ai-sdlc-security-agent');
     expect(result).toContain('Found SQL injection vulnerability');
+  });
+
+  it('validates PR number before calling gh CLI', async () => {
+    await expect(fetchReviewFindings(0)).rejects.toThrow(/Invalid PR number/);
+    await expect(fetchReviewFindings(-5)).rejects.toThrow(/Invalid PR number/);
+    await expect(fetchReviewFindings(3.14)).rejects.toThrow(/Invalid PR number/);
   });
 });
 
@@ -215,5 +269,49 @@ describe('executeFixReview()', () => {
         _reviewFindings: '### Review\n\nPlease add tests.',
       }),
     ).rejects.toThrow(); // Should throw due to max files violation
+  });
+
+  it('skips agent execution when no actionable review findings', async () => {
+    const runner = makeMockRunner();
+    const logger = makeSilentLogger();
+    const auditLog = makeMockAuditLog();
+
+    await executeFixReview(42, {
+      configDir: CONFIG_DIR,
+      runner,
+      logger,
+      auditLog,
+      _prComments: [],
+      _reviewFindings: 'No review findings (all reviews approved or pending)',
+    });
+
+    // Agent should NOT be invoked when there are no actionable findings
+    expect(runner.run).not.toHaveBeenCalled();
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'evaluate',
+        decision: 'allowed',
+        details: expect.objectContaining({
+          reason: 'no-actionable-findings',
+        }),
+      }),
+    );
+  });
+
+  it('skips agent execution when review findings are empty', async () => {
+    const runner = makeMockRunner();
+    const logger = makeSilentLogger();
+    const auditLog = makeMockAuditLog();
+
+    await executeFixReview(42, {
+      configDir: CONFIG_DIR,
+      runner,
+      logger,
+      auditLog,
+      _prComments: [],
+      _reviewFindings: '',
+    });
+
+    expect(runner.run).not.toHaveBeenCalled();
   });
 });

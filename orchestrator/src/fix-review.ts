@@ -103,6 +103,26 @@ export function countRetryAttempts(comments: string[]): number {
 }
 
 /**
+ * Validate that a PR number is a positive integer.
+ */
+export function validatePrNumber(prNumber: number): void {
+  if (!Number.isInteger(prNumber) || prNumber <= 0) {
+    throw new Error(`Invalid PR number: ${prNumber} (must be a positive integer)`);
+  }
+}
+
+/**
+ * Sanitize a git branch name to prevent command injection.
+ * Allows only alphanumeric characters, slashes, dashes, underscores, and dots.
+ */
+export function sanitizeBranchName(branch: string): string {
+  if (!/^[a-zA-Z0-9/_.-]+$/.test(branch)) {
+    throw new Error(`Invalid branch name: "${branch}" (only alphanumeric, /, -, _, . allowed)`);
+  }
+  return branch;
+}
+
+/**
  * Fetch review findings from PR reviews that requested changes.
  * Returns a formatted string with all findings from review agents.
  */
@@ -114,6 +134,9 @@ export async function fetchReviewFindings(
   if (injectedFindings !== undefined) {
     return injectedFindings;
   }
+
+  // Validate PR number to prevent command injection
+  validatePrNumber(prNumber);
 
   // Fetch reviews using gh CLI
   const { stdout } = await execFileAsync(
@@ -128,7 +151,15 @@ export async function fetchReviewFindings(
     author: { login: string };
   }
 
-  const reviews: Review[] = JSON.parse(stdout);
+  let reviews: Review[];
+  try {
+    reviews = JSON.parse(stdout);
+  } catch (err) {
+    throw new Error(
+      `Failed to parse review data from gh CLI: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+
   const changesRequestedReviews = reviews.filter((r) => r.state === 'CHANGES_REQUESTED');
 
   if (changesRequestedReviews.length === 0) {
@@ -254,11 +285,29 @@ export async function executeFixReview(
   );
   log.stageEnd('fetch-findings');
 
+  // Check if review findings are actionable (not a generic "no findings" message)
+  const isActionable =
+    reviewFindings &&
+    !reviewFindings.startsWith('No review findings') &&
+    reviewFindings.trim().length > 0;
+
+  if (!isActionable) {
+    log.info('No actionable review findings. Skipping fix-review execution.');
+    auditLog.record({
+      actor: 'system',
+      action: 'evaluate',
+      resource: `pr#${prNumber}`,
+      decision: 'allowed',
+      details: { reason: 'no-actionable-findings', reviewFindings },
+    });
+    return;
+  }
+
   // 4. Determine branch and issue number
   const { stdout: branchStdout } = await execFileAsync('git', ['branch', '--show-current'], {
     cwd: workDir,
   });
-  const currentBranch = branchStdout.trim();
+  const currentBranch = sanitizeBranchName(branchStdout.trim());
   const issueId = extractIssueId(currentBranch);
   if (issueId === null) {
     throw new Error(`Branch "${currentBranch}" does not match ai-sdlc/issue-<id> pattern`);
