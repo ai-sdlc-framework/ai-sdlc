@@ -23,6 +23,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
       - name: Write Slack context to file
         env:
           SLACK_CONTEXT: ${{ toJSON(github.event.client_payload.context) }}

@@ -195,6 +195,51 @@ jobs:
 
             core.info(`Posted ${event} review on PR #${context.payload.pull_request.number}`);
 
+      - name: Notify Slack that PR is ready for review
+        if: always()
+        env:
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          TESTING_JSON: ${{ needs.analyze.outputs.testing }}
+          CRITIC_JSON: ${{ needs.analyze.outputs.critic }}
+          SECURITY_JSON: ${{ needs.analyze.outputs.security }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = process.env.SLACK_BOT_TOKEN;
+            if (!token) return;
+
+            const pr = context.payload.pull_request;
+            const prUrl = pr.html_url;
+            const prTitle = pr.title;
+            const prNumber = pr.number;
+
+            // Check if all approved
+            let allApproved = true;
+            for (const key of ['TESTING_JSON', 'CRITIC_JSON', 'SECURITY_JSON']) {
+              try {
+                const v = JSON.parse(process.env[key] || '{}');
+                if (!v.approved) allApproved = false;
+              } catch { allApproved = false; }
+            }
+
+            const emoji = allApproved ? ':white_check_mark:' : ':warning:';
+            const status = allApproved ? 'All agents approved' : 'Changes requested by agents';
+            const action = allApproved ? 'Ready for human review and merge.' : 'Agent findings need attention before merge.';
+
+            const message = `${emoji} *PR <${prUrl}|#${prNumber}: ${prTitle}>*\n${status}. ${action}`;
+
+            await fetch('https://slack.com/api/chat.postMessage', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                channel: 'C0APASXUPM1',
+                text: message,
+              }),
+            });
+
       - name: Comment on analyze failure
         if: needs.analyze.result == 'failure'
         uses: actions/github-script@v7
