@@ -306,6 +306,50 @@ describe('ClaudeCodeRunner', () => {
       );
       expect(prompt).not.toContain('## Previous Context');
     });
+
+    it('includes review findings section when reviewFindings provided', () => {
+      const prompt = buildPrompt(
+        makeCtx({
+          reviewFindings:
+            '### Review by security-agent\n\nFound SQL injection vulnerability in user input handling.',
+        }),
+      );
+      expect(prompt).toContain('## Review Findings');
+      expect(prompt).toContain('### Review by security-agent');
+      expect(prompt).toContain('SQL injection vulnerability');
+      expect(prompt).toContain('Read the review findings above carefully');
+      expect(prompt).toContain('Address all the review findings');
+    });
+
+    it('review findings branch includes lint/format instructions when commands set', () => {
+      const prompt = buildPrompt(
+        makeCtx({
+          reviewFindings: '### Review\n\nPlease add tests.',
+          lintCommand: 'pnpm lint',
+          formatCommand: 'pnpm format',
+        }),
+      );
+      expect(prompt).toContain('## Review Findings');
+      expect(prompt).toContain('`pnpm lint`');
+      expect(prompt).toContain('`pnpm format`');
+    });
+
+    it('includes constraints section in review findings branch', () => {
+      const prompt = buildPrompt(
+        makeCtx({
+          reviewFindings: '### Review\n\nPlease add tests.',
+          constraints: {
+            maxFilesPerChange: 15,
+            requireTests: true,
+            blockedPaths: ['.github/workflows/**', '.ai-sdlc/**'],
+          },
+        }),
+      );
+      expect(prompt).toContain('## Constraints');
+      expect(prompt).toContain('Maximum files to change: 15');
+      expect(prompt).toContain('Tests required: true');
+      expect(prompt).toContain('.github/workflows/**, .ai-sdlc/**');
+    });
   });
 
   describe('parseTokenUsage', () => {
