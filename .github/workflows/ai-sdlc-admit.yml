@@ -48,6 +48,7 @@ jobs:
             --reactions '${{ github.event.issue.reactions.total_count }}' \
             --comments '${{ github.event.issue.comments }}' \
             --created-at '${{ github.event.issue.created_at }}' \
+            --author-association '${{ github.event.issue.author_association }}' \
             2>/tmp/admit-stderr.txt | tail -1)
           EXIT_CODE=$?
           set -e

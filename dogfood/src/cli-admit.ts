@@ -37,6 +37,7 @@ interface AdmitArgs {
   reactions: number;
   comments: number;
   createdAt: string;
+  authorAssociation: string;
 }
 
 function parseArgs(argv: string[]): AdmitArgs {
@@ -47,10 +48,13 @@ function parseArgs(argv: string[]): AdmitArgs {
   const reactionsStr = getArg(argv, '--reactions');
   const commentsStr = getArg(argv, '--comments');
   const createdAt = getArg(argv, '--created-at');
+  const authorAssociation = getArg(argv, '--author-association') ?? 'NONE';
 
   if (!title || !issueNumberStr) {
     console.error('Usage: admit --title "..." --body-file /path --issue-number N');
-    console.error('       --labels \'["bug"]\' --reactions N --comments N --created-at ISO');
+    console.error(
+      '       --labels \'["bug"]\' --reactions N --comments N --created-at ISO --author-association OWNER',
+    );
     process.exit(1);
   }
 
@@ -81,6 +85,7 @@ function parseArgs(argv: string[]): AdmitArgs {
     reactions: Number(reactionsStr ?? '0'),
     comments: Number(commentsStr ?? '0'),
     createdAt: createdAt ?? new Date().toISOString(),
+    authorAssociation,
   };
 }
 
@@ -97,6 +102,7 @@ async function main(): Promise<void> {
     reactionCount: args.reactions,
     commentCount: args.comments,
     createdAt: args.createdAt,
+    authorAssociation: args.authorAssociation as AdmissionInput['authorAssociation'],
   };
 
   // Load priority policy thresholds from pipeline.yaml

@@ -115,6 +115,103 @@ describe('mapIssueToPriorityInput', () => {
     const result = mapIssueToPriorityInput(makeInput());
     expect(result.competitiveDrift).toBe(0);
   });
+
+  describe('trust-based boosting', () => {
+    it('boosts builder conviction for OWNER', () => {
+      const result = mapIssueToPriorityInput(
+        makeInput({ authorAssociation: 'OWNER', labels: [], reactionCount: 0 }),
+      );
+      expect(result.builderConviction).toBe(0.8);
+    });
+
+    it('boosts builder conviction for MEMBER', () => {
+      const result = mapIssueToPriorityInput(
+        makeInput({ authorAssociation: 'MEMBER', labels: [], reactionCount: 0 }),
+      );
+      expect(result.builderConviction).toBe(0.8);
+    });
+
+    it('boosts builder conviction for COLLABORATOR', () => {
+      const result = mapIssueToPriorityInput(
+        makeInput({ authorAssociation: 'COLLABORATOR', labels: [], reactionCount: 0 }),
+      );
+      expect(result.builderConviction).toBe(0.8);
+    });
+
+    it('gives moderate conviction to CONTRIBUTOR', () => {
+      const result = mapIssueToPriorityInput(
+        makeInput({ authorAssociation: 'CONTRIBUTOR', labels: [], reactionCount: 0 }),
+      );
+      expect(result.builderConviction).toBe(0.6);
+    });
+
+    it('gives low conviction to NONE', () => {
+      const result = mapIssueToPriorityInput(
+        makeInput({ authorAssociation: 'NONE', labels: [], reactionCount: 0 }),
+      );
+      expect(result.builderConviction).toBe(0.4);
+    });
+
+    it('gives baseline team consensus for trusted sources', () => {
+      const result = mapIssueToPriorityInput(
+        makeInput({ authorAssociation: 'OWNER', reactionCount: 0 }),
+      );
+      expect(result.teamConsensus).toBeGreaterThanOrEqual(0.5);
+    });
+
+    it('gives baseline demand signal for trusted sources', () => {
+      const result = mapIssueToPriorityInput(
+        makeInput({ authorAssociation: 'OWNER', commentCount: 0 }),
+      );
+      expect(result.demandSignal).toBeGreaterThanOrEqual(0.4);
+    });
+
+    it('does not boost demand signal for untrusted sources', () => {
+      const result = mapIssueToPriorityInput(
+        makeInput({ authorAssociation: 'NONE', commentCount: 0, reactionCount: 0 }),
+      );
+      expect(result.demandSignal).toBe(0);
+      expect(result.teamConsensus).toBe(0);
+    });
+
+    it('sets soul alignment floor for trusted sources', () => {
+      const result = mapIssueToPriorityInput(makeInput({ authorAssociation: 'OWNER', labels: [] }));
+      expect(result.soulAlignment).toBeGreaterThanOrEqual(0.6);
+    });
+
+    it('admits trusted source issue with no reactions/comments', () => {
+      const input = makeInput({
+        authorAssociation: 'OWNER',
+        reactionCount: 0,
+        commentCount: 0,
+      });
+      const result = scoreIssueForAdmission(input, DEFAULT_THRESHOLDS);
+      expect(result.admitted).toBe(true);
+    });
+
+    it('may reject untrusted source issue with no signals', () => {
+      const input = makeInput({
+        authorAssociation: 'NONE',
+        reactionCount: 0,
+        commentCount: 0,
+        labels: [],
+      });
+      const strictThresholds: AdmissionThresholds = {
+        minimumScore: 0.1,
+        minimumConfidence: 0.2,
+      };
+      const result = scoreIssueForAdmission(input, strictThresholds);
+      // Untrusted with no signals should score lower than trusted
+      const trustedInput = makeInput({
+        authorAssociation: 'OWNER',
+        reactionCount: 0,
+        commentCount: 0,
+        labels: [],
+      });
+      const trustedResult = scoreIssueForAdmission(trustedInput, strictThresholds);
+      expect(trustedResult.score.composite).toBeGreaterThan(result.score.composite);
+    });
+  });
 });
 
 describe('scoreIssueForAdmission', () => {

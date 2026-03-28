@@ -187,6 +187,7 @@ export {
   type AdmissionInput,
   type AdmissionThresholds,
   type IssueAdmissionResult,
+  type AuthorAssociation,
 } from './admission-score.js';
 
 // PR review orchestration

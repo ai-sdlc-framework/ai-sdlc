@@ -15,6 +15,21 @@ import {
 
 // ── Types ────────────────────────────────────────────────────────────
 
+/**
+ * GitHub author_association values indicating trust level.
+ * OWNER/MEMBER/COLLABORATOR = trusted (project team)
+ * CONTRIBUTOR = semi-trusted (has had PRs merged)
+ * NONE = untrusted (external)
+ */
+export type AuthorAssociation =
+  | 'OWNER'
+  | 'MEMBER'
+  | 'COLLABORATOR'
+  | 'CONTRIBUTOR'
+  | 'FIRST_TIMER'
+  | 'FIRST_TIME_CONTRIBUTOR'
+  | 'NONE';
+
 export interface AdmissionInput {
   issueNumber: number;
   title: string;
@@ -26,6 +41,8 @@ export interface AdmissionInput {
   commentCount: number;
   /** ISO timestamp of issue creation. */
   createdAt: string;
+  /** GitHub author_association — determines trust-based signal boosting. */
+  authorAssociation?: AuthorAssociation;
 }
 
 export interface AdmissionThresholds {
@@ -54,6 +71,13 @@ export interface IssueAdmissionResult {
  */
 export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
   const labels = input.labels;
+  const assoc = input.authorAssociation ?? 'NONE';
+
+  // ── Trust-based signal boosting ────────────────────────────────
+  // Trusted sources (project team) get baseline conviction and demand.
+  // Untrusted sources need external validation (reactions, comments).
+  const isTrusted = assoc === 'OWNER' || assoc === 'MEMBER' || assoc === 'COLLABORATOR';
+  const isContributor = assoc === 'CONTRIBUTOR';
 
   // ── Complexity from issue body ───────────────────────────────
   const complexityMatch = input.body?.match(/###?\s*Complexity\s*\n+\s*(\d+)/i);
@@ -70,15 +94,35 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
   if (labels.includes('enhancement')) soulAlignment = 0.6;
   if (labels.includes('governance') || labels.includes('compliance')) soulAlignment = 0.85;
   if (labels.includes('spec') || labels.includes('rfc')) soulAlignment = 0.9;
+  // Trusted authors get a soul alignment floor — they know the project mission
+  if (isTrusted && soulAlignment < 0.6) soulAlignment = 0.6;
 
   // ── Reactions → demand / consensus ───────────────────────────
-  const teamConsensus = Math.min(1, input.reactionCount / 5);
+  const reactionConsensus = Math.min(1, input.reactionCount / 5);
+  // Trusted sources carry implicit team consensus
+  const teamConsensus = isTrusted ? Math.max(0.5, reactionConsensus) : reactionConsensus;
 
   // ── Comment count → demand signal ────────────────────────────
-  const demandSignal = Math.min(1, input.commentCount / 5);
+  const commentDemand = Math.min(1, input.commentCount / 5);
+  // Trusted sources filing an issue IS demand — they wouldn't file it otherwise
+  const demandSignal = isTrusted
+    ? Math.max(0.4, commentDemand)
+    : isContributor
+      ? Math.max(0.2, commentDemand)
+      : commentDemand;
 
-  // ── Builder conviction from ai-eligible label ────────────────
-  const builderConviction = labels.includes('ai-eligible') ? 0.8 : 0.4;
+  // ── Builder conviction ─────────────────────────────────────────
+  // Trusted: high conviction (they're the builders)
+  // Contributor: moderate (proven track record)
+  // ai-eligible label: explicit signal
+  // Default: low (needs validation)
+  const builderConviction = labels.includes('ai-eligible')
+    ? 0.8
+    : isTrusted
+      ? 0.8
+      : isContributor
+        ? 0.6
+        : 0.4;
 
   // ── Age → competitive drift ──────────────────────────────────
   const ageMs = Date.now() - new Date(input.createdAt).getTime();
@@ -137,7 +181,9 @@ function generateSuggestions(input: AdmissionInput, score: PriorityScore): strin
     suggestions.push('Provide a more detailed description of the problem or feature');
   }
 
-  if (d.demandPressure < 0.3) {
+  const assoc = input.authorAssociation ?? 'NONE';
+  const isTrusted = assoc === 'OWNER' || assoc === 'MEMBER' || assoc === 'COLLABORATOR';
+  if (d.demandPressure < 0.3 && !isTrusted) {
     suggestions.push('Low demand signal — add reactions or comments to show interest');
   }
 
