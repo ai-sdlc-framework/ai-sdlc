@@ -68,6 +68,34 @@ export function buildPrompt(ctx: AgentContext): string {
       `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
       `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
     );
+  } else if (ctx.reviewFindings) {
+    let step = 0;
+    lines.push(
+      '## Review Findings',
+      '',
+      ctx.reviewFindings,
+      '',
+      '## Instructions',
+      `${++step}. Read the review findings above carefully.`,
+      `${++step}. Read the relevant source files to understand the context.`,
+      `${++step}. Address all the review findings by making necessary code changes.`,
+      `${++step}. Write or update tests if requested by the reviewers.`,
+    );
+    if (lintCmd && fmtCmd) {
+      lines.push(
+        `${++step}. After making code changes, run \`${lintCmd}\` and \`${fmtCmd}\` to ensure CI will pass.`,
+      );
+    } else if (lintCmd) {
+      lines.push(
+        `${++step}. After making code changes, run \`${lintCmd}\` to ensure CI will pass.`,
+      );
+    } else if (fmtCmd) {
+      lines.push(`${++step}. After making code changes, run \`${fmtCmd}\` to ensure CI will pass.`);
+    }
+    lines.push(
+      `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
+      `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
+    );
   } else {
     let step = 0;
     lines.push(
