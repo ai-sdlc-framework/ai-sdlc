@@ -165,6 +165,28 @@ describe('fetchReviewFindings()', () => {
     await expect(fetchReviewFindings(-5)).rejects.toThrow(/Invalid PR number/);
     await expect(fetchReviewFindings(3.14)).rejects.toThrow(/Invalid PR number/);
   });
+
+  it('throws on invalid JSON from gh CLI', async () => {
+    const { execFile: execFileMock } = await import('node:child_process');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const mock = execFileMock as any;
+    const originalImpl = mock.getMockImplementation();
+    mock.mockImplementation((_cmd: string, _args: string[], _opts: unknown, cb?: unknown) => {
+      if (typeof cb === 'function') {
+        (cb as (err: null, stdout: string, stderr: string) => void)(
+          null,
+          'not valid json at all',
+          '',
+        );
+      }
+      return { stdout: '', stderr: '' };
+    });
+
+    await expect(fetchReviewFindings(42)).rejects.toThrow(/Failed to parse review data/);
+
+    // Restore original mock
+    if (originalImpl) mock.mockImplementation(originalImpl);
+  });
 });
 
 describe('executeFixReview()', () => {
