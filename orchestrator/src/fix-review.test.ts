@@ -8,6 +8,7 @@ import {
   sanitizeBranchName,
   RETRY_MARKER,
   MAX_REVIEW_FIX_ATTEMPTS,
+  type FixReviewOptions,
 } from './fix-review.js';
 import type { AgentRunner, AgentResult } from './runners/types.js';
 import type { Logger } from './logger.js';
@@ -313,5 +314,153 @@ describe('executeFixReview()', () => {
     });
 
     expect(runner.run).not.toHaveBeenCalled();
+  });
+
+  it('calls runner with review findings and correct branch', async () => {
+    const runner = makeMockRunner({
+      success: true,
+      filesChanged: ['src/fix.ts', 'src/fix.test.ts'],
+      summary: 'Fixed the issue',
+    });
+    const logger = makeSilentLogger();
+    const auditLog = makeMockAuditLog();
+
+    await executeFixReview(42, {
+      configDir: CONFIG_DIR,
+      runner,
+      logger,
+      auditLog,
+      _prComments: [],
+      _reviewFindings: '### Review by critic\n\nPlease fix the naming.',
+    });
+
+    // Verify agent was called with review findings and correct branch
+    expect(runner.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reviewFindings: '### Review by critic\n\nPlease fix the naming.',
+        branch: 'ai-sdlc/issue-42',
+        issueId: '42',
+      }),
+    );
+
+    // Verify audit log recorded agent execution + push
+    const recordCalls = (auditLog.record as ReturnType<typeof vi.fn>).mock.calls;
+    const executeCall = recordCalls.find(
+      (c: unknown[]) => (c[0] as Record<string, unknown>).action === 'execute',
+    );
+    expect(executeCall).toBeTruthy();
+    expect((executeCall![0] as Record<string, unknown>).decision).toBe('allowed');
+
+    const pushCall = recordCalls.find(
+      (c: unknown[]) =>
+        (c[0] as Record<string, unknown>).action === 'create' &&
+        String((c[0] as Record<string, unknown>).resource).includes('push/'),
+    );
+    expect(pushCall).toBeTruthy();
+  });
+
+  it('records episodic memory on success', async () => {
+    const runner = makeMockRunner();
+    const logger = makeSilentLogger();
+    const auditLog = makeMockAuditLog();
+    const memory = {
+      working: {
+        set: vi.fn(),
+        get: vi.fn(),
+        clear: vi.fn(),
+        delete: vi.fn(),
+        keys: vi.fn().mockReturnValue([]),
+      },
+      episodic: {
+        append: vi.fn(),
+        search: vi.fn().mockReturnValue([]),
+        getRecent: vi.fn().mockReturnValue([]),
+      },
+      shortTerm: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), keys: vi.fn() },
+      longTerm: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), keys: vi.fn() },
+      shared: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), keys: vi.fn() },
+    };
+
+    await executeFixReview(42, {
+      configDir: CONFIG_DIR,
+      runner,
+      logger,
+      auditLog,
+      memory: memory as unknown as FixReviewOptions['memory'],
+      _prComments: [],
+      _reviewFindings: '### Review\n\nFix it.',
+    });
+
+    expect(memory.episodic.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'fix-review-execution',
+        value: expect.objectContaining({
+          prNumber: 42,
+          outcome: 'success',
+        }),
+      }),
+    );
+    expect(memory.working.clear).toHaveBeenCalled();
+  });
+
+  it('records failure episode when agent throws', async () => {
+    const runner = makeMockRunner({ success: false, error: 'timeout' });
+    const logger = makeSilentLogger();
+    const auditLog = makeMockAuditLog();
+    const memory = {
+      working: {
+        set: vi.fn(),
+        get: vi.fn(),
+        clear: vi.fn(),
+        delete: vi.fn(),
+        keys: vi.fn().mockReturnValue([]),
+      },
+      episodic: {
+        append: vi.fn(),
+        search: vi.fn().mockReturnValue([]),
+        getRecent: vi.fn().mockReturnValue([]),
+      },
+      shortTerm: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), keys: vi.fn() },
+      longTerm: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), keys: vi.fn() },
+      shared: { get: vi.fn(), set: vi.fn(), delete: vi.fn(), keys: vi.fn() },
+    };
+
+    await expect(
+      executeFixReview(42, {
+        configDir: CONFIG_DIR,
+        runner,
+        logger,
+        auditLog,
+        memory: memory as unknown as FixReviewOptions['memory'],
+        _prComments: [],
+        _reviewFindings: '### Review\n\nFix it.',
+      }),
+    ).rejects.toThrow();
+
+    expect(memory.episodic.append).toHaveBeenCalledWith(
+      expect.objectContaining({
+        key: 'fix-review-execution',
+        value: expect.objectContaining({
+          outcome: 'failure',
+        }),
+      }),
+    );
+  });
+
+  it('logs summary at end of successful run', async () => {
+    const runner = makeMockRunner();
+    const logger = makeSilentLogger();
+    const auditLog = makeMockAuditLog();
+
+    await executeFixReview(42, {
+      configDir: CONFIG_DIR,
+      runner,
+      logger,
+      auditLog,
+      _prComments: [],
+      _reviewFindings: '### Review\n\nFix it.',
+    });
+
+    expect(logger.summary).toHaveBeenCalled();
   });
 });
