@@ -576,7 +576,8 @@ export class ClaudeCodeRunner implements AgentRunner {
       // Token usage from stream-json result event (falls back to stderr parsing)
       const tokenUsage = parseTokenUsage(result.stderr, result.model);
 
-      // Collect changed files
+      // Collect changed files — check both uncommitted and already-committed changes
+      // The agent may have committed on its own (Claude Code can run git commit)
       const diffOutput = await gitExec(ctx.workDir, ['diff', '--name-only']);
       const untrackedOutput = await gitExec(ctx.workDir, [
         'ls-files',
@@ -584,10 +585,27 @@ export class ClaudeCodeRunner implements AgentRunner {
         '--exclude-standard',
       ]);
 
-      const filesChanged = [
+      const uncommittedFiles = [
         ...diffOutput.split('\n').filter(Boolean),
         ...untrackedOutput.split('\n').filter(Boolean),
       ];
+
+      // Check if agent already committed — look for new commits on this branch
+      let committedFiles: string[] = [];
+      let agentAlreadyCommitted = false;
+      try {
+        const commitDiff = await gitExec(ctx.workDir, [
+          'diff',
+          '--name-only',
+          `origin/${ctx.branch}..HEAD`,
+        ]);
+        committedFiles = commitDiff.split('\n').filter(Boolean);
+        agentAlreadyCommitted = committedFiles.length > 0 && uncommittedFiles.length === 0;
+      } catch {
+        // origin/branch may not exist yet (first push) — that's fine
+      }
+
+      const filesChanged = agentAlreadyCommitted ? committedFiles : uncommittedFiles;
 
       if (filesChanged.length === 0) {
         return {
@@ -595,6 +613,16 @@ export class ClaudeCodeRunner implements AgentRunner {
           filesChanged: [],
           summary: 'Agent made no changes',
           error: 'No files were modified',
+          tokenUsage,
+        };
+      }
+
+      // If the agent already committed, skip our commit step
+      if (agentAlreadyCommitted) {
+        return {
+          success: true,
+          filesChanged,
+          summary: result.stdout.slice(0, 2000),
           tokenUsage,
         };
       }
