@@ -96,6 +96,13 @@ export class SecurityTriageRunner implements AgentRunner {
       };
     }
 
+    // Warn if issue body is empty or whitespace-only
+    if (!ctx.issueBody || ctx.issueBody.trim() === '') {
+      console.warn(
+        `[SecurityTriageRunner] Warning: Issue #${ctx.issueId} has an empty body. Triage quality may be degraded.`,
+      );
+    }
+
     const userContent = [
       `## Issue to Analyze`,
       '',

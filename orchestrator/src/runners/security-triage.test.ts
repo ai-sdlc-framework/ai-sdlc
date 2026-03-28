@@ -272,4 +272,68 @@ describe('SecurityTriageRunner', () => {
     expect(TRIAGE_SYSTEM_PROMPT).toBeDefined();
     expect(TRIAGE_SYSTEM_PROMPT).toContain('prompt injection');
   });
+
+  it('logs warning when issue body is empty', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const verdictData = {
+      safe: true,
+      riskScore: 0,
+      findings: [],
+      sanitizedDescription: 'Empty issue',
+      rationale: 'No body provided',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(makeApiResponse(verdictData)), { status: 200 }),
+    );
+
+    const runner = new SecurityTriageRunner();
+    await runner.run(makeContext({ issueId: '123', issueBody: '' }));
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[SecurityTriageRunner] Warning: Issue #123 has an empty body. Triage quality may be degraded.',
+    );
+  });
+
+  it('logs warning when issue body is whitespace-only', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const verdictData = {
+      safe: true,
+      riskScore: 0,
+      findings: [],
+      sanitizedDescription: 'Empty issue',
+      rationale: 'No body provided',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(makeApiResponse(verdictData)), { status: 200 }),
+    );
+
+    const runner = new SecurityTriageRunner();
+    await runner.run(makeContext({ issueId: '456', issueBody: '   \n\t  ' }));
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[SecurityTriageRunner] Warning: Issue #456 has an empty body. Triage quality may be degraded.',
+    );
+  });
+
+  it('does not log warning when issue body has content', async () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const verdictData = {
+      safe: true,
+      riskScore: 0,
+      findings: [],
+      sanitizedDescription: 'Valid issue',
+      rationale: 'Has content',
+    };
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify(makeApiResponse(verdictData)), { status: 200 }),
+    );
+
+    const runner = new SecurityTriageRunner();
+    await runner.run(makeContext({ issueBody: 'This is a real issue description' }));
+
+    expect(warnSpy).not.toHaveBeenCalled();
+  });
 });
