@@ -57,13 +57,40 @@ function makeFakeChild() {
   return child;
 }
 
+/**
+ * Wrap plain text in a stream-json result event (NDJSON line).
+ * The runner now uses --output-format stream-json, so stdout is NDJSON.
+ */
+function makeStreamResult(text: string, cost?: number): string {
+  const event = {
+    type: 'result',
+    subtype: 'success',
+    result: text,
+    total_cost_usd: cost ?? 0.01,
+    modelUsage: {
+      'test-model': {
+        inputTokens: 100,
+        outputTokens: 50,
+        cacheReadInputTokens: 0,
+      },
+    },
+  };
+  return JSON.stringify(event) + '\n';
+}
+
 function setupSpawn(opts: { stdout?: string; stderr?: string; code?: number }) {
   const child = makeFakeChild();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   spawnMock.mockReturnValue(child as any);
 
   queueMicrotask(() => {
-    if (opts.stdout) child.stdout.emit('data', Buffer.from(opts.stdout));
+    // Wrap stdout in stream-json format if it's plain text
+    if (opts.stdout) {
+      const streamOutput = opts.stdout.startsWith('{')
+        ? opts.stdout
+        : makeStreamResult(opts.stdout);
+      child.stdout.emit('data', Buffer.from(streamOutput));
+    }
     if (opts.stderr) child.stderr.emit('data', Buffer.from(opts.stderr));
     child.emit('close', opts.code ?? 0);
   });
