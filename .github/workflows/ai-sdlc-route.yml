@@ -17,6 +17,7 @@ jobs:
       - name: Parse complexity and route
         uses: actions/github-script@v7
         with:
+          github-token: ${{ secrets.AI_SDLC_PAT }}
           script: |
             const body = context.payload.issue.body || '';
 

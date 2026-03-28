@@ -63,6 +63,7 @@ jobs:
         env:
           ADMISSION_JSON: ${{ steps.admit.outputs.result }}
         with:
+          github-token: ${{ secrets.AI_SDLC_PAT }}
           script: |
             let result;
             try {
