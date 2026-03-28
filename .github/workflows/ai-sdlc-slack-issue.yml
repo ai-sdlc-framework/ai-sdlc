@@ -33,32 +33,51 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          # Use Claude to turn the Slack message into a well-formed GitHub issue
-          RESULT=$(cat /tmp/slack-context.txt | claude -p --model claude-sonnet-4-5-20250929 --max-turns 1 "$(cat <<'PROMPT'
+          # Build the full prompt with Slack context embedded
+          SLACK_CONTEXT=$(cat /tmp/slack-context.txt)
+          cat > /tmp/synthesis-prompt.txt <<PROMPT_EOF
           You are converting a Slack message into a GitHub issue for the ai-sdlc project.
 
-          Read the Slack context below and create a well-formed GitHub issue in JSON format.
-          The issue must have these sections in the body:
-          - ### Description (clear problem statement or feature request)
-          - ### Complexity (a number from 1-10 based on the scope)
-          - ### Acceptance Criteria (testable bullet points)
+          Read the Slack context below and create a well-formed GitHub issue.
+          The issue body MUST have these markdown sections:
+          - ### Description (rewrite the message as a clear problem statement or feature request — don't just copy it)
+          - ### Complexity (a number from 1-10 based on the scope of work needed)
+          - ### Acceptance Criteria (3-6 specific, testable bullet points using checkbox format)
 
-          Output ONLY a JSON object with these fields:
-          {
-            "title": "short issue title (under 80 chars)",
-            "body": "full issue body with markdown sections",
-            "labels": ["bug" or "enhancement"]
-          }
+          Output ONLY a valid JSON object with these exact fields (no markdown fences, no extra text):
+          {"title": "short imperative title under 80 chars", "body": "full issue body with the three markdown sections above", "labels": ["bug"] or ["enhancement"]}
 
-          Slack context:
-          PROMPT
-          )" 2>/dev/null | tail -1)
+          Here is the Slack context:
 
-          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+          ${SLACK_CONTEXT}
+          PROMPT_EOF
+
+          # Run Claude with the prompt and capture output
+          set +e
+          RESULT=$(claude -p --output-format json --model claude-sonnet-4-5-20250929 --max-turns 1 < /tmp/synthesis-prompt.txt 2>/tmp/synthesis-stderr.txt)
+          EXIT_CODE=$?
+          set -e
+
+          if [ -s /tmp/synthesis-stderr.txt ]; then
+            echo "::group::Synthesis stderr"
+            cat /tmp/synthesis-stderr.txt
+            echo "::endgroup::"
+          fi
+
+          if [ $EXIT_CODE -ne 0 ]; then
+            echo "::warning::Claude synthesis failed with exit code $EXIT_CODE"
+            RESULT=""
+          fi
+
+          # Extract the result text from JSON output format
+          # --output-format json wraps the result in {"type":"result","result":"..."}
+          PARSED=$(echo "$RESULT" | jq -r '.result // empty' 2>/dev/null || echo "$RESULT")
+
+          # Write to file to avoid shell escaping issues with GITHUB_OUTPUT
+          echo "$PARSED" > /tmp/synthesis-result.txt
 
       - name: Create GitHub issue
         env:
-          SYNTHESIS_JSON: ${{ steps.synthesize.outputs.result }}
           SLACK_CONTEXT: ${{ github.event.client_payload.context }}
           CHANNEL_ID: ${{ github.event.client_payload.channel_id }}
           MESSAGE_TS: ${{ github.event.client_payload.message_ts }}
@@ -67,12 +86,18 @@ jobs:
         with:
           github-token: ${{ secrets.AI_SDLC_PAT }}
           script: |
+            const fs = require('fs');
             let issue;
             try {
+              // Read synthesis result from file (avoids shell escaping issues)
+              let raw = '';
+              try {
+                raw = fs.readFileSync('/tmp/synthesis-result.txt', 'utf-8').trim();
+              } catch { raw = ''; }
               // Strip markdown fences if present
-              let raw = process.env.SYNTHESIS_JSON || '';
               raw = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '');
               issue = JSON.parse(raw);
+              core.info(`Synthesis produced: ${issue.title}`);
             } catch (err) {
               core.warning(`Failed to parse synthesis result: ${err.message}`);
               // Fallback: create issue with raw Slack context
