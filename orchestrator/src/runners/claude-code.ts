@@ -197,6 +197,70 @@ interface RunClaudeResult {
 }
 
 /**
+ * Format a stream-json event into a concise, human-readable log line.
+ */
+function formatEventForLog(line: string): string | null {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return null;
+  }
+
+  const type = parsed.type as string;
+
+  if (type === 'system') {
+    return `init session=${(parsed.session_id as string)?.slice(0, 8)}`;
+  }
+
+  if (type === 'assistant') {
+    const message = parsed.message as Record<string, unknown> | undefined;
+    const content = message?.content as Array<Record<string, unknown>> | undefined;
+    if (!content?.length) return null;
+
+    const parts: string[] = [];
+    for (const block of content) {
+      if (block.type === 'thinking') {
+        const text = String(block.thinking ?? '');
+        parts.push(`thinking: ${text.slice(0, 120)}${text.length > 120 ? '...' : ''}`);
+      } else if (block.type === 'text') {
+        const text = String(block.text ?? '');
+        parts.push(`text: ${text.slice(0, 120)}${text.length > 120 ? '...' : ''}`);
+      } else if (block.type === 'tool_use') {
+        const name = String(block.name ?? '');
+        const input = (block.input ?? {}) as Record<string, unknown>;
+        const file = extractFilePath(input);
+        parts.push(file ? `${name}: ${file}` : name);
+      }
+    }
+    return parts.join(' | ');
+  }
+
+  if (type === 'user') {
+    const message = parsed.message as Record<string, unknown> | undefined;
+    const content = message?.content as Array<Record<string, unknown>> | undefined;
+    if (!content?.length) return null;
+
+    const block = content[0];
+    if (block.type === 'tool_result') {
+      const text = String(block.content ?? '');
+      const truncated = text.slice(0, 80);
+      return `result: ${truncated}${text.length > 80 ? '...' : ''}`;
+    }
+    return null;
+  }
+
+  if (type === 'result') {
+    const cost = parsed.total_cost_usd as number | undefined;
+    const turns = parsed.num_turns as number | undefined;
+    const duration = parsed.duration_ms as number | undefined;
+    return `done — ${turns ?? '?'} turns, ${duration ? Math.round(duration / 1000) + 's' : '?'}, $${cost?.toFixed(4) ?? '?'}`;
+  }
+
+  return null;
+}
+
+/**
  * Extract a file path from a tool_use input object.
  */
 function extractFilePath(input: Record<string, unknown>): string | undefined {
@@ -353,8 +417,11 @@ function runClaude(
         const trimmed = line.trim();
         if (!trimmed) continue;
 
-        // Log raw events to stderr for CI visibility
-        process.stderr.write(`${logPrefix} event: ${trimmed.slice(0, 200)}\n`);
+        // Log formatted events to stderr for CI visibility
+        const formatted = formatEventForLog(trimmed);
+        if (formatted) {
+          process.stderr.write(`${logPrefix} ${formatted}\n`);
+        }
 
         if (onProgress) {
           const result = parseStreamEvent(trimmed, onProgress);
