@@ -272,4 +272,66 @@ describe('SecurityTriageRunner', () => {
     expect(TRIAGE_SYSTEM_PROMPT).toBeDefined();
     expect(TRIAGE_SYSTEM_PROMPT).toContain('prompt injection');
   });
+
+  describe('empty body warning', () => {
+    const safeVerdict = {
+      safe: true,
+      riskScore: 0,
+      findings: [],
+      sanitizedDescription: 'Empty issue',
+      rationale: 'No body provided',
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let warnSpy: any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let fetchSpy: any;
+
+    beforeEach(() => {
+      warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      fetchSpy = vi
+        .spyOn(globalThis, 'fetch')
+        .mockResolvedValue(
+          new Response(JSON.stringify(makeApiResponse(safeVerdict)), { status: 200 }),
+        );
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+      fetchSpy.mockRestore();
+    });
+
+    it('logs warning when issue body is empty', async () => {
+      const runner = new SecurityTriageRunner();
+      const result = await runner.run(makeContext({ issueId: '123', issueBody: '' }));
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[SecurityTriageRunner] Warning: Issue #123 has an empty body. Triage quality may be degraded.',
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(true);
+    });
+
+    it('logs warning when issue body is whitespace-only', async () => {
+      const runner = new SecurityTriageRunner();
+      const result = await runner.run(makeContext({ issueId: '456', issueBody: '   \n\t  ' }));
+
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[SecurityTriageRunner] Warning: Issue #456 has an empty body. Triage quality may be degraded.',
+      );
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(true);
+    });
+
+    it('does not log warning when issue body has content', async () => {
+      const runner = new SecurityTriageRunner();
+      const result = await runner.run(
+        makeContext({ issueBody: 'This is a real issue description' }),
+      );
+
+      expect(warnSpy).not.toHaveBeenCalled();
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(result.success).toBe(true);
+    });
+  });
 });
