@@ -120,6 +120,10 @@ import {
   defaultSandboxConstraints,
   DEFAULT_CONFIG_DIR_NAME,
   DEFAULT_PR_FOOTER,
+  DEFAULT_LINT_COMMAND,
+  DEFAULT_FORMAT_COMMAND,
+  DEFAULT_COMMIT_MESSAGE_TEMPLATE,
+  DEFAULT_COMMIT_CO_AUTHOR,
   NOTIFICATION_TITLES,
 } from './defaults.js';
 import {
@@ -520,6 +524,18 @@ async function executePipelineBody(
 
   // 9. Invoke agent (with sandbox + JIT credential lifecycle when security is provided)
   log.stage('agent');
+
+  // Post progress comment so users can see the pipeline is working
+  await tracker.addComment(
+    issueId,
+    `## AI-SDLC: Agent Started\n\n` +
+      `The AI agent is now working on this issue on branch \`${branchName}\`.\n\n` +
+      `| Detail | Value |\n|---|---|\n` +
+      `| Model | ${selectedModel ?? 'default'} |\n` +
+      `| Complexity | ${complexity} |\n` +
+      `| Strategy | ${strategy} |\n`,
+  );
+
   const runner = options.runner ?? new ClaudeCodeRunner();
 
   // Sandbox isolation around agent execution
@@ -583,6 +599,10 @@ async function executePipelineBody(
                 codebaseContext: options.codebaseContext,
                 episodicContext,
                 sandboxId,
+                lintCommand: DEFAULT_LINT_COMMAND,
+                formatCommand: DEFAULT_FORMAT_COMMAND,
+                commitMessageTemplate: DEFAULT_COMMIT_MESSAGE_TEMPLATE,
+                commitCoAuthor: DEFAULT_COMMIT_CO_AUTHOR,
               }),
           );
         },
@@ -750,6 +770,15 @@ async function executePipelineBody(
   } catch {
     log.info('Post-agent complexity evaluation skipped');
   }
+
+  // Post progress update after agent completes
+  await tracker.addComment(
+    issueId,
+    `## AI-SDLC: Agent Complete\n\n` +
+      `The agent finished working. **${result.filesChanged.length} files changed.**\n\n` +
+      `${result.summary}\n\n` +
+      `> Pushing branch and creating PR...`,
+  );
 
   // 12. Push branch
   log.stage('push');
