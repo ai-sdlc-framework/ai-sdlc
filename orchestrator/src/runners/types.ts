@@ -22,6 +22,8 @@ export interface AgentContext {
   };
   /** CI failure logs, populated only during fix-CI retries. */
   ciErrors?: string;
+  /** Review findings from PR reviews, populated only during fix-review retries. */
+  reviewFindings?: string;
   /** Agent memory for long-term/episodic recall. */
   memory?: AgentMemory;
   /** Override the default tool allowlist for the agent subprocess. */
