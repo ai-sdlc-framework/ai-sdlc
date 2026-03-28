@@ -54,6 +54,7 @@ import {
   defaultSandboxConstraints,
   NOTIFICATION_TITLES,
 } from './defaults.js';
+import { createCycleDetectorFromConfig, checkAndHandleCycle } from './cycle-utils.js';
 
 export const MAX_FIX_ATTEMPTS = DEFAULT_MAX_FIX_ATTEMPTS;
 export const MAX_LOG_LINES = DEFAULT_MAX_LOG_LINES;
@@ -204,6 +205,38 @@ export async function executeFixCI(
   }
   // Tracker is available if injected directly or if we're not in test mode
   const trackerAvailable = !!options.tracker || options._prComments === undefined;
+
+  // Create cycle detector from pipeline config
+  const cycleDetector = createCycleDetectorFromConfig(config.pipeline?.spec ?? {});
+
+  // Check for pipeline-level cycles (works across workflow boundaries)
+  if (trackerAvailable) {
+    const cycleCheck = await checkAndHandleCycle({
+      issueOrPrId: String(prNumber),
+      stage: 'fix-ci',
+      tracker: getTracker(),
+      detector: cycleDetector,
+      cycleTemplate: notifTemplates?.['cycle-detected']
+        ? {
+            title:
+              notifTemplates['cycle-detected'].title ?? NOTIFICATION_TITLES.pipelineCycleDetected,
+            body: notifTemplates['cycle-detected'].body ?? '',
+          }
+        : undefined,
+    });
+
+    if (cycleCheck.cycleDetected) {
+      log.info('Pipeline cycle detected. Halting fix-ci execution.');
+      auditLog.record({
+        actor: 'system',
+        action: 'evaluate',
+        resource: `pr#${prNumber}`,
+        decision: 'denied',
+        details: { reason: 'pipeline-cycle-detected' },
+      });
+      return;
+    }
+  }
 
   // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
@@ -380,8 +413,9 @@ export async function executeFixCI(
               const agentFailComment = agentFailTpl
                 ? renderTemplate(agentFailTpl, { stageName: 'fix-ci', details: errorDetail })
                 : { title: NOTIFICATION_TITLES.fixCIAgentFailed, body: errorDetail };
+              const cycleMarker = cycleDetector.recordInvocation('fix-ci');
               await addComment(
-                `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}`,
+                `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}\n${cycleMarker}`,
               );
               throw new Error(`Fix-CI agent failed on PR #${prNumber}: ${r.error}`);
             }
@@ -443,8 +477,9 @@ export async function executeFixCI(
           auditLog,
           log,
           onViolation: async (violationList) => {
+            const cycleMarker = cycleDetector.recordInvocation('fix-ci');
             await addComment(
-              `## ${NOTIFICATION_TITLES.fixCIGuardrailViolations}\n\n${violationList}\n\n${RETRY_MARKER}`,
+              `## ${NOTIFICATION_TITLES.fixCIGuardrailViolations}\n\n${violationList}\n\n${RETRY_MARKER}\n${cycleMarker}`,
             );
           },
         });
@@ -476,6 +511,7 @@ export async function executeFixCI(
           title: NOTIFICATION_TITLES.fixCIApplied,
           body: `Attempt ${attempts + 1} of ${maxFixAttempts} — pushed fixes to \`${currentBranch}\`.`,
         };
+    const cycleMarker = cycleDetector.recordInvocation('fix-ci');
     await addComment(
       [
         `## ${successComment.title}`,
@@ -486,6 +522,7 @@ export async function executeFixCI(
         result.filesChanged.map((f) => `- \`${f}\``).join('\n'),
         '',
         RETRY_MARKER,
+        cycleMarker,
       ].join('\n'),
     );
 

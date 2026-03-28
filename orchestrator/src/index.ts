@@ -528,6 +528,23 @@ export type {
 // Cost governance plugin
 export { CostGovernancePlugin } from './cost-governance.js';
 
+// Pipeline cycle detection
+export {
+  PipelineCycleDetector,
+  createStageMarker,
+  parseStageInvocations,
+  DEFAULT_CYCLE_LIMITS,
+  type PipelineStage,
+  type CycleConfig,
+  type CycleDetectionResult,
+} from './pipeline-cycle-detector.js';
+export {
+  checkAndHandleCycle,
+  createCycleDetectorFromConfig,
+  type CycleHandlerOptions,
+  type CycleCheckResult,
+} from './cycle-utils.js';
+
 // Comprehensive type re-exports
 export type {
   ApiVersion,
