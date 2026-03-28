@@ -25,9 +25,46 @@ import { formatContextForPrompt } from '../analysis/context-builder.js';
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Build verification step instructions (lint, format, typecheck).
+ * Returns an array of numbered step strings starting from the given step number.
+ */
+function buildVerificationSteps(
+  startStep: number,
+  lintCmd?: string,
+  fmtCmd?: string,
+  typecheckCmd?: string,
+): { lines: string[]; nextStep: number } {
+  let step = startStep;
+  const lines: string[] = [];
+
+  if (lintCmd && fmtCmd) {
+    lines.push(
+      `${++step}. After making code changes, run \`${lintCmd}\` and \`${fmtCmd}\` to catch issues before committing.`,
+    );
+  } else if (lintCmd) {
+    lines.push(
+      `${++step}. After making code changes, run \`${lintCmd}\` to catch issues before committing.`,
+    );
+  } else if (fmtCmd) {
+    lines.push(
+      `${++step}. After making code changes, run \`${fmtCmd}\` to catch issues before committing.`,
+    );
+  }
+
+  if (typecheckCmd) {
+    lines.push(
+      `${++step}. IMPORTANT: Run \`${typecheckCmd}\` to verify there are no TypeScript errors. The pre-commit hook will reject your commit if there are type errors. Fix ALL type errors before committing.`,
+    );
+  }
+
+  return { lines, nextStep: step };
+}
+
 export function buildPrompt(ctx: AgentContext): string {
   const lintCmd = ctx.lintCommand ?? DEFAULT_LINT_COMMAND;
   const fmtCmd = ctx.formatCommand ?? DEFAULT_FORMAT_COMMAND;
+  const typecheckCmd = ctx.typecheckCommand;
 
   const lines = [
     `You are fixing issue ${/^\d+$/.test(ctx.issueId) ? '#' : ''}${ctx.issueId}: ${ctx.issueTitle}`,
@@ -56,19 +93,9 @@ export function buildPrompt(ctx: AgentContext): string {
         `${++step}. If the failure is a formatting/prettier error, run \`${fmtCmd}\` to auto-fix it.`,
       );
     }
-    if (lintCmd && fmtCmd) {
-      lines.push(
-        `${++step}. After making ANY code changes, always run \`${lintCmd}\` and \`${fmtCmd}\` to catch issues before committing.`,
-      );
-    } else if (lintCmd) {
-      lines.push(
-        `${++step}. After making ANY code changes, always run \`${lintCmd}\` to catch issues before committing.`,
-      );
-    } else if (fmtCmd) {
-      lines.push(
-        `${++step}. After making ANY code changes, always run \`${fmtCmd}\` to catch issues before committing.`,
-      );
-    }
+    const ciVerify = buildVerificationSteps(step, lintCmd, fmtCmd, typecheckCmd);
+    lines.push(...ciVerify.lines);
+    step = ciVerify.nextStep;
     lines.push(
       `${++step}. Write or update tests if needed to cover your fix.`,
       `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
@@ -87,17 +114,9 @@ export function buildPrompt(ctx: AgentContext): string {
       `${++step}. Address all the review findings by making necessary code changes.`,
       `${++step}. Write or update tests if requested by the reviewers.`,
     );
-    if (lintCmd && fmtCmd) {
-      lines.push(
-        `${++step}. After making code changes, run \`${lintCmd}\` and \`${fmtCmd}\` to ensure CI will pass.`,
-      );
-    } else if (lintCmd) {
-      lines.push(
-        `${++step}. After making code changes, run \`${lintCmd}\` to ensure CI will pass.`,
-      );
-    } else if (fmtCmd) {
-      lines.push(`${++step}. After making code changes, run \`${fmtCmd}\` to ensure CI will pass.`);
-    }
+    const reviewVerify = buildVerificationSteps(step, lintCmd, fmtCmd, typecheckCmd);
+    lines.push(...reviewVerify.lines);
+    step = reviewVerify.nextStep;
     lines.push(
       `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
       `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,
@@ -110,17 +129,9 @@ export function buildPrompt(ctx: AgentContext): string {
       `${++step}. Implement the fix or feature described in the issue.`,
       `${++step}. Write or update tests to cover your changes.`,
     );
-    if (lintCmd && fmtCmd) {
-      lines.push(
-        `${++step}. After making code changes, run \`${lintCmd}\` and \`${fmtCmd}\` to ensure CI will pass.`,
-      );
-    } else if (lintCmd) {
-      lines.push(
-        `${++step}. After making code changes, run \`${lintCmd}\` to ensure CI will pass.`,
-      );
-    } else if (fmtCmd) {
-      lines.push(`${++step}. After making code changes, run \`${fmtCmd}\` to ensure CI will pass.`);
-    }
+    const defaultVerify = buildVerificationSteps(step, lintCmd, fmtCmd, typecheckCmd);
+    lines.push(...defaultVerify.lines);
+    step = defaultVerify.nextStep;
     lines.push(
       `${++step}. NEVER modify files matching the blocked paths below — violations will be automatically detected and the change will be rejected.`,
       `${++step}. Keep your changes to at most ${ctx.constraints.maxFilesPerChange} files.`,

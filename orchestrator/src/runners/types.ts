@@ -40,6 +40,8 @@ export interface AgentContext {
   lintCommand?: string;
   /** Format command for agent prompt (e.g., `npm run format`). */
   formatCommand?: string;
+  /** Typecheck command for agent prompt (e.g., `pnpm build`). */
+  typecheckCommand?: string;
   /** Commit message template with `{issueNumber}` and `{issueTitle}` placeholders. */
   commitMessageTemplate?: string;
   /** Co-author line for commits. */

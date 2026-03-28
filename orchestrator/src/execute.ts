@@ -648,6 +648,7 @@ async function executePipelineBody(
                 sandboxId,
                 lintCommand: DEFAULT_LINT_COMMAND,
                 formatCommand: DEFAULT_FORMAT_COMMAND,
+                typecheckCommand: process.env.AI_SDLC_TYPECHECK_COMMAND,
                 commitMessageTemplate: DEFAULT_COMMIT_MESSAGE_TEMPLATE,
                 commitCoAuthor: DEFAULT_COMMIT_CO_AUTHOR,
                 onProgress,
