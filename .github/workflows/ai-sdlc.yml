@@ -91,6 +91,8 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           AI_SDLC_LINT_COMMAND: pnpm lint
           AI_SDLC_FORMAT_COMMAND: pnpm format:check
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL: C0APASXUPM1
           # AI_SDLC_SANDBOX_PROVIDER: openshell  # Disabled: OpenShell install may fail silently on runner, causing pipeline to hang
         run: pnpm --filter @ai-sdlc/dogfood execute --issue ${{ github.event.issue.number }}
 

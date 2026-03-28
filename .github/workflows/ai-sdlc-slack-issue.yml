@@ -1,0 +1,141 @@
+name: AI-SDLC Slack Issue Creator
+
+on:
+  repository_dispatch:
+    types: [slack-issue]
+
+jobs:
+  create-issue:
+    name: Create Issue from Slack
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Write Slack context to file
+        env:
+          SLACK_CONTEXT: ${{ toJSON(github.event.client_payload.context) }}
+        run: printf '%s' "$SLACK_CONTEXT" > /tmp/slack-context.txt
+
+      - name: Synthesize GitHub issue from Slack context
+        id: synthesize
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Use Claude to turn the Slack message into a well-formed GitHub issue
+          RESULT=$(cat /tmp/slack-context.txt | claude -p --model claude-sonnet-4-5-20250929 --max-turns 1 "$(cat <<'PROMPT'
+          You are converting a Slack message into a GitHub issue for the ai-sdlc project.
+
+          Read the Slack context below and create a well-formed GitHub issue in JSON format.
+          The issue must have these sections in the body:
+          - ### Description (clear problem statement or feature request)
+          - ### Complexity (a number from 1-10 based on the scope)
+          - ### Acceptance Criteria (testable bullet points)
+
+          Output ONLY a JSON object with these fields:
+          {
+            "title": "short issue title (under 80 chars)",
+            "body": "full issue body with markdown sections",
+            "labels": ["bug" or "enhancement"]
+          }
+
+          Slack context:
+          PROMPT
+          )" 2>/dev/null | tail -1)
+
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub issue
+        env:
+          SYNTHESIS_JSON: ${{ steps.synthesize.outputs.result }}
+          SLACK_CONTEXT: ${{ github.event.client_payload.context }}
+          CHANNEL_ID: ${{ github.event.client_payload.channel_id }}
+          MESSAGE_TS: ${{ github.event.client_payload.message_ts }}
+          SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.AI_SDLC_PAT }}
+          script: |
+            let issue;
+            try {
+              // Strip markdown fences if present
+              let raw = process.env.SYNTHESIS_JSON || '';
+              raw = raw.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '');
+              issue = JSON.parse(raw);
+            } catch (err) {
+              core.warning(`Failed to parse synthesis result: ${err.message}`);
+              // Fallback: create issue with raw Slack context
+              issue = {
+                title: 'Issue from Slack discussion',
+                body: [
+                  '### Description',
+                  '',
+                  'Created from a Slack message in #product-ai-sdlc-dev.',
+                  '',
+                  process.env.SLACK_CONTEXT,
+                  '',
+                  '### Complexity',
+                  '3',
+                  '',
+                  '### Acceptance Criteria',
+                  '- [ ] To be defined',
+                ].join('\n'),
+                labels: ['enhancement'],
+              };
+            }
+
+            // Validate
+            if (!issue.title || !issue.body) {
+              core.setFailed('Synthesis produced invalid issue (missing title or body)');
+              return;
+            }
+
+            // Ensure labels is an array
+            const labels = Array.isArray(issue.labels) ? issue.labels : ['enhancement'];
+
+            // Add provenance footer
+            const footer = [
+              '',
+              '---',
+              `> Created from Slack #product-ai-sdlc-dev via :github-issue: emoji reaction`,
+              `> Channel: ${process.env.CHANNEL_ID} | Message: ${process.env.MESSAGE_TS}`,
+            ].join('\n');
+
+            const result = await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: issue.title,
+              body: issue.body + footer,
+              labels,
+            });
+
+            core.info(`Created issue #${result.data.number}: ${result.data.title}`);
+            core.info(`URL: ${result.data.html_url}`);
+
+            // Post confirmation back to Slack
+            const slackToken = process.env.SLACK_BOT_TOKEN;
+            if (slackToken && process.env.CHANNEL_ID) {
+              await fetch('https://slack.com/api/chat.postMessage', {
+                method: 'POST',
+                headers: {
+                  Authorization: `Bearer ${slackToken}`,
+                  'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                  channel: process.env.CHANNEL_ID,
+                  thread_ts: process.env.MESSAGE_TS,
+                  text: `Created issue <${result.data.html_url}|#${result.data.number}: ${result.data.title}> — the pipeline will process it automatically.`,
+                }),
+              });
+            }

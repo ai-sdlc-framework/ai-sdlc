@@ -352,6 +352,38 @@ async function executePipelineBody(
   const issueNumber = issueIdToNumber(issueId);
   const meter = getMeter();
 
+  // Slack notifications (optional — activates when SLACK_BOT_TOKEN is set)
+  let slackThreadId: string | undefined;
+  const slackToken = process.env.SLACK_BOT_TOKEN;
+  const slackChannel = process.env.SLACK_CHANNEL;
+
+  const notifySlack = async (message: string) => {
+    if (!slackToken || !slackChannel) return;
+    try {
+      const body: Record<string, string> = { channel: slackChannel, text: message };
+      if (slackThreadId) body.thread_ts = slackThreadId;
+      const res = await fetch('https://slack.com/api/chat.postMessage', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${slackToken}`,
+        },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json()) as { ok: boolean; ts?: string };
+      // Capture the first message's timestamp as thread ID
+      if (data.ok && !slackThreadId && data.ts) {
+        slackThreadId = data.ts;
+      }
+    } catch {
+      // Best-effort — don't fail the pipeline for Slack
+    }
+  };
+
+  await notifySlack(
+    `:rocket: *Pipeline started* for <https://github.com/${process.env.GITHUB_REPOSITORY ?? ''}/issues/${issueId}|#${issueId}: ${issue.title}>`,
+  );
+
   // Discovery: register agent and resolve by issue labels
   const discovery = createPipelineDiscovery();
   discovery.register(agentRole);
@@ -534,6 +566,9 @@ async function executePipelineBody(
       `| Model | ${selectedModel ?? 'default'} |\n` +
       `| Complexity | ${complexity} |\n` +
       `| Strategy | ${strategy} |\n`,
+  );
+  await notifySlack(
+    `:hammer_and_wrench: Agent working on \`${branchName}\` (model: ${selectedModel ?? 'default'}, complexity: ${complexity})`,
   );
 
   const runner = options.runner ?? new ClaudeCodeRunner();
@@ -795,6 +830,9 @@ async function executePipelineBody(
       `**${result.filesChanged.length} files changed.** Pushing branch and creating PR...\n\n` +
       activitySection,
   );
+  await notifySlack(
+    `:white_check_mark: Agent complete — ${result.filesChanged.length} files changed. Pushing...`,
+  );
 
   // 12. Push branch
   log.stage('push');
@@ -899,6 +937,7 @@ async function executePipelineBody(
       })
     : { title: NOTIFICATION_TITLES.prCreated, body: `Pull request created: ${pr.url}` };
   await tracker.addComment(issueId, `## ${prCreatedComment.title}\n\n${prCreatedComment.body}`);
+  await notifySlack(`:pull_request: PR created: ${pr.url}`);
 
   // 14b. Record cost from agent result
   if (options.costTracker && result.tokenUsage) {
