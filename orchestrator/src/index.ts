@@ -17,6 +17,12 @@ export {
 export { createLogger, type Logger } from './logger.js';
 export { validateConfigFiles, type FileValidationResult } from './validate-config.js';
 export { executeFixCI, countRetryAttempts, fetchCILogs, type FixCIOptions } from './fix-ci.js';
+export {
+  executeFixReview,
+  countRetryAttempts as countReviewRetryAttempts,
+  fetchReviewFindings,
+  type FixReviewOptions,
+} from './fix-review.js';
 export { executeTriage, type TriageOptions, type TriageResult } from './triage.js';
 
 // Shared utilities

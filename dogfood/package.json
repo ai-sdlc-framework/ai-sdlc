@@ -25,6 +25,7 @@
     "test:watch": "vitest",
     "execute": "tsx src/cli.ts",
     "fix-ci": "tsx src/cli-fix-ci.ts",
+    "fix-review": "tsx src/cli-fix-review.ts",
     "triage": "tsx src/cli-triage.ts",
     "watch": "tsx src/cli-watch.ts",
     "admit": "tsx src/cli-admit.ts",
