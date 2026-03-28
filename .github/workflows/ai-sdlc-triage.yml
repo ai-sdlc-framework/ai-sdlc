@@ -79,6 +79,7 @@ jobs:
         env:
           VERDICT_JSON: ${{ needs.analyze.outputs.verdict }}
         with:
+          github-token: ${{ secrets.AI_SDLC_PAT }}
           script: |
             // ── Schema validation ─────────────────────────────────────
             // Reject malformed output from Job 1 — defense against
