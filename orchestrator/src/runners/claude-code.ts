@@ -5,7 +5,13 @@
 
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import type { AgentRunner, AgentContext, AgentResult, TokenUsage } from './types.js';
+import type {
+  AgentRunner,
+  AgentContext,
+  AgentResult,
+  AgentProgressEvent,
+  TokenUsage,
+} from './types.js';
 import {
   DEFAULT_MODEL,
   DEFAULT_ALLOWED_TOOLS,
@@ -168,12 +174,102 @@ interface RunClaudeOptions {
   model?: string;
   /** When set, spawns claude inside this OpenShell sandbox. */
   sandboxId?: string;
+  /** Progress callback for streaming events. */
+  onProgress?: (event: AgentProgressEvent) => void;
 }
 
 interface RunClaudeResult {
   stdout: string;
   stderr: string;
   model: string;
+  costUsd?: number;
+}
+
+/**
+ * Extract a file path from a tool_use input object.
+ */
+function extractFilePath(input: Record<string, unknown>): string | undefined {
+  return (
+    (typeof input.file_path === 'string' ? input.file_path : undefined) ??
+    (typeof input.path === 'string' ? input.path : undefined) ??
+    (typeof input.pattern === 'string' ? input.pattern : undefined) ??
+    (typeof input.command === 'string' ? input.command.slice(0, 80) : undefined)
+  );
+}
+
+/**
+ * Parse a single NDJSON line from Claude Code stream-json output
+ * and emit a progress event if applicable.
+ */
+function parseStreamEvent(
+  line: string,
+  onProgress: (event: AgentProgressEvent) => void,
+): { resultText?: string; costUsd?: number; tokenUsage?: TokenUsage } | undefined {
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+
+  const type = parsed.type as string;
+
+  if (type === 'assistant') {
+    const message = parsed.message as Record<string, unknown> | undefined;
+    const content = message?.content as Array<Record<string, unknown>> | undefined;
+    if (!content) return undefined;
+
+    for (const block of content) {
+      if (block.type === 'tool_use') {
+        const toolName = String(block.name ?? '');
+        const input = (block.input ?? {}) as Record<string, unknown>;
+        const filePath = extractFilePath(input);
+        onProgress({
+          type: 'tool_start',
+          tool: toolName,
+          file: filePath,
+          message: filePath ? `${toolName}: ${filePath}` : toolName,
+        });
+      } else if (block.type === 'text') {
+        const text = String(block.text ?? '');
+        if (text.length > 0) {
+          onProgress({
+            type: 'text',
+            message: text.slice(0, 200),
+          });
+        }
+      }
+    }
+  }
+
+  if (type === 'result') {
+    const resultText = parsed.result as string | undefined;
+    const costUsd = parsed.total_cost_usd as number | undefined;
+
+    // Extract token usage from result event
+    const modelUsage = parsed.modelUsage as Record<string, Record<string, unknown>> | undefined;
+    let tokenUsage: TokenUsage | undefined;
+    if (modelUsage) {
+      const firstModel = Object.keys(modelUsage)[0];
+      if (firstModel) {
+        const usage = modelUsage[firstModel];
+        tokenUsage = {
+          inputTokens: (usage.inputTokens as number) ?? 0,
+          outputTokens: (usage.outputTokens as number) ?? 0,
+          cacheReadTokens: (usage.cacheReadInputTokens as number) ?? undefined,
+          model: firstModel,
+        };
+      }
+    }
+
+    if (costUsd !== undefined) {
+      onProgress({ type: 'cost', costUsd, message: `Total cost: $${costUsd.toFixed(4)}` });
+    }
+
+    return { resultText: resultText ?? undefined, costUsd, tokenUsage };
+  }
+
+  return undefined;
 }
 
 function runClaude(
@@ -186,11 +282,18 @@ function runClaude(
 
   return new Promise((resolve, reject) => {
     const model = opts?.model ?? process.env.AI_SDLC_MODEL ?? DEFAULT_MODEL;
-    const claudeArgs = ['-p', '--model', model, '--allowedTools', tools];
+    const claudeArgs = [
+      '-p',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--model',
+      model,
+      '--allowedTools',
+      tools,
+    ];
 
     // When running inside an OpenShell sandbox, prefix with sandbox connect.
-    // Only use openshell when the provider is explicitly set — the stub sandbox
-    // also returns a sandboxId but doesn't have a real openshell process.
     const useOpenShell = opts?.sandboxId && process.env.AI_SDLC_SANDBOX_PROVIDER === 'openshell';
     let cmd: string;
     let args: string[];
@@ -217,19 +320,72 @@ function runClaude(
 
     process.stderr.write(`${logPrefix} pid: ${child.pid}\n`);
 
-    const chunks: Buffer[] = [];
-    const errChunks: Buffer[] = [];
     let lastActivity = Date.now();
+    let resultText: string | undefined;
+    let resultCost: number | undefined;
+    let resultTokenUsage: TokenUsage | undefined;
+
+    // Buffer for incomplete NDJSON lines
+    let lineBuffer = '';
+    const onProgress = opts?.onProgress;
 
     child.stdout.on('data', (data: Buffer) => {
-      chunks.push(data);
       lastActivity = Date.now();
+
+      // Parse NDJSON lines from stream-json output
+      lineBuffer += data.toString('utf-8');
+      const lines = lineBuffer.split('\n');
+      // Keep the last (possibly incomplete) line in the buffer
+      lineBuffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        // Log raw events to stderr for CI visibility
+        process.stderr.write(`${logPrefix} event: ${trimmed.slice(0, 200)}\n`);
+
+        if (onProgress) {
+          const result = parseStreamEvent(trimmed, onProgress);
+          if (result) {
+            if (result.resultText !== undefined) resultText = result.resultText;
+            if (result.costUsd !== undefined) resultCost = result.costUsd;
+            if (result.tokenUsage) resultTokenUsage = result.tokenUsage;
+          }
+        } else {
+          // Still parse result event even without progress callback
+          try {
+            const parsed = JSON.parse(trimmed);
+            if (parsed.type === 'result') {
+              resultText = parsed.result as string;
+              resultCost = parsed.total_cost_usd as number;
+              const modelUsage = parsed.modelUsage as
+                | Record<string, Record<string, unknown>>
+                | undefined;
+              if (modelUsage) {
+                const firstModel = Object.keys(modelUsage)[0];
+                if (firstModel) {
+                  const usage = modelUsage[firstModel];
+                  resultTokenUsage = {
+                    inputTokens: (usage.inputTokens as number) ?? 0,
+                    outputTokens: (usage.outputTokens as number) ?? 0,
+                    cacheReadTokens: (usage.cacheReadInputTokens as number) ?? undefined,
+                    model: firstModel,
+                  };
+                }
+              }
+            }
+          } catch {
+            // Not JSON — ignore
+          }
+        }
+      }
     });
 
+    const errChunks: Buffer[] = [];
     child.stderr.on('data', (data: Buffer) => {
       errChunks.push(data);
       lastActivity = Date.now();
-      // Stream stderr to parent for real-time observability in CI
       process.stderr.write(data);
     });
 
@@ -237,25 +393,23 @@ function runClaude(
     const heartbeat = setInterval(() => {
       const elapsed = Math.round((Date.now() - startTime) / 1000);
       const idle = Math.round((Date.now() - lastActivity) / 1000);
-      const stdoutBytes = chunks.reduce((n, c) => n + c.length, 0);
-      const stderrBytes = errChunks.reduce((n, c) => n + c.length, 0);
-      process.stderr.write(
-        `${logPrefix} heartbeat: ${elapsed}s elapsed, ${idle}s since last output, stdout=${stdoutBytes}B stderr=${stderrBytes}B\n`,
-      );
+      process.stderr.write(`${logPrefix} heartbeat: ${elapsed}s elapsed, ${idle}s idle\n`);
     }, 30_000);
 
     child.on('close', (code) => {
       clearInterval(heartbeat);
       const elapsed = Math.round((Date.now() - startTime) / 1000);
-      const stdout = Buffer.concat(chunks).toString('utf-8');
       const stderr = Buffer.concat(errChunks).toString('utf-8');
-      process.stderr.write(
-        `${logPrefix} exited: code=${code} elapsed=${elapsed}s stdout=${stdout.length}B stderr=${stderr.length}B\n`,
-      );
+      process.stderr.write(`${logPrefix} exited: code=${code} elapsed=${elapsed}s\n`);
       if (code === 0) {
-        resolve({ stdout, stderr, model });
+        resolve({
+          stdout: resultText ?? '',
+          stderr,
+          model: resultTokenUsage?.model ?? model,
+          costUsd: resultCost,
+        });
       } else {
-        reject(new Error(`claude exited with code ${code}: ${stderr || stdout}`));
+        reject(new Error(`claude exited with code ${code}: ${stderr || resultText || ''}`));
       }
     });
 
@@ -332,15 +486,16 @@ export class ClaudeCodeRunner implements AgentRunner {
     const prompt = buildPrompt(ctx);
 
     try {
-      // Invoke Claude Code CLI in print mode, sending prompt via stdin
+      // Invoke Claude Code CLI with stream-json for real-time progress
       const result = await runClaude(prompt, ctx.workDir, {
         allowedTools: ctx.allowedTools,
         timeoutMs: ctx.timeoutMs,
         model: ctx.model,
         sandboxId: ctx.sandboxId,
+        onProgress: ctx.onProgress,
       });
 
-      // Parse token usage from stderr
+      // Token usage from stream-json result event (falls back to stderr parsing)
       const tokenUsage = parseTokenUsage(result.stderr, result.model);
 
       // Collect changed files

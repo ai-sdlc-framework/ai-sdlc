@@ -46,6 +46,22 @@ export interface AgentContext {
   commitCoAuthor?: string;
   /** OpenShell sandbox ID — when set, the runner spawns the agent inside this sandbox. */
   sandboxId?: string;
+  /** Progress callback — called with streaming events as the agent works. */
+  onProgress?: (event: AgentProgressEvent) => void;
+}
+
+/** Streaming progress event emitted by the agent runner. */
+export interface AgentProgressEvent {
+  /** Event type. */
+  type: 'tool_start' | 'tool_end' | 'text' | 'error' | 'cost';
+  /** Tool name (for tool_start/tool_end events). */
+  tool?: string;
+  /** File path or resource being acted on. */
+  file?: string;
+  /** Short description of what's happening. */
+  message?: string;
+  /** Cost in USD so far (for cost events). */
+  costUsd?: number;
 }
 
 export interface TokenUsage {
