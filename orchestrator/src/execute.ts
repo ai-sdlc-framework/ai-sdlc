@@ -1141,25 +1141,24 @@ function runPipelineDiagnostics(input: DiagnosticsInput): void {
 
 // ── Gitignore helper ─────────────────────────────────────────────────
 
-const RUNTIME_GITIGNORE_ENTRIES = [
-  '# AI-SDLC runtime artifacts',
-  '.ai-sdlc/state.db',
-  '.ai-sdlc/state/',
-  '.ai-sdlc/audit.jsonl',
-];
+const RUNTIME_GITIGNORE_PATHS = ['.ai-sdlc/state.db', '.ai-sdlc/state/', '.ai-sdlc/audit.jsonl'];
 
 /**
  * Ensure .gitignore in the working directory covers AI-SDLC runtime artifacts.
  * Without this the agent sees untracked runtime files and appends duplicate
  * gitignore entries on every run.
+ *
+ * Only checks path entries (not the comment header) to avoid false mismatches.
+ * Writes the block once with any missing paths.
  */
 function ensureRuntimeGitignore(workDir: string): void {
   try {
     const gitignorePath = join(workDir, '.gitignore');
     const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
-    const missing = RUNTIME_GITIGNORE_ENTRIES.filter((entry) => !existing.includes(entry));
+    const missing = RUNTIME_GITIGNORE_PATHS.filter((entry) => !existing.includes(entry));
     if (missing.length === 0) return;
-    appendFileSync(gitignorePath, '\n' + missing.join('\n') + '\n', 'utf-8');
+    const block = '\n# AI-SDLC runtime artifacts\n' + missing.join('\n') + '\n';
+    appendFileSync(gitignorePath, block, 'utf-8');
   } catch {
     // Best-effort — workDir may not exist yet in tests or dry-run scenarios
   }
