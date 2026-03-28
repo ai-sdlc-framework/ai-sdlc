@@ -538,6 +538,18 @@ async function executePipelineBody(
 
   const runner = options.runner ?? new ClaudeCodeRunner();
 
+  // Set up progress tracking — collects streaming events for the activity log
+  const progressLog: string[] = [];
+
+  const onProgress = (event: import('./runners/types.js').AgentProgressEvent) => {
+    const timestamp = new Date().toISOString().slice(11, 19);
+    if (event.type === 'tool_start' && event.tool) {
+      progressLog.push(`[${timestamp}] ${event.tool}${event.file ? `: ${event.file}` : ''}`);
+    } else if (event.type === 'cost') {
+      progressLog.push(`[${timestamp}] Cost: $${event.costUsd?.toFixed(4)}`);
+    }
+  };
+
   // Sandbox isolation around agent execution
   const codeStage = config.pipeline?.spec.stages.find((s) => s.name === 'code');
   let sandboxId: string | undefined;
@@ -603,6 +615,7 @@ async function executePipelineBody(
                 formatCommand: DEFAULT_FORMAT_COMMAND,
                 commitMessageTemplate: DEFAULT_COMMIT_MESSAGE_TEMPLATE,
                 commitCoAuthor: DEFAULT_COMMIT_CO_AUTHOR,
+                onProgress,
               }),
           );
         },
@@ -771,13 +784,16 @@ async function executePipelineBody(
     log.info('Post-agent complexity evaluation skipped');
   }
 
-  // Post progress update after agent completes
+  // Post activity log so users can see what the agent did
+  const activitySection =
+    progressLog.length > 0
+      ? `### Activity Log\n\n\`\`\`\n${progressLog.slice(-40).join('\n')}\n\`\`\``
+      : '';
   await tracker.addComment(
     issueId,
     `## AI-SDLC: Agent Complete\n\n` +
-      `The agent finished working. **${result.filesChanged.length} files changed.**\n\n` +
-      `${result.summary}\n\n` +
-      `> Pushing branch and creating PR...`,
+      `**${result.filesChanged.length} files changed.** Pushing branch and creating PR...\n\n` +
+      activitySection,
   );
 
   // 12. Push branch

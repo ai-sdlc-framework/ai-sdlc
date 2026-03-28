@@ -285,6 +285,7 @@ export {
   type AgentRunner,
   type AgentContext,
   type AgentResult,
+  type AgentProgressEvent,
   type GenericLLMConfig,
   type RegisteredRunner,
   type SecurityTriageConfig,
