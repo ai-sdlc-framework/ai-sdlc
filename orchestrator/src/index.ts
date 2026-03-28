@@ -180,6 +180,18 @@ export {
   type PriorityConfig,
 } from './priority.js';
 
+// Issue admission scoring
+export {
+  scoreIssueForAdmission,
+  mapIssueToPriorityInput,
+  type AdmissionInput,
+  type AdmissionThresholds,
+  type IssueAdmissionResult,
+} from './admission-score.js';
+
+// PR review orchestration
+export { executeReview, type ReviewContext, type ReviewOptions } from './review.js';
+
 // Agent orchestration
 export {
   createPipelineOrchestration,
@@ -261,6 +273,8 @@ export {
   RunnerRegistry,
   createRunnerRegistry,
   SecurityTriageRunner,
+  ReviewAgentRunner,
+  REVIEW_PROMPTS,
   type AgentRunner,
   type AgentContext,
   type AgentResult,
@@ -268,6 +282,10 @@ export {
   type RegisteredRunner,
   type SecurityTriageConfig,
   type TriageVerdict,
+  type ReviewAgentConfig,
+  type ReviewType,
+  type ReviewFinding,
+  type ReviewVerdict,
 } from './runners/index.js';
 
 // Runners (additional type)

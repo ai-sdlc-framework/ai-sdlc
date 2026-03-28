@@ -15,3 +15,11 @@ export {
   type TriageVerdict,
   TRIAGE_SYSTEM_PROMPT,
 } from './security-triage.js';
+export {
+  ReviewAgentRunner,
+  REVIEW_PROMPTS,
+  type ReviewAgentConfig,
+  type ReviewType,
+  type ReviewFinding,
+  type ReviewVerdict,
+} from './review-agent.js';

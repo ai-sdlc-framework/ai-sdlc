@@ -1,0 +1,208 @@
+name: AI-SDLC PR Review
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+    branches: [main]
+
+concurrency:
+  group: review-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # ── Job 1: Parallel Review Analysis (sandboxed) ──────────────────
+  # Has ANTHROPIC_API_KEY but NO GitHub write access.
+  # Defense: even if the LLM is compromised, it cannot modify the repo.
+  analyze:
+    name: Analyze PR
+    runs-on: ubuntu-latest
+    if: startsWith(github.event.pull_request.head.ref, 'ai-sdlc/issue-')
+    permissions: {} # Fully sandboxed — no GitHub access
+    outputs:
+      testing: ${{ steps.review.outputs.testing }}
+      critic: ${{ steps.review.outputs.critic }}
+      security: ${{ steps.review.outputs.security }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Extract PR diff and linked issue
+        id: context
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Generate the diff
+          git diff "$BASE_SHA"..."$HEAD_SHA" > /tmp/pr-diff.txt
+
+          # Extract linked issue number from PR body (matches "Closes #N" pattern)
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '(?:Closes|Fixes|Resolves)\s+#\K\d+' | head -1 || true)
+          echo "issue_number=${ISSUE_NUM:-}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch linked issue context
+        if: steps.context.outputs.issue_number
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue view ${{ steps.context.outputs.issue_number }} \
+            --json title,body > /tmp/linked-issue.json 2>/dev/null || echo '{}' > /tmp/linked-issue.json
+
+      - name: Create empty issue file if not fetched
+        run: test -f /tmp/linked-issue.json || echo '{}' > /tmp/linked-issue.json
+
+      - name: Run parallel review agents
+        id: review
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Run all three review agents in parallel
+          pnpm --filter @ai-sdlc/dogfood review \
+            --pr "$PR_NUMBER" \
+            --diff-file /tmp/pr-diff.txt \
+            --issue-file /tmp/linked-issue.json \
+            --type testing > /tmp/review-testing.txt 2>/tmp/review-testing-stderr.txt &
+          PID_TESTING=$!
+
+          pnpm --filter @ai-sdlc/dogfood review \
+            --pr "$PR_NUMBER" \
+            --diff-file /tmp/pr-diff.txt \
+            --issue-file /tmp/linked-issue.json \
+            --type critic > /tmp/review-critic.txt 2>/tmp/review-critic-stderr.txt &
+          PID_CRITIC=$!
+
+          pnpm --filter @ai-sdlc/dogfood review \
+            --pr "$PR_NUMBER" \
+            --diff-file /tmp/pr-diff.txt \
+            --issue-file /tmp/linked-issue.json \
+            --type security > /tmp/review-security.txt 2>/tmp/review-security-stderr.txt &
+          PID_SECURITY=$!
+
+          # Wait for all — don't fail if one agent errors
+          wait $PID_TESTING || true
+          wait $PID_CRITIC || true
+          wait $PID_SECURITY || true
+
+          # Log stderr in collapsed groups
+          for TYPE in testing critic security; do
+            if [ -s "/tmp/review-${TYPE}-stderr.txt" ]; then
+              echo "::group::${TYPE} review stderr"
+              cat "/tmp/review-${TYPE}-stderr.txt"
+              echo "::endgroup::"
+            fi
+          done
+
+          # Capture last line of each output (the JSON verdict)
+          TESTING=$(tail -1 /tmp/review-testing.txt 2>/dev/null || echo '{}')
+          CRITIC=$(tail -1 /tmp/review-critic.txt 2>/dev/null || echo '{}')
+          SECURITY=$(tail -1 /tmp/review-security.txt 2>/dev/null || echo '{}')
+
+          echo "testing=$TESTING" >> "$GITHUB_OUTPUT"
+          echo "critic=$CRITIC" >> "$GITHUB_OUTPUT"
+          echo "security=$SECURITY" >> "$GITHUB_OUTPUT"
+
+  # ── Job 2: Post Reviews (write access, no LLM) ──────────────────
+  # Has GitHub write access but NO ANTHROPIC_API_KEY.
+  # Defense: this job only reads structured JSON — no LLM interaction.
+  report:
+    name: Post Review Results
+    runs-on: ubuntu-latest
+    needs: analyze
+    if: needs.analyze.result == 'success'
+    permissions:
+      pull-requests: write
+      issues: read
+    steps:
+      - name: Validate and post reviews
+        uses: actions/github-script@v7
+        env:
+          TESTING_JSON: ${{ needs.analyze.outputs.testing }}
+          CRITIC_JSON: ${{ needs.analyze.outputs.critic }}
+          SECURITY_JSON: ${{ needs.analyze.outputs.security }}
+        with:
+          script: |
+            // ── Parse and validate all three verdicts ─────────
+            function parseVerdict(raw, type) {
+              try {
+                const v = JSON.parse(raw || '{}');
+                if (typeof v.approved !== 'boolean' ||
+                    !Array.isArray(v.findings) ||
+                    typeof v.summary !== 'string') {
+                  return { type, approved: false, findings: [{severity:'critical',message:'Invalid verdict schema'}], summary: 'Verdict parsing failed' };
+                }
+                return { ...v, type };
+              } catch {
+                return { type, approved: false, findings: [{severity:'critical',message:'Verdict JSON parsing failed'}], summary: 'Verdict not valid JSON' };
+              }
+            }
+
+            const verdicts = [
+              parseVerdict(process.env.TESTING_JSON, 'testing'),
+              parseVerdict(process.env.CRITIC_JSON, 'critic'),
+              parseVerdict(process.env.SECURITY_JSON, 'security'),
+            ];
+
+            const allApproved = verdicts.every(v => v.approved);
+            const titles = { testing: 'Testing Review', critic: 'Code Quality Review', security: 'Security Review' };
+
+            // ── Build review body ─────────────────────────────
+            let body = `## AI-SDLC: Automated PR Review\n\n`;
+            body += allApproved
+              ? `All three review agents **approved** this PR.\n\n`
+              : `One or more review agents found issues.\n\n`;
+
+            for (const v of verdicts) {
+              const status = v.approved ? 'APPROVED' : 'CHANGES REQUESTED';
+              body += `### ${titles[v.type]}: ${status}\n\n`;
+              body += `${v.summary}\n\n`;
+
+              if (v.findings.length > 0) {
+                for (const f of v.findings) {
+                  const sev = f.severity === 'critical' ? '[critical]' :
+                              f.severity === 'major' ? '[major]' :
+                              f.severity === 'minor' ? '[minor]' : '[suggestion]';
+                  const loc = f.file ? ` (\`${f.file}${f.line ? ':' + f.line : ''}\`)` : '';
+                  body += `- **${sev}**${loc}: ${f.message}\n`;
+                }
+                body += '\n';
+              }
+            }
+
+            body += '---\n';
+            body += '*Reviewed by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc)*';
+
+            // ── Post PR review ────────────────────────────────
+            const event = allApproved ? 'APPROVE' : 'REQUEST_CHANGES';
+            await github.rest.pulls.createReview({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              event,
+              body,
+            });
+
+            core.info(`Posted ${event} review on PR #${context.payload.pull_request.number}`);
+
+      - name: Comment on analyze failure
+        if: needs.analyze.result == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: '## AI-SDLC: Review Pipeline Failed\n\nThe automated review pipeline failed. See the [workflow run](' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + ') for details.\n\n*Reviewed by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc)*'
+            });

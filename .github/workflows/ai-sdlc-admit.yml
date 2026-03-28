@@ -1,0 +1,127 @@
+name: AI-SDLC Issue Admission
+
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  score:
+    name: Score Issue
+    runs-on: ubuntu-latest
+    # Skip if issue already has any pipeline labels
+    if: >-
+      !contains(toJSON(github.event.issue.labels.*.name), 'security-triage') &&
+      !contains(toJSON(github.event.issue.labels.*.name), 'triage-passed') &&
+      !contains(toJSON(github.event.issue.labels.*.name), 'ai-eligible') &&
+      !contains(toJSON(github.event.issue.labels.*.name), 'security-rejected')
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Write issue body to file
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: printf '%s' "$ISSUE_BODY" > /tmp/issue-body.txt
+
+      - name: Score issue with PPA
+        id: admit
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+        run: |
+          set +e
+          RESULT=$(pnpm --filter @ai-sdlc/dogfood admit \
+            --title "$ISSUE_TITLE" \
+            --body-file /tmp/issue-body.txt \
+            --issue-number '${{ github.event.issue.number }}' \
+            --labels '${{ toJSON(github.event.issue.labels.*.name) }}' \
+            --reactions '${{ github.event.issue.reactions.total_count }}' \
+            --comments '${{ github.event.issue.comments }}' \
+            --created-at '${{ github.event.issue.created_at }}' \
+            2>/tmp/admit-stderr.txt | tail -1)
+          EXIT_CODE=$?
+          set -e
+          if [ -s /tmp/admit-stderr.txt ]; then
+            echo "::group::Admission stderr"
+            cat /tmp/admit-stderr.txt
+            echo "::endgroup::"
+          fi
+          echo "result=$RESULT" >> "$GITHUB_OUTPUT"
+
+      - name: Process admission result
+        uses: actions/github-script@v7
+        env:
+          ADMISSION_JSON: ${{ steps.admit.outputs.result }}
+        with:
+          script: |
+            let result;
+            try {
+              result = JSON.parse(process.env.ADMISSION_JSON || '');
+            } catch {
+              core.warning('Admission output is not valid JSON — skipping');
+              return;
+            }
+
+            // Schema validation
+            if (typeof result.admitted !== 'boolean' ||
+                typeof result.reason !== 'string' ||
+                typeof result.score !== 'object') {
+              core.warning('Admission schema mismatch — skipping');
+              return;
+            }
+
+            if (result.admitted) {
+              // Add security-triage label to trigger next step
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                labels: ['security-triage']
+              });
+              core.info(`Issue admitted (score: ${result.score.composite.toFixed(4)}) — added security-triage label`);
+            } else {
+              // Post score breakdown comment with suggestions
+              const d = result.score.dimensions;
+              let body = `## AI-SDLC: Issue Admission\n\n`;
+              body += `**Status:** Not yet eligible for automated processing\n`;
+              body += `**Score:** ${result.score.composite.toFixed(4)}\n`;
+              body += `**Confidence:** ${(result.score.confidence * 100).toFixed(0)}%\n\n`;
+
+              body += `### Score Breakdown\n\n`;
+              body += `| Dimension | Score |\n|---|---|\n`;
+              body += `| Soul Alignment | ${d.soulAlignment.toFixed(2)} |\n`;
+              body += `| Demand Pressure | ${d.demandPressure.toFixed(2)} |\n`;
+              body += `| Execution Reality | ${d.executionReality.toFixed(2)} |\n`;
+              body += `| Human Curve | ${d.humanCurve.toFixed(2)} |\n\n`;
+
+              body += `**Reason:** ${result.reason}\n\n`;
+
+              if (result.suggestions && result.suggestions.length > 0) {
+                body += `### How to Improve\n\n`;
+                for (const s of result.suggestions) {
+                  body += `- ${s}\n`;
+                }
+                body += '\n';
+              }
+
+              body += `---\n`;
+              body += `> Edit the issue to address the suggestions above. It will be re-scored automatically.\n\n`;
+              body += `*Scored by [AI-SDLC PPA](https://github.com/ai-sdlc-framework/ai-sdlc)*`;
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                body
+              });
+            }

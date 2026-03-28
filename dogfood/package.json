@@ -27,6 +27,8 @@
     "fix-ci": "tsx src/cli-fix-ci.ts",
     "triage": "tsx src/cli-triage.ts",
     "watch": "tsx src/cli-watch.ts",
+    "admit": "tsx src/cli-admit.ts",
+    "review": "tsx src/cli-review.ts",
     "ppa-score": "tsx scripts/ppa-score.ts"
   },
   "dependencies": {

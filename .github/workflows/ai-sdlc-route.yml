@@ -1,0 +1,84 @@
+name: AI-SDLC Auto-Route
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  route:
+    name: Route by Complexity
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.label.name == 'triage-passed' &&
+      !contains(toJSON(github.event.issue.labels.*.name), 'ai-eligible')
+    permissions:
+      issues: write
+    steps:
+      - name: Parse complexity and route
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const body = context.payload.issue.body || '';
+
+            // Parse complexity from issue body (same regex as orchestrator/src/validate-issue.ts:142)
+            const match = body.match(/###?\s*Complexity\s*\n+\s*(\d+)/i);
+            const complexity = match ? Number(match[1]) : 0;
+
+            core.info(`Parsed complexity: ${complexity}`);
+
+            // Routing thresholds from pipeline.yaml
+            const AI_ELIGIBLE_MIN = 1;
+            const AI_ELIGIBLE_MAX = 3;
+
+            if (complexity >= AI_ELIGIBLE_MIN && complexity <= AI_ELIGIBLE_MAX) {
+              await github.rest.issues.addLabels({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                labels: ['ai-eligible']
+              });
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                body: `## AI-SDLC: Auto-Routed\n\nComplexity **${complexity}** is within the AI-eligible range (${AI_ELIGIBLE_MIN}-${AI_ELIGIBLE_MAX}). Adding \`ai-eligible\` label to trigger the AI agent.\n\n*Routed by [AI-SDLC](https://github.com/ai-sdlc-framework/ai-sdlc)*`
+              });
+
+              core.info(`Complexity ${complexity} → ai-eligible`);
+            } else if (complexity === 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                body: [
+                  '## AI-SDLC: Missing Complexity',
+                  '',
+                  'This issue passed security triage but has no `### Complexity` section.',
+                  'Please add a complexity score (1-10) so the routing engine can determine the appropriate strategy.',
+                  '',
+                  'Example:',
+                  '```',
+                  '### Complexity',
+                  '2',
+                  '```',
+                  '',
+                  '*Routed by [AI-SDLC](https://github.com/ai-sdlc-framework/ai-sdlc)*'
+                ].join('\n')
+              });
+
+              core.info('No complexity found — commented with instructions');
+            } else {
+              const strategy = complexity >= 9 ? 'human-led'
+                : complexity >= 6 ? 'ai-assisted'
+                : 'ai-with-review';
+
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.issue.number,
+                body: `## AI-SDLC: Manual Routing Required\n\nComplexity **${complexity}** exceeds the AI-eligible threshold (max ${AI_ELIGIBLE_MAX}). Routed as **"${strategy}"** — requires human involvement.\n\nA maintainer can manually add the \`ai-eligible\` label to override.\n\n*Routed by [AI-SDLC](https://github.com/ai-sdlc-framework/ai-sdlc)*`
+              });
+
+              core.info(`Complexity ${complexity} → ${strategy} (manual intervention needed)`);
+            }
