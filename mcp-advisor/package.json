@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/mcp-advisor",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "MCP server bridging human-directed AI sessions with the AI-SDLC orchestrator",
   "license": "Apache-2.0",
   "repository": {
