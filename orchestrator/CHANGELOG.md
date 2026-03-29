@@ -1,5 +1,38 @@
 # @ai-sdlc/orchestrator
 
+## [0.6.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.5.0...orchestrator-v0.6.0) (2026-03-29)
+
+
+### Features
+
+* add automated dogfood pipeline — admission, routing, and PR review workflows ([4583ab6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4583ab65285163ab16e42f140cdd74e87dbfdb9a))
+* add pipeline visibility and lint/format to agent context ([8f07b3e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8f07b3ef4bc72c1a3bc48a1ba77e6ab9643420ea))
+* add Slack integration — pipeline visibility and emoji-to-issue trigger ([ec53b7c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ec53b7c7cd9adf834e17c28fb7e45271d1bd6e9a))
+* add trust-based source weighting to PPA admission scoring ([c04ca18](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c04ca1836ce35db8f15f363f1efb5262317eefb0))
+* add typecheck command to agent prompt to prevent pre-commit failures ([3497c71](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3497c7191bb2c7a5b34e973a68de3fc2986644ae))
+* human-readable agent log output instead of raw NDJSON ([685452f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/685452f8559232d187df0a6a0095f017ef4f0fb8))
+* stream agent progress via Claude Code stream-json output ([4c5c5b4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4c5c5b4ead16d2238af4809ec1ea1e1ef954767b))
+
+
+### Bug Fixes
+
+* Add missing validation for empty issueBody in SecurityTriageRunner ([#33](https://github.com/ai-sdlc-framework/ai-sdlc/issues/33)) ([#34](https://github.com/ai-sdlc-framework/ai-sdlc/issues/34)) ([9f81e66](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9f81e66dde0950f13272064cb36695cd7c2d8387))
+* add real-time observability to Claude Code runner ([bcb2f08](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bcb2f0825f52914fa7b07acd286bbdd97f50dd87))
+* Agent should address review findings before human review ([#35](https://github.com/ai-sdlc-framework/ai-sdlc/issues/35)) ([#36](https://github.com/ai-sdlc-framework/ai-sdlc/issues/36)) ([34c7606](https://github.com/ai-sdlc-framework/ai-sdlc/commit/34c7606db4dacdc21875f876f332f8d61bfc4c2a))
+* detect agent commits by diffing against merge-base with main ([5a27dc6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5a27dc66d51c87587f02da1eaa60e46f5fa962b4))
+* detect agent-committed changes instead of reporting 'no files modified' ([7b6309d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7b6309d30a0a1a172951ba83cbc542311dc86143))
+* only use openshell prefix when provider is explicitly openshell ([e2ea832](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e2ea8324c8de7fb49c16e64bcc21e6d85a4df5e1))
+* prevent duplicate .gitignore entries from ensureRuntimeGitignore ([a1ff0fe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a1ff0fe49681ea1200059e5eefc40e555915361c))
+* resolve issue [#29](https://github.com/ai-sdlc-framework/ai-sdlc/issues/29) ([8b74a6d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8b74a6dbe9eee88c85fea40269e79c34ceded39c))
+* resolve issue [#37](https://github.com/ai-sdlc-framework/ai-sdlc/issues/37) ([a8b0707](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a8b0707fa96b565a049fd8f123535a6eb885a3ca))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.6.0
+
 ## [0.5.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.4.0...orchestrator-v0.5.0) (2026-03-24)
 
 
