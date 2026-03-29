@@ -299,4 +299,5 @@ export const NOTIFICATION_TITLES = {
   fixReviewAgentFailed: 'AI-SDLC: Fix-Review Agent Failed',
   fixReviewGuardrailViolations: 'AI-SDLC: Fix-Review Guardrail Violations',
   fixReviewApplied: 'AI-SDLC: Fix-Review Applied',
+  pipelineCycleDetected: 'AI-SDLC: Pipeline Cycle Detected',
 } as const;
