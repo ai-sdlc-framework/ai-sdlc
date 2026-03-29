@@ -590,19 +590,26 @@ export class ClaudeCodeRunner implements AgentRunner {
         ...untrackedOutput.split('\n').filter(Boolean),
       ];
 
-      // Check if agent already committed — look for new commits on this branch
+      // Check if agent already committed (and possibly pushed) —
+      // compare against the merge base with the target branch (main)
       let committedFiles: string[] = [];
       let agentAlreadyCommitted = false;
       try {
-        const commitDiff = await gitExec(ctx.workDir, [
-          'diff',
-          '--name-only',
-          `origin/${ctx.branch}..HEAD`,
-        ]);
-        committedFiles = commitDiff.split('\n').filter(Boolean);
-        agentAlreadyCommitted = committedFiles.length > 0 && uncommittedFiles.length === 0;
+        // Find the merge base with main to see all new commits on this branch
+        const mergeBase = (
+          await gitExec(ctx.workDir, ['merge-base', 'HEAD', 'origin/main'])
+        ).trim();
+        if (mergeBase) {
+          const commitDiff = await gitExec(ctx.workDir, [
+            'diff',
+            '--name-only',
+            `${mergeBase}..HEAD`,
+          ]);
+          committedFiles = commitDiff.split('\n').filter(Boolean);
+          agentAlreadyCommitted = committedFiles.length > 0 && uncommittedFiles.length === 0;
+        }
       } catch {
-        // origin/branch may not exist yet (first push) — that's fine
+        // merge-base may fail if main doesn't exist locally — that's fine
       }
 
       const filesChanged = agentAlreadyCommitted ? committedFiles : uncommittedFiles;
