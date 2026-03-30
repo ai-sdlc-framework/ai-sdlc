@@ -472,7 +472,6 @@ export async function executeFixCI(
           auditLog,
           log,
           onViolation: async (violationList) => {
-            const cycleMarker = cycleDetector.recordInvocation('fix-ci');
             await addComment(
               `## ${NOTIFICATION_TITLES.fixCIGuardrailViolations}\n\n${violationList}\n\n${RETRY_MARKER}\n${cycleMarker}`,
             );
