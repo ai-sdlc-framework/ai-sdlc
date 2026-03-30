@@ -46,7 +46,8 @@ export function createStageMarker(stage: PipelineStage): string {
  */
 export function parseStageInvocations(comments: string[]): Map<PipelineStage, number> {
   const counts = new Map<PipelineStage, number>();
-  const markerPattern = /<!-- ai-sdlc-cycle:(\w+(?:-\w+)?):(\d+) -->/g;
+  // Non-backtracking pattern: stage names are alphanumeric with optional single hyphens
+  const markerPattern = /<!-- ai-sdlc-cycle:([a-z][a-z0-9-]{0,30}):(\d{1,15}) -->/g;
 
   for (const body of comments) {
     let match;
@@ -70,19 +71,30 @@ export class PipelineCycleDetector {
 
   /**
    * Check if a cycle exists for the given issue/PR by analyzing comment history.
-   * Returns cycle detection result with looping stages if any.
+   * @param pendingStage — if set, adds +1 to this stage's count to account for the upcoming invocation
    */
-  async detectCycle(tracker: IssueTracker, issueOrPrId: string): Promise<CycleDetectionResult> {
+  async detectCycle(
+    tracker: IssueTracker,
+    issueOrPrId: string,
+    pendingStage?: PipelineStage,
+  ): Promise<CycleDetectionResult> {
     const comments = await tracker.getComments(issueOrPrId);
     const commentBodies = comments.map((c) => c.body);
-    return this.detectCycleFromComments(commentBodies);
+    return this.detectCycleFromComments(commentBodies, pendingStage);
   }
 
   /**
    * Detect cycle from comment bodies (for testing without IssueTracker).
+   * @param pendingStage — if set, adds +1 to this stage's count for the pending invocation
    */
-  detectCycleFromComments(comments: string[]): CycleDetectionResult {
+  detectCycleFromComments(comments: string[], pendingStage?: PipelineStage): CycleDetectionResult {
     const invocations = parseStageInvocations(comments);
+
+    // Account for the pending invocation that hasn't been recorded yet
+    if (pendingStage) {
+      invocations.set(pendingStage, (invocations.get(pendingStage) ?? 0) + 1);
+    }
+
     const loopingStages: Array<{ stage: PipelineStage; count: number; max: number }> = [];
     let totalInvocations = 0;
 

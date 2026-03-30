@@ -31,26 +31,41 @@ export interface CycleCheckResult {
 }
 
 /**
+ * Sanitize template content to prevent markdown/HTML injection.
+ * Strips HTML tags and limits length.
+ */
+function sanitizeTemplate(text: string): string {
+  return text.replace(/<[^>]*>/g, '').slice(0, 2000);
+}
+
+/**
  * Check for pipeline cycles and post notification if detected.
- * Returns cycle check result with marker to append to comments.
+ *
+ * The marker is generated upfront so the caller can append it to comments
+ * BEFORE executing the stage (records intent, prevents race conditions).
+ * Cycle detection accounts for the pending invocation (+1 to current count).
  */
 export async function checkAndHandleCycle(options: CycleHandlerOptions): Promise<CycleCheckResult> {
   const { issueOrPrId, stage, tracker, detector, notifySlack, cycleTemplate } = options;
 
-  // Check for existing cycles
-  const cycleResult = await detector.detectCycle(tracker, issueOrPrId);
+  // Generate marker upfront — caller appends this BEFORE execution
   const marker = detector.recordInvocation(stage);
 
+  // Detect cycles from existing comments + account for pending invocation
+  const cycleResult = await detector.detectCycle(tracker, issueOrPrId, stage);
+
   if (cycleResult.cycleDetected) {
-    // Format the cycle message
     const loopingSummary = cycleResult.loopingStages
       .map((s) => `- **${s.stage}**: ${s.count}/${s.max} invocations`)
       .join('\n');
 
-    const title = cycleTemplate?.title ?? NOTIFICATION_TITLES.pipelineCycleDetected;
-    const body =
+    const title = sanitizeTemplate(
+      cycleTemplate?.title ?? NOTIFICATION_TITLES.pipelineCycleDetected,
+    );
+    const body = sanitizeTemplate(
       cycleTemplate?.body ??
-      `The pipeline has detected an infinite loop across the following stages:\n\n${loopingSummary}\n\n**Manual intervention is required** to resolve the cycle. Please review the issue and PR to determine the root cause.`;
+        `The pipeline has detected an infinite loop across the following stages:\n\n${loopingSummary}\n\n**Manual intervention is required** to resolve the cycle. Please review the issue and PR to determine the root cause.`,
+    );
 
     const cycleMessage = `## ${title}\n\n${body}`;
 
@@ -60,20 +75,15 @@ export async function checkAndHandleCycle(options: CycleHandlerOptions): Promise
     // Send Slack notification if configured
     if (notifySlack) {
       const slackMessage = `:warning: *Pipeline Cycle Detected* for #${issueOrPrId}\n\nLooping stages:\n${cycleResult.loopingStages.map((s) => `• ${s.stage}: ${s.count}/${s.max}`).join('\n')}`;
-      await notifySlack(slackMessage);
+      await notifySlack(slackMessage).catch(() => {
+        // Best-effort — don't break the pipeline for Slack failures
+      });
     }
 
-    return {
-      cycleDetected: true,
-      marker,
-      cycleMessage,
-    };
+    return { cycleDetected: true, marker, cycleMessage };
   }
 
-  return {
-    cycleDetected: false,
-    marker,
-  };
+  return { cycleDetected: false, marker };
 }
 
 /**
@@ -91,7 +101,6 @@ export function createCycleDetectorFromConfig(config: {
     for (const stage of config.stages) {
       const maxRetries = stage.onFailure?.maxRetries;
       if (maxRetries !== undefined) {
-        // Map stage names to PipelineStage types
         if (stage.name === 'code') {
           overrides['fix-ci'] = maxRetries;
         } else if (stage.name === 'review') {

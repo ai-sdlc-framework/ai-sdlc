@@ -37,8 +37,9 @@ describe('checkAndHandleCycle()', () => {
     expect(result.cycleMessage).toBeUndefined();
   });
 
-  it('detects cycle when stage exceeds max invocations', async () => {
-    const markers = Array.from({ length: 3 }, () => `Comment\n${createStageMarker('agent')}`);
+  it('detects cycle when existing markers + pending invocation >= limit', async () => {
+    // Default agent limit is 3. With 2 existing + 1 pending = 3 >= 3 → cycle
+    const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
     const detector = new PipelineCycleDetector();
 
@@ -52,6 +53,22 @@ describe('checkAndHandleCycle()', () => {
     expect(result.cycleDetected).toBe(true);
     expect(result.cycleMessage).toContain('Pipeline Cycle Detected');
     expect(result.cycleMessage).toContain('agent');
+  });
+
+  it('does not detect cycle when below threshold (existing + pending < limit)', async () => {
+    // Default agent limit is 3. With 1 existing + 1 pending = 2 < 3 → no cycle
+    const markers = [createStageMarker('agent')];
+    const tracker = makeMockTracker(markers);
+    const detector = new PipelineCycleDetector();
+
+    const result = await checkAndHandleCycle({
+      issueOrPrId: '42',
+      stage: 'agent',
+      tracker,
+      detector,
+    });
+
+    expect(result.cycleDetected).toBe(false);
   });
 
   it('posts comment on issue when cycle detected', async () => {
@@ -82,7 +99,7 @@ describe('checkAndHandleCycle()', () => {
   });
 
   it('sends Slack notification when cycle detected and notifySlack provided', async () => {
-    const markers = Array.from({ length: 3 }, () => `Comment\n${createStageMarker('agent')}`);
+    const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
     const detector = new PipelineCycleDetector();
     const notifySlack = vi.fn().mockResolvedValue(undefined);
@@ -129,7 +146,7 @@ describe('checkAndHandleCycle()', () => {
   });
 
   it('uses custom cycle template when provided', async () => {
-    const markers = Array.from({ length: 3 }, () => `Comment\n${createStageMarker('agent')}`);
+    const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
     const detector = new PipelineCycleDetector();
 
@@ -143,6 +160,46 @@ describe('checkAndHandleCycle()', () => {
 
     expect(result.cycleMessage).toContain('Custom Title');
     expect(result.cycleMessage).toContain('Custom body text');
+  });
+
+  it('sanitizes HTML in custom cycle templates to prevent injection', async () => {
+    const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
+    const tracker = makeMockTracker(markers);
+    const detector = new PipelineCycleDetector();
+
+    const result = await checkAndHandleCycle({
+      issueOrPrId: '42',
+      stage: 'agent',
+      tracker,
+      detector,
+      cycleTemplate: {
+        title: 'Title <script>alert("xss")</script>',
+        body: 'Body <img src=x onerror=alert(1)>',
+      },
+    });
+
+    expect(result.cycleMessage).not.toContain('<script>');
+    expect(result.cycleMessage).not.toContain('<img');
+    expect(result.cycleMessage).toContain('Title alert("xss")');
+  });
+
+  it('handles Slack notification failure gracefully', async () => {
+    const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
+    const tracker = makeMockTracker(markers);
+    const detector = new PipelineCycleDetector();
+    const notifySlack = vi.fn().mockRejectedValue(new Error('Slack down'));
+
+    // Should not throw even when Slack fails
+    const result = await checkAndHandleCycle({
+      issueOrPrId: '42',
+      stage: 'agent',
+      tracker,
+      detector,
+      notifySlack,
+    });
+
+    expect(result.cycleDetected).toBe(true);
+    expect(notifySlack).toHaveBeenCalled();
   });
 });
 

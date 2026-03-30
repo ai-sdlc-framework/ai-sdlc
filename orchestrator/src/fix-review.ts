@@ -236,35 +236,7 @@ export async function executeFixReview(
 
   // Create cycle detector from pipeline config
   const cycleDetector = createCycleDetectorFromConfig(config.pipeline?.spec ?? {});
-
-  // Check for pipeline-level cycles (works across workflow boundaries)
-  if (trackerAvailable) {
-    const cycleCheck = await checkAndHandleCycle({
-      issueOrPrId: String(prNumber),
-      stage: 'fix-review',
-      tracker: getTracker(),
-      detector: cycleDetector,
-      cycleTemplate: notifTemplates?.['cycle-detected']
-        ? {
-            title:
-              notifTemplates['cycle-detected'].title ?? NOTIFICATION_TITLES.pipelineCycleDetected,
-            body: notifTemplates['cycle-detected'].body ?? '',
-          }
-        : undefined,
-    });
-
-    if (cycleCheck.cycleDetected) {
-      log.info('Pipeline cycle detected. Halting fix-review execution.');
-      auditLog.record({
-        actor: 'system',
-        action: 'evaluate',
-        resource: `pr#${prNumber}`,
-        decision: 'denied',
-        details: { reason: 'pipeline-cycle-detected' },
-      });
-      return;
-    }
-  }
+  const cycleMarker = cycleDetector.recordInvocation('fix-review');
 
   // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
@@ -307,6 +279,28 @@ export async function executeFixReview(
         };
     await addComment(`## ${limitComment.title}\n\n${limitComment.body}`);
     return;
+  }
+
+  // Check for pipeline-level cycles AFTER retry counting
+  if (trackerAvailable) {
+    const cycleCheck = await checkAndHandleCycle({
+      issueOrPrId: String(prNumber),
+      stage: 'fix-review',
+      tracker: getTracker(),
+      detector: cycleDetector,
+    });
+
+    if (cycleCheck.cycleDetected) {
+      log.info('Pipeline cycle detected. Halting fix-review execution.');
+      auditLog.record({
+        actor: 'system',
+        action: 'evaluate',
+        resource: `pr#${prNumber}`,
+        decision: 'denied',
+        details: { reason: 'pipeline-cycle-detected' },
+      });
+      return;
+    }
   }
 
   // 3. Fetch review findings
@@ -463,7 +457,7 @@ export async function executeFixReview(
               const agentFailComment = agentFailTpl
                 ? renderTemplate(agentFailTpl, { stageName: 'fix-review', details: errorDetail })
                 : { title: NOTIFICATION_TITLES.fixReviewAgentFailed, body: errorDetail };
-              const cycleMarker = cycleDetector.recordInvocation('fix-review');
+              // Use pre-created marker (one per execution, prevents double-counting)
               await addComment(
                 `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}\n${cycleMarker}`,
               );
@@ -527,7 +521,6 @@ export async function executeFixReview(
           auditLog,
           log,
           onViolation: async (violationList) => {
-            const cycleMarker = cycleDetector.recordInvocation('fix-review');
             await addComment(
               `## ${NOTIFICATION_TITLES.fixReviewGuardrailViolations}\n\n${violationList}\n\n${RETRY_MARKER}\n${cycleMarker}`,
             );
@@ -561,7 +554,6 @@ export async function executeFixReview(
           title: NOTIFICATION_TITLES.fixReviewApplied,
           body: `Attempt ${attempts + 1} of ${maxFixAttempts} — pushed review fixes to \`${currentBranch}\`.`,
         };
-    const cycleMarker = cycleDetector.recordInvocation('fix-review');
     await addComment(
       [
         `## ${successComment.title}`,

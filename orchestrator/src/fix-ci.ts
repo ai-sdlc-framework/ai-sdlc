@@ -206,37 +206,9 @@ export async function executeFixCI(
   // Tracker is available if injected directly or if we're not in test mode
   const trackerAvailable = !!options.tracker || options._prComments === undefined;
 
-  // Create cycle detector from pipeline config
+  // Create cycle detector and generate marker upfront (one per execution)
   const cycleDetector = createCycleDetectorFromConfig(config.pipeline?.spec ?? {});
-
-  // Check for pipeline-level cycles (works across workflow boundaries)
-  if (trackerAvailable) {
-    const cycleCheck = await checkAndHandleCycle({
-      issueOrPrId: String(prNumber),
-      stage: 'fix-ci',
-      tracker: getTracker(),
-      detector: cycleDetector,
-      cycleTemplate: notifTemplates?.['cycle-detected']
-        ? {
-            title:
-              notifTemplates['cycle-detected'].title ?? NOTIFICATION_TITLES.pipelineCycleDetected,
-            body: notifTemplates['cycle-detected'].body ?? '',
-          }
-        : undefined,
-    });
-
-    if (cycleCheck.cycleDetected) {
-      log.info('Pipeline cycle detected. Halting fix-ci execution.');
-      auditLog.record({
-        actor: 'system',
-        action: 'evaluate',
-        resource: `pr#${prNumber}`,
-        decision: 'denied',
-        details: { reason: 'pipeline-cycle-detected' },
-      });
-      return;
-    }
-  }
+  const cycleMarker = cycleDetector.recordInvocation('fix-ci');
 
   // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
@@ -257,6 +229,29 @@ export async function executeFixCI(
       await getTracker().addComment(String(prNumber), body);
     }
   };
+
+  // Check for pipeline-level cycles AFTER retry counting
+  // (so legitimate retries under the limit aren't blocked)
+  if (trackerAvailable) {
+    const cycleCheck = await checkAndHandleCycle({
+      issueOrPrId: String(prNumber),
+      stage: 'fix-ci',
+      tracker: getTracker(),
+      detector: cycleDetector,
+    });
+
+    if (cycleCheck.cycleDetected) {
+      log.info('Pipeline cycle detected. Halting fix-ci execution.');
+      auditLog.record({
+        actor: 'system',
+        action: 'evaluate',
+        resource: `pr#${prNumber}`,
+        decision: 'denied',
+        details: { reason: 'pipeline-cycle-detected' },
+      });
+      return;
+    }
+  }
 
   if (attempts >= maxFixAttempts) {
     log.info(`Fix-CI retry limit reached (${maxFixAttempts}). Commenting and stopping.`);
@@ -413,7 +408,7 @@ export async function executeFixCI(
               const agentFailComment = agentFailTpl
                 ? renderTemplate(agentFailTpl, { stageName: 'fix-ci', details: errorDetail })
                 : { title: NOTIFICATION_TITLES.fixCIAgentFailed, body: errorDetail };
-              const cycleMarker = cycleDetector.recordInvocation('fix-ci');
+              // Use pre-created marker (one per execution, prevents double-counting)
               await addComment(
                 `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}\n${cycleMarker}`,
               );
@@ -511,7 +506,7 @@ export async function executeFixCI(
           title: NOTIFICATION_TITLES.fixCIApplied,
           body: `Attempt ${attempts + 1} of ${maxFixAttempts} — pushed fixes to \`${currentBranch}\`.`,
         };
-    const cycleMarker = cycleDetector.recordInvocation('fix-ci');
+    // Use pre-created marker (one per execution, prevents double-counting)
     await addComment(
       [
         `## ${successComment.title}`,
