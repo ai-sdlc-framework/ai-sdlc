@@ -419,6 +419,81 @@ describe('executeFixCI()', () => {
     );
   });
 
+  it('checks for pipeline cycles when tracker is provided', async () => {
+    const runner = makeMockRunner();
+    const logger = makeSilentLogger();
+    const auditLog = makeMockAuditLog();
+    const mockTracker = {
+      listIssues: vi.fn().mockResolvedValue([]),
+      getIssue: vi
+        .fn()
+        .mockResolvedValue({ id: '42', title: 'Test', description: 'test', status: 'open' }),
+      createIssue: vi.fn().mockResolvedValue({ id: '42', title: '', status: 'open' }),
+      updateIssue: vi.fn().mockResolvedValue({ id: '42', title: '', status: 'open' }),
+      transitionIssue: vi.fn().mockResolvedValue({ id: '42', title: '', status: 'open' }),
+      addComment: vi.fn().mockResolvedValue(undefined),
+      getComments: vi.fn().mockResolvedValue([]),
+      watchIssues: vi.fn(),
+    };
+
+    await executeFixCI(42, 5555, {
+      configDir: CONFIG_DIR,
+      runner,
+      logger,
+      auditLog,
+      _ciLogs: 'error: test failed',
+      tracker: mockTracker as never,
+    });
+
+    expect(mockTracker.getComments).toHaveBeenCalledWith('42');
+    expect(runner.run).toHaveBeenCalled();
+  });
+
+  it('halts when pipeline cycle is detected via tracker', async () => {
+    const runner = makeMockRunner();
+    const logger = makeSilentLogger();
+    const auditLog = makeMockAuditLog();
+    const cycleComments = Array.from({ length: 4 }, (_, i) => ({
+      body: `Comment\n<!-- ai-sdlc-cycle:fix-ci:${i} -->`,
+      author: 'bot',
+      createdAt: new Date().toISOString(),
+    }));
+    const mockTracker = {
+      listIssues: vi.fn().mockResolvedValue([]),
+      getIssue: vi
+        .fn()
+        .mockResolvedValue({ id: '42', title: 'Test', description: 'test', status: 'open' }),
+      createIssue: vi.fn().mockResolvedValue({ id: '42', title: '', status: 'open' }),
+      updateIssue: vi.fn().mockResolvedValue({ id: '42', title: '', status: 'open' }),
+      transitionIssue: vi.fn().mockResolvedValue({ id: '42', title: '', status: 'open' }),
+      addComment: vi.fn().mockResolvedValue(undefined),
+      getComments: vi.fn().mockResolvedValue(cycleComments),
+      watchIssues: vi.fn(),
+    };
+
+    await executeFixCI(42, 5555, {
+      configDir: CONFIG_DIR,
+      runner,
+      logger,
+      auditLog,
+      _ciLogs: 'error: test failed',
+      tracker: mockTracker as never,
+    });
+
+    expect(runner.run).not.toHaveBeenCalled();
+    expect(mockTracker.addComment).toHaveBeenCalledWith(
+      '42',
+      expect.stringContaining('Cycle Detected'),
+    );
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'evaluate',
+        decision: 'denied',
+        details: expect.objectContaining({ reason: 'pipeline-cycle-detected' }),
+      }),
+    );
+  });
+
   // This test must be last — it overrides the global execFile mock
   it('throws for non-matching branch pattern', async () => {
     // Override the mock to return a non-matching branch
