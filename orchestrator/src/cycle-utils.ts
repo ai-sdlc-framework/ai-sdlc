@@ -75,8 +75,11 @@ export async function checkAndHandleCycle(options: CycleHandlerOptions): Promise
     // Send Slack notification if configured
     if (notifySlack) {
       const slackMessage = `:warning: *Pipeline Cycle Detected* for #${issueOrPrId}\n\nLooping stages:\n${cycleResult.loopingStages.map((s) => `• ${s.stage}: ${s.count}/${s.max}`).join('\n')}`;
-      await notifySlack(slackMessage).catch(() => {
-        // Best-effort — don't break the pipeline for Slack failures
+      await notifySlack(slackMessage).catch((err: unknown) => {
+        console.error(
+          '[cycle-detector] Slack notification failed:',
+          err instanceof Error ? err.message : String(err),
+        );
       });
     }
 
