@@ -21,14 +21,22 @@ export interface CycleDetectionResult {
   totalInvocations: number;
 }
 
-/** Default max invocations per stage. */
+/**
+ * Default max invocations per stage.
+ * These must be HIGHER than the per-stage retry limits (which are the
+ * primary guard). The cycle detector is a safety net for cross-stage
+ * loops, not a replacement for retry counting.
+ *
+ * Per-stage retry limits: fix-ci=2, fix-review=2
+ * Cycle limits: set to retry_limit + 2 to allow retries + headroom
+ */
 export const DEFAULT_CYCLE_LIMITS: Record<PipelineStage, number> = {
-  admission: 3,
-  triage: 3,
-  agent: 3,
-  review: 2,
-  'fix-ci': 2,
-  'fix-review': 2,
+  admission: 5,
+  triage: 5,
+  agent: 5,
+  review: 4,
+  'fix-ci': 4,
+  'fix-review': 4,
 };
 
 /**
