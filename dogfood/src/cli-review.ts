@@ -9,8 +9,9 @@
  *   review --pr 42 --diff-file /tmp/pr-diff.txt --issue-file /tmp/issue.json --type testing
  */
 
-import { readFileSync } from 'node:fs';
-import { executeReview, type ReviewContext } from '@ai-sdlc/orchestrator';
+import { readFileSync, existsSync } from 'node:fs';
+import { join } from 'node:path';
+import { executeReview, resolveRepoRoot, type ReviewContext } from '@ai-sdlc/orchestrator';
 import type { ReviewType } from '@ai-sdlc/orchestrator';
 
 // ── Arg parsing ──────────────────────────────────────────────────────
@@ -103,7 +104,21 @@ async function main(): Promise<void> {
     acceptanceCriteria,
   };
 
-  const verdict = await executeReview(args.prNumber, args.diff, args.reviewType, context);
+  // Load review policy if it exists (calibration context for review agents)
+  let reviewPolicy: string | undefined;
+  try {
+    const workDir = await resolveRepoRoot();
+    const policyPath = join(workDir, '.ai-sdlc', 'review-policy.md');
+    if (existsSync(policyPath)) {
+      reviewPolicy = readFileSync(policyPath, 'utf-8');
+    }
+  } catch {
+    // No review policy — agents use default prompts
+  }
+
+  const verdict = await executeReview(args.prNumber, args.diff, args.reviewType, context, {
+    apiConfig: reviewPolicy ? { reviewPolicy } : undefined,
+  });
 
   // Output JSON on last line for the workflow to capture
   console.log(JSON.stringify(verdict));
