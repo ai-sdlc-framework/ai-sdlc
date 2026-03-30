@@ -51,6 +51,7 @@ import {
   defaultSandboxConstraints,
   NOTIFICATION_TITLES,
 } from './defaults.js';
+import { createCycleDetectorFromConfig, checkAndHandleCycle } from './cycle-utils.js';
 
 // Default max review-fix attempts (lower than CI-fix since reviews are more deterministic)
 export const MAX_REVIEW_FIX_ATTEMPTS = 2;
@@ -233,6 +234,9 @@ export async function executeFixReview(
   // Tracker is available if injected directly or if we're not in test mode
   const trackerAvailable = !!options.tracker || options._prComments === undefined;
 
+  // Create cycle detector (marker generated after all guard conditions pass)
+  const cycleDetector = createCycleDetectorFromConfig(config.pipeline?.spec ?? {});
+
   // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
   let comments: string[];
@@ -275,6 +279,31 @@ export async function executeFixReview(
     await addComment(`## ${limitComment.title}\n\n${limitComment.body}`);
     return;
   }
+
+  // Check for pipeline-level cycles AFTER retry counting
+  if (trackerAvailable) {
+    const cycleCheck = await checkAndHandleCycle({
+      issueOrPrId: String(prNumber),
+      stage: 'fix-review',
+      tracker: getTracker(),
+      detector: cycleDetector,
+    });
+
+    if (cycleCheck.cycleDetected) {
+      log.info('Pipeline cycle detected. Halting fix-review execution.');
+      auditLog.record({
+        actor: 'system',
+        action: 'evaluate',
+        resource: `pr#${prNumber}`,
+        decision: 'denied',
+        details: { reason: 'pipeline-cycle-detected' },
+      });
+      return;
+    }
+  }
+
+  // Generate cycle marker AFTER all guard conditions pass
+  const cycleMarker = cycleDetector.recordInvocation('fix-review');
 
   // 3. Fetch review findings
   log.stage('fetch-findings');
@@ -430,8 +459,9 @@ export async function executeFixReview(
               const agentFailComment = agentFailTpl
                 ? renderTemplate(agentFailTpl, { stageName: 'fix-review', details: errorDetail })
                 : { title: NOTIFICATION_TITLES.fixReviewAgentFailed, body: errorDetail };
+              // Use pre-created marker (one per execution, prevents double-counting)
               await addComment(
-                `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}`,
+                `## ${agentFailComment.title}\n\n${agentFailComment.body}\n\n${RETRY_MARKER}\n${cycleMarker}`,
               );
               throw new Error(`Fix-review agent failed on PR #${prNumber}: ${r.error}`);
             }
@@ -494,7 +524,7 @@ export async function executeFixReview(
           log,
           onViolation: async (violationList) => {
             await addComment(
-              `## ${NOTIFICATION_TITLES.fixReviewGuardrailViolations}\n\n${violationList}\n\n${RETRY_MARKER}`,
+              `## ${NOTIFICATION_TITLES.fixReviewGuardrailViolations}\n\n${violationList}\n\n${RETRY_MARKER}\n${cycleMarker}`,
             );
           },
         });
@@ -536,6 +566,7 @@ export async function executeFixReview(
         result.filesChanged.map((f) => `- \`${f}\``).join('\n'),
         '',
         RETRY_MARKER,
+        cycleMarker,
       ].join('\n'),
     );
 

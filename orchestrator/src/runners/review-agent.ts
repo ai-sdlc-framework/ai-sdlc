@@ -43,6 +43,8 @@ export interface ReviewAgentConfig {
   timeoutMs?: number;
   /** Which review perspective to use. */
   reviewType: ReviewType;
+  /** Project-specific review policy to prepend to the system prompt (calibration context). */
+  reviewPolicy?: string;
 }
 
 // ── System prompts ───────────────────────────────────────────────────
@@ -204,7 +206,9 @@ export class ReviewAgentRunner implements AgentRunner {
         body: JSON.stringify({
           model,
           max_tokens: 4096,
-          system: REVIEW_PROMPTS[this.config.reviewType],
+          system: this.config.reviewPolicy
+            ? `${this.config.reviewPolicy}\n\n---\n\n${REVIEW_PROMPTS[this.config.reviewType]}`
+            : REVIEW_PROMPTS[this.config.reviewType],
           messages: [{ role: 'user', content: userContent }],
         }),
         signal: controller.signal,
