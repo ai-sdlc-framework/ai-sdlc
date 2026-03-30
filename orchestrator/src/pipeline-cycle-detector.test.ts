@@ -82,9 +82,10 @@ describe('PipelineCycleDetector', () => {
     it('should detect cycle when agent stage exceeds limit', () => {
       const detector = new PipelineCycleDetector();
       const comments = [
-        '<!-- ai-sdlc-cycle:agent:1 -->',
-        '<!-- ai-sdlc-cycle:agent:2 -->',
-        '<!-- ai-sdlc-cycle:agent:3 -->',
+        ...Array.from(
+          { length: DEFAULT_CYCLE_LIMITS.agent },
+          (_, i) => `<!-- ai-sdlc-cycle:agent:${i + 1} -->`,
+        ),
       ];
 
       const result = detector.detectCycleFromComments(comments);
@@ -92,50 +93,57 @@ describe('PipelineCycleDetector', () => {
       expect(result.loopingStages).toHaveLength(1);
       expect(result.loopingStages[0]).toEqual({
         stage: 'agent',
-        count: 3,
+        count: DEFAULT_CYCLE_LIMITS.agent,
         max: DEFAULT_CYCLE_LIMITS.agent,
       });
     });
 
     it('should detect cycle when fix-ci exceeds limit', () => {
       const detector = new PipelineCycleDetector();
-      const comments = ['<!-- ai-sdlc-cycle:fix-ci:1 -->', '<!-- ai-sdlc-cycle:fix-ci:2 -->'];
+      const comments = Array.from(
+        { length: DEFAULT_CYCLE_LIMITS['fix-ci'] },
+        (_, i) => `<!-- ai-sdlc-cycle:fix-ci:${i + 1} -->`,
+      );
 
       const result = detector.detectCycleFromComments(comments);
       expect(result.cycleDetected).toBe(true);
       expect(result.loopingStages).toHaveLength(1);
       expect(result.loopingStages[0]).toEqual({
         stage: 'fix-ci',
-        count: 2,
+        count: DEFAULT_CYCLE_LIMITS['fix-ci'],
         max: DEFAULT_CYCLE_LIMITS['fix-ci'],
       });
     });
 
     it('should detect multiple looping stages', () => {
       const detector = new PipelineCycleDetector();
-      const comments = [
-        '<!-- ai-sdlc-cycle:agent:1 -->',
-        '<!-- ai-sdlc-cycle:agent:2 -->',
-        '<!-- ai-sdlc-cycle:agent:3 -->',
-        '<!-- ai-sdlc-cycle:fix-ci:4 -->',
-        '<!-- ai-sdlc-cycle:fix-ci:5 -->',
-      ];
+      const agentMarkers = Array.from(
+        { length: DEFAULT_CYCLE_LIMITS.agent },
+        (_, i) => `<!-- ai-sdlc-cycle:agent:${i} -->`,
+      );
+      const fixCiMarkers = Array.from(
+        { length: DEFAULT_CYCLE_LIMITS['fix-ci'] },
+        (_, i) => `<!-- ai-sdlc-cycle:fix-ci:${i} -->`,
+      );
+      const comments = [...agentMarkers, ...fixCiMarkers];
 
       const result = detector.detectCycleFromComments(comments);
       expect(result.cycleDetected).toBe(true);
       expect(result.loopingStages).toHaveLength(2);
-      expect(result.totalInvocations).toBe(5);
+      expect(result.totalInvocations).toBe(
+        DEFAULT_CYCLE_LIMITS.agent + DEFAULT_CYCLE_LIMITS['fix-ci'],
+      );
     });
 
     it('should respect custom max invocations', () => {
       const detector = new PipelineCycleDetector({
-        maxInvocations: { ...DEFAULT_CYCLE_LIMITS, agent: 5 },
+        maxInvocations: { ...DEFAULT_CYCLE_LIMITS, agent: 10 },
       });
-      const comments = [
-        '<!-- ai-sdlc-cycle:agent:1 -->',
-        '<!-- ai-sdlc-cycle:agent:2 -->',
-        '<!-- ai-sdlc-cycle:agent:3 -->',
-      ];
+      // Create markers at the default limit — should NOT trigger cycle with custom higher limit
+      const comments = Array.from(
+        { length: DEFAULT_CYCLE_LIMITS.agent },
+        (_, i) => `<!-- ai-sdlc-cycle:agent:${i} -->`,
+      );
 
       const result = detector.detectCycleFromComments(comments);
       expect(result.cycleDetected).toBe(false);
@@ -179,12 +187,16 @@ describe('PipelineCycleDetector', () => {
   describe('integration scenarios', () => {
     it('should detect admission -> triage -> re-edit loop', () => {
       const detector = new PipelineCycleDetector();
+      // Generate enough markers to exceed limits for both stages
       const comments = [
-        'Admission scored\n<!-- ai-sdlc-cycle:admission:1 -->',
-        'Triage rejected\n<!-- ai-sdlc-cycle:triage:2 -->',
-        'Re-admitted\n<!-- ai-sdlc-cycle:admission:3 -->',
-        'Triage rejected again\n<!-- ai-sdlc-cycle:triage:4 -->',
-        'Third admission\n<!-- ai-sdlc-cycle:admission:5 -->',
+        ...Array.from(
+          { length: DEFAULT_CYCLE_LIMITS.admission },
+          (_, i) => `Admission attempt ${i}\n<!-- ai-sdlc-cycle:admission:${i} -->`,
+        ),
+        ...Array.from(
+          { length: DEFAULT_CYCLE_LIMITS.triage },
+          (_, i) => `Triage attempt ${i}\n<!-- ai-sdlc-cycle:triage:${i + 100} -->`,
+        ),
       ];
 
       const result = detector.detectCycleFromComments(comments);
@@ -192,16 +204,15 @@ describe('PipelineCycleDetector', () => {
       expect(result.loopingStages.length).toBeGreaterThan(0);
       const loopingStageNames = result.loopingStages.map((s) => s.stage);
       expect(loopingStageNames).toContain('admission');
+      expect(loopingStageNames).toContain('triage');
     });
 
     it('should detect PR -> review -> fix-review loop', () => {
       const detector = new PipelineCycleDetector();
-      const comments = [
-        'PR created\n<!-- ai-sdlc-cycle:agent:1 -->',
-        'Review requested changes\n<!-- ai-sdlc-cycle:review:2 -->',
-        'Fix applied\n<!-- ai-sdlc-cycle:fix-review:3 -->',
-        'Review requested changes again\n<!-- ai-sdlc-cycle:review:4 -->',
-      ];
+      const comments = Array.from(
+        { length: DEFAULT_CYCLE_LIMITS.review },
+        (_, i) => `Review attempt ${i}\n<!-- ai-sdlc-cycle:review:${i} -->`,
+      );
 
       const result = detector.detectCycleFromComments(comments);
       expect(result.cycleDetected).toBe(true);
@@ -211,10 +222,10 @@ describe('PipelineCycleDetector', () => {
 
     it('should detect CI -> fix-ci loop', () => {
       const detector = new PipelineCycleDetector();
-      const comments = [
-        'CI failed\n<!-- ai-sdlc-cycle:fix-ci:1 -->',
-        'CI failed differently\n<!-- ai-sdlc-cycle:fix-ci:2 -->',
-      ];
+      const comments = Array.from(
+        { length: DEFAULT_CYCLE_LIMITS['fix-ci'] },
+        (_, i) => `CI failed attempt ${i}\n<!-- ai-sdlc-cycle:fix-ci:${i} -->`,
+      );
 
       const result = detector.detectCycleFromComments(comments);
       expect(result.cycleDetected).toBe(true);

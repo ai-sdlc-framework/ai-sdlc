@@ -23,7 +23,16 @@ function makeMockTracker(comments: string[] = []): IssueTracker {
 describe('checkAndHandleCycle()', () => {
   it('returns no cycle when invocation counts are below limits', async () => {
     const tracker = makeMockTracker([]);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
 
     const result = await checkAndHandleCycle({
       issueOrPrId: '42',
@@ -38,10 +47,19 @@ describe('checkAndHandleCycle()', () => {
   });
 
   it('detects cycle when existing markers + pending invocation >= limit', async () => {
-    // Default agent limit is 3. With 2 existing + 1 pending = 3 >= 3 → cycle
+    // Limit 3: 2 existing + 1 pending = 3 >= 3 → cycle
     const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
 
     const result = await checkAndHandleCycle({
       issueOrPrId: '42',
@@ -56,10 +74,19 @@ describe('checkAndHandleCycle()', () => {
   });
 
   it('does not detect cycle when below threshold (existing + pending < limit)', async () => {
-    // Default agent limit is 3. With 1 existing + 1 pending = 2 < 3 → no cycle
+    // Limit 3: 1 existing + 1 pending = 2 < 3 → no cycle
     const markers = [createStageMarker('agent')];
     const tracker = makeMockTracker(markers);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
 
     const result = await checkAndHandleCycle({
       issueOrPrId: '42',
@@ -101,7 +128,16 @@ describe('checkAndHandleCycle()', () => {
   it('sends Slack notification when cycle detected and notifySlack provided', async () => {
     const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
     const notifySlack = vi.fn().mockResolvedValue(undefined);
 
     await checkAndHandleCycle({
@@ -117,7 +153,16 @@ describe('checkAndHandleCycle()', () => {
 
   it('does not send Slack notification when no cycle', async () => {
     const tracker = makeMockTracker([]);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
     const notifySlack = vi.fn().mockResolvedValue(undefined);
 
     await checkAndHandleCycle({
@@ -133,7 +178,16 @@ describe('checkAndHandleCycle()', () => {
 
   it('does not post comment when no cycle', async () => {
     const tracker = makeMockTracker([]);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
 
     await checkAndHandleCycle({
       issueOrPrId: '42',
@@ -148,7 +202,16 @@ describe('checkAndHandleCycle()', () => {
   it('uses custom cycle template when provided', async () => {
     const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
 
     const result = await checkAndHandleCycle({
       issueOrPrId: '42',
@@ -165,7 +228,16 @@ describe('checkAndHandleCycle()', () => {
   it('sanitizes HTML in custom cycle templates to prevent injection', async () => {
     const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
 
     const result = await checkAndHandleCycle({
       issueOrPrId: '42',
@@ -186,7 +258,16 @@ describe('checkAndHandleCycle()', () => {
   it('handles Slack notification failure gracefully', async () => {
     const markers = Array.from({ length: 2 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
     const notifySlack = vi.fn().mockRejectedValue(new Error('Slack down'));
 
     // Should not throw even when Slack fails
@@ -206,8 +287,8 @@ describe('checkAndHandleCycle()', () => {
 describe('createCycleDetectorFromConfig()', () => {
   it('creates detector with default limits when no stages configured', () => {
     const detector = createCycleDetectorFromConfig({});
-    expect(detector.getMaxInvocations('agent')).toBe(3);
-    expect(detector.getMaxInvocations('fix-ci')).toBe(2);
+    expect(detector.getMaxInvocations('agent')).toBe(5);
+    expect(detector.getMaxInvocations('fix-ci')).toBe(4);
   });
 
   it('maps code stage maxRetries to fix-ci limit', () => {
@@ -246,7 +327,7 @@ describe('createCycleDetectorFromConfig()', () => {
     const detector = createCycleDetectorFromConfig({
       stages: [{ name: 'code' }],
     });
-    expect(detector.getMaxInvocations('fix-ci')).toBe(2); // default
+    expect(detector.getMaxInvocations('fix-ci')).toBe(4); // default
   });
 
   it('ignores unknown stage names', () => {
@@ -254,8 +335,8 @@ describe('createCycleDetectorFromConfig()', () => {
       stages: [{ name: 'unknown-stage', onFailure: { maxRetries: 10 } }],
     });
     // Defaults should be unchanged
-    expect(detector.getMaxInvocations('agent')).toBe(3);
-    expect(detector.getMaxInvocations('fix-ci')).toBe(2);
+    expect(detector.getMaxInvocations('agent')).toBe(5);
+    expect(detector.getMaxInvocations('fix-ci')).toBe(4);
   });
 });
 
@@ -263,7 +344,16 @@ describe('PipelineCycleDetector.detectCycle() with IssueTracker', () => {
   it('fetches comments and detects cycle', async () => {
     const markers = Array.from({ length: 3 }, () => `Comment\n${createStageMarker('agent')}`);
     const tracker = makeMockTracker(markers);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
 
     const result = await detector.detectCycle(tracker, '42');
 
@@ -275,7 +365,16 @@ describe('PipelineCycleDetector.detectCycle() with IssueTracker', () => {
 
   it('returns no cycle when below limits', async () => {
     const tracker = makeMockTracker([`Comment\n${createStageMarker('agent')}`]);
-    const detector = new PipelineCycleDetector();
+    const detector = new PipelineCycleDetector({
+      maxInvocations: {
+        admission: 5,
+        triage: 5,
+        agent: 3,
+        review: 4,
+        'fix-ci': 4,
+        'fix-review': 4,
+      },
+    });
 
     const result = await detector.detectCycle(tracker, '42');
 
