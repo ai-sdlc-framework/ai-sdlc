@@ -206,9 +206,8 @@ export async function executeFixCI(
   // Tracker is available if injected directly or if we're not in test mode
   const trackerAvailable = !!options.tracker || options._prComments === undefined;
 
-  // Create cycle detector and generate marker upfront (one per execution)
+  // Create cycle detector (marker generated after all guard conditions pass)
   const cycleDetector = createCycleDetectorFromConfig(config.pipeline?.spec ?? {});
-  const cycleMarker = cycleDetector.recordInvocation('fix-ci');
 
   // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
@@ -275,6 +274,10 @@ export async function executeFixCI(
     await addComment(`## ${limitComment.title}\n\n${limitComment.body}`);
     return;
   }
+
+  // Generate cycle marker AFTER all guard conditions (retry limit + cycle detection)
+  // so it's only recorded when we actually proceed with execution
+  const cycleMarker = cycleDetector.recordInvocation('fix-ci');
 
   // 3. Fetch CI logs
   log.stage('fetch-logs');

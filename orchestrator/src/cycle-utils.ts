@@ -48,11 +48,11 @@ function sanitizeTemplate(text: string): string {
 export async function checkAndHandleCycle(options: CycleHandlerOptions): Promise<CycleCheckResult> {
   const { issueOrPrId, stage, tracker, detector, notifySlack, cycleTemplate } = options;
 
-  // Generate marker upfront — caller appends this BEFORE execution
-  const marker = detector.recordInvocation(stage);
+  // Detect cycles from existing comment markers (no +1 — marker is separate)
+  const cycleResult = await detector.detectCycle(tracker, issueOrPrId);
 
-  // Detect cycles from existing comments + account for pending invocation
-  const cycleResult = await detector.detectCycle(tracker, issueOrPrId, stage);
+  // Generate marker for the caller to append to comments
+  const marker = detector.recordInvocation(stage);
 
   if (cycleResult.cycleDetected) {
     const loopingSummary = cycleResult.loopingStages

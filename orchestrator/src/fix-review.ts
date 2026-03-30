@@ -234,9 +234,8 @@ export async function executeFixReview(
   // Tracker is available if injected directly or if we're not in test mode
   const trackerAvailable = !!options.tracker || options._prComments === undefined;
 
-  // Create cycle detector from pipeline config
+  // Create cycle detector (marker generated after all guard conditions pass)
   const cycleDetector = createCycleDetectorFromConfig(config.pipeline?.spec ?? {});
-  const cycleMarker = cycleDetector.recordInvocation('fix-review');
 
   // 2. Count retry attempts (via injected comments or IssueTracker)
   log.stage('check-retries');
@@ -302,6 +301,9 @@ export async function executeFixReview(
       return;
     }
   }
+
+  // Generate cycle marker AFTER all guard conditions pass
+  const cycleMarker = cycleDetector.recordInvocation('fix-review');
 
   // 3. Fetch review findings
   log.stage('fetch-findings');
