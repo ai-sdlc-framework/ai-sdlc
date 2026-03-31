@@ -168,6 +168,18 @@ export const agentRoleSchema = {
               description: 'Glob patterns for paths the agent must not modify.',
               items: { type: 'string' },
             },
+            blockedActions: {
+              type: 'array',
+              description:
+                'Shell command patterns the agent is forbidden from executing. Supports trailing * wildcards.',
+              items: { type: 'string' },
+            },
+            requireHumanApproval: {
+              type: 'array',
+              description:
+                'Action categories that require human approval before execution (e.g., merge, release, deploy).',
+              items: { type: 'string' },
+            },
           },
           additionalProperties: false,
         },

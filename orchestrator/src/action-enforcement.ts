@@ -4,6 +4,8 @@
  * dangerous operations like merging PRs, force-pushing, or dismissing reviews.
  */
 
+import type { AuditLog } from '@ai-sdlc/reference';
+
 export interface ActionEnforcementResult {
   allowed: boolean;
   /** The pattern that matched, if blocked. */
@@ -14,17 +16,10 @@ export interface ActionEnforcementResult {
 
 /**
  * Convert a glob-like blocked action pattern to a regex.
- * Supports * (any characters) at the end of a pattern.
- *
- * Examples:
- *   "gh pr merge*" → matches "gh pr merge 42 --squash"
- *   "git push --force*" → matches "git push --force origin main"
- *   "git push -f*" → matches "git push -f origin main"
+ * Supports * (any characters) anywhere in the pattern.
  */
 function patternToRegex(pattern: string): RegExp {
-  // Escape regex special chars except *
   const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-  // Replace * with .* for glob matching
   const regexStr = escaped.replace(/\*/g, '.*');
   return new RegExp(`^${regexStr}$`, 'i');
 }
@@ -34,6 +29,7 @@ function patternToRegex(pattern: string): RegExp {
  */
 export function checkAction(command: string, blockedActions: string[]): ActionEnforcementResult {
   const trimmed = command.trim();
+  if (!trimmed) return { allowed: true, command: trimmed };
 
   for (const pattern of blockedActions) {
     const regex = patternToRegex(pattern);
@@ -50,8 +46,35 @@ export function checkAction(command: string, blockedActions: string[]): ActionEn
 }
 
 /**
+ * Check an action and record the result in the audit log if blocked.
+ */
+export function enforceAction(
+  command: string,
+  blockedActions: string[],
+  auditLog?: AuditLog,
+  agentName?: string,
+): ActionEnforcementResult {
+  const result = checkAction(command, blockedActions);
+
+  if (!result.allowed && auditLog) {
+    auditLog.record({
+      actor: agentName ?? 'agent',
+      action: 'execute',
+      resource: `command/${result.command.slice(0, 100)}`,
+      decision: 'denied',
+      details: {
+        reason: 'blocked-action',
+        pattern: result.matchedPattern,
+        command: result.command,
+      },
+    });
+  }
+
+  return result;
+}
+
+/**
  * Default blocked actions for all agents.
- * These prevent agents from performing operations that require human approval.
  */
 export const DEFAULT_BLOCKED_ACTIONS: string[] = [
   'gh pr merge*',

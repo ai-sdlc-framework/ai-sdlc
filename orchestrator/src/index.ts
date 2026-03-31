@@ -189,6 +189,7 @@ export {
 // Action enforcement
 export {
   checkAction,
+  enforceAction,
   DEFAULT_BLOCKED_ACTIONS,
   type ActionEnforcementResult,
 } from './action-enforcement.js';
