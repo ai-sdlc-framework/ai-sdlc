@@ -17,6 +17,7 @@ export default tseslint.config(
       'dashboard/next-env.d.ts',
       '**/scripts/',
       '**/vitest.config.ts',
+      '.claude/hooks/',
     ],
   },
   eslint.configs.recommended,
