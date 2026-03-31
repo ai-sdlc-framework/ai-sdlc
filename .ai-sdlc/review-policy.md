@@ -121,3 +121,6 @@ These patterns have been repeatedly flagged incorrectly. Do not flag them:
 12. "Command injection via CLAUDE_PROJECT_DIR" — this env var is set by Claude Code itself, not user-controlled. The `execSync('git rev-parse')` fallback is a standard git pattern.
 13. "Command injection in shell hook via PATTERN" — when PATTERN comes from `.ai-sdlc/agent-role.yaml` (trusted, committed by maintainers). Only flag if pattern comes from untrusted input.
 14. "Missing tests for Claude Code hook scripts" — hook scripts are integration-tested by running them manually. They are NOT instrumentable by Vitest. Do NOT flag missing unit tests for `.claude/hooks/` files as critical.
+15. "Missing code for future phase" — when a PR is explicitly scoped as "Phase 1 of N" or "partial implementation", do NOT flag missing code that is planned for a future PR. The PR description explains what's included and what's deferred.
+16. "JSON.parse prototype pollution" — V8's `JSON.parse` does NOT support `__proto__` injection. Parsed objects are plain objects. This is not a real vulnerability in Node.js.
+17. "Unsafe JSON.parse on JSONL file" — when the file is written by our own hook (trusted output). The JSONL file at `~/.claude/usage-data/tool-sequences.jsonl` is written by our PostToolUse hook, not by external users.
