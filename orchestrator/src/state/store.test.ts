@@ -1421,6 +1421,272 @@ describe('Episodic Memory with Priority', () => {
   });
 });
 
+// ── Workflow Pattern Detection ──────────────────────────────────────
+
+describe('Tool Sequence Events', () => {
+  it('saves and retrieves a tool sequence event', () => {
+    const id = store.saveToolSequenceEvent({
+      sessionId: 'sess-1',
+      toolName: 'Bash',
+      actionCanonical: 'pnpm test',
+      projectPath: '/repo',
+      timestamp: '2026-03-27T10:00:00Z',
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const events = store.getToolSequenceEvents({ sessionId: 'sess-1' });
+    expect(events).toHaveLength(1);
+    expect(events[0].toolName).toBe('Bash');
+    expect(events[0].actionCanonical).toBe('pnpm test');
+  });
+
+  it('batch saves multiple events', () => {
+    const count = store.saveToolSequenceEvents([
+      {
+        sessionId: 's1',
+        toolName: 'Read',
+        actionCanonical: 'read:.ts',
+        timestamp: '2026-01-01T00:00:00Z',
+      },
+      {
+        sessionId: 's1',
+        toolName: 'Edit',
+        actionCanonical: 'edit:.ts',
+        timestamp: '2026-01-01T00:00:01Z',
+      },
+      {
+        sessionId: 's1',
+        toolName: 'Bash',
+        actionCanonical: 'pnpm test',
+        timestamp: '2026-01-01T00:00:02Z',
+      },
+    ]);
+    expect(count).toBe(3);
+
+    const events = store.getToolSequenceEvents({ sessionId: 's1' });
+    expect(events).toHaveLength(3);
+    expect(events[0].toolName).toBe('Read');
+    expect(events[2].toolName).toBe('Bash');
+  });
+
+  it('filters by since timestamp', () => {
+    store.saveToolSequenceEvent({
+      sessionId: 's1',
+      toolName: 'Bash',
+      actionCanonical: 'old',
+      timestamp: '2026-01-01T00:00:00Z',
+    });
+    store.saveToolSequenceEvent({
+      sessionId: 's1',
+      toolName: 'Bash',
+      actionCanonical: 'new',
+      timestamp: '2026-06-01T00:00:00Z',
+    });
+
+    const events = store.getToolSequenceEvents({ since: '2026-03-01T00:00:00Z' });
+    expect(events).toHaveLength(1);
+    expect(events[0].actionCanonical).toBe('new');
+  });
+
+  it('respects limit', () => {
+    for (let i = 0; i < 5; i++) {
+      store.saveToolSequenceEvent({
+        sessionId: 's1',
+        toolName: 'Bash',
+        actionCanonical: `cmd-${i}`,
+        timestamp: `2026-01-0${i + 1}T00:00:00Z`,
+      });
+    }
+    const events = store.getToolSequenceEvents({ limit: 2 });
+    expect(events).toHaveLength(2);
+  });
+});
+
+describe('Workflow Patterns', () => {
+  it('saves and retrieves a workflow pattern', () => {
+    const id = store.saveWorkflowPattern({
+      patternHash: 'abc123',
+      patternType: 'command-sequence',
+      sequenceJson: JSON.stringify([{ tool: 'Read', action: 'read:.ts' }]),
+      frequency: 5,
+      sessionCount: 3,
+      confidence: 0.8,
+      firstSeen: '2026-01-01',
+      lastSeen: '2026-03-01',
+      status: 'detected',
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const patterns = store.getWorkflowPatterns();
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].patternHash).toBe('abc123');
+    expect(patterns[0].confidence).toBe(0.8);
+  });
+
+  it('filters by status', () => {
+    store.saveWorkflowPattern({
+      patternHash: 'p1',
+      patternType: 'command-sequence',
+      sequenceJson: '[]',
+      frequency: 3,
+      sessionCount: 3,
+      confidence: 0.7,
+      status: 'detected',
+    });
+    store.saveWorkflowPattern({
+      patternHash: 'p2',
+      patternType: 'copy-paste-cycle',
+      sequenceJson: '[]',
+      frequency: 5,
+      sessionCount: 4,
+      confidence: 0.9,
+      status: 'approved',
+    });
+
+    const detected = store.getWorkflowPatterns({ status: 'detected' });
+    expect(detected).toHaveLength(1);
+    expect(detected[0].patternHash).toBe('p1');
+  });
+
+  it('upserts on duplicate pattern_hash', () => {
+    store.saveWorkflowPattern({
+      patternHash: 'dup',
+      patternType: 'command-sequence',
+      sequenceJson: '[]',
+      frequency: 3,
+      sessionCount: 3,
+      confidence: 0.6,
+      status: 'detected',
+    });
+    store.saveWorkflowPattern({
+      patternHash: 'dup',
+      patternType: 'command-sequence',
+      sequenceJson: '[]',
+      frequency: 5,
+      sessionCount: 4,
+      confidence: 0.8,
+      status: 'detected',
+    });
+
+    const patterns = store.getWorkflowPatterns();
+    expect(patterns).toHaveLength(1);
+    expect(patterns[0].frequency).toBe(5);
+  });
+});
+
+describe('Pattern Proposals', () => {
+  it('saves and retrieves a proposal', () => {
+    const patternId = store.saveWorkflowPattern({
+      patternHash: 'p1',
+      patternType: 'command-sequence',
+      sequenceJson: '[]',
+      frequency: 3,
+      sessionCount: 3,
+      confidence: 0.7,
+      status: 'detected',
+    });
+
+    const proposalId = store.savePatternProposal({
+      patternId,
+      proposalType: 'command-sequence',
+      artifactType: 'command',
+      draftContent: '# Auto-generated command',
+      confidence: 0.7,
+      status: 'pending',
+    });
+    expect(proposalId).toBeGreaterThan(0);
+
+    const proposals = store.getPatternProposals();
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0].artifactType).toBe('command');
+    expect(proposals[0].status).toBe('pending');
+  });
+
+  it('filters proposals by status', () => {
+    const patternId = store.saveWorkflowPattern({
+      patternHash: 'p2',
+      patternType: 'periodic-task',
+      sequenceJson: '[]',
+      frequency: 10,
+      sessionCount: 5,
+      confidence: 0.9,
+      status: 'detected',
+    });
+    store.savePatternProposal({
+      patternId,
+      proposalType: 'periodic',
+      artifactType: 'workflow',
+      draftContent: 'a',
+      confidence: 0.9,
+      status: 'pending',
+    });
+    store.savePatternProposal({
+      patternId,
+      proposalType: 'periodic',
+      artifactType: 'workflow',
+      draftContent: 'b',
+      confidence: 0.8,
+      status: 'approved',
+    });
+
+    const pending = store.getPatternProposals({ status: 'pending' });
+    expect(pending).toHaveLength(1);
+  });
+
+  it('updates proposal status', () => {
+    const patternId = store.saveWorkflowPattern({
+      patternHash: 'p3',
+      patternType: 'command-sequence',
+      sequenceJson: '[]',
+      frequency: 3,
+      sessionCount: 3,
+      confidence: 0.7,
+      status: 'detected',
+    });
+    const proposalId = store.savePatternProposal({
+      patternId,
+      proposalType: 'command-sequence',
+      artifactType: 'command',
+      draftContent: 'content',
+      confidence: 0.7,
+      status: 'pending',
+    });
+
+    store.updateProposalStatus(proposalId, 'approved', 'Looks good');
+
+    const proposals = store.getPatternProposals({ status: 'approved' });
+    expect(proposals).toHaveLength(1);
+    expect(proposals[0].reviewerReason).toBe('Looks good');
+    expect(proposals[0].reviewedAt).toBeTruthy();
+  });
+
+  it('rejects proposal with reason', () => {
+    const patternId = store.saveWorkflowPattern({
+      patternHash: 'p4',
+      patternType: 'command-sequence',
+      sequenceJson: '[]',
+      frequency: 3,
+      sessionCount: 3,
+      confidence: 0.7,
+      status: 'detected',
+    });
+    const proposalId = store.savePatternProposal({
+      patternId,
+      proposalType: 'command-sequence',
+      artifactType: 'command',
+      draftContent: 'content',
+      confidence: 0.7,
+      status: 'pending',
+    });
+
+    store.updateProposalStatus(proposalId, 'rejected', 'Not useful');
+
+    const rejected = store.getPatternProposals({ status: 'rejected' });
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reviewerReason).toBe('Not useful');
+  });
+});
+
 // ── Utilities ──────────────────────────────────────────────────────
 
 describe('Utilities', () => {
