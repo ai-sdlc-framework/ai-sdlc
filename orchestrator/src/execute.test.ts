@@ -12,6 +12,7 @@ import type {
 } from '@ai-sdlc/reference';
 import type { Logger } from './logger.js';
 import { createPipelineSecurity } from './security.js';
+import { execFile } from 'node:child_process';
 
 // Mock child_process.execFile used by executePipeline for git checkout/push
 vi.mock('node:child_process', () => ({
@@ -256,6 +257,40 @@ describe('executePipeline()', () => {
         auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
+
+    // Branch should have been pushed even though validation failed
+    expect(execFile).toHaveBeenCalledWith(
+      'git',
+      ['push', 'origin', 'ai-sdlc/issue-42'],
+      expect.any(Object),
+      expect.any(Function),
+    );
+
+    // Audit log should record both push and validation failure
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'push',
+        resource: 'branch/ai-sdlc/issue-42',
+        decision: 'allowed',
+      }),
+    );
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'check',
+        resource: 'agent-output',
+        decision: 'denied',
+      }),
+    );
+
+    // Comment should have been posted with violation details
+    expect(tracker.addComment).toHaveBeenCalledWith(
+      '42',
+      expect.stringContaining('Guardrail Violations'),
+    );
+    expect(tracker.addComment).toHaveBeenCalledWith('42', expect.stringContaining('blocked-path'));
+
+    // PR should NOT have been created
+    expect(sc.createPR).not.toHaveBeenCalled();
   });
 
   it('rejects when agent changes too many files', async () => {
@@ -277,6 +312,34 @@ describe('executePipeline()', () => {
         auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
+
+    // Branch should have been pushed even though validation failed
+    expect(execFile).toHaveBeenCalledWith(
+      'git',
+      ['push', 'origin', 'ai-sdlc/issue-42'],
+      expect.any(Object),
+      expect.any(Function),
+    );
+
+    // Audit log should record both push and validation failure
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'push',
+        decision: 'allowed',
+      }),
+    );
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'check',
+        decision: 'denied',
+      }),
+    );
+
+    // Comment should have been posted with violation details
+    expect(tracker.addComment).toHaveBeenCalledWith('42', expect.stringContaining('max-files'));
+
+    // PR should NOT have been created
+    expect(sc.createPR).not.toHaveBeenCalled();
   });
 
   it('rejects when agent produces no test files', async () => {
@@ -296,6 +359,34 @@ describe('executePipeline()', () => {
         auditLog,
       }),
     ).rejects.toThrow('guardrail validation');
+
+    // Branch should have been pushed even though validation failed
+    expect(execFile).toHaveBeenCalledWith(
+      'git',
+      ['push', 'origin', 'ai-sdlc/issue-42'],
+      expect.any(Object),
+      expect.any(Function),
+    );
+
+    // Audit log should record both push and validation failure
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'push',
+        decision: 'allowed',
+      }),
+    );
+    expect(auditLog.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: 'check',
+        decision: 'denied',
+      }),
+    );
+
+    // Comment should have been posted with violation details
+    expect(tracker.addComment).toHaveBeenCalledWith('42', expect.stringContaining('require-tests'));
+
+    // PR should NOT have been created
+    expect(sc.createPR).not.toHaveBeenCalled();
   });
 
   it('allows issues at complexity boundary (3 = fully-autonomous)', async () => {

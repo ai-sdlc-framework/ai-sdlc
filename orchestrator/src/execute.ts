@@ -31,6 +31,7 @@ import {
 } from '@ai-sdlc/reference';
 import { loadConfigAsync, type AiSdlcConfig } from './config.js';
 import { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
+import { validateAgentOutput } from './validate-agent-output.js';
 import { createLogger, type Logger } from './logger.js';
 import {
   createStructuredConsoleLogger,
@@ -47,7 +48,6 @@ import {
   resolveConstraints,
   isAutonomousStrategy,
   recordMetric,
-  validateAndAuditOutput,
   evaluatePipelineCompliance,
   authorizeFilesChanged,
   interpolateBranchPattern,
@@ -721,14 +721,43 @@ async function executePipelineBody(
     );
   }
 
-  // 11. Validate agent output against guardrails
-  await withSpan(
+  // 11. Post activity log so users can see what the agent did
+  const activitySection =
+    progressLog.length > 0
+      ? `### Activity Log\n\n\`\`\`\n${progressLog.slice(-40).join('\n')}\n\`\`\``
+      : '';
+  await tracker.addComment(
+    issueId,
+    `## AI-SDLC: Agent Complete\n\n` +
+      `**${result.filesChanged.length} files changed.** Pushing branch...\n\n` +
+      activitySection,
+  );
+  await notifySlack(
+    `:white_check_mark: Agent complete — ${result.filesChanged.length} files changed. Pushing...`,
+  );
+
+  // 12. Push branch (before validation to preserve work even if validation fails)
+  log.stage('push');
+  await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
+  log.stageEnd('push');
+
+  auditLog.record({
+    actor: 'system',
+    action: 'push',
+    resource: `branch/${branchName}`,
+    decision: 'allowed',
+    details: { filesChanged: result.filesChanged.length, issueId },
+  });
+
+  // 13. Validate agent output against guardrails (after push)
+  const validation = await withSpan(
     SPAN_NAMES.PIPELINE_STAGE,
     {
       [ATTRIBUTE_KEYS.STAGE]: 'validate-output',
     },
     async () => {
-      await validateAndAuditOutput({
+      log.stage('validate-output');
+      const validationResult = await validateAgentOutput({
         filesChanged: result.filesChanged,
         workDir,
         constraints: {
@@ -737,19 +766,48 @@ async function executePipelineBody(
           blockedPaths: resolved.blockedPaths,
         },
         guardrails: { maxLinesPerPR: currentLevel.guardrails.maxLinesPerPR },
-        auditLog,
-        log,
-        onViolation: async (violationList) => {
-          await tracker.addComment(
-            issueId,
-            `## ${NOTIFICATION_TITLES.guardrailViolations}\n\n${violationList}`,
-          );
-        },
       });
+      log.stageEnd('validate-output');
+      return validationResult;
     },
   );
 
-  // 11b. Evaluate quality gates and report as GitHub Check Runs
+  if (!validation.passed) {
+    // Record validation failure in audit log
+    auditLog.record({
+      actor: 'system',
+      action: 'check',
+      resource: 'agent-output',
+      decision: 'denied',
+      details: { violations: validation.violations.map((v) => v.rule) },
+    });
+
+    // Post comment explaining the violations
+    const violationList = validation.violations
+      .map((v) => `- **${v.rule}**: ${v.message}`)
+      .join('\n');
+    await tracker.addComment(
+      issueId,
+      `## ${NOTIFICATION_TITLES.guardrailViolations}\n\n${violationList}\n\n` +
+        `The branch \`${branchName}\` has been pushed with your changes. You can review the work, ` +
+        `cherry-pick valid changes, or adjust the guardrails as needed.`,
+    );
+
+    // Exit without creating PR
+    throw new Error(
+      `Agent output failed guardrail validation. Branch ${branchName} preserved for review.`,
+    );
+  }
+
+  // Validation passed — record success
+  auditLog.record({
+    actor: 'system',
+    action: 'check',
+    resource: 'agent-output',
+    decision: 'allowed',
+  });
+
+  // 13b. Evaluate quality gates and report as GitHub Check Runs
   if (qualityGate.spec.gates.length > 0) {
     try {
       const { stdout: headSha } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
@@ -788,7 +846,7 @@ async function executePipelineBody(
     }
   }
 
-  // 11c. Post-agent complexity evaluation (non-blocking)
+  // 13c. Post-agent complexity evaluation (non-blocking)
   try {
     const { stdout: diffStat } = await execFileAsync('git', ['diff', '--stat', 'HEAD~1'], {
       cwd: workDir,
@@ -820,27 +878,7 @@ async function executePipelineBody(
     log.info('Post-agent complexity evaluation skipped');
   }
 
-  // Post activity log so users can see what the agent did
-  const activitySection =
-    progressLog.length > 0
-      ? `### Activity Log\n\n\`\`\`\n${progressLog.slice(-40).join('\n')}\n\`\`\``
-      : '';
-  await tracker.addComment(
-    issueId,
-    `## AI-SDLC: Agent Complete\n\n` +
-      `**${result.filesChanged.length} files changed.** Pushing branch and creating PR...\n\n` +
-      activitySection,
-  );
-  await notifySlack(
-    `:white_check_mark: Agent complete — ${result.filesChanged.length} files changed. Pushing...`,
-  );
-
-  // 12. Push branch
-  log.stage('push');
-  await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
-  log.stageEnd('push');
-
-  // 12b. Compute cost receipt for provenance (before PR creation)
+  // 14. Compute cost receipt for provenance (before PR creation)
   let costReceipt: CostReceipt | undefined;
   if (result.tokenUsage) {
     const tu = result.tokenUsage;
@@ -864,7 +902,7 @@ async function executePipelineBody(
     };
   }
 
-  // 13. Create PR (with optional provenance, reading config from pipeline)
+  // 15. Create PR (with optional provenance, reading config from pipeline)
   const prConfig = config.pipeline?.spec.pullRequest;
   const shouldIncludeProvenance =
     options.includeProvenance ?? prConfig?.includeProvenance ?? options.security !== undefined;
