@@ -39,13 +39,16 @@ cannot construct a concrete exploit or failure case, downgrade to `minor` or
 - Character classes without alternation: `[a-zA-Z0-9/_.-]+` — no ambiguity
 - `regex.exec()` in a `while` loop with `/g` flag — `lastIndex` advances linearly, this is the standard JS pattern for finding all matches. It is NOT quadratic.
 - Any pattern where the character class has no overlapping alternatives
+- **Single `.*` wildcard patterns from trusted config** (e.g., `^gh pr merge.*$`) — a pattern with ONE `.*` cannot cause backtracking because there is only one way to match. The pattern `a.*b.*c.*` with MULTIPLE `.*` can theoretically backtrack, but our `blockedActions` patterns are simple globs like `gh pr merge*` that convert to a single `.*`. Do NOT flag these.
+- **`CLAUDE_PROJECT_DIR` environment variable** — this is set by Claude Code itself, not by users. It is a trusted source. Do NOT flag `execSync('git rev-parse')` as command injection when the fallback only runs if the env var is unset.
 
 **DO flag these as ReDoS — they are dangerous:**
 - Nested quantifiers with alternation: `(a+)+$`, `(a|aa)+`
 - Unbounded repetition on overlapping groups: `(\w+\s*)*`
 - Patterns where the engine can match the same character via multiple paths
+- Multiple overlapping `.*` in a single pattern from untrusted input
 
-**The definitive test:** Can the regex engine take exponentially different paths for the same input? If no, it is safe. Bounded character classes CANNOT cause exponential backtracking regardless of input length.
+**The definitive test:** Can the regex engine take exponentially different paths for the same input? If no, it is safe. A single `.*` has exactly one match path — it is always linear.
 
 ## Concurrency and Race Conditions
 
@@ -114,3 +117,7 @@ These patterns have been repeatedly flagged incorrectly. Do not flag them:
 8. "Unsafe JSON.parse on controlled source" — our own API/CLI output format
 9. "`exec()` with `/g` regex in while loop is quadratic" — it is linear, this is the standard JS pattern
 10. "Removed test reduces coverage" — when test was replaced, not removed
+11. "ReDoS on single `.*` wildcard from trusted config" — `^gh pr merge.*$` has ONE `.*`, cannot backtrack. Only multiple overlapping `.*` from untrusted input is dangerous.
+12. "Command injection via CLAUDE_PROJECT_DIR" — this env var is set by Claude Code itself, not user-controlled. The `execSync('git rev-parse')` fallback is a standard git pattern.
+13. "Command injection in shell hook via PATTERN" — when PATTERN comes from `.ai-sdlc/agent-role.yaml` (trusted, committed by maintainers). Only flag if pattern comes from untrusted input.
+14. "Missing tests for Claude Code hook scripts" — hook scripts are integration-tested by running them manually. They are NOT instrumentable by Vitest. Do NOT flag missing unit tests for `.claude/hooks/` files as critical.
