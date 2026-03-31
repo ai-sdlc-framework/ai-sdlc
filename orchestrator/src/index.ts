@@ -333,7 +333,27 @@ export type {
   RolloutStepRecord,
   AuditEntryRecord,
   PriorityCalibrationSample,
+  ToolSequenceEvent,
+  WorkflowPattern,
+  PatternProposal,
 } from './state/index.js';
+
+// Workflow pattern detection
+export {
+  readToolSequenceJSONL,
+  readSessionMetaFiles,
+  sessionMetaToEvents,
+  categorizeAction,
+  DEFAULT_DETECTION_OPTIONS,
+} from './workflow-patterns/index.js';
+export type {
+  CanonicalStep,
+  NGram,
+  DetectedPattern,
+  DetectionOptions,
+  RawToolSequenceEntry,
+  SessionMeta,
+} from './workflow-patterns/index.js';
 
 // Deployment targets
 export {

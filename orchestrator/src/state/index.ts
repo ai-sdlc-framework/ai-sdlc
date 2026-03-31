@@ -27,4 +27,7 @@ export type {
   RolloutStepRecord,
   AuditEntryRecord,
   PriorityCalibrationSample,
+  ToolSequenceEvent,
+  WorkflowPattern,
+  PatternProposal,
 } from './types.js';
