@@ -140,6 +140,9 @@ All runners follow the same pattern: build prompt with codebase context, spawn t
 | `ai-sdlc complexity` | Codebase complexity profile |
 | `ai-sdlc cost --last 7d` | Cost summary by agent and pipeline |
 | `ai-sdlc dashboard` | Live TUI dashboard |
+| `ai-sdlc detect-patterns` | Detect workflow patterns from telemetry data |
+| `ai-sdlc list-patterns` | View detected patterns and proposals |
+| `ai-sdlc approve-pattern ID` | Generate automation artifact from approved pattern |
 
 ## Codebase Intelligence
 
@@ -150,6 +153,7 @@ The orchestrator maintains persistent knowledge about your codebase that agents 
 - **Hotspot identification** — Git history analysis for high-churn, high-complexity files that get extra scrutiny
 - **Convention detection** — Naming patterns, test structure, import style injected as agent context
 - **Episodic memory** — Records successes, failures, and regressions so agents learn from history
+- **Workflow pattern detection** — Observes human-AI interaction sequences across sessions, mines repeated patterns via n-gram analysis, and proposes deterministic automations (commands, skills, hooks, workflows)
 
 ## Progressive Autonomy
 
@@ -163,6 +167,48 @@ Agents earn trust through demonstrated competence:
 | 3 | Principal | Can handle complex tasks with minimal oversight |
 
 Promotion requires meeting quantitative criteria (PR approval rate, rollback rate, security incidents) plus time-at-level minimums. Demotion is immediate on security incidents.
+
+## Action Governance
+
+Agents operate under declarative constraints defined in `agent-role.yaml`:
+
+```yaml
+spec:
+  constraints:
+    blockedActions:
+      - 'gh pr merge*'       # Only humans merge
+      - 'git push --force*'  # No force push
+      - 'gh pr close*'       # Only humans close PRs
+      - 'git branch -D*'     # No branch deletion
+      - 'git reset --hard*'  # No destructive resets
+    blockedPaths:
+      - '.github/workflows/**'
+      - '.ai-sdlc/**'
+    requireTests: true
+    maxFilesPerChange: 15
+```
+
+Enforcement happens at three layers:
+1. **Orchestrator** — `checkAction()` validates commands before execution with audit logging
+2. **Claude Code hooks** — PreToolUse hook reads `blockedActions` from config and blocks matching Bash commands in real-time
+3. **Branch protection** — Required status checks (CI, review, coverage) with `enforce_admins: true`
+
+## Workflow Pattern Detection
+
+The orchestrator observes how developers use AI agents and automatically detects repetitive workflows:
+
+1. **Telemetry** — A PostToolUse hook captures every tool call to JSONL with canonicalized actions
+2. **Detection** — N-gram mining (n=3 to 8) finds sequences repeated across 3+ sessions
+3. **Classification** — Patterns are classified as command sequences, copy-paste cycles, or periodic tasks
+4. **Proposals** — Each pattern generates a draft automation matching project conventions:
+
+| Pattern Type | Output Artifact |
+|---|---|
+| Command sequence (3+ step chain) | `.claude/commands/<name>.md` |
+| Copy-paste cycle (read/write across files) | `.claude/skills/<name>/SKILL.md` |
+| Periodic task (regular intervals) | `.github/workflows/<name>.yml` |
+
+**Key principle:** The LLM observes and proposes, but the output is deterministic code — no AI in the runtime loop.
 
 ## Specification
 
