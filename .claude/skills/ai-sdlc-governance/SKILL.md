@@ -1,4 +1,10 @@
-# Claude Code Rules for AI-SDLC
+---
+name: ai-sdlc-governance
+description: AI-SDLC project governance rules, workflow expectations, and pre-commit checklist. Loaded automatically at session start.
+autoContext: true
+---
+
+# AI-SDLC Governance Rules
 
 ## Critical Rules — NEVER violate these
 
@@ -60,7 +66,7 @@ When review agents post findings:
 - `reference/` — framework reference implementation
 - `dogfood/` — CLI scripts that invoke the orchestrator
 - `.ai-sdlc/` — pipeline configuration (YAML) — agents cannot modify these files
-- `.claude/` — Claude Code hooks and commands
+- `.claude/` — Claude Code hooks, commands, and skills
 - `.github/workflows/` — GitHub Actions — agents cannot modify these files
 - `spec/schemas/` — JSON schemas for YAML validation
 
