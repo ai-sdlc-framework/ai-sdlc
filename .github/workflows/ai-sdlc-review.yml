@@ -16,7 +16,8 @@ jobs:
   analyze:
     name: Analyze PR
     runs-on: ubuntu-latest
-    # Run on all PRs to main — not just agent-created ones
+    # Skip release-please PRs — they're version bumps, not code changes
+    if: "!startsWith(github.head_ref, 'release-please--')"
     permissions: {} # Fully sandboxed — no GitHub access
     outputs:
       testing: ${{ steps.review.outputs.testing }}
@@ -120,12 +121,17 @@ jobs:
     name: Post Review Results
     runs-on: ubuntu-latest
     needs: analyze
-    if: needs.analyze.result == 'success'
+    if: always()
     permissions:
       pull-requests: write
       issues: read
     steps:
+      - name: Skip if analyze was skipped (release-please PRs)
+        if: needs.analyze.result == 'skipped'
+        run: echo "Skipping review for release-please PR"
+
       - name: Validate and post reviews
+        if: needs.analyze.result == 'success'
         uses: actions/github-script@v7
         env:
           TESTING_JSON: ${{ needs.analyze.outputs.testing }}
@@ -236,19 +242,36 @@ jobs:
               core.warning(`Failed to list PR files, posting without inline comments: ${err.message}`);
             }
 
-            await github.rest.pulls.createReview({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number,
-              event,
-              body,
-              comments: validComments,
-            });
-
-            core.info(`Posted ${event} review on PR #${context.payload.pull_request.number}`);
+            try {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                event,
+                body,
+                comments: validComments,
+              });
+              core.info(`Posted ${event} review on PR #${context.payload.pull_request.number}`);
+            } catch (err) {
+              // GitHub returns 422 when GITHUB_TOKEN tries to approve a PR
+              // created by the same identity (e.g. release-please using GITHUB_TOKEN).
+              // Fall back to posting a comment instead.
+              if (err.status === 422 && /approve your own/i.test(err.message)) {
+                core.warning('Cannot self-approve PR — falling back to comment');
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.payload.pull_request.number,
+                  body,
+                });
+                core.info(`Posted review as comment on PR #${context.payload.pull_request.number}`);
+              } else {
+                throw err;
+              }
+            }
 
       - name: Notify Slack that PR is ready for review
-        if: always()
+        if: always() && needs.analyze.result == 'success'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TESTING_JSON: ${{ needs.analyze.outputs.testing }}
