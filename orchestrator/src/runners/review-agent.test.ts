@@ -81,6 +81,49 @@ describe('ReviewAgentRunner', () => {
     });
   }
 
+  it('prepends reviewPolicy to system prompt when provided', async () => {
+    let capturedBody: string = '';
+    globalThis.fetch = vi.fn(async (_url: unknown, init: unknown) => {
+      capturedBody = (init as RequestInit).body as string;
+      return mockFetchResponse({
+        approved: true,
+        findings: [],
+        summary: 'ok',
+      }) as Response;
+    });
+
+    const runner = new ReviewAgentRunner({
+      reviewType: 'security',
+      reviewPolicy: '# Project Review Policy\nBounded regex is safe.',
+    });
+    await runner.run(makeContext());
+
+    const parsed = JSON.parse(capturedBody);
+    expect(parsed.system).toContain('# Project Review Policy');
+    expect(parsed.system).toContain('Bounded regex is safe.');
+    expect(parsed.system).toContain('---');
+    expect(parsed.system).toContain(REVIEW_PROMPTS.security);
+  });
+
+  it('uses default prompt when reviewPolicy is undefined', async () => {
+    let capturedBody: string = '';
+    globalThis.fetch = vi.fn(async (_url: unknown, init: unknown) => {
+      capturedBody = (init as RequestInit).body as string;
+      return mockFetchResponse({
+        approved: true,
+        findings: [],
+        summary: 'ok',
+      }) as Response;
+    });
+
+    const runner = new ReviewAgentRunner({ reviewType: 'critic' });
+    await runner.run(makeContext());
+
+    const parsed = JSON.parse(capturedBody);
+    expect(parsed.system).toBe(REVIEW_PROMPTS.critic);
+    expect(parsed.system).not.toContain('---');
+  });
+
   it('parses a valid approval verdict', async () => {
     globalThis.fetch = vi.fn(
       async () =>

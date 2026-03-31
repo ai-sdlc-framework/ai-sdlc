@@ -16,7 +16,7 @@ jobs:
   analyze:
     name: Analyze PR
     runs-on: ubuntu-latest
-    if: startsWith(github.event.pull_request.head.ref, 'ai-sdlc/issue-')
+    # Run on all PRs to main — not just agent-created ones
     permissions: {} # Fully sandboxed — no GitHub access
     outputs:
       testing: ${{ steps.review.outputs.testing }}
