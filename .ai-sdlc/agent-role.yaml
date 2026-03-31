@@ -21,3 +21,16 @@ spec:
     blockedPaths:
       - '.github/workflows/**'
       - '.ai-sdlc/**'
+    blockedActions:
+      - 'gh pr merge*'
+      - 'git merge*'
+      - 'git push --force*'
+      - 'git push -f*'
+      - 'gh pr close*'
+      - 'gh issue close*'
+      - 'gh api */reviews/*/dismissals*'
+      - 'git branch -D*'
+      - 'git branch -d*'
+      - 'git reset --hard*'
+      - 'git checkout -- .'
+      - 'git restore .'
