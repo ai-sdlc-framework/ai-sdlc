@@ -9,7 +9,7 @@
 set -euo pipefail
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$(git rev-parse --show-toplevel 2>/dev/null || pwd)}"
-SCRIPT="$PROJECT_DIR/.claude/hooks/collect-tool-sequence.js"
+SCRIPT="${PROJECT_DIR}/.claude/hooks/collect-tool-sequence.js"
 
 if [ ! -f "$SCRIPT" ]; then
   exit 0
