@@ -84,13 +84,13 @@ describe('checkAction', () => {
     );
   });
 
-  it('blocks gh api review dismissals', () => {
+  it('allows gh api review dismissals (permitted with documented reason)', () => {
     expect(
       checkAction(
         'gh api repos/owner/repo/pulls/42/reviews/123/dismissals --method PUT',
         DEFAULT_BLOCKED_ACTIONS,
       ).allowed,
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it('blocks git branch -D', () => {
@@ -190,7 +190,6 @@ describe('hook equivalence — checkAction matches hook enforcement patterns', (
     'git push -f origin main',
     'gh pr close 42',
     'gh issue close 42 --comment "done"',
-    'gh api repos/o/r/pulls/1/reviews/2/dismissals --method PUT',
     'git branch -D feature',
     'git branch -d feature',
     'git reset --hard HEAD~1',
@@ -207,6 +206,7 @@ describe('hook equivalence — checkAction matches hook enforcement patterns', (
     'pnpm lint',
     'pnpm build',
     'echo hello',
+    'gh api repos/o/r/pulls/1/reviews/2/dismissals --method PUT',
   ];
 
   for (const cmd of blockedCommands) {

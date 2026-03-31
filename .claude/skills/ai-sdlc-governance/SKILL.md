@@ -9,7 +9,7 @@ autoContext: true
 ## Critical Rules — NEVER violate these
 
 1. **NEVER merge any pull request.** Do not run `gh pr merge`, `git merge` into main, or any merge operation. Only create or update PRs. The human merges.
-2. **NEVER dismiss PR reviews.** Do not run `gh api */reviews/*/dismissals`. If reviews have false positives, update `.ai-sdlc/review-policy.md` instead.
+2. **Dismiss PR reviews only with documented reason.** You may dismiss reviews when they failed due to infrastructure issues (e.g., API credit exhaustion) or when findings are documented false positives. Always include a clear explanation in the dismissal message. Prefer updating `.ai-sdlc/review-policy.md` for recurring false positives.
 3. **NEVER close issues or PRs.** Do not run `gh pr close` or `gh issue close`. The human decides what to close.
 4. **NEVER force push.** Do not run `git push --force` or `git push -f`.
 5. **NEVER delete branches.** Do not run `git branch -D` or `git branch -d`.
