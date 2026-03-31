@@ -175,3 +175,49 @@ describe('enforceAction', () => {
     expect(recordCall.resource.length).toBeLessThanOrEqual(108); // "command/" + 100 chars
   });
 });
+
+describe('hook equivalence — checkAction matches hook enforcement patterns', () => {
+  // These tests verify that the orchestrator's checkAction() produces the same
+  // results as the Claude Code hook (.claude/hooks/enforce-blocked-actions.js)
+  // for the default blockedActions from .ai-sdlc/agent-role.yaml.
+  // This ensures both enforcement points are consistent.
+
+  const blockedCommands = [
+    'gh pr merge 42 --squash',
+    'gh pr merge 42 --admin',
+    'git merge feature-branch',
+    'git push --force origin main',
+    'git push -f origin main',
+    'gh pr close 42',
+    'gh issue close 42 --comment "done"',
+    'gh api repos/o/r/pulls/1/reviews/2/dismissals --method PUT',
+    'git branch -D feature',
+    'git branch -d feature',
+    'git reset --hard HEAD~1',
+    'git checkout -- .',
+    'git restore .',
+  ];
+
+  const allowedCommands = [
+    'git push origin ai-sdlc/issue-42',
+    'git commit -m "fix: something"',
+    'git add -A',
+    'gh pr create --title "test"',
+    'pnpm test',
+    'pnpm lint',
+    'pnpm build',
+    'echo hello',
+  ];
+
+  for (const cmd of blockedCommands) {
+    it(`blocks: ${cmd}`, () => {
+      expect(checkAction(cmd, DEFAULT_BLOCKED_ACTIONS).allowed).toBe(false);
+    });
+  }
+
+  for (const cmd of allowedCommands) {
+    it(`allows: ${cmd}`, () => {
+      expect(checkAction(cmd, DEFAULT_BLOCKED_ACTIONS).allowed).toBe(true);
+    });
+  }
+});
