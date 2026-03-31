@@ -378,6 +378,8 @@ export interface AgentConstraints {
   blockedPaths?: string[];
   /** Shell command patterns the agent is forbidden from executing. */
   blockedActions?: string[];
+  /** Action categories that require human approval before execution. */
+  requireHumanApproval?: string[];
 }
 
 export interface HandoffContractRef {
