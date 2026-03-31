@@ -26,6 +26,9 @@ import type {
   RolloutStepRecord,
   AuditEntryRecord,
   PriorityCalibrationSample,
+  ToolSequenceEvent,
+  WorkflowPattern,
+  PatternProposal,
 } from './types.js';
 
 export class StateStore {
@@ -1042,6 +1045,167 @@ export class StateStore {
   /** Expose the underlying database for direct queries (e.g. dashboard). */
   getDatabase(): BetterSqlite3.Database {
     return this.db;
+  }
+
+  // ── Workflow Pattern Detection ─────────────────────────────────────
+
+  saveToolSequenceEvent(event: ToolSequenceEvent): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO tool_sequence_events (session_id, tool_name, action_canonical, project_path, timestamp)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      event.sessionId,
+      event.toolName,
+      event.actionCanonical,
+      event.projectPath ?? null,
+      event.timestamp,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  saveToolSequenceEvents(events: ToolSequenceEvent[]): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO tool_sequence_events (session_id, tool_name, action_canonical, project_path, timestamp)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const tx = this.db.transaction((items: ToolSequenceEvent[]) => {
+      for (const e of items) {
+        stmt.run(e.sessionId, e.toolName, e.actionCanonical, e.projectPath ?? null, e.timestamp);
+      }
+      return items.length;
+    });
+    return tx(events);
+  }
+
+  getToolSequenceEvents(opts?: {
+    sessionId?: string;
+    since?: string;
+    limit?: number;
+  }): ToolSequenceEvent[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.sessionId) {
+      conditions.push('session_id = ?');
+      params.push(opts.sessionId);
+    }
+    if (opts?.since) {
+      conditions.push('timestamp >= ?');
+      params.push(opts.since);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 10000;
+    params.push(limit);
+    const rows = this.db
+      .prepare(`SELECT * FROM tool_sequence_events ${where} ORDER BY timestamp ASC LIMIT ?`)
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      sessionId: r.session_id as string,
+      toolName: r.tool_name as string,
+      actionCanonical: r.action_canonical as string,
+      projectPath: r.project_path as string | undefined,
+      timestamp: r.timestamp as string,
+      ingestedAt: r.ingested_at as string | undefined,
+    }));
+  }
+
+  saveWorkflowPattern(pattern: WorkflowPattern): number {
+    const stmt = this.db.prepare(`
+      INSERT OR REPLACE INTO workflow_patterns
+        (pattern_hash, pattern_type, sequence_json, frequency, session_count, confidence, first_seen, last_seen, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      pattern.patternHash,
+      pattern.patternType,
+      pattern.sequenceJson,
+      pattern.frequency,
+      pattern.sessionCount,
+      pattern.confidence,
+      pattern.firstSeen ?? null,
+      pattern.lastSeen ?? null,
+      pattern.status,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getWorkflowPatterns(opts?: { status?: string }): WorkflowPattern[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.status) {
+      conditions.push('status = ?');
+      params.push(opts.status);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = this.db
+      .prepare(`SELECT * FROM workflow_patterns ${where} ORDER BY confidence DESC`)
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      patternHash: r.pattern_hash as string,
+      patternType: r.pattern_type as string,
+      sequenceJson: r.sequence_json as string,
+      frequency: r.frequency as number,
+      sessionCount: r.session_count as number,
+      confidence: r.confidence as number,
+      firstSeen: r.first_seen as string | undefined,
+      lastSeen: r.last_seen as string | undefined,
+      status: r.status as string,
+      detectedAt: r.detected_at as string | undefined,
+    }));
+  }
+
+  savePatternProposal(proposal: PatternProposal): number {
+    const stmt = this.db.prepare(`
+      INSERT INTO pattern_proposals
+        (pattern_id, proposal_type, artifact_type, artifact_path, draft_content, confidence, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(
+      proposal.patternId,
+      proposal.proposalType,
+      proposal.artifactType,
+      proposal.artifactPath ?? null,
+      proposal.draftContent,
+      proposal.confidence,
+      proposal.status,
+    );
+    return Number(result.lastInsertRowid);
+  }
+
+  getPatternProposals(opts?: { status?: string }): PatternProposal[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.status) {
+      conditions.push('status = ?');
+      params.push(opts.status);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const rows = this.db
+      .prepare(`SELECT * FROM pattern_proposals ${where} ORDER BY confidence DESC`)
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      patternId: r.pattern_id as number,
+      proposalType: r.proposal_type as string,
+      artifactType: r.artifact_type as string,
+      artifactPath: r.artifact_path as string | undefined,
+      draftContent: r.draft_content as string,
+      confidence: r.confidence as number,
+      status: r.status as string,
+      reviewedAt: r.reviewed_at as string | undefined,
+      reviewerReason: r.reviewer_reason as string | undefined,
+      createdAt: r.created_at as string | undefined,
+    }));
+  }
+
+  updateProposalStatus(id: number, status: string, reason?: string): void {
+    this.db
+      .prepare(
+        `UPDATE pattern_proposals SET status = ?, reviewed_at = datetime('now'), reviewer_reason = ? WHERE id = ?`,
+      )
+      .run(status, reason ?? null, id);
   }
 
   close(): void {

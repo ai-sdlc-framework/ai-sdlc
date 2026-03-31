@@ -2,7 +2,7 @@
  * SQLite DDL and migrations for the state store.
  */
 
-export const CURRENT_SCHEMA_VERSION = 8;
+export const CURRENT_SCHEMA_VERSION = 9;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -277,6 +277,56 @@ ALTER TABLE episodic_memory ADD COLUMN priority_composite REAL;
 ALTER TABLE episodic_memory ADD COLUMN priority_confidence REAL;
 `;
 
+export const MIGRATION_V9 = `
+-- Workflow pattern detection tables
+
+-- Tool sequence events captured by PostToolUse hook
+CREATE TABLE IF NOT EXISTS tool_sequence_events (
+  id INTEGER PRIMARY KEY,
+  session_id TEXT NOT NULL,
+  tool_name TEXT NOT NULL,
+  action_canonical TEXT NOT NULL,
+  project_path TEXT,
+  timestamp TEXT NOT NULL,
+  ingested_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_tool_seq_session ON tool_sequence_events(session_id);
+CREATE INDEX IF NOT EXISTS idx_tool_seq_ts ON tool_sequence_events(timestamp);
+
+-- Detected workflow patterns (from n-gram mining)
+CREATE TABLE IF NOT EXISTS workflow_patterns (
+  id INTEGER PRIMARY KEY,
+  pattern_hash TEXT NOT NULL UNIQUE,
+  pattern_type TEXT NOT NULL,
+  sequence_json TEXT NOT NULL,
+  frequency INTEGER NOT NULL,
+  session_count INTEGER NOT NULL,
+  confidence REAL NOT NULL,
+  first_seen TEXT,
+  last_seen TEXT,
+  status TEXT DEFAULT 'detected',
+  detected_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_workflow_patterns_status ON workflow_patterns(status);
+
+-- Automation proposals for human review
+CREATE TABLE IF NOT EXISTS pattern_proposals (
+  id INTEGER PRIMARY KEY,
+  pattern_id INTEGER NOT NULL,
+  proposal_type TEXT NOT NULL,
+  artifact_type TEXT NOT NULL,
+  artifact_path TEXT,
+  draft_content TEXT NOT NULL,
+  confidence REAL NOT NULL,
+  status TEXT DEFAULT 'pending',
+  reviewed_at TEXT,
+  reviewer_reason TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (pattern_id) REFERENCES workflow_patterns(id)
+);
+CREATE INDEX IF NOT EXISTS idx_pattern_proposals_status ON pattern_proposals(status);
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -309,5 +359,9 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 8,
     sql: MIGRATION_V8,
+  },
+  {
+    version: 9,
+    sql: MIGRATION_V9,
   },
 ];

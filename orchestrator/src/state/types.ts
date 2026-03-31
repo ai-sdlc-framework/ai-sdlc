@@ -228,3 +228,43 @@ export interface AuditEntryRecord {
   signature?: string;
   createdAt?: string;
 }
+
+// ── Workflow Pattern Detection ──────────────────────────────────────
+
+export interface ToolSequenceEvent {
+  id?: number;
+  sessionId: string;
+  toolName: string;
+  actionCanonical: string;
+  projectPath?: string;
+  timestamp: string;
+  ingestedAt?: string;
+}
+
+export interface WorkflowPattern {
+  id?: number;
+  patternHash: string;
+  patternType: string;
+  sequenceJson: string;
+  frequency: number;
+  sessionCount: number;
+  confidence: number;
+  firstSeen?: string;
+  lastSeen?: string;
+  status: string;
+  detectedAt?: string;
+}
+
+export interface PatternProposal {
+  id?: number;
+  patternId: number;
+  proposalType: string;
+  artifactType: string;
+  artifactPath?: string;
+  draftContent: string;
+  confidence: number;
+  status: string;
+  reviewedAt?: string;
+  reviewerReason?: string;
+  createdAt?: string;
+}

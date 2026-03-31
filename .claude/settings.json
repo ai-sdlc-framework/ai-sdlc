@@ -10,6 +10,16 @@
           }
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/collect-tool-sequence.sh"
+          }
+        ]
+      }
     ]
   }
 }
