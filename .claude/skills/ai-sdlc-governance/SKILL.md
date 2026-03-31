@@ -28,6 +28,14 @@ pnpm lint           # ESLint — no errors allowed
 pnpm format:check   # Prettier — run `pnpm format` to fix
 ```
 
+### Test File Check
+Before committing new `.ts` modules, verify:
+- Every new `src/**/*.ts` file (not `types.ts`, `index.ts`) has tests somewhere
+- Tests can be in a co-located `.test.ts` file OR in another test file that imports it
+- Run the relevant tests and confirm they pass before staging
+
+Do NOT rely on CI to catch missing tests — check locally first.
+
 Do NOT commit if any of these fail. Fix the errors first, then commit.
 
 ## Workflow Expectations
