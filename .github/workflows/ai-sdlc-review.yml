@@ -156,8 +156,40 @@ jobs:
 
             const allApproved = verdicts.every(v => v.approved);
             const titles = { testing: 'Testing Review', critic: 'Code Quality Review', security: 'Security Review' };
+            const sevIcons = { critical: '🔴', major: '🟠', minor: '🟡', suggestion: '💡' };
 
-            // ── Build review body ─────────────────────────────
+            // ── Separate findings into inline comments vs summary ──
+            const inlineComments = [];
+            const summaryFindings = [];
+
+            for (const v of verdicts) {
+              for (const f of v.findings) {
+                const sev = f.severity || 'suggestion';
+                const icon = sevIcons[sev] || '💡';
+                const prefix = `${icon} **[${v.type}/${sev}]**`;
+
+                if (f.file && f.line) {
+                  // Post as inline comment on the specific line
+                  inlineComments.push({
+                    path: f.file,
+                    line: f.line,
+                    body: `${prefix} ${f.message}`,
+                  });
+                } else if (f.file) {
+                  // Has file but no line — post on line 1
+                  inlineComments.push({
+                    path: f.file,
+                    line: 1,
+                    body: `${prefix} ${f.message}`,
+                  });
+                } else {
+                  // No file reference — goes in summary
+                  summaryFindings.push({ verdict: v, finding: f, prefix });
+                }
+              }
+            }
+
+            // ── Build summary body ─────────────────────────────
             let body = `## AI-SDLC: Automated PR Review\n\n`;
             body += allApproved
               ? `All three review agents **approved** this PR.\n\n`
@@ -167,30 +199,50 @@ jobs:
               const status = v.approved ? 'APPROVED' : 'CHANGES REQUESTED';
               body += `### ${titles[v.type]}: ${status}\n\n`;
               body += `${v.summary}\n\n`;
+            }
 
-              if (v.findings.length > 0) {
-                for (const f of v.findings) {
-                  const sev = f.severity === 'critical' ? '[critical]' :
-                              f.severity === 'major' ? '[major]' :
-                              f.severity === 'minor' ? '[minor]' : '[suggestion]';
-                  const loc = f.file ? ` (\`${f.file}${f.line ? ':' + f.line : ''}\`)` : '';
-                  body += `- **${sev}**${loc}: ${f.message}\n`;
-                }
-                body += '\n';
+            // Add non-inline findings to summary
+            if (summaryFindings.length > 0) {
+              body += `### General Findings\n\n`;
+              for (const { prefix, finding } of summaryFindings) {
+                body += `- ${prefix}: ${finding.message}\n`;
               }
+              body += '\n';
             }
 
             body += '---\n';
-            body += '*Reviewed by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc)*';
+            body += `*Reviewed by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — ${inlineComments.length} inline comments posted*`;
 
-            // ── Post PR review ────────────────────────────────
+            // ── Post PR review with inline comments ──────────
             const event = allApproved ? 'APPROVE' : 'REQUEST_CHANGES';
+
+            // GitHub API requires comments to reference files in the diff.
+            // Filter out comments for files not in the PR diff to avoid 422 errors.
+            let validComments = [];
+            try {
+              const { data: files } = await github.rest.pulls.listFiles({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: context.payload.pull_request.number,
+                per_page: 100,
+              });
+              const diffFiles = new Set(files.map(f => f.filename));
+              validComments = inlineComments.filter(c => diffFiles.has(c.path));
+              const skipped = inlineComments.length - validComments.length;
+              if (skipped > 0) {
+                core.info(`Skipped ${skipped} inline comments for files not in diff`);
+              }
+            } catch (err) {
+              core.warning(`Failed to list PR files, posting without inline comments: ${err.message}`);
+            }
+
             await github.rest.pulls.createReview({
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: context.payload.pull_request.number,
               event,
               body,
+              comments: validComments,
             });
 
             core.info(`Posted ${event} review on PR #${context.payload.pull_request.number}`);
