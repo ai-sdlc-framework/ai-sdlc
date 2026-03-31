@@ -77,17 +77,32 @@ cannot construct a concrete exploit or failure case, downgrade to `minor` or
 
 ## Testing Standards
 
-### What Requires Test Coverage
-- All public functions and their error paths
-- Integration points between modules (e.g., cycle detection in fix-ci/fix-review)
-- Boundary conditions (thresholds, limits, edge cases)
-- New business logic
+### Code Coverage — Defer to Codecov
+
+**DO NOT report code coverage percentages or claim "zero coverage" on files.**
+You do not have access to coverage data. The `codecov/patch` CI check validates
+actual line coverage from test runs. Your job is to review code quality and
+logic, not coverage metrics.
+
+Specifically:
+- Do NOT say "this file has zero test coverage" — you cannot know this
+- Do NOT say "missing test coverage for function X" unless the function
+  has genuinely no tests anywhere (check all test files, not just co-located ones)
+- Tests for a module can live in a different test file (e.g., `classifiers.ts`
+  tested via `detector.test.ts`)
+- If codecov/patch passes, coverage is adequate — do not second-guess it
+
+### What Requires Tests (logic review, not coverage metrics)
+- All public functions should have at least one test exercising the happy path
+- Error paths for security-critical functions
+- Boundary conditions for algorithms (thresholds, limits)
 
 ### What Does NOT Require Test Coverage (DO NOT flag as critical/major)
-- **GitHub Actions workflow YAML changes** — these are tested by running the workflow, not by unit tests. A changed `if` condition in a workflow file does not need a unit test. Do not flag this.
+- **GitHub Actions workflow YAML changes** — tested by running the workflow
 - **Thin CLI wrappers** that parse args and call orchestrator functions — tested via the orchestrator tests
 - `console.error` logging statements in catch blocks
 - Re-exports in `index.ts` barrel files
+- **Type-only files** (`types.ts`) — no runtime code to cover
 
 ### Test Replacement vs Test Removal
 When a test is removed and replaced with a different test that covers the same code path differently, this is NOT a reduction in coverage. Do not flag test replacements as "removed test coverage" unless the replacement genuinely covers fewer paths.
@@ -124,3 +139,4 @@ These patterns have been repeatedly flagged incorrectly. Do not flag them:
 15. "Missing code for future phase" — when a PR is explicitly scoped as "Phase 1 of N" or "partial implementation", do NOT flag missing code that is planned for a future PR. The PR description explains what's included and what's deferred.
 16. "JSON.parse prototype pollution" — V8's `JSON.parse` does NOT support `__proto__` injection. Parsed objects are plain objects. This is not a real vulnerability in Node.js.
 17. "Unsafe JSON.parse on JSONL file" — when the file is written by our own hook (trusted output). The JSONL file at `~/.claude/usage-data/tool-sequences.jsonl` is written by our PostToolUse hook, not by external users.
+18. "Zero test coverage for file X" — you cannot measure coverage. Defer to codecov/patch CI check. Tests may exist in a different test file. Do NOT flag coverage claims as critical.
