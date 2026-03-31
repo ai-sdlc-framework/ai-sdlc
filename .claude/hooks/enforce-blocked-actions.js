@@ -30,8 +30,15 @@ if (!command || typeof command !== 'string' || !command.trim()) {
 
 // ── Find project root and load agent-role.yaml ───────────────────
 
-const projectDir = process.env.CLAUDE_PROJECT_DIR
-  || (() => { try { return execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim(); } catch { return process.cwd(); } })();
+const projectDir =
+  process.env.CLAUDE_PROJECT_DIR ||
+  (() => {
+    try {
+      return execSync('git rev-parse --show-toplevel', { encoding: 'utf-8' }).trim();
+    } catch {
+      return process.cwd();
+    }
+  })();
 
 const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
 
@@ -64,8 +71,7 @@ for (const pattern of blockedActions) {
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',
         permissionDecision: 'deny',
-        permissionDecisionReason:
-          `Blocked by AI-SDLC governance policy: command matches blockedAction pattern '${pattern}'`,
+        permissionDecisionReason: `Blocked by AI-SDLC governance policy: command matches blockedAction pattern '${pattern}'`,
       },
     };
     process.stdout.write(JSON.stringify(result, null, 2) + '\n');
