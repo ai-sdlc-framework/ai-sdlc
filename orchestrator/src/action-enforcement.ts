@@ -83,7 +83,6 @@ export const DEFAULT_BLOCKED_ACTIONS: string[] = [
   'git push -f*',
   'gh pr close*',
   'gh issue close*',
-  'gh api */reviews/*/dismissals*',
   'git branch -D*',
   'git branch -d*',
   'git reset --hard*',
