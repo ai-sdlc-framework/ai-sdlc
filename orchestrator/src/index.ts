@@ -186,6 +186,13 @@ export {
   type PriorityConfig,
 } from './priority.js';
 
+// Action enforcement
+export {
+  checkAction,
+  DEFAULT_BLOCKED_ACTIONS,
+  type ActionEnforcementResult,
+} from './action-enforcement.js';
+
 // Issue admission scoring
 export {
   scoreIssueForAdmission,

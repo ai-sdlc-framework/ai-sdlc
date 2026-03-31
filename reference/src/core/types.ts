@@ -376,6 +376,8 @@ export interface AgentConstraints {
   requireTests?: boolean;
   allowedLanguages?: string[];
   blockedPaths?: string[];
+  /** Shell command patterns the agent is forbidden from executing. */
+  blockedActions?: string[];
 }
 
 export interface HandoffContractRef {
