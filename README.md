@@ -109,6 +109,7 @@ The orchestrator is **agent-agnostic**. It invokes AI coding agents through a st
 | Runner | CLI Command | Auth Env Var | Description |
 |---|---|---|---|
 | **ClaudeCodeRunner** | `claude -p` | `ANTHROPIC_API_KEY` | Claude Code CLI in `--print` mode |
+| **ClaudeCodeSdkRunner** | Agent SDK `query()` | `ANTHROPIC_API_KEY` | Claude Code Agent SDK with budget caps, tool filtering, governance injection |
 | **CopilotRunner** | `copilot -p --yolo` | `GH_TOKEN` / `GITHUB_TOKEN` | GitHub Copilot CLI in autonomous mode |
 | **CursorRunner** | `cursor-agent --print` | `CURSOR_API_KEY` | Cursor CLI with stream-json output |
 | **CodexRunner** | `codex exec -` | `CODEX_API_KEY` | OpenAI Codex CLI via stdin |
@@ -167,6 +168,54 @@ Agents earn trust through demonstrated competence:
 | 3 | Principal | Can handle complex tasks with minimal oversight |
 
 Promotion requires meeting quantitative criteria (PR approval rate, rollback rate, security incidents) plus time-at-level minimums. Demotion is immediate on security incidents.
+
+## Claude Code Plugin
+
+Install the AI-SDLC governance plugin for zero-config enforcement in Claude Code:
+
+```bash
+claude --plugin-dir ./ai-sdlc-plugin
+```
+
+The plugin provides:
+
+| Component | What it does |
+|---|---|
+| **6 Hooks** | PreToolUse enforcement, PostToolUse telemetry, SessionStart governance context, Stop quality gates (command + agent + asyncRewake coverage), PermissionRequest deny |
+| **5 Commands** | `/review`, `/triage`, `/fix-pr`, `/detect-patterns`, `/status` |
+| **3 Agents** | `code-reviewer`, `security-reviewer`, `test-reviewer` — each with restricted tool pools (reviewers can't Edit/Write) |
+| **1 Skill** | Governance rules auto-loaded at session start |
+| **MCP Server** | 5 tools: `check_pr_status`, `check_issue`, `get_governance_context`, `list_detected_patterns`, `get_review_policy` |
+
+The SDK runner (`ClaudeCodeSdkRunner`) provides programmatic control over agents:
+
+```typescript
+import { ClaudeCodeSdkRunner } from '@ai-sdlc/orchestrator';
+
+// Fine-grained agent control via the Agent SDK
+const runner = new ClaudeCodeSdkRunner();
+await runner.run({
+  // ... context
+  constraints: {
+    maxBudgetUsd: 5.00,     // Hard cost ceiling
+    maxTurns: 100,           // Turn limit
+    blockedActions: ['gh pr merge*'],
+    // ...
+  },
+});
+```
+
+Parallel reviews with per-reviewer tool restrictions and budget caps:
+
+```typescript
+import { runParallelSdkReviews } from '@ai-sdlc/orchestrator';
+
+const result = await runParallelSdkReviews({
+  diff, prTitle, prNumber, reviewPolicy, workDir,
+});
+// result.verdicts — 3 parallel reviews (testing, security, quality)
+// result.allApproved — true if all reviewers approved
+```
 
 ## Action Governance
 
@@ -237,6 +286,7 @@ All resource types have [JSON Schema (draft 2020-12)](spec/schemas/) definitions
 | `@ai-sdlc/reference` | [`reference/`](reference/) | TypeScript reference implementation of the spec |
 | `@ai-sdlc/conformance` | [`conformance/`](conformance/) | Language-agnostic conformance test suite |
 | `@ai-sdlc/mcp-advisor` | [`mcp-advisor/`](mcp-advisor/) | MCP server for human-directed AI usage tracking |
+| `ai-sdlc-plugin` | [`ai-sdlc-plugin/`](ai-sdlc-plugin/) | Claude Code plugin — hooks, commands, skills, agents, MCP server |
 | `dashboard/` | [`dashboard/`](dashboard/) | Web dashboard (Next.js) for cost, autonomy, and codebase views |
 | `spec/` | [`spec/`](spec/) | Formal specification and JSON schemas |
 | `docs/` | [`docs/`](docs/) | User-facing documentation |
