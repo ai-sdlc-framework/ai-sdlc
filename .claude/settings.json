@@ -1,12 +1,25 @@
 {
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/ai-sdlc-plugin/hooks/session-start.sh\"",
+            "statusMessage": "Loading AI-SDLC governance..."
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
       {
         "matcher": "Bash",
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/enforce-blocked-actions.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/ai-sdlc-plugin/hooks/enforce-blocked-actions.sh\"",
+            "if": "Bash(*)",
+            "statusMessage": "Checking action policy..."
           }
         ]
       }
@@ -16,7 +29,31 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/collect-tool-sequence.sh"
+            "command": "bash \"$CLAUDE_PROJECT_DIR/ai-sdlc-plugin/hooks/collect-tool-sequence.sh\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/ai-sdlc-plugin/hooks/quality-gate-stop.sh\"",
+            "statusMessage": "Verifying governance compliance..."
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/ai-sdlc-plugin/hooks/permission-check.sh\"",
+            "if": "Bash(gh pr merge*)"
           }
         ]
       }
