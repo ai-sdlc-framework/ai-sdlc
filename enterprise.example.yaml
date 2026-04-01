@@ -1,0 +1,41 @@
+# AI-SDLC Enterprise Plugin Configuration
+# Copy to: .ai-sdlc/enterprise.yaml (git-ignored)
+#
+# Only configure the plugins you need — unconfigured plugins are skipped.
+
+# ── License ─────────────────────────────────────────────────────────
+# Set your license key here or in AI_SDLC_LICENSE_KEY env var.
+# Without a key, plugins run in trial mode (30 days).
+# licenseKey: "your-license-key-here"
+
+# ── HTTP Audit Hook (SIEM integration) ─────────────────────────────
+# Sends every Claude Code tool event to your audit endpoint.
+# audit:
+#   endpoint: "https://governance.company.com/api/v1/audit"
+#   tokenEnvVar: "AI_SDLC_AUDIT_TOKEN"  # env var holding the auth token
+
+# ── Telemetry Push ──────────────────────────────────────────────────
+# Pushes pipeline lifecycle events (afterRun, onError) to your telemetry backend.
+# telemetry:
+#   endpoint: "https://otel.company.com/v1/logs"
+#   headers:
+#     DD-API-KEY: "${DATADOG_API_KEY}"
+
+# ── Remote Policy ───────────────────────────────────────────────────
+# Calls a policy decision endpoint before each pipeline run.
+# policy:
+#   endpoint: "https://policy.company.com/api/v1/check"
+#   failOpen: false  # true = allow on server error, false = deny
+
+# ── SIEM Export ─────────────────────────────────────────────────────
+# Exports audit log entries to SIEM providers.
+# Providers: splunk, datadog, elasticsearch, azure-sentinel, syslog
+# siem:
+#   provider: "splunk"
+#   endpoint: "https://splunk.company.com:8088/services/collector"
+#   tokenEnvVar: "SPLUNK_HEC_TOKEN"
+
+# ── Managed Settings Generator ──────────────────────────────────────
+# Generates Claude Code managed settings files for enterprise deployment.
+# Enabled automatically — no configuration needed.
+# Use: ai-sdlc-enterprise managed-settings generate --format json
