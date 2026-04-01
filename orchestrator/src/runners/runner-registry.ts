@@ -6,6 +6,7 @@
 
 import type { AgentRunner } from './types.js';
 import { ClaudeCodeRunner } from './claude-code.js';
+import { ClaudeCodeSdkRunner } from './claude-code-sdk.js';
 import { GenericLLMRunner } from './generic-llm.js';
 import { CopilotRunner } from './copilot.js';
 import { CursorRunner } from './cursor.js';
@@ -90,6 +91,16 @@ export class RunnerRegistry {
       this.runners.set('claude-code', {
         name: 'claude-code',
         runner: new ClaudeCodeRunner(),
+        available: true,
+        source: 'built-in',
+      });
+    }
+
+    // Claude Code SDK runner — available when @anthropic-ai/claude-agent-sdk is installed
+    if (!this.runners.has('claude-code-sdk')) {
+      this.runners.set('claude-code-sdk', {
+        name: 'claude-code-sdk',
+        runner: new ClaudeCodeSdkRunner(),
         available: true,
         source: 'built-in',
       });

@@ -6,6 +6,8 @@ export type {
   TokenUsage,
 } from './types.js';
 export { ClaudeCodeRunner, GitHubActionsRunner } from './claude-code.js';
+export { ClaudeCodeSdkRunner } from './claude-code-sdk.js';
+export { gitExec, detectChangedFiles, runAutoFix, type DetectedChanges } from './git-utils.js';
 export {
   GenericLLMRunner,
   type GenericLLMConfig,
@@ -29,3 +31,10 @@ export {
   type ReviewFinding,
   type ReviewVerdict,
 } from './review-agent.js';
+export {
+  runParallelSdkReviews,
+  DEFAULT_REVIEW_CONFIGS,
+  type SdkReviewConfig,
+  type SdkParallelReviewOptions,
+  type SdkParallelReviewResult,
+} from './sdk-review-runner.js';

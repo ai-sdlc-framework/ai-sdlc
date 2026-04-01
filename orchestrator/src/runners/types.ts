@@ -19,6 +19,12 @@ export interface AgentContext {
     maxFilesPerChange: number;
     requireTests: boolean;
     blockedPaths: string[];
+    /** Maximum budget in USD for a single agent run (SDK runner only). */
+    maxBudgetUsd?: number;
+    /** Maximum number of tool-call turns (SDK runner only). */
+    maxTurns?: number;
+    /** Shell command patterns the agent is forbidden from executing. */
+    blockedActions?: string[];
   };
   /** CI failure logs, populated only during fix-CI retries. */
   ciErrors?: string;

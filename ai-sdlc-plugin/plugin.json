@@ -1,0 +1,114 @@
+{
+  "name": "ai-sdlc",
+  "version": "0.7.0",
+  "description": "AI-SDLC governance framework for Claude Code — action enforcement, telemetry, quality gates, and review agents",
+  "author": {
+    "name": "AI-SDLC Framework",
+    "url": "https://ai-sdlc.io"
+  },
+  "homepage": "https://ai-sdlc.io",
+  "repository": "https://github.com/ai-sdlc-framework/ai-sdlc",
+  "license": "Apache-2.0",
+  "keywords": ["governance", "sdlc", "security", "quality-gates", "code-review"],
+
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
+            "statusMessage": "Loading AI-SDLC governance..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/enforce-blocked-actions.sh\"",
+            "if": "Bash(*)",
+            "statusMessage": "Checking action policy..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/collect-tool-sequence.sh\"",
+            "async": true
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/quality-gate-stop.sh\"",
+            "statusMessage": "Verifying governance compliance..."
+          },
+          {
+            "type": "agent",
+            "prompt": "You are an AI-SDLC governance verifier. The session transcript is at $ARGUMENTS. Read it and verify:\n1. If code was modified, the build command (pnpm build or equivalent) was run and passed\n2. If code was modified, the test suite (pnpm test or equivalent) was run and passed\n3. If code was modified, the linter (pnpm lint or equivalent) was run and passed\n4. No files in blockedPaths (.github/workflows/**, .ai-sdlc/**) were modified\n5. No secrets or API keys appear in committed code\n\nReturn ok:true only if ALL checks pass. Return ok:false with specific violations.",
+            "model": "claude-haiku-4-5-20251001",
+            "timeout": 45,
+            "statusMessage": "Running governance quality gates..."
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/deferred-coverage-check.sh\"",
+            "asyncRewake": true,
+            "statusMessage": "Checking coverage..."
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/permission-check.sh\"",
+            "if": "Bash(gh pr merge*)"
+          }
+        ]
+      }
+    ]
+  },
+
+  "mcpServers": {
+    "ai-sdlc": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/bin.js"],
+      "env": {
+        "GITHUB_TOKEN": "${user_config.github_token}",
+        "AI_SDLC_PROJECT_ROOT": "${CLAUDE_PLUGIN_DATA}"
+      }
+    }
+  },
+
+  "userConfig": {
+    "github_token": {
+      "type": "string",
+      "title": "GitHub Token",
+      "description": "Personal access token for GitHub API (label management, PR operations). Optional — falls back to gh CLI auth.",
+      "required": false,
+      "sensitive": true
+    },
+    "slack_webhook": {
+      "type": "string",
+      "title": "Slack Webhook URL",
+      "description": "Webhook URL for pipeline visibility notifications in Slack.",
+      "required": false
+    }
+  }
+}

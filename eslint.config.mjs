@@ -18,6 +18,7 @@ export default tseslint.config(
       '**/scripts/',
       '**/vitest.config.ts',
       '.claude/hooks/',
+      'ai-sdlc-plugin/hooks/',
     ],
   },
   eslint.configs.recommended,
