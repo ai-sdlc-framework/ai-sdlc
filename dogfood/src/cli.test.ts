@@ -113,14 +113,12 @@ describe('cli.ts', () => {
     expect(createPipelineAdmission).toHaveBeenCalled();
   });
 
-  it('logs enterprise plugins not available when package missing', async () => {
+  it('logs OSS-only when no enterprise.yaml', async () => {
     process.argv = ['node', 'cli.ts', '--issue', '7'];
 
     await import('./cli.js');
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(errorSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Enterprise plugins not available'),
-    );
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('running OSS only'));
   });
 });
