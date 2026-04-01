@@ -380,6 +380,10 @@ export interface AgentConstraints {
   blockedActions?: string[];
   /** Action categories that require human approval before execution. */
   requireHumanApproval?: string[];
+  /** Maximum budget in USD for a single agent run (enforced by SDK runner). */
+  maxBudgetUsd?: number;
+  /** Maximum number of tool-call turns before the agent is stopped. */
+  maxTurns?: number;
 }
 
 export interface HandoffContractRef {

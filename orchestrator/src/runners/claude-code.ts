@@ -3,8 +3,7 @@
  * and collects the result via git diff.
  */
 
-import { spawn, execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import type {
   AgentRunner,
   AgentContext,
@@ -22,8 +21,7 @@ import {
   DEFAULT_COMMIT_CO_AUTHOR,
 } from '../defaults.js';
 import { formatContextForPrompt } from '../analysis/context-builder.js';
-
-const execFileAsync = promisify(execFile);
+import { gitExec, detectChangedFiles, runAutoFix } from './git-utils.js';
 
 /**
  * Build verification step instructions (lint, format, typecheck).
@@ -172,11 +170,6 @@ export function buildPrompt(ctx: AgentContext): string {
   }
 
   return lines.join('\n');
-}
-
-async function gitExec(workDir: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd: workDir });
-  return stdout.trim();
 }
 
 interface RunClaudeOptions {
@@ -540,25 +533,6 @@ export function parseTokenUsage(stderr: string, model: string): TokenUsage | und
 /**
  * Run lint --fix and format commands (best-effort) so pre-commit hooks pass.
  */
-async function runAutoFix(workDir: string, lintCmd?: string, fmtCmd?: string): Promise<void> {
-  if (fmtCmd) {
-    try {
-      const [bin, ...args] = fmtCmd.split(' ');
-      await execFileAsync(bin, args, { cwd: workDir });
-    } catch {
-      // Format failures are non-fatal — the commit hook will catch remaining issues
-    }
-  }
-  if (lintCmd) {
-    try {
-      const [bin, ...args] = lintCmd.split(' ');
-      await execFileAsync(bin, args, { cwd: workDir });
-    } catch {
-      // Lint --fix failures are non-fatal
-    }
-  }
-}
-
 export class ClaudeCodeRunner implements AgentRunner {
   async run(ctx: AgentContext): Promise<AgentResult> {
     const prompt = buildPrompt(ctx);
@@ -576,43 +550,8 @@ export class ClaudeCodeRunner implements AgentRunner {
       // Token usage from stream-json result event (falls back to stderr parsing)
       const tokenUsage = parseTokenUsage(result.stderr, result.model);
 
-      // Collect changed files — check both uncommitted and already-committed changes
-      // The agent may have committed on its own (Claude Code can run git commit)
-      const diffOutput = await gitExec(ctx.workDir, ['diff', '--name-only']);
-      const untrackedOutput = await gitExec(ctx.workDir, [
-        'ls-files',
-        '--others',
-        '--exclude-standard',
-      ]);
-
-      const uncommittedFiles = [
-        ...diffOutput.split('\n').filter(Boolean),
-        ...untrackedOutput.split('\n').filter(Boolean),
-      ];
-
-      // Check if agent already committed (and possibly pushed) —
-      // compare against the merge base with the target branch (main)
-      let committedFiles: string[] = [];
-      let agentAlreadyCommitted = false;
-      try {
-        // Find the merge base with main to see all new commits on this branch
-        const mergeBase = (
-          await gitExec(ctx.workDir, ['merge-base', 'HEAD', 'origin/main'])
-        ).trim();
-        if (mergeBase) {
-          const commitDiff = await gitExec(ctx.workDir, [
-            'diff',
-            '--name-only',
-            `${mergeBase}..HEAD`,
-          ]);
-          committedFiles = commitDiff.split('\n').filter(Boolean);
-          agentAlreadyCommitted = committedFiles.length > 0 && uncommittedFiles.length === 0;
-        }
-      } catch {
-        // merge-base may fail if main doesn't exist locally — that's fine
-      }
-
-      const filesChanged = agentAlreadyCommitted ? committedFiles : uncommittedFiles;
+      // Collect changed files (uncommitted + agent-committed)
+      const { filesChanged, agentAlreadyCommitted } = await detectChangedFiles(ctx.workDir);
 
       if (filesChanged.length === 0) {
         return {

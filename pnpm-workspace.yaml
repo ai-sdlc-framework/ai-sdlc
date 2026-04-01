@@ -6,3 +6,4 @@ packages:
   - dogfood
   - dashboard
   - mcp-advisor
+  - ai-sdlc-plugin/mcp-server
