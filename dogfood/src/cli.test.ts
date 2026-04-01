@@ -1,7 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+const mockRun = vi.fn().mockResolvedValue({ success: true });
+const mockClose = vi.fn().mockResolvedValue(undefined);
+
 // Mock all orchestrator dependencies before importing cli
 vi.mock('@ai-sdlc/orchestrator', () => ({
+  Orchestrator: vi.fn().mockImplementation(() => ({
+    run: mockRun,
+    close: mockClose,
+  })),
   executePipeline: vi.fn().mockResolvedValue({ success: true }),
   createPipelineSecurity: vi.fn().mockReturnValue({}),
   createPipelineMetricStore: vi.fn().mockReturnValue({}),
@@ -18,6 +25,11 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
   DEFAULT_CONFIG_DIR_NAME: '.ai-sdlc',
 }));
 
+// Mock enterprise plugins (not installed in test env)
+vi.mock('@ai-sdlc-enterprise/plugins', () => {
+  throw new Error('not installed');
+});
+
 describe('cli.ts', () => {
   let originalArgv: string[];
   let exitSpy: ReturnType<typeof vi.spyOn>;
@@ -28,6 +40,8 @@ describe('cli.ts', () => {
     // @ts-expect-error -- mock process.exit for test
     exitSpy = vi.spyOn(process, 'exit').mockImplementation(() => {});
     errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    mockRun.mockClear();
+    mockClose.mockClear();
     vi.resetModules();
   });
 
@@ -47,14 +61,13 @@ describe('cli.ts', () => {
     expect(errorSpy).toHaveBeenCalledWith('Usage: execute --issue <id>');
   });
 
-  it('calls executePipeline with the issue ID on valid args', async () => {
+  it('calls Orchestrator.run with the issue ID on valid args', async () => {
     process.argv = ['node', 'cli.ts', '--issue', '42'];
 
     await import('./cli.js');
     await new Promise((r) => setTimeout(r, 50));
 
-    const { executePipeline } = await import('@ai-sdlc/orchestrator');
-    expect(executePipeline).toHaveBeenCalledWith(
+    expect(mockRun).toHaveBeenCalledWith(
       '42',
       expect.objectContaining({
         useStructuredLogger: true,
@@ -63,9 +76,8 @@ describe('cli.ts', () => {
     );
   });
 
-  it('handles executePipeline rejection gracefully', async () => {
-    const { executePipeline } = await import('@ai-sdlc/orchestrator');
-    vi.mocked(executePipeline).mockRejectedValueOnce(new Error('Pipeline failed'));
+  it('handles Orchestrator.run rejection gracefully', async () => {
+    mockRun.mockRejectedValueOnce(new Error('Pipeline failed'));
 
     process.argv = ['node', 'cli.ts', '--issue', '99'];
 
@@ -76,8 +88,7 @@ describe('cli.ts', () => {
   });
 
   it('handles non-Error exception in pipeline', async () => {
-    const { executePipeline } = await import('@ai-sdlc/orchestrator');
-    vi.mocked(executePipeline).mockRejectedValueOnce('string error');
+    mockRun.mockRejectedValueOnce('string error');
 
     process.argv = ['node', 'cli.ts', '--issue', '55'];
 
@@ -100,5 +111,16 @@ describe('cli.ts', () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(createPipelineAdmission).toHaveBeenCalled();
+  });
+
+  it('logs enterprise plugins not available when package missing', async () => {
+    process.argv = ['node', 'cli.ts', '--issue', '7'];
+
+    await import('./cli.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Enterprise plugins not available'),
+    );
   });
 });
