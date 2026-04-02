@@ -23,7 +23,19 @@ export interface ReviewFinding {
   file?: string;
   line?: number;
   message: string;
+  /** Self-assessed confidence score (0-1). Findings below 0.5 are suppressed. */
+  confidence?: number;
+  /** Category of the finding. */
+  category?: 'logic-error' | 'security' | 'design' | 'performance' | 'testing' | 'other';
+  /** Evidence supporting the finding. Required for critical/major. */
+  evidence?: {
+    codePathTraced?: string;
+    failureScenario?: string;
+  };
 }
+
+/** Minimum confidence to include a finding in the verdict. */
+const CONFIDENCE_THRESHOLD = 0.5;
 
 export interface ReviewVerdict {
   type: ReviewType;
@@ -95,19 +107,37 @@ Analyze the diff and any provided acceptance criteria. Check for:
 
 Do NOT flag: coverage percentages, missing tests for config/YAML files, type-only files, or barrel exports. Codecov and CI handle these.
 
-Respond with ONLY a JSON object (no markdown, no code fences):
+## Structured Output Format
+
+Respond with ONLY a JSON object (no markdown, no code fences).
+
+Each finding MUST include a confidence score (0.0-1.0) and a category.
+For critical/major findings, you MUST include evidence with a concrete failure scenario.
+**No evidence = no critical/major finding.** If you cannot trace the code path to a failure, downgrade to minor/suggestion.
+Findings below 0.5 confidence will be automatically suppressed.
 
 {
   "approved": true/false,
   "findings": [
-    {"severity": "critical|major|minor|suggestion", "file": "path/to/file.ts", "line": 42, "message": "description"}
+    {
+      "severity": "critical|major|minor|suggestion",
+      "confidence": 0.0-1.0,
+      "category": "testing|logic-error|security|design|performance|other",
+      "file": "path/to/file.ts",
+      "line": 42,
+      "evidence": {
+        "codePathTraced": "Function X calls Y which can return null when Z",
+        "failureScenario": "When input is empty, line 42 throws TypeError"
+      },
+      "message": "Concise description of the issue"
+    }
   ],
   "summary": "1-2 sentence overall assessment"
 }
 
 Severity guide:
-- critical: Missing tests for critical logic paths, acceptance criteria not met
-- major: Significant untested logic branches
+- critical: Missing tests for critical logic paths, acceptance criteria not met. MUST have failureScenario.
+- major: Significant untested logic branches. MUST have failureScenario.
 - minor: Minor test improvements possible
 - suggestion: Nice-to-have test additions`,
 
@@ -121,19 +151,37 @@ Analyze the diff for:
 
 Do NOT flag: style issues (formatting, whitespace, import order), type errors, lint violations, or naming conventions. ESLint, Prettier, and TypeScript handle these deterministically.
 
-Respond with ONLY a JSON object (no markdown, no code fences):
+## Structured Output Format
+
+Respond with ONLY a JSON object (no markdown, no code fences).
+
+Each finding MUST include a confidence score (0.0-1.0) and a category.
+For critical/major findings, you MUST include evidence with a concrete failure scenario.
+**No evidence = no critical/major finding.** If you cannot trace the code path to a failure, downgrade to minor/suggestion.
+Findings below 0.5 confidence will be automatically suppressed.
 
 {
   "approved": true/false,
   "findings": [
-    {"severity": "critical|major|minor|suggestion", "file": "path/to/file.ts", "line": 42, "message": "description"}
+    {
+      "severity": "critical|major|minor|suggestion",
+      "confidence": 0.0-1.0,
+      "category": "logic-error|design|performance|other",
+      "file": "path/to/file.ts",
+      "line": 42,
+      "evidence": {
+        "codePathTraced": "Function X calls Y which can return null when Z",
+        "failureScenario": "When input is empty, line 42 throws TypeError"
+      },
+      "message": "Concise description of the issue"
+    }
   ],
   "summary": "1-2 sentence overall assessment"
 }
 
 Severity guide:
-- critical: Logic errors, data loss risks, broken functionality
-- major: Significant design issues that should be fixed before merge
+- critical: Logic errors, data loss risks, broken functionality. MUST have failureScenario.
+- major: Significant design issues that should be fixed before merge. MUST have failureScenario.
 - minor: Improvements that would make the code better
 - suggestion: Optional enhancements`,
 
@@ -149,19 +197,37 @@ Analyze the diff for:
 
 Do NOT flag: type safety issues (TypeScript handles these), or issues in trusted internal code paths (config files, env vars set by the platform).
 
-Respond with ONLY a JSON object (no markdown, no code fences):
+## Structured Output Format
+
+Respond with ONLY a JSON object (no markdown, no code fences).
+
+Each finding MUST include a confidence score (0.0-1.0) and a category.
+For critical/major findings, you MUST include evidence with a concrete failure scenario.
+**No evidence = no critical/major finding.** If you cannot describe a realistic attack vector, downgrade to minor/suggestion.
+Findings below 0.5 confidence will be automatically suppressed.
 
 {
   "approved": true/false,
   "findings": [
-    {"severity": "critical|major|minor|suggestion", "file": "path/to/file.ts", "line": 42, "message": "description"}
+    {
+      "severity": "critical|major|minor|suggestion",
+      "confidence": 0.0-1.0,
+      "category": "security|other",
+      "file": "path/to/file.ts",
+      "line": 42,
+      "evidence": {
+        "codePathTraced": "User input flows from X to Y without sanitization",
+        "failureScenario": "Attacker sends malicious input via Z, causing command injection at line 42"
+      },
+      "message": "Concise description of the vulnerability"
+    }
   ],
   "summary": "1-2 sentence overall assessment"
 }
 
 Severity guide:
-- critical: Exploitable vulnerability (injection, credential leak, auth bypass)
-- major: Security weakness that should be fixed (missing validation, unsafe patterns)
+- critical: Exploitable vulnerability (injection, credential leak, auth bypass). MUST have failureScenario with attack vector.
+- major: Security weakness that should be fixed (missing validation, unsafe patterns). MUST have failureScenario.
 - minor: Defense-in-depth improvement
 - suggestion: Security hardening opportunity`,
 };
@@ -285,16 +351,36 @@ export class ReviewAgentRunner implements AgentRunner {
     try {
       const parsed = JSON.parse(cleaned);
 
-      const findings: ReviewFinding[] = Array.isArray(parsed.findings)
-        ? parsed.findings.map((f: Record<string, unknown>) => ({
-            severity: ['critical', 'major', 'minor', 'suggestion'].includes(String(f.severity))
-              ? (String(f.severity) as ReviewFinding['severity'])
-              : 'minor',
-            file: f.file ? String(f.file) : undefined,
-            line: typeof f.line === 'number' ? f.line : undefined,
-            message: String(f.message ?? ''),
-          }))
+      const rawFindings: ReviewFinding[] = Array.isArray(parsed.findings)
+        ? parsed.findings.map((f: Record<string, unknown>) => {
+            const evidence = f.evidence as Record<string, unknown> | undefined;
+            return {
+              severity: ['critical', 'major', 'minor', 'suggestion'].includes(String(f.severity))
+                ? (String(f.severity) as ReviewFinding['severity'])
+                : 'minor',
+              file: f.file ? String(f.file) : undefined,
+              line: typeof f.line === 'number' ? f.line : undefined,
+              message: String(f.message ?? ''),
+              confidence: typeof f.confidence === 'number' ? f.confidence : undefined,
+              category: f.category ? (String(f.category) as ReviewFinding['category']) : undefined,
+              evidence: evidence
+                ? {
+                    codePathTraced: evidence.codePathTraced
+                      ? String(evidence.codePathTraced)
+                      : undefined,
+                    failureScenario: evidence.failureScenario
+                      ? String(evidence.failureScenario)
+                      : undefined,
+                  }
+                : undefined,
+            };
+          })
         : [];
+
+      // Filter out low-confidence findings
+      const findings = rawFindings.filter(
+        (f) => f.confidence === undefined || f.confidence >= CONFIDENCE_THRESHOLD,
+      );
 
       return {
         type: this.config.reviewType,

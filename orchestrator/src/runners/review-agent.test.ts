@@ -294,3 +294,120 @@ describe('CI boundary preamble', () => {
     expect(REVIEW_PROMPTS.security).toContain('TypeScript handles these');
   });
 });
+
+describe('structured reasoning output', () => {
+  const reviewTypes: ReviewType[] = ['testing', 'critic', 'security'];
+
+  for (const type of reviewTypes) {
+    it(`${type} prompt requires confidence scores`, () => {
+      expect(REVIEW_PROMPTS[type]).toContain('confidence');
+      expect(REVIEW_PROMPTS[type]).toContain('0.0-1.0');
+    });
+
+    it(`${type} prompt requires evidence for critical/major`, () => {
+      expect(REVIEW_PROMPTS[type]).toContain('MUST have failureScenario');
+      expect(REVIEW_PROMPTS[type]).toContain('No evidence = no critical/major');
+    });
+
+    it(`${type} prompt mentions automatic suppression of low confidence`, () => {
+      expect(REVIEW_PROMPTS[type]).toContain('below 0.5 confidence');
+      expect(REVIEW_PROMPTS[type]).toContain('automatically suppressed');
+    });
+
+    it(`${type} prompt includes category field`, () => {
+      expect(REVIEW_PROMPTS[type]).toContain('"category"');
+    });
+  }
+});
+
+describe('confidence-based filtering', () => {
+  let runner: ReviewAgentRunner;
+
+  beforeEach(() => {
+    runner = new ReviewAgentRunner({ reviewType: 'critic' });
+  });
+
+  it('filters out findings below 0.5 confidence', () => {
+    const verdict = runner.parseVerdict(
+      JSON.stringify({
+        approved: true,
+        findings: [
+          { severity: 'minor', confidence: 0.3, message: 'low confidence issue' },
+          { severity: 'major', confidence: 0.8, message: 'high confidence issue' },
+        ],
+        summary: 'Mixed confidence',
+      }),
+    );
+
+    expect(verdict.findings).toHaveLength(1);
+    expect(verdict.findings[0].message).toBe('high confidence issue');
+  });
+
+  it('keeps findings without confidence score (backward compat)', () => {
+    const verdict = runner.parseVerdict(
+      JSON.stringify({
+        approved: true,
+        findings: [{ severity: 'minor', message: 'no confidence field' }],
+        summary: 'Legacy format',
+      }),
+    );
+
+    expect(verdict.findings).toHaveLength(1);
+  });
+
+  it('parses evidence fields', () => {
+    const verdict = runner.parseVerdict(
+      JSON.stringify({
+        approved: false,
+        findings: [
+          {
+            severity: 'critical',
+            confidence: 0.95,
+            category: 'logic-error',
+            file: 'src/foo.ts',
+            line: 42,
+            evidence: {
+              codePathTraced: 'Function X calls Y',
+              failureScenario: 'Null pointer on empty input',
+            },
+            message: 'NPE risk',
+          },
+        ],
+        summary: 'Critical bug found',
+      }),
+    );
+
+    expect(verdict.findings[0].confidence).toBe(0.95);
+    expect(verdict.findings[0].category).toBe('logic-error');
+    expect(verdict.findings[0].evidence?.codePathTraced).toBe('Function X calls Y');
+    expect(verdict.findings[0].evidence?.failureScenario).toBe('Null pointer on empty input');
+  });
+
+  it('filters all low-confidence findings and keeps approved status', () => {
+    const verdict = runner.parseVerdict(
+      JSON.stringify({
+        approved: true,
+        findings: [
+          { severity: 'suggestion', confidence: 0.2, message: 'very low' },
+          { severity: 'minor', confidence: 0.4, message: 'below threshold' },
+        ],
+        summary: 'All filtered',
+      }),
+    );
+
+    expect(verdict.findings).toHaveLength(0);
+    expect(verdict.approved).toBe(true);
+  });
+
+  it('keeps findings at exactly 0.5 confidence', () => {
+    const verdict = runner.parseVerdict(
+      JSON.stringify({
+        approved: true,
+        findings: [{ severity: 'minor', confidence: 0.5, message: 'at threshold' }],
+        summary: 'Edge case',
+      }),
+    );
+
+    expect(verdict.findings).toHaveLength(1);
+  });
+});
