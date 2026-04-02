@@ -9,7 +9,7 @@
  *   review --pr 42 --diff-file /tmp/pr-diff.txt --issue-file /tmp/issue.json --type testing
  */
 
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   executeReview,
@@ -18,6 +18,7 @@ import {
   type ReviewContext,
 } from '@ai-sdlc/orchestrator';
 import type { ReviewType } from '@ai-sdlc/orchestrator';
+import { loadReviewCalibration } from './review-calibration.js';
 
 // ── Arg parsing ──────────────────────────────────────────────────────
 
@@ -109,38 +110,12 @@ async function main(): Promise<void> {
     acceptanceCriteria,
   };
 
-  // Load review policy, principles, and exemplars
+  // Load review calibration context (policy + principles + exemplars)
   let reviewPolicy: string | undefined;
   let workDir: string;
   try {
     workDir = await resolveRepoRoot();
-    const configDir = join(workDir, '.ai-sdlc');
-
-    // Assemble calibration context: policy + principles + exemplars
-    const parts: string[] = [];
-
-    const policyPath = join(configDir, 'review-policy.md');
-    if (existsSync(policyPath)) {
-      parts.push(readFileSync(policyPath, 'utf-8'));
-    }
-
-    const principlesPath = join(configDir, 'review-principles.md');
-    if (existsSync(principlesPath)) {
-      parts.push(readFileSync(principlesPath, 'utf-8'));
-    }
-
-    const exemplarsPath = join(configDir, 'review-exemplars.yaml');
-    if (existsSync(exemplarsPath)) {
-      parts.push(
-        '## Review Exemplars (labeled examples)\n\n```yaml\n' +
-          readFileSync(exemplarsPath, 'utf-8') +
-          '\n```',
-      );
-    }
-
-    if (parts.length > 0) {
-      reviewPolicy = parts.join('\n\n---\n\n');
-    }
+    reviewPolicy = loadReviewCalibration(join(workDir, '.ai-sdlc'));
   } catch {
     workDir = process.cwd();
   }
