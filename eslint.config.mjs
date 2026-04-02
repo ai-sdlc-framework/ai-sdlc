@@ -19,6 +19,7 @@ export default tseslint.config(
       '**/vitest.config.ts',
       '.claude/hooks/',
       'ai-sdlc-plugin/hooks/',
+      '**/coverage/',
     ],
   },
   eslint.configs.recommended,

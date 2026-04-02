@@ -97,6 +97,7 @@ export async function runParallelSdkReviews(
     options?: Record<string, unknown>;
   }) => AsyncIterable<Record<string, unknown>>;
 
+  /* v8 ignore start — dynamic import fails in unit tests (SDK not installed) */
   try {
     const sdk = await import('@anthropic-ai/claude-agent-sdk');
     query = sdk.query;
@@ -108,6 +109,7 @@ export async function runParallelSdkReviews(
       errors: ['@anthropic-ai/claude-agent-sdk is not installed. Install it to use SDK reviews.'],
     };
   }
+  /* v8 ignore stop */
 
   const configs = options.reviewConfigs ?? DEFAULT_REVIEW_CONFIGS;
   const model = options.model ?? DEFAULT_REVIEW_MODEL;
@@ -142,6 +144,7 @@ export async function runParallelSdkReviews(
   };
 }
 
+/* v8 ignore start — SDK streaming loop requires real SDK connection */
 async function runSingleReview(
   query: (params: {
     prompt: string;
@@ -204,6 +207,7 @@ async function runSingleReview(
   const verdict = parseReviewVerdict(config.type, responseText);
   return { verdict, tokenUsage };
 }
+/* v8 ignore stop */
 
 /** @internal Exported for testing. */
 export function buildReviewPrompt(type: ReviewType, options: SdkParallelReviewOptions): string {
