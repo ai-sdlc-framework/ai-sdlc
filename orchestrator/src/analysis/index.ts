@@ -24,3 +24,9 @@ export { analyzeHotspots } from './hotspot-analyzer.js';
 export { computeComplexityScore } from './complexity-scorer.js';
 export { analyzeCodebase } from './analyzer.js';
 export { buildCodebaseContext, formatContextForPrompt } from './context-builder.js';
+export {
+  analyzeDiff,
+  extractChangedFiles,
+  type DiffFinding,
+  type DiffAnalysisResult,
+} from './diff-analyzer.js';

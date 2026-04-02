@@ -11,7 +11,12 @@
 
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { executeReview, resolveRepoRoot, type ReviewContext } from '@ai-sdlc/orchestrator';
+import {
+  executeReview,
+  resolveRepoRoot,
+  analyzeDiff,
+  type ReviewContext,
+} from '@ai-sdlc/orchestrator';
 import type { ReviewType } from '@ai-sdlc/orchestrator';
 
 // ── Arg parsing ──────────────────────────────────────────────────────
@@ -104,16 +109,30 @@ async function main(): Promise<void> {
     acceptanceCriteria,
   };
 
-  // Load review policy if it exists (calibration context for review agents)
+  // Load review policy and run structural pre-analysis
   let reviewPolicy: string | undefined;
+  let workDir: string;
   try {
-    const workDir = await resolveRepoRoot();
+    workDir = await resolveRepoRoot();
     const policyPath = join(workDir, '.ai-sdlc', 'review-policy.md');
     if (existsSync(policyPath)) {
       reviewPolicy = readFileSync(policyPath, 'utf-8');
     }
   } catch {
-    // No review policy — agents use default prompts
+    workDir = process.cwd();
+  }
+
+  // Run deterministic structural analysis on changed files before LLM review
+  try {
+    const diffAnalysis = await analyzeDiff(args.diff, workDir);
+    if (diffAnalysis.summary) {
+      // Prepend structural findings to the review policy so agents see them
+      reviewPolicy = reviewPolicy
+        ? `${diffAnalysis.summary}\n\n---\n\n${reviewPolicy}`
+        : diffAnalysis.summary;
+    }
+  } catch {
+    // Structural analysis is best-effort — continue without it
   }
 
   const verdict = await executeReview(args.prNumber, args.diff, args.reviewType, context, {

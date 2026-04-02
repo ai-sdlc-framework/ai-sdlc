@@ -466,6 +466,8 @@ export {
   analyzeCodebase,
   buildCodebaseContext,
   formatContextForPrompt,
+  analyzeDiff,
+  extractChangedFiles,
 } from './analysis/index.js';
 export type {
   CodebaseProfile,
@@ -479,6 +481,8 @@ export type {
   AnalyzerOptions,
   FileInfo,
   ImportStatement,
+  DiffFinding,
+  DiffAnalysisResult,
 } from './analysis/index.js';
 
 // Check runs
