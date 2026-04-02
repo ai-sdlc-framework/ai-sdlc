@@ -1,5 +1,32 @@
 # @ai-sdlc/orchestrator
 
+## [0.7.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.6.0...orchestrator-v0.7.0) (2026-04-02)
+
+
+### Features
+
+* add CI boundary to review agent prompts (AISDLC-8.1) ([975c0cd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/975c0cdf000cf8a00e0968348b673aa80ec04be6))
+* add Claude Code plugin and SDK runner for native governance integration ([804f068](https://github.com/ai-sdlc-framework/ai-sdlc/commit/804f06801e388fb356cde716291abc4e3386f050))
+* add DiffAnalyzer for deterministic structural pre-review (AISDLC-8.2) ([ae0dde5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ae0dde5cb7d227998dd73fcb290da968c05a4fb3))
+* add meta-review pass and feedback flywheel (AISDLC-8.5) ([c9ba69d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c9ba69da6fa811fecedfafd33c736b6b6b94af93))
+* add structured reasoning with confidence scores to review agents (AISDLC-8.3) ([1ed0ec0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1ed0ec0a41a476652380191022d9b5500058cec8))
+* replace 21 hand-tuned rules with principles + exemplar bank (AISDLC-8.4) ([b02a755](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b02a755e960c98f0b55d2252c0d699e82e9a4e19))
+* workflow pattern detection Phase 1 — telemetry collection ([#50](https://github.com/ai-sdlc-framework/ai-sdlc/issues/50)) ([454548e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/454548ebe86b7588dff523e68d128b3c0b283a79))
+* workflow pattern detection Phases 2-4 — detection, proposals, artifacts ([e33a303](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e33a303e8f9158076c04361d0d09cd5a6f59c2e9))
+
+
+### Bug Fixes
+
+* plugin install fixes, quality gate false positives, gitignore deduplication ([cf84f09](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cf84f09cf93aabd8e22acc5e0262a4ed22d4e4e0))
+* stop tracking orchestrator/.gitignore — generated at runtime ([909759b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/909759bd3cd7051f0bb2bdcb6696bc2277ec282b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.7.0
+
 ## [0.6.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.5.0...orchestrator-v0.6.0) (2026-03-31)
 
 
