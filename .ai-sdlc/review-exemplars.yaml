@@ -1,0 +1,174 @@
+# Review Exemplar Bank
+#
+# Labeled examples that teach review agents by demonstration.
+# To calibrate: add an exemplar, don't add a rule.
+#
+# Types: true-positive (real bug), false-positive (should not flag), borderline (judgment call)
+
+exemplars:
+  # ── True Positives (real bugs to catch) ──────────────────────────
+
+  - id: null-pointer-on-regex-match
+    type: true-positive
+    category: logic-error
+    diff: |
+      +  const result = data.match(/pattern/);
+      +  return result.groups.name;
+    verdict: "critical — result can be null when pattern doesn't match, causing TypeError"
+    principle: evidence-first
+
+  - id: missing-await-on-async
+    type: true-positive
+    category: logic-error
+    diff: |
+      +  const data = fetchData();
+      +  console.log(data.length);
+    verdict: 'major — fetchData is async but not awaited, data is a Promise not an array'
+    principle: evidence-first
+
+  - id: command-injection-user-input
+    type: true-positive
+    category: security
+    diff: |
+      +  const userInput = req.query.name;
+      +  execSync(`echo ${userInput}`);
+    verdict: 'critical — user input interpolated into shell command without escaping'
+    principle: trust-boundaries
+
+  - id: sql-injection-string-concat
+    type: true-positive
+    category: security
+    diff: |
+      +  const query = `SELECT * FROM users WHERE id = '${req.params.id}'`;
+      +  db.execute(query);
+    verdict: 'critical — user input concatenated into SQL without parameterization'
+    principle: trust-boundaries
+
+  - id: off-by-one-loop-bound
+    type: true-positive
+    category: logic-error
+    diff: |
+      +  for (let i = 0; i <= items.length; i++) {
+      +    process(items[i]);
+    verdict: 'major — off-by-one: items[items.length] is undefined, causes TypeError'
+    principle: evidence-first
+
+  # ── False Positives (should NOT be flagged) ──────────────────────
+
+  - id: json-parse-trusted-config
+    type: false-positive
+    category: security
+    diff: |
+      +  const config = JSON.parse(readFileSync('.ai-sdlc/config.yaml'));
+    verdict: 'not a vulnerability — file is trusted project config committed by maintainers'
+    principle: trust-boundaries
+
+  - id: exec-git-rev-parse-fallback
+    type: false-positive
+    category: security
+    diff: |
+      +  const dir = process.env.CLAUDE_PROJECT_DIR || execSync('git rev-parse --show-toplevel').toString().trim();
+    verdict: 'not command injection — env var is set by Claude Code platform, fallback is standard git pattern'
+    principle: trust-boundaries
+
+  - id: bounded-regex-character-class
+    type: false-positive
+    category: security
+    diff: |
+      +  const match = input.match(/^[a-z0-9-]{0,30}$/);
+    verdict: 'not ReDoS — bounded character class with no alternation, linear time'
+    principle: evidence-first
+
+  - id: single-wildcard-from-config
+    type: false-positive
+    category: security
+    diff: |
+      +  const regex = new RegExp(`^${pattern.replace(/\*/g, '.*')}$`, 'i');
+    verdict: 'not ReDoS — pattern comes from trusted agent-role.yaml config, single .* cannot backtrack'
+    principle: trust-boundaries
+
+  - id: sequential-await-race-condition
+    type: false-positive
+    category: logic-error
+    diff: |
+      +  const a = await fetchA();
+      +  const b = await fetchB(a.id);
+    verdict: 'not a race condition — sequential awaits in same function execute in strict order'
+    principle: evidence-first
+
+  - id: empty-catch-with-comment
+    type: false-positive
+    category: design
+    diff: |
+      +  } catch {
+      +    // Best-effort — telemetry failures are non-fatal
+      +  }
+    verdict: 'not a bug — intentional error swallowing for best-effort operations, documented'
+    principle: context-awareness
+
+  - id: coverage-percentage-claim
+    type: false-positive
+    category: testing
+    diff: |
+      +  export function newHelper(): string { return 'hello'; }
+    verdict: 'do not claim zero coverage — you cannot measure it, Codecov CI check handles this'
+    principle: deterministic-first
+
+  - id: tests-in-different-file
+    type: false-positive
+    category: testing
+    diff: |
+      +  export function classify(pattern: Pattern): Classification {
+    verdict: 'do not flag as untested — classify() is tested via detector.test.ts, not a co-located test'
+    principle: context-awareness
+
+  - id: hook-script-not-vitest
+    type: false-positive
+    category: testing
+    diff: |
+      +  // ai-sdlc-plugin/hooks/enforce-blocked-actions.js
+    verdict: 'hooks are tested via Node built-in test runner (.test.mjs), not Vitest. Do not flag missing Vitest tests.'
+    principle: context-awareness
+
+  - id: future-phase-missing-code
+    type: false-positive
+    category: design
+    diff: |
+      +  // Phase 1: basic implementation, Phase 2 will add caching
+    verdict: 'do not flag missing code planned for future phases — check PR description for scope'
+    principle: scope-discipline
+
+  # ── Borderline Cases (judgment calls) ────────────────────────────
+
+  - id: json-parse-on-own-hook-output
+    type: borderline
+    category: security
+    diff: |
+      +  const entries = readFileSync(jsonlPath, 'utf-8').split('\n').map(l => JSON.parse(l));
+    verdict: 'reduced risk, not zero — file written by our own hook but validate if used in security-sensitive contexts. Approve with suggestion.'
+    principle: trust-boundaries
+
+  - id: prototype-pollution-json-parse
+    type: borderline
+    category: security
+    diff: |
+      +  const data = JSON.parse(userInput);
+      +  Object.assign(config, data);
+    verdict: 'flag as major — JSON.parse preserves __proto__ as plain key, but Object.assign on untrusted input can pollute prototypes'
+    principle: evidence-first
+
+  - id: large-file-single-responsibility
+    type: borderline
+    category: design
+    diff: |
+      +  // 500-line file with 20 imports
+    verdict: 'suggest splitting if multiple responsibilities, but approve if file has a single cohesive purpose'
+    principle: signal-over-noise
+
+  - id: sdk-mock-in-tests
+    type: borderline
+    category: testing
+    diff: |
+      +  vi.mock('@anthropic-ai/claude-agent-sdk', () => ({ query: vi.fn() }));
+    verdict: 'SDK is optional peer dep, not installed in test env. Mocking is intentional. Do not flag as major.'
+    principle: context-awareness
