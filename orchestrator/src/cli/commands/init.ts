@@ -147,8 +147,12 @@ function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = '
   const gitignorePath = join(projectDir, '.gitignore');
   const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
 
-  // Only check path entries (not comments) to avoid duplicate blocks
-  const missing = GITIGNORE_PATHS.filter((entry) => !existing.includes(entry));
+  const SENTINEL = '# ai-sdlc:runtime-gitignore';
+  if (existing.includes(SENTINEL)) return;
+
+  const missing = GITIGNORE_PATHS.filter(
+    (entry) => !existing.split('\n').some((line) => line.trim() === entry),
+  );
   if (missing.length === 0) return;
 
   if (dryRun) {
@@ -156,7 +160,7 @@ function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = '
     return;
   }
 
-  const block = '\n# AI-SDLC runtime artifacts\n' + missing.join('\n') + '\n';
+  const block = (existing.length > 0 ? '\n' : '') + `${SENTINEL}\n` + missing.join('\n') + '\n';
   appendFileSync(gitignorePath, block, 'utf-8');
   console.log(`${prefix}  updated .gitignore`);
 }

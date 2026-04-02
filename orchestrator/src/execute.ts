@@ -114,7 +114,7 @@ import {
   scanPipelineAdapters,
   resolveIssueTrackerFromConfig,
 } from './adapters.js';
-import { existsSync, readFileSync, appendFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   defaultSandboxConstraints,
@@ -1277,24 +1277,21 @@ const RUNTIME_GITIGNORE_PATHS = ['.ai-sdlc/state.db', '.ai-sdlc/state/', '.ai-sd
 function ensureRuntimeGitignore(workDir: string): void {
   try {
     const gitignorePath = join(workDir, '.gitignore');
-    if (!existsSync(gitignorePath)) {
-      // Create with all entries
-      const block = '# AI-SDLC runtime artifacts\n' + RUNTIME_GITIGNORE_PATHS.join('\n') + '\n';
-      appendFileSync(gitignorePath, block, 'utf-8');
-      return;
-    }
-    const existing = readFileSync(gitignorePath, 'utf-8');
-    // Check each path individually — only add truly missing ones
-    const missing = RUNTIME_GITIGNORE_PATHS.filter((entry) => {
-      // Match as a whole non-commented line to avoid false matches on "# .ai-sdlc/state.db"
-      return !existing.split('\n').some((line) => {
-        const trimmed = line.trim();
-        return trimmed === entry && !trimmed.startsWith('#');
-      });
-    });
+    const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
+
+    const SENTINEL = '# ai-sdlc:runtime-gitignore';
+    if (existing.includes(SENTINEL)) return;
+
+    const missing = RUNTIME_GITIGNORE_PATHS.filter(
+      (entry) => !existing.split('\n').some((line) => line.trim() === entry),
+    );
     if (missing.length === 0) return;
-    const block = '\n# AI-SDLC runtime artifacts\n' + missing.join('\n') + '\n';
-    appendFileSync(gitignorePath, block, 'utf-8');
+
+    // Write atomically (writeFileSync, not appendFileSync) to avoid race conditions
+    // when parallel test processes both read before either writes.
+    const block = `${SENTINEL}\n` + missing.join('\n') + '\n';
+    const newContent = existing.length > 0 ? existing.trimEnd() + '\n' + block : block;
+    writeFileSync(gitignorePath, newContent, 'utf-8');
   } catch {
     // Best-effort — workDir may not exist yet in tests or dry-run scenarios
   }
