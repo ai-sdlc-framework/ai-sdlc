@@ -65,10 +65,25 @@ if (sessionEvents.length === 0) {
 // Telemetry actions are canonicalized as "edit:.ts", "write:.json", etc.
 
 const CONFIG_ONLY_EXTENSIONS = new Set([
-  '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
-  '.md', '.mdx', '.txt', '.rst', '.html', '.css', '.svg',
-  '.sh', '.bash', '.zsh',
-  '.lock', '.log',
+  '.json',
+  '.yaml',
+  '.yml',
+  '.toml',
+  '.ini',
+  '.cfg',
+  '.conf',
+  '.md',
+  '.mdx',
+  '.txt',
+  '.rst',
+  '.html',
+  '.css',
+  '.svg',
+  '.sh',
+  '.bash',
+  '.zsh',
+  '.lock',
+  '.log',
   'file', // fallback when no extension detected
 ]);
 
