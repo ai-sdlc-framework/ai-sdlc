@@ -59,11 +59,14 @@ export function loadConfig(configDir: string): AiSdlcConfig {
   const config: AiSdlcConfig = {};
 
   for (const file of files) {
-    // Skip non-resource YAML files (e.g. manifest.yaml)
-    if (file === 'manifest.yaml') continue;
-
     const raw = readFileSync(resolve(dir, file), 'utf-8');
     const doc: unknown = parseYaml(raw);
+
+    // Skip non-resource YAML files (review-exemplars.yaml, manifest.yaml, etc.)
+    // AI-SDLC resources always have an apiVersion field.
+    if (!doc || typeof doc !== 'object' || !('apiVersion' in doc) || !('kind' in doc)) {
+      continue;
+    }
 
     const result = validateResource(doc);
     if (!result.valid) {
