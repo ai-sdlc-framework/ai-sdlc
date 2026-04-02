@@ -206,6 +206,13 @@ export {
 
 // PR review orchestration
 export { executeReview, type ReviewContext, type ReviewOptions } from './review.js';
+export {
+  metaReview,
+  ReviewFeedbackStore,
+  type MetaReviewDecision,
+  type MetaReviewResult,
+  type ReviewFeedback,
+} from './review-meta.js';
 
 // Agent orchestration
 export {

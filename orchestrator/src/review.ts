@@ -9,6 +9,7 @@ import {
   type ReviewVerdict,
   type ReviewAgentConfig,
 } from './runners/review-agent.js';
+import { metaReview } from './review-meta.js';
 import type { Logger } from './logger.js';
 
 // ── Types ────────────────────────────────────────────────────────────
@@ -26,6 +27,10 @@ export interface ReviewOptions {
   logger?: Logger;
   /** Inject runner for testing. */
   runner?: ReviewAgentRunner;
+  /** Review principles text for meta-review context. */
+  principles?: string;
+  /** LLM caller for meta-review pass. If provided, medium-confidence findings are filtered. */
+  metaReviewLLM?: (prompt: string) => Promise<string>;
 }
 
 // ── Public API ───────────────────────────────────────────────────────
@@ -90,11 +95,22 @@ export async function executeReview(
   }
 
   try {
-    const verdict = JSON.parse(result.summary) as ReviewVerdict;
+    let verdict = JSON.parse(result.summary) as ReviewVerdict;
+    verdict = { ...verdict, type: reviewType };
+
+    // Run meta-review on medium-confidence findings if LLM caller provided
+    if (options?.metaReviewLLM && options?.principles) {
+      const metaResult = await metaReview(verdict, options.principles, options.metaReviewLLM);
+      if (metaResult.suppressed > 0) {
+        logger?.info?.(`${reviewType} meta-review: ${metaResult.suppressed} finding(s) suppressed`);
+      }
+      verdict = metaResult.verdict;
+    }
+
     logger?.info?.(
       `${reviewType} review complete: ${verdict.approved ? 'APPROVED' : 'CHANGES REQUESTED'} (${verdict.findings.length} findings)`,
     );
-    return { ...verdict, type: reviewType };
+    return verdict;
   } catch {
     logger?.error?.(`Failed to parse ${reviewType} verdict from runner output`);
     return {
