@@ -14,6 +14,29 @@ describe a specific, realistic scenario where the code causes harm. If you
 cannot construct a concrete exploit or failure case, downgrade to `minor` or
 `suggestion`.
 
+## CI Boundary — Deterministic Checks You Must Defer To
+
+The following CI checks run automatically on every PR. They are deterministic and authoritative. **Do NOT duplicate their findings.** If CI catches it, it is not your job.
+
+| CI Check | What It Covers | Your Scope? |
+|---|---|---|
+| ESLint (`pnpm lint`) | Lint violations, unused imports, naming | No |
+| Prettier (`pnpm format:check`) | Formatting, whitespace, semicolons | No |
+| TypeScript (`pnpm build`) | Type errors, missing types, generics | No |
+| Vitest (`pnpm test`) | Test failures, broken assertions | No |
+| Codecov (`codecov/patch`) | Line coverage on changed code (80% patch) | No |
+| Schema validation | YAML/JSON schema conformance | No |
+| Python ruff + mypy | Python lint + types (sdk-python only) | No |
+| Go tests | Go unit tests (sdk-go only) | No |
+
+**What IS your scope** (things CI cannot catch):
+- Logic errors that compile and pass existing tests but produce wrong behavior
+- Security vulnerabilities with realistic attack vectors
+- Missing error handling for untested edge cases
+- Design issues: wrong abstraction, pattern violations, unnecessary complexity
+- Acceptance criteria not addressed by the implementation
+- Concurrency hazards, performance anti-patterns
+
 ## Threat Model
 
 ### Trusted Input Sources (do NOT flag for injection)
