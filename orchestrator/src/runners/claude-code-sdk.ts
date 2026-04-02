@@ -30,7 +30,8 @@ const DEFAULT_MAX_TURNS = 100;
 /**
  * Map agent-role tool names to SDK-compatible tool filter patterns.
  */
-function mapToolsToSdkFormat(allowedTools?: string[]): string[] | undefined {
+/** @internal Exported for testing. */
+export function mapToolsToSdkFormat(allowedTools?: string[]): string[] | undefined {
   if (!allowedTools) return undefined;
   // SDK accepts tool names directly or glob patterns like Bash(git:*)
   return allowedTools;
@@ -40,7 +41,8 @@ function mapToolsToSdkFormat(allowedTools?: string[]): string[] | undefined {
  * Build tool deny-list from blocked actions.
  * Converts blockedActions glob patterns to SDK disallowedTools format.
  */
-function mapBlockedActionsToSdkDenyList(blockedActions?: string[]): string[] {
+/** @internal Exported for testing. */
+export function mapBlockedActionsToSdkDenyList(blockedActions?: string[]): string[] {
   if (!blockedActions || blockedActions.length === 0) return [];
   // Map each blocked action pattern to a Bash() deny rule
   return blockedActions.map((pattern) => `Bash(${pattern})`);
@@ -49,7 +51,8 @@ function mapBlockedActionsToSdkDenyList(blockedActions?: string[]): string[] {
 /**
  * Build governance system prompt appendix from constraints.
  */
-function buildGovernancePrompt(ctx: AgentContext): string {
+/** @internal Exported for testing. */
+export function buildGovernancePrompt(ctx: AgentContext): string {
   const lines: string[] = ['## AI-SDLC Governance Constraints\n'];
 
   if (ctx.constraints.blockedPaths.length > 0) {
