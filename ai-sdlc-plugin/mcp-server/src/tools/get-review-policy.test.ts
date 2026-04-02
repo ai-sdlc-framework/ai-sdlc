@@ -39,4 +39,16 @@ describe('get_review_policy', () => {
     const result = await registeredHandler({});
     expect(result.content[0].text).toContain('default calibration');
   });
+
+  it('returns error when readFileSync throws', async () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readFileSync).mockImplementation(() => {
+      throw new Error('EACCES: permission denied');
+    });
+
+    const result = await registeredHandler({});
+    expect(result.content[0].text).toContain('Error reading review policy');
+    expect(result.content[0].text).toContain('EACCES: permission denied');
+    expect((result as { isError?: boolean }).isError).toBe(true);
+  });
 });
