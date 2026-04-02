@@ -1,0 +1,15 @@
+{
+  "name": "ai-sdlc-local",
+  "owner": {
+    "name": "AI-SDLC Framework",
+    "url": "https://ai-sdlc.io"
+  },
+  "plugins": [
+    {
+      "name": "ai-sdlc",
+      "source": "./",
+      "description": "AI-SDLC governance framework — action enforcement, telemetry, quality gates, and review agents",
+      "version": "0.7.0"
+    }
+  ]
+}
