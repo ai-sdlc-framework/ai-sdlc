@@ -46,8 +46,8 @@ interface EnterpriseConfig {
   siem?: { provider: string; endpoint: string; tokenEnvVar?: string };
 }
 
-function loadEnterpriseConfig(configDir: string): EnterpriseConfig | null {
-  const configPath = join(configDir, 'enterprise.yaml');
+function loadEnterpriseConfig(workDir: string): EnterpriseConfig | null {
+  const configPath = join(workDir, '.enterprise.yaml');
   if (!existsSync(configPath)) return null;
 
   try {
@@ -92,13 +92,13 @@ function loadEnterpriseConfig(configDir: string): EnterpriseConfig | null {
 }
 
 /**
- * Load enterprise plugins from .ai-sdlc/enterprise.yaml.
+ * Load enterprise plugins from .enterprise.yaml at the repo root.
  * Returns empty array if config file missing or enterprise package not installed.
  */
-async function loadEnterprisePlugins(configDir: string): Promise<OrchestratorPlugin[]> {
-  const entConfig = loadEnterpriseConfig(configDir);
+async function loadEnterprisePlugins(workDir: string): Promise<OrchestratorPlugin[]> {
+  const entConfig = loadEnterpriseConfig(workDir);
   if (!entConfig) {
-    console.error('[ai-sdlc] No .ai-sdlc/enterprise.yaml — running OSS only');
+    console.error('[ai-sdlc] No .enterprise.yaml — running OSS only');
     return [];
   }
 
@@ -200,7 +200,7 @@ async function main(): Promise<void> {
     : undefined;
 
   // Load enterprise plugins dynamically
-  const enterprisePlugins = await loadEnterprisePlugins(configDir);
+  const enterprisePlugins = await loadEnterprisePlugins(workDir);
 
   // Use Orchestrator class for plugin lifecycle support
   const orchestrator = new Orchestrator({

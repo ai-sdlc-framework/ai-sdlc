@@ -1277,8 +1277,18 @@ const RUNTIME_GITIGNORE_PATHS = ['.ai-sdlc/state.db', '.ai-sdlc/state/', '.ai-sd
 function ensureRuntimeGitignore(workDir: string): void {
   try {
     const gitignorePath = join(workDir, '.gitignore');
-    const existing = existsSync(gitignorePath) ? readFileSync(gitignorePath, 'utf-8') : '';
-    const missing = RUNTIME_GITIGNORE_PATHS.filter((entry) => !existing.includes(entry));
+    if (!existsSync(gitignorePath)) {
+      // Create with all entries
+      const block = '# AI-SDLC runtime artifacts\n' + RUNTIME_GITIGNORE_PATHS.join('\n') + '\n';
+      appendFileSync(gitignorePath, block, 'utf-8');
+      return;
+    }
+    const existing = readFileSync(gitignorePath, 'utf-8');
+    // Check each path individually — only add truly missing ones
+    const missing = RUNTIME_GITIGNORE_PATHS.filter((entry) => {
+      // Match the entry as a whole line to avoid partial matches
+      return !existing.split('\n').some((line) => line.trim() === entry);
+    });
     if (missing.length === 0) return;
     const block = '\n# AI-SDLC runtime artifacts\n' + missing.join('\n') + '\n';
     appendFileSync(gitignorePath, block, 'utf-8');

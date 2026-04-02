@@ -1,5 +1,5 @@
 # AI-SDLC Enterprise Plugin Configuration
-# Copy to: .ai-sdlc/enterprise.yaml (git-ignored)
+# Copy to: .enterprise.yaml at repo root (git-ignored)
 #
 # Only configure the plugins you need — unconfigured plugins are skipped.
 

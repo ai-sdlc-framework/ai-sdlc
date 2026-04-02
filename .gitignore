@@ -35,7 +35,7 @@ pnpm-debug.log*
 .ai-sdlc/audit.jsonl
 .ai-sdlc/state.db
 .ai-sdlc/state/
-.ai-sdlc/enterprise.yaml
+.enterprise.yaml
 
 # Package manager
 .pnpm-store/

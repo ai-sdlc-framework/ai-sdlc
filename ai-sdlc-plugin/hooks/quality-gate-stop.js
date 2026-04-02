@@ -60,17 +60,32 @@ if (sessionEvents.length === 0) {
   process.exit(0);
 }
 
-// ── Check if code was modified ───────────────────────────────────────
+// ── Check if source code was modified ────────────────────────────────
+// Only trigger for source files — skip config/docs edits (JSON, YAML, MD, etc.)
+// Telemetry actions are canonicalized as "edit:.ts", "write:.json", etc.
 
-const codeModifyingActions = sessionEvents.filter(
-  (e) =>
-    e.tool === 'Edit' ||
-    e.tool === 'Write' ||
-    (e.tool === 'Bash' && /git (add|commit)/.test(e.action)),
-);
+const CONFIG_ONLY_EXTENSIONS = new Set([
+  '.json', '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
+  '.md', '.mdx', '.txt', '.rst', '.html', '.css', '.svg',
+  '.sh', '.bash', '.zsh',
+  '.lock', '.log',
+  'file', // fallback when no extension detected
+]);
+
+const codeModifyingActions = sessionEvents.filter((e) => {
+  if (e.tool === 'Edit' || e.tool === 'Write') {
+    // Action format: "edit:.ts" or "write:.json" — extract the extension
+    const ext = e.action.replace(/^(edit|write):/, '');
+    return !CONFIG_ONLY_EXTENSIONS.has(ext);
+  }
+  if (e.tool === 'Bash' && /git (add|commit)/.test(e.action)) {
+    return true;
+  }
+  return false;
+});
 
 if (codeModifyingActions.length === 0) {
-  // No code changes — no verification needed
+  // No source code changes — no verification needed
   process.exit(0);
 }
 
