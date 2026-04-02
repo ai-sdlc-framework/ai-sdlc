@@ -20,8 +20,11 @@ export interface EnterpriseConfig {
 }
 
 /**
- * Minimal YAML parser that handles flat keys, nested sections,
+ * Minimal YAML parser that handles flat keys, one level of nested sections,
  * booleans, and quoted string values. Returns a plain object.
+ *
+ * NOTE: Only supports 2-level nesting (e.g., `audit.endpoint`).
+ * For deeper nesting, replace with a real YAML parser (js-yaml).
  */
 export function parseSimpleYaml(raw: string): Record<string, unknown> {
   const config: Record<string, unknown> = {};
