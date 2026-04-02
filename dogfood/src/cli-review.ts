@@ -109,14 +109,37 @@ async function main(): Promise<void> {
     acceptanceCriteria,
   };
 
-  // Load review policy and run structural pre-analysis
+  // Load review policy, principles, and exemplars
   let reviewPolicy: string | undefined;
   let workDir: string;
   try {
     workDir = await resolveRepoRoot();
-    const policyPath = join(workDir, '.ai-sdlc', 'review-policy.md');
+    const configDir = join(workDir, '.ai-sdlc');
+
+    // Assemble calibration context: policy + principles + exemplars
+    const parts: string[] = [];
+
+    const policyPath = join(configDir, 'review-policy.md');
     if (existsSync(policyPath)) {
-      reviewPolicy = readFileSync(policyPath, 'utf-8');
+      parts.push(readFileSync(policyPath, 'utf-8'));
+    }
+
+    const principlesPath = join(configDir, 'review-principles.md');
+    if (existsSync(principlesPath)) {
+      parts.push(readFileSync(principlesPath, 'utf-8'));
+    }
+
+    const exemplarsPath = join(configDir, 'review-exemplars.yaml');
+    if (existsSync(exemplarsPath)) {
+      parts.push(
+        '## Review Exemplars (labeled examples)\n\n```yaml\n' +
+          readFileSync(exemplarsPath, 'utf-8') +
+          '\n```',
+      );
+    }
+
+    if (parts.length > 0) {
+      reviewPolicy = parts.join('\n\n---\n\n');
     }
   } catch {
     workDir = process.cwd();
