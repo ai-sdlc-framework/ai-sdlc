@@ -205,7 +205,8 @@ async function runSingleReview(
   return { verdict, tokenUsage };
 }
 
-function buildReviewPrompt(type: ReviewType, options: SdkParallelReviewOptions): string {
+/** @internal Exported for testing. */
+export function buildReviewPrompt(type: ReviewType, options: SdkParallelReviewOptions): string {
   return [
     `## Pull Request #${options.prNumber}: ${options.prTitle}`,
     '',
@@ -219,7 +220,8 @@ function buildReviewPrompt(type: ReviewType, options: SdkParallelReviewOptions):
   ].join('\n');
 }
 
-function parseReviewVerdict(type: ReviewType, text: string): ReviewVerdict {
+/** @internal Exported for testing. */
+export function parseReviewVerdict(type: ReviewType, text: string): ReviewVerdict {
   const cleaned = text.replace(/^```(?:json)?\s*/m, '').replace(/\s*```$/m, '');
 
   try {
