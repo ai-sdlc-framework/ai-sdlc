@@ -1286,8 +1286,11 @@ function ensureRuntimeGitignore(workDir: string): void {
     const existing = readFileSync(gitignorePath, 'utf-8');
     // Check each path individually — only add truly missing ones
     const missing = RUNTIME_GITIGNORE_PATHS.filter((entry) => {
-      // Match the entry as a whole line to avoid partial matches
-      return !existing.split('\n').some((line) => line.trim() === entry);
+      // Match as a whole non-commented line to avoid false matches on "# .ai-sdlc/state.db"
+      return !existing.split('\n').some((line) => {
+        const trimmed = line.trim();
+        return trimmed === entry && !trimmed.startsWith('#');
+      });
     });
     if (missing.length === 0) return;
     const block = '\n# AI-SDLC runtime artifacts\n' + missing.join('\n') + '\n';
