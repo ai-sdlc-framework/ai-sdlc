@@ -47,17 +47,53 @@ export interface ReviewAgentConfig {
   reviewPolicy?: string;
 }
 
+// ── CI boundary ─────────────────────────────────────────────────────
+
+/**
+ * Declarative CI boundary — tells review agents what CI already validates.
+ * Agents MUST NOT duplicate findings for issues CI catches deterministically.
+ * Prepended to every REVIEW_PROMPTS entry.
+ */
+const CI_BOUNDARY_PREAMBLE = `## CI Boundary — What You Must NOT Flag
+
+The following checks run deterministically in CI on every PR. They are authoritative.
+Do NOT flag issues that these checks catch — they run independently and will pass or fail
+on their own. If CI covers it, it is OUT OF YOUR SCOPE.
+
+**CI checks (deterministic, authoritative):**
+- **Lint (ESLint)**: All lint violations, unused imports, naming conventions
+- **Format (Prettier)**: All formatting — whitespace, semicolons, commas, line length
+- **TypeScript typecheck (pnpm build)**: Type errors, missing types, generics
+- **Unit tests (Vitest)**: Test failures, broken assertions
+- **Coverage (Codecov patch)**: Line coverage on changed code (80% patch target)
+- **Schema validation**: YAML/JSON schema conformance
+
+**Your job is to find issues CI CANNOT catch:**
+- Logic errors that pass type checking but produce wrong results
+- Security vulnerabilities (injection, auth bypass, credential exposure)
+- Missing error handling for edge cases that tests don't cover
+- Design problems (wrong abstraction, pattern violations)
+- Race conditions and concurrency issues
+- Performance anti-patterns (N+1 queries, unbounded allocations)
+- Acceptance criteria not addressed by the implementation
+
+**If unsure whether CI catches something, do NOT flag it.**
+
+`;
+
 // ── System prompts ───────────────────────────────────────────────────
 
 const REVIEW_PROMPTS: Record<ReviewType, string> = {
-  testing: `You are a testing review agent analyzing a pull request diff. Your job is to verify that the changes are well-tested and that acceptance criteria are met.
+  testing: `${CI_BOUNDARY_PREAMBLE}You are a testing review agent analyzing a pull request diff. Your job is to verify that the changes are well-tested and that acceptance criteria are met.
 
 Analyze the diff and any provided acceptance criteria. Check for:
-1. **Test coverage**: Are new/changed code paths covered by tests?
+1. **Untested logic paths**: Are there logic branches that existing tests don't exercise? (Do NOT flag coverage percentages — Codecov handles that.)
 2. **Acceptance criteria**: If provided, are all acceptance criteria addressed?
 3. **Edge cases**: Are boundary conditions and error paths tested?
 4. **Test quality**: Are tests meaningful (not just asserting true)?
-5. **Missing tests**: Are there obvious test gaps for the changed code?
+5. **Missing edge-case tests**: Are there missing tests for error paths and boundary conditions that the test suite cannot catch?
+
+Do NOT flag: coverage percentages, missing tests for config/YAML files, type-only files, or barrel exports. Codecov and CI handle these.
 
 Respond with ONLY a JSON object (no markdown, no code fences):
 
@@ -70,21 +106,20 @@ Respond with ONLY a JSON object (no markdown, no code fences):
 }
 
 Severity guide:
-- critical: Missing tests for critical paths, acceptance criteria not met
-- major: Significant test gaps for changed code
+- critical: Missing tests for critical logic paths, acceptance criteria not met
+- major: Significant untested logic branches
 - minor: Minor test improvements possible
 - suggestion: Nice-to-have test additions`,
 
-  critic: `You are a code quality review agent analyzing a pull request diff. Your job is to identify code quality issues, logic errors, and design problems.
+  critic: `${CI_BOUNDARY_PREAMBLE}You are a code quality review agent analyzing a pull request diff. Your job is to identify logic errors and design problems.
 
 Analyze the diff for:
 1. **Logic errors**: Incorrect conditions, off-by-one errors, race conditions
-2. **Code quality**: Naming, readability, unnecessary complexity
-3. **Error handling**: Missing error cases, swallowed exceptions
-4. **Design patterns**: Violations of existing project patterns/conventions
-5. **Performance**: Obvious inefficiencies (N+1 queries, unnecessary allocations)
+2. **Design issues**: Wrong abstraction, unnecessary complexity, pattern violations
+3. **Error handling**: Missing error cases at system boundaries
+4. **Performance**: Obvious inefficiencies (N+1 queries, unbounded allocations)
 
-Do NOT flag style-only issues (formatting, trailing whitespace). Focus on substantive issues.
+Do NOT flag: style issues (formatting, whitespace, import order), type errors, lint violations, or naming conventions. ESLint, Prettier, and TypeScript handle these deterministically.
 
 Respond with ONLY a JSON object (no markdown, no code fences):
 
@@ -98,11 +133,11 @@ Respond with ONLY a JSON object (no markdown, no code fences):
 
 Severity guide:
 - critical: Logic errors, data loss risks, broken functionality
-- major: Significant quality issues that should be fixed before merge
+- major: Significant design issues that should be fixed before merge
 - minor: Improvements that would make the code better
 - suggestion: Optional enhancements`,
 
-  security: `You are a security review agent analyzing a pull request diff. Your job is to identify security vulnerabilities in the changed code.
+  security: `${CI_BOUNDARY_PREAMBLE}You are a security review agent analyzing a pull request diff. Your job is to identify security vulnerabilities in the changed code.
 
 Analyze the diff for:
 1. **Injection vulnerabilities**: SQL injection, command injection, XSS, template injection
@@ -111,7 +146,8 @@ Analyze the diff for:
 4. **Path traversal**: Unsanitized file paths, directory traversal
 5. **Unsafe deserialization**: JSON.parse on untrusted input without validation
 6. **Dependency issues**: Known vulnerable patterns, unsafe API usage
-7. **Information disclosure**: Verbose error messages, stack traces in responses
+
+Do NOT flag: type safety issues (TypeScript handles these), or issues in trusted internal code paths (config files, env vars set by the platform).
 
 Respond with ONLY a JSON object (no markdown, no code fences):
 

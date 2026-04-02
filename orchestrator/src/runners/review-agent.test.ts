@@ -254,3 +254,43 @@ describe('ReviewAgentRunner', () => {
     expect(userMsg).toContain('Widget renders centered');
   });
 });
+
+describe('CI boundary preamble', () => {
+  const reviewTypes: ReviewType[] = ['testing', 'critic', 'security'];
+
+  for (const type of reviewTypes) {
+    it(`${type} prompt includes CI Boundary section`, () => {
+      expect(REVIEW_PROMPTS[type]).toContain('CI Boundary');
+      expect(REVIEW_PROMPTS[type]).toContain('Do NOT flag issues that these checks catch');
+    });
+
+    it(`${type} prompt lists deterministic CI checks`, () => {
+      const prompt = REVIEW_PROMPTS[type];
+      expect(prompt).toContain('Lint');
+      expect(prompt).toContain('Format');
+      expect(prompt).toContain('typecheck');
+      expect(prompt).toContain('Coverage');
+    });
+
+    it(`${type} prompt lists what IS in scope`, () => {
+      expect(REVIEW_PROMPTS[type]).toContain('Logic errors');
+      expect(REVIEW_PROMPTS[type]).toContain('Security vulnerabilities');
+    });
+  }
+
+  it('testing prompt tells agents not to flag coverage percentages', () => {
+    expect(REVIEW_PROMPTS.testing).toContain('Do NOT flag coverage percentages');
+    expect(REVIEW_PROMPTS.testing).toContain('Codecov handles that');
+  });
+
+  it('critic prompt tells agents not to flag style or type errors', () => {
+    expect(REVIEW_PROMPTS.critic).toContain('Do NOT flag');
+    expect(REVIEW_PROMPTS.critic).toContain('ESLint');
+    expect(REVIEW_PROMPTS.critic).toContain('Prettier');
+    expect(REVIEW_PROMPTS.critic).toContain('TypeScript');
+  });
+
+  it('security prompt tells agents not to flag type safety issues', () => {
+    expect(REVIEW_PROMPTS.security).toContain('TypeScript handles these');
+  });
+});
