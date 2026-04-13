@@ -1,0 +1,15 @@
+{
+  "name": "ai-sdlc",
+  "owner": {
+    "name": "AI-SDLC Framework",
+    "url": "https://ai-sdlc.io"
+  },
+  "plugins": [
+    {
+      "name": "ai-sdlc",
+      "source": "./ai-sdlc-plugin",
+      "description": "AI-SDLC governance framework for Claude Code — action enforcement, telemetry, quality gates, review agents, and MCP tools",
+      "version": "0.7.0"
+    }
+  ]
+}

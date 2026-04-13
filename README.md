@@ -174,7 +174,14 @@ Promotion requires meeting quantitative criteria (PR approval rate, rollback rat
 Install the AI-SDLC governance plugin for zero-config enforcement in Claude Code:
 
 ```bash
-claude --plugin-dir ./ai-sdlc-plugin
+# Add the AI-SDLC marketplace
+/plugin marketplace add --source github --repo ai-sdlc-framework/ai-sdlc
+
+# Install the plugin
+/plugin install ai-sdlc@ai-sdlc
+
+# Reload to activate
+/reload-plugins
 ```
 
 The plugin provides:
