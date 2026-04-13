@@ -175,7 +175,7 @@ Install the AI-SDLC governance plugin for zero-config enforcement in Claude Code
 
 ```bash
 # Add the AI-SDLC marketplace
-/plugin marketplace add --source github --repo ai-sdlc-framework/ai-sdlc
+/plugin marketplace add ai-sdlc-framework/ai-sdlc
 
 # Install the plugin
 /plugin install ai-sdlc@ai-sdlc
