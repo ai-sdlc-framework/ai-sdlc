@@ -29,6 +29,11 @@ import type {
   ToolSequenceEvent,
   WorkflowPattern,
   PatternProposal,
+  DesignTokenEventRecord,
+  DesignReviewEventRecord,
+  TokenComplianceRecord,
+  VisualRegressionResultRecord,
+  UsabilitySimulationResultRecord,
 } from './types.js';
 
 export class StateStore {
@@ -1206,6 +1211,135 @@ export class StateStore {
         `UPDATE pattern_proposals SET status = ?, reviewed_at = datetime('now'), reviewer_reason = ? WHERE id = ?`,
       )
       .run(status, reason ?? null, id);
+  }
+
+  // ── Design System Governance (RFC-0006) ───────────────────────────
+
+  insertDesignTokenEvent(record: DesignTokenEventRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO design_token_events (binding_name, event_type, tokens_affected, diff_json, actor, pipeline_run_id, design_review_decision)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.bindingName,
+        record.eventType,
+        record.tokensAffected ?? 0,
+        record.diffJson ?? null,
+        record.actor ?? null,
+        record.pipelineRunId ?? null,
+        record.designReviewDecision ?? null,
+      );
+    return result.lastInsertRowid as number;
+  }
+
+  getDesignTokenEvents(bindingName: string, limit = 50): DesignTokenEventRecord[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM design_token_events WHERE binding_name = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(bindingName, limit) as DesignTokenEventRecord[];
+  }
+
+  insertDesignReviewEvent(record: DesignReviewEventRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO design_review_events (binding_name, pr_number, component_name, reviewer, decision, categories_json, actionable_notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.bindingName,
+        record.prNumber ?? null,
+        record.componentName ?? null,
+        record.reviewer,
+        record.decision,
+        record.categoriesJson ?? null,
+        record.actionableNotes ?? null,
+      );
+    return result.lastInsertRowid as number;
+  }
+
+  getDesignReviewEvents(bindingName: string, limit = 50): DesignReviewEventRecord[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM design_review_events WHERE binding_name = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(bindingName, limit) as DesignReviewEventRecord[];
+  }
+
+  insertTokenComplianceSnapshot(record: TokenComplianceRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO token_compliance_history (binding_name, coverage_percent, violations_count) VALUES (?, ?, ?)`,
+      )
+      .run(record.bindingName, record.coveragePercent, record.violationsCount);
+    return result.lastInsertRowid as number;
+  }
+
+  getTokenComplianceHistory(bindingName: string, limit = 50): TokenComplianceRecord[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM token_compliance_history WHERE binding_name = ? ORDER BY scanned_at DESC LIMIT ?`,
+      )
+      .all(bindingName, limit) as TokenComplianceRecord[];
+  }
+
+  insertVisualRegressionResult(record: VisualRegressionResultRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO visual_regression_results (binding_name, story_name, viewport, diff_percentage, approved, approver, baseline_url, current_url)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.bindingName,
+        record.storyName,
+        record.viewport ?? null,
+        record.diffPercentage,
+        record.approved ? 1 : 0,
+        record.approver ?? null,
+        record.baselineUrl ?? null,
+        record.currentUrl ?? null,
+      );
+    return result.lastInsertRowid as number;
+  }
+
+  getVisualRegressionResults(bindingName: string, limit = 50): VisualRegressionResultRecord[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM visual_regression_results WHERE binding_name = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(bindingName, limit) as VisualRegressionResultRecord[];
+  }
+
+  insertUsabilitySimulationResult(record: UsabilitySimulationResultRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO usability_simulation_results (binding_name, story_name, persona_id, task_id, completed, actions_taken, expected_actions, efficiency, findings_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.bindingName,
+        record.storyName,
+        record.personaId ?? null,
+        record.taskId ?? null,
+        record.completed ? 1 : 0,
+        record.actionsTaken ?? null,
+        record.expectedActions ?? null,
+        record.efficiency ?? null,
+        record.findingsJson ?? null,
+      );
+    return result.lastInsertRowid as number;
+  }
+
+  getUsabilitySimulationResults(
+    bindingName: string,
+    limit = 50,
+  ): UsabilitySimulationResultRecord[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM usability_simulation_results WHERE binding_name = ? ORDER BY created_at DESC LIMIT ?`,
+      )
+      .all(bindingName, limit) as UsabilitySimulationResultRecord[];
   }
 
   close(): void {

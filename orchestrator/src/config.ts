@@ -19,6 +19,7 @@ import {
   type QualityGate,
   type AutonomyPolicy,
   type AdapterBinding,
+  type DesignSystemBinding,
   type AdapterRegistry,
   type ResourceKind,
 } from '@ai-sdlc/reference';
@@ -32,11 +33,16 @@ export interface AiSdlcConfig {
   adapterBinding?: AdapterBinding;
   /** All AdapterBinding resources found in the config directory. */
   adapterBindings?: AdapterBinding[];
+  /** All DesignSystemBinding resources found in the config directory (RFC-0006). */
+  designSystemBindings?: DesignSystemBinding[];
   adapterRegistry?: AdapterRegistry;
 }
 
-/** Resource kinds that allow only a single instance. */
-const KIND_KEY: Record<Exclude<ResourceKind, 'AdapterBinding'>, keyof AiSdlcConfig> = {
+/** Resource kinds that allow only a single instance. Multi-instance kinds (AdapterBinding, DesignSystemBinding) are excluded. */
+const KIND_KEY: Record<
+  Exclude<ResourceKind, 'AdapterBinding' | 'DesignSystemBinding'>,
+  keyof AiSdlcConfig
+> = {
   Pipeline: 'pipeline',
   AgentRole: 'agentRole',
   QualityGate: 'qualityGate',
@@ -77,6 +83,8 @@ export function loadConfig(configDir: string): AiSdlcConfig {
     const resource = result.data as AnyResource;
     if (resource.kind === 'AdapterBinding') {
       (config.adapterBindings ??= []).push(resource as AdapterBinding);
+    } else if (resource.kind === 'DesignSystemBinding') {
+      (config.designSystemBindings ??= []).push(resource as DesignSystemBinding);
     } else {
       const key = KIND_KEY[resource.kind];
       if (key) {

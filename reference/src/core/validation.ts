@@ -30,6 +30,7 @@ const SCHEMA_FILES: Record<ResourceKind, string> = {
   QualityGate: 'quality-gate.schema.json',
   AutonomyPolicy: 'autonomy-policy.schema.json',
   AdapterBinding: 'adapter-binding.schema.json',
+  DesignSystemBinding: 'design-system-binding.schema.json',
 };
 
 type AjvInstance = InstanceType<typeof Ajv2020>;

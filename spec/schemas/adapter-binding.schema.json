@@ -33,7 +33,11 @@
             "Sandbox",
             "SecretStore",
             "MemoryStore",
-            "EventBus"
+            "EventBus",
+            "DesignTokenProvider",
+            "ComponentCatalog",
+            "VisualRegressionRunner",
+            "UsabilitySimulationRunner"
           ],
           "description": "The abstract contract name."
         },

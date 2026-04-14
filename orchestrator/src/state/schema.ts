@@ -2,7 +2,7 @@
  * SQLite DDL and migrations for the state store.
  */
 
-export const CURRENT_SCHEMA_VERSION = 9;
+export const CURRENT_SCHEMA_VERSION = 10;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -327,6 +327,80 @@ CREATE TABLE IF NOT EXISTS pattern_proposals (
 CREATE INDEX IF NOT EXISTS idx_pattern_proposals_status ON pattern_proposals(status);
 `;
 
+export const MIGRATION_V10 = `
+-- Design System Governance tables (RFC-0006)
+
+CREATE TABLE IF NOT EXISTS design_token_events (
+  id INTEGER PRIMARY KEY,
+  binding_name TEXT NOT NULL,
+  event_type TEXT NOT NULL,
+  tokens_affected INTEGER DEFAULT 0,
+  diff_json TEXT,
+  actor TEXT,
+  pipeline_run_id TEXT,
+  design_review_decision TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_design_token_events_binding ON design_token_events(binding_name);
+CREATE INDEX IF NOT EXISTS idx_design_token_events_type ON design_token_events(event_type);
+CREATE INDEX IF NOT EXISTS idx_design_token_events_run ON design_token_events(pipeline_run_id);
+
+CREATE TABLE IF NOT EXISTS design_review_events (
+  id INTEGER PRIMARY KEY,
+  binding_name TEXT NOT NULL,
+  pr_number INTEGER,
+  component_name TEXT,
+  reviewer TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  categories_json TEXT,
+  actionable_notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_design_review_events_binding ON design_review_events(binding_name);
+CREATE INDEX IF NOT EXISTS idx_design_review_events_pr ON design_review_events(pr_number);
+CREATE INDEX IF NOT EXISTS idx_design_review_events_decision ON design_review_events(decision);
+
+CREATE TABLE IF NOT EXISTS token_compliance_history (
+  id INTEGER PRIMARY KEY,
+  binding_name TEXT NOT NULL,
+  coverage_percent REAL NOT NULL,
+  violations_count INTEGER NOT NULL DEFAULT 0,
+  scanned_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_token_compliance_binding ON token_compliance_history(binding_name);
+
+CREATE TABLE IF NOT EXISTS visual_regression_results (
+  id INTEGER PRIMARY KEY,
+  binding_name TEXT NOT NULL,
+  story_name TEXT NOT NULL,
+  viewport INTEGER,
+  diff_percentage REAL NOT NULL,
+  approved INTEGER DEFAULT 0,
+  approver TEXT,
+  baseline_url TEXT,
+  current_url TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_visual_regression_binding ON visual_regression_results(binding_name);
+CREATE INDEX IF NOT EXISTS idx_visual_regression_story ON visual_regression_results(story_name);
+
+CREATE TABLE IF NOT EXISTS usability_simulation_results (
+  id INTEGER PRIMARY KEY,
+  binding_name TEXT NOT NULL,
+  story_name TEXT NOT NULL,
+  persona_id TEXT,
+  task_id TEXT,
+  completed INTEGER DEFAULT 0,
+  actions_taken INTEGER,
+  expected_actions INTEGER,
+  efficiency REAL,
+  findings_json TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_usability_sim_binding ON usability_simulation_results(binding_name);
+CREATE INDEX IF NOT EXISTS idx_usability_sim_story ON usability_simulation_results(story_name);
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -363,5 +437,9 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 9,
     sql: MIGRATION_V9,
+  },
+  {
+    version: 10,
+    sql: MIGRATION_V10,
   },
 ];

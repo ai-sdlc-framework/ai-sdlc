@@ -112,6 +112,21 @@
         "threshold": {
           "type": "number",
           "description": "The threshold value."
+        },
+        "calibrationRange": {
+          "type": "array",
+          "description": "Expected calibration range [min, max] for this metric (RFC-0006 §13.2).",
+          "items": { "type": "number" },
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Explanation of why this threshold was chosen and guidance for calibration."
+        },
+        "window": {
+          "type": "string",
+          "description": "Trailing time window for metric evaluation (e.g., 30d, 7d)."
         }
       },
       "additionalProperties": false

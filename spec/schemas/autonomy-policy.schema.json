@@ -61,6 +61,18 @@
                     "type": "array",
                     "description": "Execute permission scopes (action names).",
                     "items": { "type": "string" }
+                  },
+                  "designSystem": {
+                    "type": "object",
+                    "description": "Design system permissions (RFC-0006 §13.1).",
+                    "properties": {
+                      "modifyExistingComponents": { "type": "boolean" },
+                      "createNewComponents": { "type": "boolean" },
+                      "modifyTokens": { "type": "boolean" },
+                      "modifyStories": { "type": "boolean" },
+                      "approveVisualDiffs": { "type": "boolean", "description": "Always false — visual diff approval is human-only (§13.3)." }
+                    },
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -88,6 +100,16 @@
                   "transactionLimit": {
                     "type": "string",
                     "description": "Maximum cost/resource budget per time period."
+                  },
+                  "requireDesignReview": {
+                    "type": "string",
+                    "enum": ["always", "conditional", "never"],
+                    "description": "When design review is required for this autonomy level (RFC-0006 §13.1)."
+                  },
+                  "maxComponentsPerPR": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "description": "Maximum number of components the agent may create/modify per PR (RFC-0006 §13.1)."
                   }
                 },
                 "additionalProperties": false

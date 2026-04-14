@@ -49,6 +49,41 @@ export type {
   CrmProvider,
   FeatureUsage,
   AnalyticsProvider,
+  // Design System adapters (RFC-0006)
+  DesignToken,
+  DesignTokenSet,
+  TokenChange,
+  TokenDiff,
+  TokenDeletion,
+  PushResult,
+  Unsubscribe,
+  BreakingChangeResult,
+  DesignTokenProvider,
+  ComponentEntry,
+  ComponentManifest,
+  ComponentQuery,
+  ComponentMatch,
+  ComponentRequirement,
+  CompositionPlan,
+  StoryEntry,
+  CatalogValidationResult,
+  ComponentCatalog,
+  BaselineSet,
+  ChangedRegion,
+  VisualRegressionFailure,
+  VisualDiffResult,
+  VisualRegressionRunner,
+  PageState,
+  AgentAction,
+  ActionResult,
+  BrowserSession,
+  Persona,
+  TaskPrompt,
+  UsabilityFinding,
+  SimulationResult,
+  AggregatedUsabilityReport,
+  UsabilityMetaReview,
+  UsabilitySimulationRunner,
 } from './interfaces.js';
 
 export {
@@ -116,6 +151,66 @@ export {
   type StubSemgrepConfig,
   type StubSemgrepAdapter,
 } from './stubs/semgrep.js';
+
+// Design System adapter stubs (RFC-0006)
+export {
+  createStubDesignTokenProvider,
+  type StubDesignTokenProviderConfig,
+  type StubDesignTokenProviderAdapter,
+} from './stubs/design-token-provider.js';
+
+export {
+  createStubComponentCatalog,
+  type StubComponentCatalogConfig,
+  type StubComponentCatalogAdapter,
+} from './stubs/component-catalog.js';
+
+export {
+  createStubVisualRegressionRunner,
+  type StubVisualRegressionConfig,
+  type StubVisualRegressionRunnerAdapter,
+} from './stubs/visual-regression-runner.js';
+
+export {
+  createStubUsabilitySimulationRunner,
+  type StubUsabilitySimulationConfig,
+  type StubUsabilitySimulationRunnerAdapter,
+} from './stubs/usability-simulation-runner.js';
+
+// Design System reference adapters (RFC-0006)
+export { createTokensStudioProvider, type TokensStudioConfig } from './tokens-studio/index.js';
+
+export {
+  flattenTokens,
+  diffTokenSets,
+  detectTokenDeletions,
+  detectBreakingChanges,
+  buildAliasMap,
+  parseTokenJson,
+  isDesignToken,
+} from './tokens-studio/dtcg-parser.js';
+
+export {
+  createFigmaVariablesProvider,
+  figmaVariablesToDtcg,
+  type FigmaVariablesConfig,
+  type FigmaHttpClient,
+  type FigmaVariablesResponse,
+} from './figma-variables/index.js';
+
+export {
+  createStorybookMcpCatalog,
+  type StorybookMcpConfig,
+  type StorybookHttpClient,
+} from './storybook-mcp/index.js';
+
+export {
+  createPlaywrightVisualRunner,
+  computePixelDiff,
+  extractChangedRegions,
+  type PlaywrightVisualConfig,
+  type BrowserLauncher,
+} from './playwright-visual/index.js';
 
 // Webhook bridge
 export {

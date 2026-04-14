@@ -185,6 +185,213 @@
                       }
                     },
                     "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "title": "Design token compliance rule (RFC-0006 §8.1)",
+                    "required": ["designTokenCompliance", "designSystem"],
+                    "properties": {
+                      "designTokenCompliance": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "designSystem": {
+                        "type": "string",
+                        "description": "Reference to a DesignSystemBinding by name."
+                      },
+                      "category": {
+                        "type": "string",
+                        "description": "Token category to check (e.g., color, spacing, typography)."
+                      },
+                      "maxViolations": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "Maximum allowed hardcoded value violations."
+                      },
+                      "coverageMetric": {
+                        "type": "object",
+                        "description": "Evaluate token coverage as a metric.",
+                        "required": ["operator", "threshold"],
+                        "properties": {
+                          "operator": {
+                            "type": "string",
+                            "enum": [">=", "<=", "==", "!=", ">", "<"]
+                          },
+                          "threshold": {
+                            "type": "number"
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "title": "Visual regression rule (RFC-0006 §8.2)",
+                    "required": ["visualRegression", "designSystem"],
+                    "properties": {
+                      "visualRegression": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "designSystem": {
+                        "type": "string",
+                        "description": "Reference to a DesignSystemBinding by name."
+                      },
+                      "config": {
+                        "type": "object",
+                        "required": ["diffThreshold"],
+                        "properties": {
+                          "diffThreshold": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 1,
+                            "description": "Maximum pixel diff percentage (0.0-1.0)."
+                          },
+                          "failOnNewStory": {
+                            "type": "boolean",
+                            "description": "Whether new stories without baselines fail."
+                          },
+                          "requireBaseline": {
+                            "type": "boolean",
+                            "description": "Whether a baseline must exist."
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "override": {
+                        "type": "object",
+                        "properties": {
+                          "approvers": {
+                            "type": "array",
+                            "items": { "type": "string" },
+                            "description": "Principals who may approve visual diffs."
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "title": "Story completeness rule (RFC-0006 §8.3)",
+                    "required": ["storyCompleteness"],
+                    "properties": {
+                      "storyCompleteness": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "config": {
+                        "type": "object",
+                        "properties": {
+                          "requireDefaultStory": {
+                            "type": "boolean",
+                            "description": "Require a default/primary story."
+                          },
+                          "requireStateStories": {
+                            "type": "boolean",
+                            "description": "Require stories for interactive states."
+                          },
+                          "requireA11yStory": {
+                            "type": "boolean",
+                            "description": "Require an accessibility-focused story."
+                          },
+                          "minStories": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "Minimum number of stories per component."
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "title": "Design review rule (RFC-0006 §8.5)",
+                    "required": ["designReview", "designSystem", "reviewers"],
+                    "properties": {
+                      "designReview": {
+                        "type": "boolean",
+                        "const": true
+                      },
+                      "designSystem": {
+                        "type": "string",
+                        "description": "Reference to a DesignSystemBinding by name."
+                      },
+                      "reviewers": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "Principals qualified to perform design review."
+                      },
+                      "minimumReviewers": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "default": 1
+                      },
+                      "timeout": {
+                        "type": "string",
+                        "description": "ISO 8601 duration for review timeout."
+                      },
+                      "onTimeout": {
+                        "type": "string",
+                        "enum": ["pause", "fail"]
+                      },
+                      "triggerConditions": {
+                        "type": "object",
+                        "properties": {
+                          "always": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": ["new-component", "token-schema-change"]
+                            }
+                          },
+                          "conditional": {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "required": ["condition", "threshold"],
+                              "properties": {
+                                "condition": {
+                                  "type": "string",
+                                  "enum": ["semantic-token-cascade", "visual-regression-diff", "complexity-score"]
+                                },
+                                "threshold": { "type": "number" }
+                              },
+                              "additionalProperties": false
+                            }
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      "feedback": {
+                        "type": "object",
+                        "properties": {
+                          "structured": { "type": "boolean" },
+                          "categories": {
+                            "type": "array",
+                            "items": {
+                              "type": "string",
+                              "enum": ["visual-quality", "contextual-fit", "interaction-design", "accessibility-intent", "design-language-consistency"]
+                            }
+                          },
+                          "actionOnReject": {
+                            "type": "string",
+                            "enum": ["return-to-agent", "escalate"]
+                          },
+                          "maxRejections": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        },
+                        "additionalProperties": false
+                      }
+                    },
+                    "additionalProperties": false
                   }
                 ]
               },
