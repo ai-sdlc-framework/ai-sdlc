@@ -1,3 +1,4 @@
+/* v8 ignore start — barrel re-exports, no logic to test */
 export type {
   IssueTracker,
   IssueComment,
@@ -305,3 +306,4 @@ export {
 
 // In-process EventBus
 export { createInProcessEventBus, type InProcessEventBus } from './in-process-event-bus.js';
+/* v8 ignore stop */

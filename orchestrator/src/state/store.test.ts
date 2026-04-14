@@ -1687,6 +1687,324 @@ describe('Pattern Proposals', () => {
   });
 });
 
+// ── Design Token Events (RFC-0006) ─────────────────────────────────
+// Note: These getters return raw SQL rows cast as the type interface.
+// The actual returned objects have snake_case keys from SQLite columns.
+
+describe('Design Token Events', () => {
+  it('inserts and retrieves token events', () => {
+    const id = store.insertDesignTokenEvent({
+      bindingName: 'tokens-studio',
+      eventType: 'changed',
+      tokensAffected: 5,
+      diffJson: '{"added":2,"removed":1}',
+      actor: 'ci-bot',
+      pipelineRunId: 'run-42',
+      designReviewDecision: 'approved',
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const events = store.getDesignTokenEvents('tokens-studio');
+    expect(events).toHaveLength(1);
+    // Raw SQLite rows have snake_case column names
+    const row = events[0] as unknown as Record<string, unknown>;
+    expect(row.binding_name).toBe('tokens-studio');
+    expect(row.event_type).toBe('changed');
+    expect(row.tokens_affected).toBe(5);
+    expect(row.diff_json).toBe('{"added":2,"removed":1}');
+    expect(row.actor).toBe('ci-bot');
+    expect(row.pipeline_run_id).toBe('run-42');
+    expect(row.design_review_decision).toBe('approved');
+  });
+
+  it('filters by binding name', () => {
+    store.insertDesignTokenEvent({
+      bindingName: 'tokens-studio',
+      eventType: 'changed',
+    });
+    store.insertDesignTokenEvent({
+      bindingName: 'figma-variables',
+      eventType: 'deleted',
+    });
+    const events = store.getDesignTokenEvents('figma-variables');
+    expect(events).toHaveLength(1);
+    const row = events[0] as unknown as Record<string, unknown>;
+    expect(row.event_type).toBe('deleted');
+  });
+
+  it('respects limit', () => {
+    for (let i = 0; i < 5; i++) {
+      store.insertDesignTokenEvent({
+        bindingName: 'ts',
+        eventType: 'changed',
+        tokensAffected: i,
+      });
+    }
+    const events = store.getDesignTokenEvents('ts', 2);
+    expect(events).toHaveLength(2);
+  });
+
+  it('handles minimal record (only required fields)', () => {
+    const id = store.insertDesignTokenEvent({
+      bindingName: 'minimal',
+      eventType: 'breaking',
+    });
+    expect(id).toBeGreaterThan(0);
+    const events = store.getDesignTokenEvents('minimal');
+    expect(events).toHaveLength(1);
+    const row = events[0] as unknown as Record<string, unknown>;
+    expect(row.event_type).toBe('breaking');
+  });
+});
+
+// ── Design Review Events (RFC-0006) ────────────────────────────────
+
+describe('Design Review Events', () => {
+  it('inserts and retrieves review events', () => {
+    const id = store.insertDesignReviewEvent({
+      bindingName: 'figma-adapter',
+      prNumber: 123,
+      componentName: 'Button',
+      reviewer: 'designer-1',
+      decision: 'approved',
+      categoriesJson: '["spacing","color"]',
+      actionableNotes: 'Consider dark mode contrast',
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const events = store.getDesignReviewEvents('figma-adapter');
+    expect(events).toHaveLength(1);
+    const row = events[0] as unknown as Record<string, unknown>;
+    expect(row.binding_name).toBe('figma-adapter');
+    expect(row.pr_number).toBe(123);
+    expect(row.component_name).toBe('Button');
+    expect(row.reviewer).toBe('designer-1');
+    expect(row.decision).toBe('approved');
+    expect(row.categories_json).toBe('["spacing","color"]');
+    expect(row.actionable_notes).toBe('Consider dark mode contrast');
+  });
+
+  it('filters by binding name', () => {
+    store.insertDesignReviewEvent({
+      bindingName: 'adapter-a',
+      reviewer: 'r1',
+      decision: 'approved',
+    });
+    store.insertDesignReviewEvent({
+      bindingName: 'adapter-b',
+      reviewer: 'r2',
+      decision: 'rejected',
+    });
+    const events = store.getDesignReviewEvents('adapter-b');
+    expect(events).toHaveLength(1);
+    const row = events[0] as unknown as Record<string, unknown>;
+    expect(row.decision).toBe('rejected');
+  });
+
+  it('respects limit', () => {
+    for (let i = 0; i < 5; i++) {
+      store.insertDesignReviewEvent({
+        bindingName: 'adapter',
+        reviewer: `r${i}`,
+        decision: 'approved',
+      });
+    }
+    const events = store.getDesignReviewEvents('adapter', 3);
+    expect(events).toHaveLength(3);
+  });
+});
+
+// ── Token Compliance History (RFC-0006) ────────────────────────────
+
+describe('Token Compliance History', () => {
+  it('inserts and retrieves compliance snapshots', () => {
+    const id = store.insertTokenComplianceSnapshot({
+      bindingName: 'ts-provider',
+      coveragePercent: 87.5,
+      violationsCount: 3,
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const records = store.getTokenComplianceHistory('ts-provider');
+    expect(records).toHaveLength(1);
+    const row = records[0] as unknown as Record<string, unknown>;
+    expect(row.binding_name).toBe('ts-provider');
+    expect(row.coverage_percent).toBe(87.5);
+    expect(row.violations_count).toBe(3);
+  });
+
+  it('filters by binding name', () => {
+    store.insertTokenComplianceSnapshot({
+      bindingName: 'provider-a',
+      coveragePercent: 90,
+      violationsCount: 0,
+    });
+    store.insertTokenComplianceSnapshot({
+      bindingName: 'provider-b',
+      coveragePercent: 75,
+      violationsCount: 5,
+    });
+    const records = store.getTokenComplianceHistory('provider-a');
+    expect(records).toHaveLength(1);
+    const row = records[0] as unknown as Record<string, unknown>;
+    expect(row.coverage_percent).toBe(90);
+  });
+
+  it('respects limit', () => {
+    for (let i = 0; i < 5; i++) {
+      store.insertTokenComplianceSnapshot({
+        bindingName: 'p',
+        coveragePercent: i * 10,
+        violationsCount: i,
+      });
+    }
+    const records = store.getTokenComplianceHistory('p', 2);
+    expect(records).toHaveLength(2);
+  });
+});
+
+// ── Visual Regression Results (RFC-0006) ───────────────────────────
+
+describe('Visual Regression Results', () => {
+  it('inserts and retrieves visual regression results', () => {
+    const id = store.insertVisualRegressionResult({
+      bindingName: 'pw-visual',
+      storyName: 'Button/Default',
+      viewport: 1280,
+      diffPercentage: 0.05,
+      approved: true,
+      approver: 'designer-1',
+      baselineUrl: 'file:///baselines/button.png',
+      currentUrl: 'file:///current/button.png',
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const results = store.getVisualRegressionResults('pw-visual');
+    expect(results).toHaveLength(1);
+    const row = results[0] as unknown as Record<string, unknown>;
+    expect(row.binding_name).toBe('pw-visual');
+    expect(row.story_name).toBe('Button/Default');
+    expect(row.viewport).toBe(1280);
+    expect(row.diff_percentage).toBe(0.05);
+    expect(row.approved).toBe(1); // SQLite stores booleans as integers
+    expect(row.approver).toBe('designer-1');
+    expect(row.baseline_url).toBe('file:///baselines/button.png');
+    expect(row.current_url).toBe('file:///current/button.png');
+  });
+
+  it('inserts unapproved results', () => {
+    store.insertVisualRegressionResult({
+      bindingName: 'pw-visual',
+      storyName: 'Card/Default',
+      diffPercentage: 0.15,
+      approved: false,
+    });
+    const results = store.getVisualRegressionResults('pw-visual');
+    expect(results).toHaveLength(1);
+    const row = results[0] as unknown as Record<string, unknown>;
+    expect(row.approved).toBe(0);
+  });
+
+  it('filters by binding name', () => {
+    store.insertVisualRegressionResult({
+      bindingName: 'runner-a',
+      storyName: 'A',
+      diffPercentage: 0.01,
+    });
+    store.insertVisualRegressionResult({
+      bindingName: 'runner-b',
+      storyName: 'B',
+      diffPercentage: 0.02,
+    });
+    const results = store.getVisualRegressionResults('runner-a');
+    expect(results).toHaveLength(1);
+    const row = results[0] as unknown as Record<string, unknown>;
+    expect(row.story_name).toBe('A');
+  });
+
+  it('respects limit', () => {
+    for (let i = 0; i < 5; i++) {
+      store.insertVisualRegressionResult({
+        bindingName: 'r',
+        storyName: `story-${i}`,
+        diffPercentage: i * 0.01,
+      });
+    }
+    const results = store.getVisualRegressionResults('r', 2);
+    expect(results).toHaveLength(2);
+  });
+});
+
+// ── Usability Simulation Results (RFC-0006) ────────────────────────
+
+describe('Usability Simulation Results', () => {
+  it('inserts and retrieves simulation results', () => {
+    const id = store.insertUsabilitySimulationResult({
+      bindingName: 'usability-runner',
+      storyName: 'Button/Default',
+      personaId: 'persona-a',
+      taskId: 'task-1',
+      completed: true,
+      actionsTaken: 3,
+      expectedActions: 2,
+      efficiency: 0.67,
+      findingsJson: '["slow response time"]',
+    });
+    expect(id).toBeGreaterThan(0);
+
+    const results = store.getUsabilitySimulationResults('usability-runner');
+    expect(results).toHaveLength(1);
+    const row = results[0] as unknown as Record<string, unknown>;
+    expect(row.binding_name).toBe('usability-runner');
+    expect(row.story_name).toBe('Button/Default');
+    expect(row.persona_id).toBe('persona-a');
+    expect(row.task_id).toBe('task-1');
+    expect(row.completed).toBe(1); // SQLite stores booleans as integers
+    expect(row.actions_taken).toBe(3);
+    expect(row.expected_actions).toBe(2);
+    expect(row.efficiency).toBeCloseTo(0.67);
+    expect(row.findings_json).toBe('["slow response time"]');
+  });
+
+  it('inserts incomplete simulation results', () => {
+    store.insertUsabilitySimulationResult({
+      bindingName: 'runner',
+      storyName: 'Modal/Open',
+      completed: false,
+    });
+    const results = store.getUsabilitySimulationResults('runner');
+    expect(results).toHaveLength(1);
+    const row = results[0] as unknown as Record<string, unknown>;
+    expect(row.completed).toBe(0);
+  });
+
+  it('filters by binding name', () => {
+    store.insertUsabilitySimulationResult({
+      bindingName: 'runner-a',
+      storyName: 'A',
+    });
+    store.insertUsabilitySimulationResult({
+      bindingName: 'runner-b',
+      storyName: 'B',
+    });
+    const results = store.getUsabilitySimulationResults('runner-a');
+    expect(results).toHaveLength(1);
+    const row = results[0] as unknown as Record<string, unknown>;
+    expect(row.story_name).toBe('A');
+  });
+
+  it('respects limit', () => {
+    for (let i = 0; i < 5; i++) {
+      store.insertUsabilitySimulationResult({
+        bindingName: 'r',
+        storyName: `story-${i}`,
+      });
+    }
+    const results = store.getUsabilitySimulationResults('r', 2);
+    expect(results).toHaveLength(2);
+  });
+});
+
 // ── Utilities ──────────────────────────────────────────────────────
 
 describe('Utilities', () => {

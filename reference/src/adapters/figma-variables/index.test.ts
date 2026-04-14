@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { figmaVariablesToDtcg, type FigmaVariablesResponse } from './figma-to-dtcg.js';
 import { createFigmaVariablesProvider, type FigmaHttpClient } from './index.js';
+import type { DesignTokenSet } from '../interfaces.js';
 
 const mockFigmaResponse: FigmaVariablesResponse = {
   status: 200,
@@ -225,7 +226,7 @@ describe('createFigmaVariablesProvider', () => {
     expect(version).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
-  it('subscribes and unsubscribes to events', () => {
+  it('subscribes and unsubscribes to change events', () => {
     const provider = createFigmaVariablesProvider({
       fileKey: 'test-file',
       apiToken: 'test-token',
@@ -239,5 +240,47 @@ describe('createFigmaVariablesProvider', () => {
     expect(typeof unsub).toBe('function');
     unsub();
     expect(called).toBe(false);
+  });
+
+  it('subscribes and unsubscribes to deletion events', () => {
+    const provider = createFigmaVariablesProvider({
+      fileKey: 'test-file',
+      apiToken: 'test-token',
+      httpClient: createMockClient(mockFigmaResponse),
+    });
+
+    let called = false;
+    const unsub = provider.onTokensDeleted(() => {
+      called = true;
+    });
+    expect(typeof unsub).toBe('function');
+    unsub();
+    expect(called).toBe(false);
+  });
+
+  it('detects deletions between baseline and current', async () => {
+    const provider = createFigmaVariablesProvider({
+      fileKey: 'test-file',
+      apiToken: 'test-token',
+      httpClient: createMockClient(mockFigmaResponse),
+    });
+
+    const baseline = await provider.getTokens();
+    // Remove the spacing group entirely
+    const current = { color: baseline.color } as DesignTokenSet;
+    const deletions = await provider.detectDeletions(baseline, current);
+    expect(deletions.length).toBeGreaterThan(0);
+  });
+
+  it('getSchemaVersion returns 0.0.0 when no snapshot exists', async () => {
+    const provider = createFigmaVariablesProvider({
+      fileKey: 'test-file',
+      apiToken: 'test-token',
+      httpClient: createMockClient(mockFigmaResponse),
+    });
+
+    // Without calling getTokens first, lastSnapshot is null
+    const version = await provider.getSchemaVersion();
+    expect(version).toBe('0.0.0');
   });
 });
