@@ -108,6 +108,43 @@
               },
               "approval": {
                 "$ref": "#/$defs/ApprovalPolicy"
+              },
+              "type": {
+                "type": "string",
+                "description": "Stage type (e.g., design-system, design-review, quality-gate, usability-test)."
+              },
+              "condition": {
+                "type": "string",
+                "description": "Expression that must evaluate to true for the stage to execute."
+              },
+              "context": {
+                "type": "object",
+                "description": "Context configuration for the stage.",
+                "additionalProperties": true
+              },
+              "constraints": {
+                "type": "object",
+                "description": "Stage-specific constraints for agent execution.",
+                "properties": {
+                  "requireStory": {
+                    "type": "boolean",
+                    "description": "Require Storybook story output."
+                  },
+                  "requireTokenUsage": {
+                    "type": "boolean",
+                    "description": "Require design token usage (no hardcoded values)."
+                  },
+                  "preferComposition": {
+                    "type": "boolean",
+                    "description": "Prefer composing existing components over creating new ones."
+                  }
+                },
+                "additionalProperties": true
+              },
+              "config": {
+                "type": "object",
+                "description": "Stage-specific configuration.",
+                "additionalProperties": true
               }
             },
             "additionalProperties": false

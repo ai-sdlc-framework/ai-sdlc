@@ -70,6 +70,14 @@
               "type": "array",
               "description": "Action categories that require human approval before execution (e.g., merge, release, deploy).",
               "items": { "type": "string" }
+            },
+            "requireStory": {
+              "type": "boolean",
+              "description": "Whether the agent must produce a Storybook story for component changes (RFC-0006)."
+            },
+            "requireTokenUsage": {
+              "type": "boolean",
+              "description": "Whether the agent must use design tokens instead of hardcoded values (RFC-0006)."
             }
           },
           "additionalProperties": false
@@ -177,6 +185,36 @@
         },
         "modelSelection": {
           "$ref": "#/$defs/ModelSelection"
+        },
+        "designSystem": {
+          "type": "object",
+          "description": "Design system context configuration for frontend agents (RFC-0006 §7).",
+          "required": ["binding"],
+          "properties": {
+            "binding": {
+              "type": "string",
+              "description": "Reference to a DesignSystemBinding resource name."
+            },
+            "contextStrategy": {
+              "type": "string",
+              "enum": ["manifest-first", "tokens-only", "full"],
+              "description": "How the agent receives design system context.",
+              "default": "manifest-first"
+            },
+            "contextStrategyOverride": {
+              "type": "string",
+              "enum": ["auto", "fixed"],
+              "description": "Whether the orchestrator may escalate the context strategy at runtime.",
+              "default": "auto"
+            },
+            "componentCreationPolicy": {
+              "type": "string",
+              "enum": ["compose-or-justify", "compose-only", "unrestricted"],
+              "description": "Policy for when the agent may create new components vs. composing existing ones.",
+              "default": "compose-or-justify"
+            }
+          },
+          "additionalProperties": false
         }
       },
       "additionalProperties": false

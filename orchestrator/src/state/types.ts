@@ -268,3 +268,64 @@ export interface PatternProposal {
   reviewerReason?: string;
   createdAt?: string;
 }
+
+// ── Design System Governance (RFC-0006) ──────────────────────────────
+
+export interface DesignTokenEventRecord {
+  id?: number;
+  bindingName: string;
+  eventType: 'changed' | 'deleted' | 'breaking';
+  tokensAffected?: number;
+  diffJson?: string;
+  actor?: string;
+  pipelineRunId?: string;
+  designReviewDecision?: string;
+  createdAt?: string;
+}
+
+export interface DesignReviewEventRecord {
+  id?: number;
+  bindingName: string;
+  prNumber?: number;
+  componentName?: string;
+  reviewer: string;
+  decision: 'approved' | 'rejected' | 'approved-with-comments';
+  categoriesJson?: string;
+  actionableNotes?: string;
+  createdAt?: string;
+}
+
+export interface TokenComplianceRecord {
+  id?: number;
+  bindingName: string;
+  coveragePercent: number;
+  violationsCount: number;
+  scannedAt?: string;
+}
+
+export interface VisualRegressionResultRecord {
+  id?: number;
+  bindingName: string;
+  storyName: string;
+  viewport?: number;
+  diffPercentage: number;
+  approved?: boolean;
+  approver?: string;
+  baselineUrl?: string;
+  currentUrl?: string;
+  createdAt?: string;
+}
+
+export interface UsabilitySimulationResultRecord {
+  id?: number;
+  bindingName: string;
+  storyName: string;
+  personaId?: string;
+  taskId?: string;
+  completed?: boolean;
+  actionsTaken?: number;
+  expectedActions?: number;
+  efficiency?: number;
+  findingsJson?: string;
+  createdAt?: string;
+}
