@@ -37,6 +37,10 @@ export const adapterBindingSchema = {
             'SecretStore',
             'MemoryStore',
             'EventBus',
+            'DesignTokenProvider',
+            'ComponentCatalog',
+            'VisualRegressionRunner',
+            'UsabilitySimulationRunner',
           ],
           description: 'The abstract contract name.',
         },
@@ -180,6 +184,16 @@ export const agentRoleSchema = {
                 'Action categories that require human approval before execution (e.g., merge, release, deploy).',
               items: { type: 'string' },
             },
+            requireStory: {
+              type: 'boolean',
+              description:
+                'Whether the agent must produce a Storybook story for component changes (RFC-0006).',
+            },
+            requireTokenUsage: {
+              type: 'boolean',
+              description:
+                'Whether the agent must use design tokens instead of hardcoded values (RFC-0006).',
+            },
           },
           additionalProperties: false,
         },
@@ -287,6 +301,37 @@ export const agentRoleSchema = {
         },
         modelSelection: {
           $ref: '#/$defs/ModelSelection',
+        },
+        designSystem: {
+          type: 'object',
+          description: 'Design system context configuration for frontend agents (RFC-0006 §7).',
+          required: ['binding'],
+          properties: {
+            binding: {
+              type: 'string',
+              description: 'Reference to a DesignSystemBinding resource name.',
+            },
+            contextStrategy: {
+              type: 'string',
+              enum: ['manifest-first', 'tokens-only', 'full'],
+              description: 'How the agent receives design system context.',
+              default: 'manifest-first',
+            },
+            contextStrategyOverride: {
+              type: 'string',
+              enum: ['auto', 'fixed'],
+              description: 'Whether the orchestrator may escalate the context strategy at runtime.',
+              default: 'auto',
+            },
+            componentCreationPolicy: {
+              type: 'string',
+              enum: ['compose-or-justify', 'compose-only', 'unrestricted'],
+              description:
+                'Policy for when the agent may create new components vs. composing existing ones.',
+              default: 'compose-or-justify',
+            },
+          },
+          additionalProperties: false,
         },
       },
       additionalProperties: false,
@@ -460,6 +505,21 @@ export const autonomyPolicySchema = {
                     description: 'Execute permission scopes (action names).',
                     items: { type: 'string' },
                   },
+                  designSystem: {
+                    type: 'object',
+                    description: 'Design system permissions (RFC-0006 §13.1).',
+                    properties: {
+                      modifyExistingComponents: { type: 'boolean' },
+                      createNewComponents: { type: 'boolean' },
+                      modifyTokens: { type: 'boolean' },
+                      modifyStories: { type: 'boolean' },
+                      approveVisualDiffs: {
+                        type: 'boolean',
+                        description: 'Always false — visual diff approval is human-only (§13.3).',
+                      },
+                    },
+                    additionalProperties: false,
+                  },
                 },
                 additionalProperties: false,
               },
@@ -486,6 +546,18 @@ export const autonomyPolicySchema = {
                   transactionLimit: {
                     type: 'string',
                     description: 'Maximum cost/resource budget per time period.',
+                  },
+                  requireDesignReview: {
+                    type: 'string',
+                    enum: ['always', 'conditional', 'never'],
+                    description:
+                      'When design review is required for this autonomy level (RFC-0006 §13.1).',
+                  },
+                  maxComponentsPerPR: {
+                    type: 'integer',
+                    minimum: 1,
+                    description:
+                      'Maximum number of components the agent may create/modify per PR (RFC-0006 §13.1).',
                   },
                 },
                 additionalProperties: false,
@@ -760,10 +832,605 @@ export const commonSchema = {
           type: 'number',
           description: 'The threshold value.',
         },
+        calibrationRange: {
+          type: 'array',
+          description: 'Expected calibration range [min, max] for this metric (RFC-0006 §13.2).',
+          items: { type: 'number' },
+          minItems: 2,
+          maxItems: 2,
+        },
+        rationale: {
+          type: 'string',
+          description: 'Explanation of why this threshold was chosen and guidance for calibration.',
+        },
+        window: {
+          type: 'string',
+          description: 'Trailing time window for metric evaluation (e.g., 30d, 7d).',
+        },
       },
       additionalProperties: false,
     },
   },
+} as const;
+
+export const designSystemBindingSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/design-system-binding.schema.json',
+  title: 'AI-SDLC DesignSystemBinding',
+  description:
+    "Declares a design system that a pipeline's frontend stages must conform to. Defines token sources, component catalogs, visual regression configuration, compliance rules, stewardship authority, and design review gates.",
+  type: 'object',
+  required: ['apiVersion', 'kind', 'metadata', 'spec'],
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'DesignSystemBinding',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      required: ['stewardship', 'designToolAuthority', 'tokens', 'catalog', 'compliance'],
+      properties: {
+        extends: {
+          type: 'string',
+          description:
+            'Reference to a parent DesignSystemBinding by name for multi-brand inheritance. Child thresholds must be >= parent thresholds. Max two-level depth.',
+        },
+        stewardship: {
+          type: 'object',
+          description: 'Defines who has authority over which aspects of this resource.',
+          required: ['designAuthority', 'engineeringAuthority'],
+          properties: {
+            designAuthority: {
+              type: 'object',
+              description: 'Principals with authority over design-scoped fields.',
+              required: ['principals', 'scope'],
+              properties: {
+                principals: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  minItems: 1,
+                  description: 'Identifiers of principals with design authority.',
+                },
+                scope: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description:
+                    'Fields governed by design authority (e.g., conflictResolution, visualBaselines, tokenSchema).',
+                },
+              },
+              additionalProperties: false,
+            },
+            engineeringAuthority: {
+              type: 'object',
+              description: 'Principals with authority over engineering-scoped fields.',
+              required: ['principals', 'scope'],
+              properties: {
+                principals: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  minItems: 1,
+                  description: 'Identifiers of principals with engineering authority.',
+                },
+                scope: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description:
+                    'Fields governed by engineering authority (e.g., catalog, visualRegression.config).',
+                },
+              },
+              additionalProperties: false,
+            },
+            sharedAuthority: {
+              type: 'object',
+              description: 'Fields requiring approval from both disciplines.',
+              properties: {
+                principals: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Principals from both disciplines.',
+                },
+                scope: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description:
+                    'Fields requiring cross-discipline approval (e.g., sync.direction, compliance.coverage.minimum).',
+                },
+              },
+              additionalProperties: false,
+            },
+            changeApproval: {
+              type: 'object',
+              description: 'Controls for change approval requirements.',
+              properties: {
+                requireBothDisciplines: {
+                  type: 'boolean',
+                  description:
+                    'Whether changes to sharedAuthority fields require approval from both disciplines.',
+                  default: true,
+                },
+                auditAllChanges: {
+                  type: 'boolean',
+                  description:
+                    'Whether all changes to this resource are recorded in the audit log.',
+                  default: true,
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        },
+        designToolAuthority: {
+          type: 'string',
+          enum: ['exploration', 'specification', 'collaborative'],
+          description:
+            'The authority level of the design tool. This is a significant organizational decision — teams MUST configure this with both design and engineering leadership.',
+        },
+        tokens: {
+          type: 'object',
+          description: 'Design token source configuration.',
+          required: ['provider', 'format', 'source', 'versionPolicy'],
+          properties: {
+            provider: {
+              type: 'string',
+              description:
+                'The DesignTokenProvider adapter name (e.g., figma-tokens-studio, figma-variables).',
+            },
+            format: {
+              type: 'string',
+              enum: ['w3c-dtcg', 'style-dictionary', 'custom'],
+              description:
+                'The token format. w3c-dtcg is the W3C Design Tokens Format Module v1.0.',
+            },
+            source: {
+              type: 'object',
+              description: 'Location of the token source.',
+              required: ['repository'],
+              properties: {
+                repository: {
+                  type: 'string',
+                  description: 'Git repository reference (e.g., org/repo).',
+                },
+                branch: {
+                  type: 'string',
+                  description: 'Branch to read tokens from.',
+                  default: 'main',
+                },
+                path: {
+                  type: 'string',
+                  description: 'Path within the repository to the token files.',
+                  default: 'tokens/',
+                },
+              },
+              additionalProperties: false,
+            },
+            versionPolicy: {
+              type: 'string',
+              enum: ['exact', 'minor', 'minor-and-major', 'latest'],
+              description:
+                'Token schema update policy. exact: only pinned version. minor: minor+patch. minor-and-major: major+minor+patch. latest: all including breaking.',
+            },
+            pinnedVersion: {
+              type: 'string',
+              description: 'Required when versionPolicy is exact. Must be a valid semver string.',
+              pattern: '^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$',
+            },
+            platform: {
+              type: 'string',
+              enum: ['web', 'ios', 'android'],
+              description:
+                'Platform-specific token expression format. Omit for platform-neutral canonical tokens.',
+            },
+            sync: {
+              type: 'object',
+              description: 'Token synchronization configuration.',
+              properties: {
+                direction: {
+                  type: 'string',
+                  enum: ['unidirectional', 'bidirectional'],
+                  description: 'Whether changes flow one way (design→code) or both ways.',
+                  default: 'unidirectional',
+                },
+                schedule: {
+                  type: 'string',
+                  description:
+                    "ISO 8601 duration for sync interval (e.g., PT15M, PT1H). Use 'manual' for external scheduling.",
+                  pattern: '^(PT?(\\d+[YMDHMS])+|manual)$',
+                },
+                conflictResolution: {
+                  type: 'string',
+                  enum: ['code-wins', 'design-wins', 'manual'],
+                  description: 'Strategy when bidirectional sync produces conflicts.',
+                  default: 'manual',
+                },
+                manualResolutionTimeout: {
+                  type: 'string',
+                  description:
+                    'ISO 8601 duration — max time pipeline may remain paused for manual conflict resolution. Required when conflictResolution is manual.',
+                  pattern: '^PT?(\\d+[YMDHMS])+$',
+                },
+                onTimeout: {
+                  type: 'string',
+                  enum: ['escalate', 'fallback-design-wins', 'fail'],
+                  description: 'Behavior when manualResolutionTimeout expires.',
+                  default: 'escalate',
+                },
+                escalateTo: {
+                  type: 'array',
+                  items: { type: 'string' },
+                  description: 'Principals to notify on escalation.',
+                },
+                prBranch: {
+                  type: 'string',
+                  description:
+                    'Branch naming template for token sync PRs. Supports {timestamp} placeholder.',
+                  default: 'ai-sdlc/token-sync-{timestamp}',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+          if: {
+            properties: {
+              versionPolicy: { const: 'exact' },
+            },
+            required: ['versionPolicy'],
+          },
+          then: {
+            required: ['provider', 'format', 'source', 'versionPolicy', 'pinnedVersion'],
+          },
+        },
+        catalog: {
+          type: 'object',
+          description: 'Component catalog configuration (e.g., Storybook MCP).',
+          required: ['provider'],
+          properties: {
+            provider: {
+              type: 'string',
+              description: 'The ComponentCatalog adapter name (e.g., storybook-mcp).',
+            },
+            source: {
+              type: 'object',
+              description: 'Location of the component catalog.',
+              properties: {
+                repository: {
+                  type: 'string',
+                  description: 'Git repository reference for the component library.',
+                },
+                storybookUrl: {
+                  type: 'string',
+                  format: 'uri',
+                  description: 'URL of the deployed Storybook instance.',
+                },
+                manifestPath: {
+                  type: 'string',
+                  description: 'Path to the component manifest file.',
+                  default: '.storybook/component-manifest.json',
+                },
+              },
+              additionalProperties: false,
+            },
+            discovery: {
+              type: 'object',
+              description: 'MCP-based component discovery configuration.',
+              properties: {
+                mcpEndpoint: {
+                  type: 'string',
+                  format: 'uri',
+                  description: 'Storybook MCP server endpoint URL.',
+                },
+                refreshInterval: {
+                  type: 'string',
+                  description: 'ISO 8601 duration for manifest cache refresh.',
+                  pattern: '^PT?(\\d+[YMDHMS])+$',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        },
+        visualRegression: {
+          type: 'object',
+          description: 'Visual regression testing configuration.',
+          properties: {
+            provider: {
+              type: 'string',
+              description:
+                'The VisualRegressionRunner adapter name (e.g., chromatic, playwright-visual, percy).',
+            },
+            config: {
+              type: 'object',
+              description: 'Provider-specific configuration.',
+              properties: {
+                projectToken: {
+                  type: 'string',
+                  description:
+                    'Project authentication token (use ${SECRET_NAME} for secret references).',
+                },
+                diffThreshold: {
+                  type: 'number',
+                  minimum: 0,
+                  maximum: 1,
+                  description: 'Maximum pixel diff percentage before a story is flagged (0.0-1.0).',
+                  default: 0.01,
+                },
+                viewports: {
+                  type: 'array',
+                  items: {
+                    type: 'integer',
+                    minimum: 1,
+                  },
+                  description: 'Viewport widths to test at (in pixels).',
+                  default: [375, 768, 1280, 1920],
+                },
+              },
+              additionalProperties: true,
+            },
+          },
+          additionalProperties: false,
+        },
+        compliance: {
+          type: 'object',
+          description: 'Design token compliance rules.',
+          required: ['coverage'],
+          properties: {
+            disallowHardcoded: {
+              type: 'array',
+              description:
+                'Patterns for disallowed hardcoded values that should use tokens instead.',
+              items: {
+                type: 'object',
+                required: ['category', 'pattern', 'message'],
+                properties: {
+                  category: {
+                    type: 'string',
+                    description: 'Token category (e.g., color, spacing, typography).',
+                  },
+                  pattern: {
+                    type: 'string',
+                    description: 'Regex pattern matching hardcoded values.',
+                  },
+                  exclude: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Values that are intentional exceptions to this rule.',
+                  },
+                  message: {
+                    type: 'string',
+                    description: 'Human-readable message explaining which token to use instead.',
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+            coverage: {
+              type: 'object',
+              description: 'Token coverage thresholds.',
+              required: ['minimum'],
+              properties: {
+                minimum: {
+                  type: 'integer',
+                  minimum: 0,
+                  maximum: 100,
+                  description: 'Minimum acceptable token coverage percentage.',
+                },
+                target: {
+                  type: 'integer',
+                  minimum: 0,
+                  maximum: 100,
+                  description: 'Target token coverage percentage.',
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        },
+        designReview: {
+          type: 'object',
+          description: 'Design review gate configuration.',
+          properties: {
+            required: {
+              type: 'boolean',
+              description: 'Whether design review gates are enabled.',
+              default: false,
+            },
+            reviewers: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Principals qualified to perform design review.',
+            },
+            scope: {
+              type: 'array',
+              items: {
+                type: 'string',
+                enum: [
+                  'visual-quality',
+                  'contextual-fit',
+                  'interaction-design',
+                  'accessibility-intent',
+                  'design-language-consistency',
+                ],
+              },
+              description: 'Aspects evaluated during design review.',
+            },
+            triggerConditions: {
+              type: 'object',
+              description: 'Conditions that trigger a design review.',
+              properties: {
+                alwaysOn: {
+                  type: 'array',
+                  items: {
+                    type: 'string',
+                    enum: ['new-component', 'token-schema-change'],
+                  },
+                  description: 'Conditions that always require design review.',
+                },
+                configurable: {
+                  type: 'array',
+                  description: 'Conditions with configurable thresholds.',
+                  items: {
+                    type: 'object',
+                    required: ['condition', 'threshold'],
+                    properties: {
+                      condition: {
+                        type: 'string',
+                        enum: [
+                          'semantic-token-cascade',
+                          'visual-regression-diff',
+                          'complexity-score',
+                        ],
+                        description: 'The trigger condition type.',
+                      },
+                      threshold: {
+                        type: 'number',
+                        description: 'Threshold value for the condition.',
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                },
+              },
+              additionalProperties: false,
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+      allOf: [
+        {
+          if: {
+            properties: {
+              tokens: {
+                properties: {
+                  sync: {
+                    properties: {
+                      conflictResolution: { const: 'manual' },
+                    },
+                    required: ['conflictResolution'],
+                  },
+                },
+              },
+            },
+          },
+          then: {
+            properties: {
+              tokens: {
+                properties: {
+                  sync: {
+                    required: ['manualResolutionTimeout'],
+                  },
+                },
+              },
+            },
+          },
+        },
+      ],
+    },
+    status: {
+      type: 'object',
+      description: 'Observed state of the design system binding.',
+      properties: {
+        lastTokenSync: {
+          type: 'object',
+          description: 'Result of the most recent token synchronization.',
+          properties: {
+            timestamp: {
+              type: 'string',
+              format: 'date-time',
+            },
+            tokensChanged: {
+              type: 'integer',
+              minimum: 0,
+            },
+            result: {
+              type: 'string',
+              enum: ['success', 'failure', 'conflict', 'blocked'],
+            },
+          },
+          additionalProperties: false,
+        },
+        catalogHealth: {
+          type: 'object',
+          description: 'Component catalog health metrics.',
+          properties: {
+            totalComponents: {
+              type: 'integer',
+              minimum: 0,
+            },
+            documentedComponents: {
+              type: 'integer',
+              minimum: 0,
+            },
+            coveragePercent: {
+              type: 'number',
+              minimum: 0,
+              maximum: 100,
+            },
+          },
+          additionalProperties: false,
+        },
+        tokenCompliance: {
+          type: 'object',
+          description: 'Current token compliance metrics.',
+          properties: {
+            currentCoverage: {
+              type: 'number',
+              minimum: 0,
+              maximum: 100,
+            },
+            violations: {
+              type: 'integer',
+              minimum: 0,
+            },
+            trend: {
+              type: 'string',
+              enum: ['improving', 'stable', 'declining'],
+            },
+          },
+          additionalProperties: false,
+        },
+        designReview: {
+          type: 'object',
+          description: 'Design review status metrics.',
+          properties: {
+            pendingReviews: {
+              type: 'integer',
+              minimum: 0,
+            },
+            averageReviewTime: {
+              type: 'string',
+              description: 'ISO 8601 duration of average review time.',
+            },
+            approvalRate: {
+              type: 'number',
+              minimum: 0,
+              maximum: 1,
+            },
+          },
+          additionalProperties: false,
+        },
+        conditions: {
+          type: 'array',
+          description: 'Structured status conditions.',
+          items: {
+            $ref: 'common.schema.json#/$defs/condition',
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
 } as const;
 
 export const pipelineSchema = {
@@ -877,6 +1544,44 @@ export const pipelineSchema = {
               },
               approval: {
                 $ref: '#/$defs/ApprovalPolicy',
+              },
+              type: {
+                type: 'string',
+                description:
+                  'Stage type (e.g., design-system, design-review, quality-gate, usability-test).',
+              },
+              condition: {
+                type: 'string',
+                description: 'Expression that must evaluate to true for the stage to execute.',
+              },
+              context: {
+                type: 'object',
+                description: 'Context configuration for the stage.',
+                additionalProperties: true,
+              },
+              constraints: {
+                type: 'object',
+                description: 'Stage-specific constraints for agent execution.',
+                properties: {
+                  requireStory: {
+                    type: 'boolean',
+                    description: 'Require Storybook story output.',
+                  },
+                  requireTokenUsage: {
+                    type: 'boolean',
+                    description: 'Require design token usage (no hardcoded values).',
+                  },
+                  preferComposition: {
+                    type: 'boolean',
+                    description: 'Prefer composing existing components over creating new ones.',
+                  },
+                },
+                additionalProperties: true,
+              },
+              config: {
+                type: 'object',
+                description: 'Stage-specific configuration.',
+                additionalProperties: true,
               },
             },
             additionalProperties: false,
@@ -1730,6 +2435,223 @@ export const qualityGateSchema = {
                     },
                     additionalProperties: false,
                   },
+                  {
+                    type: 'object',
+                    title: 'Design token compliance rule (RFC-0006 §8.1)',
+                    required: ['designTokenCompliance', 'designSystem'],
+                    properties: {
+                      designTokenCompliance: {
+                        type: 'boolean',
+                        const: true,
+                      },
+                      designSystem: {
+                        type: 'string',
+                        description: 'Reference to a DesignSystemBinding by name.',
+                      },
+                      category: {
+                        type: 'string',
+                        description: 'Token category to check (e.g., color, spacing, typography).',
+                      },
+                      maxViolations: {
+                        type: 'integer',
+                        minimum: 0,
+                        description: 'Maximum allowed hardcoded value violations.',
+                      },
+                      coverageMetric: {
+                        type: 'object',
+                        description: 'Evaluate token coverage as a metric.',
+                        required: ['operator', 'threshold'],
+                        properties: {
+                          operator: {
+                            type: 'string',
+                            enum: ['>=', '<=', '==', '!=', '>', '<'],
+                          },
+                          threshold: {
+                            type: 'number',
+                          },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    title: 'Visual regression rule (RFC-0006 §8.2)',
+                    required: ['visualRegression', 'designSystem'],
+                    properties: {
+                      visualRegression: {
+                        type: 'boolean',
+                        const: true,
+                      },
+                      designSystem: {
+                        type: 'string',
+                        description: 'Reference to a DesignSystemBinding by name.',
+                      },
+                      config: {
+                        type: 'object',
+                        required: ['diffThreshold'],
+                        properties: {
+                          diffThreshold: {
+                            type: 'number',
+                            minimum: 0,
+                            maximum: 1,
+                            description: 'Maximum pixel diff percentage (0.0-1.0).',
+                          },
+                          failOnNewStory: {
+                            type: 'boolean',
+                            description: 'Whether new stories without baselines fail.',
+                          },
+                          requireBaseline: {
+                            type: 'boolean',
+                            description: 'Whether a baseline must exist.',
+                          },
+                        },
+                        additionalProperties: false,
+                      },
+                      override: {
+                        type: 'object',
+                        properties: {
+                          approvers: {
+                            type: 'array',
+                            items: { type: 'string' },
+                            description: 'Principals who may approve visual diffs.',
+                          },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    title: 'Story completeness rule (RFC-0006 §8.3)',
+                    required: ['storyCompleteness'],
+                    properties: {
+                      storyCompleteness: {
+                        type: 'boolean',
+                        const: true,
+                      },
+                      config: {
+                        type: 'object',
+                        properties: {
+                          requireDefaultStory: {
+                            type: 'boolean',
+                            description: 'Require a default/primary story.',
+                          },
+                          requireStateStories: {
+                            type: 'boolean',
+                            description: 'Require stories for interactive states.',
+                          },
+                          requireA11yStory: {
+                            type: 'boolean',
+                            description: 'Require an accessibility-focused story.',
+                          },
+                          minStories: {
+                            type: 'integer',
+                            minimum: 1,
+                            description: 'Minimum number of stories per component.',
+                          },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                    additionalProperties: false,
+                  },
+                  {
+                    type: 'object',
+                    title: 'Design review rule (RFC-0006 §8.5)',
+                    required: ['designReview', 'designSystem', 'reviewers'],
+                    properties: {
+                      designReview: {
+                        type: 'boolean',
+                        const: true,
+                      },
+                      designSystem: {
+                        type: 'string',
+                        description: 'Reference to a DesignSystemBinding by name.',
+                      },
+                      reviewers: {
+                        type: 'array',
+                        items: { type: 'string' },
+                        description: 'Principals qualified to perform design review.',
+                      },
+                      minimumReviewers: {
+                        type: 'integer',
+                        minimum: 1,
+                        default: 1,
+                      },
+                      timeout: {
+                        type: 'string',
+                        description: 'ISO 8601 duration for review timeout.',
+                      },
+                      onTimeout: {
+                        type: 'string',
+                        enum: ['pause', 'fail'],
+                      },
+                      triggerConditions: {
+                        type: 'object',
+                        properties: {
+                          always: {
+                            type: 'array',
+                            items: {
+                              type: 'string',
+                              enum: ['new-component', 'token-schema-change'],
+                            },
+                          },
+                          conditional: {
+                            type: 'array',
+                            items: {
+                              type: 'object',
+                              required: ['condition', 'threshold'],
+                              properties: {
+                                condition: {
+                                  type: 'string',
+                                  enum: [
+                                    'semantic-token-cascade',
+                                    'visual-regression-diff',
+                                    'complexity-score',
+                                  ],
+                                },
+                                threshold: { type: 'number' },
+                              },
+                              additionalProperties: false,
+                            },
+                          },
+                        },
+                        additionalProperties: false,
+                      },
+                      feedback: {
+                        type: 'object',
+                        properties: {
+                          structured: { type: 'boolean' },
+                          categories: {
+                            type: 'array',
+                            items: {
+                              type: 'string',
+                              enum: [
+                                'visual-quality',
+                                'contextual-fit',
+                                'interaction-design',
+                                'accessibility-intent',
+                                'design-language-consistency',
+                              ],
+                            },
+                          },
+                          actionOnReject: {
+                            type: 'string',
+                            enum: ['return-to-agent', 'escalate'],
+                          },
+                          maxRejections: {
+                            type: 'integer',
+                            minimum: 1,
+                          },
+                        },
+                        additionalProperties: false,
+                      },
+                    },
+                    additionalProperties: false,
+                  },
                 ],
               },
               override: {
@@ -1815,6 +2737,7 @@ export const SCHEMAS: Record<string, object> = {
   'agent-role.schema.json': agentRoleSchema,
   'autonomy-policy.schema.json': autonomyPolicySchema,
   'common.schema.json': commonSchema,
+  'design-system-binding.schema.json': designSystemBindingSchema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
 };

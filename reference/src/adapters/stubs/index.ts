@@ -34,3 +34,28 @@ export {
 } from './sonarqube.js';
 
 export { createStubSemgrep, type StubSemgrepConfig, type StubSemgrepAdapter } from './semgrep.js';
+
+// Design System adapter stubs (RFC-0006)
+export {
+  createStubDesignTokenProvider,
+  type StubDesignTokenProviderConfig,
+  type StubDesignTokenProviderAdapter,
+} from './design-token-provider.js';
+
+export {
+  createStubComponentCatalog,
+  type StubComponentCatalogConfig,
+  type StubComponentCatalogAdapter,
+} from './component-catalog.js';
+
+export {
+  createStubVisualRegressionRunner,
+  type StubVisualRegressionConfig,
+  type StubVisualRegressionRunnerAdapter,
+} from './visual-regression-runner.js';
+
+export {
+  createStubUsabilitySimulationRunner,
+  type StubUsabilitySimulationConfig,
+  type StubUsabilitySimulationRunnerAdapter,
+} from './usability-simulation-runner.js';

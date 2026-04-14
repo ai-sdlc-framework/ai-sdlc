@@ -1,0 +1,561 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/design-system-binding.schema.json",
+  "title": "AI-SDLC DesignSystemBinding",
+  "description": "Declares a design system that a pipeline's frontend stages must conform to. Defines token sources, component catalogs, visual regression configuration, compliance rules, stewardship authority, and design review gates.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "DesignSystemBinding"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["stewardship", "designToolAuthority", "tokens", "catalog", "compliance"],
+      "properties": {
+        "extends": {
+          "type": "string",
+          "description": "Reference to a parent DesignSystemBinding by name for multi-brand inheritance. Child thresholds must be >= parent thresholds. Max two-level depth."
+        },
+        "stewardship": {
+          "type": "object",
+          "description": "Defines who has authority over which aspects of this resource.",
+          "required": ["designAuthority", "engineeringAuthority"],
+          "properties": {
+            "designAuthority": {
+              "type": "object",
+              "description": "Principals with authority over design-scoped fields.",
+              "required": ["principals", "scope"],
+              "properties": {
+                "principals": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1,
+                  "description": "Identifiers of principals with design authority."
+                },
+                "scope": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Fields governed by design authority (e.g., conflictResolution, visualBaselines, tokenSchema)."
+                }
+              },
+              "additionalProperties": false
+            },
+            "engineeringAuthority": {
+              "type": "object",
+              "description": "Principals with authority over engineering-scoped fields.",
+              "required": ["principals", "scope"],
+              "properties": {
+                "principals": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "minItems": 1,
+                  "description": "Identifiers of principals with engineering authority."
+                },
+                "scope": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Fields governed by engineering authority (e.g., catalog, visualRegression.config)."
+                }
+              },
+              "additionalProperties": false
+            },
+            "sharedAuthority": {
+              "type": "object",
+              "description": "Fields requiring approval from both disciplines.",
+              "properties": {
+                "principals": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Principals from both disciplines."
+                },
+                "scope": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Fields requiring cross-discipline approval (e.g., sync.direction, compliance.coverage.minimum)."
+                }
+              },
+              "additionalProperties": false
+            },
+            "changeApproval": {
+              "type": "object",
+              "description": "Controls for change approval requirements.",
+              "properties": {
+                "requireBothDisciplines": {
+                  "type": "boolean",
+                  "description": "Whether changes to sharedAuthority fields require approval from both disciplines.",
+                  "default": true
+                },
+                "auditAllChanges": {
+                  "type": "boolean",
+                  "description": "Whether all changes to this resource are recorded in the audit log.",
+                  "default": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "designToolAuthority": {
+          "type": "string",
+          "enum": ["exploration", "specification", "collaborative"],
+          "description": "The authority level of the design tool. This is a significant organizational decision — teams MUST configure this with both design and engineering leadership."
+        },
+        "tokens": {
+          "type": "object",
+          "description": "Design token source configuration.",
+          "required": ["provider", "format", "source", "versionPolicy"],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "The DesignTokenProvider adapter name (e.g., figma-tokens-studio, figma-variables)."
+            },
+            "format": {
+              "type": "string",
+              "enum": ["w3c-dtcg", "style-dictionary", "custom"],
+              "description": "The token format. w3c-dtcg is the W3C Design Tokens Format Module v1.0."
+            },
+            "source": {
+              "type": "object",
+              "description": "Location of the token source.",
+              "required": ["repository"],
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "description": "Git repository reference (e.g., org/repo)."
+                },
+                "branch": {
+                  "type": "string",
+                  "description": "Branch to read tokens from.",
+                  "default": "main"
+                },
+                "path": {
+                  "type": "string",
+                  "description": "Path within the repository to the token files.",
+                  "default": "tokens/"
+                }
+              },
+              "additionalProperties": false
+            },
+            "versionPolicy": {
+              "type": "string",
+              "enum": ["exact", "minor", "minor-and-major", "latest"],
+              "description": "Token schema update policy. exact: only pinned version. minor: minor+patch. minor-and-major: major+minor+patch. latest: all including breaking."
+            },
+            "pinnedVersion": {
+              "type": "string",
+              "description": "Required when versionPolicy is exact. Must be a valid semver string.",
+              "pattern": "^\\d+\\.\\d+\\.\\d+(-[a-zA-Z0-9.]+)?(\\+[a-zA-Z0-9.]+)?$"
+            },
+            "platform": {
+              "type": "string",
+              "enum": ["web", "ios", "android"],
+              "description": "Platform-specific token expression format. Omit for platform-neutral canonical tokens."
+            },
+            "sync": {
+              "type": "object",
+              "description": "Token synchronization configuration.",
+              "properties": {
+                "direction": {
+                  "type": "string",
+                  "enum": ["unidirectional", "bidirectional"],
+                  "description": "Whether changes flow one way (design→code) or both ways.",
+                  "default": "unidirectional"
+                },
+                "schedule": {
+                  "type": "string",
+                  "description": "ISO 8601 duration for sync interval (e.g., PT15M, PT1H). Use 'manual' for external scheduling.",
+                  "pattern": "^(PT?(\\d+[YMDHMS])+|manual)$"
+                },
+                "conflictResolution": {
+                  "type": "string",
+                  "enum": ["code-wins", "design-wins", "manual"],
+                  "description": "Strategy when bidirectional sync produces conflicts.",
+                  "default": "manual"
+                },
+                "manualResolutionTimeout": {
+                  "type": "string",
+                  "description": "ISO 8601 duration — max time pipeline may remain paused for manual conflict resolution. Required when conflictResolution is manual.",
+                  "pattern": "^PT?(\\d+[YMDHMS])+$"
+                },
+                "onTimeout": {
+                  "type": "string",
+                  "enum": ["escalate", "fallback-design-wins", "fail"],
+                  "description": "Behavior when manualResolutionTimeout expires.",
+                  "default": "escalate"
+                },
+                "escalateTo": {
+                  "type": "array",
+                  "items": { "type": "string" },
+                  "description": "Principals to notify on escalation."
+                },
+                "prBranch": {
+                  "type": "string",
+                  "description": "Branch naming template for token sync PRs. Supports {timestamp} placeholder.",
+                  "default": "ai-sdlc/token-sync-{timestamp}"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false,
+          "if": {
+            "properties": {
+              "versionPolicy": { "const": "exact" }
+            },
+            "required": ["versionPolicy"]
+          },
+          "then": {
+            "required": ["provider", "format", "source", "versionPolicy", "pinnedVersion"]
+          }
+        },
+        "catalog": {
+          "type": "object",
+          "description": "Component catalog configuration (e.g., Storybook MCP).",
+          "required": ["provider"],
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "The ComponentCatalog adapter name (e.g., storybook-mcp)."
+            },
+            "source": {
+              "type": "object",
+              "description": "Location of the component catalog.",
+              "properties": {
+                "repository": {
+                  "type": "string",
+                  "description": "Git repository reference for the component library."
+                },
+                "storybookUrl": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "URL of the deployed Storybook instance."
+                },
+                "manifestPath": {
+                  "type": "string",
+                  "description": "Path to the component manifest file.",
+                  "default": ".storybook/component-manifest.json"
+                }
+              },
+              "additionalProperties": false
+            },
+            "discovery": {
+              "type": "object",
+              "description": "MCP-based component discovery configuration.",
+              "properties": {
+                "mcpEndpoint": {
+                  "type": "string",
+                  "format": "uri",
+                  "description": "Storybook MCP server endpoint URL."
+                },
+                "refreshInterval": {
+                  "type": "string",
+                  "description": "ISO 8601 duration for manifest cache refresh.",
+                  "pattern": "^PT?(\\d+[YMDHMS])+$"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "visualRegression": {
+          "type": "object",
+          "description": "Visual regression testing configuration.",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "The VisualRegressionRunner adapter name (e.g., chromatic, playwright-visual, percy)."
+            },
+            "config": {
+              "type": "object",
+              "description": "Provider-specific configuration.",
+              "properties": {
+                "projectToken": {
+                  "type": "string",
+                  "description": "Project authentication token (use ${SECRET_NAME} for secret references)."
+                },
+                "diffThreshold": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1,
+                  "description": "Maximum pixel diff percentage before a story is flagged (0.0-1.0).",
+                  "default": 0.01
+                },
+                "viewports": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1
+                  },
+                  "description": "Viewport widths to test at (in pixels).",
+                  "default": [375, 768, 1280, 1920]
+                }
+              },
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        },
+        "compliance": {
+          "type": "object",
+          "description": "Design token compliance rules.",
+          "required": ["coverage"],
+          "properties": {
+            "disallowHardcoded": {
+              "type": "array",
+              "description": "Patterns for disallowed hardcoded values that should use tokens instead.",
+              "items": {
+                "type": "object",
+                "required": ["category", "pattern", "message"],
+                "properties": {
+                  "category": {
+                    "type": "string",
+                    "description": "Token category (e.g., color, spacing, typography)."
+                  },
+                  "pattern": {
+                    "type": "string",
+                    "description": "Regex pattern matching hardcoded values."
+                  },
+                  "exclude": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Values that are intentional exceptions to this rule."
+                  },
+                  "message": {
+                    "type": "string",
+                    "description": "Human-readable message explaining which token to use instead."
+                  }
+                },
+                "additionalProperties": false
+              }
+            },
+            "coverage": {
+              "type": "object",
+              "description": "Token coverage thresholds.",
+              "required": ["minimum"],
+              "properties": {
+                "minimum": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Minimum acceptable token coverage percentage."
+                },
+                "target": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Target token coverage percentage."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "designReview": {
+          "type": "object",
+          "description": "Design review gate configuration.",
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "description": "Whether design review gates are enabled.",
+              "default": false
+            },
+            "reviewers": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Principals qualified to perform design review."
+            },
+            "scope": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "visual-quality",
+                  "contextual-fit",
+                  "interaction-design",
+                  "accessibility-intent",
+                  "design-language-consistency"
+                ]
+              },
+              "description": "Aspects evaluated during design review."
+            },
+            "triggerConditions": {
+              "type": "object",
+              "description": "Conditions that trigger a design review.",
+              "properties": {
+                "alwaysOn": {
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "enum": ["new-component", "token-schema-change"]
+                  },
+                  "description": "Conditions that always require design review."
+                },
+                "configurable": {
+                  "type": "array",
+                  "description": "Conditions with configurable thresholds.",
+                  "items": {
+                    "type": "object",
+                    "required": ["condition", "threshold"],
+                    "properties": {
+                      "condition": {
+                        "type": "string",
+                        "enum": [
+                          "semantic-token-cascade",
+                          "visual-regression-diff",
+                          "complexity-score"
+                        ],
+                        "description": "The trigger condition type."
+                      },
+                      "threshold": {
+                        "type": "number",
+                        "description": "Threshold value for the condition."
+                      }
+                    },
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "tokens": {
+                "properties": {
+                  "sync": {
+                    "properties": {
+                      "conflictResolution": { "const": "manual" }
+                    },
+                    "required": ["conflictResolution"]
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "tokens": {
+                "properties": {
+                  "sync": {
+                    "required": ["manualResolutionTimeout"]
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "status": {
+      "type": "object",
+      "description": "Observed state of the design system binding.",
+      "properties": {
+        "lastTokenSync": {
+          "type": "object",
+          "description": "Result of the most recent token synchronization.",
+          "properties": {
+            "timestamp": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "tokensChanged": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "result": {
+              "type": "string",
+              "enum": ["success", "failure", "conflict", "blocked"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "catalogHealth": {
+          "type": "object",
+          "description": "Component catalog health metrics.",
+          "properties": {
+            "totalComponents": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "documentedComponents": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "coveragePercent": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          },
+          "additionalProperties": false
+        },
+        "tokenCompliance": {
+          "type": "object",
+          "description": "Current token compliance metrics.",
+          "properties": {
+            "currentCoverage": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            },
+            "violations": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "trend": {
+              "type": "string",
+              "enum": ["improving", "stable", "declining"]
+            }
+          },
+          "additionalProperties": false
+        },
+        "designReview": {
+          "type": "object",
+          "description": "Design review status metrics.",
+          "properties": {
+            "pendingReviews": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "averageReviewTime": {
+              "type": "string",
+              "description": "ISO 8601 duration of average review time."
+            },
+            "approvalRate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        "conditions": {
+          "type": "array",
+          "description": "Structured status conditions.",
+          "items": {
+            "$ref": "common.schema.json#/$defs/condition"
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

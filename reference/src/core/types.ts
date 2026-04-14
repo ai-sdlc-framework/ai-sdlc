@@ -14,7 +14,8 @@ export type ResourceKind =
   | 'AgentRole'
   | 'QualityGate'
   | 'AutonomyPolicy'
-  | 'AdapterBinding';
+  | 'AdapterBinding'
+  | 'DesignSystemBinding';
 
 export interface Metadata {
   name: string;
@@ -40,6 +41,12 @@ export interface MetricCondition {
   metric: string;
   operator: '>=' | '<=' | '==' | '!=' | '>' | '<';
   threshold: number;
+  /** Expected calibration range [min, max] for this metric (RFC-0006 §13.2). */
+  calibrationRange?: [number, number];
+  /** Explanation of threshold choice and calibration guidance. */
+  rationale?: string;
+  /** Trailing time window for metric evaluation (e.g., 30d, 7d). */
+  window?: string;
 }
 
 /** Duration in shorthand (60s, 5m, 2h, 1d, 2w) or ISO 8601 format. */
@@ -292,6 +299,13 @@ export interface ApprovalPolicy {
   onTimeout?: 'abort' | 'escalate' | 'auto-approve';
 }
 
+export interface StageConstraints {
+  requireStory?: boolean;
+  requireTokenUsage?: boolean;
+  preferComposition?: boolean;
+  [key: string]: unknown;
+}
+
 export interface Stage {
   name: string;
   agent?: string;
@@ -300,6 +314,16 @@ export interface Stage {
   timeout?: string;
   credentials?: CredentialPolicy;
   approval?: ApprovalPolicy;
+  /** Stage type (e.g., design-system, design-review, quality-gate, usability-test). */
+  type?: string;
+  /** Expression that must evaluate to true for the stage to execute. */
+  condition?: string;
+  /** Context configuration for the stage. */
+  context?: Record<string, unknown>;
+  /** Stage-specific constraints for agent execution (RFC-0006 §6). */
+  constraints?: StageConstraints;
+  /** Stage-specific configuration. */
+  config?: Record<string, unknown>;
 }
 
 export type RoutingStrategy = 'fully-autonomous' | 'ai-with-review' | 'ai-assisted' | 'human-led';
@@ -384,6 +408,10 @@ export interface AgentConstraints {
   maxBudgetUsd?: number;
   /** Maximum number of tool-call turns before the agent is stopped. */
   maxTurns?: number;
+  /** Whether the agent must produce a Storybook story for component changes (RFC-0006). */
+  requireStory?: boolean;
+  /** Whether the agent must use design tokens instead of hardcoded values (RFC-0006). */
+  requireTokenUsage?: boolean;
 }
 
 export interface HandoffContractRef {
@@ -415,6 +443,21 @@ export interface AgentCard {
   securitySchemes?: string[];
 }
 
+export type ContextStrategy = 'manifest-first' | 'tokens-only' | 'full';
+export type ContextStrategyOverride = 'auto' | 'fixed';
+export type ComponentCreationPolicy = 'compose-or-justify' | 'compose-only' | 'unrestricted';
+
+export interface AgentDesignSystemConfig {
+  /** Reference to a DesignSystemBinding resource name. */
+  binding: string;
+  /** How the agent receives design system context. */
+  contextStrategy?: ContextStrategy;
+  /** Whether the orchestrator may escalate the context strategy at runtime. */
+  contextStrategyOverride?: ContextStrategyOverride;
+  /** Policy for when the agent may create new components. */
+  componentCreationPolicy?: ComponentCreationPolicy;
+}
+
 export interface AgentRoleSpec {
   role: string;
   goal: string;
@@ -425,6 +468,8 @@ export interface AgentRoleSpec {
   skills?: Skill[];
   agentCard?: AgentCard;
   modelSelection?: ModelSelection;
+  /** Design system context for frontend agents (RFC-0006 §7). */
+  designSystem?: AgentDesignSystemConfig;
 }
 
 export interface AgentRoleStatus {
@@ -473,6 +518,88 @@ export interface ExpressionRule {
   expression: string;
 }
 
+// ── Design System Gate Rules (RFC-0006 §8) ───────────────────────────
+
+export interface DesignTokenComplianceRule {
+  designTokenCompliance: true;
+  designSystem: string;
+  category?: string;
+  maxViolations?: number;
+  /** When set, evaluates as a metric rule against token coverage. */
+  coverageMetric?: {
+    operator: '>=' | '<=' | '==' | '!=' | '>' | '<';
+    threshold: number;
+  };
+}
+
+export interface VisualRegressionRule {
+  visualRegression: true;
+  designSystem: string;
+  config: {
+    diffThreshold: number;
+    failOnNewStory?: boolean;
+    requireBaseline?: boolean;
+  };
+  override?: {
+    approvers: string[];
+  };
+}
+
+export interface StoryCompletenessRule {
+  storyCompleteness: true;
+  config: {
+    requireDefaultStory?: boolean;
+    requireStateStories?: boolean;
+    requireA11yStory?: boolean;
+    minStories?: number;
+  };
+}
+
+export type DesignReviewDecision = 'approved' | 'rejected' | 'approved-with-comments';
+
+export type DesignReviewFeedbackCategory =
+  | 'visual-quality'
+  | 'contextual-fit'
+  | 'interaction-design'
+  | 'accessibility-intent'
+  | 'design-language-consistency';
+
+export type DesignReviewRating = 'pass' | 'minor-issue' | 'major-issue';
+
+export interface DesignReviewFeedback {
+  decision: DesignReviewDecision;
+  reviewer: string;
+  categories: Array<{
+    category: DesignReviewFeedbackCategory;
+    rating: DesignReviewRating;
+    comment?: string;
+  }>;
+  actionableNotes?: string;
+  referenceUrls?: string[];
+}
+
+export interface DesignReviewGateRule {
+  designReview: true;
+  designSystem: string;
+  reviewers: string[];
+  minimumReviewers?: number;
+  timeout?: string;
+  onTimeout?: 'pause' | 'fail';
+  triggerConditions?: {
+    always?: ('new-component' | 'token-schema-change')[];
+    conditional?: Array<{
+      condition: 'semantic-token-cascade' | 'visual-regression-diff' | 'complexity-score';
+      threshold: number;
+    }>;
+  };
+  feedback?: {
+    structured?: boolean;
+    categories?: DesignReviewFeedbackCategory[];
+    actionOnReject?: 'return-to-agent' | 'escalate';
+    maxRejections?: number;
+  };
+}
+
 export type GateRule =
   | MetricRule
   | ToolRule
@@ -480,7 +607,11 @@ export type GateRule =
   | DocumentationRule
   | ProvenanceRule
   | ExpressionRule
-  | CostRule;
+  | CostRule
+  | DesignTokenComplianceRule
+  | VisualRegressionRule
+  | StoryCompletenessRule
+  | DesignReviewGateRule;
 
 export type EnforcementLevel = 'advisory' | 'soft-mandatory' | 'hard-mandatory';
 
@@ -522,10 +653,21 @@ export type QualityGate = Resource<'QualityGate', QualityGateSpec, QualityGateSt
 
 // ── AutonomyPolicy ────────────────────────────────────────────────────
 
+export interface DesignSystemPermissions {
+  modifyExistingComponents?: boolean;
+  createNewComponents?: boolean;
+  modifyTokens?: boolean;
+  modifyStories?: boolean;
+  /** Always false — visual diff approval is human-only (§13.3). */
+  approveVisualDiffs?: boolean;
+}
+
 export interface Permissions {
   read: string[];
   write: string[];
   execute: string[];
+  /** Design system permissions (RFC-0006 §13.1). */
+  designSystem?: DesignSystemPermissions;
 }
 
 export type ApprovalRequirement =
@@ -534,11 +676,17 @@ export type ApprovalRequirement =
   | 'architecture-changes-only'
   | 'none';
 
+export type DesignReviewRequirement = 'always' | 'conditional' | 'never';
+
 export interface Guardrails {
   requireApproval: ApprovalRequirement;
   maxLinesPerPR?: number;
   blockedPaths?: string[];
   transactionLimit?: string;
+  /** When design review is required for this autonomy level (RFC-0006 §13.1). */
+  requireDesignReview?: DesignReviewRequirement;
+  /** Maximum components per PR at this autonomy level (RFC-0006 §13.1). */
+  maxComponentsPerPR?: number;
 }
 
 export type MonitoringLevel = 'continuous' | 'real-time-notification' | 'audit-log';
@@ -608,7 +756,11 @@ export type AdapterInterface =
   | 'Sandbox'
   | 'SecretStore'
   | 'MemoryStore'
-  | 'EventBus';
+  | 'EventBus'
+  | 'DesignTokenProvider'
+  | 'ComponentCatalog'
+  | 'VisualRegressionRunner'
+  | 'UsabilitySimulationRunner';
 
 export interface HealthCheck {
   interval?: Duration;
@@ -633,6 +785,190 @@ export interface AdapterBindingStatus {
 
 export type AdapterBinding = Resource<'AdapterBinding', AdapterBindingSpec, AdapterBindingStatus>;
 
+// ── DesignSystemBinding (RFC-0006) ───────────────────────────────────
+
+export type DesignToolAuthority = 'exploration' | 'specification' | 'collaborative';
+export type TokenFormat = 'w3c-dtcg' | 'style-dictionary' | 'custom';
+export type TokenVersionPolicy = 'exact' | 'minor' | 'minor-and-major' | 'latest';
+export type ConflictResolution = 'code-wins' | 'design-wins' | 'manual';
+export type SyncDirection = 'unidirectional' | 'bidirectional';
+export type OnTimeout = 'escalate' | 'fallback-design-wins' | 'fail';
+export type TokenPlatform = 'web' | 'ios' | 'android';
+
+export type DesignReviewScope =
+  | 'visual-quality'
+  | 'contextual-fit'
+  | 'interaction-design'
+  | 'accessibility-intent'
+  | 'design-language-consistency';
+
+export type DesignReviewAlwaysOn = 'new-component' | 'token-schema-change';
+export type DesignReviewCondition =
+  | 'semantic-token-cascade'
+  | 'visual-regression-diff'
+  | 'complexity-score';
+
+export interface AuthorityBlock {
+  principals: string[];
+  scope: string[];
+}
+
+export interface ChangeApproval {
+  requireBothDisciplines?: boolean;
+  auditAllChanges?: boolean;
+}
+
+export interface Stewardship {
+  designAuthority: AuthorityBlock;
+  engineeringAuthority: AuthorityBlock;
+  sharedAuthority?: AuthorityBlock;
+  changeApproval?: ChangeApproval;
+}
+
+export interface TokenSource {
+  repository: string;
+  branch?: string;
+  path?: string;
+}
+
+export interface TokenSyncConfig {
+  direction?: SyncDirection;
+  schedule?: string;
+  conflictResolution?: ConflictResolution;
+  manualResolutionTimeout?: string;
+  onTimeout?: OnTimeout;
+  escalateTo?: string[];
+  prBranch?: string;
+}
+
+export interface TokenConfig {
+  provider: string;
+  format: TokenFormat;
+  source: TokenSource;
+  versionPolicy: TokenVersionPolicy;
+  pinnedVersion?: string;
+  platform?: TokenPlatform;
+  sync?: TokenSyncConfig;
+}
+
+export interface CatalogSource {
+  repository?: string;
+  storybookUrl?: string;
+  manifestPath?: string;
+}
+
+export interface CatalogDiscovery {
+  mcpEndpoint?: string;
+  refreshInterval?: string;
+}
+
+export interface CatalogConfig {
+  provider: string;
+  source?: CatalogSource;
+  discovery?: CatalogDiscovery;
+}
+
+export interface VisualRegressionProviderConfig {
+  projectToken?: string;
+  diffThreshold?: number;
+  viewports?: number[];
+  [key: string]: unknown;
+}
+
+export interface VisualRegressionConfig {
+  provider?: string;
+  config?: VisualRegressionProviderConfig;
+}
+
+export interface HardcodedRule {
+  category: string;
+  pattern: string;
+  exclude?: string[];
+  message: string;
+}
+
+export interface CoverageThreshold {
+  minimum: number;
+  target?: number;
+}
+
+export interface ComplianceConfig {
+  disallowHardcoded?: HardcodedRule[];
+  coverage: CoverageThreshold;
+}
+
+export interface DesignReviewTriggerCondition {
+  condition: DesignReviewCondition;
+  threshold: number;
+}
+
+export interface DesignReviewTriggerConditions {
+  alwaysOn?: DesignReviewAlwaysOn[];
+  configurable?: DesignReviewTriggerCondition[];
+}
+
+export interface DesignReviewConfig {
+  required?: boolean;
+  reviewers?: string[];
+  scope?: DesignReviewScope[];
+  triggerConditions?: DesignReviewTriggerConditions;
+}
+
+export interface DesignSystemBindingSpec {
+  extends?: string;
+  stewardship: Stewardship;
+  designToolAuthority: DesignToolAuthority;
+  tokens: TokenConfig;
+  catalog: CatalogConfig;
+  visualRegression?: VisualRegressionConfig;
+  compliance: ComplianceConfig;
+  designReview?: DesignReviewConfig;
+}
+
+export interface TokenSyncStatus {
+  timestamp?: string;
+  tokensChanged?: number;
+  result?: 'success' | 'failure' | 'conflict' | 'blocked';
+}
+
+export interface CatalogHealthStatus {
+  totalComponents?: number;
+  documentedComponents?: number;
+  coveragePercent?: number;
+}
+
+export interface TokenComplianceStatus {
+  currentCoverage?: number;
+  violations?: number;
+  trend?: 'improving' | 'stable' | 'declining';
+}
+
+export interface DesignReviewStatus {
+  pendingReviews?: number;
+  averageReviewTime?: string;
+  approvalRate?: number;
+}
+
+export interface DesignSystemBindingStatus {
+  lastTokenSync?: TokenSyncStatus;
+  catalogHealth?: CatalogHealthStatus;
+  tokenCompliance?: TokenComplianceStatus;
+  designReview?: DesignReviewStatus;
+  conditions?: Condition[];
+}
+
+export type DesignSystemBinding = Resource<
+  'DesignSystemBinding',
+  DesignSystemBindingSpec,
+  DesignSystemBindingStatus
+>;
+
 // ── Union Type ────────────────────────────────────────────────────────
 
-export type AnyResource = Pipeline | AgentRole | QualityGate | AutonomyPolicy | AdapterBinding;
+export type AnyResource =
+  | Pipeline
+  | AgentRole
+  | QualityGate
+  | AutonomyPolicy
+  | AdapterBinding
+  | DesignSystemBinding;

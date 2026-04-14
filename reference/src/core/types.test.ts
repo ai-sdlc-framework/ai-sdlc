@@ -9,15 +9,16 @@ describe('API_VERSION', () => {
 });
 
 describe('ResourceKind', () => {
-  it('accepts all 5 kinds', () => {
+  it('accepts all 6 kinds', () => {
     const kinds: ResourceKind[] = [
       'Pipeline',
       'AgentRole',
       'QualityGate',
       'AutonomyPolicy',
       'AdapterBinding',
+      'DesignSystemBinding',
     ];
-    expect(kinds).toHaveLength(5);
+    expect(kinds).toHaveLength(6);
   });
 });
 

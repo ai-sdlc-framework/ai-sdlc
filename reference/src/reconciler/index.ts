@@ -29,6 +29,18 @@ export { createPipelineReconciler, type PipelineReconcilerDeps } from './pipelin
 
 export { createGateReconciler, type GateReconcilerDeps } from './gate-reconciler.js';
 
+export {
+  createDesignSystemReconciler,
+  resolveConflict,
+  enforceVersionPolicy,
+  type DesignSystemReconcilerDeps,
+  type DesignSystemEvent,
+  type DesignSystemEventType,
+  type ConflictResolutionResult,
+  type VersionPolicyResult,
+  type EventHandler,
+} from './design-system-reconciler.js';
+
 export { createAutonomyReconciler, type AutonomyReconcilerDeps } from './autonomy-reconciler.js';
 
 export { createCostReconciler, type CostReconcilerDeps } from './cost-reconciler.js';

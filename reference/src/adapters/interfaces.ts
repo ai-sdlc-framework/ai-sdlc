@@ -383,6 +383,418 @@ export interface EventBus {
   subscribe(topic: string, handler: (payload: unknown) => void): () => void;
 }
 
+// ── DesignTokenProvider (RFC-0006 §9.1) ──────────────────────────────
+
+/** A W3C DTCG token entry. */
+export interface DesignToken {
+  $type: string;
+  $value: string | number | boolean | Record<string, unknown>;
+  $description?: string;
+}
+
+/** A set of design tokens keyed by dotted path (e.g., "color.primary"). */
+export interface DesignTokenSet {
+  [key: string]: DesignToken | DesignTokenSet;
+}
+
+/** A single token change within a diff. */
+export interface TokenChange {
+  path: string;
+  type: 'added' | 'modified' | 'removed';
+  oldValue?: DesignToken;
+  newValue?: DesignToken;
+}
+
+/** The result of diffing two token snapshots. */
+export interface TokenDiff {
+  changes: TokenChange[];
+  added: number;
+  modified: number;
+  removed: number;
+}
+
+/** A token that was deleted between snapshots. */
+export interface TokenDeletion {
+  path: string;
+  tokenType: string;
+  lastValue: DesignToken;
+  scope: 'primitive' | 'semantic' | 'component';
+  referencedBy: string[];
+  aliasedBy: string[];
+}
+
+/** Result of pushing tokens to a design tool or repository. */
+export interface PushResult {
+  success: boolean;
+  commitSha?: string;
+  message?: string;
+}
+
+/** Unsubscribe function for event subscriptions. */
+export type Unsubscribe = () => void;
+
+/** Breaking change detection result. */
+export interface BreakingChangeResult {
+  isBreaking: boolean;
+  breakingChanges: string[];
+}
+
+export interface DesignTokenProvider {
+  /** Fetch current tokens in W3C DTCG format. */
+  getTokens(options?: {
+    categories?: string[];
+    scope?: 'primitive' | 'semantic' | 'component';
+    mode?: string;
+  }): Promise<DesignTokenSet>;
+
+  /** Diff tokens between two snapshots. */
+  diffTokens(baseline: DesignTokenSet, current: DesignTokenSet): Promise<TokenDiff>;
+
+  /** Identify deleted tokens between snapshots. */
+  detectDeletions(baseline: DesignTokenSet, current: DesignTokenSet): Promise<TokenDeletion[]>;
+
+  /** Push token changes back to the design tool or repository. */
+  pushTokens(
+    tokens: DesignTokenSet,
+    options?: { branch?: string; message?: string },
+  ): Promise<PushResult>;
+
+  /** Subscribe to token change events. */
+  onTokensChanged(callback: (diff: TokenDiff) => void): Unsubscribe;
+
+  /** Subscribe to token deletion events. */
+  onTokensDeleted(callback: (deletions: TokenDeletion[]) => void): Unsubscribe;
+
+  /** Determine whether a schema version change is breaking. */
+  detectBreakingChange(fromVersion: string, toVersion: string): Promise<BreakingChangeResult>;
+
+  /** Report the current token schema version. */
+  getSchemaVersion(): Promise<string>;
+}
+
+// ── ComponentCatalog (RFC-0006 §9.2) ─────────────────────────────────
+
+/** A component entry in the manifest. */
+export interface ComponentEntry {
+  name: string;
+  category?: string;
+  description?: string;
+  props?: Record<string, unknown>;
+  capabilities?: string[];
+  tokenBindings?: string[];
+  stories?: string[];
+}
+
+/** The full component manifest from a catalog provider. */
+export interface ComponentManifest {
+  version: string;
+  components: ComponentEntry[];
+  generatedAt?: string;
+}
+
+/** A query to resolve components from the catalog. */
+export interface ComponentQuery {
+  name?: string;
+  category?: string;
+  capabilities?: string[];
+}
+
+/** A matched component with relevance score. */
+export interface ComponentMatch {
+  component: ComponentEntry;
+  score: number;
+  matchedOn: string[];
+}
+
+/** A requirement that existing components should satisfy. */
+export interface ComponentRequirement {
+  description: string;
+  capabilities: string[];
+  acceptableCategories?: string[];
+}
+
+/** A plan for composing existing components to satisfy a requirement. */
+export interface CompositionPlan {
+  feasible: boolean;
+  components: ComponentEntry[];
+  gaps: string[];
+  confidence: number;
+}
+
+/** A Storybook story entry. */
+export interface StoryEntry {
+  id: string;
+  name: string;
+  componentName: string;
+  kind: string;
+  parameters?: Record<string, unknown>;
+}
+
+/** Result of validating generated code against the catalog. */
+export interface CatalogValidationResult {
+  valid: boolean;
+  reusedComponents: string[];
+  newComponents: string[];
+  violations: string[];
+}
+
+export interface ComponentCatalog {
+  /** Get the component manifest. */
+  getManifest(): Promise<ComponentManifest>;
+
+  /** Resolve a component by name, category, or capabilities. */
+  resolveComponent(query: ComponentQuery): Promise<ComponentMatch[]>;
+
+  /** Check if existing components can satisfy a requirement. */
+  canCompose(requirement: ComponentRequirement): Promise<CompositionPlan>;
+
+  /** Get stories for a component. */
+  getStories(componentName: string): Promise<StoryEntry[]>;
+
+  /** Validate generated code against the catalog. */
+  validateAgainstCatalog(
+    code: string,
+    options?: { strict?: boolean },
+  ): Promise<CatalogValidationResult>;
+}
+
+// ── VisualRegressionRunner (RFC-0006 §9.3) ───────────────────────────
+
+/** A set of visual baselines keyed by story+viewport. */
+export interface BaselineSet {
+  baselines: Map<string, Buffer>;
+  capturedAt: string;
+}
+
+/** A changed region within a visual diff (RFC-0006 §8.4). */
+export interface ChangedRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  expectedTokens?: string[];
+  actualValues?: string[];
+}
+
+/** Structured failure context for agent self-correction (RFC-0006 §8.4). */
+export interface VisualRegressionFailure {
+  componentName: string;
+  storyName: string;
+  viewport: number;
+  diffPercentage: number;
+  changedRegions: ChangedRegion[];
+  affectedTokens: string[];
+  baselineUrl: string;
+  currentUrl: string;
+  diffImageUrl?: string;
+}
+
+/** The result of comparing snapshots against baselines. */
+export interface VisualDiffResult {
+  passed: boolean;
+  totalStories: number;
+  failedStories: number;
+  diffs: Array<{
+    storyId: string;
+    storyName: string;
+    viewport: number;
+    diffPercentage: number;
+    passed: boolean;
+  }>;
+}
+
+export interface VisualRegressionRunner {
+  /** Capture baselines for all stories. */
+  captureBaselines(stories: StoryEntry[]): Promise<BaselineSet>;
+
+  /** Compare current state against baselines. */
+  compareSnapshots(options: {
+    stories: StoryEntry[];
+    baselines: BaselineSet;
+    viewports: number[];
+    diffThreshold: number;
+  }): Promise<VisualDiffResult>;
+
+  /** Provide structured failure context for agent self-correction. */
+  getFailurePayload(diffResult: VisualDiffResult): Promise<VisualRegressionFailure[]>;
+
+  /** Approve a visual change (update baseline). */
+  approveChange(diffId: string, approver: string): Promise<void>;
+}
+
+// ── UsabilitySimulationRunner (RFC-0006 §A.5.2) ─────────────────────
+
+/** Simplified DOM state for agent parsing. */
+export interface PageState {
+  url: string;
+  title: string;
+  elements: Array<{
+    selector: string;
+    tagName: string;
+    text?: string;
+    role?: string;
+    visible: boolean;
+    interactive: boolean;
+    bounds?: { x: number; y: number; width: number; height: number };
+  }>;
+}
+
+/** An action the agent can execute on the page. */
+export interface AgentAction {
+  type: 'click' | 'type' | 'scroll' | 'navigate' | 'keypress' | 'hover';
+  target: string;
+  value?: string;
+}
+
+/** Result of executing an agent action. */
+export interface ActionResult {
+  success: boolean;
+  error?: string;
+  pageStateAfter?: PageState;
+}
+
+/** Browser session handle for usability simulation. */
+export interface BrowserSession {
+  sessionId: string;
+  storyUrl: string;
+  environment: {
+    browser: 'chromium' | 'firefox' | 'webkit';
+    viewport: { width: number; height: number };
+    theme?: string;
+    locale?: string;
+  };
+  isActive: boolean;
+  createdAt: string;
+  ttl: string;
+  connector: {
+    getPageState(): Promise<PageState>;
+    executeAction(action: AgentAction): Promise<ActionResult>;
+    captureScreenshot(): Promise<string>;
+  };
+}
+
+/** A simulated user persona. */
+export interface Persona {
+  id: string;
+  name: string;
+  techConfidence: 'low' | 'medium' | 'high';
+  ageRange?: [number, number];
+  accessibilityNeeds?: string[];
+}
+
+/** A task prompt for usability simulation. */
+export interface TaskPrompt {
+  id: string;
+  instruction: string;
+  successCriteria: {
+    type: 'element-state' | 'navigation' | 'form-submission' | 'custom';
+    target: string;
+  };
+  expectedActions?: number;
+  applicableTo?: string[];
+}
+
+/** A usability finding from simulation. */
+export interface UsabilityFinding {
+  severity: 'critical' | 'major' | 'minor' | 'advisory';
+  confidence: number;
+  category:
+    | 'navigation'
+    | 'discoverability'
+    | 'feedback'
+    | 'error-recovery'
+    | 'efficiency'
+    | 'learnability'
+    | 'affordance';
+  evidence: {
+    taskAttempted: string;
+    personaProfile: string;
+    actionsTaken: number;
+    expectedActions: number;
+    failurePoint?: string;
+    failureScenario: string;
+    affectedElement?: string;
+  };
+  message: string;
+}
+
+/** Result of a single persona simulation run. */
+export interface SimulationResult {
+  persona: Persona;
+  task: TaskPrompt;
+  completed: boolean;
+  metrics: {
+    actionsTaken: number;
+    expectedActions: number;
+    efficiency: number;
+    timeElapsed: string;
+    errorsEncountered: number;
+    backtrackCount: number;
+    hesitationCount: number;
+  };
+  actionTrace: Array<{
+    action: string;
+    target: string;
+    timestamp: string;
+    agentReasoning?: string;
+  }>;
+  findings: UsabilityFinding[];
+}
+
+/** Aggregated results across all persona simulations. */
+export interface AggregatedUsabilityReport {
+  totalSimulations: number;
+  completionRate: number;
+  averageEfficiency: number;
+  findings: UsabilityFinding[];
+  personaBreakdown: Array<{
+    persona: Persona;
+    completed: boolean;
+    efficiency: number;
+    findingsCount: number;
+  }>;
+}
+
+/** Meta-review result for medium-confidence findings. */
+export interface UsabilityMetaReview {
+  finding: UsabilityFinding;
+  decision: 'keep' | 'suppress';
+  adjustedSeverity?: UsabilityFinding['severity'];
+  rationale: string;
+}
+
+export interface UsabilitySimulationRunner {
+  /** Deploy a Storybook story to a browser environment for testing. */
+  deployStory(
+    story: StoryEntry,
+    options: { viewport: number; theme?: string; locale?: string },
+  ): Promise<BrowserSession>;
+
+  /** Generate persona set for simulation. */
+  generatePersonas(config: {
+    count: number;
+    demographics?: {
+      techConfidence: 'low' | 'medium' | 'high';
+      ageRange?: [number, number];
+      accessibilityNeeds?: string[];
+    };
+  }): Promise<Persona[]>;
+
+  /** Run a task-based usability simulation. */
+  runSimulation(
+    session: BrowserSession,
+    options: {
+      persona: Persona;
+      task: TaskPrompt;
+      maxActions: number;
+      timeout: string;
+    },
+  ): Promise<SimulationResult>;
+
+  /** Aggregate results across multiple persona simulations. */
+  aggregateResults(results: SimulationResult[]): Promise<AggregatedUsabilityReport>;
+}
+
 // ── Adapter Map ───────────────────────────────────────────────────────
 
 export interface AdapterInterfaces {
@@ -400,4 +812,8 @@ export interface AdapterInterfaces {
   SupportChannel: SupportChannel;
   CrmProvider: CrmProvider;
   AnalyticsProvider: AnalyticsProvider;
+  DesignTokenProvider: DesignTokenProvider;
+  ComponentCatalog: ComponentCatalog;
+  VisualRegressionRunner: VisualRegressionRunner;
+  UsabilitySimulationRunner: UsabilitySimulationRunner;
 }
