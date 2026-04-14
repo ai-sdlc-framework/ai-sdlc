@@ -45,6 +45,7 @@ export interface FigmaVariablesConfig {
 
 const FIGMA_API_BASE = 'https://api.figma.com';
 
+/* v8 ignore start — fetch-based default, always replaced by injectable mock in tests */
 function createDefaultHttpClient(): FigmaHttpClient {
   return {
     async get(url, headers) {
@@ -61,6 +62,7 @@ function createDefaultHttpClient(): FigmaHttpClient {
     },
   };
 }
+/* v8 ignore stop */
 
 export function createFigmaVariablesProvider(config: FigmaVariablesConfig): DesignTokenProvider {
   const { fileKey, apiToken, mode } = config;

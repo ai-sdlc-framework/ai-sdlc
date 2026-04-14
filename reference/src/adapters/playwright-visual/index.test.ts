@@ -198,4 +198,49 @@ describe('createPlaywrightVisualRunner', () => {
       cleanup();
     }
   });
+
+  it('approveChange copies current to baseline when file exists', async () => {
+    setup();
+    try {
+      const { writeFileSync, mkdirSync, existsSync, readFileSync } = await import('node:fs');
+      const runner = createPlaywrightVisualRunner({
+        baselinePath: tmpDir,
+        browserLauncher: createMockLauncher(),
+      });
+
+      // Create a "current" screenshot file
+      const currentDir = join(tmpDir, 'current');
+      mkdirSync(currentDir, { recursive: true });
+      const diffId = 'button--default--1280';
+      writeFileSync(join(currentDir, `${diffId}.png`), 'new-screenshot');
+
+      await runner.approveChange(diffId, 'test-user');
+
+      // Verify the baseline was updated
+      const baselinePath = join(tmpDir, `${diffId}.png`);
+      expect(existsSync(baselinePath)).toBe(true);
+      expect(readFileSync(baselinePath, 'utf-8')).toBe('new-screenshot');
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('approveChange is a no-op when current file does not exist', async () => {
+    setup();
+    try {
+      const { existsSync } = await import('node:fs');
+      const runner = createPlaywrightVisualRunner({
+        baselinePath: tmpDir,
+        browserLauncher: createMockLauncher(),
+      });
+
+      // Should not throw even if current file doesn't exist
+      await runner.approveChange('nonexistent--1280', 'test-user');
+
+      const baselinePath = join(tmpDir, 'nonexistent--1280.png');
+      expect(existsSync(baselinePath)).toBe(false);
+    } finally {
+      cleanup();
+    }
+  });
 });

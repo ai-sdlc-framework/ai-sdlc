@@ -31,6 +31,7 @@ export interface StorybookMcpConfig {
   httpClient?: StorybookHttpClient;
 }
 
+/* v8 ignore start — fetch-based default, always replaced by injectable mock in tests */
 function createDefaultHttpClient(): StorybookHttpClient {
   return {
     async get(url, headers) {
@@ -39,6 +40,7 @@ function createDefaultHttpClient(): StorybookHttpClient {
     },
   };
 }
+/* v8 ignore stop */
 
 export function createStorybookMcpCatalog(config: StorybookMcpConfig): ComponentCatalog {
   const { endpoint, token, refreshIntervalMs = 3600000 } = config;

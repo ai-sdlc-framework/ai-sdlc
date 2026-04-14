@@ -24,6 +24,7 @@ Before EVERY commit, run these checks and fix any failures:
 ```bash
 pnpm build          # TypeScript compilation — catches type errors
 pnpm test           # All tests must pass
+pnpm test:coverage  # Coverage thresholds enforced (80% lines/functions/statements, 70% branches)
 pnpm lint           # ESLint — no errors allowed
 pnpm format:check   # Prettier — run `pnpm format` to fix
 ```
