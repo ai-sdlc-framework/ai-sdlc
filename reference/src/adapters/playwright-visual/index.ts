@@ -37,6 +37,7 @@ function baselineKey(storyId: string, viewport: number): string {
   return `${storyId}--${viewport}`;
 }
 
+/* v8 ignore start — default launcher requires real Playwright; always replaced by injectable mock in tests */
 /**
  * Default browser launcher using Playwright.
  * In tests, this is replaced with a mock.
@@ -46,7 +47,6 @@ function createDefaultLauncher(_storybookUrl: string): BrowserLauncher {
   return {
     async captureScreenshot(url, viewport) {
       try {
-        /* v8 ignore start */
         // Dynamic require — playwright is an optional peer dependency
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const pw = require('playwright') as {
@@ -68,7 +68,6 @@ function createDefaultLauncher(_storybookUrl: string): BrowserLauncher {
         const screenshot = await page.screenshot({ fullPage: true });
         await browser.close();
         return Buffer.from(screenshot);
-        /* v8 ignore stop */
       } catch {
         // Playwright not available — return placeholder
         return Buffer.from(`screenshot-${url}-${viewport}`);
@@ -76,6 +75,7 @@ function createDefaultLauncher(_storybookUrl: string): BrowserLauncher {
     },
   };
 }
+/* v8 ignore stop */
 
 export function createPlaywrightVisualRunner(
   config: PlaywrightVisualConfig,
