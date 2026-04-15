@@ -1,5 +1,13 @@
 # @ai-sdlc/reference
 
+## [0.7.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.6.0...reference-v0.7.0) (2026-04-15)
+
+
+### Features
+
+* add Claude Code plugin and SDK runner for native governance integration ([804f068](https://github.com/ai-sdlc-framework/ai-sdlc/commit/804f06801e388fb356cde716291abc4e3386f050))
+* implement RFC-0006 Design System Governance Pipeline ([e6dfd4c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e6dfd4c3f9efdf4b6ddb219f02131c206dfdcb67))
+
 ## [0.6.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.5.0...reference-v0.6.0) (2026-03-31)
 
 
