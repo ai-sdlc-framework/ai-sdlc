@@ -37,9 +37,30 @@ const projectDir =
   })();
 
 // ── Detect package manager and coverage command ──────────────────────
+// Prefer the dedicated test:coverage script (works with turbo, nx, etc.).
+// Fall back to passing --coverage via -- passthrough only if no dedicated script exists.
 
 let coverageCmd;
-if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
+
+function hasScript(scriptName) {
+  try {
+    const pkg = JSON.parse(readFileSync(join(projectDir, 'package.json'), 'utf-8'));
+    return !!(pkg.scripts && pkg.scripts[scriptName]);
+  } catch {
+    return false;
+  }
+}
+
+if (hasScript('test:coverage')) {
+  // Dedicated coverage script — works with any task runner (turbo, nx, pnpm, etc.)
+  if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
+    coverageCmd = 'pnpm test:coverage';
+  } else if (existsSync(join(projectDir, 'yarn.lock'))) {
+    coverageCmd = 'yarn test:coverage';
+  } else {
+    coverageCmd = 'npm run test:coverage';
+  }
+} else if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
   coverageCmd = 'pnpm test -- --coverage --reporter=json';
 } else if (existsSync(join(projectDir, 'yarn.lock'))) {
   coverageCmd = 'yarn test --coverage --json';
