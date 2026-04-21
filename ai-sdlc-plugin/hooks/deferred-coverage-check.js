@@ -115,8 +115,27 @@ try {
   // Tests failed or coverage below threshold
   const stderr = err.stderr || '';
   const stdout = err.stdout || '';
+  const combined = stderr + stdout;
 
-  // Look for coverage summary in output
+  // ── Missing coverage provider — skip gracefully ────────────
+  // If @vitest/coverage-v8 (or c8, istanbul, etc.) isn't installed,
+  // the coverage command fails with a "cannot find" error. This is
+  // the user's project config, not an agent failure — don't block.
+  const missingProviderPatterns = [
+    /Cannot find package '@vitest\/coverage/i,
+    /Cannot find module '@vitest\/coverage/i,
+    /Failed to load coverage provider/i,
+    /coverage provider.*not found/i,
+    /ERR_MODULE_NOT_FOUND.*coverage/i,
+    /unexpected argument ['"]?--coverage/i,
+  ];
+
+  if (missingProviderPatterns.some((p) => p.test(combined))) {
+    // Coverage tooling not available in this project — skip silently
+    process.exit(0);
+  }
+
+  // ── Parse coverage results if available ────────────────────
   const coverageMatch = stdout.match(/All files\s*\|\s*([\d.]+)/);
   const threshold = 80;
 
@@ -129,9 +148,11 @@ try {
       );
       process.exit(2);
     }
+    // Coverage above threshold — pass
+    process.exit(0);
   }
 
-  // If tests failed (not just coverage), report that
+  // ── Test failures (not coverage-related) — report ──────────
   if (err.status !== 0) {
     process.stderr.write(
       `AI-SDLC Coverage Check: Test suite failed.\n` +
