@@ -57,6 +57,65 @@ const requireTests = extractField(yaml, 'requireTests') || 'true';
 const blockedActions = parseListField(yaml, 'blockedActions');
 const blockedPaths = parseListField(yaml, 'blockedPaths');
 
+// ── Detect missing dev tools ─────────────────────────────────────────
+
+const warnings = [];
+
+// Check for vitest without coverage provider
+try {
+  const pkgPath = join(projectDir, 'package.json');
+  if (existsSync(pkgPath)) {
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+    if (
+      allDeps['vitest'] &&
+      !allDeps['@vitest/coverage-v8'] &&
+      !allDeps['@vitest/coverage-istanbul']
+    ) {
+      warnings.push(
+        '⚠ vitest detected without coverage provider. Run: `pnpm add -D -w @vitest/coverage-v8`',
+      );
+    }
+  }
+} catch {
+  // Non-critical — skip
+}
+
+// Check for .env issues (AISDLC-36)
+try {
+  const envFiles = ['.env', '.env.local'].map((f) => join(projectDir, f)).filter(existsSync);
+  for (const envFile of envFiles) {
+    const lines = readFileSync(envFile, 'utf-8').split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (!line || line.startsWith('#')) continue;
+      // Spaces in key
+      if (/^[A-Za-z_]+ [A-Za-z_]/.test(line) && line.includes('=')) {
+        warnings.push(`⚠ ${envFile}:${i + 1}: key contains spaces — will cause parse errors`);
+        break;
+      }
+      // Unbalanced quotes
+      const afterEq = line.split('=').slice(1).join('=');
+      if (
+        (afterEq.startsWith('"') && !afterEq.endsWith('"')) ||
+        (afterEq.startsWith("'") && !afterEq.endsWith("'"))
+      ) {
+        warnings.push(`⚠ ${envFile}:${i + 1}: unbalanced quotes — will cause parse errors`);
+        break;
+      }
+      // Leading bullet
+      if (/^[-*]\s/.test(line)) {
+        warnings.push(
+          `⚠ ${envFile}:${i + 1}: looks like a list item, not an env var — add # to comment out`,
+        );
+        break;
+      }
+    }
+  }
+} catch {
+  // Non-critical — skip
+}
+
 // ── Load review policy if present ────────────────────────────────────
 
 let reviewPolicySummary = '';
@@ -96,6 +155,10 @@ Before EVERY commit, run these and fix any failures:
 **NEVER merge PRs. Only humans merge.**
 **NEVER close issues or PRs.**
 **NEVER force push.**${reviewPolicySummary}`;
+
+if (warnings.length > 0) {
+  context += `\n\n### Setup Warnings\n${warnings.join('\n')}`;
+}
 
 // ── Output ───────────────────────────────────────────────────────────
 
