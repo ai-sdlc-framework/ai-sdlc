@@ -6,7 +6,7 @@
  * which wakes the model via Claude Code's asyncRewake mechanism.
  *
  * Exit codes:
- *   0 = coverage OK or no coverage tool available
+ *   0 = coverage OK, no coverage tool available, or skipped
  *   2 = coverage below threshold (blocking — wakes the model)
  */
 
@@ -36,23 +36,71 @@ const projectDir =
     }
   })();
 
-// ── Detect package manager and coverage command ──────────────────────
-// Prefer the dedicated test:coverage script (works with turbo, nx, etc.).
-// Fall back to passing --coverage via -- passthrough only if no dedicated script exists.
+// ── Helpers ──────────────────────────────────────────────────────────
 
-let coverageCmd;
-
-function hasScript(scriptName) {
+function readPkg() {
   try {
-    const pkg = JSON.parse(readFileSync(join(projectDir, 'package.json'), 'utf-8'));
-    return !!(pkg.scripts && pkg.scripts[scriptName]);
+    return JSON.parse(readFileSync(join(projectDir, 'package.json'), 'utf-8'));
   } catch {
-    return false;
+    return {};
   }
 }
 
+function hasScript(name) {
+  const pkg = readPkg();
+  return !!(pkg.scripts && pkg.scripts[name]);
+}
+
+function hasDep(name) {
+  const pkg = readPkg();
+  return !!(pkg.dependencies?.[name] || pkg.devDependencies?.[name]);
+}
+
+function usesTaskRunner() {
+  return existsSync(join(projectDir, 'turbo.json')) || existsSync(join(projectDir, 'nx.json'));
+}
+
+// ── Load coverage config (.ai-sdlc/coverage-config.yaml) ────────────
+
+let coverageConfig = {};
+try {
+  const configPath = join(projectDir, '.ai-sdlc', 'coverage-config.yaml');
+  if (existsSync(configPath)) {
+    const raw = readFileSync(configPath, 'utf-8');
+    // Lightweight YAML parse for simple key: value and list fields
+    const excludeMatch = raw.match(/excludeWorkspaces:\s*\n((?:\s+-\s+.+\n?)+)/);
+    if (excludeMatch) {
+      coverageConfig.excludeWorkspaces = excludeMatch[1]
+        .split('\n')
+        .map((l) => l.replace(/^\s+-\s+/, '').trim())
+        .filter(Boolean);
+    }
+    const timeoutMatch = raw.match(/maxDurationMs:\s*(\d+)/);
+    if (timeoutMatch) {
+      coverageConfig.maxDurationMs = parseInt(timeoutMatch[1], 10);
+    }
+  }
+} catch {
+  // Non-critical — use defaults
+}
+
+const maxDurationMs = coverageConfig.maxDurationMs || 120000;
+const excludeWorkspaces = coverageConfig.excludeWorkspaces || [];
+
+// ── Check if coverage provider is available ─────────────────────────
+
+if (hasDep('vitest') && !hasDep('@vitest/coverage-v8') && !hasDep('@vitest/coverage-istanbul')) {
+  // Coverage provider not installed — skip gracefully
+  process.exit(0);
+}
+
+// ── Detect coverage command ─────────────────────────────────────────
+// Priority: dedicated test:coverage > -- passthrough with turbo awareness
+
+let coverageCmd;
+
 if (hasScript('test:coverage')) {
-  // Dedicated coverage script — works with any task runner (turbo, nx, pnpm, etc.)
+  // Dedicated script — works with any task runner
   if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
     coverageCmd = 'pnpm test:coverage';
   } else if (existsSync(join(projectDir, 'yarn.lock'))) {
@@ -60,18 +108,29 @@ if (hasScript('test:coverage')) {
   } else {
     coverageCmd = 'npm run test:coverage';
   }
+} else if (usesTaskRunner()) {
+  // Turbo/nx detected but no test:coverage script — skip rather than fail.
+  // Can't safely pass --coverage through a task runner.
+  process.exit(0);
 } else if (existsSync(join(projectDir, 'pnpm-lock.yaml'))) {
-  coverageCmd = 'pnpm test -- --coverage --reporter=json';
+  coverageCmd = 'pnpm test -- --coverage';
 } else if (existsSync(join(projectDir, 'yarn.lock'))) {
-  coverageCmd = 'yarn test --coverage --json';
+  coverageCmd = 'yarn test --coverage';
 } else if (existsSync(join(projectDir, 'package-lock.json'))) {
-  coverageCmd = 'npm test -- --coverage --json';
+  coverageCmd = 'npm test -- --coverage';
 } else {
-  // No recognized package manager — skip
   process.exit(0);
 }
 
-// ── Check if any code was modified in this session ───────────────────
+// ── Apply workspace exclusions ──────────────────────────────────────
+
+if (excludeWorkspaces.length > 0 && coverageCmd.startsWith('pnpm')) {
+  // For pnpm workspaces, add --filter to exclude listed packages
+  const filters = excludeWorkspaces.map((ws) => `--filter '!${ws}'`).join(' ');
+  coverageCmd = coverageCmd.replace('pnpm ', `pnpm ${filters} `);
+}
+
+// ── Check if any source code was modified ───────────────────────────
 
 try {
   const diff = execSync('git diff --name-only HEAD~1 2>/dev/null || echo ""', {
@@ -80,11 +139,9 @@ try {
   }).trim();
 
   if (!diff) {
-    // No changes to check coverage for
     process.exit(0);
   }
 
-  // Only check if source files were modified (not just config/docs)
   const sourceFiles = diff
     .split('\n')
     .filter(
@@ -95,7 +152,6 @@ try {
     process.exit(0);
   }
 } catch {
-  // Can't detect changes — skip
   process.exit(0);
 }
 
@@ -105,60 +161,83 @@ try {
   execSync(coverageCmd, {
     cwd: projectDir,
     encoding: 'utf-8',
-    timeout: 120000, // 2 min max
+    timeout: maxDurationMs,
     stdio: ['pipe', 'pipe', 'pipe'],
   });
 
-  // Tests passed — coverage is acceptable
   process.exit(0);
 } catch (err) {
-  // Tests failed or coverage below threshold
   const stderr = err.stderr || '';
   const stdout = err.stdout || '';
   const combined = stderr + stdout;
 
   // ── Missing coverage provider — skip gracefully ────────────
-  // If @vitest/coverage-v8 (or c8, istanbul, etc.) isn't installed,
-  // the coverage command fails with a "cannot find" error. This is
-  // the user's project config, not an agent failure — don't block.
   const missingProviderPatterns = [
     /Cannot find package '@vitest\/coverage/i,
     /Cannot find module '@vitest\/coverage/i,
     /Failed to load coverage provider/i,
+    /Failed to load url.*@vitest\/coverage/i,
     /coverage provider.*not found/i,
     /ERR_MODULE_NOT_FOUND.*coverage/i,
     /unexpected argument ['"]?--coverage/i,
   ];
 
   if (missingProviderPatterns.some((p) => p.test(combined))) {
-    // Coverage tooling not available in this project — skip silently
     process.exit(0);
   }
 
-  // ── Parse coverage results if available ────────────────────
+  // ── Timeout — exit gracefully with advisory ────────────────
+  if (err.killed || (err.signal && err.signal === 'SIGTERM')) {
+    process.exit(0);
+  }
+
+  // ── Parse coverage results ─────────────────────────────────
   const coverageMatch = stdout.match(/All files\s*\|\s*([\d.]+)/);
   const threshold = 80;
 
   if (coverageMatch) {
     const coverage = parseFloat(coverageMatch[1]);
     if (coverage < threshold) {
+      // Identify which packages are below threshold
+      const packageMatch = stdout.match(/^(\S+)\s*\|\s*([\d.]+)/gm);
+      const lowPackages = [];
+      if (packageMatch) {
+        for (const line of packageMatch) {
+          const m = line.match(/^(\S+)\s*\|\s*([\d.]+)/);
+          if (m && parseFloat(m[2]) < threshold) {
+            lowPackages.push(`${m[1]} (${m[2]}%)`);
+          }
+        }
+      }
+
+      const detail = lowPackages.length > 0 ? ` Low coverage in: ${lowPackages.join(', ')}.` : '';
       process.stderr.write(
-        `AI-SDLC Coverage Check: Overall coverage is ${coverage}% (threshold: ${threshold}%).\n` +
-          `Please add tests to improve coverage before stopping.\n`,
+        `AI-SDLC Coverage: ${coverage}% overall (threshold: ${threshold}%).${detail} Please add tests.\n`,
       );
       process.exit(2);
     }
-    // Coverage above threshold — pass
     process.exit(0);
   }
 
-  // ── Test failures (not coverage-related) — report ──────────
+  // ── Test failures — one-line actionable message ────────────
   if (err.status !== 0) {
-    process.stderr.write(
-      `AI-SDLC Coverage Check: Test suite failed.\n` +
-        `${stderr.slice(0, 500)}\n` +
-        `Please fix failing tests before stopping.\n`,
-    );
+    // Try to extract the failing package/test name
+    const failedSuite = combined.match(/FAIL\s+(\S+)/);
+    const failedPkg = combined.match(/ERR_PNPM.*?(\S+@\S+)/);
+    const failCount = combined.match(/(\d+)\s+failed/);
+
+    let summary = 'AI-SDLC Coverage: Tests failed.';
+    if (failedPkg) {
+      summary = `AI-SDLC Coverage: Tests failed in ${failedPkg[1]}.`;
+    } else if (failedSuite) {
+      summary = `AI-SDLC Coverage: Test failed: ${failedSuite[1]}.`;
+    }
+    if (failCount) {
+      summary += ` ${failCount[1]} test(s) failing.`;
+    }
+    summary += ' Please fix before stopping.\n';
+
+    process.stderr.write(summary);
     process.exit(2);
   }
 

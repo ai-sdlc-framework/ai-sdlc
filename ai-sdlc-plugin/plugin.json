@@ -61,7 +61,11 @@
             "model": "claude-haiku-4-5-20251001",
             "timeout": 45,
             "statusMessage": "Running governance quality gates..."
-          },
+          }
+        ]
+      },
+      {
+        "hooks": [
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/deferred-coverage-check.sh\"",
