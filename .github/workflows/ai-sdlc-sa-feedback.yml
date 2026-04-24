@@ -51,6 +51,7 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           PRINCIPAL: ${{ github.event.sender.login }}
           SIGNAL: ${{ steps.signal.outputs.kind }}
+          LABEL: ${{ github.event.label.name }}
         run: |
           pnpm --filter @ai-sdlc/dogfood sa-feedback record \
             --did "$DID_NAME" \
@@ -58,11 +59,11 @@ jobs:
             --dimension SA-1 \
             --signal "$SIGNAL" \
             --principal "$PRINCIPAL" \
-            --notes "via label ${{ github.event.label.name }}"
+            --notes "via label $LABEL"
           pnpm --filter @ai-sdlc/dogfood sa-feedback record \
             --did "$DID_NAME" \
             --issue "$ISSUE_NUMBER" \
             --dimension SA-2 \
             --signal "$SIGNAL" \
             --principal "$PRINCIPAL" \
-            --notes "via label ${{ github.event.label.name }}"
+            --notes "via label $LABEL"

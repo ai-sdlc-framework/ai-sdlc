@@ -91,7 +91,11 @@ export function enrichAdmissionInput(
 
   if (!binding) {
     const next: AdmissionInput = { ...input };
-    if (codeAreaQuality) next.codeAreaQuality = codeAreaQuality;
+    // When ctx.codeArea is set but buildCodeAreaQuality returns undefined
+    // (insufficient data), explicitly clear any stale value that may have
+    // been carried over from input — otherwise the spread above preserves
+    // it and drives a bogus defect-risk penalty.
+    if (ctx.codeArea) next.codeAreaQuality = codeAreaQuality;
     if (autonomyContext) next.autonomyContext = autonomyContext;
     if (designAuthoritySignal) next.designAuthoritySignal = designAuthoritySignal;
     return next;
@@ -118,7 +122,10 @@ export function enrichAdmissionInput(
   return {
     ...input,
     designSystemContext: context,
-    ...(codeAreaQuality ? { codeAreaQuality } : {}),
+    // When ctx.codeArea is set we always write codeAreaQuality — either
+    // the computed value or `undefined` — so stale input.codeAreaQuality
+    // can't silently drive a penalty under fresh enrichment context.
+    ...(ctx.codeArea ? { codeAreaQuality } : {}),
     ...(autonomyContext ? { autonomyContext } : {}),
     ...(designAuthoritySignal ? { designAuthoritySignal } : {}),
   };

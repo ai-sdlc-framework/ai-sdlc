@@ -188,6 +188,10 @@ export function computeSa1(inputs: Sa1Inputs, weights: PhaseWeights): Sa1Result 
 export function computeSa2(inputs: Sa2Inputs, weights: PhaseWeights): Sa2Result {
   const tc = normalizeCoverage(inputs.tokenCompliance);
   const ch = normalizeCoverage(inputs.catalogHealth);
+  // RFC §B.7.2: computableScore tops out at 0.5 by design — it's half
+  // the final SA-2 score. The other half comes from `0.5 × llmComponent`
+  // below, so perfect inputs on both layers yield SA-2 = 1.0. See the
+  // worked example in composite.test.ts: tc=0.88, ch=0.95 → 0.454.
   const computableScore = 0.3 * tc + 0.2 * ch;
 
   const rawPenalty =
