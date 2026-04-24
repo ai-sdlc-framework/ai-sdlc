@@ -45,8 +45,10 @@ Backlog tasks live in `backlog/tasks/` (Backlog.md) and are managed via the `mcp
 
 - **Create before execution.** When a plan includes multiple issues (e.g. an RFC implementation), create ALL backlog tasks BEFORE starting work on any of them. Use `mcp__backlog__task_create` with `milestone` + `labels` + acceptance criteria.
 - **Claim on start.** Flip status to `In Progress` via `mcp__backlog__task_edit` the moment you begin coding a task. Don't stack multiple tasks in progress unless they're actually being worked in parallel.
-- **Complete on merge.** When the PR lands (or the task is verifiably done), mark `Done` AND check every acceptance criterion via `acceptanceCriteriaCheck: [1, 2, ...]` AND write a `finalSummary` documenting changes, design decisions, verification evidence, and follow-up. No exceptions.
-- **Never leave "To Do" after implementation.** If you finish work on AISDLC-N, AISDLC-N must be `Done` before you push. Retroactive close-out is acceptable, blank close-out is not.
+- **Complete on merge — two steps, both required:**
+  1. `mcp__backlog__task_edit` with `status: 'Done'`, `acceptanceCriteriaCheck: [1, 2, ...]`, and `finalSummary` documenting changes / design decisions / verification / follow-up.
+  2. `mcp__backlog__task_complete` to **physically move the file from `backlog/tasks/` to `backlog/completed/`**. `task_edit` alone only flips the status field — the file stays in `tasks/` until `task_complete` archives it. A task isn't actually closed in the repo until it's in `backlog/completed/`.
+- **Never leave "To Do" after implementation.** If you finish work on AISDLC-N, AISDLC-N must be in `backlog/completed/` before the PR merges. Retroactive close-out is acceptable, blank close-out is not.
 
 ### `finalSummary` template
 
@@ -92,3 +94,13 @@ pnpm build && pnpm test && pnpm lint
 ```
 
 Cite the counts in `finalSummary`. If you can't reproduce the counts in the task description, the task isn't done.
+
+### Close-out checklist (end of task)
+
+```
+□ mcp__backlog__task_edit     → status: Done, acceptanceCriteriaCheck, finalSummary
+□ mcp__backlog__task_complete  → moves file from tasks/ → completed/
+□ verify with mcp__backlog__task_list (status: Done) that the task appears in the Done list
+```
+
+The file location is the source of truth: `backlog/tasks/<id>-*.md` = open, `backlog/completed/<id>-*.md` = closed. `task_edit` sets the status field inside the file but does NOT move it; `task_complete` does both.
