@@ -517,6 +517,96 @@ describe('enrichAdmissionInput — codeAreaQuality population', () => {
     });
     expect(out.codeAreaQuality).toBeUndefined();
   });
+
+  it('clears a stale codeAreaQuality when metrics are insufficient', () => {
+    // Seed only 1 data point — below the minimum.
+    store.insertCodeAreaMetrics({
+      codeArea: 'components/Button.tsx',
+      defectDensity: 0.99,
+      hasFrontendComponents: true,
+      dataPointCount: 1,
+    });
+    // Caller pre-populated input.codeAreaQuality; enrichment must not
+    // let that stale value survive when upstream buildCodeAreaQuality
+    // yields undefined (insufficient data).
+    const inputWithStale: AdmissionInput = {
+      ...makeInput(),
+      codeAreaQuality: {
+        defectDensity: 5,
+        churnRate: 5,
+        prRejectionRate: 5,
+        hasFrontendComponents: false,
+      },
+    };
+    const out = enrichAdmissionInput(inputWithStale, {
+      stateStore: store,
+      codeArea: 'components/Button.tsx',
+      now: frozenNow,
+    });
+    expect(out.codeAreaQuality).toBeUndefined();
+  });
+
+  it('swallows malformed designMetricsJson and still returns the row-level metrics', () => {
+    store.insertCodeAreaMetrics({
+      codeArea: 'components/Button.tsx',
+      defectDensity: 0.1,
+      churnRate: 0.1,
+      prRejectionRate: 0.1,
+      hasFrontendComponents: true,
+      designMetricsJson: '{broken json',
+      dataPointCount: 15,
+    });
+    const out = enrichAdmissionInput(makeInput(), {
+      stateStore: store,
+      codeArea: 'components/Button.tsx',
+      now: frozenNow,
+    });
+    expect(out.codeAreaQuality).toBeDefined();
+    expect(out.codeAreaQuality!.designQuality).toBeUndefined();
+  });
+
+  it('ignores designMetricsJson that has no recognised fields', () => {
+    store.insertCodeAreaMetrics({
+      codeArea: 'components/Button.tsx',
+      defectDensity: 0.1,
+      hasFrontendComponents: true,
+      designMetricsJson: JSON.stringify({ some: 'unrelated', other: 'data' }),
+      dataPointCount: 15,
+    });
+    const out = enrichAdmissionInput(makeInput(), {
+      stateStore: store,
+      codeArea: 'components/Button.tsx',
+      now: frozenNow,
+    });
+    expect(out.codeAreaQuality).toBeDefined();
+    expect(out.codeAreaQuality!.designQuality).toBeUndefined();
+  });
+
+  it('propagates baselineCoverage from stateStore through enrichAdmissionInput', () => {
+    store.insertVisualRegressionResult({
+      bindingName: 'acme-ds',
+      storyName: 'Button/Default',
+      diffPercentage: 0,
+      approved: true,
+    });
+    store.insertVisualRegressionResult({
+      bindingName: 'acme-ds',
+      storyName: 'Button/Primary',
+      diffPercentage: 0,
+      approved: true,
+    });
+    const dsb = makeDsb('acme-ds', {
+      catalogHealth: { coveragePercent: 0 },
+      tokenCompliance: { currentCoverage: 0 },
+    });
+    const out = enrichAdmissionInput(makeInput(), {
+      stateStore: store,
+      designSystemBinding: dsb,
+      now: frozenNow,
+    });
+    // Both rows approved → baselineCoverage = 1.0
+    expect(out.designSystemContext?.baselineCoverage).toBeCloseTo(1, 6);
+  });
 });
 
 // ── C4: autonomy factor ────────────────────────────────────────────────

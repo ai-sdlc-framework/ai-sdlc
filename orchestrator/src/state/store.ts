@@ -70,6 +70,14 @@ export class StateStore {
   }
 
   private migrate(): void {
+    // Each migration runs atomically: DDL + schema_version insert in one
+    // transaction so a crash mid-migration can't leave the DB in a
+    // half-applied state where the version row lies about actual schema.
+    const applyMigration = this.db.transaction((migration: (typeof MIGRATIONS)[number]) => {
+      this.db.exec(migration.sql);
+      this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migration.version);
+    });
+
     // Check current schema version
     try {
       const row = this.db.prepare('SELECT MAX(version) as v FROM schema_version').get() as
@@ -80,15 +88,13 @@ export class StateStore {
 
       for (const migration of MIGRATIONS) {
         if (migration.version > (current ?? 0)) {
-          this.db.exec(migration.sql);
-          this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migration.version);
+          applyMigration(migration);
         }
       }
     } catch {
       // Table doesn't exist yet — run all migrations
       for (const migration of MIGRATIONS) {
-        this.db.exec(migration.sql);
-        this.db.prepare('INSERT INTO schema_version (version) VALUES (?)').run(migration.version);
+        applyMigration(migration);
       }
     }
   }

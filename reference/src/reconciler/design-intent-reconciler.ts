@@ -503,17 +503,22 @@ export function createDesignIntentReconciler(
       }
 
       // ── 5. design-change.planned on newly-added plannedChanges ─
+      // First-run (no previous snapshot) captures the baseline without
+      // emitting; otherwise every existing plannedChanges[] entry would
+      // flood the event bus on initial deployment.
       const currentPlanned = did.spec.plannedChanges ?? [];
-      const previousIds = new Set(previous?.plannedChangeIds ?? []);
-      for (const change of currentPlanned) {
-        if (previousIds.has(change.id)) continue;
-        if (change.status !== 'planned') continue;
-        emit(deps, {
-          type: 'DesignChangePlanned',
-          didName,
-          timestamp: nowIso(deps),
-          details: { ...buildDesignChangePlannedDetails(change) },
-        });
+      if (previous) {
+        const previousIds = new Set(previous.plannedChangeIds ?? []);
+        for (const change of currentPlanned) {
+          if (previousIds.has(change.id)) continue;
+          if (change.status !== 'planned') continue;
+          emit(deps, {
+            type: 'DesignChangePlanned',
+            didName,
+            timestamp: nowIso(deps),
+            details: { ...buildDesignChangePlannedDetails(change) },
+          });
+        }
       }
 
       // ── 6. Persist snapshot for next run ─────────────────────

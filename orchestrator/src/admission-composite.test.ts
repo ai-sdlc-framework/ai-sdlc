@@ -231,6 +231,31 @@ describe('computeAdmissionComposite — §A.6 admission subset', () => {
     ).score;
     expect(gap.composite).toBeLessThan(easy.composite);
   });
+
+  it('soulAlignmentOverride replaces the label-based SA (M5 SA-1 integration)', () => {
+    // Label-based fallback → SA = 0.9 ('spec' label). Override to 0.3.
+    const input = makeInput({
+      body: '### Complexity\n5',
+      labels: ['spec'],
+    });
+    const baseline = computeAdmissionComposite(input);
+    const overridden = computeAdmissionComposite(input, undefined, {
+      soulAlignmentOverride: 0.3,
+    });
+    expect(baseline.breakdown.soulAlignment).toBeCloseTo(0.9, 6);
+    expect(overridden.breakdown.soulAlignment).toBeCloseTo(0.3, 6);
+    // Same other dimensions, so the composite ratio follows SA.
+    expect(overridden.score.dimensions.soulAlignment).toBeCloseTo(0.3, 6);
+    expect(overridden.score.composite).toBeLessThan(baseline.score.composite);
+  });
+
+  it('soulAlignmentOverride is clamped to [0, 1]', () => {
+    const input = makeInput({ body: '### Complexity\n5' });
+    const over = computeAdmissionComposite(input, undefined, { soulAlignmentOverride: 1.7 });
+    const under = computeAdmissionComposite(input, undefined, { soulAlignmentOverride: -0.5 });
+    expect(over.breakdown.soulAlignment).toBe(1);
+    expect(under.breakdown.soulAlignment).toBe(0);
+  });
 });
 
 describe('computeAdmissionComposite — override position-1 bypass', () => {

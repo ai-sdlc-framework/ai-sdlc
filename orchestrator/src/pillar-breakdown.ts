@@ -123,10 +123,13 @@ export function computePillarBreakdown(composite: AdmissionComposite): PillarBre
   };
 
   // Engineering: ER-1 (baseER), ER-2 (autonomyFactor), defectRiskFactor inverse.
+  // defectRiskFactor is clamped upstream to [0, 0.5]; the clamp01 here is
+  // a defence-in-depth guard so a regression in the upstream clamp can't
+  // feed a negative value into `mean()` and corrupt the engineering signal.
   const engineeringSignal = mean([
     b.baseExecutionReality,
     b.autonomyFactor,
-    1 - 2 * b.defectRiskFactor, // defectRiskFactor ∈ [0, 0.5] → quality ∈ [0, 1]
+    clamp01(1 - 2 * b.defectRiskFactor),
   ]);
   const engineering: PillarContribution = {
     pillar: 'engineering',

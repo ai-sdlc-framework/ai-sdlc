@@ -39,6 +39,7 @@ import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { DesignIntentDocument } from '@ai-sdlc/reference';
 import { DEFAULT_CONFIG_DIR_NAME, loadConfigAsync, resolveRepoRoot } from '@ai-sdlc/orchestrator';
+import { assertSafeReadPath, UnsafePathError } from './safe-path.js';
 import {
   compileDid,
   runLayer1,
@@ -371,7 +372,17 @@ async function resolveIssueText(args: ParsedArgs): Promise<string | undefined> {
       console.error(`--issue-file not found: ${args.issueFile}`);
       process.exit(1);
     }
-    return readFileSync(args.issueFile, 'utf-8');
+    try {
+      const workDir = await resolveRepoRoot();
+      const safe = assertSafeReadPath(args.issueFile, workDir);
+      return readFileSync(safe, 'utf-8');
+    } catch (err) {
+      if (err instanceof UnsafePathError) {
+        console.error(err.message);
+        process.exit(1);
+      }
+      throw err;
+    }
   }
   if (args.useStdin) return readStdinSync();
   return undefined;
@@ -437,7 +448,18 @@ async function runIssueSet(
     process.exit(1);
   }
 
-  const raw = readFileSync(args.issueSet!, 'utf-8');
+  let safeIssueSet: string;
+  try {
+    const workDir = await resolveRepoRoot();
+    safeIssueSet = assertSafeReadPath(args.issueSet!, workDir);
+  } catch (err) {
+    if (err instanceof UnsafePathError) {
+      console.error(err.message);
+      process.exit(1);
+    }
+    throw err;
+  }
+  const raw = readFileSync(safeIssueSet, 'utf-8');
   const doc = parseYaml(raw) as IssueSetFile;
   if (!doc?.issues || !Array.isArray(doc.issues)) {
     console.error(`Invalid issue-set YAML: missing "issues" array`);

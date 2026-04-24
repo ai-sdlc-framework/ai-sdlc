@@ -512,14 +512,18 @@ export const MIGRATION_V12 = `
 -- SA Phase-3 calibrated weights (RFC-0008 §B.8 — AISDLC-66).
 -- One row per dimension (SA-1, SA-2); upserted by the auto-calibrator
 -- nightly or on demand.
+-- CR-2 (RFC-0008 Addendum B §B.7): both weights MUST be ≥ 0.20 so
+-- neither layer can be dropped below a "minimum influence" floor by
+-- auto-calibration. The code-level clamp is the first gate; this
+-- CHECK is the last line of defense if the code clamp is bypassed.
 CREATE TABLE IF NOT EXISTS sa_phase_weights (
   id INTEGER PRIMARY KEY,
   dimension TEXT NOT NULL UNIQUE,
   w_structural REAL NOT NULL,
   w_llm REAL NOT NULL,
   calibrated_at TEXT DEFAULT (datetime('now')),
-  CHECK (w_structural >= 0 AND w_structural <= 1),
-  CHECK (w_llm >= 0 AND w_llm <= 1)
+  CHECK (w_structural >= 0.20 AND w_structural <= 0.80),
+  CHECK (w_llm >= 0.20 AND w_llm <= 0.80)
 );
 CREATE INDEX IF NOT EXISTS idx_sa_phase_weights_dim ON sa_phase_weights(dimension);
 `;

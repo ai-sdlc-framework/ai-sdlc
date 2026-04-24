@@ -185,6 +185,87 @@ describe('computeWindowStats', () => {
     expect(stats.stddev).toBeCloseTo(0.4, 6);
     expect(stats.violates).toBe(true);
   });
+
+  it('silently skips malformed layer2 JSON without throwing', () => {
+    const stats = computeWindowStats(
+      [
+        {
+          didName: 'd',
+          issueNumber: 1,
+          saDimension: 'SA-1',
+          phase: '2b',
+          compositeScore: 0.5,
+          layer2ResultJson: '{broken json',
+        },
+      ],
+      0,
+      NOW_MS,
+      DEFAULT_MEAN_THRESHOLD,
+      DEFAULT_STDDEV_THRESHOLD,
+    );
+    expect(stats.count).toBe(1);
+    expect(stats.structuralMean).toBe(0); // empty corpus → mean=0
+  });
+
+  it('silently skips malformed layer3 JSON without throwing', () => {
+    const stats = computeWindowStats(
+      [
+        {
+          didName: 'd',
+          issueNumber: 1,
+          saDimension: 'SA-1',
+          phase: '2b',
+          compositeScore: 0.5,
+          layer3ResultJson: 'not json at all',
+        },
+      ],
+      0,
+      NOW_MS,
+      DEFAULT_MEAN_THRESHOLD,
+      DEFAULT_STDDEV_THRESHOLD,
+    );
+    expect(stats.llmMean).toBe(0);
+  });
+
+  it('silently skips malformed layer1 JSON without counting hardGated', () => {
+    const stats = computeWindowStats(
+      [
+        {
+          didName: 'd',
+          issueNumber: 1,
+          saDimension: 'SA-1',
+          phase: '2b',
+          compositeScore: 0.5,
+          layer1ResultJson: '<<not json>>',
+        },
+      ],
+      0,
+      NOW_MS,
+      DEFAULT_MEAN_THRESHOLD,
+      DEFAULT_STDDEV_THRESHOLD,
+    );
+    expect(stats.deterministicFlags).toBe(0);
+  });
+
+  it('falls back to principleAlignment when domainIntent is absent in layer3 JSON', () => {
+    const stats = computeWindowStats(
+      [
+        {
+          didName: 'd',
+          issueNumber: 1,
+          saDimension: 'SA-2',
+          phase: '2b',
+          compositeScore: 0.5,
+          layer3ResultJson: JSON.stringify({ principleAlignment: 0.7 }),
+        },
+      ],
+      0,
+      NOW_MS,
+      DEFAULT_MEAN_THRESHOLD,
+      DEFAULT_STDDEV_THRESHOLD,
+    );
+    expect(stats.llmMean).toBeCloseTo(0.7, 6);
+  });
 });
 
 describe('detectSoulDrift (AC #1, #2, #4)', () => {
@@ -310,6 +391,26 @@ describe('detectSoulDrift (AC #1, #2, #4)', () => {
       stateStore: store,
       now: () => NOW_MS,
       getLastTriggerAt: () => new Date(NOW_MS - 10 * ONE_DAY).toISOString(),
+    });
+    expect(event).toBeDefined();
+  });
+
+  it('ignores unparseable lastTriggerAt and proceeds with detection', () => {
+    for (let window = 0; window < 3; window++) {
+      for (let i = 0; i < 5; i++) {
+        seedScoringEvents({
+          dimension: 'SA-1',
+          daysAgo: window * 30 + i + 1,
+          compositeScore: 0.3,
+        });
+      }
+    }
+    const event = detectSoulDrift('SA-1', {
+      stateStore: store,
+      now: () => NOW_MS,
+      // Non-ISO garbage → Date.parse returns NaN; detector should not
+      // suppress the fire but treat it as "no prior trigger".
+      getLastTriggerAt: () => 'not-a-date',
     });
     expect(event).toBeDefined();
   });

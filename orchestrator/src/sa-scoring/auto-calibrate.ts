@@ -141,9 +141,9 @@ export async function autoCalibratePhaseWeights(
       precision,
       previous: current,
       next,
-      // `changed` here reflects whether the weight pair shifted (ignoring
-      // first-run writes, which always persist to initialise the table).
-      changed: !weightsEqual(current, next),
+      // `changed` is true when we actually wrote: either the weight pair
+      // shifted, OR this was the mandatory first-run initialisation.
+      changed,
     });
   }
 

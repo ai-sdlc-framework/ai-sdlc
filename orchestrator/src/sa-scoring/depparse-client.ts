@@ -82,7 +82,7 @@ export class HttpDepparseClient implements DepparseClient {
   private readonly fetchImpl: typeof fetch;
 
   constructor(opts: HttpDepparseClientOptions) {
-    this.baseUrl = opts.baseUrl.replace(/\/$/, '');
+    this.baseUrl = assertHttpUrl(opts.baseUrl).replace(/\/$/, '');
     this.timeoutMs = opts.timeoutMs ?? 5_000;
     this.retries = opts.retries ?? 1;
     this.fetchImpl = opts.fetchImpl ?? fetch;
@@ -186,6 +186,27 @@ async function safeText(res: Response): Promise<string> {
   } catch {
     return '';
   }
+}
+
+/**
+ * Refuses non-HTTP schemes. Env-var or CLI-supplied `baseUrl` with
+ * `file://`, `data:`, `javascript:`, or similar could trigger local
+ * file reads or arbitrary protocol handlers when passed to `fetch()`.
+ */
+function assertHttpUrl(url: string): string {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new DepparseError('bad-request', `depparse baseUrl is not a valid URL: ${url}`);
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new DepparseError(
+      'bad-request',
+      `depparse baseUrl must use http: or https: (got ${parsed.protocol})`,
+    );
+  }
+  return url;
 }
 
 function errIsAbort(err: unknown): boolean {
