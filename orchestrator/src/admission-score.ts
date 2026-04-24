@@ -6,12 +6,9 @@
  * scripts and workflows.
  */
 
-import {
-  computePriority,
-  type PriorityInput,
-  type PriorityScore,
-  type PriorityConfig,
-} from './priority.js';
+import type { PriorityInput, PriorityScore, PriorityConfig } from './priority.js';
+import { computeAdmissionComposite } from './admission-composite.js';
+import { computePillarBreakdown, type PillarBreakdown } from './pillar-breakdown.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -43,6 +40,74 @@ export interface AdmissionInput {
   createdAt: string;
   /** GitHub author_association — determines trust-based signal boosting. */
   authorAssociation?: AuthorAssociation;
+  /** GitHub login of the issue author (used by C5 principal match). */
+  authorLogin?: string;
+  /** GitHub logins of anyone who commented on the issue (C5 principal match). */
+  commenterLogins?: string[];
+  // ── RFC-0008 PPA Triad enrichment (all optional, backward compatible) ──
+  /** C2 Eρ₄ inputs — populated by enrichAdmissionInput() (AISDLC-43). */
+  designSystemContext?: DesignSystemContext;
+  /** C4 inputs — current earned autonomy vs. required level (AISDLC-45). */
+  autonomyContext?: AutonomyContext;
+  /** C3 inputs — defect/churn/rejection signals per code area (AISDLC-44). */
+  codeAreaQuality?: CodeAreaQuality;
+  /** C5 inputs — HC_design signal from design-authority principals (AISDLC-46). */
+  designAuthoritySignal?: DesignAuthoritySignal;
+}
+
+export interface DesignSystemContext {
+  /** Catalog coverage percent (0–100) from DSB.status.catalogHealth. */
+  catalogCoverage?: number;
+  /** Token compliance percent (0–100) from DSB.status.tokenCompliance. */
+  tokenCompliance?: number;
+  /** True when DSB is young or catalog coverage is below the bootstrap floor. */
+  inBootstrapPhase?: boolean;
+  /** Baseline coverage from visual_regression_results before DSB adoption. */
+  baselineCoverage?: number;
+  /** Component/token gaps preventing the issue from being built catalog-first. */
+  catalogGaps?: string[];
+}
+
+export interface AutonomyContext {
+  /** The AutonomyPolicy-issued earned level for the current agent (0–3). */
+  currentEarnedLevel: number;
+  /** Level required by the issue's complexity band (≤3→1, ≤6→2, else→3). */
+  requiredLevel: number;
+}
+
+export interface DesignQualityMetrics {
+  /** Fraction of design CI checks passing in the window (0–1). */
+  designCIPassRate?: number;
+  /** Fraction of PRs in the area rejected on design grounds (0–1). */
+  designReviewRejectionRate?: number;
+  /** Fraction of usability-sim tasks completed successfully (0–1). */
+  usabilitySimPassRate?: number;
+}
+
+export interface CodeAreaQuality {
+  defectDensity?: number;
+  churnRate?: number;
+  prRejectionRate?: number;
+  /** True when the code area produces frontend artifacts gated by the DSB. */
+  hasFrontendComponents: boolean;
+  /** Present only when `hasFrontendComponents === true`. */
+  designQuality?: DesignQualityMetrics;
+}
+
+export type DesignAuthoritySignalType =
+  | 'advances-design-coherence'
+  | 'fills-catalog-gap'
+  | 'fragments-component-catalog'
+  | 'misaligned-with-brand'
+  | 'unspecified';
+
+export interface DesignAuthoritySignal {
+  /** True when the issue author/commenter is a DSB designAuthority principal. */
+  isDesignAuthority: boolean;
+  /** The signal type parsed from labels or structured comments. */
+  signalType?: DesignAuthoritySignalType;
+  /** The issue's code area compliance score in [0, 1] (used to modulate weight). */
+  areaComplianceScore?: number;
 }
 
 export interface AdmissionThresholds {
@@ -55,6 +120,11 @@ export interface IssueAdmissionResult {
   score: PriorityScore;
   reason: string;
   suggestions?: string[];
+  /**
+   * RFC-0008 §A.6 — pillar attribution + tension flags. Required on
+   * every admission result so reviewers can act on pillar mismatches.
+   */
+  pillarBreakdown: PillarBreakdown;
 }
 
 // ── Mapping ──────────────────────────────────────────────────────────
@@ -199,18 +269,26 @@ function generateSuggestions(input: AdmissionInput, score: PriorityScore): strin
 // ── Public API ───────────────────────────────────────────────────────
 
 /**
- * Score a GitHub issue for pipeline admission using the Product Priority Algorithm.
+ * Score a GitHub issue for pipeline admission using the RFC-0008 §A.6
+ * admission-subset composite.
  *
- * Returns whether the issue is admitted (score and confidence above thresholds)
- * along with the full score and, if rejected, suggestions for improvement.
+ *   P_admission = SA × D-pi_adjusted × ER × (1 + HC)
+ *
+ * M-phi, E-tau, C-kappa are deferred to runtime scoring — they apply
+ * when an admitted issue is picked up for execution, not at the gate.
+ *
+ * Returns whether the issue is admitted (score and confidence above
+ * thresholds) along with the full score and, if rejected, suggestions
+ * for improvement.
  */
 export function scoreIssueForAdmission(
   input: AdmissionInput,
   thresholds: AdmissionThresholds,
   priorityConfig?: PriorityConfig,
 ): IssueAdmissionResult {
-  const priorityInput = mapIssueToPriorityInput(input);
-  const score = computePriority(priorityInput, priorityConfig);
+  const composite = computeAdmissionComposite(input, priorityConfig);
+  const { score } = composite;
+  const pillarBreakdown = computePillarBreakdown(composite);
 
   const scorePasses = score.composite >= thresholds.minimumScore;
   const confidencePasses = score.confidence >= thresholds.minimumConfidence;
@@ -221,6 +299,7 @@ export function scoreIssueForAdmission(
       admitted: true,
       score,
       reason: `Score ${score.composite.toFixed(4)} meets threshold ${thresholds.minimumScore} with ${(score.confidence * 100).toFixed(0)}% confidence`,
+      pillarBreakdown,
     };
   }
 
@@ -239,5 +318,6 @@ export function scoreIssueForAdmission(
     score,
     reason: `Not admitted: ${reasons.join('; ')}`,
     suggestions: generateSuggestions(input, score),
+    pillarBreakdown,
   };
 }

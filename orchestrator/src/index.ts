@@ -202,7 +202,192 @@ export {
   type AdmissionThresholds,
   type IssueAdmissionResult,
   type AuthorAssociation,
+  type DesignSystemContext,
+  type AutonomyContext,
+  type CodeAreaQuality,
+  type DesignAuthoritySignal,
+  type DesignAuthoritySignalType,
+  type DesignQualityMetrics,
 } from './admission-score.js';
+export {
+  enrichAdmissionInput,
+  computeDesignSystemReadiness,
+  computeReadinessFromDesignSystemContext,
+  computeDefectRiskFactor,
+  computeAutonomyFactor,
+  computeDesignAuthorityWeight,
+  complexityToAutonomyLevel,
+  type EnrichmentContext,
+  type LifecyclePhase,
+} from './admission-enrichment.js';
+export { computeAdmissionComposite, type AdmissionComposite } from './admission-composite.js';
+export {
+  computePillarBreakdown,
+  detectTensions,
+  pillarSignalScore,
+  type PillarBreakdown,
+  type PillarContribution,
+  type PillarName,
+  type SharedDimensions,
+  type TensionFlag,
+  type TensionFlagType,
+  type HcChannelBreakdown,
+} from './pillar-breakdown.js';
+
+// RFC-0008 Addendum B — SA scoring (Layer 1/2/3 + composite)
+export {
+  compileDid,
+  validatePhase2bReadiness,
+  hashDidSpec,
+  canonicalJson,
+  tokenize,
+  serializeForStore,
+  deserializeFromStore,
+  type CompiledDid,
+  type CompiledScopeLists,
+  type CompiledScopeEntry,
+  type CompiledConstraintRule,
+  type CompiledAntiPattern,
+  type CompiledAntiPatternLists,
+  type CompiledMeasurableSignal,
+  type Bm25Corpus,
+  type Bm25Document,
+  type PrincipleCorpora,
+  type ReadinessResult,
+} from './sa-scoring/did-compiler.js';
+export {
+  HttpDepparseClient,
+  FakeDepparseClient,
+  DepparseError,
+  type DepparseClient,
+  type DepparseMatch,
+  type DepparseMatchRequest,
+  type DepparseMatchResponse,
+  type DepparseHealth,
+  type DepparseErrorKind,
+} from './sa-scoring/depparse-client.js';
+export {
+  runLayer1,
+  checkScopeGate,
+  detectConstraintViolations,
+  detectAntiPatterns,
+  checkMeasurableSignals,
+  renderPreVerifiedSummary,
+  type DeterministicScoringResult,
+  type ScopeGateResult,
+  type ScopeGateMatch,
+  type ConstraintViolation,
+  type ConstraintViolationResult,
+  type AntiPatternHit,
+  type AntiPatternResult,
+  type MeasurableSignalCheck,
+  type MeasurableSignalResult,
+  type Layer1Input,
+} from './sa-scoring/layer1-deterministic.js';
+export {
+  computeDomainRelevance,
+  computePrincipleCoverage,
+  type DomainRelevanceResult,
+  type PrincipleCoverageVector,
+  type PrincipleCoverageEntry,
+  type ContributingTerm,
+} from './sa-scoring/layer2-structural.js';
+export {
+  runLayer3,
+  buildSa1Prompt,
+  buildSa2Prompt,
+  extractJson,
+  RecordedLLMClient,
+  LayerLlmError,
+  CONFIDENCE_THRESHOLD,
+  type LLMClient,
+  type LLMScoringResult,
+  type SubtleConflict,
+  type SubtleDesignConflict,
+  type Layer3Input,
+  type PromptContext,
+  type LayerLlmErrorKind,
+} from './sa-scoring/layer3-llm.js';
+export {
+  computeSoulAlignment,
+  computeSa1,
+  computeSa2,
+  getPhaseWeights,
+  W_STRUCTURAL_FLOOR,
+  type SoulAlignmentResult,
+  type SoulAlignmentInput,
+  type Sa1Inputs,
+  type Sa2Inputs,
+  type Sa1Result,
+  type Sa2Result,
+  type SaPhase,
+  type PhaseWeights,
+} from './sa-scoring/composite.js';
+export { computeSa2Computable, type Sa2ComputableResult } from './sa-scoring/c1-sa2-computable.js';
+export {
+  SAFeedbackStore,
+  SA_FEEDBACK_LABELS,
+  classifyLabel,
+  recordOverrideFeedback,
+  type RecordFeedbackInput,
+  type PrecisionWindow,
+  type PrecisionResult,
+  type CategoryFalsePositive,
+  type OverrideFeedbackInput,
+} from './sa-scoring/feedback-store.js';
+export {
+  computeCalibrationCoefficient,
+  buildCategoryCoefficients,
+  type CategoryFeedback,
+  type BuildCategoryCoefficientsInput,
+} from './calibration.js';
+export {
+  autoCalibratePhaseWeights,
+  computePhase3Weights,
+  decideCalibrationDirection,
+  renderCalibrationDiff,
+  WEIGHT_FLOOR,
+  WEIGHT_CEILING,
+  DEFAULT_SHIFT_SIZE,
+  DEFAULT_WINDOW_DAYS,
+  PRECISION_DELTA_THRESHOLD,
+  type PrecisionPair,
+  type CalibrationDecision,
+  type ComputePhase3WeightsInput,
+  type AutoCalibrateDeps,
+  type AutoCalibrateResult,
+  type DimensionDiff,
+} from './sa-scoring/auto-calibrate.js';
+export {
+  detectSoulDrift,
+  computeWindowStats,
+  computeTrend,
+  describeDriftSource,
+  DEFAULT_MEAN_THRESHOLD,
+  DEFAULT_STDDEV_THRESHOLD,
+  DEFAULT_CONSECUTIVE_WINDOWS,
+  DEFAULT_RECOVERY_MS,
+  type SoulDriftDetectedEvent,
+  type DriftTrend,
+  type WindowStats,
+  type DriftDetectorDeps,
+} from './sa-scoring/drift-monitor.js';
+export {
+  handleCoreIdentityChanged,
+  type CoreIdentityChangedEvent,
+  type BacklogReshuffledEvent,
+  type SoulGraphStaleFlag,
+  type RescoreDeps,
+  type HandleResult,
+} from './sa-scoring/rescore-orchestrator.js';
+export {
+  scoreSoulAlignment,
+  resolveSoulAlignmentOverride,
+  type ScoreSoulAlignmentInput,
+  type ScoreSoulAlignmentDeps,
+  type SoulAlignmentScoringResult,
+} from './sa-scoring/index.js';
+export type { SaDimension, FeedbackSignal } from './state/types.js';
 
 // PR review orchestration
 export { executeReview, type ReviewContext, type ReviewOptions } from './review.js';

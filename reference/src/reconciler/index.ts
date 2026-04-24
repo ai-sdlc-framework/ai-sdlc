@@ -46,6 +46,22 @@ export { createAutonomyReconciler, type AutonomyReconcilerDeps } from './autonom
 export { createCostReconciler, type CostReconcilerDeps } from './cost-reconciler.js';
 
 export {
+  createDesignIntentReconciler,
+  computeSourceHash,
+  computeNextReviewDueMs,
+  flattenIdentityFields,
+  findPrinciplesWithoutDsbCoverage,
+  extractKeywords,
+  buildDesignChangePlannedDetails,
+  type DesignIntentReconcilerDeps,
+  type DesignIntentEvent,
+  type DesignIntentEventHandler,
+  type DesignIntentEventType,
+  type DesignIntentSnapshot,
+  type DesignChangePlannedDetails,
+} from './design-intent-reconciler.js';
+
+export {
   resourceFingerprint,
   hasSpecChanged,
   createResourceCache,

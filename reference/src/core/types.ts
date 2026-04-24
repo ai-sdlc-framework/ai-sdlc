@@ -15,7 +15,8 @@ export type ResourceKind =
   | 'QualityGate'
   | 'AutonomyPolicy'
   | 'AdapterBinding'
-  | 'DesignSystemBinding';
+  | 'DesignSystemBinding'
+  | 'DesignIntentDocument';
 
 export interface Metadata {
   name: string;
@@ -194,11 +195,27 @@ export interface PriorityInput {
   override?: boolean;
   overrideReason?: string;
   overrideExpiry?: string;
+  /** RFC-0008 §A.3 — C2 Eρ₄ design-system readiness, [0.0, 1.0]. */
+  designSystemReadiness?: number;
+  /** RFC-0008 §A.3 — C4 autonomy factor derived from AutonomyPolicy, [0.1, 1.0]. */
+  autonomyFactor?: number;
+  /** RFC-0008 §A.3 — C3 defect-risk penalty on D-pi, clamped to [0.0, 0.5]. */
+  defectRiskFactor?: number;
+  /** RFC-0008 §A.3 — C5 design-authority signal weight, [-1.0, 1.0]. */
+  designAuthorityWeight?: number;
 }
 
 export interface PriorityConfig {
   humanCurveWeights?: { explicit?: number; consensus?: number; decision?: number };
   calibrationCoefficient?: number;
+  /**
+   * RFC-0008 §10 Amendment 6 — category-scoped calibration. When both
+   * `categoryResolver` and `categoryCoefficients` are provided, the
+   * resolved category's coefficient wins over the scalar
+   * `calibrationCoefficient`. Absent resolver ⇒ scalar path (unchanged).
+   */
+  categoryResolver?: (input: PriorityInput) => string | undefined;
+  categoryCoefficients?: Record<string, number>;
 }
 
 export interface ModelRule {
@@ -963,6 +980,231 @@ export type DesignSystemBinding = Resource<
   DesignSystemBindingStatus
 >;
 
+// ── DesignIntentDocument (RFC-0008) ───────────────────────────────────
+
+/**
+ * Identity class per Addendum B. `core` fields trigger full-backlog re-score
+ * on change; `evolving` fields only re-score the admission queue. Also weights
+ * BM25 corpus construction (core=2×, evolving=1×).
+ */
+export type IdentityClass = 'core' | 'evolving';
+
+export interface AuthorityScope {
+  owner: string;
+  approvalRequired: string[];
+  scope: string[];
+}
+
+export interface SharedAuthorityScope {
+  approvalRequired?: string[];
+  scope?: string[];
+}
+
+export interface EngineeringReviewScope {
+  role: 'reviewer';
+  blockingScope?: string[];
+  rationale?: string;
+}
+
+export type ReviewCadence = 'monthly' | 'quarterly' | 'biannual' | 'annual';
+
+export interface StewardshipSplit {
+  productAuthority: AuthorityScope;
+  designAuthority: AuthorityScope;
+  sharedAuthority?: SharedAuthorityScope;
+  engineeringReview?: EngineeringReviewScope;
+  reviewCadence?: ReviewCadence;
+}
+
+export interface MissionField {
+  identityClass?: IdentityClass;
+  value: string;
+}
+
+export type ConstraintRelationship =
+  | 'must-not-require'
+  | 'must-require'
+  | 'must-not-include'
+  | 'must-include';
+
+export interface Constraint {
+  id: string;
+  identityClass?: IdentityClass;
+  concept: string;
+  relationship: ConstraintRelationship;
+  rationale?: string;
+  detectionPatterns: string[];
+}
+
+export interface ScopeTerm {
+  label: string;
+  identityClass?: IdentityClass;
+  synonyms?: string[];
+}
+
+export interface ScopeBoundaries {
+  inScope?: ScopeTerm[];
+  outOfScope?: ScopeTerm[];
+}
+
+export interface AntiPattern {
+  id: string;
+  identityClass?: IdentityClass;
+  label: string;
+  description?: string;
+  detectionPatterns: string[];
+}
+
+export type MeasurableOperator = 'gte' | 'lte' | 'gt' | 'lt' | 'eq' | 'neq';
+
+export interface MeasurableSignal {
+  id: string;
+  metric: string;
+  threshold: number;
+  operator: MeasurableOperator;
+  scope?: string;
+  identityClass?: IdentityClass;
+}
+
+export interface DesignPrinciple {
+  id: string;
+  name: string;
+  description: string;
+  identityClass?: IdentityClass;
+  measurableSignals: MeasurableSignal[];
+  antiPatterns?: AntiPattern[];
+}
+
+export interface SoulPurpose {
+  mission: MissionField;
+  constraints?: Constraint[];
+  scopeBoundaries?: ScopeBoundaries;
+  antiPatterns?: AntiPattern[];
+  designPrinciples: DesignPrinciple[];
+}
+
+export interface DIDSyncField {
+  did: string;
+  dsb: string;
+  relationship: string;
+}
+
+export interface DIDDesignSystemRef {
+  name: string;
+  namespace?: string;
+  bindingType?: 'authoritative' | 'advisory';
+  syncFields?: DIDSyncField[];
+}
+
+export interface VisualConstraintRule {
+  metric: string;
+  threshold: number;
+  operator: MeasurableOperator;
+}
+
+export interface VisualConstraint {
+  id: string;
+  identityClass?: IdentityClass;
+  label: string;
+  description?: string;
+  rule: VisualConstraintRule;
+}
+
+export interface VisualIdentity {
+  description?: string;
+  tokenSchemaRef?: string;
+  visualConstraints?: VisualConstraint[];
+  visualAntiPatterns?: AntiPattern[];
+}
+
+export interface BrandIdentity {
+  voiceAttributes?: string[];
+  voiceAntiPatterns?: AntiPattern[];
+  visualIdentity?: VisualIdentity;
+}
+
+export interface ExperientialTarget {
+  identityClass?: IdentityClass;
+  targetEmotion?: string;
+  maxStepsToFirstValue?: number;
+  usabilityTarget?: {
+    taskCompletion?: number;
+    personaType?: string;
+    [key: string]: unknown;
+  };
+  interactionEfficiency?: {
+    metric?: string;
+    targetReduction?: string;
+    [key: string]: unknown;
+  };
+  errorRecoveryRate?: number;
+  maxActionsToRecover?: number;
+  [key: string]: unknown;
+}
+
+export interface ExperientialTargets {
+  onboarding?: ExperientialTarget;
+  dailyUse?: ExperientialTarget;
+  errorRecovery?: ExperientialTarget;
+  [key: string]: ExperientialTarget | undefined;
+}
+
+export type PlannedChangeType =
+  | 'token-restructure'
+  | 'token-addition'
+  | 'token-removal'
+  | 'component-category-addition'
+  | 'brand-revision'
+  | 'theme-expansion';
+
+export type PlannedChangeStatus = 'planned' | 'in-progress' | 'completed' | 'cancelled';
+
+export interface PlannedChange {
+  id: string;
+  changeType: PlannedChangeType;
+  status: PlannedChangeStatus;
+  description?: string;
+  estimatedTimeline?: string;
+  affectedTokenPaths?: string[];
+  estimatedComponentImpact?: number;
+  addedBy?: string;
+  addedAt?: string;
+}
+
+export interface DesignIntentDocumentSpec {
+  stewardship: StewardshipSplit;
+  soulPurpose: SoulPurpose;
+  designSystemRef: DIDDesignSystemRef;
+  brandIdentity?: BrandIdentity;
+  experientialTargets?: ExperientialTargets;
+  plannedChanges?: PlannedChange[];
+}
+
+export interface DesignIntentDocumentStatus {
+  lastReviewed?: string;
+  reviewedBy?: string[];
+  nextReviewDue?: string;
+  designSystemAlignment?: {
+    tokenSchemaCoherent?: boolean;
+    complianceRulesReflectPrinciples?: boolean;
+    lastAlignmentCheck?: string;
+  };
+  ppaBinding?: {
+    sAlpha2Source?: string;
+    sAlpha1Source?: string;
+    lastScoringRun?: string;
+  };
+  /** sha256 of compiled BM25 + rule artifacts — reconciler uses this to detect changes. */
+  compiledArtifactsHash?: string;
+  conditions?: Condition[];
+}
+
+export type DesignIntentDocument = Resource<
+  'DesignIntentDocument',
+  DesignIntentDocumentSpec,
+  DesignIntentDocumentStatus
+>;
+
 // ── Union Type ────────────────────────────────────────────────────────
 
 export type AnyResource =
@@ -971,4 +1213,5 @@ export type AnyResource =
   | QualityGate
   | AutonomyPolicy
   | AdapterBinding
-  | DesignSystemBinding;
+  | DesignSystemBinding
+  | DesignIntentDocument;

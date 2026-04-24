@@ -31,6 +31,7 @@ const SCHEMA_FILES: Record<ResourceKind, string> = {
   AutonomyPolicy: 'autonomy-policy.schema.json',
   AdapterBinding: 'adapter-binding.schema.json',
   DesignSystemBinding: 'design-system-binding.schema.json',
+  DesignIntentDocument: 'design-intent-document.schema.json',
 };
 
 type AjvInstance = InstanceType<typeof Ajv2020>;

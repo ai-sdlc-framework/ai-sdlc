@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "sidecar-depparse"
+version = "0.1.0"
+description = "AI-SDLC dep-parse sidecar — spaCy-backed requirement construction detection (RFC-0008 §B.4.2)"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.29",
+    "pydantic>=2.6",
+    "spacy>=3.7,<4",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]
+
+[project.scripts]
+sidecar-depparse = "sidecar_depparse.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sidecar_depparse"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
