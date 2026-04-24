@@ -176,4 +176,48 @@ describe('HttpDepparseClient', () => {
     expect(err.name).toBe('DepparseError');
     expect(err.kind).toBe('timeout');
   });
+
+  it('retries once on 5xx then succeeds on the next attempt', async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(new Response('oops', { status: 502 }))
+      .mockResolvedValueOnce(stubJson({ matches: [] }));
+    const client = new HttpDepparseClient({
+      baseUrl: 'http://sidecar',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      retries: 1,
+    });
+    const result = await client.match({ text: 'x', patterns: [] });
+    expect(result.matches).toEqual([]);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('swallows errors thrown by res.text() when building an error message', async () => {
+    // Construct a 500 Response whose .text() throws.
+    const textThrower = {
+      status: 500,
+      text: () => Promise.reject(new Error('stream aborted')),
+    } as unknown as Response;
+    const fetchImpl = vi.fn().mockResolvedValue(textThrower);
+    const client = new HttpDepparseClient({
+      baseUrl: 'http://sidecar',
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+      retries: 0,
+    });
+    // Should still throw a typed DepparseError (not bubble the text() failure raw).
+    await expect(client.match({ text: 'x', patterns: [] })).rejects.toMatchObject({
+      kind: 'server-error',
+      status: 500,
+    });
+  });
+});
+
+describe('FakeDepparseClient', () => {
+  it('setHealth overrides the response from healthz()', async () => {
+    const client = new FakeDepparseClient();
+    client.setHealth({ status: 'error', model: 'broken', modelLoaded: false });
+    const h = await client.healthz();
+    expect(h.status).toBe('error');
+    expect(h.modelLoaded).toBe(false);
+  });
 });

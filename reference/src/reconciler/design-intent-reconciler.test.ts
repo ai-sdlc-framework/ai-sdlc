@@ -467,3 +467,261 @@ describe('DesignChangePlanned event (AISDLC-52)', () => {
     expect(snap?.plannedChangeIds).toEqual(['chg-001']);
   });
 });
+
+// ── Identity-field flattening covers every optional DID surface ──────
+
+describe('flattenIdentityFields — optional DID surfaces', () => {
+  it('flattens constraints, scopeBoundaries, soul antiPatterns, nested principle anti-patterns, brand voice/visual, experientialTargets', () => {
+    const did = baseDid({
+      soulPurpose: {
+        mission: { value: 'M', identityClass: 'core' },
+        constraints: [
+          {
+            id: 'no-tech-expertise',
+            concept: 'technical expertise',
+            relationship: 'must-not-require',
+            detectionPatterns: ['requires tech'],
+            identityClass: 'core',
+          },
+          {
+            id: 'bounded-cost',
+            concept: 'budget',
+            relationship: 'must-not-include',
+            detectionPatterns: ['over budget'],
+            // no identityClass → evolving default
+          },
+        ],
+        scopeBoundaries: {
+          inScope: [
+            { label: 'customer onboarding', identityClass: 'core' },
+            { label: 'post-purchase flows' }, // default evolving
+          ],
+          outOfScope: [
+            { label: 'enterprise SSO', synonyms: ['SAML'] },
+            { label: 'marketing CMS', identityClass: 'core' },
+          ],
+        },
+        antiPatterns: [
+          {
+            id: 'wizard',
+            label: 'multi-step wizard',
+            detectionPatterns: ['step 1 of'],
+            identityClass: 'core',
+          },
+        ],
+        designPrinciples: [
+          {
+            id: 'approachable',
+            name: 'Approachable',
+            description: 'Forms must be simple',
+            identityClass: 'core',
+            measurableSignals: [{ id: 's', metric: 'm', threshold: 1, operator: 'gte' }],
+            antiPatterns: [
+              {
+                id: 'jargon',
+                label: 'technical jargon',
+                detectionPatterns: ['DSL', 'YAML'],
+                identityClass: 'core',
+              },
+              {
+                id: 'dense-copy',
+                label: 'dense copy',
+                detectionPatterns: ['paragraph'],
+                // no identityClass → inherits from principle (core)
+              },
+            ],
+          },
+        ],
+      },
+      brandIdentity: {
+        voiceAntiPatterns: [
+          {
+            id: 'corporate-speak',
+            label: 'corporate-speak',
+            detectionPatterns: ['synergy'],
+            identityClass: 'core',
+          },
+        ],
+        visualIdentity: {
+          visualConstraints: [
+            {
+              id: 'color-palette',
+              label: 'Palette size',
+              description: 'Limit to 3 palette tokens',
+              identityClass: 'evolving',
+              rule: { metric: 'palette-count', threshold: 3, operator: 'lte' },
+            },
+          ],
+          visualAntiPatterns: [
+            {
+              id: 'rainbow',
+              label: 'rainbow gradients',
+              detectionPatterns: ['gradient'],
+              identityClass: 'core',
+            },
+          ],
+        },
+      },
+      experientialTargets: {
+        perceivedComplexity: { target: 'low', identityClass: 'core' },
+        emotionalTone: { target: 'warm' }, // default evolving
+      } as unknown as DesignIntentDocument['spec']['experientialTargets'],
+    });
+
+    const fields = flattenIdentityFields(did);
+    const paths = fields.map((f) => f.path);
+
+    expect(paths).toContain('spec.soulPurpose.constraints[no-tech-expertise]');
+    expect(paths).toContain('spec.soulPurpose.constraints[bounded-cost]');
+    expect(paths).toContain('spec.soulPurpose.scopeBoundaries.inScope[customer onboarding]');
+    expect(paths).toContain('spec.soulPurpose.scopeBoundaries.inScope[post-purchase flows]');
+    expect(paths).toContain('spec.soulPurpose.scopeBoundaries.outOfScope[enterprise SSO]');
+    expect(paths).toContain('spec.soulPurpose.scopeBoundaries.outOfScope[marketing CMS]');
+    expect(paths).toContain('spec.soulPurpose.antiPatterns[wizard]');
+    expect(paths).toContain('spec.soulPurpose.designPrinciples[approachable].antiPatterns[jargon]');
+    expect(paths).toContain(
+      'spec.soulPurpose.designPrinciples[approachable].antiPatterns[dense-copy]',
+    );
+    expect(paths).toContain('spec.brandIdentity.voiceAntiPatterns[corporate-speak]');
+    expect(paths).toContain('spec.brandIdentity.visualIdentity.visualConstraints[color-palette]');
+    expect(paths).toContain('spec.brandIdentity.visualIdentity.visualAntiPatterns[rainbow]');
+    expect(paths).toContain('spec.experientialTargets.perceivedComplexity');
+    expect(paths).toContain('spec.experientialTargets.emotionalTone');
+
+    // identityClass defaults wire correctly.
+    const denseCopy = fields.find((f) => f.path.endsWith('antiPatterns[dense-copy]'))!;
+    expect(denseCopy.identityClass).toBe('core'); // inherits from principle
+    const boundedCost = fields.find((f) => f.path.endsWith('constraints[bounded-cost]'))!;
+    expect(boundedCost.identityClass).toBe('evolving');
+    const emotionalTone = fields.find((f) => f.path.endsWith('emotionalTone'))!;
+    expect(emotionalTone.identityClass).toBe('evolving');
+  });
+
+  it('skips undefined experiential target entries', () => {
+    const did = baseDid({
+      experientialTargets: {
+        perceivedComplexity: { target: 'low' },
+        emotionalTone: undefined,
+      } as unknown as DesignIntentDocument['spec']['experientialTargets'],
+    });
+    const fields = flattenIdentityFields(did);
+    const paths = fields.map((f) => f.path);
+    expect(paths).toContain('spec.experientialTargets.perceivedComplexity');
+    expect(paths).not.toContain('spec.experientialTargets.emotionalTone');
+  });
+});
+
+// ── DSB rule corpus covers designReview.scope ────────────────────────
+
+describe('findPrinciplesWithoutDsbCoverage — designReview.scope contribution', () => {
+  it('designReview.scope keywords contribute to the corpus used for coverage', () => {
+    const did = baseDid(); // principle description: "Forms must be simple..."
+    // Ensure no compliance rules match. Coverage only possible via designReview.scope.
+    const dsb = baseDsb({
+      compliance: {
+        coverage: { minimum: 85 },
+        disallowHardcoded: [{ category: 'Unrelated', pattern: '\\bfoo\\b', message: 'bar baz' }],
+      },
+      designReview: { required: true, scope: ['forms'] },
+    } as never);
+    expect(findPrinciplesWithoutDsbCoverage(did, dsb)).toEqual([]);
+  });
+});
+
+// ── Identity diff: removed-path branch ───────────────────────────────
+
+describe('createDesignIntentReconciler — removed fields', () => {
+  it('removing a core field emits CoreIdentityChanged with "(removed)" suffix', async () => {
+    const initial = baseDid({
+      soulPurpose: {
+        mission: { value: 'M', identityClass: 'core' },
+        antiPatterns: [
+          {
+            id: 'wizard',
+            label: 'multi-step wizard',
+            detectionPatterns: ['step 1 of'],
+            identityClass: 'core',
+          },
+        ],
+        designPrinciples: [
+          {
+            id: 'approachable',
+            name: 'Approachable',
+            description: 'Forms must be simple',
+            identityClass: 'core',
+            measurableSignals: [{ id: 's', metric: 'm', threshold: 1, operator: 'gte' }],
+          },
+        ],
+      },
+    });
+    const captureDeps = makeDeps({ dsb: baseDsb() });
+    let snap: DesignIntentSnapshot | undefined;
+    captureDeps.deps.saveSnapshot = async (_n, s) => {
+      snap = s;
+    };
+    await createDesignIntentReconciler(captureDeps.deps)(initial);
+
+    // Second run: remove the wizard anti-pattern.
+    const mutated = baseDid({
+      soulPurpose: {
+        mission: { value: 'M', identityClass: 'core' },
+        designPrinciples: initial.spec.soulPurpose.designPrinciples,
+      },
+    });
+    const { deps, events } = makeDeps({ previous: snap, dsb: baseDsb() });
+    await createDesignIntentReconciler(deps)(mutated);
+
+    const core = events.filter((e) => e.type === 'CoreIdentityChanged');
+    expect(core).toHaveLength(1);
+    const changedFields = core[0].details.changedFields as string[];
+    expect(changedFields.some((f) => f.includes('(removed)'))).toBe(true);
+    expect(changedFields.some((f) => f.includes('antiPatterns[wizard]'))).toBe(true);
+  });
+
+  it('removing an evolving field emits EvolvingIdentityChanged with "(removed)" suffix', async () => {
+    const initial = baseDid({
+      soulPurpose: {
+        mission: { value: 'M', identityClass: 'evolving' },
+        constraints: [
+          {
+            id: 'legacy',
+            concept: 'legacy system',
+            relationship: 'must-not-require',
+            detectionPatterns: ['deprecated'],
+            // default evolving
+          },
+        ],
+        designPrinciples: [
+          {
+            id: 'approachable',
+            name: 'Approachable',
+            description: 'Forms must be simple',
+            identityClass: 'evolving',
+            measurableSignals: [{ id: 's', metric: 'm', threshold: 1, operator: 'gte' }],
+          },
+        ],
+      },
+    });
+    const captureDeps = makeDeps({ dsb: baseDsb() });
+    let snap: DesignIntentSnapshot | undefined;
+    captureDeps.deps.saveSnapshot = async (_n, s) => {
+      snap = s;
+    };
+    await createDesignIntentReconciler(captureDeps.deps)(initial);
+
+    const mutated = baseDid({
+      soulPurpose: {
+        mission: { value: 'M', identityClass: 'evolving' },
+        designPrinciples: initial.spec.soulPurpose.designPrinciples,
+      },
+    });
+    const { deps, events } = makeDeps({ previous: snap, dsb: baseDsb() });
+    await createDesignIntentReconciler(deps)(mutated);
+
+    const evolving = events.filter((e) => e.type === 'EvolvingIdentityChanged');
+    expect(evolving).toHaveLength(1);
+    const changedFields = evolving[0].details.changedFields as string[];
+    expect(changedFields.some((f) => f.includes('(removed)'))).toBe(true);
+    expect(changedFields.some((f) => f.includes('constraints[legacy]'))).toBe(true);
+  });
+});

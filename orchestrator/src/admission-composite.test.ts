@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { AdmissionInput } from './admission-score.js';
 import { computeAdmissionComposite } from './admission-composite.js';
 
@@ -230,5 +230,99 @@ describe('computeAdmissionComposite — §A.6 admission subset', () => {
       }),
     ).score;
     expect(gap.composite).toBeLessThan(easy.composite);
+  });
+});
+
+describe('computeAdmissionComposite — override position-1 bypass', () => {
+  // mapIssueToPriorityInput does not currently surface an override field
+  // from any label, so the Infinity short-circuit is only exercised via a
+  // spied mapper. This pins the behaviour contractually: when the mapper
+  // sets override=true, the admission composite bypasses SA/DP/ER math
+  // and produces composite=Infinity.
+  const baseInput: AdmissionInput = {
+    issueNumber: 77,
+    title: 'urgent security hotfix',
+    body: '### Complexity\n5',
+    labels: [],
+    reactionCount: 0,
+    commentCount: 0,
+    createdAt: '2026-04-01T00:00:00Z',
+  };
+
+  it('returns composite=Infinity with neutral placeholders when override=true', async () => {
+    vi.resetModules();
+    vi.doMock('./admission-score.js', async () => {
+      const actual =
+        await vi.importActual<typeof import('./admission-score.js')>('./admission-score.js');
+      return {
+        ...actual,
+        mapIssueToPriorityInput: (input: AdmissionInput) => ({
+          ...actual.mapIssueToPriorityInput(input),
+          override: true,
+          overrideReason: 'production incident',
+          overrideExpiry: '2026-05-01T00:00:00Z',
+        }),
+      };
+    });
+    const mod = await import('./admission-composite.js');
+    const { score, breakdown } = mod.computeAdmissionComposite(baseInput);
+    expect(score.composite).toBe(Infinity);
+    expect(score.override?.reason).toBe('production incident');
+    expect(score.override?.expiry).toBe('2026-05-01T00:00:00Z');
+    // Neutral placeholders used for display continuity.
+    expect(score.dimensions.soulAlignment).toBe(1);
+    expect(score.dimensions.demandPressure).toBe(1.5);
+    expect(score.dimensions.marketForce).toBe(3.0);
+    expect(score.dimensions.executionReality).toBe(1);
+    expect(score.dimensions.entropyTax).toBe(0);
+    expect(score.dimensions.humanCurve).toBe(1);
+    expect(score.confidence).toBe(1);
+    expect(breakdown.humanCurve.hcComposite).toBe(1);
+    expect(breakdown.defectRiskFactor).toBe(0);
+    expect(breakdown.designSystemReadiness).toBe(1);
+    vi.doUnmock('./admission-score.js');
+    vi.resetModules();
+  });
+
+  it('falls back to "No reason provided" when override carries no reason', async () => {
+    vi.resetModules();
+    vi.doMock('./admission-score.js', async () => {
+      const actual =
+        await vi.importActual<typeof import('./admission-score.js')>('./admission-score.js');
+      return {
+        ...actual,
+        mapIssueToPriorityInput: (input: AdmissionInput) => ({
+          ...actual.mapIssueToPriorityInput(input),
+          override: true,
+        }),
+      };
+    });
+    const mod = await import('./admission-composite.js');
+    const { score } = mod.computeAdmissionComposite(baseInput);
+    expect(score.composite).toBe(Infinity);
+    expect(score.override?.reason).toBe('No reason provided');
+    expect(score.override?.expiry).toBeUndefined();
+    vi.doUnmock('./admission-score.js');
+    vi.resetModules();
+  });
+
+  it('override path still reflects configured calibration coefficient for display', async () => {
+    vi.resetModules();
+    vi.doMock('./admission-score.js', async () => {
+      const actual =
+        await vi.importActual<typeof import('./admission-score.js')>('./admission-score.js');
+      return {
+        ...actual,
+        mapIssueToPriorityInput: (input: AdmissionInput) => ({
+          ...actual.mapIssueToPriorityInput(input),
+          override: true,
+        }),
+      };
+    });
+    const mod = await import('./admission-composite.js');
+    const { score } = mod.computeAdmissionComposite(baseInput, { calibrationCoefficient: 1.3 });
+    expect(score.dimensions.calibration).toBe(1.3);
+    vi.doUnmock('./admission-score.js');
+    vi.resetModules();
   });
 });
