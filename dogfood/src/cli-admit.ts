@@ -35,6 +35,7 @@ import {
   type EnrichmentContext,
 } from '@ai-sdlc/orchestrator';
 import type { AutonomyPolicy, DesignIntentDocument, DesignSystemBinding } from '@ai-sdlc/reference';
+import { assertSafeReadPath, UnsafePathError } from './safe-path.js';
 
 // ── Arg parsing ──────────────────────────────────────────────────────
 
@@ -51,6 +52,7 @@ function hasFlag(argv: string[], flag: string): boolean {
 interface AdmitArgs {
   title: string;
   body: string;
+  bodyFile?: string;
   issueNumber: number;
   labels: string[];
   reactions: number;
@@ -93,15 +95,6 @@ function parseArgs(argv: string[]): AdmitArgs {
     process.exit(1);
   }
 
-  let body = '';
-  if (bodyFile) {
-    try {
-      body = readFileSync(bodyFile, 'utf-8');
-    } catch {
-      body = '';
-    }
-  }
-
   let labels: string[] = [];
   if (labelsStr) {
     try {
@@ -113,7 +106,8 @@ function parseArgs(argv: string[]): AdmitArgs {
 
   return {
     title,
-    body,
+    body: '',
+    bodyFile,
     issueNumber: Number(issueNumberStr),
     labels,
     reactions: Number(reactionsStr ?? '0'),
@@ -166,6 +160,22 @@ function selectAutonomyPolicy(
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
 
+  // Resolve repo root first so we can validate user-supplied paths.
+  const workDir = await resolveRepoRoot();
+
+  if (args.bodyFile) {
+    try {
+      const safe = assertSafeReadPath(args.bodyFile, workDir);
+      args.body = readFileSync(safe, 'utf-8');
+    } catch (err) {
+      if (err instanceof UnsafePathError) {
+        console.error(err.message);
+        process.exit(1);
+      }
+      args.body = '';
+    }
+  }
+
   const input: AdmissionInput = {
     issueNumber: args.issueNumber,
     title: args.title,
@@ -187,7 +197,6 @@ async function main(): Promise<void> {
   let enrichedInput = input;
 
   try {
-    const workDir = await resolveRepoRoot();
     const configDir = join(workDir, DEFAULT_CONFIG_DIR_NAME);
     const config = await loadConfigAsync(configDir);
     const policy = config.pipeline?.spec?.priorityPolicy;
