@@ -191,4 +191,6 @@ export {
   cmdRecord as _cmdRecord,
   cmdPrecision as _cmdPrecision,
   cmdHotCategories as _cmdHotCategories,
+  main as _main,
+  parseSubcommand as _parseSubcommand,
 };

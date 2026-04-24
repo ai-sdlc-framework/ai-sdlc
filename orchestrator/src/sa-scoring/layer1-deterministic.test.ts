@@ -138,6 +138,58 @@ describe('checkScopeGate', () => {
     const result = checkScopeGate('something prefixSAMLsuffix here', compiled);
     expect(result.outOfScopeHits).toEqual([]);
   });
+
+  it('records inScopeHits when the issue mentions an in-scope label or synonym', () => {
+    const did = makeDid({
+      soulPurpose: {
+        mission: { value: 'm' },
+        scopeBoundaries: {
+          inScope: [
+            { label: 'customer onboarding', synonyms: ['account signup'] },
+            { label: 'payment processing', identityClass: 'core' },
+          ],
+        },
+        designPrinciples: [
+          {
+            id: 'p',
+            name: 'P',
+            description: 'd',
+            measurableSignals: [{ id: 's', metric: 'm', threshold: 1, operator: 'gte' }],
+          },
+        ],
+      },
+    });
+    const compiled = compileDid(did);
+    const result = checkScopeGate('Improve account signup flow with card payments', compiled);
+    expect(result.inScopeHits).toHaveLength(1);
+    expect(result.inScopeHits[0].label).toBe('customer onboarding');
+    expect(result.inScopeHits[0].synonym).toBe('account signup');
+    expect(result.hardGated).toBe(false);
+  });
+
+  it('recognises inScope matches via the label itself (no synonym)', () => {
+    const did = makeDid({
+      soulPurpose: {
+        mission: { value: 'm' },
+        scopeBoundaries: {
+          inScope: [{ label: 'payments', identityClass: 'core' }],
+        },
+        designPrinciples: [
+          {
+            id: 'p',
+            name: 'P',
+            description: 'd',
+            measurableSignals: [{ id: 's', metric: 'm', threshold: 1, operator: 'gte' }],
+          },
+        ],
+      },
+    });
+    const compiled = compileDid(did);
+    const result = checkScopeGate('Add payments retry logic', compiled);
+    expect(result.inScopeHits).toHaveLength(1);
+    expect(result.inScopeHits[0].label).toBe('payments');
+    expect(result.inScopeHits[0].synonym).toBeUndefined();
+  });
 });
 
 describe('detectConstraintViolations', () => {
@@ -285,6 +337,56 @@ describe('checkMeasurableSignals', () => {
     expect(check!.status).toBe('missing');
     expect(result.coreFailureCount).toBe(0);
   });
+
+  it('evaluates all numeric operators (gte/lte/gt/lt/eq/neq) and defaults unknown to fail', () => {
+    const didWithOps = makeDid({
+      soulPurpose: {
+        mission: { value: 'm' },
+        designPrinciples: [
+          {
+            id: 'p',
+            name: 'P',
+            description: 'd',
+            measurableSignals: [
+              { id: 'op-gte', metric: 'valGte', threshold: 10, operator: 'gte' },
+              { id: 'op-lte', metric: 'valLte', threshold: 10, operator: 'lte' },
+              { id: 'op-gt', metric: 'valGt', threshold: 10, operator: 'gt' },
+              { id: 'op-lt', metric: 'valLt', threshold: 10, operator: 'lt' },
+              { id: 'op-eq', metric: 'valEq', threshold: 10, operator: 'eq' },
+              { id: 'op-neq', metric: 'valNeq', threshold: 10, operator: 'neq' },
+              {
+                id: 'op-unknown',
+                metric: 'valUnknown',
+                threshold: 10,
+                operator: 'bogus' as never,
+              },
+            ],
+          },
+        ],
+      },
+    });
+    const compiled = compileDid(didWithOps);
+    const result = checkMeasurableSignals(
+      {
+        valGte: 11, // passes >= 10
+        valLte: 9, // passes <= 10
+        valGt: 11, // passes > 10
+        valLt: 9, // passes < 10
+        valEq: 10, // passes == 10
+        valNeq: 11, // passes != 10
+        valUnknown: 10, // unknown operator — defaults to fail
+      },
+      compiled,
+    );
+    const byId = new Map(result.checks.map((c) => [c.id, c]));
+    expect(byId.get('op-gte')!.status).toBe('pass');
+    expect(byId.get('op-lte')!.status).toBe('pass');
+    expect(byId.get('op-gt')!.status).toBe('pass');
+    expect(byId.get('op-lt')!.status).toBe('pass');
+    expect(byId.get('op-eq')!.status).toBe('pass');
+    expect(byId.get('op-neq')!.status).toBe('pass');
+    expect(byId.get('op-unknown')!.status).toBe('fail');
+  });
 });
 
 describe('runLayer1 — end-to-end integration', () => {
@@ -411,5 +513,80 @@ describe('renderPreVerifiedSummary (AC #4)', () => {
       evolvingViolationCount: 0,
     });
     expect(summary).toContain('depparse sidecar unavailable');
+  });
+
+  it('lists failing measurable signals with operator, threshold, and observed value', () => {
+    const summary = renderPreVerifiedSummary({
+      scopeGate: { inScopeHits: [], outOfScopeHits: [], hardGated: false, warnings: [] },
+      constraintViolations: { violations: [], depparseSkipped: false },
+      product: { hits: [] },
+      design: { hits: [] },
+      measurable: {
+        checks: [
+          {
+            id: 'time-to-value',
+            metric: 'secondsToFirstValue',
+            threshold: 60,
+            operator: 'lte',
+            observedValue: 120,
+            identityClass: 'core',
+            status: 'fail',
+          },
+          {
+            id: 'margin',
+            metric: 'grossMargin',
+            threshold: 0.3,
+            operator: 'gte',
+            identityClass: 'evolving',
+            status: 'missing',
+          },
+          {
+            id: 'uptime',
+            metric: 'uptime',
+            threshold: 0.99,
+            operator: 'gte',
+            observedValue: 0.999,
+            identityClass: 'core',
+            status: 'pass',
+          },
+        ],
+        coreFailureCount: 1,
+      },
+      hardGated: false,
+      coreViolationCount: 1,
+      evolvingViolationCount: 0,
+    });
+    expect(summary).toContain('time-to-value');
+    expect(summary).toContain('secondsToFirstValue lte 60');
+    expect(summary).toContain('observed 120');
+    // Only failing signals appear in the list.
+    expect(summary).not.toContain('margin (grossMargin');
+    expect(summary).not.toContain('uptime (uptime');
+  });
+
+  it('renders observed="n/a" when a failing check has no observedValue', () => {
+    const summary = renderPreVerifiedSummary({
+      scopeGate: { inScopeHits: [], outOfScopeHits: [], hardGated: false, warnings: [] },
+      constraintViolations: { violations: [], depparseSkipped: false },
+      product: { hits: [] },
+      design: { hits: [] },
+      measurable: {
+        checks: [
+          {
+            id: 'x',
+            metric: 'x',
+            threshold: 1,
+            operator: 'gte',
+            identityClass: 'core',
+            status: 'fail',
+          },
+        ],
+        coreFailureCount: 1,
+      },
+      hardGated: false,
+      coreViolationCount: 1,
+      evolvingViolationCount: 0,
+    });
+    expect(summary).toContain('observed n/a');
   });
 });

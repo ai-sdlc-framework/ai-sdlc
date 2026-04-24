@@ -90,3 +90,6 @@ if (invokedDirectly) {
     process.exit(1);
   });
 }
+
+// Re-export helpers for in-process test coverage.
+export { main as _main, shadowFromRealStore as _shadowFromRealStore };

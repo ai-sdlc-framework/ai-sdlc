@@ -286,3 +286,109 @@ describe('CONFIDENCE_THRESHOLD', () => {
     expect(CONFIDENCE_THRESHOLD).toBe(0.5);
   });
 });
+
+describe('RecordedLLMClient fallback + error paths', () => {
+  it('uses setFallbackResponse when no keyed response matches', async () => {
+    const client = new RecordedLLMClient();
+    client.setFallbackResponse('{"fallback": true}');
+    const out = await client.complete('anything goes');
+    expect(out).toBe('{"fallback": true}');
+    expect(client.promptLog).toContain('anything goes');
+  });
+
+  it('throws when no keyed response and no fallback is configured', async () => {
+    const client = new RecordedLLMClient();
+    await expect(client.complete('orphan')).rejects.toThrow(
+      'RecordedLLMClient: no response configured for this prompt',
+    );
+    expect(client.promptLog).toEqual(['orphan']);
+  });
+
+  it('prefers keyed response over fallback when key is a substring of the prompt', async () => {
+    const client = new RecordedLLMClient();
+    client.setFallbackResponse('fallback');
+    client.setResponse('SA-1', 'keyed');
+    expect(await client.complete('SA-1 prompt text')).toBe('keyed');
+    expect(await client.complete('SA-X prompt text')).toBe('fallback');
+  });
+});
+
+describe('SA-1 DID summary — experientialTargets rendering', () => {
+  it('includes experiential targets in the prompt and filters out undefined entries', () => {
+    const did: DesignIntentDocument = {
+      apiVersion: API_VERSION,
+      kind: 'DesignIntentDocument',
+      metadata: { name: 'acme-did' },
+      spec: {
+        stewardship: {
+          productAuthority: { owner: 'p', approvalRequired: ['p'], scope: ['m'] },
+          designAuthority: { owner: 'd', approvalRequired: ['d'], scope: ['dp'] },
+        },
+        soulPurpose: {
+          mission: { value: 'M' },
+          designPrinciples: [
+            {
+              id: 'p',
+              name: 'P',
+              description: 'd',
+              measurableSignals: [{ id: 's', metric: 'm', threshold: 1, operator: 'gte' }],
+            },
+          ],
+        },
+        experientialTargets: {
+          perceivedComplexity: { target: 'low' },
+          emotionalTone: undefined,
+        } as unknown as DesignIntentDocument['spec']['experientialTargets'],
+        designSystemRef: { name: 'acme-ds' },
+      },
+    };
+    const prompt = buildSa1Prompt({ issueText: 'x', did, preVerifiedSummary: SUMMARY });
+    expect(prompt).toContain('Experiential targets');
+    expect(prompt).toContain('perceivedComplexity');
+    expect(prompt).not.toContain('emotionalTone');
+  });
+});
+
+describe('parseSa1 / parseSa2 object guards', () => {
+  it('throws LayerLlmError with kind=malformed-json when SA-1 response parses to non-object', async () => {
+    const client = new RecordedLLMClient();
+    client.setResponse('SA-1', '42');
+    client.setResponse('SA-2', JSON.stringify({ principleAlignment: 0.5, confidence: 0.9 }));
+    await expect(
+      runLayer3({ issueText: 'x', did: makeDid(), preVerifiedSummary: SUMMARY, llm: client }),
+    ).rejects.toMatchObject({ kind: 'malformed-json' });
+  });
+
+  it('throws LayerLlmError with kind=malformed-json when SA-2 response parses to non-object', async () => {
+    const client = new RecordedLLMClient();
+    client.setResponse('SA-1', JSON.stringify({ domainIntent: 0.5, confidence: 0.9 }));
+    client.setResponse('SA-2', 'null');
+    await expect(
+      runLayer3({ issueText: 'x', did: makeDid(), preVerifiedSummary: SUMMARY, llm: client }),
+    ).rejects.toMatchObject({ kind: 'malformed-json' });
+  });
+
+  it('treats non-array subtleConflicts/subtleDesignConflicts as undefined (filtered to empty)', async () => {
+    const client = new RecordedLLMClient();
+    client.setResponse(
+      'SA-1',
+      JSON.stringify({ domainIntent: 0.8, confidence: 0.9, subtleConflicts: 'not an array' }),
+    );
+    client.setResponse(
+      'SA-2',
+      JSON.stringify({
+        principleAlignment: 0.8,
+        confidence: 0.9,
+        subtleDesignConflicts: { not: 'an array' },
+      }),
+    );
+    const result = await runLayer3({
+      issueText: 'x',
+      did: makeDid(),
+      preVerifiedSummary: SUMMARY,
+      llm: client,
+    });
+    expect(result.subtleConflicts).toEqual([]);
+    expect(result.subtleDesignConflicts).toEqual([]);
+  });
+});
