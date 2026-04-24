@@ -34,6 +34,15 @@ jobs:
           ISSUE_BODY: ${{ github.event.issue.body }}
         run: printf '%s' "$ISSUE_BODY" > /tmp/issue-body.txt
 
+      - name: Detect .ai-sdlc/ config presence
+        id: enrich
+        run: |
+          if [ -d .ai-sdlc ] && [ -n "$(ls -A .ai-sdlc 2>/dev/null)" ]; then
+            echo "flag=--enrich-from-state" >> "$GITHUB_OUTPUT"
+          else
+            echo "flag=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Score issue with PPA
         id: admit
         env:
@@ -49,6 +58,8 @@ jobs:
             --comments '${{ github.event.issue.comments }}' \
             --created-at '${{ github.event.issue.created_at }}' \
             --author-association '${{ github.event.issue.author_association }}' \
+            --author-login '${{ github.event.issue.user.login }}' \
+            ${{ steps.enrich.outputs.flag }} \
             2>/tmp/admit-stderr.txt | tail -1)
           EXIT_CODE=$?
           set -e
@@ -105,6 +116,23 @@ jobs:
               body += `| Demand Pressure | ${d.demandPressure.toFixed(2)} |\n`;
               body += `| Execution Reality | ${d.executionReality.toFixed(2)} |\n`;
               body += `| Human Curve | ${d.humanCurve.toFixed(2)} |\n\n`;
+
+              // Pillar breakdown (RFC-0008 §A.6)
+              if (result.pillarBreakdown) {
+                const pb = result.pillarBreakdown;
+                body += `### Pillar Breakdown\n\n`;
+                body += `| Pillar | Signal | Interpretation |\n|---|---|---|\n`;
+                body += `| Product | ${pb.product.signal.toFixed(2)} | ${pb.product.interpretation} |\n`;
+                body += `| Design | ${pb.design.signal.toFixed(2)} | ${pb.design.interpretation} |\n`;
+                body += `| Engineering | ${pb.engineering.signal.toFixed(2)} | ${pb.engineering.interpretation} |\n\n`;
+                if (pb.tensions && pb.tensions.length > 0) {
+                  body += `### Pillar Tensions\n\n`;
+                  for (const t of pb.tensions) {
+                    body += `- **${t.type}** — ${t.suggestedAction}\n`;
+                  }
+                  body += '\n';
+                }
+              }
 
               body += `**Reason:** ${result.reason}\n\n`;
 

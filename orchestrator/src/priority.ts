@@ -171,10 +171,23 @@ function computeHumanCurve(
 
 /**
  * Cκ — Calibration Coefficient [0.7, 1.3].
- * A tuning knob that lets operators scale the final score up or down.
+ *
+ * Category-scoped (RFC-0008 §10 Amendment 6) when `categoryResolver`
+ * and `categoryCoefficients` are both present: resolver returns a
+ * category label, coefficient is looked up, scalar fallback applies
+ * when the category has no entry. Otherwise uses the scalar path
+ * unchanged.
  */
-function computeCalibration(config?: PriorityConfig): number {
-  const coeff = config?.calibrationCoefficient ?? 1.0;
+function computeCalibration(input: PriorityInput, config?: PriorityConfig): number {
+  let coeff = config?.calibrationCoefficient ?? 1.0;
+  const resolver = config?.categoryResolver;
+  const table = config?.categoryCoefficients;
+  if (resolver && table) {
+    const category = resolver(input);
+    if (category && table[category] !== undefined) {
+      coeff = table[category];
+    }
+  }
   return clamp(coeff, CALIBRATION_MIN, CALIBRATION_MAX);
 }
 
@@ -184,7 +197,7 @@ function computeCalibration(config?: PriorityConfig): number {
  * Compute a confidence score [0, 1] based on the fraction of optional
  * input fields that were explicitly provided (not defaulted).
  */
-function computeConfidence(input: PriorityInput): number {
+export function computeConfidence(input: PriorityInput): number {
   let provided = 0;
   for (const field of SCORABLE_FIELDS) {
     if (input[field] !== undefined) {
@@ -240,7 +253,7 @@ export function computePriority(input: PriorityInput, config?: PriorityConfig): 
   const executionReality = computeExecutionReality(input);
   const entropyTax = computeEntropyTax(input);
   const humanCurve = computeHumanCurve(input, hcWeights);
-  const calibration = computeCalibration(config);
+  const calibration = computeCalibration(input, config);
 
   // ── Composite ─────────────────────────────────────────────────
   const composite =

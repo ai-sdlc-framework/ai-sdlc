@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/spec/schemas/sa-exemplar.schema.json",
+  "title": "SAExemplarBank",
+  "description": "Labeled SA-scoring exemplars used to measure layer precision in Phase 2a shadow mode and gate Phase 2b progression (RFC-0008 §B.6.4, §B.10.2).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["exemplars"],
+  "properties": {
+    "exemplars": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Exemplar" }
+    }
+  },
+  "$defs": {
+    "Exemplar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "dimension", "type", "issue", "verdict"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Unique identifier within the bank."
+        },
+        "dimension": {
+          "enum": ["SA-1", "SA-2"],
+          "description": "Which SA dimension this exemplar evaluates."
+        },
+        "type": {
+          "enum": ["true-positive", "false-positive", "true-negative", "false-negative"],
+          "description": "Ground-truth classification for precision tracking."
+        },
+        "issue": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["title", "body"],
+          "properties": {
+            "title": { "type": "string" },
+            "body": { "type": "string" }
+          }
+        },
+        "layer1Expected": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "hardGated": { "type": "boolean" },
+            "coreViolationCount": { "type": "integer", "minimum": 0 },
+            "evolvingViolationCount": { "type": "integer", "minimum": 0 },
+            "scopeGate": { "type": "object" },
+            "constraintViolations": { "type": "object" },
+            "antiPatternHits": { "type": "object" }
+          }
+        },
+        "layer2Expected": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "domainRelevance": { "type": "number", "minimum": 0, "maximum": 1 },
+            "overallCoverage": { "type": "number", "minimum": 0, "maximum": 1 }
+          }
+        },
+        "layer3Expected": {
+          "type": "object",
+          "additionalProperties": true,
+          "properties": {
+            "domainIntent": { "type": "number", "minimum": 0, "maximum": 1 },
+            "principleAlignment": { "type": "number", "minimum": 0, "maximum": 1 },
+            "reasoning": { "type": "string" }
+          }
+        },
+        "verdict": {
+          "type": "string",
+          "description": "Expected admission outcome (e.g. admit, reject, escalate)."
+        },
+        "principle": {
+          "type": "string",
+          "description": "DID designPrinciple id this exemplar relates to (SA-2 only)."
+        },
+        "notes": { "type": "string" }
+      }
+    }
+  }
+}

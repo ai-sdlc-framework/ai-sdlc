@@ -1,0 +1,68 @@
+name: AI-SDLC SA Feedback
+
+on:
+  issues:
+    types: [labeled]
+
+jobs:
+  record-feedback:
+    name: Record SA feedback signal
+    runs-on: ubuntu-latest
+    # Only fire on SA feedback labels
+    if: >-
+      startsWith(github.event.label.name, 'sa/accept') ||
+      startsWith(github.event.label.name, 'sa/dismiss') ||
+      startsWith(github.event.label.name, 'sa/escalate')
+    permissions:
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      - name: Resolve DID ref for this repo
+        id: did
+        run: |
+          # Take the first DID from .ai-sdlc/ as the default.
+          DID_NAME=$(find .ai-sdlc -maxdepth 2 -name '*.yaml' -exec grep -l 'kind: DesignIntentDocument' {} \; 2>/dev/null | head -1 | xargs -I {} grep -E '^\s*name:' {} 2>/dev/null | head -1 | awk '{print $2}' || true)
+          echo "name=${DID_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Classify signal from label
+        id: signal
+        env:
+          LABEL: ${{ github.event.label.name }}
+        run: |
+          case "$LABEL" in
+            sa/accept)   echo "kind=accept"  >> "$GITHUB_OUTPUT" ;;
+            sa/dismiss)  echo "kind=dismiss" >> "$GITHUB_OUTPUT" ;;
+            sa/escalate) echo "kind=escalate" >> "$GITHUB_OUTPUT" ;;
+            *) exit 0 ;;
+          esac
+
+      - name: Record feedback signal (SA-1 + SA-2)
+        if: steps.signal.outputs.kind != '' && steps.did.outputs.name != ''
+        env:
+          DID_NAME: ${{ steps.did.outputs.name }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          PRINCIPAL: ${{ github.event.sender.login }}
+          SIGNAL: ${{ steps.signal.outputs.kind }}
+        run: |
+          pnpm --filter @ai-sdlc/dogfood sa-feedback record \
+            --did "$DID_NAME" \
+            --issue "$ISSUE_NUMBER" \
+            --dimension SA-1 \
+            --signal "$SIGNAL" \
+            --principal "$PRINCIPAL" \
+            --notes "via label ${{ github.event.label.name }}"
+          pnpm --filter @ai-sdlc/dogfood sa-feedback record \
+            --did "$DID_NAME" \
+            --issue "$ISSUE_NUMBER" \
+            --dimension SA-2 \
+            --signal "$SIGNAL" \
+            --principal "$PRINCIPAL" \
+            --notes "via label ${{ github.event.label.name }}"

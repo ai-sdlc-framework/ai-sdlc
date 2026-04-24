@@ -329,3 +329,94 @@ export interface UsabilitySimulationResultRecord {
   findingsJson?: string;
   createdAt?: string;
 }
+
+// ── PPA Triad Integration (RFC-0008) ─────────────────────────────────
+
+export interface DidCompiledArtifactRecord {
+  id?: number;
+  didName: string;
+  namespace?: string;
+  sourceHash: string;
+  scopeListsJson?: string;
+  constraintRulesJson?: string;
+  antiPatternListsJson?: string;
+  measurableSignalsJson?: string;
+  bm25CorpusBlob?: Buffer;
+  principleCorporaBlob?: Buffer;
+  compiledAt?: string;
+}
+
+export type SaDimension = 'SA-1' | 'SA-2';
+export type SaPhase = '1' | '2a' | '2b' | '2c' | '3';
+
+export interface DidScoringEventRecord {
+  id?: number;
+  didName: string;
+  issueNumber: number;
+  saDimension: SaDimension;
+  phase: SaPhase;
+  layer1ResultJson?: string;
+  layer2ResultJson?: string;
+  layer3ResultJson?: string;
+  compositeScore?: number;
+  phaseWeightsJson?: string;
+  createdAt?: string;
+}
+
+export type FeedbackSignal = 'accept' | 'dismiss' | 'escalate' | 'override';
+
+export interface DidFeedbackEventRecord {
+  id?: number;
+  didName: string;
+  issueNumber: number;
+  dimension: SaDimension;
+  signal: FeedbackSignal;
+  principal?: string;
+  category?: string;
+  structuralScore?: number;
+  llmScore?: number;
+  compositeScore?: number;
+  notes?: string;
+  createdAt?: string;
+}
+
+export interface DesignChangeEventRecord {
+  id?: number;
+  didName: string;
+  changeId: string;
+  changeType: string;
+  status: string;
+  payloadJson: string;
+  emittedAt?: string;
+}
+
+export interface CodeAreaMetricsRecord {
+  id?: number;
+  codeArea: string;
+  defectDensity?: number;
+  churnRate?: number;
+  prRejectionRate?: number;
+  codeAcceptanceRate?: number;
+  hasFrontendComponents?: boolean;
+  designMetricsJson?: string;
+  dataPointCount?: number;
+  windowStart?: string;
+  windowEnd?: string;
+  computedAt?: string;
+}
+
+export interface DesignLookaheadNotificationRecord {
+  id?: number;
+  issueNumber: number;
+  firstNotifiedAt?: string;
+  lastNotifiedAt?: string;
+  pillarBreakdownJson?: string;
+}
+
+export interface SaPhaseWeightsRecord {
+  id?: number;
+  dimension: SaDimension;
+  wStructural: number;
+  wLlm: number;
+  calibratedAt?: string;
+}

@@ -34,6 +34,16 @@ import type {
   TokenComplianceRecord,
   VisualRegressionResultRecord,
   UsabilitySimulationResultRecord,
+  DidCompiledArtifactRecord,
+  DidScoringEventRecord,
+  SaDimension,
+  SaPhase,
+  DidFeedbackEventRecord,
+  FeedbackSignal,
+  DesignChangeEventRecord,
+  CodeAreaMetricsRecord,
+  DesignLookaheadNotificationRecord,
+  SaPhaseWeightsRecord,
 } from './types.js';
 
 export class StateStore {
@@ -1340,6 +1350,390 @@ export class StateStore {
         `SELECT * FROM usability_simulation_results WHERE binding_name = ? ORDER BY created_at DESC LIMIT ?`,
       )
       .all(bindingName, limit) as UsabilitySimulationResultRecord[];
+  }
+
+  // ── PPA Triad Integration (RFC-0008) ─────────────────────────────────
+
+  insertDidCompiledArtifact(record: DidCompiledArtifactRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO did_compiled_artifacts (did_name, namespace, source_hash, scope_lists_json, constraint_rules_json, anti_pattern_lists_json, measurable_signals_json, bm25_corpus_blob, principle_corpora_blob)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.didName,
+        record.namespace ?? null,
+        record.sourceHash,
+        record.scopeListsJson ?? null,
+        record.constraintRulesJson ?? null,
+        record.antiPatternListsJson ?? null,
+        record.measurableSignalsJson ?? null,
+        record.bm25CorpusBlob ?? null,
+        record.principleCorporaBlob ?? null,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  getLatestDidCompiledArtifact(didName: string): DidCompiledArtifactRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM did_compiled_artifacts WHERE did_name = ? ORDER BY compiled_at DESC, id DESC LIMIT 1`,
+      )
+      .get(didName) as Record<string, unknown> | undefined;
+    return row ? this.mapDidCompiledArtifact(row) : undefined;
+  }
+
+  getDidCompiledArtifactByHash(
+    didName: string,
+    sourceHash: string,
+  ): DidCompiledArtifactRecord | undefined {
+    const row = this.db
+      .prepare(
+        `SELECT * FROM did_compiled_artifacts WHERE did_name = ? AND source_hash = ? ORDER BY compiled_at DESC, id DESC LIMIT 1`,
+      )
+      .get(didName, sourceHash) as Record<string, unknown> | undefined;
+    return row ? this.mapDidCompiledArtifact(row) : undefined;
+  }
+
+  private mapDidCompiledArtifact(row: Record<string, unknown>): DidCompiledArtifactRecord {
+    return {
+      id: row.id as number,
+      didName: row.did_name as string,
+      namespace: row.namespace as string | undefined,
+      sourceHash: row.source_hash as string,
+      scopeListsJson: row.scope_lists_json as string | undefined,
+      constraintRulesJson: row.constraint_rules_json as string | undefined,
+      antiPatternListsJson: row.anti_pattern_lists_json as string | undefined,
+      measurableSignalsJson: row.measurable_signals_json as string | undefined,
+      bm25CorpusBlob: row.bm25_corpus_blob as Buffer | undefined,
+      principleCorporaBlob: row.principle_corpora_blob as Buffer | undefined,
+      compiledAt: row.compiled_at as string | undefined,
+    };
+  }
+
+  recordDidScoringEvent(record: DidScoringEventRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO did_scoring_events (did_name, issue_number, sa_dimension, phase, layer1_result_json, layer2_result_json, layer3_result_json, composite_score, phase_weights_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.didName,
+        record.issueNumber,
+        record.saDimension,
+        record.phase,
+        record.layer1ResultJson ?? null,
+        record.layer2ResultJson ?? null,
+        record.layer3ResultJson ?? null,
+        record.compositeScore ?? null,
+        record.phaseWeightsJson ?? null,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  getDidScoringEvents(opts?: {
+    didName?: string;
+    issueNumber?: number;
+    saDimension?: SaDimension;
+    since?: string;
+    limit?: number;
+  }): DidScoringEventRecord[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.didName) {
+      conditions.push('did_name = ?');
+      params.push(opts.didName);
+    }
+    if (opts?.issueNumber !== undefined) {
+      conditions.push('issue_number = ?');
+      params.push(opts.issueNumber);
+    }
+    if (opts?.saDimension) {
+      conditions.push('sa_dimension = ?');
+      params.push(opts.saDimension);
+    }
+    if (opts?.since) {
+      conditions.push('created_at >= ?');
+      params.push(opts.since);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 100;
+    params.push(limit);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM did_scoring_events ${where} ORDER BY created_at DESC, id DESC LIMIT ?`,
+      )
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      didName: r.did_name as string,
+      issueNumber: r.issue_number as number,
+      saDimension: r.sa_dimension as SaDimension,
+      phase: r.phase as SaPhase,
+      layer1ResultJson: r.layer1_result_json as string | undefined,
+      layer2ResultJson: r.layer2_result_json as string | undefined,
+      layer3ResultJson: r.layer3_result_json as string | undefined,
+      compositeScore: r.composite_score as number | undefined,
+      phaseWeightsJson: r.phase_weights_json as string | undefined,
+      createdAt: r.created_at as string | undefined,
+    }));
+  }
+
+  recordDidFeedback(record: DidFeedbackEventRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO did_feedback_events (did_name, issue_number, dimension, signal, principal, category, structural_score, llm_score, composite_score, notes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.didName,
+        record.issueNumber,
+        record.dimension,
+        record.signal,
+        record.principal ?? null,
+        record.category ?? null,
+        record.structuralScore ?? null,
+        record.llmScore ?? null,
+        record.compositeScore ?? null,
+        record.notes ?? null,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  getDidFeedbackEvents(opts?: {
+    didName?: string;
+    issueNumber?: number;
+    signal?: FeedbackSignal;
+    dimension?: SaDimension;
+    since?: string;
+    limit?: number;
+  }): DidFeedbackEventRecord[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.didName) {
+      conditions.push('did_name = ?');
+      params.push(opts.didName);
+    }
+    if (opts?.issueNumber !== undefined) {
+      conditions.push('issue_number = ?');
+      params.push(opts.issueNumber);
+    }
+    if (opts?.signal) {
+      conditions.push('signal = ?');
+      params.push(opts.signal);
+    }
+    if (opts?.dimension) {
+      conditions.push('dimension = ?');
+      params.push(opts.dimension);
+    }
+    if (opts?.since) {
+      conditions.push('created_at >= ?');
+      params.push(opts.since);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 500;
+    params.push(limit);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM did_feedback_events ${where} ORDER BY created_at DESC, id DESC LIMIT ?`,
+      )
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      didName: r.did_name as string,
+      issueNumber: r.issue_number as number,
+      dimension: r.dimension as SaDimension,
+      signal: r.signal as FeedbackSignal,
+      principal: r.principal as string | undefined,
+      category: r.category as string | undefined,
+      structuralScore: r.structural_score as number | undefined,
+      llmScore: r.llm_score as number | undefined,
+      compositeScore: r.composite_score as number | undefined,
+      notes: r.notes as string | undefined,
+      createdAt: r.created_at as string | undefined,
+    }));
+  }
+
+  recordDesignChange(record: DesignChangeEventRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO design_change_events (did_name, change_id, change_type, status, payload_json)
+         VALUES (?, ?, ?, ?, ?)`,
+      )
+      .run(record.didName, record.changeId, record.changeType, record.status, record.payloadJson);
+    return Number(result.lastInsertRowid);
+  }
+
+  getDesignChangeEvents(opts?: {
+    didName?: string;
+    changeId?: string;
+    limit?: number;
+  }): DesignChangeEventRecord[] {
+    const conditions: string[] = [];
+    const params: unknown[] = [];
+    if (opts?.didName) {
+      conditions.push('did_name = ?');
+      params.push(opts.didName);
+    }
+    if (opts?.changeId) {
+      conditions.push('change_id = ?');
+      params.push(opts.changeId);
+    }
+    const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const limit = opts?.limit ?? 100;
+    params.push(limit);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM design_change_events ${where} ORDER BY emitted_at DESC, id DESC LIMIT ?`,
+      )
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => ({
+      id: r.id as number,
+      didName: r.did_name as string,
+      changeId: r.change_id as string,
+      changeType: r.change_type as string,
+      status: r.status as string,
+      payloadJson: r.payload_json as string,
+      emittedAt: r.emitted_at as string | undefined,
+    }));
+  }
+
+  insertCodeAreaMetrics(record: CodeAreaMetricsRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO code_area_metrics (code_area, defect_density, churn_rate, pr_rejection_rate, code_acceptance_rate, has_frontend_components, design_metrics_json, data_point_count, window_start, window_end)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        record.codeArea,
+        record.defectDensity ?? null,
+        record.churnRate ?? null,
+        record.prRejectionRate ?? null,
+        record.codeAcceptanceRate ?? null,
+        record.hasFrontendComponents ? 1 : 0,
+        record.designMetricsJson ?? null,
+        record.dataPointCount ?? 0,
+        record.windowStart ?? null,
+        record.windowEnd ?? null,
+      );
+    return Number(result.lastInsertRowid);
+  }
+
+  /**
+   * Get the most recent metrics snapshot for a code area.
+   * `since` filters to rows where `computed_at >= since`.
+   */
+  getCodeAreaMetrics(
+    codeArea: string,
+    opts?: { since?: string },
+  ): CodeAreaMetricsRecord | undefined {
+    const conditions: string[] = ['code_area = ?'];
+    const params: unknown[] = [codeArea];
+    if (opts?.since) {
+      conditions.push('computed_at >= ?');
+      params.push(opts.since);
+    }
+    const row = this.db
+      .prepare(
+        `SELECT * FROM code_area_metrics WHERE ${conditions.join(' AND ')} ORDER BY computed_at DESC, id DESC LIMIT 1`,
+      )
+      .get(...params) as Record<string, unknown> | undefined;
+    return row ? this.mapCodeAreaMetrics(row) : undefined;
+  }
+
+  getCodeAreaMetricsHistory(
+    codeArea: string,
+    opts?: { since?: string; limit?: number },
+  ): CodeAreaMetricsRecord[] {
+    const conditions: string[] = ['code_area = ?'];
+    const params: unknown[] = [codeArea];
+    if (opts?.since) {
+      conditions.push('computed_at >= ?');
+      params.push(opts.since);
+    }
+    const limit = opts?.limit ?? 100;
+    params.push(limit);
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM code_area_metrics WHERE ${conditions.join(' AND ')} ORDER BY computed_at DESC, id DESC LIMIT ?`,
+      )
+      .all(...params) as Record<string, unknown>[];
+    return rows.map((r) => this.mapCodeAreaMetrics(r));
+  }
+
+  private mapCodeAreaMetrics(row: Record<string, unknown>): CodeAreaMetricsRecord {
+    return {
+      id: row.id as number,
+      codeArea: row.code_area as string,
+      defectDensity: row.defect_density as number | undefined,
+      churnRate: row.churn_rate as number | undefined,
+      prRejectionRate: row.pr_rejection_rate as number | undefined,
+      codeAcceptanceRate: row.code_acceptance_rate as number | undefined,
+      hasFrontendComponents: Boolean(row.has_frontend_components),
+      designMetricsJson: row.design_metrics_json as string | undefined,
+      dataPointCount: row.data_point_count as number | undefined,
+      windowStart: row.window_start as string | undefined,
+      windowEnd: row.window_end as string | undefined,
+      computedAt: row.computed_at as string | undefined,
+    };
+  }
+
+  upsertDesignLookaheadNotification(record: DesignLookaheadNotificationRecord): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO design_lookahead_notifications (issue_number, pillar_breakdown_json)
+         VALUES (?, ?)
+         ON CONFLICT(issue_number) DO UPDATE SET
+           last_notified_at = datetime('now'),
+           pillar_breakdown_json = COALESCE(excluded.pillar_breakdown_json, pillar_breakdown_json)`,
+      )
+      .run(record.issueNumber, record.pillarBreakdownJson ?? null);
+    return Number(result.lastInsertRowid);
+  }
+
+  getDesignLookaheadNotification(
+    issueNumber: number,
+  ): DesignLookaheadNotificationRecord | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM design_lookahead_notifications WHERE issue_number = ?`)
+      .get(issueNumber) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id as number,
+      issueNumber: row.issue_number as number,
+      firstNotifiedAt: row.first_notified_at as string | undefined,
+      lastNotifiedAt: row.last_notified_at as string | undefined,
+      pillarBreakdownJson: row.pillar_breakdown_json as string | undefined,
+    };
+  }
+
+  // ── SA Phase Weights (RFC-0008 §B.8 AISDLC-66) ──────────────────────
+
+  upsertSaPhaseWeights(record: SaPhaseWeightsRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO sa_phase_weights (dimension, w_structural, w_llm, calibrated_at)
+         VALUES (?, ?, ?, datetime('now'))
+         ON CONFLICT(dimension) DO UPDATE SET
+           w_structural = excluded.w_structural,
+           w_llm = excluded.w_llm,
+           calibrated_at = excluded.calibrated_at`,
+      )
+      .run(record.dimension, record.wStructural, record.wLlm);
+  }
+
+  getSaPhaseWeights(dimension: SaDimension): SaPhaseWeightsRecord | undefined {
+    const row = this.db
+      .prepare(`SELECT * FROM sa_phase_weights WHERE dimension = ?`)
+      .get(dimension) as Record<string, unknown> | undefined;
+    if (!row) return undefined;
+    return {
+      id: row.id as number,
+      dimension: row.dimension as SaDimension,
+      wStructural: row.w_structural as number,
+      wLlm: row.w_llm as number,
+      calibratedAt: row.calibrated_at as string | undefined,
+    };
   }
 
   close(): void {

@@ -853,6 +853,461 @@ export const commonSchema = {
   },
 } as const;
 
+export const designIntentDocumentSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/design-intent-document.schema.json',
+  title: 'AI-SDLC DesignIntentDocument',
+  description:
+    "Authoritative artifact defining the product's design intent at the strategic level. Shared root of the triad's design axis — both PPA and DesignSystemBinding reference it. Contains split-authority stewardship (product + design + shared + engineering review), soulPurpose (mission, design principles), structured Addendum B fields (constraints, scope boundaries, anti-patterns, measurable signals) with identityClass markers, brandIdentity, experientialTargets, and planned changes for Design→Engineering lookahead.",
+  type: 'object',
+  required: ['apiVersion', 'kind', 'metadata', 'spec'],
+  properties: {
+    apiVersion: { $ref: 'common.schema.json#/$defs/apiVersion' },
+    kind: { type: 'string', const: 'DesignIntentDocument' },
+    metadata: { $ref: 'common.schema.json#/$defs/metadata' },
+    spec: {
+      type: 'object',
+      required: ['stewardship', 'soulPurpose', 'designSystemRef'],
+      properties: {
+        stewardship: { $ref: '#/$defs/stewardshipSplit' },
+        soulPurpose: { $ref: '#/$defs/soulPurpose' },
+        designSystemRef: { $ref: '#/$defs/designSystemRef' },
+        brandIdentity: { $ref: '#/$defs/brandIdentity' },
+        experientialTargets: { $ref: '#/$defs/experientialTargets' },
+        plannedChanges: {
+          type: 'array',
+          description:
+            'Planned design changes surfaced to engineering for lookahead (RFC-0008 §A.9).',
+          items: { $ref: '#/$defs/plannedChange' },
+        },
+      },
+      additionalProperties: false,
+    },
+    status: { $ref: '#/$defs/status' },
+  },
+  additionalProperties: false,
+  $defs: {
+    identityClass: {
+      type: 'string',
+      enum: ['core', 'evolving'],
+      description:
+        'Identity class per Addendum B. `core` fields trigger full-backlog re-score on change; `evolving` fields only re-score the admission queue. Also weights BM25 corpus construction (core=2x, evolving=1x).',
+    },
+    stewardshipSplit: {
+      type: 'object',
+      description: 'Split-authority stewardship per §4.4. Replaces v3 single-owner model.',
+      required: ['productAuthority', 'designAuthority'],
+      properties: {
+        productAuthority: {
+          type: 'object',
+          description:
+            'Product-domain fields: Product owns, Design approves. Feeds SA-1 (Problem Resonance).',
+          required: ['owner', 'approvalRequired', 'scope'],
+          properties: {
+            owner: { type: 'string' },
+            approvalRequired: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            scope: { type: 'array', items: { type: 'string' }, minItems: 1 },
+          },
+          additionalProperties: false,
+        },
+        designAuthority: {
+          type: 'object',
+          description:
+            'Design-domain fields: Design owns, Product approves. Feeds SA-2 (Vibe Coherence).',
+          required: ['owner', 'approvalRequired', 'scope'],
+          properties: {
+            owner: { type: 'string' },
+            approvalRequired: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            scope: { type: 'array', items: { type: 'string' }, minItems: 1 },
+          },
+          additionalProperties: false,
+        },
+        sharedAuthority: {
+          type: 'object',
+          description: 'Shared fields: either pillar can propose, both must approve.',
+          properties: {
+            approvalRequired: { type: 'array', items: { type: 'string' } },
+            scope: { type: 'array', items: { type: 'string' } },
+          },
+          additionalProperties: false,
+        },
+        engineeringReview: {
+          type: 'object',
+          description:
+            'Engineering reviewer on all fields, blocker only on measurableSignal and detectionPattern feasibility.',
+          required: ['role'],
+          properties: {
+            role: { type: 'string', enum: ['reviewer'] },
+            blockingScope: {
+              type: 'array',
+              description: 'Dotted paths where Engineering can block on technical feasibility.',
+              items: { type: 'string' },
+            },
+            rationale: { type: 'string' },
+          },
+          additionalProperties: false,
+        },
+        reviewCadence: {
+          type: 'string',
+          enum: ['monthly', 'quarterly', 'biannual', 'annual'],
+          description: 'Minimum review frequency. RFC-0008 §4.4 mandates quarterly minimum.',
+        },
+      },
+      additionalProperties: false,
+    },
+    soulPurpose: {
+      type: 'object',
+      description: 'Strategic intent. mission is Product-owned; designPrinciples are Design-owned.',
+      required: ['mission', 'designPrinciples'],
+      properties: {
+        mission: { $ref: '#/$defs/missionField' },
+        constraints: {
+          type: 'array',
+          description:
+            'Typed constraint declarations (Addendum B §B.3.2). Each compiles to a dep-parse detection rule. Product-owned.',
+          items: { $ref: '#/$defs/constraint' },
+        },
+        scopeBoundaries: { $ref: '#/$defs/scopeBoundaries' },
+        antiPatterns: {
+          type: 'array',
+          description: 'Product-level anti-patterns (Addendum B §B.3.2). Product-owned.',
+          items: { $ref: '#/$defs/antiPattern' },
+        },
+        designPrinciples: {
+          type: 'array',
+          description:
+            'Design principles with structured measurable signals and anti-patterns. Design-owned.',
+          minItems: 1,
+          items: { $ref: '#/$defs/designPrinciple' },
+        },
+      },
+      additionalProperties: false,
+    },
+    missionField: {
+      type: 'object',
+      required: ['value'],
+      properties: {
+        identityClass: { $ref: '#/$defs/identityClass' },
+        value: {
+          type: 'string',
+          description:
+            'Natural-language mission statement. Literal input to SA-1 (Problem Resonance).',
+          minLength: 1,
+        },
+      },
+      additionalProperties: false,
+    },
+    constraint: {
+      type: 'object',
+      description: 'Typed constraint declaration with dep-parse detection patterns.',
+      required: ['id', 'concept', 'relationship'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z][a-z0-9-]*$' },
+        identityClass: { $ref: '#/$defs/identityClass' },
+        concept: { type: 'string' },
+        relationship: {
+          type: 'string',
+          enum: ['must-not-require', 'must-require', 'must-not-include', 'must-include'],
+        },
+        rationale: { type: 'string' },
+        detectionPatterns: {
+          type: 'array',
+          description:
+            'Patterns compiled into dep-parse rules. Phase 2b gate requires ≥3 patterns per constraint.',
+          items: { type: 'string' },
+          minItems: 1,
+        },
+      },
+      additionalProperties: false,
+    },
+    scopeBoundaries: {
+      type: 'object',
+      description:
+        'In-scope and out-of-scope term lists with synonyms. Compiled to keyword lists for scope gate.',
+      properties: {
+        inScope: {
+          type: 'array',
+          items: { $ref: '#/$defs/scopeTerm' },
+        },
+        outOfScope: {
+          type: 'array',
+          description: 'Out-of-scope terms. Match on core entry triggers hard scope gate.',
+          items: { $ref: '#/$defs/scopeTerm' },
+        },
+      },
+      additionalProperties: false,
+    },
+    scopeTerm: {
+      type: 'object',
+      required: ['label'],
+      properties: {
+        label: { type: 'string' },
+        identityClass: { $ref: '#/$defs/identityClass' },
+        synonyms: {
+          type: 'array',
+          description:
+            'Alternative terms. Phase 2b gate requires ≥2 synonyms per outOfScope entry.',
+          items: { type: 'string' },
+        },
+      },
+      additionalProperties: false,
+    },
+    antiPattern: {
+      type: 'object',
+      description: 'Explicit rejection of an approach the product does not take.',
+      required: ['id', 'label'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z][a-z0-9-]*$' },
+        identityClass: { $ref: '#/$defs/identityClass' },
+        label: { type: 'string' },
+        description: { type: 'string' },
+        detectionPatterns: {
+          type: 'array',
+          description:
+            'Patterns compiled to term-matching rules. Phase 2b gate requires ≥3 patterns per global anti-pattern, ≥2 per principle-level.',
+          items: { type: 'string' },
+          minItems: 1,
+        },
+      },
+      additionalProperties: false,
+    },
+    designPrinciple: {
+      type: 'object',
+      required: ['id', 'name', 'description', 'measurableSignals'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z][a-z0-9-]*$' },
+        name: { type: 'string' },
+        description: { type: 'string' },
+        identityClass: { $ref: '#/$defs/identityClass' },
+        measurableSignals: {
+          type: 'array',
+          description:
+            'Structured measurable signals (replaces free-text measurableSignal from v4).',
+          minItems: 1,
+          items: { $ref: '#/$defs/measurableSignal' },
+        },
+        antiPatterns: {
+          type: 'array',
+          description: 'Principle-scoped anti-patterns.',
+          items: { $ref: '#/$defs/antiPattern' },
+        },
+      },
+      additionalProperties: false,
+    },
+    measurableSignal: {
+      type: 'object',
+      required: ['id', 'metric', 'threshold', 'operator'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z][a-z0-9-]*$' },
+        metric: { type: 'string' },
+        threshold: { type: 'number' },
+        operator: { type: 'string', enum: ['gte', 'lte', 'gt', 'lt', 'eq', 'neq'] },
+        scope: { type: 'string' },
+        identityClass: { $ref: '#/$defs/identityClass' },
+      },
+      additionalProperties: false,
+    },
+    designSystemRef: {
+      type: 'object',
+      required: ['name'],
+      properties: {
+        name: {
+          type: 'string',
+          description:
+            'Reference to an existing DesignSystemBinding resource. Unidirectional — DSB does not back-reference the DID.',
+        },
+        namespace: { type: 'string' },
+        bindingType: {
+          type: 'string',
+          enum: ['authoritative', 'advisory'],
+          description:
+            'authoritative: DID governs DSB intent. advisory: DID informs but does not govern.',
+        },
+        syncFields: {
+          type: 'array',
+          description: 'Field-level sync relationships between DID and DSB (sharedAuthority).',
+          items: {
+            type: 'object',
+            required: ['did', 'dsb', 'relationship'],
+            properties: {
+              did: { type: 'string' },
+              dsb: { type: 'string' },
+              relationship: { type: 'string' },
+            },
+            additionalProperties: false,
+          },
+        },
+      },
+      additionalProperties: false,
+    },
+    brandIdentity: {
+      type: 'object',
+      description: 'Brand voice and visual identity. Design-owned.',
+      properties: {
+        voiceAttributes: { type: 'array', items: { type: 'string' } },
+        voiceAntiPatterns: {
+          type: 'array',
+          description:
+            'Voice anti-patterns (Addendum B). Phase 2b gate requires ≥2 voice anti-patterns.',
+          items: { $ref: '#/$defs/antiPattern' },
+        },
+        visualIdentity: {
+          type: 'object',
+          properties: {
+            description: { type: 'string' },
+            tokenSchemaRef: {
+              type: 'string',
+              description:
+                'Reference to the token source in the linked DesignSystemBinding (e.g., acme-design-system.spec.tokens).',
+            },
+            visualConstraints: {
+              type: 'array',
+              description: 'Measurable visual constraints checked against Learn phase metrics.',
+              items: { $ref: '#/$defs/visualConstraint' },
+            },
+            visualAntiPatterns: {
+              type: 'array',
+              description: 'Visual anti-patterns. Phase 2b gate requires ≥2 visual anti-patterns.',
+              items: { $ref: '#/$defs/antiPattern' },
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
+    visualConstraint: {
+      type: 'object',
+      required: ['id', 'label', 'rule'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z][a-z0-9-]*$' },
+        identityClass: { $ref: '#/$defs/identityClass' },
+        label: { type: 'string' },
+        description: { type: 'string' },
+        rule: {
+          type: 'object',
+          required: ['metric', 'threshold', 'operator'],
+          properties: {
+            metric: { type: 'string' },
+            threshold: { type: 'number' },
+            operator: { type: 'string', enum: ['gte', 'lte', 'gt', 'lt', 'eq', 'neq'] },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
+    experientialTargets: {
+      type: 'object',
+      description: 'Experiential targets for SA-1 BM25 corpus. Product-owned.',
+      properties: {
+        onboarding: { $ref: '#/$defs/experientialTarget' },
+        dailyUse: { $ref: '#/$defs/experientialTarget' },
+        errorRecovery: { $ref: '#/$defs/experientialTarget' },
+      },
+      additionalProperties: { $ref: '#/$defs/experientialTarget' },
+    },
+    experientialTarget: {
+      type: 'object',
+      properties: {
+        identityClass: { $ref: '#/$defs/identityClass' },
+        targetEmotion: { type: 'string' },
+        maxStepsToFirstValue: { type: 'integer', minimum: 1 },
+        usabilityTarget: {
+          type: 'object',
+          properties: {
+            taskCompletion: { type: 'number', minimum: 0, maximum: 1 },
+            personaType: { type: 'string' },
+          },
+          additionalProperties: true,
+        },
+        interactionEfficiency: {
+          type: 'object',
+          properties: {
+            metric: { type: 'string' },
+            targetReduction: { type: 'string' },
+          },
+          additionalProperties: true,
+        },
+        errorRecoveryRate: { type: 'number', minimum: 0, maximum: 1 },
+        maxActionsToRecover: { type: 'integer', minimum: 1 },
+      },
+      additionalProperties: true,
+    },
+    plannedChange: {
+      type: 'object',
+      required: ['id', 'changeType', 'status'],
+      properties: {
+        id: { type: 'string', pattern: '^[a-z][a-z0-9-]*$' },
+        changeType: {
+          type: 'string',
+          enum: [
+            'token-restructure',
+            'token-addition',
+            'token-removal',
+            'component-category-addition',
+            'brand-revision',
+            'theme-expansion',
+          ],
+        },
+        status: {
+          type: 'string',
+          enum: ['planned', 'in-progress', 'completed', 'cancelled'],
+        },
+        description: { type: 'string' },
+        estimatedTimeline: { type: 'string' },
+        affectedTokenPaths: { type: 'array', items: { type: 'string' } },
+        estimatedComponentImpact: { type: 'integer', minimum: 0 },
+        addedBy: { type: 'string' },
+        addedAt: { type: 'string', format: 'date-time' },
+      },
+      additionalProperties: false,
+      allOf: [
+        {
+          if: { properties: { status: { const: 'in-progress' } } },
+          then: { required: ['status', 'addedBy'] },
+        },
+      ],
+    },
+    status: {
+      type: 'object',
+      properties: {
+        lastReviewed: { type: 'string', format: 'date-time' },
+        reviewedBy: { type: 'array', items: { type: 'string' } },
+        nextReviewDue: { type: 'string', format: 'date-time' },
+        designSystemAlignment: {
+          type: 'object',
+          properties: {
+            tokenSchemaCoherent: { type: 'boolean' },
+            complianceRulesReflectPrinciples: { type: 'boolean' },
+            lastAlignmentCheck: { type: 'string', format: 'date-time' },
+          },
+          additionalProperties: false,
+        },
+        ppaBinding: {
+          type: 'object',
+          properties: {
+            sAlpha2Source: { type: 'string' },
+            sAlpha1Source: { type: 'string' },
+            lastScoringRun: { type: 'string', format: 'date-time' },
+          },
+          additionalProperties: false,
+        },
+        compiledArtifactsHash: {
+          type: 'string',
+          description:
+            'sha256 of the compiled BM25 + rule artifacts. Used by the reconciler to detect changes.',
+        },
+        conditions: {
+          type: 'array',
+          items: { $ref: 'common.schema.json#/$defs/condition' },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+} as const;
+
 export const designSystemBindingSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/design-system-binding.schema.json',
@@ -2732,12 +3187,100 @@ export const qualityGateSchema = {
   additionalProperties: false,
 } as const;
 
+export const saExemplarSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/spec/schemas/sa-exemplar.schema.json',
+  title: 'SAExemplarBank',
+  description:
+    'Labeled SA-scoring exemplars used to measure layer precision in Phase 2a shadow mode and gate Phase 2b progression (RFC-0008 §B.6.4, §B.10.2).',
+  type: 'object',
+  additionalProperties: false,
+  required: ['exemplars'],
+  properties: {
+    exemplars: {
+      type: 'array',
+      items: { $ref: '#/$defs/Exemplar' },
+    },
+  },
+  $defs: {
+    Exemplar: {
+      type: 'object',
+      additionalProperties: false,
+      required: ['id', 'dimension', 'type', 'issue', 'verdict'],
+      properties: {
+        id: {
+          type: 'string',
+          minLength: 1,
+          description: 'Unique identifier within the bank.',
+        },
+        dimension: {
+          enum: ['SA-1', 'SA-2'],
+          description: 'Which SA dimension this exemplar evaluates.',
+        },
+        type: {
+          enum: ['true-positive', 'false-positive', 'true-negative', 'false-negative'],
+          description: 'Ground-truth classification for precision tracking.',
+        },
+        issue: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['title', 'body'],
+          properties: {
+            title: { type: 'string' },
+            body: { type: 'string' },
+          },
+        },
+        layer1Expected: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            hardGated: { type: 'boolean' },
+            coreViolationCount: { type: 'integer', minimum: 0 },
+            evolvingViolationCount: { type: 'integer', minimum: 0 },
+            scopeGate: { type: 'object' },
+            constraintViolations: { type: 'object' },
+            antiPatternHits: { type: 'object' },
+          },
+        },
+        layer2Expected: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            domainRelevance: { type: 'number', minimum: 0, maximum: 1 },
+            overallCoverage: { type: 'number', minimum: 0, maximum: 1 },
+          },
+        },
+        layer3Expected: {
+          type: 'object',
+          additionalProperties: true,
+          properties: {
+            domainIntent: { type: 'number', minimum: 0, maximum: 1 },
+            principleAlignment: { type: 'number', minimum: 0, maximum: 1 },
+            reasoning: { type: 'string' },
+          },
+        },
+        verdict: {
+          type: 'string',
+          description: 'Expected admission outcome (e.g. admit, reject, escalate).',
+        },
+        principle: {
+          type: 'string',
+          description: 'DID designPrinciple id this exemplar relates to (SA-2 only).',
+        },
+        notes: { type: 'string' },
+      },
+    },
+  },
+} as const;
+
 export const SCHEMAS: Record<string, object> = {
   'adapter-binding.schema.json': adapterBindingSchema,
   'agent-role.schema.json': agentRoleSchema,
   'autonomy-policy.schema.json': autonomyPolicySchema,
   'common.schema.json': commonSchema,
+  'design-intent-document.schema.json': designIntentDocumentSchema,
   'design-system-binding.schema.json': designSystemBindingSchema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
+  'sa-exemplar.schema.json': saExemplarSchema,
 };

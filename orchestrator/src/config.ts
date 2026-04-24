@@ -20,6 +20,7 @@ import {
   type AutonomyPolicy,
   type AdapterBinding,
   type DesignSystemBinding,
+  type DesignIntentDocument,
   type AdapterRegistry,
   type ResourceKind,
 } from '@ai-sdlc/reference';
@@ -35,12 +36,14 @@ export interface AiSdlcConfig {
   adapterBindings?: AdapterBinding[];
   /** All DesignSystemBinding resources found in the config directory (RFC-0006). */
   designSystemBindings?: DesignSystemBinding[];
+  /** All DesignIntentDocument resources found in the config directory (RFC-0008). */
+  designIntentDocuments?: DesignIntentDocument[];
   adapterRegistry?: AdapterRegistry;
 }
 
-/** Resource kinds that allow only a single instance. Multi-instance kinds (AdapterBinding, DesignSystemBinding) are excluded. */
+/** Resource kinds that allow only a single instance. Multi-instance kinds are excluded. */
 const KIND_KEY: Record<
-  Exclude<ResourceKind, 'AdapterBinding' | 'DesignSystemBinding'>,
+  Exclude<ResourceKind, 'AdapterBinding' | 'DesignSystemBinding' | 'DesignIntentDocument'>,
   keyof AiSdlcConfig
 > = {
   Pipeline: 'pipeline',
@@ -85,6 +88,8 @@ export function loadConfig(configDir: string): AiSdlcConfig {
       (config.adapterBindings ??= []).push(resource as AdapterBinding);
     } else if (resource.kind === 'DesignSystemBinding') {
       (config.designSystemBindings ??= []).push(resource as DesignSystemBinding);
+    } else if (resource.kind === 'DesignIntentDocument') {
+      (config.designIntentDocuments ??= []).push(resource as DesignIntentDocument);
     } else {
       const key = KIND_KEY[resource.kind];
       if (key) {
@@ -99,7 +104,50 @@ export function loadConfig(configDir: string): AiSdlcConfig {
     config.adapterBinding = config.adapterBindings[0];
   }
 
+  // RFC-0008: validate DID → DSB cross-references
+  if (config.designIntentDocuments?.length) {
+    validateDesignIntentDocumentReferences(config);
+  }
+
   return config;
+}
+
+/**
+ * Validate that every DesignIntentDocument's `spec.designSystemRef.name`
+ * resolves to a loaded DesignSystemBinding. Namespace match is required
+ * only when both resources declare a namespace (RFC-0008 §4.5).
+ *
+ * Unidirectional: DID → DSB. DesignSystemBinding surface is not modified.
+ */
+export function validateDesignIntentDocumentReferences(config: AiSdlcConfig): void {
+  const dids = config.designIntentDocuments ?? [];
+  const dsbs = config.designSystemBindings ?? [];
+  const unresolved: string[] = [];
+
+  for (const did of dids) {
+    const targetName = did.spec.designSystemRef.name;
+    const targetNamespace = did.spec.designSystemRef.namespace;
+    const match = dsbs.find((dsb) => {
+      if (dsb.metadata.name !== targetName) return false;
+      if (targetNamespace && dsb.metadata.namespace && dsb.metadata.namespace !== targetNamespace) {
+        return false;
+      }
+      return true;
+    });
+
+    if (!match) {
+      const nsSuffix = targetNamespace ? `/${targetNamespace}` : '';
+      unresolved.push(
+        `  DesignIntentDocument "${did.metadata.name}" references "${targetName}${nsSuffix}" which does not resolve to any loaded DesignSystemBinding`,
+      );
+    }
+  }
+
+  if (unresolved.length > 0) {
+    throw new Error(
+      `DID → DesignSystemBinding reference validation failed:\n${unresolved.join('\n')}`,
+    );
+  }
 }
 
 /**

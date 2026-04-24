@@ -2,7 +2,7 @@
  * SQLite DDL and migrations for the state store.
  */
 
-export const CURRENT_SCHEMA_VERSION = 10;
+export const CURRENT_SCHEMA_VERSION = 12;
 
 export const SCHEMA_DDL = `
 CREATE TABLE IF NOT EXISTS schema_version (
@@ -401,6 +401,129 @@ CREATE INDEX IF NOT EXISTS idx_usability_sim_binding ON usability_simulation_res
 CREATE INDEX IF NOT EXISTS idx_usability_sim_story ON usability_simulation_results(story_name);
 `;
 
+export const MIGRATION_V11 = `
+-- PPA Triad Integration tables (RFC-0008)
+
+-- Compiled DID artifacts: scope lists, constraint rules, anti-pattern lists,
+-- BM25 corpus (SA-1), principle corpora (SA-2). Keyed by source_hash so the
+-- reconciler can detect DID changes cheaply.
+CREATE TABLE IF NOT EXISTS did_compiled_artifacts (
+  id INTEGER PRIMARY KEY,
+  did_name TEXT NOT NULL,
+  namespace TEXT,
+  source_hash TEXT NOT NULL,
+  scope_lists_json TEXT,
+  constraint_rules_json TEXT,
+  anti_pattern_lists_json TEXT,
+  measurable_signals_json TEXT,
+  bm25_corpus_blob BLOB,
+  principle_corpora_blob BLOB,
+  compiled_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_did_compiled_did ON did_compiled_artifacts(did_name);
+CREATE INDEX IF NOT EXISTS idx_did_compiled_hash ON did_compiled_artifacts(source_hash);
+
+-- SA scoring events: layer 1/2/3 results per issue, phase weights, composite score.
+CREATE TABLE IF NOT EXISTS did_scoring_events (
+  id INTEGER PRIMARY KEY,
+  did_name TEXT NOT NULL,
+  issue_number INTEGER NOT NULL,
+  sa_dimension TEXT NOT NULL,
+  phase TEXT NOT NULL,
+  layer1_result_json TEXT,
+  layer2_result_json TEXT,
+  layer3_result_json TEXT,
+  composite_score REAL,
+  phase_weights_json TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_did_scoring_did ON did_scoring_events(did_name);
+CREATE INDEX IF NOT EXISTS idx_did_scoring_issue ON did_scoring_events(issue_number);
+CREATE INDEX IF NOT EXISTS idx_did_scoring_created ON did_scoring_events(created_at);
+
+-- SA feedback events: accept/dismiss/escalate/override signals from Product/Design leads.
+-- Used by C6 calibration (M6) and Phase 3 weight auto-calibration.
+CREATE TABLE IF NOT EXISTS did_feedback_events (
+  id INTEGER PRIMARY KEY,
+  did_name TEXT NOT NULL,
+  issue_number INTEGER NOT NULL,
+  dimension TEXT NOT NULL,
+  signal TEXT NOT NULL CHECK (signal IN ('accept', 'dismiss', 'escalate', 'override')),
+  principal TEXT,
+  category TEXT,
+  structural_score REAL,
+  llm_score REAL,
+  composite_score REAL,
+  notes TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_did_feedback_did ON did_feedback_events(did_name);
+CREATE INDEX IF NOT EXISTS idx_did_feedback_issue ON did_feedback_events(issue_number);
+CREATE INDEX IF NOT EXISTS idx_did_feedback_signal ON did_feedback_events(signal);
+CREATE INDEX IF NOT EXISTS idx_did_feedback_created ON did_feedback_events(created_at);
+
+-- Design change events: emitted when DID.spec.plannedChanges[] adds an entry.
+-- Addendum A §A.9 Design→Engineering lookahead.
+CREATE TABLE IF NOT EXISTS design_change_events (
+  id INTEGER PRIMARY KEY,
+  did_name TEXT NOT NULL,
+  change_id TEXT NOT NULL,
+  change_type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  payload_json TEXT NOT NULL,
+  emitted_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_design_change_did ON design_change_events(did_name);
+CREATE INDEX IF NOT EXISTS idx_design_change_change ON design_change_events(change_id);
+
+-- Code area metrics: used by enrichAdmissionInput (C3) for defect risk factor
+-- and by DesignQualityTrendDegrading monitor (A.8).
+CREATE TABLE IF NOT EXISTS code_area_metrics (
+  id INTEGER PRIMARY KEY,
+  code_area TEXT NOT NULL,
+  defect_density REAL,
+  churn_rate REAL,
+  pr_rejection_rate REAL,
+  code_acceptance_rate REAL,
+  has_frontend_components INTEGER DEFAULT 0,
+  design_metrics_json TEXT,
+  data_point_count INTEGER DEFAULT 0,
+  window_start TEXT,
+  window_end TEXT,
+  computed_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_code_area_metrics_area ON code_area_metrics(code_area);
+CREATE INDEX IF NOT EXISTS idx_code_area_metrics_computed ON code_area_metrics(computed_at);
+
+-- Design lookahead notification state: dedupe per issue with 7-day expiry.
+-- Used by C7 (§11).
+CREATE TABLE IF NOT EXISTS design_lookahead_notifications (
+  id INTEGER PRIMARY KEY,
+  issue_number INTEGER NOT NULL,
+  first_notified_at TEXT DEFAULT (datetime('now')),
+  last_notified_at TEXT DEFAULT (datetime('now')),
+  pillar_breakdown_json TEXT,
+  UNIQUE(issue_number)
+);
+CREATE INDEX IF NOT EXISTS idx_lookahead_issue ON design_lookahead_notifications(issue_number);
+`;
+
+export const MIGRATION_V12 = `
+-- SA Phase-3 calibrated weights (RFC-0008 §B.8 — AISDLC-66).
+-- One row per dimension (SA-1, SA-2); upserted by the auto-calibrator
+-- nightly or on demand.
+CREATE TABLE IF NOT EXISTS sa_phase_weights (
+  id INTEGER PRIMARY KEY,
+  dimension TEXT NOT NULL UNIQUE,
+  w_structural REAL NOT NULL,
+  w_llm REAL NOT NULL,
+  calibrated_at TEXT DEFAULT (datetime('now')),
+  CHECK (w_structural >= 0 AND w_structural <= 1),
+  CHECK (w_llm >= 0 AND w_llm <= 1)
+);
+CREATE INDEX IF NOT EXISTS idx_sa_phase_weights_dim ON sa_phase_weights(dimension);
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -441,5 +564,13 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 10,
     sql: MIGRATION_V10,
+  },
+  {
+    version: 11,
+    sql: MIGRATION_V11,
+  },
+  {
+    version: 12,
+    sql: MIGRATION_V12,
   },
 ];
