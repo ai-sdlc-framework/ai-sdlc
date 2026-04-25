@@ -80,6 +80,49 @@ const mocks = vi.hoisted(() => ({
     },
   }),
   resolveRepoRoot: vi.fn(),
+  loadBacklogTaskFromRoot: vi.fn(() => ({
+    id: 'AISDLC-42',
+    numericId: 42,
+    title: 'Backlog task',
+    description: 'desc',
+    status: 'To Do',
+    priority: 'high',
+    labels: ['priority:p1', 'size:M'],
+    createdDate: '2026-04-25 09:00',
+    updatedDate: '2026-04-25 09:00',
+    acceptanceCriteria: [],
+    references: [],
+  })),
+  parseBacklogTask: vi.fn((content: string) => ({
+    id: 'TASK-FILE-1',
+    numericId: 1,
+    title: 'parsed from file',
+    description: content.slice(0, 50),
+    status: 'To Do',
+    priority: null,
+    labels: ['source:rfc'],
+    createdDate: '2026-04-25 09:00',
+    updatedDate: '2026-04-25 09:00',
+    acceptanceCriteria: [],
+    references: [],
+  })),
+  mapBacklogTaskToAdmissionInput: vi.fn(
+    (snap: { id: string; title: string; numericId: number }) => ({
+      input: {
+        issueNumber: snap.numericId,
+        title: snap.title,
+        body: 'mapped body',
+        labels: ['priority:p1'],
+        reactionCount: 0,
+        commentCount: 0,
+        createdAt: '2026-04-25T09:00:00Z',
+        authorAssociation: 'MEMBER' as const,
+      },
+      priorityInputOverrides: { explicitPriority: 0.75, complexity: 5 },
+      qualityFlags: [],
+    }),
+  ),
+  loadSoulTracks: vi.fn(() => ({})),
 }));
 
 vi.mock('@ai-sdlc/orchestrator', () => ({
@@ -89,6 +132,10 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
   scoreIssueForAdmission: mocks.scoreIssueForAdmission,
   enrichAdmissionInput: mocks.enrichAdmissionInput,
   StateStore: { open: mocks.stateStoreOpen },
+  loadBacklogTaskFromRoot: mocks.loadBacklogTaskFromRoot,
+  parseBacklogTask: mocks.parseBacklogTask,
+  mapBacklogTaskToAdmissionInput: mocks.mapBacklogTaskToAdmissionInput,
+  loadSoulTracks: mocks.loadSoulTracks,
 }));
 
 describe('cli-admit.ts', () => {
@@ -112,6 +159,10 @@ describe('cli-admit.ts', () => {
     mocks.scoreIssueForAdmission.mockClear();
     mocks.enrichAdmissionInput.mockClear();
     mocks.stateStoreOpen.mockClear();
+    mocks.loadBacklogTaskFromRoot.mockClear();
+    mocks.parseBacklogTask.mockClear();
+    mocks.mapBacklogTaskToAdmissionInput.mockClear();
+    mocks.loadSoulTracks.mockClear();
     mocks.resolveRepoRoot.mockResolvedValue(tempDir);
     vi.resetModules();
   });
@@ -316,5 +367,257 @@ describe('cli-admit.ts', () => {
     expect(ctx.designIntentDocument).toBeUndefined();
     expect(ctx.autonomyPolicy).toBeUndefined();
     expect(mocks.scoreIssueForAdmission).toHaveBeenCalled();
+  });
+
+  it('Backlog tracker via --task-id dispatches to loadBacklogTaskFromRoot + mapBacklogTaskToAdmissionInput', async () => {
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-id',
+      'AISDLC-42',
+      '--config-root',
+      tempDir,
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mocks.loadBacklogTaskFromRoot).toHaveBeenCalledWith(tempDir, 'AISDLC-42');
+    expect(mocks.mapBacklogTaskToAdmissionInput).toHaveBeenCalledTimes(1);
+    expect(mocks.parseBacklogTask).not.toHaveBeenCalled();
+    expect(mocks.scoreIssueForAdmission).toHaveBeenCalledTimes(1);
+    // priorityInputOverrides flow through to scoreIssueForAdmission's options arg
+    const call = mocks.scoreIssueForAdmission.mock.calls[0] as unknown[];
+    const options = call[3] as { priorityInputOverrides?: Record<string, unknown> } | undefined;
+    expect(options).toBeDefined();
+    expect(options?.priorityInputOverrides).toEqual({
+      explicitPriority: 0.75,
+      complexity: 5,
+    });
+  });
+
+  it('Backlog tracker via --task-file dispatches to parseBacklogTask', async () => {
+    const taskFile = join(tempDir, 'aisdlc-7.md');
+    writeFileSync(taskFile, `---\nid: AISDLC-7\ntitle: From file\nstatus: To Do\n---\n\nbody`);
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-file',
+      taskFile,
+      '--config-root',
+      tempDir,
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mocks.parseBacklogTask).toHaveBeenCalledTimes(1);
+    expect(mocks.loadBacklogTaskFromRoot).not.toHaveBeenCalled();
+    expect(mocks.mapBacklogTaskToAdmissionInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('auto-detects Backlog tracker when --task-id is supplied with no --tracker flag', async () => {
+    process.argv = ['node', 'cli-admit.ts', '--task-id', 'AISDLC-7', '--config-root', tempDir];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mocks.loadBacklogTaskFromRoot).toHaveBeenCalledTimes(1);
+    expect(mocks.mapBacklogTaskToAdmissionInput).toHaveBeenCalledTimes(1);
+  });
+
+  it('Backlog tracker exits 1 when neither --task-id nor --task-file is provided', async () => {
+    process.argv = ['node', 'cli-admit.ts', '--tracker', 'backlog'];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('--tracker backlog --task-id'));
+  });
+
+  it('Backlog tracker exits 1 when the task id is not found', async () => {
+    (
+      mocks.loadBacklogTaskFromRoot as unknown as { mockReturnValueOnce: (v: unknown) => void }
+    ).mockReturnValueOnce(undefined);
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-id',
+      'NOPE-1',
+      '--config-root',
+      tempDir,
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('Backlog task NOPE-1 not found'));
+  });
+
+  it('emits provenance JSON on stderr (tracker, configRoot, configSource)', async () => {
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-id',
+      'AISDLC-42',
+      '--config-root',
+      tempDir,
+      '--enrich-from-state',
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const provenanceCall = errorSpy.mock.calls
+      .map((args) => String(args[0]))
+      .find((line) => line.includes('"provenance"'));
+    expect(provenanceCall).toBeDefined();
+    const parsed = JSON.parse(provenanceCall as string);
+    expect(parsed.provenance.tracker).toBe('backlog');
+    expect(parsed.provenance.configRoot).toBe(tempDir);
+    expect(parsed.provenance.configSource).toBe('flag');
+    expect(parsed.provenance.designSystemBinding).toBe('acme-ds');
+    expect(parsed.provenance.designIntentDocument).toBe('acme-did');
+    expect(parsed.provenance.autonomyPolicy).toBe('acme-ap');
+  });
+
+  it('emits a fallback warning on stderr when no .ai-sdlc/ ancestor is found', async () => {
+    // resolveRepoRoot returns tempDir, no .ai-sdlc/ in it → cwd-walk fails
+    // → fallback. The skill-side caller should see this WARN and confirm.
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--title',
+      't',
+      '--body-file',
+      bodyFile,
+      '--issue-number',
+      '1',
+      '--labels',
+      '[]',
+      '--reactions',
+      '0',
+      '--comments',
+      '0',
+      '--created-at',
+      '2026-04-01T00:00:00Z',
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const warnCall = errorSpy.mock.calls
+      .map((args) => String(args[0]))
+      .find((line) => line.includes('via fallback'));
+    expect(warnCall).toBeDefined();
+  });
+
+  it('GitHub usage exits 1 when --title is missing', async () => {
+    process.argv = ['node', 'cli-admit.ts', '--issue-number', '1'];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+    expect(exitSpy).toHaveBeenCalledWith(1);
+    expect(errorSpy).toHaveBeenCalledWith(expect.stringContaining('admit --title'));
+  });
+
+  it('--config-root with task-file walks up to find .ai-sdlc and reports configSource=task-file', async () => {
+    // Place a task file inside a sibling subdir; .ai-sdlc/ at tempDir.
+    const subdir = join(tempDir, 'sub');
+    const { mkdirSync } = await import('node:fs');
+    mkdirSync(subdir, { recursive: true });
+    mkdirSync(join(tempDir, '.ai-sdlc'), { recursive: true });
+    const taskFile = join(subdir, 'aisdlc-7.md');
+    writeFileSync(taskFile, `---\nid: AISDLC-7\ntitle: t\nstatus: To Do\n---\n\nbody`);
+
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-file',
+      taskFile,
+      // No --config-root — let the walk-up resolve it.
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const provenance = errorSpy.mock.calls
+      .map((args) => String(args[0]))
+      .find((line) => line.includes('"provenance"'));
+    expect(provenance).toBeDefined();
+    const parsed = JSON.parse(provenance as string);
+    expect(parsed.provenance.configSource).toBe('task-file');
+    expect(parsed.provenance.configRoot).toBe(tempDir);
+  });
+
+  it('emits Warning on stderr when loadConfigAsync rejects', async () => {
+    mocks.loadConfigAsync.mockRejectedValueOnce(new Error('disk full'));
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--title',
+      't',
+      '--body-file',
+      bodyFile,
+      '--issue-number',
+      '1',
+      '--labels',
+      '[]',
+      '--reactions',
+      '0',
+      '--comments',
+      '0',
+      '--created-at',
+      '2026-04-01T00:00:00Z',
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const warning = errorSpy.mock.calls
+      .map((args) => String(args[0]))
+      .find((line) => line.includes('could not load pipeline config'));
+    expect(warning).toBeDefined();
+  });
+
+  it('attaches qualityFlags from the Backlog mapping onto the result', async () => {
+    (
+      mocks.mapBacklogTaskToAdmissionInput as unknown as {
+        mockReturnValueOnce: (v: unknown) => void;
+      }
+    ).mockReturnValueOnce({
+      input: {
+        issueNumber: 42,
+        title: 'zombie close',
+        body: 'body',
+        labels: ['priority:p1'],
+        reactionCount: 0,
+        commentCount: 0,
+        createdAt: '2026-04-25T09:00:00Z',
+        authorAssociation: 'MEMBER',
+      },
+      priorityInputOverrides: { defectRiskFactor: 0.3 },
+      qualityFlags: [
+        { kind: 'unchecked-acs-on-done', detail: '5/5 ACs unchecked', severity: 'high' },
+      ],
+    });
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-id',
+      'AISDLC-42',
+      '--config-root',
+      tempDir,
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(logSpy).toHaveBeenCalled();
+    const output = logSpy.mock.calls[0][0] as string;
+    const parsed = JSON.parse(output);
+    expect(parsed.qualityFlags).toHaveLength(1);
+    expect(parsed.qualityFlags[0].kind).toBe('unchecked-acs-on-done');
   });
 });

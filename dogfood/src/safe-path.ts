@@ -7,7 +7,7 @@
  */
 
 import { existsSync, realpathSync } from 'node:fs';
-import { resolve, sep } from 'node:path';
+import { basename, dirname, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 
 export class UnsafePathError extends Error {
@@ -49,9 +49,15 @@ export function assertSafeReadPath(userPath: string, repoRoot: string): string {
   try {
     real = realpathSync(resolved);
   } catch {
-    // File doesn't exist (yet) — fall back to the resolved form. The
-    // subsequent readFileSync will raise ENOENT with a clear message.
-    real = resolved;
+    // File doesn't exist (yet) — resolve the parent's realpath instead
+    // and rejoin the basename. This preserves the symlink resolution
+    // (macOS /var → /private/var) needed for the trust check, while
+    // letting the subsequent readFileSync raise ENOENT itself.
+    try {
+      real = resolve(realpathSync(dirname(resolved)), basename(resolved));
+    } catch {
+      real = resolved;
+    }
   }
   const realWithSep = real.endsWith(sep) ? real : real + sep;
   for (const root of allowedRoots(repoRoot)) {
