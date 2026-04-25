@@ -143,6 +143,73 @@ describe('loadBacklogTaskFromRoot', () => {
       rmSync(tmp, { recursive: true });
     }
   });
+
+  it('matches a file whose name uses a `.` separator (id.md form)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'backlog-load-'));
+    try {
+      mkdirSync(join(tmp, 'backlog', 'tasks'), { recursive: true });
+      writeFileSync(
+        join(tmp, 'backlog', 'tasks', 'aisdlc-11.md'),
+        `---\nid: AISDLC-11\ntitle: dot form\nstatus: To Do\n---\n`,
+      );
+      expect(loadBacklogTaskFromRoot(tmp, 'AISDLC-11')?.id).toBe('AISDLC-11');
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('skips non-matching files in the same directory', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'backlog-load-'));
+    try {
+      mkdirSync(join(tmp, 'backlog', 'tasks'), { recursive: true });
+      // Place a non-matching file FIRST in alphabetical order so
+      // readdirSync iterates past it before reaching the target.
+      // This exercises the entry-filter `continue` branch.
+      writeFileSync(
+        join(tmp, 'backlog', 'tasks', 'aisdlc-1 - First.md'),
+        `---\nid: AISDLC-1\ntitle: First\nstatus: To Do\n---\n`,
+      );
+      writeFileSync(
+        join(tmp, 'backlog', 'tasks', 'aisdlc-7 - Hello.md'),
+        `---\nid: AISDLC-7\ntitle: Hello\nstatus: To Do\n---\n`,
+      );
+      expect(loadBacklogTaskFromRoot(tmp, 'AISDLC-7')?.id).toBe('AISDLC-7');
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+});
+
+describe('parseBacklogTask — frontmatter edge cases', () => {
+  it('skips blank lines and comment lines in frontmatter', () => {
+    const fixture = `---
+# This is a comment
+
+id: AISDLC-50
+title: Has comment
+
+status: To Do
+---
+
+body`;
+    const snap = parseBacklogTask(fixture);
+    expect(snap.id).toBe('AISDLC-50');
+    expect(snap.title).toBe('Has comment');
+  });
+
+  it('skips lines that do not match `key: value` shape', () => {
+    const fixture = `---
+id: AISDLC-51
+this line is not a key value pair
+title: Survives malformed lines
+status: To Do
+---
+
+body`;
+    const snap = parseBacklogTask(fixture);
+    expect(snap.id).toBe('AISDLC-51');
+    expect(snap.title).toBe('Survives malformed lines');
+  });
 });
 
 describe('mapBacklogTaskToAdmissionInput — label mapping', () => {
@@ -216,6 +283,16 @@ describe('mapBacklogTaskToAdmissionInput — label mapping', () => {
     const m = mapBacklogTaskToAdmissionInput(snapWith({ labels: ['security'] }));
     expect(m.priorityInputOverrides.bugSeverity).toBe(5);
     expect(m.priorityInputOverrides.soulAlignment).toBe(0.7);
+  });
+
+  it('critical / p0 label promotes bugSeverity to ≥ 5', () => {
+    const fromCritical = mapBacklogTaskToAdmissionInput(snapWith({ labels: ['critical'] }));
+    expect(fromCritical.priorityInputOverrides.bugSeverity).toBe(5);
+    const fromP0 = mapBacklogTaskToAdmissionInput(snapWith({ labels: ['p0'] }));
+    expect(fromP0.priorityInputOverrides.bugSeverity).toBe(5);
+    // Layered with `bug` (severity 3) → critical wins.
+    const layered = mapBacklogTaskToAdmissionInput(snapWith({ labels: ['bug', 'critical'] }));
+    expect(layered.priorityInputOverrides.bugSeverity).toBe(5);
   });
 
   it('source:*-tonight → demandSignal 0.7 + competitiveDrift bump', () => {

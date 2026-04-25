@@ -256,6 +256,55 @@ describe('computeAdmissionComposite — §A.6 admission subset', () => {
     expect(over.breakdown.soulAlignment).toBe(1);
     expect(under.breakdown.soulAlignment).toBe(0);
   });
+
+  it('priorityInputOverrides win over the GitHub-mapper output (Backlog adapter path)', () => {
+    // Input that the GitHub mapper would shape: 'spec' label → SA 0.9,
+    // body Complexity → 3, no priority labels → explicitPriority undefined.
+    const input = makeInput({
+      body: '### Complexity\n3',
+      labels: ['spec'],
+    });
+    const baseline = computeAdmissionComposite(input);
+    const overridden = computeAdmissionComposite(input, undefined, {
+      priorityInputOverrides: {
+        soulAlignment: 0.4,
+        complexity: 8,
+        explicitPriority: 1.0,
+      },
+    });
+    // GitHub mapper said SA=0.9; override says 0.4 — override wins.
+    expect(baseline.breakdown.soulAlignment).toBeCloseTo(0.9, 6);
+    expect(overridden.breakdown.soulAlignment).toBeCloseTo(0.4, 6);
+    // GitHub mapper said complexity=3 → baseER=0.7; override says 8 → 0.2.
+    expect(baseline.breakdown.baseExecutionReality).toBeCloseTo(0.7, 6);
+    expect(overridden.breakdown.baseExecutionReality).toBeCloseTo(0.2, 6);
+    // Composite reflects both shifts.
+    expect(overridden.score.composite).toBeLessThan(baseline.score.composite);
+  });
+
+  it('priorityInputOverrides ignores undefined values (preserves GitHub defaults)', () => {
+    const input = makeInput({ body: '### Complexity\n5', labels: ['spec'] });
+    const baseline = computeAdmissionComposite(input);
+    // soulAlignment undefined → don't overwrite the GitHub mapper's 0.9.
+    const partial = computeAdmissionComposite(input, undefined, {
+      priorityInputOverrides: { soulAlignment: undefined, complexity: 9 },
+    });
+    expect(partial.breakdown.soulAlignment).toBeCloseTo(baseline.breakdown.soulAlignment, 6);
+    // complexity 9 → baseER=0.1, distinct from baseline's complexity=5 → 0.5
+    expect(partial.breakdown.baseExecutionReality).toBeCloseTo(0.1, 6);
+  });
+
+  it('soulAlignmentOverride wins over priorityInputOverrides.soulAlignment', () => {
+    // soulAlignmentOverride is the M5 SA-1 path; priorityInputOverrides is
+    // the tracker-adapter path. Spec: M5 SA-1 takes precedence when both
+    // are present (it's a calibrated score, not a heuristic).
+    const input = makeInput({ body: '### Complexity\n5', labels: ['spec'] });
+    const result = computeAdmissionComposite(input, undefined, {
+      soulAlignmentOverride: 0.2,
+      priorityInputOverrides: { soulAlignment: 0.9 },
+    });
+    expect(result.breakdown.soulAlignment).toBeCloseTo(0.2, 6);
+  });
 });
 
 describe('computeAdmissionComposite — override position-1 bypass', () => {
