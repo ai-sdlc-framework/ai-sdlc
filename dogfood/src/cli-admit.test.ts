@@ -668,6 +668,30 @@ describe('cli-admit.ts', () => {
     expect(opts.maintainers).toEqual(['alice', 'bob', 'carol']);
   });
 
+  it('--maintainers as malformed JSON is silently treated as undefined (falls back to YAML loader)', async () => {
+    mocks.loadMaintainers.mockReturnValueOnce(['from-yaml']);
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-id',
+      'AISDLC-42',
+      '--config-root',
+      tempDir,
+      '--maintainers',
+      '[broken json',
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    // Malformed JSON → maintainers === undefined → fall back to loadMaintainers.
+    expect(mocks.loadMaintainers).toHaveBeenCalledWith(tempDir);
+    const call = mocks.mapBacklogTaskToAdmissionInput.mock.calls[0] as unknown[];
+    const opts = call[1] as { maintainers?: string[] };
+    expect(opts.maintainers).toEqual(['from-yaml']);
+  });
+
   it('explicit --maintainers as JSON array is parsed correctly', async () => {
     process.argv = [
       'node',
