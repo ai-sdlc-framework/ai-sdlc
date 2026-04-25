@@ -6,7 +6,7 @@
  * RUNNER_TEMP). Refuses symlinks that escape these roots.
  */
 
-import { realpathSync } from 'node:fs';
+import { existsSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -20,6 +20,11 @@ export class UnsafePathError extends Error {
 function allowedRoots(repoRoot: string): string[] {
   const roots = [repoRoot, tmpdir()];
   if (process.env.RUNNER_TEMP) roots.push(process.env.RUNNER_TEMP);
+  // macOS workflows and shell scripts commonly write to /tmp explicitly,
+  // but `os.tmpdir()` returns `/var/folders/.../T` there. Allow `/tmp`
+  // (and its realpath, which resolves to /private/tmp on macOS) so the
+  // documented `/tmp/issue-body.txt` UX works across Linux + macOS.
+  if (existsSync('/tmp')) roots.push('/tmp');
   // Canonicalize once; include trailing separator so "/repoX" does not
   // prefix-match "/repo".
   return roots.map((r) => {
