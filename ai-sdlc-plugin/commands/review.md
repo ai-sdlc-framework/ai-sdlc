@@ -1,54 +1,110 @@
 ---
 name: review
-description: Run AI-SDLC review agents on a pull request
+description: Run AI-SDLC review agents on a pull request (testing + critic + security)
 argument-hint: <pr-number>
-allowed-tools: Read,Grep,Glob,Bash
+allowed-tools: Read, Grep, Glob, Bash
 ---
 
-Run a comprehensive code review on PR #$ARGUMENTS using three review perspectives.
+Review PR #$ARGUMENTS by invoking `@ai-sdlc/orchestrator`'s
+`executeReview()` for the three review perspectives. The orchestrator
+already drives the LLM-based `ReviewAgentRunner` and applies the
+meta-review pass that filters medium-confidence findings; this skill's
+job is to fetch context, fan out to the three review types, and
+present the structured verdicts.
 
-## Step 1: Gather PR context
+## Step 1 — Fetch PR context
+
+Don't hardcode `--repo` — let the cwd's git remote drive `gh`.
 
 ```bash
-# Get the PR diff
-gh pr diff $ARGUMENTS --repo ai-sdlc-framework/ai-sdlc > /tmp/pr-diff.txt
+PR=$ARGUMENTS
 
-# Get PR details
-gh pr view $ARGUMENTS --repo ai-sdlc-framework/ai-sdlc --json title,body,headRefName,changedFiles
+# Diff + metadata for the review agents
+gh pr diff "$PR" > /tmp/pr-diff.txt
+gh pr view "$PR" --json number,title,body,headRefName,changedFiles > /tmp/pr.json
+
+# Linked issue (if any) — feeds acceptance-criteria extraction
+LINKED=$(gh pr view "$PR" --json body --jq '
+  (.body | scan("(?i)(?:closes|fixes|resolves)\\s+#([0-9]+)"))[0][0] // empty
+')
+if [ -n "$LINKED" ]; then
+  gh issue view "$LINKED" --json number,title,body > /tmp/issue.json
+fi
 ```
 
-## Step 2: Load review policy
+If there's no linked issue, omit `--issue-file` from the calls below —
+`cli-review` falls back to the PR title/body.
 
-Read `.ai-sdlc/review-policy.md` for calibration context. Apply the golden rule: "When in doubt, approve with a suggestion — do not request changes."
+## Step 2 — Run the three review types
 
-## Step 3: Review from three perspectives
+```bash
+for TYPE in testing critic security; do
+  pnpm --filter @ai-sdlc/dogfood review \
+    --pr "$PR" \
+    --diff-file /tmp/pr-diff.txt \
+    --type "$TYPE" \
+    ${LINKED:+--issue-file /tmp/issue.json} \
+    > "/tmp/review-$TYPE.json" 2>"/tmp/review-$TYPE.stderr"
+done
+```
 
-### Testing Review
-- Are new/changed functions covered by tests?
-- Do tests cover edge cases and error paths?
-- Are test assertions meaningful (not just checking truthiness)?
-- Defer coverage percentages to codecov — do NOT guess coverage numbers.
+Each call writes a structured `ReviewVerdict` JSON to its own file:
 
-### Code Quality Review
-- Are there logic errors, off-by-one bugs, or incorrect assumptions?
-- Is the code readable and following project conventions?
-- Are there unnecessary abstractions or missing error handling?
-- Check naming, file organization, and import structure.
+```json
+{
+  "approved": true | false,
+  "findings": [
+    { "severity": "critical"|"major"|"minor"|"suggestion",
+      "file": "path",
+      "line": 42,
+      "message": "string" }
+  ],
+  "summary": "string"
+}
+```
 
-### Security Review
-- Check for injection vulnerabilities (command, SQL, XSS)
-- Look for hardcoded secrets, credentials, or API keys
-- Verify input validation at system boundaries
-- Check for path traversal, SSRF, and deserialization issues
+If any of the three calls writes to stderr, surface it — typically a
+config issue, not a true review failure.
 
-## Step 4: Report findings
+## Step 3 — Present verdicts
 
-For each finding, provide:
-- **Severity**: critical, major, minor, or suggestion
-- **File and line**: exact location in the diff
-- **Description**: what the issue is and why it matters
-- **Recommendation**: how to fix it
+For each review type in order (testing, critic, security):
 
-Only report issues you are confident are real problems. If you cannot describe a concrete failure scenario, downgrade to suggestion.
+1. Header line — `Testing: APPROVED with 2 suggestions` or `Critic: CHANGES REQUESTED — 1 critical, 3 major`
+2. Summary — the orchestrator's `summary` string
+3. Findings — only critical and major; minor and suggestion go in a collapsed list
 
-**IMPORTANT: Do NOT merge the PR. Only review and report findings.**
+End with a combined verdict line:
+
+- **All three approved** → `READY TO MERGE` (but never run `gh pr merge` — see Step 5)
+- **Any critical** → `BLOCKED — fix critical findings`
+- **Major findings only** → `CHANGES REQUESTED — see findings above`
+- **Suggestions only** → `APPROVED with suggestions` (per the golden rule from `.ai-sdlc/review-policy.md`: when in doubt, approve with a suggestion)
+
+## Step 4 — Calibration context
+
+Read `.ai-sdlc/review-policy.md` if it exists and apply its calibration
+overrides to the verdicts. The orchestrator already filters
+medium-confidence findings via the meta-review pass; the policy file
+captures additional project-specific guidance (e.g. "do not flag
+unused `_var` parameters").
+
+If you suppress a finding because it matches a policy rule, say so
+explicitly — `(suppressed by .ai-sdlc/review-policy.md: <rule>)`.
+
+## Step 5 — Never merge
+
+Do **not** run `gh pr merge` regardless of verdict. The skill reports;
+humans merge. This is a hard rule from CLAUDE.md.
+
+## Notes
+
+- The skill replaces the prior prose review prompts. Do **not**
+  reimplement the three review checklists in markdown — the orchestrator's
+  `ReviewAgentRunner` is the source of truth for review prompts.
+- If `pnpm --filter @ai-sdlc/dogfood review` is unavailable (no Node
+  workspace, no built dist), say so explicitly. Do not fall back to
+  inline review prose — that would skip the meta-review filter and
+  produce non-conformant verdicts.
+- For a focused subset (e.g. only security), pass `--type security` to
+  the loop variable directly — the wrapper supports a single type.
