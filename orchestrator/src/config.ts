@@ -39,6 +39,19 @@ export interface AiSdlcConfig {
   /** All DesignIntentDocument resources found in the config directory (RFC-0008). */
   designIntentDocuments?: DesignIntentDocument[];
   adapterRegistry?: AdapterRegistry;
+  /**
+   * Per-file load issues collected during a non-fatal load. Each entry
+   * is `{ file, error }` for a YAML file that failed to parse or
+   * validate. Non-resource YAMLs (no `apiVersion`/`kind`) and DID→DSB
+   * cross-reference failures are NOT recorded here — the former are
+   * silently skipped, the latter throw outright.
+   */
+  warnings?: ConfigLoadWarning[];
+}
+
+export interface ConfigLoadWarning {
+  file: string;
+  error: string;
 }
 
 /** Resource kinds that allow only a single instance. Multi-instance kinds are excluded. */
@@ -66,10 +79,20 @@ export function loadConfig(configDir: string): AiSdlcConfig {
   const files = readdirSync(dir).filter((f) => f.endsWith('.yaml') || f.endsWith('.yml'));
 
   const config: AiSdlcConfig = {};
+  const warnings: ConfigLoadWarning[] = [];
 
   for (const file of files) {
-    const raw = readFileSync(resolve(dir, file), 'utf-8');
-    const doc: unknown = parseYaml(raw);
+    let doc: unknown;
+    try {
+      const raw = readFileSync(resolve(dir, file), 'utf-8');
+      doc = parseYaml(raw);
+    } catch (err) {
+      // Malformed YAML — record and continue. One bad file should not
+      // poison the rest of the config (forward-looking YAMLs in active
+      // adoption are common).
+      warnings.push({ file, error: `parse error: ${(err as Error).message}` });
+      continue;
+    }
 
     // Skip non-resource YAML files (review-exemplars.yaml, manifest.yaml, etc.)
     // AI-SDLC resources always have an apiVersion field.
@@ -79,8 +102,13 @@ export function loadConfig(configDir: string): AiSdlcConfig {
 
     const result = validateResource(doc);
     if (!result.valid) {
-      const msgs = (result.errors ?? []).map((e) => `  ${e.path}: ${e.message}`).join('\n');
-      throw new Error(`Validation failed for ${file}:\n${msgs}`);
+      const msgs = (result.errors ?? []).map((e) => `${e.path}: ${e.message}`).join('; ');
+      // Forward-looking schemas are common during incremental adoption
+      // (RFC-0008 §A.4 readers landing in phases). Record + skip rather
+      // than throw — callers see the warning, the rest of the config
+      // (the parts that DO validate) continues to drive admission.
+      warnings.push({ file, error: `validation failed: ${msgs}` });
+      continue;
     }
 
     const resource = result.data as AnyResource;
@@ -97,6 +125,10 @@ export function loadConfig(configDir: string): AiSdlcConfig {
         (config as any)[key] = resource;
       }
     }
+  }
+
+  if (warnings.length > 0) {
+    config.warnings = warnings;
   }
 
   // Backward compat: set adapterBinding to the first binding

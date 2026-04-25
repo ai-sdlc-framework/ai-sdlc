@@ -87,3 +87,92 @@ describe('loadConfig()', () => {
     expect(config.adapterBindings).toBeUndefined();
   });
 });
+
+describe('loadConfig() — non-fatal warnings', () => {
+  it('skips a malformed YAML file but loads the rest of the config', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'config-warn-'));
+    try {
+      mkdirSync(tmp, { recursive: true });
+      // Valid Pipeline file
+      writeFileSync(
+        join(tmp, 'pipeline.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: test-pipeline
+spec:
+  triggers:
+    - event: issue.labeled
+      filter:
+        labels: [ai-eligible]
+  providers: {}
+  stages:
+    - name: validate
+`,
+      );
+      // Malformed YAML
+      writeFileSync(join(tmp, 'broken.yaml'), '{invalid: yaml syntax: [\n');
+      const config = loadConfig(tmp);
+      expect(config.pipeline?.metadata.name).toBe('test-pipeline');
+      expect(config.warnings).toBeDefined();
+      expect(config.warnings).toHaveLength(1);
+      expect(config.warnings![0].file).toBe('broken.yaml');
+      expect(config.warnings![0].error).toContain('parse error');
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('skips a YAML that fails schema validation but loads the rest', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'config-warn-'));
+    try {
+      mkdirSync(tmp, { recursive: true });
+      writeFileSync(
+        join(tmp, 'pipeline.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: test-pipeline
+spec:
+  triggers:
+    - event: issue.labeled
+      filter:
+        labels: [ai-eligible]
+  providers: {}
+  stages:
+    - name: validate
+`,
+      );
+      // Forward-looking AdapterBinding without required fields — fails
+      // schema validation. Should be skipped, not throw.
+      writeFileSync(
+        join(tmp, 'adapter-binding.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: AdapterBinding
+metadata:
+  name: incomplete
+spec:
+  forwardLookingField: someValue
+`,
+      );
+      const config = loadConfig(tmp);
+      expect(config.pipeline).toBeDefined();
+      expect(config.warnings).toHaveLength(1);
+      expect(config.warnings![0].file).toBe('adapter-binding.yaml');
+      expect(config.warnings![0].error).toContain('validation failed');
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('does not include warnings field when every file loads cleanly', () => {
+    const config = loadConfig(CONFIG_DIR);
+    expect(config.warnings).toBeUndefined();
+  });
+});

@@ -1,6 +1,11 @@
 // ── Core orchestration ───────────────────────────────────────────────
 
-export { loadConfig, loadConfigAsync, type AiSdlcConfig } from './config.js';
+export {
+  loadConfig,
+  loadConfigAsync,
+  type AiSdlcConfig,
+  type ConfigLoadWarning,
+} from './config.js';
 export { validateIssue, validateIssueWithExtensions, parseComplexity } from './validate-issue.js';
 export {
   executePipeline,
@@ -226,6 +231,7 @@ export {
   loadBacklogTaskFromRoot,
   mapBacklogTaskToAdmissionInput,
   loadSoulTracks,
+  loadMaintainers,
   type BacklogTaskSnapshot,
   type BacklogAcceptanceCriterion,
   type BacklogMappingOptions,
