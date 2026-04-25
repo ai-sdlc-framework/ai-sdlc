@@ -34,6 +34,7 @@ import {
   DEFAULT_CONFIG_DIR_NAME,
   loadBacklogTaskFromRoot,
   loadConfigAsync,
+  loadMaintainers,
   loadSoulTracks,
   mapBacklogTaskToAdmissionInput,
   parseBacklogTask,
@@ -109,6 +110,7 @@ function parseArgs(argv: string[]): AdmitArgs {
   const designSystemRef = getArg(argv, '--design-system-ref');
   const autonomyPolicyRef = getArg(argv, '--autonomy-policy-ref');
   const didRef = getArg(argv, '--did-ref');
+  const maintainersStr = getArg(argv, '--maintainers');
   const enrichFromState = hasFlag(argv, '--enrich-from-state');
 
   // Tracker auto-detection
@@ -146,6 +148,26 @@ function parseArgs(argv: string[]): AdmitArgs {
     }
   }
 
+  let maintainers: string[] | undefined;
+  if (maintainersStr) {
+    // Accept either a JSON array or a comma-separated list.
+    if (maintainersStr.trim().startsWith('[')) {
+      try {
+        const parsed = JSON.parse(maintainersStr) as unknown;
+        if (Array.isArray(parsed)) {
+          maintainers = parsed.filter((s): s is string => typeof s === 'string');
+        }
+      } catch {
+        maintainers = undefined;
+      }
+    } else {
+      maintainers = maintainersStr
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+    }
+  }
+
   return {
     tracker,
     title,
@@ -166,6 +188,7 @@ function parseArgs(argv: string[]): AdmitArgs {
     designSystemRef,
     autonomyPolicyRef,
     didRef,
+    maintainers,
   };
 }
 
@@ -251,9 +274,13 @@ function loadBacklogMapping(args: AdmitArgs, configRoot: string): BacklogAdmissi
     process.exit(1);
   }
   const soulTracks = loadSoulTracks(configRoot);
+  // Explicit --maintainers flag wins; otherwise auto-load from
+  // .ai-sdlc/maintainers.yaml so OWNER detection works without the
+  // skill having to read + pass the list.
+  const maintainers = args.maintainers ?? loadMaintainers(configRoot);
   return mapBacklogTaskToAdmissionInput(snapshot, {
     soulTracks,
-    maintainers: args.maintainers,
+    maintainers,
   });
 }
 
@@ -316,10 +343,17 @@ async function main(): Promise<void> {
   let resolvedDsbName: string | undefined;
   let resolvedDidName: string | undefined;
   let resolvedAutonomyPolicyName: string | undefined;
+  let configWarnings: { file: string; error: string }[] = [];
 
   try {
     const configDir = join(configRoot, DEFAULT_CONFIG_DIR_NAME);
     const config = await loadConfigAsync(configDir);
+    if (config.warnings?.length) {
+      configWarnings = config.warnings;
+      for (const w of configWarnings) {
+        console.error(`WARN: skipped ${w.file} — ${w.error}`);
+      }
+    }
     const policy = config.pipeline?.spec?.priorityPolicy;
     if (policy) {
       thresholds = {
@@ -355,8 +389,12 @@ async function main(): Promise<void> {
       enrichedInput = enrichAdmissionInput(admissionInput, ctx);
       stateStore?.close();
     }
-  } catch {
-    console.error('Warning: could not load pipeline config, using default thresholds');
+  } catch (err) {
+    // Surface the actual error message — the previous catch swallowed it
+    // and emitted a generic warning that left users guessing whether it
+    // was a missing file, a parse error, or a schema mismatch.
+    const detail = err instanceof Error ? err.message : String(err);
+    console.error(`Warning: could not load pipeline config — ${detail}`);
   }
 
   // Provenance line on stderr — makes "wrong product enrichment"
@@ -376,6 +414,7 @@ async function main(): Promise<void> {
         designSystemBinding: resolvedDsbName,
         designIntentDocument: resolvedDidName,
         autonomyPolicy: resolvedAutonomyPolicyName,
+        skippedConfigFiles: configWarnings.length > 0 ? configWarnings : undefined,
       },
     }),
   );

@@ -123,6 +123,7 @@ const mocks = vi.hoisted(() => ({
     }),
   ),
   loadSoulTracks: vi.fn(() => ({})),
+  loadMaintainers: vi.fn(() => [] as string[]),
 }));
 
 vi.mock('@ai-sdlc/orchestrator', () => ({
@@ -136,6 +137,7 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
   parseBacklogTask: mocks.parseBacklogTask,
   mapBacklogTaskToAdmissionInput: mocks.mapBacklogTaskToAdmissionInput,
   loadSoulTracks: mocks.loadSoulTracks,
+  loadMaintainers: mocks.loadMaintainers,
 }));
 
 describe('cli-admit.ts', () => {
@@ -163,6 +165,7 @@ describe('cli-admit.ts', () => {
     mocks.parseBacklogTask.mockClear();
     mocks.mapBacklogTaskToAdmissionInput.mockClear();
     mocks.loadSoulTracks.mockClear();
+    mocks.loadMaintainers.mockClear();
     mocks.resolveRepoRoot.mockResolvedValue(tempDir);
     vi.resetModules();
   });
@@ -619,5 +622,145 @@ describe('cli-admit.ts', () => {
     const parsed = JSON.parse(output);
     expect(parsed.qualityFlags).toHaveLength(1);
     expect(parsed.qualityFlags[0].kind).toBe('unchecked-acs-on-done');
+  });
+
+  it('Backlog tracker auto-loads maintainers from .ai-sdlc/maintainers.yaml', async () => {
+    mocks.loadMaintainers.mockReturnValueOnce(['alice', 'bob']);
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-id',
+      'AISDLC-42',
+      '--config-root',
+      tempDir,
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mocks.loadMaintainers).toHaveBeenCalledWith(tempDir);
+    const call = mocks.mapBacklogTaskToAdmissionInput.mock.calls[0] as unknown[];
+    const opts = call[1] as { maintainers?: string[] };
+    expect(opts.maintainers).toEqual(['alice', 'bob']);
+  });
+
+  it('explicit --maintainers flag (comma-separated) wins over the YAML loader', async () => {
+    mocks.loadMaintainers.mockReturnValueOnce(['from-yaml']);
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-id',
+      'AISDLC-42',
+      '--config-root',
+      tempDir,
+      '--maintainers',
+      'alice, bob, carol',
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(mocks.loadMaintainers).not.toHaveBeenCalled();
+    const call = mocks.mapBacklogTaskToAdmissionInput.mock.calls[0] as unknown[];
+    const opts = call[1] as { maintainers?: string[] };
+    expect(opts.maintainers).toEqual(['alice', 'bob', 'carol']);
+  });
+
+  it('explicit --maintainers as JSON array is parsed correctly', async () => {
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--tracker',
+      'backlog',
+      '--task-id',
+      'AISDLC-42',
+      '--config-root',
+      tempDir,
+      '--maintainers',
+      '["alice","bob"]',
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const call = mocks.mapBacklogTaskToAdmissionInput.mock.calls[0] as unknown[];
+    const opts = call[1] as { maintainers?: string[] };
+    expect(opts.maintainers).toEqual(['alice', 'bob']);
+  });
+
+  it('config warnings are surfaced on stderr and in the provenance line', async () => {
+    mocks.loadConfigAsync.mockResolvedValueOnce({
+      pipeline: { spec: { priorityPolicy: { minimumScore: 0.05, minimumConfidence: 0.2 } } },
+      designSystemBindings: [],
+      designIntentDocuments: [],
+      warnings: [
+        {
+          file: 'adapter-binding.yaml',
+          error: 'validation failed: spec/forwardLookingField not allowed',
+        },
+      ],
+    });
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--title',
+      't',
+      '--body-file',
+      bodyFile,
+      '--issue-number',
+      '1',
+      '--labels',
+      '[]',
+      '--reactions',
+      '0',
+      '--comments',
+      '0',
+      '--created-at',
+      '2026-04-01T00:00:00Z',
+      '--enrich-from-state',
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const stderr = errorSpy.mock.calls.map((args) => String(args[0]));
+    const skipped = stderr.find((line) => line.includes('skipped adapter-binding.yaml'));
+    expect(skipped).toBeDefined();
+    expect(skipped).toContain('forwardLookingField');
+
+    const provenance = stderr.find((line) => line.includes('"provenance"'));
+    expect(provenance).toBeDefined();
+    const parsed = JSON.parse(provenance as string);
+    expect(parsed.provenance.skippedConfigFiles).toHaveLength(1);
+    expect(parsed.provenance.skippedConfigFiles[0].file).toBe('adapter-binding.yaml');
+  });
+
+  it('surfaces the actual error when loadConfigAsync rejects (no more "could not load" generic warning)', async () => {
+    mocks.loadConfigAsync.mockRejectedValueOnce(new Error('schema_version table corrupt'));
+    process.argv = [
+      'node',
+      'cli-admit.ts',
+      '--title',
+      't',
+      '--body-file',
+      bodyFile,
+      '--issue-number',
+      '1',
+      '--labels',
+      '[]',
+      '--reactions',
+      '0',
+      '--comments',
+      '0',
+      '--created-at',
+      '2026-04-01T00:00:00Z',
+    ];
+    await import('./cli-admit.js');
+    await new Promise((r) => setTimeout(r, 50));
+
+    const stderr = errorSpy.mock.calls.map((args) => String(args[0]));
+    const warning = stderr.find((line) => line.includes('could not load pipeline config'));
+    expect(warning).toBeDefined();
+    expect(warning).toContain('schema_version table corrupt');
   });
 });
