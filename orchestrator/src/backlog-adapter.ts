@@ -19,6 +19,7 @@
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { parse as parseYaml } from 'yaml';
 import type { PriorityInput, QualityFlag } from '@ai-sdlc/reference';
 import type { AdmissionInput } from './admission-score.js';
 
@@ -450,5 +451,52 @@ export function loadSoulTracks(configRoot: string): Record<string, number> {
     return out;
   } catch {
     return {};
+  }
+}
+
+/**
+ * Load `.ai-sdlc/maintainers.yaml` from the given config root.
+ *
+ * Accepts either of two shapes:
+ *
+ *   maintainers:
+ *     - alice
+ *     - bob
+ *
+ * or with metadata (only `login` is read, the rest is forward-looking):
+ *
+ *   maintainers:
+ *     - login: alice
+ *       role: owner
+ *     - login: bob
+ *
+ * A bare top-level list (`- alice\n- bob`) is also accepted. Returns
+ * an empty array on missing file or any parse error — callers can
+ * still pass `--maintainers` explicitly to override.
+ */
+export function loadMaintainers(configRoot: string): string[] {
+  const path = join(configRoot, '.ai-sdlc', 'maintainers.yaml');
+  if (!existsSync(path)) return [];
+  try {
+    const doc = parseYaml(readFileSync(path, 'utf-8')) as unknown;
+    const list = Array.isArray(doc)
+      ? doc
+      : doc &&
+          typeof doc === 'object' &&
+          Array.isArray((doc as { maintainers?: unknown }).maintainers)
+        ? (doc as { maintainers: unknown[] }).maintainers
+        : [];
+    const out: string[] = [];
+    for (const entry of list) {
+      if (typeof entry === 'string' && entry.trim()) {
+        out.push(entry.trim());
+      } else if (entry && typeof entry === 'object' && 'login' in entry) {
+        const login = String((entry as { login: unknown }).login).trim();
+        if (login) out.push(login);
+      }
+    }
+    return out;
+  } catch {
+    return [];
   }
 }

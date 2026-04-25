@@ -425,6 +425,87 @@ describe('mapBacklogTaskToAdmissionInput — date normalisation', () => {
   });
 });
 
+describe('loadMaintainers', () => {
+  it('returns empty array when file is absent', async () => {
+    const { loadMaintainers } = await import('./backlog-adapter.js');
+    const tmp = mkdtempSync(join(tmpdir(), 'maintainers-'));
+    try {
+      expect(loadMaintainers(tmp)).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('reads `maintainers:` keyed list of strings', async () => {
+    const { loadMaintainers } = await import('./backlog-adapter.js');
+    const tmp = mkdtempSync(join(tmpdir(), 'maintainers-'));
+    try {
+      mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'maintainers.yaml'),
+        'maintainers:\n  - alice\n  - bob\n',
+      );
+      expect(loadMaintainers(tmp)).toEqual(['alice', 'bob']);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('reads a bare top-level YAML list', async () => {
+    const { loadMaintainers } = await import('./backlog-adapter.js');
+    const tmp = mkdtempSync(join(tmpdir(), 'maintainers-'));
+    try {
+      mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+      writeFileSync(join(tmp, '.ai-sdlc', 'maintainers.yaml'), '- alice\n- bob\n');
+      expect(loadMaintainers(tmp)).toEqual(['alice', 'bob']);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('reads list of objects with `login` (forward-compat metadata shape)', async () => {
+    const { loadMaintainers } = await import('./backlog-adapter.js');
+    const tmp = mkdtempSync(join(tmpdir(), 'maintainers-'));
+    try {
+      mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'maintainers.yaml'),
+        'maintainers:\n  - login: alice\n    role: owner\n  - login: bob\n',
+      );
+      expect(loadMaintainers(tmp)).toEqual(['alice', 'bob']);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('skips entries with empty / whitespace-only logins', async () => {
+    const { loadMaintainers } = await import('./backlog-adapter.js');
+    const tmp = mkdtempSync(join(tmpdir(), 'maintainers-'));
+    try {
+      mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'maintainers.yaml'),
+        'maintainers:\n  - alice\n  - "   "\n  - bob\n',
+      );
+      expect(loadMaintainers(tmp)).toEqual(['alice', 'bob']);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
+  it('returns [] on malformed YAML without throwing', async () => {
+    const { loadMaintainers } = await import('./backlog-adapter.js');
+    const tmp = mkdtempSync(join(tmpdir(), 'maintainers-'));
+    try {
+      mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+      writeFileSync(join(tmp, '.ai-sdlc', 'maintainers.yaml'), '{not: [valid yaml');
+      expect(loadMaintainers(tmp)).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+});
+
 describe('loadSoulTracks', () => {
   it('returns empty object when file absent', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'soul-tracks-'));
