@@ -222,6 +222,16 @@ export {
 } from './admission-enrichment.js';
 export { computeAdmissionComposite, type AdmissionComposite } from './admission-composite.js';
 export {
+  parseBacklogTask,
+  loadBacklogTaskFromRoot,
+  mapBacklogTaskToAdmissionInput,
+  loadSoulTracks,
+  type BacklogTaskSnapshot,
+  type BacklogAcceptanceCriterion,
+  type BacklogMappingOptions,
+  type BacklogAdmissionMapping,
+} from './backlog-adapter.js';
+export {
   computePillarBreakdown,
   detectTensions,
   pillarSignalScore,
