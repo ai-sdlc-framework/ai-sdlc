@@ -174,23 +174,26 @@ jobs:
                 const icon = sevIcons[sev] || '💡';
                 const prefix = `${icon} **[${v.type}/${sev}]**`;
 
-                if (f.file && f.line) {
-                  // Post as inline comment on the specific line
+                if (f.file && f.line && Number.isInteger(f.line) && f.line >= 1) {
+                  // Post as inline comment on the specific line. The
+                  // diff-position check below filters out lines that
+                  // exist in the file but are not part of the PR diff —
+                  // GitHub rejects those with "Line could not be resolved".
                   inlineComments.push({
                     path: f.file,
                     line: f.line,
                     body: `${prefix} ${f.message}`,
                   });
-                } else if (f.file) {
-                  // Has file but no line — post on line 1
-                  inlineComments.push({
-                    path: f.file,
-                    line: 1,
-                    body: `${prefix} ${f.message}`,
-                  });
                 } else {
-                  // No file reference — goes in summary
-                  summaryFindings.push({ verdict: v, finding: f, prefix });
+                  // No specific line (or file missing) — goes in summary.
+                  // Previously this branch fell back to `line: 1` which
+                  // produced 422s when line 1 wasn't in the diff hunks.
+                  const fileNote = f.file ? ` (${f.file})` : '';
+                  summaryFindings.push({
+                    verdict: v,
+                    finding: { ...f, message: `${f.message}${fileNote}` },
+                    prefix,
+                  });
                 }
               }
             }
@@ -222,9 +225,14 @@ jobs:
             // ── Post PR review with inline comments ──────────
             const event = allApproved ? 'APPROVE' : 'REQUEST_CHANGES';
 
-            // GitHub API requires comments to reference files in the diff.
-            // Filter out comments for files not in the PR diff to avoid 422 errors.
+            // GitHub requires comments to reference lines that appear in
+            // the PR diff (added or modified). Filter out comments whose
+            // file isn't in the diff AND comments whose line isn't in
+            // any added-line range — both produce 422 "Line could not
+            // be resolved". Findings that fail this check are demoted
+            // to summary findings so the review still posts cleanly.
             let validComments = [];
+            const demoted = [];
             try {
               const { data: files } = await github.rest.pulls.listFiles({
                 owner: context.repo.owner,
@@ -232,25 +240,85 @@ jobs:
                 pull_number: context.payload.pull_request.number,
                 per_page: 100,
               });
-              const diffFiles = new Set(files.map(f => f.filename));
-              validComments = inlineComments.filter(c => diffFiles.has(c.path));
+              // Map filename → set of added line numbers (post-image).
+              // Parse the unified-diff `patch` and walk hunks to collect
+              // the line numbers GitHub will accept for inline comments.
+              const addedLinesByFile = new Map();
+              for (const f of files) {
+                const added = new Set();
+                if (typeof f.patch === 'string') {
+                  let curLine = 0;
+                  for (const line of f.patch.split('\n')) {
+                    const hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+                    if (hunk) {
+                      curLine = Number(hunk[1]);
+                      continue;
+                    }
+                    if (line.startsWith('+') && !line.startsWith('+++')) {
+                      added.add(curLine);
+                      curLine++;
+                    } else if (line.startsWith(' ')) {
+                      // Context line — counts toward post-image position.
+                      curLine++;
+                    }
+                    // Removed lines ('-') don't advance the post-image counter.
+                  }
+                }
+                addedLinesByFile.set(f.filename, added);
+              }
+
+              for (const c of inlineComments) {
+                const added = addedLinesByFile.get(c.path);
+                if (added && added.has(c.line)) {
+                  validComments.push(c);
+                } else {
+                  // Demote to summary so the finding still surfaces.
+                  demoted.push({
+                    verdict: { type: 'review', summary: '' },
+                    finding: { message: `${c.body} (${c.path}:${c.line})` },
+                    prefix: '',
+                  });
+                }
+              }
               const skipped = inlineComments.length - validComments.length;
               if (skipped > 0) {
-                core.info(`Skipped ${skipped} inline comments for files not in diff`);
+                core.info(`Demoted ${skipped} inline comments to summary (line not in diff)`);
               }
             } catch (err) {
               core.warning(`Failed to list PR files, posting without inline comments: ${err.message}`);
             }
 
-            try {
-              await github.rest.pulls.createReview({
+            // Append demoted findings to the summary body so they don't disappear.
+            if (demoted.length > 0) {
+              if (!body.includes('### General Findings')) {
+                body = body.replace(
+                  /---\n\*Reviewed by/,
+                  `### General Findings\n\n` +
+                    demoted.map(d => `- ${d.finding.message}`).join('\n') +
+                    `\n\n---\n*Reviewed by`
+                );
+              } else {
+                body = body.replace(
+                  /---\n\*Reviewed by/,
+                  demoted.map(d => `- ${d.finding.message}`).join('\n') +
+                    `\n\n---\n*Reviewed by`
+                );
+              }
+            }
+
+            const postReview = async (comments) => {
+              return github.rest.pulls.createReview({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 pull_number: context.payload.pull_request.number,
                 event,
                 body,
-                comments: validComments,
+                comments,
               });
+            };
+
+            try {
+              await postReview(validComments);
               core.info(`Posted ${event} review on PR #${context.payload.pull_request.number}`);
             } catch (err) {
               // GitHub returns 422 when GITHUB_TOKEN tries to approve a PR
@@ -265,6 +333,15 @@ jobs:
                   body,
                 });
                 core.info(`Posted review as comment on PR #${context.payload.pull_request.number}`);
+              } else if (err.status === 422 && /Line could not be resolved/i.test(err.message)) {
+                // Last-resort fallback: our diff-position filter missed
+                // an unresolvable line. Drop all inline comments, post
+                // the summary review only — never lose the verdict.
+                core.warning(
+                  `Inline comments rejected by GitHub (${err.message}); retrying with summary-only review`,
+                );
+                await postReview([]);
+                core.info(`Posted ${event} review (summary only) on PR #${context.payload.pull_request.number}`);
               } else {
                 throw err;
               }
