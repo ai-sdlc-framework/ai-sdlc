@@ -25,7 +25,7 @@
  * the admission math — identical to the legacy PPA behaviour.
  */
 
-import type { PriorityConfig, PriorityScore } from '@ai-sdlc/reference';
+import type { PriorityConfig, PriorityInput, PriorityScore } from '@ai-sdlc/reference';
 import type { AdmissionInput } from './admission-score.js';
 import { mapIssueToPriorityInput } from './admission-score.js';
 import {
@@ -66,6 +66,14 @@ export interface AdmissionCompositeOptions {
    * callers pass undefined and the label-based fallback applies.
    */
   soulAlignmentOverride?: number;
+  /**
+   * Partial PriorityInput overrides applied AFTER `mapIssueToPriorityInput`.
+   * Used by non-GitHub trackers (e.g. Backlog.md adapter) to inject
+   * tracker-specific signals — `priority:p*` labels, AC-derived
+   * complexity, `qualityFlags` — that the GitHub-shaped mapper
+   * cannot extract. Only fields with defined values overwrite.
+   */
+  priorityInputOverrides?: Partial<PriorityInput>;
 }
 
 export function computeAdmissionComposite(
@@ -74,7 +82,10 @@ export function computeAdmissionComposite(
   options?: AdmissionCompositeOptions,
 ): AdmissionComposite {
   const timestamp = new Date().toISOString();
-  const priorityInput = mapIssueToPriorityInput(input);
+  const baseInput = mapIssueToPriorityInput(input);
+  const priorityInput = options?.priorityInputOverrides
+    ? mergePriorityInputOverrides(baseInput, options.priorityInputOverrides)
+    : baseInput;
 
   // ── Override path: position-1 bypass (§6 / AC #4) ─────────────
   if (priorityInput.override) {
@@ -191,4 +202,23 @@ function clamp01(value: number): number {
 function clampCalibration(value: number | undefined): number {
   if (value === undefined) return 1.0;
   return Math.min(1.3, Math.max(0.7, value));
+}
+
+/**
+ * Apply non-GitHub tracker overrides on top of the GitHub-shaped
+ * `mapIssueToPriorityInput` output. A field's override wins iff it is
+ * not `undefined`; this preserves the GitHub mapper's defaults for
+ * any field the override does not specify.
+ */
+function mergePriorityInputOverrides(
+  base: PriorityInput,
+  overrides: Partial<PriorityInput>,
+): PriorityInput {
+  const merged: PriorityInput = { ...base };
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value !== undefined) {
+      (merged as unknown as Record<string, unknown>)[key] = value;
+    }
+  }
+  return merged;
 }
