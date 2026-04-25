@@ -493,6 +493,19 @@ describe('loadMaintainers', () => {
     }
   });
 
+  it('returns [] when YAML is valid but neither a top-level list nor `maintainers:` keyed', async () => {
+    const { loadMaintainers } = await import('./backlog-adapter.js');
+    const tmp = mkdtempSync(join(tmpdir(), 'maintainers-'));
+    try {
+      mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+      // Valid YAML scalar / object that doesn't match any expected shape.
+      writeFileSync(join(tmp, '.ai-sdlc', 'maintainers.yaml'), 'unrelated: value\n');
+      expect(loadMaintainers(tmp)).toEqual([]);
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
   it('returns [] on malformed YAML without throwing', async () => {
     const { loadMaintainers } = await import('./backlog-adapter.js');
     const tmp = mkdtempSync(join(tmpdir(), 'maintainers-'));
