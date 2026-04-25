@@ -203,6 +203,23 @@ export interface PriorityInput {
   defectRiskFactor?: number;
   /** RFC-0008 §A.3 — C5 design-authority signal weight, [-1.0, 1.0]. */
   designAuthorityWeight?: number;
+  /**
+   * Quality concerns surfaced by the tracker adapter (e.g. Backlog
+   * `status:Done` with unchecked ACs, GitHub closed-without-resolution).
+   * Consumed by C3 `defectRiskFactor` and rendered in triage reports.
+   */
+  qualityFlags?: QualityFlag[];
+}
+
+/**
+ * Tracker-surfaced quality concern. The `kind` is a short stable
+ * identifier; downstream consumers (defectRiskFactor populator,
+ * triage report renderer, post-ship Cκ calibration) match on it.
+ */
+export interface QualityFlag {
+  kind: 'unchecked-acs-on-done' | 'no-tests-merged' | 'manual-close-no-resolution' | (string & {});
+  detail: string;
+  severity: 'low' | 'medium' | 'high';
 }
 
 export interface PriorityConfig {
