@@ -285,8 +285,9 @@ export function scoreIssueForAdmission(
   input: AdmissionInput,
   thresholds: AdmissionThresholds,
   priorityConfig?: PriorityConfig,
+  options?: import('./admission-composite.js').AdmissionCompositeOptions,
 ): IssueAdmissionResult {
-  const composite = computeAdmissionComposite(input, priorityConfig);
+  const composite = computeAdmissionComposite(input, priorityConfig, options);
   const { score } = composite;
   const pillarBreakdown = computePillarBreakdown(composite);
 
