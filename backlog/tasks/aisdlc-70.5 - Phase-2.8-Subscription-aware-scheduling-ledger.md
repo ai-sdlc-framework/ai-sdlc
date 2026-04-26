@@ -1,9 +1,10 @@
 ---
 id: AISDLC-70.5
 title: 'Phase 2.8: Subscription-aware scheduling + ledger'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-04-26 19:46'
+updated_date: '2026-04-26 20:48'
 labels:
   - rfc-0010
   - phase-2.8

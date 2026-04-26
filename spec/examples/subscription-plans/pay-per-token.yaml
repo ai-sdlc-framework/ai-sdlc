@@ -1,0 +1,13 @@
+# Reference SubscriptionPlan for direct API access (no quota window).
+# When the orchestrator sees a pay-per-token plan, it skips ledger-quota checks but still
+# attributes dollar spend to costBudget (RFC-0004 + RFC-0010 §11.5).
+apiVersion: ai-sdlc.dev/v1alpha1
+kind: SubscriptionPlan
+metadata:
+  name: pay-per-token
+spec:
+  harness: generic-api
+  billingMode: pay-per-token
+  pacingTarget: 1.0
+  hardCap: 1.0
+  quotaSource: self-tracked
