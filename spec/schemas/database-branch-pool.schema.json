@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/database-branch-pool.schema.json",
+  "title": "AI-SDLC DatabaseBranchPool",
+  "description": "Declares a pool of database branches available for per-worktree allocation (RFC-0010 §6.7 / §15).",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "DatabaseBranchPool"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["adapter", "upstream", "injection"],
+      "properties": {
+        "adapter": {
+          "type": "string",
+          "enum": ["sqlite-copy", "neon", "pg-snapshot-restore", "supabase", "external"],
+          "description": "Name of the registered DatabaseBranchAdapter."
+        },
+        "upstream": {
+          "type": "object",
+          "required": ["connectionStringEnv"],
+          "properties": {
+            "connectionStringEnv": {
+              "type": "string",
+              "description": "Env var the orchestrator reads at startup to discover the upstream connection. The value itself is never logged or persisted."
+            },
+            "branchFrom": {
+              "type": "string",
+              "description": "Named upstream branch (Neon, Supabase) or upstream identifier for snapshot-restore. By default MUST reference a stable, non-PR-feature upstream — see allowBranchFromBranch."
+            }
+          },
+          "additionalProperties": false
+        },
+        "injection": {
+          "type": "object",
+          "required": ["targetEnv"],
+          "properties": {
+            "targetEnv": {
+              "type": "string",
+              "description": "Env var name rewritten in the agent's environment to point at the per-worktree branch."
+            },
+            "additionalEnvs": {
+              "type": "array",
+              "description": "Optional component env vars derived from the rewritten connection string (e.g., PGHOST, PGDATABASE).",
+              "items": { "type": "string" }
+            }
+          },
+          "additionalProperties": false
+        },
+        "lifecycle": {
+          "type": "object",
+          "properties": {
+            "createOn": {
+              "type": "string",
+              "enum": ["worktree-allocation", "first-write-stage"],
+              "default": "worktree-allocation"
+            },
+            "reclaimOn": {
+              "type": "string",
+              "enum": ["pr-merge", "worktree-reclaim", "manual"],
+              "default": "pr-merge"
+            },
+            "maxConcurrent": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Cap on concurrent branches. Defaults to the resolved Pipeline.spec.parallelism.maxConcurrent of the pipeline that owns the WorktreePool."
+            },
+            "branchTtl": {
+              "type": "string",
+              "description": "ISO 8601 max branch age (e.g., P14D)."
+            },
+            "abandonAfter": {
+              "type": "string",
+              "default": "P7D",
+              "description": "ISO 8601 idle threshold."
+            },
+            "warmPoolSize": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 20,
+              "default": 0,
+              "description": "Pre-allocated branch count. 0 = on-demand allocation. > 0 enables the warm pool (RFC-0010 §15.4.1 / Q14)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "allowBranchFromBranch": {
+          "type": "boolean",
+          "default": false,
+          "description": "When false, the adapter refuses to allocate a branch whose upstream is itself an in-flight feature branch (RFC-0010 §15.5.1 / Q15)."
+        },
+        "migrations": {
+          "type": "object",
+          "properties": {
+            "runOnBranchCreate": { "type": "boolean", "default": true },
+            "migrationCommand": {
+              "type": "string",
+              "description": "Shell command executed inside the worktree with the branch's connection string injected. Required when runOnBranchCreate is true."
+            },
+            "migrationCwd": {
+              "type": "string",
+              "description": "Subdirectory relative to worktree root."
+            }
+          },
+          "additionalProperties": false,
+          "if": { "properties": { "runOnBranchCreate": { "const": true } } },
+          "then": { "required": ["migrationCommand"] }
+        },
+        "credentials": {
+          "type": "object",
+          "description": "Adapter-specific configuration (RFC-0010 §15.3). Schema is open because each adapter declares its own credential shape.",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

@@ -853,6 +853,145 @@ export const commonSchema = {
   },
 } as const;
 
+export const databaseBranchPoolSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/database-branch-pool.schema.json',
+  title: 'AI-SDLC DatabaseBranchPool',
+  description:
+    'Declares a pool of database branches available for per-worktree allocation (RFC-0010 §6.7 / §15).',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'metadata', 'spec'],
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'DatabaseBranchPool',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      required: ['adapter', 'upstream', 'injection'],
+      properties: {
+        adapter: {
+          type: 'string',
+          enum: ['sqlite-copy', 'neon', 'pg-snapshot-restore', 'supabase', 'external'],
+          description: 'Name of the registered DatabaseBranchAdapter.',
+        },
+        upstream: {
+          type: 'object',
+          required: ['connectionStringEnv'],
+          properties: {
+            connectionStringEnv: {
+              type: 'string',
+              description:
+                'Env var the orchestrator reads at startup to discover the upstream connection. The value itself is never logged or persisted.',
+            },
+            branchFrom: {
+              type: 'string',
+              description:
+                'Named upstream branch (Neon, Supabase) or upstream identifier for snapshot-restore. By default MUST reference a stable, non-PR-feature upstream — see allowBranchFromBranch.',
+            },
+          },
+          additionalProperties: false,
+        },
+        injection: {
+          type: 'object',
+          required: ['targetEnv'],
+          properties: {
+            targetEnv: {
+              type: 'string',
+              description:
+                "Env var name rewritten in the agent's environment to point at the per-worktree branch.",
+            },
+            additionalEnvs: {
+              type: 'array',
+              description:
+                'Optional component env vars derived from the rewritten connection string (e.g., PGHOST, PGDATABASE).',
+              items: { type: 'string' },
+            },
+          },
+          additionalProperties: false,
+        },
+        lifecycle: {
+          type: 'object',
+          properties: {
+            createOn: {
+              type: 'string',
+              enum: ['worktree-allocation', 'first-write-stage'],
+              default: 'worktree-allocation',
+            },
+            reclaimOn: {
+              type: 'string',
+              enum: ['pr-merge', 'worktree-reclaim', 'manual'],
+              default: 'pr-merge',
+            },
+            maxConcurrent: {
+              type: 'integer',
+              minimum: 1,
+              description:
+                'Cap on concurrent branches. Defaults to the resolved Pipeline.spec.parallelism.maxConcurrent of the pipeline that owns the WorktreePool.',
+            },
+            branchTtl: {
+              type: 'string',
+              description: 'ISO 8601 max branch age (e.g., P14D).',
+            },
+            abandonAfter: {
+              type: 'string',
+              default: 'P7D',
+              description: 'ISO 8601 idle threshold.',
+            },
+            warmPoolSize: {
+              type: 'integer',
+              minimum: 0,
+              maximum: 20,
+              default: 0,
+              description:
+                'Pre-allocated branch count. 0 = on-demand allocation. > 0 enables the warm pool (RFC-0010 §15.4.1 / Q14).',
+            },
+          },
+          additionalProperties: false,
+        },
+        allowBranchFromBranch: {
+          type: 'boolean',
+          default: false,
+          description:
+            'When false, the adapter refuses to allocate a branch whose upstream is itself an in-flight feature branch (RFC-0010 §15.5.1 / Q15).',
+        },
+        migrations: {
+          type: 'object',
+          properties: {
+            runOnBranchCreate: { type: 'boolean', default: true },
+            migrationCommand: {
+              type: 'string',
+              description:
+                "Shell command executed inside the worktree with the branch's connection string injected. Required when runOnBranchCreate is true.",
+            },
+            migrationCwd: {
+              type: 'string',
+              description: 'Subdirectory relative to worktree root.',
+            },
+          },
+          additionalProperties: false,
+          if: { properties: { runOnBranchCreate: { const: true } } },
+          then: { required: ['migrationCommand'] },
+        },
+        credentials: {
+          type: 'object',
+          description:
+            'Adapter-specific configuration (RFC-0010 §15.3). Schema is open because each adapter declares its own credential shape.',
+          additionalProperties: true,
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const designIntentDocumentSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/design-intent-document.schema.json',
@@ -2092,6 +2231,11 @@ export const pipelineSchema = {
         priorityPolicy: {
           $ref: '#/$defs/PriorityPolicy',
         },
+        parallelism: {
+          $ref: '#/$defs/Parallelism',
+          description:
+            'Concurrency configuration. When omitted, the pipeline executes serially. See RFC-0010 §6.1 / §9.1.',
+        },
       },
       additionalProperties: false,
     },
@@ -2664,6 +2808,33 @@ export const pipelineSchema = {
         },
         adapters: {
           $ref: '#/$defs/PriorityAdaptersConfig',
+        },
+      },
+      additionalProperties: false,
+    },
+    Parallelism: {
+      type: 'object',
+      description:
+        'Concurrency configuration introduced by RFC-0010. When this object is omitted, the pipeline executes serially (current behavior).',
+      properties: {
+        maxConcurrent: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 20,
+          description:
+            'Maximum number of issues executing concurrently. When omitted, derived from the declared SubscriptionPlan per RFC-0010 §9.1 resolution table; falls back to 1 when no plan is declared.',
+        },
+        worktreePool: {
+          type: 'string',
+          description:
+            "Name of the WorktreePool resource backing this pipeline. Defaults to the pipeline's own name.",
+        },
+        mergeStrategy: {
+          type: 'string',
+          enum: ['serialized-rebase', 'parallel-merge'],
+          default: 'serialized-rebase',
+          description:
+            'Merge ordering strategy. parallel-merge is reserved and forbidden in v1; only serialized-rebase is supported.',
         },
       },
       additionalProperties: false,
@@ -3273,14 +3444,220 @@ export const saExemplarSchema = {
   },
 } as const;
 
+export const subscriptionPlanSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/subscription-plan.schema.json',
+  title: 'AI-SDLC SubscriptionPlan',
+  description:
+    'Declares the billing-window characteristics of a harness so the SubscriptionLedger can pace dispatch correctly (RFC-0010 §6.6 / §14).',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'metadata', 'spec'],
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'SubscriptionPlan',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      required: ['harness', 'billingMode'],
+      properties: {
+        harness: {
+          type: 'string',
+          description:
+            'Name of the registered harness this plan applies to (e.g., claude-code, codex).',
+        },
+        billingMode: {
+          type: 'string',
+          enum: ['session-window', 'monthly-cap', 'pay-per-token'],
+          description: 'How the vendor meters consumption.',
+        },
+        windowDuration: {
+          type: 'string',
+          description:
+            'ISO 8601 duration (e.g., PT5H) of the rolling window. Required when billingMode is session-window.',
+        },
+        windowQuotaTokens: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            'Documented quota per window. Required when billingMode is session-window or monthly-cap.',
+        },
+        offPeak: {
+          type: 'object',
+          description: 'Off-peak multiplier configuration. Absent → no off-peak preference.',
+          required: ['enabled', 'multiplier'],
+          properties: {
+            enabled: { type: 'boolean' },
+            multiplier: {
+              type: 'number',
+              exclusiveMinimum: 1,
+              description:
+                'Token allocation multiplier during off-peak (e.g., 2.0 for Claude Code 2x).',
+            },
+            schedule: {
+              type: 'array',
+              description: 'Operator-declared off-peak time ranges; verified against vendor docs.',
+              items: {
+                type: 'object',
+                required: ['tz', 'hours'],
+                properties: {
+                  tz: { type: 'string', description: 'IANA timezone (e.g., America/Los_Angeles).' },
+                  hours: { type: 'string', description: "Hour range like '22-06'." },
+                  daysOfWeek: {
+                    type: 'string',
+                    description: "Optional comma list (e.g., 'Sat,Sun').",
+                  },
+                },
+                additionalProperties: false,
+              },
+            },
+            lastVerified: {
+              type: 'string',
+              format: 'date',
+              description:
+                'ISO 8601 date the operator last confirmed the schedule against vendor docs (RFC-0010 §14.5).',
+            },
+          },
+          additionalProperties: false,
+        },
+        pacingTarget: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          default: 0.8,
+          description: 'Target window utilization fraction at window-end.',
+        },
+        hardCap: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          default: 0.95,
+          description:
+            'Above this fraction, the orchestrator refuses to dispatch new work even with schedule: now.',
+        },
+        quotaSource: {
+          type: 'string',
+          enum: ['self-tracked', 'authoritative-api', 'authoritative-with-fallback'],
+          default: 'self-tracked',
+          description:
+            'Source of authoritative window state; see RFC-0010 §14.11 migration semantics.',
+        },
+      },
+      additionalProperties: false,
+      allOf: [
+        {
+          if: { properties: { billingMode: { const: 'session-window' } } },
+          then: { required: ['windowDuration', 'windowQuotaTokens'] },
+        },
+        {
+          if: { properties: { billingMode: { const: 'monthly-cap' } } },
+          then: { required: ['windowQuotaTokens'] },
+        },
+      ],
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+export const worktreePoolSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/worktree-pool.schema.json',
+  title: 'AI-SDLC WorktreePool',
+  description:
+    'Declares a pool of git worktrees used by a parallel-execution pipeline (RFC-0010 §6.2 / §7).',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'metadata', 'spec'],
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'WorktreePool',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      properties: {
+        rootDir: {
+          type: 'string',
+          description:
+            'Filesystem directory containing the worktrees. Supports `~` expansion. Defaults to ~/.ai-sdlc/worktrees.',
+        },
+        layout: {
+          type: 'string',
+          enum: ['repo-local', 'workspace-scoped'],
+          default: 'workspace-scoped',
+          description:
+            'Where worktrees live relative to the clone (repo-local) or in a global workspace directory (workspace-scoped).',
+        },
+        staleThresholdDays: {
+          type: 'integer',
+          minimum: 1,
+          default: 14,
+          description:
+            'Worktrees older than this and not associated with an active pipeline run are eligible for reclamation.',
+        },
+        basePort: {
+          type: 'integer',
+          minimum: 1024,
+          maximum: 65000,
+          default: 3190,
+          description: 'Base port used by the deterministic port allocator (RFC-0010 §8).',
+        },
+        ownershipGuard: {
+          type: 'string',
+          enum: ['strict', 'advisory'],
+          default: 'strict',
+          description:
+            'Strict refuses to operate on worktrees owned by a different clone; advisory only warns.',
+        },
+        cleanup: {
+          type: 'object',
+          description: 'Worktree reclamation triggers.',
+          properties: {
+            onMerge: { type: 'boolean', default: true },
+            onAbort: { type: 'boolean', default: true },
+            onTimeout: { type: 'boolean', default: true },
+          },
+          additionalProperties: false,
+        },
+        databaseBranchPools: {
+          type: 'array',
+          description: 'References to DatabaseBranchPool resources by name (RFC-0010 §6.7).',
+          items: { type: 'string' },
+        },
+        subscriptionPlans: {
+          type: 'array',
+          description: 'References to SubscriptionPlan resources by name (RFC-0010 §6.6).',
+          items: { type: 'string' },
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const SCHEMAS: Record<string, object> = {
   'adapter-binding.schema.json': adapterBindingSchema,
   'agent-role.schema.json': agentRoleSchema,
   'autonomy-policy.schema.json': autonomyPolicySchema,
   'common.schema.json': commonSchema,
+  'database-branch-pool.schema.json': databaseBranchPoolSchema,
   'design-intent-document.schema.json': designIntentDocumentSchema,
   'design-system-binding.schema.json': designSystemBindingSchema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
   'sa-exemplar.schema.json': saExemplarSchema,
+  'subscription-plan.schema.json': subscriptionPlanSchema,
+  'worktree-pool.schema.json': worktreePoolSchema,
 };

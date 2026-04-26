@@ -199,6 +199,10 @@
         },
         "priorityPolicy": {
           "$ref": "#/$defs/PriorityPolicy"
+        },
+        "parallelism": {
+          "$ref": "#/$defs/Parallelism",
+          "description": "Concurrency configuration. When omitted, the pipeline executes serially. See RFC-0010 §6.1 / §9.1."
         }
       },
       "additionalProperties": false
@@ -768,6 +772,29 @@
         },
         "adapters": {
           "$ref": "#/$defs/PriorityAdaptersConfig"
+        }
+      },
+      "additionalProperties": false
+    },
+    "Parallelism": {
+      "type": "object",
+      "description": "Concurrency configuration introduced by RFC-0010. When this object is omitted, the pipeline executes serially (current behavior).",
+      "properties": {
+        "maxConcurrent": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20,
+          "description": "Maximum number of issues executing concurrently. When omitted, derived from the declared SubscriptionPlan per RFC-0010 §9.1 resolution table; falls back to 1 when no plan is declared."
+        },
+        "worktreePool": {
+          "type": "string",
+          "description": "Name of the WorktreePool resource backing this pipeline. Defaults to the pipeline's own name."
+        },
+        "mergeStrategy": {
+          "type": "string",
+          "enum": ["serialized-rebase", "parallel-merge"],
+          "default": "serialized-rebase",
+          "description": "Merge ordering strategy. parallel-merge is reserved and forbidden in v1; only serialized-rebase is supported."
         }
       },
       "additionalProperties": false

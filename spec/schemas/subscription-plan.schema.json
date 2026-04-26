@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/subscription-plan.schema.json",
+  "title": "AI-SDLC SubscriptionPlan",
+  "description": "Declares the billing-window characteristics of a harness so the SubscriptionLedger can pace dispatch correctly (RFC-0010 §6.6 / §14).",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "SubscriptionPlan"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["harness", "billingMode"],
+      "properties": {
+        "harness": {
+          "type": "string",
+          "description": "Name of the registered harness this plan applies to (e.g., claude-code, codex)."
+        },
+        "billingMode": {
+          "type": "string",
+          "enum": ["session-window", "monthly-cap", "pay-per-token"],
+          "description": "How the vendor meters consumption."
+        },
+        "windowDuration": {
+          "type": "string",
+          "description": "ISO 8601 duration (e.g., PT5H) of the rolling window. Required when billingMode is session-window."
+        },
+        "windowQuotaTokens": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Documented quota per window. Required when billingMode is session-window or monthly-cap."
+        },
+        "offPeak": {
+          "type": "object",
+          "description": "Off-peak multiplier configuration. Absent → no off-peak preference.",
+          "required": ["enabled", "multiplier"],
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "multiplier": {
+              "type": "number",
+              "exclusiveMinimum": 1,
+              "description": "Token allocation multiplier during off-peak (e.g., 2.0 for Claude Code 2x)."
+            },
+            "schedule": {
+              "type": "array",
+              "description": "Operator-declared off-peak time ranges; verified against vendor docs.",
+              "items": {
+                "type": "object",
+                "required": ["tz", "hours"],
+                "properties": {
+                  "tz": { "type": "string", "description": "IANA timezone (e.g., America/Los_Angeles)." },
+                  "hours": { "type": "string", "description": "Hour range like '22-06'." },
+                  "daysOfWeek": { "type": "string", "description": "Optional comma list (e.g., 'Sat,Sun')." }
+                },
+                "additionalProperties": false
+              }
+            },
+            "lastVerified": {
+              "type": "string",
+              "format": "date",
+              "description": "ISO 8601 date the operator last confirmed the schedule against vendor docs (RFC-0010 §14.5)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "pacingTarget": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.8,
+          "description": "Target window utilization fraction at window-end."
+        },
+        "hardCap": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.95,
+          "description": "Above this fraction, the orchestrator refuses to dispatch new work even with schedule: now."
+        },
+        "quotaSource": {
+          "type": "string",
+          "enum": ["self-tracked", "authoritative-api", "authoritative-with-fallback"],
+          "default": "self-tracked",
+          "description": "Source of authoritative window state; see RFC-0010 §14.11 migration semantics."
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": { "properties": { "billingMode": { "const": "session-window" } } },
+          "then": { "required": ["windowDuration", "windowQuotaTokens"] }
+        },
+        {
+          "if": { "properties": { "billingMode": { "const": "monthly-cap" } } },
+          "then": { "required": ["windowQuotaTokens"] }
+        }
+      ]
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,76 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/worktree-pool.schema.json",
+  "title": "AI-SDLC WorktreePool",
+  "description": "Declares a pool of git worktrees used by a parallel-execution pipeline (RFC-0010 §6.2 / §7).",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "WorktreePool"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "properties": {
+        "rootDir": {
+          "type": "string",
+          "description": "Filesystem directory containing the worktrees. Supports `~` expansion. Defaults to ~/.ai-sdlc/worktrees."
+        },
+        "layout": {
+          "type": "string",
+          "enum": ["repo-local", "workspace-scoped"],
+          "default": "workspace-scoped",
+          "description": "Where worktrees live relative to the clone (repo-local) or in a global workspace directory (workspace-scoped)."
+        },
+        "staleThresholdDays": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 14,
+          "description": "Worktrees older than this and not associated with an active pipeline run are eligible for reclamation."
+        },
+        "basePort": {
+          "type": "integer",
+          "minimum": 1024,
+          "maximum": 65000,
+          "default": 3190,
+          "description": "Base port used by the deterministic port allocator (RFC-0010 §8)."
+        },
+        "ownershipGuard": {
+          "type": "string",
+          "enum": ["strict", "advisory"],
+          "default": "strict",
+          "description": "Strict refuses to operate on worktrees owned by a different clone; advisory only warns."
+        },
+        "cleanup": {
+          "type": "object",
+          "description": "Worktree reclamation triggers.",
+          "properties": {
+            "onMerge": { "type": "boolean", "default": true },
+            "onAbort": { "type": "boolean", "default": true },
+            "onTimeout": { "type": "boolean", "default": true }
+          },
+          "additionalProperties": false
+        },
+        "databaseBranchPools": {
+          "type": "array",
+          "description": "References to DatabaseBranchPool resources by name (RFC-0010 §6.7).",
+          "items": { "type": "string" }
+        },
+        "subscriptionPlans": {
+          "type": "array",
+          "description": "References to SubscriptionPlan resources by name (RFC-0010 §6.6).",
+          "items": { "type": "string" }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
