@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/artifacts/review.schema.json",
+  "title": "Review artifact (RFC-0010 §16.4)",
+  "type": "object",
+  "required": ["$schema", "verdict", "summary"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "reviewer": { "type": "string", "enum": ["testing", "critic", "security"] },
+    "verdict": {
+      "type": "string",
+      "enum": ["approve", "approve-with-suggestions", "request-changes"]
+    },
+    "summary": { "type": "string", "minLength": 5 },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["severity", "description"],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": ["info", "minor", "major", "critical"]
+          },
+          "file": { "type": "string" },
+          "line": { "type": "integer", "minimum": 1 },
+          "endLine": { "type": "integer", "minimum": 1 },
+          "description": { "type": "string", "minLength": 5 },
+          "suggestion": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

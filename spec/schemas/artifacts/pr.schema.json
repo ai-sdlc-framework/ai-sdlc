@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/artifacts/pr.schema.json",
+  "title": "PR artifact (RFC-0010 §16.4)",
+  "type": "object",
+  "required": ["$schema", "number", "url", "branch", "baseSha", "headSha"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "number": { "type": "integer", "minimum": 1 },
+    "url": { "type": "string", "format": "uri" },
+    "branch": { "type": "string" },
+    "title": { "type": "string" },
+    "baseSha": { "type": "string", "minLength": 7 },
+    "headSha": { "type": "string", "minLength": 7 },
+    "draft": { "type": "boolean" },
+    "createdAt": { "type": "string", "format": "date-time" }
+  },
+  "additionalProperties": false
+}

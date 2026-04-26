@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/artifacts/plan.schema.json",
+  "title": "Plan artifact (RFC-0010 §16.4)",
+  "type": "object",
+  "required": ["$schema", "approach", "filesToTouch", "expectedDifficulty"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "approach": { "type": "string", "minLength": 10 },
+    "filesToTouch": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "testStrategy": { "type": "string" },
+    "expectedDifficulty": {
+      "type": "string",
+      "enum": ["trivial", "low", "medium", "high", "research"]
+    },
+    "openQuestions": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}
