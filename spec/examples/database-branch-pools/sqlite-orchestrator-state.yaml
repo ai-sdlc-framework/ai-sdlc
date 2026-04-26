@@ -1,0 +1,19 @@
+# Reference DatabaseBranchPool for the orchestrator's own SQLite state.
+# Each parallel agent gets a copy-on-allocation per-branch SQLite file so concurrent
+# pipeline runs don't corrupt each other's state.
+apiVersion: ai-sdlc.dev/v1alpha1
+kind: DatabaseBranchPool
+metadata:
+  name: orchestrator-state
+spec:
+  adapter: sqlite-copy
+  upstream:
+    connectionStringEnv: ORCHESTRATOR_DB
+  injection:
+    targetEnv: ORCHESTRATOR_DB
+  lifecycle:
+    createOn: worktree-allocation
+    reclaimOn: worktree-reclaim
+  migrations:
+    runOnBranchCreate: true
+    migrationCommand: 'pnpm orchestrator:migrate'
