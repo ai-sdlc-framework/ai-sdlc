@@ -1,5 +1,22 @@
 # @ai-sdlc/orchestrator
 
+## Unreleased
+
+### Features
+
+* RFC-0010 Phase 1: deterministic port allocator + worktree slug/ownership verification + JSON schemas (`Pipeline.spec.parallelism`, `WorktreePool`, `SubscriptionPlan`, `DatabaseBranchPool`).
+* RFC-0010 Phase 2: WorktreePoolManager (allocate/adopt/reclaim/cleanupOnMerge/list/reclaimStale) with strict cross-clone ownership guard. Wired into `execute.ts` behind `AI_SDLC_PARALLELISM=experimental`.
+* RFC-0010 Phase 2.5: per-stage model routing + ModelRegistry with deprecation lifecycle + conditional review fan-out classifier with confident/confidence consistency rule + calibration log + cli-model-bump + cli-classifier-feedback. Cost-governance gains `model_alias` and `shadow_cost_usd` columns (Migration V13).
+* RFC-0010 Phase 2.7: HarnessAdapter framework with shipped Claude Code + Codex adapters, version probe (open-ended upper bound default), independence enforcement (`requiresIndependentHarnessFrom`), cyclic-constraint validation. Adapter-authoring guide at `docs/operations/adapter-authoring.md`.
+* RFC-0010 Phase 2.8: SubscriptionLedger with `(harness, accountId, tenant)` keying + schedule-aware dispatcher (4 modes) + rolling token-estimate calibration + EstimateBootstrapped + frozen estimates + burn-down report + tier analysis + cli-tier-recommendation. Reference plans at `spec/examples/subscription-plans/`.
+* RFC-0010 Phase 3: WorkerPool (bounded concurrency, PPA-priority ordering) + file-based MergeGate (with timeout + force-release) + decideRequeue (failure-type taxonomy + RetriageStorm detection + triage-history JSONL). Per project policy: orchestrator never executes `gh pr merge`.
+* RFC-0010 Phase 4: dual-format artifact directory (`.md` + schema-conformant `.json`), 5 JSON schemas at `spec/schemas/artifacts/`, StateWriter with 60s heartbeat + 5min stale detection, `_events.jsonl` event stream, atomic JSON writes, cli-status command.
+* RFC-0010 Phase 5: extended operator runbook with five new failure-mode recovery playbooks (WorktreeOwnershipMismatch, RebaseConflict, stuck heartbeats, IndependenceViolated, MigrationDiverged, BranchQuotaExceeded), chaos test plan, feature-flag promotion ritual.
+
+### Notes
+
+The `AI_SDLC_PARALLELISM` flag remains `off` by default. Promotion to default-on requires the chaos-test plan in `docs/operations/operator-runbook.md` to pass and a 1-week dogfood soak window — both deferred to a follow-up release.
+
 ## [0.6.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.5.0...orchestrator-v0.6.0) (2026-03-31)
 
 
