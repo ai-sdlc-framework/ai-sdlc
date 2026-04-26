@@ -147,6 +147,7 @@ import type { StateStore } from './state/store.js';
 import { enrichAgentContext } from './context-enrichment.js';
 import { reportGateCheckRuns } from './check-runs.js';
 import type { PriorityScore } from './priority.js';
+import { WorktreePoolManager, readParallelismMode, type ParallelismMode } from './runtime/index.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -229,6 +230,19 @@ export async function executePipeline(
     (options.useStructuredLogger ? createStructuredConsoleLogger() : createLogger());
   const auditLog = options.auditLog ?? createDefaultAuditLog(workDir);
   const metricStore = options.metricStore;
+
+  // RFC-0010 §6/§7 Phase 2: parallelism opt-in. When AI_SDLC_PARALLELISM is unset (default),
+  // execution proceeds serially exactly as today. When set to 'experimental' or 'on', a
+  // WorktreePoolManager is instantiated for the worker-pool dispatcher landing in Phase 3
+  // (RFC-0010 §9). For now the manager is constructed but not yet routed through — Phase 2
+  // ships the wire-in surface; Phase 3 wires the worker pool to consume it.
+  const parallelismMode: ParallelismMode = readParallelismMode();
+  let worktreePool: WorktreePoolManager | undefined;
+  if (parallelismMode !== 'off') {
+    worktreePool = new WorktreePoolManager(workDir);
+    log.info(`[parallelism] mode=${parallelismMode}, pool root=${worktreePool.rootDir}`);
+  }
+  void worktreePool; // referenced by Phase 3 dispatcher; silences unused-var lint until then
 
   // 1. Load .ai-sdlc/ config (async: includes adapter scanning + manifest distribution)
   log.stage('load-config');

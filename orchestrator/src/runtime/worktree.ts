@@ -1,4 +1,4 @@
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, realpath, stat } from 'node:fs/promises';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 const SLUG_INVALID = /[^a-zA-Z0-9._-]+/g;
@@ -53,6 +53,14 @@ export async function verifyOwnership(
   expectedClonePath: string,
 ): Promise<OwnershipResult> {
   const expectedWorktreesDir = resolve(expectedClonePath, '.git', 'worktrees');
+  // Canonicalize the expected dir to follow symlinks (e.g., macOS /var → /private/var).
+  // realpath fails if the path doesn't exist; fall back to resolve() in that case.
+  let canonicalExpected = expectedWorktreesDir;
+  try {
+    canonicalExpected = await realpath(expectedWorktreesDir);
+  } catch {
+    /* directory doesn't exist yet — keep the resolved (non-canonical) path */
+  }
   const dotGitPath = join(worktreePathArg, '.git');
 
   let pointer: string;
@@ -62,7 +70,7 @@ export async function verifyOwnership(
   } catch {
     return {
       owned: false,
-      expectedClone: expectedWorktreesDir,
+      expectedClone: canonicalExpected,
       actualClone: null,
       reason: 'pointer-missing',
     };
@@ -73,24 +81,31 @@ export async function verifyOwnership(
   if (!match) {
     return {
       owned: false,
-      expectedClone: expectedWorktreesDir,
+      expectedClone: canonicalExpected,
       actualClone: pointer || null,
       reason: 'pointer-malformed',
     };
   }
   const declared = match[1].trim();
   const declaredAbs = isAbsolute(declared) ? declared : resolve(dirname(dotGitPath), declared);
-  const resolvedDeclared = resolve(declaredAbs);
+  // Canonicalize the declared path the same way; if it doesn't exist, the worktree is
+  // detached and we can fall back to the resolved string.
+  let canonicalDeclared = resolve(declaredAbs);
+  try {
+    canonicalDeclared = await realpath(declaredAbs);
+  } catch {
+    /* declared dir doesn't exist — use the resolved string for comparison */
+  }
 
   // The pointer should land inside `<expectedClone>/.git/worktrees/<name>/`.
   const owned =
-    resolvedDeclared === expectedWorktreesDir ||
-    resolvedDeclared.startsWith(expectedWorktreesDir + sep);
+    canonicalDeclared === canonicalExpected ||
+    canonicalDeclared.startsWith(canonicalExpected + sep);
 
   return {
     owned,
-    expectedClone: expectedWorktreesDir,
-    actualClone: resolvedDeclared,
+    expectedClone: canonicalExpected,
+    actualClone: canonicalDeclared,
     reason: owned ? 'ok' : 'cross-clone',
   };
 }

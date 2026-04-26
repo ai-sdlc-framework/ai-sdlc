@@ -1,9 +1,10 @@
 ---
 id: AISDLC-70.2
 title: 'Phase 2: Worktree pool manager'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-04-26 19:44'
+updated_date: '2026-04-26 20:19'
 labels:
   - rfc-0010
   - phase-2
