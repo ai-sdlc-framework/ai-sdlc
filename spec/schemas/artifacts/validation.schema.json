@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/artifacts/validation.schema.json",
+  "title": "Validation artifact (RFC-0010 §16.4)",
+  "type": "object",
+  "required": ["$schema", "tests", "build"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "tests": {
+      "type": "object",
+      "required": ["passed", "failed"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "failures": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["test", "message"],
+            "properties": {
+              "test": { "type": "string" },
+              "message": { "type": "string" }
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "build": {
+      "type": "object",
+      "required": ["status"],
+      "properties": {
+        "status": { "type": "string", "enum": ["passed", "failed"] },
+        "errorOutput": { "type": "string" }
+      },
+      "additionalProperties": false
+    },
+    "lint": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["passed", "failed"] },
+        "errorCount": { "type": "integer", "minimum": 0 },
+        "warningCount": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "typecheck": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "enum": ["passed", "failed"] },
+        "errorCount": { "type": "integer", "minimum": 0 }
+      },
+      "additionalProperties": false
+    },
+    "manualChecks": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

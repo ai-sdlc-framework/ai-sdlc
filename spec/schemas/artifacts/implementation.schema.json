@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/artifacts/implementation.schema.json",
+  "title": "Implementation artifact (RFC-0010 §16.4)",
+  "type": "object",
+  "required": ["$schema", "summary", "filesModified"],
+  "properties": {
+    "$schema": { "type": "string" },
+    "summary": { "type": "string", "minLength": 10 },
+    "filesModified": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["path", "kind"],
+        "properties": {
+          "path": { "type": "string" },
+          "kind": { "type": "string", "enum": ["new", "modified", "deleted", "renamed"] },
+          "linesAdded": { "type": "integer", "minimum": 0 },
+          "linesRemoved": { "type": "integer", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "commandsRun": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "testsAdded": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "deviationsFromPlan": { "type": "string" }
+  },
+  "additionalProperties": false
+}

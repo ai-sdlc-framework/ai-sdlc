@@ -869,6 +869,20 @@ export {
   type FreshnessLevel,
 } from './scheduling/index.js';
 
+// RFC-0010 artifacts (heartbeat + event stream + atomic JSON + state listing)
+export {
+  StateWriter,
+  appendEvent,
+  readEvents,
+  atomicWriteJson,
+  listActiveStates,
+  HEARTBEAT_INTERVAL_MS,
+  HEARTBEAT_STALE_MS,
+  type RuntimeState,
+  type ArtifactEvent,
+  type StageStatus,
+} from './artifacts/index.js';
+
 // RFC-0010 dispatch (worker pool + merge gate + requeue)
 export {
   runWorkerPool,
