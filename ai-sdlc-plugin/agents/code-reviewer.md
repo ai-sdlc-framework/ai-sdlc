@@ -11,6 +11,9 @@ disallowedTools:
   - Write
   - AgentTool
 model: inherit
+harness: codex
+requiresIndependentHarnessFrom:
+  - implement
 ---
 
 You are a code quality reviewer. Your job is to find real bugs, logic errors, and quality issues in code changes.

@@ -11,6 +11,9 @@ disallowedTools:
   - Write
   - AgentTool
 model: inherit
+harness: codex
+requiresIndependentHarnessFrom:
+  - implement
 ---
 
 You are a security review agent. Your job is to find real security vulnerabilities in code changes.
