@@ -122,11 +122,16 @@ export interface CostLedgerEntry {
   runId: string;
   agentName: string;
   pipelineType: string;
+  /** Resolved physical model ID (e.g., 'claude-sonnet-4-6'). RFC-0010 §11.4. */
   model?: string;
+  /** Original alias used in pipeline YAML before resolution (e.g., 'sonnet'). RFC-0010 §11.4. */
+  modelAlias?: string;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
   costUsd?: number;
+  /** Informational shadow cost (what this work would have cost on pay-per-token); does NOT decrement costBudget. RFC-0010 §14.10. */
+  shadowCostUsd?: number;
   issueId?: string;
   issueNumber?: number;
   prNumber?: number;

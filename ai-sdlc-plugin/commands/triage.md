@@ -3,6 +3,7 @@ name: triage
 description: Score and triage an issue with the RFC-0008 admission composite (PPA + pillar breakdown). Auto-detects GitHub or Backlog.md.
 argument-hint: <issue-id>
 allowed-tools: Read, Grep, Glob, Bash, mcp__backlog__task_view
+model: haiku
 ---
 
 Triage issue `$ARGUMENTS` by running it through `@ai-sdlc/orchestrator`'s

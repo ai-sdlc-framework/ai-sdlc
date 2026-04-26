@@ -145,6 +145,20 @@
                 "type": "object",
                 "description": "Stage-specific configuration.",
                 "additionalProperties": true
+              },
+              "model": {
+                "type": "string",
+                "description": "Per-stage model alias (haiku, sonnet, opus, opus[1m]) or 'inherit' to defer to Pipeline.spec.defaultModel. RFC-0010 §6.3 / §11."
+              },
+              "kind": {
+                "type": "string",
+                "enum": ["agent", "review-classifier", "review-fanout"],
+                "description": "Stage kind. Defaults to 'agent'. review-classifier and review-fanout drive RFC-0010 §12 conditional review behavior."
+              },
+              "maxBudgetUsd": {
+                "type": "number",
+                "exclusiveMinimum": 0,
+                "description": "Per-stage cost ceiling. When exceeded the orchestrator emits BudgetExceeded and applies onFailure. RFC-0010 §6.3 / §11.5."
               }
             },
             "additionalProperties": false
@@ -203,6 +217,11 @@
         "parallelism": {
           "$ref": "#/$defs/Parallelism",
           "description": "Concurrency configuration. When omitted, the pipeline executes serially. See RFC-0010 §6.1 / §9.1."
+        },
+        "defaultModel": {
+          "type": "string",
+          "default": "sonnet",
+          "description": "Resolution target for any Stage with model: inherit (or absent). Defaults to sonnet. RFC-0010 §6.4."
         }
       },
       "additionalProperties": false

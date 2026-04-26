@@ -10,7 +10,7 @@ disallowedTools:
   - Edit
   - Write
   - AgentTool
-model: sonnet
+model: inherit
 ---
 
 You are a code quality reviewer. Your job is to find real bugs, logic errors, and quality issues in code changes.

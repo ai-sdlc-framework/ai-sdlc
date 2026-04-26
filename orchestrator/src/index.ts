@@ -768,6 +768,61 @@ export type {
 // Cost governance plugin
 export { CostGovernancePlugin } from './cost-governance.js';
 
+// RFC-0010 runtime primitives
+export {
+  WorktreePoolManager,
+  WorktreePoolError,
+  WorktreeOwnershipError,
+  deterministicPort,
+  allocatePort,
+  allocateContiguousPorts,
+  isPortFree,
+  PortAllocationError,
+  slugifyBranch,
+  worktreePath,
+  verifyOwnership,
+  assertOwnership,
+  isExistingWorktree,
+  readParallelismMode,
+  isParallelismEnabled,
+  PARALLELISM_FLAG,
+  DEFAULT_BASE_PORT,
+  DEFAULT_POOL_ROOT,
+  DEFAULT_STALE_THRESHOLD_DAYS,
+  type WorktreePoolSpec,
+  type WorktreePoolManagerDeps,
+  type WorktreeHandle,
+  type AllocateOptions,
+  type AllocatePortOptions,
+  type AllocateContiguousOptions,
+  type OwnershipResult,
+  type ParallelismMode,
+} from './runtime/index.js';
+
+// RFC-0010 model registry + classifier
+export {
+  ModelRegistry,
+  ModelRemovedError,
+  UnknownAliasError,
+  DEFAULT_REGISTRY,
+  decideFromRawOutput,
+  decideFromInvocationFailure,
+  validateClassifierOutput,
+  defaultRulesetDecision,
+  appendCalibrationEntry,
+  ALL_REVIEWERS,
+  type ModelEntry,
+  type ResolutionContext,
+  type ResolutionResult,
+  type ResolutionEvent,
+  type ReviewerName,
+  type ClassifierOutput,
+  type ClassifierDecision,
+  type FellOpenReason,
+  type CalibrationLogEntry,
+  type DiffSummary,
+} from './models/index.js';
+
 // Pipeline cycle detection
 export {
   PipelineCycleDetector,

@@ -528,6 +528,15 @@ CREATE TABLE IF NOT EXISTS sa_phase_weights (
 CREATE INDEX IF NOT EXISTS idx_sa_phase_weights_dim ON sa_phase_weights(dimension);
 `;
 
+export const MIGRATION_V13 = `
+-- RFC-0010 §11.4 cost attribution: track the model alias used in pipeline YAML
+-- alongside the resolved physical model ID, plus an informational shadow cost
+-- (what subscription-harness work would have cost on pay-per-token).
+ALTER TABLE cost_ledger ADD COLUMN model_alias TEXT;
+ALTER TABLE cost_ledger ADD COLUMN shadow_cost_usd REAL;
+CREATE INDEX IF NOT EXISTS idx_cost_ledger_model_alias ON cost_ledger(model_alias);
+`;
+
 export const MIGRATIONS: Migration[] = [
   {
     version: 1,
@@ -576,5 +585,9 @@ export const MIGRATIONS: Migration[] = [
   {
     version: 12,
     sql: MIGRATION_V12,
+  },
+  {
+    version: 13,
+    sql: MIGRATION_V13,
   },
 ];

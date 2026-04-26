@@ -504,18 +504,20 @@ export class StateStore {
 
   saveCostEntry(entry: CostLedgerEntry): number {
     const stmt = this.db.prepare(`
-      INSERT INTO cost_ledger (run_id, agent_name, pipeline_type, model, input_tokens, output_tokens, total_tokens, cost_usd, issue_id, issue_number, pr_number, stage_name, cache_read_tokens)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO cost_ledger (run_id, agent_name, pipeline_type, model, model_alias, input_tokens, output_tokens, total_tokens, cost_usd, shadow_cost_usd, issue_id, issue_number, pr_number, stage_name, cache_read_tokens)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const result = stmt.run(
       entry.runId,
       entry.agentName,
       entry.pipelineType,
       entry.model ?? null,
+      entry.modelAlias ?? null,
       entry.inputTokens ?? 0,
       entry.outputTokens ?? 0,
       entry.totalTokens ?? 0,
       entry.costUsd ?? 0,
+      entry.shadowCostUsd ?? null,
       entry.issueId ?? null,
       entry.issueNumber ?? null,
       entry.prNumber ?? null,
@@ -581,10 +583,12 @@ export class StateStore {
       agentName: row.agent_name as string,
       pipelineType: row.pipeline_type as string,
       model: row.model as string | undefined,
+      modelAlias: row.model_alias as string | undefined,
       inputTokens: row.input_tokens as number | undefined,
       outputTokens: row.output_tokens as number | undefined,
       totalTokens: row.total_tokens as number | undefined,
       costUsd: row.cost_usd as number | undefined,
+      shadowCostUsd: row.shadow_cost_usd as number | undefined,
       issueId: row.issue_id as string | undefined,
       issueNumber: row.issue_number as number | undefined,
       prNumber: row.pr_number as number | undefined,
