@@ -159,6 +159,24 @@
                 "type": "number",
                 "exclusiveMinimum": 0,
                 "description": "Per-stage cost ceiling. When exceeded the orchestrator emits BudgetExceeded and applies onFailure. RFC-0010 §6.3 / §11.5."
+              },
+              "harness": {
+                "type": "string",
+                "enum": ["claude-code", "codex", "gemini-cli", "opencode", "aider", "generic-api", "inherit"],
+                "description": "Per-stage harness selection. Defaults to 'inherit' (Pipeline.spec.defaultHarness, default 'claude-code'). RFC-0010 §6.3 / §13."
+              },
+              "harnessFallback": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "enum": ["claude-code", "codex", "gemini-cli", "opencode", "aider", "generic-api"]
+                },
+                "description": "Ordered fallback chain on availability failures. RFC-0010 §13.5."
+              },
+              "requiresIndependentHarnessFrom": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Upstream stage names whose resolved harness MUST be excluded from this stage's effective chain (cross-harness review independence per RFC §13.10 / Q8)."
               }
             },
             "additionalProperties": false
@@ -222,6 +240,20 @@
           "type": "string",
           "default": "sonnet",
           "description": "Resolution target for any Stage with model: inherit (or absent). Defaults to sonnet. RFC-0010 §6.4."
+        },
+        "defaultHarness": {
+          "type": "string",
+          "enum": ["claude-code", "codex", "gemini-cli", "opencode", "aider", "generic-api"],
+          "default": "claude-code",
+          "description": "Resolution target for any Stage with harness: inherit. Defaults to claude-code. RFC-0010 §6.5."
+        },
+        "defaultHarnessFallback": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["claude-code", "codex", "gemini-cli", "opencode", "aider", "generic-api"]
+          },
+          "description": "Pipeline-wide default fallback chain applied to stages that omit harnessFallback. RFC-0010 §6.5."
         }
       },
       "additionalProperties": false

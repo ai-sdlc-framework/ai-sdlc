@@ -799,6 +799,34 @@ export {
   type ParallelismMode,
 } from './runtime/index.js';
 
+// RFC-0010 harness adapters
+export {
+  HarnessRegistry,
+  UnknownHarnessError,
+  ClaudeCodeAdapter,
+  CodexAdapter,
+  createDefaultHarnessRegistry,
+  probeVersion,
+  matchesRange,
+  enforceIndependence,
+  validateIndependenceGraph,
+  CyclicIndependenceConstraintError,
+  type HarnessAdapter,
+  type HarnessAvailability,
+  type HarnessCapabilities,
+  type HarnessEvent,
+  type HarnessInput,
+  type HarnessName,
+  type HarnessRequires,
+  type HarnessResult,
+  type HarnessResultStatus,
+  type ClaudeCodeAdapterDeps,
+  type CodexAdapterDeps,
+  type IndependenceResult,
+  type UpstreamRun,
+  type ToolDefinition,
+} from './harness/index.js';
+
 // RFC-0010 model registry + classifier
 export {
   ModelRegistry,
