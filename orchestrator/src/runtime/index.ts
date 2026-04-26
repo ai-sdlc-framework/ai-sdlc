@@ -20,3 +20,21 @@ export {
   WorktreeOwnershipError,
   type OwnershipResult,
 } from './worktree.js';
+
+export {
+  WorktreePoolManager,
+  WorktreePoolError,
+  DEFAULT_POOL_ROOT,
+  DEFAULT_STALE_THRESHOLD_DAYS,
+  type WorktreePoolSpec,
+  type WorktreePoolManagerDeps,
+  type AllocateOptions,
+  type WorktreeHandle,
+} from './worktree-pool.js';
+
+export {
+  readParallelismMode,
+  isParallelismEnabled,
+  FLAG_NAME as PARALLELISM_FLAG,
+  type ParallelismMode,
+} from './parallelism-flag.js';

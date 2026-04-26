@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, writeFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import {
   slugifyBranch,
   worktreePath,
@@ -74,7 +74,9 @@ describe('verifyOwnership and assertOwnership', () => {
     const result = await verifyOwnership(worktreeDir, cloneDir);
     expect(result.owned).toBe(true);
     expect(result.reason).toBe('ok');
-    expect(result.actualClone).toBe(resolve(cloneDir, '.git', 'worktrees', 'my-branch'));
+    // verifyOwnership canonicalizes via realpath; assert against the realpath of the dir.
+    const canonical = await realpath(join(cloneDir, '.git', 'worktrees', 'my-branch'));
+    expect(result.actualClone).toBe(canonical);
   });
 
   it('accepts a relative pointer path', async () => {
