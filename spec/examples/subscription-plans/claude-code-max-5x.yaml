@@ -1,0 +1,21 @@
+# Reference SubscriptionPlan for Claude Code Max 5x.
+# Operators verify off-peak.lastVerified against vendor docs at least quarterly.
+apiVersion: ai-sdlc.dev/v1alpha1
+kind: SubscriptionPlan
+metadata:
+  name: claude-code-max-5x
+spec:
+  harness: claude-code
+  billingMode: session-window
+  windowDuration: PT5H
+  windowQuotaTokens: 1000000
+  pacingTarget: 0.85
+  hardCap: 0.95
+  quotaSource: self-tracked
+  offPeak:
+    enabled: true
+    multiplier: 2.0
+    schedule:
+      - { tz: 'America/Los_Angeles', hours: '22-06' }
+      - { tz: 'America/Los_Angeles', hours: '0-7', daysOfWeek: 'Sat,Sun' }
+    lastVerified: '2026-04-15'

@@ -827,6 +827,48 @@ export {
   type ToolDefinition,
 } from './harness/index.js';
 
+// RFC-0010 subscription scheduling
+export {
+  SubscriptionLedger,
+  validateTenantShares,
+  evaluateSchedule,
+  CalibrationStore,
+  COLD_START_DEFAULT,
+  buildBurnDownReport,
+  analyzeTier,
+  PLAN_COSTS_USD,
+  isOffPeakAt,
+  nextOffPeakStart,
+  ageInDays,
+  freshnessLevel,
+  DEFAULT_TENANT,
+  COLD_START_DEFAULT_INPUT,
+  COLD_START_DEFAULT_OUTPUT,
+  ESTIMATE_VARIANCE_THRESHOLD,
+  ROLLING_WINDOW_SIZE,
+  type SubscriptionPlan,
+  type Schedule,
+  type TokenEstimate,
+  type LedgerKey,
+  type WindowState,
+  type AdmissionDecision,
+  type BurnDownReport,
+  type LedgerEvent,
+  type BillingMode,
+  type QuotaSource,
+  type OffPeakSchedule,
+  type BurnDownInput,
+  type CalibrationStoreDeps,
+  type LedgerDeps,
+  type ScheduleDecision,
+  type ScheduleEvaluationContext,
+  type Confidence,
+  type ContentionEvent,
+  type TierAnalysisInput,
+  type TierAnalysisResult,
+  type FreshnessLevel,
+} from './scheduling/index.js';
+
 // RFC-0010 model registry + classifier
 export {
   ModelRegistry,

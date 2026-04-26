@@ -2222,6 +2222,31 @@ export const pipelineSchema = {
                 description:
                   "Upstream stage names whose resolved harness MUST be excluded from this stage's effective chain (cross-harness review independence per RFC §13.10 / Q8).",
               },
+              schedule: {
+                type: 'string',
+                enum: ['now', 'off-peak', 'quota-permitting', 'defer-if-low-priority'],
+                default: 'now',
+                description: 'Subscription-aware dispatch hint per RFC §6.3 / §14.3.',
+              },
+              estimatedTokens: {
+                type: 'object',
+                properties: {
+                  input: { type: 'integer', minimum: 0 },
+                  output: { type: 'integer', minimum: 0 },
+                  frozen: { type: 'boolean' },
+                },
+                required: ['input', 'output'],
+                additionalProperties: false,
+                description:
+                  'Operator hint for SubscriptionLedger window-headroom math. When omitted, cold-start defaults apply (50000/10000) and EstimateBootstrapped fires after first run. Set frozen: true to opt out of rolling updates. RFC §6.3 / §14.6.',
+              },
+              databaseAccess: {
+                type: 'string',
+                enum: ['none', 'read', 'write', 'migrate'],
+                default: 'none',
+                description:
+                  'Per-stage database-access declaration. Drives DatabaseBranchPool provisioning per RFC §6.3 / §15.7.',
+              },
             },
             additionalProperties: false,
           },
@@ -2302,6 +2327,34 @@ export const pipelineSchema = {
           },
           description:
             'Pipeline-wide default fallback chain applied to stages that omit harnessFallback. RFC-0010 §6.5.',
+        },
+        tenant: {
+          type: 'string',
+          description:
+            'Tenant identifier for SubscriptionLedger keying. When set, partitions a shared vendor account into virtual sub-windows per RFC-0010 §6.5 / §14.12.',
+        },
+        tenantQuotaShare: {
+          type: 'number',
+          minimum: 0,
+          maximum: 1,
+          description:
+            "Fraction of the shared account's window quota allocated to this tenant. Required when tenant is set and multiple tenants exist on the same account; sum across tenants MUST equal 1.0.",
+        },
+        accountId: {
+          type: 'string',
+          description:
+            'Override for HarnessAdapter.getAccountId() auto-derivation (LedgerKeyAmbiguous fallback). RFC-0010 §6.5.',
+        },
+        offPeakMaxWait: {
+          type: 'string',
+          description:
+            'Maximum time a schedule: off-peak stage may wait before dispatching on-peak. ISO 8601 duration; defaults to PT8H. RFC-0010 §6.5 / §14.3.',
+        },
+        artifactSchemaVersion: {
+          type: 'string',
+          default: 'v1',
+          description:
+            'Pinned artifact-schema version per RFC-0010 §6.5 / §16.4 schema evolution semantics.',
         },
       },
       additionalProperties: false,
