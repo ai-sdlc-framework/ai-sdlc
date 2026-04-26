@@ -1,0 +1,29 @@
+# Reference DatabaseBranchPool for production Neon Postgres.
+# Operators set NEON_API_TOKEN and DATABASE_URL_DEV in env; the orchestrator forks a
+# branch from the 'dev' upstream per worktree and reclaims on PR merge.
+apiVersion: ai-sdlc.dev/v1alpha1
+kind: DatabaseBranchPool
+metadata:
+  name: primary-postgres
+spec:
+  adapter: neon
+  upstream:
+    connectionStringEnv: DATABASE_URL_DEV
+    branchFrom: dev
+  injection:
+    targetEnv: DATABASE_URL
+    additionalEnvs: [PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD]
+  lifecycle:
+    createOn: worktree-allocation
+    reclaimOn: pr-merge
+    maxConcurrent: 10
+    branchTtl: P14D
+    abandonAfter: P7D
+    warmPoolSize: 0
+  allowBranchFromBranch: false
+  migrations:
+    runOnBranchCreate: true
+    migrationCommand: 'pnpm db:migrate'
+  credentials:
+    apiTokenEnv: NEON_API_TOKEN
+    projectId: prj_replace_me

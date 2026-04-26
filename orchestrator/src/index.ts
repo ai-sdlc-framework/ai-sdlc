@@ -869,6 +869,37 @@ export {
   type FreshnessLevel,
 } from './scheduling/index.js';
 
+// RFC-0010 database branching (DatabaseBranchAdapter framework + 4 adapters)
+export {
+  DatabaseAdapterRegistry,
+  UnknownDatabaseAdapterError,
+  SqliteCopyAdapter,
+  NeonAdapter,
+  PgSnapshotRestoreAdapter,
+  ExternalAdapter,
+  createDefaultDatabaseAdapterRegistry,
+  buildInjectionOverrides,
+  parsePostgresUrl,
+  maskConnectionString,
+  enforceTopologyGuard,
+  buildMigrationDivergedEvent,
+  DatabaseBranchAdapterError,
+  BranchTopologyForbiddenError,
+  type DatabaseBranchAdapter,
+  type DatabaseBranchCapabilities,
+  type DatabaseBranchHandle,
+  type DatabaseAdapterName,
+  type ResolvedDatabaseBranchPool,
+  type DatabaseAccess,
+  type SqliteCopyAdapterDeps,
+  type NeonAdapterDeps,
+  type PgSnapshotRestoreAdapterDeps,
+  type ExternalAdapterDeps,
+  type InjectedEnvOverrides,
+  type KnownInFlightBranches,
+  type MigrationDivergedEvent,
+} from './database/index.js';
+
 // RFC-0010 artifacts (heartbeat + event stream + atomic JSON + state listing)
 export {
   StateWriter,
