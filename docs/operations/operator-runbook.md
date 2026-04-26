@@ -323,6 +323,94 @@ The `lastVerified` date on a SubscriptionPlan is more than 30 days old. Check cu
 
 ---
 
+## Recovery Runbooks (specific failure modes)
+
+### `WorktreeOwnershipMismatch`
+
+**Symptom.** Pipeline-load fails or `cli-status` shows a worktree the orchestrator refuses to operate on. The error message names the expected clone path vs the actual clone path.
+
+**Cause.** The pool-root directory contains a worktree from a different clone of the same upstream repo. Two common scenarios:
+- An operator (or another orchestrator) cloned the repo to a different path and used the same pool root.
+- The original clone was deleted but the pool root persisted.
+
+**Recovery.**
+1. Confirm the worktree's `.git` pointer file: `cat <pool>/<branch-slug>/.git`
+2. If the declared `gitdir` references a clone that still exists: re-run from that clone, OR move the worktree to a pool-root scoped to your clone.
+3. If the original clone is gone: manually remove the worktree directory (it's orphaned). `rm -rf <pool>/<branch-slug>`. The next `git worktree add` will recreate it cleanly.
+4. To prevent recurrence: scope each clone's pool to a distinct path (default workspace-scoped layout already does this).
+
+### `RebaseConflict`
+
+**Symptom.** Merge gate suspended a pipeline run. The branch's base is stale and `git rebase origin/main` hit a content conflict.
+
+**Recovery.**
+1. `cd <pool>/<branch-slug>` and inspect with `git status` — files in conflict are listed.
+2. Either resolve manually (preferred for substantive conflicts) or run `git rebase --abort` to bail.
+3. If aborting: re-trigger the pipeline run; the orchestrator will re-fetch and try again. If the rebase fails the same way, the issue likely needs a different implementation approach — re-triage manually.
+4. After resolving + `git rebase --continue`: `git push --force-with-lease origin <branch>`. The orchestrator will detect the up-to-date base on next merge-gate acquisition.
+
+### Stuck heartbeats (agent hung mid-stage)
+
+**Symptom.** `cli-status` shows an issue with `(STALE)` next to its heartbeat age. No progress for >5 minutes.
+
+**Cause.** The agent process crashed or wedged mid-stage; the heartbeat writer didn't get a chance to update `state.json`.
+
+**Recovery.**
+1. Check the actual process: `ps aux | grep <issue-id>`. If it's gone, the agent crashed.
+2. Check the worktree for partial state: `cd <pool>/<branch-slug>; git status`. Any uncommitted work is lost or salvageable depending on what was written.
+3. To recover the slot: run `cli-requeue <issue-id>` to re-dispatch (Phase 3 dispatcher); or reclaim the worktree manually via `pool.reclaim()` then re-run.
+4. Persistent stuck heartbeats on the same issue → check the issue itself for a pathological pattern (e.g., agent stuck in a verify-then-fix loop). Re-triage manually.
+
+### `IndependenceViolated`
+
+**Symptom.** Slack digest entry: review-stage ran on the same harness as the implementer because fallback emptied the chain.
+
+**Recovery.**
+1. If the original implementer's harness has recovered: re-run the review stage manually with `cli-requeue` (it'll get the fresh fallback chain).
+2. If the harness is persistently down: temporarily expand the stage's `harnessFallback` chain to include another vendor (e.g., add `aider` after `claude-code, codex`).
+3. If the pipeline declared `onFailure: abort` for `IndependenceViolated`, the run is suspended; operator decision required.
+
+### `MigrationDiverged`
+
+**Symptom.** Slack digest: child branches inherit a migration that no longer exists in any merged code (parent PR was abandoned).
+
+**Recovery.** See AISDLC-70.9 / RFC §15.5.1 — three options:
+1. **Rebase children:** acceptable if the parent migration was discardable.
+2. **Accept divergence:** child PR ships its own copy of the parent's migration. Acceptable when the migration was correct.
+3. **Reclaim children:** cancel child PRs entirely. Most aggressive.
+
+The orchestrator does NOT auto-reclaim — every option above requires operator triage.
+
+### `BranchQuotaExceeded`
+
+**Symptom.** New worktrees can't allocate database branches; pipeline-load fails.
+
+**Recovery.**
+1. Run the stale-branch sweep: `cli-branch-sweep` (or the equivalent operator command — check `cli-status --branches`). Reclaims branches past their TTL.
+2. If sweep doesn't free enough: lower `WorktreePool.spec.parallelism.maxConcurrent` temporarily.
+3. Long-term: upgrade the vendor quota tier (Neon, Supabase, RDS).
+
+## Chaos test plan (Phase 5 hardening)
+
+Per RFC §17 Phase 5, before promoting `AI_SDLC_PARALLELISM=experimental` to default-on, the dogfood pipeline MUST pass three chaos scenarios:
+
+| Scenario | Setup | Verification |
+|---|---|---|
+| **Kill during plan** | Dispatch 3 parallel issues, send SIGKILL to one agent during the plan stage | Surviving agents continue; killed agent's worktree reclaimed within `branchTtl`; PR not created |
+| **Kill during implement** | Same, kill during implement | Worktree reclaimed; partial commits NOT pushed; issue requeues with re-scoring per §9.4 |
+| **Kill during validate** | Same, kill during validate | Implementation artifact preserved (already written); validation re-runs on requeue |
+
+The chaos test is intended to be run by the operator before the feature-flag promotion, not as a CI gate. Document failures in the RFC's revision history (v21+) before promoting.
+
+## Feature-flag promotion ritual (after 1-week soak)
+
+1. Verify dogfood pipeline ran for ≥7 consecutive days with `AI_SDLC_PARALLELISM=experimental` and no `IndependenceViolated`/`MigrationDiverged`/stuck-heartbeat events that required operator intervention.
+2. Run the chaos test plan above. All three scenarios MUST pass.
+3. Update `orchestrator/src/runtime/parallelism-flag.ts` so `readParallelismMode()` defaults to `'on'` when the env var is unset.
+4. Append a v21 entry to `spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md` revision history documenting the promotion date and the chaos-test results.
+5. Update `CHANGELOG.md` with the user-visible behavior change ("parallelism is now on by default").
+6. Announce in Slack with a link to the rollback procedure (set `AI_SDLC_PARALLELISM=off` to disable).
+
 ## Related Documents
 
 - [RFC-0010 — Parallel Execution and Worktree Pooling](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) — full normative spec for everything this runbook references
