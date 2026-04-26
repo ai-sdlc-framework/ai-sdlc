@@ -105,3 +105,7 @@ RFC-NNNN-short-title.md
 | [RFC-0003](RFC-0003-infrastructure-adapters.md) | Infrastructure Provider Adapters | Draft |
 | [RFC-0004](RFC-0004-cost-governance-and-attribution.md) | Cost Governance and Attribution | Draft |
 | [RFC-0005](RFC-0005-product-priority-algorithm.md) | Product Priority Algorithm (PPA) | Draft |
+| [RFC-0006](RFC-0006-design-system-governance-v5-final.md) | Design System Governance | Draft |
+| [RFC-0008](RFC-0008-ppa-triad-integration-final-combined.md) | PPA Triad Integration | Draft |
+| [RFC-0009](RFC-0009-tessellated-design-sharding.md) | Tessellated Design Sharding | Draft |
+| [RFC-0010](RFC-0010-parallel-execution-worktree-pooling.md) | Parallel Execution and Worktree Pooling | Draft |
