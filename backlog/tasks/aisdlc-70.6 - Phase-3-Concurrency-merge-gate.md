@@ -1,9 +1,10 @@
 ---
 id: AISDLC-70.6
 title: 'Phase 3: Concurrency + merge gate'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-04-26 19:46'
+updated_date: '2026-04-26 20:58'
 labels:
   - rfc-0010
   - phase-3

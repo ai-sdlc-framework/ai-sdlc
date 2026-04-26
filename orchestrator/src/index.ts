@@ -869,6 +869,28 @@ export {
   type FreshnessLevel,
 } from './scheduling/index.js';
 
+// RFC-0010 dispatch (worker pool + merge gate + requeue)
+export {
+  runWorkerPool,
+  withMergeGate,
+  forceReleaseMergeGate,
+  isBranchUpToDate,
+  MergeGateLockTimeoutError,
+  decideRequeue,
+  appendTriageHistory,
+  type WorkItem,
+  type WorkerPoolDeps,
+  type WorkerPoolEvent,
+  type WorkerPoolResult,
+  type FailureEvent,
+  type RequeueTrigger,
+  type RequeueDecision,
+  type RequeueDecisionInput,
+  type TriageHistoryEntry,
+  type FailureClassification,
+  type MergeGateDeps,
+} from './dispatch/index.js';
+
 // RFC-0010 model registry + classifier
 export {
   ModelRegistry,
