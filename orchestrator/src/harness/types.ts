@@ -90,6 +90,12 @@ export interface HarnessResult {
   outputTokens: number;
   /** Files the harness wrote to $ARTIFACTS_DIR. */
   artifactPaths: string[];
+  /**
+   * Final assistant text response, when the stage produced one (read-only stages like
+   * triage/review return their verdict here; code-generation stages typically write to
+   * artifacts and leave this empty or set it to a brief summary).
+   */
+  outputText?: string;
   errorDetail?: string;
 }
 

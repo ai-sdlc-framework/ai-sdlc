@@ -6,17 +6,27 @@
  *   Full:     triage --issue 42
  *   Analyze:  triage --title "..." --body "..." --dry-run
  *             Outputs verdict JSON to stdout (no tracker needed).
+ *
+ * Billing path (--via):
+ *   --via cli  → invoke `claude` CLI subscription (Pro/Max). Default for AISDLC-* issues
+ *                or whenever ANTHROPIC_API_KEY is unset.
+ *   --via api  → call Anthropic Messages API directly with ANTHROPIC_API_KEY. Default
+ *                for numeric (GitHub) issues when the env var is set.
  */
 
 import { readFileSync } from 'node:fs';
-import { executeTriage } from '@ai-sdlc/orchestrator';
+import { executeTriage, ClaudeCodeAdapter } from '@ai-sdlc/orchestrator';
 import { resolveRepoRoot } from '@ai-sdlc/orchestrator';
+import type { SecurityTriageConfig } from '@ai-sdlc/orchestrator';
+
+type Via = 'cli' | 'api';
 
 interface TriageArgs {
   issueId?: string;
   title?: string;
   body?: string;
   dryRun: boolean;
+  via?: Via;
 }
 
 function getArg(argv: string[], flag: string): string | undefined {
@@ -31,6 +41,8 @@ function parseArgs(argv: string[]): TriageArgs {
   const bodyArg = getArg(argv, '--body');
   const bodyFile = getArg(argv, '--body-file');
   const dryRun = argv.includes('--dry-run');
+  const viaRaw = getArg(argv, '--via');
+  const via: Via | undefined = viaRaw === 'cli' || viaRaw === 'api' ? viaRaw : undefined;
 
   // Read body from file if --body-file is provided (avoids shell quoting issues)
   let body = bodyArg ?? process.env.ISSUE_BODY;
@@ -39,24 +51,47 @@ function parseArgs(argv: string[]): TriageArgs {
   }
 
   if (!issueId && !title) {
-    console.error('Usage: triage --issue <id>');
-    console.error('       triage --title "..." --body "..." --dry-run');
+    console.error('Usage: triage --issue <id> [--via cli|api]');
+    console.error('       triage --title "..." --body "..." --dry-run [--via cli|api]');
     console.error('       triage --title "..." --body-file /path/to/body.txt --dry-run');
     console.error('       ISSUE_TITLE="..." ISSUE_BODY="..." triage --dry-run');
     process.exit(1);
   }
 
-  return { issueId, title, body, dryRun };
+  return { issueId, title, body, dryRun, via };
+}
+
+/**
+ * Pick the billing path:
+ *   - explicit --via wins
+ *   - AISDLC-* issues default to CLI (subscription path for internal backlog)
+ *   - missing ANTHROPIC_API_KEY → CLI (no other option)
+ *   - otherwise → API (legacy default for GitHub workflow)
+ */
+function resolveVia(args: TriageArgs): Via {
+  if (args.via) return args.via;
+  if (args.issueId?.startsWith('AISDLC-')) return 'cli';
+  if (!process.env.ANTHROPIC_API_KEY) return 'cli';
+  return 'api';
+}
+
+function buildTriageConfig(via: Via): SecurityTriageConfig | undefined {
+  if (via !== 'cli') return undefined;
+  return { harness: new ClaudeCodeAdapter() };
 }
 
 async function main(): Promise<void> {
   const args = parseArgs(process.argv);
   const workDir = await resolveRepoRoot();
+  const via = resolveVia(args);
+  const triageConfig = buildTriageConfig(via);
+
+  console.error(`[ai-sdlc] [triage] billing path: ${via}`);
 
   // Analyze-only mode: pass title/body directly, skip tracker
   if (args.title) {
     const { SecurityTriageRunner } = await import('@ai-sdlc/orchestrator');
-    const runner = new SecurityTriageRunner();
+    const runner = new SecurityTriageRunner(triageConfig);
     const result = await runner.run({
       issueId: args.issueId ?? '0',
       issueTitle: args.title,
@@ -89,6 +124,7 @@ async function main(): Promise<void> {
     const result = await executeTriage(args.issueId!, {
       workDir,
       dryRun: args.dryRun,
+      triageConfig,
     });
 
     console.log('\n── Security Triage Result ──');

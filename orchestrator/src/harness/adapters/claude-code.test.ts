@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import type { spawn } from 'node:child_process';
 import { ClaudeCodeAdapter } from './claude-code.js';
 
 describe('ClaudeCodeAdapter', () => {
@@ -101,16 +102,137 @@ describe('ClaudeCodeAdapter', () => {
       expect(result.status).toBe('success');
     });
 
-    it('default invoke throws (Phase 3 wires the dispatcher)', async () => {
-      const a = new ClaudeCodeAdapter();
-      await expect(
-        a.invoke({
-          prompt: 'test',
-          cwd: '/tmp',
-          model: 'claude-sonnet-4-6',
-          artifactsDir: '/tmp/artifacts',
-        }),
-      ).rejects.toThrow(/not wired into dispatch yet/);
+    it('spawns claude CLI with -p stream-json args, writes prompt to stdin, parses result event', async () => {
+      const calls: { cmd: string; args: string[]; cwd?: string; stdinWritten: string } = {
+        cmd: '',
+        args: [],
+        stdinWritten: '',
+      };
+      const fakeSpawn = ((cmd: string, args: string[], opts: { cwd?: string }) => {
+        calls.cmd = cmd;
+        calls.args = args;
+        calls.cwd = opts.cwd;
+        const stdoutHandlers: Array<(c: Buffer) => void> = [];
+        const stderrHandlers: Array<(c: Buffer) => void> = [];
+        const closeHandlers: Array<(code: number | null, signal: NodeJS.Signals | null) => void> =
+          [];
+        const errorHandlers: Array<(e: Error) => void> = [];
+        const child = {
+          stdout: {
+            on: (event: string, cb: (c: Buffer) => void) => {
+              if (event === 'data') stdoutHandlers.push(cb);
+            },
+          },
+          stderr: {
+            on: (event: string, cb: (c: Buffer) => void) => {
+              if (event === 'data') stderrHandlers.push(cb);
+            },
+          },
+          stdin: {
+            write: (s: string) => {
+              calls.stdinWritten += s;
+            },
+            end: () => {},
+          },
+          on: (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'close') {
+              closeHandlers.push(
+                cb as (code: number | null, signal: NodeJS.Signals | null) => void,
+              );
+            }
+            if (event === 'error') errorHandlers.push(cb as (e: Error) => void);
+          },
+        };
+        // Simulate stream-json output on next tick.
+        setImmediate(() => {
+          for (const h of stdoutHandlers) {
+            h(Buffer.from('{"type":"system","subtype":"init"}\n'));
+            h(
+              Buffer.from(
+                '{"type":"result","result":"verdict-text","total_cost_usd":0.0042,"modelUsage":{"claude-sonnet-4-6":{"inputTokens":1234,"outputTokens":567}}}\n',
+              ),
+            );
+          }
+          for (const h of closeHandlers) h(0, null);
+        });
+        return child as unknown as ReturnType<typeof spawn>;
+      }) as unknown as typeof spawn;
+
+      const a = new ClaudeCodeAdapter({ spawn: fakeSpawn });
+      const result = await a.invoke({
+        prompt: 'analyze this',
+        cwd: '/tmp/wt',
+        model: 'claude-sonnet-4-6',
+        artifactsDir: '/tmp/artifacts',
+      });
+
+      expect(calls.cmd).toBe('claude');
+      expect(calls.args).toEqual([
+        '-p',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+        '--model',
+        'claude-sonnet-4-6',
+      ]);
+      expect(calls.cwd).toBe('/tmp/wt');
+      expect(calls.stdinWritten).toBe('analyze this');
+      expect(result.status).toBe('success');
+      expect(result.outputText).toBe('verdict-text');
+      expect(result.costUsd).toBe(0.0042);
+      expect(result.inputTokens).toBe(1234);
+      expect(result.outputTokens).toBe(567);
+    });
+
+    it('returns failure when claude exits non-zero', async () => {
+      const fakeSpawn = (() => {
+        const closeHandlers: Array<(code: number | null) => void> = [];
+        const stderrHandlers: Array<(c: Buffer) => void> = [];
+        const child = {
+          stdout: { on: () => {} },
+          stderr: {
+            on: (event: string, cb: (c: Buffer) => void) => {
+              if (event === 'data') stderrHandlers.push(cb);
+            },
+          },
+          stdin: { write: () => {}, end: () => {} },
+          on: (event: string, cb: (...args: unknown[]) => void) => {
+            if (event === 'close') closeHandlers.push(cb as (code: number | null) => void);
+          },
+        };
+        setImmediate(() => {
+          for (const h of stderrHandlers) h(Buffer.from('claude: not authenticated'));
+          for (const h of closeHandlers) h(1);
+        });
+        return child as unknown as ReturnType<typeof spawn>;
+      }) as unknown as typeof spawn;
+
+      const a = new ClaudeCodeAdapter({ spawn: fakeSpawn });
+      const result = await a.invoke({
+        prompt: 'x',
+        cwd: '/tmp',
+        model: 'claude-sonnet-4-6',
+        artifactsDir: '/tmp/artifacts',
+      });
+      expect(result.status).toBe('failure');
+      expect(result.exitCode).toBe(1);
+      expect(result.errorDetail).toContain('not authenticated');
+    });
+
+    it('returns unavailable when spawn throws (binary missing)', async () => {
+      const fakeSpawn = (() => {
+        throw new Error('ENOENT: no such file or directory');
+      }) as unknown as typeof spawn;
+
+      const a = new ClaudeCodeAdapter({ spawn: fakeSpawn });
+      const result = await a.invoke({
+        prompt: 'x',
+        cwd: '/tmp',
+        model: 'claude-sonnet-4-6',
+        artifactsDir: '/tmp/artifacts',
+      });
+      expect(result.status).toBe('unavailable');
+      expect(result.errorDetail).toContain('ENOENT');
     });
   });
 });

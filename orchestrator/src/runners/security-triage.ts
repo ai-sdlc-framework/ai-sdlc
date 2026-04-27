@@ -1,9 +1,13 @@
 /**
- * Security Triage runner — analyzes issues for prompt injection and
- * adversarial content. Read-only: never modifies files.
+ * Security Triage runner — analyzes issues for prompt injection and adversarial content.
+ * Read-only: never modifies files.
  *
- * Uses the Anthropic Messages API directly (not Claude Code CLI)
- * to produce a structured safety verdict.
+ * Two execution paths:
+ *   - **API path** (default for backward-compat): direct Anthropic Messages API call,
+ *     billed against ANTHROPIC_API_KEY. Used by the public GitHub-issue workflow.
+ *   - **Harness path**: invoke a HarnessAdapter (e.g. ClaudeCodeAdapter) that drives the
+ *     `claude` CLI subscription. Used by the internal backlog workflow so triage runs
+ *     under the Pro/Max plan instead of pay-per-token.
  */
 
 import type { AgentRunner, AgentContext, AgentResult, TokenUsage } from './types.js';
@@ -12,6 +16,7 @@ import {
   DEFAULT_ANTHROPIC_MODEL,
   DEFAULT_LLM_TIMEOUT_MS,
 } from '../defaults.js';
+import type { HarnessAdapter } from '../harness/types.js';
 
 // ── Types ────────────────────────────────────────────────────────────
 
@@ -39,6 +44,15 @@ export interface SecurityTriageConfig {
   timeoutMs?: number;
   /** Risk score threshold at or above which issues are auto-rejected. Defaults to 6. */
   rejectThreshold?: number;
+  /**
+   * When set, triage routes through this harness instead of the Anthropic Messages API.
+   * Lets the internal backlog pipeline run triage under the Claude Code subscription.
+   */
+  harness?: HarnessAdapter;
+  /** Working directory for harness invocations. Defaults to process.cwd(). */
+  harnessCwd?: string;
+  /** Artifacts dir passed to the harness. Defaults to /tmp. */
+  harnessArtifactsDir?: string;
 }
 
 // ── Triage prompt ────────────────────────────────────────────────────
@@ -86,16 +100,6 @@ export class SecurityTriageRunner implements AgentRunner {
   }
 
   async run(ctx: AgentContext): Promise<AgentResult> {
-    const apiKey = this.config.apiKey ?? process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) {
-      return {
-        success: false,
-        filesChanged: [],
-        summary: 'Missing ANTHROPIC_API_KEY for security triage',
-        error: 'ANTHROPIC_API_KEY environment variable is not set',
-      };
-    }
-
     // Warn if issue body is empty or whitespace-only
     if (!ctx.issueBody || ctx.issueBody.trim() === '') {
       console.warn(
@@ -115,11 +119,13 @@ export class SecurityTriageRunner implements AgentRunner {
     ].join('\n');
 
     try {
-      const verdict = await this.callAPI(apiKey, userContent);
+      const verdict = this.config.harness
+        ? await this.callHarness(this.config.harness, userContent)
+        : await this.callApiPath(userContent);
 
       return {
         success: true,
-        filesChanged: [], // Read-only — never modifies files
+        filesChanged: [],
         summary: JSON.stringify(verdict),
         tokenUsage: verdict._tokenUsage,
       };
@@ -131,6 +137,46 @@ export class SecurityTriageRunner implements AgentRunner {
         error: err instanceof Error ? err.message : String(err),
       };
     }
+  }
+
+  private async callApiPath(
+    userContent: string,
+  ): Promise<TriageVerdict & { _tokenUsage?: TokenUsage }> {
+    const apiKey = this.config.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new Error(
+        'ANTHROPIC_API_KEY is not set and no harness is configured. Set the env var or pass `harness` in SecurityTriageConfig (recommended for the subscription-billed backlog workflow).',
+      );
+    }
+    return this.callAPI(apiKey, userContent);
+  }
+
+  private async callHarness(
+    harness: HarnessAdapter,
+    userContent: string,
+  ): Promise<TriageVerdict & { _tokenUsage?: TokenUsage }> {
+    const model = this.config.model ?? DEFAULT_ANTHROPIC_MODEL;
+    const result = await harness.invoke({
+      prompt: `${TRIAGE_SYSTEM_PROMPT}\n\n${userContent}`,
+      cwd: this.config.harnessCwd ?? process.cwd(),
+      model,
+      artifactsDir: this.config.harnessArtifactsDir ?? '/tmp',
+      timeout: this.config.timeoutMs ? `PT${Math.ceil(this.config.timeoutMs / 1000)}S` : undefined,
+    });
+
+    if (result.status !== 'success' || !result.outputText) {
+      throw new Error(
+        `harness ${harness.name} returned ${result.status}: ${result.errorDetail ?? '(no detail)'}`,
+      );
+    }
+
+    const verdict = this.parseVerdict(result.outputText);
+    const tokenUsage: TokenUsage = {
+      inputTokens: result.inputTokens,
+      outputTokens: result.outputTokens,
+      model,
+    };
+    return { ...verdict, _tokenUsage: tokenUsage };
   }
 
   private async callAPI(
