@@ -411,3 +411,76 @@ describe('confidence-based filtering', () => {
     expect(verdict.findings).toHaveLength(1);
   });
 });
+
+describe('ReviewAgentRunner — large-context escalation', () => {
+  const originalFetch = globalThis.fetch;
+  beforeEach(() => {
+    process.env.ANTHROPIC_API_KEY = 'test-key';
+  });
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function captureRequest() {
+    const captured: { body: string; headers: Record<string, string> } = { body: '', headers: {} };
+    globalThis.fetch = vi.fn(async (_url: unknown, init: unknown) => {
+      const ri = init as RequestInit;
+      captured.body = ri.body as string;
+      captured.headers = (ri.headers as Record<string, string>) ?? {};
+      return mockFetchResponse({
+        approved: true,
+        findings: [],
+        summary: 'ok',
+      }) as Response;
+    });
+    return captured;
+  }
+
+  it('uses default model when input is below threshold', async () => {
+    const captured = captureRequest();
+    const runner = new ReviewAgentRunner({ reviewType: 'critic' });
+    await runner.run(makeContext({ issueBody: 'small diff' }));
+    const parsed = JSON.parse(captured.body);
+    expect(parsed.model).toBe('claude-sonnet-4-5-20250929');
+    expect(captured.headers['anthropic-beta']).toBeUndefined();
+  });
+
+  it('escalates to large-context model when input exceeds threshold', async () => {
+    const captured = captureRequest();
+    const runner = new ReviewAgentRunner({
+      reviewType: 'critic',
+      largeContextThresholdChars: 1000,
+      largeContextModel: 'claude-opus-4-7',
+    });
+    // Force input above threshold.
+    const huge = 'x'.repeat(5000);
+    await runner.run(makeContext({ issueBody: huge }));
+    const parsed = JSON.parse(captured.body);
+    expect(parsed.model).toBe('claude-opus-4-7');
+    expect(captured.headers['anthropic-beta']).toBe('context-1m-2025-08-07');
+  });
+
+  it('falls back to default large-context model when none configured', async () => {
+    const captured = captureRequest();
+    const runner = new ReviewAgentRunner({
+      reviewType: 'security',
+      largeContextThresholdChars: 100,
+    });
+    await runner.run(makeContext({ issueBody: 'x'.repeat(2000) }));
+    const parsed = JSON.parse(captured.body);
+    // Default falls back to env var or 'claude-opus-4-7'
+    expect(parsed.model).not.toBe('claude-sonnet-4-5-20250929');
+    expect(captured.headers['anthropic-beta']).toBe('context-1m-2025-08-07');
+  });
+
+  it('does not escalate when input is exactly at threshold', async () => {
+    const captured = captureRequest();
+    // Build context just-at-threshold; system prompt + user content combined is the trigger.
+    const runner = new ReviewAgentRunner({
+      reviewType: 'critic',
+      largeContextThresholdChars: 10_000_000, // very high — never escalates
+    });
+    await runner.run(makeContext({ issueBody: 'x'.repeat(50_000) }));
+    expect(captured.headers['anthropic-beta']).toBeUndefined();
+  });
+});
