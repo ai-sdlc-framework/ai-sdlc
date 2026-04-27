@@ -1,0 +1,111 @@
+apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: dogfood-backlog-pipeline
+  labels:
+    ai-sdlc.io/component: dogfood
+    ai-sdlc.io/workflow: backlog
+spec:
+  # Backlog tasks are dispatched manually via
+  # `pnpm --filter @ai-sdlc/dogfood watch --issue AISDLC-N`. cli-watch auto-loads
+  # this pipeline file when any issue ID starts with `AISDLC-`. The schema requires
+  # at least one trigger so we declare a `manual.dispatch` placeholder; no automatic
+  # event listener is registered.
+  triggers:
+    - event: manual.dispatch
+      filter:
+        labels:
+          - triage-passed
+  providers:
+    backlog:
+      type: backlog-md
+      config:
+        backlogDir: ./backlog
+        taskPrefix: AISDLC
+  stages:
+    - name: validate-issue
+      qualityGates:
+        - dogfood-quality-gates
+      onFailure:
+        strategy: abort
+        notification: gate-failure
+    - name: code
+      agent: coding-agent
+      timeout: PT30M
+      credentials:
+        scope:
+          - repo:read
+          - repo:write
+        ttl: PT35M
+        revokeOnComplete: true
+      onFailure:
+        strategy: retry
+        maxRetries: 2
+        retryDelay: PT1M
+        notification: agent-failure
+    - name: review
+      approval:
+        required: true
+        blocking: true
+        timeout: PT72H
+        onTimeout: abort
+  priorityPolicy:
+    enabled: true
+    minimumScore: 0.05
+    minimumConfidence: 0.2
+    soulPurpose: 'Provide the open, vendor-neutral governance specification that enables enterprises to adopt AI coding agents with confidence, auditability, and predictability'
+    dimensions:
+      humanCurveWeights:
+        explicit: 0.5
+        consensus: 0.3
+        decision: 0.2
+    calibration:
+      enabled: true
+      lookbackPeriod: P30D
+  routing:
+    complexityThresholds:
+      ai-with-review:
+        min: 1
+        max: 6
+        strategy: ai-with-review
+  branching:
+    pattern: 'ai-sdlc/{issueIdLower}-{slug}'
+    targetBranch: main
+    cleanup: on-merge
+  pullRequest:
+    titleTemplate: 'feat: {issueTitle} ({issueId})'
+    descriptionSections:
+      - summary
+      - changes
+      - closes
+    includeProvenance: true
+    # `References` (not `Closes`) — backlog tasks aren't auto-closed by GitHub PR
+    # merges; the .github/workflows/backlog-task-complete workflow runs after merge
+    # and moves the task file to backlog/completed/ via the backlog CLI.
+    closeKeyword: References
+  notifications:
+    templates:
+      gate-failure:
+        target: issue
+        title: 'AI-SDLC: Quality Gate Failed'
+        body: '{details}'
+      agent-failure:
+        target: issue
+        title: 'AI-SDLC: Agent Failed'
+        body: 'Error during {stageName}: {details}'
+      pr-created:
+        target: issue
+        title: 'AI-SDLC: PR Created for {issueId}'
+        body: 'Pull request opened for backlog task {issueId}: {prUrl}'
+      fix-ci-limit:
+        target: pr
+        title: 'AI-SDLC: Retry Limit Reached'
+        body: 'Max fix attempts reached. Manual intervention needed.'
+      complexity-too-high:
+        target: issue
+        title: 'AI-SDLC: Complexity Too High'
+        body: 'Backlog task {issueId} complexity ({score}) routed as "{strategy}" — requires human involvement.'
+      fix-ci-success:
+        target: pr
+        title: 'AI-SDLC: Fix-CI Applied'
+        body: 'Attempt {attempt} of {max} — pushed fixes to `{branch}`.'

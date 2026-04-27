@@ -61,6 +61,42 @@ export function interpolate(text: string, vars: Record<string, string>): string 
 }
 
 /**
+ * Build the standard set of template vars for branch / PR / notification interpolation.
+ * Provides backward-compatible {issueNumber} + {issueTitle} alongside backlog-friendly
+ * {issueId}, {issueIdLower}, {slug}.
+ */
+export function buildIssueTemplateVars(
+  issueId: string,
+  issueTitle: string,
+): Record<string, string> {
+  return {
+    issueNumber: issueId,
+    issueTitle,
+    issueId,
+    issueIdLower: issueId.toLowerCase(),
+    slug: slugify(issueTitle),
+  };
+}
+
+/**
+ * Convert an arbitrary string to a kebab-case slug suitable for branch names.
+ * Lowercases, replaces non-alphanumerics with single dashes, trims dashes from
+ * start/end, and truncates to 40 chars at a word boundary so the resulting
+ * branch name stays under git's path-component limits.
+ */
+export function slugify(input: string, maxLen = 40): string {
+  const cleaned = input
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  if (cleaned.length <= maxLen) return cleaned;
+  // Truncate at the last dash before maxLen so we don't cut a word in half.
+  const truncated = cleaned.slice(0, maxLen);
+  const lastDash = truncated.lastIndexOf('-');
+  return lastDash > maxLen / 2 ? truncated.slice(0, lastDash) : truncated;
+}
+
+/**
  * Interpolate a branch name pattern by replacing `{key}` placeholders.
  * Falls back to `ai-sdlc/issue-{issueNumber}` when no pattern is provided.
  */

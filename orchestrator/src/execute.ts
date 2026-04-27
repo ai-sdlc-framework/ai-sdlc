@@ -54,6 +54,7 @@ import {
   interpolatePRTitle,
   issueIdToNumber,
   formatIssueRef,
+  buildIssueTemplateVars,
 } from './shared.js';
 import {
   checkKillSwitch,
@@ -539,7 +540,7 @@ async function executePipelineBody(
   log.stageEnd('validate-issue');
 
   // 7. Create branch and checkout locally (read pattern from pipeline config)
-  const branchVars = { issueNumber: issueId, issueTitle: issue.title };
+  const branchVars = buildIssueTemplateVars(issueId, issue.title);
   const branchName = interpolateBranchPattern(config.pipeline?.spec.branching?.pattern, branchVars);
   await sc.createBranch({ name: branchName });
   await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir });
@@ -935,7 +936,7 @@ async function executePipelineBody(
     provenanceBlock = '\n\n' + provenanceText;
   }
 
-  const prVars = { issueNumber: issueId, issueTitle: issue.title };
+  const prVars = buildIssueTemplateVars(issueId, issue.title);
   const prTitle = interpolatePRTitle(prConfig?.titleTemplate, prVars);
   const closeKeyword = prConfig?.closeKeyword ?? 'Closes';
   const targetBranch = config.pipeline?.spec.branching?.targetBranch ?? 'main';

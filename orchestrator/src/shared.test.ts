@@ -16,6 +16,8 @@ import {
   authorizeFilesChanged,
   interpolateBranchPattern,
   interpolatePRTitle,
+  buildIssueTemplateVars,
+  slugify,
   createPipelineAuthorizationChain,
   createAbacPermissionHook,
   createBlockedPathsHook,
@@ -562,5 +564,66 @@ describe('authorization chain composition', () => {
     // Blocked by ABAC (no write permission)
     const deniedAbac = chain({ agent: 'coder', action: 'write', target: '.env' });
     expect(deniedAbac.allowed).toBe(false);
+  });
+});
+
+describe('slugify()', () => {
+  it('lowercases and dasherizes alphanumerics', () => {
+    expect(slugify('Hello World')).toBe('hello-world');
+  });
+
+  it('collapses multiple non-alphanumerics to a single dash', () => {
+    expect(slugify('foo  ::  bar___baz')).toBe('foo-bar-baz');
+  });
+
+  it('strips leading and trailing dashes', () => {
+    expect(slugify('---hello---')).toBe('hello');
+  });
+
+  it('truncates long inputs at a word boundary', () => {
+    const slug = slugify('Documentation consolidation: ai-sdlc/docs ↔ ai-sdlc-io/content', 40);
+    expect(slug.length).toBeLessThanOrEqual(40);
+    // Should not end mid-word; should end on a word boundary (no trailing partial word).
+    expect(slug).not.toMatch(/-[a-z]{1,2}$/);
+  });
+
+  it('falls back to hard truncation when there is no late dash', () => {
+    // Very long single token
+    const slug = slugify('a'.repeat(80), 40);
+    expect(slug.length).toBe(40);
+  });
+
+  it('returns empty string for input with no alphanumerics', () => {
+    expect(slugify('  !!!  ')).toBe('');
+  });
+});
+
+describe('buildIssueTemplateVars()', () => {
+  it('exposes both legacy {issueNumber} and new {issueId} for backward compat', () => {
+    const vars = buildIssueTemplateVars('AISDLC-68', 'Documentation consolidation');
+    expect(vars.issueNumber).toBe('AISDLC-68');
+    expect(vars.issueId).toBe('AISDLC-68');
+    expect(vars.issueIdLower).toBe('aisdlc-68');
+    expect(vars.issueTitle).toBe('Documentation consolidation');
+    expect(vars.slug).toBe('documentation-consolidation');
+  });
+
+  it('handles numeric (GitHub) issue IDs cleanly', () => {
+    const vars = buildIssueTemplateVars('42', 'Fix the alignment bug');
+    expect(vars.issueId).toBe('42');
+    expect(vars.issueIdLower).toBe('42');
+    expect(vars.slug).toBe('fix-the-alignment-bug');
+  });
+
+  it('produces backlog-friendly branch via interpolateBranchPattern', () => {
+    const vars = buildIssueTemplateVars('AISDLC-68', 'Documentation consolidation');
+    const branch = interpolateBranchPattern('ai-sdlc/{issueIdLower}-{slug}', vars);
+    expect(branch).toBe('ai-sdlc/aisdlc-68-documentation-consolidation');
+  });
+
+  it('produces backlog-friendly PR title via interpolatePRTitle', () => {
+    const vars = buildIssueTemplateVars('AISDLC-68', 'Docs consolidation');
+    const title = interpolatePRTitle('feat: {issueTitle} ({issueId})', vars);
+    expect(title).toBe('feat: Docs consolidation (AISDLC-68)');
   });
 });

@@ -26,7 +26,15 @@ import {
 } from '@ai-sdlc/reference';
 
 export interface AiSdlcConfig {
+  /** Default pipeline (first Pipeline resource loaded; preserved for backward compat). */
   pipeline?: Pipeline;
+  /**
+   * All Pipeline resources found in the config directory. The dual-workflow setup
+   * (RFC-0010 §11): one pipeline for the public GitHub-issue path (API-key billed),
+   * another for the internal backlog path (subscription-billed). cli-watch picks
+   * by name based on the issue ID prefix.
+   */
+  pipelines?: Pipeline[];
   agentRole?: AgentRole;
   qualityGate?: QualityGate;
   autonomyPolicy?: AutonomyPolicy;
@@ -56,10 +64,12 @@ export interface ConfigLoadWarning {
 
 /** Resource kinds that allow only a single instance. Multi-instance kinds are excluded. */
 const KIND_KEY: Record<
-  Exclude<ResourceKind, 'AdapterBinding' | 'DesignSystemBinding' | 'DesignIntentDocument'>,
+  Exclude<
+    ResourceKind,
+    'AdapterBinding' | 'DesignSystemBinding' | 'DesignIntentDocument' | 'Pipeline'
+  >,
   keyof AiSdlcConfig
 > = {
-  Pipeline: 'pipeline',
   AgentRole: 'agentRole',
   QualityGate: 'qualityGate',
   AutonomyPolicy: 'autonomyPolicy',
@@ -118,6 +128,14 @@ export function loadConfig(configDir: string): AiSdlcConfig {
       (config.designSystemBindings ??= []).push(resource as DesignSystemBinding);
     } else if (resource.kind === 'DesignIntentDocument') {
       (config.designIntentDocuments ??= []).push(resource as DesignIntentDocument);
+    } else if (resource.kind === 'Pipeline') {
+      (config.pipelines ??= []).push(resource as Pipeline);
+      // Backward-compat: `config.pipeline` (singular) = the canonical one.
+      // Prefer the file literally named `pipeline.yaml` (the default workflow).
+      // Fall back to the first loaded otherwise.
+      if (file === 'pipeline.yaml' || file === 'pipeline.yml' || !config.pipeline) {
+        config.pipeline = resource as Pipeline;
+      }
     } else {
       const key = KIND_KEY[resource.kind];
       if (key) {
