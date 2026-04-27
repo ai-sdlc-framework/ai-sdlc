@@ -3,6 +3,14 @@ name: backlog-task-complete
 # Auto-close backlog tasks when a PR with `(AISDLC-N)` in its title merges.
 # Opens a follow-up PR (rather than committing directly to main) so the move is
 # auditable and respects branch protection.
+#
+# IDEMPOTENCY: When the PR was created by the `/ai-sdlc execute` plugin command,
+# the task file was already moved from backlog/tasks/ to backlog/completed/ as
+# part of the merged PR. In that case, scripts/close-backlog-task.sh exits 2
+# (already-completed no-op) and the follow-up-PR step is skipped via the
+# `already_closed` output. Net effect: this workflow is a no-op for tasks shipped
+# through /ai-sdlc execute, and a follow-up-PR creator for tasks shipped through
+# any other path (e.g. external contributors merging via the GitHub UI).
 
 on:
   pull_request:

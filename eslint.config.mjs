@@ -20,6 +20,7 @@ export default tseslint.config(
       '.claude/hooks/',
       'ai-sdlc-plugin/hooks/',
       'ai-sdlc-plugin/agents/',
+      'ai-sdlc-plugin/commands/',
       '**/coverage/',
     ],
   },
