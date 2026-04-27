@@ -5,6 +5,7 @@ import {
   type TriageVerdict,
 } from './security-triage.js';
 import type { AgentContext } from './types.js';
+import type { HarnessAdapter, HarnessInput, HarnessResult } from '../harness/types.js';
 
 function makeContext(overrides: Partial<AgentContext> = {}): AgentContext {
   return {
@@ -333,5 +334,147 @@ describe('SecurityTriageRunner', () => {
       expect(fetchSpy).toHaveBeenCalledTimes(1);
       expect(result.success).toBe(true);
     });
+  });
+});
+
+describe('SecurityTriageRunner — harness path', () => {
+  const originalApiKey = process.env.ANTHROPIC_API_KEY;
+
+  beforeEach(() => {
+    delete process.env.ANTHROPIC_API_KEY;
+  });
+
+  afterEach(() => {
+    if (originalApiKey !== undefined) process.env.ANTHROPIC_API_KEY = originalApiKey;
+    else delete process.env.ANTHROPIC_API_KEY;
+    vi.restoreAllMocks();
+  });
+
+  function makeHarness(result: {
+    status?: 'success' | 'failure';
+    outputText?: string;
+    inputTokens?: number;
+    outputTokens?: number;
+    errorDetail?: string;
+  }): HarnessAdapter & { invoke: ReturnType<typeof vi.fn> } {
+    const invoke = vi.fn(async (_input: HarnessInput) => ({
+      status: (result.status ?? 'success') as HarnessResult['status'],
+      exitCode: 0,
+      costUsd: 0,
+      inputTokens: result.inputTokens ?? 100,
+      outputTokens: result.outputTokens ?? 50,
+      artifactPaths: [],
+      outputText: result.outputText,
+      errorDetail: result.errorDetail,
+    }));
+    return {
+      name: 'claude-code',
+      capabilities: {
+        freshContext: true,
+        customTools: true,
+        streaming: true,
+        worktreeAwareCwd: true,
+        skills: true,
+        artifactWrites: true,
+        maxContextTokens: 1_000_000,
+      },
+      requires: {
+        binary: 'claude',
+        versionRange: '>=2.0.0',
+        versionProbe: { args: [], parse: () => '' },
+      },
+      getAccountId: async () => null,
+      isAvailable: async () => ({ available: true }),
+      availableModels: async () => [],
+      invoke,
+    };
+  }
+
+  it('routes through harness instead of API when harness is configured', async () => {
+    const harness = makeHarness({
+      outputText: JSON.stringify({
+        safe: true,
+        riskScore: 1,
+        findings: [],
+        sanitizedDescription: 'A clean issue',
+        rationale: 'No injection signals',
+      }),
+    });
+    const runner = new SecurityTriageRunner({ harness });
+    const result = await runner.run(makeContext({ issueBody: 'real issue body' }));
+
+    expect(harness.invoke).toHaveBeenCalledOnce();
+    const call = harness.invoke.mock.calls[0]![0] as HarnessInput;
+    expect(call.prompt).toContain(TRIAGE_SYSTEM_PROMPT);
+    expect(call.prompt).toContain('real issue body');
+    expect(call.model).toBe('claude-sonnet-4-5-20250929');
+    expect(result.success).toBe(true);
+    const verdict = JSON.parse(result.summary) as TriageVerdict;
+    expect(verdict.safe).toBe(true);
+    expect(verdict.riskScore).toBe(1);
+  });
+
+  it('does NOT require ANTHROPIC_API_KEY when harness is configured', async () => {
+    const harness = makeHarness({
+      outputText: JSON.stringify({
+        safe: true,
+        riskScore: 0,
+        findings: [],
+        sanitizedDescription: '',
+        rationale: 'ok',
+      }),
+    });
+    const runner = new SecurityTriageRunner({ harness });
+    const result = await runner.run(makeContext());
+    expect(result.success).toBe(true);
+    expect(result.error).toBeUndefined();
+  });
+
+  it('returns failure with helpful message when harness invoke fails', async () => {
+    const harness = makeHarness({
+      status: 'failure',
+      errorDetail: 'claude: not authenticated — run `claude login`',
+    });
+    const runner = new SecurityTriageRunner({ harness });
+    const result = await runner.run(makeContext());
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('not authenticated');
+  });
+
+  it('passes through harnessCwd and harnessArtifactsDir when set', async () => {
+    const harness = makeHarness({
+      outputText:
+        '{"safe":true,"riskScore":0,"findings":[],"sanitizedDescription":"","rationale":"ok"}',
+    });
+    const runner = new SecurityTriageRunner({
+      harness,
+      harnessCwd: '/some/worktree',
+      harnessArtifactsDir: '/some/artifacts/AISDLC-68',
+    });
+    await runner.run(makeContext());
+    const call = harness.invoke.mock.calls[0]![0] as HarnessInput;
+    expect(call.cwd).toBe('/some/worktree');
+    expect(call.artifactsDir).toBe('/some/artifacts/AISDLC-68');
+  });
+
+  it('reports tokens from harness result in tokenUsage', async () => {
+    const harness = makeHarness({
+      outputText:
+        '{"safe":true,"riskScore":0,"findings":[],"sanitizedDescription":"","rationale":"ok"}',
+      inputTokens: 5432,
+      outputTokens: 234,
+    });
+    const runner = new SecurityTriageRunner({ harness });
+    const result = await runner.run(makeContext());
+    expect(result.tokenUsage?.inputTokens).toBe(5432);
+    expect(result.tokenUsage?.outputTokens).toBe(234);
+  });
+
+  it('API path is unaffected: still throws helpful error when no key + no harness', async () => {
+    const runner = new SecurityTriageRunner();
+    const result = await runner.run(makeContext());
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('ANTHROPIC_API_KEY is not set');
+    expect(result.error).toContain('harness');
   });
 });
