@@ -170,6 +170,24 @@ function parseListField(yaml, field) {
 }
 
 /**
+ * Read the active task ID. Prefers the sentinel file `.worktrees/.active-task`
+ * (written by `/ai-sdlc execute`); falls back to `AI_SDLC_ACTIVE_TASK_ID` env
+ * var so the hook stays testable from a normal shell.
+ */
+function readActiveTaskId(projectAbs) {
+  const sentinelPath = join(projectAbs, '.worktrees', '.active-task');
+  if (existsSync(sentinelPath)) {
+    try {
+      const id = readFileSync(sentinelPath, 'utf-8').trim();
+      if (id) return id;
+    } catch {
+      // fall through to env var
+    }
+  }
+  return process.env.AI_SDLC_ACTIVE_TASK_ID || null;
+}
+
+/**
  * Convert a glob like `.ai-sdlc/**` or `.github/workflows/*.yml` to a regex.
  * - `**` matches any sequence including `/`
  * - `*` matches any sequence except `/`
@@ -194,11 +212,18 @@ function matchGlob(glob, path) {
 
 /**
  * Load permittedExternalPaths from the active task's frontmatter.
- * Active task is identified by AI_SDLC_ACTIVE_TASK_ID env var (e.g. AISDLC-68).
- * Returns [] when no env var, no matching task file, or no frontmatter field.
+ *
+ * Active task is identified by reading `.worktrees/.active-task` (a sentinel
+ * file written by `/ai-sdlc execute` at start, deleted at end). The env-var
+ * approach (AI_SDLC_ACTIVE_TASK_ID) does not work mid-session — the hook runs
+ * in a fresh subprocess of the Claude Code parent, which can't have its env
+ * mutated from a slash command. The env var is still honored as a fallback so
+ * users can invoke the hook in tests / external tooling.
+ *
+ * Returns [] when no active task, no matching task file, or no frontmatter field.
  */
 function loadPermittedExternalPaths(projectAbs) {
-  const taskId = process.env.AI_SDLC_ACTIVE_TASK_ID;
+  const taskId = readActiveTaskId(projectAbs);
   if (!taskId) return [];
 
   const tasksDir = join(projectAbs, 'backlog', 'tasks');

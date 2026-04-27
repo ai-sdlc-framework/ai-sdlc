@@ -76,4 +76,8 @@ describe('/ai-sdlc cleanup body contract', () => {
   it('handles missing .worktrees/ directory gracefully', () => {
     assert.match(body, /No \.worktrees\/ directory/);
   });
+
+  it('removes the .active-task sentinel during sweep (defensive cleanup)', () => {
+    assert.match(body, /rm -f \.worktrees\/\.active-task/);
+  });
 });

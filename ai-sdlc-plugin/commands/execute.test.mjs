@@ -78,8 +78,11 @@ describe('/ai-sdlc execute body contract', () => {
     assert.match(body, /subagent_type:\s*developer/i);
   });
 
-  it('exports AI_SDLC_ACTIVE_TASK_ID for the developer (PreToolUse hook reads it)', () => {
-    assert.match(body, /AI_SDLC_ACTIVE_TASK_ID/);
+  it('PreToolUse hook resolves the active task via .worktrees/.active-task sentinel', () => {
+    // env-var approach was abandoned because mid-session env mutations don't
+    // propagate to the hook subprocess; the sentinel file is the canonical
+    // signal now (see Step 4).
+    assert.match(body, /\.worktrees\/\.active-task/);
   });
 
   it('runs all three reviewers in parallel (code, test, security)', () => {
@@ -146,6 +149,22 @@ describe('/ai-sdlc execute body contract', () => {
   it('cross-links sibling PRs back into the main PR body', () => {
     assert.match(body, /Sibling PRs/);
     assert.match(body, /gh pr edit/);
+  });
+
+  it('writes the .worktrees/.active-task sentinel at Step 4', () => {
+    // The PreToolUse hook reads this sentinel — env vars don't propagate
+    // mid-session, so the sentinel file is the canonical active-task signal.
+    assert.match(body, /\.worktrees\/\.active-task/);
+    assert.match(body, /echo "\$TASK_ID" > \.worktrees\/\.active-task/);
+  });
+
+  it('cleans up the sentinel at end of run regardless of outcome', () => {
+    assert.match(body, /rm -f \.worktrees\/\.active-task/);
+    assert.match(body, /whether the run succeeded, failed, was rolled back, or escalated/i);
+  });
+
+  it('documents the single-task limitation', () => {
+    assert.match(body, /Single-task limitation/);
   });
 
   it('opens a PR via gh pr create', () => {

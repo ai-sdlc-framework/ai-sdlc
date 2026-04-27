@@ -240,6 +240,60 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (Write/Edit)', () => {
     assert.ok(isDenied(result), 'should deny when task ID is not found');
   });
 
+  it('reads active task from .worktrees/.active-task sentinel file (preferred over env)', () => {
+    // Slash command writes this sentinel at start of /ai-sdlc execute.
+    // The env-var path is a fallback; the file is the canonical source of truth.
+    const sentinelDir = join(tempDir, '.worktrees');
+    const sentinelPath = join(sentinelDir, '.active-task');
+    mkdirSync(sentinelDir, { recursive: true });
+    writeFileSync(sentinelPath, 'AISDLC-99\n');
+    try {
+      const result = runHookFile('Write', join(siblingDir, 'allowed.txt'));
+      assert.ok(!isDenied(result), 'should allow when sentinel file points at AISDLC-99');
+    } finally {
+      rmSync(sentinelPath, { force: true });
+      rmSync(sentinelDir, { recursive: true, force: true });
+    }
+  });
+
+  it('sentinel file takes precedence over env var when both set', () => {
+    const sentinelDir = join(tempDir, '.worktrees');
+    const sentinelPath = join(sentinelDir, '.active-task');
+    mkdirSync(sentinelDir, { recursive: true });
+    writeFileSync(sentinelPath, 'AISDLC-99\n');
+    try {
+      // env var points at a non-existent task; sentinel points at the real one
+      const result = runHookFile('Write', join(siblingDir, 'allowed.txt'), {
+        AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-9999',
+      });
+      assert.ok(!isDenied(result), 'sentinel wins over env var');
+    } finally {
+      rmSync(sentinelPath, { force: true });
+      rmSync(sentinelDir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls back to env var when sentinel file is missing', () => {
+    const result = runHookFile('Write', join(siblingDir, 'allowed.txt'), {
+      AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-99',
+    });
+    assert.ok(!isDenied(result), 'env var fallback works for tests / external tooling');
+  });
+
+  it('handles empty sentinel file gracefully (treats as no active task)', () => {
+    const sentinelDir = join(tempDir, '.worktrees');
+    const sentinelPath = join(sentinelDir, '.active-task');
+    mkdirSync(sentinelDir, { recursive: true });
+    writeFileSync(sentinelPath, '');
+    try {
+      const result = runHookFile('Write', join(siblingDir, 'foo.txt'));
+      assert.ok(isDenied(result), 'empty sentinel = no allowlist = deny');
+    } finally {
+      rmSync(sentinelPath, { force: true });
+      rmSync(sentinelDir, { recursive: true, force: true });
+    }
+  });
+
   it('does not block Bash tools when toolName is Write/Edit (no cross-tool leakage)', () => {
     // Even with a Bash command in tool_input, if tool_name is Write the Bash
     // blocked-actions logic should NOT fire (only file_path enforcement applies).

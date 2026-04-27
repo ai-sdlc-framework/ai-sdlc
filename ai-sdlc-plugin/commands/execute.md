@@ -74,9 +74,20 @@ git worktree add "$WORKTREE_PATH" -b "$BRANCH" origin/main
 
 If `git worktree add` fails because the branch already exists, the operator's prior run left state. Tell them: "Worktree branch `$BRANCH` already exists. Run `/ai-sdlc cleanup $TASK_ID` first, or pick a different task." Then stop.
 
-## Step 4 — Flip task to In Progress
+## Step 4 — Flip task to In Progress + write active-task sentinel
 
 Use `mcp__backlog__task_edit` to set `status: 'In Progress'`. This makes the dashboard reflect that work has started.
+
+Then write the active-task sentinel file so the PreToolUse hook can resolve `permittedExternalPaths` for cross-repo writes:
+
+```bash
+mkdir -p .worktrees
+echo "$TASK_ID" > .worktrees/.active-task
+```
+
+The sentinel is the canonical source of truth for "which task is currently active in this session." The hook reads it on every Write/Edit; without it, cross-repo writes are denied. CRITICAL: this file MUST be deleted at end of run (Step 13) regardless of success/failure, otherwise the next `/ai-sdlc execute` invocation inherits the stale active task. Treat it as a try/finally — if anything fails between here and Step 13, still delete.
+
+> **Single-task limitation**: only one `/ai-sdlc execute` may run at a time. Parallel runs would race on the sentinel. v2 may add per-worktree sentinels.
 
 ## Step 5 — Invoke the developer subagent
 
@@ -122,8 +133,8 @@ Return the JSON shape documented in your agent definition.
 When invoking the Task tool for the developer agent:
 
 - `subagent_type: developer`
-- Set `AI_SDLC_ACTIVE_TASK_ID=$TASK_ID` in the environment so the PreToolUse hook honors `permittedExternalPaths` from the task frontmatter
 - The agent's cwd will be the worktree path
+- The PreToolUse hook will read the active task ID from `.worktrees/.active-task` (written in Step 4) to resolve `permittedExternalPaths` for cross-repo writes
 
 Watch for `[ai-sdlc-progress]` lines in the agent's tool output and surface them to the user as they appear.
 
@@ -324,9 +335,17 @@ If any sibling PR creation fails partway, do NOT roll back the main PR — print
 After all siblings:
 - Update the main PR body via `gh pr edit $MAIN_PR_URL --body "..."` to add a `## Sibling PRs` section listing each sibling URL.
 
-## Step 13 — Report
+## Step 13 — Cleanup sentinel + Report
 
-Print a tight summary:
+Always remove the active-task sentinel — the hook would otherwise see a stale active task on the next invocation:
+
+```bash
+rm -f .worktrees/.active-task
+```
+
+Run this whether the run succeeded, failed, was rolled back, or escalated. It's the closing bracket of the implicit try/finally started at Step 4.
+
+Then print a tight summary:
 
 - ✅ Task: `$TASK_ID` — `<title>`
 - ✅ Branch: `$BRANCH` (worktree at `$WORKTREE_PATH`)
