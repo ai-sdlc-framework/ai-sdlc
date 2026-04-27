@@ -51,6 +51,17 @@ export interface ReviewAgentConfig {
   apiKey?: string;
   /** Model to use. Defaults to claude-sonnet-4-5. */
   model?: string;
+  /**
+   * Model to escalate to when the input exceeds the large-context threshold.
+   * Defaults to AI_SDLC_REVIEW_LARGE_MODEL env var, then claude-opus-4-7.
+   */
+  largeContextModel?: string;
+  /**
+   * Char-count threshold above which the runner switches to `largeContextModel`
+   * and sets the Anthropic 1M-context beta header. Default ~150k tokens
+   * (the standard Anthropic context limit) at the 4-chars-per-token heuristic.
+   */
+  largeContextThresholdChars?: number;
   /** Request timeout in ms. Defaults to 120_000. */
   timeoutMs?: number;
   /** Which review perspective to use. */
@@ -58,6 +69,17 @@ export interface ReviewAgentConfig {
   /** Project-specific review policy to prepend to the system prompt (calibration context). */
   reviewPolicy?: string;
 }
+
+/**
+ * Default escalation threshold. Anthropic's standard context window is 200k tokens;
+ * we leave headroom for the system prompt + response and trigger escalation around
+ * 150k tokens (≈ 600k chars at the 4-char/token heuristic). The user's recurring
+ * "PR too large for review" failure on PR #67 happened above this threshold.
+ */
+const DEFAULT_LARGE_CONTEXT_THRESHOLD_CHARS = 600_000;
+const DEFAULT_LARGE_CONTEXT_MODEL = process.env.AI_SDLC_REVIEW_LARGE_MODEL ?? 'claude-opus-4-7';
+/** Anthropic 1M-context beta header. Required when sending > 200k tokens. */
+const ANTHROPIC_LONG_CONTEXT_BETA = 'context-1m-2025-08-07';
 
 // ── CI boundary ─────────────────────────────────────────────────────
 
@@ -291,26 +313,42 @@ export class ReviewAgentRunner implements AgentRunner {
     userContent: string,
   ): Promise<ReviewVerdict & { _tokenUsage?: TokenUsage }> {
     const apiUrl = this.config.apiUrl ?? DEFAULT_ANTHROPIC_API_URL;
-    const model = this.config.model ?? DEFAULT_ANTHROPIC_MODEL;
+    const baseModel = this.config.model ?? DEFAULT_ANTHROPIC_MODEL;
     const timeoutMs = this.config.timeoutMs ?? DEFAULT_LLM_TIMEOUT_MS;
+
+    const system = this.config.reviewPolicy
+      ? `${this.config.reviewPolicy}\n\n---\n\n${REVIEW_PROMPTS[this.config.reviewType]}`
+      : REVIEW_PROMPTS[this.config.reviewType];
+
+    // Escalate to a 1M-context model when the input is large enough to risk
+    // overflowing the standard 200k-token window. The signal we use is char count
+    // of (system + user) since precise tokenization isn't available client-side.
+    const threshold =
+      this.config.largeContextThresholdChars ?? DEFAULT_LARGE_CONTEXT_THRESHOLD_CHARS;
+    const inputChars = system.length + userContent.length;
+    const escalate = inputChars > threshold;
+    const model = escalate
+      ? (this.config.largeContextModel ?? DEFAULT_LARGE_CONTEXT_MODEL)
+      : baseModel;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      };
+      if (escalate) headers['anthropic-beta'] = ANTHROPIC_LONG_CONTEXT_BETA;
+
       const res = await fetch(apiUrl, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
+        headers,
         body: JSON.stringify({
           model,
           max_tokens: 4096,
-          system: this.config.reviewPolicy
-            ? `${this.config.reviewPolicy}\n\n---\n\n${REVIEW_PROMPTS[this.config.reviewType]}`
-            : REVIEW_PROMPTS[this.config.reviewType],
+          system,
           messages: [{ role: 'user', content: userContent }],
         }),
         signal: controller.signal,
