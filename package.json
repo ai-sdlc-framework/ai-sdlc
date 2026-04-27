@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test",
+    "test": "pnpm -r test && node scripts/check-docs-sync.mjs",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -20,6 +20,8 @@
     "format:check": "prettier --check .",
     "clean": "pnpm -r clean",
     "validate-schemas": "pnpm -C reference validate-schemas",
+    "docs:sync": "node scripts/docs-sync.mjs",
+    "docs:check": "node scripts/check-docs-sync.mjs",
     "prepare": "husky"
   },
   "lint-staged": {

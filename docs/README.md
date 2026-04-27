@@ -2,6 +2,12 @@
 
 User-facing documentation for the AI-SDLC Framework.
 
+## Contributing to Documentation
+
+Documentation source files live in the `ai-sdlc` repository under `docs/`. Changes to documentation should be made to the `.md` files here, not directly to the published `.mdx` files in `ai-sdlc-io`.
+
+See the repository root README for details on the documentation sync workflow.
+
 ## Sections
 
 | Section | Description |

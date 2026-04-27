@@ -22,6 +22,11 @@ spec:
       config:
         backlogDir: ./backlog
         taskPrefix: AISDLC
+    github:
+      type: github
+      config:
+        org: ai-sdlc-framework
+        repo: ai-sdlc
   stages:
     - name: validate-issue
       qualityGates:
