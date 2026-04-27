@@ -14,6 +14,8 @@ references:
   - /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc-io/content/
   - >-
     /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md
+permittedExternalPaths:
+  - '../ai-sdlc-io/'
 priority: medium
 ---
 
