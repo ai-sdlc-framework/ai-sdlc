@@ -27,6 +27,16 @@ vi.mock('@ai-sdlc/orchestrator', () => ({
       }),
     }),
   })),
+  // The harness wiring (commit 3d6dcf3) added ClaudeCodeAdapter to cli-triage.ts
+  // imports. Without this mock, module init crashes on the missing export and
+  // every spy assertion in this file fires zero times.
+  ClaudeCodeAdapter: vi.fn().mockImplementation(() => ({
+    name: 'claude-code',
+    invoke: vi.fn(),
+    isAvailable: vi.fn().mockResolvedValue({ available: true }),
+    getAccountId: vi.fn().mockResolvedValue(null),
+    availableModels: vi.fn().mockResolvedValue([]),
+  })),
 }));
 
 describe('cli-triage.ts', () => {

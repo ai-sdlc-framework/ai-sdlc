@@ -97,6 +97,7 @@ async function main(): Promise<void> {
   if (!selectedPipeline) {
     console.error(`No Pipeline resource found in ${DEFAULT_CONFIG_DIR_NAME}/`);
     process.exit(1);
+    return; // belt-and-suspenders for tests that stub process.exit to no-op
   }
   console.log(`[watch] using pipeline: ${selectedPipeline.metadata.name}`);
   config.pipeline = selectedPipeline;
