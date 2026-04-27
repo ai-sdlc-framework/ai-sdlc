@@ -29,9 +29,18 @@ describe('gitExec', () => {
 
     const result = await gitExec('/tmp/repo', ['branch', '--show-current']);
     expect(result).toBe('main');
-    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['branch', '--show-current'], {
-      cwd: '/tmp/repo',
-    });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['-c', 'core.quotePath=false', 'branch', '--show-current'],
+      { cwd: '/tmp/repo' },
+    );
+  });
+
+  it('always prepends -c core.quotePath=false so unicode paths come back raw', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+    await gitExec('/tmp/repo', ['diff', '--name-only']);
+    const args = mockExecFileAsync.mock.calls[0][1];
+    expect(args.slice(0, 2)).toEqual(['-c', 'core.quotePath=false']);
   });
 
   it('trims whitespace from output', async () => {
@@ -45,7 +54,11 @@ describe('gitExec', () => {
     mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
 
     await gitExec('/my/project', ['status']);
-    expect(mockExecFileAsync).toHaveBeenCalledWith('git', ['status'], { cwd: '/my/project' });
+    expect(mockExecFileAsync).toHaveBeenCalledWith(
+      'git',
+      ['-c', 'core.quotePath=false', 'status'],
+      { cwd: '/my/project' },
+    );
   });
 
   it('propagates errors from git', async () => {

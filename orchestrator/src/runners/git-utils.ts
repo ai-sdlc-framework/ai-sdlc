@@ -7,9 +7,20 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-/** Run a git command in the given directory. */
+/**
+ * Run a git command in the given directory.
+ *
+ * Always passes `-c core.quotePath=false` so paths containing non-ASCII
+ * characters (e.g. ↔, é, 中) come back as raw UTF-8 instead of git's default
+ * octal-escaped form (`"file with \342\206\224.md"`). Without this, the AISDLC-68
+ * task file (which has ↔ in its name) showed up in `git diff --name-only`
+ * as a quoted+escaped string and the subsequent `git add -- <file>` rejected
+ * with "pathspec did not match".
+ */
 export async function gitExec(workDir: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd: workDir });
+  const { stdout } = await execFileAsync('git', ['-c', 'core.quotePath=false', ...args], {
+    cwd: workDir,
+  });
   return stdout.trim();
 }
 
