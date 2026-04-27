@@ -1,7 +1,21 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { access, mkdtemp, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
+/** Poll until a file exists or `timeoutMs` elapses (test sync helper). */
+async function waitForFile(path: string, timeoutMs = 5000): Promise<void> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      await access(path);
+      return;
+    } catch {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+  throw new Error(`waitForFile timed out after ${timeoutMs}ms: ${path}`);
+}
 import { runWorkerPool, type WorkItem } from './worker-pool.js';
 import { withMergeGate, isBranchUpToDate, MergeGateLockTimeoutError } from './merge-gate.js';
 import { decideRequeue, appendTriageHistory } from './requeue.js';
@@ -146,7 +160,16 @@ describe('withMergeGate', () => {
         releaseFirst = r;
       });
     });
-    await expect(withMergeGate(tmpRoot, async () => 'never', { timeoutMs: 200 })).rejects.toThrow(
+    // Wait until `first` has actually acquired the lock before launching the
+    // contender; without this, the second call can win the exclusive-create
+    // race and the test asserts on the wrong arm. (The 5s default is a
+    // CI-load-friendly upper bound — the lock should appear in <50ms.)
+    await waitForFile(join(tmpRoot, '.merge-gate.lock'));
+
+    // Bumped from 200ms to 1500ms so the test isn't pinned to the merge-gate
+    // poll cadence (POLL_INTERVAL_MS=100); under CI load 200ms gave only ~2
+    // poll cycles before the timeout fired, racing other I/O.
+    await expect(withMergeGate(tmpRoot, async () => 'never', { timeoutMs: 1500 })).rejects.toThrow(
       MergeGateLockTimeoutError,
     );
     releaseFirst();
