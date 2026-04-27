@@ -10,9 +10,13 @@ Companion to `/ai-sdlc execute`. Two modes:
 
 ## Mode 1 — Sweep all merged worktrees (no arguments)
 
-When `$ARGUMENTS` is empty, do exactly what `/ai-sdlc execute` does at start: walk `.worktrees/`, check each branch's PR status via `gh pr list`, remove any whose PR has merged.
+When `$ARGUMENTS` is empty, do exactly what `/ai-sdlc execute` does at start: walk `.worktrees/`, check each branch's PR status via `gh pr list`, remove any whose PR has merged. Also remove a stale `.worktrees/.active-task` sentinel (an `/ai-sdlc execute` run that aborted without cleanup leaves it behind, which would block cross-repo writes for the next non-execute Edit/Write).
 
 ```bash
+# Clear stale sentinel — safe even if no run is in flight, since /ai-sdlc execute
+# rewrites it at start of every invocation.
+rm -f .worktrees/.active-task
+
 if [ ! -d .worktrees ]; then
   echo "No .worktrees/ directory — nothing to sweep."
   exit 0
