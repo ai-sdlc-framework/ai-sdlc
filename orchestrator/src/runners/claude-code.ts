@@ -21,7 +21,13 @@ import {
   DEFAULT_COMMIT_CO_AUTHOR,
 } from '../defaults.js';
 import { formatContextForPrompt } from '../analysis/context-builder.js';
-import { gitExec, detectChangedFiles, runAutoFix, snapshotWorktree } from './git-utils.js';
+import {
+  gitExec,
+  detectChangedFiles,
+  runAutoFix,
+  snapshotWorktree,
+  detectCrossRepoWrites,
+} from './git-utils.js';
 
 /**
  * Build verification step instructions (lint, format, typecheck).
@@ -611,6 +617,19 @@ export class ClaudeCodeRunner implements AgentRunner {
         await runAutoFix(ctx.workDir, lintCmd, fmtCmd);
         await gitExec(ctx.workDir, ['add', '--', ...filesChanged]);
         await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
+      }
+
+      // Detect cross-repo writes (e.g., agent edited files in ../sister-repo)
+      // and surface them as a stderr warning so the operator knows to commit
+      // them in the sibling repo separately. Not a hard failure — sometimes
+      // cross-repo work is intended (the AISDLC-68 docs sync, for example).
+      const crossRepoWrites = await detectCrossRepoWrites(ctx.workDir);
+      for (const write of crossRepoWrites) {
+        process.stderr.write(
+          `[ai-sdlc:runner] WARNING: agent wrote ${write.files.length} file(s) into sibling repo ` +
+            `${write.repoPath} — those changes are NOT in this PR. ` +
+            `Files: ${write.files.slice(0, 5).join(', ')}${write.files.length > 5 ? ` (+${write.files.length - 5} more)` : ''}\n`,
+        );
       }
 
       return {

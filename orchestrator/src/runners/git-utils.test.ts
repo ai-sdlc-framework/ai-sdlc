@@ -11,7 +11,13 @@ vi.mock('node:util', () => ({
   promisify: () => mockExecFileAsync,
 }));
 
-import { gitExec, detectChangedFiles, runAutoFix, snapshotWorktree } from './git-utils.js';
+import {
+  gitExec,
+  detectChangedFiles,
+  runAutoFix,
+  snapshotWorktree,
+  detectCrossRepoWrites,
+} from './git-utils.js';
 
 describe('gitExec', () => {
   beforeEach(() => {
@@ -211,6 +217,22 @@ describe('snapshotWorktree', () => {
     expect(baseline.untracked.size).toBe(0);
     expect(baseline.modified.size).toBe(0);
   });
+});
+
+describe('detectCrossRepoWrites', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('returns [] when rev-parse fails (workDir is not a git repo)', async () => {
+    mockExecFileAsync.mockRejectedValue(new Error('not a git repository'));
+    const writes = await detectCrossRepoWrites('/tmp/not-a-repo');
+    expect(writes).toEqual([]);
+  });
+
+  // Sibling-walk paths use real fs (readdir/stat). The mocked execFile
+  // makes a true integration test impractical from this unit suite; the
+  // happy-path detection is verified end-to-end in the cli-watch run.
 });
 
 describe('runAutoFix', () => {
