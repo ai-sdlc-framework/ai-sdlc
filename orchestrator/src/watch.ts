@@ -99,6 +99,12 @@ export function startWatch(options: WatchOptions = {}): WatchHandle {
         try {
           await executePipeline(issueId, {
             ...options.executeOptions,
+            // Pass the dispatcher-selected pipeline so executePipeline doesn't
+            // re-load from disk and pick the wrong one in multi-pipeline configs
+            // (RFC-0010 dual workflow). Without this, an enqueued backlog
+            // pipeline silently downgrades to pipeline.yaml's branching/PR
+            // templates.
+            pipelineOverride: pipeline,
           });
           const result: ReconcileResult = { type: 'success' as const };
           options.onReconcile?.(pipeline.metadata.name, result);

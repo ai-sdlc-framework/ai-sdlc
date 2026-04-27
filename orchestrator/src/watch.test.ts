@@ -85,4 +85,26 @@ describe('startWatch()', () => {
       expect(onReconcile).toHaveBeenCalledWith('callback-test', expect.any(Object));
     }
   });
+
+  it('forwards the enqueued Pipeline to executePipeline as pipelineOverride', async () => {
+    const { executePipeline } = await import('./execute.js');
+    const handle = startWatch({
+      reconcilerConfig: { periodicIntervalMs: 60_000 },
+    });
+
+    const pipeline = makePipeline('dogfood-backlog-pipeline');
+    handle.enqueue(pipeline, 'AISDLC-68');
+
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    handle.stop();
+
+    // Verify the enqueued pipeline was passed through as `pipelineOverride`
+    // (the AISDLC-68 rerun bug — without this, executePipeline reloads from
+    // disk and silently picks pipeline.yaml even when cli-watch selected
+    // pipeline-backlog.yaml).
+    if (vi.mocked(executePipeline).mock.calls.length > 0) {
+      const [, options] = vi.mocked(executePipeline).mock.calls[0];
+      expect(options?.pipelineOverride).toBe(pipeline);
+    }
+  });
 });

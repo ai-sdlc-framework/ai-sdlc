@@ -215,6 +215,14 @@ export interface ExecuteOptions {
   stateStore?: StateStore;
   /** Priority score from PPA scoring (set by watch loop or caller). */
   priorityScore?: PriorityScore;
+  /**
+   * Override the Pipeline resource selected for this execution. When set, takes
+   * precedence over the on-disk `config.pipeline` loaded from `.ai-sdlc/`. The
+   * watch loop uses this to pass the dispatcher-selected pipeline (e.g., the
+   * backlog pipeline for AISDLC-* issues) instead of letting executePipeline
+   * fall back to the canonical pipeline.yaml.
+   */
+  pipelineOverride?: import('@ai-sdlc/reference').Pipeline;
 }
 
 /**
@@ -249,6 +257,14 @@ export async function executePipeline(
   log.stage('load-config');
   const config: AiSdlcConfig = await loadConfigAsync(configDir);
   log.stageEnd('load-config');
+
+  // If the caller (e.g., cli-watch's pipeline dispatcher) selected a specific
+  // Pipeline resource, override the on-disk default. Without this, multi-
+  // pipeline configs (RFC-0010 dual workflow: pipeline.yaml + pipeline-backlog.yaml)
+  // always fall back to pipeline.yaml because loadConfig prefers it as canonical.
+  if (options.pipelineOverride) {
+    config.pipeline = options.pipelineOverride;
+  }
 
   // Kill switch check (before any work)
   if (options.security) {
@@ -415,6 +431,52 @@ export async function restoreOriginalBranch(
       `[pipeline] failed to restore HEAD to \`${originalHead}\`: ${(err as Error).message}`,
     );
   }
+}
+
+/**
+ * Push a branch to origin, rebasing onto the remote tip if it has advanced.
+ * Pre-AISDLC-68-rerun the pipeline did a plain `git push` and rejected with
+ * non-fast-forward when the remote branch had drifted (e.g. a previous run's
+ * commits or a manual edit). The fix: try push; on non-fast-forward, fetch +
+ * rebase HEAD onto origin/<branch>, retry once. Rebase conflicts surface as
+ * the original error so the operator can resolve manually.
+ *
+ * @internal — exported for unit tests.
+ */
+export async function pushBranchWithRebase(
+  workDir: string,
+  branchName: string,
+  log: { info: (msg: string) => void } | undefined,
+): Promise<void> {
+  try {
+    await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
+    return;
+  } catch (err) {
+    const stderr = (err as { stderr?: string }).stderr ?? (err as Error).message;
+    if (!/non-fast-forward|rejected/i.test(stderr)) {
+      throw err;
+    }
+    log?.info(`[pipeline] push rejected (non-fast-forward); rebasing onto origin/${branchName}`);
+  }
+
+  // Fetch + rebase + retry. If the rebase fails, surface a clear error.
+  try {
+    await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir });
+    await execFileAsync('git', ['rebase', `origin/${branchName}`], { cwd: workDir });
+  } catch (rebaseErr) {
+    // Abort the partial rebase so the worktree isn't left in a half-merged state.
+    try {
+      await execFileAsync('git', ['rebase', '--abort'], { cwd: workDir });
+    } catch {
+      /* nothing to abort */
+    }
+    throw new Error(
+      `Push rebase failed for branch ${branchName}: ${(rebaseErr as Error).message}. ` +
+        `Resolve conflicts manually and re-run the pipeline.`,
+    );
+  }
+
+  await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
 }
 
 async function executePipelineBody(
@@ -819,9 +881,13 @@ async function executePipelineBody(
     `:white_check_mark: Agent complete — ${result.filesChanged.length} files changed. Pushing...`,
   );
 
-  // 12. Push branch (before validation to preserve work even if validation fails)
+  // 12. Push branch (before validation to preserve work even if validation fails).
+  // Fetch first + rebase if the remote has diverged so push fast-forwards
+  // cleanly. Without this, re-runs against an existing remote branch (e.g. when
+  // the issue branch was updated by another pipeline run or by a hand-edit)
+  // reject with non-fast-forward and the agent's work is stranded locally.
   log.stage('push');
-  await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
+  await pushBranchWithRebase(workDir, branchName, log);
   log.stageEnd('push');
 
   auditLog.record({
