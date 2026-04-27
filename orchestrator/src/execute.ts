@@ -362,8 +362,10 @@ export async function executePipeline(
  * Capture the current branch name (or commit SHA in detached-HEAD state) so the
  * pipeline can restore the user's worktree after the run. Returns null on git
  * failure — callers treat null as "don't try to restore".
+ *
+ * @internal — exported for unit tests.
  */
-async function captureCurrentBranch(workDir: string): Promise<string | null> {
+export async function captureCurrentBranch(workDir: string): Promise<string | null> {
   try {
     const { stdout } = await execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], {
       cwd: workDir,
@@ -385,8 +387,10 @@ async function captureCurrentBranch(workDir: string): Promise<string | null> {
  * working tree is clean. If the working tree has uncommitted changes (from a
  * partial pipeline run), log a warning and leave HEAD where it is — better to
  * preserve the pipeline's state than to clobber whatever the user has.
+ *
+ * @internal — exported for unit tests.
  */
-async function restoreOriginalBranch(
+export async function restoreOriginalBranch(
   workDir: string,
   originalHead: string | null,
   log: { info: (msg: string) => void } | undefined,

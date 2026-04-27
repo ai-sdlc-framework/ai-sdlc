@@ -230,9 +230,22 @@ describe('detectCrossRepoWrites', () => {
     expect(writes).toEqual([]);
   });
 
-  // Sibling-walk paths use real fs (readdir/stat). The mocked execFile
-  // makes a true integration test impractical from this unit suite; the
-  // happy-path detection is verified end-to-end in the cli-watch run.
+  it('returns [] when readdir on the parent directory fails', async () => {
+    // rev-parse succeeds, but the synthetic path's parent doesn't exist —
+    // readdir throws ENOENT and the function catches and returns [].
+    mockExecFileAsync.mockImplementation((cmd: string, args: string[]) => {
+      if (Array.isArray(args) && args[0] === 'rev-parse' && args[1] === '--show-toplevel') {
+        return Promise.resolve({ stdout: '/nonexistent/lonely-repo\n', stderr: '' });
+      }
+      return Promise.resolve({ stdout: '', stderr: '' });
+    });
+    const writes = await detectCrossRepoWrites('/nonexistent/lonely-repo');
+    expect(writes).toEqual([]);
+  });
+
+  // Real-fs sibling-repo integration tests live in
+  // git-utils.cross-repo.test.ts (separate file so it doesn't inherit this
+  // file's child_process mock — the test creates real git repos).
 });
 
 describe('runAutoFix', () => {

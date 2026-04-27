@@ -186,7 +186,7 @@ describe('ClaudeCodeRunner', () => {
     // specific git output call setupGitExec() to override. Without this
     // default, runner code that calls git outside the tested path (e.g.
     // pre-agent worktree snapshot) would hang on the unimplemented mock.
-     
+
     (
       execFileMock as unknown as { mockImplementation: (fn: (...a: unknown[]) => unknown) => void }
     ).mockImplementation((..._args: unknown[]) => {
