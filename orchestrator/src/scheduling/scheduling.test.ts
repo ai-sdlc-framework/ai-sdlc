@@ -108,9 +108,13 @@ describe('SubscriptionLedger', () => {
 
   it('admit returns no when consumption would exceed hardCap', async () => {
     const io = memoryIO();
-    const ledger = new SubscriptionLedger('/tmp/artifacts', { io });
+    // Pin to a peak hour (12:00 PT). samplePlan has off-peak 22-06 PT with
+    // multiplier 2 — without pinning, when CI runs in the off-peak window
+    // consumption is halved and this assertion flips. The peak/off-peak
+    // semantics are tested separately below; this test just exercises hardCap.
+    const peakNow = () => new Date('2026-04-08T19:00:00Z');
+    const ledger = new SubscriptionLedger('/tmp/artifacts', { io, now: peakNow });
     await ledger.load(sampleKey, samplePlan);
-    // Consume close to the cap.
     for (let i = 0; i < 10; i++) {
       await ledger.record(sampleKey, samplePlan, { input: 90_000, output: 10_000 });
     }
@@ -263,7 +267,9 @@ describe('evaluateSchedule', () => {
 
   it('schedule: quota-permitting requeues when admission no', async () => {
     const io = memoryIO();
-    const ledger = new SubscriptionLedger('/tmp/artifacts', { io });
+    // Pin to peak (12:00 PT) so the off-peak multiplier doesn't halve consumption.
+    const peakNow = () => new Date('2026-04-08T19:00:00Z');
+    const ledger = new SubscriptionLedger('/tmp/artifacts', { io, now: peakNow });
     await ledger.load(sampleKey, samplePlan);
     for (let i = 0; i < 10; i++) {
       await ledger.record(sampleKey, samplePlan, { input: 90_000, output: 10_000 });
@@ -359,7 +365,9 @@ describe('CalibrationStore', () => {
 describe('buildBurnDownReport', () => {
   it('produces an under-pacing recommendation when projected < pacingTarget - 0.10', async () => {
     const io = memoryIO();
-    const ledger = new SubscriptionLedger('/tmp/artifacts', { io });
+    // Pin to peak so off-peak multiplier doesn't halve the recorded tokens.
+    const peakNow = () => new Date('2026-04-08T19:00:00Z');
+    const ledger = new SubscriptionLedger('/tmp/artifacts', { io, now: peakNow });
     await ledger.load(sampleKey, samplePlan);
     await ledger.record(sampleKey, samplePlan, { input: 50_000, output: 10_000 });
     const report = buildBurnDownReport({
