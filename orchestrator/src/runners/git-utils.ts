@@ -143,10 +143,17 @@ export async function detectCrossRepoWrites(workDir: string): Promise<CrossRepoW
     try {
       const status = await gitExec(candidate, ['status', '--porcelain']);
       if (!status.trim()) continue;
+      // Porcelain v1: first 2 chars are status (XY), then 1+ whitespace, then
+      // path. Cannot use slice(3) — gitExec already trimmed the leading space
+      // when X is unmodified ("M " becomes "M" after trim, dropping a column
+      // and eating the first filename character).
       const files = status
         .split('\n')
         .filter(Boolean)
-        .map((line) => line.slice(3).trim());
+        .map((line) => {
+          const m = line.match(/^.{1,2}\s+(.+)$/);
+          return m ? m[1] : line;
+        });
       writes.push({ repoPath: candidate, files });
     } catch {
       // Couldn't read status — skip silently.
