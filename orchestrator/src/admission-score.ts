@@ -53,6 +53,26 @@ export interface AdmissionInput {
   codeAreaQuality?: CodeAreaQuality;
   /** C5 inputs — HC_design signal from design-authority principals (AISDLC-46). */
   designAuthoritySignal?: DesignAuthoritySignal;
+  /**
+   * Backlog-task signals (RFC-0010 dual-workflow). Populated when the issue comes
+   * from a Backlog.md task instead of GitHub. Used to discriminate between tasks
+   * that share identical GitHub-style signals (no reactions / no comments / OWNER
+   * author) — typical for the internal backlog workflow.
+   */
+  backlogContext?: BacklogContext;
+}
+
+export interface BacklogContext {
+  /** Frontmatter `priority` field — operator's stated importance. */
+  priority?: 'critical' | 'high' | 'medium' | 'low';
+  /** Number of tasks this one is blocked by (frontmatter `dependencies`). */
+  dependencyCount?: number;
+  /** Number of file/RFC/URL references in the task body. */
+  referenceCount?: number;
+  /** Number of acceptance criteria — proxy for scope. */
+  acceptanceCriteriaCount?: number;
+  /** Frontmatter `status` value (e.g. "To Do", "Draft", "In Progress", "Done"). */
+  status?: string;
 }
 
 export interface DesignSystemContext {
@@ -142,6 +162,19 @@ export interface IssueAdmissionResult {
 export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
   const labels = input.labels;
   const assoc = input.authorAssociation ?? 'NONE';
+  const backlog = input.backlogContext;
+
+  // ── Backlog status veto ─────────────────────────────────────
+  // Drafts aren't ready to admit; orchestrator should ignore them.
+  if (backlog?.status === 'Draft') {
+    return {
+      itemId: `#${input.issueNumber}`,
+      title: input.title,
+      description: input.body ?? '',
+      labels,
+      soulAlignment: 0,
+    };
+  }
 
   // ── Trust-based signal boosting ────────────────────────────────
   // Trusted sources (project team) get baseline conviction and demand.
@@ -149,9 +182,14 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
   const isTrusted = assoc === 'OWNER' || assoc === 'MEMBER' || assoc === 'COLLABORATOR';
   const isContributor = assoc === 'CONTRIBUTOR';
 
-  // ── Complexity from issue body ───────────────────────────────
+  // ── Complexity from issue body, AC count, or backlog context ─
   const complexityMatch = input.body?.match(/###?\s*Complexity\s*\n+\s*(\d+)/i);
-  const complexity = complexityMatch ? Number(complexityMatch[1]) : undefined;
+  let complexity = complexityMatch ? Number(complexityMatch[1]) : undefined;
+  // Backlog tasks rarely include a `### Complexity` header — fall back to AC count
+  // (each AC is roughly one logical unit; clamp at 10).
+  if (complexity === undefined && backlog?.acceptanceCriteriaCount !== undefined) {
+    complexity = Math.min(10, Math.max(1, Math.ceil(backlog.acceptanceCriteriaCount * 1.2)));
+  }
 
   // ── Bug severity from labels ─────────────────────────────────
   let bugSeverity: number | undefined;
@@ -164,6 +202,10 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
   if (labels.includes('enhancement')) soulAlignment = 0.6;
   if (labels.includes('governance') || labels.includes('compliance')) soulAlignment = 0.85;
   if (labels.includes('spec') || labels.includes('rfc')) soulAlignment = 0.9;
+  // Backlog-specific labels — RFC process work directly serves project mission;
+  // tech-debt is operationally important but not mission-defining.
+  if (labels.includes('rfc-process') || labels.includes('architecture')) soulAlignment = 0.85;
+  if (labels.includes('tech-debt') && soulAlignment < 0.55) soulAlignment = 0.55;
   // Trusted authors get a soul alignment floor — they know the project mission
   if (isTrusted && soulAlignment < 0.6) soulAlignment = 0.6;
 
@@ -186,13 +228,18 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
   // Contributor: moderate (proven track record)
   // ai-eligible label: explicit signal
   // Default: low (needs validation)
-  const builderConviction = labels.includes('ai-eligible')
+  let builderConviction = labels.includes('ai-eligible')
     ? 0.8
     : isTrusted
       ? 0.8
       : isContributor
         ? 0.6
         : 0.4;
+  // Backlog tasks blocked by other work get a conviction penalty — the team
+  // can't confidently dispatch them until upstream lands.
+  if (backlog?.dependencyCount && backlog.dependencyCount > 0) {
+    builderConviction = Math.max(0.2, builderConviction - 0.3);
+  }
 
   // ── Age → competitive drift ──────────────────────────────────
   const ageMs = Date.now() - new Date(input.createdAt).getTime();
@@ -210,6 +257,14 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
     };
   }
 
+  // ── Explicit priority — labels first, then backlog frontmatter ──
+  let explicitPriority: number | undefined;
+  if (labels.includes('high')) explicitPriority = 0.8;
+  else if (labels.includes('low')) explicitPriority = 0.2;
+  else if (backlog?.priority) {
+    explicitPriority = mapBacklogPriorityToScalar(backlog.priority);
+  }
+
   return {
     itemId: `#${input.issueNumber}`,
     title: input.title,
@@ -223,8 +278,24 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
     complexity,
     competitiveDrift,
     teamConsensus,
-    explicitPriority: labels.includes('high') ? 0.8 : labels.includes('low') ? 0.2 : undefined,
+    explicitPriority,
   };
+}
+
+/** Map backlog frontmatter priority string to a scalar in [0,1]. */
+function mapBacklogPriorityToScalar(p: BacklogContext['priority']): number {
+  switch (p) {
+    case 'critical':
+      return 1.0;
+    case 'high':
+      return 0.8;
+    case 'medium':
+      return 0.5;
+    case 'low':
+      return 0.2;
+    default:
+      return 0.5;
+  }
 }
 
 // ── Suggestions ──────────────────────────────────────────────────────
@@ -321,4 +392,14 @@ export function scoreIssueForAdmission(
     suggestions: generateSuggestions(input, score),
     pillarBreakdown,
   };
+}
+
+/** Map backlog frontmatter priority string to the typed BacklogContext shape. */
+export function normalizeBacklogPriority(p: string | null | undefined): BacklogContext['priority'] {
+  if (!p) return undefined;
+  const lower = p.toLowerCase().trim();
+  if (lower === 'critical' || lower === 'high' || lower === 'medium' || lower === 'low') {
+    return lower;
+  }
+  return undefined;
 }

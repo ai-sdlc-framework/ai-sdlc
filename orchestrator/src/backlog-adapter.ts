@@ -21,7 +21,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import type { PriorityInput, QualityFlag } from '@ai-sdlc/reference';
-import type { AdmissionInput } from './admission-score.js';
+import { normalizeBacklogPriority, type AdmissionInput } from './admission-score.js';
 
 // ── Snapshot shape ──────────────────────────────────────────────────
 
@@ -46,6 +46,8 @@ export interface BacklogTaskSnapshot {
   createdBy?: string;
   acceptanceCriteria: BacklogAcceptanceCriterion[];
   references: string[];
+  /** Task IDs this task is blocked by (frontmatter `dependencies`). */
+  dependencies: string[];
   /** Filesystem path the snapshot was read from. */
   sourcePath?: string;
 }
@@ -66,6 +68,7 @@ export function parseBacklogTask(content: string, sourcePath?: string): BacklogT
 
   const labels = normaliseLabels(fm.labels);
   const references = normaliseStringArray(fm.references);
+  const dependencies = normaliseStringArray(fm.dependencies);
   const description = extractSection(content, 'Description');
   const acceptanceCriteria = extractAcceptanceCriteria(content);
 
@@ -82,6 +85,7 @@ export function parseBacklogTask(content: string, sourcePath?: string): BacklogT
     createdBy: fm.created_by ? String(fm.created_by).trim() : undefined,
     acceptanceCriteria,
     references,
+    dependencies,
     sourcePath,
   };
 }
@@ -386,6 +390,13 @@ export function mapBacklogTaskToAdmissionInput(
     createdAt: normaliseIsoDate(snap.createdDate),
     authorAssociation,
     authorLogin: snap.createdBy,
+    backlogContext: {
+      priority: normalizeBacklogPriority(snap.priority),
+      dependencyCount: snap.dependencies.length,
+      referenceCount: snap.references.length,
+      acceptanceCriteriaCount: snap.acceptanceCriteria.length,
+      status: snap.status,
+    },
   };
 
   const priorityInputOverrides: Partial<PriorityInput> = {};
