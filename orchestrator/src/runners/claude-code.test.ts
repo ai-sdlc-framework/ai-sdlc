@@ -80,19 +80,23 @@ function makeStreamResult(text: string, cost?: number): string {
 
 function setupSpawn(opts: { stdout?: string; stderr?: string; code?: number }) {
   const child = makeFakeChild();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  spawnMock.mockReturnValue(child as any);
+  // Schedule emission INSIDE the mock so events fire after spawn is invoked,
+  // not after setupSpawn is called. This matters when the runner does async
+  // pre-spawn work (e.g. snapshotting the worktree) — without this, the
+  // microtask fires before spawn() attaches listeners and tests time out.
 
-  queueMicrotask(() => {
-    // Wrap stdout in stream-json format if it's plain text
-    if (opts.stdout) {
-      const streamOutput = opts.stdout.startsWith('{')
-        ? opts.stdout
-        : makeStreamResult(opts.stdout);
-      child.stdout.emit('data', Buffer.from(streamOutput));
-    }
-    if (opts.stderr) child.stderr.emit('data', Buffer.from(opts.stderr));
-    child.emit('close', opts.code ?? 0);
+  spawnMock.mockImplementation(() => {
+    queueMicrotask(() => {
+      if (opts.stdout) {
+        const streamOutput = opts.stdout.startsWith('{')
+          ? opts.stdout
+          : makeStreamResult(opts.stdout);
+        child.stdout.emit('data', Buffer.from(streamOutput));
+      }
+      if (opts.stderr) child.stderr.emit('data', Buffer.from(opts.stderr));
+      child.emit('close', opts.code ?? 0);
+    });
+    return child as never;
   });
 
   return child;
@@ -100,24 +104,35 @@ function setupSpawn(opts: { stdout?: string; stderr?: string; code?: number }) {
 
 function setupSpawnError(err: Error) {
   const child = makeFakeChild();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  spawnMock.mockReturnValue(child as any);
-  queueMicrotask(() => {
-    child.emit('error', err);
+
+  spawnMock.mockImplementation(() => {
+    queueMicrotask(() => {
+      child.emit('error', err);
+    });
+    return child as never;
   });
   return child;
 }
 
 /**
  * Mock execFile for git and lint/format commands.
- * commitFailOnce: if true, the first 'commit' call fails, the second succeeds (tests retry logic).
+ *
+ * `untrackedFiles` is the post-agent untracked set (agent-created files). The
+ * mock seeds the pre-agent baseline as empty by default — to model files that
+ * existed pre-agent (and should be excluded from the agent's diff), pass
+ * `preExistingUntracked`.
+ *
+ * commitFailOnce: if true, the first 'commit' call fails, the second succeeds
+ * (tests retry logic).
  */
 function setupGitExec(
   changedFiles: string[],
   untrackedFiles: string[] = [],
-  opts?: { commitFailOnce?: boolean },
+  opts?: { commitFailOnce?: boolean; preExistingUntracked?: string[] },
 ) {
   let commitAttempt = 0;
+  let lsFilesCallCount = 0;
+  const baselineUntracked = opts?.preExistingUntracked ?? [];
 
   // @ts-expect-error -- partial mock for test
   execFileMock.mockImplementation((_cmd: unknown, args: unknown, _opts: unknown, cb?: unknown) => {
@@ -133,7 +148,10 @@ function setupGitExec(
       if (gitArgs[0] === 'diff' && gitArgs[1] === '--name-only') {
         stdout = changedFiles.join('\n');
       } else if (gitArgs[0] === 'ls-files') {
-        stdout = untrackedFiles.join('\n');
+        // First call (pre-agent snapshot) → baseline; subsequent → post-agent.
+        lsFilesCallCount++;
+        const out = lsFilesCallCount === 1 ? baselineUntracked : untrackedFiles;
+        stdout = out.join('\n');
       } else if (gitArgs[0] === 'commit') {
         commitAttempt++;
         if (opts?.commitFailOnce && commitAttempt === 1) {
@@ -164,6 +182,20 @@ function setupGitExec(
 describe('ClaudeCodeRunner', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Default execFile behavior — empty stdout, no error. Tests that need
+    // specific git output call setupGitExec() to override. Without this
+    // default, runner code that calls git outside the tested path (e.g.
+    // pre-agent worktree snapshot) would hang on the unimplemented mock.
+     
+    (
+      execFileMock as unknown as { mockImplementation: (fn: (...a: unknown[]) => unknown) => void }
+    ).mockImplementation((..._args: unknown[]) => {
+      const cb = _args.find((a) => typeof a === 'function') as
+        | ((...a: unknown[]) => void)
+        | undefined;
+      if (cb) cb(null, { stdout: '', stderr: '' });
+      return undefined;
+    });
   });
 
   afterEach(() => {
@@ -534,6 +566,34 @@ describe('ClaudeCodeRunner', () => {
 
       expect(result.success).toBe(true);
       expect(result.filesChanged).toEqual(['modified.ts', 'new.ts']);
+    });
+
+    it('excludes pre-existing untracked files from filesChanged (AISDLC-68 fix)', async () => {
+      // The agent created `new.ts`. The user's worktree had stale `.db-wal`
+      // and `draft.md` untracked before the agent ran — those must NOT end
+      // up in the agent's filesChanged or commit.
+      setupSpawn({ stdout: 'Created new file', stderr: '' });
+      setupGitExec(['modified.ts'], ['.db-wal', 'draft.md', 'new.ts'], {
+        preExistingUntracked: ['.db-wal', 'draft.md'],
+      });
+
+      const runner = new ClaudeCodeRunner();
+      const result = await runner.run(makeCtx());
+
+      expect(result.success).toBe(true);
+      expect(result.filesChanged).toEqual(['modified.ts', 'new.ts']);
+      expect(result.filesChanged).not.toContain('.db-wal');
+      expect(result.filesChanged).not.toContain('draft.md');
+
+      // git add must be called with explicit file args, NOT `-A`
+      const addCalls = execFileMock.mock.calls.filter(
+        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1][0] === 'add',
+      );
+      for (const call of addCalls) {
+        const args = call[1] as string[];
+        expect(args).not.toContain('-A');
+        expect(args).toContain('--');
+      }
     });
 
     it('stages, runs autofix, and commits', async () => {

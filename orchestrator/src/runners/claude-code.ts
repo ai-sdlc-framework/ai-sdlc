@@ -21,7 +21,7 @@ import {
   DEFAULT_COMMIT_CO_AUTHOR,
 } from '../defaults.js';
 import { formatContextForPrompt } from '../analysis/context-builder.js';
-import { gitExec, detectChangedFiles, runAutoFix } from './git-utils.js';
+import { gitExec, detectChangedFiles, runAutoFix, snapshotWorktree } from './git-utils.js';
 
 /**
  * Build verification step instructions (lint, format, typecheck).
@@ -538,6 +538,12 @@ export class ClaudeCodeRunner implements AgentRunner {
     const prompt = buildPrompt(ctx);
 
     try {
+      // Snapshot the worktree BEFORE invoking the agent so we can subtract any
+      // pre-existing untracked noise (sqlite working files, draft files the user
+      // hasn't decided to commit yet, in-flight edits) from the agent's diff.
+      // Without this, `git add` would sweep them into the agent's commit.
+      const baseline = await snapshotWorktree(ctx.workDir);
+
       // Invoke Claude Code CLI with stream-json for real-time progress
       const result = await runClaude(prompt, ctx.workDir, {
         allowedTools: ctx.allowedTools,
@@ -550,8 +556,12 @@ export class ClaudeCodeRunner implements AgentRunner {
       // Token usage from stream-json result event (falls back to stderr parsing)
       const tokenUsage = parseTokenUsage(result.stderr, result.model);
 
-      // Collect changed files (uncommitted + agent-committed)
-      const { filesChanged, agentAlreadyCommitted } = await detectChangedFiles(ctx.workDir);
+      // Collect changed files (uncommitted + agent-committed), excluding
+      // pre-existing untracked noise.
+      const { filesChanged, agentAlreadyCommitted } = await detectChangedFiles(
+        ctx.workDir,
+        baseline,
+      );
 
       if (filesChanged.length === 0) {
         return {
@@ -573,16 +583,19 @@ export class ClaudeCodeRunner implements AgentRunner {
         };
       }
 
-      // Stage, lint/format, and commit
-      await gitExec(ctx.workDir, ['add', '-A']);
+      // Stage only the files the agent touched (NOT `git add -A`, which
+      // would include pre-existing untracked noise per the AISDLC-68 incident).
+      await gitExec(ctx.workDir, ['add', '--', ...filesChanged]);
 
       // Run lint and format before committing to avoid pre-commit hook failures
       const lintCmd = ctx.lintCommand ?? DEFAULT_LINT_COMMAND;
       const fmtCmd = ctx.formatCommand ?? DEFAULT_FORMAT_COMMAND;
       await runAutoFix(ctx.workDir, lintCmd, fmtCmd);
 
-      // Re-stage after auto-fix may have modified files
-      await gitExec(ctx.workDir, ['add', '-A']);
+      // Re-stage the same set in case auto-fix re-modified them. Auto-fix should
+      // not touch files outside the agent's diff, but if it does, those changes
+      // are the user's problem to commit separately.
+      await gitExec(ctx.workDir, ['add', '--', ...filesChanged]);
 
       const tmpl = ctx.commitMessageTemplate ?? DEFAULT_COMMIT_MESSAGE_TEMPLATE;
       const coAuthor = ctx.commitCoAuthor ?? DEFAULT_COMMIT_CO_AUTHOR;
@@ -593,9 +606,10 @@ export class ClaudeCodeRunner implements AgentRunner {
       try {
         await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
       } catch {
-        // Pre-commit hook may have auto-fixed files — re-stage and retry once
+        // Pre-commit hook may have auto-fixed files — re-stage the agent's
+        // file set and retry once.
         await runAutoFix(ctx.workDir, lintCmd, fmtCmd);
-        await gitExec(ctx.workDir, ['add', '-A']);
+        await gitExec(ctx.workDir, ['add', '--', ...filesChanged]);
         await gitExec(ctx.workDir, ['commit', '-m', `${commitMsg}\n\nCo-Authored-By: ${coAuthor}`]);
       }
 

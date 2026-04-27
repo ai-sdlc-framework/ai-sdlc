@@ -18,18 +18,58 @@ export interface DetectedChanges {
   agentAlreadyCommitted: boolean;
 }
 
+export interface WorktreeBaseline {
+  /** Set of paths that were untracked BEFORE the agent ran. */
+  untracked: Set<string>;
+  /** Set of paths that had unstaged modifications BEFORE the agent ran. */
+  modified: Set<string>;
+}
+
 /**
- * Detect files changed by an agent — checks both uncommitted changes
- * and already-committed changes (agent may have self-committed).
+ * Snapshot the untracked + modified file lists in the worktree. Captured before
+ * the agent runs so detectChangedFiles can subtract pre-existing noise (SQLite
+ * working files, draft RFCs the user hasn't decided to commit yet, in-flight
+ * edits on the previous branch). Without this, `git add -A` sweeps everything
+ * into the agent's commit (the AISDLC-68 incident).
+ *
+ * Failures degrade gracefully to an empty baseline — never block the pipeline
+ * because the snapshot couldn't run.
  */
-export async function detectChangedFiles(workDir: string): Promise<DetectedChanges> {
+export async function snapshotWorktree(workDir: string): Promise<WorktreeBaseline> {
+  try {
+    const [untrackedOutput, modifiedOutput] = await Promise.all([
+      gitExec(workDir, ['ls-files', '--others', '--exclude-standard']),
+      gitExec(workDir, ['diff', '--name-only']),
+    ]);
+    return {
+      untracked: new Set(untrackedOutput.split('\n').filter(Boolean)),
+      modified: new Set(modifiedOutput.split('\n').filter(Boolean)),
+    };
+  } catch {
+    return { untracked: new Set(), modified: new Set() };
+  }
+}
+
+/**
+ * Detect files changed by an agent — checks both uncommitted changes and
+ * already-committed changes (agent may have self-committed). When `baseline`
+ * is provided, untracked files that existed BEFORE the agent ran are excluded
+ * (they belong to the user, not the agent's diff).
+ */
+export async function detectChangedFiles(
+  workDir: string,
+  baseline?: WorktreeBaseline,
+): Promise<DetectedChanges> {
   const diffOutput = await gitExec(workDir, ['diff', '--name-only']);
   const untrackedOutput = await gitExec(workDir, ['ls-files', '--others', '--exclude-standard']);
 
-  const uncommittedFiles = [
-    ...diffOutput.split('\n').filter(Boolean),
-    ...untrackedOutput.split('\n').filter(Boolean),
-  ];
+  const allUntracked = untrackedOutput.split('\n').filter(Boolean);
+  // Untracked files that existed pre-agent are user state — exclude them.
+  const agentUntracked = baseline
+    ? allUntracked.filter((f) => !baseline.untracked.has(f))
+    : allUntracked;
+
+  const uncommittedFiles = [...diffOutput.split('\n').filter(Boolean), ...agentUntracked];
 
   // Check if agent already committed — compare against merge base with main
   let committedFiles: string[] = [];

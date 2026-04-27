@@ -11,7 +11,7 @@ vi.mock('node:util', () => ({
   promisify: () => mockExecFileAsync,
 }));
 
-import { gitExec, detectChangedFiles, runAutoFix } from './git-utils.js';
+import { gitExec, detectChangedFiles, runAutoFix, snapshotWorktree } from './git-utils.js';
 
 describe('gitExec', () => {
   beforeEach(() => {
@@ -165,6 +165,51 @@ describe('detectChangedFiles', () => {
 
     const result = await detectChangedFiles('/tmp/repo');
     expect(result.filesChanged).toEqual(['a.ts', 'b.ts']);
+  });
+
+  it('subtracts pre-existing untracked files from filesChanged when baseline is provided', async () => {
+    setupSequence([
+      { stdout: 'mod.ts' }, // git diff (post-agent)
+      { stdout: 'mod.ts\n.db-wal\nstale.md\nnew.ts' }, // ls-files (post-agent: pre-existing + new)
+      { error: 'no base' },
+    ]);
+
+    const baseline = {
+      untracked: new Set(['.db-wal', 'stale.md']),
+      modified: new Set<string>(),
+    };
+    const result = await detectChangedFiles('/tmp/repo', baseline);
+
+    // Only the agent's new file (`new.ts`) survives — the user's stale
+    // untracked files (`.db-wal`, `stale.md`) are filtered out.
+    expect(result.filesChanged).not.toContain('.db-wal');
+    expect(result.filesChanged).not.toContain('stale.md');
+    expect(result.filesChanged).toContain('new.ts');
+  });
+});
+
+describe('snapshotWorktree', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('captures the untracked + modified file sets', async () => {
+    mockExecFileAsync
+      .mockResolvedValueOnce({ stdout: '.db-wal\ndraft.md', stderr: '' }) // ls-files
+      .mockResolvedValueOnce({ stdout: 'src/foo.ts', stderr: '' }); // diff
+
+    const baseline = await snapshotWorktree('/tmp/repo');
+    expect(baseline.untracked.has('.db-wal')).toBe(true);
+    expect(baseline.untracked.has('draft.md')).toBe(true);
+    expect(baseline.modified.has('src/foo.ts')).toBe(true);
+  });
+
+  it('returns an empty baseline when git fails (degrades gracefully)', async () => {
+    mockExecFileAsync.mockRejectedValue(new Error('git not a repo'));
+
+    const baseline = await snapshotWorktree('/tmp/not-a-repo');
+    expect(baseline.untracked.size).toBe(0);
+    expect(baseline.modified.size).toBe(0);
   });
 });
 
