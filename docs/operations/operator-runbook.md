@@ -411,6 +411,32 @@ The chaos test is intended to be run by the operator before the feature-flag pro
 5. Update `CHANGELOG.md` with the user-visible behavior change ("parallelism is now on by default").
 6. Announce in Slack with a link to the rollback procedure (set `AI_SDLC_PARALLELISM=off` to disable).
 
+## Backlog-task auto-close on PR merge
+
+The `.github/workflows/backlog-task-complete.yml` workflow watches every PR-merged
+event. When a PR title contains `(AISDLC-N)` or `(AISDLC-N.M)`, the workflow:
+
+1. Runs `scripts/close-backlog-task.sh AISDLC-N`, which flips the frontmatter
+   `status` to `Done` and `git mv`s `backlog/tasks/<file>` →
+   `backlog/completed/<file>`.
+2. Pushes the move on a new branch `chore/close-aisdlc-N`.
+3. Opens a follow-up PR titled `chore: close AISDLC-N (auto)` referencing the
+   merged source PR.
+
+The workflow opens a PR rather than committing to `main` directly so the move is
+auditable and respects branch protection. The follow-up PR is intended to merge
+without review (it's just file relocation), but the human approves it.
+
+**Operator action when this misfires:**
+
+- Title doesn't match the regex → workflow skips silently. If you intended a
+  backlog task to close, edit the PR title to include `(AISDLC-N)` and re-trigger
+  by adding/removing a label, or run the script locally and push.
+- Script exits 2 (`already in completed/`) → no-op, expected after a previous
+  partial run. The workflow still skips opening the follow-up PR.
+- Follow-up PR conflicts with concurrent branch updates → rebase the
+  `chore/close-aisdlc-N` branch onto current `main` and push again.
+
 ## Related Documents
 
 - [RFC-0010 — Parallel Execution and Worktree Pooling](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) — full normative spec for everything this runbook references
