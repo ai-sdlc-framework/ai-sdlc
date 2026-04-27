@@ -101,7 +101,8 @@ describe('detectChangedFiles', () => {
 
   it('returns empty when no uncommitted or committed changes', async () => {
     setupSequence([
-      { stdout: '' }, // git diff --name-only
+      { stdout: '' }, // git diff --name-only (unstaged)
+      { stdout: '' }, // git diff --name-only --cached (staged)
       { stdout: '' }, // git ls-files --others --exclude-standard
       { stdout: 'abc123' }, // git merge-base HEAD origin/main
       { stdout: '' }, // git diff --name-only abc123..HEAD
@@ -114,23 +115,50 @@ describe('detectChangedFiles', () => {
 
   it('returns uncommitted files when there are local changes', async () => {
     setupSequence([
-      { stdout: 'src/foo.ts\nsrc/bar.ts' }, // git diff --name-only
+      { stdout: 'src/foo.ts\nsrc/bar.ts' }, // git diff --name-only (unstaged)
+      { stdout: '' }, // git diff --name-only --cached (no staged)
       { stdout: 'src/new.ts' }, // git ls-files --others
       { stdout: 'abc123' }, // git merge-base
       { stdout: '' }, // git diff merge-base..HEAD
     ]);
 
     const result = await detectChangedFiles('/tmp/repo');
-    expect(result.filesChanged).toEqual(['src/foo.ts', 'src/bar.ts', 'src/new.ts']);
+    expect(result.filesChanged.sort()).toEqual(['src/bar.ts', 'src/foo.ts', 'src/new.ts']);
     expect(result.agentAlreadyCommitted).toBe(false);
+  });
+
+  it('returns staged files (agent self-staged via git add)', async () => {
+    setupSequence([
+      { stdout: '' }, // unstaged
+      { stdout: 'src/agent-staged.ts\nREADME.md' }, // staged
+      { stdout: '' }, // untracked
+      { error: 'no merge base' },
+    ]);
+
+    const result = await detectChangedFiles('/tmp/repo');
+    expect(result.filesChanged.sort()).toEqual(['README.md', 'src/agent-staged.ts']);
+    expect(result.agentAlreadyCommitted).toBe(false);
+  });
+
+  it('dedupes when a file is in both staged and unstaged diffs', async () => {
+    setupSequence([
+      { stdout: 'src/foo.ts' }, // unstaged
+      { stdout: 'src/foo.ts\nsrc/bar.ts' }, // staged (overlaps with unstaged on foo.ts)
+      { stdout: '' }, // untracked
+      { error: 'no merge base' },
+    ]);
+
+    const result = await detectChangedFiles('/tmp/repo');
+    expect(result.filesChanged.sort()).toEqual(['src/bar.ts', 'src/foo.ts']);
   });
 
   it('detects agent-committed changes when no uncommitted files but commits ahead', async () => {
     setupSequence([
-      { stdout: '' }, // git diff --name-only (no uncommitted)
-      { stdout: '' }, // git ls-files --others (no untracked)
-      { stdout: 'abc123' }, // git merge-base
-      { stdout: 'src/committed.ts\nREADME.md' }, // git diff merge-base..HEAD
+      { stdout: '' }, // unstaged
+      { stdout: '' }, // staged
+      { stdout: '' }, // untracked
+      { stdout: 'abc123' }, // merge-base
+      { stdout: 'src/committed.ts\nREADME.md' }, // commit-diff
     ]);
 
     const result = await detectChangedFiles('/tmp/repo');
@@ -140,10 +168,11 @@ describe('detectChangedFiles', () => {
 
   it('returns uncommitted files even when there are also committed changes', async () => {
     setupSequence([
-      { stdout: 'src/modified.ts' }, // git diff --name-only
-      { stdout: '' }, // git ls-files --others
-      { stdout: 'abc123' }, // git merge-base
-      { stdout: 'src/committed.ts' }, // git diff merge-base..HEAD
+      { stdout: 'src/modified.ts' }, // unstaged
+      { stdout: '' }, // staged
+      { stdout: '' }, // untracked
+      { stdout: 'abc123' }, // merge-base
+      { stdout: 'src/committed.ts' }, // commit-diff
     ]);
 
     const result = await detectChangedFiles('/tmp/repo');
@@ -154,8 +183,9 @@ describe('detectChangedFiles', () => {
 
   it('handles merge-base failure gracefully (no origin/main)', async () => {
     setupSequence([
-      { stdout: 'src/foo.ts' }, // git diff --name-only
-      { stdout: '' }, // git ls-files --others
+      { stdout: 'src/foo.ts' }, // unstaged
+      { stdout: '' }, // staged
+      { stdout: '' }, // untracked
       { error: 'fatal: Not a valid object name origin/main' }, // merge-base fails
     ]);
 
@@ -166,29 +196,32 @@ describe('detectChangedFiles', () => {
 
   it('filters empty lines from git output', async () => {
     setupSequence([
-      { stdout: '\n\nfile1.ts\n\nfile2.ts\n\n' }, // diff with extra newlines
+      { stdout: '\n\nfile1.ts\n\nfile2.ts\n\n' }, // unstaged with extra newlines
+      { stdout: '' }, // staged
       { stdout: '\n' }, // ls-files with just newline
       { error: 'no merge base' }, // merge-base fails
     ]);
 
     const result = await detectChangedFiles('/tmp/repo');
-    expect(result.filesChanged).toEqual(['file1.ts', 'file2.ts']);
+    expect(result.filesChanged.sort()).toEqual(['file1.ts', 'file2.ts']);
   });
 
   it('combines diff and untracked files', async () => {
     setupSequence([
-      { stdout: 'a.ts' }, // git diff
-      { stdout: 'b.ts' }, // git ls-files
+      { stdout: 'a.ts' }, // unstaged diff
+      { stdout: '' }, // staged
+      { stdout: 'b.ts' }, // ls-files
       { error: 'no base' }, // merge-base fails
     ]);
 
     const result = await detectChangedFiles('/tmp/repo');
-    expect(result.filesChanged).toEqual(['a.ts', 'b.ts']);
+    expect(result.filesChanged.sort()).toEqual(['a.ts', 'b.ts']);
   });
 
   it('subtracts pre-existing untracked files from filesChanged when baseline is provided', async () => {
     setupSequence([
       { stdout: 'mod.ts' }, // git diff (post-agent)
+      { stdout: '' }, // staged
       { stdout: 'mod.ts\n.db-wal\nstale.md\nnew.ts' }, // ls-files (post-agent: pre-existing + new)
       { error: 'no base' },
     ]);

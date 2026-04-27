@@ -62,17 +62,32 @@ export async function snapshotWorktree(workDir: string): Promise<WorktreeBaselin
 }
 
 /**
- * Detect files changed by an agent — checks both uncommitted changes and
- * already-committed changes (agent may have self-committed). When `baseline`
- * is provided, untracked files that existed BEFORE the agent ran are excluded
- * (they belong to the user, not the agent's diff).
+ * Detect files changed by an agent. Three signals contribute:
+ *
+ *   - **Unstaged working-tree changes** (`git diff --name-only`)
+ *   - **Staged but uncommitted changes** (`git diff --name-only --cached`) — the
+ *     agent sometimes runs `git add` itself before yielding control. Without
+ *     this signal the orchestrator returned "Agent made no changes" and bailed
+ *     even though the agent's work was sitting in the index (the AISDLC-68
+ *     fourth-rerun bug).
+ *   - **Untracked files** (`git ls-files --others`)
+ *
+ * When `baseline` is provided, untracked files that existed BEFORE the agent
+ * ran are excluded — they belong to the user, not the agent's diff.
+ *
+ * Also checks whether the agent self-committed (compares HEAD to merge-base
+ * with origin/main). Self-committed runs short-circuit the orchestrator's
+ * commit step.
  */
 export async function detectChangedFiles(
   workDir: string,
   baseline?: WorktreeBaseline,
 ): Promise<DetectedChanges> {
-  const diffOutput = await gitExec(workDir, ['diff', '--name-only']);
-  const untrackedOutput = await gitExec(workDir, ['ls-files', '--others', '--exclude-standard']);
+  const [diffOutput, stagedOutput, untrackedOutput] = await Promise.all([
+    gitExec(workDir, ['diff', '--name-only']),
+    gitExec(workDir, ['diff', '--name-only', '--cached']),
+    gitExec(workDir, ['ls-files', '--others', '--exclude-standard']),
+  ]);
 
   const allUntracked = untrackedOutput.split('\n').filter(Boolean);
   // Untracked files that existed pre-agent are user state — exclude them.
@@ -80,7 +95,15 @@ export async function detectChangedFiles(
     ? allUntracked.filter((f) => !baseline.untracked.has(f))
     : allUntracked;
 
-  const uncommittedFiles = [...diffOutput.split('\n').filter(Boolean), ...agentUntracked];
+  // Combine + dedupe: a file may show up in both unstaged and staged diffs
+  // (partial-stage scenario), and untracked files are mutually exclusive
+  // with diffs but include for completeness.
+  const uncommittedSet = new Set<string>([
+    ...diffOutput.split('\n').filter(Boolean),
+    ...stagedOutput.split('\n').filter(Boolean),
+    ...agentUntracked,
+  ]);
+  const uncommittedFiles = [...uncommittedSet];
 
   // Check if agent already committed — compare against merge base with main
   let committedFiles: string[] = [];
