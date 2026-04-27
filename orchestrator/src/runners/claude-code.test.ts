@@ -139,7 +139,11 @@ function setupGitExec(
     const callback =
       typeof _opts === 'function' ? _opts : (cb as ((...a: unknown[]) => void) | undefined);
     const cmdStr = typeof _cmd === 'string' ? _cmd : '';
-    const gitArgs = Array.isArray(args) ? args : [];
+    // gitExec now prepends `-c core.quotePath=false` to every git invocation;
+    // strip it so the subcommand parsing below stays simple.
+    const rawArgs = Array.isArray(args) ? args : [];
+    const gitArgs =
+      rawArgs[0] === '-c' && typeof rawArgs[1] === 'string' ? rawArgs.slice(2) : rawArgs;
 
     let stdout = '';
     let error: Error | null = null;
@@ -587,7 +591,7 @@ describe('ClaudeCodeRunner', () => {
 
       // git add must be called with explicit file args, NOT `-A`
       const addCalls = execFileMock.mock.calls.filter(
-        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1][0] === 'add',
+        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1].includes('add'),
       );
       for (const call of addCalls) {
         const args = call[1] as string[];
@@ -605,13 +609,13 @@ describe('ClaudeCodeRunner', () => {
 
       // git add should be called (at least twice: once before autofix, once after)
       const addCalls = execFileMock.mock.calls.filter(
-        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1][0] === 'add',
+        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1].includes('add'),
       );
       expect(addCalls.length).toBeGreaterThanOrEqual(2);
 
       // git commit should be called
       const commitCall = execFileMock.mock.calls.find(
-        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1][0] === 'commit',
+        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1].includes('commit'),
       );
       expect(commitCall).toBeTruthy();
     });
@@ -627,7 +631,7 @@ describe('ClaudeCodeRunner', () => {
 
       // Commit should have been called twice
       const commitCalls = execFileMock.mock.calls.filter(
-        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1][0] === 'commit',
+        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1].includes('commit'),
       );
       expect(commitCalls.length).toBe(2);
     });
@@ -645,7 +649,7 @@ describe('ClaudeCodeRunner', () => {
       );
 
       const commitCall = execFileMock.mock.calls.find(
-        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1][0] === 'commit',
+        (c) => c[0] === 'git' && Array.isArray(c[1]) && c[1].includes('commit'),
       );
       const commitArgs = commitCall![1] as string[];
       const msg = commitArgs[commitArgs.indexOf('-m') + 1];
@@ -750,7 +754,10 @@ describe('ClaudeCodeRunner', () => {
           const callback =
             typeof _opts === 'function' ? _opts : (cb as ((...a: unknown[]) => void) | undefined);
           const cmdStr = typeof _cmd === 'string' ? _cmd : '';
-          const gitArgs = Array.isArray(args) ? args : [];
+          // Strip the gitExec-injected `-c core.quotePath=false` prefix.
+          const rawArgs = Array.isArray(args) ? args : [];
+          const gitArgs =
+            rawArgs[0] === '-c' && typeof rawArgs[1] === 'string' ? rawArgs.slice(2) : rawArgs;
           _callCount++;
 
           let stdout = '';
