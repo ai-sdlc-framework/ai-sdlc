@@ -1,18 +1,24 @@
 /**
  * AI-SDLC Action Enforcement Hook (PreToolUse)
  *
- * Reads blockedActions from .ai-sdlc/agent-role.yaml in the project directory
- * and checks the incoming Bash command against them.
+ * Enforces governance from .ai-sdlc/agent-role.yaml across three tool families:
  *
- * Returns a deny decision if the command matches a blocked pattern.
- * Fail-safe: allows everything on any error.
+ * 1. **Bash** — checks `tool_input.command` against `blockedActions` patterns.
+ * 2. **Write / Edit** — checks `tool_input.file_path` against `blockedPaths` globs
+ *    (relative to project root). Paths outside the project root are denied unless
+ *    they fall under `permittedExternalPaths` declared in the active task's
+ *    frontmatter (active task = `AI_SDLC_ACTIVE_TASK_ID` env var).
+ *
+ * Returns a deny decision when a tool call matches a guarded pattern.
+ * Fail-safe: allows everything on any error — never block a session because
+ * the policy file couldn't be parsed.
  */
 
-const { readFileSync } = require('fs');
-const { join } = require('path');
+const { readFileSync, existsSync, readdirSync } = require('fs');
+const { join, resolve, isAbsolute, relative, sep } = require('path');
 const { execSync } = require('child_process');
 
-// ── Read stdin (tool input JSON from Claude Code) ────────────────
+// ── Read stdin (tool input JSON from Claude Code) ────────────────────
 
 let input;
 try {
@@ -22,12 +28,10 @@ try {
   process.exit(0);
 }
 
-const command = input?.tool_input?.command;
-if (!command || typeof command !== 'string' || !command.trim()) {
-  process.exit(0);
-}
+const toolName = input?.tool_name;
+const toolInput = input?.tool_input || {};
 
-// ── Find project root and load agent-role.yaml ───────────────────
+// ── Find project root and load agent-role.yaml ───────────────────────
 
 const projectDir =
   process.env.CLAUDE_PROJECT_DIR ||
@@ -41,65 +45,187 @@ const projectDir =
 
 const agentRolePath = join(projectDir, '.ai-sdlc', 'agent-role.yaml');
 
-let blockedActions;
+let blockedActions = [];
+let blockedPaths = [];
 try {
   const yaml = readFileSync(agentRolePath, 'utf-8');
-  blockedActions = parseBlockedActions(yaml);
+  blockedActions = parseListField(yaml, 'blockedActions');
+  blockedPaths = parseListField(yaml, 'blockedPaths');
 } catch {
   process.exit(0);
 }
 
-if (!blockedActions || blockedActions.length === 0) {
-  process.exit(0);
-}
+// ── Dispatch by tool ─────────────────────────────────────────────────
 
-// ── Check command against blocked actions ─────────────────────────
-
-const trimmed = command.trim();
-
-for (const pattern of blockedActions) {
-  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
-  const regexStr = escaped.replace(/\*/g, '.*');
-  const regex = new RegExp(`^${regexStr}$`, 'i');
-
-  if (regex.test(trimmed)) {
-    const result = {
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason: `Blocked by AI-SDLC governance policy: command matches blockedAction pattern '${pattern}'`,
-      },
-    };
-    process.stdout.write(JSON.stringify(result, null, 2) + '\n');
-    process.exit(0);
-  }
+if (toolName === 'Bash' || (!toolName && toolInput.command)) {
+  enforceBash(toolInput.command);
+} else if (toolName === 'Write' || toolName === 'Edit') {
+  enforceWriteEdit(toolInput.file_path);
 }
 
 process.exit(0);
 
-// ── Simple YAML parser for blockedActions ─────────────────────────
+// ── Bash enforcement (unchanged behavior) ────────────────────────────
 
-function parseBlockedActions(yaml) {
-  const lines = yaml.split('\n');
-  const actions = [];
-  let inSection = false;
+function enforceBash(command) {
+  if (!command || typeof command !== 'string' || !command.trim()) return;
+  if (blockedActions.length === 0) return;
 
-  for (const line of lines) {
-    if (/^\s*blockedActions:\s*$/.test(line)) {
-      inSection = true;
-      continue;
+  const trimmed = command.trim();
+  for (const pattern of blockedActions) {
+    const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&');
+    const regexStr = escaped.replace(/\*/g, '.*');
+    const regex = new RegExp(`^${regexStr}$`, 'i');
+    if (regex.test(trimmed)) {
+      deny(`command matches blockedAction pattern '${pattern}'`);
     }
+  }
+}
 
-    if (inSection) {
-      if (/^[a-zA-Z]/.test(line)) break;
-      if (/^\s*$/.test(line)) continue;
+// ── Write/Edit enforcement (new behavior) ────────────────────────────
 
-      const match = line.match(/^\s+-\s+['"]?(.+?)['"]?\s*$/);
-      if (match) {
-        actions.push(match[1]);
+function enforceWriteEdit(filePath) {
+  if (!filePath || typeof filePath !== 'string') return;
+
+  // Always work with absolute paths so both relative tool inputs and
+  // already-absolute ones get the same treatment.
+  const absPath = isAbsolute(filePath) ? resolve(filePath) : resolve(projectDir, filePath);
+
+  const projectAbs = resolve(projectDir);
+  const insideProject = absPath === projectAbs || absPath.startsWith(projectAbs + sep);
+
+  if (insideProject) {
+    // Path is inside the project root — check against blockedPaths globs.
+    // Relative path uses POSIX separators because globs do.
+    const relPath = relative(projectAbs, absPath).split(sep).join('/');
+    for (const glob of blockedPaths) {
+      if (matchGlob(glob, relPath)) {
+        deny(
+          `path '${relPath}' matches blocked path '${glob}'. ` +
+            `Configuration files under blockedPaths are out of scope for agent edits.`,
+        );
       }
+    }
+    return;
+  }
+
+  // Path is OUTSIDE the project root — only allowed if the active task's
+  // permittedExternalPaths covers it.
+  const allowed = loadPermittedExternalPaths(projectAbs);
+  for (const ext of allowed) {
+    const extAbs = resolve(projectAbs, ext);
+    if (absPath === extAbs || absPath.startsWith(extAbs + sep)) {
+      return; // explicit allow
     }
   }
 
-  return actions;
+  // No allowlist match — deny with a clear, actionable reason.
+  if (allowed.length === 0) {
+    deny(
+      `path '${absPath}' is outside the project root. ` +
+        `To permit cross-repo writes for this task, add 'permittedExternalPaths' to ` +
+        `the task frontmatter and set AI_SDLC_ACTIVE_TASK_ID before invoking the agent.`,
+    );
+  } else {
+    deny(
+      `path '${absPath}' is outside the project root and not under the active ` +
+        `task's permittedExternalPaths (${allowed.join(', ')}).`,
+    );
+  }
+}
+
+// ── Helpers ──────────────────────────────────────────────────────────
+
+function deny(reason) {
+  const result = {
+    hookSpecificOutput: {
+      hookEventName: 'PreToolUse',
+      permissionDecision: 'deny',
+      permissionDecisionReason: `Blocked by AI-SDLC governance policy: ${reason}`,
+    },
+  };
+  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  process.exit(0);
+}
+
+function parseListField(yaml, field) {
+  const lines = yaml.split('\n');
+  const items = [];
+  let inSection = false;
+
+  for (const line of lines) {
+    if (new RegExp(`^\\s*${field}:\\s*$`).test(line)) {
+      inSection = true;
+      continue;
+    }
+    if (inSection) {
+      if (/^[a-zA-Z]/.test(line)) break;
+      if (/^\s*$/.test(line)) continue;
+      const match = line.match(/^\s+-\s+['"]?(.+?)['"]?\s*$/);
+      if (match) items.push(match[1]);
+    }
+  }
+
+  return items;
+}
+
+/**
+ * Convert a glob like `.ai-sdlc/**` or `.github/workflows/*.yml` to a regex.
+ * - `**` matches any sequence including `/`
+ * - `*` matches any sequence except `/`
+ * - other characters are matched literally
+ */
+function matchGlob(glob, path) {
+  const regexStr = glob
+    .split('')
+    .map((char, i, arr) => {
+      if (char === '*' && arr[i + 1] === '*') return '__DOUBLESTAR__';
+      if (char === '*' && arr[i - 1] === '*') return '';
+      if (char === '*') return '[^/]*';
+      if (/[.+?^${}()|[\]\\]/.test(char)) return '\\' + char;
+      return char;
+    })
+    .join('')
+    .replace(/__DOUBLESTAR__/g, '.*');
+
+  const regex = new RegExp(`^${regexStr}$`);
+  return regex.test(path);
+}
+
+/**
+ * Load permittedExternalPaths from the active task's frontmatter.
+ * Active task is identified by AI_SDLC_ACTIVE_TASK_ID env var (e.g. AISDLC-68).
+ * Returns [] when no env var, no matching task file, or no frontmatter field.
+ */
+function loadPermittedExternalPaths(projectAbs) {
+  const taskId = process.env.AI_SDLC_ACTIVE_TASK_ID;
+  if (!taskId) return [];
+
+  const tasksDir = join(projectAbs, 'backlog', 'tasks');
+  if (!existsSync(tasksDir)) return [];
+
+  let entries;
+  try {
+    entries = readdirSync(tasksDir);
+  } catch {
+    return [];
+  }
+
+  // Task files are named `<id-lower> - <slug>.md` (e.g. `aisdlc-68 - foo.md`).
+  // Match case-insensitively on the id prefix to be tolerant.
+  const idLower = taskId.toLowerCase();
+  const taskFile = entries.find((f) => f.toLowerCase().startsWith(idLower + ' '));
+  if (!taskFile) return [];
+
+  let content;
+  try {
+    content = readFileSync(join(tasksDir, taskFile), 'utf-8');
+  } catch {
+    return [];
+  }
+
+  const fmMatch = content.match(/^---\n([\s\S]*?)\n---/);
+  if (!fmMatch) return [];
+
+  return parseListField(fmMatch[1], 'permittedExternalPaths');
 }

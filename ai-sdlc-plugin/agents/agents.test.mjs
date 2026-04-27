@@ -59,7 +59,8 @@ function parseFrontmatter(filePath) {
   return result;
 }
 
-const agentFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
+const agentFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md', 'developer.md'];
+const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
 const agents = {};
 
 before(() => {
@@ -132,9 +133,51 @@ describe('agent definition tool restrictions', () => {
     }
   });
 
-  it('all agents specify sonnet as the model', () => {
+  it('all agents inherit the model from the parent session', () => {
     for (const file of agentFiles) {
-      assert.equal(agents[file].model, 'sonnet', `${file} should use sonnet model`);
+      assert.equal(
+        agents[file].model,
+        'inherit',
+        `${file} should inherit model — keeps subagent on the orchestrator's tier`,
+      );
     }
+  });
+
+  it('developer.md has Edit and Write in tools (it implements code)', () => {
+    assert.ok(agents['developer.md'].tools.includes('Edit'), 'developer needs Edit');
+    assert.ok(agents['developer.md'].tools.includes('Write'), 'developer needs Write');
+    assert.ok(agents['developer.md'].tools.includes('Bash'), 'developer needs Bash');
+  });
+
+  it('developer.md disallows AgentTool (no recursive subagent spawning)', () => {
+    assert.ok(
+      agents['developer.md'].disallowedTools.includes('AgentTool'),
+      'developer must not spawn nested subagents',
+    );
+  });
+
+  it('developer.md uses claude-code as its harness', () => {
+    assert.equal(
+      agents['developer.md'].harness,
+      'claude-code',
+      'developer is the implementer; reviewer independence is enforced via the reviewer agents',
+    );
+  });
+
+  it('developer.md body documents the [ai-sdlc-progress] convention', () => {
+    const body = readFileSync(join(__dirname, 'developer.md'), 'utf-8');
+    assert.ok(
+      body.includes('[ai-sdlc-progress]'),
+      'developer prompt must instruct emitting progress lines per stage',
+    );
+  });
+
+  it('developer.md body embeds the hard governance rules (defense-in-depth)', () => {
+    const body = readFileSync(join(__dirname, 'developer.md'), 'utf-8');
+    // SubagentStart hook also injects these, but embedding them in the agent
+    // prompt is belt-and-braces in case the hook ever fails to fire.
+    assert.ok(body.includes('Never merge'), 'embed never-merge rule');
+    assert.ok(body.includes('Never force-push'), 'embed never-force-push rule');
+    assert.ok(body.includes('Never edit `.ai-sdlc/**`'), 'embed blocked-paths rule');
   });
 });
