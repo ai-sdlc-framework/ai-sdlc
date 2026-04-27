@@ -312,3 +312,121 @@ describe('scoreIssueForAdmission', () => {
     expect(result.score.dimensions.calibration).toBe(1.3);
   });
 });
+
+describe('mapIssueToPriorityInput — backlog context', () => {
+  function backlogInput(overrides: Partial<AdmissionInput> = {}): AdmissionInput {
+    return {
+      issueNumber: 68,
+      title: 'Documentation consolidation',
+      body: 'Two parallel doc trees diverge.',
+      labels: ['docs', 'infrastructure'],
+      reactionCount: 0,
+      commentCount: 0,
+      createdAt: '2026-04-26T19:20:00Z',
+      authorAssociation: 'OWNER',
+      backlogContext: {
+        priority: 'medium',
+        dependencyCount: 0,
+        referenceCount: 3,
+        acceptanceCriteriaCount: 6,
+        status: 'To Do',
+      },
+      ...overrides,
+    };
+  }
+
+  it('vetoes Draft tasks via soulAlignment=0', () => {
+    const out = mapIssueToPriorityInput(backlogInput({ backlogContext: { status: 'Draft' } }));
+    expect(out.soulAlignment).toBe(0);
+  });
+
+  it('uses backlog priority for explicitPriority when no high/low label set', () => {
+    const high = mapIssueToPriorityInput(backlogInput({ backlogContext: { priority: 'high' } }));
+    expect(high.explicitPriority).toBe(0.8);
+
+    const critical = mapIssueToPriorityInput(
+      backlogInput({ backlogContext: { priority: 'critical' } }),
+    );
+    expect(critical.explicitPriority).toBe(1.0);
+
+    const low = mapIssueToPriorityInput(backlogInput({ backlogContext: { priority: 'low' } }));
+    expect(low.explicitPriority).toBe(0.2);
+  });
+
+  it('label `high` still wins over backlog priority (explicit > frontmatter)', () => {
+    const out = mapIssueToPriorityInput(
+      backlogInput({
+        labels: ['docs', 'high'],
+        backlogContext: { priority: 'low' },
+      }),
+    );
+    expect(out.explicitPriority).toBe(0.8);
+  });
+
+  it('derives complexity from acceptance-criteria count when no Complexity header', () => {
+    const out = mapIssueToPriorityInput(
+      backlogInput({ backlogContext: { acceptanceCriteriaCount: 6 } }),
+    );
+    // 6 ACs * 1.2 = 7.2, ceil = 8
+    expect(out.complexity).toBe(8);
+  });
+
+  it('explicit ### Complexity header still wins over AC-derived complexity', () => {
+    const out = mapIssueToPriorityInput(
+      backlogInput({
+        body: '### Complexity\n3\n',
+        backlogContext: { acceptanceCriteriaCount: 6 },
+      }),
+    );
+    expect(out.complexity).toBe(3);
+  });
+
+  it('penalizes builderConviction when task has dependencies (blocked)', () => {
+    const blocked = mapIssueToPriorityInput(
+      backlogInput({ backlogContext: { dependencyCount: 2 } }),
+    );
+    const unblocked = mapIssueToPriorityInput(
+      backlogInput({ backlogContext: { dependencyCount: 0 } }),
+    );
+    expect(blocked.builderConviction!).toBeLessThan(unblocked.builderConviction!);
+  });
+
+  it('boosts soulAlignment for rfc-process / architecture labels', () => {
+    const rfc = mapIssueToPriorityInput(backlogInput({ labels: ['docs', 'rfc-process'] }));
+    expect(rfc.soulAlignment).toBe(0.85);
+
+    const arch = mapIssueToPriorityInput(backlogInput({ labels: ['architecture'] }));
+    expect(arch.soulAlignment).toBe(0.85);
+  });
+
+  it('AISDLC-68 vs AISDLC-69 score differently when their labels diverge (the original bug)', () => {
+    const aisdlc68 = mapIssueToPriorityInput(
+      backlogInput({
+        issueNumber: 68,
+        title: 'Docs consolidation',
+        labels: ['docs', 'infrastructure', 'tech-debt', 'triage-passed'],
+        backlogContext: {
+          priority: 'medium',
+          dependencyCount: 0,
+          acceptanceCriteriaCount: 6,
+          status: 'To Do',
+        },
+      }),
+    );
+    const aisdlc69 = mapIssueToPriorityInput(
+      backlogInput({
+        issueNumber: 69,
+        title: 'RFC drift detection',
+        labels: ['docs', 'infrastructure', 'rfc-process', 'triage-passed'],
+        backlogContext: {
+          priority: 'medium',
+          dependencyCount: 0,
+          acceptanceCriteriaCount: 4,
+          status: 'To Do',
+        },
+      }),
+    );
+    // AISDLC-69 (rfc-process) gets soulAlignment 0.85, AISDLC-68 (tech-debt) gets 0.6
+    expect(aisdlc69.soulAlignment).toBeGreaterThan(aisdlc68.soulAlignment!);
+  });
+});

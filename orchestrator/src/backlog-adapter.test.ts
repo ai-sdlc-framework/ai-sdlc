@@ -58,6 +58,7 @@ function snapWith(overrides: Partial<BacklogTaskSnapshot>): BacklogTaskSnapshot 
     updatedDate: '2026-04-25 09:00',
     acceptanceCriteria: [],
     references: [],
+    dependencies: [],
     ...overrides,
   };
 }
