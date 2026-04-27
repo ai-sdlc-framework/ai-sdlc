@@ -314,6 +314,13 @@ export async function executePipeline(
     });
   }
 
+  // Capture the user's current HEAD so we can restore it after the pipeline.
+  // Without this, `git checkout <issue-branch>` inside the pipeline body
+  // leaves the user's working tree on the issue branch even after the run
+  // completes (the AISDLC-68 incident). Long-term fix is a worktree pool
+  // (RFC-0010 §7); this is the pragmatic save+restore.
+  const originalHead = await captureCurrentBranch(workDir);
+
   // Wrap pipeline body in try/catch to record failure episodes
   try {
     return await executePipelineBody(
@@ -346,6 +353,63 @@ export async function executePipeline(
       options.memory.working.clear();
     }
     throw err;
+  } finally {
+    await restoreOriginalBranch(workDir, originalHead, log);
+  }
+}
+
+/**
+ * Capture the current branch name (or commit SHA in detached-HEAD state) so the
+ * pipeline can restore the user's worktree after the run. Returns null on git
+ * failure — callers treat null as "don't try to restore".
+ */
+async function captureCurrentBranch(workDir: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], {
+      cwd: workDir,
+    });
+    return stdout.trim();
+  } catch {
+    // Detached HEAD or no git repo. Try the SHA fallback.
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: workDir });
+      return stdout.trim();
+    } catch {
+      return null;
+    }
+  }
+}
+
+/**
+ * Restore the user's original HEAD if the pipeline switched branches AND the
+ * working tree is clean. If the working tree has uncommitted changes (from a
+ * partial pipeline run), log a warning and leave HEAD where it is — better to
+ * preserve the pipeline's state than to clobber whatever the user has.
+ */
+async function restoreOriginalBranch(
+  workDir: string,
+  originalHead: string | null,
+  log: { info: (msg: string) => void } | undefined,
+): Promise<void> {
+  if (!originalHead) return;
+  try {
+    const current = await captureCurrentBranch(workDir);
+    if (current === originalHead) return;
+    // Refuse to checkout if the worktree has uncommitted changes — git would
+    // either block the checkout or carry the changes across, both bad.
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: workDir });
+    if (stdout.trim().length > 0) {
+      log?.info(
+        `[pipeline] worktree dirty after pipeline; HEAD left at \`${current}\`. ` +
+          `To restore: \`git stash && git checkout ${originalHead}\``,
+      );
+      return;
+    }
+    await execFileAsync('git', ['checkout', originalHead], { cwd: workDir });
+  } catch (err) {
+    log?.info(
+      `[pipeline] failed to restore HEAD to \`${originalHead}\`: ${(err as Error).message}`,
+    );
   }
 }
 
@@ -788,14 +852,26 @@ async function executePipelineBody(
   );
 
   if (!validation.passed) {
-    // Record validation failure in audit log
+    // One-line summary suitable for log lines + thrown error message.
+    const violationSummary = validation.violations.map((v) => `${v.rule}: ${v.message}`).join('; ');
+
+    // Record validation failure in audit log with full violation detail (rule
+    // + message), not just the rule names — the rule name alone doesn't tell
+    // the operator what to fix.
     auditLog.record({
       actor: 'system',
       action: 'check',
       resource: 'agent-output',
       decision: 'denied',
-      details: { violations: validation.violations.map((v) => v.rule) },
+      details: {
+        violations: validation.violations.map((v) => ({ rule: v.rule, message: v.message })),
+      },
     });
+
+    // Surface the rejection detail to the structured log so the operator sees
+    // it in stderr immediately. Without this the only signal was the
+    // (detail-free) thrown error message.
+    log.error(`[validate-output] rejected: ${violationSummary}`);
 
     // Post comment explaining the violations
     const violationList = validation.violations
@@ -808,9 +884,11 @@ async function executePipelineBody(
         `cherry-pick valid changes, or adjust the guardrails as needed.`,
     );
 
-    // Exit without creating PR
+    // Exit without creating PR. Include the violation summary in the error
+    // message so cli-watch and downstream loggers see the actual rejection.
     throw new Error(
-      `Agent output failed guardrail validation. Branch ${branchName} preserved for review.`,
+      `Agent output failed guardrail validation: ${violationSummary}. ` +
+        `Branch ${branchName} preserved for review.`,
     );
   }
 

@@ -91,6 +91,70 @@ export async function detectChangedFiles(
   };
 }
 
+export interface CrossRepoWrite {
+  /** Sibling repository absolute path. */
+  repoPath: string;
+  /** Files modified or added in that sibling, relative to its root. */
+  files: string[];
+}
+
+/**
+ * Detect writes the agent made into sibling git repositories (i.e., directories
+ * adjacent to `workDir` that are themselves git repos). Surfaced as a warning,
+ * not a hard failure — the AISDLC-68 task LEGITIMATELY needed to sync into
+ * `../ai-sdlc-io/`, and we don't want to forbid that. The orchestrator just
+ * needs to surface that the changes exist so the operator knows to commit them
+ * separately in the sibling repo.
+ *
+ * Returns one entry per dirty sibling repo, with the list of changed files.
+ * Empty array when no siblings are dirty (the common case).
+ */
+export async function detectCrossRepoWrites(workDir: string): Promise<CrossRepoWrite[]> {
+  const { readdir, stat } = await import('node:fs/promises');
+  const { dirname, join, resolve } = await import('node:path');
+
+  let workTreeRoot: string;
+  try {
+    workTreeRoot = await gitExec(workDir, ['rev-parse', '--show-toplevel']);
+  } catch {
+    return [];
+  }
+
+  const parent = dirname(resolve(workTreeRoot));
+  let entries: string[];
+  try {
+    entries = await readdir(parent);
+  } catch {
+    return [];
+  }
+
+  const writes: CrossRepoWrite[] = [];
+  for (const entry of entries) {
+    const candidate = join(parent, entry);
+    if (resolve(candidate) === resolve(workTreeRoot)) continue; // skip self
+    try {
+      const s = await stat(candidate);
+      if (!s.isDirectory()) continue;
+      // Quick git-repo check via `rev-parse --is-inside-work-tree`.
+      await gitExec(candidate, ['rev-parse', '--is-inside-work-tree']);
+    } catch {
+      continue;
+    }
+    try {
+      const status = await gitExec(candidate, ['status', '--porcelain']);
+      if (!status.trim()) continue;
+      const files = status
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => line.slice(3).trim());
+      writes.push({ repoPath: candidate, files });
+    } catch {
+      // Couldn't read status — skip silently.
+    }
+  }
+  return writes;
+}
+
 /**
  * Run lint and format auto-fix commands (best-effort, non-fatal).
  */
