@@ -216,13 +216,27 @@ describe('parseTokenJson', () => {
 describe('createTokensStudioProvider', () => {
   let tmpDir: string;
 
+  // execSync env that strips GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE so
+  // commands run inside tmpDir resolve against tmpDir's own .git rather than
+  // any parent worktree's git dir. Husky pre-push hooks export GIT_DIR
+  // pointing at the parent .git, which would otherwise corrupt these
+  // temp-repo commits (and worse, leak commits into the parent branch).
+  const cleanGitEnv = () => {
+    const env = { ...process.env };
+    delete env.GIT_DIR;
+    delete env.GIT_WORK_TREE;
+    delete env.GIT_INDEX_FILE;
+    return env;
+  };
+  const gitOpts = () => ({ cwd: tmpDir, env: cleanGitEnv() });
+
   function setup() {
     tmpDir = mkdtempSync(join(tmpdir(), 'tokens-studio-'));
 
     // Initialize a git repo
-    execSync('git init', { cwd: tmpDir });
-    execSync('git config user.email "test@test.com"', { cwd: tmpDir });
-    execSync('git config user.name "Test"', { cwd: tmpDir });
+    execSync('git init', gitOpts());
+    execSync('git config user.email "test@test.com"', gitOpts());
+    execSync('git config user.name "Test"', gitOpts());
 
     // Create token directory with fixture files
     const tokenDir = join(tmpDir, 'tokens');
@@ -253,8 +267,8 @@ describe('createTokensStudioProvider', () => {
     writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({ version: '2.1.0' }));
 
     // Commit everything so git operations work
-    execSync('git add -A', { cwd: tmpDir });
-    execSync('git commit -m "initial"', { cwd: tmpDir });
+    execSync('git add -A', gitOpts());
+    execSync('git commit -m "initial"', gitOpts());
   }
 
   afterEach(() => {
