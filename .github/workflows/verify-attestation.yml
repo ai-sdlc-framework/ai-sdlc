@@ -47,8 +47,11 @@ jobs:
       - name: Install (orchestrator only — verifier needs the runtime barrel)
         run: pnpm install --frozen-lockfile
 
-      - name: Build orchestrator (verifier imports compiled JS)
-        run: pnpm --filter @ai-sdlc/orchestrator build
+      - name: Build orchestrator + dependencies (verifier imports compiled JS)
+        # `...` suffix builds @ai-sdlc/orchestrator AND its workspace deps
+        # (notably @ai-sdlc/reference) in topological order. Without it the
+        # orchestrator build fails with TS2307: cannot find @ai-sdlc/reference.
+        run: pnpm --filter "@ai-sdlc/orchestrator..." build
 
       - name: Verify attestation
         id: verify
