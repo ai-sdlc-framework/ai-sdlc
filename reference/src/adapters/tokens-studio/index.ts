@@ -85,7 +85,16 @@ export function createTokensStudioProvider(config: TokensStudioConfig): DesignTo
   }
 
   function gitExec(cmd: string): string {
-    return execSync(cmd, { cwd: repoPath, encoding: 'utf-8' }).trim();
+    // Strip GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE so commands resolve
+    // against repoPath's own .git, not whatever a parent process (e.g. a
+    // husky hook running from another worktree) leaked into the env.
+    // Without this, vitest tests against this provider can corrupt the
+    // parent worktree's branch when invoked from a pre-push hook.
+    const env = { ...process.env };
+    delete env.GIT_DIR;
+    delete env.GIT_WORK_TREE;
+    delete env.GIT_INDEX_FILE;
+    return execSync(cmd, { cwd: repoPath, encoding: 'utf-8', env }).trim();
   }
 
   return {
