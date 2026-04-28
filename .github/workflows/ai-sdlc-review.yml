@@ -10,14 +10,68 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Job 0: Check for valid local attestation (AISDLC-74) ────────
+  # `verify-attestation.yml` sets the `ai-sdlc/attestation` commit status.
+  # If it's `success` (= attestation valid), we skip the duplicate review
+  # run that this workflow would otherwise do — `/ai-sdlc execute` already
+  # ran the same three reviewer subagents locally and signed the verdicts.
+  # If absent or `failure`, we run review normally (and verify-attestation.yml
+  # has already posted the friendly fallback comment).
+  check_attestation:
+    name: Check local-review attestation
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    permissions:
+      statuses: read
+    outputs:
+      attestation_valid: ${{ steps.check.outputs.valid }}
+    steps:
+      - id: check
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const sha = process.env.HEAD_SHA;
+            // Poll briefly: verify-attestation.yml runs in parallel, so the
+            // status may not yet exist when this job starts. We give it a few
+            // attempts before falling back to "not valid → run CI review".
+            const maxAttempts = 12; // ~60s total
+            let valid = 'false';
+            for (let i = 0; i < maxAttempts; i++) {
+              const { data } = await github.rest.repos.getCombinedStatusForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: sha,
+              });
+              const att = data.statuses.find((s) => s.context === 'ai-sdlc/attestation');
+              if (att && att.state === 'success') {
+                valid = 'true';
+                core.notice(
+                  `ai-sdlc/attestation status is success — SKIPPING duplicate CI review (AISDLC-74)`,
+                );
+                break;
+              }
+              if (att && att.state !== 'pending') {
+                core.notice(
+                  `ai-sdlc/attestation status is ${att.state} (${att.description ?? ''}) — running CI review normally`,
+                );
+                break;
+              }
+              if (i < maxAttempts - 1) await new Promise((r) => setTimeout(r, 5000));
+            }
+            core.setOutput('valid', valid);
+
   # ── Job 1: Parallel Review Analysis (sandboxed) ──────────────────
   # Has ANTHROPIC_API_KEY but NO GitHub write access.
   # Defense: even if the LLM is compromised, it cannot modify the repo.
   analyze:
     name: Analyze PR
     runs-on: ubuntu-latest
-    # Skip release-please PRs — they're version bumps, not code changes
-    if: "!startsWith(github.head_ref, 'release-please--')"
+    needs: check_attestation
+    # Skip release-please PRs AND skip when a valid local attestation exists
+    # (AISDLC-74): `/ai-sdlc execute` already ran the same three reviewers.
+    if: "!startsWith(github.head_ref, 'release-please--') && needs.check_attestation.outputs.attestation_valid != 'true'"
     permissions: {} # Fully sandboxed — no GitHub access
     outputs:
       testing: ${{ steps.review.outputs.testing }}
@@ -120,14 +174,20 @@ jobs:
   report:
     name: Post Review Results
     runs-on: ubuntu-latest
-    needs: analyze
+    needs: [check_attestation, analyze]
     if: always()
     permissions:
       pull-requests: write
       issues: read
     steps:
+      - name: Skip if attestation valid (AISDLC-74 — local /ai-sdlc execute review trusted)
+        if: needs.check_attestation.outputs.attestation_valid == 'true'
+        run: |
+          echo "::notice::Local review attestation is valid — Post Review Results SKIPPING duplicate CI review (AISDLC-74)."
+          echo "::notice::See .ai-sdlc/attestations/<head-sha>.dsse.json for the signed envelope."
+
       - name: Skip if analyze was skipped (release-please PRs)
-        if: needs.analyze.result == 'skipped'
+        if: needs.analyze.result == 'skipped' && needs.check_attestation.outputs.attestation_valid != 'true'
         run: echo "Skipping review for release-please PR"
 
       - name: Validate and post reviews

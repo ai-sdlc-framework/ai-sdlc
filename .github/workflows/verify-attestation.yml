@@ -1,0 +1,92 @@
+name: AI-SDLC Verify Review Attestation
+
+# Reads the DSSE attestation at .ai-sdlc/attestations/<head-sha>.dsse.json,
+# verifies the signature against any-of-N pubkeys in
+# .ai-sdlc/trusted-reviewers.yaml, verifies all predicate fields against
+# current PR state (commit SHA, diff hash, policy hash, agent file hashes,
+# schema version), and sets the commit status `ai-sdlc/attestation` to
+# `valid` or `invalid (<reason>)`.
+#
+# Downstream effect (AISDLC-74):
+#  - `ai-sdlc-review.yml` Post Review Results checks this status; when valid,
+#    it short-circuits cleanly (no duplicate review run).
+#  - When missing/invalid, this workflow ALSO posts a friendly educational
+#    PR comment via `scripts/post-attestation-comment.mjs` (idempotent).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+concurrency:
+  group: verify-attestation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Verify attestation
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    permissions:
+      contents: read
+      statuses: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (orchestrator only — verifier needs the runtime barrel)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build orchestrator (verifier imports compiled JS)
+        run: pnpm --filter @ai-sdlc/orchestrator build
+
+      - name: Verify attestation
+        id: verify
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: node scripts/verify-attestation.mjs
+
+      - name: Set commit status (ai-sdlc/attestation)
+        uses: actions/github-script@v7
+        env:
+          STATUS: ${{ steps.verify.outputs.status }}
+          REASON: ${{ steps.verify.outputs.reason }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        with:
+          script: |
+            const status = process.env.STATUS;
+            const reason = process.env.REASON || '';
+            const sha = process.env.HEAD_SHA;
+            const description =
+              status === 'valid'
+                ? 'attestation valid — Post Review Results will skip CI review'
+                : `invalid (${reason})`.slice(0, 140); // GitHub status descriptions cap at 140 chars
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              state: status === 'valid' ? 'success' : 'failure',
+              context: 'ai-sdlc/attestation',
+              description,
+            });
+
+      - name: Post friendly fallback comment when invalid (idempotent)
+        if: steps.verify.outputs.status != 'valid'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          ATTESTATION_REASON: ${{ steps.verify.outputs.reason }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node scripts/post-attestation-comment.mjs

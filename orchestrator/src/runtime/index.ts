@@ -40,3 +40,24 @@ export {
 } from './parallelism-flag.js';
 
 export { cleanGitEnv, gitExecFile } from './git-env.js';
+
+export {
+  ACCEPTED_SCHEMA_VERSIONS,
+  DSSE_PAYLOAD_TYPE,
+  buildPredicate,
+  generateSigningKeyPair,
+  paeEncode,
+  sha1Hex,
+  sha256Hex,
+  signAttestation,
+  validateTrustedReviewers,
+  verifyAttestation,
+  type AttestationPredicate,
+  type DsseEnvelope,
+  type DsseSignature,
+  type ReviewerEntry,
+  type SchemaVersion,
+  type SubjectDigest,
+  type TrustedReviewer,
+  type VerifyResult,
+} from './attestations.js';

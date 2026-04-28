@@ -1,0 +1,27 @@
+# Trusted contributor signing keys for review attestations (AISDLC-74).
+#
+# Each entry is a public key whose corresponding private key lives under
+# `~/.ai-sdlc/signing-key.pem` on a contributor's machine. CI's
+# `verify-attestation.yml` workflow reads this file, tries the signature on
+# `.ai-sdlc/attestations/<head-sha>.dsse.json` against ANY-OF-N pubkeys here,
+# and short-circuits the duplicate review run when one matches.
+#
+# Adding a contributor is a normal PR review:
+#   1. Run `/ai-sdlc init-signing-key` on your machine.
+#   2. Open a PR appending an entry below using the YAML block the command
+#      printed.
+#   3. A maintainer reviews + merges (just like any policy change).
+#   4. After merge, `/ai-sdlc execute` will produce attestations CI accepts.
+#
+# Schema:
+#   - identity:  free-form string (typically email or GitHub handle)
+#   - machine:   free-form label (lets one identity register multiple keys)
+#   - pubkey:    PEM-encoded ed25519 public key (multi-line block scalar)
+#   - addedAt:   ISO 8601 date the entry was added
+#   - addedBy:   GitHub handle of the maintainer who approved this entry's PR
+#
+# REMOVING an entry: open a PR deleting the row. Existing attestations signed
+# by the removed key become invalid retroactively (CI rejects them on the
+# next push), so coordinate with the contributor before removing.
+
+reviewers: []

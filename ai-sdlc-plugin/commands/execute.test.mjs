@@ -190,4 +190,41 @@ describe('/ai-sdlc execute body contract', () => {
   it('preserves worktree for inspection on failure', () => {
     assert.match(body, /Worktree preserved/);
   });
+
+  // ── AISDLC-74: review attestation contract ────────────────────────
+  // Step 10 must build + sign + write a DSSE envelope BEFORE the chore
+  // commit so CI's verify-attestation workflow can verify it on push.
+
+  it('Step 10: refuses to sign when ~/.ai-sdlc/signing-key.pem is missing', () => {
+    assert.match(body, /\$HOME\/\.ai-sdlc\/signing-key\.pem/);
+    assert.match(body, /\/ai-sdlc init-signing-key/);
+  });
+
+  it('Step 10: invokes scripts/sign-attestation.mjs with verdicts + iteration + harness-note', () => {
+    assert.match(body, /scripts\/sign-attestation\.mjs/);
+    assert.match(body, /--review-verdicts/);
+    assert.match(body, /--iteration-count/);
+    assert.match(body, /--harness-note/);
+  });
+
+  it('Step 10: skips the signing step when iteration cap was exceeded', () => {
+    // The chunk that handles attestation must be inside the "reviews approved"
+    // branch — the iteration-cap branch does not sign (the PR is
+    // [needs-human-attention] and the human owns the close-out).
+    assert.match(body, /If reviews approved cleanly:/);
+    assert.match(body, /Skip this step entirely if the iteration cap was exceeded/i);
+  });
+
+  it('Step 10: stages the .ai-sdlc/attestations/ file in the chore commit', () => {
+    assert.match(body, /git add backlog\/tasks backlog\/completed \.ai-sdlc\/attestations/);
+  });
+
+  it('Step 10: writes the envelope at .ai-sdlc/attestations/<head-sha>.dsse.json', () => {
+    assert.match(body, /\.ai-sdlc\/attestations\/<head-sha>\.dsse\.json/);
+  });
+
+  it('Step 10: chore commit message references AISDLC-74 + verify-attestation', () => {
+    assert.match(body, /AISDLC-74/);
+    assert.match(body, /verify-attestation/);
+  });
 });

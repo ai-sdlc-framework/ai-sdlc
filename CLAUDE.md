@@ -37,6 +37,42 @@
 - Prettier for formatting, ESLint for linting.
 - No unnecessary abstractions — three similar lines are better than a premature abstraction.
 
+## Review attestations
+
+`/ai-sdlc execute` runs three reviewer subagents (code/test/security) locally before pushing, then signs a DSSE attestation that CI verifies and trusts — skipping its own duplicate review run. Half of every clean run used to be duplicate review work; the attestation collapses it (AISDLC-74).
+
+### Bootstrap (one time per machine)
+
+1. `/ai-sdlc init-signing-key` — generates `~/.ai-sdlc/signing-key.pem` (ed25519, mode 0600) and prints a YAML block.
+2. Open a PR adding that YAML block to `.ai-sdlc/trusted-reviewers.yaml`. A maintainer reviews + merges (just like any policy change).
+3. After merge, `/ai-sdlc execute` will produce attestations CI accepts.
+
+If `/ai-sdlc execute` errors with `signing-key not found`, run step 1 + open the onboarding PR first. Until the PR merges, attestations still get signed but CI marks them invalid (`signature did not match any trusted reviewer pubkey`) and runs its own review.
+
+### File convention
+
+- `~/.ai-sdlc/signing-key.pem` — private key (mode 0600, never committed, never leaves your machine)
+- `.ai-sdlc/trusted-reviewers.yaml` — pubkey allowlist (committed, reviewed)
+- `.ai-sdlc/attestations/<commit-sha>.dsse.json` — per-commit signed envelopes (committed, ~1-2KB each, audit trail)
+- `.ai-sdlc/schemas/attestation.v1.schema.json` — JSON schema (current allowlist: `['v1']`)
+
+### CI behavior
+
+- `verify-attestation.yml` runs on `pull_request`. It verifies the envelope at `.ai-sdlc/attestations/<head-sha>.dsse.json` against current PR state (commit SHA, diff hash, policy hash, agent file hashes, schema version) and sets the `ai-sdlc/attestation` commit status to `valid` or `invalid (<reason>)`.
+- `ai-sdlc-review.yml` Post Review Results checks that status. When `valid`, it short-circuits cleanly with a notice. Otherwise, it runs the duplicate review normally.
+- When the attestation is missing or invalid, `verify-attestation.yml` ALSO posts a friendly educational PR comment (idempotent — checked via `<!-- ai-sdlc:attestation-fallback-comment -->` marker before posting again). The comment explains the bootstrap flow and the most common failure causes (force-push diff change, policy edit, missing trusted-reviewers entry).
+
+### What CI rejects (intentional)
+
+- Force-push that changes the diff after signing → `diffHash mismatch`
+- Edit to `.ai-sdlc/review-policy.md` after signing → `policyHash mismatch`
+- Edit to `ai-sdlc-plugin/agents/*.md` after signing → `agentFileHash mismatch`
+- `schemaVersion` outside the current allowlist → `schemaVersion 'vN' not in allowlist [v1]`
+- Signature from a private key whose pubkey isn't in `.ai-sdlc/trusted-reviewers.yaml` → `signature did not match any trusted reviewer pubkey`
+- Copy-pasted attestation from another PR → `subject digest mismatch`
+
+All five rejections are by design (threat model). Re-run `/ai-sdlc execute` against the current head to produce a fresh attestation.
+
 ## Backlog Workflow
 
 Backlog tasks live in `backlog/tasks/` (Backlog.md) and are managed via the `mcp__backlog__*` MCP tools. Every issue executed under the AI-SDLC pipeline MUST be tracked here.

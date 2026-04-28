@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/attestation.v1.schema.json",
+  "title": "AI-SDLC Review Attestation v1",
+  "description": "DSSE envelope (https://github.com/secure-systems-lab/dsse) carrying a v1 review-attestation predicate. Schema for /ai-sdlc execute Step 10 outputs at .ai-sdlc/attestations/<commit-sha>.dsse.json — verified by .github/workflows/verify-attestation.yml.",
+  "type": "object",
+  "required": ["payloadType", "payload", "signatures"],
+  "additionalProperties": false,
+  "properties": {
+    "payloadType": {
+      "type": "string",
+      "const": "application/vnd.ai-sdlc.attestation+json",
+      "description": "Vendor URI for the AI-SDLC review-attestation predicate. Bound by DSSE PAE so a signature for one payloadType can never be replayed onto another."
+    },
+    "payload": {
+      "type": "string",
+      "description": "Base64-encoded JSON of the predicate. Decoded predicate must conform to the `predicate` definition in this schema.",
+      "minLength": 1
+    },
+    "signatures": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["keyid", "sig"],
+        "additionalProperties": false,
+        "properties": {
+          "keyid": {
+            "type": "string",
+            "description": "Identifier of the public key that produced this signature. Free-form, typically <identity>:<machine>.",
+            "minLength": 1
+          },
+          "sig": {
+            "type": "string",
+            "description": "Base64-encoded raw ed25519 signature (64 bytes → 88 b64 chars).",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "predicate": {
+      "type": "object",
+      "required": [
+        "schemaVersion",
+        "subject",
+        "diffHash",
+        "policyHash",
+        "reviewers",
+        "pluginVersion",
+        "iterationCount",
+        "harnessNote",
+        "signedAt"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "type": "string",
+          "enum": ["v1"],
+          "description": "MANDATORY. Allowlist enforced by CI — currently only 'v1' is accepted."
+        },
+        "subject": {
+          "type": "object",
+          "required": ["digest"],
+          "additionalProperties": false,
+          "properties": {
+            "digest": {
+              "type": "object",
+              "required": ["sha1"],
+              "additionalProperties": false,
+              "properties": {
+                "sha1": {
+                  "type": "string",
+                  "pattern": "^[0-9a-f]{40}$",
+                  "description": "Git commit SHA-1 (40 lowercase hex chars)."
+                }
+              }
+            }
+          }
+        },
+        "diffHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "sha256 of `git diff origin/main...HEAD` at attestation time. Mismatch = PR diff changed since signing."
+        },
+        "policyHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "sha256 of `.ai-sdlc/review-policy.md` at attestation time. Mismatch = policy edited since signing."
+        },
+        "reviewers": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["agentId", "agentFileHash", "harness", "approved", "findings"],
+            "additionalProperties": false,
+            "properties": {
+              "agentId": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Matches the `name` field of the reviewer agent .md file (e.g. 'code-reviewer')."
+              },
+              "agentFileHash": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$",
+                "description": "sha256 of the reviewer agent's .md file at attestation time. Mismatch = agent file changed since signing."
+              },
+              "harness": {
+                "type": "string",
+                "minLength": 1,
+                "description": "Harness used for the review (e.g. 'codex', 'claude-code')."
+              },
+              "approved": { "type": "boolean" },
+              "findings": {
+                "type": "object",
+                "required": ["critical", "major", "minor", "suggestion"],
+                "additionalProperties": false,
+                "properties": {
+                  "critical": { "type": "integer", "minimum": 0 },
+                  "major": { "type": "integer", "minimum": 0 },
+                  "minor": { "type": "integer", "minimum": 0 },
+                  "suggestion": { "type": "integer", "minimum": 0 }
+                },
+                "description": "Counts only — full verdict JSON lives in PR body for human review."
+              }
+            }
+          }
+        },
+        "pluginVersion": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Version of ai-sdlc-plugin/plugin.json at attestation time."
+        },
+        "iterationCount": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of dev rounds (re-implementation passes) the work went through. ONE attestation per RUN — earlier iterations are not separately attested."
+        },
+        "harnessNote": {
+          "type": "string",
+          "description": "Empty string when reviewer-independence was enforced; warning string when fallback occurred (e.g. '⚠ INDEPENDENCE NOT ENFORCED (codex unavailable, fell back to claude-code)')."
+        },
+        "signedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp at signing."
+        }
+      }
+    }
+  }
+}
