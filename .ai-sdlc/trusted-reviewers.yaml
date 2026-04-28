@@ -37,4 +37,12 @@
 # match. If you need a richer YAML feature, add a real YAML lib to the
 # verify-attestation workflow's install step first.
 
-reviewers: []
+reviewers:
+  - identity: 'dominique@reliablegenius.io'
+    machine: 'doms-macbook'
+    addedAt: '2026-04-28'
+    addedBy: 'deefactorial'
+    pubkey: |
+      -----BEGIN PUBLIC KEY-----
+      MCowBQYDK2VwAyEA7RfNqQjnRnt7dG0gjIWIkqyfvn+/aMycmbaEbq7lS7E=
+      -----END PUBLIC KEY-----
