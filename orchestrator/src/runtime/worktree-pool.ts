@@ -9,6 +9,7 @@ import {
   verifyOwnership,
   WorktreeOwnershipError,
 } from './worktree.js';
+import { cleanGitEnv } from './git-env.js';
 
 export const DEFAULT_POOL_ROOT = '~/.ai-sdlc/worktrees';
 export const DEFAULT_STALE_THRESHOLD_DAYS = 14;
@@ -70,7 +71,13 @@ export class WorktreePoolManager {
     this.ownershipGuard = spec.ownershipGuard ?? 'strict';
     this.git =
       deps.git ??
-      ((args, opts) => execFileAsync('git', args, opts as Record<string, unknown> | undefined));
+      ((args, opts) => {
+        // Strip leaked GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE so worktree
+        // operations bind to `clonePath`'s repo rather than a husky hook's
+        // env (AISDLC-72).
+        const merged = { env: cleanGitEnv(), ...(opts as Record<string, unknown> | undefined) };
+        return execFileAsync('git', args, merged);
+      });
     this.now = deps.now ?? (() => new Date());
   }
 

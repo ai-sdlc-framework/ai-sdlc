@@ -52,6 +52,7 @@ import {
   NOTIFICATION_TITLES,
 } from './defaults.js';
 import { createCycleDetectorFromConfig, checkAndHandleCycle } from './cycle-utils.js';
+import { cleanGitEnv } from './runtime/git-env.js';
 
 // Default max review-fix attempts (lower than CI-fix since reviews are more deterministic)
 export const MAX_REVIEW_FIX_ATTEMPTS = 2;
@@ -333,8 +334,10 @@ export async function executeFixReview(
   }
 
   // 4. Determine branch and issue number
+  // cleanGitEnv() prevents leaked GIT_DIR from binding to a parent repo (AISDLC-72).
   const { stdout: branchStdout } = await execFileAsync('git', ['branch', '--show-current'], {
     cwd: workDir,
+    env: cleanGitEnv(),
   });
   const currentBranch = sanitizeBranchName(branchStdout.trim());
   const issueId = extractIssueId(currentBranch);
@@ -532,8 +535,12 @@ export async function executeFixReview(
     );
 
     // 10. Push to the same branch (review agents re-run automatically via pull_request.synchronize)
+    // cleanGitEnv() prevents leaked GIT_DIR from binding to a parent repo (AISDLC-72).
     log.stage('push');
-    await execFileAsync('git', ['push', 'origin', currentBranch], { cwd: workDir });
+    await execFileAsync('git', ['push', 'origin', currentBranch], {
+      cwd: workDir,
+      env: cleanGitEnv(),
+    });
     log.stageEnd('push');
 
     auditLog.record({

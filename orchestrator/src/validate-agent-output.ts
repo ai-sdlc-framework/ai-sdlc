@@ -5,6 +5,7 @@
  */
 
 import { execFile } from 'node:child_process';
+import { cleanGitEnv } from './runtime/git-env.js';
 
 export interface ValidationContext {
   filesChanged: string[];
@@ -83,11 +84,18 @@ export async function validateAgentOutput(ctx: ValidationContext): Promise<Valid
 
   // 3. Max lines per PR
   if (ctx.guardrails.maxLinesPerPR !== undefined) {
+    // cleanGitEnv() prevents leaked GIT_DIR from binding this call to a
+    // parent process's git repo (AISDLC-72).
     const stdout = await new Promise<string>((resolve, reject) => {
-      execFile('git', ['diff', '--stat', 'HEAD~1'], { cwd: ctx.workDir }, (err, out) => {
-        if (err) reject(err);
-        else resolve(out);
-      });
+      execFile(
+        'git',
+        ['diff', '--stat', 'HEAD~1'],
+        { cwd: ctx.workDir, env: cleanGitEnv() },
+        (err, out) => {
+          if (err) reject(err);
+          else resolve(out);
+        },
+      );
     });
     const totalLines = parseDiffStatLines(stdout);
     if (totalLines > ctx.guardrails.maxLinesPerPR) {

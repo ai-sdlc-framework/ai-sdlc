@@ -32,7 +32,7 @@ describe('gitExec', () => {
     expect(mockExecFileAsync).toHaveBeenCalledWith(
       'git',
       ['-c', 'core.quotePath=false', 'branch', '--show-current'],
-      { cwd: '/tmp/repo' },
+      expect.objectContaining({ cwd: '/tmp/repo' }),
     );
   });
 
@@ -57,8 +57,35 @@ describe('gitExec', () => {
     expect(mockExecFileAsync).toHaveBeenCalledWith(
       'git',
       ['-c', 'core.quotePath=false', 'status'],
-      { cwd: '/my/project' },
+      expect.objectContaining({ cwd: '/my/project' }),
     );
+  });
+
+  it('strips GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE from inherited env (AISDLC-72)', async () => {
+    mockExecFileAsync.mockResolvedValue({ stdout: '', stderr: '' });
+    const prev = {
+      GIT_DIR: process.env.GIT_DIR,
+      GIT_WORK_TREE: process.env.GIT_WORK_TREE,
+      GIT_INDEX_FILE: process.env.GIT_INDEX_FILE,
+    };
+    process.env.GIT_DIR = '/tmp/leaked-parent/.git';
+    process.env.GIT_WORK_TREE = '/tmp/leaked-parent';
+    process.env.GIT_INDEX_FILE = '/tmp/leaked-parent/.git/index';
+    try {
+      await gitExec('/tmp/repo', ['status']);
+      const opts = mockExecFileAsync.mock.calls[0][2] as { env: NodeJS.ProcessEnv };
+      expect(opts.env).toBeDefined();
+      expect(opts.env.GIT_DIR).toBeUndefined();
+      expect(opts.env.GIT_WORK_TREE).toBeUndefined();
+      expect(opts.env.GIT_INDEX_FILE).toBeUndefined();
+    } finally {
+      if (prev.GIT_DIR === undefined) delete process.env.GIT_DIR;
+      else process.env.GIT_DIR = prev.GIT_DIR;
+      if (prev.GIT_WORK_TREE === undefined) delete process.env.GIT_WORK_TREE;
+      else process.env.GIT_WORK_TREE = prev.GIT_WORK_TREE;
+      if (prev.GIT_INDEX_FILE === undefined) delete process.env.GIT_INDEX_FILE;
+      else process.env.GIT_INDEX_FILE = prev.GIT_INDEX_FILE;
+    }
   });
 
   it('propagates errors from git', async () => {

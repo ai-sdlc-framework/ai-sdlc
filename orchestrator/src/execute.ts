@@ -56,6 +56,7 @@ import {
   formatIssueRef,
   buildIssueTemplateVars,
 } from './shared.js';
+import { cleanGitEnv } from './runtime/git-env.js';
 import {
   checkKillSwitch,
   issueAgentCredentials,
@@ -382,15 +383,23 @@ export async function executePipeline(
  * @internal — exported for unit tests.
  */
 export async function captureCurrentBranch(workDir: string): Promise<string | null> {
+  // cleanGitEnv() strips GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE so git
+  // resolves against `workDir`'s own .git rather than whatever a parent
+  // process (e.g. husky pre-push hook running in another worktree) leaked
+  // into the env (AISDLC-72).
   try {
     const { stdout } = await execFileAsync('git', ['symbolic-ref', '--short', 'HEAD'], {
       cwd: workDir,
+      env: cleanGitEnv(),
     });
     return stdout.trim();
   } catch {
     // Detached HEAD or no git repo. Try the SHA fallback.
     try {
-      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: workDir });
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: workDir,
+        env: cleanGitEnv(),
+      });
       return stdout.trim();
     } catch {
       return null;
@@ -417,7 +426,11 @@ export async function restoreOriginalBranch(
     if (current === originalHead) return;
     // Refuse to checkout if the worktree has uncommitted changes — git would
     // either block the checkout or carry the changes across, both bad.
-    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], { cwd: workDir });
+    // cleanGitEnv() prevents leaked GIT_DIR from corrupting these calls (AISDLC-72).
+    const { stdout } = await execFileAsync('git', ['status', '--porcelain'], {
+      cwd: workDir,
+      env: cleanGitEnv(),
+    });
     if (stdout.trim().length > 0) {
       log?.info(
         `[pipeline] worktree dirty after pipeline; HEAD left at \`${current}\`. ` +
@@ -425,7 +438,10 @@ export async function restoreOriginalBranch(
       );
       return;
     }
-    await execFileAsync('git', ['checkout', originalHead], { cwd: workDir });
+    await execFileAsync('git', ['checkout', originalHead], {
+      cwd: workDir,
+      env: cleanGitEnv(),
+    });
   } catch (err) {
     log?.info(
       `[pipeline] failed to restore HEAD to \`${originalHead}\`: ${(err as Error).message}`,
@@ -448,8 +464,11 @@ export async function pushBranchWithRebase(
   branchName: string,
   log: { info: (msg: string) => void } | undefined,
 ): Promise<void> {
+  // cleanGitEnv() ensures these git calls bind to `workDir`'s own .git, not
+  // a leaked GIT_DIR from a parent process (AISDLC-72).
+  const env = cleanGitEnv();
   try {
-    await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
+    await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir, env });
     return;
   } catch (err) {
     const stderr = (err as { stderr?: string }).stderr ?? (err as Error).message;
@@ -461,12 +480,12 @@ export async function pushBranchWithRebase(
 
   // Fetch + rebase + retry. If the rebase fails, surface a clear error.
   try {
-    await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir });
-    await execFileAsync('git', ['rebase', `origin/${branchName}`], { cwd: workDir });
+    await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir, env });
+    await execFileAsync('git', ['rebase', `origin/${branchName}`], { cwd: workDir, env });
   } catch (rebaseErr) {
     // Abort the partial rebase so the worktree isn't left in a half-merged state.
     try {
-      await execFileAsync('git', ['rebase', '--abort'], { cwd: workDir });
+      await execFileAsync('git', ['rebase', '--abort'], { cwd: workDir, env });
     } catch {
       /* nothing to abort */
     }
@@ -476,7 +495,7 @@ export async function pushBranchWithRebase(
     );
   }
 
-  await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir });
+  await execFileAsync('git', ['push', 'origin', branchName], { cwd: workDir, env });
 }
 
 async function executePipelineBody(
@@ -673,8 +692,12 @@ async function executePipelineBody(
   const branchVars = buildIssueTemplateVars(issueId, issue.title);
   const branchName = interpolateBranchPattern(config.pipeline?.spec.branching?.pattern, branchVars);
   await sc.createBranch({ name: branchName });
-  await execFileAsync('git', ['fetch', 'origin', branchName], { cwd: workDir });
-  await execFileAsync('git', ['checkout', branchName], { cwd: workDir });
+  // cleanGitEnv() prevents leaked GIT_DIR from corrupting these calls (AISDLC-72).
+  await execFileAsync('git', ['fetch', 'origin', branchName], {
+    cwd: workDir,
+    env: cleanGitEnv(),
+  });
+  await execFileAsync('git', ['checkout', branchName], { cwd: workDir, env: cleanGitEnv() });
 
   // 8. Resolve agent constraints
   const resolved = resolveConstraints(agentRole.spec.constraints, currentLevel);
@@ -975,6 +998,7 @@ async function executePipelineBody(
     try {
       const { stdout: headSha } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
         cwd: workDir,
+        env: cleanGitEnv(),
       });
       const gateResults = qualityGate.spec.gates.map((gate) => {
         const evalResult = evaluatePipelineGate(gate, {
@@ -1013,6 +1037,7 @@ async function executePipelineBody(
   try {
     const { stdout: diffStat } = await execFileAsync('git', ['diff', '--stat', 'HEAD~1'], {
       cwd: workDir,
+      env: cleanGitEnv(),
     });
     const insertMatch = diffStat.match(/(\d+) insertions?\(\+\)/);
     const deleteMatch = diffStat.match(/(\d+) deletions?\(-\)/);

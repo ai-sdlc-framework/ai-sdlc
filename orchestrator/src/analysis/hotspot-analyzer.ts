@@ -7,6 +7,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { FileInfo, Hotspot, ImportStatement } from './types.js';
 import { DEFAULT_GIT_HISTORY_DAYS, DEFAULT_HOTSPOT_THRESHOLD } from '../defaults.js';
+import { cleanGitEnv } from '../runtime/git-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -25,10 +26,11 @@ export async function getFileChurn(
 ): Promise<ChurnEntry[]> {
   try {
     const since = `${historyDays} days ago`;
+    // cleanGitEnv() prevents leaked GIT_DIR from binding to a parent repo (AISDLC-72).
     const { stdout } = await execFileAsync(
       'git',
       ['log', '--format=', '--name-only', `--since=${since}`],
-      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024 },
+      { cwd: repoPath, maxBuffer: 10 * 1024 * 1024, env: cleanGitEnv() },
     );
 
     const counts = new Map<string, number>();

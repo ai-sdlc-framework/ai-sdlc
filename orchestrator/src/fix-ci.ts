@@ -55,6 +55,7 @@ import {
   NOTIFICATION_TITLES,
 } from './defaults.js';
 import { createCycleDetectorFromConfig, checkAndHandleCycle } from './cycle-utils.js';
+import { cleanGitEnv } from './runtime/git-env.js';
 
 export const MAX_FIX_ATTEMPTS = DEFAULT_MAX_FIX_ATTEMPTS;
 export const MAX_LOG_LINES = DEFAULT_MAX_LOG_LINES;
@@ -285,8 +286,10 @@ export async function executeFixCI(
   log.stageEnd('fetch-logs');
 
   // 4. Determine branch and issue number
+  // cleanGitEnv() prevents leaked GIT_DIR from binding to a parent repo (AISDLC-72).
   const { stdout: branchStdout } = await execFileAsync('git', ['branch', '--show-current'], {
     cwd: workDir,
+    env: cleanGitEnv(),
   });
   const currentBranch = branchStdout.trim();
   const issueId = extractIssueId(currentBranch);
@@ -484,8 +487,12 @@ export async function executeFixCI(
     );
 
     // 10. Push to the same branch (CI re-runs automatically)
+    // cleanGitEnv() prevents leaked GIT_DIR from binding to a parent repo (AISDLC-72).
     log.stage('push');
-    await execFileAsync('git', ['push', 'origin', currentBranch], { cwd: workDir });
+    await execFileAsync('git', ['push', 'origin', currentBranch], {
+      cwd: workDir,
+      env: cleanGitEnv(),
+    });
     log.stageEnd('push');
 
     auditLog.record({
