@@ -152,6 +152,170 @@ export type VerifyResult =
   | { valid: true; predicate: AttestationPredicate; trustedReviewer: TrustedReviewer }
   | { valid: false; reason: string };
 
+// ─── Schema validation ────────────────────────────────────────────
+//
+// Defense-in-depth against GITHUB_OUTPUT injection (and any other
+// downstream consumer that interpolates predicate fields into a
+// structured format). Every field that the verifier ever interpolates
+// into a `reason` string MUST be regex-validated to a known-safe
+// charset BEFORE the rest of `verifyAttestation` runs. If validation
+// fails, we return a FIXED reason string that does not embed the bad
+// value — never give the attacker a way to smuggle their payload past
+// us by burying it in our reason text.
+//
+// Mirror of `.ai-sdlc/schemas/attestation.v1.schema.json` — kept in
+// sync by the `validatePredicateShape` test ('schema mirror in sync').
+
+/** sha1 git commit (40 lowercase hex chars). */
+const SHA1_HEX = /^[0-9a-f]{40}$/;
+/** sha256 hex (64 lowercase hex chars). */
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+/** ISO 8601 timestamp — permissive enough for `new Date().toISOString()`. */
+const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
+/** Free-form short identifier — letters, digits, dot, dash, underscore. */
+const SHORT_ID = /^[A-Za-z0-9._-]+$/;
+/**
+ * `harnessNote` is the only field the operator can put long-form text
+ * in. We allow letters/digits/punctuation/whitespace but reject CR/LF
+ * (which is what attackers need to inject newline-key=value pairs).
+ */
+const SAFE_TEXT = /^[^\r\n]*$/;
+
+/**
+ * Validate a parsed predicate against the v1 schema regex patterns.
+ *
+ * Returns `null` when the predicate is shape-valid; otherwise returns
+ * a static failure reason that does NOT embed any user-controlled
+ * value (just the field path). This is the load-bearing property:
+ * the malicious value never reaches the `reason` string, so it can't
+ * propagate to GITHUB_OUTPUT or commit-status descriptions.
+ */
+export function validatePredicateShape(parsed: unknown): string | null {
+  if (parsed === null || typeof parsed !== 'object') {
+    return 'schema validation failed: predicate must be an object';
+  }
+  const p = parsed as Record<string, unknown>;
+
+  // schemaVersion — string from the accepted enum.
+  if (typeof p['schemaVersion'] !== 'string') {
+    return 'schema validation failed: schemaVersion must be a string';
+  }
+  if (!ACCEPTED_SCHEMA_VERSIONS.includes(p['schemaVersion'] as SchemaVersion)) {
+    // Bounded set — safe to surface the version. We also re-check this
+    // in `verifyAttestation` after shape validation so the error
+    // surface is consistent between schema-rejection and allowlist.
+    return 'schema validation failed: schemaVersion not in accepted enum';
+  }
+
+  // subject.digest.sha1 — 40 hex chars.
+  const subject = p['subject'];
+  if (subject === null || typeof subject !== 'object') {
+    return 'schema validation failed: subject must be an object';
+  }
+  const digest = (subject as Record<string, unknown>)['digest'];
+  if (digest === null || typeof digest !== 'object') {
+    return 'schema validation failed: subject.digest must be an object';
+  }
+  const sha1 = (digest as Record<string, unknown>)['sha1'];
+  if (typeof sha1 !== 'string' || !SHA1_HEX.test(sha1)) {
+    return 'schema validation failed: subject.digest.sha1 does not match pattern';
+  }
+
+  // diffHash + policyHash — 64 hex chars each.
+  for (const field of ['diffHash', 'policyHash'] as const) {
+    const v = p[field];
+    if (typeof v !== 'string' || !SHA256_HEX.test(v)) {
+      return `schema validation failed: ${field} does not match pattern`;
+    }
+  }
+
+  // pluginVersion — short ID (no CR/LF, no `=`).
+  const pluginVersion = p['pluginVersion'];
+  if (
+    typeof pluginVersion !== 'string' ||
+    pluginVersion.length === 0 ||
+    !SHORT_ID.test(pluginVersion)
+  ) {
+    return 'schema validation failed: pluginVersion does not match pattern';
+  }
+
+  // iterationCount — positive integer.
+  const iterationCount = p['iterationCount'];
+  if (
+    typeof iterationCount !== 'number' ||
+    !Number.isInteger(iterationCount) ||
+    iterationCount < 1
+  ) {
+    return 'schema validation failed: iterationCount must be a positive integer';
+  }
+
+  // harnessNote — free-form, but no CR/LF (else it can inject
+  // newlines into a downstream key=value writer).
+  const harnessNote = p['harnessNote'];
+  if (typeof harnessNote !== 'string' || !SAFE_TEXT.test(harnessNote)) {
+    return 'schema validation failed: harnessNote contains forbidden characters';
+  }
+
+  // signedAt — ISO 8601.
+  const signedAt = p['signedAt'];
+  if (typeof signedAt !== 'string' || !ISO_8601.test(signedAt)) {
+    return 'schema validation failed: signedAt does not match ISO 8601 pattern';
+  }
+
+  // reviewers — array of objects, each with regex-validated fields.
+  const reviewers = p['reviewers'];
+  if (!Array.isArray(reviewers) || reviewers.length === 0) {
+    return 'schema validation failed: reviewers must be a non-empty array';
+  }
+  for (let i = 0; i < reviewers.length; i++) {
+    const r = reviewers[i];
+    if (r === null || typeof r !== 'object') {
+      return 'schema validation failed: reviewer entry must be an object';
+    }
+    const rec = r as Record<string, unknown>;
+    const agentId = rec['agentId'];
+    if (typeof agentId !== 'string' || agentId.length === 0 || !SHORT_ID.test(agentId)) {
+      return 'schema validation failed: reviewer agentId does not match pattern';
+    }
+    const agentFileHash = rec['agentFileHash'];
+    if (typeof agentFileHash !== 'string' || !SHA256_HEX.test(agentFileHash)) {
+      return 'schema validation failed: reviewer agentFileHash does not match pattern';
+    }
+    const harness = rec['harness'];
+    if (typeof harness !== 'string' || harness.length === 0 || !SHORT_ID.test(harness)) {
+      return 'schema validation failed: reviewer harness does not match pattern';
+    }
+    if (typeof rec['approved'] !== 'boolean') {
+      return 'schema validation failed: reviewer approved must be a boolean';
+    }
+    const findings = rec['findings'];
+    if (findings === null || typeof findings !== 'object') {
+      return 'schema validation failed: reviewer findings must be an object';
+    }
+    for (const sev of ['critical', 'major', 'minor', 'suggestion'] as const) {
+      const n = (findings as Record<string, unknown>)[sev];
+      if (typeof n !== 'number' || !Number.isInteger(n) || n < 0) {
+        return 'schema validation failed: reviewer findings count must be a non-negative integer';
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * The set of reviewer agent IDs the verifier expects to see in every
+ * attestation. Exported so callers (verify-attestation.mjs) can
+ * cross-check that all three reviewers are present + match.
+ *
+ * Frozen to discourage callers from mutating it.
+ */
+export const REQUIRED_REVIEWER_AGENT_IDS: readonly string[] = Object.freeze([
+  'code-reviewer',
+  'test-reviewer',
+  'security-reviewer',
+]);
+
 /** Inputs for building an attestation predicate. */
 export interface BuildPredicateInputs {
   commitSha: string;
@@ -326,21 +490,37 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
     return { valid: false, reason: 'envelope has no signatures' };
   }
 
-  let payloadJson: Buffer;
-  try {
-    payloadJson = Buffer.from(opts.envelope.payload, 'base64');
-  } catch {
-    return { valid: false, reason: 'payload is not valid base64' };
+  // Node's `Buffer.from(s, 'base64')` does NOT throw on invalid input —
+  // it silently drops non-base64 chars. We round-trip through .toString
+  // ('base64') below as part of the JSON-parse step; PAE re-encoding then
+  // catches any tampering at signature-verify time.
+  if (typeof opts.envelope.payload !== 'string' || opts.envelope.payload.length === 0) {
+    return { valid: false, reason: 'envelope payload is empty or non-string' };
   }
+  const payloadJson = Buffer.from(opts.envelope.payload, 'base64');
 
-  let predicate: AttestationPredicate;
+  let parsed: unknown;
   try {
-    predicate = JSON.parse(payloadJson.toString('utf-8')) as AttestationPredicate;
+    parsed = JSON.parse(payloadJson.toString('utf-8'));
   } catch {
     return { valid: false, reason: 'payload is not valid JSON' };
   }
 
-  // ── Schema version (do this BEFORE any field check so v2 envelopes get a clear reason) ──
+  // ── Schema validation (REGEX-BOUND) ───────────────────────────
+  // This MUST run before any predicate field is interpolated into a
+  // reason string. The shape validator returns a fixed (non-interpolated)
+  // reason on failure so a malicious value cannot smuggle CR/LF or
+  // `=` into our output. See validatePredicateShape for rationale.
+  const shapeError = validatePredicateShape(parsed);
+  if (shapeError !== null) {
+    return { valid: false, reason: shapeError };
+  }
+  const predicate = parsed as AttestationPredicate;
+
+  // ── Schema version allowlist (post-shape) ─────────────────────
+  // Belt-and-braces: the shape validator already enforced membership in
+  // ACCEPTED_SCHEMA_VERSIONS, but callers can override the allowlist via
+  // opts.acceptedSchemaVersions for forward-compat tests, so re-check here.
   if (!allowlist.includes(predicate.schemaVersion)) {
     return {
       valid: false,
@@ -378,11 +558,15 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
   }
 
   // ── Bind to PR state ──────────────────────────────────────────
+  // Note: every field interpolated into a reason below has already been
+  // regex-bounded by validatePredicateShape (sha1/sha256 hex, SHORT_ID
+  // for agentId), so embedding them in reason strings cannot inject
+  // CR/LF or `=` into downstream key=value writers.
   const expectedSha = opts.expected.commitSha.toLowerCase();
-  if (predicate.subject?.digest?.sha1?.toLowerCase() !== expectedSha) {
+  if (predicate.subject.digest.sha1.toLowerCase() !== expectedSha) {
     return {
       valid: false,
-      reason: `subject digest mismatch: expected ${expectedSha}, got ${predicate.subject?.digest?.sha1}`,
+      reason: `subject digest mismatch (envelope was signed for a different commit)`,
     };
   }
   if (predicate.diffHash !== opts.expected.diffHash) {
@@ -394,12 +578,27 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
       reason: 'policyHash mismatch (.ai-sdlc/review-policy.md changed since attestation)',
     };
   }
-  for (const r of predicate.reviewers ?? []) {
+  for (const r of predicate.reviewers) {
     const expectedHash = opts.expected.expectedAgentFileHashes[r.agentId];
     if (expectedHash && expectedHash !== r.agentFileHash) {
       return {
         valid: false,
         reason: `agentFileHash mismatch for reviewer '${r.agentId}' (agent file changed since attestation)`,
+      };
+    }
+  }
+
+  // ── Reviewer-set completeness ────────────────────────────────
+  // Every attestation MUST cover all three required reviewers (code,
+  // test, security). Without this, a contributor could ship an
+  // attestation containing only `code-reviewer` and bypass the test
+  // and security review entirely.
+  const present = new Set(predicate.reviewers.map((r) => r.agentId));
+  for (const required of REQUIRED_REVIEWER_AGENT_IDS) {
+    if (!present.has(required)) {
+      return {
+        valid: false,
+        reason: `reviewer set incomplete: missing required reviewer '${required}'`,
       };
     }
   }

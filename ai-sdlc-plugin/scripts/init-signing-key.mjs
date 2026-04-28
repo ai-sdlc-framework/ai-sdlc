@@ -17,9 +17,9 @@
  */
 
 import { generateKeyPairSync } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, chmodSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 
 const HOME = homedir();
 const KEY_DIR = join(HOME, '.ai-sdlc');
@@ -89,7 +89,3 @@ process.stdout.write(
   `\nUntil that PR merges, /ai-sdlc execute can still sign attestations but CI will\n` +
     `mark them as 'invalid (signature did not match...)' and run its own review.\n`,
 );
-
-// Touch dirname to silence "unused import" lint if ever extended.
-void dirname;
-void readFileSync;

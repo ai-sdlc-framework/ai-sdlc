@@ -15,11 +15,13 @@
 import { describe, it, expect } from 'vitest';
 import {
   ACCEPTED_SCHEMA_VERSIONS,
+  REQUIRED_REVIEWER_AGENT_IDS,
   buildPredicate,
   generateSigningKeyPair,
   paeEncode,
   sha256Hex,
   signAttestation,
+  validatePredicateShape,
   validateTrustedReviewers,
   verifyAttestation,
   type AttestationPredicate,
@@ -448,5 +450,253 @@ describe('validateTrustedReviewers', () => {
 describe('ACCEPTED_SCHEMA_VERSIONS', () => {
   it('includes v1', () => {
     expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v1');
+  });
+});
+
+// ─── Schema-shape validator (defense in depth, post-review fixes) ──
+//
+// `validatePredicateShape` is the first thing `verifyAttestation` runs.
+// It MUST reject malicious predicates BEFORE any user-controlled value
+// can be interpolated into a `reason` string — otherwise downstream
+// consumers that parse reason as `key=value` (e.g. `$GITHUB_OUTPUT`)
+// can be tricked into accepting attacker-controlled keys.
+
+describe('validatePredicateShape (regex bound)', () => {
+  function goodPredicate(): AttestationPredicate {
+    return buildPredicate(DEFAULT_INPUTS);
+  }
+
+  it('accepts a freshly-built v1 predicate', () => {
+    expect(validatePredicateShape(goodPredicate())).toBeNull();
+  });
+
+  it('rejects null / non-object', () => {
+    expect(validatePredicateShape(null)).toMatch(/predicate must be an object/);
+    expect(validatePredicateShape('not an object')).toMatch(/must be an object/);
+    expect(validatePredicateShape(42)).toMatch(/must be an object/);
+  });
+
+  it('rejects schemaVersion outside the accepted enum', () => {
+    const p = { ...goodPredicate(), schemaVersion: 'v9' };
+    expect(validatePredicateShape(p)).toMatch(/schemaVersion not in accepted enum/);
+  });
+
+  it('rejects sha1 with embedded newline (the GITHUB_OUTPUT injection vector)', () => {
+    const p = goodPredicate();
+    // 40 hex chars + literal newline + injection → exactly the attack
+    // vector the reviewer flagged. Pattern check must reject it BEFORE
+    // any field gets interpolated into a reason string.
+    p.subject.digest.sha1 = 'a'.repeat(40) + '\nstatus=valid';
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/subject\.digest\.sha1 does not match pattern/);
+    // The reason itself must NOT embed the malicious value.
+    expect(reason).not.toContain('\nstatus=valid');
+    expect(reason).not.toContain('status=valid');
+  });
+
+  it('rejects uppercase hex in sha1 (round-trip: known-good then mutate one char to uppercase)', () => {
+    const p = goodPredicate();
+    p.subject.digest.sha1 = 'A' + 'a'.repeat(39); // valid as case-insensitive, INVALID under our pattern
+    expect(validatePredicateShape(p)).toMatch(/subject\.digest\.sha1 does not match pattern/);
+  });
+
+  it('rejects sha1 of wrong length (39 chars)', () => {
+    const p = goodPredicate();
+    p.subject.digest.sha1 = 'a'.repeat(39);
+    expect(validatePredicateShape(p)).toMatch(/subject\.digest\.sha1 does not match pattern/);
+  });
+
+  it('rejects diffHash with non-hex chars (no colon prefix tolerated)', () => {
+    const p = goodPredicate();
+    p.diffHash = 'sha256:' + 'a'.repeat(64); // schema is bare hex, not prefixed
+    expect(validatePredicateShape(p)).toMatch(/diffHash does not match pattern/);
+  });
+
+  it('rejects policyHash with embedded CRLF', () => {
+    const p = goodPredicate();
+    p.policyHash = 'a'.repeat(64).slice(0, 30) + '\r\n' + 'b'.repeat(32);
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/policyHash does not match pattern/);
+    expect(reason).not.toMatch(/\r|\n/);
+  });
+
+  it('rejects harnessNote containing newline (downstream key=value injection)', () => {
+    const p = goodPredicate();
+    p.harnessNote = 'fine\nstatus=valid';
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/harnessNote contains forbidden characters/);
+    expect(reason).not.toContain('status=valid');
+  });
+
+  it('rejects pluginVersion with `=` (key=value injection)', () => {
+    const p = goodPredicate();
+    p.pluginVersion = '0.7.0\nfoo=bar';
+    expect(validatePredicateShape(p)).toMatch(/pluginVersion does not match pattern/);
+  });
+
+  it('rejects iterationCount of 0 or negative', () => {
+    expect(validatePredicateShape({ ...goodPredicate(), iterationCount: 0 })).toMatch(
+      /iterationCount must be a positive integer/,
+    );
+    expect(validatePredicateShape({ ...goodPredicate(), iterationCount: -1 })).toMatch(
+      /iterationCount must be a positive integer/,
+    );
+    expect(validatePredicateShape({ ...goodPredicate(), iterationCount: 1.5 })).toMatch(
+      /iterationCount must be a positive integer/,
+    );
+  });
+
+  it('rejects signedAt that is not ISO 8601', () => {
+    expect(validatePredicateShape({ ...goodPredicate(), signedAt: 'yesterday' })).toMatch(
+      /signedAt does not match/,
+    );
+  });
+
+  it('rejects empty reviewers array', () => {
+    expect(validatePredicateShape({ ...goodPredicate(), reviewers: [] })).toMatch(
+      /reviewers must be a non-empty array/,
+    );
+  });
+
+  it('rejects reviewer agentId with embedded newline', () => {
+    const p = goodPredicate();
+    p.reviewers[0].agentId = 'code-reviewer\nstatus=valid';
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/reviewer agentId does not match pattern/);
+    expect(reason).not.toContain('status=valid');
+  });
+
+  it('rejects reviewer agentFileHash that is not 64 hex', () => {
+    const p = goodPredicate();
+    p.reviewers[1].agentFileHash = 'short';
+    expect(validatePredicateShape(p)).toMatch(/reviewer agentFileHash does not match pattern/);
+  });
+
+  it('rejects reviewer findings count that is non-integer or negative', () => {
+    const p = goodPredicate();
+    (p.reviewers[0].findings as unknown as Record<string, number>).critical = -1;
+    expect(validatePredicateShape(p)).toMatch(
+      /reviewer findings count must be a non-negative integer/,
+    );
+  });
+});
+
+describe('verifyAttestation (post-review hardening)', () => {
+  it('rejects schema-shape violations BEFORE interpolating values into reason', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    // Hand-craft a malicious envelope: forge a sha1 with `\nstatus=valid`.
+    // We can't sign a malformed predicate normally (signAttestation would
+    // sign it fine — the schema check is at VERIFY time), so we sign and
+    // then verify. The signature won't match the tampered payload, but
+    // the verify must fail BEFORE the signature check on schema grounds
+    // when we replace the payload with a malicious one. Simplest: build
+    // a payload directly + signature from random.
+    const malicious: AttestationPredicate = {
+      ...predicate,
+      subject: { digest: { sha1: 'a'.repeat(40) + '\nstatus=valid' } },
+    };
+    // Sign the malicious predicate (signAttestation doesn't shape-check).
+    const envelope = signAttestation({
+      predicate: malicious,
+      privateKeyPem,
+      keyid: 'attacker:laptop',
+    });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        commitSha: FIXED_COMMIT,
+        diffHash: predicate.diffHash,
+        policyHash: predicate.policyHash,
+        expectedAgentFileHashes: {},
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.reason).toMatch(/schema validation failed: subject\.digest\.sha1/);
+      // Critical: the malicious value must NOT appear in the reason.
+      expect(result.reason).not.toContain('status=valid');
+      expect(result.reason).not.toContain('\n');
+      expect(result.reason).not.toContain('\r');
+    }
+  });
+
+  it('rejects an attestation that is missing a required reviewer (incomplete reviewer set)', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const inputs = {
+      ...DEFAULT_INPUTS,
+      // Drop test-reviewer + security-reviewer — only code-reviewer remains.
+      reviewers: [DEFAULT_INPUTS.reviewers[0]],
+    };
+    const predicate = buildPredicate(inputs);
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: buildExpected(predicate),
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.reason).toMatch(/reviewer set incomplete/);
+      expect(result.reason).toMatch(/test-reviewer|security-reviewer/);
+    }
+  });
+
+  it('accepts when all 3 required reviewers are present (regression for the set check)', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: buildExpected(predicate),
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects schemaVersion v0 (boundary case below v1)', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    // Mutate the payload to claim v0 then re-sign so the signature is
+    // valid — then verify must reject on schema grounds.
+    const mutated = { ...predicate, schemaVersion: 'v0' as unknown as 'v1' };
+    // signAttestation refuses, so build the envelope manually.
+    const payloadJson = Buffer.from(JSON.stringify(mutated), 'utf-8');
+    const pae = paeEncode('application/vnd.ai-sdlc.attestation+json', payloadJson);
+    // Use Node's sign directly via signAttestation's path: we have to
+    // bypass its own enum check. Easiest: sign with the raw private key.
+    // Instead just hand-craft an envelope with the bad version and assert
+    // the verify rejects. Signature will not verify, but the SHAPE check
+    // runs first.
+    const envelope: DsseEnvelope = {
+      payloadType: 'application/vnd.ai-sdlc.attestation+json',
+      payload: payloadJson.toString('base64'),
+      signatures: [{ keyid: 'k', sig: Buffer.alloc(64).toString('base64') }],
+    };
+    void pae;
+    void privateKeyPem;
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: buildExpected(predicate),
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.reason).toMatch(/schemaVersion not in accepted enum/);
+    }
+  });
+});
+
+describe('REQUIRED_REVIEWER_AGENT_IDS', () => {
+  it('lists all three reviewers (code, test, security)', () => {
+    expect(REQUIRED_REVIEWER_AGENT_IDS).toContain('code-reviewer');
+    expect(REQUIRED_REVIEWER_AGENT_IDS).toContain('test-reviewer');
+    expect(REQUIRED_REVIEWER_AGENT_IDS).toContain('security-reviewer');
+    expect(REQUIRED_REVIEWER_AGENT_IDS).toHaveLength(3);
+  });
+
+  it('is frozen so callers cannot mutate it', () => {
+    expect(Object.isFrozen(REQUIRED_REVIEWER_AGENT_IDS)).toBe(true);
   });
 });

@@ -2,7 +2,7 @@ name: AI-SDLC PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize]
+    types: [opened, synchronize, reopened]
     branches: [main]
 
 concurrency:

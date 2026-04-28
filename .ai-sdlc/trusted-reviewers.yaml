@@ -23,5 +23,18 @@
 # REMOVING an entry: open a PR deleting the row. Existing attestations signed
 # by the removed key become invalid retroactively (CI rejects them on the
 # next push), so coordinate with the contributor before removing.
+#
+# ─── Format note (LOAD-BEARING) ───────────────────────────────────
+# CI's `scripts/verify-attestation.mjs` uses a hand-rolled YAML loader
+# to keep the verify-attestation workflow's install footprint minimal
+# (no `js-yaml` dep). The loader REQUIRES the strict format below:
+#   - Every scalar value single-quoted (`identity: 'a@b.com'`).
+#   - `pubkey:` is a `|` block scalar; each PEM line indented exactly 6 spaces.
+#   - No tab characters anywhere.
+#   - Comments `#` only at column 0.
+# Anything fancier (multi-line string folding, nested mappings, anchors,
+# etc.) WILL be silently dropped by the loader and your entry will not
+# match. If you need a richer YAML feature, add a real YAML lib to the
+# verify-attestation workflow's install step first.
 
 reviewers: []

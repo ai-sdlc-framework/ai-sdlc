@@ -24,7 +24,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { parseTrustedReviewers, runVerifier } from './verify-attestation.mjs';
+import {
+  buildGithubOutputLines,
+  parseTrustedReviewers,
+  runVerifier,
+} from './verify-attestation.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -341,7 +345,14 @@ describe('runVerifier (integration)', () => {
       repoRoot: fixture.root,
     });
     assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /schemaVersion 'v99' not in allowlist|signature did not match/);
+    // Post-review hardening: the schema validator runs FIRST and rejects
+    // non-allowlisted schemaVersion values with a fixed reason that does
+    // not embed user-controlled content. The earlier signature-mismatch
+    // path is no longer reachable for this specific input.
+    assert.match(
+      out.reason,
+      /schemaVersion not in accepted enum|schemaVersion 'v99' not in allowlist|signature did not match/,
+    );
   });
 
   it('returns invalid (signature did not match) when the attestation was signed with an untrusted key', () => {
@@ -356,6 +367,131 @@ describe('runVerifier (integration)', () => {
     });
     assert.equal(out.status, 'invalid');
     assert.match(out.reason, /signature did not match/);
+  });
+});
+
+// ─── GITHUB_OUTPUT writer (post-review hardening) ────────────────
+//
+// The original `appendFileSync(GITHUB_OUTPUT, \`status=${out.status}\nreason=${out.reason}\n\`)`
+// was injection-prone: a malicious reason containing `\nstatus=valid` would
+// emit two `status=` lines and GitHub Actions' last-write-wins parser would
+// pick `valid`, bypassing the entire attestation trust boundary. The
+// hardened writer uses a heredoc with an unguessable random delimiter.
+
+describe('buildGithubOutputLines (injection-resistant writer)', () => {
+  it('emits a status=KEY line and a reason heredoc block', () => {
+    const out = buildGithubOutputLines('valid', 'ok');
+    assert.match(out, /^status=valid\n/);
+    assert.match(out, /reason<<EOF_[0-9a-f]{64}\n/);
+    assert.match(out, /\nok\nEOF_[0-9a-f]{64}\n$/);
+  });
+
+  it('uses a fresh random delimiter per call (unpredictable to attacker)', () => {
+    const a = buildGithubOutputLines('valid', 'ok');
+    const b = buildGithubOutputLines('valid', 'ok');
+    const delimA = a.match(/EOF_([0-9a-f]{64})/)[1];
+    const delimB = b.match(/EOF_([0-9a-f]{64})/)[1];
+    assert.notEqual(delimA, delimB, 'delimiter must be random per invocation');
+  });
+
+  it('cannot inject a duplicate status= line via newline in reason (CRITICAL)', () => {
+    // The exact attack: reason contains `\nstatus=valid` which would, in a
+    // naive `key=value\n` implementation, emit a second `status=` line that
+    // GitHub Actions parses as a duplicate key (last-wins → `valid`).
+    //
+    // With heredoc: the injection lines ARE present in the file as raw
+    // bytes, but they're INSIDE a `reason<<EOF_<random>` block, so GitHub
+    // Actions parses them as part of the reason value, not as new keys.
+    // We model GitHub's parser here: split on the heredoc boundary, then
+    // count `^status=` only OUTSIDE the heredoc body.
+    const out = buildGithubOutputLines(
+      'invalid',
+      'subject digest mismatch\nstatus=valid\nreason=oops',
+    );
+    const lines = out.split('\n');
+    const openIdx = lines.findIndex((l) => /^reason<<EOF_[0-9a-f]{64}$/.test(l));
+    assert.notEqual(openIdx, -1, 'must include a heredoc opener');
+    const delim = lines[openIdx].slice('reason<<'.length);
+    const closeIdx = lines.findIndex((l, i) => i > openIdx && l === delim);
+    assert.notEqual(closeIdx, -1, 'must include a closing delimiter');
+    // Lines OUTSIDE the heredoc body (before opener + at/after closer).
+    const outsideHeredoc = [...lines.slice(0, openIdx), ...lines.slice(closeIdx)];
+    const statusLines = outsideHeredoc.filter((l) => /^status=/.test(l));
+    assert.equal(statusLines.length, 1, 'exactly one status= line outside the heredoc');
+    assert.equal(statusLines[0], 'status=invalid');
+    const reasonKeyLines = outsideHeredoc.filter((l) => /^reason=/.test(l));
+    assert.equal(
+      reasonKeyLines.length,
+      0,
+      `should be 0 reason= key= lines (we use heredoc form), got ${reasonKeyLines.length}`,
+    );
+  });
+
+  it('strips lines that match the random delimiter (defense-in-depth)', () => {
+    // We can't predict the delimiter, but we can confirm that a reason
+    // ending in `EOF_<actual-delim>` would not close the heredoc early.
+    // Easier check: feed a reason WITH some of the prefix, ensure the
+    // structure stays well-formed and the delimiter at the end is intact.
+    const out = buildGithubOutputLines('invalid', 'EOF_short_partial\nmore');
+    const lines = out.split('\n');
+    // Last non-empty line must be the closing heredoc delimiter.
+    const nonEmpty = lines.filter((l) => l.length > 0);
+    assert.match(nonEmpty[nonEmpty.length - 1], /^EOF_[0-9a-f]{64}$/);
+  });
+
+  it('rejects unknown status (only valid/invalid permitted)', () => {
+    assert.throws(() => buildGithubOutputLines('maybe', 'ok'), /must be 'valid' or 'invalid'/);
+  });
+});
+
+describe('runVerifier (injection regression)', () => {
+  it('rejects an attestation where sha1 carries a literal `\\nstatus=valid` (CRITICAL)', () => {
+    // Build a fixture where a malicious envelope claims a sha1 with
+    // newline + status=valid embedded. The shape validator MUST reject
+    // this, and the rejection reason MUST NOT contain the injection.
+    const fixture = setupFixture();
+    try {
+      const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+      writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+      // Sign a normal attestation, then mutate the payload sha1.
+      writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem);
+      const envPath = join(
+        fixture.root,
+        '.ai-sdlc',
+        'attestations',
+        `${fixture.headSha}.dsse.json`,
+      );
+      const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+      const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+      predicate.subject.digest.sha1 = 'a'.repeat(40) + '\nstatus=valid';
+      envelope.payload = Buffer.from(JSON.stringify(predicate), 'utf-8').toString('base64');
+      writeFileSync(envPath, JSON.stringify(envelope, null, 2));
+
+      const out = runVerifier({
+        headSha: fixture.headSha,
+        baseSha: fixture.baseSha,
+        repoRoot: fixture.root,
+      });
+      assert.equal(out.status, 'invalid');
+      assert.match(out.reason, /schema validation failed: subject\.digest\.sha1/);
+      // The injection must NOT appear in the reason string.
+      assert.equal(out.reason.includes('status=valid'), false);
+      assert.equal(out.reason.includes('\n'), false);
+      assert.equal(out.reason.includes('\r'), false);
+
+      // And when we feed THIS reason through the writer, the structure
+      // is still safe (statuses=1 outside heredoc, reason in heredoc).
+      const lines = buildGithubOutputLines(out.status, out.reason).split('\n');
+      const openIdx = lines.findIndex((l) => /^reason<<EOF_[0-9a-f]{64}$/.test(l));
+      const delim = lines[openIdx].slice('reason<<'.length);
+      const closeIdx = lines.findIndex((l, i) => i > openIdx && l === delim);
+      const outsideHeredoc = [...lines.slice(0, openIdx), ...lines.slice(closeIdx)];
+      const statuses = outsideHeredoc.filter((l) => /^status=/.test(l));
+      assert.equal(statuses.length, 1);
+      assert.equal(statuses[0], 'status=invalid');
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
   });
 });
 

@@ -21,12 +21,47 @@
 
 import { readFileSync, existsSync, appendFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { join } from 'node:path';
 import {
   verifyAttestation,
   sha256Hex,
   validateTrustedReviewers,
 } from '../orchestrator/dist/runtime/attestations.js';
+
+/**
+ * Build the lines we append to `$GITHUB_OUTPUT`.
+ *
+ * GitHub Actions parses `$GITHUB_OUTPUT` line-by-line as `key=value` (or
+ * heredoc blocks). A naive `\`status=${out.status}\nreason=${out.reason}\n\``
+ * is exploitable: if `out.reason` contains a literal `\n` followed by
+ * `status=valid`, GitHub parses BOTH `status=invalid` AND `status=valid`,
+ * and last-write-wins means the attacker's value sticks.
+ *
+ * Defense: emit `reason` using GitHub's heredoc multi-line format with a
+ * RANDOM (per-invocation, unpredictable) delimiter. The attacker cannot
+ * close the heredoc without guessing 64 hex chars. We additionally strip
+ * any line containing the delimiter from `reason` as a redundant guard.
+ *
+ * Exported so unit tests can assert the line shape end-to-end without
+ * touching disk.
+ */
+export function buildGithubOutputLines(status, reason) {
+  // status comes from a hard-coded literal ('valid' / 'invalid'); assert.
+  if (status !== 'valid' && status !== 'invalid') {
+    throw new Error(`buildGithubOutputLines: status must be 'valid' or 'invalid', got ${status}`);
+  }
+  // 64 hex chars = 256 bits of entropy — unguessable per-invocation.
+  const delim = `EOF_${randomBytes(32).toString('hex')}`;
+  // Defense in depth: if the reason somehow contains the delimiter
+  // (eg. ours own future bug), strip the offending lines so the heredoc
+  // can't be closed early.
+  const safeReason = String(reason ?? '')
+    .split('\n')
+    .filter((line) => !line.includes(delim))
+    .join('\n');
+  return `status=${status}\nreason<<${delim}\n${safeReason}\n${delim}\n`;
+}
 
 /**
  * Tiny YAML loader for `.ai-sdlc/trusted-reviewers.yaml`. Only handles the
@@ -148,7 +183,7 @@ if (invokedDirectly) {
   }
   const out = runVerifier({ headSha, baseSha });
   if (process.env.GITHUB_OUTPUT) {
-    appendFileSync(process.env.GITHUB_OUTPUT, `status=${out.status}\nreason=${out.reason}\n`);
+    appendFileSync(process.env.GITHUB_OUTPUT, buildGithubOutputLines(out.status, out.reason));
   }
   process.stdout.write(`status=${out.status}\nreason=${out.reason}\n`);
 }
