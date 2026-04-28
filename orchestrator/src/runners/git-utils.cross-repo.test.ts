@@ -13,11 +13,15 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { detectCrossRepoWrites } from './git-utils.js';
+import { cleanGitEnv } from '../runtime/git-env.js';
 
 const execFileAsync = promisify(execFile);
 
+// cleanGitEnv() prevents leaked GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE
+// from binding these temp-repo commands to a parent worktree's git context
+// (the AISDLC-68 → AISDLC-72 surface story).
 async function git(cwd: string, ...args: string[]): Promise<void> {
-  await execFileAsync('git', args, { cwd });
+  await execFileAsync('git', args, { cwd, env: cleanGitEnv() });
 }
 
 async function makeRepo(dir: string): Promise<void> {

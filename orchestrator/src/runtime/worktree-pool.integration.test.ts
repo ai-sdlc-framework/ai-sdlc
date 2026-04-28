@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorktreePoolManager } from './worktree-pool.js';
 import { allocatePort, deterministicPort } from './port-allocator.js';
+import { cleanGitEnv } from './git-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -44,12 +45,18 @@ describe('WorktreePoolManager integration (real git)', () => {
     await mkdir(cloneDir, { recursive: true });
 
     // Initialize a real git repo with main branch + initial commit.
-    await execFileAsync('git', ['init', '-b', 'main', cloneDir]);
-    await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: cloneDir });
-    await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: cloneDir });
+    // cleanGitEnv() prevents leaked GIT_DIR (e.g. from a husky hook) from
+    // binding these temp-repo commands to the parent worktree (AISDLC-72).
+    const env = cleanGitEnv();
+    await execFileAsync('git', ['init', '-b', 'main', cloneDir], { env });
+    await execFileAsync('git', ['config', 'user.email', 'test@example.com'], {
+      cwd: cloneDir,
+      env,
+    });
+    await execFileAsync('git', ['config', 'user.name', 'Test'], { cwd: cloneDir, env });
     await writeFile(join(cloneDir, 'README.md'), '# fixture\n');
-    await execFileAsync('git', ['add', '.'], { cwd: cloneDir });
-    await execFileAsync('git', ['commit', '-m', 'initial'], { cwd: cloneDir });
+    await execFileAsync('git', ['add', '.'], { cwd: cloneDir, env });
+    await execFileAsync('git', ['commit', '-m', 'initial'], { cwd: cloneDir, env });
   });
 
   afterEach(async () => {

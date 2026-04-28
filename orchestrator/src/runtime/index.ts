@@ -38,3 +38,5 @@ export {
   FLAG_NAME as PARALLELISM_FLAG,
   type ParallelismMode,
 } from './parallelism-flag.js';
+
+export { cleanGitEnv, gitExecFile } from './git-env.js';

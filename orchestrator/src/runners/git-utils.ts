@@ -4,6 +4,7 @@
 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { cleanGitEnv } from '../runtime/git-env.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -16,10 +17,15 @@ const execFileAsync = promisify(execFile);
  * task file (which has ↔ in its name) showed up in `git diff --name-only`
  * as a quoted+escaped string and the subsequent `git add -- <file>` rejected
  * with "pathspec did not match".
+ *
+ * Uses `cleanGitEnv()` (AISDLC-72) so git resolves against `workDir`'s own
+ * .git rather than whatever a parent process (husky pre-push hook running
+ * in another worktree) leaked into GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE.
  */
 export async function gitExec(workDir: string, args: string[]): Promise<string> {
   const { stdout } = await execFileAsync('git', ['-c', 'core.quotePath=false', ...args], {
     cwd: workDir,
+    env: cleanGitEnv(),
   });
   return stdout.trim();
 }

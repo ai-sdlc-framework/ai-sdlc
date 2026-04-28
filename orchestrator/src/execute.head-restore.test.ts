@@ -19,8 +19,21 @@ import { captureCurrentBranch, restoreOriginalBranch } from './execute.js';
 
 const execFileAsync = promisify(execFile);
 
+// Strip GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE so test git commands run
+// inside tmpDir resolve against tmpDir's own .git rather than any parent
+// worktree's git dir. The husky pre-push hook exports GIT_DIR pointing at
+// the parent .git, which would otherwise corrupt these temp-repo commits
+// (and worse, leak commits into the parent branch). See AISDLC-72.
+function cleanGitEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.GIT_DIR;
+  delete env.GIT_WORK_TREE;
+  delete env.GIT_INDEX_FILE;
+  return env;
+}
+
 async function git(cwd: string, ...args: string[]): Promise<void> {
-  await execFileAsync('git', args, { cwd });
+  await execFileAsync('git', args, { cwd, env: cleanGitEnv() });
 }
 
 async function makeRepo(): Promise<string> {
@@ -56,7 +69,10 @@ describe('captureCurrentBranch', () => {
   });
 
   it('falls back to commit SHA when HEAD is detached', async () => {
-    const { stdout: sha } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: repo });
+    const { stdout: sha } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+      cwd: repo,
+      env: cleanGitEnv(),
+    });
     await git(repo, 'checkout', '--detach', sha.trim());
 
     const result = await captureCurrentBranch(repo);

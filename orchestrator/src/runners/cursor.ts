@@ -13,13 +13,16 @@ import {
   DEFAULT_COMMIT_CO_AUTHOR,
 } from '../defaults.js';
 import { buildPrompt } from './claude-code.js';
+import { cleanGitEnv } from '../runtime/git-env.js';
 
 export { buildPrompt };
 
 const execFileAsync = promisify(execFile);
 
+// Strip GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE so git resolves against
+// `workDir`'s own .git rather than whatever a parent process leaked (AISDLC-72).
 async function gitExec(workDir: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, { cwd: workDir });
+  const { stdout } = await execFileAsync('git', args, { cwd: workDir, env: cleanGitEnv() });
   return stdout.trim();
 }
 
