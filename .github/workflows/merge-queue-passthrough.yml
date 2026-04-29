@@ -1,0 +1,29 @@
+name: Merge Queue Passthrough
+
+# Required-status-check passthrough for the GitHub merge queue.
+#
+# When a PR is added to the merge queue, GitHub creates a temporary merge
+# commit on a `gh-readonly-queue/<branch>/...` ref and fires `merge_group:`
+# events. The merge queue won't merge until every required status check
+# reports SUCCESS on that merge commit.
+#
+# `ci.yml` triggers on `merge_group` and produces the `CI OK` check.
+# `ai-sdlc-review.yml` does NOT (it heavily uses `github.event.pull_request.*`
+# fields which are null on merge_group). To unblock the queue without
+# refactoring that workflow, this file emits the `Post Review Results`
+# check name on merge_group as a passthrough.
+#
+# Justification: review already ran on the PR head before the queue accepted
+# it. Re-running the LLM review on the merge commit would be wasteful and
+# probabilistic. The merge commit's content is `PR head + main` — the only
+# new code is the merge resolution (handled by ci.yml's lint/build/test).
+
+on:
+  merge_group:
+
+jobs:
+  post-review:
+    name: Post Review Results
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "merge_group passthrough — review already ran on PR head"
