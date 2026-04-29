@@ -112,7 +112,14 @@ permittedExternalPaths:
 
 The PreToolUse hook reads this via a per-worktree sentinel `<worktree>/.active-task` (written by `/ai-sdlc execute` Step 4). Without the allowlist, writes outside the worktree are denied. With the allowlist, the developer subagent may write to the listed paths but does NOT commit there itself — `/ai-sdlc execute` Step 12 creates parallel PRs in the sibling repos. The env var `AI_SDLC_ACTIVE_TASK_ID` remains a fallback for tests / external tooling.
 
-**Parallel runs are safe.** Multiple `/ai-sdlc execute` invocations can run concurrently against the same project root, including with cross-repo writes. Each invocation's developer subagent has its own per-worktree `.active-task` sentinel, so the hook resolves the correct `permittedExternalPaths` for each run independently — no shared project-level state to race on (AISDLC-81). The legacy project-level `.worktrees/.active-task` sentinel from earlier versions still works as a fallback for one release but is no longer written by `/ai-sdlc execute`.
+**Parallel runs are first-class.** Multiple `/ai-sdlc execute` invocations can run concurrently against the same project root, including with cross-repo writes. The Step 0-13 pipeline lives inside the `execute-orchestrator` subagent (AISDLC-82) — the only plugin agent permitted to spawn nested subagents (`Task` tool). The slash command body is a thin wrapper that fires one `Task(execute-orchestrator)` call, so the main Claude Code session can fan out N orchestrators in parallel from a single message. Each orchestrator drives its own developer + 3 reviewer subagents against its own worktree, with its own per-worktree `.active-task` sentinel (AISDLC-81) — no shared project-level state to race on.
+
+Scaling notes:
+- N parallel runs ⇒ up to **3N concurrent reviewer subagents** (each orchestrator spawns 3 reviewers in parallel at Step 7). Reviewers are read-only so file-system contention is fine.
+- The husky `pre-push` hook in `.husky/pre-push` serialises across orchestrators only at the push boundary (Step 11). Steps 5-10 (developer + reviews + attestation) run fully in parallel across orchestrators.
+- `/loop /ai-sdlc:execute <task-id>` continues to work — `/loop` fires one Task at a time, which composes naturally with the orchestrator-subagent design.
+
+The legacy project-level `.worktrees/.active-task` sentinel from earlier versions still works as a fallback for one release but is no longer written by `/ai-sdlc execute`.
 
 ### Lifecycle rules
 
