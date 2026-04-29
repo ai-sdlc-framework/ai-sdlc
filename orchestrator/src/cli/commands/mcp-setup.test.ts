@@ -27,9 +27,15 @@ describe('detectAgents', () => {
     expect(names).toContain('Claude Code');
   });
 
-  it('detects Cursor when .cursor/ directory exists', () => {
+  it('detects Cursor when .cursor/ directory exists in the project', () => {
     mkdirSync(join(tmpDir, '.cursor'));
     const agents = detectAgents(tmpDir);
+    const names = agents.map((a) => a.name);
+    expect(names).toContain('Cursor');
+  });
+
+  it('detects Cursor when --cursor opt-in is passed even without .cursor/', () => {
+    const agents = detectAgents(tmpDir, { cursorOptIn: true });
     const names = agents.map((a) => a.name);
     expect(names).toContain('Cursor');
   });
@@ -48,13 +54,20 @@ describe('detectAgents', () => {
     expect(names).toContain('Windsurf');
   });
 
-  it('does not detect Cursor without .cursor/ directory', () => {
-    const agents = detectAgents(tmpDir);
-    const names = agents.map((a) => a.name);
-    // Cursor might still be detected via binary — but without the dir
-    // and assuming the binary is not always on PATH in CI, we check
-    // that the detection logic at least returns Claude Code.
-    expect(names).toContain('Claude Code');
+  it('does not detect Cursor without .cursor/ directory or opt-in', () => {
+    // Cursor now requires explicit --cursor flag, project .cursor/ dir, or
+    // a user-global ~/.cursor/. Binary-on-PATH alone is no longer enough,
+    // so we ensure HOME points at a Cursor-free temp dir for the test.
+    const prevHome = process.env.HOME;
+    process.env.HOME = tmpDir;
+    try {
+      const agents = detectAgents(tmpDir);
+      const names = agents.map((a) => a.name);
+      expect(names).not.toContain('Cursor');
+      expect(names).toContain('Claude Code');
+    } finally {
+      process.env.HOME = prevHome;
+    }
   });
 
   it('returns correct config paths and keys', () => {
@@ -72,6 +85,25 @@ describe('detectAgents', () => {
 
     expect(map.get('VS Code')?.configPath).toBe('.vscode/mcp.json');
     expect(map.get('VS Code')?.configKey).toBe('servers');
+  });
+
+  it('pins mcp-advisor to the supplied version in the npx args', () => {
+    const agents = detectAgents(tmpDir, { pinVersion: '0.6.0', cursorOptIn: true });
+    const claude = agents.find((a) => a.name === 'Claude Code');
+    expect(claude).toBeDefined();
+    const args = (claude!.serverEntry as { args: string[] }).args;
+    expect(args).toEqual(['-y', '@ai-sdlc/mcp-advisor@0.6.0']);
+    expect((claude!.serverEntry as { _aiSdlcComment?: string })._aiSdlcComment).toMatch(
+      /Pinned to the orchestrator/,
+    );
+  });
+
+  it('omits the pin when no version is supplied (back-compat)', () => {
+    const agents = detectAgents(tmpDir);
+    const claude = agents.find((a) => a.name === 'Claude Code');
+    expect(claude).toBeDefined();
+    const args = (claude!.serverEntry as { args: string[] }).args;
+    expect(args).toEqual(['-y', '@ai-sdlc/mcp-advisor']);
   });
 });
 

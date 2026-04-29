@@ -144,6 +144,27 @@ pnpm test
 pnpm validate-schemas
 ```
 
+### Should co-developers use the published `@ai-sdlc/orchestrator` or a local checkout?
+
+**Use a local checkout when contributing changes to AI-SDLC itself.** Run
+`pnpm --filter @ai-sdlc/orchestrator build` and link the dist binary
+(`pnpm --filter @ai-sdlc/orchestrator exec node dist/cli/index.js …`) so
+the version you exercise is the one your branch ships. The published npm
+package is a snapshot — if you `npm i -g @ai-sdlc/orchestrator` while
+hacking on a feature branch, the global binary will mask your edits and
+you will silently test the wrong code.
+
+**Use the published package when integrating AI-SDLC into a downstream
+project.** Run `npm i -g @ai-sdlc/orchestrator@latest` (or pin a specific
+version in your project's tooling) and let `ai-sdlc init` write a pinned
+`@ai-sdlc/mcp-advisor@<version>` into your `.mcp.json`. Reproducible
+deploys come from pinned dependencies, not floating tags.
+
+`ai-sdlc --version` prints a 3-line block (CLI / orchestrator / plugin
+versions) so you can spot drift between a global install and a
+co-located plugin checkout. If the lines disagree, the CLI emits a
+`WARN  versions out of sync` line pointing at the upgrade command.
+
 ## Commit Messages
 
 This project uses [Conventional Commits](https://www.conventionalcommits.org/) enforced by [commitlint](https://commitlint.js.org/). Every commit message must follow this format:

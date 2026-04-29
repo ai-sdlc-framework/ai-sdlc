@@ -1,12 +1,26 @@
 /**
  * ai-sdlc init — initialize a project with AI-SDLC config files.
+ *
+ * AISDLC-78 enhancements:
+ *  - Print a 3-line version block at startup so operators see CLI,
+ *    orchestrator, and plugin versions in one place. Drift triggers a
+ *    visible warning instead of silently shipping mismatched binaries.
+ *  - Substitute `your-org` in the pipeline.yaml template using
+ *    `git remote get-url origin` (ssh + https forms supported). Falls
+ *    back to the placeholder only when no remote is configured.
+ *  - Pin `@ai-sdlc/mcp-advisor` in generated `.mcp.json` to the
+ *    orchestrator version that ran init, with an inline opt-out hint.
+ *  - Skip `.cursor/mcp.json` unless Cursor is detected (project-local
+ *    `.cursor/`, user-global `~/.cursor/`) or `--cursor` is passed.
  */
 
 import { Command } from 'commander';
 import { existsSync, mkdirSync, writeFileSync, readFileSync, appendFileSync } from 'node:fs';
 import { join, basename } from 'node:path';
-import { detectAgents, installMcpServer } from './mcp-setup.js';
+import { detectAgentsDetailed, installMcpServer } from './mcp-setup.js';
 import { detectWorkspace, generateWorkspaceYaml, type WorkspaceRepo } from './workspace-detect.js';
+import { detectGitRemote, applyRemoteToPipelineYaml } from './git-remote.js';
+import { resolveVersions, formatVersionBlock } from '../versions.js';
 
 const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
@@ -262,19 +276,26 @@ function ensureGitignore(projectDir: string, dryRun: boolean, prefix: string = '
   console.log(`${prefix}  updated .gitignore`);
 }
 
+interface InitProjectOptions {
+  /** Pre-rendered pipeline YAML (with org/repo substituted). */
+  pipelineYaml: string;
+  /** Agent-role tier selection (drives `agent-role.yaml` template). */
+  tier: AgentRoleTier;
+}
+
 /** Initialize a single project directory with AI-SDLC config files. */
 function initProject(
   projectDir: string,
   configDirName: string,
   dryRun: boolean,
   prefix: string = '',
-  tier: AgentRoleTier = 'coding',
+  options: InitProjectOptions = { pipelineYaml: PIPELINE_YAML, tier: 'coding' },
 ): void {
   const configDir = join(projectDir, configDirName);
 
   const files = [
-    { name: 'pipeline.yaml', content: PIPELINE_YAML },
-    { name: 'agent-role.yaml', content: getAgentRoleYaml(tier) },
+    { name: 'pipeline.yaml', content: options.pipelineYaml },
+    { name: 'agent-role.yaml', content: getAgentRoleYaml(options.tier) },
     { name: 'quality-gate.yaml', content: QUALITY_GATE_YAML },
     { name: 'autonomy-policy.yaml', content: AUTONOMY_POLICY_YAML },
   ];
@@ -339,6 +360,7 @@ export const initCommand = new Command('init')
   .description('Initialize AI-SDLC configuration in the current project')
   .option('--dry-run', 'Show what would be created without writing files')
   .option('--skip-mcp', 'Skip MCP server auto-configuration')
+  .option('--cursor', 'Force-install Cursor MCP config even if Cursor is not detected')
   .option('-d, --dir <path>', 'Config directory name', '.ai-sdlc')
   .option(
     '--role <tier>',
@@ -358,6 +380,24 @@ export const initCommand = new Command('init')
       return;
     }
     const tier = tierInput as AgentRoleTier;
+    const cursorOptIn = !!opts.cursor;
+
+    // ── version provenance (AC #1) ────────────────────────────────────
+    const versions = resolveVersions({ workDir: projectDir });
+    console.log(formatVersionBlock(versions));
+    console.log('');
+
+    // ── pipeline.yaml org/repo substitution (AC #2) ───────────────────
+    const remote = detectGitRemote({ cwd: projectDir });
+    const pipelineYaml = applyRemoteToPipelineYaml(PIPELINE_YAML, remote);
+    if (remote.detected) {
+      console.log(`Detected git remote: ${remote.org}/${remote.repo}`);
+    } else {
+      console.log(
+        `No git origin remote detected — pipeline.yaml will use the 'your-org' placeholder.`,
+      );
+    }
+    console.log('');
 
     // Detect workspace (multi-repo parent directory)
     const workspace = detectWorkspace(projectDir);
@@ -375,17 +415,33 @@ export const initCommand = new Command('init')
       // Cascade into each child repo
       for (const repo of workspace.repos) {
         console.log(`\n${repo.name}/`);
-        initProject(repo.absPath, configDirName, dryRun, '  ', tier);
+        // Per-repo remote detection so each child gets its own org/repo.
+        const childRemote = detectGitRemote({ cwd: repo.absPath });
+        const childPipeline = applyRemoteToPipelineYaml(PIPELINE_YAML, childRemote);
+        if (childRemote.detected) {
+          console.log(`  detected remote: ${childRemote.org}/${childRemote.repo}`);
+        }
+        initProject(repo.absPath, configDirName, dryRun, '  ', {
+          pipelineYaml: childPipeline,
+          tier,
+        });
       }
 
       // MCP setup at workspace root (serves all repos)
       if (!opts.skipMcp) {
-        const agents = detectAgents(projectDir, { isWorkspace: true });
+        const { detected, skipped } = detectAgentsDetailed(projectDir, {
+          isWorkspace: true,
+          pinVersion: versions.orchestrator,
+          cursorOptIn,
+        });
 
         console.log(`\nMCP server setup (workspace root):`);
-        console.log(`  detected ${agents.map((a) => a.name).join(', ')}`);
+        console.log(`  detected ${detected.map((a) => a.name).join(', ') || '(none)'}`);
+        for (const sk of skipped) {
+          console.log(`  skip ${sk.name} — ${sk.reason}`);
+        }
 
-        for (const agent of agents) {
+        for (const agent of detected) {
           const status = installMcpServer(projectDir, agent, dryRun);
           const pad = status === 'merged' ? ' ' : '';
           console.log(`  ${status}${pad} ${agent.configPath} (${agent.name})`);
@@ -396,15 +452,21 @@ export const initCommand = new Command('init')
       console.log(`Run 'ai-sdlc health' to verify your configuration.`);
     } else {
       // Single-repo mode (original behavior)
-      initProject(projectDir, configDirName, dryRun, '', tier);
+      initProject(projectDir, configDirName, dryRun, '', { pipelineYaml, tier });
 
       if (!opts.skipMcp) {
-        const agents = detectAgents(projectDir);
+        const { detected, skipped } = detectAgentsDetailed(projectDir, {
+          pinVersion: versions.orchestrator,
+          cursorOptIn,
+        });
 
         console.log(`\nMCP server setup:`);
-        console.log(`  detected ${agents.map((a) => a.name).join(', ')}`);
+        console.log(`  detected ${detected.map((a) => a.name).join(', ') || '(none)'}`);
+        for (const sk of skipped) {
+          console.log(`  skip ${sk.name} — ${sk.reason}`);
+        }
 
-        for (const agent of agents) {
+        for (const agent of detected) {
           const status = installMcpServer(projectDir, agent, dryRun);
           const pad = status === 'merged' ? ' ' : '';
           console.log(`  ${status}${pad} ${agent.configPath} (${agent.name})`);

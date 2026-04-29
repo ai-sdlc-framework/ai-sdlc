@@ -40,7 +40,16 @@ export function formatTable(data: Record<string, unknown>): string {
       lines.push('Health Check');
       lines.push('─'.repeat(40));
       lines.push(`Config:      ${data.configValid ? 'valid' : 'INVALID'}`);
-      lines.push(`State Store: ${data.stateStoreConnected ? 'connected' : 'not configured'}`);
+      // AISDLC-78: the previous "not configured" string read like a setup
+      // failure to fresh users. The state store is created on demand by
+      // the first pipeline run; explicitly flag deferred initialization.
+      lines.push(
+        `State Store: ${
+          data.stateStoreConnected
+            ? 'connected'
+            : 'deferred (initializes on first pipeline run; pass --init-state to create now)'
+        }`,
+      );
       const errors = data.errors as string[];
       if (errors.length > 0) {
         lines.push('');
@@ -69,8 +78,16 @@ export function formatTable(data: Record<string, unknown>): string {
         for (const agent of agents) {
           const total = agent.totalTasks as number;
           const success = agent.successCount as number;
+          const declaredOnly = agent.declaredOnly === true;
           const pct = total > 0 ? `${Math.round((success / total) * 100)}%` : '-';
-          const lastTask = agent.lastTaskAt ? (agent.lastTaskAt as string).split('T')[0] : '-';
+          // AISDLC-78 (AC #10): mark declared-but-not-executed rows so a
+          // fresh-install user sees their `agent-role.yaml` declarations
+          // even before the first pipeline run populates the ledger.
+          const lastTask = declaredOnly
+            ? '(declared, not yet executed)'
+            : agent.lastTaskAt
+              ? (agent.lastTaskAt as string).split('T')[0]
+              : '-';
           lines.push(
             String(agent.agentName ?? '').padEnd(20) +
               String(agent.currentLevel ?? 0).padEnd(7) +
