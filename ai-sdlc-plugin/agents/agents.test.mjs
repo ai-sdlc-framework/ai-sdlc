@@ -59,8 +59,19 @@ function parseFrontmatter(filePath) {
   return result;
 }
 
-const agentFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md', 'developer.md'];
+const agentFiles = [
+  'code-reviewer.md',
+  'security-reviewer.md',
+  'test-reviewer.md',
+  'developer.md',
+  'execute-orchestrator.md',
+];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
+// The orchestrator is the only agent with Task in its tools list — every other
+// agent declares disallowedTools: [AgentTool] to prevent recursive subagent
+// spawning. We exempt the orchestrator from the all-agents-disallow-AgentTool
+// assertion below.
+const nonOrchestratorAgentFiles = agentFiles.filter((f) => f !== 'execute-orchestrator.md');
 const agents = {};
 
 before(() => {
@@ -106,8 +117,12 @@ describe('agent definition tool restrictions', () => {
     );
   });
 
-  it('all agents have AgentTool in disallowedTools', () => {
-    for (const file of agentFiles) {
+  it('all non-orchestrator agents have AgentTool in disallowedTools', () => {
+    // execute-orchestrator is the deliberate exception — it's the one agent
+    // permitted to spawn nested subagents (developer + 3 reviewers). Every
+    // other agent must disallow AgentTool to prevent recursive subagent
+    // spawning that would break the parallel-runs design (see AISDLC-82).
+    for (const file of nonOrchestratorAgentFiles) {
       assert.ok(
         agents[file].disallowedTools.includes('AgentTool'),
         `${file} should disallow AgentTool`,
@@ -179,5 +194,87 @@ describe('agent definition tool restrictions', () => {
     assert.ok(body.includes('Never merge'), 'embed never-merge rule');
     assert.ok(body.includes('Never force-push'), 'embed never-force-push rule');
     assert.ok(body.includes('Never edit `.ai-sdlc/**`'), 'embed blocked-paths rule');
+  });
+});
+
+describe('execute-orchestrator agent (AISDLC-82)', () => {
+  it('declares Task in its tools list (the only agent permitted to spawn subagents)', () => {
+    assert.ok(
+      agents['execute-orchestrator.md'].tools.includes('Task'),
+      'execute-orchestrator must have Task to spawn developer + 3 reviewer subagents',
+    );
+  });
+
+  it('does NOT have AgentTool in disallowedTools (it needs to spawn subagents)', () => {
+    const disallowed = agents['execute-orchestrator.md'].disallowedTools || [];
+    assert.ok(
+      !disallowed.includes('AgentTool'),
+      'execute-orchestrator must NOT disallow AgentTool — it is the orchestrator',
+    );
+  });
+
+  it('inherits the model from the spawning session (no fixed model lock-in)', () => {
+    assert.equal(
+      agents['execute-orchestrator.md'].model,
+      'inherit',
+      'execute-orchestrator must inherit model so dev/Max-20x tier flows through',
+    );
+  });
+
+  it('declares the plugin task_edit + task_complete tools (preserve unknown frontmatter)', () => {
+    const tools = agents['execute-orchestrator.md'].tools;
+    assert.ok(
+      tools.includes('mcp__ai-sdlc-plugin__task_edit'),
+      'execute-orchestrator needs the plugin variant of task_edit (preserves permittedExternalPaths — AISDLC-83)',
+    );
+    assert.ok(
+      tools.includes('mcp__ai-sdlc-plugin__task_complete'),
+      'execute-orchestrator needs the plugin variant of task_complete (preserves permittedExternalPaths — AISDLC-83)',
+    );
+  });
+
+  it('body contains Step 0 marker (sweep merged worktrees)', () => {
+    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
+    assert.match(body, /## Step 0/, 'must contain Step 0 marker');
+    assert.match(body, /Sweep merged worktrees/i, 'Step 0 must describe the sweep');
+  });
+
+  it('body contains Step 13 marker (cleanup sentinel + report)', () => {
+    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
+    assert.match(body, /## Step 13/, 'must contain Step 13 marker');
+    assert.match(body, /Cleanup sentinel/i, 'Step 13 must describe the sentinel cleanup');
+  });
+
+  it('body embeds the hard governance rules (defense-in-depth)', () => {
+    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
+    assert.match(body, /Never merge any PR/i, 'must embed never-merge rule');
+    assert.match(body, /Never force-push/i, 'must embed never-force-push rule');
+    assert.match(body, /Never edit `\.ai-sdlc\/\*\*`/i, 'must embed never-edit-config rule');
+  });
+
+  it('body invokes all three reviewer subagents (code, test, security)', () => {
+    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
+    assert.match(body, /code-reviewer/, 'must invoke code-reviewer');
+    assert.match(body, /test-reviewer/, 'must invoke test-reviewer');
+    assert.match(body, /security-reviewer/, 'must invoke security-reviewer');
+  });
+
+  it('body documents the per-worktree sentinel hard dependency (AISDLC-81)', () => {
+    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
+    assert.match(body, /AISDLC-81/, 'must reference the per-worktree sentinel prerequisite');
+    assert.match(
+      body,
+      /\$WORKTREE_PATH\/\.active-task/,
+      'must write the per-worktree sentinel (not the project-level one)',
+    );
+  });
+
+  it('body forbids spawning execute-orchestrator recursively (parallel design rule)', () => {
+    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
+    assert.match(
+      body,
+      /Never spawn the `execute-orchestrator` agent recursively/i,
+      "orchestrator must not spawn another orchestrator — that is the main session's job",
+    );
   });
 });
