@@ -57,6 +57,34 @@
     "sdk-go": {
       "release-type": "go",
       "component": "sdk-go"
+    },
+    "ai-sdlc-plugin": {
+      "release-type": "simple",
+      "component": "ai-sdlc-plugin",
+      "package-name": "ai-sdlc-plugin",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "json",
+          "path": "plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": ".claude-plugin/plugin.json",
+          "jsonpath": "$.version"
+        },
+        {
+          "type": "json",
+          "path": "/.claude-plugin/marketplace.json",
+          "jsonpath": "$.plugins[0].version"
+        },
+        {
+          "type": "json",
+          "path": "mcp-server/package.json",
+          "jsonpath": "$.version"
+        }
+      ]
     }
   }
 }

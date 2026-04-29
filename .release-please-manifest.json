@@ -5,5 +5,6 @@
   "orchestrator": "0.6.0",
   "mcp-advisor": "0.6.0",
   "sdk-python": "0.2.0",
-  "sdk-go": "0.2.0"
+  "sdk-go": "0.2.0",
+  "ai-sdlc-plugin": "0.7.1"
 }
