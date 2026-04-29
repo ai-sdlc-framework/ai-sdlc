@@ -55,12 +55,25 @@ describe('/ai-sdlc execute frontmatter', () => {
     assert.match(frontmatter['allowed-tools'], /\bBash\b/);
   });
 
-  it('allows the backlog task_edit MCP tool (for status flips)', () => {
-    assert.match(frontmatter['allowed-tools'], /mcp__backlog__task_edit/);
+  it('allows the plugin task_edit MCP tool (for status flips, preserves unknown frontmatter keys)', () => {
+    // Per AISDLC-83: rewired from upstream `mcp__backlog__task_edit` to the
+    // plugin's drop-in (AISDLC-73), which preserves `permittedExternalPaths`
+    // and other unknown frontmatter keys across status flips.
+    assert.match(frontmatter['allowed-tools'], /mcp__ai-sdlc-plugin__task_edit/);
+    assert.doesNotMatch(
+      frontmatter['allowed-tools'],
+      /mcp__backlog__task_edit\b/,
+      'upstream task_edit must not be re-introduced — see AISDLC-73 (strips unknown keys)',
+    );
   });
 
-  it('allows the backlog task_complete MCP tool (file move on Done)', () => {
-    assert.match(frontmatter['allowed-tools'], /mcp__backlog__task_complete/);
+  it('allows the plugin task_complete MCP tool (file move on Done, preserves frontmatter)', () => {
+    assert.match(frontmatter['allowed-tools'], /mcp__ai-sdlc-plugin__task_complete/);
+    assert.doesNotMatch(
+      frontmatter['allowed-tools'],
+      /mcp__backlog__task_complete\b/,
+      'upstream task_complete must not be re-introduced — see AISDLC-73',
+    );
   });
 
   it('allows AskUserQuestion (for review-gate decisions)', () => {
@@ -113,9 +126,11 @@ describe('/ai-sdlc execute body contract', () => {
 
   it('marks task Done + runs task_complete BEFORE pushing the PR', () => {
     // The Done flip and file move must land in the same PR as the work,
-    // sequenced after reviews approve and before push.
+    // sequenced after reviews approve and before push. AISDLC-83 rewired
+    // the call site to the plugin's drop-in (preserves unknown frontmatter
+    // keys like permittedExternalPaths).
     assert.match(body, /mark task Done.*BEFORE push/i);
-    assert.match(body, /mcp__backlog__task_complete/);
+    assert.match(body, /mcp__ai-sdlc-plugin__task_complete/);
   });
 
   it('skips the Done flip when iteration cap was exceeded', () => {

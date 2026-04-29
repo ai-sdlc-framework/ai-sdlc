@@ -2,7 +2,7 @@
 name: execute
 description: Execute a backlog task end-to-end via subagents — worktree → developer → reviews → PR. Replaces the orchestrator-driven dogfood pipeline for backlog tasks.
 argument-hint: <task-id>
-allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion, mcp__backlog__task_view, mcp__backlog__task_edit, mcp__backlog__task_complete
+allowed-tools: Read, Grep, Glob, Bash, Task, AskUserQuestion, mcp__backlog__task_view, mcp__ai-sdlc-plugin__task_edit, mcp__ai-sdlc-plugin__task_complete
 model: inherit
 ---
 
@@ -76,7 +76,9 @@ If `git worktree add` fails because the branch already exists, the operator's pr
 
 ## Step 4 — Flip task to In Progress + write active-task sentinel
 
-Use `mcp__backlog__task_edit` to set `status: 'In Progress'`. This makes the dashboard reflect that work has started.
+Use `mcp__ai-sdlc-plugin__task_edit` to set `status: 'In Progress'`. This makes the dashboard reflect that work has started.
+
+> **Why the plugin's task_edit (not upstream `mcp__backlog__task_edit`)?** Upstream re-serialises frontmatter from its known schema and silently strips unrecognised keys — including `permittedExternalPaths`, which this command relies on for cross-repo writes. The plugin's drop-in (AISDLC-73) preserves unknown keys verbatim. Same goes for `mcp__ai-sdlc-plugin__task_complete` in Step 10.
 
 Then write the **per-worktree** active-task sentinel so the PreToolUse hook can resolve `permittedExternalPaths` for cross-repo writes:
 
@@ -143,7 +145,7 @@ Watch for `[ai-sdlc-progress]` lines in the agent's tool output and surface them
 
 The developer returns a JSON object. Parse it and check:
 
-- If `commitSha` is `null`, the developer couldn't complete the task. Print the `notes` field, revert the task to `To Do` via `mcp__backlog__task_edit`, leave the worktree on disk for inspection, and stop. Print: "Worktree preserved at `$WORKTREE_PATH`. To clean up: `/ai-sdlc cleanup $TASK_ID`."
+- If `commitSha` is `null`, the developer couldn't complete the task. Print the `notes` field, revert the task to `To Do` via `mcp__ai-sdlc-plugin__task_edit`, leave the worktree on disk for inspection, and stop. Print: "Worktree preserved at `$WORKTREE_PATH`. To clean up: `/ai-sdlc cleanup $TASK_ID`."
 - If any of `verifications.{build,test,lint}` is `failed`, treat as developer failure (same rollback as above).
 - Otherwise proceed to review.
 
@@ -245,8 +247,8 @@ If reviews approved cleanly:
    ## Follow-up
    (none) | <anything from developer.notes>
    ```
-3. **Call `mcp__backlog__task_edit`** with `id: $TASK_ID`, `status: 'Done'`, `acceptanceCriteriaCheck: [...]`, `finalSummary: '...'`.
-4. **Call `mcp__backlog__task_complete`** with `id: $TASK_ID` — this physically moves `backlog/tasks/<file>.md` → `backlog/completed/<file>.md`.
+3. **Call `mcp__ai-sdlc-plugin__task_edit`** with `id: $TASK_ID`, `status: 'Done'`, `acceptanceCriteriaCheck: [...]`, `finalSummary: '...'`.
+4. **Call `mcp__ai-sdlc-plugin__task_complete`** with `id: $TASK_ID` — this physically moves `backlog/tasks/<file>.md` → `backlog/completed/<file>.md`.
 5. **Build + sign the review attestation** (AISDLC-74). Before staging the chore commit, write a DSSE envelope at `.ai-sdlc/attestations/<head-sha>.dsse.json` so CI can verify the local review and skip its own duplicate review run:
 
    ```bash

@@ -149,7 +149,7 @@ Don't apply labels automatically — confirm first. If the user agrees,
 apply via the right tracker:
 
 - **GitHub**: `gh issue edit <N> --add-label "$LABEL"`
-- **Backlog**: ask the user to run `mcp__backlog__task_edit` themselves (it's intentionally not in `allowed-tools` here).
+- **Backlog**: ask the user to run `mcp__ai-sdlc-plugin__task_edit` themselves (it's intentionally not in `allowed-tools` here; the plugin drop-in preserves unknown frontmatter keys per AISDLC-73).
 
 ## Notes
 
