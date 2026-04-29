@@ -179,12 +179,153 @@ jobs:
     permissions:
       pull-requests: write
       issues: read
+      # AISDLC-87: contents:write is required for the CI-side attestor step
+      # to commit + push the signed envelope back to the PR branch. The push
+      # target is gated to same-repo PRs (head.repo.full_name ==
+      # github.repository) — fork PRs can't push to their head ref via
+      # GITHUB_TOKEN even with contents:write, and we explicitly skip the
+      # step in that case.
+      contents: write
+    # The push step needs git + node available — the report job otherwise
+    # only ran github-script. Provide a checkout so the workflow has the
+    # repo state to commit attestations against.
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
       - name: Skip if attestation valid (AISDLC-74 — local /ai-sdlc execute review trusted)
         if: needs.check_attestation.outputs.attestation_valid == 'true'
         run: |
           echo "::notice::Local review attestation is valid — Post Review Results SKIPPING duplicate CI review (AISDLC-74)."
           echo "::notice::See .ai-sdlc/attestations/<head-sha>.dsse.json for the signed envelope."
+
+      # AISDLC-87: CI-side attestor.
+      # When all 3 reviewer agents approved AND there's no valid local
+      # attestation, sign one with the CI-attestor key and push it back to
+      # the PR branch. Lets remote-agent and external-contributor PRs
+      # produce a trust signal verify-attestation.yml will accept on the
+      # next sync.
+      #
+      # Gates:
+      #   - analyze succeeded (we have verdicts)
+      #   - all 3 verdicts approved
+      #   - no valid local attestation already exists (decision delegated
+      #     to ci-sign-attestation.mjs --skip-if-valid which calls the
+      #     verifier)
+      #   - the CI-attestor private key is configured
+      #   - PR is from the same repo (not a fork — token can't push to a
+      #     fork's branch). Forked-PR contributors get the friendly
+      #     fallback comment from verify-attestation.yml.
+      - name: CI-side attestor — sign + push when reviewers approved
+        if: |
+          needs.analyze.result == 'success' &&
+          needs.check_attestation.outputs.attestation_valid != 'true' &&
+          github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          AI_SDLC_CI_ATTESTOR_PRIVATE_KEY: ${{ secrets.AI_SDLC_CI_ATTESTOR_PRIVATE_KEY }}
+          TESTING_JSON: ${{ needs.analyze.outputs.testing }}
+          CRITIC_JSON: ${{ needs.analyze.outputs.critic }}
+          SECURITY_JSON: ${{ needs.analyze.outputs.security }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          # Hard precondition: secret must be set. Without it we can't sign
+          # — exit cleanly with a notice (the friendly fallback comment from
+          # verify-attestation.yml will already have explained the situation).
+          if [ -z "${AI_SDLC_CI_ATTESTOR_PRIVATE_KEY}" ]; then
+            echo "::notice::AI_SDLC_CI_ATTESTOR_PRIVATE_KEY secret not set — skipping CI-side attestor (run the bootstrap PR first; see CLAUDE.md)."
+            exit 0
+          fi
+
+          # Decide approval gate from the parsed verdicts the analyze job
+          # already extracted. Skip if any reviewer didn't approve — the
+          # script enforces this too, but we want to avoid the install +
+          # build cost when we know we'd no-op.
+          ALL_APPROVED=$(node -e '
+            try {
+              const t = JSON.parse(process.env.TESTING_JSON || "{}");
+              const c = JSON.parse(process.env.CRITIC_JSON || "{}");
+              const s = JSON.parse(process.env.SECURITY_JSON || "{}");
+              const ok = [t, c, s].every(v => v && v.approved === true);
+              process.stdout.write(ok ? "true" : "false");
+            } catch { process.stdout.write("false"); }
+          ')
+          if [ "$ALL_APPROVED" != "true" ]; then
+            echo "::notice::Not all reviewers approved — CI-side attestor skipped."
+            exit 0
+          fi
+
+          # The orchestrator + verifier need to be installed and built so
+          # ci-sign-attestation.mjs can import the runtime barrel. The
+          # report job otherwise doesn't need pnpm — guard with a check
+          # in case the runner image already has it cached.
+          which pnpm >/dev/null 2>&1 || npm install -g pnpm
+          pnpm install --frozen-lockfile
+          pnpm --filter "@ai-sdlc/orchestrator..." build
+
+          # Compose the verdicts JSON the script expects.
+          node -e '
+            const fs = require("fs");
+            const verdicts = [
+              { type: "testing",  ...JSON.parse(process.env.TESTING_JSON || "{}") },
+              { type: "critic",   ...JSON.parse(process.env.CRITIC_JSON  || "{}") },
+              { type: "security", ...JSON.parse(process.env.SECURITY_JSON|| "{}") },
+            ];
+            fs.writeFileSync("/tmp/ci-review-verdicts.json", JSON.stringify(verdicts));
+          '
+
+          # Sign — script no-ops cleanly when --skip-if-valid + valid
+          # local attestation already exists, signs additively when an
+          # invalid one is present, signs fresh when none exist.
+          OUT_PATH=$(node scripts/ci-sign-attestation.mjs \
+            --review-verdicts /tmp/ci-review-verdicts.json \
+            --iteration-count 1 \
+            --harness-note "" \
+            --skip-if-valid \
+            --pr-base-sha "$PR_BASE_SHA" \
+            --pr-head-sha "$PR_HEAD_SHA")
+          echo "ci-sign-attestation output: $OUT_PATH"
+
+          # If the script skipped (output starts with "skipped:") there's
+          # nothing to commit.
+          case "$OUT_PATH" in
+            skipped:*) echo "::notice::CI-side attestor skipped — local attestation already valid."; exit 0;;
+          esac
+
+          # Commit + push the new envelope to the PR branch with [skip ci]
+          # so we don't trigger another review run on the chore commit.
+          git config user.name  "ai-sdlc-ci-attestor[bot]"
+          git config user.email "ci-attestor@ai-sdlc.local"
+
+          # Fetch + check out the PR branch so the push lands on the right ref.
+          # checkout@v4 already fetched the PR head; we just need to align
+          # local HEAD with the branch name.
+          git fetch origin "$PR_HEAD_REF":"$PR_HEAD_REF" 2>/dev/null || true
+          git checkout "$PR_HEAD_REF" 2>/dev/null || git switch -c "$PR_HEAD_REF"
+
+          git add "$OUT_PATH"
+          if git diff --cached --quiet; then
+            echo "::notice::Attestation envelope already on branch — nothing to commit."
+            exit 0
+          fi
+          # Commit message: keep on a single line with literal \n separators
+          # (passed via printf) so the YAML `|` block scalar's indentation
+          # rules don't conflict with multi-line shell-string literals. Git
+          # accepts repeated -m flags as separate paragraphs which is
+          # cleaner than printf-substitution for fixed text.
+          git commit \
+            -m "chore(ci): sign review attestation [skip ci]" \
+            -m "CI-side attestor (AISDLC-87) signed an envelope at $OUT_PATH after all three CI reviewer agents approved this PR. The verifier accepts CI-signed envelopes identically to maintainer-signed ones, as long as the ci-attestor pubkey is in .ai-sdlc/trusted-reviewers.yaml." \
+            -m "Co-Authored-By: ai-sdlc-ci-attestor[bot] <ci-attestor@ai-sdlc.local>"
+          git push origin "HEAD:$PR_HEAD_REF"
 
       - name: Skip if analyze was skipped (release-please PRs)
         if: needs.analyze.result == 'skipped' && needs.check_attestation.outputs.attestation_valid != 'true'

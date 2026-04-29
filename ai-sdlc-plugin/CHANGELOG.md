@@ -8,6 +8,37 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ## Unreleased
 
+### Added
+
+- **CI-side attestor** (`scripts/ci-sign-attestation.mjs` +
+  `.github/workflows/ai-sdlc-review.yml` Post Review Results step): when CI's
+  three reviewer agents (testing/critic/security) all approve a PR AND the
+  PR has no valid local attestation, CI signs a DSSE envelope with a
+  `ci-attestor` key from GitHub Secrets and pushes it back to the PR branch
+  with `[skip ci]`. The verifier (AISDLC-84/85) accepts CI-signed envelopes
+  identically to maintainer-signed ones — same DSSE format, same predicate.
+  Unblocks remote-agent `/ai-sdlc execute` runs (AISDLC-78/79/80/85 root
+  cause was no signing key in the remote sandbox) and gives external
+  contributors a zero-key path to a valid attestation. The CI signing step
+  delegates the "should I sign?" decision to the existing verifier
+  (`--skip-if-valid`), so it never redundantly signs over a valid local
+  attestation but DOES sign additively alongside an invalid one (the
+  multi-envelope scan picks the valid one). Step is gated to same-repo PRs
+  via `head.repo.full_name == github.repository` — fork PRs cannot push to
+  their head ref via GITHUB_TOKEN, so they get the existing friendly
+  fallback comment instead. Bootstrap (one-time, maintainer-only) is
+  documented in `CLAUDE.md` → "Bootstrap CI-side attestor": generate
+  keypair, add private key as GH Secret `AI_SDLC_CI_ATTESTOR_PRIVATE_KEY`,
+  uncomment + fill the placeholder in `.ai-sdlc/trusted-reviewers.yaml`,
+  open onboarding PR. Until that PR merges, `verify-attestation.yml`
+  rejects CI-signed envelopes with `signature did not match any trusted
+  reviewer pubkey` — the SAFE default (CI signing is additive, never
+  weakens the trust model). Regression coverage:
+  `scripts/ci-sign-attestation.test.mjs` exercises the three core shapes
+  (no-local-attestation → CI signs → verifier valid; valid-local → CI
+  no-ops; invalid-local → CI signs additively → verifier picks valid one)
+  end-to-end against the real verifier. (AISDLC-87)
+
 ### Documentation
 
 - **Remote-agent usage policy** (`CLAUDE.md`): documented that Anthropic CCR
