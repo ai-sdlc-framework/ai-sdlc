@@ -75,8 +75,10 @@ function runHook(command) {
   return runHookRaw(input);
 }
 
-function runHookFile(toolName, file_path, env = {}) {
-  const input = JSON.stringify({ tool_name: toolName, tool_input: { file_path } });
+function runHookFile(toolName, file_path, env = {}, cwd) {
+  const payload = { tool_name: toolName, tool_input: { file_path } };
+  if (cwd) payload.cwd = cwd;
+  const input = JSON.stringify(payload);
   return runHookRaw(input, env);
 }
 
@@ -303,5 +305,234 @@ describe('ai-sdlc-plugin enforce-blocked-actions hook (Write/Edit)', () => {
     });
     const result = runHookRaw(input);
     assert.ok(!isDenied(result), 'should not apply Bash rules to Write tool');
+  });
+});
+
+// ── Per-worktree sentinel resolution (AISDLC-81) ────────────────────
+//
+// The single project-level sentinel can't support parallel /ai-sdlc execute
+// runs. The hook now walks up from the tool's cwd to find a per-worktree
+// sentinel `<projectRoot>/.worktrees/<id>/.active-task`. Project-level
+// sentinel is kept as a fallback for one release for backwards compat.
+
+describe('ai-sdlc-plugin enforce-blocked-actions hook (per-worktree sentinel, AISDLC-81)', () => {
+  // Build TWO synthetic worktrees, each with its OWN active-task sentinel,
+  // each pointing at a DIFFERENT task with DIFFERENT permittedExternalPaths.
+  // The regression scenario: parallel runs must each get the right allowlist.
+  let parTempDir;
+  let siblingA;
+  let siblingB;
+  let worktreeA;
+  let worktreeB;
+
+  before(() => {
+    parTempDir = join(tmpdir(), `enforce-blocked-parallel-${Date.now()}`);
+    siblingA = join(tmpdir(), `enforce-blocked-sibling-a-${Date.now()}`);
+    siblingB = join(tmpdir(), `enforce-blocked-sibling-b-${Date.now()}`);
+
+    const aiSdlcDir = join(parTempDir, '.ai-sdlc');
+    const tasksDir = join(parTempDir, 'backlog', 'tasks');
+    worktreeA = join(parTempDir, '.worktrees', 'aisdlc-100');
+    worktreeB = join(parTempDir, '.worktrees', 'aisdlc-101');
+
+    mkdirSync(aiSdlcDir, { recursive: true });
+    mkdirSync(tasksDir, { recursive: true });
+    mkdirSync(siblingA, { recursive: true });
+    mkdirSync(siblingB, { recursive: true });
+    mkdirSync(worktreeA, { recursive: true });
+    mkdirSync(worktreeB, { recursive: true });
+    mkdirSync(join(worktreeA, 'src'), { recursive: true });
+
+    writeFileSync(
+      join(aiSdlcDir, 'agent-role.yaml'),
+      `role: coding-agent
+goal: Test agent
+blockedPaths:
+  - '.github/workflows/**'
+  - '.ai-sdlc/**'
+blockedActions: []
+`,
+    );
+
+    // Two task files, each pointing at a DIFFERENT sibling.
+    const siblingARelative = '../' + siblingA.split('/').pop();
+    const siblingBRelative = '../' + siblingB.split('/').pop();
+
+    writeFileSync(
+      join(tasksDir, 'aisdlc-100 - task-a.md'),
+      `---
+id: AISDLC-100
+title: Task A
+permittedExternalPaths:
+  - '${siblingARelative}'
+---
+
+Body A.
+`,
+    );
+    writeFileSync(
+      join(tasksDir, 'aisdlc-101 - task-b.md'),
+      `---
+id: AISDLC-101
+title: Task B
+permittedExternalPaths:
+  - '${siblingBRelative}'
+---
+
+Body B.
+`,
+    );
+
+    // Write each worktree's per-worktree sentinel.
+    writeFileSync(join(worktreeA, '.active-task'), 'AISDLC-100\n');
+    writeFileSync(join(worktreeB, '.active-task'), 'AISDLC-101\n');
+  });
+
+  after(() => {
+    rmSync(parTempDir, { recursive: true, force: true });
+    rmSync(siblingA, { recursive: true, force: true });
+    rmSync(siblingB, { recursive: true, force: true });
+  });
+
+  function runWith({ file_path, cwd, env = {} }) {
+    const payload = { tool_name: 'Write', tool_input: { file_path }, cwd };
+    return runHookRaw(JSON.stringify(payload), {
+      ...env,
+      CLAUDE_PROJECT_DIR: parTempDir,
+    });
+  }
+
+  it('worktree A active task (cwd inside worktreeA) allows write to siblingA', () => {
+    const result = runWith({
+      file_path: join(siblingA, 'foo.txt'),
+      cwd: worktreeA,
+    });
+    assert.ok(!isDenied(result), 'siblingA is in AISDLC-100 allowlist');
+  });
+
+  it('worktree A active task (cwd inside worktreeA) DENIES write to siblingB', () => {
+    const result = runWith({
+      file_path: join(siblingB, 'foo.txt'),
+      cwd: worktreeA,
+    });
+    assert.ok(isDenied(result), 'siblingB is NOT in AISDLC-100 allowlist');
+  });
+
+  it('worktree B active task (cwd inside worktreeB) allows write to siblingB', () => {
+    const result = runWith({
+      file_path: join(siblingB, 'foo.txt'),
+      cwd: worktreeB,
+    });
+    assert.ok(!isDenied(result), 'siblingB is in AISDLC-101 allowlist');
+  });
+
+  it('worktree B active task (cwd inside worktreeB) DENIES write to siblingA', () => {
+    const result = runWith({
+      file_path: join(siblingA, 'foo.txt'),
+      cwd: worktreeB,
+    });
+    assert.ok(isDenied(result), 'siblingA is NOT in AISDLC-101 allowlist');
+  });
+
+  it('cwd nested DEEP inside worktreeA still resolves the right sentinel', () => {
+    // A subagent often does a real Edit inside a nested package directory; the
+    // hook walks up to find the worktree's sentinel.
+    const deepCwd = join(worktreeA, 'src', 'lib', 'inner');
+    mkdirSync(deepCwd, { recursive: true });
+    const result = runWith({
+      file_path: join(siblingA, 'foo.txt'),
+      cwd: deepCwd,
+    });
+    assert.ok(!isDenied(result), 'deep cwd still resolves to AISDLC-100 sentinel');
+  });
+
+  it('falls back to project-level sentinel when cwd is outside any worktree', () => {
+    // Write a project-level sentinel pointing at AISDLC-100.
+    const projectSentinelDir = join(parTempDir, '.worktrees');
+    const projectSentinelPath = join(projectSentinelDir, '.active-task');
+    writeFileSync(projectSentinelPath, 'AISDLC-100\n');
+    try {
+      // cwd is the project root itself (NOT inside any .worktrees/<id>).
+      const result = runWith({
+        file_path: join(siblingA, 'foo.txt'),
+        cwd: parTempDir,
+      });
+      assert.ok(
+        !isDenied(result),
+        'project-level sentinel fallback should grant the legacy AISDLC-100 allowlist',
+      );
+    } finally {
+      rmSync(projectSentinelPath, { force: true });
+    }
+  });
+
+  it('per-worktree sentinel takes precedence over project-level sentinel', () => {
+    // worktreeA sentinel says AISDLC-100 (siblingA OK, siblingB blocked).
+    // Project-level sentinel claims AISDLC-101 (would allow siblingB).
+    // The per-worktree value MUST win.
+    const projectSentinelDir = join(parTempDir, '.worktrees');
+    const projectSentinelPath = join(projectSentinelDir, '.active-task');
+    writeFileSync(projectSentinelPath, 'AISDLC-101\n');
+    try {
+      const result = runWith({
+        file_path: join(siblingB, 'foo.txt'),
+        cwd: worktreeA,
+      });
+      assert.ok(
+        isDenied(result),
+        'per-worktree sentinel (AISDLC-100) wins over project-level (AISDLC-101); siblingB still blocked',
+      );
+    } finally {
+      rmSync(projectSentinelPath, { force: true });
+    }
+  });
+
+  it('falls back to env var when neither per-worktree nor project-level sentinel exists', () => {
+    // Use the original test fixture's env var fallback against a worktree
+    // path that has no per-worktree sentinel and no project-level sentinel.
+    const orphanWorktree = join(parTempDir, '.worktrees', 'aisdlc-200-orphan');
+    mkdirSync(orphanWorktree, { recursive: true });
+    try {
+      const result = runWith({
+        file_path: join(siblingA, 'foo.txt'),
+        cwd: orphanWorktree,
+        env: { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-100' },
+      });
+      assert.ok(!isDenied(result), 'env var fallback supplies AISDLC-100 allowlist');
+    } finally {
+      rmSync(orphanWorktree, { recursive: true, force: true });
+    }
+  });
+
+  it('REGRESSION: two parallel worktrees with different active tasks resolve independently', () => {
+    // The crux of AISDLC-81: simulate two interleaved tool calls from two
+    // different /ai-sdlc execute runs, both in flight simultaneously. Each
+    // must get the correct allowlist, even though they share the project root.
+    const aIntoA = runWith({ file_path: join(siblingA, 'a1.txt'), cwd: worktreeA });
+    const aIntoB = runWith({ file_path: join(siblingB, 'a2.txt'), cwd: worktreeA });
+    const bIntoA = runWith({ file_path: join(siblingA, 'b1.txt'), cwd: worktreeB });
+    const bIntoB = runWith({ file_path: join(siblingB, 'b2.txt'), cwd: worktreeB });
+
+    assert.ok(!isDenied(aIntoA), 'A→siblingA allowed (A is AISDLC-100)');
+    assert.ok(isDenied(aIntoB), 'A→siblingB denied (B not in AISDLC-100 allowlist)');
+    assert.ok(isDenied(bIntoA), 'B→siblingA denied (A not in AISDLC-101 allowlist)');
+    assert.ok(!isDenied(bIntoB), 'B→siblingB allowed (B is AISDLC-101)');
+  });
+
+  it('handles missing per-worktree sentinel by falling through (no crash)', () => {
+    // A worktree directory exists but its sentinel does not — should fall
+    // through to project-level / env, not crash.
+    const sentinelLessWorktree = join(parTempDir, '.worktrees', 'aisdlc-300-no-sentinel');
+    mkdirSync(sentinelLessWorktree, { recursive: true });
+    try {
+      const result = runWith({
+        file_path: join(siblingA, 'foo.txt'),
+        cwd: sentinelLessWorktree,
+      });
+      // No allowlist anywhere => deny, but NOT crash.
+      assert.ok(isDenied(result), 'no allowlist source => deny');
+    } finally {
+      rmSync(sentinelLessWorktree, { recursive: true, force: true });
+    }
   });
 });

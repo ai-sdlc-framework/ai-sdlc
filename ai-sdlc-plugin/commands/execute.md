@@ -78,16 +78,17 @@ If `git worktree add` fails because the branch already exists, the operator's pr
 
 Use `mcp__backlog__task_edit` to set `status: 'In Progress'`. This makes the dashboard reflect that work has started.
 
-Then write the active-task sentinel file so the PreToolUse hook can resolve `permittedExternalPaths` for cross-repo writes:
+Then write the **per-worktree** active-task sentinel so the PreToolUse hook can resolve `permittedExternalPaths` for cross-repo writes:
 
 ```bash
-mkdir -p .worktrees
-echo "$TASK_ID" > .worktrees/.active-task
+echo "$TASK_ID" > "$WORKTREE_PATH/.active-task"
 ```
 
-The sentinel is the canonical source of truth for "which task is currently active in this session." The hook reads it on every Write/Edit; without it, cross-repo writes are denied. CRITICAL: this file MUST be deleted at end of run (Step 13) regardless of success/failure, otherwise the next `/ai-sdlc execute` invocation inherits the stale active task. Treat it as a try/finally — if anything fails between here and Step 13, still delete.
+The sentinel lives **inside the worktree** (at `.worktrees/<task-id-lower>/.active-task`), not at the project-level `.worktrees/.active-task` path used by older versions. This is the canonical source of truth for "which task is active for this worktree." The hook walks up from the developer subagent's cwd to find this file, so each parallel `/ai-sdlc execute` run has its own sentinel without racing the others. Without it, cross-repo writes are denied.
 
-> **Single-task limitation**: only one `/ai-sdlc execute` may run at a time. Parallel runs would race on the sentinel. v2 may add per-worktree sentinels.
+CRITICAL: this file MUST be deleted at end of run (Step 13) regardless of success/failure, otherwise a future invocation reading the worktree (e.g. `/ai-sdlc cleanup` or another execute that re-uses the path) inherits the stale active task. Treat it as a try/finally — if anything fails between here and Step 13, still delete.
+
+> **Parallel runs are safe.** Multiple `/ai-sdlc execute` invocations can run concurrently against the same project root, including with cross-repo writes — each invocation reads/writes its own per-worktree sentinel. The legacy project-level sentinel `.worktrees/.active-task` is no longer written by this command, but the hook still falls back to it for one release for compatibility (deprecated, will be removed in v0.9.0+).
 
 ## Step 5 — Invoke the developer subagent
 
@@ -134,7 +135,7 @@ When invoking the Task tool for the developer agent:
 
 - `subagent_type: developer`
 - The agent's cwd will be the worktree path
-- The PreToolUse hook will read the active task ID from `.worktrees/.active-task` (written in Step 4) to resolve `permittedExternalPaths` for cross-repo writes
+- The PreToolUse hook walks up from the agent's cwd to find `<worktree>/.active-task` (written in Step 4) and resolves `permittedExternalPaths` from that task's frontmatter for cross-repo writes
 
 Watch for `[ai-sdlc-progress]` lines in the agent's tool output and surface them to the user as they appear.
 
@@ -376,13 +377,13 @@ After all siblings:
 
 ## Step 13 — Cleanup sentinel + Report
 
-Always remove the active-task sentinel — the hook would otherwise see a stale active task on the next invocation:
+Always remove the per-worktree active-task sentinel — without this a future invocation reading the worktree could see a stale active task:
 
 ```bash
-rm -f .worktrees/.active-task
+rm -f "$WORKTREE_PATH/.active-task"
 ```
 
-Run this whether the run succeeded, failed, was rolled back, or escalated. It's the closing bracket of the implicit try/finally started at Step 4.
+Run this whether the run succeeded, failed, was rolled back, or escalated. It's the closing bracket of the implicit try/finally started at Step 4. Note: only the per-worktree sentinel is touched here — the legacy project-level `.worktrees/.active-task` is no longer written by Step 4 and is not deleted here either (the hook will simply ignore it when no per-worktree sentinel matches).
 
 Then print a tight summary:
 
