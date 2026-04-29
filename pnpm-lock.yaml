@@ -42,7 +42,7 @@ importers:
         specifier: ^1.26.0
         version: 1.26.0(zod@3.25.76)
       zod:
-        specifier: ^3.23.0
+        specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
       '@types/node':
@@ -51,6 +51,9 @@ importers:
       '@vitest/coverage-v8':
         specifier: ^3.2.4
         version: 3.2.4(vitest@3.2.4(@types/node@22.19.9)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))
+      esbuild:
+        specifier: ^0.27.3
+        version: 0.27.3
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
