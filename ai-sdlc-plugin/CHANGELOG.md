@@ -8,6 +8,25 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ## Unreleased
 
+### Documentation
+
+- **Remote-agent usage policy** (`CLAUDE.md`): documented that Anthropic CCR
+  remote agents (scheduled via the bundled `/schedule` skill,
+  `Path: bundled:schedule`) are read-only by design. Empirical 4-for-4
+  failure rate of `/ai-sdlc execute` over `/schedule` (AISDLC-78, -79, -80,
+  -85) confirmed the structural blockers: no signing key in the remote
+  sandbox, plugin not auto-installed, subagents not registered, no local
+  worktree. The new `Remote agents (/schedule) — read-only by design`
+  section in `CLAUDE.md` lists acceptable patterns (PR status surveys,
+  backlog state reports, cron-triggered metric digests, Slack workflows,
+  CI run surveys) and explicitly-prohibited patterns
+  (`/ai-sdlc execute`, signing-key-dependent flows, plugin-subagent
+  flows, worktree flows, cross-repo write flows). Notes AISDLC-87
+  (CI-side attestor) as the planned fix that will eventually unblock
+  remote-agent `/ai-sdlc execute`. Since the `/schedule` skill is
+  system-bundled (not in this repo), the callout lives in `CLAUDE.md`
+  per AISDLC-86 AC #4. (AISDLC-86)
+
 ### Changed
 
 - **`/ai-sdlc execute`, `/ai-sdlc status`, `/ai-sdlc triage`**: rewired all
