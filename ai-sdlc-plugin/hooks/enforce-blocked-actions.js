@@ -15,7 +15,7 @@
  */
 
 const { readFileSync, existsSync, readdirSync } = require('fs');
-const { join, resolve, isAbsolute, relative, sep } = require('path');
+const { join, resolve, isAbsolute, relative, sep, dirname } = require('path');
 const { execSync } = require('child_process');
 
 // ── Read stdin (tool input JSON from Claude Code) ────────────────────
@@ -30,6 +30,7 @@ try {
 
 const toolName = input?.tool_name;
 const toolInput = input?.tool_input || {};
+const toolCwd = typeof input?.cwd === 'string' ? input.cwd : null;
 
 // ── Find project root and load agent-role.yaml ───────────────────────
 
@@ -110,8 +111,15 @@ function enforceWriteEdit(filePath) {
   }
 
   // Path is OUTSIDE the project root — only allowed if the active task's
-  // permittedExternalPaths covers it.
-  const allowed = loadPermittedExternalPaths(projectAbs);
+  // permittedExternalPaths covers it. The hook resolves "which task is
+  // active" by walking up from the tool's cwd (the developer subagent's
+  // worktree) to find a per-worktree `.active-task` sentinel; if none
+  // is found it falls back to the legacy project-level sentinel.
+  //
+  // We use cwd here rather than the file_path because external writes
+  // sit OUTSIDE `.worktrees/<id>/`, so file_path can never contain a
+  // worktree ancestor. The cwd of the subagent always does.
+  const allowed = loadPermittedExternalPaths(projectAbs, toolCwd || process.cwd());
   for (const ext of allowed) {
     const extAbs = resolve(projectAbs, ext);
     if (absPath === extAbs || absPath.startsWith(extAbs + sep)) {
@@ -170,21 +178,95 @@ function parseListField(yaml, field) {
 }
 
 /**
- * Read the active task ID. Prefers the sentinel file `.worktrees/.active-task`
- * (written by `/ai-sdlc execute`); falls back to `AI_SDLC_ACTIVE_TASK_ID` env
- * var so the hook stays testable from a normal shell.
+ * Read the active task ID. Resolution order (AISDLC-81):
+ *   1. Per-worktree sentinel: walk `searchFrom` up looking for an ancestor
+ *      `<projectRoot>/.worktrees/<id>/` and read its `.active-task`. This
+ *      lets parallel `/ai-sdlc execute` runs each have their own active
+ *      task without racing on a project-level file.
+ *   2. Project-level sentinel `<projectRoot>/.worktrees/.active-task`
+ *      (legacy fallback, retained for one release for non-execute callers
+ *      and old runs that still write the project-level path).
+ *      DEPRECATED: drop in v0.9.0+. Per-worktree sentinels are the only
+ *      supported location once existing worktrees on the legacy layout
+ *      have rolled over.
+ *   3. `AI_SDLC_ACTIVE_TASK_ID` env var so the hook stays testable from
+ *      a normal shell / external tooling.
+ *
+ * Returns the task ID string or `null` if no source is set.
  */
-function readActiveTaskId(projectAbs) {
-  const sentinelPath = join(projectAbs, '.worktrees', '.active-task');
-  if (existsSync(sentinelPath)) {
+function readActiveTaskId(projectAbs, searchFrom) {
+  // 1. Per-worktree sentinel from the tool's cwd (or file_path's dir).
+  const perWorktree = findWorktreeSentinel(projectAbs, searchFrom);
+  if (perWorktree) {
     try {
-      const id = readFileSync(sentinelPath, 'utf-8').trim();
+      const id = readFileSync(perWorktree, 'utf-8').trim();
+      if (id) return id;
+    } catch {
+      // fall through to project-level sentinel
+    }
+  }
+
+  // 2. Project-level sentinel (DEPRECATED — remove in v0.9.0+).
+  const projectSentinel = join(projectAbs, '.worktrees', '.active-task');
+  if (existsSync(projectSentinel)) {
+    try {
+      const id = readFileSync(projectSentinel, 'utf-8').trim();
       if (id) return id;
     } catch {
       // fall through to env var
     }
   }
+
+  // 3. Env var fallback.
   return process.env.AI_SDLC_ACTIVE_TASK_ID || null;
+}
+
+/**
+ * Walk `startFrom` up the directory tree looking for a path of the form
+ * `<projectAbs>/.worktrees/<id>/`. When found, return the absolute path
+ * to that worktree's `.active-task` sentinel (whether or not it exists
+ * — the caller checks). Returns `null` when no `.worktrees/<id>/`
+ * ancestor exists at or under projectAbs.
+ *
+ * Notes:
+ * - Search is bounded: stops as soon as we reach `projectAbs` or the
+ *   filesystem root, whichever comes first.
+ * - The matched ancestor must be a DIRECT child of `<projectAbs>/.worktrees/`
+ *   (i.e. exactly one path component below `.worktrees/`). Nested
+ *   directories like `.worktrees/<id>/sub/` correctly resolve UP to
+ *   `<projectAbs>/.worktrees/<id>/`.
+ */
+function findWorktreeSentinel(projectAbs, startFrom) {
+  if (!startFrom) return null;
+  const start = isAbsolute(startFrom) ? resolve(startFrom) : resolve(projectAbs, startFrom);
+
+  const worktreesRoot = join(projectAbs, '.worktrees');
+
+  // The candidate worktree must live inside <projectAbs>/.worktrees/.
+  // If start is not under that, no per-worktree sentinel is reachable.
+  if (start !== worktreesRoot && !start.startsWith(worktreesRoot + sep)) {
+    return null;
+  }
+
+  let current = start;
+  // Walk up until the parent of current === worktreesRoot. That makes
+  // current === `<projectAbs>/.worktrees/<id>/`.
+  while (true) {
+    if (dirname(current) === worktreesRoot) {
+      // current is `.worktrees/<id>/`
+      return join(current, '.active-task');
+    }
+    const parent = dirname(current);
+    if (parent === current) return null; // hit fs root
+    if (parent === worktreesRoot) {
+      // Already handled above, defensive.
+      return join(current, '.active-task');
+    }
+    if (!parent.startsWith(worktreesRoot + sep) && parent !== worktreesRoot) {
+      return null;
+    }
+    current = parent;
+  }
 }
 
 /**
@@ -213,17 +295,20 @@ function matchGlob(glob, path) {
 /**
  * Load permittedExternalPaths from the active task's frontmatter.
  *
- * Active task is identified by reading `.worktrees/.active-task` (a sentinel
- * file written by `/ai-sdlc execute` at start, deleted at end). The env-var
- * approach (AI_SDLC_ACTIVE_TASK_ID) does not work mid-session — the hook runs
- * in a fresh subprocess of the Claude Code parent, which can't have its env
- * mutated from a slash command. The env var is still honored as a fallback so
- * users can invoke the hook in tests / external tooling.
+ * Active task is identified by `readActiveTaskId`, which prefers a
+ * per-worktree sentinel `<projectRoot>/.worktrees/<id>/.active-task`
+ * (resolved by walking up from the tool's cwd) and falls back to a
+ * project-level `<projectRoot>/.worktrees/.active-task` (legacy, kept
+ * for one release per AISDLC-81) and finally to the env var
+ * `AI_SDLC_ACTIVE_TASK_ID` for tests / external tooling.
+ *
+ * The per-worktree sentinel is what enables parallel `/ai-sdlc execute`
+ * runs to share a project root without racing each other's allowlist.
  *
  * Returns [] when no active task, no matching task file, or no frontmatter field.
  */
-function loadPermittedExternalPaths(projectAbs) {
-  const taskId = readActiveTaskId(projectAbs);
+function loadPermittedExternalPaths(projectAbs, searchFrom) {
+  const taskId = readActiveTaskId(projectAbs, searchFrom);
   if (!taskId) return [];
 
   const tasksDir = join(projectAbs, 'backlog', 'tasks');

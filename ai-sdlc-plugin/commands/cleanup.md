@@ -10,11 +10,12 @@ Companion to `/ai-sdlc execute`. Two modes:
 
 ## Mode 1 — Sweep all merged worktrees (no arguments)
 
-When `$ARGUMENTS` is empty, do exactly what `/ai-sdlc execute` does at start: walk `.worktrees/`, check each branch's PR status via `gh pr list`, remove any whose PR has merged. Also remove a stale `.worktrees/.active-task` sentinel (an `/ai-sdlc execute` run that aborted without cleanup leaves it behind, which would block cross-repo writes for the next non-execute Edit/Write).
+When `$ARGUMENTS` is empty, do exactly what `/ai-sdlc execute` does at start: walk `.worktrees/`, check each branch's PR status via `gh pr list`, remove any whose PR has merged. Also remove the legacy project-level `.worktrees/.active-task` sentinel if present — it's no longer written by `/ai-sdlc execute` (per-worktree sentinels replaced it in AISDLC-81) and would only ever be a leftover from a much older run. Per-worktree `.active-task` files inside each worktree directory are removed automatically when `git worktree remove` deletes the worktree.
 
 ```bash
-# Clear stale sentinel — safe even if no run is in flight, since /ai-sdlc execute
-# rewrites it at start of every invocation.
+# Clear the legacy project-level sentinel if it still exists. Safe to delete:
+# /ai-sdlc execute now writes per-worktree sentinels at .worktrees/<id>/.active-task
+# instead of the project-level path.
 rm -f .worktrees/.active-task
 
 if [ ! -d .worktrees ]; then
@@ -31,6 +32,8 @@ for wt in .worktrees/*/; do
   MERGED_AT=$(gh pr list --head "$WT_BRANCH" --state merged --json mergedAt --jq '.[0].mergedAt' 2>/dev/null)
   if [ -n "$MERGED_AT" ] && [ "$MERGED_AT" != "null" ]; then
     echo "Removing $wt (branch $WT_BRANCH merged at $MERGED_AT)"
+    # The per-worktree .active-task sentinel (if any) is removed atomically
+    # with the worktree itself.
     git worktree remove --force "$wt" 2>/dev/null || true
     REMOVED=$((REMOVED + 1))
   fi
@@ -53,6 +56,9 @@ fi
 # Capture the branch name before removing so we can remind the operator.
 BRANCH=$(git -C "$WORKTREE_PATH" rev-parse --abbrev-ref HEAD 2>/dev/null)
 
+# git worktree remove --force deletes the entire worktree directory, which
+# includes the per-worktree .active-task sentinel written by /ai-sdlc execute
+# Step 4. No separate `rm` needed — the sentinel goes with the worktree.
 git worktree remove --force "$WORKTREE_PATH"
 echo "Removed worktree $WORKTREE_PATH (was on branch $BRANCH)."
 
