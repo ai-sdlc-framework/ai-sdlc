@@ -43,8 +43,9 @@ export async function analyzeCodebase(options: AnalyzerOptions): Promise<Codebas
   // Step 5: Detect architectural patterns
   const architecturalPatterns = detectPatterns(files, modules);
 
-  // Step 6: Detect conventions
-  const conventions = detectConventions(files);
+  // Step 6: Detect conventions (project-config-aware: package.json, vite.config.*,
+  // tsconfig.json, jsconfig.json, webpack.config.* — see AISDLC-80).
+  const conventions = await detectConventions(files, { repoPath: options.repoPath });
 
   // Step 7: Analyze hotspots
   const hotspots = await analyzeHotspots(options.repoPath, files, importsByFile, {

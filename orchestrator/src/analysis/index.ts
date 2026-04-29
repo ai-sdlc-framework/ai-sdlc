@@ -18,7 +18,17 @@ export type {
 
 export { walkFiles, detectModules } from './file-walker.js';
 export { parseImports, buildModuleGraph } from './dependency-parser.js';
-export { detectConventions } from './convention-detector.js';
+export {
+  detectConventions,
+  detectReactProject,
+  loadProjectAliases,
+  parseTsConfigAliases,
+  parseViteOrWebpackAliases,
+  enumerateTestLocations,
+  type DetectConventionsOptions,
+  type PathAliasMap,
+  type TestLocationSummary,
+} from './convention-detector.js';
 export { detectPatterns } from './pattern-detector.js';
 export { analyzeHotspots } from './hotspot-analyzer.js';
 export { computeComplexityScore } from './complexity-scorer.js';

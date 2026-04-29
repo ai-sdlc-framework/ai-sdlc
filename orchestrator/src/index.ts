@@ -668,6 +668,11 @@ export {
   parseImports,
   buildModuleGraph,
   detectConventions,
+  detectReactProject,
+  loadProjectAliases,
+  parseTsConfigAliases,
+  parseViteOrWebpackAliases,
+  enumerateTestLocations,
   detectPatterns,
   analyzeHotspots,
   computeComplexityScore,
@@ -691,6 +696,9 @@ export type {
   ImportStatement,
   DiffFinding,
   DiffAnalysisResult,
+  DetectConventionsOptions,
+  PathAliasMap,
+  TestLocationSummary,
 } from './analysis/index.js';
 
 // Check runs
