@@ -78,6 +78,73 @@ All rejections are by design (threat model). Re-run `/ai-sdlc execute` against t
 
 - Rebase, amend, or force-push that doesn't change reviewed content → still valid (filename SHA is informational only; matching is by predicate content). This was the day-one breakage AISDLC-84 fixed: every PR-merge cycle ate a duplicate review run because rebasing PR-N onto main rewrote the SHA on disk and the verifier couldn't find a match. The verifier now accepts as long as `diffHash + policyHash + agentFileHashes + pluginVersion + schemaVersion` all still resolve to the current PR state.
 
+## CI-side attestor (AISDLC-87)
+
+`/ai-sdlc execute` requires a local signing key — which fork PRs, remote-agent runs, and external contributors don't have. The CI-side attestor closes that gap: when CI's three reviewer agents (testing/critic/security) all approve a PR and no valid local attestation exists, `.github/workflows/ai-sdlc-review.yml` runs `scripts/ci-sign-attestation.mjs`, signs a DSSE envelope with the `ci-attestor` key from GitHub Secrets, and pushes it back to the PR branch. The verifier (AISDLC-84/85) accepts CI-signed envelopes identically to maintainer-signed ones — same DSSE format, same predicate, same threat model.
+
+### Bootstrap CI-side attestor (one-time, maintainer-only)
+
+This is a one-time setup the repo maintainer does ONCE per repo. After this, every PR that lacks a local attestation but has 3 approving CI reviews automatically gets a CI-signed envelope.
+
+1. **Generate the keypair locally** (do NOT commit the private key):
+
+   ```bash
+   node -e '
+     const { generateKeyPairSync } = require("node:crypto");
+     const { privateKey, publicKey } = generateKeyPairSync("ed25519");
+     const priv = privateKey.export({ format: "pem", type: "pkcs8" }).toString();
+     const pub  = publicKey.export({ format: "pem", type: "spki" }).toString();
+     require("node:fs").writeFileSync("/tmp/ci-attestor.priv.pem", priv);
+     require("node:fs").writeFileSync("/tmp/ci-attestor.pub.pem",  pub);
+     console.log("PRIVATE KEY: /tmp/ci-attestor.priv.pem (add to GH Secret AI_SDLC_CI_ATTESTOR_PRIVATE_KEY)");
+     console.log("PUBLIC KEY (paste under ci-attestor in trusted-reviewers.yaml):");
+     console.log(pub);
+   '
+   ```
+
+2. **Add the private key as a GitHub Secret** named `AI_SDLC_CI_ATTESTOR_PRIVATE_KEY`:
+
+   ```bash
+   gh secret set AI_SDLC_CI_ATTESTOR_PRIVATE_KEY < /tmp/ci-attestor.priv.pem
+   rm /tmp/ci-attestor.priv.pem  # only the GH Secret should hold it now
+   ```
+
+3. **Open an onboarding PR** that uncomments + fills in the `ci-attestor` placeholder block in `.ai-sdlc/trusted-reviewers.yaml` with the public key from step 1. Example final block:
+
+   ```yaml
+     - identity: 'ci-attestor'
+       machine: 'github-actions'
+       addedAt: '<today's date>'
+       addedBy: '<your GitHub handle>'
+       pubkey: |
+         -----BEGIN PUBLIC KEY-----
+         <pubkey-pem-here>
+         -----END PUBLIC KEY-----
+   ```
+
+   Maintainer reviews + merges this PR like any other policy change.
+
+4. **Verify it works** by opening any PR with no local attestation. After CI's 3 reviewer agents all approve, the report job's "CI-side attestor" step signs an envelope and pushes a `chore(ci): sign review attestation [skip ci]` commit to the PR branch. The next sync of `verify-attestation.yml` reports `valid` against the new envelope.
+
+### CI-attestor security model
+
+- The CI-attestor key has the SAME trust as a maintainer key. Anyone who gets read access to `AI_SDLC_CI_ATTESTOR_PRIVATE_KEY` can sign valid attestations for any PR. Treat it like a maintainer credential: rotate on any suspected leak, and only grant `secrets:read` to workflows that need it.
+- The CI-side attestor only signs after `analyze` (the sandboxed reviewer job) returns 3 approvals. It refuses to sign on `CHANGES_REQUESTED`. Even if the LLM were compromised, the verdict gate runs in the report job which has no `ANTHROPIC_API_KEY` access — it only reads structured JSON.
+- The CI signing step is gated to same-repo PRs (`head.repo.full_name == github.repository`). Fork PRs cannot trigger CI signing because GITHUB_TOKEN can't push to a fork's head ref. Fork contributors get the friendly fallback comment from `verify-attestation.yml` and a maintainer can either approve manually or push the fork to a same-repo branch first.
+- The chore commit uses `[skip ci]` to avoid loops — without it, the new commit would re-trigger `ai-sdlc-review.yml` which would re-run the reviewers, re-approve, re-sign, ad infinitum.
+- Rebase / chore-commit allowlist still applies (AISDLC-85). The CI attestor signs against the actual PR head SHA, so the envelope's subject + diff bind to the dev's commits — the chore-commit-on-top is the CI's own attestation chore commit, which falls under the existing `.ai-sdlc/attestations/<sha>.dsse.json` allowlist pattern.
+
+### Operator workflow — external contributor PR (zero-key contributor)
+
+1. External contributor opens a PR from their fork (or pushes to a same-repo branch). They have no signing key.
+2. `verify-attestation.yml` reports `invalid (missing)` and posts the friendly fallback comment.
+3. `ai-sdlc-review.yml`'s analyze job runs the 3 reviewer agents. They all approve.
+4. `ai-sdlc-review.yml`'s report job's "CI-side attestor" step signs an envelope and pushes it to the PR branch.
+   - Same-repo branch: succeeds, branch gets the chore commit, next verify-attestation run reports `valid`.
+   - Fork PR: skipped (token can't push). Maintainer either approves manually OR pulls the fork into a same-repo branch.
+5. Maintainer (CODEOWNERS) reviews + approves the PR.
+6. Merge queue picks it up + merges. No local-key requirement for the contributor.
+
 ## Remote agents (`/schedule`) — read-only by design
 
 Anthropic CCR remote-agent runs (scheduled via the bundled `/schedule` skill, `Path: bundled:schedule`) execute on Anthropic infrastructure with a fresh, ephemeral filesystem and **no access to the operator's machine**. They MUST be treated as read-only.
