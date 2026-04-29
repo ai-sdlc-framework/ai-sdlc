@@ -5,8 +5,8 @@
  *  - The `npx -y` arg list now pins `@ai-sdlc/mcp-advisor@<version>` so
  *    fresh installs don't silently jump to whatever is published when
  *    the orchestrator binary itself was last updated. Each generated
- *    config carries an `_aiSdlcComment` documenting how to opt back
- *    into floating-tag behaviour.
+ *    config file carries a single top-level `_aiSdlcComment` documenting
+ *    how to opt back into floating-tag behaviour.
  *  - Cursor is no longer detected by binary-on-PATH alone; the user
  *    must either have a `.cursor/` directory present (real signal of
  *    use) or pass `--cursor` to opt in. This avoids writing
@@ -27,9 +27,9 @@ export interface DetectedAgent {
 
 /**
  * The opt-out comment we write alongside the pinned mcp-advisor entry.
- * Lives next to the entry under a leading-underscore key so JSON parsers
- * and MCP clients ignore it; humans editing by hand see exactly how to
- * re-enable floating-latest behaviour.
+ * Lives at the top level of the generated MCP config under a leading-
+ * underscore key so JSON parsers and MCP clients ignore it; humans
+ * editing by hand see exactly how to re-enable floating-latest behaviour.
  */
 const PIN_OPT_OUT_COMMENT =
   'Pinned to the orchestrator version that ran `ai-sdlc init`. ' +
@@ -48,7 +48,6 @@ function standardEntry(
   const entry: Record<string, unknown> = {
     command: 'npx',
     args: ['-y', pinnedSpec(version)],
-    _aiSdlcComment: PIN_OPT_OUT_COMMENT,
   };
   if (env) entry.env = env;
   return entry;
@@ -62,7 +61,6 @@ function vscodeEntry(
     type: 'stdio',
     command: 'npx',
     args: ['-y', pinnedSpec(version)],
-    _aiSdlcComment: PIN_OPT_OUT_COMMENT,
   };
   if (env) entry.env = env;
   return entry;
@@ -240,6 +238,13 @@ export function installMcpServer(
     if (!dryRun) {
       section['ai-sdlc'] = agent.serverEntry;
       existing[agent.configKey] = section;
+      // Top-level pin-comment: standard convention is a single
+      // `_aiSdlcComment` key at the root of the document, not inside each
+      // server entry. We add it on first write but never overwrite an
+      // existing top-level value (caller may have customised it).
+      if (!('_aiSdlcComment' in existing)) {
+        existing._aiSdlcComment = PIN_OPT_OUT_COMMENT;
+      }
       writeFileSync(fullPath, JSON.stringify(existing, null, 2) + '\n', 'utf-8');
     }
     return 'merged';
@@ -251,6 +256,7 @@ export function installMcpServer(
       mkdirSync(dir, { recursive: true });
     }
     const config = {
+      _aiSdlcComment: PIN_OPT_OUT_COMMENT,
       [agent.configKey]: {
         'ai-sdlc': agent.serverEntry,
       },

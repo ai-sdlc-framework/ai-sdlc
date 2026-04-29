@@ -93,9 +93,10 @@ describe('detectAgents', () => {
     expect(claude).toBeDefined();
     const args = (claude!.serverEntry as { args: string[] }).args;
     expect(args).toEqual(['-y', '@ai-sdlc/mcp-advisor@0.6.0']);
-    expect((claude!.serverEntry as { _aiSdlcComment?: string })._aiSdlcComment).toMatch(
-      /Pinned to the orchestrator/,
-    );
+    // The pin-opt-out comment is now written at the top level of the MCP
+    // config file (see installMcpServer tests below), not inside each
+    // server entry. So the entry itself must NOT carry the comment.
+    expect((claude!.serverEntry as { _aiSdlcComment?: string })._aiSdlcComment).toBeUndefined();
   });
 
   it('omits the pin when no version is supplied (back-compat)', () => {
@@ -249,5 +250,41 @@ describe('installMcpServer', () => {
       command: 'npx',
       args: ['-y', '@ai-sdlc/mcp-advisor'],
     });
+  });
+
+  it('writes the pin-opt-out comment at the top level when creating a new file', () => {
+    installMcpServer(tmpDir, claudeAgent, false);
+    const content = JSON.parse(readFileSync(join(tmpDir, '.mcp.json'), 'utf-8'));
+    expect(typeof content._aiSdlcComment).toBe('string');
+    expect(content._aiSdlcComment).toMatch(/Pinned to the orchestrator/);
+    // And the per-entry comment must NOT be present.
+    expect(content.mcpServers['ai-sdlc']._aiSdlcComment).toBeUndefined();
+  });
+
+  it('adds the top-level comment when merging into a file that lacks it', () => {
+    writeFileSync(
+      join(tmpDir, '.mcp.json'),
+      JSON.stringify({ mcpServers: { other: { command: 'x' } } }),
+      'utf-8',
+    );
+    installMcpServer(tmpDir, claudeAgent, false);
+    const content = JSON.parse(readFileSync(join(tmpDir, '.mcp.json'), 'utf-8'));
+    expect(content._aiSdlcComment).toMatch(/Pinned to the orchestrator/);
+    expect(content.mcpServers.other).toEqual({ command: 'x' });
+  });
+
+  it('preserves an existing top-level _aiSdlcComment instead of overwriting', () => {
+    const userCustomised = 'My custom note about why this is pinned.';
+    writeFileSync(
+      join(tmpDir, '.mcp.json'),
+      JSON.stringify({
+        _aiSdlcComment: userCustomised,
+        mcpServers: { other: { command: 'x' } },
+      }),
+      'utf-8',
+    );
+    installMcpServer(tmpDir, claudeAgent, false);
+    const content = JSON.parse(readFileSync(join(tmpDir, '.mcp.json'), 'utf-8'));
+    expect(content._aiSdlcComment).toBe(userCustomised);
   });
 });
