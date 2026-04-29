@@ -26,7 +26,11 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildGithubOutputLines,
+  collectAncestors,
+  findChoreCommitViolation,
+  loadAttestationsBySubject,
   parseTrustedReviewers,
+  resolveParentWalkDepth,
   runVerifier,
 } from './verify-attestation.mjs';
 
@@ -257,17 +261,23 @@ describe('runVerifier (integration)', () => {
     assert.match(out.reason, /missing/);
   });
 
-  it('returns invalid (diffHash mismatch) after a force-push changes the diff (AC #9)', () => {
+  it('returns invalid after a force-push changes the diff (AC #9 — replay protection)', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     writeTrustedReviewersYaml(fixture.root, publicKeyPem);
     writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem);
     // Simulate a force-push by amending the head commit with extra content.
+    // The amended head replaces the original — the original SHA is no longer
+    // an ancestor of the new head, so the parent-walking verifier (AISDLC-76)
+    // can't find a matching attestation by subject lookup.
     writeFileSync(join(fixture.root, 'feature.txt'), 'feature\nMORE CONTENT\n');
     git(['add', 'feature.txt'], fixture.root);
     git(['commit', '--amend', '-q', '--no-edit'], fixture.root);
     const newHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
-    // Move the envelope to the new head sha so the file-existence check passes —
-    // verifier should now reject on diffHash, not on missing file.
+    // Even if the attacker renames the envelope to <newHead>.dsse.json, the
+    // predicate's subject sha1 still points at the original commit, which is
+    // not an ancestor of the amended head — the parent-walk lookup misses
+    // and the verifier reports `missing`. This is the expected post-AISDLC-76
+    // shape for the "force-push changes the diff" replay attack.
     const oldEnvelope = readFileSync(
       join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`),
       'utf-8',
@@ -282,7 +292,7 @@ describe('runVerifier (integration)', () => {
       repoRoot: fixture.root,
     });
     assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /subject digest mismatch|diffHash mismatch/);
+    assert.match(out.reason, /missing|subject digest mismatch|diffHash mismatch/);
   });
 
   it('returns invalid (policyHash mismatch) after .ai-sdlc/review-policy.md edit (AC #10)', () => {
@@ -473,7 +483,12 @@ describe('runVerifier (injection regression)', () => {
         repoRoot: fixture.root,
       });
       assert.equal(out.status, 'invalid');
-      assert.match(out.reason, /schema validation failed: subject\.digest\.sha1/);
+      // Either the parent-walk subject-discovery layer rejects the
+      // malicious sha1 via its regex filter (AISDLC-76 — surfaces as
+      // "missing"), or the schema validator catches it after a hit.
+      // The critical security property is that the malicious value
+      // never reaches the reason string in either case.
+      assert.match(out.reason, /schema validation failed: subject\.digest\.sha1|missing/);
       // The injection must NOT appear in the reason string.
       assert.equal(out.reason.includes('status=valid'), false);
       assert.equal(out.reason.includes('\n'), false);
@@ -489,6 +504,345 @@ describe('runVerifier (injection regression)', () => {
       const statuses = outsideHeredoc.filter((l) => /^status=/.test(l));
       assert.equal(statuses.length, 1);
       assert.equal(statuses[0], 'status=invalid');
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─── AISDLC-76: parent-walk + chore-commit allowlist ─────────────
+//
+// `/ai-sdlc execute` Step 10 sequence: dev commit (signed subject) → chore
+// commit (file move + .dsse.json file). PR head = chore commit. Pre-AISDLC-76
+// the verifier looked for `<head-sha>.dsse.json` strictly and failed on every
+// real run. The new verifier walks the first N first-parent ancestors and
+// matches the envelope by `subject.digest.sha1`. The diff hash check then
+// uses the dev commit's own diff (not the full PR diff), and any commits
+// between subject and head are restricted to a small chore-commit allowlist.
+
+describe('resolveParentWalkDepth', () => {
+  it('uses default when env value is missing or empty', () => {
+    assert.equal(resolveParentWalkDepth(undefined), 2);
+    assert.equal(resolveParentWalkDepth(null), 2);
+    assert.equal(resolveParentWalkDepth(''), 2);
+  });
+  it('parses a valid integer in range', () => {
+    assert.equal(resolveParentWalkDepth('0'), 0);
+    assert.equal(resolveParentWalkDepth('5'), 5);
+    assert.equal(resolveParentWalkDepth('8'), 8);
+  });
+  it('falls back to default for malformed or out-of-range values', () => {
+    assert.equal(resolveParentWalkDepth('abc'), 2);
+    assert.equal(resolveParentWalkDepth('-1'), 2);
+    assert.equal(resolveParentWalkDepth('9'), 2);
+    assert.equal(resolveParentWalkDepth('1.5'), 1); // parseInt strips fraction
+  });
+  it('honors a custom fallback', () => {
+    assert.equal(resolveParentWalkDepth(undefined, 4), 4);
+    assert.equal(resolveParentWalkDepth('not-a-number', 4), 4);
+  });
+});
+
+// Build a fixture that mirrors the real `/ai-sdlc execute` Step 10 PR shape:
+// baseline (with trusted-reviewers.yaml already committed) → dev commit (signed
+// subject) → chore commit (mark task Done + add attestation file). PR head =
+// chore commit. The trusted-reviewers.yaml MUST be committed in baseline so it
+// doesn't end up in the chore-commit diff.
+function setupChoreCommitFixture(publicKeyPem) {
+  const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-chore-'));
+  git(['init', '-q', '-b', 'main'], root);
+  git(['config', 'user.email', 'test@test.com'], root);
+  git(['config', 'user.name', 'test'], root);
+  git(['config', 'commit.gpgsign', 'false'], root);
+  mkdirSync(join(root, '.ai-sdlc', 'attestations'), { recursive: true });
+  mkdirSync(join(root, 'ai-sdlc-plugin', 'agents'), { recursive: true });
+  mkdirSync(join(root, 'backlog', 'tasks'), { recursive: true });
+  mkdirSync(join(root, 'backlog', 'completed'), { recursive: true });
+  writeFileSync(join(root, '.ai-sdlc', 'review-policy.md'), REVIEW_POLICY);
+  for (const [name, content] of Object.entries(AGENT_FILES)) {
+    writeFileSync(join(root, 'ai-sdlc-plugin', 'agents', `${name}.md`), content);
+  }
+  writeTrustedReviewersYaml(root, publicKeyPem);
+  // Baseline (PR base).
+  writeFileSync(join(root, 'baseline.txt'), 'baseline\n');
+  writeFileSync(join(root, 'backlog', 'tasks', 'aisdlc-99 - example.md'), 'open\n');
+  git(['add', '.'], root);
+  git(['commit', '-q', '-m', 'baseline'], root);
+  const baseSha = git(['rev-parse', 'HEAD'], root).trim();
+  // Dev commit — the signed subject.
+  writeFileSync(join(root, 'feature.txt'), 'feature\n');
+  git(['add', 'feature.txt'], root);
+  git(['commit', '-q', '-m', 'feat: add feature'], root);
+  const devSha = git(['rev-parse', 'HEAD'], root).trim();
+  return { root, baseSha, devSha };
+}
+
+// Stage the typical Step-10 chore commit on top of the dev commit + write the
+// attestation file. Returns the chore commit SHA (= PR head) plus a function
+// to inject extra changes into the chore commit before the commit itself
+// happens — used by the negative test to slip a `.ts` file into the chore.
+function makeChoreCommit(root, devSha, baseSha, privateKeyPem, extraFiles = {}) {
+  // Step 10's task_complete: rename the task file from tasks/ → completed/.
+  const tasksFile = join(root, 'backlog', 'tasks', 'aisdlc-99 - example.md');
+  const completedFile = join(root, 'backlog', 'completed', 'aisdlc-99 - example.md');
+  writeFileSync(completedFile, readFileSync(tasksFile, 'utf-8') + 'done\n');
+  // Remove the old file via git rm so the chore commit's diff includes both
+  // the deletion and the addition.
+  git(['rm', '-q', join('backlog', 'tasks', 'aisdlc-99 - example.md')], root);
+  // Sign the attestation against the DEV commit's SHA (this is what
+  // `ai-sdlc-plugin/scripts/sign-attestation.mjs` does in production).
+  writeAttestation(root, devSha, baseSha, privateKeyPem);
+  // Add anything the test wants to smuggle into the chore commit.
+  for (const [relPath, content] of Object.entries(extraFiles)) {
+    const full = join(root, relPath);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(full, content);
+  }
+  git(['add', '-A'], root);
+  git(['commit', '-q', '-m', 'chore: mark AISDLC-99 complete'], root);
+  return git(['rev-parse', 'HEAD'], root).trim();
+}
+
+describe('runVerifier (AISDLC-76 parent-walk + chore allowlist)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    keys = generateSigningKeyPair();
+    fixture = setupChoreCommitFixture(keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('AC #5: accepts the dev+chore PR shape via first-parent ancestor walk', () => {
+    const choreSha = makeChoreCommit(
+      fixture.root,
+      fixture.devSha,
+      fixture.baseSha,
+      keys.privateKeyPem,
+    );
+    const out = runVerifier({
+      headSha: choreSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid, got: ${out.reason}`);
+    assert.equal(out.reason, 'ok');
+  });
+
+  it('AC #6: rejects with `chore commit out of scope` when chore touches a `.ts` file', () => {
+    const choreSha = makeChoreCommit(
+      fixture.root,
+      fixture.devSha,
+      fixture.baseSha,
+      keys.privateKeyPem,
+      { 'src/sneaky.ts': 'export const sneaky = true;\n' },
+    );
+    const out = runVerifier({
+      headSha: choreSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /chore commit out of scope/);
+    assert.match(out.reason, /src\/sneaky\.ts/);
+  });
+
+  it('rejects when chore touches an arbitrary docs file outside the allowlist', () => {
+    const choreSha = makeChoreCommit(
+      fixture.root,
+      fixture.devSha,
+      fixture.baseSha,
+      keys.privateKeyPem,
+      { 'docs/release-notes.md': 'unreviewed release notes\n' },
+    );
+    const out = runVerifier({
+      headSha: choreSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /chore commit out of scope/);
+    assert.match(out.reason, /docs\/release-notes\.md/);
+  });
+
+  it('rejects when no envelope subject matches any candidate ancestor (AC #1 negative)', () => {
+    // Build the chore commit + envelope as usual…
+    const choreSha = makeChoreCommit(
+      fixture.root,
+      fixture.devSha,
+      fixture.baseSha,
+      keys.privateKeyPem,
+    );
+    // …but verify with parentWalkDepth=0 so only the head is eligible.
+    // The envelope's subject = devSha (parent of head) → no match → missing.
+    const out = runVerifier({
+      headSha: choreSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+      parentWalkDepth: 0,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /missing/);
+  });
+
+  it('AC #3: rejects ambiguously when two attestations match different ancestors', () => {
+    // First chore commit + attestation for the dev commit.
+    const choreSha = makeChoreCommit(
+      fixture.root,
+      fixture.devSha,
+      fixture.baseSha,
+      keys.privateKeyPem,
+    );
+    // Now plant a SECOND attestation whose subject = the chore commit itself.
+    // Both `devSha` and `choreSha` are ancestors of the head (= choreSha here),
+    // so the parent walk sees two matches and must fail-closed.
+    writeAttestation(fixture.root, choreSha, fixture.baseSha, keys.privateKeyPem);
+    const out = runVerifier({
+      headSha: choreSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /ambiguous/);
+  });
+
+  it('rejects with diffHash mismatch when attested dev diff was tampered post-sign', () => {
+    // Sign + chore commit, then mutate the envelope's diffHash. The verifier
+    // matches via parent walk, recomputes the dev-commit own diff, and the
+    // hash check fails — this exercises AC #2 (diff is computed from the
+    // dev commit's parent..dev range, not the full PR diff).
+    const choreSha = makeChoreCommit(
+      fixture.root,
+      fixture.devSha,
+      fixture.baseSha,
+      keys.privateKeyPem,
+    );
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.devSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    predicate.diffHash = 'b'.repeat(64); // valid shape, wrong value
+    envelope.payload = Buffer.from(JSON.stringify(predicate), 'utf-8').toString('base64');
+    writeFileSync(envPath, JSON.stringify(envelope, null, 2));
+    const out = runVerifier({
+      headSha: choreSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    // diffHash fails first if signature still verifies, otherwise signature.
+    // Either way the reason references one of the bound checks.
+    assert.match(out.reason, /diffHash mismatch|signature did not match/);
+  });
+});
+
+describe('collectAncestors', () => {
+  it('returns head + N first-parent ancestors in head-first order', () => {
+    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
+    try {
+      // baseline + dev commit, no chore yet — ancestors of devSha at depth 2:
+      // [devSha, baseSha].
+      const ancestors = collectAncestors(fixture.devSha, 2, fixture.root);
+      assert.equal(ancestors[0], fixture.devSha.toLowerCase());
+      assert.equal(ancestors[1], fixture.baseSha.toLowerCase());
+      assert.ok(ancestors.length <= 3);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+  it('returns just the head when depth=0', () => {
+    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
+    try {
+      const ancestors = collectAncestors(fixture.devSha, 0, fixture.root);
+      assert.equal(ancestors.length, 1);
+      assert.equal(ancestors[0], fixture.devSha.toLowerCase());
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('loadAttestationsBySubject', () => {
+  it('returns an empty map when the attestations dir is missing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-load-'));
+    try {
+      const out = loadAttestationsBySubject(root);
+      assert.equal(out.size, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('skips files that are not valid envelopes / not 40-hex sha1 subjects', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-load-'));
+    try {
+      mkdirSync(join(root, '.ai-sdlc', 'attestations'), { recursive: true });
+      // Not JSON.
+      writeFileSync(join(root, '.ai-sdlc', 'attestations', 'junk.dsse.json'), 'not json');
+      // JSON but missing payload.
+      writeFileSync(
+        join(root, '.ai-sdlc', 'attestations', 'noPayload.dsse.json'),
+        JSON.stringify({}),
+      );
+      // Valid JSON envelope but subject sha1 has bad shape.
+      const bad = {
+        payloadType: 'application/vnd.ai-sdlc.attestation+json',
+        payload: Buffer.from(
+          JSON.stringify({ subject: { digest: { sha1: 'NOTHEX' } } }),
+          'utf-8',
+        ).toString('base64'),
+        signatures: [],
+      };
+      writeFileSync(
+        join(root, '.ai-sdlc', 'attestations', 'badShape.dsse.json'),
+        JSON.stringify(bad),
+      );
+      const out = loadAttestationsBySubject(root);
+      assert.equal(out.size, 0);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('findChoreCommitViolation', () => {
+  it('returns null when subject===head (no chore commits)', () => {
+    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
+    try {
+      const v = findChoreCommitViolation(fixture.devSha, fixture.devSha, fixture.root);
+      assert.equal(v, null);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+  it('returns null when chore only touches allowlisted paths', () => {
+    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
+    try {
+      const choreSha = makeChoreCommit(
+        fixture.root,
+        fixture.devSha,
+        fixture.baseSha,
+        generateSigningKeyPair().privateKeyPem,
+      );
+      const v = findChoreCommitViolation(fixture.devSha, choreSha, fixture.root);
+      assert.equal(v, null);
+    } finally {
+      rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+  it('returns the offending path when chore touches anything else', () => {
+    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
+    try {
+      const choreSha = makeChoreCommit(
+        fixture.root,
+        fixture.devSha,
+        fixture.baseSha,
+        generateSigningKeyPair().privateKeyPem,
+        { 'README.md': 'README change snuck into chore\n' },
+      );
+      const v = findChoreCommitViolation(fixture.devSha, choreSha, fixture.root);
+      assert.equal(v, 'README.md');
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
