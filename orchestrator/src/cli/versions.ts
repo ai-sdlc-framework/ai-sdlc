@@ -101,9 +101,11 @@ export interface ResolveVersionsOptions {
 export function resolveVersions(opts: ResolveVersionsOptions = {}): VersionTriple {
   const orchPath = opts.orchestratorPackageJsonPath ?? findOrchestratorPackageJson();
   const orchestrator = readPackageVersion(orchPath) ?? FALLBACK_VERSION;
-  // The CLI ships from the same package.json today, so cli === orchestrator.
-  // We keep them logically separate so a future split (e.g. a thinner
-  // CLI veneer) can report distinct numbers without changing callers.
+  // The CLI ships from the same package.json today, so cli === orchestrator
+  // by construction. Drift detection between cli/orchestrator is therefore
+  // a no-op until the CLI is split out (planned: a thinner veneer that
+  // versions independently of the runtime). We keep them logically
+  // separate so callers and tests don't have to change shape on that day.
   const cli = orchestrator;
   const plugin = opts.pluginVersionOverride ?? findPluginVersion(opts.workDir ?? process.cwd());
 
@@ -117,6 +119,14 @@ export function resolveVersions(opts: ResolveVersionsOptions = {}): VersionTripl
  * Render the canonical 3-line version block. Always emits a
  * trailing newline. When drift is detected, appends a warning line
  * pointing at the upgrade hint.
+ *
+ * The CLI and orchestrator rows are rendered separately even though
+ * today they always show the same number — both ship from the same
+ * `@ai-sdlc/orchestrator` package.json. The shape is intentionally
+ * future-proofed: when the CLI is split into a thinner veneer with
+ * its own version it will start to differ from the orchestrator
+ * runtime, and operators are then trained to read both rows. Until
+ * then a duplicate value is the honest answer.
  */
 export function formatVersionBlock(versions: VersionTriple): string {
   const lines = [
