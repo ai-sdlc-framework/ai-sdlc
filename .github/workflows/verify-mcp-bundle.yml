@@ -1,0 +1,36 @@
+name: Verify MCP Bundle
+
+# AISDLC-75: the ai-sdlc-plugin manifest loads `mcp-server/dist/bin.js` at
+# runtime. Marketplace clones do NOT run `pnpm install`, so the committed
+# bundle MUST exist, be valid ESM, run with no node_modules, and stay fresh.
+# `scripts/verify-bundle.mjs` checks all four. Without this gate, a stale
+# bundle silently breaks every governance hook + MCP tool in cached installs.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'ai-sdlc-plugin/**'
+      - '.github/workflows/verify-mcp-bundle.yml'
+
+concurrency:
+  group: verify-mcp-bundle-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify-bundle:
+    name: Verify dist/bin.js
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Install (workspace)
+        run: pnpm install --frozen-lockfile
+      - name: Verify committed bundle (presence, ESM, self-contained, fresh)
+        run: pnpm --filter @ai-sdlc/plugin-mcp-server verify-bundle
