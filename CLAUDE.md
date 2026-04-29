@@ -78,6 +78,32 @@ All rejections are by design (threat model). Re-run `/ai-sdlc execute` against t
 
 - Rebase, amend, or force-push that doesn't change reviewed content → still valid (filename SHA is informational only; matching is by predicate content). This was the day-one breakage AISDLC-84 fixed: every PR-merge cycle ate a duplicate review run because rebasing PR-N onto main rewrote the SHA on disk and the verifier couldn't find a match. The verifier now accepts as long as `diffHash + policyHash + agentFileHashes + pluginVersion + schemaVersion` all still resolve to the current PR state.
 
+## Remote agents (`/schedule`) — read-only by design
+
+Anthropic CCR remote-agent runs (scheduled via the bundled `/schedule` skill, `Path: bundled:schedule`) execute on Anthropic infrastructure with a fresh, ephemeral filesystem and **no access to the operator's machine**. They MUST be treated as read-only.
+
+**Empirical justification.** Four consecutive `/ai-sdlc execute` runs scheduled via `/schedule` failed identically (overnight: AISDLC-78 / -79 / -80; morning: AISDLC-85). Root cause is structural, not flaky: the remote sandbox has no signing key, doesn't auto-install the `ai-sdlc-plugin/`, and can't register the plugin's subagents — so Step 1 (worktree bootstrap) and Steps 5-10 (developer + reviewers + DSSE attestation) of the execute pipeline cannot run. The medium-term fix is **AISDLC-87 (CI-side attestor)**, which moves attestation signing into a trusted CI workflow and unblocks remote-agent `/ai-sdlc execute` runs. Until AISDLC-87 ships, the policy below is hard.
+
+### Acceptable remote-agent task patterns (read-only)
+
+- **PR status surveys** — `gh pr list`, `gh pr view`, summarising open reviews, flagging stale PRs.
+- **Backlog state reports** — `mcp__backlog__task_list`, surfacing `In Progress` / blocked / overdue tasks.
+- **Cron-triggered metric digests** — review-throughput counts, attestation valid/invalid ratios, dogfood-loop health.
+- **Slack workflows** — morning check-ins, end-of-day summaries, on-call digests posted to a visibility channel.
+- **CI / workflow status surveys** — `gh run list`, recent failures, flake detection across the last N runs.
+
+All of the above only need `gh` / MCP read tools and the network — no signing key, no plugin, no worktree.
+
+### Explicitly prohibited remote-agent patterns
+
+- **`/ai-sdlc execute <task-id>`** — will fail at Step 1 (no plugin loaded) or Step 9 (no signing key).
+- **Any signing-key-dependent flow** — `/ai-sdlc init-signing-key`, signing fresh DSSE attestations, anything that touches `~/.ai-sdlc/signing-key.pem`.
+- **Any plugin-subagent-dependent flow** — `developer`, `code-reviewer`, `test-reviewer`, `security-reviewer`, `execute-orchestrator` subagents are not registered in the remote sandbox.
+- **Any flow that opens a worktree** — `/ai-sdlc execute`, `/ai-sdlc cleanup`, anything touching `.worktrees/`.
+- **Any cross-repo write flow** — sibling-repo PRs (`permittedExternalPaths`) require local checkouts of those repos.
+
+If a `/schedule`-triggered task needs to do real code work, the correct pattern today is: have the remote agent *file a backlog task or GitHub issue describing the work*, then a human (or local Claude Code session) picks it up and runs `/ai-sdlc execute` against it.
+
 ## Backlog Workflow
 
 Backlog tasks live in `backlog/tasks/` (Backlog.md) and are managed via the `mcp__backlog__*` MCP tools. Every issue executed under the AI-SDLC pipeline MUST be tracked here.
