@@ -33,9 +33,12 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildGithubOutputLines,
+  findChoreCommitViolations,
   loadAllAttestations,
   parseTrustedReviewers,
   predicateMatchReason,
+  resolveAncestorDepth,
+  resolveSubjectShaForEnvelope,
   runVerifier,
 } from './verify-attestation.mjs';
 
@@ -594,6 +597,386 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
   });
 });
 
+// ─── AISDLC-85 — chore-commit-on-top fix ────────────────────────────
+//
+// The standard `/ai-sdlc execute` shape signs at the dev commit's HEAD
+// THEN adds a chore commit (file move + attestation file) on top. AISDLC-84
+// computed diffHash from PR HEAD's diff, which included the chore commit,
+// so the attestation never verified. AISDLC-85 recomputes diffHash from
+// each envelope's `subject.digest.sha1` (the dev commit's SHA at sign time)
+// and gates on a chore-commit allowlist to prevent malicious chore commits.
+
+describe('runVerifier (AISDLC-85 — chore-commit-on-top)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  /**
+   * Helper: simulate the exact `/ai-sdlc execute` Step 10 sequence.
+   * 1. Sign attestation against the current HEAD (= dev commit).
+   * 2. Layer a chore commit on top that adds the attestation file +
+   *    optionally moves a backlog task file from tasks/ to completed/.
+   * 3. Optionally inject extra files into the chore commit (for the
+   *    malicious-chore-commit AC #5 case).
+   *
+   * Returns the SHAs at each step.
+   */
+  function simulateExecuteStep10({ extraChoreFiles = {}, includeTaskMove = true } = {}) {
+    // Pre-populate a backlog task file BEFORE the dev commit so the
+    // chore commit can move it. The task file is part of the BASE,
+    // matching the shape of a real run.
+    if (includeTaskMove) {
+      mkdirSync(join(fixture.root, 'backlog', 'tasks'), { recursive: true });
+      writeFileSync(
+        join(fixture.root, 'backlog', 'tasks', 'aisdlc-99-task.md'),
+        '# task body\nstatus: To Do\n',
+      );
+      git(['add', 'backlog/tasks/aisdlc-99-task.md'], fixture.root);
+      git(['commit', '-q', '-m', 'add task file'], fixture.root);
+    }
+    // Re-grab base + head AFTER any prep commits, so the dev commit
+    // diffs against the post-prep state. The verifier's PR_BASE_SHA is
+    // origin/main's tip; in this test it's whatever HEAD was before
+    // the dev commit landed.
+    const baseSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    // Dev commit — substantive change (the reviewed work).
+    writeFileSync(join(fixture.root, 'src-feature.txt'), 'reviewed feature\n');
+    git(['add', 'src-feature.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: reviewed feature'], fixture.root);
+    const devSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    // Sign attestation against devSha. Match the real signer: the
+    // diff range is `<base>...<devSha>` (NOT `<base>...<HEAD-after-chore>`).
+    writeAttestation(fixture.root, devSha, baseSha, devSha, keys.privateKeyPem);
+    // Chore commit on top: add attestation file + optionally move task.
+    // `git mv` requires the destination directory to exist already, so
+    // mkdirSync first.
+    if (includeTaskMove) {
+      mkdirSync(join(fixture.root, 'backlog', 'completed'), { recursive: true });
+      git(
+        ['mv', 'backlog/tasks/aisdlc-99-task.md', 'backlog/completed/aisdlc-99-task.md'],
+        fixture.root,
+      );
+      // Touch the moved file so the chore commit also "edits" it (mirrors
+      // the real `task_edit Done → task_complete` sequence which writes
+      // the new status into the file).
+      writeFileSync(
+        join(fixture.root, 'backlog', 'completed', 'aisdlc-99-task.md'),
+        '# task body\nstatus: Done\n',
+      );
+    }
+    // Stage the attestation file (it was written to disk by writeAttestation
+    // but git doesn't know about it yet).
+    git(['add', '.ai-sdlc/attestations'], fixture.root);
+    // Stage extra files (used by AC #5 to smuggle a .ts file into chore).
+    for (const [path, content] of Object.entries(extraChoreFiles)) {
+      mkdirSync(join(fixture.root, dirname(path)), { recursive: true });
+      writeFileSync(join(fixture.root, path), content);
+      git(['add', path], fixture.root);
+    }
+    git(['commit', '-q', '-m', 'chore: attest + complete task'], fixture.root);
+    const headSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    return { baseSha, devSha, headSha };
+  }
+
+  it('AC #3: accepts the standard dev-commit + chore-commit shape from /ai-sdlc execute', () => {
+    const { baseSha, devSha, headSha } = simulateExecuteStep10();
+    assert.notEqual(devSha, headSha, 'chore commit must add a real new SHA on top');
+    const out = runVerifier({ headSha, baseSha, repoRoot: fixture.root });
+    assert.equal(
+      out.status,
+      'valid',
+      `expected valid for dev+chore shape, got ${out.status}: ${out.reason}`,
+    );
+    assert.equal(out.reason, 'ok');
+  });
+
+  it('AC #4: accepts after a rebase rewrites the dev commit SHA — falls back to ancestor walk', () => {
+    // First land a normal dev+chore PR.
+    const { baseSha, devSha, headSha } = simulateExecuteStep10();
+    assert.notEqual(devSha, headSha);
+    // Now simulate a post-sign rebase: rewrite BOTH the dev commit and the
+    // chore commit with new committer dates → new SHAs all the way down.
+    // The envelope's `subject.digest.sha1` (== devSha) is now orphaned —
+    // it's no longer reachable from PR HEAD. The verifier must fall back
+    // to walking PR HEAD's first-parent ancestors and recomputing diff
+    // hashes per ancestor.
+    const devTree = git(['rev-parse', `${devSha}^{tree}`], fixture.root).trim();
+    const devMessage = git(['log', '-1', '--pretty=%B', devSha], fixture.root).trim();
+    const choreTree = git(['rev-parse', `${headSha}^{tree}`], fixture.root).trim();
+    const choreMessage = git(['log', '-1', '--pretty=%B', headSha], fixture.root).trim();
+    const env = {
+      ...cleanEnv(),
+      GIT_COMMITTER_DATE: '2030-06-15T00:00:00Z',
+      GIT_AUTHOR_DATE: '2030-06-15T00:00:00Z',
+    };
+    const newDevSha = execFileSync(
+      'git',
+      ['commit-tree', devTree, '-p', baseSha, '-m', devMessage],
+      { cwd: fixture.root, env, encoding: 'utf-8' },
+    ).trim();
+    const newHeadSha = execFileSync(
+      'git',
+      ['commit-tree', choreTree, '-p', newDevSha, '-m', choreMessage],
+      { cwd: fixture.root, env, encoding: 'utf-8' },
+    ).trim();
+    git(['update-ref', 'HEAD', newHeadSha], fixture.root);
+    assert.notEqual(newDevSha, devSha, 'rebase must produce new dev SHA');
+    assert.notEqual(newHeadSha, headSha, 'rebase must produce new head SHA');
+    // Sanity-check: the OLD devSha is no longer reachable from new HEAD.
+    let oldStillReachable = true;
+    try {
+      execFileSync('git', ['merge-base', '--is-ancestor', devSha, newHeadSha], {
+        cwd: fixture.root,
+        env: cleanEnv(),
+      });
+    } catch {
+      oldStillReachable = false;
+    }
+    assert.equal(oldStillReachable, false, 'rebase should orphan the old dev SHA');
+
+    const out = runVerifier({ headSha: newHeadSha, baseSha, repoRoot: fixture.root });
+    assert.equal(
+      out.status,
+      'valid',
+      `expected valid after rebase via ancestor walk, got ${out.status}: ${out.reason}`,
+    );
+    assert.equal(out.reason, 'ok');
+  });
+
+  it('AC #5 (security): rejects when the chore commit modifies code outside the allowlist', () => {
+    // The malicious case: an attacker who controls a chore commit could
+    // add a `.ts` file. The dev commit's attestation only covers the dev
+    // commit's diff; if we accept this, the .ts file ships unreviewed.
+    // Verifier MUST reject with `unexpected chore commit content`.
+    const { baseSha, headSha } = simulateExecuteStep10({
+      extraChoreFiles: {
+        'src/malicious.ts': '// attacker-supplied code, never reviewed\nexport const evil = 1;\n',
+      },
+    });
+    const out = runVerifier({ headSha, baseSha, repoRoot: fixture.root });
+    assert.equal(out.status, 'invalid', `expected invalid, got ${out.status}: ${out.reason}`);
+    assert.match(out.reason, /unexpected chore commit content/);
+    assert.match(out.reason, /src\/malicious\.ts/);
+  });
+
+  it('AC #5 (security): rejects when the chore commit modifies a top-level file', () => {
+    // Defense in depth: even a single non-allowlisted file (no `src/`
+    // prefix) should be rejected. We use a top-level config file.
+    const { baseSha, headSha } = simulateExecuteStep10({
+      extraChoreFiles: {
+        'package.json': '{"name": "smuggled"}\n',
+      },
+    });
+    const out = runVerifier({ headSha, baseSha, repoRoot: fixture.root });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /unexpected chore commit content/);
+    assert.match(out.reason, /package\.json/);
+  });
+
+  it('accepts when chore commit ONLY moves the backlog task file (no extras)', () => {
+    // Same as AC #3 but verify the explicit allowlist branch — the chore
+    // commit's diff has both a `.dsse.json` add and `.md` add+delete. We
+    // already covered this in AC #3 but make the assertion explicit so a
+    // future regression that only tightens one allowlist pattern fails
+    // visibly here.
+    const { baseSha, headSha, devSha } = simulateExecuteStep10();
+    const violations = findChoreCommitViolations({
+      subjectSha: devSha,
+      headSha,
+      repoRoot: fixture.root,
+    });
+    assert.deepEqual(
+      violations,
+      [],
+      `chore commit should be allowlist-clean, got ${JSON.stringify(violations)}`,
+    );
+    const out = runVerifier({ headSha, baseSha, repoRoot: fixture.root });
+    assert.equal(out.status, 'valid', out.reason);
+  });
+
+  it('rejects when chore commit modifies the policy file (which lives outside the allowlist)', () => {
+    // Edge case: the chore commit modifies `.ai-sdlc/review-policy.md`.
+    // That's NOT in the chore allowlist (only `.ai-sdlc/attestations/*`
+    // is). It would also fail the policyHash check, but we want the
+    // chore-commit gate to fire FIRST so the operator sees the right
+    // diagnostic.
+    const { baseSha, headSha } = simulateExecuteStep10({
+      extraChoreFiles: {
+        '.ai-sdlc/review-policy.md':
+          '# review policy v1\nGolden rule: when in doubt, approve.\n## ATTACKER ADDED\n',
+      },
+    });
+    const out = runVerifier({ headSha, baseSha, repoRoot: fixture.root });
+    assert.equal(out.status, 'invalid');
+    // Either the chore-allowlist OR policyHash mismatch is acceptable —
+    // both correctly reject the malicious change. We assert one of them.
+    assert.match(
+      out.reason,
+      /(unexpected chore commit content.*review-policy\.md|policyHash mismatch)/,
+    );
+  });
+});
+
+// ─── AISDLC-85 — unit tests for the new helpers ──────────────────────
+
+describe('resolveAncestorDepth (AISDLC-85)', () => {
+  it('returns the default (5) for missing/empty values', () => {
+    assert.equal(resolveAncestorDepth(undefined), 5);
+    assert.equal(resolveAncestorDepth(null), 5);
+    assert.equal(resolveAncestorDepth(''), 5);
+  });
+
+  it('returns the parsed value when valid', () => {
+    assert.equal(resolveAncestorDepth('1'), 1);
+    assert.equal(resolveAncestorDepth('10'), 10);
+  });
+
+  it('clamps to the hard cap (32)', () => {
+    assert.equal(resolveAncestorDepth('1000'), 32);
+    assert.equal(resolveAncestorDepth('33'), 32);
+  });
+
+  it('falls back to the default for invalid input', () => {
+    assert.equal(resolveAncestorDepth('not-a-number'), 5);
+    assert.equal(resolveAncestorDepth('-1'), 5);
+    assert.equal(resolveAncestorDepth('0'), 5);
+    assert.equal(resolveAncestorDepth('1.5'), 5);
+  });
+});
+
+describe('findChoreCommitViolations (AISDLC-85)', () => {
+  it('returns [] when subject == head (no chore commit)', () => {
+    const calls = [];
+    const fakeGit = (args) => {
+      calls.push(args);
+      return '';
+    };
+    const v = findChoreCommitViolations({
+      subjectSha: 'a'.repeat(40),
+      headSha: 'a'.repeat(40),
+      repoRoot: '/tmp/fake',
+      gitFn: fakeGit,
+    });
+    assert.deepEqual(v, []);
+    assert.equal(calls.length, 0, 'should not invoke git when shas are equal');
+  });
+
+  it('returns [] when chore commit only touches allowlisted paths', () => {
+    const fakeGit = () =>
+      [
+        '.ai-sdlc/attestations/abc.dsse.json',
+        'backlog/tasks/aisdlc-99-task.md',
+        'backlog/completed/aisdlc-99-task.md',
+      ].join('\n') + '\n';
+    const v = findChoreCommitViolations({
+      subjectSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      repoRoot: '/tmp/fake',
+      gitFn: fakeGit,
+    });
+    assert.deepEqual(v, []);
+  });
+
+  it('flags anything outside the allowlist (single .ts file)', () => {
+    const fakeGit = () => ['.ai-sdlc/attestations/abc.dsse.json', 'src/malicious.ts'].join('\n');
+    const v = findChoreCommitViolations({
+      subjectSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      repoRoot: '/tmp/fake',
+      gitFn: fakeGit,
+    });
+    assert.deepEqual(v, ['src/malicious.ts']);
+  });
+
+  it('flags allowed-prefix-but-wrong-extension files (e.g. attestations/foo.txt)', () => {
+    const fakeGit = () => '.ai-sdlc/attestations/foo.txt';
+    const v = findChoreCommitViolations({
+      subjectSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      repoRoot: '/tmp/fake',
+      gitFn: fakeGit,
+    });
+    assert.deepEqual(v, ['.ai-sdlc/attestations/foo.txt']);
+  });
+
+  it('flags backlog files outside tasks/ and completed/ subdirs', () => {
+    const fakeGit = () => 'backlog/drafts/foo.md\nbacklog/foo.md';
+    const v = findChoreCommitViolations({
+      subjectSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      repoRoot: '/tmp/fake',
+      gitFn: fakeGit,
+    });
+    assert.deepEqual(v, ['backlog/drafts/foo.md', 'backlog/foo.md']);
+  });
+
+  it('does not allow nested attestation paths (anchored to single segment)', () => {
+    // `.ai-sdlc/attestations/sub/foo.dsse.json` should NOT pass the regex
+    // (the `[^/]+` stops at directory separators). Defense against an
+    // attacker creating `.ai-sdlc/attestations/payload/index.html`.
+    const fakeGit = () => '.ai-sdlc/attestations/sub/foo.dsse.json';
+    const v = findChoreCommitViolations({
+      subjectSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      repoRoot: '/tmp/fake',
+      gitFn: fakeGit,
+    });
+    assert.deepEqual(v, ['.ai-sdlc/attestations/sub/foo.dsse.json']);
+  });
+});
+
+describe('resolveSubjectShaForEnvelope (AISDLC-85)', () => {
+  it('returns null when predicate.diffHash is missing', () => {
+    const r = resolveSubjectShaForEnvelope({
+      envelope: { payload: 'x' },
+      predicate: {},
+      baseSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      repoRoot: '/tmp/fake',
+      depth: 5,
+      gitFn: () => '',
+    });
+    assert.equal(r, null);
+  });
+
+  it('returns null when no ancestor diff matches', () => {
+    // Stub git: merge-base says not-an-ancestor; rev-list returns one
+    // commit; diff returns empty content (sha256 won't match the
+    // 'wrongdiffhash...' value).
+    const fakeGit = (args) => {
+      if (args[0] === 'merge-base') {
+        const err = new Error('not an ancestor');
+        err.status = 1;
+        throw err;
+      }
+      if (args[0] === 'rev-list') return 'b'.repeat(40) + '\n';
+      if (args[0] === 'diff') return 'something different';
+      return '';
+    };
+    const r = resolveSubjectShaForEnvelope({
+      envelope: { payload: 'x' },
+      predicate: {
+        diffHash: '0'.repeat(64),
+        subject: { digest: { sha1: 'c'.repeat(40) } },
+      },
+      baseSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      repoRoot: '/tmp/fake',
+      depth: 5,
+      gitFn: fakeGit,
+    });
+    assert.equal(r, null);
+  });
+});
 describe('predicateMatchReason', () => {
   function baseExpected() {
     return {
