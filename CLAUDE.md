@@ -58,7 +58,7 @@ If `/ai-sdlc execute` errors with `signing-key not found`, run step 1 + open the
 
 ### CI behavior
 
-- `verify-attestation.yml` runs on `pull_request`. It verifies the envelope at `.ai-sdlc/attestations/<head-sha>.dsse.json` against current PR state (commit SHA, diff hash, policy hash, agent file hashes, schema version) and sets the `ai-sdlc/attestation` commit status to `valid` or `invalid (<reason>)`.
+- `verify-attestation.yml` runs on `pull_request`. It scans every `.ai-sdlc/attestations/*.dsse.json` on the PR branch and matches by recomputing the predicate's content bindings (diff hash, policy hash, agent file hashes, plugin version, schema version) against current PR state — so the verifier is rebase-stable (AISDLC-84). It sets the `ai-sdlc/attestation` commit status to `valid` or `invalid (<reason>)`.
 - `ai-sdlc-review.yml` Post Review Results checks that status. When `valid`, it short-circuits cleanly with a notice. Otherwise, it runs the duplicate review normally.
 - When the attestation is missing or invalid, `verify-attestation.yml` ALSO posts a friendly educational PR comment (idempotent — checked via `<!-- ai-sdlc:attestation-fallback-comment -->` marker before posting again). The comment explains the bootstrap flow and the most common failure causes (force-push diff change, policy edit, missing trusted-reviewers entry).
 
@@ -66,12 +66,17 @@ If `/ai-sdlc execute` errors with `signing-key not found`, run step 1 + open the
 
 - Force-push that changes the diff after signing → `diffHash mismatch`
 - Edit to `.ai-sdlc/review-policy.md` after signing → `policyHash mismatch`
-- Edit to `ai-sdlc-plugin/agents/*.md` after signing → `agentFileHash mismatch`
+- Edit to `ai-sdlc-plugin/agents/*.md` after signing → `agentFileHashes[<name>] mismatch`
 - `schemaVersion` outside the current allowlist → `schemaVersion 'vN' not in allowlist [v1]`
+- `pluginVersion` drift between the attestation and `ai-sdlc-plugin/plugin.json` → `pluginVersion mismatch`
 - Signature from a private key whose pubkey isn't in `.ai-sdlc/trusted-reviewers.yaml` → `signature did not match any trusted reviewer pubkey`
-- Copy-pasted attestation from another PR → `subject digest mismatch`
+- Copy-pasted attestation from another PR with different reviewed content → `diffHash mismatch`
 
-All five rejections are by design (threat model). Re-run `/ai-sdlc execute` against the current head to produce a fresh attestation.
+All rejections are by design (threat model). Re-run `/ai-sdlc execute` against the current head to produce a fresh attestation.
+
+### What CI accepts (intentional, post-AISDLC-84)
+
+- Rebase, amend, or force-push that doesn't change reviewed content → still valid (filename SHA is informational only; matching is by predicate content). This was the day-one breakage AISDLC-84 fixed: every PR-merge cycle ate a duplicate review run because rebasing PR-N onto main rewrote the SHA on disk and the verifier couldn't find a match. The verifier now accepts as long as `diffHash + policyHash + agentFileHashes + pluginVersion + schemaVersion` all still resolve to the current PR state.
 
 ## Backlog Workflow
 

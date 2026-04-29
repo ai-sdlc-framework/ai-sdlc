@@ -1,22 +1,29 @@
 /**
  * Integration tests for `scripts/verify-attestation.mjs` — the verifier the
- * `verify-attestation.yml` workflow shells out to (AISDLC-74).
+ * `verify-attestation.yml` workflow shells out to (AISDLC-74 / AISDLC-84).
  *
  * Covers the workflow contract end-to-end against a synthetic git repo so
- * the regression cases (force-push diff change, policy edit, agent edit)
- * exercise the same hash + signature codepath that production runs.
+ * the regression cases (rebase, amend, force-push diff change, policy edit,
+ * agent edit) exercise the same hash + signature codepath that production
+ * runs.
  *
  * Run with: node --test scripts/verify-attestation.test.mjs
  *
- * AC traceability:
- *   - AC #6 (verify against PR state)
- *   - AC #9 (replay protection: force-push diff change)
- *   - AC #10 (policy-pin: review-policy.md change)
- *   - AC #11 (agent-pin: reviewer agent .md change)
- *   - AC #12 (schema-version enforcement)
+ * AC traceability (AISDLC-84):
+ *   - AC #1/#2 (predicate-content match selection — exactly-one / multi / zero)
+ *   - AC #3   (signature verification still runs against trusted-reviewers.yaml)
+ *   - AC #4   (schema-version allowlist still runs)
+ *   - AC #6   (rebase: new HEAD SHA, same diff content → accepts)
+ *   - AC #7   (amend with no diff change → accepts)
+ *   - AC #8   (force-push that changes the diff → rejects with diffHash mismatch)
+ *   - AC #9   (policy edit after sign → rejects with policyHash mismatch)
+ *   - AC #10  (agent file edit after sign → rejects with agentFileHashes[<name>] mismatch)
+ *   - AC #11  (cross-PR copy with different diff → rejects)
+ *   - AC #12  (schemaVersion not in allowlist → rejects)
+ *   - AC #13  (signature from untrusted pubkey → rejects)
  */
 
-import { describe, it, before, after, beforeEach, afterEach } from 'node:test';
+import { describe, it, before, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -26,11 +33,9 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildGithubOutputLines,
-  collectAncestors,
-  findChoreCommitViolation,
-  loadAttestationsBySubject,
+  loadAllAttestations,
   parseTrustedReviewers,
-  resolveParentWalkDepth,
+  predicateMatchReason,
   runVerifier,
 } from './verify-attestation.mjs';
 
@@ -88,6 +93,9 @@ const AGENT_FILES = {
   'test-reviewer': '---\nname: test-reviewer\n---\nbody2\n',
   'security-reviewer': '---\nname: security-reviewer\n---\nbody3\n',
 };
+// Plugin manifest baseline. Tests can override by writing a different
+// version into the fixture's plugin.json before runVerifier.
+const PLUGIN_VERSION = '0.7.1';
 
 function setupFixture() {
   const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-test-'));
@@ -103,6 +111,10 @@ function setupFixture() {
   for (const [name, content] of Object.entries(AGENT_FILES)) {
     writeFileSync(join(root, 'ai-sdlc-plugin', 'agents', `${name}.md`), content);
   }
+  writeFileSync(
+    join(root, 'ai-sdlc-plugin', 'plugin.json'),
+    JSON.stringify({ name: 'ai-sdlc', version: PLUGIN_VERSION }, null, 2),
+  );
   // Initial commit (this is the BASE the PR diffs against).
   writeFileSync(join(root, 'baseline.txt'), 'baseline\n');
   git(['add', '.'], root);
@@ -134,7 +146,11 @@ function writeTrustedReviewersYaml(root, pubkeyPem) {
   writeFileSync(join(root, '.ai-sdlc', 'trusted-reviewers.yaml'), yaml);
 }
 
-function writeAttestation(root, headSha, baseSha, privateKeyPem, overrides = {}) {
+// `subjectSha` is what gets baked into the envelope's predicate AND used as
+// the filename. The verifier no longer enforces it (AISDLC-84), but we keep
+// it accurate to the original convention so audit-trail readers see a real
+// SHA on disk. Defaults to `headSha` for callers that don't care.
+function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, overrides = {}) {
   const diff = git(['diff', `${baseSha}...${headSha}`], root);
   const policy = readFileSync(join(root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
   const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
@@ -145,11 +161,11 @@ function writeAttestation(root, headSha, baseSha, privateKeyPem, overrides = {})
     findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
   }));
   const predicate = buildPredicate({
-    commitSha: headSha,
+    commitSha: subjectSha,
     diff,
     policy,
     reviewers,
-    pluginVersion: '0.7.0',
+    pluginVersion: PLUGIN_VERSION,
     iterationCount: 1,
     harnessNote: '',
     signedAt: '2026-04-27T00:00:00.000Z',
@@ -162,9 +178,10 @@ function writeAttestation(root, headSha, baseSha, privateKeyPem, overrides = {})
     keyid: 'dev@example.com:laptop',
   });
   writeFileSync(
-    join(root, '.ai-sdlc', 'attestations', `${headSha}.dsse.json`),
+    join(root, '.ai-sdlc', 'attestations', `${subjectSha}.dsse.json`),
     JSON.stringify(envelope, null, 2),
   );
+  return { predicate, envelope };
 }
 
 describe('parseTrustedReviewers', () => {
@@ -224,7 +241,7 @@ reviewers:
   });
 });
 
-describe('runVerifier (integration)', () => {
+describe('runVerifier (happy path + existing AISDLC-74 regressions)', () => {
   let fixture;
 
   beforeEach(() => {
@@ -238,7 +255,13 @@ describe('runVerifier (integration)', () => {
   it('returns valid for a freshly-signed attestation matching all PR state', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-    writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
 
     const out = runVerifier({
       headSha: fixture.headSha,
@@ -261,44 +284,16 @@ describe('runVerifier (integration)', () => {
     assert.match(out.reason, /missing/);
   });
 
-  it('returns invalid after a force-push changes the diff (AC #9 — replay protection)', () => {
+  it('AC #9: rejects (policyHash mismatch) after .ai-sdlc/review-policy.md edit', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-    writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem);
-    // Simulate a force-push by amending the head commit with extra content.
-    // The amended head replaces the original — the original SHA is no longer
-    // an ancestor of the new head, so the parent-walking verifier (AISDLC-76)
-    // can't find a matching attestation by subject lookup.
-    writeFileSync(join(fixture.root, 'feature.txt'), 'feature\nMORE CONTENT\n');
-    git(['add', 'feature.txt'], fixture.root);
-    git(['commit', '--amend', '-q', '--no-edit'], fixture.root);
-    const newHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
-    // Even if the attacker renames the envelope to <newHead>.dsse.json, the
-    // predicate's subject sha1 still points at the original commit, which is
-    // not an ancestor of the amended head — the parent-walk lookup misses
-    // and the verifier reports `missing`. This is the expected post-AISDLC-76
-    // shape for the "force-push changes the diff" replay attack.
-    const oldEnvelope = readFileSync(
-      join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`),
-      'utf-8',
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
     );
-    writeFileSync(
-      join(fixture.root, '.ai-sdlc', 'attestations', `${newHead}.dsse.json`),
-      oldEnvelope,
-    );
-    const out = runVerifier({
-      headSha: newHead,
-      baseSha: fixture.baseSha,
-      repoRoot: fixture.root,
-    });
-    assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /missing|subject digest mismatch|diffHash mismatch/);
-  });
-
-  it('returns invalid (policyHash mismatch) after .ai-sdlc/review-policy.md edit (AC #10)', () => {
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-    writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem);
     // Edit the policy AFTER signing. Verifier should reject.
     writeFileSync(
       join(fixture.root, '.ai-sdlc', 'review-policy.md'),
@@ -313,11 +308,18 @@ describe('runVerifier (integration)', () => {
     assert.match(out.reason, /policyHash mismatch/);
   });
 
-  it('returns invalid (agentFileHash mismatch) after a reviewer agent edit (AC #11)', () => {
+  it('AC #10: rejects (agentFileHashes mismatch) after a reviewer agent edit', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-    writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem);
-    // Edit the code-reviewer agent file AFTER signing. Verifier should reject.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    // Edit the code-reviewer agent file AFTER signing. Verifier should reject
+    // with the specific agent ID in the reason (AC #10).
     writeFileSync(
       join(fixture.root, 'ai-sdlc-plugin', 'agents', 'code-reviewer.md'),
       AGENT_FILES['code-reviewer'] + '\n## ADDED RULES AFTER ATTESTATION\n',
@@ -328,21 +330,26 @@ describe('runVerifier (integration)', () => {
       repoRoot: fixture.root,
     });
     assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /agentFileHash mismatch.*code-reviewer/);
+    assert.match(
+      out.reason,
+      /agentFileHashes\[code-reviewer\]|agentFileHash mismatch.*code-reviewer/,
+    );
   });
 
-  it('returns invalid (schemaVersion mismatch) when envelope claims a non-allowlisted version (AC #12)', () => {
+  it('AC #12: rejects (schemaVersion) when envelope claims a non-allowlisted version', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-    // Sign with v1 (the only accepted version) then mutate the payload to v2.
-    // We need to bypass signAttestation's allowlist check, so we hand-craft
-    // a v2 envelope by re-base64-encoding a tampered predicate. Without
-    // re-signing, the signature won't match — that's still "invalid", which
-    // is what the AC asks for. (The full schema-version test is in the
-    // attestations.test.ts unit test; here we assert the verifier surfaces
-    // SOME failure when the envelope payload claims schemaVersion outside the
-    // allowlist.)
-    writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem, {});
+    // Sign with v1 then mutate the payload to v99. Without re-signing the
+    // signature will not verify, but the predicate-content scan rejects on
+    // schemaVersion FIRST so the closest-mismatch reason should surface
+    // the schemaVersion failure, not the signature failure.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
     const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
     const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
     const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
@@ -355,21 +362,20 @@ describe('runVerifier (integration)', () => {
       repoRoot: fixture.root,
     });
     assert.equal(out.status, 'invalid');
-    // Post-review hardening: the schema validator runs FIRST and rejects
-    // non-allowlisted schemaVersion values with a fixed reason that does
-    // not embed user-controlled content. The earlier signature-mismatch
-    // path is no longer reachable for this specific input.
-    assert.match(
-      out.reason,
-      /schemaVersion not in accepted enum|schemaVersion 'v99' not in allowlist|signature did not match/,
-    );
+    assert.match(out.reason, /schemaVersion.*v99|schemaVersion not in/);
   });
 
-  it('returns invalid (signature did not match) when the attestation was signed with an untrusted key', () => {
+  it('AC #13: rejects (signature) when the attestation was signed with an untrusted key', () => {
     const { privateKeyPem } = generateSigningKeyPair();
     const { publicKeyPem: otherPubkey } = generateSigningKeyPair();
     writeTrustedReviewersYaml(fixture.root, otherPubkey);
-    writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
     const out = runVerifier({
       headSha: fixture.headSha,
       baseSha: fixture.baseSha,
@@ -377,6 +383,344 @@ describe('runVerifier (integration)', () => {
     });
     assert.equal(out.status, 'invalid');
     assert.match(out.reason, /signature did not match/);
+  });
+});
+
+// ─── AISDLC-84 — rebase-stable matching ─────────────────────────────
+//
+// The whole point of AISDLC-84: SHA can change for non-content reasons
+// (rebase, amend, force-push of a no-op edit) and the verifier must still
+// accept the existing attestation as long as the CONTENT bindings still
+// match current PR state.
+
+describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('AC #6: accepts after a rebase that rewrites HEAD SHA but keeps the same diff content', () => {
+    // Sign against the pre-rebase HEAD.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+    );
+    // Simulate "rebase onto main" — the diff content is unchanged but the
+    // commit's metadata (committer-date) shifts, producing a new SHA. We
+    // use `git commit-tree` directly so we get a fresh SHA without
+    // touching the working tree, mirroring what `git rebase` would do
+    // for a single commit on top of an unchanged base.
+    const tree = git(['rev-parse', 'HEAD^{tree}'], fixture.root).trim();
+    const message = git(['log', '-1', '--pretty=%B', 'HEAD'], fixture.root).trim();
+    // GIT_COMMITTER_DATE override → different SHA, identical tree + parent.
+    const env = {
+      ...cleanEnv(),
+      GIT_COMMITTER_DATE: '2030-01-01T00:00:00Z',
+      GIT_AUTHOR_DATE: '2030-01-01T00:00:00Z',
+    };
+    const newSha = execFileSync(
+      'git',
+      ['commit-tree', tree, '-p', fixture.baseSha, '-m', message],
+      { cwd: fixture.root, env, encoding: 'utf-8' },
+    ).trim();
+    git(['update-ref', 'HEAD', newSha], fixture.root);
+    assert.notEqual(newSha, fixture.headSha, 'rebase must produce a new SHA');
+    // Diff content from base to new HEAD is identical to base→old HEAD.
+    const oldDiff = readFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`),
+      'utf-8',
+    );
+    void oldDiff;
+    const out = runVerifier({
+      headSha: newSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid after rebase, got: ${out.reason}`);
+    assert.equal(out.reason, 'ok');
+  });
+
+  it('AC #7: accepts after `git commit --amend --no-edit -m <new msg>` (message-only change)', () => {
+    // Sign + then amend the commit message. Tree (= diff) is unchanged.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+    );
+    git(['commit', '--amend', '-q', '-m', 'feature (with edited message)'], fixture.root);
+    const newHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    assert.notEqual(newHead, fixture.headSha);
+    const out = runVerifier({
+      headSha: newHead,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid after amend, got: ${out.reason}`);
+  });
+
+  it('AC #8: rejects (diffHash mismatch) when force-push actually changes the diff', () => {
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+    );
+    // Amend with extra content. Now the diff genuinely differs.
+    writeFileSync(join(fixture.root, 'feature.txt'), 'feature\nMORE CONTENT\n');
+    git(['add', 'feature.txt'], fixture.root);
+    git(['commit', '--amend', '-q', '--no-edit'], fixture.root);
+    const newHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    const out = runVerifier({
+      headSha: newHead,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /diffHash mismatch/);
+  });
+
+  it('AC #11: rejects (diffHash mismatch) when an attestation from another PR is copy-pasted', () => {
+    // Build a second fixture and add an extra commit so its diff genuinely
+    // differs from PR-B (= the outer `fixture`). Sign PR-A's attestation,
+    // copy it onto PR-B's branch, then verify against PR-B's state —
+    // should reject because PR-A's attested diffHash doesn't match
+    // PR-B's recomputed diff.
+    const otherFixture = setupFixture();
+    try {
+      // Make PR-A's diff genuinely different from PR-B's:
+      writeFileSync(join(otherFixture.root, 'extra-pr-a.txt'), 'this file only exists in PR-A\n');
+      git(['add', 'extra-pr-a.txt'], otherFixture.root);
+      git(['commit', '-q', '-m', 'PR-A only commit'], otherFixture.root);
+      const prAHead = git(['rev-parse', 'HEAD'], otherFixture.root).trim();
+      writeTrustedReviewersYaml(otherFixture.root, keys.publicKeyPem);
+      // Sign PR-A's attestation against its different head + diff.
+      writeAttestation(
+        otherFixture.root,
+        prAHead,
+        otherFixture.baseSha,
+        prAHead,
+        keys.privateKeyPem,
+      );
+      const prAEnvelope = readFileSync(
+        join(otherFixture.root, '.ai-sdlc', 'attestations', `${prAHead}.dsse.json`),
+        'utf-8',
+      );
+      // Copy PR-A's envelope file into PR-B's attestations directory.
+      writeFileSync(
+        join(fixture.root, '.ai-sdlc', 'attestations', `${prAHead}.dsse.json`),
+        prAEnvelope,
+      );
+      const out = runVerifier({
+        headSha: fixture.headSha,
+        baseSha: fixture.baseSha,
+        repoRoot: fixture.root,
+      });
+      assert.equal(out.status, 'invalid');
+      assert.match(out.reason, /diffHash mismatch/);
+    } finally {
+      rmSync(otherFixture.root, { recursive: true, force: true });
+    }
+  });
+
+  it('AC #2: when multiple envelopes match, picks the most recently signed', () => {
+    // Plant TWO envelopes that both pass the predicate-content match
+    // (same diff + same policy + same agents + same plugin version),
+    // signed at different timestamps. The newer one wins. We assert this
+    // by giving the OLDER envelope a different keyid + signing it with a
+    // SECOND key that's NOT trusted; if the verifier picks the older one,
+    // signature verification fails (= "signature did not match"). The
+    // pass-through to status=valid proves it picked the newer one.
+    const otherKeys = generateSigningKeyPair();
+    // Old envelope, signed with untrusted key.
+    {
+      const diff = git(['diff', `${fixture.baseSha}...${fixture.headSha}`], fixture.root);
+      const policy = readFileSync(join(fixture.root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
+      const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
+        agentId,
+        agentFileContent: content,
+        harness: 'codex',
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      }));
+      const predicate = buildPredicate({
+        commitSha: 'a'.repeat(40),
+        diff,
+        policy,
+        reviewers,
+        pluginVersion: PLUGIN_VERSION,
+        iterationCount: 1,
+        harnessNote: '',
+        signedAt: '2024-01-01T00:00:00.000Z', // OLDER
+      });
+      const envelope = signAttestation({
+        predicate,
+        privateKeyPem: otherKeys.privateKeyPem,
+        keyid: 'untrusted',
+      });
+      writeFileSync(
+        join(fixture.root, '.ai-sdlc', 'attestations', `${'a'.repeat(40)}.dsse.json`),
+        JSON.stringify(envelope, null, 2),
+      );
+    }
+    // New envelope, signed with trusted key.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+      { signedAt: '2026-04-27T00:00:00.000Z' },
+    );
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid, got: ${out.reason}`);
+  });
+});
+
+describe('predicateMatchReason', () => {
+  function baseExpected() {
+    return {
+      diffHash: 'a'.repeat(64),
+      policyHash: 'b'.repeat(64),
+      expectedAgentFileHashes: { 'code-reviewer': 'c'.repeat(64) },
+      pluginVersion: '0.7.1',
+      acceptedSchemaVersions: ['v1'],
+    };
+  }
+  function basePredicate() {
+    return {
+      schemaVersion: 'v1',
+      diffHash: 'a'.repeat(64),
+      policyHash: 'b'.repeat(64),
+      pluginVersion: '0.7.1',
+      reviewers: [{ agentId: 'code-reviewer', agentFileHash: 'c'.repeat(64) }],
+    };
+  }
+
+  it('returns null when every binding matches', () => {
+    assert.equal(predicateMatchReason(basePredicate(), baseExpected()), null);
+  });
+
+  it('returns schemaVersion mismatch first when schema is wrong', () => {
+    const r = predicateMatchReason({ ...basePredicate(), schemaVersion: 'v9' }, baseExpected());
+    assert.equal(r.field, 'schemaVersion');
+    assert.match(r.detail, /not in allowlist/);
+  });
+
+  it('returns diffHash mismatch when diff differs', () => {
+    const r = predicateMatchReason(
+      { ...basePredicate(), diffHash: 'x'.repeat(64) },
+      baseExpected(),
+    );
+    assert.equal(r.field, 'diffHash');
+  });
+
+  it('returns policyHash mismatch when policy differs', () => {
+    const r = predicateMatchReason(
+      { ...basePredicate(), policyHash: 'x'.repeat(64) },
+      baseExpected(),
+    );
+    assert.equal(r.field, 'policyHash');
+  });
+
+  it('returns agentFileHashes[<id>] mismatch when an agent file differs', () => {
+    const p = basePredicate();
+    p.reviewers[0].agentFileHash = 'x'.repeat(64);
+    const r = predicateMatchReason(p, baseExpected());
+    assert.match(r.field, /agentFileHashes\[code-reviewer\]/);
+    assert.match(r.detail, /code-reviewer.*differs/);
+  });
+
+  it('returns pluginVersion mismatch when versions differ', () => {
+    const r = predicateMatchReason({ ...basePredicate(), pluginVersion: '9.9.9' }, baseExpected());
+    assert.equal(r.field, 'pluginVersion');
+    assert.match(r.detail, /9\.9\.9/);
+  });
+
+  it('skips the pluginVersion check when expected.pluginVersion is empty', () => {
+    const r = predicateMatchReason(
+      { ...basePredicate(), pluginVersion: '9.9.9' },
+      { ...baseExpected(), pluginVersion: '' },
+    );
+    assert.equal(r, null);
+  });
+
+  it('strips CR/LF from interpolated values to defend against $GITHUB_OUTPUT injection', () => {
+    // The threat: a malicious schemaVersion containing `\n` could, if
+    // emitted naively into $GITHUB_OUTPUT as `key=value\n`, smuggle a
+    // duplicate `status=valid` key past the parser. CR/LF must be
+    // stripped at the boundary. The literal text `status=valid` inside
+    // the heredoc body is harmless (the heredoc writer wraps it), so
+    // we only assert no raw newlines escape — the writer test covers
+    // the rest of the chain.
+    const r = predicateMatchReason(
+      { ...basePredicate(), schemaVersion: 'v9\nstatus=valid' },
+      baseExpected(),
+    );
+    assert.equal(r.field, 'schemaVersion');
+    assert.equal(r.detail.includes('\n'), false);
+    assert.equal(r.detail.includes('\r'), false);
+  });
+});
+
+describe('loadAllAttestations', () => {
+  it('returns an empty list when the attestations dir is missing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-load-'));
+    try {
+      assert.deepEqual(loadAllAttestations(root), []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+  it('skips junk files (non-JSON, missing payload, undecodable predicate)', () => {
+    const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-load-'));
+    try {
+      mkdirSync(join(root, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(join(root, '.ai-sdlc', 'attestations', 'junk.dsse.json'), 'not json');
+      writeFileSync(
+        join(root, '.ai-sdlc', 'attestations', 'noPayload.dsse.json'),
+        JSON.stringify({}),
+      );
+      writeFileSync(
+        join(root, '.ai-sdlc', 'attestations', 'badPayload.dsse.json'),
+        JSON.stringify({ payload: 'not-base64-json!' }),
+      );
+      writeFileSync(
+        join(root, '.ai-sdlc', 'attestations', 'README.md'),
+        'this should be ignored — wrong extension',
+      );
+      // One real-ish entry to make sure the scan still proceeds.
+      const okPayload = Buffer.from(JSON.stringify({ schemaVersion: 'v1' }), 'utf-8').toString(
+        'base64',
+      );
+      writeFileSync(
+        join(root, '.ai-sdlc', 'attestations', 'real.dsse.json'),
+        JSON.stringify({ payload: okPayload }),
+      );
+      const all = loadAllAttestations(root);
+      assert.equal(all.length, 1);
+      assert.equal(all[0].fileName, 'real.dsse.json');
+      assert.equal(all[0].predicate.schemaVersion, 'v1');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -456,15 +800,27 @@ describe('buildGithubOutputLines (injection-resistant writer)', () => {
 
 describe('runVerifier (injection regression)', () => {
   it('rejects an attestation where sha1 carries a literal `\\nstatus=valid` (CRITICAL)', () => {
-    // Build a fixture where a malicious envelope claims a sha1 with
-    // newline + status=valid embedded. The shape validator MUST reject
-    // this, and the rejection reason MUST NOT contain the injection.
+    // Under AISDLC-84 the verifier no longer indexes envelopes by sha1, so
+    // the attack surface shifts: a malicious sha1 with embedded `\n` lands
+    // in the predicate, and `verifyAttestation` (orchestrator runtime)
+    // shape-validates it. Either (a) the predicate-content scan mismatches
+    // first (because the diff/policy/etc. don't match the malicious
+    // envelope) so the rejection reason describes a content mismatch, or
+    // (b) when the content scan DOES match, the orchestrator's regex-bound
+    // schema check rejects with a fixed reason that doesn't embed the
+    // malicious value. In both branches the malicious bytes never reach
+    // the GITHUB_OUTPUT key=value boundary.
     const fixture = setupFixture();
     try {
       const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
       writeTrustedReviewersYaml(fixture.root, publicKeyPem);
-      // Sign a normal attestation, then mutate the payload sha1.
-      writeAttestation(fixture.root, fixture.headSha, fixture.baseSha, privateKeyPem);
+      writeAttestation(
+        fixture.root,
+        fixture.headSha,
+        fixture.baseSha,
+        fixture.headSha,
+        privateKeyPem,
+      );
       const envPath = join(
         fixture.root,
         '.ai-sdlc',
@@ -483,13 +839,8 @@ describe('runVerifier (injection regression)', () => {
         repoRoot: fixture.root,
       });
       assert.equal(out.status, 'invalid');
-      // Either the parent-walk subject-discovery layer rejects the
-      // malicious sha1 via its regex filter (AISDLC-76 — surfaces as
-      // "missing"), or the schema validator catches it after a hit.
-      // The critical security property is that the malicious value
-      // never reaches the reason string in either case.
-      assert.match(out.reason, /schema validation failed: subject\.digest\.sha1|missing/);
-      // The injection must NOT appear in the reason string.
+      // The malicious value must NOT appear in the reason string regardless
+      // of which rejection branch we land in.
       assert.equal(out.reason.includes('status=valid'), false);
       assert.equal(out.reason.includes('\n'), false);
       assert.equal(out.reason.includes('\r'), false);
@@ -508,347 +859,4 @@ describe('runVerifier (injection regression)', () => {
       rmSync(fixture.root, { recursive: true, force: true });
     }
   });
-});
-
-// ─── AISDLC-76: parent-walk + chore-commit allowlist ─────────────
-//
-// `/ai-sdlc execute` Step 10 sequence: dev commit (signed subject) → chore
-// commit (file move + .dsse.json file). PR head = chore commit. Pre-AISDLC-76
-// the verifier looked for `<head-sha>.dsse.json` strictly and failed on every
-// real run. The new verifier walks the first N first-parent ancestors and
-// matches the envelope by `subject.digest.sha1`. The diff hash check then
-// uses the dev commit's own diff (not the full PR diff), and any commits
-// between subject and head are restricted to a small chore-commit allowlist.
-
-describe('resolveParentWalkDepth', () => {
-  it('uses default when env value is missing or empty', () => {
-    assert.equal(resolveParentWalkDepth(undefined), 2);
-    assert.equal(resolveParentWalkDepth(null), 2);
-    assert.equal(resolveParentWalkDepth(''), 2);
-  });
-  it('parses a valid integer in range', () => {
-    assert.equal(resolveParentWalkDepth('0'), 0);
-    assert.equal(resolveParentWalkDepth('5'), 5);
-    assert.equal(resolveParentWalkDepth('8'), 8);
-  });
-  it('falls back to default for malformed or out-of-range values', () => {
-    assert.equal(resolveParentWalkDepth('abc'), 2);
-    assert.equal(resolveParentWalkDepth('-1'), 2);
-    assert.equal(resolveParentWalkDepth('9'), 2);
-    assert.equal(resolveParentWalkDepth('1.5'), 1); // parseInt strips fraction
-  });
-  it('honors a custom fallback', () => {
-    assert.equal(resolveParentWalkDepth(undefined, 4), 4);
-    assert.equal(resolveParentWalkDepth('not-a-number', 4), 4);
-  });
-});
-
-// Build a fixture that mirrors the real `/ai-sdlc execute` Step 10 PR shape:
-// baseline (with trusted-reviewers.yaml already committed) → dev commit (signed
-// subject) → chore commit (mark task Done + add attestation file). PR head =
-// chore commit. The trusted-reviewers.yaml MUST be committed in baseline so it
-// doesn't end up in the chore-commit diff.
-function setupChoreCommitFixture(publicKeyPem) {
-  const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-chore-'));
-  git(['init', '-q', '-b', 'main'], root);
-  git(['config', 'user.email', 'test@test.com'], root);
-  git(['config', 'user.name', 'test'], root);
-  git(['config', 'commit.gpgsign', 'false'], root);
-  mkdirSync(join(root, '.ai-sdlc', 'attestations'), { recursive: true });
-  mkdirSync(join(root, 'ai-sdlc-plugin', 'agents'), { recursive: true });
-  mkdirSync(join(root, 'backlog', 'tasks'), { recursive: true });
-  mkdirSync(join(root, 'backlog', 'completed'), { recursive: true });
-  writeFileSync(join(root, '.ai-sdlc', 'review-policy.md'), REVIEW_POLICY);
-  for (const [name, content] of Object.entries(AGENT_FILES)) {
-    writeFileSync(join(root, 'ai-sdlc-plugin', 'agents', `${name}.md`), content);
-  }
-  writeTrustedReviewersYaml(root, publicKeyPem);
-  // Baseline (PR base).
-  writeFileSync(join(root, 'baseline.txt'), 'baseline\n');
-  writeFileSync(join(root, 'backlog', 'tasks', 'aisdlc-99 - example.md'), 'open\n');
-  git(['add', '.'], root);
-  git(['commit', '-q', '-m', 'baseline'], root);
-  const baseSha = git(['rev-parse', 'HEAD'], root).trim();
-  // Dev commit — the signed subject.
-  writeFileSync(join(root, 'feature.txt'), 'feature\n');
-  git(['add', 'feature.txt'], root);
-  git(['commit', '-q', '-m', 'feat: add feature'], root);
-  const devSha = git(['rev-parse', 'HEAD'], root).trim();
-  return { root, baseSha, devSha };
-}
-
-// Stage the typical Step-10 chore commit on top of the dev commit + write the
-// attestation file. Returns the chore commit SHA (= PR head) plus a function
-// to inject extra changes into the chore commit before the commit itself
-// happens — used by the negative test to slip a `.ts` file into the chore.
-function makeChoreCommit(root, devSha, baseSha, privateKeyPem, extraFiles = {}) {
-  // Step 10's task_complete: rename the task file from tasks/ → completed/.
-  const tasksFile = join(root, 'backlog', 'tasks', 'aisdlc-99 - example.md');
-  const completedFile = join(root, 'backlog', 'completed', 'aisdlc-99 - example.md');
-  writeFileSync(completedFile, readFileSync(tasksFile, 'utf-8') + 'done\n');
-  // Remove the old file via git rm so the chore commit's diff includes both
-  // the deletion and the addition.
-  git(['rm', '-q', join('backlog', 'tasks', 'aisdlc-99 - example.md')], root);
-  // Sign the attestation against the DEV commit's SHA (this is what
-  // `ai-sdlc-plugin/scripts/sign-attestation.mjs` does in production).
-  writeAttestation(root, devSha, baseSha, privateKeyPem);
-  // Add anything the test wants to smuggle into the chore commit.
-  for (const [relPath, content] of Object.entries(extraFiles)) {
-    const full = join(root, relPath);
-    mkdirSync(dirname(full), { recursive: true });
-    writeFileSync(full, content);
-  }
-  git(['add', '-A'], root);
-  git(['commit', '-q', '-m', 'chore: mark AISDLC-99 complete'], root);
-  return git(['rev-parse', 'HEAD'], root).trim();
-}
-
-describe('runVerifier (AISDLC-76 parent-walk + chore allowlist)', () => {
-  let fixture;
-  let keys;
-
-  beforeEach(() => {
-    keys = generateSigningKeyPair();
-    fixture = setupChoreCommitFixture(keys.publicKeyPem);
-  });
-
-  afterEach(() => {
-    rmSync(fixture.root, { recursive: true, force: true });
-  });
-
-  it('AC #5: accepts the dev+chore PR shape via first-parent ancestor walk', () => {
-    const choreSha = makeChoreCommit(
-      fixture.root,
-      fixture.devSha,
-      fixture.baseSha,
-      keys.privateKeyPem,
-    );
-    const out = runVerifier({
-      headSha: choreSha,
-      baseSha: fixture.baseSha,
-      repoRoot: fixture.root,
-    });
-    assert.equal(out.status, 'valid', `expected valid, got: ${out.reason}`);
-    assert.equal(out.reason, 'ok');
-  });
-
-  it('AC #6: rejects with `chore commit out of scope` when chore touches a `.ts` file', () => {
-    const choreSha = makeChoreCommit(
-      fixture.root,
-      fixture.devSha,
-      fixture.baseSha,
-      keys.privateKeyPem,
-      { 'src/sneaky.ts': 'export const sneaky = true;\n' },
-    );
-    const out = runVerifier({
-      headSha: choreSha,
-      baseSha: fixture.baseSha,
-      repoRoot: fixture.root,
-    });
-    assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /chore commit out of scope/);
-    assert.match(out.reason, /src\/sneaky\.ts/);
-  });
-
-  it('rejects when chore touches an arbitrary docs file outside the allowlist', () => {
-    const choreSha = makeChoreCommit(
-      fixture.root,
-      fixture.devSha,
-      fixture.baseSha,
-      keys.privateKeyPem,
-      { 'docs/release-notes.md': 'unreviewed release notes\n' },
-    );
-    const out = runVerifier({
-      headSha: choreSha,
-      baseSha: fixture.baseSha,
-      repoRoot: fixture.root,
-    });
-    assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /chore commit out of scope/);
-    assert.match(out.reason, /docs\/release-notes\.md/);
-  });
-
-  it('rejects when no envelope subject matches any candidate ancestor (AC #1 negative)', () => {
-    // Build the chore commit + envelope as usual…
-    const choreSha = makeChoreCommit(
-      fixture.root,
-      fixture.devSha,
-      fixture.baseSha,
-      keys.privateKeyPem,
-    );
-    // …but verify with parentWalkDepth=0 so only the head is eligible.
-    // The envelope's subject = devSha (parent of head) → no match → missing.
-    const out = runVerifier({
-      headSha: choreSha,
-      baseSha: fixture.baseSha,
-      repoRoot: fixture.root,
-      parentWalkDepth: 0,
-    });
-    assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /missing/);
-  });
-
-  it('AC #3: rejects ambiguously when two attestations match different ancestors', () => {
-    // First chore commit + attestation for the dev commit.
-    const choreSha = makeChoreCommit(
-      fixture.root,
-      fixture.devSha,
-      fixture.baseSha,
-      keys.privateKeyPem,
-    );
-    // Now plant a SECOND attestation whose subject = the chore commit itself.
-    // Both `devSha` and `choreSha` are ancestors of the head (= choreSha here),
-    // so the parent walk sees two matches and must fail-closed.
-    writeAttestation(fixture.root, choreSha, fixture.baseSha, keys.privateKeyPem);
-    const out = runVerifier({
-      headSha: choreSha,
-      baseSha: fixture.baseSha,
-      repoRoot: fixture.root,
-    });
-    assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /ambiguous/);
-  });
-
-  it('rejects with diffHash mismatch when attested dev diff was tampered post-sign', () => {
-    // Sign + chore commit, then mutate the envelope's diffHash. The verifier
-    // matches via parent walk, recomputes the dev-commit own diff, and the
-    // hash check fails — this exercises AC #2 (diff is computed from the
-    // dev commit's parent..dev range, not the full PR diff).
-    const choreSha = makeChoreCommit(
-      fixture.root,
-      fixture.devSha,
-      fixture.baseSha,
-      keys.privateKeyPem,
-    );
-    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.devSha}.dsse.json`);
-    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
-    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
-    predicate.diffHash = 'b'.repeat(64); // valid shape, wrong value
-    envelope.payload = Buffer.from(JSON.stringify(predicate), 'utf-8').toString('base64');
-    writeFileSync(envPath, JSON.stringify(envelope, null, 2));
-    const out = runVerifier({
-      headSha: choreSha,
-      baseSha: fixture.baseSha,
-      repoRoot: fixture.root,
-    });
-    assert.equal(out.status, 'invalid');
-    // diffHash fails first if signature still verifies, otherwise signature.
-    // Either way the reason references one of the bound checks.
-    assert.match(out.reason, /diffHash mismatch|signature did not match/);
-  });
-});
-
-describe('collectAncestors', () => {
-  it('returns head + N first-parent ancestors in head-first order', () => {
-    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
-    try {
-      // baseline + dev commit, no chore yet — ancestors of devSha at depth 2:
-      // [devSha, baseSha].
-      const ancestors = collectAncestors(fixture.devSha, 2, fixture.root);
-      assert.equal(ancestors[0], fixture.devSha.toLowerCase());
-      assert.equal(ancestors[1], fixture.baseSha.toLowerCase());
-      assert.ok(ancestors.length <= 3);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  });
-  it('returns just the head when depth=0', () => {
-    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
-    try {
-      const ancestors = collectAncestors(fixture.devSha, 0, fixture.root);
-      assert.equal(ancestors.length, 1);
-      assert.equal(ancestors[0], fixture.devSha.toLowerCase());
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('loadAttestationsBySubject', () => {
-  it('returns an empty map when the attestations dir is missing', () => {
-    const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-load-'));
-    try {
-      const out = loadAttestationsBySubject(root);
-      assert.equal(out.size, 0);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-  it('skips files that are not valid envelopes / not 40-hex sha1 subjects', () => {
-    const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-verify-load-'));
-    try {
-      mkdirSync(join(root, '.ai-sdlc', 'attestations'), { recursive: true });
-      // Not JSON.
-      writeFileSync(join(root, '.ai-sdlc', 'attestations', 'junk.dsse.json'), 'not json');
-      // JSON but missing payload.
-      writeFileSync(
-        join(root, '.ai-sdlc', 'attestations', 'noPayload.dsse.json'),
-        JSON.stringify({}),
-      );
-      // Valid JSON envelope but subject sha1 has bad shape.
-      const bad = {
-        payloadType: 'application/vnd.ai-sdlc.attestation+json',
-        payload: Buffer.from(
-          JSON.stringify({ subject: { digest: { sha1: 'NOTHEX' } } }),
-          'utf-8',
-        ).toString('base64'),
-        signatures: [],
-      };
-      writeFileSync(
-        join(root, '.ai-sdlc', 'attestations', 'badShape.dsse.json'),
-        JSON.stringify(bad),
-      );
-      const out = loadAttestationsBySubject(root);
-      assert.equal(out.size, 0);
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('findChoreCommitViolation', () => {
-  it('returns null when subject===head (no chore commits)', () => {
-    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
-    try {
-      const v = findChoreCommitViolation(fixture.devSha, fixture.devSha, fixture.root);
-      assert.equal(v, null);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  });
-  it('returns null when chore only touches allowlisted paths', () => {
-    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
-    try {
-      const choreSha = makeChoreCommit(
-        fixture.root,
-        fixture.devSha,
-        fixture.baseSha,
-        generateSigningKeyPair().privateKeyPem,
-      );
-      const v = findChoreCommitViolation(fixture.devSha, choreSha, fixture.root);
-      assert.equal(v, null);
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  });
-  it('returns the offending path when chore touches anything else', () => {
-    const fixture = setupChoreCommitFixture(generateSigningKeyPair().publicKeyPem);
-    try {
-      const choreSha = makeChoreCommit(
-        fixture.root,
-        fixture.devSha,
-        fixture.baseSha,
-        generateSigningKeyPair().privateKeyPem,
-        { 'README.md': 'README change snuck into chore\n' },
-      );
-      const v = findChoreCommitViolation(fixture.devSha, choreSha, fixture.root);
-      assert.equal(v, 'README.md');
-    } finally {
-      rmSync(fixture.root, { recursive: true, force: true });
-    }
-  });
-});
-
-after(() => {
-  // No global cleanup needed — beforeEach/afterEach handle their fixtures.
 });
