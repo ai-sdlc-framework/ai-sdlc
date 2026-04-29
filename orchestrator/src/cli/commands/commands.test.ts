@@ -143,6 +143,117 @@ describe('init command', () => {
   });
 });
 
+// ── init --role tier defaults (AISDLC-79) ────────────────────────────
+
+describe('init command — agent-role tiers (AISDLC-79)', () => {
+  /**
+   * Capture the agent-role.yaml content the init command writes for a given
+   * --role argv. Returns the content string (the second arg to writeFileSync).
+   *
+   * Re-imports the module each call so we get a fresh Commander instance and
+   * avoid stale option state between tier tests.
+   */
+  async function captureAgentRoleYaml(argv: string[]): Promise<string | undefined> {
+    vi.resetModules();
+    mockExistsSync.mockReturnValue(false);
+
+    const { initCommand } = await import('./init.js');
+    initCommand.setOptionValue('dryRun', undefined);
+    initCommand.setOptionValue('role', undefined);
+
+    await initCommand.parseAsync(['--skip-mcp', ...argv], { from: 'user' });
+
+    const call = mockWriteFileSync.mock.calls.find(
+      (c) => typeof c[0] === 'string' && (c[0] as string).endsWith('agent-role.yaml'),
+    );
+    return call ? (call[1] as string) : undefined;
+  }
+
+  it('defaults to coding tier (no --role flag) — preserves pre-AISDLC-79 behavior + NotebookEdit', async () => {
+    const yaml = await captureAgentRoleYaml([]);
+    expect(yaml).toBeDefined();
+    expect(yaml).toContain('Tier: coding-agent (default)');
+    // Coding tier tools
+    expect(yaml).toMatch(/^\s*-\s*Edit\b/m);
+    expect(yaml).toMatch(/^\s*-\s*Write\b/m);
+    expect(yaml).toMatch(/^\s*-\s*Read\b/m);
+    expect(yaml).toMatch(/^\s*-\s*Glob\b/m);
+    expect(yaml).toMatch(/^\s*-\s*Grep\b/m);
+    expect(yaml).toMatch(/^\s*-\s*Bash\b/m);
+    expect(yaml).toMatch(/^\s*-\s*NotebookEdit\b/m);
+    // Excluded tools must NOT appear as actual list items (commented mentions are fine)
+    expect(yaml).not.toMatch(/^\s*-\s*WebFetch\b/m);
+    expect(yaml).not.toMatch(/^\s*-\s*WebSearch\b/m);
+    expect(yaml).not.toMatch(/^\s*-\s*Task\b/m);
+    expect(yaml).not.toMatch(/^\s*-\s*Skill\b/m);
+  });
+
+  it('--role coding produces the same template as the default', async () => {
+    const yaml = await captureAgentRoleYaml(['--role', 'coding']);
+    expect(yaml).toBeDefined();
+    expect(yaml).toContain('Tier: coding-agent (default)');
+    expect(yaml).toMatch(/^\s*-\s*NotebookEdit\b/m);
+    expect(yaml).not.toMatch(/^\s*-\s*WebFetch\b/m);
+  });
+
+  it('--role research adds WebFetch + WebSearch on top of coding tier', async () => {
+    const yaml = await captureAgentRoleYaml(['--role', 'research']);
+    expect(yaml).toBeDefined();
+    expect(yaml).toContain('Tier: research-agent');
+    expect(yaml).toMatch(/^\s*-\s*Edit\b/m);
+    expect(yaml).toMatch(/^\s*-\s*NotebookEdit\b/m);
+    expect(yaml).toMatch(/^\s*-\s*WebFetch\b/m);
+    expect(yaml).toMatch(/^\s*-\s*WebSearch\b/m);
+    // Still excludes meta-tier tools
+    expect(yaml).not.toMatch(/^\s*-\s*Task\b/m);
+    expect(yaml).not.toMatch(/^\s*-\s*Skill\b/m);
+  });
+
+  it('--role meta adds Task + Skill on top of research tier', async () => {
+    const yaml = await captureAgentRoleYaml(['--role', 'meta']);
+    expect(yaml).toBeDefined();
+    expect(yaml).toContain('Tier: meta-agent');
+    expect(yaml).toMatch(/^\s*-\s*Edit\b/m);
+    expect(yaml).toMatch(/^\s*-\s*NotebookEdit\b/m);
+    expect(yaml).toMatch(/^\s*-\s*WebFetch\b/m);
+    expect(yaml).toMatch(/^\s*-\s*WebSearch\b/m);
+    expect(yaml).toMatch(/^\s*-\s*Task\b/m);
+    expect(yaml).toMatch(/^\s*-\s*Skill\b/m);
+  });
+
+  it('rejects invalid --role value with exit code 1', async () => {
+    vi.resetModules();
+    mockExistsSync.mockReturnValue(false);
+
+    const { initCommand } = await import('./init.js');
+    initCommand.setOptionValue('dryRun', undefined);
+    initCommand.setOptionValue('role', undefined);
+
+    await initCommand.parseAsync(['--skip-mcp', '--role', 'bogus'], { from: 'user' });
+
+    expect(process.exitCode).toBe(1);
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    const errOutput = consoleErrorSpy.mock.calls.map((c) => c[0]).join('\n');
+    expect(errOutput).toContain("invalid --role value 'bogus'");
+    expect(errOutput).toContain('coding');
+    expect(errOutput).toContain('research');
+    expect(errOutput).toContain('meta');
+    // No files should have been written when validation fails
+    expect(mockWriteFileSync).not.toHaveBeenCalled();
+  });
+
+  it('exposes getAgentRoleYaml + AGENT_ROLE_TIERS from init module', async () => {
+    vi.resetModules();
+    const mod = await import('./init.js');
+    expect(mod.AGENT_ROLE_TIERS).toEqual(['coding', 'research', 'meta']);
+    expect(mod.getAgentRoleYaml('coding')).toContain('coding-agent (default)');
+    expect(mod.getAgentRoleYaml('research')).toContain('research-agent');
+    expect(mod.getAgentRoleYaml('meta')).toContain('meta-agent');
+    // Default arg = 'coding'
+    expect(mod.getAgentRoleYaml()).toBe(mod.getAgentRoleYaml('coding'));
+  });
+});
+
 // ── run ──────────────────────────────────────────────────────────────
 
 describe('run command', () => {
