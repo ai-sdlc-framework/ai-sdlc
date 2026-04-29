@@ -6,6 +6,15 @@ dist/
 *.tsbuildinfo
 .next/
 
+# AISDLC-75: the ai-sdlc-plugin MCP server is loaded by the plugin manifest at
+# `mcp-server/dist/bin.js`. Marketplace clones do NOT run `pnpm install`, so
+# this bundled artifact MUST ship in the source tree. The bundle is produced
+# by `pnpm --filter @ai-sdlc/plugin-mcp-server build` (esbuild --packages=bundle)
+# and gated by `scripts/verify-bundle.mjs` in CI.
+!ai-sdlc-plugin/mcp-server/dist/
+ai-sdlc-plugin/mcp-server/dist/*
+!ai-sdlc-plugin/mcp-server/dist/bin.js
+
 # Coverage
 coverage/
 .nyc_output/
