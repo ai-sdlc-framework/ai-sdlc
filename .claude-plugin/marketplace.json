@@ -9,7 +9,7 @@
       "name": "ai-sdlc",
       "source": "./ai-sdlc-plugin",
       "description": "AI-SDLC governance framework for Claude Code — action enforcement, telemetry, quality gates, review agents, and MCP tools",
-      "version": "0.7.0"
+      "version": "0.7.1"
     }
   ]
 }

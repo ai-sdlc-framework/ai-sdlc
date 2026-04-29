@@ -1,6 +1,6 @@
 {
   "name": "@ai-sdlc/plugin-mcp-server",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "description": "MCP server for the AI-SDLC Claude Code plugin — governance tools for Claude",
   "license": "Apache-2.0",
   "repository": {
