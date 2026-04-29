@@ -114,7 +114,7 @@ This is a one-time setup the repo maintainer does ONCE per repo. After this, eve
    ```yaml
      - identity: 'ci-attestor'
        machine: 'github-actions'
-       addedAt: '<today's date>'
+       addedAt: "<today's date>"
        addedBy: '<your GitHub handle>'
        pubkey: |
          -----BEGIN PUBLIC KEY-----
@@ -124,14 +124,14 @@ This is a one-time setup the repo maintainer does ONCE per repo. After this, eve
 
    Maintainer reviews + merges this PR like any other policy change.
 
-4. **Verify it works** by opening any PR with no local attestation. After CI's 3 reviewer agents all approve, the report job's "CI-side attestor" step signs an envelope and pushes a `chore(ci): sign review attestation [skip ci]` commit to the PR branch. The next sync of `verify-attestation.yml` reports `valid` against the new envelope.
+4. **Verify it works** by opening any PR with no local attestation. After CI's 3 reviewer agents all approve, the report job's "CI-side attestor" step signs an envelope and pushes a `chore(ci): sign review attestation [skip ci]` commit to the PR branch. The same step then posts the `ai-sdlc/attestation` commit status (`success`) DIRECTLY against the chore-commit SHA — `[skip ci]` prevents `verify-attestation.yml` from re-running on the chore commit, so we set the status ourselves (the CI-sign step just signed the envelope against current PR state, so the verifier would also report `valid` if it ran). The PR's required-checks then resolve cleanly without a second review pass.
 
 ### CI-attestor security model
 
 - The CI-attestor key has the SAME trust as a maintainer key. Anyone who gets read access to `AI_SDLC_CI_ATTESTOR_PRIVATE_KEY` can sign valid attestations for any PR. Treat it like a maintainer credential: rotate on any suspected leak, and only grant `secrets:read` to workflows that need it.
 - The CI-side attestor only signs after `analyze` (the sandboxed reviewer job) returns 3 approvals. It refuses to sign on `CHANGES_REQUESTED`. Even if the LLM were compromised, the verdict gate runs in the report job which has no `ANTHROPIC_API_KEY` access — it only reads structured JSON.
 - The CI signing step is gated to same-repo PRs (`head.repo.full_name == github.repository`). Fork PRs cannot trigger CI signing because GITHUB_TOKEN can't push to a fork's head ref. Fork contributors get the friendly fallback comment from `verify-attestation.yml` and a maintainer can either approve manually or push the fork to a same-repo branch first.
-- The chore commit uses `[skip ci]` to avoid loops — without it, the new commit would re-trigger `ai-sdlc-review.yml` which would re-run the reviewers, re-approve, re-sign, ad infinitum.
+- The chore commit uses `[skip ci]` to avoid loops — without it, the new commit would re-trigger `ai-sdlc-review.yml` which would re-run the reviewers, re-approve, re-sign, ad infinitum. Because `[skip ci]` ALSO suppresses `verify-attestation.yml` for the chore SHA, the CI-sign step posts the `ai-sdlc/attestation=success` commit status directly against the chore SHA after push (it just signed the envelope against current PR state, so the verifier would report the same).
 - Rebase / chore-commit allowlist still applies (AISDLC-85). The CI attestor signs against the actual PR head SHA, so the envelope's subject + diff bind to the dev's commits — the chore-commit-on-top is the CI's own attestation chore commit, which falls under the existing `.ai-sdlc/attestations/<sha>.dsse.json` allowlist pattern.
 
 ### Operator workflow — external contributor PR (zero-key contributor)
@@ -140,7 +140,7 @@ This is a one-time setup the repo maintainer does ONCE per repo. After this, eve
 2. `verify-attestation.yml` reports `invalid (missing)` and posts the friendly fallback comment.
 3. `ai-sdlc-review.yml`'s analyze job runs the 3 reviewer agents. They all approve.
 4. `ai-sdlc-review.yml`'s report job's "CI-side attestor" step signs an envelope and pushes it to the PR branch.
-   - Same-repo branch: succeeds, branch gets the chore commit, next verify-attestation run reports `valid`.
+   - Same-repo branch: succeeds, branch gets the chore commit, and the same step posts `ai-sdlc/attestation=success` directly against the chore-commit SHA (the `[skip ci]` tag would otherwise prevent `verify-attestation.yml` from running on that SHA).
    - Fork PR: skipped (token can't push). Maintainer either approves manually OR pulls the fork into a same-repo branch.
 5. Maintainer (CODEOWNERS) reviews + approves the PR.
 6. Merge queue picks it up + merges. No local-key requirement for the contributor.

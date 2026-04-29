@@ -186,6 +186,17 @@ jobs:
       # GITHUB_TOKEN even with contents:write, and we explicitly skip the
       # step in that case.
       contents: write
+      # AISDLC-87 round-2 fix: statuses:write lets the CI-side attestor step
+      # post the `ai-sdlc/attestation` commit status DIRECTLY on the new
+      # chore-commit SHA instead of relying on `verify-attestation.yml` to
+      # re-run on the synchronize event. The chore commit uses `[skip ci]`
+      # to prevent the review-loop, but `[skip ci]` ALSO suppresses
+      # `verify-attestation.yml` for the same SHA — so the status would
+      # never be posted. The CI-sign step KNOWS the envelope is valid (it
+      # just signed it against current PR state), so it can post the status
+      # itself without re-running the verifier. See CLAUDE.md → "Bootstrap
+      # CI-side attestor" step 4 for the full flow.
+      statuses: write
     # The push step needs git + node available — the report job otherwise
     # only ran github-script. Provide a checkout so the workflow has the
     # repo state to commit attestations against.
@@ -195,9 +206,17 @@ jobs:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
+      # AISDLC-87 round-2 fix: pin pnpm version to repo's `packageManager`
+      # field via pnpm/action-setup (matches `analyze` job above) instead of
+      # `npm install -g pnpm` which floats to whatever the latest is. The
+      # `cache: pnpm` on setup-node also requires pnpm to be installed before
+      # setup-node runs, so the order matters.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: pnpm
 
       - name: Skip if attestation valid (AISDLC-74 — local /ai-sdlc execute review trusted)
         if: needs.check_attestation.outputs.attestation_valid == 'true'
@@ -264,11 +283,14 @@ jobs:
           fi
 
           # The orchestrator + verifier need to be installed and built so
-          # ci-sign-attestation.mjs can import the runtime barrel. The
-          # report job otherwise doesn't need pnpm — guard with a check
-          # in case the runner image already has it cached.
-          which pnpm >/dev/null 2>&1 || npm install -g pnpm
-          pnpm install --frozen-lockfile
+          # ci-sign-attestation.mjs can import the runtime barrel. pnpm is
+          # already installed via `pnpm/action-setup@v4` at job start.
+          # `--ignore-scripts` (security hardening, AISDLC-87 round-2):
+          # this job has the CI-attestor private key in env, so we refuse
+          # to run dependency postinstall scripts that could exfiltrate it.
+          # The orchestrator + verifier don't depend on any postinstall side
+          # effects (pure TS → JS build), so this is safe.
+          pnpm install --frozen-lockfile --ignore-scripts
           pnpm --filter "@ai-sdlc/orchestrator..." build
 
           # Compose the verdicts JSON the script expects.
@@ -321,11 +343,64 @@ jobs:
           # rules don't conflict with multi-line shell-string literals. Git
           # accepts repeated -m flags as separate paragraphs which is
           # cleaner than printf-substitution for fixed text.
+          #
+          # `[skip ci]` is intentional: prevents `ai-sdlc-review.yml` from
+          # re-running on its own commit (would loop forever — re-review,
+          # re-approve, re-sign, ...). It ALSO skips `verify-attestation.yml`
+          # for the same SHA, which is why the next step posts the
+          # `ai-sdlc/attestation` commit status DIRECTLY (AISDLC-87 round-2
+          # fix — the original implementation relied on verify-attestation
+          # re-running on the chore-commit synchronize event, which never
+          # happens with `[skip ci]`).
           git commit \
             -m "chore(ci): sign review attestation [skip ci]" \
             -m "CI-side attestor (AISDLC-87) signed an envelope at $OUT_PATH after all three CI reviewer agents approved this PR. The verifier accepts CI-signed envelopes identically to maintainer-signed ones, as long as the ci-attestor pubkey is in .ai-sdlc/trusted-reviewers.yaml." \
             -m "Co-Authored-By: ai-sdlc-ci-attestor[bot] <ci-attestor@ai-sdlc.local>"
           git push origin "HEAD:$PR_HEAD_REF"
+
+          # Capture the chore-commit SHA so the next step can post the
+          # `ai-sdlc/attestation` status directly against it. We do this
+          # AFTER push so a failed push doesn't leave a misleading status.
+          CHORE_SHA=$(git rev-parse HEAD)
+          echo "chore_sha=$CHORE_SHA" >> "$GITHUB_OUTPUT"
+          echo "envelope_path=$OUT_PATH" >> "$GITHUB_OUTPUT"
+        id: ci_sign
+
+      # AISDLC-87 round-2 fix (Option B per reviewer feedback): set the
+      # `ai-sdlc/attestation` commit status directly on the chore commit
+      # SHA we just pushed. The chore commit message contains `[skip ci]`,
+      # which prevents `ai-sdlc-review.yml` from re-running (intentional —
+      # avoids signing-loop) BUT also prevents `verify-attestation.yml`
+      # from running on the chore SHA. Without this step, the chore SHA
+      # would have NO `ai-sdlc/attestation` status, and the PR would
+      # appear to be missing the attestation check forever.
+      #
+      # We can post `success` directly because we just signed the envelope
+      # against the current PR state — the verifier would also report
+      # `valid` if it ran. This is functionally identical to the verifier
+      # reporting valid, just without the round trip.
+      - name: Post ai-sdlc/attestation status on chore-commit SHA
+        if: steps.ci_sign.outputs.chore_sha != ''
+        uses: actions/github-script@v7
+        env:
+          CHORE_SHA: ${{ steps.ci_sign.outputs.chore_sha }}
+          ENVELOPE_PATH: ${{ steps.ci_sign.outputs.envelope_path }}
+        with:
+          script: |
+            const sha = process.env.CHORE_SHA;
+            const envelopePath = process.env.ENVELOPE_PATH || '';
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha,
+              state: 'success',
+              context: 'ai-sdlc/attestation',
+              description:
+                'attestation valid (CI-signed) — Post Review Results will skip duplicate review',
+            });
+            core.notice(
+              `Posted ai-sdlc/attestation=success on ${sha} for envelope ${envelopePath}`,
+            );
 
       - name: Skip if analyze was skipped (release-please PRs)
         if: needs.analyze.result == 'skipped' && needs.check_attestation.outputs.attestation_valid != 'true'
