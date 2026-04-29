@@ -7,3 +7,11 @@ coverage:
     patch:
       default:
         target: 80%
+
+# Build / verify scripts run as subprocesses (`node bundle.mjs`,
+# `node verify-bundle.mjs`) and are exercised end-to-end by tests + CI
+# workflows that import their OUTPUT, not their source. Codecov can't see
+# subprocess invocations as "covered". Excluded so patch coverage on the
+# real product code isn't dragged down by build tooling.
+ignore:
+  - '**/scripts/**'
