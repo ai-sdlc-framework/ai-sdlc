@@ -1,0 +1,11 @@
+# CODEOWNERS for ai-sdlc-framework/ai-sdlc
+#
+# Branch protection on `main` is configured to require Code Owner approval
+# before merging. The owners listed here become the required reviewers.
+#
+# Syntax: <pattern> <owner> [<owner> ...]
+# Patterns follow .gitignore-like rules; LAST matching pattern wins.
+# Reference: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-security/customizing-your-repository/about-code-owners
+
+# Default owner for everything in the repo.
+*       @deefactorial
