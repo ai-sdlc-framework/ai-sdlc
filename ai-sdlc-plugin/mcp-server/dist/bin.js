@@ -21127,6 +21127,399 @@ function registerGetReviewPolicy(server2, deps) {
   );
 }
 
+// src/tools/task-edit.ts
+import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync4, writeFileSync } from "node:fs";
+import { join as join4 } from "node:path";
+
+// src/lib/backlog-frontmatter.ts
+var FRONTMATTER_DELIMITER = "---";
+function splitFrontmatter(content) {
+  const lineEnding = content.includes("\r\n") ? "\r\n" : "\n";
+  const lines = content.split(lineEnding);
+  if (lines.length === 0 || lines[0] !== FRONTMATTER_DELIMITER) {
+    return { hasFrontmatter: false, frontmatterLines: [], bodyLines: lines, lineEnding };
+  }
+  let closeIdx = -1;
+  for (let i = 1; i < lines.length; i++) {
+    if (lines[i] === FRONTMATTER_DELIMITER) {
+      closeIdx = i;
+      break;
+    }
+  }
+  if (closeIdx === -1) {
+    return { hasFrontmatter: false, frontmatterLines: [], bodyLines: lines, lineEnding };
+  }
+  return {
+    hasFrontmatter: true,
+    frontmatterLines: lines.slice(1, closeIdx),
+    bodyLines: lines.slice(closeIdx + 1),
+    lineEnding
+  };
+}
+function joinFrontmatter(split) {
+  const { hasFrontmatter, frontmatterLines, bodyLines, lineEnding } = split;
+  if (!hasFrontmatter) {
+    return bodyLines.join(lineEnding);
+  }
+  return [FRONTMATTER_DELIMITER, ...frontmatterLines, FRONTMATTER_DELIMITER, ...bodyLines].join(
+    lineEnding
+  );
+}
+function parseFrontmatterBlocks(frontmatterLines) {
+  const blocks = [];
+  let current = null;
+  for (const line of frontmatterLines) {
+    const keyMatch = line.match(/^([A-Za-z_][A-Za-z0-9_-]*)\s*:(?:\s|$)/);
+    if (keyMatch && !line.startsWith(" ") && !line.startsWith("	")) {
+      if (current) blocks.push(current);
+      current = { key: keyMatch[1], lines: [line] };
+      continue;
+    }
+    if (!current) {
+      current = { key: "", lines: [line] };
+      continue;
+    }
+    current.lines.push(line);
+  }
+  if (current) blocks.push(current);
+  return blocks;
+}
+function serializeFrontmatterBlocks(blocks) {
+  const out = [];
+  for (const block of blocks) out.push(...block.lines);
+  return out;
+}
+function setFrontmatterScalar(blocks, key, value) {
+  const formatted = formatScalarLine(key, value);
+  const idx = blocks.findIndex((b) => b.key === key);
+  if (idx === -1) {
+    return [...blocks, { key, lines: [formatted] }];
+  }
+  const next = [...blocks];
+  next[idx] = { key, lines: [formatted] };
+  return next;
+}
+function formatScalarLine(key, value) {
+  if (needsQuoting(value)) {
+    const escaped = value.replace(/'/g, "''");
+    return `${key}: '${escaped}'`;
+  }
+  return `${key}: ${value}`;
+}
+function needsQuoting(value) {
+  if (value === "") return true;
+  if (/^[\s!&*?|>%@`#,[\]{}'"-]/.test(value)) return true;
+  if (/[:#]/.test(value)) return true;
+  if (/^(true|false|null|yes|no|on|off|~)$/i.test(value)) return true;
+  if (/^-?\d+(\.\d+)?$/.test(value)) return true;
+  return false;
+}
+function checkAcceptanceCriteria(bodyLines, indices) {
+  if (indices.length === 0) return bodyLines;
+  const wanted = new Set(indices);
+  const out = [];
+  let inAcSection = false;
+  let positionalIdx = 0;
+  for (const line of bodyLines) {
+    if (/^##\s+Acceptance Criteria/i.test(line)) {
+      inAcSection = true;
+      positionalIdx = 0;
+      out.push(line);
+      continue;
+    }
+    if (inAcSection && /^##\s+/.test(line)) {
+      inAcSection = false;
+      out.push(line);
+      continue;
+    }
+    if (!inAcSection) {
+      out.push(line);
+      continue;
+    }
+    const acMatch = line.match(/^(\s*-\s+\[)([ xX])(\]\s+)(?:#(\d+)\s+)?(.*)$/);
+    if (!acMatch) {
+      out.push(line);
+      continue;
+    }
+    positionalIdx += 1;
+    const explicitIdx = acMatch[4] ? Number(acMatch[4]) : void 0;
+    const acIdx = explicitIdx ?? positionalIdx;
+    if (wanted.has(acIdx)) {
+      const prefix = acMatch[1];
+      const suffix = acMatch[3];
+      const numberMarker = explicitIdx !== void 0 ? `#${explicitIdx} ` : "";
+      out.push(`${prefix}x${suffix}${numberMarker}${acMatch[5]}`);
+    } else {
+      out.push(line);
+    }
+  }
+  return out;
+}
+function setFinalSummary(bodyLines, summary) {
+  const headingIdx = bodyLines.findIndex((line) => /^##\s+Final Summary\s*$/i.test(line));
+  const summaryLines = summary.split(/\r?\n/);
+  if (headingIdx === -1) {
+    const trimmed = trimTrailingBlankLines(bodyLines);
+    const out = [...trimmed];
+    if (out.length > 0) out.push("");
+    out.push("## Final Summary", "", ...summaryLines, "");
+    return out;
+  }
+  let endIdx = bodyLines.length;
+  for (let i = headingIdx + 1; i < bodyLines.length; i++) {
+    if (/^##\s+/.test(bodyLines[i])) {
+      endIdx = i;
+      break;
+    }
+  }
+  const before = bodyLines.slice(0, headingIdx + 1);
+  const after = bodyLines.slice(endIdx);
+  return [...before, "", ...summaryLines, "", ...after];
+}
+function trimTrailingBlankLines(lines) {
+  let end = lines.length;
+  while (end > 0 && lines[end - 1].trim() === "") end -= 1;
+  return lines.slice(0, end);
+}
+function applyTaskEdit(content, op) {
+  const split = splitFrontmatter(content);
+  const blocks = parseFrontmatterBlocks(split.frontmatterLines);
+  let nextBlocks = blocks;
+  let frontmatterChanged = false;
+  if (op.status !== void 0) {
+    nextBlocks = setFrontmatterScalar(nextBlocks, "status", op.status);
+    frontmatterChanged = true;
+  }
+  const bodyOps = op.acceptanceCriteriaCheck !== void 0 || op.finalSummary !== void 0;
+  const shouldStampDate = op.updatedDate === true || typeof op.updatedDate === "string" && op.updatedDate.length > 0 || op.updatedDate !== false && (frontmatterChanged || bodyOps);
+  if (shouldStampDate) {
+    const value = typeof op.updatedDate === "string" ? op.updatedDate : nowStamp();
+    nextBlocks = setFrontmatterScalar(nextBlocks, "updated_date", value);
+  }
+  let nextBody = split.bodyLines;
+  if (op.acceptanceCriteriaCheck !== void 0) {
+    nextBody = checkAcceptanceCriteria(nextBody, op.acceptanceCriteriaCheck);
+  }
+  if (op.finalSummary !== void 0) {
+    nextBody = setFinalSummary(nextBody, op.finalSummary);
+  }
+  const nextSplit = {
+    ...split,
+    frontmatterLines: serializeFrontmatterBlocks(nextBlocks),
+    bodyLines: nextBody
+  };
+  return joinFrontmatter(nextSplit);
+}
+function nowStamp(date3 = /* @__PURE__ */ new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date3.getUTCFullYear()}-${pad(date3.getUTCMonth() + 1)}-${pad(date3.getUTCDate())} ${pad(date3.getUTCHours())}:${pad(date3.getUTCMinutes())}`;
+}
+function readFrontmatterScalar(content, key) {
+  const split = splitFrontmatter(content);
+  if (!split.hasFrontmatter) return void 0;
+  const blocks = parseFrontmatterBlocks(split.frontmatterLines);
+  const block = blocks.find((b) => b.key === key);
+  if (!block) return void 0;
+  if (block.lines.length === 0) return void 0;
+  const first = block.lines[0];
+  const m = first.match(/^[A-Za-z_][A-Za-z0-9_-]*\s*:\s*(.*)$/);
+  if (!m) return void 0;
+  let value = m[1].trim();
+  if (value.startsWith("'") && value.endsWith("'") && value.length >= 2 || value.startsWith('"') && value.endsWith('"') && value.length >= 2) {
+    value = value.slice(1, -1);
+    if (first.includes(": '")) value = value.replace(/''/g, "'");
+  }
+  return value;
+}
+
+// src/tools/task-edit.ts
+function registerTaskEdit(server2, deps) {
+  server2.tool(
+    "task_edit",
+    "Edit a Backlog.md task file (status, AC checks, final summary) while preserving unknown frontmatter keys (e.g. permittedExternalPaths). AISDLC-73 fix.",
+    {
+      id: external_exports.string().describe('Task ID, e.g. "AISDLC-68" (case insensitive)'),
+      status: external_exports.string().optional().describe('New status value. Common values: "To Do", "In Progress", "Done", "Draft".'),
+      acceptanceCriteriaCheck: external_exports.array(external_exports.number().int().positive()).optional().describe(
+        "AC indices (1-based, matching the `#N` markers in the AC list) to flip from `[ ]` to `[x]`."
+      ),
+      finalSummary: external_exports.string().optional().describe(
+        'Markdown content for the "## Final Summary" section. Replaces the section if it exists, otherwise appends it.'
+      ),
+      updatedDate: external_exports.union([external_exports.string(), external_exports.boolean()]).optional().describe(
+        'Override the auto-stamped `updated_date` frontmatter value. Pass a string for an explicit timestamp, `false` to skip stamping. Defaults to "now" whenever any other field changes.'
+      )
+    },
+    async ({ id, status, acceptanceCriteriaCheck, finalSummary, updatedDate }) => {
+      try {
+        const located = locateTaskFile(deps.projectDir, id);
+        if (!located) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Task ${id} not found under ${join4(deps.projectDir, "backlog")}/{tasks,completed}/`
+              }
+            ],
+            isError: true
+          };
+        }
+        const { path } = located;
+        const before = readFileSync4(path, "utf-8");
+        const after = applyTaskEdit(before, {
+          status,
+          acceptanceCriteriaCheck,
+          finalSummary,
+          updatedDate
+        });
+        if (after !== before) {
+          writeFileSync(path, after, "utf-8");
+        }
+        const summaryParts = [`# task_edit: ${id}`, `Path: ${path}`];
+        if (status !== void 0) summaryParts.push(`Status \u2192 ${status}`);
+        if (acceptanceCriteriaCheck && acceptanceCriteriaCheck.length > 0) {
+          summaryParts.push(`Checked ACs: ${acceptanceCriteriaCheck.join(", ")}`);
+        }
+        if (finalSummary !== void 0)
+          summaryParts.push(`Final Summary updated (${finalSummary.length} chars)`);
+        if (after === before) summaryParts.push("No changes (no-op)");
+        const preserved = readFrontmatterScalar(after, "permittedExternalPaths");
+        if (preserved !== void 0) {
+          summaryParts.push(`permittedExternalPaths preserved: ${preserved}`);
+        }
+        return { content: [{ type: "text", text: summaryParts.join("\n") }] };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error editing task ${id}: ${err.message}`
+            }
+          ],
+          isError: true
+        };
+      }
+    }
+  );
+}
+function locateTaskFile(projectDir, id) {
+  const idLower = id.toLowerCase();
+  const buckets = [
+    { dir: join4(projectDir, "backlog", "tasks"), bucket: "tasks" },
+    { dir: join4(projectDir, "backlog", "completed"), bucket: "completed" }
+  ];
+  for (const { dir, bucket } of buckets) {
+    if (!existsSync4(dir)) continue;
+    for (const entry of readdirSync(dir)) {
+      const lower = entry.toLowerCase();
+      if (lower.startsWith(`${idLower} `) || lower.startsWith(`${idLower}.`)) {
+        return { path: join4(dir, entry), bucket };
+      }
+    }
+  }
+  return void 0;
+}
+
+// src/tools/task-complete.ts
+import { existsSync as existsSync5, mkdirSync, readFileSync as readFileSync5, renameSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { basename, dirname, join as join5 } from "node:path";
+function registerTaskComplete(server2, deps) {
+  server2.tool(
+    "task_complete",
+    "Mark a Backlog.md task Done and move it from backlog/tasks/ to backlog/completed/, preserving unknown frontmatter keys. AISDLC-73 fix.",
+    {
+      id: external_exports.string().describe('Task ID, e.g. "AISDLC-68" (case insensitive)'),
+      finalSummary: external_exports.string().optional().describe('Markdown content for the "## Final Summary" section.'),
+      updatedDate: external_exports.union([external_exports.string(), external_exports.boolean()]).optional().describe("Override the auto-stamped `updated_date` value (string), or `false` to skip.")
+    },
+    async ({ id, finalSummary, updatedDate }) => {
+      try {
+        const located = locateTaskFile(deps.projectDir, id);
+        if (!located) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Task ${id} not found under ${join5(deps.projectDir, "backlog")}/{tasks,completed}/`
+              }
+            ],
+            isError: true
+          };
+        }
+        if (located.bucket === "completed") {
+          const before2 = readFileSync5(located.path, "utf-8");
+          const after2 = applyTaskEdit(before2, {
+            status: "Done",
+            finalSummary,
+            updatedDate
+          });
+          if (after2 !== before2) writeFileSync2(located.path, after2, "utf-8");
+          return {
+            content: [
+              {
+                type: "text",
+                text: [
+                  `# task_complete: ${id} (already in backlog/completed/)`,
+                  `Path: ${located.path}`,
+                  after2 === before2 ? "No changes (idempotent no-op)" : "Status / summary refreshed"
+                ].join("\n")
+              }
+            ]
+          };
+        }
+        const before = readFileSync5(located.path, "utf-8");
+        const after = applyTaskEdit(before, {
+          status: "Done",
+          finalSummary,
+          updatedDate
+        });
+        if (after !== before) writeFileSync2(located.path, after, "utf-8");
+        const completedDir = join5(deps.projectDir, "backlog", "completed");
+        if (!existsSync5(completedDir)) mkdirSync(completedDir, { recursive: true });
+        const filename = basename(located.path);
+        const destPath = join5(completedDir, filename);
+        if (existsSync5(destPath)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Refusing to clobber existing file at ${destPath}. Resolve manually.`
+              }
+            ],
+            isError: true
+          };
+        }
+        mkdirSync(dirname(destPath), { recursive: true });
+        renameSync(located.path, destPath);
+        return {
+          content: [
+            {
+              type: "text",
+              text: [
+                `# task_complete: ${id}`,
+                `Moved: ${located.path}`,
+                `   \u2192 : ${destPath}`,
+                `Status: Done`,
+                finalSummary !== void 0 ? `Final Summary set (${finalSummary.length} chars)` : ""
+              ].filter(Boolean).join("\n")
+            }
+          ]
+        };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error completing task ${id}: ${err.message}`
+            }
+          ],
+          isError: true
+        };
+      }
+    }
+  );
+}
+
 // src/tools/index.ts
 function registerAllTools(server2, deps) {
   registerCheckPrStatus(server2, deps);
@@ -21134,6 +21527,8 @@ function registerAllTools(server2, deps) {
   registerGetGovernanceContext(server2, deps);
   registerListDetectedPatterns(server2, deps);
   registerGetReviewPolicy(server2, deps);
+  registerTaskEdit(server2, deps);
+  registerTaskComplete(server2, deps);
 }
 
 // src/server.ts
