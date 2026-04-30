@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolDeps } from '../types.js';
 import { applyTaskEdit, readFrontmatterScalar } from '../lib/backlog-frontmatter.js';
+import { resolveProjectRoot } from '../lib/resolve-project-root.js';
 
 /**
  * MCP tool: `task_edit` — drop-in replacement for `mcp__backlog__task_edit`
@@ -47,13 +48,21 @@ export function registerTaskEdit(server: McpServer, deps: ToolDeps): void {
     },
     async ({ id, status, acceptanceCriteriaCheck, finalSummary, updatedDate }) => {
       try {
-        const located = locateTaskFile(deps.projectDir, id);
+        // Resolve the project root at call time (AISDLC-99). Prefer the
+        // `deps.projectDir` injected by the server when it points at a
+        // valid backlog root (this lets tests inject a tmpdir without
+        // mucking with env vars). Otherwise re-run the env+cwd resolver,
+        // which sidesteps the broken `${CLAUDE_PLUGIN_DATA}` default the
+        // plugin manifest sets for `AI_SDLC_PROJECT_ROOT`.
+        const projectDir = pickProjectRoot(deps.projectDir);
+        if (typeof projectDir !== 'string') return projectDir; // error result
+        const located = locateTaskFile(projectDir, id);
         if (!located) {
           return {
             content: [
               {
                 type: 'text' as const,
-                text: `Task ${id} not found under ${join(deps.projectDir, 'backlog')}/{tasks,completed}/`,
+                text: `Task ${id} not found under ${join(projectDir, 'backlog')}/{tasks,completed}/`,
               },
             ],
             isError: true,
@@ -105,6 +114,41 @@ export function registerTaskEdit(server: McpServer, deps: ToolDeps): void {
 }
 
 // ── Internals (exported for tests) ─────────────────────────────────────
+
+/**
+ * Pick a project root for a backlog tool call (AISDLC-99).
+ *
+ * Returns the resolved absolute path on success. On failure, returns an
+ * MCP tool result the caller can return directly (so the tool surfaces
+ * the canonical "could not resolve project root" error to the user
+ * instead of swallowing it).
+ *
+ * Resolution order:
+ * 1. The injected `deps.projectDir` if it exists AND contains `backlog/`
+ *    (this is the test-friendly path — tests inject a tmpdir).
+ * 2. `resolveProjectRoot()` — the env-var-with-cwd-fallback discovery.
+ */
+export function pickProjectRoot(
+  injected: string,
+): string | { content: { type: 'text'; text: string }[]; isError: true } {
+  if (injected && hasBacklogDir(injected)) return injected;
+  try {
+    return resolveProjectRoot();
+  } catch (err) {
+    return {
+      content: [{ type: 'text' as const, text: (err as Error).message }],
+      isError: true,
+    };
+  }
+}
+
+function hasBacklogDir(dir: string): boolean {
+  try {
+    return existsSync(join(dir, 'backlog'));
+  } catch {
+    return false;
+  }
+}
 
 export interface LocatedTask {
   path: string;

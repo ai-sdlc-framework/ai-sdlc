@@ -280,3 +280,14 @@ Cite the counts in `finalSummary`. If you can't reproduce the counts in the task
 ```
 
 The file location is the source of truth: `backlog/tasks/<id>-*.md` = open, `backlog/completed/<id>-*.md` = closed. `task_edit` sets the status field inside the file but does NOT move it; `task_complete` does both.
+
+## Plugin MCP server — project-root discovery (AISDLC-99)
+
+The plugin's MCP server (`ai-sdlc-plugin/mcp-server/`) exposes filesystem-touching tools (`mcp__plugin_ai-sdlc_ai-sdlc__task_edit`, `mcp__plugin_ai-sdlc_ai-sdlc__task_complete`, `get_governance_context`, `get_review_policy`) that need to know which directory is "the project". Resolution happens in this order at every tool call:
+
+1. **`AI_SDLC_PROJECT_ROOT` env var** — used only if it points at an existing directory containing a `backlog/` subdirectory. The plugin's `plugin.json` sets this to `${CLAUDE_PLUGIN_DATA}` (which resolves to `~/.claude/plugins/data/<source>-<plugin>/`); that path has no `backlog/`, so the resolver transparently falls through.
+2. **`CLAUDE_PROJECT_DIR` env var** — same `backlog/` validity check. Claude Code sets this when a session is bound to a project.
+3. **Walk up from `process.cwd()`** — find the nearest ancestor with a `backlog/` subdirectory. This is the path that actually wins for `task_edit` / `task_complete` calls in a normal Claude Code session opened inside an AI-SDLC project.
+4. **Throw** — if none of the above resolves, the tool returns a clear error: `"AI-SDLC: could not resolve project root. Set AI_SDLC_PROJECT_ROOT or run from a directory inside a project with a backlog/ subdirectory."`
+
+This means you almost never need to set anything by hand. Just open Claude Code in your project (or any subdirectory of it) and the plugin's task tools will operate on the correct `backlog/`. To override (e.g. point at a different checkout) export `AI_SDLC_PROJECT_ROOT=/abs/path/to/project` before launching Claude Code.

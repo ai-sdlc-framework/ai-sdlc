@@ -4,7 +4,7 @@ import { basename, dirname, join } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolDeps } from '../types.js';
 import { applyTaskEdit } from '../lib/backlog-frontmatter.js';
-import { locateTaskFile } from './task-edit.js';
+import { locateTaskFile, pickProjectRoot } from './task-edit.js';
 
 /**
  * MCP tool: `task_complete` — drop-in replacement for
@@ -33,13 +33,19 @@ export function registerTaskComplete(server: McpServer, deps: ToolDeps): void {
     },
     async ({ id, finalSummary, updatedDate }) => {
       try {
-        const located = locateTaskFile(deps.projectDir, id);
+        // Resolve the project root at call time (AISDLC-99). See the matching
+        // comment in `task-edit.ts` for the why — short version: the plugin
+        // manifest sets `AI_SDLC_PROJECT_ROOT=${CLAUDE_PLUGIN_DATA}`, which is
+        // the wrong directory, so we fall back to walking up from cwd.
+        const projectDir = pickProjectRoot(deps.projectDir);
+        if (typeof projectDir !== 'string') return projectDir; // error result
+        const located = locateTaskFile(projectDir, id);
         if (!located) {
           return {
             content: [
               {
                 type: 'text' as const,
-                text: `Task ${id} not found under ${join(deps.projectDir, 'backlog')}/{tasks,completed}/`,
+                text: `Task ${id} not found under ${join(projectDir, 'backlog')}/{tasks,completed}/`,
               },
             ],
             isError: true,
@@ -83,7 +89,7 @@ export function registerTaskComplete(server: McpServer, deps: ToolDeps): void {
         });
         if (after !== before) writeFileSync(located.path, after, 'utf-8');
 
-        const completedDir = join(deps.projectDir, 'backlog', 'completed');
+        const completedDir = join(projectDir, 'backlog', 'completed');
         if (!existsSync(completedDir)) mkdirSync(completedDir, { recursive: true });
 
         const filename = basename(located.path);
