@@ -60,6 +60,7 @@ If `/ai-sdlc execute` errors with `signing-key not found`, run step 1 + open the
 
 - `verify-attestation.yml` runs on `pull_request`. It scans every `.ai-sdlc/attestations/*.dsse.json` on the PR branch and matches by recomputing the predicate's content bindings (diff hash, policy hash, agent file hashes, plugin version, schema version) against current PR state — so the verifier is rebase-stable (AISDLC-84). It sets the `ai-sdlc/attestation` commit status to `valid` or `invalid (<reason>)`.
 - `ai-sdlc-review.yml` Post Review Results checks that status. When `valid`, it short-circuits cleanly with a notice. Otherwise, it runs the duplicate review normally.
+- Force-pushes to PRs with valid attestations now auto-recover the bot approval (AISDLC-93); no manual `gh pr review --approve` needed. The skip-when-attestation-valid step posts a fresh `gh pr review --approve` so branch protection's `dismiss_stale_reviews: true` rule (which dismisses the prior approval on every push) doesn't strand auto-merge.
 - When the attestation is missing or invalid, `verify-attestation.yml` ALSO posts a friendly educational PR comment (idempotent — checked via `<!-- ai-sdlc:attestation-fallback-comment -->` marker before posting again). The comment explains the bootstrap flow and the most common failure causes (force-push diff change, policy edit, missing trusted-reviewers entry).
 
 ### What CI rejects (intentional)
