@@ -393,9 +393,17 @@ export function findChoreCommitViolations({ subjectSha, headSha, repoRoot, gitFn
  * that expose it. We intentionally keep this scoped to the verifier (don't
  * import the orchestrator-side helper) so the verifier can run from a
  * source checkout that hasn't built the orchestrator.
+ *
+ * `core.quotepath=false` is required so unicode paths (e.g. backlog
+ * filenames containing `—` or `→`) come back as raw UTF-8 instead of git's
+ * default octal-escaped + double-quoted form `"backlog/.../aisdlc-XX-\342\200\224..."`.
+ * The chore-commit allowlist regex is anchored against unquoted paths;
+ * without this flag a unicode backlog filename in a chore commit causes
+ * `findChoreCommitViolations` to false-positive and the verifier rejects
+ * with `unexpected chore commit content` (AISDLC-92, traced from PR #101).
  */
 function git(args, cwd) {
-  return execFileSync('git', args, {
+  return execFileSync('git', ['-c', 'core.quotepath=false', ...args], {
     cwd,
     encoding: 'utf-8',
     maxBuffer: 64 * 1024 * 1024,

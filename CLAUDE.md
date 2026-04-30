@@ -176,6 +176,12 @@ If a `/schedule`-triggered task needs to do real code work, the correct pattern 
 
 Backlog tasks live in `backlog/tasks/` (Backlog.md) and are managed via the `mcp__backlog__*` MCP tools. Every issue executed under the AI-SDLC pipeline MUST be tracked here.
 
+### Filename constraint — ASCII only (AISDLC-92)
+
+Task **titles** may use unicode for human readability (`—`, `→`, `≥`, etc.), but the resulting **filename** in `backlog/tasks/` and `backlog/completed/` must be ASCII-only until upstream Backlog.md ships a unicode-stripping fix. Background: PR #101 (AISDLC-90) was blocked when the auto-derived filename contained `—` and `→` — git's `core.quotepath=true` default octal-escaped + double-quoted the path in `git diff --name-only`, which broke the verifier's chore-commit allowlist regex (`^backlog/(tasks|completed)/.+\.md$`). The verifier was hardened (`-c core.quotepath=false`) but ASCII-only filenames are the defense-in-depth layer.
+
+The `scripts/check-backlog-ascii.sh` pre-commit hook (wired in `.husky/pre-commit`) enforces this on staged additions/renames; it ignores legacy unicode-named files already in `backlog/completed/` so historical commits don't churn. To rename: `git mv "<unicode-name>.md" "<ascii-equivalent>.md"`. To retitle the task itself: `mcp__backlog__task_edit` with a new title, or rename the file and resync via `task_edit` to keep the frontmatter aligned.
+
 ### Canonical execution paths
 
 | Use case | Command | Billing | Notes |
