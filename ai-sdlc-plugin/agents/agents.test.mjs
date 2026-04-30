@@ -198,10 +198,31 @@ describe('agent definition tool restrictions', () => {
 });
 
 describe('execute-orchestrator agent (AISDLC-82)', () => {
-  it('declares Task in its tools list (the only agent permitted to spawn subagents)', () => {
+  it('declares Agent(<allowlist>) in its tools list (the only agent permitted to spawn subagents)', () => {
+    // AISDLC-90: the Task tool was renamed to Agent in Claude Code v2.1.63.
+    // The orchestrator uses the modern Agent(<allowlist>) form, which both
+    // grants the tool and restricts which subagent types can be spawned —
+    // defense-in-depth against recursive orchestrator spawning.
+    const tools = agents['execute-orchestrator.md'].tools;
+    const agentDecl = tools.find((t) => t.startsWith('Agent('));
     assert.ok(
-      agents['execute-orchestrator.md'].tools.includes('Task'),
-      'execute-orchestrator must have Task to spawn developer + 3 reviewer subagents',
+      agentDecl,
+      'execute-orchestrator must declare Agent(<allowlist>) form to spawn developer + 3 reviewer subagents',
+    );
+    // Allowlist must contain exactly the four spawnable subagents.
+    assert.match(agentDecl, /\bdeveloper\b/, 'allowlist must include developer');
+    assert.match(agentDecl, /\bcode-reviewer\b/, 'allowlist must include code-reviewer');
+    assert.match(agentDecl, /\btest-reviewer\b/, 'allowlist must include test-reviewer');
+    assert.match(agentDecl, /\bsecurity-reviewer\b/, 'allowlist must include security-reviewer');
+  });
+
+  it('does NOT declare the legacy bare Task tool (renamed to Agent in v2.1.63 — AISDLC-90)', () => {
+    // Negative assertion: a bare `Task` entry would silently no-op under the
+    // modern allowlist semantics. The legacy spelling must not regress.
+    const tools = agents['execute-orchestrator.md'].tools;
+    assert.ok(
+      !tools.includes('Task'),
+      'execute-orchestrator must NOT declare bare `Task` — use Agent(<allowlist>) instead',
     );
   });
 
@@ -221,16 +242,33 @@ describe('execute-orchestrator agent (AISDLC-82)', () => {
     );
   });
 
-  it('declares the plugin task_edit + task_complete tools (preserve unknown frontmatter)', () => {
+  it('declares the plugin task_edit + task_complete tools with the correct MCP namespace (AISDLC-90)', () => {
+    // Plugin-supplied MCP tools use the namespace
+    // `mcp__plugin_<plugin-name>_<server-name>__<tool>`. From plugin.json,
+    // plugin name is `ai-sdlc` and the server key under mcpServers is also
+    // `ai-sdlc`, so the prefix is `mcp__plugin_ai-sdlc_ai-sdlc__`.
     const tools = agents['execute-orchestrator.md'].tools;
     assert.ok(
-      tools.includes('mcp__ai-sdlc-plugin__task_edit'),
-      'execute-orchestrator needs the plugin variant of task_edit (preserves permittedExternalPaths — AISDLC-83)',
+      tools.includes('mcp__plugin_ai-sdlc_ai-sdlc__task_edit'),
+      'execute-orchestrator needs the plugin variant of task_edit (preserves permittedExternalPaths — AISDLC-83) under the correct mcp__plugin_<plugin>_<server>__ namespace',
     );
     assert.ok(
-      tools.includes('mcp__ai-sdlc-plugin__task_complete'),
-      'execute-orchestrator needs the plugin variant of task_complete (preserves permittedExternalPaths — AISDLC-83)',
+      tools.includes('mcp__plugin_ai-sdlc_ai-sdlc__task_complete'),
+      'execute-orchestrator needs the plugin variant of task_complete (preserves permittedExternalPaths — AISDLC-83) under the correct mcp__plugin_<plugin>_<server>__ namespace',
     );
+  });
+
+  it('does NOT declare the legacy mcp__ai-sdlc-plugin__* namespace (silently dropped — AISDLC-90)', () => {
+    // Negative assertion: the previous (incorrect) namespace would cause the
+    // tool entries to silently fail allowlist matching and be dropped from
+    // the orchestrator's actual tool grant. Make sure we don't regress.
+    const tools = agents['execute-orchestrator.md'].tools;
+    for (const tool of tools) {
+      assert.ok(
+        !tool.startsWith('mcp__ai-sdlc-plugin__'),
+        `execute-orchestrator must NOT declare legacy mcp__ai-sdlc-plugin__* namespace; found '${tool}'`,
+      );
+    }
   });
 
   it('body contains Step 0 marker (sweep merged worktrees)', () => {
