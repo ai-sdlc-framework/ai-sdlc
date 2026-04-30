@@ -9,13 +9,7 @@
   "homepage": "https://ai-sdlc.io",
   "repository": "https://github.com/ai-sdlc-framework/ai-sdlc",
   "license": "Apache-2.0",
-  "keywords": [
-    "governance",
-    "sdlc",
-    "security",
-    "quality-gates",
-    "code-review"
-  ],
+  "keywords": ["governance", "sdlc", "security", "quality-gates", "code-review"],
   "hooks": {
     "SessionStart": [
       {
@@ -92,9 +86,7 @@
   "mcpServers": {
     "ai-sdlc": {
       "command": "node",
-      "args": [
-        "${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/bin.js"
-      ],
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/bin.js"],
       "env": {
         "AI_SDLC_PROJECT_ROOT": "${CLAUDE_PLUGIN_DATA}"
       }
