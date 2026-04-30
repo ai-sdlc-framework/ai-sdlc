@@ -2,7 +2,7 @@
 name: execute
 description: Execute a backlog task end-to-end via subagents — worktree → developer → reviews → PR. Spawns the execute-orchestrator subagent so multiple invocations from the main session can fan out in parallel.
 argument-hint: <task-id>
-allowed-tools: Task
+allowed-tools: Agent(execute-orchestrator)
 model: inherit
 ---
 
@@ -12,12 +12,12 @@ Execute backlog task `$ARGUMENTS` by spawning the `execute-orchestrator` subagen
 
 Originally the Step 0-13 recipe lived in this command body and ran in the main session. That made parallel runs impossible — every subagent invoked from the body (`developer`, the three reviewers, etc.) declares `disallowedTools: [AgentTool]` to prevent recursive spawning, and the main session's body is sequential by construction.
 
-`execute-orchestrator` is the one and only plugin agent with `Task` in its tools list. Moving the recipe into that agent makes parallel runs first-class:
+`execute-orchestrator` is the one and only plugin agent with `Agent` (formerly `Task`, renamed in Claude Code v2.1.63) in its tools list. Moving the recipe into that agent makes parallel runs first-class:
 
-- One `/ai-sdlc execute <id>` invocation → main session fires one `Task(execute-orchestrator)` → orchestrator drives one pipeline.
-- N parallel runs → main session fires N `Task(execute-orchestrator)` calls **in a single message** → all N orchestrators run concurrently, each in their own worktree, with independent per-worktree `.active-task` sentinels (AISDLC-81), independent developer + reviewer fan-outs, and independent PRs.
+- One `/ai-sdlc execute <id>` invocation → main session fires one `Agent(execute-orchestrator)` → orchestrator drives one pipeline.
+- N parallel runs → main session fires N `Agent(execute-orchestrator)` calls **in a single message** → all N orchestrators run concurrently, each in their own worktree, with independent per-worktree `.active-task` sentinels (AISDLC-81), independent developer + reviewer fan-outs, and independent PRs.
 
-`/loop /ai-sdlc:execute <task-id>` continues to work unchanged — `/loop` fires one Task at a time, which composes naturally with the new design.
+`/loop /ai-sdlc:execute <task-id>` continues to work unchanged — `/loop` fires one Agent call at a time, which composes naturally with the new design.
 
 ## Scaling notes
 
@@ -27,7 +27,7 @@ Originally the Step 0-13 recipe lived in this command body and ran in the main s
 
 ## Orchestration
 
-Spawn the orchestrator via the Task tool:
+Spawn the orchestrator via the Agent tool:
 
 - `subagent_type: execute-orchestrator`
 - `prompt: "$ARGUMENTS"` (the task ID is the only argument the orchestrator needs)

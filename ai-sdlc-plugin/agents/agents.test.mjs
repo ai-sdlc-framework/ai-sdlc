@@ -67,10 +67,11 @@ const agentFiles = [
   'execute-orchestrator.md',
 ];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
-// The orchestrator is the only agent with Task in its tools list — every other
-// agent declares disallowedTools: [AgentTool] to prevent recursive subagent
-// spawning. We exempt the orchestrator from the all-agents-disallow-AgentTool
-// assertion below.
+// The orchestrator is the only agent with Agent(<allowlist>) in its tools list
+// (the Task tool was renamed to Agent in Claude Code v2.1.63 — AISDLC-90).
+// Every other agent declares disallowedTools: [AgentTool] to prevent recursive
+// subagent spawning. We exempt the orchestrator from the
+// all-agents-disallow-AgentTool assertion below.
 const nonOrchestratorAgentFiles = agentFiles.filter((f) => f !== 'execute-orchestrator.md');
 const agents = {};
 
@@ -226,6 +227,19 @@ describe('execute-orchestrator agent (AISDLC-82)', () => {
     );
   });
 
+  it('does NOT over-declare AskUserQuestion (removed in AISDLC-90)', () => {
+    // Negative regression guard for AC #9: the orchestrator body uses the
+    // structured-failure-return pattern (outcome: aborted + populate notes)
+    // at every "ask the user" site rather than calling AskUserQuestion
+    // directly. Re-introducing AskUserQuestion would silently re-enable the
+    // mid-pipeline interactive prompt that breaks parallel runs.
+    const tools = agents['execute-orchestrator.md'].tools;
+    assert.ok(
+      !tools.includes('AskUserQuestion'),
+      'execute-orchestrator must NOT declare AskUserQuestion — over-declared, removed in AISDLC-90',
+    );
+  });
+
   it('does NOT have AgentTool in disallowedTools (it needs to spawn subagents)', () => {
     const disallowed = agents['execute-orchestrator.md'].disallowedTools || [];
     assert.ok(
@@ -313,6 +327,20 @@ describe('execute-orchestrator agent (AISDLC-82)', () => {
       body,
       /Never spawn the `execute-orchestrator` agent recursively/i,
       "orchestrator must not spawn another orchestrator — that is the main session's job",
+    );
+  });
+
+  it('body uses outcome: aborted at "ask the user" sites (AC #10 — structured-failure pattern)', () => {
+    // AISDLC-90 AC #10 reworded the previous "ask the user via
+    // AskUserQuestion" wording into the structured-failure-return pattern
+    // (outcome: aborted + populate notes for the spawning session to
+    // escalate). This assertion guards the body wording against silent
+    // regression to the interactive-ask phrasing.
+    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
+    assert.match(
+      body,
+      /outcome:\s*aborted/i,
+      'orchestrator must signal failures via structured outcome:aborted, not interactive prompts',
     );
   });
 });

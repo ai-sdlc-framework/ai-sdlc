@@ -61,8 +61,20 @@ describe('/ai-sdlc execute frontmatter', () => {
     assert.equal(frontmatter.model, 'inherit');
   });
 
-  it('allows the Task tool (only tool needed — orchestrator does the rest)', () => {
-    assert.match(frontmatter['allowed-tools'], /\bTask\b/);
+  it('allows the Agent tool restricted to execute-orchestrator (AISDLC-90: Task→Agent rename)', () => {
+    // The Task tool was renamed to Agent in Claude Code v2.1.63. The slash
+    // command uses the Agent(<allowlist>) form so it both grants the tool
+    // and restricts which subagent it may spawn — there's only ever one
+    // /ai-sdlc execute orchestrator per invocation, parallel runs come from
+    // the operator (or /loop) firing the slash command multiple times.
+    assert.match(frontmatter['allowed-tools'], /\bAgent\(execute-orchestrator\)/);
+    // Negative regression guard: must not regress to the legacy bare `Task`
+    // entry, which would silently drop allowlist matching post-v2.1.63.
+    assert.doesNotMatch(
+      frontmatter['allowed-tools'],
+      /\bTask\b/,
+      'must not regress to legacy bare Task entry — use Agent(execute-orchestrator)',
+    );
   });
 
   it('does NOT itself need backlog MCP tools (orchestrator declares those)', () => {
@@ -95,7 +107,11 @@ describe('/ai-sdlc execute body (thin wrapper)', () => {
 
   it('explains the parallel-runs design rationale', () => {
     assert.match(cmdBody, /parallel/i);
-    assert.match(cmdBody, /AgentTool/, 'should explain why Task is on the orchestrator only');
+    assert.match(
+      cmdBody,
+      /AgentTool/,
+      'should explain why Agent(execute-orchestrator) is on the orchestrator only',
+    );
   });
 
   it('documents `/loop` compatibility', () => {
@@ -155,18 +171,20 @@ describe('execute-orchestrator body contract (the moved Step 0-13 recipe)', () =
     // The Done flip and file move must land in the same PR as the work,
     // sequenced after reviews approve and before push.
     assert.match(orchestratorBody, /mark task Done.*BEFORE push/i);
-    assert.match(orchestratorBody, /mcp__ai-sdlc-plugin__task_complete/);
+    assert.match(orchestratorBody, /mcp__plugin_ai-sdlc_ai-sdlc__task_complete/);
   });
 
   it('uses the plugin task_edit (preserves permittedExternalPaths — AISDLC-83)', () => {
     // Upstream mcp__backlog__task_edit silently strips unknown frontmatter
     // keys including permittedExternalPaths. The plugin drop-in preserves
-    // them. The orchestrator must call the plugin variants. The body may
-    // mention the upstream names in explanatory text (e.g. "not upstream
-    // mcp__backlog__task_edit") so we strip those backtick-quoted forms
-    // before the negative assertion.
-    assert.match(orchestratorBody, /mcp__ai-sdlc-plugin__task_edit/);
-    assert.match(orchestratorBody, /mcp__ai-sdlc-plugin__task_complete/);
+    // them. The orchestrator must call the plugin variants under the correct
+    // mcp__plugin_<plugin>_<server>__ namespace (AISDLC-90 fixed the prior
+    // mcp__ai-sdlc-plugin__* spelling that silently dropped the tool grant).
+    // The body may mention the upstream names in explanatory text (e.g. "not
+    // upstream mcp__backlog__task_edit") so we strip those backtick-quoted
+    // forms before the negative assertion.
+    assert.match(orchestratorBody, /mcp__plugin_ai-sdlc_ai-sdlc__task_edit/);
+    assert.match(orchestratorBody, /mcp__plugin_ai-sdlc_ai-sdlc__task_complete/);
 
     // Strip backtick-quoted upstream-name explanations before the regression
     // check so the rationale paragraph doesn't trip the assertion.
