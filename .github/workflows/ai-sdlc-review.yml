@@ -218,11 +218,50 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # AISDLC-93: this step ALSO posts a fresh `gh pr review --approve`.
+      #
+      # Why: branch protection has `dismiss_stale_reviews: true`, so any
+      # force-push (rebase, content-preserving fix like AISDLC-92's unicode
+      # filename rename, etc.) dismisses the prior bot approval. The new CI
+      # run on the new HEAD sees the local attestation is still valid
+      # (AISDLC-84 verifier matches by content hashes, not filename SHA) and
+      # short-circuits the duplicate LLM review per AISDLC-74 — but pre-fix,
+      # this short-circuit didn't carry the bot approval through. Result: PR
+      # had no approval, auto-merge stuck even with all required checks
+      # green. AISDLC-90's PR #101 surfaced this; needed manual
+      # `gh pr review --approve` to unblock.
+      #
+      # Why this is safe: the local attestation is verified by
+      # `verify-attestation.yml` against current PR state (commit SHA, diff
+      # hash, policy hash, agent file hashes, plugin version, schema
+      # version) and surfaced as the `ai-sdlc/attestation` commit status.
+      # Posting a bot approval here is functionally equivalent to a
+      # maintainer manually clicking "Approve" because they trust the same
+      # attestation — no new trust, just resilience to dismissal.
       - name: Skip if attestation valid (AISDLC-74 — local /ai-sdlc execute review trusted)
         if: needs.check_attestation.outputs.attestation_valid == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           echo "::notice::Local review attestation is valid — Post Review Results SKIPPING duplicate CI review (AISDLC-74)."
           echo "::notice::See .ai-sdlc/attestations/<head-sha>.dsse.json for the signed envelope."
+          # Re-establish the bot approval on the latest HEAD. dismiss_stale_reviews:
+          # true means any prior approval was dismissed on this push; we need a fresh
+          # one so auto-merge can fire. The local attestation is already verified by
+          # ai-sdlc/attestation status check (AISDLC-84/85), so this approval is
+          # backed by the same trust chain as a freshly-run LLM review (AISDLC-93).
+          gh pr review "${{ github.event.pull_request.number }}" --approve --body "$(cat <<'EOF'
+          ## AI-SDLC: local review attestation accepted
+
+          The author signed a local review attestation (3 reviewer subagents approved during /ai-sdlc execute).
+          CI's verify-attestation workflow validated the envelope against current PR state — see the
+          `ai-sdlc/attestation` commit status for the audit trail.
+
+          Per AISDLC-74, when the local attestation is valid, CI skips its duplicate LLM review.
+          Per AISDLC-93, this skip path now also posts this bot approval so auto-merge can fire after a force-push
+          (which would otherwise dismiss the prior approval via branch protection's dismiss_stale_reviews rule).
+          EOF
+          )"
 
       # AISDLC-87: CI-side attestor.
       # When all 3 reviewer agents approved AND there's no valid local
