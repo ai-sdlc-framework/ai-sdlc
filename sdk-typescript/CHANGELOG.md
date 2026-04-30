@@ -1,5 +1,19 @@
 # @ai-sdlc/sdk
 
+## [0.8.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-typescript-v0.7.0...sdk-typescript-v0.8.0) (2026-04-30)
+
+
+### Bug Fixes
+
+* resolve issue [#29](https://github.com/ai-sdlc-framework/ai-sdlc/issues/29) ([8b74a6d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8b74a6dbe9eee88c85fea40269e79c34ceded39c))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.8.0
+
 ## [0.7.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/sdk-typescript-v0.6.0...sdk-typescript-v0.7.0) (2026-04-29)
 
 

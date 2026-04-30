@@ -23,6 +23,89 @@
 
 The `AI_SDLC_PARALLELISM` flag remains `off` by default. Promotion to default-on requires the chaos-test plan in `docs/operations/operator-runbook.md` to pass and a 1-week dogfood soak window — both deferred to a follow-up release.
 
+## [0.8.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.7.0...orchestrator-v0.8.0) (2026-04-30)
+
+
+### Features
+
+* add action governance — blockedActions in agent-role.yaml ([#45](https://github.com/ai-sdlc-framework/ai-sdlc/issues/45)) ([eb53342](https://github.com/ai-sdlc-framework/ai-sdlc/commit/eb5334229bfd3f66464c4986efb0c432d1756a3e))
+* add automated dogfood pipeline — admission, routing, and PR review workflows ([4583ab6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4583ab65285163ab16e42f140cdd74e87dbfdb9a))
+* add CI boundary to review agent prompts (AISDLC-8.1) ([975c0cd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/975c0cdf000cf8a00e0968348b673aa80ec04be6))
+* add Claude Code plugin and SDK runner for native governance integration ([804f068](https://github.com/ai-sdlc-framework/ai-sdlc/commit/804f06801e388fb356cde716291abc4e3386f050))
+* add DiffAnalyzer for deterministic structural pre-review (AISDLC-8.2) ([ae0dde5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ae0dde5cb7d227998dd73fcb290da968c05a4fb3))
+* add meta-review pass and feedback flywheel (AISDLC-8.5) ([c9ba69d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c9ba69da6fa811fecedfafd33c736b6b6b94af93))
+* add pipeline visibility and lint/format to agent context ([8f07b3e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8f07b3ef4bc72c1a3bc48a1ba77e6ab9643420ea))
+* add pipeline-level cycle detection ([#41](https://github.com/ai-sdlc-framework/ai-sdlc/issues/41)) ([#42](https://github.com/ai-sdlc-framework/ai-sdlc/issues/42)) ([c730803](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c7308031e4b6f340c1cc195ae876565d0afe6d7d))
+* add Slack integration — pipeline visibility and emoji-to-issue trigger ([ec53b7c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ec53b7c7cd9adf834e17c28fb7e45271d1bd6e9a))
+* add structured reasoning with confidence scores to review agents (AISDLC-8.3) ([1ed0ec0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1ed0ec0a41a476652380191022d9b5500058cec8))
+* add trust-based source weighting to PPA admission scoring ([c04ca18](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c04ca1836ce35db8f15f363f1efb5262317eefb0))
+* add typecheck command to agent prompt to prevent pre-commit failures ([3497c71](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3497c7191bb2c7a5b34e973a68de3fc2986644ae))
+* human-readable agent log output instead of raw NDJSON ([685452f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/685452f8559232d187df0a6a0095f017ef4f0fb8))
+* implement RFC-0006 Design System Governance Pipeline ([e6dfd4c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e6dfd4c3f9efdf4b6ddb219f02131c206dfdcb67))
+* **orchestrator:** add backlog template vars + multi-pipeline support ([fd69674](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fd6967475fab54a8af51cfcf95919416cc6a0568))
+* **orchestrator:** add BacklogAdapter for admission scoring ([8435d5b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8435d5b27a46551f88065a8004b2b03201517ebe))
+* **orchestrator:** cryptographic review attestations for skip-duplicate-CI (AISDLC-74) ([a120071](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a120071720d91545c51b6c91b05a3ffb223d2cf5))
+* **orchestrator:** escalate review agent to large-context model + pre-push coverage gate ([a55e17c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a55e17cb52f592ec8eb008c11e6e2942ce02fc2a))
+* **orchestrator:** implement rfc-0008 ppa triad integration end-to-end ([522950d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/522950d70b566145feb9718ed88495f09b3e9b9a))
+* **orchestrator:** loadMaintainers reader for .ai-sdlc/maintainers.yaml ([1887b7a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1887b7a0957d8b3f0d77a6cdda9aeabe88dab7f6))
+* **orchestrator:** non-fatal config warnings instead of throw-on-first-failure ([c99b6a5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c99b6a5e0812af57cd9efbec75b905de75824e18))
+* **orchestrator:** priorityInputOverrides on AdmissionCompositeOptions ([93ab906](https://github.com/ai-sdlc-framework/ai-sdlc/commit/93ab90665a7256ef77cdff51a0b21a48274b51be))
+* **orchestrator:** recalibrate ppa scoring for backlog tasks via backlog-context ([02e8105](https://github.com/ai-sdlc-framework/ai-sdlc/commit/02e8105ae76152a81e1d9eaa7a24fc3fc37a6ffa))
+* **orchestrator:** rfc-0010 phase 1 foundations ([9197a0d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9197a0da89916d9a595289cf493a4918b6f1451d))
+* **orchestrator:** rfc-0010 phase 2 worktree pool manager ([554034a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/554034a1da4c24c8d4da2b8e8c710262d51fddaf))
+* **orchestrator:** rfc-0010 phase 2.5 model routing + classifier ([12b9750](https://github.com/ai-sdlc-framework/ai-sdlc/commit/12b97508db1874b847d4fb40e210cfbef62f3c1a))
+* **orchestrator:** rfc-0010 phase 2.7 harness adapter framework ([847a965](https://github.com/ai-sdlc-framework/ai-sdlc/commit/847a96541f45924f89070c8a106ff83e329d8d12))
+* **orchestrator:** rfc-0010 phase 2.8 subscription-aware scheduling ([ea26d40](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea26d40de0f82c06abb70a4c2b920336ee62e6af))
+* **orchestrator:** rfc-0010 phase 3 worker pool + merge gate + requeue ([6fe1b75](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6fe1b750cbbad1b4b254f03dd51f96dd84558430))
+* **orchestrator:** rfc-0010 phase 4 artifacts + observability ([93a41f1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/93a41f178961047d87aca7f6701ff4e43f301dae))
+* **orchestrator:** rfc-0010 phase 6 database isolation ([d44597f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d44597f4aa29330eb7f8c3bd5a1f6a57e89f4d4c))
+* **orchestrator:** tier-based agent-role tool defaults — coding/research/meta (AISDLC-79) ([22ffe01](https://github.com/ai-sdlc-framework/ai-sdlc/commit/22ffe011964a65e3c71da49bbb8cad5904b3481c))
+* **orchestrator:** wire ClaudeCodeAdapter into security triage ([ddaadf7](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ddaadf7743254d1f3afb9cd7d7cb50ac425b271c))
+* replace 21 hand-tuned rules with principles + exemplar bank (AISDLC-8.4) ([b02a755](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b02a755e960c98f0b55d2252c0d699e82e9a4e19))
+* stream agent progress via Claude Code stream-json output ([4c5c5b4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4c5c5b4ead16d2238af4809ec1ea1e1ef954767b))
+* workflow pattern detection Phase 1 — telemetry collection ([#50](https://github.com/ai-sdlc-framework/ai-sdlc/issues/50)) ([454548e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/454548ebe86b7588dff523e68d128b3c0b283a79))
+* workflow pattern detection Phase 1 — telemetry collection ([#50](https://github.com/ai-sdlc-framework/ai-sdlc/issues/50)) ([68f36be](https://github.com/ai-sdlc-framework/ai-sdlc/commit/68f36be6e66dd354b483ed2d851993823d544b7b))
+* workflow pattern detection Phases 2-4 — detection, proposals, artifacts ([e33a303](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e33a303e8f9158076c04361d0d09cd5a6f59c2e9))
+* workflow pattern detection Phases 2-4 — detection, proposals, artifacts ([e6ffd6a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e6ffd6aa93cbd9ca27fdb9b2eead4e6f12ed54ac))
+
+
+### Bug Fixes
+
+* Add missing validation for empty issueBody in SecurityTriageRunner ([#33](https://github.com/ai-sdlc-framework/ai-sdlc/issues/33)) ([#34](https://github.com/ai-sdlc-framework/ai-sdlc/issues/34)) ([9f81e66](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9f81e66dde0950f13272064cb36695cd7c2d8387))
+* add real-time observability to Claude Code runner ([bcb2f08](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bcb2f0825f52914fa7b07acd286bbdd97f50dd87))
+* address review findings — add schema, audit logging, requireHumanApproval ([e11a79d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e11a79dcacd8ff0f19934e09e18c6e169879a52f))
+* Agent should address review findings before human review ([#35](https://github.com/ai-sdlc-framework/ai-sdlc/issues/35)) ([#36](https://github.com/ai-sdlc-framework/ai-sdlc/issues/36)) ([34c7606](https://github.com/ai-sdlc-framework/ai-sdlc/commit/34c7606db4dacdc21875f876f332f8d61bfc4c2a))
+* allow review dismissals with documented reason ([c38fa35](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c38fa358d89c6d9d297f68bbb7f4f99fbd008569))
+* detect agent commits by diffing against merge-base with main ([5a27dc6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5a27dc66d51c87587f02da1eaa60e46f5fa962b4))
+* detect agent-committed changes instead of reporting 'no files modified' ([7b6309d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7b6309d30a0a1a172951ba83cbc542311dc86143))
+* only use openshell prefix when provider is explicitly openshell ([e2ea832](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e2ea8324c8de7fb49c16e64bcc21e6d85a4df5e1))
+* **orchestrator:** address local review findings for RFC-0008 ([3da537b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3da537b7aa1dd2a8c184414fc65368a3b23c94fe))
+* **orchestrator:** convention detector — React naming, multi-test-dir, path aliases (AISDLC-80) ([fdeefe4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fdeefe405f758b703c5bb5ec609c4fea4db2c009))
+* **orchestrator:** deflake withmergegate timeout test ([57aa161](https://github.com/ai-sdlc-framework/ai-sdlc/commit/57aa161de32b1631f94b08109667afb3cdce6dd9))
+* **orchestrator:** disable git core.quotepath so unicode filenames stage cleanly ([ea27178](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea27178afc6e266cc566b76848c20199790ce0cd))
+* **orchestrator:** include staged diff in detectChangedFiles ([b255d7a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b255d7a7c1836eb311c1967549898743097f15a4))
+* **orchestrator:** init UX papercuts (AISDLC-78) ([a4303bf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a4303bf7cbf3150f7bff0aa34d2c917088c18c3d))
+* **orchestrator:** only stage agent-touched files (drop git add -a) ([0eef249](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0eef249d2bec18253ac4f73562c2771f37975aaf))
+* **orchestrator:** pass dispatcher pipeline through; rebase before push ([26c2061](https://github.com/ai-sdlc-framework/ai-sdlc/commit/26c2061ea3f49a7e776cb237613485adb384b4fc))
+* **orchestrator:** pin scheduling tests to peak hour to deflake CI ([8e07d24](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8e07d2484d5297ce1667d0381f490d2d0f6c7666))
+* **orchestrator:** restore HEAD, surface guardrail detail, detect cross-repo writes ([34cdbb2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/34cdbb27a14eb89ebbbaa57533a79e726386c495))
+* **orchestrator:** schema-validate attestation predicate + sanitize GITHUB_OUTPUT (AISDLC-74) ([09ccaf3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/09ccaf3c66709ae93af06a59d3cfbe617a7281e4))
+* **orchestrator:** strip GIT_DIR from all execSync('git ...') sites (AISDLC-72) ([09e7780](https://github.com/ai-sdlc-framework/ai-sdlc/commit/09e7780e121ad26e18ace9f6fb0463ed318a7c64))
+* **orchestrator:** unshadow CLI --version listener and cover with integration tests (AISDLC-78) ([db8c4b2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/db8c4b2afa3384d83663997ae02760a6dd12c2da))
+* plugin install fixes, quality gate false positives, gitignore deduplication ([cf84f09](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cf84f09cf93aabd8e22acc5e0262a4ed22d4e4e0))
+* prevent duplicate .gitignore entries from ensureRuntimeGitignore ([a1ff0fe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a1ff0fe49681ea1200059e5eefc40e555915361c))
+* resolve issue [#29](https://github.com/ai-sdlc-framework/ai-sdlc/issues/29) ([8b74a6d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8b74a6dbe9eee88c85fea40269e79c34ceded39c))
+* resolve issue [#37](https://github.com/ai-sdlc-framework/ai-sdlc/issues/37) ([a8b0707](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a8b0707fa96b565a049fd8f123535a6eb885a3ca))
+* resolve issue [#46](https://github.com/ai-sdlc-framework/ai-sdlc/issues/46) ([6bd9f39](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6bd9f39c84423f688e39f87467c5aea4810e446c))
+* stop tracking orchestrator/.gitignore — generated at runtime ([909759b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/909759bd3cd7051f0bb2bdcb6696bc2277ec282b))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.8.0
+
 ## [0.7.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.6.0...orchestrator-v0.7.0) (2026-04-29)
 
 
