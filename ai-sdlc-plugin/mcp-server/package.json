@@ -25,6 +25,10 @@
       "import": "./dist/index.js"
     }
   },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "scripts": {
     "build": "tsc && pnpm bundle",
     "bundle": "node scripts/bundle.mjs",
