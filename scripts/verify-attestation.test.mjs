@@ -824,6 +824,81 @@ describe('runVerifier (AISDLC-85 — chore-commit-on-top)', () => {
       /(unexpected chore commit content.*review-policy\.md|policyHash mismatch)/,
     );
   });
+
+  // ─── AISDLC-92 — unicode-named backlog task in chore commit ──────────
+  //
+  // Regression: when a backlog task title contained unicode (`—`, `→`),
+  // Backlog.md derived a filename containing those chars. The chore commit
+  // moved the file from `backlog/tasks/` to `backlog/completed/`. Git's
+  // default `core.quotepath=true` octal-escaped + double-quoted that path
+  // in `git diff --name-only` output (e.g. `"backlog/.../...\\342\\200\\224..."`).
+  // The chore-commit allowlist regex (`^backlog/(tasks|completed)/.+\\.md$`)
+  // is anchored on `^backlog`, so the leading `"` made it false-positive.
+  // Verifier rejected with `unexpected chore commit content`, blocking the
+  // PR (#101 / AISDLC-90). Fix: prepend `-c core.quotepath=false` to every
+  // git invocation in the verifier's `git()` helper.
+  it('AISDLC-92: accepts chore commit moving a unicode-named backlog task file', () => {
+    // Pre-populate a backlog task file with unicode in its name BEFORE the
+    // dev commit so the chore commit can move it. Mirrors the failure mode
+    // observed when AISDLC-90's title used `—` and `→`.
+    const unicodeTaskName = 'aisdlc-99 - Task-with-unicode-—-and-→-chars.md';
+    mkdirSync(join(fixture.root, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(
+      join(fixture.root, 'backlog', 'tasks', unicodeTaskName),
+      '# task body\nstatus: To Do\n',
+    );
+    git(['add', `backlog/tasks/${unicodeTaskName}`], fixture.root);
+    git(['commit', '-q', '-m', 'add unicode-named task'], fixture.root);
+    const baseSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Dev commit — the substantive (reviewed) work.
+    writeFileSync(join(fixture.root, 'src-feature.txt'), 'reviewed feature\n');
+    git(['add', 'src-feature.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: reviewed feature'], fixture.root);
+    const devSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign attestation against the dev commit (matches `/ai-sdlc execute`
+    // Step 10 ordering — sign BEFORE the chore commit lands).
+    writeAttestation(fixture.root, devSha, baseSha, devSha, keys.privateKeyPem);
+
+    // Chore commit on top: move the unicode task file + add the
+    // attestation file. This is the exact shape that broke PR #101.
+    mkdirSync(join(fixture.root, 'backlog', 'completed'), { recursive: true });
+    git(
+      ['mv', `backlog/tasks/${unicodeTaskName}`, `backlog/completed/${unicodeTaskName}`],
+      fixture.root,
+    );
+    writeFileSync(
+      join(fixture.root, 'backlog', 'completed', unicodeTaskName),
+      '# task body\nstatus: Done\n',
+    );
+    git(['add', '.ai-sdlc/attestations'], fixture.root);
+    git(['commit', '-q', '-m', 'chore: attest + complete task'], fixture.root);
+    const headSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Direct check: violations must be empty (the regression that AISDLC-92
+    // fixes — quotepath=true would emit `"backlog/...\\342..."` paths that
+    // fail the `^backlog/(tasks|completed)/.+\\.md$` anchor).
+    const violations = findChoreCommitViolations({
+      subjectSha: devSha,
+      headSha,
+      repoRoot: fixture.root,
+    });
+    assert.deepEqual(
+      violations,
+      [],
+      `unicode backlog filenames must NOT trigger chore-commit violations, got: ${JSON.stringify(violations)}`,
+    );
+
+    // End-to-end: the verifier accepts the PR.
+    const out = runVerifier({ headSha, baseSha, repoRoot: fixture.root });
+    assert.equal(
+      out.status,
+      'valid',
+      `expected valid for unicode-task chore shape, got ${out.status}: ${out.reason}`,
+    );
+    assert.equal(out.reason, 'ok');
+  });
 });
 
 // ─── AISDLC-85 — unit tests for the new helpers ──────────────────────
@@ -931,6 +1006,26 @@ describe('findChoreCommitViolations (AISDLC-85)', () => {
       gitFn: fakeGit,
     });
     assert.deepEqual(v, ['.ai-sdlc/attestations/sub/foo.dsse.json']);
+  });
+
+  it('AISDLC-92: accepts unicode-named backlog files when git emits raw UTF-8 paths', () => {
+    // With `core.quotepath=false` (which the real `git()` helper now sets),
+    // git emits raw UTF-8 path bytes — no leading `"` and no octal escape.
+    // The allowlist regex is anchored on `^backlog`, so the unquoted path
+    // matches normally. This test pins the post-fix behavior.
+    const fakeGit = () =>
+      [
+        '.ai-sdlc/attestations/abc.dsse.json',
+        'backlog/tasks/aisdlc-92 - Verifier-—-quotepath-→-fix.md',
+        'backlog/completed/aisdlc-92 - Verifier-—-quotepath-→-fix.md',
+      ].join('\n');
+    const v = findChoreCommitViolations({
+      subjectSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+      repoRoot: '/tmp/fake',
+      gitFn: fakeGit,
+    });
+    assert.deepEqual(v, []);
   });
 });
 
