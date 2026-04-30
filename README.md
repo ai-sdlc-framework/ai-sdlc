@@ -188,11 +188,44 @@ The plugin provides:
 
 | Component | What it does |
 |---|---|
-| **6 Hooks** | PreToolUse enforcement, PostToolUse telemetry, SessionStart governance context, Stop quality gates (command + agent + asyncRewake coverage), PermissionRequest deny |
-| **5 Commands** | `/review`, `/triage`, `/fix-pr`, `/detect-patterns`, `/status` |
+| **7 Hooks** | PreToolUse enforcement, PostToolUse telemetry, SessionStart governance context + plugin-version staleness nag, Stop quality gates (command + agent + asyncRewake coverage), PermissionRequest deny |
+| **6 Commands** | `/review`, `/triage`, `/fix-pr`, `/detect-patterns`, `/status`, `/version` |
 | **3 Agents** | `code-reviewer`, `security-reviewer`, `test-reviewer` — each with restricted tool pools (reviewers can't Edit/Write) |
 | **1 Skill** | Governance rules auto-loaded at session start |
 | **MCP Server** | 5 tools: `check_pr_status`, `check_issue`, `get_governance_context`, `list_detected_patterns`, `get_review_policy` |
+
+### Staying up to date
+
+Claude Code plugins don't auto-update — once installed, your bundled version
+stays put until you explicitly run `/plugin update <name>`. To make sure that
+gap doesn't silently swallow new features (the same way it once cost a
+30-minute diagnosis loop when `execute-orchestrator` shipped in v0.8.0 against
+a v0.7.0 install), the plugin includes a SessionStart staleness check
+(AISDLC-89):
+
+- Every Claude Code session start, the plugin fetches `marketplace.json` from
+  `main` on this repo and compares the published version to the bundled one.
+- When the bundled version is older, you see a one-line yellow banner on
+  stderr telling you which version is available and how to update:
+
+  ```
+  ⚠ ai-sdlc plugin v0.7.0 installed, v0.8.1 available.
+    Run: /plugin update ai-sdlc && /reload-plugins
+    Changelog: https://github.com/ai-sdlc-framework/ai-sdlc/releases
+  ```
+
+- Result is cached for 24h at `~/.cache/ai-sdlc-plugin/version-check.json`,
+  so subsequent session starts within a day skip the network call.
+- **Silent on every failure mode** — offline, GitHub rate-limited, malformed
+  JSON, anything else: the hook exits 0 and the session proceeds normally.
+  No spam, no blocked startup.
+
+To run the check on demand (bypassing the cache), use `/ai-sdlc version`. It
+prints installed / latest / last-checked / status as a structured block.
+
+To opt out entirely, set `AI_SDLC_DISABLE_VERSION_CHECK=1` in your shell —
+the SessionStart hook short-circuits immediately and `/ai-sdlc version`
+prints `disabled` instead of querying the marketplace.
 
 The SDK runner (`ClaudeCodeSdkRunner`) provides programmatic control over agents:
 
