@@ -2982,7 +2982,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve.call(this, root, ref);
+      let _sch = resolve2.call(this, root, ref);
       if (_sch === void 0) {
         const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3009,7 +3009,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve(root, ref) {
+    function resolve2(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3584,7 +3584,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve(baseURI, relativeURI, options) {
+    function resolve2(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3811,7 +3811,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve,
+      resolve: resolve2,
       resolveComponent,
       equal,
       serialize,
@@ -12888,12 +12888,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve) => {
+    return new Promise((resolve2) => {
       const json = serializeMessage(message);
       if (this._stdout.write(json)) {
-        resolve();
+        resolve2();
       } else {
-        this._stdout.once("drain", resolve);
+        this._stdout.once("drain", resolve2);
       }
     });
   }
@@ -18955,7 +18955,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve) => setTimeout(resolve, pollInterval));
+        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -18972,7 +18972,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -19050,7 +19050,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve(parseResult.data);
+            resolve2(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -19311,12 +19311,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve2, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve, interval);
+      const timeoutId = setTimeout(resolve2, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -20275,7 +20275,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve) => setTimeout(resolve, pollInterval));
+      await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -21128,7 +21128,7 @@ function registerGetReviewPolicy(server2, deps) {
 }
 
 // src/tools/task-edit.ts
-import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync4, writeFileSync } from "node:fs";
+import { existsSync as existsSync5, readdirSync, readFileSync as readFileSync4, writeFileSync } from "node:fs";
 import { join as join4 } from "node:path";
 
 // src/lib/backlog-frontmatter.ts
@@ -21332,6 +21332,46 @@ function readFrontmatterScalar(content, key) {
   return value;
 }
 
+// src/lib/resolve-project-root.ts
+import { existsSync as existsSync4, statSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
+var ERROR_MESSAGE = "AI-SDLC: could not resolve project root. Set AI_SDLC_PROJECT_ROOT or run from a directory inside a project with a backlog/ subdirectory.";
+function hasBacklogDir(dir) {
+  try {
+    if (!existsSync4(dir)) return false;
+    if (!statSync(dir).isDirectory()) return false;
+    const backlog = resolve(dir, "backlog");
+    if (!existsSync4(backlog)) return false;
+    return statSync(backlog).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function walkUpForBacklog(start) {
+  let current = isAbsolute(start) ? start : resolve(start);
+  while (true) {
+    if (hasBacklogDir(current)) return current;
+    const parent = dirname(current);
+    if (parent === current) return void 0;
+    current = parent;
+  }
+}
+function resolveProjectRoot(opts = {}) {
+  const env = opts.env ?? process.env;
+  const cwd = opts.cwd ?? process.cwd();
+  const envProjectRoot = env.AI_SDLC_PROJECT_ROOT;
+  if (envProjectRoot && hasBacklogDir(envProjectRoot)) {
+    return resolve(envProjectRoot);
+  }
+  const claudeProjectDir = env.CLAUDE_PROJECT_DIR;
+  if (claudeProjectDir && hasBacklogDir(claudeProjectDir)) {
+    return resolve(claudeProjectDir);
+  }
+  const fromCwd = walkUpForBacklog(cwd);
+  if (fromCwd) return fromCwd;
+  throw new Error(ERROR_MESSAGE);
+}
+
 // src/tools/task-edit.ts
 function registerTaskEdit(server2, deps) {
   server2.tool(
@@ -21352,13 +21392,15 @@ function registerTaskEdit(server2, deps) {
     },
     async ({ id, status, acceptanceCriteriaCheck, finalSummary, updatedDate }) => {
       try {
-        const located = locateTaskFile(deps.projectDir, id);
+        const projectDir = pickProjectRoot(deps.projectDir);
+        if (typeof projectDir !== "string") return projectDir;
+        const located = locateTaskFile(projectDir, id);
         if (!located) {
           return {
             content: [
               {
                 type: "text",
-                text: `Task ${id} not found under ${join4(deps.projectDir, "backlog")}/{tasks,completed}/`
+                text: `Task ${id} not found under ${join4(projectDir, "backlog")}/{tasks,completed}/`
               }
             ],
             isError: true
@@ -21402,6 +21444,24 @@ function registerTaskEdit(server2, deps) {
     }
   );
 }
+function pickProjectRoot(injected) {
+  if (injected && hasBacklogDir2(injected)) return injected;
+  try {
+    return resolveProjectRoot();
+  } catch (err) {
+    return {
+      content: [{ type: "text", text: err.message }],
+      isError: true
+    };
+  }
+}
+function hasBacklogDir2(dir) {
+  try {
+    return existsSync5(join4(dir, "backlog"));
+  } catch {
+    return false;
+  }
+}
 function locateTaskFile(projectDir, id) {
   const idLower = id.toLowerCase();
   const buckets = [
@@ -21409,7 +21469,7 @@ function locateTaskFile(projectDir, id) {
     { dir: join4(projectDir, "backlog", "completed"), bucket: "completed" }
   ];
   for (const { dir, bucket } of buckets) {
-    if (!existsSync4(dir)) continue;
+    if (!existsSync5(dir)) continue;
     for (const entry of readdirSync(dir)) {
       const lower = entry.toLowerCase();
       if (lower.startsWith(`${idLower} `) || lower.startsWith(`${idLower}.`)) {
@@ -21421,8 +21481,8 @@ function locateTaskFile(projectDir, id) {
 }
 
 // src/tools/task-complete.ts
-import { existsSync as existsSync5, mkdirSync, readFileSync as readFileSync5, renameSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { basename, dirname, join as join5 } from "node:path";
+import { existsSync as existsSync6, mkdirSync, readFileSync as readFileSync5, renameSync, writeFileSync as writeFileSync2 } from "node:fs";
+import { basename, dirname as dirname2, join as join5 } from "node:path";
 function registerTaskComplete(server2, deps) {
   server2.tool(
     "task_complete",
@@ -21434,13 +21494,15 @@ function registerTaskComplete(server2, deps) {
     },
     async ({ id, finalSummary, updatedDate }) => {
       try {
-        const located = locateTaskFile(deps.projectDir, id);
+        const projectDir = pickProjectRoot(deps.projectDir);
+        if (typeof projectDir !== "string") return projectDir;
+        const located = locateTaskFile(projectDir, id);
         if (!located) {
           return {
             content: [
               {
                 type: "text",
-                text: `Task ${id} not found under ${join5(deps.projectDir, "backlog")}/{tasks,completed}/`
+                text: `Task ${id} not found under ${join5(projectDir, "backlog")}/{tasks,completed}/`
               }
             ],
             isError: true
@@ -21474,11 +21536,11 @@ function registerTaskComplete(server2, deps) {
           updatedDate
         });
         if (after !== before) writeFileSync2(located.path, after, "utf-8");
-        const completedDir = join5(deps.projectDir, "backlog", "completed");
-        if (!existsSync5(completedDir)) mkdirSync(completedDir, { recursive: true });
+        const completedDir = join5(projectDir, "backlog", "completed");
+        if (!existsSync6(completedDir)) mkdirSync(completedDir, { recursive: true });
         const filename = basename(located.path);
         const destPath = join5(completedDir, filename);
-        if (existsSync5(destPath)) {
+        if (existsSync6(destPath)) {
           return {
             content: [
               {
@@ -21489,7 +21551,7 @@ function registerTaskComplete(server2, deps) {
             isError: true
           };
         }
-        mkdirSync(dirname(destPath), { recursive: true });
+        mkdirSync(dirname2(destPath), { recursive: true });
         renameSync(located.path, destPath);
         return {
           content: [
@@ -21537,7 +21599,12 @@ function createPluginMcpServer() {
     name: "ai-sdlc-plugin",
     version: "0.7.0"
   });
-  const projectDir = process.env.CLAUDE_PROJECT_DIR || process.env.AI_SDLC_PROJECT_ROOT || process.cwd();
+  let projectDir;
+  try {
+    projectDir = resolveProjectRoot();
+  } catch {
+    projectDir = process.cwd();
+  }
   registerAllTools(server2, { projectDir });
   return { server: server2 };
 }
