@@ -18,6 +18,11 @@
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start.sh\"",
             "statusMessage": "Loading AI-SDLC governance..."
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/check-plugin-version.sh\"",
+            "statusMessage": "Checking plugin version..."
           }
         ]
       }
