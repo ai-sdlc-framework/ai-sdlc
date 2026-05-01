@@ -13,10 +13,18 @@
  *     --iteration-count 1 \
  *     --harness-note ""
  *
+ *   # AISDLC-102 oracle mode (no signing key required, prints contentHash):
+ *   node ai-sdlc-plugin/scripts/sign-attestation.mjs --print-content-hash
+ *
  * Inputs (CLI flags):
  *   --review-verdicts  path to JSON: [{ agentId, harness, approved, findings }]
  *   --iteration-count  integer (1 = single dev pass; 2 = one iteration ran)
  *   --harness-note     string (empty = independence enforced; non-empty = warning text)
+ *   --print-content-hash  bool: compute + print AISDLC-94 contentHash for the
+ *                         current worktree (origin/main...HEAD) and exit.
+ *                         Used by /ai-sdlc execute Step 10.5 (AISDLC-102) to
+ *                         decide whether reviewers must re-run after rebase.
+ *                         Does not require a signing key, does not write files.
  *
  * Reads from cwd (the worktree):
  *   - HEAD via `git rev-parse HEAD`
@@ -47,8 +55,14 @@ function parseArgs(argv) {
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a.startsWith('--')) {
-      out[a.substring(2)] = argv[i + 1];
-      i++;
+      const next = argv[i + 1];
+      // Boolean flag: either no next arg, or next arg is itself a `--flag`.
+      if (next === undefined || next.startsWith('--')) {
+        out[a.substring(2)] = true;
+      } else {
+        out[a.substring(2)] = next;
+        i++;
+      }
     }
   }
   return out;
@@ -73,6 +87,48 @@ function git(args, cwd) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
+
+  const repoRoot = resolve(process.cwd());
+
+  // ──────────────────────────────────────────────────────────────────
+  // AISDLC-102: --print-content-hash mode (read-only oracle for Step 10.5)
+  //
+  // Step 10.5 of the orchestrator (`ai-sdlc-plugin/agents/execute-orchestrator.md`)
+  // calls this script BEFORE and AFTER `git rebase origin/main` to decide
+  // whether the post-rebase content materially differs from what the reviewers
+  // approved. Same hash → reuse approval; different hash → re-spawn reviewers.
+  //
+  // This mode does NOT require a signing key, does NOT touch any files, and
+  // does NOT call buildPredicate / signAttestation — it just computes
+  // contentHash via the same algorithm AISDLC-94 ships and prints it.
+  // ──────────────────────────────────────────────────────────────────
+  if (args['print-content-hash']) {
+    const orchestratorBarrelRO = join(
+      repoRoot,
+      'orchestrator',
+      'dist',
+      'runtime',
+      'attestations.js',
+    );
+    if (!existsSync(orchestratorBarrelRO)) {
+      fail(
+        `${orchestratorBarrelRO} not found. Run \`pnpm --filter @ai-sdlc/orchestrator build\` first.`,
+      );
+    }
+    const { collectChangedFileEntries: collectRO, computeContentHash } = await import(
+      orchestratorBarrelRO
+    );
+    let entriesRO;
+    try {
+      entriesRO = collectRO('origin/main', 'HEAD', repoRoot);
+    } catch (err) {
+      fail(err.message ?? String(err));
+    }
+    const hash = computeContentHash(entriesRO);
+    process.stdout.write(`${hash}\n`);
+    return;
+  }
+
   const verdictsPath = args['review-verdicts'];
   const iterationCount = Number(args['iteration-count'] ?? '1');
   const harnessNote = args['harness-note'] ?? '';
@@ -82,7 +138,6 @@ async function main() {
     fail(`--iteration-count must be a positive integer, got ${args['iteration-count']}`);
   }
 
-  const repoRoot = resolve(process.cwd());
   const keyPath = join(homedir(), '.ai-sdlc', 'signing-key.pem');
   if (!existsSync(keyPath)) {
     fail(

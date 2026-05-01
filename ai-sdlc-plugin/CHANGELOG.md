@@ -51,6 +51,34 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ### Added
 
+- **Pre-sign rebase + conditional re-review** (`agents/execute-orchestrator.md`
+  Step 10.5; `scripts/sign-attestation.mjs --print-content-hash`): inserted a
+  new step between Step 9 (review iteration loop) and Step 10 (sign attestation)
+  that fetches `origin/main` (with a 30s timeout), skips when `git merge-base
+  --is-ancestor` reports no-op, otherwise rebases. The post-rebase
+  `contentHash` (AISDLC-94 dual-hash oracle) decides whether reviewers'
+  approval still binds (same hash → reuse) or whether 3 reviewers must
+  re-spawn for one round (different hash → re-review). Rebase conflicts abort
+  with `outcome: aborted (rebase-conflict)`; rebase-loop (main moves 3 times
+  during attempts) aborts with `outcome: aborted (rebase-loop)` — the
+  orchestrator never auto-resolves. Re-review iterations share Step 9's cap
+  (max 2 dev iterations); cap exceeded → ships as `[needs-human-attention]`.
+  Step 3 (worktree setup) ALSO fetches latest main first so the developer +
+  reviewers run against current state from the start. Together with
+  AISDLC-101 (verifier-side per-file delta hashing) this closes the
+  AISDLC-93 / PR #102 attestation-invalidation gap as a defense-in-depth
+  pair: producer-side Step 10.5 minimises *fresh* invalidation by signing
+  the latest state; verifier-side AISDLC-101 accepts envelopes whose
+  per-file blob SHA matches when sibling PRs merge between our push and our
+  merge. The new `--print-content-hash` flag on `sign-attestation.mjs` is a
+  read-only oracle used by Step 10.5 to compare pre/post rebase content
+  without requiring a signing key. Tier 2 implementation (`pipeline-cli/src/steps/`)
+  is deferred to AISDLC-100.5 (RFC-0012 Phase 5) since `pipeline-cli/`
+  doesn't exist yet (RFC-0012 Phase 1 = AISDLC-100.1). Test coverage:
+  `commands/execute.test.mjs` adds 9 new assertions on the orchestrator
+  body for Step 10.5 prose markers and Step 3 fresh-base behaviour.
+  (AISDLC-102)
+
 - **CI-side attestor** (`scripts/ci-sign-attestation.mjs` +
   `.github/workflows/ai-sdlc-review.yml` Post Review Results step): when CI's
   three reviewer agents (testing/critic/security) all approve a PR AND the

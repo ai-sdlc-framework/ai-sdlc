@@ -216,4 +216,59 @@ describe('sign-attestation.mjs', () => {
     assert.ok(existsSync(expectedPath), `expected envelope at ${expectedPath}`);
     assert.ok(res.stdout.includes(expectedPath), 'stdout should print the written path');
   });
+
+  // ── AISDLC-102: --print-content-hash oracle mode ──────────────────
+  // Step 10.5 of the orchestrator calls this mode before and after a
+  // pre-sign rebase to decide whether reviewers must re-run.
+
+  it('--print-content-hash prints contentHash and exits 0 without writing files (AISDLC-102)', () => {
+    // No --review-verdicts, no signing key required — pure read-only.
+    const res = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
+    // contentHash from AISDLC-94 is 64-hex-char sha256.
+    assert.match(res.stdout.trim(), /^[a-f0-9]{64}$/, 'should print sha256 hex');
+    // No envelope must have been written.
+    const attestationsDir = join(fixture.root, '.ai-sdlc', 'attestations');
+    assert.ok(!existsSync(attestationsDir), 'must not write any attestations files');
+  });
+
+  it('--print-content-hash is deterministic across invocations on same content (AISDLC-102)', () => {
+    // The AISDLC-94 contentHash binds to {path, blobSha} pairs sorted by
+    // path — same files at same SHAs ⇒ same hash. This is the property
+    // Step 10.5 relies on to decide "rebase didn't change anything."
+    const res1 = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    const res2 = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(res1.status, 0, `res1 stderr: ${res1.stderr}`);
+    assert.equal(res2.status, 0, `res2 stderr: ${res2.stderr}`);
+    assert.equal(
+      res1.stdout.trim(),
+      res2.stdout.trim(),
+      'two consecutive invocations on identical content must produce identical hash',
+    );
+  });
+
+  it('--print-content-hash detects content changes (AISDLC-102 re-review oracle)', () => {
+    // The ORACLE: if contentHash changes after rebase, reviewers must
+    // re-run. Simulate the file-content change case directly by mutating
+    // the changed file and amending the commit, then re-hashing.
+    const before = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(before.status, 0);
+    const beforeHash = before.stdout.trim();
+
+    // Mutate the changed file and amend the HEAD commit so origin/main...HEAD
+    // diff now covers different content. fixture.headSha points at the prior
+    // HEAD; the amend replaces it.
+    writeFileSync(join(fixture.root, 'feature.txt'), 'feature MUTATED\n');
+    git(['add', 'feature.txt'], fixture.root);
+    git(['commit', '-q', '--amend', '--no-edit'], fixture.root);
+
+    const after = runHelper(fixture.root, ['--print-content-hash'], { HOME: tmpHome });
+    assert.equal(after.status, 0);
+    const afterHash = after.stdout.trim();
+    assert.notEqual(
+      beforeHash,
+      afterHash,
+      'mutating a changed file must change contentHash (re-review trigger)',
+    );
+  });
 });
