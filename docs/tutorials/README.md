@@ -9,6 +9,7 @@ Step-by-step walkthroughs for common AI-SDLC scenarios.
 3. **[Configuring progressive autonomy](03-progressive-autonomy.md)** — Set up agent levels with promotion and demotion
 4. **[Building a custom adapter](04-custom-adapter.md)** — Implement an adapter for your tool of choice
 5. **[Multi-agent orchestration](05-multi-agent-orchestration.md)** — Configure agent handoffs and orchestration patterns
+6. **[Cost governance with CostPolicy](cost-governance.md)** — Declare per-execution / per-stage / monthly budgets and cost-aware model selection (RFC-0004)
 
 ## Contributing
 
