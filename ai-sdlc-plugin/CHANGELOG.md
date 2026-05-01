@@ -297,6 +297,22 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ### Changed
 
+- **`pnpm --filter @ai-sdlc/dogfood watch` migrated to `executePipeline()`
+  from `@ai-sdlc/pipeline-cli`** (AISDLC-100.5, RFC-0012 Phase 5) — the
+  watch CLI in `dogfood/src/cli-watch.ts` no longer wraps
+  `@ai-sdlc/orchestrator`'s reconciler-driven `startWatch`. Each `--issue`
+  is now driven directly through the shared Tier 2 composite from the
+  pipeline-cli package, which runs Steps 0-13 against a `SubagentSpawner`
+  selected per `--spawner auto|shell|sdk|mock` (default `auto` →
+  `defaultSpawner()` resolution per RFC §8.3 — `ShellClaudePSpawner`
+  preferred when `claude` CLI is on PATH, falling back to
+  `ClaudeCodeSDKSpawner` when `ANTHROPIC_API_KEY` is set). Behavior parity
+  is intentionally narrow: reconciler retry/backoff, Pipeline-resource
+  routing, admission gating, autonomy enforcement, audit logging, OTEL
+  instrumentation, and provenance attestation are NOT yet exposed by
+  pipeline-cli — those code paths still live in the orchestrator-driven
+  `pnpm --filter @ai-sdlc/dogfood execute` CLI (`cli.ts`, unchanged) and
+  Phase 6 follow-up tracks restoring them on top of `executePipeline()`.
 - **`/ai-sdlc execute`, `/ai-sdlc status`, `/ai-sdlc triage`**: rewired all
   call sites that previously used `mcp__backlog__task_edit` and
   `mcp__backlog__task_complete` to the plugin's drop-in replacements
