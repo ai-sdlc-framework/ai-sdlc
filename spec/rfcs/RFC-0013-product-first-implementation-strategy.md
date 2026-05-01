@@ -1,5 +1,5 @@
 ---
-id: RFC-0003
+id: RFC-0013
 title: AI-SDLC Orchestrator — Product Strategy
 status: Draft
 author: AI-SDLC Contributors
@@ -14,7 +14,7 @@ targetSpecVersion: v1alpha1
 requiresDocs: []
 ---
 
-# RFC-0003: AI-SDLC Orchestrator — Product Strategy
+# RFC-0013: AI-SDLC Orchestrator — Product Strategy
 
 **Status:** Draft
 **Author:** AI-SDLC Contributors
