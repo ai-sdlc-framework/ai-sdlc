@@ -1,0 +1,335 @@
+name: AI-SDLC DoR Ingress
+
+# RFC-0011 §5.2 GitHub Action ingress shim. Wires the rubric library
+# function (evaluateIssueE2E) into the GitHub issue + PR lifecycle:
+#
+#   - issues:opened / issues:edited  → score the issue body, post the
+#     idempotent clarification comment when needs-clarification.
+#   - pull_request:opened/synchronize touching `backlog/tasks/*.md` → score
+#     the changed task bodies (the in-repo equivalent of an issue).
+#
+# Phase 3 (AISDLC-115.4) ships this workflow in warn-only mode (see
+# .ai-sdlc/dor-config.yaml) — comments are posted, but the workflow does
+# not block PR merges or close issues. Flip the config's `evaluationMode`
+# to `enforce` after the soak window confirms the false-positive rate.
+
+on:
+  issues:
+    types: [opened, edited]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'backlog/tasks/*.md'
+
+# One concurrency group per (workflow, issue/pr) pair so a rapid edit
+# storm collapses to a single in-flight evaluation. Idempotent comment
+# posting handles the race anyway, but this saves CI minutes.
+concurrency:
+  group: dor-ingress-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  evaluate-issue:
+    name: Evaluate issue against DoR rubric
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issues'
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install + build pipeline-cli
+        run: |
+          pnpm install --filter @ai-sdlc/pipeline-cli... --frozen-lockfile
+          pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: Write issue body to disk
+        env:
+          ISSUE_BODY: ${{ github.event.issue.body }}
+        run: |
+          mkdir -p /tmp/dor
+          printf '%s' "$ISSUE_BODY" > /tmp/dor/issue.md
+
+      - name: Run Stage A evaluation (hermetic)
+        id: evaluate
+        env:
+          ISSUE_TITLE: ${{ github.event.issue.title }}
+          ISSUE_NUM: ${{ github.event.issue.number }}
+        run: |
+          set +e
+          OUT=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
+            dor-evaluate "gh#${ISSUE_NUM}" \
+            --body-file /tmp/dor/issue.md \
+            --title "$ISSUE_TITLE" \
+            --source github \
+            --hermetic)
+          STATUS=$?
+          echo "$OUT" > /tmp/dor/verdict.json
+          # 0 = admit, 2 = needs-clarification, anything else = real failure
+          if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 2 ]; then
+            echo "::error::dor-evaluate failed with exit $STATUS"
+            cat /tmp/dor/verdict.json
+            exit "$STATUS"
+          fi
+          VERDICT=$(node -e "process.stdout.write(require('/tmp/dor/verdict.json').overallVerdict)")
+          echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+
+      - name: Render clarification comment via pipeline-cli
+        if: steps.evaluate.outputs.verdict == 'needs-clarification'
+        id: render
+        # Single source of truth for comment composition lives in
+        # `pipeline-cli/src/dor/comment-loop.ts`'s `renderClarificationComment()`.
+        # That function applies `redactSecrets()` to every gate finding +
+        # clarifying question before they reach the body — critical because
+        # gate-3 references can extract URLs/paths from the issue body that
+        # contain leaked tokens (sk-ant-..., AWS keys, JWTs, etc.). The shim
+        # used to re-implement the renderer inline in github-script and
+        # SKIPPED the redaction pass; this step replaces that with a
+        # subcommand call so both paths emit identical (redacted) markdown.
+        run: |
+          BODY=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
+            dor-render-comment --verdict-file /tmp/dor/verdict.json --channel author)
+          # Multiline output via heredoc so newlines survive into env.
+          {
+            echo 'body<<__DOR_END__'
+            printf '%s' "$BODY"
+            echo
+            echo '__DOR_END__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post idempotent clarification comment
+        if: steps.evaluate.outputs.verdict == 'needs-clarification'
+        uses: actions/github-script@v7
+        env:
+          DOR_BODY: ${{ steps.render.outputs.body }}
+        with:
+          script: |
+            const marker = '<!-- ai-sdlc:dor-comment channel="author" -->';
+            const body = process.env.DOR_BODY;
+            if (!body || !body.includes(marker)) {
+              core.setFailed('dor-render-comment produced an empty or marker-less body');
+              return;
+            }
+
+            const issue_number = context.payload.issue.number;
+            // Locate prior agent comment via marker (idempotency). Use
+            // `github.paginate` instead of a single per_page=100 call so
+            // issues with >100 prior comments still find the marker —
+            // otherwise we'd post a duplicate clarification on every edit.
+            const existing = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const prior = existing.find((c) => c.body && c.body.includes(marker));
+            if (prior) {
+              if (prior.body.trim() === body.trim()) {
+                core.info('DoR comment unchanged — no-op.');
+                return;
+              }
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: prior.id,
+                body,
+              });
+              core.notice(`Updated DoR comment ${prior.id} on issue #${issue_number}`);
+            } else {
+              const { data: created } = await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                body,
+              });
+              core.notice(`Created DoR comment ${created.id} on issue #${issue_number}`);
+            }
+
+            // Apply the status:needs-clarification label so the GitHub UI
+            // surfaces the pipeline state. The label name mirrors the new
+            // backlog status enum (RFC §9.1).
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              labels: ['status:needs-clarification'],
+            });
+
+      - name: Remove status:needs-clarification on admit
+        if: steps.evaluate.outputs.verdict == 'admit'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issue_number = context.payload.issue.number;
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number,
+                name: 'status:needs-clarification',
+              });
+              core.notice(`Removed status:needs-clarification label on #${issue_number}`);
+            } catch (err) {
+              if (err.status === 404) {
+                core.info('No status:needs-clarification label to remove.');
+              } else {
+                throw err;
+              }
+            }
+
+  evaluate-pr-tasks:
+    name: Evaluate backlog tasks changed by PR
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      pull-requests: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Install + build pipeline-cli
+        run: |
+          pnpm install --filter @ai-sdlc/pipeline-cli... --frozen-lockfile
+          pnpm --filter @ai-sdlc/pipeline-cli build
+
+      - name: List changed backlog/tasks/*.md files
+        id: changed
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          # Limit to backlog/tasks/*.md additions/modifications (Added or Modified).
+          FILES=$(git diff --name-only --diff-filter=AM "$BASE_SHA" "$HEAD_SHA" -- 'backlog/tasks/*.md' || true)
+          # GitHub Actions multiline output via heredoc.
+          {
+            echo 'files<<EOF'
+            echo "$FILES"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+          if [ -z "$FILES" ]; then
+            echo "no-changes=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Evaluate each changed task
+        if: steps.changed.outputs.no-changes != 'true'
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          FILES: ${{ steps.changed.outputs.files }}
+        run: |
+          mkdir -p /tmp/dor
+          : > /tmp/dor/results.jsonl
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            ID=$(basename "$f" .md | cut -d- -f1-2)
+            set +e
+            OUT=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
+              dor-evaluate "$ID" --body-file "$f" --source backlog --hermetic)
+            STATUS=$?
+            set -e
+            if [ "$STATUS" -ne 0 ] && [ "$STATUS" -ne 2 ]; then
+              echo "::error::Failed to evaluate $f (exit $STATUS)"
+              echo "$OUT"
+              exit "$STATUS"
+            fi
+            # One JSON line per evaluated task with the source file inlined.
+            # SECURITY (AISDLC-115.4 round-2 critical fix): pass $f via env var
+            # instead of shell-interpolating into the JS literal. A malicious PR
+            # could otherwise add a backlog/tasks/*.md file with a single quote
+            # in the name to escape the JS string and execute arbitrary code in
+            # the runner. $OUT is also written to a file rather than interpolated
+            # to keep the node -e source free of shell-substituted JSON.
+            printf '%s\n' "$OUT" > /tmp/dor/_eval_out.json
+            EVAL_FILE="$f" node -e "const v = JSON.parse(require('fs').readFileSync('/tmp/dor/_eval_out.json', 'utf8')); v.__file = process.env.EVAL_FILE; process.stdout.write(JSON.stringify(v))" \
+              >> /tmp/dor/results.jsonl
+            echo >> /tmp/dor/results.jsonl
+          done <<< "$FILES"
+
+      - name: Render PR summary comment via pipeline-cli
+        if: steps.changed.outputs.no-changes != 'true'
+        id: render-pr
+        # Single source of truth for comment composition + secret redaction
+        # (see `pipeline-cli/src/dor/comment-loop.ts` `renderPrTasksComment`).
+        # The inline github-script renderer used to embed `gate.finding`
+        # verbatim, so a leaked token in a task body could reflect into the
+        # public PR comment.
+        run: |
+          BODY=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
+            dor-render-pr-summary --verdicts-file /tmp/dor/results.jsonl --channel author)
+          {
+            echo 'body<<__DOR_END__'
+            printf '%s' "$BODY"
+            echo
+            echo '__DOR_END__'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Post idempotent PR summary comment
+        if: steps.changed.outputs.no-changes != 'true'
+        uses: actions/github-script@v7
+        env:
+          DOR_BODY: ${{ steps.render-pr.outputs.body }}
+        with:
+          script: |
+            const marker = '<!-- ai-sdlc:dor-comment channel="author" -->';
+            const body = process.env.DOR_BODY;
+            if (!body || !body.includes(marker)) {
+              core.setFailed('dor-render-pr-summary produced an empty or marker-less body');
+              return;
+            }
+
+            const pr_number = context.payload.pull_request.number;
+            // `github.paginate` instead of a single per_page=100 call —
+            // PRs with >100 prior comments still need to find the marker
+            // or we'd post a duplicate summary on every CI run.
+            const existing = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: pr_number,
+              per_page: 100,
+            });
+            const prior = existing.find((c) => c.body && c.body.includes(marker));
+            if (prior) {
+              if (prior.body.trim() === body.trim()) {
+                core.info('DoR PR comment unchanged — no-op.');
+                return;
+              }
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: prior.id,
+                body,
+              });
+              core.notice(`Updated DoR PR comment ${prior.id}`);
+            } else {
+              const { data: created } = await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: pr_number,
+                body,
+              });
+              core.notice(`Created DoR PR comment ${created.id}`);
+            }
