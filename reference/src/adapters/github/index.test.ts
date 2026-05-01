@@ -13,6 +13,8 @@ const mockIssues = {
   get: vi.fn(),
   create: vi.fn(),
   update: vi.fn(),
+  addLabels: vi.fn(),
+  removeLabel: vi.fn(),
 };
 
 const mockPulls = {
@@ -211,6 +213,139 @@ describe('createGitHubIssueTracker', () => {
     const issue = await tracker.transitionIssue('5', 'close');
     expect(issue.status).toBe('closed');
     expect(mockIssues.update).toHaveBeenCalledWith(expect.objectContaining({ state: 'closed' }));
+  });
+
+  // ── RFC-0011 §9.1 — Needs Clarification status (AISDLC-115.1) ─────
+
+  it('mapGitHubIssue surfaces Needs Clarification when label is present', async () => {
+    mockIssues.listForRepo.mockResolvedValue({
+      data: [
+        {
+          number: 99,
+          title: 'Vague',
+          body: null,
+          state: 'open',
+          labels: [{ name: 'status:needs-clarification' }, { name: 'bug' }],
+          assignee: null,
+          html_url: 'https://github.com/test-org/test-repo/issues/99',
+        },
+      ],
+    });
+    const issues = await tracker.listIssues({});
+    expect(issues).toHaveLength(1);
+    expect(issues[0].status).toBe('Needs Clarification');
+    expect(issues[0].labels).toContain('status:needs-clarification');
+  });
+
+  it('transitionIssue("Needs Clarification") adds the marker label', async () => {
+    mockIssues.addLabels = vi.fn().mockResolvedValue({ data: [] });
+    mockIssues.get.mockResolvedValue({
+      data: {
+        number: 7,
+        title: 'Clarify me',
+        body: 'TBD',
+        state: 'open',
+        labels: [{ name: 'status:needs-clarification' }],
+        assignee: null,
+        html_url: 'https://github.com/test-org/test-repo/issues/7',
+      },
+    });
+
+    const issue = await tracker.transitionIssue('7', 'Needs Clarification');
+    expect(mockIssues.addLabels).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue_number: 7,
+        labels: ['status:needs-clarification'],
+      }),
+    );
+    expect(issue.status).toBe('Needs Clarification');
+  });
+
+  it('transitionIssue("needs-clarification") (kebab) also adds the label', async () => {
+    mockIssues.addLabels = vi.fn().mockResolvedValue({ data: [] });
+    mockIssues.get.mockResolvedValue({
+      data: {
+        number: 8,
+        title: 'x',
+        body: null,
+        state: 'open',
+        labels: [{ name: 'status:needs-clarification' }],
+        assignee: null,
+        html_url: 'u',
+      },
+    });
+
+    await tracker.transitionIssue('8', 'needs-clarification');
+    expect(mockIssues.addLabels).toHaveBeenCalled();
+  });
+
+  it('transitionIssue to a non-NC status removes the marker label if present', async () => {
+    mockIssues.removeLabel = vi.fn().mockResolvedValue({ data: [] });
+    mockIssues.update.mockResolvedValue({
+      data: {
+        number: 9,
+        title: 'Now ready',
+        body: null,
+        state: 'open',
+        labels: [],
+        assignee: null,
+        html_url: 'u',
+      },
+    });
+
+    await tracker.transitionIssue('9', 'open');
+    expect(mockIssues.removeLabel).toHaveBeenCalledWith(
+      expect.objectContaining({
+        issue_number: 9,
+        name: 'status:needs-clarification',
+      }),
+    );
+  });
+
+  it('transitionIssue("close") does NOT touch the marker label', async () => {
+    mockIssues.removeLabel = vi.fn();
+    mockIssues.update.mockResolvedValue({
+      data: {
+        number: 10,
+        title: 'Closing',
+        body: null,
+        state: 'closed',
+        labels: [],
+        assignee: null,
+        html_url: 'u',
+      },
+    });
+
+    await tracker.transitionIssue('10', 'close');
+    expect(mockIssues.removeLabel).not.toHaveBeenCalled();
+    expect(mockIssues.update).toHaveBeenCalledWith(expect.objectContaining({ state: 'closed' }));
+  });
+
+  it('transitionIssue swallows 404 when removing an absent marker label', async () => {
+    mockIssues.removeLabel = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('not found'), { status: 404 }));
+    mockIssues.update.mockResolvedValue({
+      data: {
+        number: 11,
+        title: 'Open',
+        body: null,
+        state: 'open',
+        labels: [],
+        assignee: null,
+        html_url: 'u',
+      },
+    });
+
+    await expect(tracker.transitionIssue('11', 'open')).resolves.toBeDefined();
+  });
+
+  it('transitionIssue rethrows non-404 removeLabel errors', async () => {
+    mockIssues.removeLabel = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error('rate limited'), { status: 403 }));
+
+    await expect(tracker.transitionIssue('12', 'open')).rejects.toThrow('rate limited');
   });
 
   it('watchIssues returns empty async iterator', async () => {

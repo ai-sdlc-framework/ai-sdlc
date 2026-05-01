@@ -13,9 +13,12 @@ const OUTPUT = resolve(__dirname, '../src/core/generated-schemas.ts');
 
 function toCamelCase(filename: string): string {
   // "agent-role.schema.json" → "agentRoleSchema"
+  // "dor-config.v1.schema.json" → "dorConfigV1Schema"
   return (
-    filename.replace('.schema.json', '').replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()) +
-    'Schema'
+    filename
+      .replace('.schema.json', '')
+      .replace(/\.([a-z0-9])/g, (_, c: string) => c.toUpperCase())
+      .replace(/-([a-z])/g, (_, c: string) => c.toUpperCase()) + 'Schema'
   );
 }
 

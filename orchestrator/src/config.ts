@@ -66,7 +66,14 @@ export interface ConfigLoadWarning {
 const KIND_KEY: Record<
   Exclude<
     ResourceKind,
-    'AdapterBinding' | 'DesignSystemBinding' | 'DesignIntentDocument' | 'Pipeline'
+    | 'AdapterBinding'
+    | 'DesignSystemBinding'
+    | 'DesignIntentDocument'
+    | 'Pipeline'
+    // RFC-0011 Phase 1 (AISDLC-115.1): DorConfig has its own loader path
+    // (`.ai-sdlc/dor-config.yaml`) — it is NOT loaded through the generic
+    // config-directory walk, so it doesn't need a `KIND_KEY` mapping yet.
+    | 'DorConfig'
   >,
   keyof AiSdlcConfig
 > = {
