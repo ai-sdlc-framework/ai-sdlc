@@ -54,6 +54,7 @@ secrets-adjacent string before the entry is serialised:
 - Per-gate `finding` and `clarificationQuestion` (LLM-derived; may
   quote the body verbatim)
 - Top-level `summary` and `questions[]`
+- Operator-supplied `notes` (free-form annotation field)
 
 Pattern catalogue (registry order — specific BEFORE generic so the
 more-meaningful marker wins):
@@ -67,15 +68,16 @@ more-meaningful marker wins):
 | `STRIPE_LIVE_SECRET` | `sk_live_[A-Za-z0-9]{20,}` | Stripe secret keys (AISDLC-126) |
 | `STRIPE_LIVE_PUBLISHABLE` | `pk_live_[A-Za-z0-9]{20,}` | Stripe publishable keys (AISDLC-126) |
 | `STRIPE_WEBHOOK` | `whsec_[A-Za-z0-9]{20,}` | Stripe webhook signing secrets (AISDLC-126) |
-| `GCP_API_KEY` | `AIza[0-9A-Za-z_-]{35}` | GCP API keys, exactly 39 chars (AISDLC-126) |
+| `GCP_API_KEY` | `AIza[0-9A-Za-z_-]{35,}` | GCP API keys, ≥ 39 chars (AISDLC-126; greedy `{35,}` AISDLC-128) |
 | `SENDGRID` | `SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}` | SendGrid 3-segment dotted keys (AISDLC-126) |
-| `TWILIO_SID` | `AC[a-f0-9]{32}` | Twilio account SIDs (AISDLC-126) |
-| `MAILGUN` | `key-[a-f0-9]{32}` | Mailgun v1 API keys (AISDLC-126) |
-| `GITHUB_PAT_FINE` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs |
-| `GITHUB_PAT` | `ghp_[A-Za-z0-9]{36}` | Classic GitHub PATs |
-| `AWS_ACCESS_KEY` | `AKIA[0-9A-Z]{16}` | AWS access key IDs |
-| `JWT` | `eyJ<base64url>.eyJ<base64url>.<base64url>` | Three-segment JWTs |
-| `HIGH-ENTROPY` | `[A-Za-z0-9_-]{40,}` | Catch-all, last |
+| `TWILIO_SID` | `AC[a-f0-9]{32,}` | Twilio account SIDs (AISDLC-126; greedy `{32,}` AISDLC-128) |
+| `MAILGUN` | `key-[a-f0-9]{32,}` | Mailgun v1 API keys (AISDLC-126; greedy `{32,}` AISDLC-128) |
+| `GITHUB_PAT_FINE` | `github_pat_[A-Za-z0-9_]{82,}` | Fine-grained GitHub PATs (greedy `{82,}` AISDLC-128) |
+| `GITHUB_PAT` | `ghp_[A-Za-z0-9]{36,}` | Classic GitHub PATs (greedy `{36,}` AISDLC-128) |
+| `AWS_ACCESS_KEY` | `AKIA[0-9A-Z]{16,}` | AWS access key IDs (greedy `{16,}` AISDLC-128) |
+| `PRIVATE_KEY_BLOCK` | `-----BEGIN (?:RSA \| EC \| OPENSSH \| DSA \| PGP )?PRIVATE KEY( BLOCK)?-----...` | PEM-encoded private-key blocks (AISDLC-128) |
+| `JWT` | `eyJ<base64url>.eyJ<base64url>.<base64url>` | Three-segment JWTs (second-segment `eyJ` anchor is intentional — AISDLC-128) |
+| `HIGH-ENTROPY` | `(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{48,}` | Catch-all, last (raised 40 → 48 + require ≥1 digit AISDLC-128) |
 
 Matches are replaced with `[REDACTED:<marker>]`. The catch-all uses
 `[REDACTED:HIGH-ENTROPY]` instead of pretending to know what it caught.
