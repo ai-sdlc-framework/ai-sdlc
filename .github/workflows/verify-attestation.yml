@@ -17,25 +17,50 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
+  # AISDLC-113: also verify inside the merge-queue's gh-readonly-queue branch
+  # so a sibling PR merging into the same files between PR-head verification
+  # and merge-queue execution can't ship a stale-attestation PR. The triple-
+  # hash window (AISDLC-101) handles most legitimate cases, but verifying
+  # against the actual merge result is defense-in-depth.
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
-  group: verify-attestation-${{ github.event.pull_request.number }}
+  group: verify-attestation-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
   cancel-in-progress: true
 
 jobs:
   verify:
     name: Verify attestation
     runs-on: ubuntu-latest
-    if: "!startsWith(github.head_ref, 'release-please--')"
+    # Skip release-please's own PRs (they don't carry attestations) — also
+    # skip merge_group runs whose head_ref is a release-please queue branch.
+    if: "!startsWith(github.head_ref, 'release-please--') && !contains(github.event.merge_group.head_ref || '', 'release-please--')"
     permissions:
       contents: read
       statuses: write
       pull-requests: write
     steps:
+      # AISDLC-113: derive head/base SHAs from whichever event triggered us.
+      # pull_request → github.event.pull_request.{head,base}.sha
+      # merge_group  → github.event.merge_group.{head,base}_sha
+      - name: Resolve subject SHA + base SHA from event payload
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            echo "head_sha=${{ github.event.merge_group.head_sha }}" >> "$GITHUB_OUTPUT"
+            echo "base_sha=${{ github.event.merge_group.base_sha }}" >> "$GITHUB_OUTPUT"
+            echo "is_merge_group=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> "$GITHUB_OUTPUT"
+            echo "base_sha=${{ github.event.pull_request.base.sha }}" >> "$GITHUB_OUTPUT"
+            echo "is_merge_group=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ steps.resolve.outputs.head_sha }}
 
       - uses: pnpm/action-setup@v4
 
@@ -56,8 +81,8 @@ jobs:
       - name: Verify attestation
         id: verify
         env:
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          PR_BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
         run: node scripts/verify-attestation.mjs
 
       - name: Set commit status (ai-sdlc/attestation)
@@ -65,7 +90,7 @@ jobs:
         env:
           STATUS: ${{ steps.verify.outputs.status }}
           REASON: ${{ steps.verify.outputs.reason }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
         with:
           script: |
             const status = process.env.STATUS;
@@ -84,12 +109,14 @@ jobs:
               description,
             });
 
-      - name: Post friendly fallback comment when invalid (idempotent)
-        if: steps.verify.outputs.status != 'valid'
+      - name: Post friendly fallback comment when invalid (idempotent, PR only)
+        # Merge-queue runs have no PR to comment on; skip comment but still
+        # rely on the commit status above to gate the merge.
+        if: steps.verify.outputs.status != 'valid' && steps.resolve.outputs.is_merge_group != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           ATTESTATION_REASON: ${{ steps.verify.outputs.reason }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
         run: node scripts/post-attestation-comment.mjs
