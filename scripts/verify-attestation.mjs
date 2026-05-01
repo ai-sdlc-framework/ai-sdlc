@@ -65,6 +65,7 @@ import {
   verifyAttestation,
   sha256Hex,
   computeContentHash,
+  computeContentHashV3,
   validateTrustedReviewers,
 } from '../orchestrator/dist/runtime/attestations.js';
 
@@ -239,18 +240,22 @@ export function predicateMatchReason(predicate, expected) {
       detail: `schemaVersion '${safeForReason(predicate.schemaVersion, 16)}' not in allowlist [${expected.acceptedSchemaVersions.join(', ')}]`,
     };
   }
-  // AISDLC-94 dual-hash acceptance: if the envelope's `contentHash` matches
-  // the expected `contentHash`, the post-apply tree state is identical and
-  // we accept the envelope even if `diffHash` diverges (typical post-rebase
-  // shape: a sibling PR already touched the same files, so `@@` hunk
-  // headers + context lines shifted but file content is unchanged). Phase 2
-  // (separate follow-up task) will drop the diffHash leg after a soak
-  // period — until then both checks live in parallel.
+  // AISDLC-94 + AISDLC-101 triple-hash acceptance: accept if ANY of the
+  // three legs match. v1 (`diffHash`) is the legacy literal-diff hash;
+  // v2 (`contentHash`) is the post-apply blob-SHA-per-file hash; v3
+  // (`contentHashV3`) is the per-file (base, head) blob-pair transition
+  // hash (covers the AISDLC-93 / PR #102 sibling-overlap case better
+  // than v2). Phase 2 keeps all three legs in parallel during the soak;
+  // a future schema bump will drop v1 + v2 once v3 is the universal shape.
   const hasContentHashMatch =
     typeof predicate.contentHash === 'string' &&
     typeof expected.contentHash === 'string' &&
     predicate.contentHash === expected.contentHash;
-  if (!hasContentHashMatch && predicate.diffHash !== expected.diffHash) {
+  const hasContentHashV3Match =
+    typeof predicate.contentHashV3 === 'string' &&
+    typeof expected.contentHashV3 === 'string' &&
+    predicate.contentHashV3 === expected.contentHashV3;
+  if (!hasContentHashMatch && !hasContentHashV3Match && predicate.diffHash !== expected.diffHash) {
     return { field: 'diffHash', detail: 'diffHash mismatch (PR diff differs from attested diff)' };
   }
   if (predicate.policyHash !== expected.policyHash) {
@@ -462,9 +467,38 @@ export function resolveSubjectShaForEnvelope({
   // base differs but the resolved file content is identical. We try both
   // checks at every candidate so a single envelope can match either way.
   const expectedContentHash = predicate?.contentHash;
-  if (typeof expectedDiffHash !== 'string' && typeof expectedContentHash !== 'string') {
+  // AISDLC-101 Phase-2 triple-hash: also try recomputing `contentHashV3`
+  // (per-file (base, head) blob-pair transition). Stricter binding than v2
+  // — covers the AISDLC-93 sibling-overlap case better when paired with
+  // the producer-side pre-sign rebase from AISDLC-102.
+  const expectedContentHashV3 = predicate?.contentHashV3;
+  if (
+    typeof expectedDiffHash !== 'string' &&
+    typeof expectedContentHash !== 'string' &&
+    typeof expectedContentHashV3 !== 'string'
+  ) {
     return null;
   }
+
+  /**
+   * Resolve a file's blob SHA at a given ref via `git ls-tree -r`. Returns
+   * the empty string on missing path / ls-tree failure (= the canonical
+   * "deleted" or "not present at this endpoint" marker). Shared between
+   * the v2 and v3 recompute paths so they agree on enumeration semantics.
+   */
+  const resolveBlobShaAt = (ref, path) => {
+    try {
+      const lsOut = gitFn(['ls-tree', '-r', ref, '--', path], repoRoot);
+      const line = lsOut.split('\n').find((l) => l.length > 0);
+      if (line) {
+        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+        if (m) return m[1];
+      }
+    } catch {
+      // ls-tree failed → treat as deleted / absent.
+    }
+    return '';
+  };
 
   /** Recompute the changed-file set for `base...sha` and return contentHash. */
   const computeShaContentHash = (sha) => {
@@ -477,26 +511,52 @@ export function resolveSubjectShaForEnvelope({
     const paths = nameOnly.split('\n').filter((l) => l.length > 0);
     const entries = [];
     for (const p of paths) {
-      let blobSha = '';
-      try {
-        const lsOut = gitFn(['ls-tree', '-r', sha, '--', p], repoRoot);
-        const line = lsOut.split('\n').find((l) => l.length > 0);
-        if (line) {
-          const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
-          if (m) blobSha = m[1];
-        }
-      } catch {
-        // ls-tree failed (path missing at sha) → treat as deleted.
-      }
-      entries.push({ path: p, blobSha });
+      entries.push({ path: p, blobSha: resolveBlobShaAt(sha, p) });
     }
     return computeContentHash(entries);
   };
 
+  /**
+   * Recompute the per-file-delta `contentHashV3` for `base...sha`. Resolves
+   * each changed file's blob SHA at BOTH the merge-base of `<base>` +
+   * `<sha>` (= the file's content before our PR's commits) AND `<sha>`
+   * (= after our PR's commits), then composes per-file delta hashes via
+   * `computeContentHashV3`.
+   */
+  const computeShaContentHashV3 = (sha) => {
+    let mergeBase;
+    try {
+      mergeBase = gitFn(['merge-base', baseSha, sha], repoRoot).trim();
+    } catch {
+      return null;
+    }
+    if (!/^[0-9a-f]{40}$/.test(mergeBase)) return null;
+    let nameOnly;
+    try {
+      nameOnly = gitFn(['diff', '--name-only', '--no-renames', `${baseSha}...${sha}`], repoRoot);
+    } catch {
+      return null;
+    }
+    const paths = nameOnly.split('\n').filter((l) => l.length > 0);
+    const entries = [];
+    for (const p of paths) {
+      entries.push({
+        path: p,
+        baseBlobSha: resolveBlobShaAt(mergeBase, p),
+        headBlobSha: resolveBlobShaAt(sha, p),
+      });
+    }
+    return computeContentHashV3(entries);
+  };
+
   const tryShaMatches = (sha) => {
-    // Try contentHash first when the envelope has it — that's the
-    // rebase-tolerant path, so a positive match here is the expected
-    // post-AISDLC-94 outcome.
+    // Try contentHashV3 first when the envelope has it — strictest
+    // rebase-tolerant binding, expected post-AISDLC-101.
+    if (typeof expectedContentHashV3 === 'string') {
+      const ch3 = computeShaContentHashV3(sha);
+      if (ch3 !== null && ch3 === expectedContentHashV3) return true;
+    }
+    // Then v2 contentHash (post-AISDLC-94 envelopes).
     if (typeof expectedContentHash === 'string') {
       const ch = computeShaContentHash(sha);
       if (ch !== null && ch === expectedContentHash) return true;
@@ -678,11 +738,14 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     }
     // Subject resolved — now check the OTHER bindings (policy / agents /
     // plugin version / schema) using the envelope's own diffHash AND
-    // contentHash (when present) as expected (since we've already
-    // established the subject matches by either binding).
+    // contentHash AND contentHashV3 (when present) as expected (since
+    // we've already established the subject matches by ANY of the three
+    // bindings). The triple-hash OR is short-circuited to "match" by
+    // construction here.
     const reason = predicateMatchReason(entry.predicate, {
-      diffHash: entry.predicate.diffHash, // by construction == sha256 of subject's diff (or matched via contentHash)
+      diffHash: entry.predicate.diffHash, // by construction == sha256 of subject's diff (or matched via contentHash[V3])
       contentHash: entry.predicate.contentHash, // identity match — accept whichever binding matched
+      contentHashV3: entry.predicate.contentHashV3, // AISDLC-101: same identity-match shape
       policyHash,
       expectedAgentFileHashes,
       pluginVersion,
@@ -775,6 +838,10 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       // even if (post-rebase) the diff text shifted. We've already
       // content-matched it upstream by construction.
       contentHash: chosen.entry.predicate.contentHash,
+      // AISDLC-101: pass the envelope's own contentHashV3 so the runtime's
+      // triple-hash acceptance also accepts on the per-file-delta leg.
+      // Identity match by construction — same rationale as contentHash.
+      contentHashV3: chosen.entry.predicate.contentHashV3,
       policyHash,
       expectedAgentFileHashes,
     },

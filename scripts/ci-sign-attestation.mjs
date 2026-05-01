@@ -260,9 +260,12 @@ async function main() {
       `${orchestratorBarrel} not found. Run \`pnpm --filter "@ai-sdlc/orchestrator..." build\` first.`,
     );
   }
-  const { buildPredicate, signAttestation, collectChangedFileEntries } = await import(
-    orchestratorBarrel
-  );
+  const {
+    buildPredicate,
+    signAttestation,
+    collectChangedFileEntries,
+    collectChangedFileDeltaEntries,
+  } = await import(orchestratorBarrel);
 
   // ── Short-circuit: skip when a valid attestation already exists ─────
   // AC #8: contributor PR with valid local attestation → CI does NOT
@@ -293,6 +296,14 @@ async function main() {
   let changedFiles;
   try {
     changedFiles = collectChangedFileEntries(baseSha, headSha, repoRoot);
+  } catch (err) {
+    fail(err.message ?? String(err));
+  }
+  // AISDLC-101: also collect per-file (base, head) blob deltas for
+  // `contentHashV3` (Phase 2 triple-hash).
+  let changedFileDeltas;
+  try {
+    changedFileDeltas = collectChangedFileDeltaEntries(baseSha, headSha, repoRoot);
   } catch (err) {
     fail(err.message ?? String(err));
   }
@@ -340,6 +351,7 @@ async function main() {
     iterationCount,
     harnessNote,
     changedFiles,
+    changedFileDeltas,
   });
 
   const runId = process.env.GITHUB_RUN_ID ?? 'local';

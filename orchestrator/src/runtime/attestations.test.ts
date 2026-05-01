@@ -17,8 +17,10 @@ import {
   ACCEPTED_SCHEMA_VERSIONS,
   REQUIRED_REVIEWER_AGENT_IDS,
   buildPredicate,
+  collectChangedFileDeltaEntries,
   collectChangedFileEntries,
   computeContentHash,
+  computeContentHashV3,
   generateSigningKeyPair,
   paeEncode,
   sha256Hex,
@@ -1052,5 +1054,505 @@ describe('REQUIRED_REVIEWER_AGENT_IDS', () => {
 
   it('is frozen so callers cannot mutate it', () => {
     expect(Object.isFrozen(REQUIRED_REVIEWER_AGENT_IDS)).toBe(true);
+  });
+});
+
+// ─── AISDLC-101 — per-file-delta contentHashV3 (Phase 2 triple-hash) ──
+//
+// `contentHashV3` is the third leg of the AISDLC-94 dual-hash → AISDLC-101
+// triple-hash migration. Where v2 `contentHash` commits to the post-apply
+// blob SHA per file, v3 commits to the (base, head) blob-pair TRANSITION
+// per file: `fileDeltaHash[path] = sha256(base_blob_sha + ' -> ' +
+// head_blob_sha)`. The outer hash is sha256 over a sorted canonical
+// `<path>\t<fileDeltaHash>\n` per line.
+//
+// Invariants tested below:
+//  - same inputs in any order → same outer hash
+//  - same OUR delta (B1→H1 or B2→H2 with B==H both sides) → same fileDeltaHash
+//  - any genuine content change (head blob flips) → fileDeltaHash flips
+//  - the canonical encoding stays injective under tab/newline rejection
+//  - v3 is independent of v2: v3 can match while v2 diverges, and vice versa
+
+describe('computeContentHashV3 (AISDLC-101)', () => {
+  const fileA = {
+    path: 'src/a.ts',
+    baseBlobSha: 'a'.repeat(40),
+    headBlobSha: 'b'.repeat(40),
+  };
+  const fileB = {
+    path: 'src/b.ts',
+    baseBlobSha: 'c'.repeat(40),
+    headBlobSha: 'd'.repeat(40),
+  };
+  const fileC = {
+    path: 'src/c.ts',
+    baseBlobSha: 'e'.repeat(40),
+    headBlobSha: 'f'.repeat(40),
+  };
+
+  it('produces the same hash regardless of input ordering', () => {
+    const h1 = computeContentHashV3([fileA, fileB, fileC]);
+    const h2 = computeContentHashV3([fileC, fileA, fileB]);
+    const h3 = computeContentHashV3([fileB, fileC, fileA]);
+    expect(h1).toBe(h2);
+    expect(h2).toBe(h3);
+    expect(h1).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('produces the same hash when the (base, head) pair is identical even if base differs from another run', () => {
+    // Property under test: SAME (base_blob, head_blob) per file → SAME
+    // fileDeltaHash → SAME outer hash. This is the canonical "rebase
+    // produced the same delta" invariant: two PRs with identical
+    // before/after blob pairs hash to the same v3.
+    const run1 = computeContentHashV3([fileA, fileB]);
+    const run2 = computeContentHashV3([fileA, fileB]);
+    expect(run1).toBe(run2);
+  });
+
+  it('produces a DIFFERENT hash when the head blob changes (= our PR contribution diverged)', () => {
+    // The threat-model boundary case: a conflict resolution that produces
+    // a different post-apply file content flips the head blob SHA →
+    // fileDeltaHash flips → v3 outer hash flips → verifier rejects.
+    const before = computeContentHashV3([fileA]);
+    const after = computeContentHashV3([
+      { path: fileA.path, baseBlobSha: fileA.baseBlobSha, headBlobSha: 'z'.repeat(40) },
+    ]);
+    expect(before).not.toBe(after);
+  });
+
+  it('produces a DIFFERENT hash when the base blob changes (sibling PR overlap detected)', () => {
+    // The AISDLC-93 / PR #102 scenario: a sibling PR landed on main and
+    // modified the SAME file. The rebased PR-X now has a different base
+    // blob for that file (the merge-base now contains the sibling's
+    // contributions). v3's binding catches this: even if the head blob
+    // stays the same (identical resolved content), the base blob changed
+    // → fileDeltaHash flips → v3 hash flips. The verifier surfaces this
+    // honestly rather than silently approving a sibling-overlapped state.
+    const before = computeContentHashV3([fileA]);
+    const sibling = computeContentHashV3([
+      { path: fileA.path, baseBlobSha: 'z'.repeat(40), headBlobSha: fileA.headBlobSha },
+    ]);
+    expect(before).not.toBe(sibling);
+  });
+
+  it('produces a DIFFERENT hash when a file is added vs. modified (empty base vs. populated base)', () => {
+    // Add (base=='', head=<sha>) vs modify (base=<old>, head=<new>) must
+    // produce distinct fileDeltaHashes — the canonical encoding includes
+    // the base blob, so an add and a modify can't collide.
+    const added = computeContentHashV3([
+      { path: 'src/new.ts', baseBlobSha: '', headBlobSha: 'a'.repeat(40) },
+    ]);
+    const modified = computeContentHashV3([
+      { path: 'src/new.ts', baseBlobSha: 'b'.repeat(40), headBlobSha: 'a'.repeat(40) },
+    ]);
+    expect(added).not.toBe(modified);
+  });
+
+  it('produces a DIFFERENT hash when a file is deleted vs. kept', () => {
+    const kept = computeContentHashV3([fileA]);
+    const deleted = computeContentHashV3([
+      { path: fileA.path, baseBlobSha: fileA.baseBlobSha, headBlobSha: '' },
+    ]);
+    expect(kept).not.toBe(deleted);
+  });
+
+  it('handles the empty changed-file set (no-op PR, sha256 of empty string)', () => {
+    expect(computeContentHashV3([])).toBe(sha256Hex(''));
+  });
+
+  it('deduplicates same-path entries with last-write-wins (idempotent against double-enumeration)', () => {
+    const explicit = computeContentHashV3([
+      { path: 'src/x.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+      { path: 'src/x.ts', baseBlobSha: 'c'.repeat(40), headBlobSha: 'd'.repeat(40) }, // overrides
+    ]);
+    const cleanRun = computeContentHashV3([
+      { path: 'src/x.ts', baseBlobSha: 'c'.repeat(40), headBlobSha: 'd'.repeat(40) },
+    ]);
+    expect(explicit).toBe(cleanRun);
+  });
+
+  it('lowercases blob SHAs before hashing (case-insensitive normalization)', () => {
+    const lower = computeContentHashV3([
+      { path: 'src/x.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+    ]);
+    const upper = computeContentHashV3([
+      { path: 'src/x.ts', baseBlobSha: 'A'.repeat(40), headBlobSha: 'B'.repeat(40) },
+    ]);
+    expect(lower).toBe(upper);
+  });
+
+  it('throws on entries missing `path`', () => {
+    expect(() =>
+      computeContentHashV3([
+        { path: '', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+      ] as unknown as Parameters<typeof computeContentHashV3>[0]),
+    ).toThrow(/path must be a non-empty string/);
+  });
+
+  it('throws on entries with non-string baseBlobSha', () => {
+    expect(() =>
+      computeContentHashV3([
+        {
+          path: 'src/x.ts',
+          baseBlobSha: undefined as unknown as string,
+          headBlobSha: 'a'.repeat(40),
+        },
+      ]),
+    ).toThrow(/baseBlobSha must be a string/);
+  });
+
+  it('throws on entries with non-string headBlobSha', () => {
+    expect(() =>
+      computeContentHashV3([
+        {
+          path: 'src/x.ts',
+          baseBlobSha: 'a'.repeat(40),
+          headBlobSha: undefined as unknown as string,
+        },
+      ]),
+    ).toThrow(/headBlobSha must be a string/);
+  });
+
+  it('rejects path entries containing tab to keep canonical encoding injective', () => {
+    expect(() =>
+      computeContentHashV3([
+        { path: 'src/with\ttab.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+      ]),
+    ).toThrow(/path must not contain tab or newline/);
+  });
+
+  it('rejects path entries containing newline to keep canonical encoding injective', () => {
+    expect(() =>
+      computeContentHashV3([
+        { path: 'src/with\nnewline.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+      ]),
+    ).toThrow(/path must not contain tab or newline/);
+  });
+});
+
+describe('collectChangedFileDeltaEntries (AISDLC-101)', () => {
+  // Stub `runGit` to avoid needing a real worktree. The stub mirrors the
+  // real git CLI shapes:
+  //   merge-base <a> <b>          → single-line SHA
+  //   diff --name-only ...        → newline-separated paths
+  //   ls-tree -r <ref> -- <path>  → `<mode> blob <sha>\t<path>`
+  function makeRunGit(
+    mergeBase: string,
+    nameOnly: string,
+    blobByRefAndPath: Record<string, Record<string, string>>,
+  ): (args: string[], cwd: string) => string {
+    return (args: string[]): string => {
+      // The first non-flag positional is the subcommand (we may have
+      // `-c core.quotepath=false` prepended).
+      const dashCFlags = args.filter((a, i) => a === '-c' && i + 1 < args.length).length;
+      const cmdIdx = dashCFlags * 2;
+      const cmd = args[cmdIdx];
+      if (cmd === 'merge-base') return `${mergeBase}\n`;
+      if (cmd === 'diff') return nameOnly;
+      if (cmd === 'ls-tree') {
+        const refIdx = cmdIdx + 2; // ls-tree -r <ref>
+        const ref = args[refIdx];
+        const dashDashIdx = args.indexOf('--');
+        const path = args[dashDashIdx + 1];
+        const blob = blobByRefAndPath[ref]?.[path];
+        if (!blob) return '';
+        return `100644 blob ${blob}\t${path}\n`;
+      }
+      throw new Error(`stub runGit: unexpected command ${cmd}`);
+    };
+  }
+
+  // Must be a valid 40-char hex SHA-1 — the helper validates merge-base
+  // output. `e` is in [0-9a-f].
+  const MERGE_BASE = 'e'.repeat(40);
+
+  it('returns one entry per changed file with base + head blob SHAs', () => {
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: makeRunGit(MERGE_BASE, 'src/a.ts\nsrc/b.ts\n', {
+        [MERGE_BASE]: { 'src/a.ts': 'a'.repeat(40), 'src/b.ts': 'b'.repeat(40) },
+        HEAD: { 'src/a.ts': 'c'.repeat(40), 'src/b.ts': 'd'.repeat(40) },
+      }),
+    });
+    expect(entries).toEqual([
+      { path: 'src/a.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'c'.repeat(40) },
+      { path: 'src/b.ts', baseBlobSha: 'b'.repeat(40), headBlobSha: 'd'.repeat(40) },
+    ]);
+  });
+
+  it('treats missing-at-base files as new (empty baseBlobSha)', () => {
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: makeRunGit(MERGE_BASE, 'src/new.ts\n', {
+        [MERGE_BASE]: {}, // not present at base
+        HEAD: { 'src/new.ts': 'a'.repeat(40) },
+      }),
+    });
+    expect(entries).toEqual([{ path: 'src/new.ts', baseBlobSha: '', headBlobSha: 'a'.repeat(40) }]);
+  });
+
+  it('treats missing-at-head files as deleted (empty headBlobSha)', () => {
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: makeRunGit(MERGE_BASE, 'src/gone.ts\n', {
+        [MERGE_BASE]: { 'src/gone.ts': 'a'.repeat(40) },
+        HEAD: {}, // deleted at head
+      }),
+    });
+    expect(entries).toEqual([
+      { path: 'src/gone.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: '' },
+    ]);
+  });
+
+  it('rejects diff output containing tab in a path', () => {
+    expect(() =>
+      collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+        runGit: makeRunGit(MERGE_BASE, 'src/with\ttab.ts\n', {}),
+      }),
+    ).toThrow(/path must not contain tab or newline/);
+  });
+
+  it('returns an empty array for a no-op diff', () => {
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: makeRunGit(MERGE_BASE, '', {}),
+    });
+    expect(entries).toEqual([]);
+  });
+
+  it('wraps merge-base failures with a clear error message', () => {
+    expect(() =>
+      collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+        runGit: (args) => {
+          if (args[0] === 'merge-base') {
+            throw new Error('fatal: bad revision');
+          }
+          return '';
+        },
+      }),
+    ).toThrow(/git merge-base failed: fatal: bad revision/);
+  });
+
+  it('rejects when merge-base returns non-SHA output (defense in depth)', () => {
+    expect(() =>
+      collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+        runGit: (args) => {
+          if (args[0] === 'merge-base') return 'not-a-sha\n';
+          return '';
+        },
+      }),
+    ).toThrow(/merge-base returned non-SHA output/);
+  });
+
+  it('wraps diff failures with a clear error message', () => {
+    expect(() =>
+      collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+        runGit: (args) => {
+          if (args[0] === 'merge-base') return `${MERGE_BASE}\n`;
+          // first arg includes -c core.quotepath=false; actual diff is later
+          if (args.includes('diff')) throw new Error('fatal: ambiguous range');
+          return '';
+        },
+      }),
+    ).toThrow(/git diff --name-only failed: fatal: ambiguous range/);
+  });
+});
+
+describe('buildPredicate with contentHashV3 (AISDLC-101)', () => {
+  const CHANGED_FILE_DELTAS = [
+    { path: 'src/a.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+    { path: 'src/b.ts', baseBlobSha: 'c'.repeat(40), headBlobSha: 'd'.repeat(40) },
+  ];
+
+  it('omits contentHashV3 when changedFileDeltas is not provided', () => {
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    expect(predicate.contentHashV3).toBeUndefined();
+  });
+
+  it('includes contentHashV3 when changedFileDeltas is provided (Phase 2 triple-hash envelope)', () => {
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: CHANGED_FILE_DELTAS,
+    });
+    expect(predicate.contentHashV3).toBe(computeContentHashV3(CHANGED_FILE_DELTAS));
+  });
+
+  it('includes contentHashV3 for empty changedFileDeltas array (no-op PR)', () => {
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFileDeltas: [] });
+    expect(predicate.contentHashV3).toBe(sha256Hex(''));
+  });
+
+  it('emits all three hashes when both changedFiles + changedFileDeltas provided (triple-hash)', () => {
+    // Verifies the additive triple-hash window: an envelope built from a
+    // post-AISDLC-101 sign run carries diffHash + contentHash + contentHashV3
+    // simultaneously. Verifier OR's the three legs at verify time.
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFiles: [
+        { path: 'src/a.ts', blobSha: 'b'.repeat(40) },
+        { path: 'src/b.ts', blobSha: 'd'.repeat(40) },
+      ],
+      changedFileDeltas: CHANGED_FILE_DELTAS,
+    });
+    expect(predicate.diffHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(predicate.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(predicate.contentHashV3).toMatch(/^[0-9a-f]{64}$/);
+    // Independence: v3 differs from v2 (different canonical encoding +
+    // different domain — v2 hashes head blob, v3 hashes base→head delta).
+    expect(predicate.contentHash).not.toBe(predicate.contentHashV3);
+  });
+});
+
+describe('validatePredicateShape with contentHashV3 (AISDLC-101)', () => {
+  function tripleHashPredicate(): AttestationPredicate {
+    return buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFiles: [{ path: 'src/x.ts', blobSha: 'a'.repeat(40) }],
+      changedFileDeltas: [
+        { path: 'src/x.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+      ],
+    });
+  }
+
+  it('accepts a v1 predicate with contentHashV3 present (Phase 2 triple-hash)', () => {
+    expect(validatePredicateShape(tripleHashPredicate())).toBeNull();
+  });
+
+  it('accepts a v1 predicate with contentHashV3 absent (legacy + Phase 1)', () => {
+    expect(validatePredicateShape(buildPredicate(DEFAULT_INPUTS))).toBeNull();
+  });
+
+  it('rejects contentHashV3 with wrong length', () => {
+    const p: Record<string, unknown> = { ...tripleHashPredicate(), contentHashV3: 'short' };
+    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
+  });
+
+  it('rejects contentHashV3 with non-hex chars', () => {
+    const p: Record<string, unknown> = { ...tripleHashPredicate(), contentHashV3: 'g'.repeat(64) };
+    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
+  });
+
+  it('rejects contentHashV3 with embedded CRLF (downstream injection vector)', () => {
+    const p: Record<string, unknown> = {
+      ...tripleHashPredicate(),
+      contentHashV3: 'a'.repeat(30) + '\r\n' + 'b'.repeat(32),
+    };
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/contentHashV3 does not match pattern/);
+    expect(reason).not.toMatch(/\r|\n/);
+  });
+
+  it('rejects contentHashV3 that is not a string', () => {
+    const p: Record<string, unknown> = { ...tripleHashPredicate(), contentHashV3: 12345 };
+    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
+  });
+});
+
+describe('verifyAttestation with contentHashV3 triple-hash mode (AISDLC-101)', () => {
+  const CHANGED_FILES = [
+    { path: 'src/a.ts', blobSha: 'a'.repeat(40) },
+    { path: 'src/b.ts', blobSha: 'b'.repeat(40) },
+  ];
+  const CHANGED_FILE_DELTAS = [
+    { path: 'src/a.ts', baseBlobSha: 'x'.repeat(40), headBlobSha: 'a'.repeat(40) },
+    { path: 'src/b.ts', baseBlobSha: 'y'.repeat(40), headBlobSha: 'b'.repeat(40) },
+  ];
+
+  it('accepts when contentHashV3 matches even though diffHash AND contentHash diverge (sibling-overlap scenario)', () => {
+    // The headline AISDLC-101 fix scenario: the v2 contentHash diverges
+    // because the rebased head's blob now contains a sibling PR's
+    // contributions (= different head blob SHA), AND the diff text
+    // shifted (= different diffHash). v3 still matches because the
+    // (base, head) blob-pair transition was preserved across the
+    // producer-side pre-sign rebase (AISDLC-102) — the verifier accepts
+    // on the v3 leg.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFiles: CHANGED_FILES,
+      changedFileDeltas: CHANGED_FILE_DELTAS,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        diffHash: sha256Hex('different diff text after rebase'),
+        contentHash: sha256Hex('different post-apply blob SHAs'),
+        contentHashV3: predicate.contentHashV3,
+      },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects when ALL three legs diverge (genuine content change → reject)', () => {
+    // Threat-model boundary: a malicious rebase that changed the
+    // post-apply file content flips the head blob SHA → fileDeltaHash
+    // flips → contentHashV3 flips. With v1 + v2 + v3 ALL diverging,
+    // the verifier MUST reject.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFiles: CHANGED_FILES,
+      changedFileDeltas: CHANGED_FILE_DELTAS,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        diffHash: sha256Hex('different diff'),
+        contentHash: sha256Hex('different content'),
+        contentHashV3: sha256Hex('different delta'),
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
+  });
+
+  it('does NOT accept on contentHashV3 when expected.contentHashV3 is omitted (callers must opt in)', () => {
+    // Defensive check: a caller that hasn't been updated for AISDLC-101
+    // (passes only diffHash + contentHash in `expected`) gets the
+    // dual-hash behavior, not a silent triple-hash acceptance. Forces
+    // explicit opt-in at every verify site.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFiles: CHANGED_FILES,
+      changedFileDeltas: CHANGED_FILE_DELTAS,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        diffHash: sha256Hex('shifted diff'),
+        contentHash: sha256Hex('shifted content'),
+        // contentHashV3 deliberately NOT set — caller hasn't opted in.
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
+  });
+
+  it('still accepts a Phase-1 envelope (no contentHashV3) via contentHash leg when v3 expected is set', () => {
+    // Backward-compat: envelopes signed BEFORE AISDLC-101 landed only
+    // carry diffHash + contentHash. The verifier MUST still accept them
+    // on the contentHash leg even when the caller passes a v3 expected
+    // value (which won't match the absent envelope field).
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
+    expect(predicate.contentHashV3).toBeUndefined();
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        diffHash: sha256Hex('shifted diff'),
+        contentHash: predicate.contentHash, // v2 leg matches
+        contentHashV3: sha256Hex('something v3'), // unused; envelope has no v3
+      },
+    });
+    expect(result.valid).toBe(true);
   });
 });
