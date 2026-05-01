@@ -2,6 +2,7 @@
 id: RFC-0002
 title: Pipeline Orchestration Policy
 status: Draft
+lifecycle: Draft
 author: AI-SDLC Contributors
 created: 2026-02-09
 updated: 2026-02-09
@@ -15,6 +16,7 @@ requiresDocs:
 # RFC-0002: Pipeline Orchestration Policy
 
 **Status:** Draft
+**Lifecycle:** Draft
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-09
 **Updated:** 2026-02-09

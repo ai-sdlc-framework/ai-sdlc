@@ -2,6 +2,7 @@
 id: RFC-0006
 title: Design System Governance Pipeline
 status: Final
+lifecycle: Implemented
 author: Dominique Legault, Morgan Hirtle, Alexander Kline
 created: 2026-03-28
 updated: 2026-04-30
@@ -25,6 +26,7 @@ requiresDocs:
 
 **Document type:** Normative (final)
 **Status:** Final v5 — Token Versioning, Multi-Brand Inheritance, Cross-Platform, Adapter Priority Decisions
+**Lifecycle:** Implemented
 **Created:** 2026-03-28
 **Revised:** 2026-04-13
 **Authors:** [Author Name]

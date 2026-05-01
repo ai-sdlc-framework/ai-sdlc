@@ -6,7 +6,9 @@ id: RFC-NNNN
 # Human-readable title (no `RFC-NNNN:` prefix — that's encoded in `id`).
 title: Title
 
-# Lifecycle status. One of:
+# Legacy status enum (retained for back-compat with `scripts/check-rfc-docs.mjs`).
+# Prefer the `lifecycle` field below for new RFCs — it captures the per-owner
+# sign-off + implementation arc more precisely. One of:
 #   Draft        — being written by the author
 #   Under Review — open for community discussion / SIG review
 #   Approved     — sign-off complete, spec update pending
@@ -17,6 +19,19 @@ title: Title
 #   Rejected     — reviewed and rejected
 #   Withdrawn    — withdrawn by the author
 status: Draft
+
+# AISDLC-118 lifecycle field — separate from the per-owner sign-off checklist
+# in the body. Drafts SHOULD land on main as soon as the author considers
+# them shareable so stakeholders can link to the canonical URL; sign-off no
+# longer gates visibility. One of:
+#   Draft            — initial brainstorm; structure may shift; sign-off
+#                      boxes empty
+#   Ready for Review — structure stable; at least one owner signed; awaiting
+#                      remaining owners
+#   Signed Off       — all owners signed; design locked
+#   Implemented      — corresponding milestone reached Done
+#   Superseded       — replaced by a newer RFC (header notes the successor)
+lifecycle: Draft
 
 # Primary author name(s). Comma-separated for multi-author RFCs.
 author: '[Name]'
@@ -58,6 +73,7 @@ requiresDocs: []
 # RFC-NNNN: Title
 
 **Status:** Draft
+**Lifecycle:** Draft
 **Author:** [Name]
 **Created:** YYYY-MM-DD
 **Updated:** YYYY-MM-DD
@@ -66,6 +82,13 @@ requiresDocs: []
 > The bold-style status block above is preserved for human readability. The
 > YAML frontmatter at the top of the file is the source of truth for tooling
 > (CI, dashboards, the RFC index in `README.md`).
+>
+> **AISDLC-118 — drafts land on main early.** As soon as you consider this
+> RFC shareable (typically after the first internal pass), open a PR that
+> lands it on main with `lifecycle: Draft`. Stakeholders can then reference
+> it at the canonical `spec/rfcs/RFC-NNNN-*.md` URL while you iterate. Sign-
+> off no longer gates visibility — flip `lifecycle` as the design matures
+> (Draft → Ready for Review → Signed Off → Implemented).
 
 ---
 

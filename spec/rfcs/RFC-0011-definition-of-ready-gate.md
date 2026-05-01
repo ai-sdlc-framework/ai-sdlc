@@ -2,6 +2,7 @@
 id: RFC-0011
 title: Definition-of-Ready Gate for Pipeline Admission
 status: Draft
+lifecycle: Signed Off
 author: dominique@reliablegenius.io
 created: 2026-04-30
 updated: 2026-04-30
@@ -15,6 +16,7 @@ requiresDocs: []
 # RFC-0011: Definition-of-Ready Gate for Pipeline Admission
 
 **Status:** Awaiting Product owner sign-off (Engineering + Operator signed off 2026-04-30)
+**Lifecycle:** Signed Off (per AISDLC-118 backfill — all three owners signed; design locked)
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-04-30
 **Updated:** 2026-04-30
