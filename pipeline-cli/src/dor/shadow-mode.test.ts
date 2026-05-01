@@ -329,7 +329,21 @@ describe('Shadow eval — corpus as proxy for real-issue stream', () => {
     // — which is the calibrated-LLM ideal. Real-issue runs use the
     // full unfiltered comparison; the operator reviews each
     // disagreement per the RFC §5.6 process.
+    //
+    // Defense against silent corpus drift (AISDLC-123): we ALSO assert
+    // the exact count of genuine-improvement disagreements (10 = 5
+    // gate-4 + 5 gate-6 fixtures) AND r.total === fixtures.length, so
+    // a future fixture rename, a skipped fixture, or an empty corpus
+    // surfaces immediately rather than passing silently under the
+    // disagreement-rate threshold.
     expect(r.disagreementRate).toBeGreaterThanOrEqual(0);
+    expect(r.total).toBe(fixtures.length);
+    const genuineImprovementDisagreements = r.disagreements.filter((d) => {
+      const fx = fixtures.find((f) => f.name === d.issueId);
+      if (!fx) return false;
+      return /^needs-clarification\/gate-(4|6)-/.test(fx.bucket);
+    });
+    expect(genuineImprovementDisagreements.length).toBe(10);
     const noisyDisagreements = r.disagreements.filter((d) => {
       // Look up the originating bucket
       const fx = fixtures.find((f) => f.name === d.issueId);
