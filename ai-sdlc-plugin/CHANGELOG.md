@@ -103,7 +103,29 @@ with entries grouped under a release heading or `Unreleased` while in flight.
   Draft/Under Review/Rejected/Withdrawn skipped; deferred warned;
   malformed rejected), recursive doc lookup, template skip, and CLI exit
   codes. (AISDLC-69.3)
-
+- **CI-skip marker hygiene** (AISDLC-88) — three-layer prevention for the five
+  GitHub Actions magic tokens (`(skip ci marker)`, `(ci skip marker)`, `(no ci marker)`,
+  `(skip actions marker)`, `(actions skip marker)` — paren-quoted here to avoid
+  triggering the parser this CHANGELOG entry documents) leaking into commit
+  messages and silently disabling workflows.
+  1. New `scripts/check-skip-ci-marker.sh` (`.husky/pre-push` wiring is an
+     operator follow-up): scans every commit being pushed for the literal
+     bracketed substrings (case-insensitive), prints a clear remediation
+     message, and exits 1. Override via `AI_SDLC_SKIP_MARKER_GATE=1 git push`.
+     Bot-author exemption: a commit authored by `ai-sdlc-ci-attestor[bot]`
+     (production identity per `.github/workflows/ai-sdlc-review.yml`; legacy
+     `github-actions[bot]` kept as fallback) AND subjected
+     `chore(ci): sign review attestation*` passes (the documented AISDLC-87
+     chore commit).
+  2. New Hard Rule in `ai-sdlc-plugin/agents/developer.md` (Hard Rule 7) and
+     `ai-sdlc-plugin/commands/execute.md` (post-AISDLC-98 the orchestrator
+     subagent file is gone; the slash command body now hosts the rule). The
+     agents must use the **paren-quoted form** when discussing these tokens
+     in commit bodies. Backtick-wrapping does NOT defeat GitHub's
+     literal-substring parser — only the bracket-free form is safe.
+  3. The slash command body's Step 10 chore-commit body is now sed-sanitised
+     before `git commit -m` as defense-in-depth (so even a leaked token in
+     interpolated text gets rewritten before it can land).
 - **CI-side attestor** (`scripts/ci-sign-attestation.mjs` +
   `.github/workflows/ai-sdlc-review.yml` Post Review Results step): when CI's
   three reviewer agents (testing/critic/security) all approve a PR AND the
