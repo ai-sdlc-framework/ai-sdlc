@@ -322,11 +322,65 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
   it('embeds the hard governance rules (defense-in-depth)', () => {
     // The slash command body now carries the same governance rules the
     // developer + reviewers also embed — belt-and-braces in case a future
-    // edit drops one. Excludes Hard Rule 7 (recursive-orchestrator) which
-    // became moot when the orchestrator was deleted.
+    // edit drops one. Hard Rule 7 (CI-skip token rule, AISDLC-88) is
+    // asserted by the dedicated AISDLC-88 tests below.
     assert.match(cmdBody, /Never merge any PR/i, 'must embed never-merge rule');
     assert.match(cmdBody, /Never force-push/i, 'must embed never-force-push rule');
     assert.match(cmdBody, /Never edit `\.ai-sdlc\/\*\*`/i, 'must embed never-edit-config rule');
+  });
+
+  // ── AISDLC-88: CI-skip marker hygiene ─────────────────────────────
+  // The slash command body must enumerate the five GH Actions magic
+  // tokens and document the paren-quoted escape (Hard Rule 7), AND
+  // Step 10 must sed-sanitise those tokens out of the chore commit
+  // body before `git commit -m` (defense-in-depth).
+
+  it('body forbids GH Actions CI-skip magic tokens in commit messages (AISDLC-88)', () => {
+    // Hard Rule 7 must enumerate all five tokens and document the
+    // paren-quoted escape pattern.
+    assert.ok(cmdBody.includes('AISDLC-88'), 'reference AISDLC-88 task ID');
+    assert.match(cmdBody, /\[skip ci\]/, 'enumerate the [skip ci] token');
+    assert.match(cmdBody, /\[ci skip\]/, 'enumerate the [ci skip] token');
+    assert.match(cmdBody, /\[no ci\]/, 'enumerate the [no ci] token');
+    assert.match(cmdBody, /\[skip actions\]/, 'enumerate the [skip actions] token');
+    assert.match(cmdBody, /\[actions skip\]/, 'enumerate the [actions skip] token');
+    assert.match(cmdBody, /\(skip ci marker\)/, 'show the paren-quoted example');
+    assert.match(
+      cmdBody,
+      /backtick-wrapping.*does NOT defeat/i,
+      'must explicitly debunk the backtick-wrapping myth',
+    );
+    // The CI-side attestor's chore commit is the documented exception —
+    // call it out by author identity (production OR legacy fallback) AND
+    // subject prefix so future readers know which one commit is exempt.
+    assert.match(
+      cmdBody,
+      /(github-actions|ai-sdlc-ci-attestor)\[bot\]/,
+      'name the bot-author exemption',
+    );
+    assert.match(
+      cmdBody,
+      /chore\(ci\): sign review attestation/,
+      'name the bot-subject exemption',
+    );
+  });
+
+  it('Step 10 sanitises CI-skip magic tokens out of the chore commit body (AISDLC-88)', () => {
+    // The chore commit MUST fire verify-attestation.yml + ai-sdlc-review.yml.
+    // Step 10 sanitises any leaked magic token before piping into git commit -m.
+    // Sed pipeline must rewrite all five tokens. We don't pin the exact
+    // sed flags, but the five replacement targets must all be present.
+    assert.match(cmdBody, /\(skip ci marker\)/, 'replacement for [skip ci]');
+    assert.match(cmdBody, /\(ci skip marker\)/, 'replacement for [ci skip]');
+    assert.match(cmdBody, /\(no ci marker\)/, 'replacement for [no ci]');
+    assert.match(cmdBody, /\(skip actions marker\)/, 'replacement for [skip actions]');
+    assert.match(cmdBody, /\(actions skip marker\)/, 'replacement for [actions skip]');
+    // Must wire through git commit -m with the sanitised body.
+    assert.match(
+      cmdBody,
+      /git commit -m "\$CHORE_BODY"/,
+      'commit must use the sanitised body, not the raw template',
+    );
   });
 
   // ── AISDLC-74: review attestation contract ────────────────────────
