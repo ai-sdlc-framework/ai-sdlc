@@ -6,6 +6,10 @@
 
 * convention detector — eliminate three false-positives surfaced by the React/Vite dogfood case (AISDLC-80): (1) PascalCase components + camelCase hooks/stores no longer flagged as `mixed` when `package.json` declares React; (2) testing convention enumerates ALL detected directories (`__tests__/`, `tests/`, `tests/e2e/`, `src/tests/`, `cypress/`, `e2e/`, ...) plus collocated `*.test.*` instead of collapsing to a single label; (3) Vite/TS/webpack path aliases (`@components`, `@engine`, ...) now parsed from `vite.config.{js,ts,mjs,cjs}`, `tsconfig.json`, `jsconfig.json`, and `webpack.config.*` and reported as their own bucket. `detectConventions` is now async and accepts an optional `{ repoPath }` for project-config-aware detection (legacy file-only signature still works without `repoPath`).
 
+### Added
+
+* **RFC-0010 Phase 5 follow-up — `AI_SDLC_PARALLELISM` promoted to default-on (AISDLC-116).** The flag now defaults to `'on'` per maintainer directive 2026-05-01 — corpus-driven (zero parallelism-related incidents in the trailing observation window) rather than calendar-driven. The original Phase 5 AC #4 ("1 week of dogfood pipeline running with `AI_SDLC_PARALLELISM=experimental`") calendar gate is dropped. Backwards compat preserved: explicit `'experimental'` still routes to the pre-promotion mode for callers that want to pin it; explicit `'off'` / `'disabled'` / `'false'` / `'0'` is the opt-out path. Pre-promotion fail-safe-off behavior changes to fail-on for unknown values (typos like `'enable'` or `'yes'` no longer silently disable parallelism). RFC-0010 revision history extended with v21 (Phase 5 hardening shipped) and v22 (default-on promotion).
+
 ### Features
 
 * `init --role <tier>` flag for `agent-role.yaml` tool defaults (AISDLC-79). Three tiers ship with intent-driven tool surfaces: `coding` (default — `Edit, Write, Read, Glob, Grep, Bash, NotebookEdit`), `research` (coding + `WebFetch, WebSearch`), `meta` (research + `Task, Skill`). Invalid `--role` values exit 1 with the accepted list. **Migration: nothing changes for current users** — `init` with no flag uses the `coding` tier (the previous default plus `NotebookEdit`), and existing `agent-role.yaml` files are still skipped (never overwritten). See `backlog/decisions/AISDLC-79-agent-role-tools-defaults.md` for rationale and tier rationale.
@@ -21,7 +25,7 @@
 
 ### Notes
 
-The `AI_SDLC_PARALLELISM` flag remains `off` by default. Promotion to default-on requires the chaos-test plan in `docs/operations/operator-runbook.md` to pass and a 1-week dogfood soak window — both deferred to a follow-up release.
+The `AI_SDLC_PARALLELISM` flag defaults to `on` as of AISDLC-116 (this Unreleased cycle). The original promotion criteria — chaos-test plan in `docs/operations/operator-runbook.md` plus a 1-week dogfood soak window — were dropped by maintainer directive 2026-05-01 in favor of substantive readiness (no parallelism-related incidents in the trailing observation window). Operators who want to pin the pre-promotion mode can still set `AI_SDLC_PARALLELISM=experimental`; operators who want to disable parallelism entirely can set `AI_SDLC_PARALLELISM=off` (or `disabled`/`false`/`0`).
 
 ## [0.9.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.8.0...orchestrator-v0.9.0) (2026-04-30)
 

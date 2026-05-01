@@ -241,11 +241,14 @@ export async function executePipeline(
   const auditLog = options.auditLog ?? createDefaultAuditLog(workDir);
   const metricStore = options.metricStore;
 
-  // RFC-0010 §6/§7 Phase 2: parallelism opt-in. When AI_SDLC_PARALLELISM is unset (default),
-  // execution proceeds serially exactly as today. When set to 'experimental' or 'on', a
-  // WorktreePoolManager is instantiated for the worker-pool dispatcher landing in Phase 3
-  // (RFC-0010 §9). For now the manager is constructed but not yet routed through — Phase 2
-  // ships the wire-in surface; Phase 3 wires the worker pool to consume it.
+  // RFC-0010 §6/§7 Phase 2: parallelism. Per AISDLC-116 (maintainer directive 2026-05-01),
+  // AI_SDLC_PARALLELISM now defaults to 'on' — corpus-driven (no parallelism-related incidents
+  // in the trailing observation window) rather than calendar-driven. Explicit
+  // 'experimental' is preserved for callers pinning the pre-promotion mode; explicit
+  // 'off' / 'disabled' / 'false' / '0' is the opt-out path. When the resolved mode is
+  // not 'off', a WorktreePoolManager is instantiated for the worker-pool dispatcher
+  // (RFC-0010 §9). The manager is constructed but not yet routed through — Phase 2
+  // shipped the wire-in surface; Phase 3 wires the worker pool to consume it.
   const parallelismMode: ParallelismMode = readParallelismMode();
   let worktreePool: WorktreePoolManager | undefined;
   if (parallelismMode !== 'off') {
