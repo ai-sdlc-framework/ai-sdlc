@@ -1,6 +1,10 @@
 pnpm exec lint-staged
 pnpm typecheck
 
-# >>> backlog-drift pre-commit hook >>>
-npx backlog-drift hook-run 2>&1
-# <<< backlog-drift pre-commit hook <<<
+# >>> backlog-drift strict pre-commit gate (AISDLC-119) >>>
+# Replaces the legacy advisory `npx backlog-drift hook-run` (exited 0 on errors).
+# Strict mode runs `backlog-drift check --task <id>` per staged backlog/tasks/*.md
+# and FAILS the commit on drift errors.
+# Escape: AI_SDLC_SKIP_DRIFT_GATE=1 git commit ...  OR  git commit --no-verify
+./scripts/check-backlog-drift.sh
+# <<< backlog-drift strict pre-commit gate (AISDLC-119) <<<
