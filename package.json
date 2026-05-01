@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check",
+    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -25,6 +25,7 @@
     "docs:check": "node scripts/check-docs-sync.mjs",
     "docs:test": "node --test scripts/docs-sync.test.mjs",
     "test:publishable": "node --test scripts/check-publishable-package-configs.test.mjs",
+    "test:drift-gate": "node --test scripts/check-backlog-drift.test.mjs",
     "rfc:check": "node scripts/check-rfc-docs.mjs",
     "rfc:test": "node --test scripts/check-rfc-docs.test.mjs",
     "prepare": "husky"
