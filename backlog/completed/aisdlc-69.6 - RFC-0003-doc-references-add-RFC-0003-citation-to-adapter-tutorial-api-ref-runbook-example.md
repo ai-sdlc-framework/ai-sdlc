@@ -41,7 +41,7 @@ The doc surfaces already cover adapters but do **not** cite RFC-0003 by ID:
 
 The CI gate in AISDLC-69.3 will look for the literal string `RFC-0003` in at least one file under each declared subdirectory. Without explicit references, the gate will fail for RFC-0003.
 
-(Note: there is a sibling RFC-0003 file — `RFC-0003-product-first-implementation-strategy.md` — that has `requiresDocs: []` and is intentionally exempt; this task only addresses the infrastructure-adapters RFC.)
+(Historical note: a sibling file previously shared the RFC-0003 ID — `RFC-0003-product-first-implementation-strategy.md` with `requiresDocs: []`. AISDLC-109 renumbered it to `RFC-0013-product-first-implementation-strategy.md`, so RFC-0003 now refers unambiguously to the infrastructure-adapters RFC.)
 
 ## What this task does
 
