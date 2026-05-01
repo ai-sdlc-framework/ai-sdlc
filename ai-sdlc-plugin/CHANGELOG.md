@@ -78,6 +78,31 @@ with entries grouped under a release heading or `Unreleased` while in flight.
   `commands/execute.test.mjs` adds 9 new assertions on the orchestrator
   body for Step 10.5 prose markers and Step 3 fresh-base behaviour.
   (AISDLC-102)
+- **RFC docs-drift CI gate** (`scripts/check-rfc-docs.mjs` +
+  `scripts/check-rfc-docs.test.mjs` + `pnpm rfc:check` / `pnpm rfc:test`):
+  enforces the `requiresDocs` convention defined in AISDLC-69.2. The script
+  walks `spec/rfcs/RFC-*.md` (skipping the template), parses YAML
+  frontmatter, and for every sign-off-locked RFC (`status: Approved`,
+  `Implemented`, or `Final`) verifies that each surface listed in
+  `requiresDocs` has at least one .md file under the corresponding
+  `docs/<subdir>/` (per the schema enum: tutorial→tutorials,
+  operator-runbook→operations, api-reference→api-reference,
+  getting-started→getting-started, example→examples) that references the
+  RFC by its `id`. RFCs flagged `deferredDocs: true` short-circuit with a
+  warning that announces remaining days until the deadline (or `OVERDUE`).
+  Pre-sign-off statuses (`Draft`, `Under Review`, `Rejected`, `Withdrawn`)
+  are skipped — the operator process documented in `spec/rfcs/README.md`
+  says docs land before requesting `Approved`, so we don't gate authoring.
+  Wired into the root `pnpm test` chain so the check runs on every local
+  test invocation. Operator follow-up: add `pnpm rfc:check` as an explicit
+  step in `.github/workflows/ci.yml` (workflow files are blocked from the
+  developer subagent, so this CHANGELOG entry is the handoff). Regression
+  coverage: 46 node:test cases covering frontmatter parsing edge cases
+  (CRLF, comments, malformed fences, inline empty list, block list,
+  booleans), validation outcomes (Approved/Implemented/Final enforced;
+  Draft/Under Review/Rejected/Withdrawn skipped; deferred warned;
+  malformed rejected), recursive doc lookup, template skip, and CLI exit
+  codes. (AISDLC-69.3)
 
 - **CI-side attestor** (`scripts/ci-sign-attestation.mjs` +
   `.github/workflows/ai-sdlc-review.yml` Post Review Results step): when CI's
