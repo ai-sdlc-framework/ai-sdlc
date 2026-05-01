@@ -240,6 +240,18 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ### Removed
 
+- **Agent-type Stop hook governance check from `ai-sdlc-plugin/plugin.json`**
+  (AISDLC-120, AISDLC-108 follow-up). The first element of `hooks.Stop[]` was
+  an `"type": "agent"` entry that invoked Haiku at the end of every
+  conversational turn with a prompt to verify build/test/lint/blockedPaths —
+  the same governance check the deleted `quality-gate-stop.sh` had been
+  running, just LLM-backed instead of shell-backed. Per AISDLC-108's intent
+  ("verification belongs on the git lifecycle, not every conversational
+  turn"), the per-turn LLM verification was redundant with the husky
+  pre-push gate (`scripts/check-coverage.sh` →  `pnpm -r test:coverage` +
+  the 80% codecov patch threshold). The second `Stop` block
+  (`deferred-coverage-check.sh`, `asyncRewake: true`) is unrelated — it's
+  the post-turn coverage check, the script still exists, and it stays.
 - **`hooks/quality-gate-stop.{sh,js,test.mjs}` + Stop-hook entries** that
   invoked it (AISDLC-108). The Claude `Stop` hook ran
   `quality-gate-stop.sh` at the end of every conversational turn,
