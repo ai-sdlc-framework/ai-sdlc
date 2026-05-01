@@ -168,7 +168,7 @@ All of the above only need `gh` / MCP read tools and the network — no signing 
 
 - **`/ai-sdlc execute <task-id>`** — will fail at Step 1 (no plugin loaded) or Step 9 (no signing key).
 - **Any signing-key-dependent flow** — `/ai-sdlc init-signing-key`, signing fresh DSSE attestations, anything that touches `~/.ai-sdlc/signing-key.pem`.
-- **Any plugin-subagent-dependent flow** — `developer`, `code-reviewer`, `test-reviewer`, `security-reviewer`, `execute-orchestrator` subagents are not registered in the remote sandbox.
+- **Any plugin-subagent-dependent flow** — `developer`, `code-reviewer`, `test-reviewer`, `security-reviewer` subagents are not registered in the remote sandbox.
 - **Any flow that opens a worktree** — `/ai-sdlc execute`, `/ai-sdlc cleanup`, anything touching `.worktrees/`.
 - **Any cross-repo write flow** — sibling-repo PRs (`permittedExternalPaths`) require local checkouts of those repos.
 
@@ -214,12 +214,18 @@ permittedExternalPaths:
 
 The PreToolUse hook reads this via a per-worktree sentinel `<worktree>/.active-task` (written by `/ai-sdlc execute` Step 4). Without the allowlist, writes outside the worktree are denied. With the allowlist, the developer subagent may write to the listed paths but does NOT commit there itself — `/ai-sdlc execute` Step 12 creates parallel PRs in the sibling repos. The env var `AI_SDLC_ACTIVE_TASK_ID` remains a fallback for tests / external tooling.
 
-**Parallel runs are first-class.** Multiple `/ai-sdlc execute` invocations can run concurrently against the same project root, including with cross-repo writes. The Step 0-13 pipeline lives inside the `execute-orchestrator` subagent (AISDLC-82) — the only plugin agent permitted to spawn nested subagents. Its tool grant is `Agent(developer, code-reviewer, test-reviewer, security-reviewer)` (AISDLC-90: `Task` was renamed to `Agent` in Claude Code v2.1.63; the allowlist form both grants the tool and forbids recursive orchestrator spawning at the tool layer). The slash command body is a thin wrapper that fires one `Agent(execute-orchestrator)` call, so the main Claude Code session can fan out N orchestrators in parallel from a single message. Each orchestrator drives its own developer + 3 reviewer subagents against its own worktree, with its own per-worktree `.active-task` sentinel (AISDLC-81) — no shared project-level state to race on.
+**Parallel runs are first-class — but parallelism is per-Claude-Code-session, not per-subagent (AISDLC-98).** The Step 0-13 pipeline lives inline in the `/ai-sdlc execute` slash command body (`ai-sdlc-plugin/commands/execute.md`). The slash command body runs in the main Claude Code session, which has the `Agent` tool, so it can spawn the developer + 3 reviewer subagents directly. Its tool grant is `Agent(developer, code-reviewer, test-reviewer, security-reviewer)` (`Task` was renamed to `Agent` in Claude Code v2.1.63; the allowlist form both grants the tool and restricts which subagent types may be spawned).
+
+Why inline rather than a subagent middleman? AISDLC-82 originally moved the recipe into an `execute-orchestrator` subagent so a single main session could fan out N orchestrators in one message. That design is unimplementable on the current Claude Code harness: **plugin subagents cannot use the `Agent` tool, regardless of frontmatter declarations.** Empirical proof came from AISDLC-69.2's parallel-execution test, which returned `"No such tool available: Agent. Agent is not available inside subagents."` Claude Code filters `Agent` out of every plugin subagent's tool grant one level deep, and the allowlist form `Agent(developer, ...)` is silently dropped just the same. AISDLC-98 reverted AISDLC-82 and moved the pipeline back inline.
+
+Parallel-run model under the new design:
+- Each `/ai-sdlc execute <task-id>` invocation runs in its own Claude Code session — the main session DOES have `Agent`, so it spawns the developer + 3 reviewers directly without a middleman.
+- For multiple tasks in flight, run `/loop /ai-sdlc execute <task-id>` (one task per loop tick, or fire the slash command from multiple terminal sessions). Each invocation is independent: its own worktree, its own per-worktree `.active-task` sentinel (AISDLC-81), its own developer + reviewer fan-out, its own PR. No shared project-level state to race on.
+- `/loop /ai-sdlc execute <task-id>` is now the canonical parallel-throughput pattern — single developer + 3 reviewers per loop tick, sequenced by the loop driver.
 
 Scaling notes:
-- N parallel runs ⇒ up to **3N concurrent reviewer subagents** (each orchestrator spawns 3 reviewers in parallel at Step 7). Reviewers are read-only so file-system contention is fine.
-- The husky `pre-push` hook in `.husky/pre-push` serialises across orchestrators only at the push boundary (Step 11). Steps 5-10 (developer + reviews + attestation) run fully in parallel across orchestrators.
-- `/loop /ai-sdlc:execute <task-id>` continues to work — `/loop` fires one Agent call at a time, which composes naturally with the orchestrator-subagent design.
+- N parallel `/ai-sdlc execute` runs ⇒ up to **3N concurrent reviewer subagents** (each invocation spawns 3 reviewers in parallel at Step 7). Reviewers are read-only so file-system contention is fine.
+- The husky `pre-push` hook in `.husky/pre-push` serialises across runs only at the push boundary (Step 11). Steps 5-10 (developer + reviews + attestation) run fully in parallel across concurrent invocations.
 
 The legacy project-level `.worktrees/.active-task` sentinel from earlier versions still works as a fallback for one release but is no longer written by `/ai-sdlc execute`.
 

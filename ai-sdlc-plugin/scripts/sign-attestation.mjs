@@ -93,7 +93,7 @@ async function main() {
   // ──────────────────────────────────────────────────────────────────
   // AISDLC-102: --print-content-hash mode (read-only oracle for Step 10.5)
   //
-  // Step 10.5 of the orchestrator (`ai-sdlc-plugin/agents/execute-orchestrator.md`)
+  // Step 10.5 of the /ai-sdlc execute pipeline (`ai-sdlc-plugin/commands/execute.md`)
   // calls this script BEFORE and AFTER `git rebase origin/main` to decide
   // whether the post-rebase content materially differs from what the reviewers
   // approved. Same hash → reuse approval; different hash → re-spawn reviewers.
