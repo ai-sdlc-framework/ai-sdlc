@@ -2027,6 +2027,212 @@ export const designSystemBindingSchema = {
   additionalProperties: false,
 } as const;
 
+export const dorConfigV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/dor-config.v1.schema.json',
+  title: 'AI-SDLC DorConfig',
+  description:
+    'Per-project configuration for the Definition-of-Ready (DoR) gate (RFC-0011). Lives on disk at .ai-sdlc/dor-config.yaml. Phase 1 schema — consumed by future evaluator phases.',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'spec'],
+  properties: {
+    apiVersion: {
+      $ref: 'common.schema.json#/$defs/apiVersion',
+    },
+    kind: {
+      type: 'string',
+      const: 'DorConfig',
+    },
+    metadata: {
+      $ref: 'common.schema.json#/$defs/metadata',
+    },
+    spec: {
+      type: 'object',
+      required: ['evaluationMode'],
+      properties: {
+        rubricVersion: {
+          type: 'string',
+          description:
+            'Pinned rubric version. v1 is the only currently published rubric (RFC-0011 §4).',
+          enum: ['v1'],
+          default: 'v1',
+        },
+        evaluationMode: {
+          type: 'string',
+          enum: ['warn-only', 'enforce'],
+          description:
+            'Per RFC §10 / §13 Q-resolution: warn-only posts comments + flags but does NOT move issues to Needs Clarification; enforce moves issues to Needs Clarification on a failing verdict.',
+        },
+        notifications: {
+          type: 'object',
+          description: 'Where clarification questions are posted (RFC §13 Q5 dual-fanout).',
+          properties: {
+            authorChannel: {
+              type: 'boolean',
+              default: true,
+              description:
+                'When true, post clarification comment to where the issue was authored (GitHub issue / backlog file / Slack thread).',
+            },
+            dedicatedChannel: {
+              type: 'object',
+              description:
+                'Optional centralised triage channel(s). If set, clarification posts go to BOTH the author channel AND the dedicated channel.',
+              properties: {
+                slack: {
+                  type: 'string',
+                  description: 'Slack channel ID or #name to mirror clarification comments to.',
+                  minLength: 1,
+                },
+                github_team: {
+                  type: 'string',
+                  description:
+                    "GitHub team handle (e.g. '@org/triage') to ping on clarification posts.",
+                  minLength: 1,
+                },
+              },
+              additionalProperties: false,
+              minProperties: 1,
+            },
+          },
+          additionalProperties: false,
+        },
+        staleness: {
+          type: 'object',
+          description:
+            'Two-stage warn-then-close staleness policy for issues stuck in Needs Clarification (RFC §13 Q6).',
+          required: ['warnAfterDays', 'closeAfterDays', 'closedLabel'],
+          properties: {
+            warnAfterDays: {
+              type: 'integer',
+              minimum: 1,
+              default: 14,
+              description:
+                'Days of inactivity before posting the staleness warning to the same channels as the original clarification.',
+            },
+            closeAfterDays: {
+              type: 'integer',
+              minimum: 2,
+              default: 28,
+              description:
+                'Days of inactivity before auto-closing the issue. MUST be greater than warnAfterDays (validated externally — JSON Schema cannot express cross-property constraints for integers without draft-2020 unevaluatedProperties tricks).',
+            },
+            closedLabel: {
+              type: 'string',
+              minLength: 1,
+              default: 'closed-as-stale-dor',
+              description:
+                'Label applied when the issue is auto-closed (so stale-DoR-closures are queryable).',
+            },
+          },
+          additionalProperties: false,
+        },
+        autoPassRules: {
+          type: 'array',
+          description:
+            'Auto-pass shortcuts for issue types where the rubric does not apply (RFC §6.4). Per Q-resolution: each rule MAY skip specific gates while retaining others.',
+          items: {
+            type: 'object',
+            required: ['kind', 'sources'],
+            properties: {
+              kind: {
+                type: 'string',
+                minLength: 1,
+                description:
+                  "Stable rule identifier (e.g. 'dependency-bump', 'doc-typo', 'generated-ci-failure'). Matches the dispatcher's rule registry.",
+              },
+              sources: {
+                type: 'array',
+                minItems: 1,
+                items: {
+                  type: 'string',
+                  minLength: 1,
+                },
+                description:
+                  "Author identities that trigger this rule (e.g. 'dependabot[bot]', 'renovate[bot]', 'github-actions[bot]').",
+              },
+              titlePattern: {
+                type: 'string',
+                description:
+                  'Optional regex (JavaScript flavour) the issue title must match for this rule to fire.',
+                minLength: 1,
+              },
+              maxBodyDiffLines: {
+                type: 'integer',
+                minimum: 1,
+                description: 'Optional cap on body diff size in lines (used by doc-typo).',
+              },
+              gatesSkipped: {
+                type: 'array',
+                description:
+                  'Gate IDs (1-7) skipped by this rule. Empty array = full skip (legacy auto-pass shortcut).',
+                items: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: 7,
+                },
+                uniqueItems: true,
+                default: [],
+              },
+              gatesRetained: {
+                type: 'array',
+                description:
+                  'Gate IDs (1-7) still evaluated when this rule matches. Allows partial auto-pass (e.g. dependency bumps still get scope-bounded check).',
+                items: {
+                  type: 'integer',
+                  minimum: 1,
+                  maximum: 7,
+                },
+                uniqueItems: true,
+                default: [],
+              },
+            },
+            additionalProperties: false,
+          },
+          default: [],
+        },
+        escalation: {
+          type: 'object',
+          description:
+            'Optional escalation policy (RFC §6.3) — populated in later phases. Schema-only here.',
+          properties: {
+            maxRoundsBeforeHumanTriage: {
+              type: 'integer',
+              minimum: 1,
+              default: 3,
+            },
+            triageRouters: {
+              type: 'array',
+              items: {
+                type: 'object',
+                properties: {
+                  github_team: {
+                    type: 'string',
+                    minLength: 1,
+                  },
+                  slack: {
+                    type: 'string',
+                    minLength: 1,
+                  },
+                },
+                additionalProperties: false,
+                minProperties: 1,
+              },
+            },
+          },
+          additionalProperties: false,
+        },
+        bypassRequiresRole: {
+          type: 'string',
+          description: 'Trusted-reviewer role required to apply the dor-bypass label (RFC §7.4).',
+          default: 'maintainer',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const pipelineSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/pipeline.schema.json',
@@ -3478,6 +3684,117 @@ export const qualityGateSchema = {
   additionalProperties: false,
 } as const;
 
+export const refinementVerdictV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/refinement-verdict.v1.schema.json',
+  title: 'AI-SDLC RefinementVerdict',
+  description:
+    'Per-issue verdict produced by the Definition-of-Ready evaluator (RFC-0011 §5, §9.2). One file per evaluation; written to the calibration log and consumed by ingress shims (GitHub Action, Claude Code subagent, future Forge / Slack shims).',
+  type: 'object',
+  required: ['issueId', 'rubricVersion', 'overallVerdict', 'gates', 'signedAt', 'evaluatorVersion'],
+  properties: {
+    issueId: {
+      type: 'string',
+      minLength: 1,
+      description: "Stable issue identifier (e.g. 'AISDLC-92', 'gh#42', 'forge-1234').",
+    },
+    rubricVersion: {
+      type: 'string',
+      enum: ['v1'],
+      description:
+        'Rubric version this verdict was scored against. Pinned so historical verdicts are interpretable after rubric revisions.',
+    },
+    overallVerdict: {
+      type: 'string',
+      enum: ['admit', 'needs-clarification'],
+      description:
+        "Composite verdict. 'admit' = pass DoR, advance to PPA. 'needs-clarification' = block + post questions.",
+    },
+    gates: {
+      type: 'array',
+      minItems: 1,
+      maxItems: 7,
+      description:
+        'Per-gate verdict shape (RFC §4.1 — exactly 7 gates in v1; smaller arrays allowed for partial evaluations e.g. when an autoPassRule skips gates).',
+      items: {
+        type: 'object',
+        required: ['gateId', 'verdict', 'confidence'],
+        properties: {
+          gateId: {
+            type: 'integer',
+            minimum: 1,
+            maximum: 7,
+            description:
+              'Rubric gate number (1: AC binary-testable, 2: no markers, 3: refs resolve, 4: scope bounded, 5: surface named, 6: done-state describable, 7: no invisible deps).',
+          },
+          verdict: {
+            type: 'string',
+            enum: ['pass', 'fail', 'skip'],
+            description:
+              "Per-gate outcome. 'skip' = autoPassRule excluded this gate; 'fail' = gate produced a blocking finding; 'pass' = gate cleared.",
+          },
+          confidence: {
+            type: 'string',
+            enum: ['high', 'medium', 'low'],
+            description:
+              'Per-gate confidence (RFC §5.5, §13 Q4). low → escalate to human triager; medium → act + flag for spot-check; high → act on verdict.',
+          },
+          clarificationQuestion: {
+            type: 'string',
+            minLength: 1,
+            description:
+              "Optional single clarifying question the evaluator wants the author to answer. Only set when verdict='fail'.",
+          },
+          finding: {
+            type: 'string',
+            minLength: 1,
+            description:
+              "Optional human-readable finding describing why this gate failed (e.g. 'AC #2 not binary-testable').",
+          },
+          stage: {
+            type: 'string',
+            enum: ['A', 'B'],
+            description:
+              "Which evaluation stage produced this verdict (RFC §4.4). 'A' = deterministic regex / link / structure; 'B' = LLM semantic check.",
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    signedAt: {
+      type: 'string',
+      format: 'date-time',
+      description: 'ISO-8601 timestamp at which the evaluator finalised this verdict.',
+    },
+    evaluatorVersion: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Semver / git-sha of the evaluator binary that produced this verdict. Used for calibration log cross-referencing (RFC §5.5).',
+    },
+    summary: {
+      type: 'string',
+      maxLength: 500,
+      description: 'Optional one-sentence human-readable summary of the verdict.',
+    },
+    questions: {
+      type: 'array',
+      items: {
+        type: 'string',
+        minLength: 1,
+      },
+      description:
+        'Aggregate clarifying questions for the comment-loop ingress to post (deduped, ordered).',
+    },
+    overallConfidence: {
+      type: 'string',
+      enum: ['high', 'medium', 'low'],
+      description: 'Optional aggregate confidence across all gates (RFC §5.5).',
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const rfcSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/rfc.schema.json',
@@ -3868,8 +4185,10 @@ export const SCHEMAS: Record<string, object> = {
   'database-branch-pool.schema.json': databaseBranchPoolSchema,
   'design-intent-document.schema.json': designIntentDocumentSchema,
   'design-system-binding.schema.json': designSystemBindingSchema,
+  'dor-config.v1.schema.json': dorConfigV1Schema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
+  'refinement-verdict.v1.schema.json': refinementVerdictV1Schema,
   'rfc.schema.json': rfcSchema,
   'sa-exemplar.schema.json': saExemplarSchema,
   'subscription-plan.schema.json': subscriptionPlanSchema,

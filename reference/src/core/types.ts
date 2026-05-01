@@ -16,7 +16,8 @@ export type ResourceKind =
   | 'AutonomyPolicy'
   | 'AdapterBinding'
   | 'DesignSystemBinding'
-  | 'DesignIntentDocument';
+  | 'DesignIntentDocument'
+  | 'DorConfig';
 
 export interface Metadata {
   name: string;

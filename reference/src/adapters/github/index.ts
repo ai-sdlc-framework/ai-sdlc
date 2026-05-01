@@ -62,6 +62,13 @@ function getOwnerRepo(config: GitHubConfig): { owner: string; repo: string } {
   return { owner: config.org, repo: config.repo };
 }
 
+/**
+ * Label used to represent the `Needs Clarification` lifecycle status on GitHub
+ * Issues per RFC-0011 §9.1. GitHub Issues only natively support open/closed,
+ * so the DoR gate uses a label to encode the richer task lifecycle.
+ */
+export const NEEDS_CLARIFICATION_LABEL = 'status:needs-clarification';
+
 function mapGitHubIssue(gh: {
   number: number;
   title: string;
@@ -71,14 +78,19 @@ function mapGitHubIssue(gh: {
   assignee?: { login: string } | null;
   html_url: string;
 }): Issue {
+  const labelNames = (gh.labels as Array<{ name?: string } | string>)
+    .map((l) => (typeof l === 'string' ? l : (l.name ?? '')))
+    .filter(Boolean);
+  // RFC-0011 §9.1: surface the Needs Clarification label as a first-class
+  // status so callers don't have to scan labels themselves. Existing
+  // open/closed semantics are preserved when the label is absent.
+  const status = labelNames.includes(NEEDS_CLARIFICATION_LABEL) ? 'Needs Clarification' : gh.state;
   return {
     id: String(gh.number),
     title: gh.title,
     description: gh.body ?? undefined,
-    status: gh.state,
-    labels: (gh.labels as Array<{ name?: string } | string>)
-      .map((l) => (typeof l === 'string' ? l : (l.name ?? '')))
-      .filter(Boolean),
+    status,
+    labels: labelNames,
     assignee: gh.assignee?.login,
     url: gh.html_url,
   };
@@ -152,7 +164,39 @@ export function createGitHubIssueTracker(config: GitHubConfig): IssueTracker {
     },
 
     async transitionIssue(id: string, transition: string): Promise<Issue> {
-      const state = transition === 'close' ? 'closed' : 'open';
+      // RFC-0011 §9.1: Needs Clarification is represented as a label, not
+      // as a GitHub native state. Add/remove the marker label without
+      // touching open/closed.
+      const normalised = transition.toLowerCase().trim();
+      if (normalised === 'needs clarification' || normalised === 'needs-clarification') {
+        await octokit.issues.addLabels({
+          ...ownerRepo,
+          issue_number: Number(id),
+          labels: [NEEDS_CLARIFICATION_LABEL],
+        });
+        const { data } = await octokit.issues.get({
+          ...ownerRepo,
+          issue_number: Number(id),
+        });
+        return mapGitHubIssue(data);
+      }
+      // Any non-Needs-Clarification, non-close transition implicitly clears
+      // the marker label (mirrors the lifecycle: ready → To Do clears DoR
+      // block).
+      if (normalised !== 'close' && normalised !== 'closed') {
+        try {
+          await octokit.issues.removeLabel({
+            ...ownerRepo,
+            issue_number: Number(id),
+            name: NEEDS_CLARIFICATION_LABEL,
+          });
+        } catch (err: unknown) {
+          // 404 = label wasn't on the issue; safe to ignore.
+          const status = (err as { status?: number }).status;
+          if (status !== 404) throw err;
+        }
+      }
+      const state = normalised === 'close' || normalised === 'closed' ? 'closed' : 'open';
       const { data } = await octokit.issues.update({
         ...ownerRepo,
         issue_number: Number(id),

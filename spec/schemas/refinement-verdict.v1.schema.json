@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/refinement-verdict.v1.schema.json",
+  "title": "AI-SDLC RefinementVerdict",
+  "description": "Per-issue verdict produced by the Definition-of-Ready evaluator (RFC-0011 §5, §9.2). One file per evaluation; written to the calibration log and consumed by ingress shims (GitHub Action, Claude Code subagent, future Forge / Slack shims).",
+  "type": "object",
+  "required": ["issueId", "rubricVersion", "overallVerdict", "gates", "signedAt", "evaluatorVersion"],
+  "properties": {
+    "issueId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Stable issue identifier (e.g. 'AISDLC-92', 'gh#42', 'forge-1234')."
+    },
+    "rubricVersion": {
+      "type": "string",
+      "enum": ["v1"],
+      "description": "Rubric version this verdict was scored against. Pinned so historical verdicts are interpretable after rubric revisions."
+    },
+    "overallVerdict": {
+      "type": "string",
+      "enum": ["admit", "needs-clarification"],
+      "description": "Composite verdict. 'admit' = pass DoR, advance to PPA. 'needs-clarification' = block + post questions."
+    },
+    "gates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 7,
+      "description": "Per-gate verdict shape (RFC §4.1 — exactly 7 gates in v1; smaller arrays allowed for partial evaluations e.g. when an autoPassRule skips gates).",
+      "items": {
+        "type": "object",
+        "required": ["gateId", "verdict", "confidence"],
+        "properties": {
+          "gateId": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 7,
+            "description": "Rubric gate number (1: AC binary-testable, 2: no markers, 3: refs resolve, 4: scope bounded, 5: surface named, 6: done-state describable, 7: no invisible deps)."
+          },
+          "verdict": {
+            "type": "string",
+            "enum": ["pass", "fail", "skip"],
+            "description": "Per-gate outcome. 'skip' = autoPassRule excluded this gate; 'fail' = gate produced a blocking finding; 'pass' = gate cleared."
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["high", "medium", "low"],
+            "description": "Per-gate confidence (RFC §5.5, §13 Q4). low → escalate to human triager; medium → act + flag for spot-check; high → act on verdict."
+          },
+          "clarificationQuestion": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional single clarifying question the evaluator wants the author to answer. Only set when verdict='fail'."
+          },
+          "finding": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Optional human-readable finding describing why this gate failed (e.g. 'AC #2 not binary-testable')."
+          },
+          "stage": {
+            "type": "string",
+            "enum": ["A", "B"],
+            "description": "Which evaluation stage produced this verdict (RFC §4.4). 'A' = deterministic regex / link / structure; 'B' = LLM semantic check."
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "signedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp at which the evaluator finalised this verdict."
+    },
+    "evaluatorVersion": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Semver / git-sha of the evaluator binary that produced this verdict. Used for calibration log cross-referencing (RFC §5.5)."
+    },
+    "summary": {
+      "type": "string",
+      "maxLength": 500,
+      "description": "Optional one-sentence human-readable summary of the verdict."
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Aggregate clarifying questions for the comment-loop ingress to post (deduped, ordered)."
+    },
+    "overallConfidence": {
+      "type": "string",
+      "enum": ["high", "medium", "low"],
+      "description": "Optional aggregate confidence across all gates (RFC §5.5)."
+    }
+  },
+  "additionalProperties": false
+}

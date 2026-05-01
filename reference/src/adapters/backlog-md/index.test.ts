@@ -311,4 +311,47 @@ describe('createBacklogMdIssueTracker', () => {
     const issue = await customTracker.createIssue({ title: 'Custom Prefix Task' });
     expect(issue.id).toBe('CUSTOM-1');
   });
+
+  // ── RFC-0011 §9.1 — Needs Clarification status (AISDLC-115.1) ──────
+
+  it('transitionIssue accepts Needs Clarification when listed in config statuses', async () => {
+    const configWithDor = `project_name: dor-project
+default_status: "To Do"
+statuses: ["Draft", "Needs Clarification", "To Do", "In Progress", "Done"]
+labels: []
+task_prefix: "PROJ"
+`;
+    mockFs = createMockFs(
+      {
+        '/mock/backlog/config.yml': configWithDor,
+        '/mock/backlog/tasks/proj-1 - Fix-the-login-bug.md': TASK_CONTENT,
+      },
+      {
+        '/mock/backlog': ['config.yml', 'tasks'],
+        '/mock/backlog/tasks': ['proj-1 - Fix-the-login-bug.md'],
+      },
+    );
+    const dorTracker = createBacklogMdIssueTracker(config, mockFs);
+    const issue = await dorTracker.transitionIssue('PROJ-1', 'Needs Clarification');
+    expect(issue.status).toBe('Needs Clarification');
+
+    const [, content] = mockFs.writeFile.mock.calls[0];
+    expect(content).toContain('status: Needs Clarification');
+  });
+
+  it('default status set (no config file) includes Draft + Needs Clarification', async () => {
+    // No config.yml → adapter falls back to default statuses.
+    mockFs = createMockFs(
+      {
+        '/mock/backlog/tasks/proj-1 - Fix-the-login-bug.md': TASK_CONTENT,
+      },
+      {
+        '/mock/backlog': ['tasks'],
+        '/mock/backlog/tasks': ['proj-1 - Fix-the-login-bug.md'],
+      },
+    );
+    const fallbackTracker = createBacklogMdIssueTracker(config, mockFs);
+    const issue = await fallbackTracker.transitionIssue('PROJ-1', 'Needs Clarification');
+    expect(issue.status).toBe('Needs Clarification');
+  });
 });
