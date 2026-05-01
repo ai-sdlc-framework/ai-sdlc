@@ -53,3 +53,24 @@ After editing, run `pnpm docs:sync` so `ai-sdlc-io/content/docs/` stays in sync.
 4. AISDLC-69.3's `pnpm docs:check` (or equivalent) passes for RFC-0005.
 <!-- AC:END -->
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Added RFC-0005 (Product Priority Algorithm) citations to docs/api-reference/priority.md (new "Spec references" section) and docs/operations/operator-runbook.md (PPA scoring callout, required-reading list, Related Documents).
+
+## AC status
+- ✓ All 4 ACs met (rfc:check skips pre-sign-off RFCs; gate will pass once RFC-0005 reaches Approved)
+
+## Verification
+- `pnpm rfc:check` clean (8 RFCs walked)
+- `pnpm rfc:test` 46/46
+- `pnpm build && pnpm lint && pnpm format:check` clean
+- 3 reviews approved: code 0c/0M/1m/0s; test 0c/0M/0m/0s; security 0c/0M/0m/0s
+- ⚠ INDEPENDENCE NOT ENFORCED
+
+## Follow-up
+- Code minor: `priority.md` line 7 says RFC-0005 "defines the seven dimensions" — RFC-0005's Summary uses "five dimensions plus bounded human influence and self-calibrating feedback"; tighten phrasing
+- Operator: run `pnpm docs:sync` against `ai-sdlc-io/` for sibling propagation
+<!-- SECTION:FINAL_SUMMARY:END -->
