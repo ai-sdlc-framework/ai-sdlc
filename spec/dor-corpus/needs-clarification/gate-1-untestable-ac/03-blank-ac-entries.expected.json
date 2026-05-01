@@ -1,0 +1,6 @@
+{
+  "overallVerdict": "needs-clarification",
+  "failsGates": [1],
+  "description": "Gate 1 fixture: 03-blank-ac-entries",
+  "allowExtraFailures": true
+}

@@ -1,0 +1,5 @@
+{
+  "overallVerdict": "needs-clarification",
+  "failsGates": [2],
+  "description": "Inline-code TBD still trips gate 2 (only fenced code is stripped)."
+}

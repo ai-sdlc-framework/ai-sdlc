@@ -144,4 +144,27 @@ describe('CLI router', () => {
     const result = stdoutJson() as { swept: unknown[] };
     expect(result.swept).toEqual([]);
   });
+
+  it('dor-evaluate admits a well-formed issue (RFC-0011 Phase 2a)', async () => {
+    const { writeFileSync, mkdirSync: mk } = await import('node:fs');
+    mk(join(tmp, 'pipeline-cli', 'src'), { recursive: true });
+    writeFileSync(join(tmp, 'pipeline-cli', 'src', 'index.ts'), 'export {};');
+    const bodyPath = join(tmp, 'body.md');
+    writeFileSync(
+      bodyPath,
+      '## Description\nFix typo in `pipeline-cli/src/index.ts`.\n## Acceptance Criteria\n- [ ] #1 typo fixed\n',
+    );
+    setArgv('dor-evaluate', 'AISDLC-1', '--body-file', bodyPath, '--hermetic', '--work-dir', tmp);
+    await buildCli().parseAsync();
+    const result = stdoutJson() as { overallVerdict: string };
+    expect(result.overallVerdict).toBe('admit');
+  });
+
+  it('dor-evaluate exits 2 on needs-clarification', async () => {
+    const { writeFileSync } = await import('node:fs');
+    const bodyPath = join(tmp, 'body.md');
+    writeFileSync(bodyPath, 'plain body, no AC, no surface.');
+    setArgv('dor-evaluate', 'AISDLC-2', '--body-file', bodyPath, '--hermetic', '--work-dir', tmp);
+    await expect(buildCli().parseAsync()).rejects.toThrow(/process\.exit\(2\)/);
+  });
 });

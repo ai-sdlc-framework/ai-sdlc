@@ -29,6 +29,9 @@
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
+import { evaluateIssue, type IssueInput } from '../dor/index.js';
+import { runStageACorpus } from '../dor/corpus.js';
+import { readFileSync } from 'node:fs';
 import { beginTask } from '../steps/04-flip-status.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
 import { buildReviewPrompts } from '../steps/07-build-review-prompts.js';
@@ -421,6 +424,70 @@ export function buildCli(): Argv {
           }
           const result = await cleanupTask({ taskId: argv['task-id'] as string, worktreePath });
           emit(result);
+        },
+      )
+      // RFC-0011 Phase 2a — Definition-of-Ready Stage A.
+      .command(
+        'dor-evaluate <issue-id>',
+        'RFC-0011 Phase 2a — evaluate a single issue against Stage A (deterministic gates only).',
+        (y) =>
+          y
+            .positional('issue-id', { type: 'string', demandOption: true })
+            .option('body-file', {
+              type: 'string',
+              describe:
+                'Path to a markdown file containing the issue body. Defaults to reading from stdin.',
+            })
+            .option('title', { type: 'string', default: '' })
+            .option('source', {
+              type: 'string',
+              choices: ['github', 'backlog', 'forge', 'slack'] as const,
+              default: 'backlog' as const,
+            })
+            .option('hermetic', {
+              type: 'boolean',
+              default: false,
+              describe: 'Hermetic mode — only the file-existence resolver runs (no gh / fetch).',
+            }),
+        async (argv) => {
+          const bodyFile = argv['body-file'] as string | undefined;
+          const body = bodyFile ? readFileSync(bodyFile, 'utf8') : await readStdin();
+          const input: IssueInput = {
+            source: argv.source as IssueInput['source'],
+            id: String(argv['issue-id']),
+            title: String(argv.title || argv['issue-id']),
+            body,
+            workDir: argv['work-dir'] as string,
+          };
+          const verdict = await evaluateIssue(input, { hermetic: argv.hermetic as boolean });
+          emit(verdict);
+          if (verdict.overallVerdict === 'needs-clarification') process.exit(2);
+        },
+      )
+      .command(
+        'dor-corpus [corpus-root]',
+        'RFC-0011 Phase 2a — run the Stage A regression suite against the corpus directory.',
+        (y) =>
+          y
+            .positional('corpus-root', {
+              type: 'string',
+              default: 'spec/dor-corpus',
+              describe: 'Path to the corpus directory (relative to --work-dir).',
+            })
+            .option('hermetic', { type: 'boolean', default: true })
+            .option('quiet', {
+              type: 'boolean',
+              default: false,
+              describe: 'Suppress per-failure detail; only print the summary report.',
+            }),
+        async (argv) => {
+          const root = String(argv['corpus-root']);
+          const absRoot = root.startsWith('/') ? root : `${argv['work-dir']}/${root}`;
+          const report = await runStageACorpus(absRoot, {
+            evaluatorOpts: { hermetic: argv.hermetic as boolean },
+          });
+          emit(report);
+          if (report.failed > 0) process.exit(1);
         },
       )
       .demandCommand(1, 'A subcommand is required. Run with --help for the list.')
