@@ -287,6 +287,64 @@ Cite the counts in `finalSummary`. If you can't reproduce the counts in the task
 
 The file location is the source of truth: `backlog/tasks/<id>-*.md` = open, `backlog/completed/<id>-*.md` = closed. `task_edit` sets the status field inside the file but does NOT move it; `task_complete` does both.
 
+## Releases
+
+### Publishable package configs (AISDLC-97)
+
+`.github/workflows/release.yml` runs `pnpm -r publish --no-git-checks` with **no `--access` flag**. That means every workspace package whose `package.json` is NOT marked `"private": true` MUST carry its own publishConfig block:
+
+```jsonc
+{
+  "name": "@ai-sdlc/<thing>",
+  // ...
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  }
+}
+```
+
+Without it, npm rejects the publish with:
+
+```
+npm error code E402
+npm error 402 Payment Required - PUT https://registry.npmjs.org/@ai-sdlc%2f... - You must sign up for private packages
+```
+
+Scoped packages default to private on the npm registry, and the release workflow has no override.
+
+#### Why this is a CLAUDE.md rule
+
+Forensic AISDLC-97 investigation: `@ai-sdlc/plugin-mcp-server` v0.8.0 + v0.8.1 both **silently failed to publish**. The release workflow ran, npm rejected mcp-server with E402, but the publish job overall didn't visibly bubble up the failure as "this package never shipped" — it looked like a normal CI hiccup. Result: two consecutive ai-sdlc-plugin minor bumps shipped to git tags but only the second-to-last package made it to npm. The fix commit `1c8b584` was the FIRST time `publishConfig` had ever been added to that package's `package.json` on main; the original "fix in PR #54" memory was wrong — it had never actually been committed.
+
+#### How to spot-check before merging a release-please PR
+
+```bash
+# Diff every publishable package's publishConfig against the spec.
+pnpm lint:publishable
+```
+
+The script (`scripts/check-publishable-package-configs.mjs`) walks every entry in `pnpm-workspace.yaml`, skips `"private": true` packages, and asserts the rest carry `publishConfig.access: "public"` AND `publishConfig.registry: "https://registry.npmjs.org/"`. Exit 0 = green; exit 1 = something will fail to publish on the next release.
+
+It's wired into `pnpm test` (via `pnpm test:publishable`) so the tree-wide test run catches regressions, but the operator should also wire it as an explicit CI step in `.github/workflows/ci.yml` (the workflow file is blocked from the developer subagent — this is a follow-up):
+
+```yaml
+- name: Lint publishable package configs
+  run: pnpm lint:publishable
+```
+
+#### How to add a new publishable package without forgetting
+
+1. Create the package under a workspace path and add it to `pnpm-workspace.yaml`.
+2. In its `package.json`, decide:
+   - **Internal-only?** Add `"private": true` — done; the lint will skip it.
+   - **Publishing to npm?** Add the `publishConfig` block above before any other field after `"exports"`. Run `pnpm lint:publishable` to confirm green.
+3. If release-please should track its version, add it under `packages` in `release-please-config.json`.
+
+#### Why release-please can't fix this for us
+
+`release-please-config.json` only updates the `$.version` jsonpath of `mcp-server/package.json` (declared as an `extra-files` entry). It does NOT regenerate the file from a template, and it does NOT add or strip `publishConfig`. So the field is preserved across release-please runs once it's checked in — but release-please will never *add* it for you. The lint is the only safety net.
+
 ## Plugin MCP server — project-root discovery (AISDLC-99)
 
 The plugin's MCP server (`ai-sdlc-plugin/mcp-server/`) exposes filesystem-touching tools (`mcp__plugin_ai-sdlc_ai-sdlc__task_edit`, `mcp__plugin_ai-sdlc_ai-sdlc__task_complete`, `get_governance_context`, `get_review_policy`) that need to know which directory is "the project". Resolution happens in this order at every tool call:

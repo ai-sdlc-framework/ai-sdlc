@@ -12,10 +12,11 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check",
+    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
+    "lint:publishable": "node scripts/check-publishable-package-configs.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "clean": "pnpm -r clean",
@@ -23,6 +24,7 @@
     "docs:sync": "node scripts/docs-sync.mjs",
     "docs:check": "node scripts/check-docs-sync.mjs",
     "docs:test": "node --test scripts/docs-sync.test.mjs",
+    "test:publishable": "node --test scripts/check-publishable-package-configs.test.mjs",
     "prepare": "husky"
   },
   "lint-staged": {
