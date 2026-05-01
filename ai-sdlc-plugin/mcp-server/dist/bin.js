@@ -21582,6 +21582,1771 @@ function registerTaskComplete(server2, deps) {
   );
 }
 
+// ../../pipeline-cli/dist/runtime/shell-claude-p-spawner.js
+import { spawn as nodeSpawn } from "node:child_process";
+var DEFAULT_TIMEOUT_MS = 30 * 60 * 1e3;
+var ShellClaudePSpawner = class {
+  binary;
+  processSpawner;
+  defaultTimeoutMs;
+  extraArgs;
+  constructor(options = {}) {
+    this.binary = options.binary ?? "claude";
+    this.processSpawner = options.spawn ?? nodeSpawn;
+    this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.extraArgs = options.extraArgs ?? [];
+  }
+  async spawnParallel(opts) {
+    return Promise.all(opts.map((o) => this.spawn1(o)));
+  }
+  spawn(opts) {
+    return this.spawn1(opts);
+  }
+  /**
+   * Build the argv list for a given subagent invocation. Exposed (rather than
+   * inlined) so tests can assert the exact CLI shape without invoking `spawn`.
+   */
+  buildArgv(opts) {
+    return [
+      "--print",
+      "--output-format",
+      "json",
+      "--permission-mode",
+      "bypassPermissions",
+      "--agent",
+      opts.type,
+      ...this.extraArgs,
+      opts.prompt
+    ];
+  }
+  spawn1(opts) {
+    const start = Date.now();
+    const argv = this.buildArgv(opts);
+    const timeoutMs = opts.timeout ?? this.defaultTimeoutMs;
+    return new Promise((resolve2) => {
+      let child;
+      try {
+        child = this.processSpawner(this.binary, argv, { cwd: opts.cwd });
+      } catch (err) {
+        resolve2({
+          type: opts.type,
+          output: "",
+          status: "error",
+          error: `failed to spawn ${this.binary}: ${stringifyError(err)}`,
+          durationMs: Date.now() - start
+        });
+        return;
+      }
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+      const settle = (result) => {
+        if (settled)
+          return;
+        settled = true;
+        clearTimeout(timer);
+        resolve2(result);
+      };
+      const timer = setTimeout(() => {
+        try {
+          child.kill("SIGTERM");
+        } catch {
+        }
+        settle({
+          type: opts.type,
+          output: stdout,
+          status: "timeout",
+          error: `claude -p timed out after ${timeoutMs}ms`,
+          durationMs: Date.now() - start
+        });
+      }, timeoutMs);
+      child.stdout?.on("data", (chunk) => {
+        stdout += chunk.toString();
+      });
+      child.stderr?.on("data", (chunk) => {
+        stderr += chunk.toString();
+      });
+      child.on("error", (err) => {
+        settle({
+          type: opts.type,
+          output: stdout,
+          status: "error",
+          error: stringifyError(err),
+          durationMs: Date.now() - start
+        });
+      });
+      child.on("close", (code) => {
+        if (code !== 0) {
+          settle({
+            type: opts.type,
+            output: stdout,
+            status: "error",
+            error: stderr.trim() || `claude -p exited with code ${code ?? "null"}`,
+            durationMs: Date.now() - start
+          });
+          return;
+        }
+        const parsed = parseClaudeOutput(stdout);
+        settle({
+          type: opts.type,
+          output: stdout,
+          parsed,
+          status: "success",
+          durationMs: Date.now() - start
+        });
+      });
+    });
+  }
+};
+function parseClaudeOutput(stdout) {
+  const trimmed = stdout.trim();
+  if (!trimmed)
+    return void 0;
+  let envelope;
+  try {
+    envelope = JSON.parse(trimmed);
+  } catch {
+    return void 0;
+  }
+  if (typeof envelope === "object" && envelope !== null && "result" in envelope) {
+    const result = envelope.result;
+    if (typeof result === "string") {
+      try {
+        return JSON.parse(result);
+      } catch {
+        return result;
+      }
+    }
+    return result;
+  }
+  return envelope;
+}
+function stringifyError(err) {
+  if (err instanceof Error)
+    return err.message;
+  if (typeof err === "string")
+    return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
+// ../../pipeline-cli/dist/runtime/claude-code-sdk-spawner.js
+var DEFAULT_TIMEOUT_MS2 = 30 * 60 * 1e3;
+var ClaudeCodeSDKSpawner = class {
+  apiKey;
+  model;
+  defaultTimeoutMs;
+  invoker;
+  constructor(options = {}) {
+    this.apiKey = options.apiKey ?? process.env.ANTHROPIC_API_KEY;
+    this.model = options.model;
+    this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS2;
+    this.invoker = options.invoker ?? defaultSDKInvoker;
+  }
+  async spawnParallel(opts) {
+    return Promise.all(opts.map((o) => this.spawn1(o)));
+  }
+  spawn(opts) {
+    return this.spawn1(opts);
+  }
+  async spawn1(opts) {
+    const start = Date.now();
+    const timeoutMs = opts.timeout ?? this.defaultTimeoutMs;
+    if (!this.apiKey) {
+      return {
+        type: opts.type,
+        output: "",
+        status: "error",
+        error: "ClaudeCodeSDKSpawner: no API key \u2014 pass `apiKey` in constructor or set ANTHROPIC_API_KEY",
+        durationMs: Date.now() - start
+      };
+    }
+    try {
+      const result = await withTimeout(this.invoker({
+        type: opts.type,
+        prompt: opts.prompt,
+        cwd: opts.cwd,
+        apiKey: this.apiKey,
+        model: this.model,
+        timeoutMs
+      }), timeoutMs);
+      return {
+        type: opts.type,
+        output: result.output,
+        parsed: result.parsed,
+        status: "success",
+        durationMs: Date.now() - start
+      };
+    } catch (err) {
+      if (err instanceof TimeoutError) {
+        return {
+          type: opts.type,
+          output: "",
+          status: "timeout",
+          error: err.message,
+          durationMs: Date.now() - start
+        };
+      }
+      return {
+        type: opts.type,
+        output: "",
+        status: "error",
+        error: stringifyError2(err),
+        durationMs: Date.now() - start
+      };
+    }
+  }
+};
+async function dispatchToSDK(sdk, args, pkg = "@anthropic-ai/claude-code") {
+  const root = sdk.default ?? sdk;
+  const { type, prompt, cwd, apiKey, model } = args;
+  if (typeof root.query === "function") {
+    const iter = root.query({ prompt, cwd, agent: type, apiKey, model });
+    let output = "";
+    let parsed;
+    for await (const chunk of iter) {
+      if (typeof chunk === "string") {
+        output += chunk;
+        continue;
+      }
+      if (chunk && typeof chunk === "object") {
+        const c = chunk;
+        if (typeof c.text === "string")
+          output += c.text;
+        if (c.type === "result" && "result" in c) {
+          parsed = c.result;
+          if (typeof c.result === "string") {
+            output = output || c.result;
+          }
+        }
+      }
+    }
+    return { output, parsed };
+  }
+  if (typeof root.ClaudeCode === "function") {
+    const client = new root.ClaudeCode({ apiKey, model });
+    const raw = await client.runAgent({ subagentType: type, agent: type, prompt, cwd });
+    return normaliseRunAgentResponse(raw);
+  }
+  throw new Error(`Claude Code SDK at \`${pkg}\` does not expose a recognised entry point (neither \`query\` nor \`ClaudeCode\`). The SDK API may have shifted; pass a custom \`invoker\` to ClaudeCodeSDKSpawner to bridge the new shape.`);
+}
+var defaultSDKInvoker = async (args) => {
+  const pkg = "@anthropic-ai/claude-code";
+  let sdk;
+  try {
+    sdk = await import(
+      /* @vite-ignore */
+      pkg
+    );
+  } catch (err) {
+    throw new Error(`Claude Code SDK not installed: \`${pkg}\` could not be imported. Install it with \`pnpm add @anthropic-ai/claude-code\` or pass a custom \`invoker\` to ClaudeCodeSDKSpawner. Original error: ${stringifyError2(err)}`);
+  }
+  return dispatchToSDK(sdk, args, pkg);
+};
+function normaliseRunAgentResponse(raw) {
+  if (typeof raw === "string") {
+    return { output: raw };
+  }
+  if (raw && typeof raw === "object") {
+    const r = raw;
+    const output = typeof r.output === "string" ? r.output : typeof r.text === "string" ? r.text : typeof r.result === "string" ? r.result : JSON.stringify(raw);
+    const parsed = typeof r.result === "object" ? r.result : void 0;
+    return { output, parsed };
+  }
+  return { output: "" };
+}
+var TimeoutError = class extends Error {
+  constructor(timeoutMs) {
+    super(`ClaudeCodeSDKSpawner: SDK call timed out after ${timeoutMs}ms`);
+    this.name = "TimeoutError";
+  }
+};
+function withTimeout(p, timeoutMs) {
+  return new Promise((resolve2, reject) => {
+    const timer = setTimeout(() => reject(new TimeoutError(timeoutMs)), timeoutMs);
+    p.then((v) => {
+      clearTimeout(timer);
+      resolve2(v);
+    }, (e) => {
+      clearTimeout(timer);
+      reject(e);
+    });
+  });
+}
+function stringifyError2(err) {
+  if (err instanceof Error)
+    return err.message;
+  if (typeof err === "string")
+    return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
+// ../../pipeline-cli/dist/runtime/default-spawner.js
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+var execFileP = promisify(execFile);
+var defaultWhich = async (bin) => {
+  const command = process.platform === "win32" ? "where" : "which";
+  try {
+    const { stdout } = await execFileP(command, [bin], { timeout: 5e3 });
+    return stdout.trim().length > 0;
+  } catch {
+    return false;
+  }
+};
+async function defaultSpawner(options = {}) {
+  const which = options.which ?? defaultWhich;
+  const readEnv = options.env ?? (() => process.env.ANTHROPIC_API_KEY);
+  if (await which(options.shell?.binary ?? "claude")) {
+    return new ShellClaudePSpawner(options.shell);
+  }
+  const apiKey = readEnv();
+  if (apiKey) {
+    return new ClaudeCodeSDKSpawner({
+      apiKey,
+      ...options.sdk
+    });
+  }
+  throw new Error("No Claude Code runtime available \u2014 install the `claude` CLI (https://docs.claude.com/claude-code) for subscription billing, or set ANTHROPIC_API_KEY for API-key billing via @anthropic-ai/claude-code SDK.");
+}
+
+// ../../pipeline-cli/dist/runtime/exec.js
+import { execFile as execFile2 } from "node:child_process";
+import { promisify as promisify2 } from "node:util";
+var execFileP2 = promisify2(execFile2);
+var defaultRunner = async (command, args, opts = {}) => {
+  try {
+    const result = await execFileP2(command, args, {
+      cwd: opts.cwd,
+      timeout: opts.timeout ?? 6e4,
+      env: { ...process.env, ...opts.env },
+      maxBuffer: 32 * 1024 * 1024
+    });
+    const stdout = result.stdout;
+    const stderr = result.stderr;
+    return {
+      stdout: typeof stdout === "string" ? stdout : stdout.toString("utf8"),
+      stderr: typeof stderr === "string" ? stderr : stderr.toString("utf8"),
+      code: 0
+    };
+  } catch (err) {
+    const e = err;
+    const result = {
+      stdout: typeof e.stdout === "string" ? e.stdout : e.stdout?.toString() ?? "",
+      stderr: typeof e.stderr === "string" ? e.stderr : e.stderr?.toString() ?? "",
+      code: typeof e.code === "number" ? e.code : 1
+    };
+    if (opts.allowFailure) {
+      return result;
+    }
+    const reason = result.stderr || result.stdout || e.message || "command failed";
+    const exposed = new Error(`${command} ${args.join(" ")} failed: ${reason.trim()}`);
+    exposed.result = result;
+    throw exposed;
+  }
+};
+
+// ../../pipeline-cli/dist/steps/00-sweep.js
+import { existsSync as existsSync7, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
+import { join as join6 } from "node:path";
+async function sweepMergedWorktrees(opts) {
+  const runner = opts.runner ?? defaultRunner;
+  const worktreesDir = join6(opts.workDir, ".worktrees");
+  if (!existsSync7(worktreesDir)) {
+    return { swept: [] };
+  }
+  const swept = [];
+  let entries;
+  try {
+    entries = readdirSync2(worktreesDir);
+  } catch {
+    return { swept: [] };
+  }
+  for (const entry of entries) {
+    const wt = join6(worktreesDir, entry);
+    let isDir = false;
+    try {
+      isDir = statSync2(wt).isDirectory();
+    } catch {
+      continue;
+    }
+    if (!isDir)
+      continue;
+    let branch;
+    try {
+      const r = await runner("git", ["-C", wt, "rev-parse", "--abbrev-ref", "HEAD"], {
+        allowFailure: true
+      });
+      if (r.code !== 0)
+        continue;
+      branch = r.stdout.trim();
+    } catch {
+      continue;
+    }
+    if (!branch || branch === "HEAD")
+      continue;
+    let mergedAt = "";
+    try {
+      const r = await runner("gh", [
+        "pr",
+        "list",
+        "--head",
+        branch,
+        "--state",
+        "merged",
+        "--json",
+        "mergedAt",
+        "--jq",
+        ".[0].mergedAt"
+      ], { allowFailure: true, cwd: opts.workDir });
+      if (r.code === 0)
+        mergedAt = r.stdout.trim();
+    } catch {
+      continue;
+    }
+    if (!mergedAt || mergedAt === "null")
+      continue;
+    try {
+      await runner("git", ["worktree", "remove", "--force", wt], {
+        cwd: opts.workDir,
+        allowFailure: true
+      });
+      swept.push({ worktreePath: wt, branch, mergedAt });
+    } catch {
+    }
+  }
+  return { swept };
+}
+
+// ../../pipeline-cli/dist/steps/01-validate.js
+import { existsSync as existsSync8, readdirSync as readdirSync3, readFileSync as readFileSync6 } from "node:fs";
+import { join as join7 } from "node:path";
+function findTaskFile(taskId, workDir) {
+  const tasksDir = join7(workDir, "backlog", "tasks");
+  if (!existsSync8(tasksDir))
+    return null;
+  const lower = taskId.toLowerCase();
+  let entries;
+  try {
+    entries = readdirSync3(tasksDir);
+  } catch {
+    return null;
+  }
+  const prefix = `${lower} -`;
+  const match = entries.find((name) => name.toLowerCase().startsWith(prefix));
+  return match ? join7(tasksDir, match) : null;
+}
+function parseTaskFile(filePath) {
+  const raw = readFileSync6(filePath, "utf8");
+  const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!fmMatch) {
+    throw new Error(`Task file ${filePath} missing YAML frontmatter`);
+  }
+  const fmRaw = fmMatch[1];
+  const body = fmMatch[2];
+  const fm = parseSimpleYaml(fmRaw);
+  const acRe = /^- \[( |x|X)\] (?:#(\d+) )?(.*)$/gm;
+  const acs = [];
+  const acsChecked = [];
+  let m;
+  while ((m = acRe.exec(body)) !== null) {
+    acs.push(m[3].trim());
+    acsChecked.push(m[1].toLowerCase() === "x");
+  }
+  const descMatch = body.match(/##\s+Description\s*\n([\s\S]*?)(?=\n##\s|$)/);
+  const description = descMatch ? descMatch[1].replace(/<!--\s*SECTION:DESCRIPTION:BEGIN\s*-->/g, "").replace(/<!--\s*SECTION:DESCRIPTION:END\s*-->/g, "").trim() : "";
+  const id = String(fm.id ?? "").trim();
+  const title = String(fm.title ?? "").trim();
+  const status = String(fm.status ?? "").trim();
+  let permittedExternalPaths;
+  if (Array.isArray(fm.permittedExternalPaths)) {
+    permittedExternalPaths = fm.permittedExternalPaths.map(String);
+  }
+  let references;
+  if (Array.isArray(fm.references)) {
+    references = fm.references.map(String);
+  }
+  return {
+    id,
+    title,
+    status,
+    acceptanceCriteria: acs,
+    acceptanceCriteriaChecked: acsChecked,
+    permittedExternalPaths,
+    references,
+    description,
+    rawBody: body,
+    filePath
+  };
+}
+function parseSimpleYaml(raw) {
+  const out = {};
+  const lines = raw.split("\n");
+  let currentList = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (!line.trim() || line.trim().startsWith("#")) {
+      currentList = null;
+      continue;
+    }
+    const listItem = line.match(/^\s+- (.*)$/);
+    if (listItem && currentList) {
+      const arr = out[currentList] ?? [];
+      arr.push(stripQuotes(listItem[1]));
+      out[currentList] = arr;
+      continue;
+    }
+    const kv = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
+    if (!kv) {
+      currentList = null;
+      continue;
+    }
+    const key = kv[1];
+    const value = kv[2].trim();
+    if (value === "") {
+      out[key] = [];
+      currentList = key;
+    } else {
+      out[key] = stripQuotes(value);
+      currentList = null;
+    }
+  }
+  return out;
+}
+function stripQuotes(s) {
+  const trimmed = s.trim();
+  if (trimmed.startsWith("'") && trimmed.endsWith("'") || trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
+}
+async function validateTask(opts) {
+  const filePath = findTaskFile(opts.taskId, opts.workDir);
+  if (!filePath) {
+    return { ok: false, reason: `no task file for ${opts.taskId}` };
+  }
+  let task;
+  try {
+    task = parseTaskFile(filePath);
+  } catch (err) {
+    return { ok: false, reason: `failed to parse task file: ${err.message}` };
+  }
+  if (task.status === "Done") {
+    return { ok: false, reason: `status is 'Done' \u2014 already shipped`, task };
+  }
+  if (task.status === "Draft") {
+    return { ok: false, reason: `status is 'Draft' \u2014 task not ready for execution`, task };
+  }
+  if (task.status !== "To Do" && task.status !== "In Progress") {
+    return {
+      ok: false,
+      reason: `unexpected status "${task.status}" \u2014 expected 'To Do' or 'In Progress'`,
+      task
+    };
+  }
+  if (task.acceptanceCriteria.length === 0) {
+    return { ok: false, reason: "task has no acceptance criteria", task };
+  }
+  if (task.status === "In Progress" && task.acceptanceCriteriaChecked.length === task.acceptanceCriteria.length && task.acceptanceCriteriaChecked.every((c) => c)) {
+    return {
+      ok: false,
+      reason: "stale-Done shape: status='In Progress' with all acceptance criteria checked \u2014 needs triage",
+      task
+    };
+  }
+  return { ok: true, task };
+}
+
+// ../../pipeline-cli/dist/steps/02-compute-branch.js
+import { existsSync as existsSync9, readFileSync as readFileSync7 } from "node:fs";
+import { join as join8 } from "node:path";
+var DEFAULT_PATTERN = "ai-sdlc/{issueIdLower}-{slug}";
+function slugify(title) {
+  return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
+}
+function readBranchPattern(workDir, fallback = DEFAULT_PATTERN) {
+  const yamlPath = join8(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
+  if (!existsSync9(yamlPath))
+    return fallback;
+  let raw;
+  try {
+    raw = readFileSync7(yamlPath, "utf8");
+  } catch {
+    return fallback;
+  }
+  const m = raw.match(/branching:\s*[\r\n]+\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/);
+  return m ? m[1].trim() : fallback;
+}
+async function computeBranchName(opts) {
+  const taskIdLower = opts.taskId.toLowerCase();
+  const slug = slugify(opts.task.title);
+  const pattern = readBranchPattern(opts.workDir, opts.defaultPattern ?? DEFAULT_PATTERN);
+  const branch = pattern.replace(/\{issueIdLower\}/g, taskIdLower).replace(/\{slug\}/g, slug);
+  const worktreePath = join8(opts.workDir, ".worktrees", taskIdLower);
+  return { branch, worktreePath, slug, taskIdLower };
+}
+
+// ../../pipeline-cli/dist/steps/03-setup-worktree.js
+import { mkdirSync as mkdirSync2 } from "node:fs";
+import { join as join9 } from "node:path";
+async function setupWorktree(opts) {
+  const runner = opts.runner ?? defaultRunner;
+  if (!opts.skipFetch) {
+    await runner("git", ["fetch", "origin", "main"], {
+      cwd: opts.workDir,
+      timeout: 3e4,
+      allowFailure: true
+    });
+  }
+  mkdirSync2(join9(opts.workDir, ".worktrees"), { recursive: true });
+  const addResult = await runner("git", ["worktree", "add", opts.worktreePath, "-b", opts.branch, "origin/main"], { cwd: opts.workDir, allowFailure: true });
+  if (addResult.code !== 0) {
+    throw new Error(`git worktree add failed for branch '${opts.branch}': ${addResult.stderr.trim() || "unknown error"}
+Likely cause: branch already exists. Run \`/ai-sdlc cleanup ${opts.taskId}\` first or pick a different task.`);
+  }
+  const baseShaResult = await runner("git", ["-C", opts.worktreePath, "rev-parse", "HEAD"], {
+    allowFailure: true
+  });
+  const baseSha = baseShaResult.code === 0 ? baseShaResult.stdout.trim() : "";
+  return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
+}
+
+// ../../pipeline-cli/dist/steps/04-flip-status.js
+import { readFileSync as readFileSync8, writeFileSync as writeFileSync3 } from "node:fs";
+import { join as join10 } from "node:path";
+function patchFrontmatterStatus(raw, newStatus) {
+  const fm = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+  if (!fm) {
+    throw new Error("task file missing YAML frontmatter");
+  }
+  const fmRaw = fm[1];
+  const body = fm[2];
+  let foundStatus = false;
+  const patched = fmRaw.split("\n").map((line) => {
+    const m = line.match(/^(status:\s*)(.+)$/);
+    if (m) {
+      foundStatus = true;
+      return `${m[1]}${newStatus}`;
+    }
+    return line;
+  }).join("\n");
+  const finalFm = foundStatus ? patched : `${patched}
+status: ${newStatus}`;
+  return `---
+${finalFm}
+---
+${body}`;
+}
+async function beginTask(opts) {
+  const status = opts.status ?? "In Progress";
+  const taskFile = findTaskFile(opts.taskId, opts.workDir);
+  if (!taskFile) {
+    throw new Error(`Step 4 begin-task: no task file found for ${opts.taskId}`);
+  }
+  const raw = readFileSync8(taskFile, "utf8");
+  const patched = patchFrontmatterStatus(raw, status);
+  writeFileSync3(taskFile, patched, "utf8");
+  const sentinelPath = join10(opts.worktreePath, ".active-task");
+  writeFileSync3(sentinelPath, `${opts.taskId}
+`, "utf8");
+  return { taskId: opts.taskId, worktreePath: opts.worktreePath, sentinelPath };
+}
+
+// ../../pipeline-cli/dist/steps/05-build-dev-prompt.js
+async function buildDeveloperPrompt(opts) {
+  const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join("\n");
+  const refs = opts.task.references && opts.task.references.length > 0 ? opts.task.references.join("\n") : "(none)";
+  const externalPaths = opts.task.permittedExternalPaths && opts.task.permittedExternalPaths.length > 0 ? opts.task.permittedExternalPaths.join("\n") : "none";
+  const iteration = opts.iteration ?? 1;
+  const feedbackBlock = iteration > 1 && opts.reviewerFeedback ? `
+
+## Reviewer feedback (round ${iteration - 1})
+
+${opts.reviewerFeedback}
+
+Address every finding above and re-run all four verifications before committing.
+` : "";
+  const prompt = `You are implementing backlog task ${opts.taskId} in worktree ${opts.worktreePath}.
+
+## Task title
+${opts.task.title}
+
+## Description
+${opts.task.description}
+
+## Acceptance criteria
+${acList}
+
+## References
+${refs}
+
+## Permitted external paths (cross-repo writes)
+${externalPaths}
+
+## Verification commands (run before commit)
+- pnpm build
+- pnpm test
+- pnpm lint
+- pnpm format:check
+
+## Commit message template
+<conventional-commit type>: <subject> (${opts.taskId})
+
+<body>
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+
+## Branch
+You are on branch \`${opts.branch}\` checked out at \`${opts.worktreePath}\`.
+` + feedbackBlock + `
+Return the JSON shape documented in your agent definition.
+`;
+  return { prompt, task: opts.task };
+}
+
+// ../../pipeline-cli/dist/steps/06-parse-dev-return.js
+var VALID_VERIFICATION_STATUSES = ["passed", "failed", "skipped"];
+async function parseDeveloperReturn(opts) {
+  let parsed = opts.developerReturn;
+  if (typeof parsed === "string") {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch (err) {
+      return { ok: false, reason: `failed to parse developer JSON: ${err.message}` };
+    }
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return { ok: false, reason: "developer return is not an object" };
+  }
+  const obj = parsed;
+  for (const key of [
+    "summary",
+    "filesChanged",
+    "commitSha",
+    "verifications",
+    "acceptanceCriteriaMet"
+  ]) {
+    if (!(key in obj)) {
+      return { ok: false, reason: `developer return missing required key '${key}'` };
+    }
+  }
+  if (!Array.isArray(obj.filesChanged)) {
+    return { ok: false, reason: "developer return field 'filesChanged' must be an array" };
+  }
+  if (!Array.isArray(obj.acceptanceCriteriaMet)) {
+    return { ok: false, reason: "developer return field 'acceptanceCriteriaMet' must be an array" };
+  }
+  const v = obj.verifications;
+  if (!v || typeof v !== "object") {
+    return { ok: false, reason: "developer return field 'verifications' must be an object" };
+  }
+  const vObj = v;
+  for (const key of ["build", "test", "lint", "format"]) {
+    const val = vObj[key];
+    if (typeof val !== "string" || !VALID_VERIFICATION_STATUSES.includes(val)) {
+      return {
+        ok: false,
+        reason: `developer return verifications.${key} must be one of ${VALID_VERIFICATION_STATUSES.join("/")}`
+      };
+    }
+  }
+  if (obj.commitSha === null || obj.commitSha === void 0) {
+    return {
+      ok: false,
+      reason: `developer reported null commitSha \u2014 task could not be completed${typeof obj.notes === "string" && obj.notes ? ": " + obj.notes : ""}`,
+      developer: obj
+    };
+  }
+  for (const key of ["build", "test", "lint", "format"]) {
+    if (vObj[key] === "failed") {
+      return {
+        ok: false,
+        reason: `developer reported verifications.${key} = failed`,
+        developer: obj
+      };
+    }
+  }
+  return { ok: true, developer: obj };
+}
+
+// ../../pipeline-cli/dist/steps/07-build-review-prompts.js
+import { existsSync as existsSync10, readFileSync as readFileSync9 } from "node:fs";
+import { join as join11 } from "node:path";
+var REVIEWERS = ["code-reviewer", "test-reviewer", "security-reviewer"];
+async function buildReviewPrompts(opts) {
+  const runner = opts.runner ?? defaultRunner;
+  const diffResult = await runner("git", ["diff", "origin/main...HEAD"], {
+    cwd: opts.worktreePath,
+    allowFailure: true
+  });
+  const diff = diffResult.code === 0 ? diffResult.stdout : "";
+  const filesResult = await runner("git", ["diff", "--name-only", "origin/main...HEAD"], {
+    cwd: opts.worktreePath,
+    allowFailure: true
+  });
+  const changedFiles = filesResult.code === 0 ? filesResult.stdout.split("\n").map((l) => l.trim()).filter(Boolean) : [];
+  let codexAvailable = opts.codexAvailable;
+  if (codexAvailable === void 0) {
+    try {
+      const which = await runner("which", ["codex"], { allowFailure: true });
+      codexAvailable = which.code === 0 && which.stdout.trim().length > 0;
+    } catch {
+      codexAvailable = false;
+    }
+  }
+  const harnessNote = codexAvailable ? "" : "\u26A0 INDEPENDENCE NOT ENFORCED (codex unavailable, fell back to claude-code)";
+  const policyPath = join11(opts.workDir, ".ai-sdlc", "review-policy.md");
+  const policy = existsSync10(policyPath) ? readFileSync9(policyPath, "utf8") : "";
+  const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join("\n");
+  const prompts = REVIEWERS.map((reviewer) => ({
+    reviewer,
+    prompt: buildPrompt(reviewer, {
+      taskId: opts.taskId,
+      title: opts.task.title,
+      description: opts.task.description,
+      acList,
+      diff,
+      changedFiles,
+      branch: opts.branch,
+      policy,
+      harnessNote
+    })
+  }));
+  return { prompts, diff, changedFiles, harnessNote };
+}
+function buildPrompt(reviewer, inputs) {
+  const policyBlock = inputs.policy ? `
+## Project review policy (.ai-sdlc/review-policy.md)
+
+${inputs.policy}
+` : "";
+  const harnessBlock = inputs.harnessNote ? `
+${inputs.harnessNote}
+` : "";
+  const filesBlock = inputs.changedFiles.length ? inputs.changedFiles.map((f) => `- ${f}`).join("\n") : "(none)";
+  return `You are the ${reviewer} for backlog task ${inputs.taskId}.
+
+## Task
+${inputs.title}
+
+## Description
+${inputs.description}
+
+## Acceptance criteria
+${inputs.acList}
+
+## Branch / base
+branch: ${inputs.branch} \u2192 main
+
+## Changed files
+${filesBlock}
+` + policyBlock + harnessBlock + `
+## Diff
+
+\`\`\`diff
+${inputs.diff}
+\`\`\`
+
+Return a verdict JSON: { approved: boolean, findings: [...], summary: string }.
+`;
+}
+
+// ../../pipeline-cli/dist/steps/08-aggregate-verdicts.js
+var SEVERITIES = ["critical", "major", "minor", "suggestion"];
+async function aggregateVerdicts(opts) {
+  const counts = {
+    critical: 0,
+    major: 0,
+    minor: 0,
+    suggestion: 0
+  };
+  for (const v of opts.verdicts) {
+    for (const f of v.findings ?? []) {
+      const sev = SEVERITIES.includes(f.severity) ? f.severity : "suggestion";
+      counts[sev] = (counts[sev] ?? 0) + 1;
+    }
+  }
+  const allApproved = opts.verdicts.length > 0 && opts.verdicts.every((v) => v.approved);
+  const blocking = counts.critical > 0 || counts.major > 0;
+  const decision = allApproved && !blocking ? "APPROVED" : "CHANGES_REQUESTED";
+  const harnessNote = opts.harnessNote ?? "";
+  const summaryLines = [];
+  if (harnessNote)
+    summaryLines.push(harnessNote);
+  summaryLines.push(`Verdict: ${decision} \u2014 ${counts.critical} critical, ${counts.major} major, ${counts.minor} minor, ${counts.suggestion} suggestion across ${opts.verdicts.length} reviewers`);
+  return {
+    approved: decision === "APPROVED",
+    counts,
+    decision,
+    verdicts: opts.verdicts,
+    harnessNote,
+    summary: summaryLines.join("\n")
+  };
+}
+function formatFeedback(verdicts) {
+  const lines = [];
+  for (const v of verdicts) {
+    const blockingFindings = (v.findings ?? []).filter((f) => f.severity === "critical" || f.severity === "major");
+    if (blockingFindings.length === 0)
+      continue;
+    lines.push(`### ${v.agentId} (${v.harness})`);
+    for (const f of blockingFindings) {
+      const loc = f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "general";
+      lines.push(`- [${f.severity}] ${loc} \u2014 ${f.message}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n").trim();
+}
+
+// ../../pipeline-cli/dist/steps/09-iterate.js
+var REVIEWER_TYPES = ["code-reviewer", "test-reviewer", "security-reviewer"];
+var DEFAULT_MAX_ITERATIONS = 2;
+async function iterateReviewLoop(opts) {
+  const maxIter = opts.maxIterations ?? DEFAULT_MAX_ITERATIONS;
+  let iteration = 1;
+  let currentDev = opts.initialDeveloperReturn;
+  let currentVerdict = opts.initialVerdict;
+  if (opts.onIteration) {
+    await opts.onIteration(iteration, currentVerdict);
+  }
+  while (iteration < maxIter && currentVerdict.decision === "CHANGES_REQUESTED") {
+    if (!opts.spawner) {
+      break;
+    }
+    iteration++;
+    const feedback = formatFeedback(currentVerdict.verdicts);
+    const { prompt: devPrompt } = await buildDeveloperPrompt({
+      taskId: opts.taskId,
+      task: opts.task,
+      branch: opts.branch,
+      worktreePath: opts.worktreePath,
+      reviewerFeedback: feedback,
+      iteration
+    });
+    const devResult = await opts.spawner.spawn({
+      type: "developer",
+      prompt: devPrompt,
+      cwd: opts.worktreePath
+    });
+    const parsedDev = await parseDeveloperReturn({
+      developerReturn: devResult.parsed ?? devResult.output
+    });
+    if (!parsedDev.ok || !parsedDev.developer) {
+      break;
+    }
+    currentDev = parsedDev.developer;
+    const { prompts } = await buildReviewPrompts({
+      taskId: opts.taskId,
+      task: opts.task,
+      branch: opts.branch,
+      worktreePath: opts.worktreePath,
+      workDir: opts.worktreePath
+    });
+    const reviewSpawn = await opts.spawner.spawnParallel(prompts.map((p) => ({ type: p.reviewer, prompt: p.prompt, cwd: opts.worktreePath })));
+    const newVerdicts = reviewSpawn.map((r, i) => coerceReviewerVerdict(REVIEWER_TYPES[i], r));
+    currentVerdict = await aggregateVerdicts({
+      verdicts: newVerdicts,
+      harnessNote: opts.initialVerdict.harnessNote
+    });
+    if (opts.onIteration) {
+      await opts.onIteration(iteration, currentVerdict);
+    }
+  }
+  const needsHumanAttention = currentVerdict.decision === "CHANGES_REQUESTED" && iteration >= maxIter;
+  return {
+    finalDeveloperReturn: currentDev,
+    finalVerdict: currentVerdict,
+    iterations: iteration,
+    needsHumanAttention
+  };
+}
+function coerceReviewerVerdict(agentId, r) {
+  let parsed = r.parsed;
+  if (parsed === void 0 && typeof r.output === "string") {
+    try {
+      parsed = JSON.parse(r.output);
+    } catch {
+      parsed = null;
+    }
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return {
+      agentId,
+      harness: "claude-code",
+      approved: false,
+      findings: [
+        {
+          severity: "critical",
+          message: `${agentId} returned no parseable verdict (status=${r.status}${r.error ? ", error=" + r.error : ""})`
+        }
+      ]
+    };
+  }
+  const obj = parsed;
+  return {
+    agentId,
+    harness: typeof obj.harness === "string" ? obj.harness : "claude-code",
+    approved: !!obj.approved,
+    findings: Array.isArray(obj.findings) ? obj.findings : [],
+    summary: typeof obj.summary === "string" ? obj.summary : void 0
+  };
+}
+
+// ../../pipeline-cli/dist/steps/10-finalize.js
+import { existsSync as existsSync11, mkdirSync as mkdirSync3, readFileSync as readFileSync10, renameSync as renameSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { basename as basename2, dirname as dirname3, join as join12 } from "node:path";
+function buildFinalSummary(opts) {
+  const allAcs = opts.task.acceptanceCriteria.map((_, i) => i + 1);
+  const acceptanceCriteriaCheck = opts.developerReturn.acceptanceCriteriaMet.length > 0 ? opts.developerReturn.acceptanceCriteriaMet : allAcs;
+  const filesBlock = opts.developerReturn.filesChanged.length > 0 ? opts.developerReturn.filesChanged.map((f) => `- ${f}`).join("\n") : "- (none)";
+  const harnessLine = opts.verdict.harnessNote ? ` (${opts.verdict.harnessNote})` : "";
+  const finalSummary = `## Summary
+${opts.developerReturn.summary}
+
+## Changes
+${filesBlock}
+
+## Design decisions
+${opts.developerReturn.notes ?? "(none)"}
+
+## Verification
+- \`pnpm build\` \u2014 ${opts.developerReturn.verifications.build}
+- \`pnpm test\` \u2014 ${opts.developerReturn.verifications.test}
+- \`pnpm lint\` \u2014 ${opts.developerReturn.verifications.lint}
+- \`pnpm format:check\` \u2014 ${opts.developerReturn.verifications.format}
+- 3 parallel reviews approved${harnessLine}
+
+## Follow-up
+${opts.developerReturn.notes ?? "(none)"}
+`;
+  return { finalSummary, acceptanceCriteriaCheck };
+}
+function moveTaskToCompleted(taskFilePath) {
+  const fileName = basename2(taskFilePath);
+  const tasksDir = dirname3(taskFilePath);
+  const completedDir = join12(dirname3(tasksDir), "completed");
+  mkdirSync3(completedDir, { recursive: true });
+  const destPath = join12(completedDir, fileName);
+  renameSync2(taskFilePath, destPath);
+  return destPath;
+}
+async function finalizeTask(opts) {
+  if (opts.verdict.decision !== "APPROVED") {
+    return {
+      finalSummary: "",
+      acceptanceCriteriaCheck: [],
+      attestationPath: null,
+      choreCommitSha: null,
+      skipped: true
+    };
+  }
+  const runner = opts.runner ?? defaultRunner;
+  const { finalSummary, acceptanceCriteriaCheck } = buildFinalSummary(opts);
+  const taskFile = findTaskFile(opts.taskId, opts.worktreePath) ?? findTaskFile(opts.taskId, opts.workDir);
+  if (!taskFile) {
+    throw new Error(`finalize: cannot locate task file for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`);
+  }
+  const raw = readFileSync10(taskFile, "utf8");
+  const patched = patchFrontmatterStatus(raw, "Done");
+  writeFileSync4(taskFile, patched, "utf8");
+  const completedPath = moveTaskToCompleted(taskFile);
+  parseTaskFile(completedPath);
+  let attestationPath = null;
+  const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join12(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
+  if (helperScript && existsSync11(helperScript)) {
+    const signResult = await runner("node", [helperScript], {
+      cwd: opts.worktreePath,
+      allowFailure: true
+    });
+    if (signResult.code === 0) {
+      const m = signResult.stdout.match(/\.ai-sdlc\/attestations\/[a-f0-9]+\.dsse\.json/);
+      attestationPath = m ? m[0] : null;
+    }
+  }
+  let choreCommitSha = null;
+  if (!opts.skipCommit) {
+    const addArgs = ["add", "backlog/tasks", "backlog/completed"];
+    if (attestationPath)
+      addArgs.push(".ai-sdlc/attestations");
+    await runner("git", addArgs, { cwd: opts.worktreePath, allowFailure: true });
+    const message = `chore: mark ${opts.taskId} complete
+
+Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in this PR.
+` + (attestationPath ? `Signed review attestation included at ${attestationPath} (AISDLC-74) so CI's verify-attestation workflow can skip the duplicate review run.
+
+` : `
+`) + `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+`;
+    const commitResult = await runner("git", ["commit", "-m", message], {
+      cwd: opts.worktreePath,
+      allowFailure: true
+    });
+    if (commitResult.code === 0) {
+      const sha = await runner("git", ["rev-parse", "--short", "HEAD"], {
+        cwd: opts.worktreePath,
+        allowFailure: true
+      });
+      if (sha.code === 0)
+        choreCommitSha = sha.stdout.trim();
+    }
+  }
+  return {
+    finalSummary,
+    acceptanceCriteriaCheck,
+    attestationPath,
+    choreCommitSha,
+    skipped: false
+  };
+}
+
+// ../../pipeline-cli/dist/steps/11-push-and-pr.js
+import { existsSync as existsSync12, readFileSync as readFileSync11 } from "node:fs";
+import { join as join13 } from "node:path";
+var DEFAULT_TITLE_TEMPLATE = "feat: {issueTitle} ({issueId})";
+function readTitleTemplate(workDir) {
+  const path = join13(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
+  if (!existsSync12(path))
+    return DEFAULT_TITLE_TEMPLATE;
+  let raw;
+  try {
+    raw = readFileSync11(path, "utf8");
+  } catch {
+    return DEFAULT_TITLE_TEMPLATE;
+  }
+  const m = raw.match(/pullRequest:\s*[\r\n]+\s*titleTemplate:\s*['"]?([^'"\r\n]+)['"]?/);
+  return m ? m[1].trim() : DEFAULT_TITLE_TEMPLATE;
+}
+function composeTitle(template, taskId, taskTitle, needsHumanAttention) {
+  const tagged = needsHumanAttention ? `${taskTitle} [needs-human-attention]` : taskTitle;
+  return template.replace(/\{issueTitle\}/g, tagged).replace(/\{issueId\}/g, taskId);
+}
+function composeBody(opts) {
+  const headerWarning = opts.needsHumanAttention ? `> **\u26A0 This PR exceeded the auto-iteration cap with unresolved review findings. Human review/intervention requested.**
+
+` : "";
+  const filesBlock = opts.developerReturn.filesChanged.length > 0 ? opts.developerReturn.filesChanged.map((f) => `- ${f}`).join("\n") : "- (none)";
+  const reviewer = opts.verdict.verdicts.find((v) => v.agentId === "code-reviewer");
+  const reviewBlock = reviewer ? `
+<details>
+<summary>Code reviewer verdict</summary>
+
+${reviewer.summary ?? "(no summary)"}
+
+</details>
+` : "";
+  return headerWarning + `${opts.developerReturn.summary}
+
+## Changed files
+${filesBlock}
+` + reviewBlock + `
+References ${opts.taskId}
+`;
+}
+async function pushAndPr(opts) {
+  const runner = opts.runner ?? defaultRunner;
+  const pushResult = await runner("git", ["push", "-u", "origin", opts.branch], {
+    cwd: opts.worktreePath,
+    allowFailure: true
+  });
+  if (pushResult.code !== 0) {
+    const stderr = pushResult.stderr.trim();
+    const reason = /non-fast-forward|rejected/i.test(stderr) ? `non-fast-forward push to '${opts.branch}'; cleanup is to delete the remote branch and rerun, but that's destructive \u2014 confirm with the operator first` : `git push failed: ${stderr || pushResult.stdout.trim() || "unknown error"}`;
+    return { pushed: false, prUrl: null, reason };
+  }
+  const titleTemplate = readTitleTemplate(opts.workDir);
+  const title = composeTitle(titleTemplate, opts.taskId, opts.task.title, !!opts.needsHumanAttention);
+  const body = composeBody(opts);
+  const prResult = await runner("gh", ["pr", "create", "--title", title, "--body", body, "--base", "main", "--head", opts.branch], { cwd: opts.worktreePath, allowFailure: true });
+  if (prResult.code !== 0) {
+    return {
+      pushed: true,
+      prUrl: null,
+      reason: `gh pr create failed: ${prResult.stderr.trim() || prResult.stdout.trim() || "unknown error"}`
+    };
+  }
+  const prUrl = prResult.stdout.trim().split("\n").pop()?.trim() ?? null;
+  return { pushed: true, prUrl };
+}
+
+// ../../pipeline-cli/dist/steps/12-sibling-prs.js
+async function siblingPrs(opts) {
+  const runner = opts.runner ?? defaultRunner;
+  const taskIdLower = opts.taskId.toLowerCase();
+  const branchName = `ai-sdlc/${taskIdLower}-sibling`;
+  const externals = opts.developerReturn.filesChangedExternal ?? [];
+  if (externals.length === 0) {
+    return { prs: [] };
+  }
+  const prs = [];
+  for (const ext of externals) {
+    const isRepo = await runner("git", ["-C", ext.repo, "rev-parse", "--show-toplevel"], {
+      allowFailure: true
+    });
+    if (isRepo.code !== 0) {
+      prs.push({ repo: ext.repo, branch: branchName, prUrl: null, reason: "not a git repository" });
+      continue;
+    }
+    const status = await runner("git", ["-C", ext.repo, "status", "--porcelain"], {
+      allowFailure: true
+    });
+    if (status.code !== 0 || !status.stdout.trim()) {
+      prs.push({
+        repo: ext.repo,
+        branch: branchName,
+        prUrl: null,
+        reason: "no dirty files in sibling repo"
+      });
+      continue;
+    }
+    const repoView = await runner("gh", ["-R", ".", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"], { cwd: ext.repo, allowFailure: true });
+    if (repoView.code !== 0) {
+      prs.push({
+        repo: ext.repo,
+        branch: branchName,
+        prUrl: null,
+        reason: `gh auth not configured for sibling repo (${repoView.stderr.trim() || "unknown"})`
+      });
+      continue;
+    }
+    const nameWithOwner = repoView.stdout.trim();
+    const checkout = await runner("git", ["-C", ext.repo, "checkout", "-b", branchName], {
+      allowFailure: true
+    });
+    if (checkout.code !== 0) {
+      prs.push({
+        repo: ext.repo,
+        branch: branchName,
+        prUrl: null,
+        reason: `git checkout -b failed: ${checkout.stderr.trim()}`
+      });
+      continue;
+    }
+    const addArgs = ["-C", ext.repo, "add", "--", ...ext.files];
+    await runner("git", addArgs, { allowFailure: true });
+    const message = `feat: ${opts.task.title} \u2014 sibling for ${opts.taskId}
+
+Companion changes for ${opts.mainPrUrl}.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+`;
+    const commit = await runner("git", ["-C", ext.repo, "commit", "-m", message], {
+      allowFailure: true
+    });
+    if (commit.code !== 0) {
+      prs.push({
+        repo: ext.repo,
+        branch: branchName,
+        prUrl: null,
+        reason: `git commit failed: ${commit.stderr.trim()}`
+      });
+      continue;
+    }
+    const push = await runner("git", ["-C", ext.repo, "push", "-u", "origin", branchName], {
+      allowFailure: true
+    });
+    if (push.code !== 0) {
+      prs.push({
+        repo: ext.repo,
+        branch: branchName,
+        prUrl: null,
+        reason: `git push failed: ${push.stderr.trim()}`
+      });
+      continue;
+    }
+    const filesList = ext.files.map((f) => `- ${f}`).join("\n");
+    const body = `Companion PR for ${opts.mainPrUrl} (${opts.taskId}).
+
+${opts.developerReturn.summary}
+
+## Files changed
+${filesList || "- (none)"}
+`;
+    const prTitle = `feat: ${opts.task.title} \u2014 sibling for ${opts.taskId}`;
+    const create = await runner("gh", [
+      "-R",
+      nameWithOwner,
+      "pr",
+      "create",
+      "--title",
+      prTitle,
+      "--body",
+      body,
+      "--base",
+      "main",
+      "--head",
+      branchName
+    ], { allowFailure: true, cwd: ext.repo });
+    if (create.code !== 0) {
+      prs.push({
+        repo: ext.repo,
+        branch: branchName,
+        prUrl: null,
+        reason: `gh pr create failed: ${create.stderr.trim() || create.stdout.trim()}`
+      });
+      continue;
+    }
+    const prUrl = create.stdout.trim().split("\n").pop()?.trim() ?? null;
+    prs.push({ repo: ext.repo, branch: branchName, prUrl });
+  }
+  return { prs };
+}
+
+// ../../pipeline-cli/dist/steps/13-cleanup.js
+import { existsSync as existsSync13, unlinkSync } from "node:fs";
+import { join as join14 } from "node:path";
+async function cleanupTask(opts) {
+  const sentinelPath = join14(opts.worktreePath, ".active-task");
+  if (!existsSync13(sentinelPath)) {
+    return { sentinelRemoved: false };
+  }
+  try {
+    unlinkSync(sentinelPath);
+    return { sentinelRemoved: true };
+  } catch {
+    return { sentinelRemoved: false };
+  }
+}
+
+// src/tools/pipeline-tools.ts
+var defaultStepRunners = {
+  sweepMergedWorktrees,
+  validateTask,
+  computeBranchName,
+  setupWorktree,
+  beginTask,
+  buildDeveloperPrompt,
+  parseDeveloperReturn,
+  buildReviewPrompts,
+  aggregateVerdicts,
+  iterateReviewLoop,
+  finalizeTask,
+  pushAndPr,
+  siblingPrs,
+  cleanupTask
+};
+var taskSpecSchema = external_exports.object({
+  id: external_exports.string(),
+  title: external_exports.string(),
+  status: external_exports.string(),
+  acceptanceCriteria: external_exports.array(external_exports.string()),
+  acceptanceCriteriaChecked: external_exports.array(external_exports.boolean()),
+  permittedExternalPaths: external_exports.array(external_exports.string()).optional(),
+  references: external_exports.array(external_exports.string()).optional(),
+  description: external_exports.string(),
+  rawBody: external_exports.string(),
+  filePath: external_exports.string()
+}).passthrough();
+var verificationStatusSchema = external_exports.enum(["passed", "failed", "skipped"]);
+var developerReturnSchema = external_exports.object({
+  summary: external_exports.string(),
+  filesChanged: external_exports.array(external_exports.string()),
+  filesChangedExternal: external_exports.array(external_exports.object({ repo: external_exports.string(), files: external_exports.array(external_exports.string()) }).passthrough()).optional(),
+  commitSha: external_exports.string().nullable(),
+  verifications: external_exports.object({
+    build: verificationStatusSchema,
+    test: verificationStatusSchema,
+    lint: verificationStatusSchema,
+    format: verificationStatusSchema
+  }).passthrough(),
+  acceptanceCriteriaMet: external_exports.array(external_exports.number()),
+  notes: external_exports.string().optional()
+}).passthrough();
+var severitySchema = external_exports.enum(["critical", "major", "minor", "suggestion"]);
+var reviewerFindingSchema = external_exports.object({
+  severity: severitySchema,
+  file: external_exports.string().optional(),
+  line: external_exports.number().optional(),
+  message: external_exports.string()
+}).passthrough();
+var reviewerVerdictSchema = external_exports.object({
+  agentId: external_exports.string(),
+  harness: external_exports.string(),
+  approved: external_exports.boolean(),
+  findings: external_exports.array(reviewerFindingSchema),
+  summary: external_exports.string().optional()
+}).passthrough();
+var aggregatedVerdictSchema = external_exports.object({
+  approved: external_exports.boolean(),
+  counts: external_exports.object({
+    critical: external_exports.number(),
+    major: external_exports.number(),
+    minor: external_exports.number(),
+    suggestion: external_exports.number()
+  }).passthrough(),
+  decision: external_exports.enum(["APPROVED", "CHANGES_REQUESTED"]),
+  verdicts: external_exports.array(reviewerVerdictSchema),
+  harnessNote: external_exports.string(),
+  summary: external_exports.string()
+}).passthrough();
+function jsonResult(payload) {
+  return {
+    content: [{ type: "text", text: JSON.stringify(payload, null, 2) }]
+  };
+}
+function errorResult(step, err) {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    content: [{ type: "text", text: `${step} failed: ${message}` }],
+    isError: true
+  };
+}
+function registerPipelineTools(server2, deps = {}) {
+  const runners = { ...defaultStepRunners, ...deps.stepRunners ?? {} };
+  const spawnerFactory = deps.spawnerFactory ?? defaultSpawner;
+  server2.tool(
+    "pipeline_step_0_sweep",
+    "RFC-0012 Step 0: sweep merged worktrees from <workDir>/.worktrees/. Removes worktrees whose PR has merged.",
+    {
+      workDir: external_exports.string().describe("Project root containing .worktrees/")
+    },
+    async ({ workDir }) => {
+      try {
+        const result = await runners.sweepMergedWorktrees({ workDir });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_0_sweep", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_1_validate",
+    "RFC-0012 Step 1: validate the backlog task spec at <workDir>/backlog/tasks/<taskId> -*.md.",
+    {
+      taskId: external_exports.string().describe('Backlog task ID, e.g. "AISDLC-100.3" (case-insensitive)'),
+      workDir: external_exports.string().describe("Project root containing backlog/tasks/")
+    },
+    async ({ taskId, workDir }) => {
+      try {
+        const result = await runners.validateTask({ taskId, workDir });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_1_validate", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_2_compute_branch",
+    "RFC-0012 Step 2: compute the branch name + worktree path for the task using <workDir>/.ai-sdlc/pipeline-backlog.yaml.",
+    {
+      taskId: external_exports.string().describe("Backlog task ID"),
+      task: taskSpecSchema.describe("Parsed TaskSpec returned by Step 1"),
+      workDir: external_exports.string().describe("Project root"),
+      defaultPattern: external_exports.string().optional().describe("Override the default branch pattern when no pipeline config is present.")
+    },
+    async ({ taskId, task, workDir, defaultPattern }) => {
+      try {
+        const result = await runners.computeBranchName({ taskId, task, workDir, defaultPattern });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_2_compute_branch", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_3_setup_worktree",
+    "RFC-0012 Step 3: create the per-task git worktree from origin/main.",
+    {
+      taskId: external_exports.string(),
+      branch: external_exports.string().describe("Computed by Step 2"),
+      worktreePath: external_exports.string().describe("Computed by Step 2"),
+      workDir: external_exports.string(),
+      skipFetch: external_exports.boolean().optional().describe("Skip the `git fetch origin main` step (useful in tests / offline runs).")
+    },
+    async ({ taskId, branch, worktreePath, workDir, skipFetch }) => {
+      try {
+        const result = await runners.setupWorktree({
+          taskId,
+          branch,
+          worktreePath,
+          workDir,
+          skipFetch
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_3_setup_worktree", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_4_begin_task",
+    "RFC-0012 Step 4: flip task status to In Progress in the on-disk task file and write the per-worktree .active-task sentinel (AISDLC-81).",
+    {
+      taskId: external_exports.string(),
+      worktreePath: external_exports.string(),
+      workDir: external_exports.string(),
+      status: external_exports.string().optional().describe("Override status (defaults to 'In Progress').")
+    },
+    async ({ taskId, worktreePath, workDir, status }) => {
+      try {
+        const result = await runners.beginTask({ taskId, worktreePath, workDir, status });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_4_begin_task", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_5_build_dev_prompt",
+    "RFC-0012 Step 5: render the developer subagent prompt from the TaskSpec. Pure function \u2014 no side effects.",
+    {
+      taskId: external_exports.string(),
+      task: taskSpecSchema,
+      branch: external_exports.string(),
+      worktreePath: external_exports.string(),
+      reviewerFeedback: external_exports.string().optional().describe("Optional reviewer feedback bundle for iteration N>1 (Step 9)."),
+      iteration: external_exports.number().optional().describe("Iteration number \u2014 set to >1 to inject the feedback section (default 1).")
+    },
+    async ({ taskId, task, branch, worktreePath, reviewerFeedback, iteration }) => {
+      try {
+        const result = await runners.buildDeveloperPrompt({
+          taskId,
+          task,
+          branch,
+          worktreePath,
+          reviewerFeedback,
+          iteration
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_5_build_dev_prompt", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_6_parse_dev_return",
+    "RFC-0012 Step 6: parse + validate the developer subagent JSON return. Applies the developer-failed gate (null commitSha or any verifications.failed).",
+    {
+      developerReturn: external_exports.union([external_exports.string(), external_exports.unknown()]).describe(
+        "Developer subagent's structured return \u2014 either a JSON string OR an already-parsed object."
+      )
+    },
+    async ({ developerReturn }) => {
+      try {
+        const result = await runners.parseDeveloperReturn({ developerReturn });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_6_parse_dev_return", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_7_build_review_prompts",
+    "RFC-0012 Step 7: capture the PR diff + changed files and render 3 reviewer-specific prompts (code, test, security).",
+    {
+      taskId: external_exports.string(),
+      task: taskSpecSchema,
+      branch: external_exports.string(),
+      worktreePath: external_exports.string(),
+      workDir: external_exports.string(),
+      codexAvailable: external_exports.boolean().optional().describe("Override the codex-availability detection (test injection).")
+    },
+    async ({ taskId, task, branch, worktreePath, workDir, codexAvailable }) => {
+      try {
+        const result = await runners.buildReviewPrompts({
+          taskId,
+          task,
+          branch,
+          worktreePath,
+          workDir,
+          codexAvailable
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_7_build_review_prompts", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_8_aggregate_verdicts",
+    "RFC-0012 Step 8: aggregate the three reviewer verdicts into a single APPROVED / CHANGES_REQUESTED gate decision.",
+    {
+      verdicts: external_exports.array(reviewerVerdictSchema).describe("Reviewer verdicts to aggregate."),
+      harnessNote: external_exports.string().optional().describe("Optional harness independence note (prepended to the aggregated summary).")
+    },
+    async ({ verdicts, harnessNote }) => {
+      try {
+        const result = await runners.aggregateVerdicts({ verdicts, harnessNote });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_8_aggregate_verdicts", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_9_iterate",
+    "RFC-0012 Step 9: review-iteration loop. Re-spawns developer + 3 reviewers up to maxIterations on CHANGES_REQUESTED. Resolves the default SubagentSpawner (RFC-0012 \xA78.3) when none is supplied.",
+    {
+      taskId: external_exports.string(),
+      worktreePath: external_exports.string(),
+      task: taskSpecSchema,
+      branch: external_exports.string(),
+      initialDeveloperReturn: developerReturnSchema,
+      initialVerdict: aggregatedVerdictSchema,
+      maxIterations: external_exports.number().optional().describe(
+        "Cap on TOTAL iterations (defaults to 2 = max one retry after CHANGES_REQUESTED)."
+      )
+    },
+    async ({
+      taskId,
+      worktreePath,
+      task,
+      branch,
+      initialDeveloperReturn,
+      initialVerdict,
+      maxIterations
+    }) => {
+      try {
+        const spawner = await spawnerFactory();
+        const result = await runners.iterateReviewLoop({
+          taskId,
+          worktreePath,
+          task,
+          branch,
+          initialDeveloperReturn,
+          initialVerdict,
+          maxIterations,
+          spawner
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_9_iterate", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_10_finalize",
+    "RFC-0012 Step 10: build acceptanceCriteriaCheck + finalSummary, flip task to Done, move tasks/\u2192completed/, sign attestation (if helper available), and create the chore commit.",
+    {
+      taskId: external_exports.string(),
+      workDir: external_exports.string(),
+      worktreePath: external_exports.string(),
+      task: taskSpecSchema,
+      developerReturn: developerReturnSchema,
+      verdict: aggregatedVerdictSchema,
+      iterations: external_exports.number().describe("Total iterations from Step 9."),
+      signAttestationScript: external_exports.string().optional().describe("Path to sign-attestation.mjs (defaults to detection by env var)."),
+      skipCommit: external_exports.boolean().optional().describe("Skip the chore commit (useful in tests without a real git repo).")
+    },
+    async ({
+      taskId,
+      workDir,
+      worktreePath,
+      task,
+      developerReturn,
+      verdict,
+      iterations,
+      signAttestationScript,
+      skipCommit
+    }) => {
+      try {
+        const result = await runners.finalizeTask({
+          taskId,
+          workDir,
+          worktreePath,
+          task,
+          developerReturn,
+          verdict,
+          iterations,
+          signAttestationScript,
+          skipCommit
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_10_finalize", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_11_push_and_pr",
+    "RFC-0012 Step 11: push the worktree branch and open the GitHub PR. NEVER force-pushes.",
+    {
+      taskId: external_exports.string(),
+      workDir: external_exports.string(),
+      worktreePath: external_exports.string(),
+      branch: external_exports.string(),
+      task: taskSpecSchema,
+      developerReturn: developerReturnSchema,
+      verdict: aggregatedVerdictSchema,
+      needsHumanAttention: external_exports.boolean().optional().describe("Tag the PR title with [needs-human-attention] when iteration cap was exceeded.")
+    },
+    async ({
+      taskId,
+      workDir,
+      worktreePath,
+      branch,
+      task,
+      developerReturn,
+      verdict,
+      needsHumanAttention
+    }) => {
+      try {
+        const result = await runners.pushAndPr({
+          taskId,
+          workDir,
+          worktreePath,
+          branch,
+          task,
+          developerReturn,
+          verdict,
+          needsHumanAttention
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_11_push_and_pr", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_12_sibling_prs",
+    "RFC-0012 Step 12: open companion PRs in sibling repos for any developer.filesChangedExternal entries.",
+    {
+      taskId: external_exports.string(),
+      workDir: external_exports.string(),
+      task: taskSpecSchema,
+      developerReturn: developerReturnSchema,
+      mainPrUrl: external_exports.string().describe("URL of the main PR opened by Step 11.")
+    },
+    async ({ taskId, workDir, task, developerReturn, mainPrUrl }) => {
+      try {
+        const result = await runners.siblingPrs({
+          taskId,
+          workDir,
+          task,
+          developerReturn,
+          mainPrUrl
+        });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_12_sibling_prs", err);
+      }
+    }
+  );
+  server2.tool(
+    "pipeline_step_13_cleanup",
+    "RFC-0012 Step 13: cleanup the per-worktree .active-task sentinel. Always runs (success / failure / rollback).",
+    {
+      taskId: external_exports.string(),
+      worktreePath: external_exports.string()
+    },
+    async ({ taskId, worktreePath }) => {
+      try {
+        const result = await runners.cleanupTask({ taskId, worktreePath });
+        return jsonResult(result);
+      } catch (err) {
+        return errorResult("pipeline_step_13_cleanup", err);
+      }
+    }
+  );
+}
+
 // src/tools/index.ts
 function registerAllTools(server2, deps) {
   registerCheckPrStatus(server2, deps);
@@ -21591,6 +23356,7 @@ function registerAllTools(server2, deps) {
   registerGetReviewPolicy(server2, deps);
   registerTaskEdit(server2, deps);
   registerTaskComplete(server2, deps);
+  registerPipelineTools(server2);
 }
 
 // src/server.ts
