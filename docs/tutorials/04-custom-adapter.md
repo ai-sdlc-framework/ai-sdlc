@@ -1,5 +1,9 @@
 # Tutorial 4: Building a Custom Adapter
 
+> **Spec reference:** See [RFC-0003 (Infrastructure Provider Adapters)](../../spec/rfcs/RFC-0003-infrastructure-adapters.md)
+> for the normative interface contracts that extend the adapter system to
+> infrastructure concerns (audit, sandbox, secrets, memory, events).
+
 Adapters are the integration layer between AI-SDLC and external tools. The
 [AdapterBinding](../../spec/spec.md#55-adapterbinding) resource declares a tool
 integration as a swappable provider behind a uniform

@@ -3,6 +3,7 @@
 **Audience:** AI-SDLC maintainers adding support for a new coding-agent runtime (Gemini CLI, OpenCode, Aider, etc.).
 **Status:** Draft v1
 **Companion to:** [RFC-0010 §13](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md)
+**Related spec:** [RFC-0003 (Infrastructure Provider Adapters)](../../spec/rfcs/RFC-0003-infrastructure-adapters.md) §1 — extended adapter interface enum (`AuditSink`, `Sandbox`, `SecretStore`, `MemoryStore`, `EventBus`).
 
 ---
 
