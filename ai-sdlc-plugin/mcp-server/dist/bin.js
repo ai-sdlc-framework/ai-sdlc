@@ -22915,6 +22915,10 @@ async function cleanupTask(opts) {
   }
 }
 
+// ../../pipeline-cli/dist/deps/dependency-graph.js
+import { existsSync as existsSync14, readdirSync as readdirSync4, readFileSync as readFileSync12 } from "node:fs";
+import { join as join15 } from "node:path";
+
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {
   sweepMergedWorktrees,
