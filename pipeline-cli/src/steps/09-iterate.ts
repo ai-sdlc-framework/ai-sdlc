@@ -71,7 +71,7 @@ export async function iterateReviewLoop(
       taskId: opts.taskId,
       task: opts.task,
       branch: opts.branch,
-      worktreePath: opts.workDir,
+      worktreePath: opts.worktreePath,
       reviewerFeedback: feedback,
       iteration,
     });
@@ -79,7 +79,7 @@ export async function iterateReviewLoop(
     const devResult = await opts.spawner.spawn({
       type: 'developer',
       prompt: devPrompt,
-      cwd: opts.workDir,
+      cwd: opts.worktreePath,
     });
     const parsedDev = await parseDeveloperReturn({
       developerReturn: devResult.parsed ?? devResult.output,
@@ -94,12 +94,12 @@ export async function iterateReviewLoop(
       taskId: opts.taskId,
       task: opts.task,
       branch: opts.branch,
-      worktreePath: opts.workDir,
-      workDir: opts.workDir,
+      worktreePath: opts.worktreePath,
+      workDir: opts.worktreePath,
     });
 
     const reviewSpawn = await opts.spawner.spawnParallel(
-      prompts.map((p) => ({ type: p.reviewer, prompt: p.prompt, cwd: opts.workDir })),
+      prompts.map((p) => ({ type: p.reviewer, prompt: p.prompt, cwd: opts.worktreePath })),
     );
 
     const newVerdicts: ReviewerVerdict[] = reviewSpawn.map((r: SubagentResult, i) =>

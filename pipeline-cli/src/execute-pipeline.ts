@@ -35,6 +35,7 @@ import {
   type AggregatedVerdict,
   type DeveloperReturn,
   type PipelineOptions,
+  type PipelineOutcome,
   type PipelineResult,
   type ReviewerType,
   type ReviewerVerdict,
@@ -122,7 +123,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     if (!parsedDev.ok || !parsedDev.developer) {
       aborted = parsedDev.reason ?? 'developer subagent failed';
       outcome = 'developer-failed';
-      return abort(opts, branch.branch, branch.worktreePath, null, aborted);
+      return abort(opts, branch.branch, branch.worktreePath, null, aborted, 'developer-failed');
     }
     const initialDev: DeveloperReturn = parsedDev.developer;
 
@@ -157,7 +158,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     // Step 9 — iteration loop
     const loop = await iterateReviewLoop({
       taskId: opts.taskId,
-      workDir: branch.worktreePath,
+      worktreePath: branch.worktreePath,
       task,
       branch: branch.branch,
       initialDeveloperReturn: initialDev,
@@ -195,11 +196,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       runner: opts.runner,
     });
     if (!push.pushed) {
+      // outcome already defaults to 'aborted'; just record the reason.
       aborted = push.reason ?? 'push failed';
-      outcome = 'aborted';
     } else if (!push.prUrl) {
       aborted = push.reason ?? 'PR creation failed';
-      outcome = 'aborted';
     } else {
       prUrl = push.prUrl;
       outcome = loop.needsHumanAttention ? 'needs-human-attention' : 'approved';
@@ -241,12 +241,13 @@ function abort(
   worktreePath: string,
   finalVerdict: AggregatedVerdict | null,
   reason: string,
+  outcome: PipelineOutcome = 'aborted',
 ): PipelineResult {
   return {
     taskId: opts.taskId,
     branch,
     worktreePath,
-    outcome: 'aborted',
+    outcome,
     prUrl: null,
     siblingPrUrls: [],
     iterations: 0,

@@ -13,6 +13,7 @@ const REQUIRED_EXPORTS = [
   'executePipeline',
   // runtime
   'MockSpawner',
+  'defaultRunner',
   // step functions (one per step)
   'sweepMergedWorktrees',
   'validateTask',

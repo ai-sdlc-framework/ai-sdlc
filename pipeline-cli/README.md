@@ -14,6 +14,9 @@ The package is **`private: true`** in Phase 1. Phase 8 (AISDLC-100.8) flips that
 
 ## Layout
 
+Tests live next to the code they exercise (one `*.test.ts` per source file).
+The integration test for the Tier 2 composite is colocated with `execute-pipeline.ts`.
+
 ```
 pipeline-cli/
 ├── package.json
@@ -22,39 +25,36 @@ pipeline-cli/
 ├── vitest.config.ts
 ├── bin/
 │   └── ai-sdlc-pipeline.mjs        # shebang wrapper around dist/cli/index.js
-├── src/
-│   ├── index.ts                    # public barrel
-│   ├── types.ts                    # PipelineOptions, StepResult, SubagentSpawner, etc.
-│   ├── execute-pipeline.ts         # Tier 2 composite entry point
-│   ├── runtime/
-│   │   ├── index.ts
-│   │   ├── exec.ts                 # Runner abstraction over child_process.execFile
-│   │   └── subagent-spawner.ts     # SubagentSpawner interface + MockSpawner
-│   ├── steps/
-│   │   ├── index.ts
-│   │   ├── 00-sweep.ts             # Step 0 — sweep merged worktrees
-│   │   ├── 01-validate.ts          # Step 1 — validate backlog task spec
-│   │   ├── 02-compute-branch.ts    # Step 2 — branch name + worktree path
-│   │   ├── 03-setup-worktree.ts    # Step 3 — git worktree add
-│   │   ├── 04-flip-status.ts       # Step 4 — status flip + .active-task sentinel
-│   │   ├── 05-build-dev-prompt.ts  # Step 5 — developer prompt template
-│   │   ├── 06-parse-dev-return.ts  # Step 6 — parse + gate developer JSON
-│   │   ├── 07-build-review-prompts.ts # Step 7 — 3 reviewer prompts
-│   │   ├── 08-aggregate-verdicts.ts   # Step 8 — verdict aggregation
-│   │   ├── 09-iterate.ts           # Step 9 — review iteration loop
-│   │   ├── 10-finalize.ts          # Step 10 — Done + completed/ + attestation + chore commit
-│   │   ├── 11-push-and-pr.ts       # Step 11 — push + gh pr create
-│   │   ├── 12-sibling-prs.ts       # Step 12 — cross-repo sibling PRs
-│   │   └── 13-cleanup.ts           # Step 13 — sentinel cleanup
-│   └── cli/
-│       └── index.ts                # yargs subcommand router
-└── tests/
-    ├── helpers/
-    │   └── make-task.ts            # backlog task fixture builder
-    ├── unit/
-    │   └── steps/                  # one test file per step
-    └── integration/
-        └── pipeline.test.ts        # full Step 0-13 with MockSpawner
+└── src/
+    ├── index.ts + index.test.ts    # public barrel + barrel re-export coverage
+    ├── types.ts + types.test.ts    # PipelineOptions, StepResult, SubagentSpawner, etc.
+    ├── execute-pipeline.ts         # Tier 2 composite entry point
+    ├── execute-pipeline.test.ts    # full Step 0-13 integration with MockSpawner
+    ├── __test-helpers/             # FakeRunner + tmp backlog task fixture builder
+    │   ├── fake-runner.ts
+    │   └── make-task.ts
+    ├── runtime/
+    │   ├── index.ts                # barrel — exports SubagentSpawner + Runner surface
+    │   ├── exec.ts + exec.test.ts                       # Runner abstraction over child_process.execFile
+    │   └── subagent-spawner.ts + subagent-spawner.test.ts  # SubagentSpawner interface + MockSpawner
+    ├── steps/                      # each step.ts has a colocated step.test.ts
+    │   ├── index.ts                # barrel
+    │   ├── 00-sweep.ts             # Step 0 — sweep merged worktrees
+    │   ├── 01-validate.ts          # Step 1 — validate backlog task spec
+    │   ├── 02-compute-branch.ts    # Step 2 — branch name + worktree path
+    │   ├── 03-setup-worktree.ts    # Step 3 — git worktree add
+    │   ├── 04-flip-status.ts       # Step 4 — status flip + .active-task sentinel
+    │   ├── 05-build-dev-prompt.ts  # Step 5 — developer prompt template
+    │   ├── 06-parse-dev-return.ts  # Step 6 — parse + gate developer JSON
+    │   ├── 07-build-review-prompts.ts # Step 7 — 3 reviewer prompts
+    │   ├── 08-aggregate-verdicts.ts   # Step 8 — verdict aggregation
+    │   ├── 09-iterate.ts           # Step 9 — review iteration loop
+    │   ├── 10-finalize.ts          # Step 10 — Done + completed/ + attestation + chore commit
+    │   ├── 11-push-and-pr.ts       # Step 11 — push + gh pr create
+    │   ├── 12-sibling-prs.ts       # Step 12 — cross-repo sibling PRs
+    │   └── 13-cleanup.ts           # Step 13 — sentinel cleanup
+    └── cli/
+        └── index.ts                # yargs subcommand router
 ```
 
 ## CLI quickstart
@@ -143,9 +143,9 @@ These come from RFC-0012 §3.1 + the AI-SDLC governance hooks:
 
 ## Testing
 
-- **Unit tests** live next to each step in `tests/unit/steps/<step>.test.ts`. Each step has happy-path + error-path coverage.
-- **Integration test** in `tests/integration/pipeline.test.ts` runs the full Step 0-13 against `MockSpawner` in a tmp project root.
-- **CLI tests** in `tests/unit/cli.test.ts` exercise the yargs router.
+- **Unit tests** are colocated with the source they exercise — `src/steps/<step>.ts` ↔ `src/steps/<step>.test.ts`. Each step has happy-path + error-path coverage.
+- **Integration test** lives at `src/execute-pipeline.test.ts` and runs the full Step 0-13 against `MockSpawner` + `FakeRunner` in a tmp project root.
+- **Test helpers** (`FakeRunner`, `makeTmpProject`, `writeTaskFile`) live in `src/__test-helpers/` so they're picked up by Vitest's default include glob alongside the colocated `*.test.ts` files.
 - **Coverage gate** is 80% lines/functions, enforced by `vitest.config.ts` and the workspace-level `scripts/check-coverage.sh`.
 
 ```bash

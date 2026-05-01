@@ -102,7 +102,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     ).toBe(true);
   });
 
-  it('developer-failed path: returns aborted/developer-failed without opening PR', async () => {
+  it('developer-failed path: returns developer-failed outcome without opening PR', async () => {
     writeTaskFile(tmp, {
       id: 'AISDLC-101',
       title: 'broken developer',
@@ -127,7 +127,7 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       skipFinalizeCommit: true,
     });
 
-    expect(result.outcome).toBe('aborted');
+    expect(result.outcome).toBe('developer-failed');
     expect(result.prUrl).toBeNull();
     expect(result.notes).toMatch(/null commitSha|could not finish/);
   });

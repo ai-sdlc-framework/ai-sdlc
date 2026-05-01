@@ -22,7 +22,11 @@ export interface PipelineOptions {
   workDir: string;
   /** Subagent dispatch implementation. Required for Tier 2; Tier 1 uses Agent tool calls instead. */
   spawner?: SubagentSpawner;
-  /** Cap on developer iterations after a CHANGES_REQUESTED verdict. Defaults to 2 (matches AISDLC-82). */
+  /**
+   * Cap on TOTAL review iterations including the initial Step 5b/7b run.
+   * Defaults to 2 (matches AISDLC-82) — i.e. one retry after a CHANGES_REQUESTED
+   * verdict before flagging `needs-human-attention`.
+   */
   maxReviewIterations?: number;
   /** Optional progress callback fired per iteration of the review loop. */
   onProgress?: (iteration: number, verdict: AggregatedVerdict) => Promise<void> | void;
@@ -226,13 +230,23 @@ export interface AggregatedVerdict {
 
 export interface IterateReviewLoopOptions {
   taskId: string;
-  workDir: string;
+  /**
+   * Path to the per-task git worktree. Steps 5/7 inside the loop need to read
+   * the diff against the worktree HEAD, so this is the worktree path, NOT the
+   * project root. (The composite `executePipeline()` passes `branch.worktreePath`.)
+   */
+  worktreePath: string;
   task: TaskSpec;
   branch: string;
   /** First-round developer return — produced by Step 5/6 by the caller. */
   initialDeveloperReturn: DeveloperReturn;
   /** First-round aggregated verdict — produced by Step 7/8 by the caller. */
   initialVerdict: AggregatedVerdict;
+  /**
+   * Cap on TOTAL iterations (including the initial Step 5b/7b run that the caller
+   * already performed before invoking the loop). With the default of 2 the loop
+   * body runs at most ONCE — i.e. one retry after a CHANGES_REQUESTED verdict.
+   */
   maxIterations?: number;
   spawner?: SubagentSpawner;
   onIteration?: (iteration: number, verdict: AggregatedVerdict) => Promise<void> | void;

@@ -78,7 +78,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const spawner = new MockSpawner({});
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
-      workDir: tmp,
+      worktreePath: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -94,7 +94,7 @@ describe('Step 9 — iterateReviewLoop', () => {
   it('returns immediately when no spawner is provided (Tier 1 prose mode)', async () => {
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
-      workDir: tmp,
+      worktreePath: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -138,7 +138,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     });
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
-      workDir: tmp,
+      worktreePath: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -189,7 +189,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     });
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
-      workDir: tmp,
+      worktreePath: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -212,7 +212,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     });
     const r = await iterateReviewLoop({
       taskId: 'AISDLC-1',
-      workDir: tmp,
+      worktreePath: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
@@ -229,7 +229,7 @@ describe('Step 9 — iterateReviewLoop', () => {
     const seen: number[] = [];
     await iterateReviewLoop({
       taskId: 'AISDLC-1',
-      workDir: tmp,
+      worktreePath: tmp,
       task,
       branch: 'b',
       initialDeveloperReturn: goodDev,
