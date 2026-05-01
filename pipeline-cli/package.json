@@ -18,7 +18,8 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "bin": {
-    "ai-sdlc-pipeline": "bin/ai-sdlc-pipeline.mjs"
+    "ai-sdlc-pipeline": "bin/ai-sdlc-pipeline.mjs",
+    "cli-deps": "bin/cli-deps.mjs"
   },
   "exports": {
     ".": {
@@ -32,6 +33,10 @@
     "./runtime": {
       "types": "./dist/runtime/index.d.ts",
       "import": "./dist/runtime/index.js"
+    },
+    "./deps": {
+      "types": "./dist/deps/index.d.ts",
+      "import": "./dist/deps/index.js"
     }
   },
   "publishConfig": {

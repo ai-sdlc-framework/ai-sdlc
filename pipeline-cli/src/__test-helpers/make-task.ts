@@ -19,6 +19,18 @@ export interface MakeTaskOptions {
   permittedExternalPaths?: string[];
   description?: string;
   references?: string[];
+  /**
+   * Other task IDs this task depends on. Rendered as the `dependencies:` YAML
+   * frontmatter list — same shape the dependency-graph builder reads.
+   */
+  dependencies?: string[];
+  /**
+   * If true, write the task into `backlog/completed/` instead of
+   * `backlog/tasks/`. Used by dependency-graph tests to simulate the
+   * frontier-readiness check (a dependency is "satisfied" when it lives in
+   * completed/).
+   */
+  completed?: boolean;
 }
 
 /**
@@ -47,11 +59,12 @@ export function cleanupTmpProject(dir: string): void {
  */
 export function writeTaskFile(workDir: string, opts: MakeTaskOptions): string {
   const fileName = `${opts.id.toLowerCase()} - ${slugify(opts.title)}.md`;
-  const path = join(workDir, 'backlog', 'tasks', fileName);
+  const subdir = opts.completed ? 'completed' : 'tasks';
+  const path = join(workDir, 'backlog', subdir, fileName);
 
   const acs = opts.acceptanceCriteria ?? ['First criterion', 'Second criterion'];
   const checked = opts.acceptanceCriteriaChecked ?? new Array(acs.length).fill(false);
-  const status = opts.status ?? 'To Do';
+  const status = opts.status ?? (opts.completed ? 'Done' : 'To Do');
 
   const fmLines: string[] = [`id: ${opts.id}`, `title: '${opts.title}'`, `status: ${status}`];
   if (opts.references && opts.references.length > 0) {
@@ -61,6 +74,10 @@ export function writeTaskFile(workDir: string, opts: MakeTaskOptions): string {
   if (opts.permittedExternalPaths && opts.permittedExternalPaths.length > 0) {
     fmLines.push('permittedExternalPaths:');
     for (const p of opts.permittedExternalPaths) fmLines.push(`  - '${p}'`);
+  }
+  if (opts.dependencies && opts.dependencies.length > 0) {
+    fmLines.push('dependencies:');
+    for (const d of opts.dependencies) fmLines.push(`  - ${d}`);
   }
 
   const acLines = acs.map((ac, i) => `- [${checked[i] ? 'x' : ' '}] #${i + 1} ${ac}`).join('\n');
