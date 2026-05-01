@@ -64,7 +64,6 @@ import {
   ACCEPTED_SCHEMA_VERSIONS,
   verifyAttestation,
   sha256Hex,
-  computeContentHash,
   computeContentHashV3,
   validateTrustedReviewers,
 } from '../orchestrator/dist/runtime/attestations.js';
@@ -232,31 +231,25 @@ function safeForReason(v, max = 32) {
 }
 
 export function predicateMatchReason(predicate, expected) {
-  // schemaVersion FIRST so an envelope from a future schema doesn't get
-  // confusingly reported as "diffHash mismatch".
+  // schemaVersion FIRST so an envelope from a non-accepted schema doesn't
+  // get confusingly reported as a content-hash mismatch.
   if (!expected.acceptedSchemaVersions.includes(predicate.schemaVersion)) {
     return {
       field: 'schemaVersion',
       detail: `schemaVersion '${safeForReason(predicate.schemaVersion, 16)}' not in allowlist [${expected.acceptedSchemaVersions.join(', ')}]`,
     };
   }
-  // AISDLC-94 + AISDLC-101 triple-hash acceptance: accept if ANY of the
-  // three legs match. v1 (`diffHash`) is the legacy literal-diff hash;
-  // v2 (`contentHash`) is the post-apply blob-SHA-per-file hash; v3
-  // (`contentHashV3`) is the per-file (base, head) blob-pair transition
-  // hash (covers the AISDLC-93 / PR #102 sibling-overlap case better
-  // than v2). Phase 2 keeps all three legs in parallel during the soak;
-  // a future schema bump will drop v1 + v2 once v3 is the universal shape.
-  const hasContentHashMatch =
-    typeof predicate.contentHash === 'string' &&
-    typeof expected.contentHash === 'string' &&
-    predicate.contentHash === expected.contentHash;
-  const hasContentHashV3Match =
-    typeof predicate.contentHashV3 === 'string' &&
-    typeof expected.contentHashV3 === 'string' &&
-    predicate.contentHashV3 === expected.contentHashV3;
-  if (!hasContentHashMatch && !hasContentHashV3Match && predicate.diffHash !== expected.diffHash) {
-    return { field: 'diffHash', detail: 'diffHash mismatch (PR diff differs from attested diff)' };
+  // AISDLC-103 (Verifier Phase 3): v3-only content binding. The legacy
+  // `diffHash` (v1) and `contentHash` (v2) legs were dropped in this
+  // phase — only `contentHashV3` is consulted. v3 commits to the per-file
+  // (base, head) blob-pair transition; paired with the AISDLC-102
+  // producer-side pre-sign rebase, this is the single content binding
+  // we now require.
+  if (predicate.contentHashV3 !== expected.contentHashV3) {
+    return {
+      field: 'contentHashV3',
+      detail: 'contentHashV3 mismatch (PR content differs from attested content)',
+    };
   }
   if (predicate.policyHash !== expected.policyHash) {
     return {
@@ -297,7 +290,7 @@ export function predicateMatchReason(predicate, expected) {
  */
 const MISMATCH_RANK = {
   schemaVersion: 0,
-  diffHash: 1,
+  contentHashV3: 1,
   policyHash: 2,
   pluginVersion: 4,
 };
@@ -428,25 +421,27 @@ function git(args, cwd) {
 }
 
 /**
- * Try to resolve a "subject SHA" usable for diff-recomputation against this
- * envelope's `predicate.diffHash`. Returns `{ sha, source }` on success or
- * `null` on failure. `source` is `'subject'` if the envelope's own
- * `subject.digest.sha1` is reachable from PR HEAD and matches; `'ancestor'`
- * if we matched by walking PR HEAD's first-parent chain.
+ * Try to resolve a "subject SHA" usable for content-recomputation against
+ * this envelope's `predicate.contentHashV3`. Returns `{ sha, source }` on
+ * success or `null` on failure. `source` is `'subject'` if the envelope's
+ * own `subject.digest.sha1` is reachable from PR HEAD and matches;
+ * `'ancestor'` if we matched by walking PR HEAD's first-parent chain.
  *
- * Algorithm:
+ * Algorithm (AISDLC-103, Verifier Phase 3 — v3-only):
  *  1. If `subject.digest.sha1` is well-formed AND reachable from PR HEAD
- *     (`git merge-base --is-ancestor`), recompute the diff and check if its
- *     sha256 equals `predicate.diffHash`. If yes → match (source='subject').
+ *     (`git merge-base --is-ancestor`), recompute the per-file (base,
+ *     head) blob-pair transition and check if its sha256 equals
+ *     `predicate.contentHashV3`. If yes → match (source='subject').
  *  2. Otherwise walk PR HEAD's first-parent ancestors up to `depth` and
- *     return the first ancestor whose `<base>...<ancestor>` diff hashes
- *     to `predicate.diffHash` (source='ancestor').
- *  3. Otherwise return `null` — the envelope's diff doesn't correspond to
- *     any reachable commit on this branch.
+ *     return the first ancestor whose recomputed `contentHashV3` equals
+ *     `predicate.contentHashV3` (source='ancestor').
+ *  3. Otherwise return `null` — the envelope's content doesn't correspond
+ *     to any reachable commit on this branch.
  *
- * This is what makes the verifier rebase-stable + chore-commit-aware: the
- * envelope's signed `subject.digest.sha1` is the preferred match (cheapest,
- * most precise), but if rebase rewrote ancestry we fall back to walking.
+ * The legacy v1 (`diffHash`) and v2 (`contentHash`) acceptance legs were
+ * dropped in this phase — `validatePredicateShape` already rejects v3
+ * envelopes that carry either field, so even if a stale leg matched we'd
+ * never reach this code path with a valid v3 envelope.
  *
  * Exported for unit testing. The injected `gitFn` lets tests stub git.
  */
@@ -459,32 +454,18 @@ export function resolveSubjectShaForEnvelope({
   depth,
   gitFn = git,
 }) {
-  const expectedDiffHash = predicate?.diffHash;
-  // AISDLC-94 dual-hash mode: if the envelope carries a contentHash, also
-  // try matching by recomputing `contentHash` for each candidate subject's
-  // `<base>...<subject>` changed-file set. A match here is rebase-tolerant:
-  // the file blob SHAs at the post-apply tree don't change when the rebase
-  // base differs but the resolved file content is identical. We try both
-  // checks at every candidate so a single envelope can match either way.
-  const expectedContentHash = predicate?.contentHash;
-  // AISDLC-101 Phase-2 triple-hash: also try recomputing `contentHashV3`
-  // (per-file (base, head) blob-pair transition). Stricter binding than v2
-  // — covers the AISDLC-93 sibling-overlap case better when paired with
-  // the producer-side pre-sign rebase from AISDLC-102.
+  // AISDLC-103: v3-only — `contentHashV3` is required in valid v3
+  // envelopes. If the envelope is missing the field we can't match it
+  // against any candidate subject SHA.
   const expectedContentHashV3 = predicate?.contentHashV3;
-  if (
-    typeof expectedDiffHash !== 'string' &&
-    typeof expectedContentHash !== 'string' &&
-    typeof expectedContentHashV3 !== 'string'
-  ) {
+  if (typeof expectedContentHashV3 !== 'string') {
     return null;
   }
 
   /**
    * Resolve a file's blob SHA at a given ref via `git ls-tree -r`. Returns
    * the empty string on missing path / ls-tree failure (= the canonical
-   * "deleted" or "not present at this endpoint" marker). Shared between
-   * the v2 and v3 recompute paths so they agree on enumeration semantics.
+   * "deleted" or "not present at this endpoint" marker).
    */
   const resolveBlobShaAt = (ref, path) => {
     try {
@@ -498,22 +479,6 @@ export function resolveSubjectShaForEnvelope({
       // ls-tree failed → treat as deleted / absent.
     }
     return '';
-  };
-
-  /** Recompute the changed-file set for `base...sha` and return contentHash. */
-  const computeShaContentHash = (sha) => {
-    let nameOnly;
-    try {
-      nameOnly = gitFn(['diff', '--name-only', '--no-renames', `${baseSha}...${sha}`], repoRoot);
-    } catch {
-      return null;
-    }
-    const paths = nameOnly.split('\n').filter((l) => l.length > 0);
-    const entries = [];
-    for (const p of paths) {
-      entries.push({ path: p, blobSha: resolveBlobShaAt(sha, p) });
-    }
-    return computeContentHash(entries);
   };
 
   /**
@@ -550,27 +515,8 @@ export function resolveSubjectShaForEnvelope({
   };
 
   const tryShaMatches = (sha) => {
-    // Try contentHashV3 first when the envelope has it — strictest
-    // rebase-tolerant binding, expected post-AISDLC-101.
-    if (typeof expectedContentHashV3 === 'string') {
-      const ch3 = computeShaContentHashV3(sha);
-      if (ch3 !== null && ch3 === expectedContentHashV3) return true;
-    }
-    // Then v2 contentHash (post-AISDLC-94 envelopes).
-    if (typeof expectedContentHash === 'string') {
-      const ch = computeShaContentHash(sha);
-      if (ch !== null && ch === expectedContentHash) return true;
-    }
-    if (typeof expectedDiffHash === 'string') {
-      let diff;
-      try {
-        diff = gitFn(['diff', `${baseSha}...${sha}`], repoRoot);
-      } catch {
-        return false;
-      }
-      if (sha256Hex(diff) === expectedDiffHash) return true;
-    }
-    return false;
+    const ch3 = computeShaContentHashV3(sha);
+    return ch3 !== null && ch3 === expectedContentHashV3;
   };
 
   // Step 1: if the envelope's subject SHA is reachable from PR HEAD, prefer it.
@@ -685,15 +631,14 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     };
   }
 
-  // Per-envelope: try to resolve a subject SHA whose recomputed bindings
-  // match the envelope. AISDLC-94 dual-hash mode tries BOTH the legacy
-  // diffHash leg AND the rebase-tolerant contentHash leg at every candidate
-  // — a positive match on either is enough. If we find one, the envelope
-  // is content-matched (modulo policy / agents / plugin version / schema,
+  // Per-envelope: try to resolve a subject SHA whose recomputed
+  // `contentHashV3` matches the envelope (AISDLC-103, Verifier Phase 3 —
+  // v3 is the only content binding now). If we find one, the envelope is
+  // content-matched (modulo policy / agents / plugin version / schema,
   // which are checked by `predicateMatchReason` using the envelope's own
   // hashes as the expected values — they line up by construction once
-  // we've matched). If we can't resolve a subject SHA, neither hash
-  // corresponds to anything reachable from PR HEAD → mismatch.
+  // we've matched). If we can't resolve a subject SHA, the v3 hash
+  // doesn't correspond to anything reachable from PR HEAD → mismatch.
   const matched = []; // { entry, subjectSha, source }
   const mismatches = []; // { entry, reason }
   for (const entry of all) {
@@ -706,46 +651,37 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       depth: ancestorDepth,
     });
     if (resolution === null) {
-      // No subject SHA on this branch matches the envelope's diffHash OR
-      // contentHash → diff/content bindings differ. Hand off to
-      // predicateMatchReason for a unified reason: schemaVersion is
-      // checked first (so a future schema is reported correctly), then
-      // diffHash. We synthesize a bogus expected.diffHash + omit
-      // expected.contentHash so predicateMatchReason surfaces the
-      // diffHash mismatch rather than the policy / agents one.
+      // No subject SHA on this branch matches the envelope's
+      // contentHashV3 (or the envelope is a legacy v1/v2 shape that
+      // no longer carries v3). Hand off to predicateMatchReason for a
+      // unified reason: schemaVersion is checked first (so a legacy
+      // envelope reports the schemaVersion-allowlist failure rather
+      // than a content mismatch), then contentHashV3. We synthesize a
+      // sentinel expected.contentHashV3 so predicateMatchReason
+      // surfaces the content mismatch reason for true v3 envelopes
+      // whose content actually drifted.
       const reason = predicateMatchReason(entry.predicate, {
-        diffHash: '0'.repeat(64), // sentinel — does not match any real diff
-        // contentHash intentionally omitted — we already know it didn't
-        // match (otherwise resolveSubjectShaForEnvelope would have
-        // returned a resolution).
+        contentHashV3: '0'.repeat(64), // sentinel — does not match any real content
         policyHash,
         expectedAgentFileHashes,
         pluginVersion,
         acceptedSchemaVersions: ACCEPTED_SCHEMA_VERSIONS,
       });
-      // predicateMatchReason returns null when the sentinel happens to
-      // equal the envelope's diffHash (impossibly rare — sha256 of
-      // sixty-four zeros is not a real diff). Fall through to a static
-      // diffHash mismatch reason so we never accidentally accept.
       mismatches.push({
         entry,
         reason: reason ?? {
-          field: 'diffHash',
-          detail: 'diffHash mismatch (PR diff differs from attested diff)',
+          field: 'contentHashV3',
+          detail: 'contentHashV3 mismatch (PR content differs from attested content)',
         },
       });
       continue;
     }
     // Subject resolved — now check the OTHER bindings (policy / agents /
-    // plugin version / schema) using the envelope's own diffHash AND
-    // contentHash AND contentHashV3 (when present) as expected (since
-    // we've already established the subject matches by ANY of the three
-    // bindings). The triple-hash OR is short-circuited to "match" by
-    // construction here.
+    // plugin version / schema) using the envelope's own contentHashV3 as
+    // expected (since we've already established the subject matches by
+    // construction).
     const reason = predicateMatchReason(entry.predicate, {
-      diffHash: entry.predicate.diffHash, // by construction == sha256 of subject's diff (or matched via contentHash[V3])
-      contentHash: entry.predicate.contentHash, // identity match — accept whichever binding matched
-      contentHashV3: entry.predicate.contentHashV3, // AISDLC-101: same identity-match shape
+      contentHashV3: entry.predicate.contentHashV3, // identity match — already validated upstream
       policyHash,
       expectedAgentFileHashes,
       pluginVersion,
@@ -849,23 +785,14 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   // verifier-side ancestor walk above is the source of truth for which
   // commit the envelope binds to).
   //
-  // We pass the envelope's own `predicate.diffHash` as `expected.diffHash`
-  // since we've already content-matched it against
-  // `git diff <base>...<subjectSha>` upstream. Same for policy/agents.
+  // AISDLC-103 (Verifier Phase 3): only `contentHashV3` is passed. The
+  // envelope's own value is forwarded since we've already content-matched
+  // upstream — the runtime check is identity-equal by construction.
   const result = verifyAttestation({
     envelope: chosen.entry.envelope,
     trustedReviewers,
     expected: {
       commitSha: chosen.entry.predicate?.subject?.digest?.sha1 ?? '0'.repeat(40),
-      diffHash: chosen.entry.predicate.diffHash,
-      // AISDLC-94: pass the envelope's own contentHash so the runtime's
-      // dual-hash acceptance accepts the envelope when content matches
-      // even if (post-rebase) the diff text shifted. We've already
-      // content-matched it upstream by construction.
-      contentHash: chosen.entry.predicate.contentHash,
-      // AISDLC-101: pass the envelope's own contentHashV3 so the runtime's
-      // triple-hash acceptance also accepts on the per-file-delta leg.
-      // Identity match by construction — same rationale as contentHash.
       contentHashV3: chosen.entry.predicate.contentHashV3,
       policyHash,
       expectedAgentFileHashes,

@@ -272,12 +272,11 @@ describe('sign-attestation.mjs', () => {
     );
   });
 
-  it('emits a Phase-2 triple-hash envelope (diffHash + contentHash + contentHashV3) (AISDLC-101)', () => {
-    // The local sign script feeds collectChangedFileEntries +
-    // collectChangedFileDeltaEntries into buildPredicate, so a fresh
-    // envelope must carry all three legs. The verifier's triple-hash
-    // OR depends on this; without v3 in the envelope we'd silently
-    // regress to the AISDLC-94 dual-hash window.
+  it('emits a v3-only envelope (contentHashV3 required, diffHash + contentHash forbidden) (AISDLC-103)', () => {
+    // The local sign script now feeds only collectChangedFileDeltaEntries
+    // into buildPredicate. A fresh envelope MUST carry contentHashV3 and
+    // MUST NOT carry the legacy diffHash / contentHash fields — the
+    // verifier rejects predicates carrying either.
     writeKey(tmpHome);
     const verdictsPath = join(fixture.root, 'verdicts.json');
     writeFileSync(
@@ -297,12 +296,21 @@ describe('sign-attestation.mjs', () => {
     const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
     const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
     const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
-    assert.match(predicate.diffHash, /^[0-9a-f]{64}$/, 'envelope must carry diffHash (v1)');
-    assert.match(predicate.contentHash, /^[0-9a-f]{64}$/, 'envelope must carry contentHash (v2)');
+    assert.equal(predicate.schemaVersion, 'v3', 'fresh envelope must be schemaVersion v3');
     assert.match(
       predicate.contentHashV3,
       /^[0-9a-f]{64}$/,
-      'envelope must carry contentHashV3 (v3, AISDLC-101)',
+      'envelope must carry contentHashV3 (v3, AISDLC-101 / AISDLC-103)',
+    );
+    assert.equal(
+      predicate.diffHash,
+      undefined,
+      'AISDLC-103: v3 envelope must NOT carry legacy diffHash field',
+    );
+    assert.equal(
+      predicate.contentHash,
+      undefined,
+      'AISDLC-103: v3 envelope must NOT carry legacy contentHash field',
     );
   });
 });

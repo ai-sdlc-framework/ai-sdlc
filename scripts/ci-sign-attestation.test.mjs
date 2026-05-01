@@ -43,6 +43,7 @@ const orchestratorBarrel = join(repoRoot, 'orchestrator', 'dist', 'runtime', 'at
 let buildPredicate;
 let signAttestation;
 let generateSigningKeyPair;
+let collectChangedFileDeltaEntries;
 
 before(async () => {
   // The verifier + the script-under-test both import the orchestrator's
@@ -59,6 +60,7 @@ before(async () => {
   buildPredicate = mod.buildPredicate;
   signAttestation = mod.signAttestation;
   generateSigningKeyPair = mod.generateSigningKeyPair;
+  collectChangedFileDeltaEntries = mod.collectChangedFileDeltaEntries;
 });
 
 function cleanEnv() {
@@ -171,7 +173,6 @@ function linkScriptDeps(root) {
  * and AC #9 (invalid-existing → CI signs additively).
  */
 function writeMaintainerEnvelope(root, headSha, baseSha, privateKeyPem, options = {}) {
-  const diff = git(['diff', `${baseSha}...${headSha}`], root);
   const policy = readFileSync(join(root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
   const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
     agentId,
@@ -180,15 +181,20 @@ function writeMaintainerEnvelope(root, headSha, baseSha, privateKeyPem, options 
     approved: true,
     findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
   }));
+  // AISDLC-103: v3-only — collect per-file (base, head) blob deltas instead
+  // of legacy diff. `options.changedFileDeltas` lets callers force a tampered
+  // shape (replaces the previous `tamperedDiff` knob).
+  const changedFileDeltas =
+    options.changedFileDeltas ?? collectChangedFileDeltaEntries(baseSha, headSha, root);
   const predicate = buildPredicate({
     commitSha: headSha,
-    diff: options.tamperedDiff ?? diff,
     policy,
     reviewers,
     pluginVersion: PLUGIN_VERSION,
     iterationCount: 1,
     harnessNote: '',
     signedAt: '2026-04-28T00:00:00.000Z',
+    changedFileDeltas,
   });
   const envelope = signAttestation({
     predicate,
@@ -441,11 +447,11 @@ describe('ci-sign-attestation.mjs end-to-end', () => {
     assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
   });
 
-  it('AISDLC-101: CI-signed envelope carries contentHashV3 (Phase 2 triple-hash)', () => {
-    // The CI-side attestor MUST emit Phase 2 triple-hash envelopes too —
-    // otherwise external-contributor / fork PRs (which depend on the
-    // CI attestor for signing) would silently regress to the AISDLC-94
-    // dual-hash window.
+  it('AISDLC-103: CI-signed envelope is v3-only (contentHashV3 required, diffHash + contentHash forbidden)', () => {
+    // The CI-side attestor MUST emit v3 envelopes only — otherwise
+    // external-contributor / fork PRs (which depend on the CI attestor
+    // for signing) would emit envelopes the post-AISDLC-103 verifier
+    // rejects on schemaVersion-allowlist grounds.
     runCiSignScript({
       cwd: fixture.root,
       verdicts: VERDICTS_ALL_APPROVED,
@@ -455,16 +461,21 @@ describe('ci-sign-attestation.mjs end-to-end', () => {
     const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
     const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
     const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
-    assert.match(predicate.diffHash, /^[0-9a-f]{64}$/, 'CI envelope must carry diffHash (v1)');
-    assert.match(
-      predicate.contentHash,
-      /^[0-9a-f]{64}$/,
-      'CI envelope must carry contentHash (v2)',
-    );
+    assert.equal(predicate.schemaVersion, 'v3', 'CI envelope must be schemaVersion v3');
     assert.match(
       predicate.contentHashV3,
       /^[0-9a-f]{64}$/,
-      'CI envelope must carry contentHashV3 (v3, AISDLC-101)',
+      'CI envelope must carry contentHashV3 (v3, AISDLC-101 / AISDLC-103)',
+    );
+    assert.equal(
+      predicate.diffHash,
+      undefined,
+      'AISDLC-103: CI envelope must NOT carry legacy diffHash field',
+    );
+    assert.equal(
+      predicate.contentHash,
+      undefined,
+      'AISDLC-103: CI envelope must NOT carry legacy contentHash field',
     );
   });
 
@@ -550,7 +561,6 @@ describe('ci-sign-attestation.mjs end-to-end', () => {
     // Stranger envelope at a DIFFERENT filename — simulating the
     // pre-AISDLC-111 "additive" shape that the purge step now collapses.
     const strangerSha = '1'.repeat(40);
-    const diff = git(['diff', `${fixture.baseSha}...${fixture.headSha}`], fixture.root);
     const policy = readFileSync(join(fixture.root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
     const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
       agentId,
@@ -559,15 +569,20 @@ describe('ci-sign-attestation.mjs end-to-end', () => {
       approved: true,
       findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
     }));
+    const changedFileDeltas = collectChangedFileDeltaEntries(
+      fixture.baseSha,
+      fixture.headSha,
+      fixture.root,
+    );
     const predicate = buildPredicate({
       commitSha: fixture.headSha,
-      diff,
       policy,
       reviewers,
       pluginVersion: PLUGIN_VERSION,
       iterationCount: 1,
       harnessNote: '',
       signedAt: '2026-04-28T00:00:00.000Z',
+      changedFileDeltas,
     });
     const strangerEnv = signAttestation({
       predicate,

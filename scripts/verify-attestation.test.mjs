@@ -153,36 +153,17 @@ function writeTrustedReviewersYaml(root, pubkeyPem) {
 // the filename. The verifier no longer enforces it (AISDLC-84), but we keep
 // it accurate to the original convention so audit-trail readers see a real
 // SHA on disk. Defaults to `headSha` for callers that don't care.
-/**
- * Walk `git diff --name-only` + `git ls-tree` for the given range and return
- * the entries `computeContentHash` expects. Mirrors the helper baked into
- * `ai-sdlc-plugin/scripts/sign-attestation.mjs` so test attestations carry
- * the same `contentHash` shape as production envelopes (AISDLC-94).
- */
-function collectChangedFileEntries(root, baseRef, headRef) {
-  const nameOnly = git(['diff', '--name-only', '--no-renames', `${baseRef}...${headRef}`], root);
-  const paths = nameOnly.split('\n').filter((p) => p.length > 0);
-  return paths.map((p) => {
-    let blobSha = '';
-    try {
-      const lsOut = git(['ls-tree', '-r', headRef, '--', p], root);
-      const line = lsOut.split('\n').find((l) => l.length > 0);
-      if (line) {
-        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
-        if (m) blobSha = m[1];
-      }
-    } catch {
-      // ls-tree failed → treat as deleted.
-    }
-    return { path: p, blobSha };
-  });
-}
+
+// AISDLC-103: the legacy `collectChangedFileEntries` helper (which mirrored
+// AISDLC-94's contentHash producer) was deleted along with the contentHash
+// dual-hash leg. Only `collectChangedFileDeltaEntries` (the v3 producer)
+// remains.
 
 /**
  * Walk merge-base + per-file (base, head) blob-pair lookups for the given
  * range and return the entries `computeContentHashV3` expects. Mirrors the
  * production `collectChangedFileDeltaEntries` so test attestations carry
- * the same `contentHashV3` shape (AISDLC-101).
+ * the same `contentHashV3` shape (AISDLC-101 / AISDLC-103).
  */
 function collectChangedFileDeltaEntries(root, baseRef, headRef) {
   const mergeBase = git(['merge-base', baseRef, headRef], root).trim();
@@ -209,7 +190,7 @@ function collectChangedFileDeltaEntries(root, baseRef, headRef) {
 }
 
 function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, overrides = {}) {
-  const diff = git(['diff', `${baseSha}...${headSha}`], root);
+  void headSha; // unused after AISDLC-103 (no diff text bound anymore)
   const policy = readFileSync(join(root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
   const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
     agentId,
@@ -218,31 +199,22 @@ function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, ove
     approved: true,
     findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
   }));
-  // AISDLC-94: include the changed-file set so test envelopes carry
-  // `contentHash` by default (the production `sign-attestation.mjs` script
-  // does the same). Callers that want to test the legacy "v1 envelope with
-  // no contentHash" path can pass `changedFiles: undefined` in overrides.
-  const changedFiles =
-    overrides.changedFiles !== undefined
-      ? overrides.changedFiles
-      : collectChangedFileEntries(root, baseSha, subjectSha);
-  // AISDLC-101: also include the per-file-delta set so test envelopes
-  // carry `contentHashV3` by default. Callers can opt out with
-  // `changedFileDeltas: null` to test legacy / dual-hash-only paths.
+  // AISDLC-103: v3-only — collect per-file (base, head) blob deltas
+  // against the SUBJECT sha (= what the dev commit attested). Callers
+  // can override via `overrides.changedFileDeltas` to test specific
+  // shapes (e.g. an empty no-op PR).
   const changedFileDeltas =
     overrides.changedFileDeltas !== undefined
       ? overrides.changedFileDeltas
       : collectChangedFileDeltaEntries(root, baseSha, subjectSha);
   const predicate = buildPredicate({
     commitSha: subjectSha,
-    diff,
     policy,
     reviewers,
     pluginVersion: PLUGIN_VERSION,
     iterationCount: 1,
     harnessNote: '',
     signedAt: '2026-04-27T00:00:00.000Z',
-    changedFiles,
     changedFileDeltas,
     ...overrides,
   });
@@ -546,7 +518,7 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
     assert.equal(out.status, 'valid', `expected valid after amend, got: ${out.reason}`);
   });
 
-  it('AC #8: rejects (diffHash mismatch) when force-push actually changes the diff', () => {
+  it('AC #8: rejects (contentHashV3 mismatch) when force-push actually changes the diff', () => {
     writeAttestation(
       fixture.root,
       fixture.headSha,
@@ -554,7 +526,8 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
       fixture.headSha,
       keys.privateKeyPem,
     );
-    // Amend with extra content. Now the diff genuinely differs.
+    // Amend with extra content. Now the per-file (base, head) blob delta
+    // genuinely differs (the head blob SHA flips on the changed file).
     writeFileSync(join(fixture.root, 'feature.txt'), 'feature\nMORE CONTENT\n');
     git(['add', 'feature.txt'], fixture.root);
     git(['commit', '--amend', '-q', '--no-edit'], fixture.root);
@@ -565,10 +538,10 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
       repoRoot: fixture.root,
     });
     assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /diffHash mismatch/);
+    assert.match(out.reason, /contentHashV3 mismatch/);
   });
 
-  it('AC #11: rejects (diffHash mismatch) when an attestation from another PR is copy-pasted', () => {
+  it('AC #11: rejects (contentHashV3 mismatch) when an attestation from another PR is copy-pasted', () => {
     // Build a second fixture and add an extra commit so its diff genuinely
     // differs from PR-B (= the outer `fixture`). Sign PR-A's attestation,
     // copy it onto PR-B's branch, then verify against PR-B's state —
@@ -605,7 +578,7 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
         repoRoot: fixture.root,
       });
       assert.equal(out.status, 'invalid');
-      assert.match(out.reason, /diffHash mismatch/);
+      assert.match(out.reason, /contentHashV3 mismatch/);
     } finally {
       rmSync(otherFixture.root, { recursive: true, force: true });
     }
@@ -620,9 +593,11 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
     // signature verification fails (= "signature did not match"). The
     // pass-through to status=valid proves it picked the newer one.
     const otherKeys = generateSigningKeyPair();
-    // Old envelope, signed with untrusted key.
+    // Old envelope, signed with untrusted key. Uses the SAME content
+    // bindings (= same changedFileDeltas relative to fixture state) but
+    // an older signedAt timestamp; the verifier must prefer the newer
+    // (trusted) envelope below.
     {
-      const diff = git(['diff', `${fixture.baseSha}...${fixture.headSha}`], fixture.root);
       const policy = readFileSync(join(fixture.root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
       const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
         agentId,
@@ -631,15 +606,20 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
         approved: true,
         findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
       }));
+      const changedFileDeltas = collectChangedFileDeltaEntries(
+        fixture.root,
+        fixture.baseSha,
+        fixture.headSha,
+      );
       const predicate = buildPredicate({
-        commitSha: 'a'.repeat(40),
-        diff,
+        commitSha: fixture.headSha,
         policy,
         reviewers,
         pluginVersion: PLUGIN_VERSION,
         iterationCount: 1,
         harnessNote: '',
         signedAt: '2024-01-01T00:00:00.000Z', // OLDER
+        changedFileDeltas,
       });
       const envelope = signAttestation({
         predicate,
@@ -1101,8 +1081,8 @@ describe('findChoreCommitViolations (AISDLC-85)', () => {
   });
 });
 
-describe('resolveSubjectShaForEnvelope (AISDLC-85)', () => {
-  it('returns null when predicate.diffHash is missing', () => {
+describe('resolveSubjectShaForEnvelope (AISDLC-85 / AISDLC-103)', () => {
+  it('returns null when predicate.contentHashV3 is missing', () => {
     const r = resolveSubjectShaForEnvelope({
       envelope: { payload: 'x' },
       predicate: {},
@@ -1115,24 +1095,31 @@ describe('resolveSubjectShaForEnvelope (AISDLC-85)', () => {
     assert.equal(r, null);
   });
 
-  it('returns null when no ancestor diff matches', () => {
-    // Stub git: merge-base says not-an-ancestor; rev-list returns one
-    // commit; diff returns empty content (sha256 won't match the
-    // 'wrongdiffhash...' value).
+  it('returns null when no ancestor contentHashV3 matches', () => {
+    // Stub git: merge-base says not-an-ancestor for the subject SHA, then
+    // rev-list returns one ancestor commit; merge-base for that ancestor
+    // returns a fake SHA so the v3 recompute proceeds; diff returns no
+    // changed files so v3 recomputes to sha256('') which won't match
+    // the bogus expected.
     const fakeGit = (args) => {
-      if (args[0] === 'merge-base') {
+      // skip the leading -c core.quotepath=false flags from the real git wrapper
+      const trim = args.filter((a) => a !== '-c' && a !== 'core.quotepath=false');
+      const cmd = trim[0];
+      if (cmd === 'merge-base' && trim[1] === '--is-ancestor') {
         const err = new Error('not an ancestor');
         err.status = 1;
         throw err;
       }
-      if (args[0] === 'rev-list') return 'b'.repeat(40) + '\n';
-      if (args[0] === 'diff') return 'something different';
+      if (cmd === 'merge-base') return 'e'.repeat(40) + '\n';
+      if (cmd === 'rev-list') return 'b'.repeat(40) + '\n';
+      if (cmd === 'diff') return ''; // no changed files
+      if (cmd === 'ls-tree') return '';
       return '';
     };
     const r = resolveSubjectShaForEnvelope({
       envelope: { payload: 'x' },
       predicate: {
-        diffHash: '0'.repeat(64),
+        contentHashV3: '0'.repeat(64), // bogus expected — won't match sha256('')
         subject: { digest: { sha1: 'c'.repeat(40) } },
       },
       baseSha: 'a'.repeat(40),
@@ -1144,20 +1131,20 @@ describe('resolveSubjectShaForEnvelope (AISDLC-85)', () => {
     assert.equal(r, null);
   });
 });
-describe('predicateMatchReason', () => {
+describe('predicateMatchReason (AISDLC-103)', () => {
   function baseExpected() {
     return {
-      diffHash: 'a'.repeat(64),
+      contentHashV3: 'a'.repeat(64),
       policyHash: 'b'.repeat(64),
       expectedAgentFileHashes: { 'code-reviewer': 'c'.repeat(64) },
       pluginVersion: '0.7.1',
-      acceptedSchemaVersions: ['v1'],
+      acceptedSchemaVersions: ['v3'],
     };
   }
   function basePredicate() {
     return {
-      schemaVersion: 'v1',
-      diffHash: 'a'.repeat(64),
+      schemaVersion: 'v3',
+      contentHashV3: 'a'.repeat(64),
       policyHash: 'b'.repeat(64),
       pluginVersion: '0.7.1',
       reviewers: [{ agentId: 'code-reviewer', agentFileHash: 'c'.repeat(64) }],
@@ -1174,12 +1161,12 @@ describe('predicateMatchReason', () => {
     assert.match(r.detail, /not in allowlist/);
   });
 
-  it('returns diffHash mismatch when diff differs', () => {
+  it('returns contentHashV3 mismatch when content differs', () => {
     const r = predicateMatchReason(
-      { ...basePredicate(), diffHash: 'x'.repeat(64) },
+      { ...basePredicate(), contentHashV3: 'x'.repeat(64) },
       baseExpected(),
     );
-    assert.equal(r.field, 'diffHash');
+    assert.equal(r.field, 'contentHashV3');
   });
 
   it('returns policyHash mismatch when policy differs', () => {
@@ -1547,43 +1534,18 @@ describe('runVerifier (AISDLC-94 — rebase-tolerant contentHash)', () => {
 
     const out = runVerifier({ headSha: tampered, baseSha: b1, repoRoot: fixture.root });
     assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
-    assert.match(out.reason, /diffHash mismatch/);
+    assert.match(out.reason, /contentHashV3 mismatch/);
   });
 
-  it('still accepts a legacy v1 envelope (no contentHash) via the diffHash leg', () => {
-    // Backward-compat: envelopes signed BEFORE AISDLC-94 landed only
-    // carry `diffHash`. The verifier MUST still accept them when the
-    // diff hash matches. We force this by passing `changedFiles: null`
-    // to writeAttestation, which the helper translates to "skip the
-    // contentHash field" (matching the pre-AISDLC-94 buildPredicate
-    // behavior).
-    writeAttestation(
-      fixture.root,
-      fixture.headSha,
-      fixture.baseSha,
-      fixture.headSha,
-      keys.privateKeyPem,
-      { changedFiles: null }, // force legacy shape
-    );
-    // Sanity: the envelope on disk has NO contentHash field.
-    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
-    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
-    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
-    assert.equal(predicate.contentHash, undefined, 'legacy envelope must not have contentHash');
-
-    const out = runVerifier({
-      headSha: fixture.headSha,
-      baseSha: fixture.baseSha,
-      repoRoot: fixture.root,
-    });
-    assert.equal(out.status, 'valid', `legacy v1 envelope must verify, got: ${out.reason}`);
-  });
-
-  it('a fresh dual-hash envelope verifies on the contentHash leg even when the diff text is unchanged', () => {
-    // No rebase; just confirm the contentHash codepath produces valid
-    // for a normal happy-path PR. (Both diffHash AND contentHash match
-    // — the verifier picks whichever leg fires first in the matcher,
-    // but the result must be `valid`.)
+  // AISDLC-103 inverts the legacy AISDLC-94 "still accepts a v1 envelope
+  // via the diffHash leg" test. With v1/v2 schemaVersions removed from
+  // the allowlist and the legacy hash fields forbidden in v3 envelopes,
+  // there's no longer a way to construct a "legacy envelope" that the
+  // current verifier accepts — every accepted envelope MUST be v3-shaped.
+  // Producer regression coverage lives in the sign-attestation tests.
+  it('AISDLC-103: a fresh v3 envelope verifies via the contentHashV3 leg', () => {
+    // No rebase; happy-path PR. The fresh envelope carries contentHashV3
+    // and that's what the verifier matches on.
     writeAttestation(
       fixture.root,
       fixture.headSha,
@@ -1594,10 +1556,21 @@ describe('runVerifier (AISDLC-94 — rebase-tolerant contentHash)', () => {
     const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
     const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
     const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.equal(predicate.schemaVersion, 'v3');
     assert.match(
-      predicate.contentHash ?? '',
+      predicate.contentHashV3 ?? '',
       /^[0-9a-f]{64}$/,
-      'fresh envelope must carry contentHash (64-char sha256 hex)',
+      'fresh envelope must carry contentHashV3 (64-char sha256 hex)',
+    );
+    assert.equal(
+      predicate.diffHash,
+      undefined,
+      'AISDLC-103: v3 envelope must NOT carry legacy diffHash',
+    );
+    assert.equal(
+      predicate.contentHash,
+      undefined,
+      'AISDLC-103: v3 envelope must NOT carry legacy contentHash',
     );
 
     const out = runVerifier({
@@ -1704,12 +1677,10 @@ describe('runVerifier (AISDLC-101 — triple-hash with per-file-delta contentHas
     assert.equal(out.status, 'valid', `expected valid post-rebase, got: ${out.reason}`);
   });
 
-  it('triple-hash envelope STILL rejects a real content-tampering amend (threat model preserved)', () => {
-    // Mirrors AISDLC-94's threat-model boundary: an attacker who amends
-    // PR-X to add unreviewed code MUST cause all three legs to diverge.
-    // v1 diffHash flips (different diff text), v2 contentHash flips
-    // (different head blob SHA), v3 contentHashV3 flips (different
-    // fileDeltaHash because head blob SHA flipped). Verifier rejects.
+  it('v3 envelope STILL rejects a real content-tampering amend (threat model preserved)', () => {
+    // Threat-model boundary: an attacker who amends PR-X to add
+    // unreviewed code flips the head blob SHA → fileDeltaHash flips →
+    // contentHashV3 flips → verifier rejects.
     writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-line\n');
     git(['add', 'shared.txt'], fixture.root);
     git(['commit', '-q', '-m', 'add shared.txt baseline'], fixture.root);
@@ -1730,7 +1701,7 @@ describe('runVerifier (AISDLC-101 — triple-hash with per-file-delta contentHas
 
     const out = runVerifier({ headSha: tampered, baseSha: b1, repoRoot: fixture.root });
     assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
-    assert.match(out.reason, /diffHash mismatch/);
+    assert.match(out.reason, /contentHashV3 mismatch/);
   });
 
   it('AISDLC-93 sibling-overlap: v3 ALSO accepts when the producer pre-signs against the rebase target', () => {
@@ -1793,94 +1764,87 @@ describe('runVerifier (AISDLC-101 — triple-hash with per-file-delta contentHas
     );
   });
 
-  it('v3-only envelope (no diffHash match, no contentHash match) verifies via the v3 leg', () => {
-    // Surgical test for the v3 acceptance leg: build an envelope with
-    // diffHash + contentHash deliberately set to bogus values via
-    // predicateOverride, but contentHashV3 set to the correct recomputed
-    // value. The verifier must accept on v3 alone.
-    //
-    // This proves the v3 leg works independently — without it, the
-    // AISDLC-101 fix would silently degrade to the AISDLC-94 dual-hash
-    // and the operator wouldn't notice in normal happy-path tests.
-    const b = fixture.baseSha;
-    const h = fixture.headSha;
-    const correctDeltas = collectChangedFileDeltaEntries(fixture.root, b, h);
-    // Construct envelope with bogus diffHash + bogus contentHash, but
-    // CORRECT contentHashV3. The recomputed v3 must still match.
-    writeAttestation(fixture.root, h, b, h, keys.privateKeyPem, {
-      predicateOverride: {
-        diffHash: 'f'.repeat(64),
-        contentHash: 'a'.repeat(64),
-        // contentHashV3 stays as buildPredicate computed it from the
-        // default changedFileDeltas (= the correct value).
-      },
-    });
-    // Sanity check the on-disk envelope: only v3 is "right" relative to
-    // current HEAD.
-    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${h}.dsse.json`);
-    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
-    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
-    assert.equal(predicate.diffHash, 'f'.repeat(64), 'diffHash must be the bogus override');
-    assert.equal(predicate.contentHash, 'a'.repeat(64), 'contentHash must be the bogus override');
-    assert.match(predicate.contentHashV3 ?? '', /^[0-9a-f]{64}$/, 'contentHashV3 must be set');
-    // Confirm the recomputed v3 matches the envelope's v3 (= the v3 leg
-    // accept condition).
-    void correctDeltas; // documented for the reader; the buildPredicate
-    // call on the writeAttestation default path already used these
-    // entries to compute the envelope's contentHashV3.
-
-    const out = runVerifier({ headSha: h, baseSha: b, repoRoot: fixture.root });
-    assert.equal(out.status, 'valid', `v3-only envelope must verify, got: ${out.reason}`);
-  });
-
-  it('v3-only envelope: when contentHashV3 ALSO diverges, verifier rejects', () => {
-    // Counter-case to the test above: with diffHash + contentHash bogus
-    // AND contentHashV3 bogus, no leg matches and the verifier rejects.
-    // Tightens the v3-only test to confirm v3 isn't accidentally
-    // ALWAYS-matching.
+  it('AISDLC-103: v3 envelope with bogus contentHashV3 → verifier rejects', () => {
+    // Surgical counter-case: build a v3 envelope with contentHashV3
+    // deliberately set to a bogus value via predicateOverride; the
+    // verifier MUST reject. (No leg matches; v3 is the only content
+    // binding now.)
     const b = fixture.baseSha;
     const h = fixture.headSha;
     writeAttestation(fixture.root, h, b, h, keys.privateKeyPem, {
-      predicateOverride: {
-        diffHash: 'f'.repeat(64),
-        contentHash: 'a'.repeat(64),
-        contentHashV3: 'b'.repeat(64),
-      },
+      predicateOverride: { contentHashV3: 'b'.repeat(64) },
     });
     const out = runVerifier({ headSha: h, baseSha: b, repoRoot: fixture.root });
     assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
-    assert.match(out.reason, /diffHash mismatch/);
+    assert.match(out.reason, /contentHashV3 mismatch/);
   });
 
-  it('Phase-1 envelope (no contentHashV3) still verifies in the triple-hash window', () => {
-    // Backward-compat: an envelope signed BEFORE AISDLC-101 only carries
-    // diffHash + contentHash. The verifier MUST still accept it on
-    // either of those two legs. Force this by passing
-    // changedFileDeltas: null so writeAttestation skips the v3 field.
-    writeAttestation(
-      fixture.root,
-      fixture.headSha,
-      fixture.baseSha,
-      fixture.headSha,
-      keys.privateKeyPem,
-      { changedFileDeltas: null },
+  // AISDLC-103 INVERSION of the legacy AISDLC-101 "Phase-1 envelope still
+  // verifies via the dual-hash leg" test. The dual-hash window is gone:
+  // a Phase-1 envelope (= no contentHashV3) is now rejected with the
+  // schemaVersion-allowlist reason because writeAttestation can no longer
+  // produce a "v1" envelope through the public API. We hand-craft the
+  // legacy shape to assert the reject path.
+  it('AISDLC-103: Phase-1 envelope (schemaVersion v1, no contentHashV3) is now REJECTED', () => {
+    // Hand-craft a v1-shaped envelope on disk. The script's verifier
+    // matches by predicate-content scan, so the schema validator runs
+    // FIRST and rejects on schemaVersion not in [v3].
+    const headSha = fixture.headSha;
+    const legacyPredicate = {
+      schemaVersion: 'v1',
+      subject: { digest: { sha1: headSha } },
+      diffHash: 'a'.repeat(64),
+      policyHash: 'b'.repeat(64),
+      reviewers: [
+        {
+          agentId: 'code-reviewer',
+          agentFileHash: 'c'.repeat(64),
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'test-reviewer',
+          agentFileHash: 'd'.repeat(64),
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'security-reviewer',
+          agentFileHash: 'e'.repeat(64),
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+      ],
+      pluginVersion: PLUGIN_VERSION,
+      iterationCount: 1,
+      harnessNote: '',
+      signedAt: '2026-04-27T00:00:00.000Z',
+    };
+    const payloadJson = Buffer.from(JSON.stringify(legacyPredicate), 'utf-8');
+    const envelope = {
+      payloadType: 'application/vnd.ai-sdlc.attestation+json',
+      payload: payloadJson.toString('base64'),
+      signatures: [{ keyid: 'maintainer:laptop', sig: Buffer.alloc(64).toString('base64') }],
+    };
+    writeFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${headSha}.dsse.json`),
+      JSON.stringify(envelope, null, 2),
     );
-    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
-    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
-    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
-    assert.equal(
-      predicate.contentHashV3,
-      undefined,
-      'Phase-1 envelope must not carry contentHashV3',
-    );
-    assert.match(predicate.contentHash ?? '', /^[0-9a-f]{64}$/, 'must still have v2 contentHash');
 
     const out = runVerifier({
-      headSha: fixture.headSha,
+      headSha,
       baseSha: fixture.baseSha,
       repoRoot: fixture.root,
     });
-    assert.equal(out.status, 'valid', `Phase-1 envelope must verify, got: ${out.reason}`);
+    assert.equal(
+      out.status,
+      'invalid',
+      `Phase-1 envelope must be REJECTED, got: ${out.status} (${out.reason})`,
+    );
+    assert.match(out.reason, /schemaVersion 'v1' not in allowlist|schemaVersion not in/);
   });
 });
 
