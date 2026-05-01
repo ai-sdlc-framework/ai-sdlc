@@ -4,7 +4,7 @@ Shared core library for the AI-SDLC pipeline. Implements RFC-0012 Phase 1.
 
 ## Status
 
-**Phase 1 of RFC-0012** — extracts Step 0-13 logic from `ai-sdlc-plugin/agents/execute-orchestrator.md` and `orchestrator/src/` into pure step functions exposed three ways:
+**Phases 1-2 of RFC-0012** — extracts Step 0-13 logic from `ai-sdlc-plugin/agents/execute-orchestrator.md` and `orchestrator/src/` into pure step functions exposed three ways, plus the production `SubagentSpawner` implementations (Phase 2):
 
 1. **TypeScript library** — `import { validateTask, executePipeline, ... } from '@ai-sdlc/pipeline-cli'`
 2. **CLI subcommands** — `ai-sdlc-pipeline <command>` (yargs-driven)
@@ -35,8 +35,11 @@ pipeline-cli/
     │   └── make-task.ts
     ├── runtime/
     │   ├── index.ts                # barrel — exports SubagentSpawner + Runner surface
-    │   ├── exec.ts + exec.test.ts                       # Runner abstraction over child_process.execFile
-    │   └── subagent-spawner.ts + subagent-spawner.test.ts  # SubagentSpawner interface + MockSpawner
+    │   ├── exec.ts + exec.test.ts                                    # Runner abstraction over child_process.execFile
+    │   ├── subagent-spawner.ts + subagent-spawner.test.ts            # SubagentSpawner interface + MockSpawner
+    │   ├── shell-claude-p-spawner.ts + .test.ts                      # Tier 2 default — `claude --print --agent <type>` shell-out (subscription)
+    │   ├── claude-code-sdk-spawner.ts + .test.ts                     # Tier 2 alternative — @anthropic-ai/claude-code SDK (API key)
+    │   └── default-spawner.ts + default-spawner.test.ts              # `defaultSpawner()` resolver: which→shell, env→sdk, else throw
     ├── steps/                      # each step.ts has a colocated step.test.ts
     │   ├── index.ts                # barrel
     │   ├── 00-sweep.ts             # Step 0 — sweep merged worktrees
@@ -89,7 +92,11 @@ const result = await executePipeline({
 console.log(result.outcome);  // 'approved' | 'needs-human-attention' | 'developer-failed' | 'aborted'
 ```
 
-The production spawners (`ShellClaudePSpawner` for subscription billing, `ClaudeCodeSDKSpawner` for API-key billing) land in **Phase 2 — AISDLC-100.2**.
+The production spawners ship as of **Phase 2 — AISDLC-100.2**:
+
+- **`ShellClaudePSpawner`** (subscription billing) — shells out to the operator's installed `claude` CLI with `claude --print --output-format json --permission-mode bypassPermissions --agent <type> <prompt>`. No API tokens consumed; reuses the operator's logged-in Claude Code session. NB: the RFC §8.2 sketch said `--subagent <type>` but the actual flag is **`--agent <type>`** (verified empirically against the installed CLI on 2026-04-30); see the spawner JSDoc for full Q5 (RFC §15) resolution notes.
+- **`ClaudeCodeSDKSpawner`** (API-key billing) — uses `@anthropic-ai/claude-code` SDK programmatically. The SDK is **lazy-imported** (NOT a hard dependency of `pipeline-cli`) so subscription-only consumers don't have to install ~50MB of SDK code they'll never use; install it with `pnpm add @anthropic-ai/claude-code` only when you need API-key billing.
+- **`defaultSpawner()`** — convenience resolver: prefers `claude` CLI on PATH (subscription), falls back to `ANTHROPIC_API_KEY` (API key), throws with an instructional error if neither is available.
 
 ## SubagentSpawner contract
 
@@ -158,7 +165,7 @@ pnpm test:watch            # iteration mode
 
 | Phase | Task | What changes |
 |---|---|---|
-| 2 | AISDLC-100.2 | `ShellClaudePSpawner` (subscription) + `ClaudeCodeSDKSpawner` (API key) |
+| 2 | AISDLC-100.2 | `ShellClaudePSpawner` (subscription) + `ClaudeCodeSDKSpawner` (API key) + `defaultSpawner()` resolver — **shipped** |
 | 3 | AISDLC-100.3 | Wrap each step function as an MCP tool in `ai-sdlc-plugin/mcp-server/` |
 | 4 | AISDLC-100.4 | Refactor `commands/execute.md` to use the CLI; delete `agents/execute-orchestrator.md` |
 | 5 | AISDLC-100.5 | Migrate `dogfood/src/watch.ts` to call `executePipeline()` |

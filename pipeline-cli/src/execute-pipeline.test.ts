@@ -6,11 +6,14 @@
  * fakes the LLM dispatch.
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { executePipeline } from './execute-pipeline.js';
 import { MockSpawner } from './runtime/subagent-spawner.js';
+import { defaultSpawner } from './runtime/default-spawner.js';
+import { ShellClaudePSpawner } from './runtime/shell-claude-p-spawner.js';
+import { ClaudeCodeSDKSpawner } from './runtime/claude-code-sdk-spawner.js';
 import { FakeRunner, ok, fail } from './__test-helpers/fake-runner.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from './__test-helpers/make-task.js';
 import type { DeveloperReturn } from './types.js';
@@ -250,5 +253,88 @@ describe('integration — executePipeline (full Step 0-13)', () => {
 
     expect(result.outcome).toBe('aborted');
     expect(existsSync(join(tmp, '.worktrees', 'aisdlc-104', '.active-task'))).toBe(false);
+  });
+});
+
+describe('integration — defaultSpawner picks the right spawner per environment', () => {
+  it('picks ShellClaudePSpawner when claude CLI is available', async () => {
+    const spawner = await defaultSpawner({
+      which: vi.fn().mockResolvedValue(true),
+      env: () => undefined,
+    });
+    expect(spawner).toBeInstanceOf(ShellClaudePSpawner);
+  });
+
+  it('picks ClaudeCodeSDKSpawner when only ANTHROPIC_API_KEY is set', async () => {
+    const spawner = await defaultSpawner({
+      which: vi.fn().mockResolvedValue(false),
+      env: () => 'sk-ant-test',
+    });
+    expect(spawner).toBeInstanceOf(ClaudeCodeSDKSpawner);
+  });
+
+  it('throws clearly when neither runtime is available', async () => {
+    await expect(
+      defaultSpawner({
+        which: vi.fn().mockResolvedValue(false),
+        env: () => undefined,
+      }),
+    ).rejects.toThrow(/install the `claude` CLI|set ANTHROPIC_API_KEY/);
+  });
+
+  it('the default spawner is interchangeable with MockSpawner in executePipeline (smoke)', async () => {
+    // Use a mock-backed defaultSpawner via the SDK invoker injection so we
+    // exercise the full pipeline against a default-resolved spawner without
+    // touching network or shell. This proves the resolved spawner satisfies
+    // the SubagentSpawner contract end-to-end (Step 5b + Step 7b).
+    writeTaskFile(tmp, {
+      id: 'AISDLC-200',
+      title: 'default spawner smoke',
+      status: 'To Do',
+      acceptanceCriteria: ['ship a thing'],
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-200'), { recursive: true });
+
+    // Defer to the SDK path via env, but inject a mock invoker so no real SDK
+    // call is made.
+    const spawner = await defaultSpawner({
+      which: vi.fn().mockResolvedValue(false),
+      env: () => 'sk-ant-test',
+      sdk: {
+        invoker: vi.fn().mockImplementation(async ({ type }: { type: string }) => {
+          if (type === 'developer') {
+            return {
+              output: '',
+              parsed: {
+                summary: 'shipped',
+                filesChanged: ['x.ts'],
+                commitSha: 'abc1234',
+                verifications: {
+                  build: 'passed',
+                  test: 'passed',
+                  lint: 'passed',
+                  format: 'passed',
+                },
+                acceptanceCriteriaMet: [1],
+                notes: '',
+              },
+            };
+          }
+          return { output: '', parsed: { approved: true, findings: [], summary: 'lgtm' } };
+        }),
+      },
+    });
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-200',
+      workDir: tmp,
+      spawner,
+      runner: makeHappyRunner().toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 2,
+    });
+
+    expect(result.outcome).toBe('approved');
+    expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
   });
 });
