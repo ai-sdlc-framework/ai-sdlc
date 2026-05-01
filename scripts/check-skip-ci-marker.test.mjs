@@ -129,7 +129,7 @@ describe('check-skip-ci-marker.sh (AISDLC-88)', () => {
     assert.equal(r.status, 1, `expected 1 on uppercase, got ${r.status}: ${r.stderr}`);
   });
 
-  it('exempts the AISDLC-87 bot-authored chore commit (correct author + correct subject)', () => {
+  it('exempts the AISDLC-87 bot-authored chore commit (legacy github-actions[bot] identity)', () => {
     writeFileSync(join(root, 'd.txt'), 'd\n');
     git(['add', 'd.txt'], root);
     git(['commit', '-q', '-m', 'chore(ci): sign review attestation [skip ci]'], root, {
@@ -142,6 +142,32 @@ describe('check-skip-ci-marker.sh (AISDLC-88)', () => {
     const base = git(['rev-parse', 'HEAD~1'], root).trim();
     const r = runCheck(root, [['refs/heads/main', head, 'refs/heads/main', base]]);
     assert.equal(r.status, 0, `expected 0 for bot exemption, got ${r.status}: ${r.stderr}`);
+  });
+
+  it('exempts the AISDLC-87 bot-authored chore commit (production ai-sdlc-ci-attestor[bot] identity)', () => {
+    // This is the identity actually configured in
+    // `.github/workflows/ai-sdlc-review.yml` (the `git config user.name`
+    // and `git config user.email` block on the CI-side attestor step).
+    // The earlier test used the legacy `github-actions[bot]` identity
+    // which is kept in the allowlist as a fallback; this test locks in
+    // the production identity so a future allowlist refactor cannot
+    // silently regress the exemption.
+    writeFileSync(join(root, 'd2.txt'), 'd2\n');
+    git(['add', 'd2.txt'], root);
+    git(['commit', '-q', '-m', 'chore(ci): sign review attestation [skip ci]'], root, {
+      GIT_AUTHOR_NAME: 'ai-sdlc-ci-attestor[bot]',
+      GIT_AUTHOR_EMAIL: 'ci-attestor@ai-sdlc.local',
+      GIT_COMMITTER_NAME: 'ai-sdlc-ci-attestor[bot]',
+      GIT_COMMITTER_EMAIL: 'ci-attestor@ai-sdlc.local',
+    });
+    const head = git(['rev-parse', 'HEAD'], root).trim();
+    const base = git(['rev-parse', 'HEAD~1'], root).trim();
+    const r = runCheck(root, [['refs/heads/main', head, 'refs/heads/main', base]]);
+    assert.equal(
+      r.status,
+      0,
+      `expected 0 for production-identity bot exemption, got ${r.status}: ${r.stderr}`,
+    );
   });
 
   it('does NOT exempt a non-bot author who copied the chore-commit subject line', () => {

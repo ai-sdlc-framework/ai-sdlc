@@ -8,6 +8,10 @@
 - Never use `gh api pulls/N/update-branch` with merge method.
 - Keep commit history linear — no merge commits on feature branches.
 
+### CI marker hygiene (AISDLC-88)
+
+GitHub Actions silently skips ALL workflows for a push when ANY commit body contains `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, or `[actions skip]` — substring match, no warning. To discuss these tokens in commit messages without triggering the skip, use the paren-quoted form: `(skip ci marker)` instead of `[skip ci]`. Backtick-wrapping does NOT defeat the parser. The `scripts/check-skip-ci-marker.sh` pre-push gate enforces this.
+
 ## Branch Naming
 
 - Feature branches: `feat/<description>` or `ai-sdlc/issue-<number>`
