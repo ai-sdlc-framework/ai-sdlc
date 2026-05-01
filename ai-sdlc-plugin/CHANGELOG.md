@@ -183,6 +183,28 @@ with entries grouped under a release heading or `Unreleased` while in flight.
   no-ops; invalid-local → CI signs additively → verifier picks valid one)
   end-to-end against the real verifier. (AISDLC-87)
 
+### Removed
+
+- **`hooks/quality-gate-stop.{sh,js,test.mjs}` + Stop-hook entries** that
+  invoked it (AISDLC-108). The Claude `Stop` hook ran
+  `quality-gate-stop.sh` at the end of every conversational turn,
+  scanning `~/.claude/usage-data/tool-sequences.jsonl` (multi-MB across
+  all sessions) and on miss exit-2'd to wake the model with a
+  "Verifying governance compliance..." stderr blast. This was the wrong
+  layer: build/test/lint verification belongs on the git lifecycle, not
+  every turn. The canonical gate is `.husky/pre-push` →
+  `scripts/check-coverage.sh` (runs `pnpm -r test:coverage` workspace-wide
+  + enforces the 80% codecov patch threshold), which already runs at the
+  right boundary and blocks the push not the conversation. Per-turn false
+  positives during long orchestrator runs were the trigger for removal.
+  Removed entries from the bundled `ai-sdlc-plugin/plugin.json` and
+  `ai-sdlc-plugin/.claude-plugin/plugin.json` Stop arrays; the deferred
+  coverage check (`hooks/deferred-coverage-check.sh`, asyncRewake) and
+  the Haiku governance verifier remain because they don't duplicate the
+  pre-push gate. Project-level `.claude/settings.json` Stop entry must
+  also be stripped — handled by the operator (file is outside the
+  developer subagent's write scope).
+
 ### Documentation
 
 - **RFC-0006 retroactive user docs** (`docs/tutorials/design-system-getting-started.md`,
