@@ -86,6 +86,37 @@ Read the task with `mcp__backlog__task_view` to render its full structure. Then 
 
 If validation fails, print the reason clearly and stop. Don't create a worktree.
 
+### Step 1.5 — Dependency pre-flight (AISDLC-117)
+
+Before creating the worktree, refuse to start a task whose dependencies aren't all Done. This catches the AISDLC-104-style duplicate-dispatch class of bug at source — when a task's siblings haven't merged yet (or the task itself was already shipped in a parallel session), `cli-deps preflight` reports `ok: false` and we abort cleanly with a clear list of blockers.
+
+```bash
+# cli-deps is the AISDLC-117 dependency-graph CLI shipped from @ai-sdlc/pipeline-cli.
+# Exits 0 if every dependency is in backlog/completed/; exits non-zero with a
+# JSON `{ok, reason, blockers, dangling}` envelope on stderr otherwise.
+PREFLIGHT_OUT=$(pnpm --filter @ai-sdlc/pipeline-cli exec cli-deps preflight "$TASK_ID" --work-dir "$(pwd)" 2>&1)
+PREFLIGHT_EXIT=$?
+if [ "$PREFLIGHT_EXIT" -ne 0 ]; then
+  echo "ERROR: dependency preflight failed for $TASK_ID:"
+  echo "$PREFLIGHT_OUT"
+  echo ""
+  echo "To inspect the dispatch-ready frontier instead: pnpm --filter @ai-sdlc/pipeline-cli exec cli-deps frontier --format table"
+  exit 1
+fi
+```
+
+This step is fail-closed: if `cli-deps` itself errors (binary not built, broken JSON, etc.) the slash command still aborts rather than dispatching blindly. Run `pnpm --filter @ai-sdlc/pipeline-cli build` if the binary is missing.
+
+### Step 1.6 — Frontier consultation (operator hint, AISDLC-117)
+
+For `/loop /ai-sdlc execute` runs (and ad-hoc multi-task dispatch), the operator should consult the dispatch-ready frontier before picking a candidate rather than relying on instinct. This is the same data the AISDLC-117 task description called out as the cure for "manual dependency tracing":
+
+```bash
+pnpm --filter @ai-sdlc/pipeline-cli exec cli-deps frontier --format table
+```
+
+If `$TASK_ID` is on the printed list (or independent of the listed items), proceed. If not, the task's blockers are still open — `cli-deps blockers $TASK_ID --format table` lists what to ship first. The loop driver SHOULD prefer frontier tasks; the slash command body's Step 1.5 is the hard gate that refuses non-ready tasks regardless of where the dispatch decision came from.
+
 ## Step 2 — Compute branch name
 
 The branch pattern lives in `.ai-sdlc/pipeline-backlog.yaml` under `branching.pattern`. Today it's `ai-sdlc/{issueIdLower}-{slug}` where `{slug}` is a kebab-cased version of the task title.
