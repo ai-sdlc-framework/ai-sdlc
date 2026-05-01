@@ -17,12 +17,33 @@
  *   that the committed bundle is fresh + still self-contained.
  */
 import { build } from 'esbuild';
+import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { dirname, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const pkgRoot = resolve(__dirname, '..');
+
+// Workspace dep: @ai-sdlc/pipeline-cli is consumed via the pnpm symlink at
+// node_modules/@ai-sdlc/pipeline-cli → ../../pipeline-cli. Esbuild needs the
+// dep's `dist/` (declared as `main`/`exports.import`) to resolve. CI runs
+// `pnpm install --frozen-lockfile` only, so without this guard the freshness
+// rebuild in verify-bundle.mjs fails with `Could not resolve "@ai-sdlc/pipeline-cli"`.
+const pipelineCliRoot = resolve(pkgRoot, '..', '..', 'pipeline-cli');
+const pipelineCliDist = join(pipelineCliRoot, 'dist', 'index.js');
+if (!existsSync(pipelineCliDist)) {
+  console.log('[bundle] building @ai-sdlc/pipeline-cli (dep dist missing)');
+  const built = spawnSync('pnpm', ['build'], {
+    cwd: pipelineCliRoot,
+    stdio: 'inherit',
+  });
+  if (built.status !== 0) {
+    console.error('[bundle] FAIL: could not build @ai-sdlc/pipeline-cli');
+    process.exit(built.status ?? 1);
+  }
+}
 
 // `createRequire` shim lets bundled CJS dependencies (which use `require()`)
 // keep working under our ESM output format. Esbuild auto-emits the

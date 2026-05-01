@@ -30,7 +30,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
-    "build": "tsc && pnpm bundle",
+    "build": "pnpm --filter @ai-sdlc/pipeline-cli build && tsc && pnpm bundle",
     "bundle": "node scripts/bundle.mjs",
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run",
