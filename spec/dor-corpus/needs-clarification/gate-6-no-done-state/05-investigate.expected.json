@@ -1,4 +1,9 @@
 {
   "overallVerdict": "admit",
-  "description": "Gate 6 (Stage B) — Stage A admits with soft heuristic; Phase 2b LLM is expected to block: 05-investigate"
+  "description": "Gate 6 (Stage B) — Stage A admits with soft heuristic; Phase 2b LLM is expected to block: 05-investigate",
+  "e2e": {
+    "overallVerdict": "needs-clarification",
+    "failsGates": [6],
+    "stageB": { "6": "fail" }
+  }
 }

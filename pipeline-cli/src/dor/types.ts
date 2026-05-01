@@ -108,6 +108,33 @@ export interface StageAVerdict {
 }
 
 /**
+ * End-to-end (Stage A + Stage B) refinement verdict. Maps 1:1 onto
+ * `spec/schemas/refinement-verdict.v1.schema.json` — every field listed
+ * here is in the schema, and `additionalProperties: false` in the schema
+ * means we strip any internal fields (notably the Stage A `durationMs`)
+ * before persisting or transmitting.
+ *
+ * Phase 2b composite shape (RFC §5, §9.2). The orchestrator builds this
+ * by running Stage A, asking Stage B for verdicts on the gates Stage A
+ * couldn't decide (gates 4 + 6 always; any pass-with-low/medium-confidence
+ * optionally), and merging per-gate verdicts.
+ */
+export interface RefinementVerdict {
+  issueId: string;
+  rubricVersion: 'v1';
+  overallVerdict: OverallVerdict;
+  gates: GateEvaluation[];
+  signedAt: string;
+  evaluatorVersion: string;
+  /** Optional aggregate summary line. */
+  summary?: string;
+  /** Aggregated clarifying questions (deduped, ordered). */
+  questions?: string[];
+  /** Aggregate confidence — floor across contributing gates per RFC §5.5 / Q4. */
+  overallConfidence?: GateConfidence;
+}
+
+/**
  * Resolver registry — RFC §13 Q2 resolution.
  *
  * Each resolver knows ONE reference shape (GitHub issue link, repo file,

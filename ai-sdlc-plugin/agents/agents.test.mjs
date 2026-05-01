@@ -78,6 +78,7 @@ const agentFiles = [
   'test-reviewer.md',
   'developer.md',
   'rebase-resolver.md',
+  'refinement-reviewer.md',
 ];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
 const agents = {};

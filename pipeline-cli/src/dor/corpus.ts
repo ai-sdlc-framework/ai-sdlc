@@ -31,6 +31,17 @@ export interface FixtureExpectation {
   allowExtraFailures?: boolean;
   /** Optional fixture description (informational only). */
   description?: string;
+  /**
+   * Optional end-to-end (Stage A + Stage B) expectation block — RFC-0011
+   * Phase 2b. Consumed by `runE2ECorpus()`; the Stage A regression
+   * runner ignores it. Shape:
+   *   { overallVerdict, failsGates?, stageB?: { "<gateId>": "pass"|"fail" } }
+   */
+  e2e?: {
+    overallVerdict: OverallVerdict;
+    failsGates?: GateId[];
+    stageB?: Record<string, 'pass' | 'fail'>;
+  };
 }
 
 export interface CorpusFixture {
