@@ -1,0 +1,56 @@
+{
+  "name": "@ai-sdlc/pipeline-cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "AI-SDLC pipeline shared core library — RFC-0012 Phase 1 (Step 0-13 pure functions + CLI router + composite executePipeline)",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ai-sdlc-framework/ai-sdlc.git",
+    "directory": "pipeline-cli"
+  },
+  "files": [
+    "dist",
+    "bin",
+    "!dist/**/*.test.*",
+    "!dist/**/*.map"
+  ],
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "ai-sdlc-pipeline": "bin/ai-sdlc-pipeline.mjs"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./steps": {
+      "types": "./dist/steps/index.d.ts",
+      "import": "./dist/steps/index.js"
+    },
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "import": "./dist/runtime/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist *.tsbuildinfo",
+    "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:watch": "vitest",
+    "cli": "node bin/ai-sdlc-pipeline.mjs"
+  },
+  "dependencies": {
+    "yargs": "^17.7.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/yargs": "^17.0.33",
+    "@vitest/coverage-v8": "^3.2.4",
+    "typescript": "^5.7.0",
+    "vitest": "^3.0.0"
+  }
+}

@@ -22,6 +22,7 @@ export default tseslint.config(
       'ai-sdlc-plugin/agents/',
       'ai-sdlc-plugin/commands/',
       '**/coverage/',
+      'pipeline-cli/bin/',
     ],
   },
   eslint.configs.recommended,
