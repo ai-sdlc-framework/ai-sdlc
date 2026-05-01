@@ -1,0 +1,5 @@
+{
+  "overallVerdict": "needs-clarification",
+  "failsGates": [3],
+  "description": "Gate 3 fixture: 02-broken-aisdlc"
+}

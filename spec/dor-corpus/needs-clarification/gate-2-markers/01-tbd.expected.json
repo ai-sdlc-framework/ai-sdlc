@@ -1,0 +1,5 @@
+{
+  "overallVerdict": "needs-clarification",
+  "failsGates": [2],
+  "description": "Gate 2 fixture: 01-tbd"
+}

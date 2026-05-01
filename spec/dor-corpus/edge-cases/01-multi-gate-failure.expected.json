@@ -1,0 +1,6 @@
+{
+  "overallVerdict": "needs-clarification",
+  "failsGates": [1, 2, 5, 7],
+  "allowExtraFailures": true,
+  "description": "Multiple gates fail simultaneously — gate 1 (no AC), gate 2 (TBD), gate 5 (no surface), gate 7 (deps)."
+}

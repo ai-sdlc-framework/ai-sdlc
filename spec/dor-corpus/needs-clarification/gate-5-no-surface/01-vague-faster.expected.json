@@ -1,0 +1,5 @@
+{
+  "overallVerdict": "needs-clarification",
+  "failsGates": [5],
+  "description": "Gate 5 fixture: 01-vague-faster"
+}
