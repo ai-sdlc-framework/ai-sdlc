@@ -20,6 +20,10 @@ export * from './calibration-log.js';
 export * from './secret-redact.js';
 export * from './corpus-e2e.js';
 export * from './shadow-mode.js';
+export * from './comment-loop.js';
+export * from './staleness.js';
+export * from './ingress-claude.js';
+export * from './dor-config.js';
 export * from './gates/index.js';
 export {
   DEFAULT_RESOLVERS,

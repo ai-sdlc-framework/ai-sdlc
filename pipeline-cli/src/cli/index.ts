@@ -31,6 +31,17 @@ import { hideBin } from 'yargs/helpers';
 import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
 import { evaluateIssue, type IssueInput } from '../dor/index.js';
 import { runStageACorpus } from '../dor/corpus.js';
+import { refineBacklogTask } from '../dor/ingress-claude.js';
+import { decideStaleness } from '../dor/staleness.js';
+import { loadDorConfig } from '../dor/dor-config.js';
+import {
+  renderClarificationComment,
+  renderAdmitComment,
+  renderPrTasksComment,
+  type PrTaskVerdict,
+  type RenderCommentOpts,
+} from '../dor/comment-loop.js';
+import type { RefinementVerdict } from '../dor/types.js';
 import { readFileSync } from 'node:fs';
 import { beginTask } from '../steps/04-flip-status.js';
 import { buildDeveloperPrompt } from '../steps/05-build-dev-prompt.js';
@@ -488,6 +499,148 @@ export function buildCli(): Argv {
           });
           emit(report);
           if (report.failed > 0) process.exit(1);
+        },
+      )
+      // RFC-0011 Phase 3 (AISDLC-115.4) — Claude Code subagent ingress shim.
+      .command(
+        'dor-refine-task <task-id>',
+        'RFC-0011 Phase 3 — run the DoR gate against a backlog task and write the calibration log entry. Stage A only (hermetic) — Stage B is layered in by the slash command body via subagent dispatch.',
+        (y) =>
+          y
+            .positional('task-id', { type: 'string', demandOption: true })
+            .option('hermetic', { type: 'boolean', default: true }),
+        async (argv) => {
+          const result = await refineBacklogTask(String(argv['task-id']), {
+            workDir: argv['work-dir'] as string,
+            evaluateOpts: { hermetic: argv.hermetic as boolean },
+          });
+          emit(result);
+          if (result.shouldRefuseExecution) process.exit(2);
+        },
+      )
+      // RFC-0011 Phase 3 — staleness decider for the cron sweeper.
+      .command(
+        'dor-staleness-decide',
+        'RFC-0011 Phase 3 — decide warn/close action for a needs-clarification candidate.',
+        (y) =>
+          y
+            .option('issue-id', { type: 'string', demandOption: true })
+            .option('last-activity-at', {
+              type: 'string',
+              demandOption: true,
+              describe: 'ISO-8601 timestamp of the last author activity.',
+            })
+            .option('warned-at', { type: 'string' })
+            .option('now', { type: 'string' }),
+        (argv) => {
+          const config = loadDorConfig({ workDir: argv['work-dir'] as string }).staleness;
+          const decision = decideStaleness(
+            {
+              issueId: String(argv['issue-id']),
+              lastAuthorActivityAt: String(argv['last-activity-at']),
+              warnedAt: argv['warned-at'] as string | undefined,
+            },
+            {
+              now: argv.now ? new Date(String(argv.now)) : undefined,
+              config,
+            },
+          );
+          emit(decision);
+        },
+      )
+      // RFC-0011 Phase 3 — render the DoR comment from a verdict file.
+      // Single source of truth for comment composition: GitHub Action shim,
+      // Claude Code subagent shim, and any future Slack/Forge shim all call
+      // this so the `redactSecrets()` pass in `comment-loop.ts` runs against
+      // every render path. Avoids re-implementing the renderer inline in
+      // `actions/github-script` (which previously bypassed redaction and
+      // could leak `gate-3` finding text containing extracted URLs / paths
+      // verbatim into the public comment).
+      .command(
+        'dor-render-comment',
+        'RFC-0011 Phase 3 — render a DoR clarification or admit comment from a verdict JSON.',
+        (y) =>
+          y
+            .option('verdict-file', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                "Path to a verdict JSON file (or '-' to read from stdin). Shape: RefinementVerdict.",
+            })
+            .option('channel', {
+              type: 'string',
+              choices: ['author', 'dedicated-slack', 'dedicated-github'] as const,
+              default: 'author' as const,
+              describe: 'Channel marker scope — drives the HTML idempotency marker.',
+            })
+            .option('rubric-url', {
+              type: 'string',
+              describe: 'Override for the rubric docs URL surfaced in the comment header.',
+            })
+            .option('mode', {
+              type: 'string',
+              choices: ['auto', 'clarification', 'admit'] as const,
+              default: 'auto' as const,
+              describe: "Force a specific renderer. 'auto' picks based on verdict.overallVerdict.",
+            }),
+        async (argv) => {
+          const file = String(argv['verdict-file']);
+          const raw = file === '-' ? await readStdin() : readFileSync(file, 'utf8');
+          let verdict: RefinementVerdict;
+          try {
+            verdict = JSON.parse(raw) as RefinementVerdict;
+          } catch (err) {
+            fail(`failed to parse verdict JSON from ${file}: ${(err as Error).message}`);
+          }
+          const opts: RenderCommentOpts = {
+            channel: argv.channel as RenderCommentOpts['channel'],
+          };
+          if (argv['rubric-url']) opts.rubricUrl = String(argv['rubric-url']);
+          const mode = String(argv.mode) as 'auto' | 'clarification' | 'admit';
+          const useAdmit =
+            mode === 'admit' || (mode === 'auto' && verdict.overallVerdict === 'admit');
+          const body = useAdmit
+            ? renderAdmitComment(verdict, opts)
+            : renderClarificationComment(verdict, opts);
+          // Plain markdown on stdout — callers feed it directly into the
+          // GitHub API body field. NOT JSON-wrapped because the GH Action
+          // step captures stdout into an env var and posts it verbatim.
+          process.stdout.write(body);
+        },
+      )
+      // RFC-0011 Phase 3 — render the PR-tasks summary comment from a JSONL
+      // of per-task verdicts. Same redaction guarantee as `dor-render-comment`:
+      // every `gate.finding` is passed through `redactSecrets()` so a leaked
+      // token in a task body cannot reflect into the public PR comment.
+      .command(
+        'dor-render-pr-summary',
+        'RFC-0011 Phase 3 — render the PR-tasks summary comment from a JSONL verdict file.',
+        (y) =>
+          y
+            .option('verdicts-file', {
+              type: 'string',
+              demandOption: true,
+              describe: "Path to a JSONL file (or '-' for stdin). One PrTaskVerdict per line.",
+            })
+            .option('channel', {
+              type: 'string',
+              choices: ['author', 'dedicated-slack', 'dedicated-github'] as const,
+              default: 'author' as const,
+            }),
+        async (argv) => {
+          const file = String(argv['verdicts-file']);
+          const raw = file === '-' ? await readStdin() : readFileSync(file, 'utf8');
+          const lines = raw.split('\n').filter((l) => l.trim().length > 0);
+          let verdicts: PrTaskVerdict[];
+          try {
+            verdicts = lines.map((l) => JSON.parse(l) as PrTaskVerdict);
+          } catch (err) {
+            fail(`failed to parse verdicts JSONL ${file}: ${(err as Error).message}`);
+          }
+          const body = renderPrTasksComment(verdicts, {
+            channel: argv.channel as RenderCommentOpts['channel'],
+          });
+          process.stdout.write(body);
         },
       )
       .demandCommand(1, 'A subcommand is required. Run with --help for the list.')

@@ -1,0 +1,12 @@
+{
+  "overallVerdict": "needs-clarification",
+  "failsGates": [1, 2, 5],
+  "allowExtraFailures": true,
+  "description": "AISDLC-115.4 AC #7 — vague issue created → DoR comment posted → author edits → re-check → admitted as ready. This fixture is the BEFORE state (vague body). The post-edit AFTER state is asserted programmatically in pipeline-cli/src/dor/comment-loop.test.ts and ingress-claude.test.ts (re-check with the fixed body flips the verdict to admit and shows the comment is updated, not duplicated).",
+  "e2e": {
+    "overallVerdict": "needs-clarification",
+    "failsGates": [1, 2, 5],
+    "allowExtraFailures": true,
+    "stageB": {}
+  }
+}

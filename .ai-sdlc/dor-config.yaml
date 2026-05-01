@@ -1,0 +1,35 @@
+# Definition-of-Ready (DoR) gate configuration — RFC-0011 §13 Q5/Q6 + §9.3.
+#
+# Phase 3 (AISDLC-115.4) wired the orchestration layer to read this file.
+# The schema is at spec/schemas/dor-config.v1.schema.json. Defaults below
+# match the schema's documented defaults so a freshly-bootstrapped repo
+# behaves identically to a repo with no config at all.
+
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DorConfig
+metadata:
+  name: ai-sdlc-dor
+spec:
+  rubricVersion: v1
+  # Phase 3 ships in warn-only mode — the gate posts comments but does
+  # NOT block /ai-sdlc execute on a needs-clarification verdict. Flip to
+  # 'enforce' after the soak window confirms false-positive rate is low.
+  evaluationMode: warn-only
+
+  notifications:
+    # Always post the clarification comment to where the issue was authored
+    # (GitHub issue thread, backlog file, etc.).
+    authorChannel: true
+    # Optional centralised triage channel. When set, the comment fans out
+    # to BOTH the author channel AND this one (RFC §13 Q5 dual-fanout).
+    # Uncomment + populate to enable.
+    # dedicatedChannel:
+    #   slack: '#ai-sdlc-dor'
+    #   github_team: '@ai-sdlc-framework/triage'
+
+  # Two-stage warn-then-close staleness for issues stuck in Needs Clarification
+  # (RFC §13 Q6). closeAfterDays MUST be > warnAfterDays.
+  staleness:
+    warnAfterDays: 14
+    closeAfterDays: 28
+    closedLabel: 'closed-as-stale-dor'

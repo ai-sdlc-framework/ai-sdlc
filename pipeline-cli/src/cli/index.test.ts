@@ -167,4 +167,96 @@ describe('CLI router', () => {
     setArgv('dor-evaluate', 'AISDLC-2', '--body-file', bodyPath, '--hermetic', '--work-dir', tmp);
     await expect(buildCli().parseAsync()).rejects.toThrow(/process\.exit\(2\)/);
   });
+
+  it('dor-render-comment redacts secrets in gate findings (subcommand path matches TS path)', async () => {
+    const { writeFileSync } = await import('node:fs');
+    const verdictPath = join(tmp, 'verdict.json');
+    // Build the secret marker via template-literal concatenation so GH
+    // secret-scanning doesn't flag the test source. Same trick as
+    // comment-loop.test.ts.
+    const fakeAnthropicToken = `sk-ant-` + `api03-` + 'A'.repeat(60);
+    const verdict = {
+      issueId: 'AISDLC-render-1',
+      rubricVersion: 'v1',
+      overallVerdict: 'needs-clarification',
+      gates: [
+        {
+          gateId: 3,
+          verdict: 'fail',
+          severity: 'block',
+          stage: 'A',
+          confidence: 'high',
+          finding: `1 reference(s) failed to resolve: https://example.test/?token=${fakeAnthropicToken}`,
+        },
+      ],
+      questions: [],
+      signedAt: '2026-05-01T12:00:00.000Z',
+      evaluatorVersion: 'render-test-v1',
+    };
+    writeFileSync(verdictPath, JSON.stringify(verdict));
+    setArgv(
+      'dor-render-comment',
+      '--verdict-file',
+      verdictPath,
+      '--channel',
+      'author',
+      '--work-dir',
+      tmp,
+    );
+    await buildCli().parseAsync();
+    const out = stdoutChunks.join('');
+    expect(out).not.toContain(fakeAnthropicToken);
+    expect(out).toContain('[REDACTED:ANTHROPIC]');
+    expect(out).toContain('### Gate 3');
+    expect(out).toContain('<!-- ai-sdlc:dor-comment channel="author" -->');
+  });
+
+  it('dor-render-comment auto-picks admit renderer when overallVerdict=admit', async () => {
+    const { writeFileSync } = await import('node:fs');
+    const verdictPath = join(tmp, 'admit.json');
+    const verdict = {
+      issueId: 'AISDLC-render-2',
+      rubricVersion: 'v1',
+      overallVerdict: 'admit',
+      gates: [],
+      signedAt: '2026-05-01T12:00:00.000Z',
+      evaluatorVersion: 'render-test-v1',
+    };
+    writeFileSync(verdictPath, JSON.stringify(verdict));
+    setArgv('dor-render-comment', '--verdict-file', verdictPath, '--work-dir', tmp);
+    await buildCli().parseAsync();
+    const out = stdoutChunks.join('');
+    expect(out).toContain('Issue ready for execution');
+  });
+
+  it('dor-render-pr-summary redacts secrets in per-task findings', async () => {
+    const { writeFileSync } = await import('node:fs');
+    const file = join(tmp, 'results.jsonl');
+    const fakeAnthropicToken = `sk-ant-` + `api03-` + 'A'.repeat(60);
+    const v1 = {
+      issueId: 'AISDLC-x',
+      rubricVersion: 'v1',
+      overallVerdict: 'needs-clarification',
+      gates: [
+        {
+          gateId: 3,
+          verdict: 'fail',
+          severity: 'block',
+          stage: 'A',
+          confidence: 'high',
+          finding: `path: apps/${fakeAnthropicToken}/file.ts`,
+        },
+      ],
+      signedAt: '2026-05-01T12:00:00.000Z',
+      evaluatorVersion: 'render-test-v1',
+      __file: 'backlog/tasks/aisdlc-x - leak.md',
+    };
+    writeFileSync(file, JSON.stringify(v1) + '\n');
+    setArgv('dor-render-pr-summary', '--verdicts-file', file, '--work-dir', tmp);
+    await buildCli().parseAsync();
+    const out = stdoutChunks.join('');
+    expect(out).not.toContain(fakeAnthropicToken);
+    expect(out).toContain('[REDACTED:ANTHROPIC]');
+    expect(out).toContain('## Backlog tasks: DoR clarifications needed');
+  });
 });
