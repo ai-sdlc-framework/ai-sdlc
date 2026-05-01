@@ -74,9 +74,15 @@ describe('/ai-sdlc rebase frontmatter', () => {
     assert.ok(tools.includes('Read'), 'must grant Read');
   });
 
-  it('declares mcp__backlog__task_view (read-only task lookup)', () => {
+  it('does NOT declare unused mcp__backlog__task_view tool (AISDLC-105 reviewer round 2)', () => {
+    // The frontmatter previously declared this tool but the body never
+    // exercised it — declared-but-unused tools are noise. Remove until
+    // a concrete need lands.
     const tools = frontmatter['allowed-tools'];
-    assert.ok(tools.includes('mcp__backlog__task_view'), 'must grant task_view for derivation');
+    assert.ok(
+      !tools.includes('mcp__backlog__task_view'),
+      'must not declare unused mcp__backlog__task_view',
+    );
   });
 
   it('does NOT declare the legacy bare Task tool', () => {
@@ -261,5 +267,191 @@ describe('/ai-sdlc rebase body — operator output', () => {
     assert.match(body, /## Step 7.*Report/);
     assert.match(body, /Outcome:/);
     assert.match(body, /Re-attestation:/);
+  });
+});
+
+// ──────────────────────────────────────────────────────────────────────
+// AISDLC-105 round-2 reviewer fixes — regression gates for the four
+// load-bearing breakages flagged in the second code review:
+//
+//   1. CRITICAL — Step 1 sed regex was BSD-incompatible (`+?` rejected)
+//      and even on GNU sed produced the wrong task ID.
+//   2. MAJOR    — Step 5 `exit 0` killed the command before Step 6,
+//      stranding the rebased commits unpushed.
+//   3. MAJOR    — subagent + slash command both pushed (duplicate push).
+//   4. MAJOR    — Step 5 read /tmp/rebase-resolver-${PR}.json but no step
+//      ever wrote it.
+// ──────────────────────────────────────────────────────────────────────
+
+describe('/ai-sdlc rebase body — Step 1 task-id regex (BSD-portable)', () => {
+  // Ground truth: the regex literal in commands/rebase.md MUST be
+  // portable across BSD sed (macOS) AND GNU sed (linux). Reviewer round
+  // 2 rejected the prior `+?` non-greedy form because BSD sed errors
+  // with `RE error: repetition-operator operand invalid` and the slash
+  // command died before the subagent spawned.
+  function deriveTaskIdFromBranch(branch, regexFromBody) {
+    // JS regex ≠ POSIX ERE 1:1 but `[a-z]+-[0-9.]+` translates faithfully.
+    const m = branch.match(regexFromBody);
+    return m ? m[1] : null;
+  }
+  // The regex in body shape: 's|^ai-sdlc/([a-z]+-[0-9.]+).*|\1|'
+  const portable = /^ai-sdlc\/([a-z]+-[0-9.]+).*/;
+
+  it('regex literal in body uses BSD-portable [a-z]+-[0-9.]+ pattern', () => {
+    assert.match(body, /\[a-z\]\+-\[0-9\.\]\+/);
+  });
+
+  it('regex does NOT use the BSD-incompatible `+?` non-greedy quantifier', () => {
+    // Find the TASK_ID_LOWER assignment line(s) and assert no `+?` appears.
+    const sedLine = body.split('\n').find((l) => l.includes('TASK_ID_LOWER=') && l.includes('sed'));
+    assert.ok(sedLine, 'TASK_ID_LOWER sed pipeline must exist');
+    assert.doesNotMatch(sedLine, /\+\?/, 'must not use `+?` (BSD sed rejects it)');
+  });
+
+  it('captures aisdlc-105 from ai-sdlc/aisdlc-105-rebase-resolver-...', () => {
+    assert.equal(
+      deriveTaskIdFromBranch('ai-sdlc/aisdlc-105-rebase-resolver-subagent', portable),
+      'aisdlc-105',
+    );
+  });
+
+  it('captures aisdlc-100.2 from ai-sdlc/aisdlc-100.2-foo-bar (sub-IDs preserved)', () => {
+    assert.equal(deriveTaskIdFromBranch('ai-sdlc/aisdlc-100.2-foo-bar', portable), 'aisdlc-100.2');
+  });
+
+  it('captures aisdlc-115 from ai-sdlc/aisdlc-115-something (no sub-ID)', () => {
+    assert.equal(deriveTaskIdFromBranch('ai-sdlc/aisdlc-115-something', portable), 'aisdlc-115');
+  });
+
+  it('captures the bare prefix-N when there is no slug suffix', () => {
+    assert.equal(deriveTaskIdFromBranch('ai-sdlc/aisdlc-115', portable), 'aisdlc-115');
+  });
+
+  it('documents BSD vs GNU sed portability inline so the rule is visible', () => {
+    assert.match(body, /BSD sed/);
+    assert.match(body, /portable/i);
+  });
+});
+
+describe('/ai-sdlc rebase body — Step 5 falls through to Step 6 (no exit 0)', () => {
+  // Ground truth: when contentHash is unchanged, Step 5 must SKIP the
+  // signing logic but MUST NOT terminate the command — Step 6 still
+  // needs to push the rebased commits. The prior `exit 0` left commits
+  // stranded in the worktree while operators believed the rebase was
+  // done. Round-2 reviewer flagged this as "concrete failure: PR shows
+  // pre-rebase HEAD on GitHub".
+  it('Step 5 skip-resign branch does NOT use `exit 0`', () => {
+    const step5 = body.split('## Step 5')[1]?.split('## Step 6')[0] || '';
+    assert.ok(step5.length > 0, 'Step 5 section must exist before Step 6');
+    // Ban the literal `exit 0` from the skip-resign control flow.
+    assert.doesNotMatch(
+      step5,
+      /^\s*exit 0\s*$/m,
+      'Step 5 must not contain `exit 0` (would skip Step 6 push)',
+    );
+  });
+
+  it('Step 5 uses if/else control flow (skip vs sign) rather than early-exit', () => {
+    const step5 = body.split('## Step 5')[1]?.split('## Step 6')[0] || '';
+    // Either an `if … then … else …` or an inverted-guard `if [ $PRE != $POST ]; then ... fi`
+    // pattern is acceptable. We assert at least an `else` OR an `fi` exists in
+    // the section to prove the skip path is wrapped, not exited.
+    assert.match(step5, /\bfi\b/, 'Step 5 must close an if-block (control flow, not exit)');
+  });
+
+  it('Step 5 documents that skip-branch must fall through to Step 6', () => {
+    const step5 = body.split('## Step 5')[1]?.split('## Step 6')[0] || '';
+    assert.match(
+      step5,
+      /[Ff]all(s)? through to Step 6|MUST.*push|push.*MUST/,
+      'Step 5 must explain that the skip branch still requires Step 6 to run',
+    );
+  });
+});
+
+describe('/ai-sdlc rebase body — push-owner consolidation (single push)', () => {
+  // Ground truth: the slash command body owns the force-push (Step 6).
+  // The subagent does NOT push. Round-2 reviewer caught duplicate-push
+  // race (subagent pushed AND slash command pushed = 2 CI runs and
+  // potentially the chore commit lost).
+  it('Step 3 prompt instructs subagent NOT to push', () => {
+    const step3 = body.split('## Step 3')[1]?.split('## Step 4')[0] || '';
+    assert.match(
+      step3,
+      /Do NOT push from the subagent|subagent.*does NOT push|sole.*force-with-lease push/i,
+      'Step 3 prompt must instruct the subagent not to push',
+    );
+  });
+
+  it('Step 6 (in slash command) is the only `git push --force-with-lease` site', () => {
+    // The body should contain at most one `git push --force-with-lease`
+    // call site (Step 6). Reference shapes inside fenced documentation
+    // blocks are allowed but the actually-executable push must be unique.
+    const lines = body.split('\n');
+    const pushSites = lines.filter(
+      (l) => /git push --force-with-lease origin/.test(l) && !l.trim().startsWith('#'),
+    );
+    assert.equal(
+      pushSites.length,
+      1,
+      `expected exactly one executable force-with-lease push site (Step 6); found ${pushSites.length}`,
+    );
+  });
+});
+
+describe('/ai-sdlc rebase body — subagent JSON written to /tmp before Step 5', () => {
+  // Ground truth: Step 5's jq calls read /tmp/rebase-resolver-${PR}.json
+  // but if no step writes it, the file is empty/missing and PRE_HASH /
+  // POST_HASH always come back blank — the skip-resign branch never
+  // fires and Step 5 always re-signs. Defeats the AISDLC-101 v3-leg
+  // optimization.
+  it('Step 4 (or between 4 and 5) writes /tmp/rebase-resolver-${PR}.json', () => {
+    const upToStep5 = body.split('## Step 5')[0];
+    assert.match(
+      upToStep5,
+      /\/tmp\/rebase-resolver-\$\{PR\}\.json/,
+      'a step BEFORE Step 5 must reference the /tmp JSON path',
+    );
+    // And it must be a write (heredoc, redirection, or printf-into-file),
+    // not just a mention.
+    assert.match(
+      upToStep5,
+      /(cat\s*>\s*\/tmp\/rebase-resolver|>\s*\/tmp\/rebase-resolver-\$\{PR\}\.json)/,
+      'must write to the file via heredoc or redirection',
+    );
+  });
+
+  it('Step 4 documents WHY the persistence is needed (prevents skip-resign regression)', () => {
+    const step4 = body.split('## Step 4')[1]?.split('## Step 5')[0] || '';
+    assert.match(
+      step4,
+      /skip-resign|skip the.*signing|skip the.*sign|Step 5/i,
+      'Step 4 must explain that Step 5 reads the persisted file',
+    );
+  });
+});
+
+describe('/ai-sdlc rebase body — re-attestation fidelity (iteration + harness)', () => {
+  // Ground truth: when re-signing after rebase, carry the original
+  // attestation's iterationCount + harnessNote forward instead of
+  // hard-coding `1` and `""`. Falls back to defaults + documents the
+  // loss in the chore commit body if the original envelope is missing.
+  it('reads iterationCount from the pre-rebase DSSE envelope (not hard-coded 1)', () => {
+    assert.match(
+      body,
+      /iterationCount.*?1|PRE_ITER/,
+      'must read iterationCount from the pre-rebase attestation file',
+    );
+    // The body should reference the pre-rebase attestation file path.
+    assert.match(body, /\.ai-sdlc\/attestations\/\$\{PRE_HEAD_SHA\}\.dsse\.json/);
+  });
+
+  it('reads harnessNote from the pre-rebase DSSE envelope (not hard-coded "")', () => {
+    assert.match(body, /harnessNote/);
+    assert.match(body, /PRE_HARNESS_NOTE/);
+  });
+
+  it('documents the fidelity-loss fallback path when pre-rebase envelope is missing', () => {
+    assert.match(body, /FIDELITY_NOTE|reset to defaults|fidelity/i);
   });
 });
