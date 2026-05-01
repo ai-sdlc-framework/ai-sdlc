@@ -32,6 +32,7 @@ requiresDocs: []
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | v1 | 2026-05-01 | dominique | Initial draft. Foundation tooling lives in AISDLC-117 (`cli-deps`); this RFC scopes the composition layer (PPA + DoR + critical-path + cross-RFC). |
+| v2 | 2026-05-01 | dominique | Removed §8 (Cross-RFC dependency tracking) — scope creep. The pipeline dispatches tasks, not RFCs, so RFC-to-RFC dependencies don't drive any pipeline decision; that's a separate index-rendering concern that doesn't need RFC ceremony. Dropped §3 goal, §1 reference, Phase 5 from the implementation plan, the schema-change line, and Q3 from open questions. Renumbered §9-§14 → §8-§13 and Q4-Q7 → Q3-Q6 accordingly. |
 
 ---
 
@@ -44,8 +45,6 @@ Three composition points:
 1. **PPA × Graph** → depth-aware priority. A high-PPA task whose blocker is a low-PPA task should auto-bump the blocker's score so the critical path moves first.
 2. **DoR × Graph** → blast-radius surfacing. When an issue lands in `Needs Clarification`, the DoR comment should tell the author "this gates N downstream tasks" so the urgency is legible.
 3. **Graph × Observability** → critical-path digest. Slack/dashboard surfaces the next 3-5 critical-path items so operators don't waste cycles on graph leaves while a 12-task chain stalls.
-
-Plus one cross-cutting capability: **cross-RFC dependency tracking** so the RFC index reflects which RFCs gate which.
 
 ## 2. Motivation
 
@@ -77,7 +76,6 @@ None of these decisions can be made by PPA, DoR, or the graph in isolation. Comp
 - Compose the dependency graph (AISDLC-117) with PPA priority scoring (RFC-0008).
 - Compose the dependency graph with DoR admission verdicts (RFC-0011).
 - Surface critical-path information in Slack digest + operator dashboard.
-- Track dependencies between RFCs (not just between tasks) so the RFC index reflects strategic ordering.
 
 ### Non-Goals
 
@@ -92,7 +90,6 @@ AISDLC-117 ships `cli-deps frontier|blockers|impact|validate|graph` as a CLI sur
 - The PPA scorer (Section 5)
 - The DoR comment generator (Section 6)
 - The Slack/dashboard digest (Section 7)
-- The RFC index renderer (Section 8)
 
 ### 4.1 Graph snapshot artifact
 
@@ -170,65 +167,36 @@ Sorted by `effectivePriority` (Section 5).
 
 The operator dashboard (referenced in RFC-0010 cli-status) renders the graph as an interactive view: click a task → see its blockers + downstream + PPA score + DoR verdict. Mermaid-style rendering with color-coding by status (To Do = blue, In Progress = yellow, Needs Clarification = red, Done = green).
 
-## 8. Cross-RFC Dependency Tracking
+## 8. Schema Changes
 
-### 8.1 The problem
-
-RFC-0011 Phase 4 depends on RFC-0008 (PPA composition). RFC-0014 (this RFC) depends on AISDLC-117 (cli-deps foundation). Today these dependencies are buried in prose; the RFC index doesn't surface them.
-
-### 8.2 The composition
-
-RFC frontmatter gains a `Depends-On:` field listing other RFCs:
-
-```yaml
----
-id: RFC-0014
-title: Dependency Graph Composition for Pipeline Decisions
-Depends-On: [RFC-0005, RFC-0008, RFC-0010, RFC-0011]
-...
----
-```
-
-The `spec/rfcs/README.md` index renders these as a separate dependency table:
-
-| RFC | Depends On | Required By |
-|---|---|---|
-| RFC-0014 | RFC-0005, RFC-0008, RFC-0010, RFC-0011 | (none yet) |
-| RFC-0011 | (none) | RFC-0014 |
-
-This makes RFC implementation order legible at a glance.
-
-## 9. Schema Changes
-
-- New `Depends-On:` array field in RFC frontmatter (Section 8.2).
 - New `$ARTIFACTS_DIR/_deps/snapshot.<timestamp>.jsonl` artifact (Section 4.1).
 - New `blastRadius` + `highestDownstreamPriority` fields in DoR calibration log (Section 6.3).
 - Extension to PPA dispatcher's priority comparator (Section 5.2) — internal API change, no schema change.
 
-## 10. Backward Compatibility
+## 9. Backward Compatibility
 
 - All composition layers are **opt-in** behind feature flag `AI_SDLC_DEPS_COMPOSITION`. Default `off` until shipped + soaked.
 - AISDLC-117 ships first as the foundation; this RFC's compositions land incrementally on top.
 - Existing PPA scoring + DoR verdicts unchanged when the flag is off.
 
-## 11. Alternatives Considered
+## 10. Alternatives Considered
 
-### 11.1 Bake graph awareness into PPA itself
+### 10.1 Bake graph awareness into PPA itself
 
 Could have made PPA's scoring algorithm directly graph-aware (e.g., "include downstream reach as an 8th dimension"). Rejected because:
 
 - PPA's 7 dimensions are stable + signed-off (RFC-0005, RFC-0008). Adding an 8th would re-litigate calibration.
 - The graph-awareness is a **dispatch concern**, not a scoring concern. Keeping them separate respects the RFC-0005 architecture.
 
-### 11.2 Skip the DoR composition
+### 10.2 Skip the DoR composition
 
 DoR is fresh (RFC-0011 just signed off May 1). Could ship the PPA + observability compositions first and add DoR later. Considered; rejected because the DoR/graph composition produces immediate value (blast radius is high-signal for authors) and the cost is small.
 
-### 11.3 Compute graph in PPA scorer instead of as a CLI
+### 10.3 Compute graph in PPA scorer instead of as a CLI
 
 Could have made the dependency graph a private internal of the PPA scorer rather than a first-class CLI. Rejected because the CLI is also useful for sprint planning, RFC index rendering, and ad-hoc operator queries — none of which should require running the PPA scorer.
 
-## 12. Implementation Plan
+## 11. Implementation Plan
 
 Sequential phases, each behind feature flag `AI_SDLC_DEPS_COMPOSITION`.
 
@@ -238,30 +206,27 @@ Sequential phases, each behind feature flag `AI_SDLC_DEPS_COMPOSITION`.
 | **Phase 2: PPA composition** | 1 wk | Extend dispatcher's priority comparator to use `effectivePriority`; integration test with chain fixtures | Critical-path leaves bubble to top; PPA per-task scores unchanged |
 | **Phase 3: DoR composition** | 0.5 wk | Extend DoR comment template + calibration log with blast-radius fields | Vague root-of-chain issue gets blast-radius callout in DoR comment |
 | **Phase 4: Slack + dashboard digest** | 1 wk | Critical-path section in weekly digest; dashboard graph view | Digest renders top 3-5; dashboard interactive |
-| **Phase 5: Cross-RFC tracking** | 0.5 wk | `Depends-On:` frontmatter + index table renderer; `pnpm rfc:check` validates references resolve | RFC index shows dependency graph; CI catches dangling refs |
-| **Phase 6: Soak + flag promotion** | corpus-driven, NOT calendar-gated | Run with flag off → operators opt in → measure dispatch quality vs PPA-only baseline | Promotion when dispatch correctness > 95% AND no operator override-rate spike |
+| **Phase 5: Soak + flag promotion** | corpus-driven, NOT calendar-gated | Run with flag off → operators opt in → measure dispatch quality vs PPA-only baseline | Promotion when dispatch correctness > 95% AND no operator override-rate spike |
 
-Total wall-clock: ~3-4 weeks (Phase 6 is corpus-driven per maintainer directive 2026-05-01).
+Total wall-clock: ~3 weeks (Phase 5 is corpus-driven per maintainer directive 2026-05-01).
 
-Critical path: Phase 1 → Phase 2 → Phases 3/4/5 (parallelizable) → Phase 6.
+Critical path: Phase 1 → Phase 2 → Phases 3/4 (parallelizable) → Phase 5.
 
-## 13. Open Questions
+## 12. Open Questions
 
-1. **Q1: How does the depth-aware priority interact with PPA's existing tie-breaking rules?** PPA uses recency as a tie-breaker after composite score. When two tasks have equal effective priority, should depth-aware priority override the recency tiebreaker, or compose with it? Lean: compose. Decide before Phase 2 ships.
+1. **Q1: How does the depth-aware priority interact with PPA's existing tie-breaking rules?** PPA uses recency as a tie-breaker after composite score. When two tasks have equal effective priority, should depth-aware priority override the recency tiebreaker, or compose with it? Lean: compose. Decide before Phase 2 ships. **Resolution (2026-05-01):** Option B — depth as primary tiebreak, recency tertiary. Dispatcher sort order is `effectivePriority DESC` → `criticalPathLength DESC` → `recency DESC`. Rationale: structural signal (chain depth) strictly dominates arbitrary signal (recency) when effective priority is tied; an operator can trace "why this one?" as "longest chain → newest commit" without calibrating magic-number weights. The composition stays read-only for PPA per §5.3 (per-task scores in the calibration log are unchanged; only the dispatcher's sort is affected).
 
-2. **Q2: What's the right graph artifact retention policy?** Snapshots accumulate in `$ARTIFACTS_DIR/_deps/`. Without retention, this grows unbounded. Lean: keep last 30 days + the snapshot at any RFC-significant event (major dispatch decision, calibration revision). Decide before Phase 1 ships.
+2. **Q2: What's the right graph artifact retention policy?** Snapshots accumulate in `$ARTIFACTS_DIR/_deps/`. Without retention, this grows unbounded. Lean: keep last 30 days + the snapshot at any RFC-significant event (major dispatch decision, calibration revision). Decide before Phase 1 ships. **Resolution (2026-05-01):** Option C — time-based rolling retention (30 days) + event-tagged permanent retention. Significant-event set: dispatch decisions, calibration revisions, RFC `Lifecycle` transitions. Snapshot writer reads an event tag on each call (`tag: 'rolling' | 'dispatch' | 'calibration' | 'lifecycle-transition'`); rolling-tagged snapshots are trimmed by mtime > 30d, the rest are kept indefinitely. Phase 1 must define a `cli-deps gc` command that does the rolling trim, and a `cli-deps inspect --tag <name>` to enumerate event-tagged snapshots so an operator can audit / prune the permanent tier when it grows. Storage growth on the permanent tier is bounded by event frequency × snapshot size; if either grows beyond expectations, a future revision can introduce per-tag caps (e.g. "keep last 100 dispatch snapshots, last 50 calibration snapshots") rather than redesigning the policy.
 
-3. **Q3: Should Cross-RFC dependencies be enforced or advisory?** If RFC-A `Depends-On: [RFC-B]` and RFC-B is `Lifecycle: Draft`, can RFC-A reach `Lifecycle: Signed Off`? Lean: advisory in v1 (just surface in index); enforced in a future version. Decide before Phase 5 ships.
+3. **Q3: How does the composition handle external dependencies?** A task may depend on something OUTSIDE the backlog system (e.g., "wait for npm version X to publish"). Lean: out of scope for v1; document the limitation. The graph models internal task dependencies only. Decide before Phase 1 ships.
 
-4. **Q4: How does the composition handle external dependencies?** A task may depend on something OUTSIDE the backlog system (e.g., "wait for npm version X to publish"). Lean: out of scope for v1; document the limitation. The graph models internal task dependencies only. Decide before Phase 1 ships.
+4. **Q4: What's the cost of recomputing the graph per dispatch?** AISDLC-117 ships an in-memory graph; recompute cost is O(V+E) which is trivial for our task counts. But if the dispatcher recomputes per dispatch decision (vs caching), per-decision overhead matters at scale. Lean: cache with a 30s TTL. Decide before Phase 2 ships.
 
-5. **Q5: What's the cost of recomputing the graph per dispatch?** AISDLC-117 ships an in-memory graph; recompute cost is O(V+E) which is trivial for our task counts. But if the dispatcher recomputes per dispatch decision (vs caching), per-decision overhead matters at scale. Lean: cache with a 30s TTL. Decide before Phase 2 ships.
+5. **Q5: How does DoR blast-radius interact with the auto-pass rules?** Alex's signal-pipeline auto-pass (RFC-0011 Addition 1) skips gates 1, 4, 5, 6. If a signal-pipeline-generated task has high blast radius, should the DoR comment STILL surface it even though most gates were skipped? Lean: yes, surface always — blast radius is independent of gate evaluation. Decide before Phase 3 ships.
 
-6. **Q6: How does DoR blast-radius interact with the auto-pass rules?** Alex's signal-pipeline auto-pass (RFC-0011 Addition 1) skips gates 1, 4, 5, 6. If a signal-pipeline-generated task has high blast radius, should the DoR comment STILL surface it even though most gates were skipped? Lean: yes, surface always — blast radius is independent of gate evaluation. Decide before Phase 3 ships.
+6. **Q6: Does the graph snapshot need a write barrier with the Backlog.md adapter?** If the operator edits a task's `dependencies:` field while the dispatcher is reading the snapshot, what's the consistency model? Lean: snapshots are point-in-time; concurrent edits become visible at the next snapshot. No write barrier needed. Decide before Phase 1 ships.
 
-7. **Q7: Does the graph snapshot need a write barrier with the Backlog.md adapter?** If the operator edits a task's `dependencies:` field while the dispatcher is reading the snapshot, what's the consistency model? Lean: snapshots are point-in-time; concurrent edits become visible at the next snapshot. No write barrier needed. Decide before Phase 1 ships.
-
-## 14. References
+## 13. References
 
 - RFC-0005 — Product Priority Algorithm (PPA scoring foundation)
 - RFC-0008 — PPA Triad Integration
