@@ -4,7 +4,7 @@ title: Design System Governance Pipeline
 status: Final
 author: Dominique Legault, Morgan Hirtle, Alexander Kline
 created: 2026-03-28
-updated: 2026-04-13
+updated: 2026-04-30
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0002
@@ -13,12 +13,12 @@ requiresDocs:
   - tutorial
   - operator-runbook
   - api-reference
-# All three doc surfaces are intentionally deferred — the spec is sign-off
-# locked but the reference implementations (Tokens Studio + Figma adapters,
-# Storybook ComponentCatalog, Playwright VisualRegressionRunner) are still in
-# flight. AISDLC-69.4 tracks the retroactive doc authoring gap.
-deferredDocs: true
-deferredDocsDeadline: 2026-07-31
+# AISDLC-69.4 retroactively authored the three required doc surfaces:
+#   • docs/tutorials/design-system-getting-started.md
+#   • docs/operations/design-system-operator-runbook.md
+#   • docs/api-reference/design-system.md
+# Each cites RFC-0006 by id so the AISDLC-69.3 CI gate accepts them. The
+# `deferredDocs` escape hatch is therefore no longer set.
 ---
 
 # RFC-0006: Design System Governance Pipeline

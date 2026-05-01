@@ -82,6 +82,26 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ### Documentation
 
+- **RFC-0006 retroactive user docs** (`docs/tutorials/design-system-getting-started.md`,
+  `docs/operations/design-system-operator-runbook.md`,
+  `docs/api-reference/design-system.md`): authored the three doc surfaces
+  declared in RFC-0006's `requiresDocs` frontmatter. The tutorial (~1.3k
+  words, three worked examples) walks a frontend team through declaring a
+  `DesignSystemBinding`, wiring three quality gates, and operating the
+  design-token-cascade / compose-or-justify / token-deletion-blocked flows
+  end to end. The operator runbook (~1.2k words) covers the daily / weekly /
+  monthly cadence for the design system maintainer + pipeline operator
+  (rotating MCP bearer tokens, approving token migrations, refreshing
+  baselines, tuning `cascadeThreshold` and review SLA) plus an
+  RFC-0006-specific event triage table. The api-reference doc covers the
+  three RFC-0006 adapter interfaces (`DesignTokenProvider`,
+  `ComponentCatalog`, `VisualRegressionRunner`) and their project-owned
+  reference implementations (`tokens-studio`, `figma-variables`,
+  `storybook-mcp`, `playwright-visual`). RFC-0006 frontmatter
+  `deferredDocs: true` removed (no longer applicable); `updated: 2026-04-30`
+  bumped. Closes the canonical "missing docs" example that motivated
+  AISDLC-69. (AISDLC-69.4)
+
 - **RFC `requiresDocs` frontmatter convention** (`spec/rfcs/RFC-0001-template.md`,
   `spec/rfcs/README.md`, `spec/schemas/rfc.schema.json`): every RFC now
   carries a YAML frontmatter block with `id` / `title` / `status` / `author` /
