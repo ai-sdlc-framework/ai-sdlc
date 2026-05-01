@@ -17,6 +17,7 @@ import {
   ACCEPTED_SCHEMA_VERSIONS,
   REQUIRED_REVIEWER_AGENT_IDS,
   buildPredicate,
+  computeContentHash,
   generateSigningKeyPair,
   paeEncode,
   sha256Hex,
@@ -685,6 +686,263 @@ describe('verifyAttestation (post-review hardening)', () => {
     if (!result.valid) {
       expect(result.reason).toMatch(/schemaVersion not in accepted enum/);
     }
+  });
+});
+
+// ─── AISDLC-94 — rebase-tolerant contentHash ─────────────────────────
+//
+// `contentHash` binds the attestation to the post-apply tree state of the
+// PR (each changed file's blob SHA at HEAD), not the literal `git diff`
+// text. This is rebase-tolerant: a rebase onto a base where another PR
+// already touched the same files will shift the diff's `@@` hunk headers
+// + context lines (= different `diffHash`) without changing any blob SHA
+// (= same `contentHash`). The verifier accepts EITHER hash matching during
+// the Phase 1 dual-hash window.
+
+describe('computeContentHash (AISDLC-94)', () => {
+  const fileA = { path: 'src/a.ts', blobSha: 'a'.repeat(40) };
+  const fileB = { path: 'src/b.ts', blobSha: 'b'.repeat(40) };
+  const fileC = { path: 'src/c.ts', blobSha: 'c'.repeat(40) };
+
+  it('produces the same hash regardless of input ordering (sorted canonical encoding)', () => {
+    // The canonical encoding sorts by path before hashing — so any input
+    // permutation must produce the same digest. This is what makes the
+    // hash "the post-apply tree state" rather than "the order git happened
+    // to enumerate files in".
+    const h1 = computeContentHash([fileA, fileB, fileC]);
+    const h2 = computeContentHash([fileC, fileA, fileB]);
+    const h3 = computeContentHash([fileB, fileC, fileA]);
+    expect(h1).toBe(h2);
+    expect(h2).toBe(h3);
+    expect(h1).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('produces the same hash when rebased onto a different base (= same content, same blob SHAs)', () => {
+    // Simulated scenario: PR-X is signed against base B1; the same files
+    // exist in PR-X with the same content after a clean rebase onto B2.
+    // The git blob SHAs are content-addressed, so they're identical
+    // across rebases when content doesn't change. Hence `contentHash`
+    // is stable. This is the AISDLC-94 fix in a nutshell.
+    const beforeRebase = computeContentHash([fileA, fileB]);
+    const afterCleanRebase = computeContentHash([fileA, fileB]); // same blob SHAs
+    expect(beforeRebase).toBe(afterCleanRebase);
+  });
+
+  it('produces a different hash when a conflict resolution changes file content', () => {
+    // The threat-model boundary: a rebase that resolved a conflict
+    // differently changes the blob SHA of the affected file → contentHash
+    // diverges → attestation correctly invalidated.
+    const beforeConflict = computeContentHash([fileA, fileB]);
+    const afterConflict = computeContentHash([
+      fileA,
+      { path: fileB.path, blobSha: 'd'.repeat(40) },
+    ]);
+    expect(beforeConflict).not.toBe(afterConflict);
+  });
+
+  it('produces a different hash when a file is deleted vs kept', () => {
+    // Deleted files use empty `blobSha` so the canonical line is
+    // `<path>\t\n` — distinct from a kept file's `<path>\t<blobSha>\n`.
+    // This means contentHash detects "we removed file X" as a real change.
+    const kept = computeContentHash([fileA, fileB]);
+    const deleted = computeContentHash([fileA, { path: fileB.path, blobSha: '' }]);
+    expect(kept).not.toBe(deleted);
+  });
+
+  it('produces a different hash when a file is added vs missing entirely', () => {
+    const without = computeContentHash([fileA]);
+    const withExtra = computeContentHash([fileA, fileB]);
+    expect(without).not.toBe(withExtra);
+  });
+
+  it('handles the empty changed-file set (no-op PR, sha256 of empty string)', () => {
+    const h = computeContentHash([]);
+    expect(h).toBe(sha256Hex(''));
+  });
+
+  it('deduplicates same-path entries with last-write-wins (idempotent against double-enumeration)', () => {
+    // If a caller accidentally enumerates the same path twice (e.g. from
+    // two overlapping diff invocations), the LAST blob SHA wins. This
+    // makes the function order-stable AND idempotent rather than
+    // producing a different hash than a clean run would.
+    const dedupedExplicit = computeContentHash([
+      { path: 'src/x.ts', blobSha: 'a'.repeat(40) },
+      { path: 'src/x.ts', blobSha: 'b'.repeat(40) }, // overrides
+    ]);
+    const cleanRun = computeContentHash([{ path: 'src/x.ts', blobSha: 'b'.repeat(40) }]);
+    expect(dedupedExplicit).toBe(cleanRun);
+  });
+
+  it('lowercases blob SHAs before hashing (case-insensitive normalization)', () => {
+    const lower = computeContentHash([{ path: 'src/x.ts', blobSha: 'a'.repeat(40) }]);
+    const upper = computeContentHash([{ path: 'src/x.ts', blobSha: 'A'.repeat(40) }]);
+    expect(lower).toBe(upper);
+  });
+
+  it('throws on entries missing `path`', () => {
+    expect(() =>
+      computeContentHash([{ path: '', blobSha: 'a'.repeat(40) }] as unknown as Parameters<
+        typeof computeContentHash
+      >[0]),
+    ).toThrow(/path must be a non-empty string/);
+  });
+
+  it('throws on entries with non-string blobSha', () => {
+    expect(() =>
+      computeContentHash([{ path: 'src/x.ts', blobSha: undefined as unknown as string }]),
+    ).toThrow(/blobSha must be a string/);
+  });
+});
+
+describe('buildPredicate with contentHash (AISDLC-94)', () => {
+  const CHANGED_FILES = [
+    { path: 'src/a.ts', blobSha: 'a'.repeat(40) },
+    { path: 'src/b.ts', blobSha: 'b'.repeat(40) },
+  ];
+
+  it('omits contentHash when changedFiles is not provided (legacy v1 envelope)', () => {
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    expect(predicate.contentHash).toBeUndefined();
+    // diffHash is still required by the schema, regardless.
+    expect(predicate.diffHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('includes contentHash when changedFiles is provided (Phase 1 dual-hash envelope)', () => {
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
+    expect(predicate.contentHash).toBe(computeContentHash(CHANGED_FILES));
+    expect(predicate.diffHash).toBe(sha256Hex(DEFAULT_INPUTS.diff));
+  });
+
+  it('includes contentHash for empty changedFiles array (no-op PR)', () => {
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: [] });
+    expect(predicate.contentHash).toBe(sha256Hex(''));
+  });
+});
+
+describe('validatePredicateShape with contentHash (AISDLC-94)', () => {
+  function dualHashPredicate(): AttestationPredicate {
+    return buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFiles: [{ path: 'src/x.ts', blobSha: 'a'.repeat(40) }],
+    });
+  }
+
+  it('accepts a v1 predicate with contentHash present (Phase 1 dual-hash)', () => {
+    expect(validatePredicateShape(dualHashPredicate())).toBeNull();
+  });
+
+  it('accepts a v1 predicate with contentHash absent (legacy)', () => {
+    expect(validatePredicateShape(buildPredicate(DEFAULT_INPUTS))).toBeNull();
+  });
+
+  it('rejects contentHash with wrong length', () => {
+    const p: Record<string, unknown> = { ...dualHashPredicate(), contentHash: 'short' };
+    expect(validatePredicateShape(p)).toMatch(/contentHash does not match pattern/);
+  });
+
+  it('rejects contentHash with non-hex chars', () => {
+    const p: Record<string, unknown> = { ...dualHashPredicate(), contentHash: 'g'.repeat(64) };
+    expect(validatePredicateShape(p)).toMatch(/contentHash does not match pattern/);
+  });
+
+  it('rejects contentHash with embedded CRLF (downstream injection vector)', () => {
+    const p: Record<string, unknown> = {
+      ...dualHashPredicate(),
+      contentHash: 'a'.repeat(30) + '\r\n' + 'b'.repeat(32),
+    };
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/contentHash does not match pattern/);
+    expect(reason).not.toMatch(/\r|\n/);
+  });
+
+  it('rejects contentHash that is not a string', () => {
+    const p: Record<string, unknown> = { ...dualHashPredicate(), contentHash: 12345 };
+    expect(validatePredicateShape(p)).toMatch(/contentHash does not match pattern/);
+  });
+});
+
+describe('verifyAttestation with contentHash dual-hash mode (AISDLC-94)', () => {
+  const CHANGED_FILES = [
+    { path: 'src/a.ts', blobSha: 'a'.repeat(40) },
+    { path: 'src/b.ts', blobSha: 'b'.repeat(40) },
+  ];
+
+  it('accepts when contentHash matches even though diffHash diverges (rebase scenario)', () => {
+    // The headline regression-fix scenario: PR was signed at base B1.
+    // After a clean rebase onto B2 (where a sibling PR already touched
+    // the same files), `git diff B2...HEAD` produces different text
+    // (different `@@` hunk headers, different context lines), so
+    // diffHash diverges. But every file's blob SHA at HEAD is unchanged
+    // (the rebase had no conflicts), so contentHash still matches. The
+    // verifier must accept on the contentHash leg of the dual hash.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        // diffHash diverges (post-rebase shape), but contentHash matches.
+        diffHash: sha256Hex('different diff text after rebase'),
+        contentHash: predicate.contentHash,
+      },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('falls back to diffHash matching when envelope has no contentHash (legacy v1)', () => {
+    // Envelope signed before AISDLC-94 landed — only carries diffHash.
+    // The verifier MUST still accept it on the diffHash leg.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate(DEFAULT_INPUTS); // no changedFiles
+    expect(predicate.contentHash).toBeUndefined();
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: buildExpected(predicate),
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects when both diffHash AND contentHash diverge (real content change)', () => {
+    // The threat-model case: a rebase that genuinely resolved a conflict
+    // differently DOES change blob SHAs → contentHash diverges → reject.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        diffHash: sha256Hex('different diff'),
+        contentHash: sha256Hex('completely different tree state'),
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
+  });
+
+  it('does NOT accept on contentHash when expected.contentHash is omitted (callers must opt in)', () => {
+    // Defensive check: the dual-hash acceptance only kicks in when the
+    // CALLER passes expected.contentHash. A caller that hasn't yet been
+    // updated for AISDLC-94 still gets the old diffHash-only behavior.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        diffHash: sha256Hex('shifted diff'),
+        // contentHash deliberately NOT set — caller hasn't opted in.
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
   });
 });
 

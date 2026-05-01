@@ -71,6 +71,63 @@ function git(args, cwd) {
   });
 }
 
+/**
+ * Collect the changed-file set for `contentHash` (AISDLC-94). Returns one
+ * `{ path, blobSha }` entry per file in `git diff --name-only <base>...<head>`
+ * with the blob SHA from `git ls-tree HEAD <path>`. Deleted files get an
+ * empty `blobSha` (the path still appears so the hash distinguishes
+ * "deleted" from "kept").
+ *
+ * `--no-renames` so a rename shows up as add+delete (= two entries) — that
+ * way a rebase that resolved a conflict by renaming differently produces a
+ * different hash. `-c core.quotepath=false` mirrors the verifier's git
+ * helper so unicode paths come back as raw UTF-8.
+ */
+function collectChangedFileEntries(baseRef, headRef, repoRoot) {
+  let nameOnly;
+  try {
+    nameOnly = execFileSync(
+      'git',
+      [
+        '-c',
+        'core.quotepath=false',
+        'diff',
+        '--name-only',
+        '--no-renames',
+        `${baseRef}...${headRef}`,
+      ],
+      { cwd: repoRoot, env: cleanGitEnv(), encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 },
+    );
+  } catch (err) {
+    fail(`failed to enumerate changed files via git diff: ${err.message ?? err}`);
+  }
+  const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+  const entries = [];
+  for (const path of paths) {
+    // `git ls-tree -r <ref> -- <path>` returns blank when the path doesn't
+    // exist at <ref> (= deleted file). Empty blobSha is then used as the
+    // marker — see computeContentHash for canonical encoding.
+    let blobSha = '';
+    try {
+      const lsOut = execFileSync(
+        'git',
+        ['-c', 'core.quotepath=false', 'ls-tree', '-r', headRef, '--', path],
+        { cwd: repoRoot, env: cleanGitEnv(), encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 },
+      );
+      // ls-tree output: `<mode> <type> <sha>\t<path>` (one line per file).
+      const line = lsOut.split('\n').find((l) => l.length > 0);
+      if (line) {
+        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+        if (m) blobSha = m[1];
+      }
+    } catch {
+      // ls-tree failed (path missing) → treat as deleted, leave blobSha=''.
+    }
+    entries.push({ path, blobSha });
+  }
+  return entries;
+}
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const verdictsPath = args['review-verdicts'];
@@ -105,6 +162,10 @@ async function main() {
   // Gather inputs.
   const headSha = git(['rev-parse', 'HEAD'], repoRoot).trim();
   const diff = git(['diff', 'origin/main...HEAD'], repoRoot);
+  // AISDLC-94: also collect changed-file blob SHAs for `contentHash`.
+  // The diff range `origin/main...HEAD` matches what we hash for diffHash,
+  // so the two bindings cover the same file set.
+  const changedFiles = collectChangedFileEntries('origin/main', 'HEAD', repoRoot);
   const policy = readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8');
   const verdicts = JSON.parse(readFileSync(verdictsPath, 'utf-8'));
   if (!Array.isArray(verdicts)) {
@@ -140,6 +201,7 @@ async function main() {
     pluginVersion,
     iterationCount,
     harnessNote,
+    changedFiles,
   });
 
   const privateKeyPem = readFileSync(keyPath, 'utf-8');
