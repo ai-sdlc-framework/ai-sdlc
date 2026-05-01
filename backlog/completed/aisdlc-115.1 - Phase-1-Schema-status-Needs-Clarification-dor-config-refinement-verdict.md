@@ -3,7 +3,7 @@ id: AISDLC-115.1
 title: >-
   Phase 1: Schema + status (Needs Clarification + dor-config +
   refinement-verdict)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-01 16:25'
 labels:
@@ -34,3 +34,23 @@ Foundation phase. Adds the `Needs Clarification` status + the two new YAML/JSON 
 - [ ] #4 JSON-schema validators wired into existing test harness; existing tooling (Backlog.md task_edit, GitHub IssueTracker) accepts the new status without regression
 - [ ] #5 Pre-existing test suite stays green; new schema tests at 80%+ patch coverage
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+RFC-0011 Phase 1 schema foundation. Adds `Needs Clarification` lifecycle status to BOTH IssueTracker adapters (Backlog.md adds to default + project-config status set; GitHub uses `status:needs-clarification` label per RFC §9.1). Lands two new JSON schemas (`spec/schemas/dor-config.v1.schema.json` + `spec/schemas/refinement-verdict.v1.schema.json`) wired into the existing ajv harness. No evaluator logic — that's Phase 2a (115.2).
+
+## Verification
+- pnpm build && pnpm test (5104 vitest passes + 46/46 node tests) && pnpm lint && pnpm format:check — clean
+- validation.ts patch coverage 89.51% lines (above 80%)
+- 3 reviews APPROVED: code 0c/0M/4m/2s; test 0c/0M/1m/0s; security 0c/0M/0m/0s
+
+## Reviewer follow-ups (non-blocking, defer to Phase 2 or follow-up)
+- AnyResource union missing DorConfig (type-system inconsistency, not runtime bug)
+- dor-config schema doesn't require `metadata` field unlike sibling schemas (convention drift)
+- mapGitHubIssue marker-label overrides gh.state unconditionally — stale-closed issues surface as Needs Clarification
+- listIssues({status:'Needs Clarification'}) doesn't honor the filter
+- Phase 2: enforce closeAfterDays > warnAfterDays at runtime
+- Phase 2: resolve gatesSkipped/gatesRetained overlap precedence
+<!-- SECTION:FINAL_SUMMARY:END -->
