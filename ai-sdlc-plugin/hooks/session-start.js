@@ -152,6 +152,8 @@ Before EVERY commit, run these and fix any failures:
 3. \`pnpm lint\` — No lint errors
 4. \`pnpm format:check\` — Run \`pnpm format\` to fix
 
+AI-SDLC: \`.husky/pre-push\` runs \`pnpm -r test:coverage\` (80% threshold) as the canonical verification gate. Run the four commands above before \`git push\` to fail fast.
+
 **NEVER merge PRs. Only humans merge.**
 **NEVER close issues or PRs.**
 **NEVER force push.**${reviewPolicySummary}`;

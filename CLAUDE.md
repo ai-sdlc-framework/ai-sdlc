@@ -83,6 +83,7 @@ GitHub Actions silently skips ALL workflows for a push when ANY commit body cont
 ## Testing
 
 - Run `pnpm build && pnpm test && pnpm lint && pnpm format:check` before pushing.
+- **Canonical verification gate**: `.husky/pre-push` runs `scripts/check-coverage.sh`, which executes `pnpm -r test:coverage` workspace-wide and enforces the 80% codecov patch threshold. The pre-push hook is the authoritative boundary — fail-fast locally by running the full check chain above before `git push` so the gate is a no-op rather than a surprise. Skip with `AI_SDLC_SKIP_COVERAGE_GATE=1 git push` only when truly necessary. (AISDLC-108 deleted the per-turn `quality-gate-stop` Claude hook that previously duplicated this gate at the wrong layer — verification belongs on the git lifecycle, not every conversational turn.)
 - Hook scripts (`.js` in `ai-sdlc-plugin/hooks/`) are tested via Node built-in test runner (`.test.mjs`), not Vitest.
 - MCP server and orchestrator use Vitest.
 
