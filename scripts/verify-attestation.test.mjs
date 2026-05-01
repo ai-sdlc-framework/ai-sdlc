@@ -1883,3 +1883,146 @@ describe('runVerifier (AISDLC-101 — triple-hash with per-file-delta contentHas
     assert.equal(out.status, 'valid', `Phase-1 envelope must verify, got: ${out.reason}`);
   });
 });
+
+// ─── AISDLC-100.6 — pipelineVersion forensic logging (RFC-0012 Phase 6) ──
+//
+// The verifier reads `predicate.pipelineVersion` from the matched envelope
+// and emits a single info-level log line. It is NOT enforced — the verdict
+// stays `valid` regardless of which version (or no version) is present.
+// These tests exercise both shapes (with + without) end-to-end through
+// `runVerifier` against synthetic git fixtures, matching the rest of the
+// AISDLC-94/-101 hash-leg tests in this file.
+
+describe('runVerifier (AISDLC-100.6 — pipelineVersion forensic logging)', () => {
+  let fixture;
+  let keys;
+  /**
+   * Capture `console.log` for the duration of a `runVerifier` call. The
+   * verifier emits the pipelineVersion line via `console.log` (info-level,
+   * stdout) so a workflow log scrape can correlate envelopes with the
+   * pipeline-cli version that signed them. Returns `{ result, logs }`.
+   */
+  function withCapturedLogs(fn) {
+    const logs = [];
+    const origLog = console.log;
+    console.log = (...args) => {
+      logs.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' '));
+    };
+    try {
+      const result = fn();
+      return { result, logs };
+    } finally {
+      console.log = origLog;
+    }
+  }
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('logs pipelineVersion at info level when the envelope carries it (does NOT enforce)', () => {
+    // Sign an envelope that includes pipelineVersion. The verifier must
+    // still return `valid` AND emit an info-level log line surfacing the
+    // version. This is the AC #3 round-trip — the field flows producer →
+    // envelope → verifier log without ever being enforced.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+      { pipelineVersion: '0.1.0' },
+    );
+
+    const { result, logs } = withCapturedLogs(() =>
+      runVerifier({
+        headSha: fixture.headSha,
+        baseSha: fixture.baseSha,
+        repoRoot: fixture.root,
+      }),
+    );
+    assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
+    const matched = logs.find((l) => l.includes('[ai-sdlc/attestation] pipelineVersion:'));
+    assert.ok(matched, `expected pipelineVersion log line, got: ${logs.join('\n')}`);
+    assert.match(matched, /pipelineVersion: 0\.1\.0/);
+    // Critical: must NOT be a "missing" line.
+    assert.ok(
+      !matched.includes('<missing>'),
+      'present pipelineVersion must not log <missing> marker',
+    );
+  });
+
+  it('logs <missing> marker when the envelope omits pipelineVersion (legacy envelope)', () => {
+    // Sign a legacy-shape envelope (no pipelineVersion). Verifier still
+    // accepts AND surfaces the absence so an operator scanning logs can
+    // tell the difference between "old envelope without the field" and
+    // "shape error suppressed the line".
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+      // explicitly omit pipelineVersion
+    );
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.equal(
+      predicate.pipelineVersion,
+      undefined,
+      'legacy envelope must not carry pipelineVersion',
+    );
+
+    const { result, logs } = withCapturedLogs(() =>
+      runVerifier({
+        headSha: fixture.headSha,
+        baseSha: fixture.baseSha,
+        repoRoot: fixture.root,
+      }),
+    );
+    assert.equal(result.status, 'valid', `legacy envelope must verify, got: ${result.reason}`);
+    const matched = logs.find((l) => l.includes('[ai-sdlc/attestation] pipelineVersion:'));
+    assert.ok(
+      matched,
+      `expected pipelineVersion log line even for legacy, got: ${logs.join('\n')}`,
+    );
+    assert.match(matched, /<missing>/);
+    assert.match(matched, /legacy envelope/);
+  });
+
+  it('does NOT enforce a specific pipelineVersion value (forensic only)', () => {
+    // Whatever version the envelope claims, the verifier must accept the
+    // envelope as long as the signature + bindings are valid. This is
+    // the deliberate trade-off vs. `pluginVersion` (which IS enforced) —
+    // pipeline-cli is internal scaffolding and bumps shouldn't fail
+    // builds. We sign with an arbitrary semver string + verify accepts.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+      { pipelineVersion: '99.99.99-future' },
+    );
+
+    const { result } = withCapturedLogs(() =>
+      runVerifier({
+        headSha: fixture.headSha,
+        baseSha: fixture.baseSha,
+        repoRoot: fixture.root,
+      }),
+    );
+    assert.equal(
+      result.status,
+      'valid',
+      `pipelineVersion must NOT be enforced, got: ${result.reason}`,
+    );
+  });
+});

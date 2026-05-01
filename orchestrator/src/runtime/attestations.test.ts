@@ -1057,6 +1057,135 @@ describe('REQUIRED_REVIEWER_AGENT_IDS', () => {
   });
 });
 
+// ─── AISDLC-100.6 — pipelineVersion (RFC-0012 Phase 6) ───────────────
+//
+// `pipelineVersion` records which `@ai-sdlc/pipeline-cli` version produced
+// the envelope. Forensic / audit purpose only — the verifier surfaces it
+// in logs but does NOT enforce a specific version. Optional in v1 for
+// backward compat with envelopes signed before pipeline-cli existed.
+
+describe('buildPredicate with pipelineVersion (AISDLC-100.6)', () => {
+  it('omits pipelineVersion when not provided (legacy / pre-Phase-6 callers)', () => {
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    expect(predicate.pipelineVersion).toBeUndefined();
+  });
+
+  it('includes pipelineVersion when provided', () => {
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, pipelineVersion: '0.1.0' });
+    expect(predicate.pipelineVersion).toBe('0.1.0');
+  });
+
+  it('includes pipelineVersion with prerelease tag (semver shape)', () => {
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, pipelineVersion: '0.2.0-rc.3' });
+    expect(predicate.pipelineVersion).toBe('0.2.0-rc.3');
+  });
+
+  it('omits pipelineVersion when caller passes undefined or empty string', () => {
+    // Intentional design: `null`-ish callers (e.g. environments without
+    // pipeline-cli installed) MUST NOT produce a malformed envelope.
+    const undef = buildPredicate({ ...DEFAULT_INPUTS, pipelineVersion: undefined });
+    expect(undef.pipelineVersion).toBeUndefined();
+    const empty = buildPredicate({ ...DEFAULT_INPUTS, pipelineVersion: '' });
+    expect(empty.pipelineVersion).toBeUndefined();
+  });
+});
+
+describe('validatePredicateShape with pipelineVersion (AISDLC-100.6)', () => {
+  function withPipelineVersion(version: string | undefined): AttestationPredicate {
+    const p = buildPredicate(DEFAULT_INPUTS);
+    if (version === undefined) {
+      delete (p as Partial<AttestationPredicate>).pipelineVersion;
+    } else {
+      p.pipelineVersion = version;
+    }
+    return p;
+  }
+
+  it('accepts a v1 predicate with pipelineVersion absent (legacy v1 envelope)', () => {
+    expect(validatePredicateShape(withPipelineVersion(undefined))).toBeNull();
+  });
+
+  it('accepts a v1 predicate with semver pipelineVersion present', () => {
+    expect(validatePredicateShape(withPipelineVersion('0.1.0'))).toBeNull();
+  });
+
+  it('accepts pipelineVersion with prerelease suffix', () => {
+    expect(validatePredicateShape(withPipelineVersion('1.2.3-rc.4'))).toBeNull();
+    expect(validatePredicateShape(withPipelineVersion('0.0.1-alpha.1'))).toBeNull();
+  });
+
+  it('rejects pipelineVersion with non-semver shape', () => {
+    expect(validatePredicateShape(withPipelineVersion('v0.1.0'))).toMatch(
+      /pipelineVersion does not match pattern/,
+    );
+    expect(validatePredicateShape(withPipelineVersion('0.1'))).toMatch(
+      /pipelineVersion does not match pattern/,
+    );
+    expect(validatePredicateShape(withPipelineVersion('not-a-version'))).toMatch(
+      /pipelineVersion does not match pattern/,
+    );
+  });
+
+  it('rejects pipelineVersion with embedded CRLF (downstream injection vector)', () => {
+    const reason = validatePredicateShape(withPipelineVersion('0.1.0\nstatus=valid'));
+    expect(reason).toMatch(/pipelineVersion does not match pattern/);
+    // Critical: the malicious value must NOT appear in the reason string.
+    expect(reason).not.toContain('status=valid');
+    expect(reason).not.toMatch(/[\r\n]/);
+  });
+
+  it('rejects pipelineVersion that is not a string', () => {
+    const p: Record<string, unknown> = {
+      ...buildPredicate(DEFAULT_INPUTS),
+      pipelineVersion: 12345,
+    };
+    expect(validatePredicateShape(p)).toMatch(/pipelineVersion does not match pattern/);
+  });
+
+  it('rejects empty-string pipelineVersion when present (callers must omit instead)', () => {
+    // `buildPredicate` itself omits the field on empty input, but a
+    // hand-crafted envelope could still ship `pipelineVersion: ''`. The
+    // validator must reject it so producers don't accidentally publish
+    // unenforceable empty values.
+    const p = withPipelineVersion('');
+    expect(validatePredicateShape(p)).toMatch(/pipelineVersion does not match pattern/);
+  });
+});
+
+describe('verifyAttestation with pipelineVersion (AISDLC-100.6)', () => {
+  it('round-trips a signed envelope carrying pipelineVersion', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, pipelineVersion: '0.1.0' });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: buildExpected(predicate),
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      // Field round-trips through DSSE encoding intact.
+      expect(result.predicate.pipelineVersion).toBe('0.1.0');
+    }
+  });
+
+  it('still verifies legacy envelopes that omit pipelineVersion', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    expect(predicate.pipelineVersion).toBeUndefined();
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: buildExpected(predicate),
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.predicate.pipelineVersion).toBeUndefined();
+    }
+  });
+});
+
 // ─── AISDLC-101 — per-file-delta contentHashV3 (Phase 2 triple-hash) ──
 //
 // `contentHashV3` is the third leg of the AISDLC-94 dual-hash → AISDLC-101

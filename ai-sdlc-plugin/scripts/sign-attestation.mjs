@@ -210,12 +210,34 @@ async function main() {
   );
   const pluginVersion = pluginManifest.version ?? 'unknown';
 
+  // AISDLC-100.6 (RFC-0012 Phase 6): read `@ai-sdlc/pipeline-cli` version
+  // from its `package.json` and include in the predicate. Forensic / audit
+  // purpose only — the verifier logs but does NOT enforce a specific
+  // pipeline-cli version. Resolution: sibling workspace package at
+  // `<repoRoot>/pipeline-cli/package.json`. If the file is missing OR
+  // unparseable OR has no `version` field, fall back to `null` so the
+  // predicate omits the field rather than carrying a bogus value.
+  let pipelineVersion = null;
+  try {
+    const pipelinePkgPath = join(repoRoot, 'pipeline-cli', 'package.json');
+    if (existsSync(pipelinePkgPath)) {
+      const pipelinePkg = JSON.parse(readFileSync(pipelinePkgPath, 'utf-8'));
+      if (typeof pipelinePkg.version === 'string' && pipelinePkg.version.length > 0) {
+        pipelineVersion = pipelinePkg.version;
+      }
+    }
+  } catch {
+    // Malformed package.json — leave pipelineVersion null so we omit the
+    // field rather than embedding a bad value.
+  }
+
   const predicate = buildPredicate({
     commitSha: headSha,
     diff,
     policy,
     reviewers,
     pluginVersion,
+    pipelineVersion: pipelineVersion ?? undefined,
     iterationCount,
     harnessNote,
     changedFiles,
