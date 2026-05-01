@@ -11,10 +11,17 @@ name: Auto-enable auto-merge on PR open
 # External (fork) PRs are excluded by the head-repo guard — they still
 # require manual approval before any merge can happen, which is correct
 # (drive-by malicious PRs shouldn't be granted auto-merge automatically).
+#
+# Trigger types include `synchronize` and `reopened` so force-pushes during
+# the AI-SDLC pipeline (rebase onto main, attestation re-sign, conflict
+# resolution) self-heal — every push that GitHub silently dismisses
+# auto-merge from re-fires this workflow which re-enables it. `gh pr merge
+# --auto` is idempotent (verified empirically: exit 0 + no error when
+# auto-merge is already enabled), so no extra guard is needed (AISDLC-130).
 
 on:
   pull_request:
-    types: [opened]
+    types: [opened, synchronize, reopened]
 
 permissions:
   pull-requests: write

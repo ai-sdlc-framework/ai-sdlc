@@ -80,6 +80,12 @@ GitHub Actions silently skips ALL workflows for a push when ANY commit body cont
 - **Never force push to main/master.**
 - Dismiss stale reviews with a documented reason when they are false positives (truncated JSON, API errors).
 
+### Auto-merge (`auto-enable-auto-merge.yml`) (AISDLC-130)
+
+The `auto-enable-auto-merge.yml` workflow enables GitHub's auto-merge on every PR opened from a same-repo branch (fork PRs intentionally excluded). It re-fires on `synchronize` (force-push) + `reopened` events so force-pushes during the AI-SDLC pipeline (rebase onto main, attestation re-sign, conflict resolution) don't strand auto-merge — GitHub auto-recovers within seconds of the push. `gh pr merge --auto --rebase` is naturally idempotent (verified empirically: exit 0 + no error when auto-merge is already enabled), so the workflow body needs no extra guard.
+
+**Policy distinction**: setting `--auto` is NOT merging. The orchestrator setting the flag is allowed; the actual merge actor is GitHub once required checks pass + bot approval is valid. The "Never merge PRs" rule above applies to clicking the merge button or running `gh pr merge` WITHOUT `--auto` — i.e. taking the merge action immediately. Setting `--auto` only declares intent; GitHub still waits for required checks and reviews before performing the merge.
+
 ## Testing
 
 - Run `pnpm build && pnpm test && pnpm lint && pnpm format:check` before pushing.
