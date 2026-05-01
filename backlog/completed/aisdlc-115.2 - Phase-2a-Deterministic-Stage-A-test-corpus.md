@@ -1,7 +1,7 @@
 ---
 id: AISDLC-115.2
 title: 'Phase 2a: Deterministic Stage A + test corpus'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-01 16:25'
 labels:
@@ -37,3 +37,26 @@ Deterministic Stage A: regex / structural / link-check evaluators that catch ~40
 - [ ] #6 Stage A ships standalone — issues passing Stage A are admitted as `ready` until Phase 2b lands the LLM Stage B
 - [ ] #7 New code reaches 80%+ patch coverage
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+RFC-0011 Phase 2a: 7-gate deterministic Stage A evaluator + 76-fixture test corpus + 3-resolver registry + 2 CLI subcommands (dor-evaluate, dor-corpus). Stage A runs <1ms per fixture (well under 100ms budget). Gates 4 (scope) + 6 (done-state) pure Stage B per RFC §4.4 — return verdict:'skip' with soft heuristic findings; corpus fixtures document Stage B expectation.
+
+## Verification
+- pipeline-cli 404/404 tests pass; coverage 87.56%/100%/75% on dor module (above 80% target)
+- pnpm build && pnpm test && pnpm lint && pnpm format:check clean
+- 3 reviews APPROVED: code 0c/0M/4m/0s; test 0c/0M/2m/0s; security 0c/0M/2m/0s
+
+## Follow-ups (filed)
+- AISDLC-121: SSRF — url-head resolver should block private IPs
+- AISDLC-122: Path traversal — file-existence resolver should reject `..` segments
+
+## Other reviewer minors (defer to Phase 2b or follow-up)
+- --quiet option declared but unused in dor-corpus handler
+- Hermetic mode honors user-supplied resolvers (could break contract)
+- Single AbortController shared across HEAD+GET fallback in url-head
+- url-head test gated by `!globalThis.fetch` is dead code on Node 18+
+- No CLI integration test for dor-corpus subcommand
+<!-- SECTION:FINAL_SUMMARY:END -->
