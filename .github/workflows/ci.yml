@@ -75,7 +75,12 @@ jobs:
         # is invoked). `npx` (without --no-install) downloads it on
         # demand; the package is small (~few hundred KB) so the cold
         # fetch is acceptable for this gate.
-        run: npx backlog-drift check
+        #
+        # Pinned to 0.1.3 — first version with the URL-fragment fix
+        # (refs like `spec/rfc.md#section` no longer false-positive as
+        # missing files). Pre-0.1.3 produced ~70% noise on our backlog.
+        # See docs/upstream-bug-reports/backlog-drift-url-fragment-false-positive.md
+        run: npx backlog-drift@0.1.3 check
 
   build-and-test:
     name: Build & Test (Node ${{ matrix.node-version }})
