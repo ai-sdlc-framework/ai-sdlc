@@ -1,6 +1,6 @@
 project_name: 'ai-sdlc-workspace'
 default_status: 'To Do'
-statuses: ['To Do', 'In Progress', 'Done']
+statuses: ['Draft', 'Needs Clarification', 'To Do', 'In Progress', 'Done']
 labels: []
 date_format: yyyy-mm-dd
 max_column_width: 20

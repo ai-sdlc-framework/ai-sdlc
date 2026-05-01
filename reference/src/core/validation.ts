@@ -32,7 +32,19 @@ const SCHEMA_FILES: Record<ResourceKind, string> = {
   AdapterBinding: 'adapter-binding.schema.json',
   DesignSystemBinding: 'design-system-binding.schema.json',
   DesignIntentDocument: 'design-intent-document.schema.json',
+  DorConfig: 'dor-config.v1.schema.json',
 };
+
+/**
+ * Schemas that are NOT top-level resources (no apiVersion/kind/metadata
+ * envelope) but still need ad-hoc validation. RFC-0011 §9.2 verdicts
+ * fall here — one per evaluation, written to the calibration log.
+ */
+const ARTIFACT_SCHEMA_FILES = {
+  RefinementVerdict: 'refinement-verdict.v1.schema.json',
+} as const;
+
+export type ArtifactKind = keyof typeof ARTIFACT_SCHEMA_FILES;
 
 type AjvInstance = InstanceType<typeof Ajv2020>;
 type ValidatorFn = ReturnType<AjvInstance['compile']>;
@@ -67,6 +79,25 @@ function getValidator(kind: ResourceKind): ValidatorFn {
     }
     validator = getAjv().compile(schema);
     validators.set(kind, validator);
+  }
+  return validator;
+}
+
+const artifactValidators = new Map<ArtifactKind, ValidatorFn>();
+
+function getArtifactValidator(kind: ArtifactKind): ValidatorFn {
+  let validator = artifactValidators.get(kind);
+  if (!validator) {
+    const schemaFile = ARTIFACT_SCHEMA_FILES[kind];
+    if (!schemaFile) {
+      throw new Error(`Unknown artifact kind: ${kind}`);
+    }
+    const schema = SCHEMAS[schemaFile];
+    if (!schema) {
+      throw new Error(`Schema not found for: ${schemaFile}`);
+    }
+    validator = getAjv().compile(schema);
+    artifactValidators.set(kind, validator);
   }
   return validator;
 }
@@ -145,6 +176,33 @@ export function validate<T extends AnyResource = AnyResource>(
   const errors = formatValidationErrors(validator.errors ?? []);
 
   return { valid: false, errors };
+}
+
+/**
+ * Validate an artifact (non-resource document such as a RefinementVerdict)
+ * against its JSON Schema. Artifacts have no apiVersion/kind/metadata
+ * envelope so there is no inference path — callers MUST pass the kind.
+ */
+export function validateArtifact<T = unknown>(
+  kind: ArtifactKind,
+  data: unknown,
+): ValidationResult<T> {
+  const validator = getArtifactValidator(kind);
+  const valid = validator(data);
+
+  if (valid) {
+    return { valid: true, data: data as T };
+  }
+
+  const errors = formatValidationErrors(validator.errors ?? []);
+  return { valid: false, errors };
+}
+
+/**
+ * Convenience wrapper for the RFC-0011 §9.2 RefinementVerdict shape.
+ */
+export function validateRefinementVerdict<T = unknown>(data: unknown): ValidationResult<T> {
+  return validateArtifact<T>('RefinementVerdict', data);
 }
 
 /**

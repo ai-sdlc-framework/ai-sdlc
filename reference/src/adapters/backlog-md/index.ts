@@ -150,13 +150,22 @@ async function findTaskFile(
 async function loadConfig(fs: BacklogFs, backlogDir: string): Promise<BacklogConfig> {
   const configPath = `${backlogDir}/config.yml`;
   if (!(await fs.exists(configPath))) {
-    return { task_prefix: 'TASK', statuses: ['To Do', 'In Progress', 'Done'] };
+    return {
+      task_prefix: 'TASK',
+      statuses: ['Draft', 'Needs Clarification', 'To Do', 'In Progress', 'Done'],
+    };
   }
   const content = await fs.readFile(configPath);
   const parsed = parseYaml(content) as Record<string, unknown>;
   return {
     task_prefix: (parsed.task_prefix as string) ?? 'TASK',
-    statuses: (parsed.statuses as string[]) ?? ['To Do', 'In Progress', 'Done'],
+    statuses: (parsed.statuses as string[]) ?? [
+      'Draft',
+      'Needs Clarification',
+      'To Do',
+      'In Progress',
+      'Done',
+    ],
   };
 }
 
