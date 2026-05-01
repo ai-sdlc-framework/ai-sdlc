@@ -124,54 +124,6 @@ function git(args, cwd) {
 }
 
 /**
- * Collect the changed-file set for `contentHash` (AISDLC-94). Mirrors the
- * helper in `ai-sdlc-plugin/scripts/sign-attestation.mjs`. See its docstring
- * for the algorithm. We re-implement here rather than importing because the
- * two scripts must run independently — the local script doesn't import from
- * `scripts/` and the CI script doesn't import from `ai-sdlc-plugin/`.
- */
-function collectChangedFileEntries(baseRef, headRef, repoRoot) {
-  let nameOnly;
-  try {
-    nameOnly = execFileSync(
-      'git',
-      [
-        '-c',
-        'core.quotepath=false',
-        'diff',
-        '--name-only',
-        '--no-renames',
-        `${baseRef}...${headRef}`,
-      ],
-      { cwd: repoRoot, env: cleanGitEnv(), encoding: 'utf-8', maxBuffer: 64 * 1024 * 1024 },
-    );
-  } catch (err) {
-    fail(`failed to enumerate changed files via git diff: ${err.message ?? err}`);
-  }
-  const paths = nameOnly.split('\n').filter((p) => p.length > 0);
-  const entries = [];
-  for (const path of paths) {
-    let blobSha = '';
-    try {
-      const lsOut = execFileSync(
-        'git',
-        ['-c', 'core.quotepath=false', 'ls-tree', '-r', headRef, '--', path],
-        { cwd: repoRoot, env: cleanGitEnv(), encoding: 'utf-8', maxBuffer: 16 * 1024 * 1024 },
-      );
-      const line = lsOut.split('\n').find((l) => l.length > 0);
-      if (line) {
-        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
-        if (m) blobSha = m[1];
-      }
-    } catch {
-      // ls-tree failed (path missing) → treat as deleted.
-    }
-    entries.push({ path, blobSha });
-  }
-  return entries;
-}
-
-/**
  * Map the CI workflow's reviewer-type labels (testing / critic / security) to
  * the canonical agentIds the verifier expects in
  * `REQUIRED_REVIEWER_AGENT_IDS`. Accepts canonical IDs as-is. Exported for
@@ -308,7 +260,9 @@ async function main() {
       `${orchestratorBarrel} not found. Run \`pnpm --filter "@ai-sdlc/orchestrator..." build\` first.`,
     );
   }
-  const { buildPredicate, signAttestation } = await import(orchestratorBarrel);
+  const { buildPredicate, signAttestation, collectChangedFileEntries } = await import(
+    orchestratorBarrel
+  );
 
   // ── Short-circuit: skip when a valid attestation already exists ─────
   // AC #8: contributor PR with valid local attestation → CI does NOT
@@ -336,7 +290,12 @@ async function main() {
   // ── Gather inputs ────────────────────────────────────────────────────
   const diff = git(['diff', `${baseSha}...${headSha}`], repoRoot);
   // AISDLC-94: also collect changed-file blob SHAs for `contentHash`.
-  const changedFiles = collectChangedFileEntries(baseSha, headSha, repoRoot);
+  let changedFiles;
+  try {
+    changedFiles = collectChangedFileEntries(baseSha, headSha, repoRoot);
+  } catch (err) {
+    fail(err.message ?? String(err));
+  }
   const policyPath = join(repoRoot, '.ai-sdlc', 'review-policy.md');
   if (!existsSync(policyPath)) fail(`review policy not found: ${policyPath}`);
   const policy = readFileSync(policyPath, 'utf-8');

@@ -17,6 +17,7 @@ import {
   ACCEPTED_SCHEMA_VERSIONS,
   REQUIRED_REVIEWER_AGENT_IDS,
   buildPredicate,
+  collectChangedFileEntries,
   computeContentHash,
   generateSigningKeyPair,
   paeEncode,
@@ -791,6 +792,101 @@ describe('computeContentHash (AISDLC-94)', () => {
     expect(() =>
       computeContentHash([{ path: 'src/x.ts', blobSha: undefined as unknown as string }]),
     ).toThrow(/blobSha must be a string/);
+  });
+
+  it('rejects path entries containing tab to keep canonical encoding injective', () => {
+    // Without rejection, a single entry `{ path: 'a\tB1\nb', blobSha: 'B2' }`
+    // would collide with the two-entry set `[{ a, B1 }, { b, B2 }]` because
+    // the canonical encoding `<path>\t<sha>\n` is not injective when paths
+    // can contain its delimiters. The rejection closes that gap.
+    expect(() =>
+      computeContentHash([{ path: 'src/with\ttab.ts', blobSha: 'a'.repeat(40) }]),
+    ).toThrow(/path must not contain tab or newline/);
+  });
+
+  it('rejects path entries containing newline to keep canonical encoding injective', () => {
+    expect(() =>
+      computeContentHash([{ path: 'src/with\nnewline.ts', blobSha: 'a'.repeat(40) }]),
+    ).toThrow(/path must not contain tab or newline/);
+  });
+});
+
+describe('collectChangedFileEntries (AISDLC-94)', () => {
+  // We pass a stub `runGit` so the test doesn't require a real worktree.
+  // The stub mirrors the real git CLI's output shapes:
+  //   diff --name-only     → newline-separated paths
+  //   ls-tree -r <ref> --  → `<mode> blob <sha>\t<path>`
+  function makeRunGit(
+    nameOnly: string,
+    blobByPath: Record<string, string>,
+  ): (args: string[], cwd: string) => string {
+    return (args: string[]): string => {
+      const cmd = args[args.indexOf('-c') + 2] ?? args[0]; // skip core.quotepath flag
+      if (cmd === 'diff') return nameOnly;
+      if (cmd === 'ls-tree') {
+        // The path is the last positional after `--`.
+        const dashDashIdx = args.indexOf('--');
+        const path = args[dashDashIdx + 1];
+        const blob = blobByPath[path];
+        if (!blob) return '';
+        return `100644 blob ${blob}\t${path}\n`;
+      }
+      throw new Error(`stub runGit: unexpected command ${cmd}`);
+    };
+  }
+
+  it('returns one entry per changed file with its post-apply blob SHA', () => {
+    const entries = collectChangedFileEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: makeRunGit('src/a.ts\nsrc/b.ts\n', {
+        'src/a.ts': 'a'.repeat(40),
+        'src/b.ts': 'b'.repeat(40),
+      }),
+    });
+    expect(entries).toEqual([
+      { path: 'src/a.ts', blobSha: 'a'.repeat(40) },
+      { path: 'src/b.ts', blobSha: 'b'.repeat(40) },
+    ]);
+  });
+
+  it('treats files missing at headRef as deleted (empty blobSha)', () => {
+    // ls-tree returns blank for the deleted file → blobSha stays ''.
+    const entries = collectChangedFileEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: makeRunGit('src/kept.ts\nsrc/deleted.ts\n', {
+        'src/kept.ts': 'a'.repeat(40),
+        // no entry for src/deleted.ts → stub returns ''
+      }),
+    });
+    expect(entries).toEqual([
+      { path: 'src/kept.ts', blobSha: 'a'.repeat(40) },
+      { path: 'src/deleted.ts', blobSha: '' },
+    ]);
+  });
+
+  it('rejects diff output containing tab in a path (defense in depth)', () => {
+    // The stub returns a path with a literal `\t` in it. Without rejection
+    // here, the entry would later defeat computeContentHash's injectivity.
+    expect(() =>
+      collectChangedFileEntries('origin/main', 'HEAD', '/tmp/repo', {
+        runGit: makeRunGit('src/with\ttab.ts\n', { 'src/with\ttab.ts': 'a'.repeat(40) }),
+      }),
+    ).toThrow(/path must not contain tab or newline/);
+  });
+
+  it('returns an empty array for a no-op diff', () => {
+    const entries = collectChangedFileEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: makeRunGit('', {}),
+    });
+    expect(entries).toEqual([]);
+  });
+
+  it('wraps diff failures with a clear error message', () => {
+    expect(() =>
+      collectChangedFileEntries('origin/main', 'HEAD', '/tmp/repo', {
+        runGit: () => {
+          throw new Error('fatal: bad revision');
+        },
+      }),
+    ).toThrow(/git diff --name-only failed: fatal: bad revision/);
   });
 });
 

@@ -33,6 +33,9 @@
  */
 
 import { createHash, generateKeyPairSync, sign, verify } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+
+import { cleanGitEnv } from './git-env.js';
 
 /**
  * The currently-accepted predicate schema versions. CI rejects any envelope
@@ -425,6 +428,19 @@ export function computeContentHash(entries: ChangedFileEntry[]): string {
     if (typeof e.blobSha !== 'string') {
       throw new Error(`computeContentHash: entry blobSha must be a string for path ${e.path}`);
     }
+    // Reject path entries containing the canonical-encoding delimiters
+    // (\t between path and sha, \n between lines). Without this, a
+    // single entry `{ path: 'a\tB1\nb', blobSha: 'B2' }` and the
+    // two-entry set `[{ a, B1 }, { b, B2 }]` produce the same canonical
+    // string and therefore the same hash — defeating the binding. Git's
+    // default config already disallows \n in tracked filenames on most
+    // platforms; we defend in depth here so the hash itself is injective
+    // regardless of what the caller hands us.
+    if (e.path.includes('\t') || e.path.includes('\n')) {
+      throw new Error(
+        `computeContentHash: entry path must not contain tab or newline characters (got ${JSON.stringify(e.path)})`,
+      );
+    }
     // Normalize: forward-slashes (git already emits forward-slashes
     // regardless of platform but be defensive), lowercase blob SHA.
     const normalizedPath = e.path.replace(/\\/g, '/');
@@ -433,6 +449,111 @@ export function computeContentHash(entries: ChangedFileEntry[]): string {
   const sorted = [...byPath.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   const canonical = sorted.map(([path, sha]) => `${path}\t${sha}\n`).join('');
   return sha256Hex(canonical);
+}
+
+/**
+ * Optional injection points for `collectChangedFileEntries`. Defaults are
+ * production behaviour; tests pass synthetic `runGit` to avoid spawning git.
+ */
+export interface CollectChangedFileEntriesOptions {
+  /**
+   * Run `git <args>` in `cwd` and return stdout (utf-8). Defaults to
+   * `execFileSync` with the git-context env scrubbed (see `cleanGitEnv`).
+   * Tests pass a stub so they don't depend on a real worktree.
+   */
+  runGit?: (args: string[], cwd: string) => string;
+}
+
+/**
+ * Collect the changed-file set used to compute `contentHash` (AISDLC-94).
+ *
+ * Returns one `{ path, blobSha }` entry per file in
+ * `git diff --name-only <baseRef>...<headRef>` with the blob SHA from
+ * `git ls-tree -r <headRef> -- <path>`. Deleted files get an empty
+ * `blobSha` (the path still appears so the canonical encoding distinguishes
+ * "deleted" from "kept").
+ *
+ * `--no-renames` so a rename shows up as add+delete (= two entries) — that
+ * way a rebase that resolved a conflict by renaming differently produces a
+ * different hash. `-c core.quotepath=false` mirrors the verifier's git
+ * helper so unicode paths come back as raw UTF-8.
+ *
+ * Path entries containing `\t` or `\n` are rejected to keep the canonical
+ * encoding injective (mirrors the rejection in `computeContentHash`). Such
+ * paths are exceedingly rare in practice — git's default config disallows
+ * `\n` in tracked filenames on most platforms — but we defend in depth so
+ * malicious or pathological inputs can't smuggle entries past the binding.
+ *
+ * Extracted from the previously-duplicated helpers in
+ * `ai-sdlc-plugin/scripts/sign-attestation.mjs` and
+ * `scripts/ci-sign-attestation.mjs` so a single source of truth applies the
+ * same parsing + validation to every signing site.
+ */
+export function collectChangedFileEntries(
+  baseRef: string,
+  headRef: string,
+  repoRoot: string,
+  options: CollectChangedFileEntriesOptions = {},
+): ChangedFileEntry[] {
+  const runGit =
+    options.runGit ??
+    ((args: string[], cwd: string): string =>
+      execFileSync('git', args, {
+        cwd,
+        env: cleanGitEnv(),
+        encoding: 'utf-8',
+        maxBuffer: 64 * 1024 * 1024,
+      }));
+
+  let nameOnly: string;
+  try {
+    nameOnly = runGit(
+      [
+        '-c',
+        'core.quotepath=false',
+        'diff',
+        '--name-only',
+        '--no-renames',
+        `${baseRef}...${headRef}`,
+      ],
+      repoRoot,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`collectChangedFileEntries: git diff --name-only failed: ${msg}`);
+  }
+
+  const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+  const entries: ChangedFileEntry[] = [];
+  for (const path of paths) {
+    // Reject delimiters here too so the error surfaces at the enumeration
+    // site (cleaner than failing later inside computeContentHash).
+    if (path.includes('\t') || path.includes('\n')) {
+      throw new Error(
+        `collectChangedFileEntries: path must not contain tab or newline characters (got ${JSON.stringify(path)})`,
+      );
+    }
+    // `git ls-tree -r <ref> -- <path>` returns blank when the path doesn't
+    // exist at <ref> (= deleted file). Empty blobSha is then used as the
+    // marker — see computeContentHash for canonical encoding.
+    let blobSha = '';
+    try {
+      const lsOut = runGit(
+        ['-c', 'core.quotepath=false', 'ls-tree', '-r', headRef, '--', path],
+        repoRoot,
+      );
+      // ls-tree output: `<mode> <type> <sha>\t<path>` (one line per file).
+      const line = lsOut.split('\n').find((l) => l.length > 0);
+      if (line) {
+        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+        if (m) blobSha = m[1];
+      }
+    } catch {
+      // ls-tree failed (path missing) → treat as deleted, leave blobSha=''.
+    }
+    entries.push({ path, blobSha });
+  }
+  return entries;
 }
 
 /**

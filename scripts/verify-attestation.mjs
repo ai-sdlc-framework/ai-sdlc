@@ -625,13 +625,15 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     };
   }
 
-  // Per-envelope: try to resolve a subject SHA whose recomputed diff matches
-  // `predicate.diffHash`. If we find one, the envelope is content-matched
-  // (modulo policy / agents / plugin version / schema, which are checked
-  // by `predicateMatchReason` using the envelope's own diffHash as the
-  // expected value — they line up by construction once we've matched).
-  // If we can't resolve a subject SHA, the envelope's diff doesn't
-  // correspond to anything reachable from PR HEAD → diffHash mismatch.
+  // Per-envelope: try to resolve a subject SHA whose recomputed bindings
+  // match the envelope. AISDLC-94 dual-hash mode tries BOTH the legacy
+  // diffHash leg AND the rebase-tolerant contentHash leg at every candidate
+  // — a positive match on either is enough. If we find one, the envelope
+  // is content-matched (modulo policy / agents / plugin version / schema,
+  // which are checked by `predicateMatchReason` using the envelope's own
+  // hashes as the expected values — they line up by construction once
+  // we've matched). If we can't resolve a subject SHA, neither hash
+  // corresponds to anything reachable from PR HEAD → mismatch.
   const matched = []; // { entry, subjectSha, source }
   const mismatches = []; // { entry, reason }
   for (const entry of all) {
