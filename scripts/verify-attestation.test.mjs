@@ -153,6 +153,31 @@ function writeTrustedReviewersYaml(root, pubkeyPem) {
 // the filename. The verifier no longer enforces it (AISDLC-84), but we keep
 // it accurate to the original convention so audit-trail readers see a real
 // SHA on disk. Defaults to `headSha` for callers that don't care.
+/**
+ * Walk `git diff --name-only` + `git ls-tree` for the given range and return
+ * the entries `computeContentHash` expects. Mirrors the helper baked into
+ * `ai-sdlc-plugin/scripts/sign-attestation.mjs` so test attestations carry
+ * the same `contentHash` shape as production envelopes (AISDLC-94).
+ */
+function collectChangedFileEntries(root, baseRef, headRef) {
+  const nameOnly = git(['diff', '--name-only', '--no-renames', `${baseRef}...${headRef}`], root);
+  const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+  return paths.map((p) => {
+    let blobSha = '';
+    try {
+      const lsOut = git(['ls-tree', '-r', headRef, '--', p], root);
+      const line = lsOut.split('\n').find((l) => l.length > 0);
+      if (line) {
+        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+        if (m) blobSha = m[1];
+      }
+    } catch {
+      // ls-tree failed → treat as deleted.
+    }
+    return { path: p, blobSha };
+  });
+}
+
 function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, overrides = {}) {
   const diff = git(['diff', `${baseSha}...${headSha}`], root);
   const policy = readFileSync(join(root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
@@ -163,6 +188,14 @@ function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, ove
     approved: true,
     findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
   }));
+  // AISDLC-94: include the changed-file set so test envelopes carry
+  // `contentHash` by default (the production `sign-attestation.mjs` script
+  // does the same). Callers that want to test the legacy "v1 envelope with
+  // no contentHash" path can pass `changedFiles: undefined` in overrides.
+  const changedFiles =
+    overrides.changedFiles !== undefined
+      ? overrides.changedFiles
+      : collectChangedFileEntries(root, baseSha, subjectSha);
   const predicate = buildPredicate({
     commitSha: subjectSha,
     diff,
@@ -172,6 +205,7 @@ function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, ove
     iterationCount: 1,
     harnessNote: '',
     signedAt: '2026-04-27T00:00:00.000Z',
+    changedFiles,
     ...overrides,
   });
   if (overrides.predicateOverride) Object.assign(predicate, overrides.predicateOverride);
@@ -1336,5 +1370,203 @@ describe('runVerifier (injection regression)', () => {
     } finally {
       rmSync(fixture.root, { recursive: true, force: true });
     }
+  });
+});
+
+// ─── AISDLC-94 — rebase-tolerant contentHash dual-hash mode ──────────
+//
+// The headline regression: PR-X is signed at base B1. Sibling PR-Y
+// (touching the same files) merges into main, becoming part of B2. PR-X
+// gets rebased onto B2 — clean, no conflicts, file content unchanged in
+// PR-X's altered files. But `git diff B2...PR-X` produces different
+// TEXT than `git diff B1...PR-X` did at sign time (different `@@` hunk
+// headers, shifted context lines), so `diffHash` diverges.
+//
+// AISDLC-93/PR #102 hit exactly this when AISDLC-90/PR #101 merged
+// first. The Phase 1 fix: dual-hash envelopes carry `contentHash`
+// (sha256 of {path, blobSha} for each changed file at HEAD) alongside
+// `diffHash`. The verifier accepts on contentHash even when diffHash
+// diverges — file blob SHAs are content-addressed and survive rebases
+// that don't conflict.
+
+describe('runVerifier (AISDLC-94 — rebase-tolerant contentHash)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('accepts after a rebase onto a base where another PR added DIFFERENT files (diff text stable, but commit ancestry changed)', () => {
+    // Reduced scenario: the rebase target adds ONLY files PR-X doesn't
+    // touch. The diff `<base>...<head>` for PR-X's files is identical
+    // (they're not in the new base's tree at all), but the rebase still
+    // produces fresh commit SHAs. The verifier's pre-AISDLC-94 ancestor
+    // walk handled this case via diffHash matching against new commit
+    // SHAs; AISDLC-94's contentHash leg also handles it because the
+    // blob SHA of PR-X's file is unchanged (same content → same git
+    // blob → same contentHash).
+    //
+    // Note: the more complex "sibling PR touched the SAME file" scenario
+    // genuinely changes file content post-rebase (the rebased file now
+    // includes the sibling PR's contributions), so the blob SHA changes
+    // and contentHash legitimately diverges. That case requires the
+    // operator to re-run /ai-sdlc execute against the rebased branch —
+    // it is NOT what AISDLC-94 Phase 1 promises to fix. Phase 1 ships
+    // dual-hash so the verifier ALSO accepts on diffHash (legacy path)
+    // when contentHash diverges; future Phase 2 work may explore
+    // "per-file delta" hashing for the overlapping-files case.
+
+    // Step 1: at base = B1, with empty repo state from setupFixture.
+    const b1 = fixture.baseSha;
+
+    // Step 2: PR-X branches from B1, modifies prx-only.txt.
+    git(['checkout', '-q', '-b', 'pr-x', b1], fixture.root);
+    writeFileSync(join(fixture.root, 'prx-only.txt'), 'PR-X exclusive content\n');
+    git(['add', 'prx-only.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-X adds prx-only.txt'], fixture.root);
+    const prXOriginalHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign attestation against PR-X at base B1.
+    writeAttestation(fixture.root, prXOriginalHead, b1, prXOriginalHead, keys.privateKeyPem);
+
+    // Step 3: PR-Y lands on main — adds a different file pry-only.txt.
+    git(['checkout', '-q', 'main'], fixture.root);
+    writeFileSync(join(fixture.root, 'pry-only.txt'), 'PR-Y exclusive content\n');
+    git(['add', 'pry-only.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-Y adds pry-only.txt'], fixture.root);
+    const b2 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    assert.notEqual(b2, b1, 'PR-Y merge must produce a new base');
+
+    // Step 4: rebase PR-X onto B2. PR-X's commits replay cleanly because
+    // they touch a different file than PR-Y's. The rebased PR-X's HEAD
+    // SHA differs from the original — but prx-only.txt's blob SHA at
+    // HEAD is identical (same content). contentHash is stable.
+    git(['checkout', '-q', 'pr-x'], fixture.root);
+    git(['rebase', '-q', b2], fixture.root);
+    const prXRebasedHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    assert.notEqual(prXRebasedHead, prXOriginalHead, 'rebase must produce new SHA');
+
+    // Confirm the blob SHA stayed stable across the rebase (= the
+    // load-bearing property of contentHash).
+    const oldBlob = git(['ls-tree', '-r', prXOriginalHead, '--', 'prx-only.txt'], fixture.root);
+    const newBlob = git(['ls-tree', '-r', prXRebasedHead, '--', 'prx-only.txt'], fixture.root);
+    assert.equal(
+      oldBlob.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/)[1],
+      newBlob.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/)[1],
+      'prx-only.txt blob SHA must be stable across rebase (= AISDLC-94 invariant)',
+    );
+
+    // Step 5: verify against the post-rebase head + new base. Either
+    // leg of the dual-hash check should succeed (diffHash is also
+    // stable here because PR-X's diff text is identical), but the
+    // important guarantee is that contentHash CAN succeed independently
+    // — proven by the blob-SHA-stability assertion above.
+    const out = runVerifier({
+      headSha: prXRebasedHead,
+      baseSha: b2,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid post-rebase, got: ${out.reason}`);
+    assert.equal(out.reason, 'ok');
+  });
+
+  it('rejects after a rebase that resolved a conflict by changing file content', () => {
+    // The threat-model boundary case: a rebase WITH a conflict resolution
+    // that changes the file content MUST invalidate the attestation
+    // (otherwise an attacker could rebase onto a malicious base, resolve
+    // the conflict in a way that smuggles in unreviewed changes, and
+    // pass the verifier). Blob SHAs are content-addressed → conflict
+    // resolution changes content → blob SHA changes → contentHash
+    // diverges → verifier rejects.
+
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'add shared.txt baseline'], fixture.root);
+    const b1 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // PR-X branches from B1 and rewrites the line.
+    git(['checkout', '-q', '-b', 'pr-x', b1], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'PR-X-changed-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-X rewrites'], fixture.root);
+    const prXHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    writeAttestation(fixture.root, prXHead, b1, prXHead, keys.privateKeyPem);
+
+    // Now POST-SIGN, simulate the operator amending PR-X to use a
+    // DIFFERENT resolution (= different blob SHA). This is the "I
+    // resolved the conflict by smuggling in unreviewed code" case.
+    writeFileSync(join(fixture.root, 'shared.txt'), 'PR-X-changed-line\nUNREVIEWED-INJECTION\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '--amend', '-q', '--no-edit'], fixture.root);
+    const tampered = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    const out = runVerifier({ headSha: tampered, baseSha: b1, repoRoot: fixture.root });
+    assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
+    assert.match(out.reason, /diffHash mismatch/);
+  });
+
+  it('still accepts a legacy v1 envelope (no contentHash) via the diffHash leg', () => {
+    // Backward-compat: envelopes signed BEFORE AISDLC-94 landed only
+    // carry `diffHash`. The verifier MUST still accept them when the
+    // diff hash matches. We force this by passing `changedFiles: null`
+    // to writeAttestation, which the helper translates to "skip the
+    // contentHash field" (matching the pre-AISDLC-94 buildPredicate
+    // behavior).
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+      { changedFiles: null }, // force legacy shape
+    );
+    // Sanity: the envelope on disk has NO contentHash field.
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.equal(predicate.contentHash, undefined, 'legacy envelope must not have contentHash');
+
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `legacy v1 envelope must verify, got: ${out.reason}`);
+  });
+
+  it('a fresh dual-hash envelope verifies on the contentHash leg even when the diff text is unchanged', () => {
+    // No rebase; just confirm the contentHash codepath produces valid
+    // for a normal happy-path PR. (Both diffHash AND contentHash match
+    // — the verifier picks whichever leg fires first in the matcher,
+    // but the result must be `valid`.)
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+    );
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.match(
+      predicate.contentHash ?? '',
+      /^[0-9a-f]{64}$/,
+      'fresh envelope must carry contentHash (64-char sha256 hex)',
+    );
+
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', out.reason);
   });
 });

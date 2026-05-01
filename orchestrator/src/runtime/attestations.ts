@@ -90,6 +90,19 @@ export interface AttestationPredicate {
   subject: { digest: SubjectDigest };
   /** sha256 of `git diff origin/main...HEAD` at attestation time. */
   diffHash: string;
+  /**
+   * Rebase-tolerant content binding (AISDLC-94). sha256 over a canonical
+   * line-per-file string of the form `<path>\t<blobSha>\n` (sorted ascending
+   * by path) for every file in the PR's changed-file set. Survives rebases
+   * that shift `@@` hunk headers or context lines without changing the
+   * post-apply file content.
+   *
+   * Optional in v1 for Phase 1 dual-hash backward compatibility — envelopes
+   * signed before this field landed only carry `diffHash` and the verifier
+   * still accepts them. Phase 2 (separate follow-up task) makes
+   * `contentHash` required and removes `diffHash`.
+   */
+  contentHash?: string;
   /** sha256 of `.ai-sdlc/review-policy.md` at attestation time. */
   policyHash: string;
   /** Reviewer entries — typically 3 (code/test/security). */
@@ -221,11 +234,22 @@ export function validatePredicateShape(parsed: unknown): string | null {
     return 'schema validation failed: subject.digest.sha1 does not match pattern';
   }
 
-  // diffHash + policyHash — 64 hex chars each.
+  // diffHash + policyHash — 64 hex chars each. Required.
   for (const field of ['diffHash', 'policyHash'] as const) {
     const v = p[field];
     if (typeof v !== 'string' || !SHA256_HEX.test(v)) {
       return `schema validation failed: ${field} does not match pattern`;
+    }
+  }
+
+  // contentHash (AISDLC-94) — optional in Phase 1 (dual-hash mode). When
+  // present, must be a 64-char hex sha256. Absence is OK (legacy v1
+  // envelopes signed before this field landed). Phase 2 will make it
+  // required and drop diffHash.
+  if (p['contentHash'] !== undefined) {
+    const ch = p['contentHash'];
+    if (typeof ch !== 'string' || !SHA256_HEX.test(ch)) {
+      return 'schema validation failed: contentHash does not match pattern';
     }
   }
 
@@ -316,6 +340,21 @@ export const REQUIRED_REVIEWER_AGENT_IDS: readonly string[] = Object.freeze([
   'security-reviewer',
 ]);
 
+/**
+ * One entry in the changed-file set used to compute `contentHash`
+ * (AISDLC-94). `path` is the repo-relative forward-slash path; `blobSha`
+ * is the git blob SHA-1 (40 lowercase hex chars) of the file's CURRENT
+ * post-apply content at the attested commit.
+ *
+ * For deleted files, set `blobSha` to the empty string — the canonical
+ * line still includes the path so a delete-vs-keep difference between
+ * two PRs produces different hashes.
+ */
+export interface ChangedFileEntry {
+  path: string;
+  blobSha: string;
+}
+
 /** Inputs for building an attestation predicate. */
 export interface BuildPredicateInputs {
   commitSha: string;
@@ -333,6 +372,12 @@ export interface BuildPredicateInputs {
   harnessNote: string;
   /** Override `signedAt` for deterministic tests. */
   signedAt?: string;
+  /**
+   * Changed-file set for `contentHash` (AISDLC-94). Optional in Phase 1
+   * — when omitted, the predicate's `contentHash` field is also omitted
+   * and the verifier falls back to the legacy `diffHash` match.
+   */
+  changedFiles?: ChangedFileEntry[];
 }
 
 /**
@@ -349,6 +394,48 @@ export function sha1Hex(input: string | Buffer): string {
 }
 
 /**
+ * Compute the rebase-tolerant `contentHash` (AISDLC-94) over a changed-file
+ * set. The canonical encoding is one line per entry, sorted ascending by
+ * path, with `<path>\t<blobSha>\n` per line. The whole string is sha256-ed.
+ *
+ * Why this beats `diffHash`:
+ *   - Rebasing PR-X onto a new `main` that already touched the same files
+ *     does NOT change the post-apply blob SHAs (assuming no conflict),
+ *     so `contentHash` stays stable across the rebase.
+ *   - A conflict resolution that picks different content WILL change the
+ *     blob SHA → `contentHash` changes → attestation correctly invalidated.
+ *   - Force-pushing a no-op edit (e.g. `git commit --amend --no-edit`) keeps
+ *     blob SHAs identical → `contentHash` stays stable.
+ *
+ * The deduplication step makes the function idempotent if a caller
+ * accidentally passes the same path twice (last-write-wins per path).
+ *
+ * Pure function. The caller (sign-attestation script) is responsible for
+ * gathering the file set (via `git diff --name-only` + `git ls-tree`).
+ */
+export function computeContentHash(entries: ChangedFileEntry[]): string {
+  // Dedup by path (last entry wins) so callers passing the same file
+  // twice — e.g. an add+modify in two diff invocations — don't produce
+  // a different hash than a clean run.
+  const byPath = new Map<string, string>();
+  for (const e of entries) {
+    if (typeof e?.path !== 'string' || e.path.length === 0) {
+      throw new Error(`computeContentHash: entry path must be a non-empty string`);
+    }
+    if (typeof e.blobSha !== 'string') {
+      throw new Error(`computeContentHash: entry blobSha must be a string for path ${e.path}`);
+    }
+    // Normalize: forward-slashes (git already emits forward-slashes
+    // regardless of platform but be defensive), lowercase blob SHA.
+    const normalizedPath = e.path.replace(/\\/g, '/');
+    byPath.set(normalizedPath, e.blobSha.toLowerCase());
+  }
+  const sorted = [...byPath.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const canonical = sorted.map(([path, sha]) => `${path}\t${sha}\n`).join('');
+  return sha256Hex(canonical);
+}
+
+/**
  * Build the predicate payload from raw inputs. Pure function — no I/O,
  * no signing. The caller (`/ai-sdlc execute` Step 10) reads files and git
  * output, then hands them here.
@@ -359,7 +446,10 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
       `buildPredicate: commitSha must be a 40-char hex SHA-1, got ${inputs.commitSha}`,
     );
   }
-  return {
+  // AISDLC-94 dual-hash mode: include `contentHash` when the caller
+  // provided a changed-file set. Omitted otherwise so v1 envelopes
+  // remain backward-compatible.
+  const predicate: AttestationPredicate = {
     schemaVersion: 'v1',
     subject: { digest: { sha1: inputs.commitSha.toLowerCase() } },
     diffHash: sha256Hex(inputs.diff),
@@ -376,6 +466,10 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
     harnessNote: inputs.harnessNote,
     signedAt: inputs.signedAt ?? new Date().toISOString(),
   };
+  if (Array.isArray(inputs.changedFiles)) {
+    predicate.contentHash = computeContentHash(inputs.changedFiles);
+  }
+  return predicate;
 }
 
 /**
@@ -460,6 +554,15 @@ export interface VerifyOptions {
     diffHash: string;
     policyHash: string;
     expectedAgentFileHashes: Record<string, string>;
+    /**
+     * Phase-1 dual-hash acceptance (AISDLC-94). When the envelope has a
+     * `contentHash` field AND this expected value is set, a match here
+     * also satisfies the binding even if `diffHash` differs (typical
+     * post-rebase shape: file content unchanged but `@@` hunk headers
+     * shifted because a sibling PR already touched the same files).
+     * Omit to disable contentHash acceptance.
+     */
+    contentHash?: string;
   };
   /**
    * Override the accepted-schema-versions allowlist (for tests). Defaults
@@ -569,7 +672,19 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
       reason: `subject digest mismatch (envelope was signed for a different commit)`,
     };
   }
-  if (predicate.diffHash !== opts.expected.diffHash) {
+  // AISDLC-94 dual-hash acceptance: if the envelope's `contentHash`
+  // matches the expected `contentHash`, the post-apply tree state is
+  // identical and the attestation remains valid even when `diffHash`
+  // diverges (typical rebase: a sibling PR already touched the same
+  // files, so `@@` hunk headers + context lines shifted, but the
+  // file content the reviewers signed off on is unchanged).
+  // Falls through to the legacy diffHash check when contentHash isn't
+  // present or doesn't match — Phase 2 will drop the diffHash leg.
+  const hasContentHashMatch =
+    typeof predicate.contentHash === 'string' &&
+    typeof opts.expected.contentHash === 'string' &&
+    predicate.contentHash === opts.expected.contentHash;
+  if (!hasContentHashMatch && predicate.diffHash !== opts.expected.diffHash) {
     return { valid: false, reason: 'diffHash mismatch (PR diff changed since attestation)' };
   }
   if (predicate.policyHash !== opts.expected.policyHash) {
