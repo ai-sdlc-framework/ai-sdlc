@@ -35,17 +35,6 @@
         ]
       }
     ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/ai-sdlc-plugin/hooks/quality-gate-stop.sh\"",
-            "statusMessage": "Verifying governance compliance..."
-          }
-        ]
-      }
-    ],
     "PermissionRequest": [
       {
         "matcher": "Bash",
