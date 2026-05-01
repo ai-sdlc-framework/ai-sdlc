@@ -178,6 +178,36 @@ function collectChangedFileEntries(root, baseRef, headRef) {
   });
 }
 
+/**
+ * Walk merge-base + per-file (base, head) blob-pair lookups for the given
+ * range and return the entries `computeContentHashV3` expects. Mirrors the
+ * production `collectChangedFileDeltaEntries` so test attestations carry
+ * the same `contentHashV3` shape (AISDLC-101).
+ */
+function collectChangedFileDeltaEntries(root, baseRef, headRef) {
+  const mergeBase = git(['merge-base', baseRef, headRef], root).trim();
+  const nameOnly = git(['diff', '--name-only', '--no-renames', `${baseRef}...${headRef}`], root);
+  const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+  const lookupBlob = (ref, path) => {
+    try {
+      const lsOut = git(['ls-tree', '-r', ref, '--', path], root);
+      const line = lsOut.split('\n').find((l) => l.length > 0);
+      if (line) {
+        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+        if (m) return m[1];
+      }
+    } catch {
+      // missing at ref → empty
+    }
+    return '';
+  };
+  return paths.map((p) => ({
+    path: p,
+    baseBlobSha: lookupBlob(mergeBase, p),
+    headBlobSha: lookupBlob(headRef, p),
+  }));
+}
+
 function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, overrides = {}) {
   const diff = git(['diff', `${baseSha}...${headSha}`], root);
   const policy = readFileSync(join(root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
@@ -196,6 +226,13 @@ function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, ove
     overrides.changedFiles !== undefined
       ? overrides.changedFiles
       : collectChangedFileEntries(root, baseSha, subjectSha);
+  // AISDLC-101: also include the per-file-delta set so test envelopes
+  // carry `contentHashV3` by default. Callers can opt out with
+  // `changedFileDeltas: null` to test legacy / dual-hash-only paths.
+  const changedFileDeltas =
+    overrides.changedFileDeltas !== undefined
+      ? overrides.changedFileDeltas
+      : collectChangedFileDeltaEntries(root, baseSha, subjectSha);
   const predicate = buildPredicate({
     commitSha: subjectSha,
     diff,
@@ -206,6 +243,7 @@ function writeAttestation(root, subjectSha, baseSha, headSha, privateKeyPem, ove
     harnessNote: '',
     signedAt: '2026-04-27T00:00:00.000Z',
     changedFiles,
+    changedFileDeltas,
     ...overrides,
   });
   if (overrides.predicateOverride) Object.assign(predicate, overrides.predicateOverride);
@@ -1568,5 +1606,280 @@ describe('runVerifier (AISDLC-94 — rebase-tolerant contentHash)', () => {
       repoRoot: fixture.root,
     });
     assert.equal(out.status, 'valid', out.reason);
+  });
+});
+
+// ─── AISDLC-101 — per-file-delta contentHashV3 (Phase 2 triple-hash) ─
+//
+// Phase 2 of the AISDLC-94 dual-hash → triple-hash migration. Adds a third
+// content binding `contentHashV3` over per-file `(base_blob_sha,
+// head_blob_sha)` transitions. The verifier OR's all three legs (v1
+// diffHash, v2 contentHash, v3 contentHashV3) — any single matching leg
+// is enough.
+//
+// The headline regression case driving Phase 2 is AISDLC-93 / PR #102:
+// when a sibling PR landed on main and modified the same file as PR-X
+// between OUR sign + OUR merge, the rebased PR-X HEAD blob now contains
+// the sibling's contributions → v2 contentHash diverges (the post-apply
+// blob SHA changed). v3 commits to the (base, head) transition, which
+// also changes when the base shifts — so v3 alone doesn't fully solve
+// the sibling-overlap case in isolation, but PROVIDES a stricter
+// "post-apply only" delta binding that complements the producer-side
+// pre-sign rebase from AISDLC-102. The 3-layer combination handles the
+// real-world sibling-overlap reliably.
+
+describe('runVerifier (AISDLC-101 — triple-hash with per-file-delta contentHashV3)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('triple-hash envelope verifies on happy path (all three legs match)', () => {
+    // Default writeAttestation now emits a triple-hash envelope:
+    // diffHash + contentHash + contentHashV3 all populated. Verifier's
+    // matching loop finds the subject SHA via ANY leg (v3 first, then
+    // v2, then v1) and accepts.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+    );
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.match(
+      predicate.contentHashV3 ?? '',
+      /^[0-9a-f]{64}$/,
+      'fresh envelope must carry contentHashV3 (64-char sha256 hex)',
+    );
+
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', out.reason);
+  });
+
+  it('triple-hash envelope still verifies after a rebase that shifts ancestry (v2/v3 stable)', () => {
+    // Mirrors the AISDLC-94 "rebase onto a base where another PR added
+    // DIFFERENT files" scenario. The PR-X file's blob SHA stays stable
+    // across the rebase, so BOTH v2 contentHash and v3 contentHashV3
+    // recompute to the same values → verifier accepts.
+    const b1 = fixture.baseSha;
+    git(['checkout', '-q', '-b', 'pr-x', b1], fixture.root);
+    writeFileSync(join(fixture.root, 'prx-only.txt'), 'PR-X exclusive content\n');
+    git(['add', 'prx-only.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-X adds prx-only.txt'], fixture.root);
+    const prXOriginalHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    writeAttestation(fixture.root, prXOriginalHead, b1, prXOriginalHead, keys.privateKeyPem);
+
+    // PR-Y lands on main with a DIFFERENT file (no overlap with PR-X).
+    git(['checkout', '-q', 'main'], fixture.root);
+    writeFileSync(join(fixture.root, 'pry-only.txt'), 'PR-Y exclusive content\n');
+    git(['add', 'pry-only.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-Y adds pry-only.txt'], fixture.root);
+    const b2 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    git(['checkout', '-q', 'pr-x'], fixture.root);
+    git(['rebase', '-q', b2], fixture.root);
+    const prXRebasedHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    const out = runVerifier({
+      headSha: prXRebasedHead,
+      baseSha: b2,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid post-rebase, got: ${out.reason}`);
+  });
+
+  it('triple-hash envelope STILL rejects a real content-tampering amend (threat model preserved)', () => {
+    // Mirrors AISDLC-94's threat-model boundary: an attacker who amends
+    // PR-X to add unreviewed code MUST cause all three legs to diverge.
+    // v1 diffHash flips (different diff text), v2 contentHash flips
+    // (different head blob SHA), v3 contentHashV3 flips (different
+    // fileDeltaHash because head blob SHA flipped). Verifier rejects.
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'add shared.txt baseline'], fixture.root);
+    const b1 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    git(['checkout', '-q', '-b', 'pr-x', b1], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'PR-X-changed-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-X rewrites'], fixture.root);
+    const prXHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+    writeAttestation(fixture.root, prXHead, b1, prXHead, keys.privateKeyPem);
+
+    // Tamper post-sign.
+    writeFileSync(join(fixture.root, 'shared.txt'), 'PR-X-changed-line\nUNREVIEWED-INJECTION\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '--amend', '-q', '--no-edit'], fixture.root);
+    const tampered = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    const out = runVerifier({ headSha: tampered, baseSha: b1, repoRoot: fixture.root });
+    assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
+    assert.match(out.reason, /diffHash mismatch/);
+  });
+
+  it('AISDLC-93 sibling-overlap: v3 ALSO accepts when the producer pre-signs against the rebase target', () => {
+    // The AISDLC-93 / PR #102 root case: PR-X and sibling PR-Y both
+    // modify the same file. Phase 2 (AISDLC-101) handles this in
+    // combination with Phase 1.5 (AISDLC-102, producer-side pre-sign
+    // rebase): the producer rebases onto the latest origin/main BEFORE
+    // signing, so the envelope's (base_blob, head_blob) pair already
+    // accounts for the sibling's contributions. At verify time the
+    // verifier recomputes the same (base_blob, head_blob) pair against
+    // current HEAD → v3 matches.
+    //
+    // Test reduction: simulate the post-rebase state directly. Sign
+    // the attestation AGAINST the rebased state (= what AISDLC-102
+    // gives us). Then verify against the same head — all three legs
+    // match by construction. The load-bearing assertion is that
+    // contentHashV3 is present + is what makes the envelope verifiable
+    // in the rebase-tolerant codepath.
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-shared\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'baseline shared.txt'], fixture.root);
+    const b1 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // PR-Y lands first on main and modifies shared.txt.
+    git(['checkout', '-q', 'main'], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-shared\nPR-Y-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-Y modifies shared.txt'], fixture.root);
+    const b2 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // PR-X branches from b2 (= AISDLC-102 producer-side pre-sign rebase
+    // gave us a fresh base) and adds its own line on top.
+    git(['checkout', '-q', '-b', 'pr-x', b2], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-shared\nPR-Y-line\nPR-X-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-X adds line on top of PR-Y baseline'], fixture.root);
+    const prXHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign against b2 (= the post-rebase base), not against b1.
+    writeAttestation(fixture.root, prXHead, b2, prXHead, keys.privateKeyPem);
+
+    // Verify against b2 + prXHead → all three legs match.
+    const out = runVerifier({
+      headSha: prXHead,
+      baseSha: b2,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid, got: ${out.reason}`);
+
+    // Sanity: confirm the envelope carries contentHashV3 (= the new
+    // Phase 2 leg). Otherwise the test is silently a Phase 1 regression
+    // test, not a Phase 2 one.
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${prXHead}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.match(
+      predicate.contentHashV3 ?? '',
+      /^[0-9a-f]{64}$/,
+      'envelope must carry contentHashV3 — Phase 2 binding',
+    );
+  });
+
+  it('v3-only envelope (no diffHash match, no contentHash match) verifies via the v3 leg', () => {
+    // Surgical test for the v3 acceptance leg: build an envelope with
+    // diffHash + contentHash deliberately set to bogus values via
+    // predicateOverride, but contentHashV3 set to the correct recomputed
+    // value. The verifier must accept on v3 alone.
+    //
+    // This proves the v3 leg works independently — without it, the
+    // AISDLC-101 fix would silently degrade to the AISDLC-94 dual-hash
+    // and the operator wouldn't notice in normal happy-path tests.
+    const b = fixture.baseSha;
+    const h = fixture.headSha;
+    const correctDeltas = collectChangedFileDeltaEntries(fixture.root, b, h);
+    // Construct envelope with bogus diffHash + bogus contentHash, but
+    // CORRECT contentHashV3. The recomputed v3 must still match.
+    writeAttestation(fixture.root, h, b, h, keys.privateKeyPem, {
+      predicateOverride: {
+        diffHash: 'f'.repeat(64),
+        contentHash: 'a'.repeat(64),
+        // contentHashV3 stays as buildPredicate computed it from the
+        // default changedFileDeltas (= the correct value).
+      },
+    });
+    // Sanity check the on-disk envelope: only v3 is "right" relative to
+    // current HEAD.
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${h}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.equal(predicate.diffHash, 'f'.repeat(64), 'diffHash must be the bogus override');
+    assert.equal(predicate.contentHash, 'a'.repeat(64), 'contentHash must be the bogus override');
+    assert.match(predicate.contentHashV3 ?? '', /^[0-9a-f]{64}$/, 'contentHashV3 must be set');
+    // Confirm the recomputed v3 matches the envelope's v3 (= the v3 leg
+    // accept condition).
+    void correctDeltas; // documented for the reader; the buildPredicate
+    // call on the writeAttestation default path already used these
+    // entries to compute the envelope's contentHashV3.
+
+    const out = runVerifier({ headSha: h, baseSha: b, repoRoot: fixture.root });
+    assert.equal(out.status, 'valid', `v3-only envelope must verify, got: ${out.reason}`);
+  });
+
+  it('v3-only envelope: when contentHashV3 ALSO diverges, verifier rejects', () => {
+    // Counter-case to the test above: with diffHash + contentHash bogus
+    // AND contentHashV3 bogus, no leg matches and the verifier rejects.
+    // Tightens the v3-only test to confirm v3 isn't accidentally
+    // ALWAYS-matching.
+    const b = fixture.baseSha;
+    const h = fixture.headSha;
+    writeAttestation(fixture.root, h, b, h, keys.privateKeyPem, {
+      predicateOverride: {
+        diffHash: 'f'.repeat(64),
+        contentHash: 'a'.repeat(64),
+        contentHashV3: 'b'.repeat(64),
+      },
+    });
+    const out = runVerifier({ headSha: h, baseSha: b, repoRoot: fixture.root });
+    assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
+    assert.match(out.reason, /diffHash mismatch/);
+  });
+
+  it('Phase-1 envelope (no contentHashV3) still verifies in the triple-hash window', () => {
+    // Backward-compat: an envelope signed BEFORE AISDLC-101 only carries
+    // diffHash + contentHash. The verifier MUST still accept it on
+    // either of those two legs. Force this by passing
+    // changedFileDeltas: null so writeAttestation skips the v3 field.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+      { changedFileDeltas: null },
+    );
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.equal(
+      predicate.contentHashV3,
+      undefined,
+      'Phase-1 envelope must not carry contentHashV3',
+    );
+    assert.match(predicate.contentHash ?? '', /^[0-9a-f]{64}$/, 'must still have v2 contentHash');
+
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `Phase-1 envelope must verify, got: ${out.reason}`);
   });
 });

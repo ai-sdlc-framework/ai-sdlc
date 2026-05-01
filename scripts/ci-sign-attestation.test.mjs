@@ -369,6 +369,33 @@ describe('ci-sign-attestation.mjs end-to-end', () => {
     assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
   });
 
+  it('AISDLC-101: CI-signed envelope carries contentHashV3 (Phase 2 triple-hash)', () => {
+    // The CI-side attestor MUST emit Phase 2 triple-hash envelopes too —
+    // otherwise external-contributor / fork PRs (which depend on the
+    // CI attestor for signing) would silently regress to the AISDLC-94
+    // dual-hash window.
+    runCiSignScript({
+      cwd: fixture.root,
+      verdicts: VERDICTS_ALL_APPROVED,
+      env: { AI_SDLC_CI_ATTESTOR_PRIVATE_KEY: ciKeys.privateKeyPem },
+      extraArgs: ['--pr-base-sha', fixture.baseSha, '--pr-head-sha', fixture.headSha],
+    });
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.match(predicate.diffHash, /^[0-9a-f]{64}$/, 'CI envelope must carry diffHash (v1)');
+    assert.match(
+      predicate.contentHash,
+      /^[0-9a-f]{64}$/,
+      'CI envelope must carry contentHash (v2)',
+    );
+    assert.match(
+      predicate.contentHashV3,
+      /^[0-9a-f]{64}$/,
+      'CI envelope must carry contentHashV3 (v3, AISDLC-101)',
+    );
+  });
+
   it('AC #8: contributor PR with valid local attestation → CI does NOT redundantly sign', () => {
     // The maintainer signed first, with a key that's ALSO trusted (we add
     // a second entry to the fixture). The script should detect via the
