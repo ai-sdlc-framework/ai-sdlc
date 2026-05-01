@@ -123,6 +123,8 @@ type AnyResource = Pipeline | AgentRole | QualityGate | AutonomyPolicy | Adapter
 
 ### Pipeline Types
 
+> Implements RFC-0002 §5 stage object.
+
 | Type | Description |
 |---|---|
 | `Pipeline` | `Resource<'Pipeline', PipelineSpec, PipelineStatus>` |
