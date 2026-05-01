@@ -55,13 +55,6 @@
       {
         "hooks": [
           {
-            "type": "agent",
-            "prompt": "You are an AI-SDLC governance verifier. The session transcript is at $ARGUMENTS. Read it and verify:\n1. If code was modified, the build command (pnpm build or equivalent) was run and passed\n2. If code was modified, the test suite (pnpm test or equivalent) was run and passed\n3. If code was modified, the linter (pnpm lint or equivalent) was run and passed\n4. No files in blockedPaths (.github/workflows/**, .ai-sdlc/**) were modified\n5. No secrets or API keys appear in committed code\n\nReturn ok:true only if ALL checks pass. Return ok:false with specific violations.",
-            "model": "claude-haiku-4-5-20251001",
-            "timeout": 45,
-            "statusMessage": "Running governance quality gates..."
-          },
-          {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/deferred-coverage-check.sh\"",
             "asyncRewake": true,
