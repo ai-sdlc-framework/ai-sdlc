@@ -2,6 +2,10 @@
 
 Interface contracts for external tool integrations, built-in adapters (GitHub, Linear), community stubs, adapter registry, scanner, webhook bridge, and git-based resolution.
 
+> **Spec reference:** Implements [RFC-0003 (Infrastructure Provider Adapters)](../../spec/rfcs/RFC-0003-infrastructure-adapters.md)
+> §2-§6 — `AuditSink`, `Sandbox`, `SecretStore`, `MemoryStore`, and `EventBus`
+> interface contracts.
+
 ## Import
 
 ```typescript

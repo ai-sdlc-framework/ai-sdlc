@@ -4,6 +4,12 @@
  * Demonstrates implementing the IssueTracker interface from scratch,
  * registering it, and using the webhook bridge.
  *
+ * Spec reference: RFC-0003 (Infrastructure Provider Adapters) §3 — Sandbox
+ * and the broader adapter interface enum extension. The IssueTracker shown
+ * here is one of the SDLC interfaces that AdapterBinding has covered since
+ * v1alpha1; RFC-0003 extends the same pattern to the five infrastructure
+ * concerns (AuditSink, Sandbox, SecretStore, MemoryStore, EventBus).
+ *
  * Run: npx tsx docs/examples/adapter-implementation.ts
  */
 
