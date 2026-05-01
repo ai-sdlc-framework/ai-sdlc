@@ -94,9 +94,15 @@ BRANCH=$(echo "$BRANCH_PATTERN" | sed "s|{issueIdLower}|$TASK_ID_LOWER|g; s|{slu
 WORKTREE_PATH=".worktrees/$TASK_ID_LOWER"
 ```
 
-## Step 3 — Set up the worktree
+## Step 3 — Set up the worktree (fresh base from latest main)
 
 ```bash
+# Fetch latest main FIRST so the worktree gets created from the freshest base.
+# Costs nothing if main hasn't moved (git fetch is a no-op when remote is unchanged),
+# but if main has moved, the developer + reviewers run against current state from
+# the start — reducing the chance Step 10.5 (pre-sign rebase) finds drift later.
+# (AISDLC-102: fresh base at Step 3 + pre-sign rebase at Step 10.5 are
+# paired defenses against attestation invalidation when sibling PRs land mid-run.)
 git fetch origin main
 mkdir -p .worktrees
 git worktree add "$WORKTREE_PATH" -b "$BRANCH" origin/main
@@ -248,6 +254,111 @@ PR body opens with: > **⚠ This PR exceeded the auto-iteration cap (2 rounds) w
 ```
 
 Then collapse all three review verdicts (round-by-round if multiple iterations ran) into `<details>` blocks in the PR body.
+
+## Step 10.5 — Pre-sign rebase + conditional re-review (AISDLC-102)
+
+**Purpose.** Reduce the FREQUENCY of attestation invalidation by ensuring we sign against the latest `origin/main` state. Without this step, every PR that sits in the review queue while a sibling PR merges has its blob SHAs drift the moment we rebase later — invalidating the attestation we just signed and forcing a duplicate CI review run (the AISDLC-93 / PR #102 root case).
+
+This step composes with AISDLC-101 (per-file delta hashing as verifier-side defense). Together they form defense in depth — Step 10.5 minimises *fresh* invalidation by signing the latest state; AISDLC-101 lets the verifier accept envelopes that were valid at sign time but drifted between push and merge due to a sibling merging into the SAME files.
+
+Skip this step entirely if the iteration cap was exceeded (the PR is `[needs-human-attention]` — let the human handle the rebase before flipping Done).
+
+If reviews approved cleanly:
+
+```bash
+cd "$WORKTREE_PATH"
+
+# 1. Snapshot the pre-rebase contentHash. This is the AISDLC-94 oracle for
+#    "did file content actually change?" — same hash before/after rebase
+#    means the reviewers' approval still binds without re-spawning them.
+PRE_HASH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/sign-attestation.mjs" \
+  --print-content-hash 2>/dev/null || echo "")
+
+# 2. Fetch latest main with a bounded timeout. On fetch failure, skip the
+#    rebase and proceed to Step 10 — flaky network must NOT block signing
+#    (the verifier still has AISDLC-101's per-file delta as fallback).
+if ! timeout 30 git fetch origin main 2>&1; then
+  echo "[ai-sdlc-progress] Step 10.5: git fetch origin main failed (timeout/network); skipping rebase, proceeding to Step 10"
+  cd -
+  # Fall through to Step 10 unchanged
+else
+  # 3. Skip rebase if origin/main is already an ancestor of HEAD (the most
+  #    common case — main hasn't moved since Step 3 fetched it).
+  if git merge-base --is-ancestor origin/main HEAD; then
+    echo "[ai-sdlc-progress] Step 10.5: origin/main already ancestor of HEAD; no rebase needed"
+    cd -
+    # Fall through to Step 10 unchanged
+  else
+    # 4. Rebase, bounded at 3 attempts to avoid infinite loops if siblings
+    #    keep merging mid-run.
+    REBASE_ATTEMPTS=0
+    REBASE_OK=0
+    while [ "$REBASE_ATTEMPTS" -lt 3 ]; do
+      REBASE_ATTEMPTS=$((REBASE_ATTEMPTS + 1))
+      if git rebase origin/main; then
+        REBASE_OK=1
+        break
+      fi
+      # Conflict — abort cleanly (we never auto-resolve; operator owns
+      # conflict resolution). `git rebase --abort` restores pre-rebase HEAD.
+      git rebase --abort 2>/dev/null || true
+      # Re-fetch in case main moved AGAIN while we were rebasing
+      timeout 30 git fetch origin main 2>&1 || break
+    done
+
+    if [ "$REBASE_OK" -ne 1 ]; then
+      cd -
+      # Conflict OR rebase loop — abort with structured failure. Operator
+      # resolves manually then re-runs `/ai-sdlc execute`.
+      if [ "$REBASE_ATTEMPTS" -ge 3 ]; then
+        echo "ERROR: Step 10.5 rebase loop — main moved 3 times during rebase attempts."
+        echo "       outcome: aborted (rebase-loop)"
+      else
+        echo "ERROR: Step 10.5 rebase conflict — operator must resolve manually."
+        echo "       Run: cd $WORKTREE_PATH && git fetch origin main && git rebase origin/main"
+        echo "       Resolve conflicts, then re-run: /ai-sdlc execute $TASK_ID"
+        echo "       outcome: aborted (rebase-conflict)"
+      fi
+      # Return JSON with outcome: aborted, populated notes; do NOT proceed to Step 10.
+      exit 1
+    fi
+
+    # 5. Rebase succeeded. Compare contentHash to decide whether reviewers'
+    #    approval still binds (same content) or re-review is needed (different
+    #    content because main now has sibling commits inside our changed files).
+    POST_HASH=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/sign-attestation.mjs" \
+      --print-content-hash 2>/dev/null || echo "")
+    cd -
+
+    if [ -n "$PRE_HASH" ] && [ "$PRE_HASH" = "$POST_HASH" ]; then
+      echo "[ai-sdlc-progress] Step 10.5: rebased cleanly, contentHash unchanged ($PRE_HASH); reviewers' approval reused"
+      # Fall through to Step 10 unchanged
+    else
+      echo "[ai-sdlc-progress] Step 10.5: rebased; contentHash changed ($PRE_HASH → $POST_HASH); re-spawning 3 reviewers (1 round)"
+      # Re-spawn the three reviewers in parallel, single round only. Build a
+      # fresh review context from the post-rebase diff. Re-use Step 7's prompt
+      # template but include a "## Post-rebase context" preamble noting that
+      # main moved during review and the diff now reflects the rebased state.
+      cd "$WORKTREE_PATH"
+      git diff origin/main...HEAD > "/tmp/pr-diff-${TASK_ID}.txt"
+      git diff --name-only origin/main...HEAD > "/tmp/pr-files-${TASK_ID}.txt"
+      cd -
+
+      # Spawn 3 reviewers in parallel (single message, three Agent tool calls)
+      # exactly as Step 7 did — code-reviewer, test-reviewer, security-reviewer.
+      # If all three approve: proceed to Step 10. If any request changes: this
+      # round counts toward Step 9's iteration cap (max 2 dev iterations total).
+      # If the cap is already at 2, ship as `[needs-human-attention]` per Step 9.
+    fi
+  fi
+fi
+```
+
+After Step 10.5 completes successfully, proceed to Step 10. The signed attestation will bind to the rebased HEAD — which is what CI verifies against the PR head SHA — so the dual-hash predicate (AISDLC-94) matches by construction at push time.
+
+> **Why we re-review on contentHash change.** A rebase that pulls in sibling commits inside our changed files materially alters what CI is asked to merge. The reviewers' prior approval was against the pre-rebase content; if that content is no longer current, the approval no longer binds. The AISDLC-94 `contentHash` is the precise oracle: same hash = byte-identical reviewed content = approval reused; different hash = different content = re-spawn reviewers. This is why Phase 1 of AISDLC-94 was a hard prerequisite for this task.
+
+> **Coordination with AISDLC-101 (verifier-side defense).** Step 10.5 closes the *producer-side* failure mode (we sign stale state then push fresh). AISDLC-101 (per-file delta hashing in the verifier) closes the *post-push* failure mode (sibling merges between our push and our merge). Both layers reduce the attestation-invalidation rate; neither alone closes both gaps.
 
 ## Step 10 — Mark task Done + sign attestation + commit (BEFORE push)
 

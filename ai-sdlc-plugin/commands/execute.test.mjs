@@ -313,4 +313,79 @@ describe('execute-orchestrator body contract (the moved Step 0-13 recipe)', () =
     assert.match(orchestratorBody, /AISDLC-74/);
     assert.match(orchestratorBody, /verify-attestation/);
   });
+
+  // ── AISDLC-102: pre-sign rebase + conditional re-review contract ────
+  // Step 10.5 sits between Step 9 (iteration loop) and Step 10 (sign
+  // attestation). It rebases onto latest main and decides whether reviewers
+  // need to re-run based on the AISDLC-94 contentHash oracle.
+
+  it('Step 10.5: declares purpose and AISDLC-102 attribution', () => {
+    assert.match(orchestratorBody, /Step 10\.5.*Pre-sign rebase/);
+    assert.match(orchestratorBody, /AISDLC-102/);
+  });
+
+  it('Step 10.5: fetches origin main with a bounded timeout', () => {
+    // AC #2: fetch with timeout; on failure, skip rebase rather than block.
+    assert.match(orchestratorBody, /timeout 30 git fetch origin main/);
+    assert.match(orchestratorBody, /flaky network must NOT block signing/i);
+  });
+
+  it('Step 10.5: skips rebase when origin/main is already an ancestor', () => {
+    // AC #3: skip rebase if no-op (most common case — main hasn't moved
+    // since Step 3 fetched it).
+    assert.match(orchestratorBody, /git merge-base --is-ancestor origin\/main HEAD/);
+    assert.match(orchestratorBody, /no rebase needed/);
+  });
+
+  it('Step 10.5: aborts on rebase conflict (no auto-resolve)', () => {
+    // AC #4: conflict → outcome: aborted with structured notes; never
+    // auto-resolve — operator owns conflict resolution.
+    assert.match(orchestratorBody, /git rebase --abort/);
+    assert.match(orchestratorBody, /outcome: aborted \(rebase-conflict\)/);
+    assert.match(orchestratorBody, /never auto-resolve/i);
+  });
+
+  it('Step 10.5: bounds rebase attempts at 3 to avoid infinite loops', () => {
+    // AC #8: cap rebase attempts at 3 if main keeps moving mid-run.
+    assert.match(orchestratorBody, /REBASE_ATTEMPTS.*3/);
+    assert.match(orchestratorBody, /outcome: aborted \(rebase-loop\)/);
+  });
+
+  it('Step 10.5: reuses reviewers approval when post-rebase contentHash unchanged', () => {
+    // AC #5: same contentHash before and after rebase → reviewers'
+    // approval still binds, skip to Step 10 directly.
+    assert.match(orchestratorBody, /PRE_HASH.*POST_HASH/s);
+    assert.match(orchestratorBody, /reviewers' approval reused/);
+  });
+
+  it('Step 10.5: re-spawns 3 reviewers in parallel when contentHash changed', () => {
+    // AC #6: contentHash changed → re-spawn 3 reviewers (single round).
+    assert.match(orchestratorBody, /re-spawning 3 reviewers/);
+    assert.match(orchestratorBody, /Spawn 3 reviewers in parallel/i);
+  });
+
+  it('Step 10.5: shares Step 9 iteration cap for re-review', () => {
+    // AC #7: re-review counts toward Step 9's cap (max 2 dev iterations).
+    assert.match(orchestratorBody, /Step 9's iteration cap/);
+    assert.match(orchestratorBody, /\[needs-human-attention\]/);
+  });
+
+  it('Step 10.5: skips entirely when iteration cap was exceeded', () => {
+    // The iteration-cap branch ships as [needs-human-attention] without
+    // signing or rebasing — the human owns the rebase before close-out.
+    assert.match(orchestratorBody, /Skip this step entirely if the iteration cap was exceeded/i);
+  });
+
+  it('Step 10.5: notes coordination with AISDLC-101 (verifier-side defense)', () => {
+    // Defense-in-depth layering: producer-side (this) + verifier-side (101).
+    assert.match(orchestratorBody, /AISDLC-101/);
+    assert.match(orchestratorBody, /defense in depth/i);
+  });
+
+  it('Step 3: also fetches origin main BEFORE worktree creation (fresh base)', () => {
+    // AC #9: Step 3 rebases onto latest main for early fresh start; costs
+    // nothing if main hasn't moved.
+    assert.match(orchestratorBody, /Step 3.*fresh base from latest main/);
+    assert.match(orchestratorBody, /paired\s+defenses/i);
+  });
 });

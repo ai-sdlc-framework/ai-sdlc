@@ -34,9 +34,14 @@ Spawn the orchestrator via the Agent tool:
 
 When the orchestrator returns its JSON, surface the final summary block (the `Task: ... Branch: ... PR: ...` lines from its Step 13) plus the PR URL. If `outcome` is `developer-failed` or `aborted`, surface the `notes` field so the operator knows what to fix.
 
+## Pre-sign rebase + conditional re-review (AISDLC-102)
+
+Between Step 9 (review iteration loop) and Step 10 (sign attestation), the orchestrator runs Step 10.5: `git fetch origin main` (with timeout), `git merge-base --is-ancestor` to skip when no-op, then `git rebase origin/main` if needed. The post-rebase contentHash (AISDLC-94 dual-hash oracle) decides whether reviewers' approval still binds (same hash → reuse) or whether 3 reviewers must be re-spawned for one round (different hash → re-review). Rebase conflicts abort with `outcome: aborted`; the orchestrator never auto-resolves. Step 3 (worktree setup) ALSO fetches latest main first so the developer + reviewers run against current state from the start. Together with AISDLC-101 (verifier-side per-file delta hashing) this closes the AISDLC-93 / PR #102 attestation-invalidation gap in defense-in-depth layers.
+
 ## What this command DOES NOT do (intentional)
 
 - **Never runs `gh pr merge`.** The orchestrator never merges; only humans merge. Per CLAUDE.md.
 - **Never runs `git push --force`.** The orchestrator aborts on non-fast-forward push.
 - **Never edits `.ai-sdlc/**` or `.github/workflows/**`.** Both the PreToolUse hook and the orchestrator's hard rules block this.
+- **Never auto-resolves rebase conflicts.** Step 10.5 aborts with `outcome: aborted` on conflict; the operator owns conflict resolution.
 - **Never spawns more than one orchestrator from a single `/ai-sdlc execute` invocation.** Parallel runs are achieved by the operator (or `/loop`) firing the slash command multiple times — each invocation gets its own orchestrator subagent.
