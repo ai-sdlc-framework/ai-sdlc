@@ -1,3 +1,26 @@
+---
+id: RFC-0006
+title: Design System Governance Pipeline
+status: Final
+author: Dominique Legault, Morgan Hirtle, Alexander Kline
+created: 2026-03-28
+updated: 2026-04-13
+targetSpecVersion: v1alpha1
+requires:
+  - RFC-0002
+  - RFC-0004
+requiresDocs:
+  - tutorial
+  - operator-runbook
+  - api-reference
+# All three doc surfaces are intentionally deferred — the spec is sign-off
+# locked but the reference implementations (Tokens Studio + Figma adapters,
+# Storybook ComponentCatalog, Playwright VisualRegressionRunner) are still in
+# flight. AISDLC-69.4 tracks the retroactive doc authoring gap.
+deferredDocs: true
+deferredDocsDeadline: 2026-07-31
+---
+
 # RFC-0006: Design System Governance Pipeline
 
 **Document type:** Normative (final)

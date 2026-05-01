@@ -1,3 +1,18 @@
+---
+id: RFC-0008
+title: PPA Triad Integration
+status: Final
+author: Dominique Legault, Morgan Hirtle, Alexander Kline
+created: 2026-04-03
+updated: 2026-04-13
+targetSpecVersion: v1alpha1
+requires:
+  - RFC-0006
+requiresDocs:
+  - api-reference
+  - operator-runbook
+---
+
 # RFC-0008: PPA Triad Integration
 
 **Document type:** Normative (final)

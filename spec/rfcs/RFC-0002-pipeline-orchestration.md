@@ -1,3 +1,17 @@
+---
+id: RFC-0002
+title: Pipeline Orchestration Policy
+status: Draft
+author: AI-SDLC Contributors
+created: 2026-02-09
+updated: 2026-02-09
+targetSpecVersion: v1alpha1
+requiresDocs:
+  - tutorial
+  - api-reference
+  - example
+---
+
 # RFC-0002: Pipeline Orchestration Policy
 
 **Status:** Draft

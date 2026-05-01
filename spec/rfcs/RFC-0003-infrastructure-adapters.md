@@ -1,3 +1,18 @@
+---
+id: RFC-0003
+title: Infrastructure Provider Adapters
+status: Draft
+author: AI-SDLC Contributors
+created: 2026-02-10
+updated: 2026-02-10
+targetSpecVersion: v1alpha1
+requiresDocs:
+  - tutorial
+  - api-reference
+  - operator-runbook
+  - example
+---
+
 # RFC-0003: Infrastructure Provider Adapters
 
 **Status:** Draft
