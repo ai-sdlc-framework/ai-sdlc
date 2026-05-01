@@ -17,8 +17,22 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+
+/**
+ * Initialize `dir` as a real git repo (with no remote) so detectGitRemote
+ * sees a valid `.git/` and reports the no-remote fallback path. We use a
+ * real `git init` instead of `mkdirSync('.git')` so git doesn't walk UP
+ * looking for a parent repository (AISDLC-104) — an empty `.git/` is not
+ * a valid repository, and on a developer laptop where the test is invoked
+ * from inside the ai-sdlc-framework checkout, that walk-up silently
+ * resolves to the host repo's origin and breaks the fallback assertion.
+ */
+function initBareRepo(dir: string): void {
+  execSync('git init --quiet', { cwd: dir, stdio: 'ignore' });
+}
 
 let tmpDir: string;
 let prevCwd: string;
@@ -69,7 +83,7 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     // Mark the project dir as a git repo (so detectWorkspace() sees a
     // single-repo project) but DO NOT configure an `origin` remote so
     // detectGitRemote returns the FALLBACK.
-    mkdirSync(join(tmpDir, '.git'));
+    initBareRepo(tmpDir);
     await runInit(['--skip-mcp']);
 
     const pipeline = readFileSync(join(tmpDir, '.ai-sdlc', 'pipeline.yaml'), 'utf-8');
@@ -82,8 +96,55 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     expect(out).toContain("'your-org' placeholder");
   });
 
+  it('falls back even when invoked from inside a host repo with its own origin (AISDLC-104)', async () => {
+    // AISDLC-104 regression witness. Recreates the failing topology:
+    //   /tmp/host-with-origin/        <- has .git AND origin=acme-host/host-repo
+    //     /tmp/host-with-origin/proj/ <- the project we're initializing
+    //                                   (with an empty `.git/` dir like the
+    //                                    pre-AISDLC-104 single-repo test)
+    //
+    // Without GIT_CEILING_DIRECTORIES, git sees the empty `.git/` in proj/
+    // is invalid and walks UP looking for a real repo, finding hostDir's
+    // .git with origin=acme-host. The fallback then never fires — exactly
+    // the original ai-sdlc-framework bleed when the orchestrator tests
+    // are invoked from inside the framework checkout. With AISDLC-104's
+    // ceiling pin, git stops at proj/ and reports the no-remote fallback.
+    const hostDir = mkdtempSync(join(tmpdir(), 'aisdlc-104-host-'));
+    try {
+      // Build the host repo with a fake origin.
+      execSync('git init --quiet', { cwd: hostDir, stdio: 'ignore' });
+      execSync('git remote add origin git@github.com:acme-host/host-repo.git', {
+        cwd: hostDir,
+        stdio: 'ignore',
+      });
+
+      const projDir = join(hostDir, 'proj');
+      mkdirSync(projDir);
+      // Empty `.git/` — enough for detectWorkspace's existsSync check, but
+      // invalid as a real git repo so git would walk up without our ceiling.
+      mkdirSync(join(projDir, '.git'));
+
+      // Run init from inside the nested project. process.cwd() during
+      // the action will be projDir; without the ceiling-directories
+      // pin, git would walk up to hostDir and report acme-host/host-repo.
+      await runInit(['--skip-mcp'], projDir);
+
+      const pipeline = readFileSync(join(projDir, '.ai-sdlc', 'pipeline.yaml'), 'utf-8');
+      expect(pipeline).toContain('org: your-org');
+      expect(pipeline).not.toContain('acme-host');
+
+      const out = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+      expect(out).toContain('No git origin remote detected');
+      expect(out).not.toContain('acme-host');
+    } finally {
+      // chdir back before rm so we never try to rmdir our own cwd.
+      process.chdir(prevCwd);
+      rmSync(hostDir, { recursive: true, force: true });
+    }
+  });
+
   it('writes all four config YAML files plus the .gitignore runtime block', async () => {
-    mkdirSync(join(tmpDir, '.git'));
+    initBareRepo(tmpDir);
     await runInit(['--skip-mcp']);
 
     const cfg = join(tmpDir, '.ai-sdlc');
@@ -102,7 +163,7 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
   });
 
   it('emits the 3-line version provenance block at startup (AISDLC-78 AC #1)', async () => {
-    mkdirSync(join(tmpDir, '.git'));
+    initBareRepo(tmpDir);
     await runInit(['--skip-mcp']);
     const out = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(out).toMatch(/ai-sdlc CLI:\s+\S+/);
