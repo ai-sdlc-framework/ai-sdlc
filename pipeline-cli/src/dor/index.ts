@@ -1,17 +1,24 @@
 /**
- * Definition-of-Ready (DoR) public surface — RFC-0011 Phase 2a.
+ * Definition-of-Ready (DoR) public surface — RFC-0011 Phase 2a + 2b.
  *
- * Stage A only. Stage B (LLM) lands in Phase 2b (AISDLC-115.3).
+ * Stage A (deterministic, Phase 2a) and Stage B (LLM-backed, Phase 2b
+ * / AISDLC-115.3). Composite end-to-end entry point is
+ * `evaluateIssueE2E()`; Stage A standalone is `evaluateIssue()`.
  *
  * Consumers import:
- *   import { evaluateIssue, type IssueInput } from '@ai-sdlc/pipeline-cli/dor';
+ *   import { evaluateIssueE2E, type IssueInput } from '@ai-sdlc/pipeline-cli/dor';
  *
  * Or via the top-level barrel:
- *   import { evaluateIssue } from '@ai-sdlc/pipeline-cli';
+ *   import { evaluateIssueE2E } from '@ai-sdlc/pipeline-cli';
  */
 export * from './types.js';
 export * from './evaluate.js';
 export * from './corpus.js';
+export * from './stage-b.js';
+export * from './composite.js';
+export * from './calibration-log.js';
+export * from './corpus-e2e.js';
+export * from './shadow-mode.js';
 export * from './gates/index.js';
 export {
   DEFAULT_RESOLVERS,

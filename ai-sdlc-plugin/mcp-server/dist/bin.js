@@ -22939,6 +22939,16 @@ init_file_existence();
 import { existsSync as existsSync16, readFileSync as readFileSync13, readdirSync as readdirSync6, statSync as statSync4 } from "node:fs";
 import { basename as basename3, join as join17, relative } from "node:path";
 
+// ../../pipeline-cli/dist/dor/stage-b.js
+var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
+
+// ../../pipeline-cli/dist/dor/composite.js
+var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
+
+// ../../pipeline-cli/dist/dor/calibration-log.js
+import { appendFileSync, mkdirSync as mkdirSync4 } from "node:fs";
+import { dirname as dirname4, join as join18 } from "node:path";
+
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {
   sweepMergedWorktrees,

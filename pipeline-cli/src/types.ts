@@ -330,7 +330,12 @@ export interface CleanupResult {
 
 // ── SubagentSpawner abstraction (RFC-0012 §8) ────────────────────────
 
-export type SubagentType = 'developer' | 'code-reviewer' | 'test-reviewer' | 'security-reviewer';
+export type SubagentType =
+  | 'developer'
+  | 'code-reviewer'
+  | 'test-reviewer'
+  | 'security-reviewer'
+  | 'refinement-reviewer';
 
 export interface SpawnOpts {
   type: SubagentType;
