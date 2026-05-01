@@ -15,7 +15,7 @@ Complete working examples demonstrating AI-SDLC SDK usage.
 
 | Example | Description |
 |---|---|
-| [complete-pipeline.yaml](complete-pipeline.yaml) | Full pipeline with all resource types configured together |
+| [complete-pipeline.yaml](complete-pipeline.yaml) | Full pipeline with all resource types configured together (RFC-0002 §6 example) |
 
 ## Running Examples
 

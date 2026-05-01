@@ -1,5 +1,7 @@
 # Tutorial 1: Setting Up a Basic Pipeline
 
+> See RFC-0002 (Pipeline Orchestration Policy) for the normative spec.
+
 In the AI-SDLC Framework, a **Pipeline** is the top-level resource that ties together triggers, providers, and stages to define a complete software development lifecycle workflow. When an event occurs (such as an issue being assigned), the pipeline orchestrates which agents act, in what order, and under what quality constraints.
 
 This tutorial walks you through creating a Pipeline resource from scratch, starting with a minimal single-stage configuration and building up to a fully-routed, multi-stage workflow.
