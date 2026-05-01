@@ -51,6 +51,34 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ### Added
 
+- **rebase-resolver subagent + `/ai-sdlc rebase` slash command** (AISDLC-105) —
+  new `agents/rebase-resolver.md` plugin subagent + `commands/rebase.md` slash
+  command body that automate the mechanical 80% of PR rebase + conflict
+  resolution and escalate the architectural 20%. Surfaced 2026-05-01 after the
+  orchestrator did 6+ manual rebase rounds across PRs #113, #114, #115 in one
+  session (PR #115 alone needed three iterations: CHANGELOG → modify-vs-delete
+  → prettier-drift CI failure). The subagent handles five mechanical rules
+  (CHANGELOG `Unreleased > Added` overlaps → keep both bullets; test additions
+  to the same describe → keep both `it()` cases; non-overlapping code
+  additions → keep both unless shared identifier; prettier drift → run
+  `pnpm exec prettier --write` per resolved file before `git rebase --continue`;
+  `--force-with-lease` only, refuses on `main`/`master`) and escalates four
+  cases back to the operator (modify-vs-delete with port location guess;
+  semantic conflict on overlapping lines; verification failure → no push;
+  3-attempt iteration cap exceeded). The `/ai-sdlc rebase <pr>` slash command
+  wraps the subagent: locates the worktree at `.worktrees/<task-id-lower>`
+  (recreates from origin if missing), spawns the subagent, parses the
+  structured JSON return, re-signs the attestation only when `contentHash`
+  changed (using `sign-attestation.mjs --print-content-hash` as the
+  AISDLC-94/101 oracle from AISDLC-102), and force-pushes with
+  `--force-with-lease`. Test coverage: 30+ assertions in
+  `agents/rebase-resolver.test.mjs` (frontmatter, hard rules, 5 mechanical
+  rules, 4 escalation cases, return contract, fixture conflict scenarios for
+  CHANGELOG overlap + test additions + modify-vs-delete + prettier drift +
+  verification failure + force-with-lease refusal + attestation re-sign skip
+  + iteration-cap escalation) plus 25+ assertions in
+  `commands/rebase.test.mjs` (frontmatter, pipeline contract, hard rules,
+  re-attestation flow, push step refuse-on-main, escalation handling).
 - **Pre-sign rebase + conditional re-review** (`agents/execute-orchestrator.md`
   Step 10.5; `scripts/sign-attestation.mjs --print-content-hash`): inserted a
   new step between Step 9 (review iteration loop) and Step 10 (sign attestation)

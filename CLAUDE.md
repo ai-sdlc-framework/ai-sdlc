@@ -8,6 +8,57 @@
 - Never use `gh api pulls/N/update-branch` with merge method.
 - Keep commit history linear — no merge commits on feature branches.
 
+### Automated rebase via `/ai-sdlc rebase <pr>` (AISDLC-105)
+
+Manual rebase + conflict resolution loops were eating significant orchestrator
+time. The `/ai-sdlc rebase <pr-number>` slash command (backed by the
+`rebase-resolver` plugin subagent) automates the mechanical 80% of the work
+and escalates the architectural 20%.
+
+What it handles automatically:
+
+1. **CHANGELOG `Unreleased > Added` overlaps** → keeps both bullets
+2. **Test additions to the same `describe(...)`** → keeps both `it()` cases
+3. **Non-overlapping code additions** → keeps both unless a shared identifier
+   suggests a logical conflict
+4. **Prettier drift after manual edit** → runs `pnpm exec prettier --write`
+   on every resolved file before `git rebase --continue` (the root cause of
+   PR #115's iter-4 CI failure)
+5. **Force-push hygiene** → uses `--force-with-lease`, refuses on `main`/`master`
+
+What it escalates back:
+
+1. **Modify-vs-delete conflicts** — needs a hand-port to a new architectural
+   home, with a best-guess location in the escalation reason
+2. **Semantic conflicts on overlapping lines** — both branches modified the
+   same lines with different intent
+3. **Verification failures** (`pnpm build && pnpm test && pnpm lint && pnpm
+   format:check`) after resolution — does NOT push
+4. **Iteration cap exceeded** (3 rebase attempts couldn't converge because
+   main keeps moving)
+
+Re-attestation: only re-signs the DSSE envelope when `contentHash` actually
+changed (uses `sign-attestation.mjs --print-content-hash` as the AISDLC-94/101
+oracle). When the rebase didn't move any blob SHA at HEAD, the existing
+attestation still verifies and is reused.
+
+When to invoke manually:
+
+- A PR's `verify-attestation.yml` reports `invalid (diff drift)` because a
+  sibling PR merged into the same files
+- A PR is "Update branch" yellow in the GitHub UI but you want a linear
+  history (CLAUDE.md "Always rebase" rule, not the merge-commit alternative)
+- A PR has been sitting idle while siblings merged and you want to avoid
+  the manual rebase loop proactively
+
+Out of scope:
+
+- Does NOT merge PRs (only humans merge)
+- Does NOT push with plain `--force` / `-f` (only `--force-with-lease`)
+- Does NOT push to `main`/`master` (refuses early)
+- Does NOT auto-resolve modify-vs-delete or semantic conflicts (escalates)
+- Does NOT re-sign the attestation when the contentHash is unchanged
+
 ### CI marker hygiene (AISDLC-88)
 
 GitHub Actions silently skips ALL workflows for a push when ANY commit body contains `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, or `[actions skip]` — substring match, no warning. To discuss these tokens in commit messages without triggering the skip, use the paren-quoted form: `(skip ci marker)` instead of `[skip ci]`. Backtick-wrapping does NOT defeat the parser. The `scripts/check-skip-ci-marker.sh` pre-push gate enforces this.
