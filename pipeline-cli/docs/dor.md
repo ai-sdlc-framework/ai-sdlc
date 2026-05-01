@@ -55,17 +55,27 @@ secrets-adjacent string before the entry is serialised:
   quote the body verbatim)
 - Top-level `summary` and `questions[]`
 
-Pattern catalogue:
+Pattern catalogue (registry order — specific BEFORE generic so the
+more-meaningful marker wins):
 
-| Marker | Shape |
-|---|---|
-| `OPENAI` | `sk-[A-Za-z0-9]{20,}` |
-| `OPENAI_PROJECT` | `sk-proj-[A-Za-z0-9_-]{20,}` |
-| `GITHUB_PAT` | `ghp_[A-Za-z0-9]{36}` |
-| `GITHUB_PAT_FINE` | `github_pat_[A-Za-z0-9_]{82}` |
-| `AWS_ACCESS_KEY` | `AKIA[0-9A-Z]{16}` |
-| `JWT` | `eyJ<base64url>.eyJ<base64url>.<base64url>` |
-| `HIGH-ENTROPY` | `[A-Za-z0-9_-]{40,}` (catch-all, last) |
+| Marker | Shape | Notes |
+|---|---|---|
+| `ANTHROPIC` | `sk-ant-(?:api03\|admin01)-[A-Za-z0-9_-]{20,}` | Anthropic API + admin keys (AISDLC-126) |
+| `OPENAI_PROJECT` | `sk-proj-[A-Za-z0-9_-]{20,}` | Project-scoped OpenAI keys |
+| `OPENAI` | `sk-[A-Za-z0-9]{20,}` | Classic OpenAI keys |
+| `SLACK` | `xox[abprs]-[A-Za-z0-9-]{10,}` | Bot/user/refresh/app/legacy tokens (AISDLC-126) |
+| `STRIPE_LIVE_SECRET` | `sk_live_[A-Za-z0-9]{20,}` | Stripe secret keys (AISDLC-126) |
+| `STRIPE_LIVE_PUBLISHABLE` | `pk_live_[A-Za-z0-9]{20,}` | Stripe publishable keys (AISDLC-126) |
+| `STRIPE_WEBHOOK` | `whsec_[A-Za-z0-9]{20,}` | Stripe webhook signing secrets (AISDLC-126) |
+| `GCP_API_KEY` | `AIza[0-9A-Za-z_-]{35}` | GCP API keys, exactly 39 chars (AISDLC-126) |
+| `SENDGRID` | `SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}` | SendGrid 3-segment dotted keys (AISDLC-126) |
+| `TWILIO_SID` | `AC[a-f0-9]{32}` | Twilio account SIDs (AISDLC-126) |
+| `MAILGUN` | `key-[a-f0-9]{32}` | Mailgun v1 API keys (AISDLC-126) |
+| `GITHUB_PAT_FINE` | `github_pat_[A-Za-z0-9_]{82}` | Fine-grained GitHub PATs |
+| `GITHUB_PAT` | `ghp_[A-Za-z0-9]{36}` | Classic GitHub PATs |
+| `AWS_ACCESS_KEY` | `AKIA[0-9A-Z]{16}` | AWS access key IDs |
+| `JWT` | `eyJ<base64url>.eyJ<base64url>.<base64url>` | Three-segment JWTs |
+| `HIGH-ENTROPY` | `[A-Za-z0-9_-]{40,}` | Catch-all, last |
 
 Matches are replaced with `[REDACTED:<marker>]`. The catch-all uses
 `[REDACTED:HIGH-ENTROPY]` instead of pretending to know what it caught.
@@ -73,6 +83,14 @@ Pattern order matters: the more-specific entries (e.g. OpenAI's
 `sk-proj-` variant) come BEFORE less-specific ones, and the
 high-entropy catch-all is last so it only fires when no named pattern
 matched.
+
+The redactor is **idempotent** by construction: every marker contains
+characters (`[`, `:`, `]`) that are NOT in any pattern's character
+class, so `redactSecrets(redactSecrets(s)) === redactSecrets(s)` for
+every registered shape (asserted in `secret-redact.test.ts`). This
+matters when the same string flows through multiple redaction surfaces
+(e.g. the calibration log writer + a downstream Slack-digest re-redact)
+— the marker is stable across passes.
 
 The registry is exported from `@ai-sdlc/pipeline-cli/dor` so other
 consumers (Slack digest, dashboard, shadow-mode tooling) can apply the
