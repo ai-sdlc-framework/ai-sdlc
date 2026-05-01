@@ -154,6 +154,54 @@ describe('buildPredicate', () => {
     const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFileDeltas: [] });
     expect(predicate.contentHashV3).toBe(sha256Hex(''));
   });
+
+  it('throws when a changedFileDeltas element is null (caught early, not at verify time)', () => {
+    expect(() =>
+      buildPredicate({
+        ...DEFAULT_INPUTS,
+        changedFileDeltas: [null as unknown as (typeof DEFAULT_INPUTS.changedFileDeltas)[number]],
+      }),
+    ).toThrow(/changedFileDeltas\[0\] must be an object/);
+  });
+
+  it('throws when a changedFileDeltas element is missing path (or path is empty)', () => {
+    expect(() =>
+      buildPredicate({
+        ...DEFAULT_INPUTS,
+        changedFileDeltas: [{ path: '', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) }],
+      }),
+    ).toThrow(/changedFileDeltas\[0\]\.path must be a non-empty string/);
+  });
+
+  it('throws when a changedFileDeltas element baseBlobSha is not a string', () => {
+    expect(() =>
+      buildPredicate({
+        ...DEFAULT_INPUTS,
+        changedFileDeltas: [
+          {
+            path: 'src/foo.ts',
+            baseBlobSha: 123 as unknown as string,
+            headBlobSha: 'b'.repeat(40),
+          },
+        ],
+      }),
+    ).toThrow(/changedFileDeltas\[0\]\.baseBlobSha must be a string/);
+  });
+
+  it('throws when a changedFileDeltas element headBlobSha is not a string', () => {
+    expect(() =>
+      buildPredicate({
+        ...DEFAULT_INPUTS,
+        changedFileDeltas: [
+          {
+            path: 'src/foo.ts',
+            baseBlobSha: 'a'.repeat(40),
+            headBlobSha: undefined as unknown as string,
+          },
+        ],
+      }),
+    ).toThrow(/changedFileDeltas\[0\]\.headBlobSha must be a string/);
+  });
 });
 
 describe('signAttestation + verifyAttestation (happy path)', () => {
