@@ -52,8 +52,15 @@ jobs:
     # awareness) can still land. This step runs `backlog-drift check`
     # against the entire backlog so PRs that introduce repository-wide
     # drift fail at PR time rather than accumulating silently.
+    #
+    # SEQUENCING NOTE (AISDLC-119 review feedback): main currently has
+    # 259 pre-existing drift issues (from before AISDLC-119 shipped).
+    # `continue-on-error: true` keeps this job advisory until the
+    # one-time cleanup task lands; remove the flag after cleanup so
+    # this becomes a hard gate via `ci-ok`'s needs.
     name: Backlog Drift
     runs-on: ubuntu-latest
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
