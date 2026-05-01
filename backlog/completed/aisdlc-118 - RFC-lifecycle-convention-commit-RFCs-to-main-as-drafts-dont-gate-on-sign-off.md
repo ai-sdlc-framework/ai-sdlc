@@ -3,7 +3,7 @@ id: AISDLC-118
 title: >-
   RFC lifecycle convention: commit RFCs to main as drafts (don't gate on
   sign-off)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-01 16:35'
 labels:
@@ -63,3 +63,17 @@ The RFC visibility gap blocks stakeholder review (Alex example today) and create
 - [ ] #6 spec/rfcs/README.md index table shows Lifecycle column so stakeholders see the state at a glance
 - [ ] #7 Optional Phase 2 (filed separate if needed): `pnpm rfc:check` validates Lifecycle field is present + matches sign-off state (e.g., Signed Off lifecycle requires all owners to have signed)
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Formalized RFC lifecycle convention. Added lifecycle: frontmatter field (Draft|Ready for Review|Signed Off|Implemented|Superseded) + schema enum + auto-derived mirror + README index column + template + CLAUDE.md docs. Backfilled all 12 existing RFCs.
+
+## Verification
+- pnpm rfc:check OK; pnpm test 46/46 pass; build/lint/format clean
+- 3 reviews APPROVED: code 0c/0M/2m/2s; test 0c/0M/1m/0s; security 0c/0M/0m/0s
+
+## Follow-up
+- pnpm rfc:check should validate lifecycle + sign-off consistency (separate task)
+<!-- SECTION:FINAL_SUMMARY:END -->
