@@ -864,6 +864,24 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
   if (!Array.isArray(inputs.changedFileDeltas)) {
     throw new Error(`buildPredicate: changedFileDeltas must be an array (pass [] for no-op PRs)`);
   }
+  // Per-element shape guard catches producer-side bugs early — without this,
+  // a malformed delta would surface as an opaque contentHashV3 mismatch on the
+  // verifier side (different machine), making debugging much harder.
+  for (let i = 0; i < inputs.changedFileDeltas.length; i++) {
+    const delta = inputs.changedFileDeltas[i];
+    if (!delta || typeof delta !== 'object') {
+      throw new Error(`buildPredicate: changedFileDeltas[${i}] must be an object`);
+    }
+    if (typeof delta.path !== 'string' || delta.path.length === 0) {
+      throw new Error(`buildPredicate: changedFileDeltas[${i}].path must be a non-empty string`);
+    }
+    if (typeof delta.baseBlobSha !== 'string') {
+      throw new Error(`buildPredicate: changedFileDeltas[${i}].baseBlobSha must be a string`);
+    }
+    if (typeof delta.headBlobSha !== 'string') {
+      throw new Error(`buildPredicate: changedFileDeltas[${i}].headBlobSha must be a string`);
+    }
+  }
   const predicate: AttestationPredicate = {
     schemaVersion: 'v3',
     subject: { digest: { sha1: inputs.commitSha.toLowerCase() } },
