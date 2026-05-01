@@ -262,6 +262,36 @@ Task **titles** may use unicode for human readability (`—`, `→`, `≥`, etc.
 
 The `scripts/check-backlog-ascii.sh` pre-commit hook (wired in `.husky/pre-commit`) enforces this on staged additions/renames; it ignores legacy unicode-named files already in `backlog/completed/` so historical commits don't churn. To rename: `git mv "<unicode-name>.md" "<ascii-equivalent>.md"`. To retitle the task itself: `mcp__backlog__task_edit` with a new title, or rename the file and resync via `task_edit` to keep the frontmatter aligned.
 
+### Strict drift gate — pre-commit + CI (AISDLC-119)
+
+`backlog-drift` checks that every reference inside a task's frontmatter (file paths, dependency IDs, related URLs) actually resolves. The hook used to be **advisory** (`npx backlog-drift hook-run`) — it printed warnings and exited 0, which let 223 drift issues accumulate across 152 tasks despite running on every commit. AISDLC-119 made it **strict**: any commit that stages a `backlog/tasks/*.md` file with drift errors now fails.
+
+#### How it works
+
+- **Pre-commit (per-task, fast).** `.husky/pre-commit` invokes `scripts/check-backlog-drift.sh` (operator-wired — agent sandboxes can't edit `.husky/` directly; replace the legacy `npx backlog-drift hook-run` line with `./scripts/check-backlog-drift.sh`). The script collects staged `backlog/tasks/*.md` files (`--diff-filter=AM` — only Added or Modified, so the `tasks/` → `completed/` rename done by `task_complete` is excluded), extracts the task ID from each filename, and runs `npx backlog-drift check --task <id>` per task. Any non-zero exit blocks the commit. Performance budget is < 500ms for the typical 1-task commit; multi-task commits scale linearly with the number of staged tasks.
+- **CI (full repo, defense-in-depth).** `.github/workflows/ci.yml` has a `backlog-drift` job that runs `npx backlog-drift check` against the entire backlog. It catches drift introduced via merges (rebase conflicts, sibling-PR overlaps, file moves outside the dev's awareness) that the per-task pre-commit gate can't see. It's a required check via the `ci-ok` aggregator.
+
+#### Escape hatches (use sparingly)
+
+| Scenario | Command |
+|---|---|
+| Skip just the strict drift gate (lint-staged + typecheck still run) | `AI_SDLC_SKIP_DRIFT_GATE=1 git commit ...` |
+| Skip the entire pre-commit pipeline | `git commit --no-verify` |
+
+The CI step has no env-var escape — drift on a PR must either be fixed or `--no-verify`'d in a follow-up commit. (The 223-issue legacy backlog is a separate one-time cleanup task; the gate is "stop the bleeding" only.)
+
+#### Auto-fix workflow
+
+When the gate blocks a commit, the failure message lists each offending task and the fix command:
+
+```
+[backlog-drift] AISDLC-119 has drift errors:
+  ✗ Referenced file no longer exists: backlog/tasks/aisdlc-117 - Compute-...md
+  Run `npx backlog-drift fix --task AISDLC-119` to auto-fix.
+```
+
+`fix` rewrites the task file in place: removes deleted references, normalizes dependency IDs, drops orphan `(new)` placeholders. Stage the result and re-commit.
+
 ### Canonical execution paths
 
 | Use case | Command | Billing | Notes |

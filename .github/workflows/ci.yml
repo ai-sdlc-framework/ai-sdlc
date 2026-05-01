@@ -45,6 +45,31 @@ jobs:
       - run: pnpm lint
       - run: pnpm format:check
 
+  backlog-drift:
+    # AISDLC-119: full-backlog drift gate. The husky pre-commit only
+    # checks STAGED tasks, so drift introduced via merges (rebase
+    # conflicts, sibling-PR overlaps, file moves outside the dev's
+    # awareness) can still land. This step runs `backlog-drift check`
+    # against the entire backlog so PRs that introduce repository-wide
+    # drift fail at PR time rather than accumulating silently.
+    name: Backlog Drift
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run backlog-drift check (full repo)
+        # `backlog-drift` is not a workspace dep — it's a standalone CLI
+        # used as project tooling (parity with how `backlog-cli` itself
+        # is invoked). `npx` (without --no-install) downloads it on
+        # demand; the package is small (~few hundred KB) so the cold
+        # fetch is acceptable for this gate.
+        run: npx backlog-drift check
+
   build-and-test:
     name: Build & Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
@@ -147,11 +172,11 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, build-and-test, test-python, test-go]
+    needs: [lint, backlog-drift, build-and-test, test-python, test-go]
     runs-on: ubuntu-latest
     steps:
       - run: |
-          results=("${{ needs.lint.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}")
+          results=("${{ needs.lint.result }}" "${{ needs.backlog-drift.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}")
           for result in "${results[@]}"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "CI failed: found job with result '$result'"
