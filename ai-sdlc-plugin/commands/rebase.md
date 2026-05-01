@@ -6,7 +6,6 @@ allowed-tools:
   - Read
   - Bash
   - Agent(rebase-resolver)
-  - mcp__backlog__task_view
 model: inherit
 ---
 
@@ -67,8 +66,13 @@ if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
   exit 1
 fi
 
-# Derive task ID from branch (pattern: ai-sdlc/<task-id-lower>-<slug>).
-TASK_ID_LOWER=$(echo "$BRANCH" | sed -E 's|^ai-sdlc/([a-z0-9.-]+?)(-[a-z0-9].*)?$|\1|')
+# Derive task ID from branch (pattern: ai-sdlc/<prefix>-<numeric>[.<sub>]-<slug>).
+# IMPORTANT: this regex MUST be portable across BSD sed (macOS) and GNU sed
+# (linux). BSD sed has no `+?` non-greedy quantifier, and even on GNU sed
+# `+?` would stop at the first dash, mangling task IDs like `aisdlc-105`
+# down to `aisdlc`. Use an explicit `<letters>-<digits-and-dots>` shape
+# instead — captures `aisdlc-105`, `aisdlc-100.2`, etc.
+TASK_ID_LOWER=$(echo "$BRANCH" | sed -E 's|^ai-sdlc/([a-z]+-[0-9.]+).*|\1|')
 WORKTREE_PATH=".worktrees/$TASK_ID_LOWER"
 ```
 
@@ -107,12 +111,14 @@ $HEAD_SHA
 origin/main
 
 ## Conflict resolution rules (the 80%)
-1. CHANGELOG Unreleased > Added overlaps → KEEP BOTH bullets
+1. CHANGELOG Unreleased > Added overlaps → KEEP BOTH bullets (earliest first)
 2. Test file additions to same describe → KEEP BOTH it() blocks
 3. Code additions, non-overlapping → KEEP BOTH; escalate if shared identifier
 4. Run `pnpm exec prettier --write <file>` on every resolved file before
    `git rebase --continue`
-5. Push uses `--force-with-lease`, refuses on main/master
+5. Do NOT push from the subagent. The slash command body (Step 6) owns
+   the single force-with-lease push so re-attestation can be committed
+   atomically with the rebased commits.
 
 ## Escalation cases (the 20%)
 1. Modify-vs-delete → escalate with best-guess port location
@@ -154,7 +160,9 @@ they appear.
 
 ## Step 4 — Parse subagent return value
 
-Read the JSON returned by the subagent. Branch on `outcome`:
+Read the JSON returned by the subagent (its final assistant message is a
+single JSON object — see the rebase-resolver agent's "Return value"
+section). Branch on `outcome`:
 
 - **`escalated`** — print `escalationReason`, `notes`, and tell the
   operator they need to handle this manually. Do NOT push, do NOT
@@ -162,7 +170,19 @@ Read the JSON returned by the subagent. Branch on `outcome`:
   for manual conflict resolution." Stop.
 - **`failed`** — print the failure reason. The subagent already
   rolled back. Stop.
-- **`success`** — proceed to Step 5 (re-attestation).
+- **`success`** — persist the structured return JSON to disk so Step 5
+  can read it with `jq` (the assistant message itself isn't directly
+  accessible to the bash subshell), then proceed to Step 5
+  (re-attestation).
+
+```bash
+# Persist the subagent's return JSON before Step 5 reads it. Without
+# this write the jq calls in Step 5 would always see empty hashes and
+# the skip-resign optimization would never fire.
+cat > /tmp/rebase-resolver-${PR}.json <<'REBASE_RESOLVER_JSON'
+<<paste the subagent's return JSON object here verbatim>>
+REBASE_RESOLVER_JSON
+```
 
 ## Step 5 — Re-sign attestation if contentHash changed (AISDLC-105 + AISDLC-102 + AISDLC-94)
 
@@ -171,7 +191,10 @@ envelopes whose `contentHash` is unchanged (rebase didn't touch any blob
 SHA at HEAD). AISDLC-101 further accepts unchanged per-file delta
 hashes. So re-signing is only needed when `contentHash` actually moved.
 
-Use the oracle the subagent already ran:
+Use the oracle the subagent already ran. **CRITICAL**: the conditional
+below skips the *signing* logic but MUST fall through to Step 6
+(force-push). Do NOT `exit 0` inside the skip branch — the rebase
+commits still need to be pushed even when no re-attestation is needed.
 
 ```bash
 PRE_HASH=$(jq -r '.preContentHash // empty' /tmp/rebase-resolver-${PR}.json)
@@ -180,58 +203,73 @@ POST_HASH=$(jq -r '.postContentHash // empty' /tmp/rebase-resolver-${PR}.json)
 if [ -n "$PRE_HASH" ] && [ "$PRE_HASH" = "$POST_HASH" ]; then
   echo "[ai-sdlc-progress] re-attestation: skipped — contentHash unchanged ($PRE_HASH)"
   # No re-signing needed; the existing attestation envelope still verifies.
-  exit 0
-fi
+  # Falls through to Step 6 (push) — the rebased commits MUST still push.
+else
+  echo "[ai-sdlc-progress] re-attestation: contentHash changed ($PRE_HASH → $POST_HASH); re-signing"
 
-echo "[ai-sdlc-progress] re-attestation: contentHash changed ($PRE_HASH → $POST_HASH); re-signing"
-```
+  cd "$WORKTREE_PATH"
 
-When re-signing IS needed, call `sign-attestation.mjs` exactly the same
-way `/ai-sdlc execute` Step 10 does, then commit + push the updated
-envelope:
+  if [ ! -f "$HOME/.ai-sdlc/signing-key.pem" ]; then
+    echo "ERROR: No signing key at ~/.ai-sdlc/signing-key.pem."
+    echo "       Re-attestation needed but cannot sign locally."
+    echo "       Run /ai-sdlc init-signing-key once, open the printed onboarding PR,"
+    echo "       then re-run /ai-sdlc rebase $PR."
+    exit 1
+  fi
 
-```bash
-cd "$WORKTREE_PATH"
+  # Reuse any review-verdicts from a previous run if present, otherwise
+  # pass an empty verdicts file so the predicate carries the iteration
+  # count + harness note from a normal /ai-sdlc execute Step 10 invocation.
+  VERDICTS=/tmp/review-verdicts-${TASK_ID_LOWER}.json
+  [ -f "$VERDICTS" ] || echo '[]' > "$VERDICTS"
 
-if [ ! -f "$HOME/.ai-sdlc/signing-key.pem" ]; then
-  echo "ERROR: No signing key at ~/.ai-sdlc/signing-key.pem."
-  echo "       Re-attestation needed but cannot sign locally."
-  echo "       Run /ai-sdlc init-signing-key once, open the printed onboarding PR,"
-  echo "       then re-run /ai-sdlc rebase $PR."
-  exit 1
-fi
+  # Carry the pre-rebase attestation's iterationCount + harnessNote
+  # forward to preserve fidelity. The originals live in the DSSE payload
+  # at `.ai-sdlc/attestations/<pre-rebase-head-sha>.dsse.json`. If we
+  # can't read them (envelope missing or malformed), fall back to the
+  # safe defaults and document the loss in the chore commit body.
+  PRE_HEAD_SHA="$HEAD_SHA"
+  PRE_ATTESTATION=".ai-sdlc/attestations/${PRE_HEAD_SHA}.dsse.json"
+  if [ -f "$PRE_ATTESTATION" ]; then
+    PRE_ITER=$(jq -r '.payload' "$PRE_ATTESTATION" \
+      | base64 -d 2>/dev/null \
+      | jq -r '.iterationCount // 1')
+    PRE_HARNESS_NOTE=$(jq -r '.payload' "$PRE_ATTESTATION" \
+      | base64 -d 2>/dev/null \
+      | jq -r '.harnessNote // ""')
+    FIDELITY_NOTE=""
+  else
+    PRE_ITER=1
+    PRE_HARNESS_NOTE=""
+    FIDELITY_NOTE="(pre-rebase attestation $PRE_ATTESTATION not on disk; iterationCount + harnessNote reset to defaults)"
+  fi
 
-# Reuse any review-verdicts from a previous run if present, otherwise
-# pass an empty verdicts file so the predicate carries the iteration
-# count + harness note from a normal /ai-sdlc execute Step 10 invocation.
-VERDICTS=/tmp/review-verdicts-${TASK_ID_LOWER}.json
-[ -f "$VERDICTS" ] || echo '[]' > "$VERDICTS"
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/sign-attestation.mjs" \
+    --review-verdicts "$VERDICTS" \
+    --iteration-count "$PRE_ITER" \
+    --harness-note "$PRE_HARNESS_NOTE"
 
-node "${CLAUDE_PLUGIN_ROOT}/scripts/sign-attestation.mjs" \
-  --review-verdicts "$VERDICTS" \
-  --iteration-count 1 \
-  --harness-note ""
-
-# Sanitise CHORE_BODY for AISDLC-88 magic tokens, same as
-# /ai-sdlc execute Step 10. The chore commit MUST fire
-# verify-attestation.yml on push.
-CHORE_BODY="chore: re-sign review attestation after rebase
+  # Sanitise CHORE_BODY for AISDLC-88 magic tokens, same as
+  # /ai-sdlc execute Step 10. The chore commit MUST fire
+  # verify-attestation.yml on push.
+  CHORE_BODY="chore: re-sign review attestation after rebase
 
 Auto-generated by /ai-sdlc rebase. Rebase changed HEAD but reviewers'
 approval still binds (re-signed because contentHash changed); the new
-envelope verifies against the rebased HEAD.
+envelope verifies against the rebased HEAD. ${FIDELITY_NOTE}
 
 Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
-CHORE_BODY=$(printf '%s' "$CHORE_BODY" | sed -E \
-  -e 's/\[[Ss][Kk][Ii][Pp] [Cc][Ii]\]/(skip ci marker)/g' \
-  -e 's/\[[Cc][Ii] [Ss][Kk][Ii][Pp]\]/(ci skip marker)/g' \
-  -e 's/\[[Nn][Oo] [Cc][Ii]\]/(no ci marker)/g' \
-  -e 's/\[[Ss][Kk][Ii][Pp] [Aa][Cc][Tt][Ii][Oo][Nn][Ss]\]/(skip actions marker)/g' \
-  -e 's/\[[Aa][Cc][Tt][Ii][Oo][Nn][Ss] [Ss][Kk][Ii][Pp]\]/(actions skip marker)/g')
+  CHORE_BODY=$(printf '%s' "$CHORE_BODY" | sed -E \
+    -e 's/\[[Ss][Kk][Ii][Pp] [Cc][Ii]\]/(skip ci marker)/g' \
+    -e 's/\[[Cc][Ii] [Ss][Kk][Ii][Pp]\]/(ci skip marker)/g' \
+    -e 's/\[[Nn][Oo] [Cc][Ii]\]/(no ci marker)/g' \
+    -e 's/\[[Ss][Kk][Ii][Pp] [Aa][Cc][Tt][Ii][Oo][Nn][Ss]\]/(skip actions marker)/g' \
+    -e 's/\[[Aa][Cc][Tt][Ii][Oo][Nn][Ss] [Ss][Kk][Ii][Pp]\]/(actions skip marker)/g')
 
-git add .ai-sdlc/attestations
-git commit -m "$CHORE_BODY"
-cd -
+  git add .ai-sdlc/attestations
+  git commit -m "$CHORE_BODY"
+  cd -
+fi
 ```
 
 ## Step 6 — Force-push with --force-with-lease (AISDLC-105 Hard Rule 2)

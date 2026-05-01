@@ -277,6 +277,34 @@ describe('rebase-resolver body — workflow stages', () => {
   });
 });
 
+// AISDLC-105 round-2 reviewer fix: push-owner consolidation.
+// Originally Stage 6 of the subagent ran `git push --force-with-lease`,
+// AND the slash command's Step 6 ran the same push. Result: duplicate
+// push, double CI run, race conditions, and the chore commit could be
+// orphaned if the subagent push landed first.
+//
+// Fix: subagent does NOT push. The slash command body owns the single
+// force-push. The reference shape is preserved in the docs so future
+// readers see what the slash command does, but the subagent must not
+// execute it.
+describe('rebase-resolver body — push-owner consolidation (round-2 fix)', () => {
+  it('Stage 6 is now a return stage, not a push stage', () => {
+    // The phrase "DO NOT push" must appear in the workflow Stage 6.
+    assert.match(body, /DO NOT push|do NOT push/);
+  });
+
+  it('Stage 6 hands off to the slash command for push + re-attestation', () => {
+    assert.match(body, /slash command.*push|sole owner.*force-push|hand.*off/i);
+  });
+
+  it('Rule 5 explains the single-push policy and points at the slash command', () => {
+    // The agent spec's Rule 5 used to instruct pushing; now it must
+    // explicitly state the subagent does NOT push.
+    assert.match(body, /Rule 5/);
+    assert.match(body, /sole push owner|push.*slash command|push is the slash command/i);
+  });
+});
+
 // ──────────────────────────────────────────────────────────────────────
 // Fixture tests for the mechanical resolution algorithm.
 //

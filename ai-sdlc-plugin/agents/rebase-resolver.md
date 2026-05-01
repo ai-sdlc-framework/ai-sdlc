@@ -84,10 +84,13 @@ Stages:
 5. **verify** — Run `pnpm build && pnpm test && pnpm lint && pnpm format:check`.
    On any failure, escalate (do NOT push; the operator owns recovery).
    Emit: `[ai-sdlc-progress] verify: build/test/lint/format clean | <failed-stage>`
-6. **push** — `git push --force-with-lease origin <branch>`. Refuse on
-   `main`/`master`. On non-fast-forward (someone else pushed), abort with
-   `outcome: failed` and `escalationReason: push-rejected`.
-   Emit: `[ai-sdlc-progress] push: force-with-lease succeeded`
+6. **return** — DO NOT push. The slash command body (`commands/rebase.md`
+   Step 6) is the sole owner of the force-push so re-attestation can be
+   committed atomically with the rebase before pushing. Return the
+   structured JSON with `outcome: success`; the slash command will run
+   the push under its own bash (still `--force-with-lease`, still refusing
+   on main/master).
+   Emit: `[ai-sdlc-progress] return: handing off to /ai-sdlc rebase for re-attestation + push`
 
 ## Conflict resolution rules — the 80% you handle
 
@@ -97,11 +100,12 @@ Both branches added new bullet entries to the same `## Unreleased > ###
 Added` (or `### Changed`, `### Fixed`) section. The conflict markers wrap
 both sets of bullets.
 
-**Resolution: KEEP BOTH.** Different features = different bullets. Order
-doesn't matter for changelog purposes; preserve both branches' bullets in
-the order they appear (current branch first, incoming-from-main second is
-fine — alphabetisation is not a project rule). Strip the `<<<<<<<`,
-`=======`, `>>>>>>>` markers but keep every bullet.
+**Resolution: KEEP BOTH.** Different features = different bullets.
+Preserve both branches' bullets with **earliest first** — incoming-from-main
+bullets (which already landed on main) come before the current branch's
+new bullets. This matches the project's CHANGELOG convention (chronological
+landing order) and what reviewers expect when scanning a release. Strip
+the `<<<<<<<`, `=======`, `>>>>>>>` markers but keep every bullet.
 
 This is rule-1 because it's by far the most common conflict in this repo
 and was the entire content of PR #113's friction.
@@ -147,12 +151,19 @@ This was the root cause of PR #115's iteration 4 CI failure — the
 manual edit added a trailing space and CI's `prettier --check` rejected
 the push. Always format-on-resolve, before continuing.
 
-### Rule 5 — `--force-with-lease`, never `--force`
+### Rule 5 — `--force-with-lease`, never `--force` (push is the slash command's job, not yours)
 
-Always push with `--force-with-lease`, never with `--force` / `-f`. And
-refuse to push at all if the branch is `main` or `master`:
+You do NOT push. The slash command body (`commands/rebase.md` Step 6) is
+the sole push owner — that lets it commit any re-attestation envelope
+atomically with the rebased commits before the push hits `origin`. If
+you push from here AND the slash command pushes from there, you get
+duplicate pushes, race-conditions, and double CI runs.
+
+The single-push policy is the rule; the *contents* of the policy are
+identical to what the slash command enforces:
 
 ```bash
+# Reference shape — DO NOT run this from the subagent.
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 if [ "$BRANCH" = "main" ] || [ "$BRANCH" = "master" ]; then
   echo "ERROR: refusing to force-push $BRANCH"
@@ -162,7 +173,9 @@ git push --force-with-lease origin "$BRANCH"
 ```
 
 `--force-with-lease` refuses if the remote moved under us — which
-preserves a co-pusher's work. Plain `--force` clobbers it.
+preserves a co-pusher's work. Plain `--force` clobbers it. The subagent
+verifies the rebase + resolution + verification chain succeeded and then
+returns; the slash command body owns the push.
 
 ## Escalation cases — the 20% you DON'T resolve
 
@@ -272,8 +285,9 @@ Return a JSON object as your final message (no other text):
 `outcome` semantics:
 
 - `success` — rebase completed (including the no-op case where
-  `origin/main` was already ancestor of HEAD), verification passed,
-  push succeeded. The slash command will then handle re-attestation.
+  `origin/main` was already ancestor of HEAD), verification passed.
+  The subagent does NOT push; the slash command body owns the push +
+  re-attestation as a single atomic step.
 - `escalated` — a 20% case fired (modify-vs-delete, semantic conflict,
   verification failure, iteration cap). The worktree is left in a clean
   state (rebase aborted, no push). Operator owns next steps.

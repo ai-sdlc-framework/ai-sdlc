@@ -66,7 +66,19 @@ function parseFrontmatter(filePath) {
 // level deep regardless of frontmatter), so the orchestrator middleman
 // pattern from AISDLC-82 is unimplementable on this harness. See the
 // /ai-sdlc execute slash command body for the new home of the pipeline.
-const agentFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md', 'developer.md'];
+//
+// AISDLC-105: rebase-resolver.md added — the project-wide invariants below
+// (every agent has Read in tools, every agent disallows AgentTool, every
+// agent inherits the model) MUST gate every plugin subagent uniformly,
+// so this list is the source of truth for "all plugin subagents". When
+// a new agent ships, append it here.
+const agentFiles = [
+  'code-reviewer.md',
+  'security-reviewer.md',
+  'test-reviewer.md',
+  'developer.md',
+  'rebase-resolver.md',
+];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
 const agents = {};
 
