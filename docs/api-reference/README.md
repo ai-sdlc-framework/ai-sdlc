@@ -9,6 +9,7 @@ The orchestrator runtime — CLI, agent runners, codebase analysis, and state st
 | Module | Description |
 |---|---|
 | [Runners](runners.md) | Agent runners (Claude Code, Copilot, Cursor, Codex, GenericLLM) and runner registry |
+| [Parallel Execution](parallel-execution.md) | Worktree pool, harness adapter, database branch adapter, subscription plan / ledger (RFC-0010) |
 
 ## SDK (`@ai-sdlc/reference`)
 
