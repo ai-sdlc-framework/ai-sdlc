@@ -2,6 +2,11 @@
 
 The Product Priority Algorithm (PPA) provides autonomous work item prioritization. It computes a composite priority score from seven dimensions that capture product alignment, market signals, execution feasibility, and human input.
 
+## Spec references
+
+- **[RFC-0005 — Product Priority Algorithm](../../spec/rfcs/RFC-0005-product-priority-algorithm.md)** — the foundational specification for PPA; defines the seven dimensions, the multiplicative composite formula, the calibration loop, and the adapter contracts referenced throughout this page.
+- **[RFC-0008 — PPA Triad Integration](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md)** — the integration layer that wires the RFC-0005 scoring model into admission (Product / Design / Engineering pillars), introducing the admission-subset composite and `pillarBreakdown` surface documented in [Admission Subset](#admission-subset-rfc-0008) below.
+
 ## Quick Start
 
 ```typescript

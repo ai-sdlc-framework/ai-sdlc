@@ -10,7 +10,7 @@
 
 The Pipeline Operator owns the **policy, posture, and triage layer** of an AI-SDLC pipeline. Three engineering capabilities had to land before this role could exist coherently:
 
-- **PPA scoring** (RFC-0008) lifted prioritization out of human hands.
+- **PPA scoring** (RFC-0005, integrated via RFC-0008) lifted prioritization out of human hands.
 - **AI-driven implementation + review** lifted code production and code review out of human hands.
 - **Parallel + cost-aware orchestration** (RFC-0010) lifted infrastructure choreography out of human hands.
 
@@ -298,7 +298,7 @@ The `lastVerified` date on a SubscriptionPlan is more than 30 days old. Check cu
 ### Required
 
 - YAML config + JSON-schema literacy
-- Read [PPA scoring](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md) at a conceptual level
+- Read [PPA scoring](../../spec/rfcs/RFC-0005-product-priority-algorithm.md) (RFC-0005, foundational spec) and the [Triad Integration](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md) layer (RFC-0008) at a conceptual level
 - Vendor billing-model literacy (subscription tiers, off-peak schedules, monthly caps)
 - Triage / prioritization mindset — decide which events warrant action
 - Some budget/finance intuition — tier recommendations, dollar vs token cost model
@@ -440,6 +440,7 @@ without review (it's just file relocation), but the human approves it.
 ## Related Documents
 
 - [RFC-0010 — Parallel Execution and Worktree Pooling](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) — full normative spec for everything this runbook references
-- [RFC-0008 — PPA Triad Integration](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md) — scoring model the operator interprets but doesn't tune
+- [RFC-0005 — Product Priority Algorithm](../../spec/rfcs/RFC-0005-product-priority-algorithm.md) — foundational PPA spec defining the seven dimensions, composite formula, and calibration loop the operator interprets but doesn't tune
+- [RFC-0008 — PPA Triad Integration](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md) — admission-time integration of RFC-0005 across Product / Design / Engineering pillars
 - [RFC-0004 — Cost Governance and Attribution](../../spec/rfcs/RFC-0004-cost-governance-and-attribution.md) — `costBudget` semantics
 - [Project Slack Integration](../../../.claude/projects/-Users-dominique-Documents-dev-ai-sdlc/memory/project_slack_integration.md) — how digest entries reach the operator
