@@ -155,9 +155,12 @@ async function main() {
       `${orchestratorBarrel} not found. Run \`pnpm --filter @ai-sdlc/orchestrator build\` first.`,
     );
   }
-  const { buildPredicate, signAttestation, collectChangedFileEntries } = await import(
-    orchestratorBarrel
-  );
+  const {
+    buildPredicate,
+    signAttestation,
+    collectChangedFileEntries,
+    collectChangedFileDeltaEntries,
+  } = await import(orchestratorBarrel);
 
   // Gather inputs.
   const headSha = git(['rev-parse', 'HEAD'], repoRoot).trim();
@@ -168,6 +171,15 @@ async function main() {
   let changedFiles;
   try {
     changedFiles = collectChangedFileEntries('origin/main', 'HEAD', repoRoot);
+  } catch (err) {
+    fail(err.message ?? String(err));
+  }
+  // AISDLC-101: also collect per-file (base, head) blob deltas for
+  // `contentHashV3` (Phase 2 triple-hash). Same diff range as diffHash +
+  // contentHash so all three legs cover the same file set.
+  let changedFileDeltas;
+  try {
+    changedFileDeltas = collectChangedFileDeltaEntries('origin/main', 'HEAD', repoRoot);
   } catch (err) {
     fail(err.message ?? String(err));
   }
@@ -207,6 +219,7 @@ async function main() {
     iterationCount,
     harnessNote,
     changedFiles,
+    changedFileDeltas,
   });
 
   const privateKeyPem = readFileSync(keyPath, 'utf-8');

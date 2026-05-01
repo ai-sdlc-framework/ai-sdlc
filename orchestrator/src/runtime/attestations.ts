@@ -106,6 +106,37 @@ export interface AttestationPredicate {
    * `contentHash` required and removes `diffHash`.
    */
   contentHash?: string;
+  /**
+   * Per-file-delta content binding (AISDLC-101 — Phase 2 of the AISDLC-94
+   * dual-hash migration). sha256 over a canonical line-per-file string
+   * of the form `<path>\t<fileDeltaHash>\n` (sorted ascending by path),
+   * where `fileDeltaHash[path] = sha256(<base_blob_sha> + ' -> ' +
+   * <head_blob_sha>)`. The base blob SHA comes from the merge-base of the
+   * PR's `<baseRef>` and `<headRef>`; the head blob SHA from the PR's
+   * `<headRef>`.
+   *
+   * Why this is "third leg" of the triple-hash:
+   *  - `diffHash` (legacy v1) commits to the literal `git diff` text.
+   *    Breaks on rebase whenever `@@` headers shift.
+   *  - `contentHash` (AISDLC-94) commits to the post-apply tree state.
+   *    Stable when the PR rebases cleanly onto a base that didn't touch
+   *    the same files. BREAKS in the AISDLC-93 / PR #102 case where a
+   *    SIBLING PR already modified the same files between OUR sign +
+   *    OUR merge — the rebased file's HEAD blob now contains the
+   *    sibling's contributions, so the head blob SHA changes.
+   *  - `contentHashV3` commits to the (base, head) blob-pair transition
+   *    per file. Provides a stricter binding than v2 alone (it commits
+   *    to "we moved file F from blob A to blob B", not just "we ended
+   *    up at blob B"). Accepted alongside v1 (diffHash) + v2 (contentHash)
+   *    during the triple-hash window — the verifier OR's the three legs.
+   *
+   * Optional in v1 for Phase 2 backward compatibility — envelopes signed
+   * before this field landed only carry `diffHash` + (optionally) `contentHash`,
+   * and the verifier still accepts them on either of those two legs. A
+   * later schema bump (separate follow-up task) will require `contentHashV3`
+   * and drop the legacy legs.
+   */
+  contentHashV3?: string;
   /** sha256 of `.ai-sdlc/review-policy.md` at attestation time. */
   policyHash: string;
   /** Reviewer entries — typically 3 (code/test/security). */
@@ -256,6 +287,17 @@ export function validatePredicateShape(parsed: unknown): string | null {
     }
   }
 
+  // contentHashV3 (AISDLC-101) — optional in Phase 2 (triple-hash mode).
+  // Same pattern + rationale as contentHash: when present, must be a
+  // 64-char hex sha256. Absence is OK for envelopes signed before
+  // AISDLC-101 landed (they fall back to v1 `diffHash` or v2 `contentHash`).
+  if (p['contentHashV3'] !== undefined) {
+    const ch3 = p['contentHashV3'];
+    if (typeof ch3 !== 'string' || !SHA256_HEX.test(ch3)) {
+      return 'schema validation failed: contentHashV3 does not match pattern';
+    }
+  }
+
   // pluginVersion — short ID (no CR/LF, no `=`).
   const pluginVersion = p['pluginVersion'];
   if (
@@ -358,6 +400,27 @@ export interface ChangedFileEntry {
   blobSha: string;
 }
 
+/**
+ * One entry in the per-file-delta set used to compute `contentHashV3`
+ * (AISDLC-101). `path` is the repo-relative forward-slash path;
+ * `baseBlobSha` is the git blob SHA-1 of the file at the merge-base of
+ * `<baseRef>` and `<headRef>` (= the file's content BEFORE the PR's
+ * commits replayed); `headBlobSha` is the git blob SHA-1 of the file at
+ * `<headRef>` (= AFTER the PR's commits).
+ *
+ * For files that don't exist at one of the endpoints (newly added or
+ * deleted), the corresponding `*BlobSha` is the empty string. The
+ * canonical line still includes the path so:
+ *   - "added file" (`base=''`, `head=<sha>`) → distinct from "kept file"
+ *     (`base=<old>`, `head=<new>`)
+ *   - "deleted file" (`base=<old>`, `head=''`) → distinct from "added file"
+ */
+export interface ChangedFileDeltaEntry {
+  path: string;
+  baseBlobSha: string;
+  headBlobSha: string;
+}
+
 /** Inputs for building an attestation predicate. */
 export interface BuildPredicateInputs {
   commitSha: string;
@@ -381,6 +444,15 @@ export interface BuildPredicateInputs {
    * and the verifier falls back to the legacy `diffHash` match.
    */
   changedFiles?: ChangedFileEntry[];
+  /**
+   * Per-file-delta set for `contentHashV3` (AISDLC-101). Optional in
+   * Phase 2 — when omitted, the predicate's `contentHashV3` field is
+   * also omitted and the verifier falls back to either of the legacy
+   * legs (`diffHash` or `contentHash`). When provided, captures the
+   * (base_blob_sha → head_blob_sha) transition per file rather than just
+   * the head blob SHA.
+   */
+  changedFileDeltas?: ChangedFileDeltaEntry[];
 }
 
 /**
@@ -557,6 +629,188 @@ export function collectChangedFileEntries(
 }
 
 /**
+ * Compute the per-file-delta `contentHashV3` (AISDLC-101) over a set of
+ * `{path, baseBlobSha, headBlobSha}` triples. The canonical encoding is
+ * one line per entry, sorted ascending by path, with
+ * `<path>\t<fileDeltaHash>\n` per line, where
+ * `fileDeltaHash = sha256(baseBlobSha + ' -> ' + headBlobSha)`. The
+ * outer `contentHashV3` is the sha256 of the concatenated lines.
+ *
+ * Why per-file delta hashing — and what it adds vs. AISDLC-94's `contentHash`:
+ *   - `contentHash` (AISDLC-94) hashes the post-apply blob SHA per file.
+ *     If a sibling PR landed between OUR sign + OUR merge AND modified
+ *     the SAME file, the rebased file's HEAD blob SHA contains both the
+ *     sibling contribution AND ours → contentHash diverges (false reject).
+ *   - `contentHashV3` (AISDLC-101) hashes the (base, head) blob-pair
+ *     transition per file. Provides a stricter "we moved file F from blob
+ *     A to blob B" binding than just "we ended up at blob B". Any genuine
+ *     content change still flips the head blob SHA → fileDeltaHash flips
+ *     → contentHashV3 flips → reject (threat model preserved).
+ *
+ * This is the SECOND line of defense in the 3-layer rebase-tolerance
+ * plan (AISDLC-94 = Phase 1 verifier-side dual-hash, AISDLC-102 = Phase 1.5
+ * producer-side pre-sign rebase, AISDLC-101 = Phase 2 per-file delta).
+ * The verifier OR's all three legs during the triple-hash window.
+ *
+ * Path-delimiter rejection (\t / \n) mirrors `computeContentHash` so the
+ * canonical encoding stays injective regardless of caller input.
+ *
+ * Pure function. Idempotent against double-enumeration via dedup-by-path
+ * (last-write-wins per path), same as `computeContentHash`.
+ */
+export function computeContentHashV3(entries: ChangedFileDeltaEntry[]): string {
+  // Dedup by path (last entry wins) so callers passing the same file
+  // twice — e.g. add+modify in two diff invocations — don't produce a
+  // different hash than a clean run.
+  const byPath = new Map<string, { baseBlobSha: string; headBlobSha: string }>();
+  for (const e of entries) {
+    if (typeof e?.path !== 'string' || e.path.length === 0) {
+      throw new Error(`computeContentHashV3: entry path must be a non-empty string`);
+    }
+    if (typeof e.baseBlobSha !== 'string') {
+      throw new Error(
+        `computeContentHashV3: entry baseBlobSha must be a string for path ${e.path}`,
+      );
+    }
+    if (typeof e.headBlobSha !== 'string') {
+      throw new Error(
+        `computeContentHashV3: entry headBlobSha must be a string for path ${e.path}`,
+      );
+    }
+    // Reject path entries containing the canonical-encoding delimiters
+    // (\t between path and delta hash, \n between lines). See the same
+    // rejection in `computeContentHash` for the injectivity rationale.
+    if (e.path.includes('\t') || e.path.includes('\n')) {
+      throw new Error(
+        `computeContentHashV3: entry path must not contain tab or newline characters (got ${JSON.stringify(e.path)})`,
+      );
+    }
+    const normalizedPath = e.path.replace(/\\/g, '/');
+    byPath.set(normalizedPath, {
+      baseBlobSha: e.baseBlobSha.toLowerCase(),
+      headBlobSha: e.headBlobSha.toLowerCase(),
+    });
+  }
+  const sorted = [...byPath.entries()].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  const canonical = sorted
+    .map(([path, { baseBlobSha, headBlobSha }]) => {
+      const fileDeltaHash = sha256Hex(`${baseBlobSha} -> ${headBlobSha}`);
+      return `${path}\t${fileDeltaHash}\n`;
+    })
+    .join('');
+  return sha256Hex(canonical);
+}
+
+/**
+ * Collect the per-file-delta set used to compute `contentHashV3` (AISDLC-101).
+ *
+ * Returns one `{ path, baseBlobSha, headBlobSha }` entry per file in
+ * `git diff --name-only <baseRef>...<headRef>`. The base blob SHA is read
+ * from the *merge-base* of `<baseRef>` and `<headRef>` (which the `...`
+ * 3-dot diff range already targets — `A...B` diffs against
+ * `merge-base(A,B)`); the head blob SHA from `<headRef>`. Files newly
+ * added in the PR have empty `baseBlobSha`; deleted files have empty
+ * `headBlobSha`.
+ *
+ * Mirrors `collectChangedFileEntries`'s flag set (`--no-renames`,
+ * `core.quotepath=false`) for consistency with the other binding's file
+ * enumeration.
+ *
+ * Extracted so a single source of truth handles the two ls-tree lookups
+ * (one per endpoint) at every signing site — `sign-attestation.mjs` and
+ * `ci-sign-attestation.mjs`.
+ */
+export function collectChangedFileDeltaEntries(
+  baseRef: string,
+  headRef: string,
+  repoRoot: string,
+  options: CollectChangedFileEntriesOptions = {},
+): ChangedFileDeltaEntry[] {
+  const runGit =
+    options.runGit ??
+    ((args: string[], cwd: string): string =>
+      execFileSync('git', args, {
+        cwd,
+        env: cleanGitEnv(),
+        encoding: 'utf-8',
+        maxBuffer: 64 * 1024 * 1024,
+      }));
+
+  // Resolve the merge-base ONCE so each ls-tree below uses a stable
+  // commit (`<baseRef>` may be a moving ref like `origin/main`). The
+  // `A...B` diff range already targets merge-base(A,B), so reading
+  // base blob SHAs at the merge-base keeps the per-file delta
+  // semantically aligned with the file enumeration.
+  let mergeBase: string;
+  try {
+    mergeBase = runGit(['merge-base', baseRef, headRef], repoRoot).trim();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`collectChangedFileDeltaEntries: git merge-base failed: ${msg}`);
+  }
+  if (!/^[0-9a-f]{40}$/.test(mergeBase)) {
+    throw new Error(
+      `collectChangedFileDeltaEntries: git merge-base returned non-SHA output: ${JSON.stringify(mergeBase)}`,
+    );
+  }
+
+  let nameOnly: string;
+  try {
+    nameOnly = runGit(
+      [
+        '-c',
+        'core.quotepath=false',
+        'diff',
+        '--name-only',
+        '--no-renames',
+        `${baseRef}...${headRef}`,
+      ],
+      repoRoot,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`collectChangedFileDeltaEntries: git diff --name-only failed: ${msg}`);
+  }
+
+  const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+  const entries: ChangedFileDeltaEntry[] = [];
+
+  /**
+   * Resolve a file's blob SHA at a given ref via `git ls-tree -r`. Returns
+   * the empty string when the path doesn't exist at the ref (= the file
+   * was added in the PR for `mergeBase`, or deleted in the PR for `headRef`).
+   */
+  const resolveBlobSha = (ref: string, path: string): string => {
+    try {
+      const lsOut = runGit(
+        ['-c', 'core.quotepath=false', 'ls-tree', '-r', ref, '--', path],
+        repoRoot,
+      );
+      const line = lsOut.split('\n').find((l) => l.length > 0);
+      if (line) {
+        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+        if (m) return m[1];
+      }
+    } catch {
+      // ls-tree failed (path missing at ref) → empty blob marker.
+    }
+    return '';
+  };
+
+  for (const path of paths) {
+    if (path.includes('\t') || path.includes('\n')) {
+      throw new Error(
+        `collectChangedFileDeltaEntries: path must not contain tab or newline characters (got ${JSON.stringify(path)})`,
+      );
+    }
+    const baseBlobSha = resolveBlobSha(mergeBase, path);
+    const headBlobSha = resolveBlobSha(headRef, path);
+    entries.push({ path, baseBlobSha, headBlobSha });
+  }
+  return entries;
+}
+
+/**
  * Build the predicate payload from raw inputs. Pure function — no I/O,
  * no signing. The caller (`/ai-sdlc execute` Step 10) reads files and git
  * output, then hands them here.
@@ -589,6 +843,12 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
   };
   if (Array.isArray(inputs.changedFiles)) {
     predicate.contentHash = computeContentHash(inputs.changedFiles);
+  }
+  // AISDLC-101 Phase 2 triple-hash: include `contentHashV3` when the caller
+  // provided a per-file-delta set. Omitted otherwise — verifier falls back
+  // to the v1 (`diffHash`) or v2 (`contentHash`) leg.
+  if (Array.isArray(inputs.changedFileDeltas)) {
+    predicate.contentHashV3 = computeContentHashV3(inputs.changedFileDeltas);
   }
   return predicate;
 }
@@ -684,6 +944,14 @@ export interface VerifyOptions {
      * Omit to disable contentHash acceptance.
      */
     contentHash?: string;
+    /**
+     * Phase-2 triple-hash acceptance (AISDLC-101). When the envelope has a
+     * `contentHashV3` field AND this expected value is set, a match here
+     * ALSO satisfies the binding (in addition to the v1 `diffHash` and v2
+     * `contentHash` legs). The verifier OR's the three legs — any single
+     * leg matching is enough to accept. Omit to disable v3 acceptance.
+     */
+    contentHashV3?: string;
   };
   /**
    * Override the accepted-schema-versions allowlist (for tests). Defaults
@@ -793,19 +1061,35 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
       reason: `subject digest mismatch (envelope was signed for a different commit)`,
     };
   }
-  // AISDLC-94 dual-hash acceptance: if the envelope's `contentHash`
-  // matches the expected `contentHash`, the post-apply tree state is
-  // identical and the attestation remains valid even when `diffHash`
-  // diverges (typical rebase: a sibling PR already touched the same
-  // files, so `@@` hunk headers + context lines shifted, but the
-  // file content the reviewers signed off on is unchanged).
-  // Falls through to the legacy diffHash check when contentHash isn't
-  // present or doesn't match — Phase 2 will drop the diffHash leg.
+  // AISDLC-94 + AISDLC-101 triple-hash acceptance: accept if ANY of the
+  // three legs match.
+  //
+  //   - v1 (`diffHash`): legacy literal-diff hash. Breaks on rebase.
+  //   - v2 (`contentHash`): post-apply blob SHA per file (AISDLC-94).
+  //     Stable when the rebase target didn't touch the same files.
+  //   - v3 (`contentHashV3`): per-file (base, head) blob-pair transition
+  //     (AISDLC-101). Stricter binding than v2 — commits to "we moved
+  //     file F from blob A to blob B" rather than just "we ended up at
+  //     blob B".
+  //
+  // Both v2 and v3 require the CALLER to opt in (by setting the
+  // corresponding `expected.*` field). A genuine content change still
+  // flips every file's head blob SHA → all three legs reject. Future
+  // schema bump (separate follow-up task) will require v3 and drop the
+  // legacy legs.
   const hasContentHashMatch =
     typeof predicate.contentHash === 'string' &&
     typeof opts.expected.contentHash === 'string' &&
     predicate.contentHash === opts.expected.contentHash;
-  if (!hasContentHashMatch && predicate.diffHash !== opts.expected.diffHash) {
+  const hasContentHashV3Match =
+    typeof predicate.contentHashV3 === 'string' &&
+    typeof opts.expected.contentHashV3 === 'string' &&
+    predicate.contentHashV3 === opts.expected.contentHashV3;
+  if (
+    !hasContentHashMatch &&
+    !hasContentHashV3Match &&
+    predicate.diffHash !== opts.expected.diffHash
+  ) {
     return { valid: false, reason: 'diffHash mismatch (PR diff changed since attestation)' };
   }
   if (predicate.policyHash !== opts.expected.policyHash) {

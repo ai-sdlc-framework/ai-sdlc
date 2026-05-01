@@ -9,7 +9,7 @@
 
 import { describe, it, beforeEach, afterEach, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -269,6 +269,40 @@ describe('sign-attestation.mjs', () => {
       beforeHash,
       afterHash,
       'mutating a changed file must change contentHash (re-review trigger)',
+    );
+  });
+
+  it('emits a Phase-2 triple-hash envelope (diffHash + contentHash + contentHashV3) (AISDLC-101)', () => {
+    // The local sign script feeds collectChangedFileEntries +
+    // collectChangedFileDeltaEntries into buildPredicate, so a fresh
+    // envelope must carry all three legs. The verifier's triple-hash
+    // OR depends on this; without v3 in the envelope we'd silently
+    // regress to the AISDLC-94 dual-hash window.
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify([
+        { agentId: 'code-reviewer', harness: 'codex', approved: true, findings: {} },
+        { agentId: 'test-reviewer', harness: 'codex', approved: true, findings: {} },
+        { agentId: 'security-reviewer', harness: 'codex', approved: true, findings: {} },
+      ]),
+    );
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    assert.match(predicate.diffHash, /^[0-9a-f]{64}$/, 'envelope must carry diffHash (v1)');
+    assert.match(predicate.contentHash, /^[0-9a-f]{64}$/, 'envelope must carry contentHash (v2)');
+    assert.match(
+      predicate.contentHashV3,
+      /^[0-9a-f]{64}$/,
+      'envelope must carry contentHashV3 (v3, AISDLC-101)',
     );
   });
 });
