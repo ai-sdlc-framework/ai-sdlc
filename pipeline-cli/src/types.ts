@@ -1,0 +1,368 @@
+/**
+ * Core types for the @ai-sdlc/pipeline-cli library.
+ *
+ * RFC-0012 Phase 1. These types are stable contracts shared across:
+ *  - Tier 1 (slash command body) — invokes step functions via CLI subcommands
+ *  - Tier 2 (TypeScript service `executePipeline`) — imports the step functions directly
+ *  - MCP tool wrappers (Phase 3) — re-export the step signatures as MCP tools
+ *
+ * Keep this file dependency-free so it can be imported anywhere without
+ * pulling in node-only or test-only modules.
+ */
+
+// ── Pipeline orchestration shapes ────────────────────────────────────
+
+/**
+ * Top-level options for `executePipeline()` (Tier 2 composite entry point).
+ */
+export interface PipelineOptions {
+  /** Backlog task ID (e.g. "AISDLC-100.1"). Case-insensitive — internally normalised to lowercase. */
+  taskId: string;
+  /** Project root (where `backlog/`, `.ai-sdlc/`, `.worktrees/` live). Defaults to `process.cwd()`. */
+  workDir: string;
+  /** Subagent dispatch implementation. Required for Tier 2; Tier 1 uses Agent tool calls instead. */
+  spawner?: SubagentSpawner;
+  /** Cap on developer iterations after a CHANGES_REQUESTED verdict. Defaults to 2 (matches AISDLC-82). */
+  maxReviewIterations?: number;
+  /** Optional progress callback fired per iteration of the review loop. */
+  onProgress?: (iteration: number, verdict: AggregatedVerdict) => Promise<void> | void;
+  /** Optional logger; defaults to console. */
+  logger?: PipelineLogger;
+  /**
+   * Optional command runner used by the deterministic steps (git/gh/etc.).
+   * Defaults to `defaultRunner` (live `child_process.execFile`). Tests inject
+   * a `FakeRunner` to assert + script the side-effect surface.
+   */
+  runner?: import('./runtime/exec.js').Runner;
+  /**
+   * Optional flag to skip the chore commit at finalize-task. Useful when running
+   * the pipeline against a project root that isn't a real git repo (tests).
+   */
+  skipFinalizeCommit?: boolean;
+}
+
+/**
+ * Final result returned by `executePipeline()`.
+ */
+export interface PipelineResult {
+  taskId: string;
+  branch: string;
+  worktreePath: string;
+  outcome: PipelineOutcome;
+  prUrl: string | null;
+  siblingPrUrls: string[];
+  iterations: number;
+  finalVerdict: AggregatedVerdict | null;
+  notes?: string;
+}
+
+export type PipelineOutcome = 'approved' | 'needs-human-attention' | 'developer-failed' | 'aborted';
+
+// ── Step contracts ───────────────────────────────────────────────────
+
+/**
+ * Generic shape for a step function's structured return value.
+ * Steps either resolve with a `StepResult<T>` or throw a `StepError`.
+ */
+export interface StepResult<T = unknown> {
+  ok: boolean;
+  data?: T;
+  reason?: string;
+}
+
+export class StepError extends Error {
+  constructor(
+    message: string,
+    public readonly step: string,
+    public readonly cause?: unknown,
+  ) {
+    super(message);
+    this.name = 'StepError';
+  }
+}
+
+// ── Step 0 — Sweep ───────────────────────────────────────────────────
+
+export interface SweepResult {
+  swept: Array<{ worktreePath: string; branch: string; mergedAt: string }>;
+}
+
+// ── Step 1 — Validate task ───────────────────────────────────────────
+
+/**
+ * Subset of backlog task frontmatter the pipeline consumes.
+ * Unknown keys are ignored at parse time.
+ */
+export interface TaskSpec {
+  id: string;
+  title: string;
+  status: string;
+  acceptanceCriteria: string[];
+  acceptanceCriteriaChecked: boolean[];
+  permittedExternalPaths?: string[];
+  description: string;
+  references?: string[];
+  /** Raw markdown body of the task (for the developer prompt). */
+  rawBody: string;
+  /** Path to the on-disk task file. */
+  filePath: string;
+}
+
+export interface ValidateResult {
+  ok: boolean;
+  reason?: string;
+  task?: TaskSpec;
+}
+
+// ── Step 2 — Compute branch name ─────────────────────────────────────
+
+export interface ComputeBranchResult {
+  branch: string;
+  worktreePath: string;
+  slug: string;
+  taskIdLower: string;
+}
+
+// ── Step 3 — Setup worktree ──────────────────────────────────────────
+
+export interface SetupWorktreeResult {
+  branch: string;
+  worktreePath: string;
+  baseSha: string;
+}
+
+// ── Step 4 — Begin task ──────────────────────────────────────────────
+
+export interface BeginTaskResult {
+  taskId: string;
+  worktreePath: string;
+  sentinelPath: string;
+}
+
+// ── Step 5 — Build developer prompt ──────────────────────────────────
+
+export interface DeveloperPromptResult {
+  prompt: string;
+  /** The task spec that was rendered (echo for caller convenience). */
+  task: TaskSpec;
+}
+
+// ── Step 6 — Parse developer return ──────────────────────────────────
+
+/**
+ * The structured return value the developer subagent emits.
+ * Mirrors the JSON contract documented in `ai-sdlc-plugin/agents/developer.md`.
+ */
+export interface DeveloperReturn {
+  summary: string;
+  filesChanged: string[];
+  filesChangedExternal?: Array<{ repo: string; files: string[] }>;
+  commitSha: string | null;
+  verifications: {
+    build: VerificationStatus;
+    test: VerificationStatus;
+    lint: VerificationStatus;
+    format: VerificationStatus;
+  };
+  acceptanceCriteriaMet: number[];
+  notes?: string;
+}
+
+export type VerificationStatus = 'passed' | 'failed' | 'skipped';
+
+export interface ParseDeveloperReturnResult {
+  ok: boolean;
+  reason?: string;
+  developer?: DeveloperReturn;
+}
+
+// ── Step 7 — Build review prompts ────────────────────────────────────
+
+export type ReviewerType = 'code-reviewer' | 'test-reviewer' | 'security-reviewer';
+
+export interface ReviewPrompt {
+  reviewer: ReviewerType;
+  prompt: string;
+}
+
+export interface BuildReviewPromptsResult {
+  prompts: ReviewPrompt[];
+  diff: string;
+  changedFiles: string[];
+  harnessNote: string;
+}
+
+// ── Step 8 — Aggregate verdicts ──────────────────────────────────────
+
+export type Severity = 'critical' | 'major' | 'minor' | 'suggestion';
+
+export interface ReviewerFinding {
+  severity: Severity;
+  file?: string;
+  line?: number;
+  message: string;
+}
+
+export interface ReviewerVerdict {
+  agentId: ReviewerType | string;
+  harness: 'claude-code' | 'codex' | string;
+  approved: boolean;
+  findings: ReviewerFinding[];
+  summary?: string;
+}
+
+export interface AggregatedVerdict {
+  approved: boolean;
+  /** Stable counts by severity (sum across all reviewers). */
+  counts: Record<Severity, number>;
+  /** Verdict gate decision. APPROVED iff all reviewers approved AND no critical/major findings. */
+  decision: 'APPROVED' | 'CHANGES_REQUESTED';
+  verdicts: ReviewerVerdict[];
+  harnessNote: string;
+  summary: string;
+}
+
+// ── Step 9 — Iteration loop ──────────────────────────────────────────
+
+export interface IterateReviewLoopOptions {
+  taskId: string;
+  workDir: string;
+  task: TaskSpec;
+  branch: string;
+  /** First-round developer return — produced by Step 5/6 by the caller. */
+  initialDeveloperReturn: DeveloperReturn;
+  /** First-round aggregated verdict — produced by Step 7/8 by the caller. */
+  initialVerdict: AggregatedVerdict;
+  maxIterations?: number;
+  spawner?: SubagentSpawner;
+  onIteration?: (iteration: number, verdict: AggregatedVerdict) => Promise<void> | void;
+}
+
+export interface IterateReviewLoopResult {
+  finalDeveloperReturn: DeveloperReturn;
+  finalVerdict: AggregatedVerdict;
+  iterations: number;
+  /** Set when iteration cap was hit and the final verdict still has critical/major. */
+  needsHumanAttention: boolean;
+}
+
+// ── Step 10 — Finalize ───────────────────────────────────────────────
+
+export interface FinalizeTaskOptions {
+  taskId: string;
+  workDir: string;
+  worktreePath: string;
+  task: TaskSpec;
+  developerReturn: DeveloperReturn;
+  verdict: AggregatedVerdict;
+  iterations: number;
+}
+
+export interface FinalizeTaskResult {
+  finalSummary: string;
+  acceptanceCriteriaCheck: number[];
+  /** Path to the chore commit's attestation envelope (if produced). */
+  attestationPath: string | null;
+  /** SHA of the chore commit, if one was created. */
+  choreCommitSha: string | null;
+  /** Set when finalization was skipped because the PR is `[needs-human-attention]`. */
+  skipped: boolean;
+}
+
+// ── Step 11 — Push and PR ────────────────────────────────────────────
+
+export interface PushAndPrOptions {
+  taskId: string;
+  workDir: string;
+  worktreePath: string;
+  branch: string;
+  task: TaskSpec;
+  developerReturn: DeveloperReturn;
+  verdict: AggregatedVerdict;
+  needsHumanAttention?: boolean;
+}
+
+export interface PushAndPrResult {
+  pushed: boolean;
+  prUrl: string | null;
+  /** When push fails non-fast-forward we abort cleanly with a reason. */
+  reason?: string;
+}
+
+// ── Step 12 — Sibling PRs ────────────────────────────────────────────
+
+export interface SiblingPrOptions {
+  taskId: string;
+  workDir: string;
+  task: TaskSpec;
+  developerReturn: DeveloperReturn;
+  mainPrUrl: string;
+}
+
+export interface SiblingPrResult {
+  prs: Array<{ repo: string; branch: string; prUrl: string | null; reason?: string }>;
+}
+
+// ── Step 13 — Cleanup ────────────────────────────────────────────────
+
+export interface CleanupOptions {
+  taskId: string;
+  worktreePath: string;
+}
+
+export interface CleanupResult {
+  sentinelRemoved: boolean;
+}
+
+// ── SubagentSpawner abstraction (RFC-0012 §8) ────────────────────────
+
+export type SubagentType = 'developer' | 'code-reviewer' | 'test-reviewer' | 'security-reviewer';
+
+export interface SpawnOpts {
+  type: SubagentType;
+  prompt: string;
+  cwd: string;
+  /** Per-spawn timeout in ms. Defaults to 30 minutes if the spawner respects it. */
+  timeout?: number;
+}
+
+export interface SubagentResult {
+  type: SubagentType;
+  /** Raw stdout/output from the subagent (may be empty on error). */
+  output: string;
+  /** Parsed structured payload if the subagent returned JSON. */
+  parsed?: unknown;
+  status: 'success' | 'timeout' | 'error';
+  error?: string;
+  durationMs: number;
+}
+
+/**
+ * Tier 2 abstraction over "how do I dispatch a subagent" — the only piece of
+ * the pipeline that varies between subscription billing (`claude -p`), API-key
+ * billing (Claude Code SDK), and tests (MockSpawner).
+ *
+ * The concrete implementations land in Phase 2 (AISDLC-100.2). Phase 1 ships
+ * the interface and a `MockSpawner` for unit/integration tests.
+ */
+export interface SubagentSpawner {
+  spawn(opts: SpawnOpts): Promise<SubagentResult>;
+  spawnParallel(opts: SpawnOpts[]): Promise<SubagentResult[]>;
+}
+
+// ── Logger ────────────────────────────────────────────────────────────
+
+export interface PipelineLogger {
+  info(message: string): void;
+  warn(message: string): void;
+  error(message: string): void;
+  /** Emit a `[ai-sdlc-progress] <stage>: <status>` line for orchestrator surfacing. */
+  progress(stage: string, status: string): void;
+}
+
+export const DEFAULT_LOGGER: PipelineLogger = {
+  info: (m) => console.log(m),
+  warn: (m) => console.warn(m),
+  error: (m) => console.error(m),
+  progress: (stage, status) => console.log(`[ai-sdlc-progress] ${stage}: ${status}`),
+};
