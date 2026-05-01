@@ -38,6 +38,7 @@
     "verify-bundle": "node scripts/verify-bundle.mjs"
   },
   "dependencies": {
+    "@ai-sdlc/pipeline-cli": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "zod": "^3.25.76"
   },

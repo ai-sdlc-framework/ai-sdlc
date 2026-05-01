@@ -51,6 +51,38 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ### Added
 
+- **Pipeline step functions exposed as MCP tools** (`ai-sdlc-plugin/mcp-server/src/tools/pipeline-tools.ts`)
+  — RFC-0012 Phase 3. Each Step 0-13 function from `@ai-sdlc/pipeline-cli`
+  (AISDLC-100.1) is now wrapped as an MCP tool named
+  `pipeline_step_<N>_<name>` (`pipeline_step_0_sweep`,
+  `pipeline_step_1_validate`, …, `pipeline_step_13_cleanup`) so the
+  `/ai-sdlc execute` slash command body can invoke each phase via
+  `mcp__plugin_ai-sdlc_ai-sdlc__pipeline_step_<N>_<name>` instead of
+  shelling out to the `ai-sdlc-pipeline` CLI binary inline. Each tool's
+  input schema mirrors the corresponding `Options` interface; each tool's
+  output is the structured `Result` type JSON-serialised inside an MCP
+  `text` content item. Step 9 (the iteration loop — the only step that
+  needs an LLM dispatch boundary) lazily resolves the production
+  `defaultSpawner()` from `@ai-sdlc/pipeline-cli/runtime` (AISDLC-100.2 —
+  `ShellClaudePSpawner` if `claude` is on PATH, `ClaudeCodeSDKSpawner` if
+  `ANTHROPIC_API_KEY` is set, throws otherwise per RFC-0012 §8.3). Tests
+  inject `stepRunners` + `spawnerFactory` via `PipelineToolDeps` so they
+  don't shell out to claude or hit the Anthropic API. The existing 7
+  governance tools (`task_edit`, `task_complete`,
+  `get_governance_context`, `get_review_policy`,
+  `list_detected_patterns`, `check_pr_status`, `check_issue`) continue to
+  register unchanged — total registered tool count is now 21. Test
+  coverage: 25 new vitest cases in `pipeline-tools.test.ts` covering
+  registration shape (14 tools, naming, descriptions, schemas), per-step
+  successful invocation with mocked step + spawner, schema validation
+  rejection on missing/malformed inputs, and error propagation through
+  `isError` text results. New `@ai-sdlc/pipeline-cli` workspace
+  dependency added to `ai-sdlc-plugin/mcp-server/package.json`. Bundle
+  size grew from ~600KB to 791KB to inline the pipeline-cli step
+  functions (the marketplace clone of the plugin still works without
+  `pnpm install` — esbuild rolls every runtime dep into `dist/bin.js`,
+  the AISDLC-75 contract). (AISDLC-100.3)
+
 - **rebase-resolver subagent + `/ai-sdlc rebase` slash command** (AISDLC-105) —
   new `agents/rebase-resolver.md` plugin subagent + `commands/rebase.md` slash
   command body that automate the mechanical 80% of PR rebase + conflict
