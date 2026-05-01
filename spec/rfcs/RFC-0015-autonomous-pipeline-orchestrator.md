@@ -359,7 +359,7 @@ This RFC explicitly delegates quota management to RFC-0010 §14 — orchestrator
 
    **Counter-argument: B (`/loop`)** has the lowest barrier — zero new infrastructure, operator just uses the workflow they already know. For dogfood / single-developer use, the simplicity wins even if quota is wasted; the wasted tokens are visible (operator sees their context-window usage in real-time) and the operator can stop the `/loop` if they care.
 
-   Decide before Phase 1. The chosen harness shapes ALL of Q3/Q5/Q6/§12.
+   Decide before Phase 1. The chosen harness shapes ALL of Q3/Q5/Q6/§12. **Resolution (2026-05-01):** Option A — pure Node process. Phase 1 ships `node ai-sdlc-plugin/orchestrator/run.mjs` (or similar location) as the operator-managed entry point, packaged with a systemd unit + Docker image template + GH Actions self-hosted runner config so operators can pick their supervision mode. Workers (the LLM dispatch boundary) go through `SubagentSpawner` per RFC-0012 — same code path as today's `/ai-sdlc execute`. **Side-effect on prior questions**: Q3's "5min cap" and Q5's "backoff" rationales drop the subscription-cost argument (polling is now zero-cost) — the resolutions stand but on observability/noise grounds only, not cost. §12's resource-sizing model can be tightened: idle ticks consume 0 subscription tokens; only worker dispatches (dev + 3 reviewers) burn the window.
 
 ## 14. References
 
