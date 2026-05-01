@@ -59,20 +59,15 @@ function parseFrontmatter(filePath) {
   return result;
 }
 
-const agentFiles = [
-  'code-reviewer.md',
-  'security-reviewer.md',
-  'test-reviewer.md',
-  'developer.md',
-  'execute-orchestrator.md',
-];
+// AISDLC-98: the execute-orchestrator subagent was deleted. The Step 0-13
+// pipeline now lives inline in `ai-sdlc-plugin/commands/execute.md` and
+// runs in the main Claude Code session (which has the `Agent` tool).
+// Plugin subagents cannot use `Agent` (the harness filters it out one
+// level deep regardless of frontmatter), so the orchestrator middleman
+// pattern from AISDLC-82 is unimplementable on this harness. See the
+// /ai-sdlc execute slash command body for the new home of the pipeline.
+const agentFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md', 'developer.md'];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
-// The orchestrator is the only agent with Agent(<allowlist>) in its tools list
-// (the Task tool was renamed to Agent in Claude Code v2.1.63 — AISDLC-90).
-// Every other agent declares disallowedTools: [AgentTool] to prevent recursive
-// subagent spawning. We exempt the orchestrator from the
-// all-agents-disallow-AgentTool assertion below.
-const nonOrchestratorAgentFiles = agentFiles.filter((f) => f !== 'execute-orchestrator.md');
 const agents = {};
 
 before(() => {
@@ -118,12 +113,14 @@ describe('agent definition tool restrictions', () => {
     );
   });
 
-  it('all non-orchestrator agents have AgentTool in disallowedTools', () => {
-    // execute-orchestrator is the deliberate exception — it's the one agent
-    // permitted to spawn nested subagents (developer + 3 reviewers). Every
-    // other agent must disallow AgentTool to prevent recursive subagent
-    // spawning that would break the parallel-runs design (see AISDLC-82).
-    for (const file of nonOrchestratorAgentFiles) {
+  it('all agents have AgentTool in disallowedTools (no nested subagents)', () => {
+    // AISDLC-98: every plugin agent must disallow AgentTool because the
+    // Claude Code harness filters Agent out of plugin subagent grants
+    // anyway — the explicit disallow keeps the intent visible and
+    // prevents future regressions if/when the harness ever changes.
+    // The /ai-sdlc execute pipeline that needs to spawn subagents lives
+    // in the slash command body (main session), NOT in a subagent.
+    for (const file of agentFiles) {
       assert.ok(
         agents[file].disallowedTools.includes('AgentTool'),
         `${file} should disallow AgentTool`,
@@ -198,149 +195,9 @@ describe('agent definition tool restrictions', () => {
   });
 });
 
-describe('execute-orchestrator agent (AISDLC-82)', () => {
-  it('declares Agent(<allowlist>) in its tools list (the only agent permitted to spawn subagents)', () => {
-    // AISDLC-90: the Task tool was renamed to Agent in Claude Code v2.1.63.
-    // The orchestrator uses the modern Agent(<allowlist>) form, which both
-    // grants the tool and restricts which subagent types can be spawned —
-    // defense-in-depth against recursive orchestrator spawning.
-    const tools = agents['execute-orchestrator.md'].tools;
-    const agentDecl = tools.find((t) => t.startsWith('Agent('));
-    assert.ok(
-      agentDecl,
-      'execute-orchestrator must declare Agent(<allowlist>) form to spawn developer + 3 reviewer subagents',
-    );
-    // Allowlist must contain exactly the four spawnable subagents.
-    assert.match(agentDecl, /\bdeveloper\b/, 'allowlist must include developer');
-    assert.match(agentDecl, /\bcode-reviewer\b/, 'allowlist must include code-reviewer');
-    assert.match(agentDecl, /\btest-reviewer\b/, 'allowlist must include test-reviewer');
-    assert.match(agentDecl, /\bsecurity-reviewer\b/, 'allowlist must include security-reviewer');
-  });
-
-  it('does NOT declare the legacy bare Task tool (renamed to Agent in v2.1.63 — AISDLC-90)', () => {
-    // Negative assertion: a bare `Task` entry would silently no-op under the
-    // modern allowlist semantics. The legacy spelling must not regress.
-    const tools = agents['execute-orchestrator.md'].tools;
-    assert.ok(
-      !tools.includes('Task'),
-      'execute-orchestrator must NOT declare bare `Task` — use Agent(<allowlist>) instead',
-    );
-  });
-
-  it('does NOT over-declare AskUserQuestion (removed in AISDLC-90)', () => {
-    // Negative regression guard for AC #9: the orchestrator body uses the
-    // structured-failure-return pattern (outcome: aborted + populate notes)
-    // at every "ask the user" site rather than calling AskUserQuestion
-    // directly. Re-introducing AskUserQuestion would silently re-enable the
-    // mid-pipeline interactive prompt that breaks parallel runs.
-    const tools = agents['execute-orchestrator.md'].tools;
-    assert.ok(
-      !tools.includes('AskUserQuestion'),
-      'execute-orchestrator must NOT declare AskUserQuestion — over-declared, removed in AISDLC-90',
-    );
-  });
-
-  it('does NOT have AgentTool in disallowedTools (it needs to spawn subagents)', () => {
-    const disallowed = agents['execute-orchestrator.md'].disallowedTools || [];
-    assert.ok(
-      !disallowed.includes('AgentTool'),
-      'execute-orchestrator must NOT disallow AgentTool — it is the orchestrator',
-    );
-  });
-
-  it('inherits the model from the spawning session (no fixed model lock-in)', () => {
-    assert.equal(
-      agents['execute-orchestrator.md'].model,
-      'inherit',
-      'execute-orchestrator must inherit model so dev/Max-20x tier flows through',
-    );
-  });
-
-  it('declares the plugin task_edit + task_complete tools with the correct MCP namespace (AISDLC-90)', () => {
-    // Plugin-supplied MCP tools use the namespace
-    // `mcp__plugin_<plugin-name>_<server-name>__<tool>`. From plugin.json,
-    // plugin name is `ai-sdlc` and the server key under mcpServers is also
-    // `ai-sdlc`, so the prefix is `mcp__plugin_ai-sdlc_ai-sdlc__`.
-    const tools = agents['execute-orchestrator.md'].tools;
-    assert.ok(
-      tools.includes('mcp__plugin_ai-sdlc_ai-sdlc__task_edit'),
-      'execute-orchestrator needs the plugin variant of task_edit (preserves permittedExternalPaths — AISDLC-83) under the correct mcp__plugin_<plugin>_<server>__ namespace',
-    );
-    assert.ok(
-      tools.includes('mcp__plugin_ai-sdlc_ai-sdlc__task_complete'),
-      'execute-orchestrator needs the plugin variant of task_complete (preserves permittedExternalPaths — AISDLC-83) under the correct mcp__plugin_<plugin>_<server>__ namespace',
-    );
-  });
-
-  it('does NOT declare the legacy mcp__ai-sdlc-plugin__* namespace (silently dropped — AISDLC-90)', () => {
-    // Negative assertion: the previous (incorrect) namespace would cause the
-    // tool entries to silently fail allowlist matching and be dropped from
-    // the orchestrator's actual tool grant. Make sure we don't regress.
-    const tools = agents['execute-orchestrator.md'].tools;
-    for (const tool of tools) {
-      assert.ok(
-        !tool.startsWith('mcp__ai-sdlc-plugin__'),
-        `execute-orchestrator must NOT declare legacy mcp__ai-sdlc-plugin__* namespace; found '${tool}'`,
-      );
-    }
-  });
-
-  it('body contains Step 0 marker (sweep merged worktrees)', () => {
-    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
-    assert.match(body, /## Step 0/, 'must contain Step 0 marker');
-    assert.match(body, /Sweep merged worktrees/i, 'Step 0 must describe the sweep');
-  });
-
-  it('body contains Step 13 marker (cleanup sentinel + report)', () => {
-    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
-    assert.match(body, /## Step 13/, 'must contain Step 13 marker');
-    assert.match(body, /Cleanup sentinel/i, 'Step 13 must describe the sentinel cleanup');
-  });
-
-  it('body embeds the hard governance rules (defense-in-depth)', () => {
-    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
-    assert.match(body, /Never merge any PR/i, 'must embed never-merge rule');
-    assert.match(body, /Never force-push/i, 'must embed never-force-push rule');
-    assert.match(body, /Never edit `\.ai-sdlc\/\*\*`/i, 'must embed never-edit-config rule');
-  });
-
-  it('body invokes all three reviewer subagents (code, test, security)', () => {
-    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
-    assert.match(body, /code-reviewer/, 'must invoke code-reviewer');
-    assert.match(body, /test-reviewer/, 'must invoke test-reviewer');
-    assert.match(body, /security-reviewer/, 'must invoke security-reviewer');
-  });
-
-  it('body documents the per-worktree sentinel hard dependency (AISDLC-81)', () => {
-    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
-    assert.match(body, /AISDLC-81/, 'must reference the per-worktree sentinel prerequisite');
-    assert.match(
-      body,
-      /\$WORKTREE_PATH\/\.active-task/,
-      'must write the per-worktree sentinel (not the project-level one)',
-    );
-  });
-
-  it('body forbids spawning execute-orchestrator recursively (parallel design rule)', () => {
-    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
-    assert.match(
-      body,
-      /Never spawn the `execute-orchestrator` agent recursively/i,
-      "orchestrator must not spawn another orchestrator — that is the main session's job",
-    );
-  });
-
-  it('body uses outcome: aborted at "ask the user" sites (AC #10 — structured-failure pattern)', () => {
-    // AISDLC-90 AC #10 reworded the previous "ask the user via
-    // AskUserQuestion" wording into the structured-failure-return pattern
-    // (outcome: aborted + populate notes for the spawning session to
-    // escalate). This assertion guards the body wording against silent
-    // regression to the interactive-ask phrasing.
-    const body = readFileSync(join(__dirname, 'execute-orchestrator.md'), 'utf-8');
-    assert.match(
-      body,
-      /outcome:\s*aborted/i,
-      'orchestrator must signal failures via structured outcome:aborted, not interactive prompts',
-    );
-  });
-});
+// AISDLC-98: the execute-orchestrator subagent has been deleted. Body-shape
+// assertions for the Step 0-13 pipeline now live in
+// `ai-sdlc-plugin/commands/execute.test.mjs` (against the slash command
+// body itself, which is where the recipe was moved). See that file for
+// the contract that used to live in the `describe('execute-orchestrator
+// agent ...')` block here.
