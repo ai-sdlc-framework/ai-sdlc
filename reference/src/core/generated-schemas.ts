@@ -3478,6 +3478,99 @@ export const qualityGateSchema = {
   additionalProperties: false,
 } as const;
 
+export const rfcSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/rfc.schema.json',
+  title: 'AI-SDLC RFC Frontmatter',
+  description:
+    'YAML frontmatter convention for `spec/rfcs/RFC-NNNN-*.md` files. Defines the closed enum of `requiresDocs` values consumed by the docs-drift CI script (AISDLC-69.3). The full RFC body lives below the frontmatter as Markdown.',
+  type: 'object',
+  required: ['id', 'title', 'status', 'author', 'created', 'updated', 'requiresDocs'],
+  additionalProperties: false,
+  properties: {
+    id: {
+      type: 'string',
+      pattern: '^RFC-[0-9]{4}$',
+      description:
+        'Canonical RFC identifier in the form `RFC-NNNN`. Must match the filename prefix (e.g. `RFC-0006-design-system-governance-v5-final.md` → `id: RFC-0006`).',
+    },
+    title: {
+      type: 'string',
+      minLength: 3,
+      description: "Human-readable title (no `RFC-NNNN:` prefix — that's encoded in `id`).",
+    },
+    status: {
+      type: 'string',
+      enum: ['Draft', 'Under Review', 'Approved', 'Implemented', 'Final', 'Rejected', 'Withdrawn'],
+      description:
+        'Lifecycle status. `Final` is a terminal pre-implementation status used by sign-off-gated RFCs (RFC-0006, RFC-0008) where the spec is locked but reference implementations are still in flight; `Implemented` is set after the spec lands in the normative documents.',
+    },
+    author: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Primary author name(s). Comma-separated for multi-author RFCs (e.g. `Alexander Kline (Arcana Concept Studio), AI-SDLC Contributors`).',
+    },
+    created: {
+      type: 'string',
+      format: 'date',
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
+      description: 'ISO 8601 date (YYYY-MM-DD) the RFC was first created.',
+    },
+    updated: {
+      type: 'string',
+      format: 'date',
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
+      description: 'ISO 8601 date (YYYY-MM-DD) of the most recent substantive update.',
+    },
+    targetSpecVersion: {
+      type: 'string',
+      description: 'Spec API version this RFC targets (e.g. `v1alpha1`). Optional but recommended.',
+    },
+    requires: {
+      type: 'array',
+      items: { type: 'string', pattern: '^RFC-[0-9]{4}$' },
+      description:
+        'Other RFC IDs this RFC depends on (e.g. RFC-0006 requires RFC-0002 and RFC-0004). Optional.',
+    },
+    amends: {
+      type: 'array',
+      items: { type: 'string', pattern: '^RFC-[0-9]{4}$' },
+      description:
+        'Other RFC IDs this RFC amends (e.g. RFC-0010 amends RFC-0002 §3 and §5). Optional.',
+    },
+    requiresDocs: {
+      type: 'array',
+      uniqueItems: true,
+      items: {
+        type: 'string',
+        enum: ['tutorial', 'operator-runbook', 'api-reference', 'getting-started', 'example'],
+      },
+      description:
+        'Closed enum declaring which user-facing doc surfaces must reference this RFC. Each value maps to a `docs/` subdirectory: `tutorial` → `docs/tutorials/`, `operator-runbook` → `docs/operations/`, `api-reference` → `docs/api-reference/`, `getting-started` → `docs/getting-started/`, `example` → `docs/examples/`. The CI script (AISDLC-69.3) enforces that for each value in this array, at least one file in the corresponding subdirectory must reference the RFC by its `id` (e.g. literal text `RFC-0006`). An empty array (`[]`) is valid for purely strategic/conceptual RFCs (e.g. product strategy) and means CI does not check for any doc surface — the RFC body SHOULD explain why no user docs are required.',
+    },
+    deferredDocs: {
+      type: 'boolean',
+      default: false,
+      description:
+        "Escape hatch for RFCs whose `requiresDocs` surfaces are intentionally deferred (e.g. spec finalised but reference implementation in flight, so the runbook can't be written yet). When `true`, `deferredDocsDeadline` MUST also be set. CI passes but logs a warning that grows louder as the deadline approaches. NOTE: deadline enforcement is informational in v1; a future task may turn it into a hard gate.",
+    },
+    deferredDocsDeadline: {
+      type: 'string',
+      format: 'date',
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}$',
+      description:
+        'ISO 8601 date by which the deferred docs MUST be authored. REQUIRED when `deferredDocs: true`.',
+    },
+  },
+  allOf: [
+    {
+      if: { properties: { deferredDocs: { const: true } }, required: ['deferredDocs'] },
+      then: { required: ['deferredDocsDeadline'] },
+    },
+  ],
+} as const;
+
 export const saExemplarSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/spec/schemas/sa-exemplar.schema.json',
@@ -3777,6 +3870,7 @@ export const SCHEMAS: Record<string, object> = {
   'design-system-binding.schema.json': designSystemBindingSchema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
+  'rfc.schema.json': rfcSchema,
   'sa-exemplar.schema.json': saExemplarSchema,
   'subscription-plan.schema.json': subscriptionPlanSchema,
   'worktree-pool.schema.json': worktreePoolSchema,

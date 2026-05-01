@@ -1,3 +1,17 @@
+---
+id: RFC-0004
+title: Cost Governance and Attribution
+status: Draft
+author: AI-SDLC Contributors
+created: 2026-02-16
+updated: 2026-02-16
+targetSpecVersion: v1alpha1
+requiresDocs:
+  - tutorial
+  - api-reference
+  - operator-runbook
+---
+
 # RFC-0004: Cost Governance and Attribution
 
 **Status:** Draft

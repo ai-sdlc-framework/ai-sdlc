@@ -1,3 +1,16 @@
+---
+id: RFC-0005
+title: Product Priority Algorithm (PPA)
+status: Draft
+author: Alexander Kline (Arcana Concept Studio), AI-SDLC Contributors
+created: 2026-03-24
+updated: 2026-03-24
+targetSpecVersion: v1alpha1
+requiresDocs:
+  - api-reference
+  - operator-runbook
+---
+
 # RFC-0005: Product Priority Algorithm (PPA)
 
 **Status:** Draft

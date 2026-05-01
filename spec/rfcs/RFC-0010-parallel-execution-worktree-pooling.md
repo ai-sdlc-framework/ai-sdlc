@@ -1,3 +1,22 @@
+---
+id: RFC-0010
+title: Parallel Execution and Worktree Pooling
+status: Draft
+author: Dominique Legault
+created: 2026-04-26
+updated: 2026-04-26
+targetSpecVersion: v1alpha1
+requires:
+  - RFC-0002
+  - RFC-0008
+amends:
+  - RFC-0002
+  - RFC-0004
+requiresDocs:
+  - operator-runbook
+  - api-reference
+---
+
 # RFC-0010: Parallel Execution and Worktree Pooling
 
 **Document type:** Normative (draft)

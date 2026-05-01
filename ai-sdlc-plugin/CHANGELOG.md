@@ -82,6 +82,25 @@ with entries grouped under a release heading or `Unreleased` while in flight.
 
 ### Documentation
 
+- **RFC `requiresDocs` frontmatter convention** (`spec/rfcs/RFC-0001-template.md`,
+  `spec/rfcs/README.md`, `spec/schemas/rfc.schema.json`): every RFC now
+  carries a YAML frontmatter block with `id` / `title` / `status` / `author` /
+  `created` / `updated` / `requiresDocs` (and optional `deferredDocs` +
+  `deferredDocsDeadline`). The `requiresDocs` field is a closed enum
+  (`tutorial`, `operator-runbook`, `api-reference`, `getting-started`,
+  `example`) that declares which user-facing doc surfaces the RFC requires
+  — the docs-drift CI gate (AISDLC-69.3) will enforce that each declared
+  surface has at least one doc file referencing the RFC by ID. RFCs 0002,
+  0003 (both 0003a and 0003b), 0004, 0005, 0006, 0008, and 0010 migrated
+  from markdown-bold-style status (`**Status:** Draft`) to YAML; the
+  bold-status block is preserved in the body for human readability but
+  the frontmatter is the source of truth for tooling. The README RFC index
+  table is refreshed to reflect actual statuses (RFC-0006 / RFC-0008 are
+  `Final`, not `Draft`) and a new `requiresDocs` column. The stale
+  RFC-0007 / RFC-0009 rows are documented as reserved/withdrawn slots.
+  RFC-0006 declares `deferredDocs: true` with a `2026-07-31` deadline —
+  AISDLC-69.4 tracks the retroactive doc authoring. (AISDLC-69.2)
+
 - **Remote-agent usage policy** (`CLAUDE.md`): documented that Anthropic CCR
   remote agents (scheduled via the bundled `/schedule` skill,
   `Path: bundled:schedule`) are read-only by design. Empirical 4-for-4

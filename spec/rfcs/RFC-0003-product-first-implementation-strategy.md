@@ -1,3 +1,19 @@
+---
+id: RFC-0003
+title: AI-SDLC Orchestrator — Product Strategy
+status: Draft
+author: AI-SDLC Contributors
+created: 2026-02-11
+updated: 2026-02-12
+targetSpecVersion: v1alpha1
+# Strategic / conceptual RFC — defines product positioning rather than a
+# user-facing capability that needs tutorials or API docs. The companion
+# product-strategy material lives outside the docs/ tree (in research/ and
+# external positioning), so the docs-drift CI gate is intentionally disabled
+# here. See "Operator process" in spec/rfcs/README.md.
+requiresDocs: []
+---
+
 # RFC-0003: AI-SDLC Orchestrator — Product Strategy
 
 **Status:** Draft
