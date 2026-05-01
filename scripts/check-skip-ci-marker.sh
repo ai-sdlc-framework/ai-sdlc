@@ -15,9 +15,11 @@
 # AISDLC-87's CI-side attestor uses `[skip ci]` ON PURPOSE in its chore
 # commit (`chore(ci): sign review attestation [skip ci]`) to avoid the
 # review-loop — that one commit is the documented exception, gated by
-# author identity (`github-actions[bot]`) AND subject prefix
-# (`chore(ci): sign review attestation`). Every other commit must be
-# clean.
+# author identity (`ai-sdlc-ci-attestor[bot]` per the production
+# `ai-sdlc-review.yml` `git config user.name/email` block; the legacy
+# `github-actions[bot]` patterns are kept too as a harmless fallback)
+# AND subject prefix (`chore(ci): sign review attestation`). Every
+# other commit must be clean.
 #
 # Activation: invoked from `.husky/pre-push`. Operator must wire it
 # into the husky hook (the agent that authors AISDLC-88 cannot edit
@@ -77,12 +79,16 @@ scan_commits() {
     fi
 
     # Bot-author exemption (AISDLC-87 CI-side attestor):
-    #   - Author is `github-actions[bot]` or its noreply email
+    #   - Author is `ai-sdlc-ci-attestor[bot]` (the production identity
+    #     configured in `.github/workflows/ai-sdlc-review.yml`'s
+    #     `git config user.name/email` block) or its `ci-attestor@ai-sdlc.local`
+    #     email. The legacy `github-actions[bot]` patterns are kept as a
+    #     harmless fallback in case future CI work reverts to that identity.
     #   - Subject starts with `chore(ci): sign review attestation`
     # Both must hold; either alone is not enough.
     local is_bot_author=0
     case "$author" in
-      *'github-actions[bot]'*|*'41898282+github-actions[bot]@users.noreply.github.com'*)
+      *'ai-sdlc-ci-attestor[bot]'*|*'ci-attestor@ai-sdlc.local'*|*'github-actions[bot]'*|*'41898282+github-actions[bot]@users.noreply.github.com'*)
         is_bot_author=1
         ;;
     esac
