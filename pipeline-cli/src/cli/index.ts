@@ -41,7 +41,7 @@ import { setupWorktree } from '../steps/03-setup-worktree.js';
 import { siblingPrs } from '../steps/12-sibling-prs.js';
 import { sweepMergedWorktrees } from '../steps/00-sweep.js';
 import { validateTask } from '../steps/01-validate.js';
-import type { ReviewerVerdict } from '../types.js';
+import type { AggregatedVerdict, DeveloperReturn, ReviewerVerdict } from '../types.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -50,6 +50,19 @@ function emit(result: unknown): void {
 function fail(reason: string, code = 1): never {
   process.stderr.write(JSON.stringify({ ok: false, reason }, null, 2) + '\n');
   process.exit(code);
+}
+
+/**
+ * Parse a CLI option containing JSON, routing any SyntaxError through `fail()`
+ * so the caller (Tier 1 prose) gets a parseable `{ok: false, reason}` envelope
+ * instead of a raw stack trace from `JSON.parse`.
+ */
+function parseJsonOption<T>(raw: unknown, optionName: string): T {
+  try {
+    return JSON.parse(String(raw)) as T;
+  } catch (err) {
+    fail(`failed to parse --${optionName} JSON: ${(err as Error).message}`);
+  }
 }
 
 /**
@@ -313,8 +326,11 @@ export function buildCli(): Argv {
             workDir: argv['work-dir'] as string,
             worktreePath,
             task: v.task,
-            developerReturn: JSON.parse(String(argv['developer-return'])),
-            verdict: JSON.parse(String(argv.verdict)),
+            developerReturn: parseJsonOption<DeveloperReturn>(
+              argv['developer-return'],
+              'developer-return',
+            ),
+            verdict: parseJsonOption<AggregatedVerdict>(argv.verdict, 'verdict'),
             iterations: argv.iterations as number,
             skipCommit: argv['skip-commit'] as boolean,
           });
@@ -350,8 +366,11 @@ export function buildCli(): Argv {
             worktreePath,
             branch: branch.branch,
             task: v.task,
-            developerReturn: JSON.parse(String(argv['developer-return'])),
-            verdict: JSON.parse(String(argv.verdict)),
+            developerReturn: parseJsonOption<DeveloperReturn>(
+              argv['developer-return'],
+              'developer-return',
+            ),
+            verdict: parseJsonOption<AggregatedVerdict>(argv.verdict, 'verdict'),
             needsHumanAttention: argv['needs-human-attention'] as boolean,
           });
           emit(result);
@@ -376,7 +395,10 @@ export function buildCli(): Argv {
             taskId: argv['task-id'] as string,
             workDir: argv['work-dir'] as string,
             task: v.task,
-            developerReturn: JSON.parse(String(argv['developer-return'])),
+            developerReturn: parseJsonOption<DeveloperReturn>(
+              argv['developer-return'],
+              'developer-return',
+            ),
             mainPrUrl: argv['main-pr-url'] as string,
           });
           emit(result);
