@@ -2,6 +2,7 @@
 id: RFC-0004
 title: Cost Governance and Attribution
 status: Draft
+lifecycle: Draft
 author: AI-SDLC Contributors
 created: 2026-02-16
 updated: 2026-02-16
@@ -15,6 +16,7 @@ requiresDocs:
 # RFC-0004: Cost Governance and Attribution
 
 **Status:** Draft
+**Lifecycle:** Draft
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-16
 **Updated:** 2026-02-16

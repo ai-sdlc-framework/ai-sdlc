@@ -2,6 +2,7 @@
 id: RFC-0008
 title: PPA Triad Integration
 status: Final
+lifecycle: Implemented
 author: Dominique Legault, Morgan Hirtle, Alexander Kline
 created: 2026-04-03
 updated: 2026-04-13
@@ -17,6 +18,7 @@ requiresDocs:
 
 **Document type:** Normative (final)
 **Status:** Final v4 — Complete with Addendum A (Engineering Integration), Addendum B (Deterministic-First SA Scoring), and Addendum B CR Resolution
+**Lifecycle:** Implemented
 **Created:** 2026-04-03
 **Revised:** 2026-04-13
 **Authors:** [Author Name]

@@ -234,6 +234,24 @@ All of the above only need `gh` / MCP read tools and the network — no signing 
 
 If a `/schedule`-triggered task needs to do real code work, the correct pattern today is: have the remote agent *file a backlog task or GitHub issue describing the work*, then a human (or local Claude Code session) picks it up and runs `/ai-sdlc execute` against it.
 
+## RFCs
+
+RFCs live in `spec/rfcs/RFC-NNNN-*.md`. The full process is in [`spec/rfcs/README.md`](spec/rfcs/README.md); the canonical template is [`spec/rfcs/RFC-0001-template.md`](spec/rfcs/RFC-0001-template.md).
+
+### Lifecycle convention (AISDLC-118)
+
+Every RFC carries a `lifecycle:` frontmatter field, separate from the per-owner sign-off checklist in the body. Values:
+
+- **Draft** — initial brainstorm; structure may shift; sign-off boxes empty
+- **Ready for Review** — structure stable; ready for owner sign-off; at least one owner signed
+- **Signed Off** — all owners signed; design locked
+- **Implemented** — corresponding milestone reached Done
+- **Superseded** — replaced by a newer RFC (header notes the successor)
+
+**Drafts land on main early.** As soon as the author considers an RFC shareable (typically after the first internal pass), open a PR that merges it to main with `lifecycle: Draft`. Stakeholders can then reference it at the canonical `spec/rfcs/RFC-NNNN-*.md` URL while iteration continues. Sign-off no longer gates visibility — the two questions (is it shareable? is it signed off?) are orthogonal. Hiding drafts until sign-off destroys the feedback loop the RFC process is supposed to create.
+
+The legacy `status:` field (`Draft` / `Under Review` / `Approved` / `Implemented` / `Final` / `Rejected` / `Withdrawn`) is retained for back-compat with `scripts/check-rfc-docs.mjs` (which uses it to decide when to enforce the `requiresDocs` gate). New RFCs SHOULD set both fields. Mapping table is in `spec/rfcs/README.md`.
+
 ## Backlog Workflow
 
 Backlog tasks live in `backlog/tasks/` (Backlog.md) and are managed via the `mcp__backlog__*` MCP tools. Every issue executed under the AI-SDLC pipeline MUST be tracked here.

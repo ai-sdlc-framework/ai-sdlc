@@ -23,7 +23,43 @@ An RFC is **not** required for:
 - Adding informative content to non-normative documents
 - Updating examples or glossary entries
 
-## RFC Lifecycle
+## RFC Lifecycle (AISDLC-118)
+
+The `lifecycle` frontmatter field captures the per-owner sign-off + implementation arc:
+
+```
+Draft → Ready for Review → Signed Off → Implemented
+                                              │
+                                              └─→ Superseded (terminal)
+```
+
+| Lifecycle | Meaning | Sign-off state |
+|---|---|---|
+| **Draft** | Initial brainstorm; structure may shift | Sign-off boxes empty |
+| **Ready for Review** | Structure stable; ready for owner sign-off | At least one owner signed; awaiting others |
+| **Signed Off** | All owners signed; design locked | All owner boxes checked |
+| **Implemented** | Corresponding milestone reached Done | n/a (post-sign-off state) |
+| **Superseded** | Replaced by newer RFC | Header notes the successor |
+
+**Drafts MUST land on main early.** As soon as the author considers the RFC shareable (typically after the first internal pass), it should be merged to main with `lifecycle: Draft`. Stakeholders can then reference it at its canonical `spec/rfcs/RFC-NNNN-*.md` URL while iteration continues through normal PR review. **Sign-off no longer gates visibility** — these are orthogonal questions. Hiding drafts until sign-off destroys the feedback loop the RFC process is supposed to create.
+
+The `lifecycle` field is separate from the per-owner sign-off checklist that lives in the RFC body (`## Sign-Off`). The checklist is the source of truth for which individual owners have signed; `lifecycle` is the aggregate state used by the index table and tooling.
+
+### Legacy `status` field
+
+The original `status` enum (Draft / Under Review / Approved / Implemented / Final / Rejected / Withdrawn) is retained for back-compat with `scripts/check-rfc-docs.mjs`, which uses it to decide when to enforce the `requiresDocs` gate. New RFCs SHOULD set both fields. Mapping guide:
+
+| `lifecycle` | Recommended `status` |
+|---|---|
+| `Draft` | `Draft` |
+| `Ready for Review` | `Draft` (use legacy `Under Review` only if you want the WG-review semantics) |
+| `Signed Off` | `Approved` (or `Final` for sign-off-gated RFCs whose reference impl is still in flight) |
+| `Implemented` | `Implemented` (or `Final` retained from the pre-AISDLC-118 convention) |
+| `Superseded` | `Withdrawn` (and link the successor in the body) |
+
+## Legacy RFC Lifecycle (pre-AISDLC-118)
+
+The flow below describes the original Kubernetes-KEP-style process. AISDLC-118 reframes the visibility question (drafts on main early) but the per-stage activity descriptions still apply.
 
 ```
 Draft → Discussion → WG Review → PoC → Approval → Spec Update
@@ -146,10 +182,12 @@ CI passes but logs a warning that grows louder as the deadline approaches. Hard 
 ### Operator process — when authoring an RFC
 
 1. Copy `RFC-0001-template.md` and fill in the YAML frontmatter at the top.
-2. Pick the `status` value that matches your phase (`Draft` for new work).
+2. Pick the `status` value that matches your phase (`Draft` for new work) AND set the `lifecycle` field (also `Draft` for new work — see the [RFC Lifecycle (AISDLC-118)](#rfc-lifecycle-aisdlc-118) section above).
 3. Decide which doc surfaces the RFC needs by walking through the `requiresDocs` enum. Pick the smallest set that covers the user-visible impact — empty (`[]`) is acceptable and correct for purely strategic / conceptual RFCs (e.g. RFC-0013 product strategy).
-4. **Before requesting `Approved` status**, ensure each surface in `requiresDocs` has at least one doc file referencing the RFC by its `id`. If the docs aren't ready, set `deferredDocs: true` with a deadline AND file a backlog task for the gap (so the orchestrator can eventually pick it up).
-5. When the spec lands and the docs exist, flip `status` to `Implemented` (or `Final` for sign-off-gated RFCs) and remove `deferredDocs` if it was set.
+4. **Land the draft on main early.** As soon as the structure is shareable (typically after the first internal pass), open a PR that merges the RFC to main with `lifecycle: Draft`. Stakeholders can then reference it at the canonical `spec/rfcs/RFC-NNNN-*.md` URL while you iterate. Sign-off no longer gates visibility.
+5. As the design matures, flip `lifecycle` through the states (Draft → Ready for Review → Signed Off → Implemented) via subsequent PRs that update the frontmatter alongside the per-owner sign-off checklist in the body.
+6. **Before requesting `Approved` status**, ensure each surface in `requiresDocs` has at least one doc file referencing the RFC by its `id`. If the docs aren't ready, set `deferredDocs: true` with a deadline AND file a backlog task for the gap (so the orchestrator can eventually pick it up).
+7. When the spec lands and the docs exist, flip `status` to `Implemented` (or `Final` for sign-off-gated RFCs), set `lifecycle: Implemented`, and remove `deferredDocs` if it was set.
 
 ## File Naming
 
@@ -164,17 +202,20 @@ RFC-NNNN-short-title.md
 
 ## Index
 
-| RFC                                                                              | Title                                  | Status      | requiresDocs                                  |
-| -------------------------------------------------------------------------------- | -------------------------------------- | ----------- | --------------------------------------------- |
-| [RFC-0001](RFC-0001-template.md)                                                 | Template                               | —           | —                                             |
-| [RFC-0002](RFC-0002-pipeline-orchestration.md)                                   | Pipeline Orchestration Policy          | Draft       | tutorial, api-reference, example              |
-| [RFC-0003](RFC-0003-infrastructure-adapters.md)                                  | Infrastructure Provider Adapters       | Draft       | tutorial, api-reference, operator-runbook, example |
-| [RFC-0004](RFC-0004-cost-governance-and-attribution.md)                          | Cost Governance and Attribution        | Draft       | tutorial, api-reference, operator-runbook     |
-| [RFC-0005](RFC-0005-product-priority-algorithm.md)                               | Product Priority Algorithm (PPA)       | Draft       | api-reference, operator-runbook               |
-| [RFC-0006](RFC-0006-design-system-governance-v5-final.md)                        | Design System Governance               | Final       | tutorial, operator-runbook, api-reference     |
-| [RFC-0008](RFC-0008-ppa-triad-integration-final-combined.md)                     | PPA Triad Integration                  | Final       | api-reference, operator-runbook               |
-| [RFC-0010](RFC-0010-parallel-execution-worktree-pooling.md)                      | Parallel Execution and Worktree Pooling| Draft       | operator-runbook, api-reference               |
-| [RFC-0013](RFC-0013-product-first-implementation-strategy.md)                    | AI-SDLC Orchestrator Product Strategy  | Draft       | _(none — strategic)_                          |
+| RFC                                                                              | Title                                  | Lifecycle    | Status      | requiresDocs                                  |
+| -------------------------------------------------------------------------------- | -------------------------------------- | ------------ | ----------- | --------------------------------------------- |
+| [RFC-0001](RFC-0001-template.md)                                                 | Template                               | —            | —           | —                                             |
+| [RFC-0002](RFC-0002-pipeline-orchestration.md)                                   | Pipeline Orchestration Policy          | Draft        | Draft       | tutorial, api-reference, example              |
+| [RFC-0003](RFC-0003-infrastructure-adapters.md)                                  | Infrastructure Provider Adapters       | Draft        | Draft       | tutorial, api-reference, operator-runbook, example |
+| [RFC-0004](RFC-0004-cost-governance-and-attribution.md)                          | Cost Governance and Attribution        | Draft        | Draft       | tutorial, api-reference, operator-runbook     |
+| [RFC-0005](RFC-0005-product-priority-algorithm.md)                               | Product Priority Algorithm (PPA)       | Draft        | Draft       | api-reference, operator-runbook               |
+| [RFC-0006](RFC-0006-design-system-governance-v5-final.md)                        | Design System Governance               | Implemented  | Final       | tutorial, operator-runbook, api-reference     |
+| [RFC-0008](RFC-0008-ppa-triad-integration-final-combined.md)                     | PPA Triad Integration                  | Implemented  | Final       | api-reference, operator-runbook               |
+| [RFC-0010](RFC-0010-parallel-execution-worktree-pooling.md)                      | Parallel Execution and Worktree Pooling| Implemented  | Draft       | operator-runbook, api-reference               |
+| [RFC-0011](RFC-0011-definition-of-ready-gate.md)                                 | Definition-of-Ready Gate               | Signed Off   | Draft       | _(none — phased rollout)_                     |
+| [RFC-0012](RFC-0012-two-tier-pipeline-architecture.md)                           | Two-Tier Pipeline Architecture         | Signed Off   | Approved    | _(none — internal architecture)_              |
+| [RFC-0013](RFC-0013-product-first-implementation-strategy.md)                    | AI-SDLC Orchestrator Product Strategy  | Draft        | Draft       | _(none — strategic)_                          |
+| [RFC-0014](RFC-0014-dependency-graph-composition.md)                             | Dependency Graph Composition           | Draft        | Draft       | _(none — phased rollout)_                     |
 
 > **Note:** RFC-0007 and RFC-0009 are reserved / withdrawn slots — their RFCs were folded into RFC-0006 (Figma Make scope) and RFC-0008 (sharding model) respectively, and their files were never finalised.
 > RFC-0003 was previously a slot collision — two different proposals (`-infrastructure-adapters` and `-product-first-implementation-strategy`) were both numbered 0003. The collision was resolved in AISDLC-109 by renumbering the product-strategy RFC to RFC-0013; RFC-0003 now refers unambiguously to the infrastructure-adapters RFC.

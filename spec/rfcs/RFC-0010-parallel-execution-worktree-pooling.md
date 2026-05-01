@@ -2,6 +2,13 @@
 id: RFC-0010
 title: Parallel Execution and Worktree Pooling
 status: Draft
+# Lifecycle: Implemented per AISDLC-118 — sub-tasks AISDLC-70.1 through 70.9
+# all reached Done. The legacy `status: Draft` is retained because the
+# remaining design-system + product-owner sign-off boxes were never filled in
+# (the work shipped on engineering-owner sign-off alone). New RFCs should
+# instead progress `status: Approved → Implemented` in lockstep with
+# `lifecycle`. See spec/rfcs/README.md "Legacy `status` field".
+lifecycle: Implemented
 author: Dominique Legault
 created: 2026-04-26
 updated: 2026-04-26
@@ -21,6 +28,7 @@ requiresDocs:
 
 **Document type:** Normative (draft)
 **Status:** Draft v1 — pending review
+**Lifecycle:** Implemented (AISDLC-70.1 through 70.9 all Done; sign-off retained engineering-owner-only)
 **Created:** 2026-04-26
 **Authors:** Dominique Legault (CTO / Engineering Authority)
 **Reviewers:** TBD

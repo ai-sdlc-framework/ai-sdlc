@@ -2,6 +2,7 @@
 id: RFC-0013
 title: AI-SDLC Orchestrator — Product Strategy
 status: Draft
+lifecycle: Draft
 author: AI-SDLC Contributors
 created: 2026-02-11
 updated: 2026-02-12
@@ -17,6 +18,7 @@ requiresDocs: []
 # RFC-0013: AI-SDLC Orchestrator — Product Strategy
 
 **Status:** Draft
+**Lifecycle:** Draft
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-11
 **Updated:** 2026-02-12

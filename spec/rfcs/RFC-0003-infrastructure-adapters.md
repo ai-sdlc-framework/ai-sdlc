@@ -2,6 +2,7 @@
 id: RFC-0003
 title: Infrastructure Provider Adapters
 status: Draft
+lifecycle: Draft
 author: AI-SDLC Contributors
 created: 2026-02-10
 updated: 2026-02-10
@@ -16,6 +17,7 @@ requiresDocs:
 # RFC-0003: Infrastructure Provider Adapters
 
 **Status:** Draft
+**Lifecycle:** Draft
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-10
 **Updated:** 2026-02-10

@@ -2,6 +2,7 @@
 id: RFC-0014
 title: Dependency Graph Composition for Pipeline Decisions
 status: Draft
+lifecycle: Draft
 author: dominique@reliablegenius.io
 created: 2026-05-01
 updated: 2026-05-01

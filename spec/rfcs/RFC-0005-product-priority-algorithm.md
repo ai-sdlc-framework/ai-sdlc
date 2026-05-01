@@ -2,6 +2,7 @@
 id: RFC-0005
 title: Product Priority Algorithm (PPA)
 status: Draft
+lifecycle: Draft
 author: Alexander Kline (Arcana Concept Studio), AI-SDLC Contributors
 created: 2026-03-24
 updated: 2026-03-24
@@ -14,6 +15,7 @@ requiresDocs:
 # RFC-0005: Product Priority Algorithm (PPA)
 
 **Status:** Draft
+**Lifecycle:** Draft
 **Author:** Alexander Kline (Arcana Concept Studio), AI-SDLC Contributors
 **Created:** 2026-03-24
 **Updated:** 2026-03-24

@@ -2,6 +2,7 @@
 id: RFC-0012
 title: Two-Tier Pipeline Architecture with Shared Core Library
 status: Approved
+lifecycle: Signed Off
 author: dominique@reliablegenius.io
 created: 2026-04-30
 updated: 2026-04-30
@@ -12,6 +13,7 @@ requiresDocs: []
 # RFC-0012: Two-Tier Pipeline Architecture with Shared Core Library
 
 **Status:** Accepted (signed off 2026-04-30; ready for implementation)
+**Lifecycle:** Signed Off (Engineering + Operator owners signed; Product owner sign-off intentionally omitted — see Sign-Off note below)
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-04-30
 **Updated:** 2026-04-30

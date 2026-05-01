@@ -3820,7 +3820,13 @@ export const rfcSchema = {
       type: 'string',
       enum: ['Draft', 'Under Review', 'Approved', 'Implemented', 'Final', 'Rejected', 'Withdrawn'],
       description:
-        'Lifecycle status. `Final` is a terminal pre-implementation status used by sign-off-gated RFCs (RFC-0006, RFC-0008) where the spec is locked but reference implementations are still in flight; `Implemented` is set after the spec lands in the normative documents.',
+        'Lifecycle status (legacy enum, retained for backward compatibility with `scripts/check-rfc-docs.mjs`). New RFCs SHOULD also set the `lifecycle` field — see AISDLC-118 — which captures the per-owner sign-off + implementation arc more precisely (Draft → Ready for Review → Signed Off → Implemented → Superseded). `Final` is a terminal pre-implementation status used by sign-off-gated RFCs (RFC-0006, RFC-0008) where the spec is locked but reference implementations are still in flight; `Implemented` is set after the spec lands in the normative documents.',
+    },
+    lifecycle: {
+      type: 'string',
+      enum: ['Draft', 'Ready for Review', 'Signed Off', 'Implemented', 'Superseded'],
+      description:
+        "AISDLC-118 lifecycle state, separate from the per-owner sign-off checklist in the RFC body. Drafts SHOULD land on main as soon as they're shareable so stakeholders can link to the canonical URL — sign-off no longer gates visibility. Values: `Draft` (initial brainstorm; structure may shift; sign-off boxes empty), `Ready for Review` (structure stable; awaiting sign-off; at least one owner signed), `Signed Off` (all owners signed; design locked), `Implemented` (corresponding milestone reached Done), `Superseded` (replaced by newer RFC; header notes the successor).",
     },
     author: {
       type: 'string',
