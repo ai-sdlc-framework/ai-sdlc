@@ -1,7 +1,7 @@
 ---
 id: AISDLC-119
 title: Tighten backlog-drift husky pre-commit hook to FAIL on errors (not advisory)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-01 16:47'
 labels:
@@ -63,3 +63,18 @@ This is the kind of meta-tooling that compounds. Every day without it adds new d
 - [ ] #7 Existing 223-issue drift backlog requires a one-time human cleanup pass first (file as separate follow-up task; this hook only prevents NEW drift)
 - [ ] #8 Documentation in CLAUDE.md `Backlog Workflow` section explaining the hook's strict mode + escape hatches
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Tightened backlog-drift hook from advisory (`hook-run` exited 0 on errors → 223 drift accumulated) to strict (`backlog-drift check --task <id>` per staged task → fails commit on errors). New `scripts/check-backlog-drift.sh` + `.husky/pre-commit` wired + CI job (continue-on-error: true until 259-drift cleanup) + 8 hermetic Node tests + CLAUDE.md docs.
+
+## Verification
+- 8/8 tests pass; pnpm build && pnpm test && pnpm lint && pnpm format:check clean
+- 3 reviews APPROVED: code 0c/0M (major sequencing addressed inline, continue-on-error)/2m/2s; test 0c/0M/2m/0s; security 0c/0M/0m/0s
+
+## Follow-up (file as separate task)
+- One-time cleanup of the 259 pre-existing drift issues — once green, remove `continue-on-error: true` from .github/workflows/ci.yml backlog-drift job to make it a hard gate
+- Pin backlog-drift version in CI (currently uses bare npx fetch from npmjs.org)
+<!-- SECTION:FINAL_SUMMARY:END -->
