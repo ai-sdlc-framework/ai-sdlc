@@ -1,7 +1,7 @@
 ---
 id: AISDLC-69.6
 title: RFC-0003 doc references — add RFC-0003 citation to adapter tutorial / api-ref / runbook / example
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-30 17:35'
 updated_date: '2026-04-30 17:35'
@@ -69,3 +69,23 @@ After editing, run `pnpm docs:sync` so `ai-sdlc-io/content/docs/` stays in sync.
 6. AISDLC-69.3's `pnpm docs:check` (or equivalent) passes for RFC-0003 (infrastructure-adapters).
 <!-- AC:END -->
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+Added RFC-0003 (Infrastructure Provider Adapters) citations to the four adapter doc surfaces. Dev wisely chose `docs/operations/adapter-authoring.md` over `operator-runbook.md` to dodge merge conflicts with PRs #128 + #129.
+
+## AC status
+- ✓ All 3 ACs met
+
+## Verification
+- `pnpm rfc:check` clean (RFC-0003 in pre-sign-off skipped bucket)
+- `pnpm build && pnpm test && pnpm lint && pnpm format:check` clean
+- 3 reviews approved: code 0c/0M/1m/1s; test 0c/0M/0m/0s; security 0c/0M/0m/0s
+
+## Operator follow-up (from review)
+- **Pre-existing RFC-0003 ID collision**: TWO files in `spec/rfcs/` declare `id: RFC-0003` — `RFC-0003-infrastructure-adapters.md` and `RFC-0003-product-first-implementation-strategy.md`. Citations resolve by file path so this PR works, but the duplicate ID is a footgun for any tool resolving by ID. File a separate backlog task to renumber one of them.
+- `examples/adapter-implementation.ts` cites `§3 — Sandbox` but the example demonstrates IssueTracker. Tighten to `§1 (Extended Interface Enum)` for accuracy.
+- Operator: run `pnpm docs:sync` against `ai-sdlc-io/` sibling
+<!-- SECTION:FINAL_SUMMARY:END -->
