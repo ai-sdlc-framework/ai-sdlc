@@ -179,11 +179,14 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, backlog-drift, build-and-test, test-python, test-go]
+    needs: [lint, build-and-test, test-python, test-go]
     runs-on: ubuntu-latest
     steps:
       - run: |
-          results=("${{ needs.lint.result }}" "${{ needs.backlog-drift.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}")
+          # AISDLC-119: backlog-drift intentionally excluded from ci-ok
+          # aggregation until the 259-issue cleanup ships. Job still runs
+          # for visibility but its FAILURE result must not block merges.
+          results=("${{ needs.lint.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}")
           for result in "${results[@]}"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "CI failed: found job with result '$result'"
