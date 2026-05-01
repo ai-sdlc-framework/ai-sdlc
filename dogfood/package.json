@@ -37,6 +37,7 @@
   },
   "dependencies": {
     "@ai-sdlc/orchestrator": "workspace:*",
+    "@ai-sdlc/pipeline-cli": "workspace:*",
     "@ai-sdlc/reference": "workspace:*",
     "yaml": "^2.7.0"
   },
