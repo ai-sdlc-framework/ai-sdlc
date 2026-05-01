@@ -358,11 +358,7 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
       /(github-actions|ai-sdlc-ci-attestor)\[bot\]/,
       'name the bot-author exemption',
     );
-    assert.match(
-      cmdBody,
-      /chore\(ci\): sign review attestation/,
-      'name the bot-subject exemption',
-    );
+    assert.match(cmdBody, /chore\(ci\): sign review attestation/, 'name the bot-subject exemption');
   });
 
   it('Step 10 sanitises CI-skip magic tokens out of the chore commit body (AISDLC-88)', () => {
