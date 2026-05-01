@@ -33,6 +33,7 @@
  *   - Mailgun keys: `key-<32 hex>`
  *   - GitHub PATs: `ghp_...` (classic) and `github_pat_...` (fine-grained)
  *   - AWS access keys: `AKIA...`
+ *   - PEM private-key blocks: `-----BEGIN ... PRIVATE KEY-----`
  *   - JWTs: three base64url segments separated by dots
  *   - Generic high-entropy: long alphanumeric runs (warn-level catch-all)
  *
@@ -89,38 +90,101 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
   // Stripe webhook signing secrets (`whsec_<24>`). Treated as fully
   // sensitive — anyone with the secret can forge webhook signatures.
   { name: 'STRIPE_WEBHOOK', regex: /whsec_[A-Za-z0-9]{20,}/g },
-  // GCP API keys (`AIza<35>`) — exactly 39 chars total per Google's
-  // documented format. Body uses base64url charset.
-  { name: 'GCP_API_KEY', regex: /AIza[0-9A-Za-z_-]{35}/g },
+  // GCP API keys (`AIza<35>`) — 39 chars total per Google's documented
+  // format. Body uses base64url charset. Quantifier is `{35,}` rather
+  // than `{35}` exact so that if Google extends the format (or a longer
+  // variant lands), the trailing chars are still redacted rather than
+  // leaking past the marker. The HIGH-ENTROPY backstop only fires at
+  // 48+ chars (see catch-all below) — below that, this is the only
+  // defense. (AISDLC-128 trailing-leak fix.)
+  { name: 'GCP_API_KEY', regex: /AIza[0-9A-Za-z_-]{35,}/g },
   // SendGrid API keys — three dotted segments: `SG.<22>.<43>`. Lengths
   // are exact per SendGrid's documented format.
   { name: 'SENDGRID', regex: /SG\.[A-Za-z0-9_-]{22}\.[A-Za-z0-9_-]{43}/g },
   // Twilio account SIDs (`AC<32 hex>`). Auth tokens are 32 hex chars
   // with no documented prefix — caught by the high-entropy fallback.
-  { name: 'TWILIO_SID', regex: /AC[a-f0-9]{32}/g },
+  // Quantifier is `{32,}` (not `{32}` exact) to greedily consume any
+  // trailing hex chars rather than leak them past the marker.
+  // (AISDLC-128 trailing-leak fix, cohort with AWS/GCP/Mailgun.)
+  { name: 'TWILIO_SID', regex: /AC[a-f0-9]{32,}/g },
   // Mailgun API keys (`key-<32 hex>`). Legacy v1 format; v2 keys use a
-  // different shape Mailgun has not yet publicly documented.
-  { name: 'MAILGUN', regex: /key-[a-f0-9]{32}/g },
+  // different shape Mailgun has not yet publicly documented. `{32,}`
+  // for the same trailing-leak reason as TWILIO_SID. (AISDLC-128.)
+  { name: 'MAILGUN', regex: /key-[a-f0-9]{32,}/g },
   // GitHub fine-grained PATs (`github_pat_<22>_<59>`). The 82-char body
-  // is exactly the documented length (GitHub PAT format reference).
-  { name: 'GITHUB_PAT_FINE', regex: /github_pat_[A-Za-z0-9_]{82}/g },
-  // GitHub classic PATs (`ghp_<36>`).
-  { name: 'GITHUB_PAT', regex: /ghp_[A-Za-z0-9]{36}/g },
+  // is the documented length (GitHub PAT format reference). Quantifier
+  // is `{82,}` so trailing alphanumerics get redacted with the marker
+  // rather than leaking past it (e.g. when the PAT is followed by a
+  // contiguous identifier in pasted text). (AISDLC-128 trailing-leak
+  // fix.)
+  { name: 'GITHUB_PAT_FINE', regex: /github_pat_[A-Za-z0-9_]{82,}/g },
+  // GitHub classic PATs (`ghp_<36>`). Quantifier is `{36,}` (not `{36}`
+  // exact) for the same trailing-leak reason as GITHUB_PAT_FINE — under
+  // the old exact-length quantifier, trailing alphanumerics adjacent to
+  // a 36-char body would leak past the marker (e.g. `ghp_<36>BBBBBBBB`
+  // → `[REDACTED:GITHUB_PAT]BBBBBBBB`). (AISDLC-128 trailing-leak fix,
+  // round 2 — completes the cohort with AWS/GCP/Twilio/Mailgun/PAT_FINE.)
+  { name: 'GITHUB_PAT', regex: /ghp_[A-Za-z0-9]{36,}/g },
   // AWS access key IDs (`AKIA<16>`). Secret access keys are caught by
   // the high-entropy fallback — no documented prefix to anchor on.
-  { name: 'AWS_ACCESS_KEY', regex: /AKIA[0-9A-Z]{16}/g },
+  // Quantifier is `{16,}` so trailing alphanumerics get redacted along
+  // with the marker (e.g. `AKIA<16>AAAA` → `[REDACTED:AWS_ACCESS_KEY]`
+  // not `[REDACTED:AWS_ACCESS_KEY]AAAA`). (AISDLC-128 trailing-leak fix.)
+  { name: 'AWS_ACCESS_KEY', regex: /AKIA[0-9A-Z]{16,}/g },
+  // PEM-encoded private-key blocks. The HIGH-ENTROPY catch-all already
+  // shreds each base64 line of the key body (64 alphanumeric chars per
+  // line ≥ 48), but the BEGIN/END headers themselves persist verbatim
+  // and uniquely identify the block as a private key — which is itself
+  // a "you probably want to rotate this" signal. Cover the documented
+  // PEM types: RSA / EC / OPENSSH / DSA / PGP, plus the unprefixed
+  // generic `PRIVATE KEY` (PKCS#8). The `[\s\S]*?` body is non-greedy
+  // so consecutive blocks don't get glued into one match. (AISDLC-128.)
+  {
+    name: 'PRIVATE_KEY_BLOCK',
+    regex:
+      /-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY( BLOCK)?-----[\s\S]*?-----END (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY( BLOCK)?-----/g,
+  },
   // JWTs — three base64url segments separated by dots. The leading
   // `eyJ` anchor is the base64url encoding of `{"` which is the start
-  // of every JWT header. Minimum 10 chars per segment keeps the false
-  // positive rate low while still catching short tokens.
+  // of every JWT header. The SECOND segment ALSO starts with `eyJ` for
+  // the same reason — the JWT payload is a JSON object, so its base64url
+  // encoding always begins with `eyJ` (encoding `{"`). This double
+  // anchor is INTENTIONAL false-positive control: relaxing the second
+  // `eyJ` to `[A-Za-z0-9_-]+` would fire on any three-dot-separated
+  // base64url-ish string (e.g. content-addressed file paths) and
+  // erodes signal. Do not relax. (AISDLC-128 anchor-intent comment.)
+  // Minimum 10 chars per segment keeps the false-positive rate low
+  // while still catching short tokens.
   { name: 'JWT', regex: /eyJ[A-Za-z0-9_-]{10,}\.eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g },
-  // High-entropy catch-all — any 40+ char alphanumeric/underscore/hyphen
-  // run. This WILL false-positive on long hashes, blob SHAs, etc., so
-  // it emits a generic marker instead of pretending to know what it
-  // caught. Last in the list so specific patterns get a chance first.
+  // High-entropy catch-all — any 48+ char alphanumeric/underscore/hyphen
+  // run that ALSO contains at least one digit. This WILL false-positive
+  // on long hashes / blob SHAs / hex commit refs, so it emits a generic
+  // marker instead of pretending to know what it caught. Last in the
+  // list so specific patterns get a chance first.
+  //
+  // AISDLC-128 raised the threshold from 40 → 48 (matches typical token
+  // minimum lengths) AND added the `(?=[A-Za-z0-9_-]*\d)` lookahead
+  // requiring at least one digit. The whole point of the calibration
+  // log is human-readable spot-checking; under the old 40-char rule,
+  // common DoR finding text — purely-alphabetic branch names, hyphenated
+  // PR titles, package paths — was redacted half away, eroding
+  // usefulness fast.
+  //
+  // The (length≥48 + ≥1 digit) rule keeps purely-alphabetic branch
+  // names intact (e.g. `feat-prevent-secret-persistence-with-three-
+  // layer-defense`), but numbered AISDLC branches like `aisdlc-NNN-...`
+  // are still shredded — the digit requirement is a coarse filter, not
+  // a precise one. Trade-off: over-redact, never under-redact. Tightening
+  // the lookahead further (e.g. requiring the digit AFTER a fixed
+  // position) doesn't fix the AISDLC-NNN case anyway (digits land in
+  // the first 10 chars) and introduces a calibration nightmare. The
+  // digit requirement excludes pure-word identifiers (which are almost
+  // never tokens — real high-entropy secrets mix alphanumerics) while
+  // still catching commit SHAs and base64url token bodies (which always
+  // include digits).
   {
     name: 'HIGH-ENTROPY',
-    regex: /[A-Za-z0-9_-]{40,}/g,
+    regex: /(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{48,}/g,
     replacement: '[REDACTED:HIGH-ENTROPY]',
   },
 ];
