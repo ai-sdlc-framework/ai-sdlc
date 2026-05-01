@@ -114,7 +114,7 @@ with entries grouped under a release heading or `Unreleased` while in flight.
      message, and exits 1. Override via `AI_SDLC_SKIP_MARKER_GATE=1 git push`.
      Bot-author exemption: a commit authored by `ai-sdlc-ci-attestor[bot]`
      (production identity per `.github/workflows/ai-sdlc-review.yml`; legacy
-     `github-actions[bot]` kept as fallback) AND subjected
+     `github-actions[bot]` retained as a fallback in the script) AND subjected
      `chore(ci): sign review attestation*` passes (the documented AISDLC-87
      chore commit).
   2. New Hard Rule in `ai-sdlc-plugin/agents/developer.md` (Hard Rule 7) and
