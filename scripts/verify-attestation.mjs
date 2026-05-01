@@ -815,6 +815,31 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     };
   }
 
+  // --- Forensic logging: pipelineVersion (AISDLC-100.6) -----------------
+  // Surface which `@ai-sdlc/pipeline-cli` version signed the matched
+  // envelope. Info-level, NOT enforced — equivalent to AISDLC-87/AISDLC-94's
+  // `pluginVersion` treatment in the rejected list above. Legacy envelopes
+  // (signed before pipeline-cli existed / before Phase 6 landed) carry no
+  // `pipelineVersion`; we surface that explicitly so an operator scanning
+  // CI logs can tell the difference between "unknown shipping version" and
+  // "field present but old".
+  const matchedPipelineVersion = chosen.entry.predicate?.pipelineVersion;
+  if (typeof matchedPipelineVersion === 'string' && matchedPipelineVersion.length > 0) {
+    // The shape validator (orchestrator runtime) regex-bounds this field
+    // to a strict semver (`MAJOR.MINOR.PATCH(-prerelease)?`) before we
+    // emit it, so embedding the value in console.log can't smuggle CR/LF
+    // into downstream log parsers — but we run the validator as part of
+    // verifyAttestation BELOW. To stay safe regardless of ordering, emit
+    // a static-fallback line if the value contains anything we wouldn't
+    // expect in a semver string.
+    const safeSemver = /^[0-9.\-a-z]+$/.test(matchedPipelineVersion)
+      ? matchedPipelineVersion
+      : '<unsafe value redacted>';
+    console.log(`[ai-sdlc/attestation] pipelineVersion: ${safeSemver}`);
+  } else {
+    console.log(`[ai-sdlc/attestation] pipelineVersion: <missing> (legacy envelope)`);
+  }
+
   // --- Verify signature + schema (delegates to runtime) -----------------
   // The orchestrator's verifyAttestation does its own (regex-bound) schema
   // validation, schemaVersion allowlist re-check, signature check, and the

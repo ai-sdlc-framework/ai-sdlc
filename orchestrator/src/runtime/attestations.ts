@@ -143,6 +143,18 @@ export interface AttestationPredicate {
   reviewers: ReviewerEntry[];
   /** Plugin version from `ai-sdlc-plugin/plugin.json`. */
   pluginVersion: string;
+  /**
+   * Pipeline-cli version from `pipeline-cli/package.json` (RFC-0012 Phase 6 /
+   * AISDLC-100.6). Forensic / audit purpose only — the verifier logs this
+   * but does NOT enforce a specific version. Equivalent to AISDLC-87/AISDLC-94's
+   * `pluginVersion` field but for the `@ai-sdlc/pipeline-cli` workspace package.
+   *
+   * Optional in v1 for backward compatibility — envelopes signed BEFORE
+   * pipeline-cli existed (and BEFORE this field landed) carry no
+   * `pipelineVersion` and the verifier still accepts them, logging
+   * `<missing> (legacy envelope)` instead.
+   */
+  pipelineVersion?: string;
   /** Iteration count — how many dev rounds the work went through. */
   iterationCount: number;
   /**
@@ -221,6 +233,13 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 const ISO_8601 = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 /** Free-form short identifier — letters, digits, dot, dash, underscore. */
 const SHORT_ID = /^[A-Za-z0-9._-]+$/;
+/**
+ * Semver-shape pattern for `pipelineVersion` (AISDLC-100.6). Accepts
+ * `MAJOR.MINOR.PATCH` and the optional `-prerelease` suffix used by npm
+ * tags (e.g. `0.1.0-rc.2`). Mirrors the schema's regex so JSON-Schema
+ * validators and the in-process shape validator agree.
+ */
+const SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?$/;
 /**
  * `harnessNote` is the only field the operator can put long-form text
  * in. We allow letters/digits/punctuation/whitespace but reject CR/LF
@@ -306,6 +325,18 @@ export function validatePredicateShape(parsed: unknown): string | null {
     !SHORT_ID.test(pluginVersion)
   ) {
     return 'schema validation failed: pluginVersion does not match pattern';
+  }
+
+  // pipelineVersion (AISDLC-100.6) — optional. When present, must be a
+  // semver-shaped string (`MAJOR.MINOR.PATCH` with optional `-prerelease`).
+  // Absence is OK (legacy v1 envelopes signed before pipeline-cli existed
+  // / before Phase 6 landed). The verifier logs but does NOT enforce a
+  // specific version — see `scripts/verify-attestation.mjs`.
+  if (p['pipelineVersion'] !== undefined) {
+    const pv = p['pipelineVersion'];
+    if (typeof pv !== 'string' || pv.length === 0 || !SEMVER.test(pv)) {
+      return 'schema validation failed: pipelineVersion does not match pattern';
+    }
   }
 
   // iterationCount — positive integer.
@@ -434,6 +465,14 @@ export interface BuildPredicateInputs {
     findings: ReviewerEntry['findings'];
   }>;
   pluginVersion: string;
+  /**
+   * Pipeline-cli version from `pipeline-cli/package.json` (AISDLC-100.6).
+   * Optional — when omitted (e.g. legacy callers, environments where
+   * pipeline-cli isn't installed), the predicate's `pipelineVersion` field
+   * is also omitted. Forensic / audit purpose only — the verifier logs
+   * this but does not enforce.
+   */
+  pipelineVersion?: string;
   iterationCount: number;
   harnessNote: string;
   /** Override `signedAt` for deterministic tests. */
@@ -849,6 +888,12 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
   // to the v1 (`diffHash`) or v2 (`contentHash`) leg.
   if (Array.isArray(inputs.changedFileDeltas)) {
     predicate.contentHashV3 = computeContentHashV3(inputs.changedFileDeltas);
+  }
+  // AISDLC-100.6: include `pipelineVersion` only when the caller provided
+  // it. Omitted otherwise so legacy v1 envelopes (signed before pipeline-cli
+  // existed) still round-trip identically through validatePredicateShape.
+  if (typeof inputs.pipelineVersion === 'string' && inputs.pipelineVersion.length > 0) {
+    predicate.pipelineVersion = inputs.pipelineVersion;
   }
   return predicate;
 }
