@@ -32,5 +32,12 @@ jobs:
           cache: pnpm
       - name: Install (workspace)
         run: pnpm install --frozen-lockfile
+      - name: Build workspace deps (pipeline-cli is a workspace dep of mcp-server)
+        # AISDLC-110: verify-bundle's freshness rebuild calls esbuild which
+        # bundles @ai-sdlc/pipeline-cli — its dist/ must exist for esbuild
+        # to resolve the import. CI only runs `pnpm install`, not `pnpm -r build`,
+        # so we explicitly build the dep first. Without this, every PR that
+        # touches the workspace fails the freshness rebuild step.
+        run: pnpm --filter @ai-sdlc/pipeline-cli build
       - name: Verify committed bundle (presence, ESM, self-contained, fresh)
         run: pnpm --filter @ai-sdlc/plugin-mcp-server verify-bundle
