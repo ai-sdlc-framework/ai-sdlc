@@ -22,7 +22,8 @@
 
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import type { IssueInput, RefinementVerdict } from './types.js';
+import { redactSecrets } from './secret-redact.js';
+import type { GateEvaluation, IssueInput, RefinementVerdict } from './types.js';
 
 export interface CalibrationEntryInput {
   /** Issue snapshot at evaluation time (id / title / body). Optional but recommended. */
@@ -80,8 +81,16 @@ export interface CalibrationEntry {
   notes?: string;
 }
 
-/** Maximum body characters to inline in the log. Larger bodies are SHA'd. */
-const BODY_INLINE_LIMIT = 500;
+/**
+ * Maximum body characters to inline in the log. Larger bodies are SHA'd.
+ *
+ * AISDLC-122 lowered this from 500 → 80 to shrink the surface area for
+ * pasted secrets that don't match a known shape. 80 chars is enough to
+ * eyeball whether the issue is "the typo PR" vs "the auth bug", but
+ * short enough that anything resembling structured data (a token, a URL
+ * with auth params, a long config blob) trips the SHA branch instead.
+ */
+const BODY_INLINE_LIMIT = 80;
 
 /**
  * Resolve the calibration log path: explicit override > opts.artifactsDir
@@ -133,10 +142,10 @@ export function buildEntry(
     ? {
         id: issue.id,
         source: issue.source,
-        title: issue.title,
+        title: redactSecrets(issue.title),
         ...(issue.body && issue.body.length > BODY_INLINE_LIMIT
           ? { bodySha: shortSha(issue.body) }
-          : { bodyPreview: issue.body ?? '' }),
+          : { bodyPreview: redactSecrets(issue.body ?? '') }),
       }
     : undefined;
 
@@ -150,8 +159,38 @@ export function buildEntry(
     failedGates,
     outcome: outcome ?? '',
     issue: issueSnapshot,
-    verdict,
-    notes,
+    verdict: redactVerdict(verdict),
+    notes: notes !== undefined ? redactSecrets(notes) : notes,
+  };
+}
+
+/**
+ * Apply `redactSecrets()` to the LLM-derived free-text fields inside a
+ * verdict (`finding`, `clarificationQuestion` per gate, plus the
+ * top-level `summary` and `questions[]`). Returns a new verdict object;
+ * the input is not mutated so callers can keep their unredacted copy
+ * for in-memory consumers (e.g. comment-loop ingress that posts the
+ * clarifying question back to GitHub before the redaction layer cares).
+ */
+function redactVerdict(verdict: RefinementVerdict): RefinementVerdict {
+  return {
+    ...verdict,
+    summary: verdict.summary !== undefined ? redactSecrets(verdict.summary) : verdict.summary,
+    questions: verdict.questions
+      ? verdict.questions.map((q) => redactSecrets(q))
+      : verdict.questions,
+    gates: verdict.gates.map(redactGate),
+  };
+}
+
+function redactGate(gate: GateEvaluation): GateEvaluation {
+  return {
+    ...gate,
+    finding: gate.finding !== undefined ? redactSecrets(gate.finding) : gate.finding,
+    clarificationQuestion:
+      gate.clarificationQuestion !== undefined
+        ? redactSecrets(gate.clarificationQuestion)
+        : gate.clarificationQuestion,
   };
 }
 

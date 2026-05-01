@@ -121,6 +121,38 @@ describe('buildEntry', () => {
     expect(eLong.issue?.bodyPreview).toBeUndefined();
   });
 
+  it('switches to bodySha at the AISDLC-122 80-char inline limit', () => {
+    // AISDLC-122 lowered BODY_INLINE_LIMIT 500 → 80. A body of exactly
+    // 80 chars is still inlined (limit is `>` not `>=`); 81 trips SHA.
+    // Use word+space text so we don't trip the HIGH-ENTROPY 40+ run
+    // catch-all in `redactSecrets()` — that's a redaction-layer concern
+    // and is asserted separately below.
+    // Repeat 'ab ' (3 chars) and trim/pad to exactly 80 chars. The
+    // mandatory spaces break up alphanumeric runs so HIGH-ENTROPY (40+
+    // alphanum/_/-) doesn't fire.
+    const padded = 'ab '.repeat(27).slice(0, 80);
+    expect(padded).toHaveLength(80);
+    const at = {
+      id: 'i3',
+      source: 'github' as const,
+      title: 't',
+      body: padded,
+    };
+    const eAt = buildEntry({ verdict: verdict(), issue: at });
+    expect(eAt.issue?.bodyPreview).toBe(padded);
+    expect(eAt.issue?.bodySha).toBeUndefined();
+
+    const over = {
+      id: 'i4',
+      source: 'github' as const,
+      title: 't',
+      body: `${padded}!`, // 81 chars
+    };
+    const eOver = buildEntry({ verdict: verdict(), issue: over });
+    expect(eOver.issue?.bodySha).toMatch(/^cs_[0-9a-f]{8}$/);
+    expect(eOver.issue?.bodyPreview).toBeUndefined();
+  });
+
   it('passes outcome through', () => {
     const e = buildEntry({ verdict: verdict(), outcome: 'override', notes: 'maintainer overrode' });
     expect(e.outcome).toBe('override');
@@ -171,5 +203,66 @@ describe('appendCalibrationEntry', () => {
     const { path } = appendCalibrationEntry({ verdict: verdict() }, { artifactsDir: tmp });
     expect(path).toBe(join(tmp, '_dor', 'calibration.jsonl'));
     expect(existsSync(path)).toBe(true);
+  });
+
+  it('redacts known-shape secrets from title, bodyPreview, and verdict findings (AISDLC-122)', () => {
+    // Use OBVIOUSLY FAKE tokens that pattern-match but aren't real
+    // secrets. Each one targets a distinct registry entry so the test
+    // covers more than just one regex.
+    // Note: OpenAI classic keys are `sk-[A-Za-z0-9]{20,}` — no hyphen
+    // in the body. The `testkey` prefix keeps the literal obviously fake
+    // without breaking the pattern.
+    const fakeOpenAI = 'sk-testkeyABCDEF1234567890abcdef1234567890';
+    const fakeGithub = `ghp_${'a'.repeat(36)}`;
+    const fakeAws = 'AKIAIOSFODNN7EXAMPLE';
+
+    const issue = {
+      id: 'leaky',
+      source: 'github' as const,
+      // Title carries the OpenAI-shape token. <80 chars total so the
+      // body still inlines (we want bodyPreview to also redact).
+      title: `bug: ${fakeOpenAI} fails`,
+      // Body carries the GitHub PAT.
+      body: `Stack trace shows ${fakeGithub} in header`,
+    };
+
+    const v = verdict({
+      gates: [
+        {
+          gateId: 1,
+          verdict: 'fail',
+          severity: 'block',
+          stage: 'B',
+          confidence: 'high',
+          // The LLM finding quotes back the AWS key from the body.
+          finding: `Body contains AWS key ${fakeAws} — looks like a leak`,
+          clarificationQuestion: `Did you mean to share ${fakeAws}?`,
+        },
+      ],
+      summary: `Issue mentions ${fakeOpenAI}`,
+      questions: [`Is ${fakeGithub} still active?`],
+    });
+
+    const target = join(tmp, 'redact.jsonl');
+    appendCalibrationEntry({ verdict: v, issue }, { filePath: target });
+
+    // Read back the on-disk JSONL — this is the surface that would be
+    // committed if the pipeline did `git add -A`. The in-memory entry
+    // is NOT what we're asserting; the persisted line is.
+    const raw = readFileSync(target, 'utf8');
+    const parsed = JSON.parse(raw.trim()) as CalibrationEntry;
+
+    // None of the literal fake tokens may appear anywhere in the line.
+    expect(raw).not.toContain(fakeOpenAI);
+    expect(raw).not.toContain(fakeGithub);
+    expect(raw).not.toContain(fakeAws);
+
+    // And the redaction markers should be present in the right places.
+    expect(parsed.issue?.title).toContain('[REDACTED:OPENAI]');
+    expect(parsed.issue?.bodyPreview).toContain('[REDACTED:GITHUB_PAT]');
+    expect(parsed.verdict.gates[0].finding).toContain('[REDACTED:AWS_ACCESS_KEY]');
+    expect(parsed.verdict.gates[0].clarificationQuestion).toContain('[REDACTED:AWS_ACCESS_KEY]');
+    expect(parsed.verdict.summary).toContain('[REDACTED:OPENAI]');
+    expect(parsed.verdict.questions?.[0]).toContain('[REDACTED:GITHUB_PAT]');
   });
 });

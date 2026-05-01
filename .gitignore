@@ -49,6 +49,19 @@ pnpm-debug.log*
 .ai-sdlc/memory/
 .enterprise.yaml
 
+# AISDLC-122: pipeline-cli writes the DoR calibration log to
+# `artifacts/_dor/calibration.jsonl` by default. The log captures issue
+# titles + body previews + LLM-derived `finding` / `clarificationQuestion`
+# strings that may quote pasted secrets. Combined with the dogfood
+# pipeline's `git add -A` practice (per `feedback_stash_completely_before_pipelines.md`),
+# an unscrubbed paste of an API key in an issue body could be committed
+# to git history through this log. Three layers of defense:
+#   1. Ignore the directory entirely (this rule).
+#   2. Lower BODY_INLINE_LIMIT in pipeline-cli/src/dor/calibration-log.ts
+#      (80 chars), so most bodies become a SHA reference.
+#   3. Regex redaction in pipeline-cli/src/dor/secret-redact.ts.
+artifacts/
+
 # Package manager
 .pnpm-store/
 
