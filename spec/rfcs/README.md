@@ -147,7 +147,7 @@ CI passes but logs a warning that grows louder as the deadline approaches. Hard 
 
 1. Copy `RFC-0001-template.md` and fill in the YAML frontmatter at the top.
 2. Pick the `status` value that matches your phase (`Draft` for new work).
-3. Decide which doc surfaces the RFC needs by walking through the `requiresDocs` enum. Pick the smallest set that covers the user-visible impact — empty (`[]`) is acceptable and correct for purely strategic / conceptual RFCs (e.g. RFC-0003 product strategy).
+3. Decide which doc surfaces the RFC needs by walking through the `requiresDocs` enum. Pick the smallest set that covers the user-visible impact — empty (`[]`) is acceptable and correct for purely strategic / conceptual RFCs (e.g. RFC-0013 product strategy).
 4. **Before requesting `Approved` status**, ensure each surface in `requiresDocs` has at least one doc file referencing the RFC by its `id`. If the docs aren't ready, set `deferredDocs: true` with a deadline AND file a backlog task for the gap (so the orchestrator can eventually pick it up).
 5. When the spec lands and the docs exist, flip `status` to `Implemented` (or `Final` for sign-off-gated RFCs) and remove `deferredDocs` if it was set.
 
@@ -168,13 +168,13 @@ RFC-NNNN-short-title.md
 | -------------------------------------------------------------------------------- | -------------------------------------- | ----------- | --------------------------------------------- |
 | [RFC-0001](RFC-0001-template.md)                                                 | Template                               | —           | —                                             |
 | [RFC-0002](RFC-0002-pipeline-orchestration.md)                                   | Pipeline Orchestration Policy          | Draft       | tutorial, api-reference, example              |
-| [RFC-0003a](RFC-0003-infrastructure-adapters.md)                                 | Infrastructure Provider Adapters       | Draft       | tutorial, api-reference, operator-runbook, example |
-| [RFC-0003b](RFC-0003-product-first-implementation-strategy.md)                   | AI-SDLC Orchestrator Product Strategy  | Draft       | _(none — strategic)_                          |
+| [RFC-0003](RFC-0003-infrastructure-adapters.md)                                  | Infrastructure Provider Adapters       | Draft       | tutorial, api-reference, operator-runbook, example |
 | [RFC-0004](RFC-0004-cost-governance-and-attribution.md)                          | Cost Governance and Attribution        | Draft       | tutorial, api-reference, operator-runbook     |
 | [RFC-0005](RFC-0005-product-priority-algorithm.md)                               | Product Priority Algorithm (PPA)       | Draft       | api-reference, operator-runbook               |
 | [RFC-0006](RFC-0006-design-system-governance-v5-final.md)                        | Design System Governance               | Final       | tutorial, operator-runbook, api-reference     |
 | [RFC-0008](RFC-0008-ppa-triad-integration-final-combined.md)                     | PPA Triad Integration                  | Final       | api-reference, operator-runbook               |
 | [RFC-0010](RFC-0010-parallel-execution-worktree-pooling.md)                      | Parallel Execution and Worktree Pooling| Draft       | operator-runbook, api-reference               |
+| [RFC-0013](RFC-0013-product-first-implementation-strategy.md)                    | AI-SDLC Orchestrator Product Strategy  | Draft       | _(none — strategic)_                          |
 
-> **Note:** RFC-0003 is a deliberate slot collision — two different proposals were initially numbered 0003 (`-infrastructure-adapters` and `-product-first-implementation-strategy`). They are disambiguated as **RFC-0003a** and **RFC-0003b** in the index above for clarity, while the file names are preserved as-is to avoid breaking existing references. Future RFCs should not reuse a number; this is a one-off historical artifact.
-> RFC-0007 and RFC-0009 are reserved / withdrawn slots — their RFCs were folded into RFC-0006 (Figma Make scope) and RFC-0008 (sharding model) respectively, and their files were never finalised.
+> **Note:** RFC-0007 and RFC-0009 are reserved / withdrawn slots — their RFCs were folded into RFC-0006 (Figma Make scope) and RFC-0008 (sharding model) respectively, and their files were never finalised.
+> RFC-0003 was previously a slot collision — two different proposals (`-infrastructure-adapters` and `-product-first-implementation-strategy`) were both numbered 0003. The collision was resolved in AISDLC-109 by renumbering the product-strategy RFC to RFC-0013; RFC-0003 now refers unambiguously to the infrastructure-adapters RFC.

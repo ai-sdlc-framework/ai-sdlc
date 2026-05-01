@@ -1048,6 +1048,6 @@ spec:
 - [autonomy-policy.schema.json](../schemas/autonomy-policy.schema.json) — Existing `transactionLimit` field
 - [quality-gate.schema.json](../schemas/quality-gate.schema.json) — Existing gate rule types
 - [RFC-0002: Pipeline Orchestration Policy](./RFC-0002-pipeline-orchestration.md) — Stage failure policies (retry costs)
-- [RFC-0003: AI-SDLC Orchestrator Product Strategy](./RFC-0003-product-first-implementation-strategy.md) — Orchestrator architecture and commercial model
+- [RFC-0013: AI-SDLC Orchestrator Product Strategy](./RFC-0013-product-first-implementation-strategy.md) — Orchestrator architecture and commercial model
 - [Anthropic API Pricing](https://www.anthropic.com/pricing) — Model pricing reference
 - [OpenAI API Pricing](https://openai.com/api/pricing/) — Model pricing reference
