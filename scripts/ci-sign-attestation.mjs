@@ -321,12 +321,9 @@ async function main() {
       `${orchestratorBarrel} not found. Run \`pnpm --filter "@ai-sdlc/orchestrator..." build\` first.`,
     );
   }
-  const {
-    buildPredicate,
-    signAttestation,
-    collectChangedFileEntries,
-    collectChangedFileDeltaEntries,
-  } = await import(orchestratorBarrel);
+  const { buildPredicate, signAttestation, collectChangedFileDeltaEntries } = await import(
+    orchestratorBarrel
+  );
 
   // ── Short-circuit: skip when a valid attestation already exists ─────
   // AC #8: contributor PR with valid local attestation → CI does NOT
@@ -357,16 +354,10 @@ async function main() {
   }
 
   // ── Gather inputs ────────────────────────────────────────────────────
-  const diff = git(['diff', `${baseSha}...${headSha}`], repoRoot);
-  // AISDLC-94: also collect changed-file blob SHAs for `contentHash`.
-  let changedFiles;
-  try {
-    changedFiles = collectChangedFileEntries(baseSha, headSha, repoRoot);
-  } catch (err) {
-    fail(err.message ?? String(err));
-  }
-  // AISDLC-101: also collect per-file (base, head) blob deltas for
-  // `contentHashV3` (Phase 2 triple-hash).
+  // AISDLC-103 (Verifier Phase 3): only the v3 per-file (base, head) blob
+  // delta is collected. Legacy `diffHash` (sha256 of literal git diff) +
+  // `contentHash` (head blob SHA per file) were dropped along with the
+  // schemaVersion bump to v3. See orchestrator/src/runtime/attestations.ts.
   let changedFileDeltas;
   try {
     changedFileDeltas = collectChangedFileDeltaEntries(baseSha, headSha, repoRoot);
@@ -430,14 +421,12 @@ async function main() {
 
   const predicate = buildPredicate({
     commitSha: headSha,
-    diff,
     policy,
     reviewers,
     pluginVersion,
     pipelineVersion: pipelineVersion ?? undefined,
     iterationCount,
     harnessNote,
-    changedFiles,
     changedFileDeltas,
   });
 

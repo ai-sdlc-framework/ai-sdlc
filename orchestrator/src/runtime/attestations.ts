@@ -40,12 +40,22 @@ import { cleanGitEnv } from './git-env.js';
 /**
  * The currently-accepted predicate schema versions. CI rejects any envelope
  * whose `payload.schemaVersion` is not in this allowlist — this is the
- * forward-compatibility hatch (we add a new version here when we change the
- * predicate shape, and CI keeps accepting v1 until we explicitly remove it).
+ * forward-compatibility hatch.
+ *
+ * AISDLC-103 (Verifier Phase 3) narrowed this to `['v3']` only:
+ *  - `v1` envelopes (pre-AISDLC-94, diffHash-only) are rejected.
+ *  - `v2` was never landed as a distinct schemaVersion — the AISDLC-94
+ *    `contentHash` and AISDLC-101 `contentHashV3` shipped under the v1
+ *    schemaVersion as additive optional fields during the dual- and
+ *    triple-hash soak windows.
+ *  - `v3` envelopes carry `contentHashV3` as a required field and DO NOT
+ *    carry `diffHash` or `contentHash` (the legacy hashes are forbidden;
+ *    a v3 envelope smuggling either field is rejected by
+ *    `validatePredicateShape`).
  *
  * Exported so the `verify-attestation` workflow can `import`/inline it.
  */
-export const ACCEPTED_SCHEMA_VERSIONS = ['v1'] as const;
+export const ACCEPTED_SCHEMA_VERSIONS = ['v3'] as const;
 export type SchemaVersion = (typeof ACCEPTED_SCHEMA_VERSIONS)[number];
 
 /**
@@ -91,52 +101,39 @@ export interface AttestationPredicate {
   schemaVersion: SchemaVersion;
   /** The commit being attested. */
   subject: { digest: SubjectDigest };
-  /** sha256 of `git diff origin/main...HEAD` at attestation time. */
-  diffHash: string;
   /**
-   * Rebase-tolerant content binding (AISDLC-94). sha256 over a canonical
-   * line-per-file string of the form `<path>\t<blobSha>\n` (sorted ascending
-   * by path) for every file in the PR's changed-file set. Survives rebases
-   * that shift `@@` hunk headers or context lines without changing the
-   * post-apply file content.
-   *
-   * Optional in v1 for Phase 1 dual-hash backward compatibility — envelopes
-   * signed before this field landed only carry `diffHash` and the verifier
-   * still accepts them. Phase 2 (separate follow-up task) makes
-   * `contentHash` required and removes `diffHash`.
-   */
-  contentHash?: string;
-  /**
-   * Per-file-delta content binding (AISDLC-101 — Phase 2 of the AISDLC-94
-   * dual-hash migration). sha256 over a canonical line-per-file string
-   * of the form `<path>\t<fileDeltaHash>\n` (sorted ascending by path),
-   * where `fileDeltaHash[path] = sha256(<base_blob_sha> + ' -> ' +
+   * Per-file-delta content binding (AISDLC-101 — required as of AISDLC-103
+   * Phase 3). sha256 over a canonical line-per-file string of the form
+   * `<path>\t<fileDeltaHash>\n` (sorted ascending by path), where
+   * `fileDeltaHash[path] = sha256(<base_blob_sha> + ' -> ' +
    * <head_blob_sha>)`. The base blob SHA comes from the merge-base of the
    * PR's `<baseRef>` and `<headRef>`; the head blob SHA from the PR's
    * `<headRef>`.
    *
-   * Why this is "third leg" of the triple-hash:
-   *  - `diffHash` (legacy v1) commits to the literal `git diff` text.
-   *    Breaks on rebase whenever `@@` headers shift.
-   *  - `contentHash` (AISDLC-94) commits to the post-apply tree state.
-   *    Stable when the PR rebases cleanly onto a base that didn't touch
-   *    the same files. BREAKS in the AISDLC-93 / PR #102 case where a
-   *    SIBLING PR already modified the same files between OUR sign +
-   *    OUR merge — the rebased file's HEAD blob now contains the
-   *    sibling's contributions, so the head blob SHA changes.
-   *  - `contentHashV3` commits to the (base, head) blob-pair transition
-   *    per file. Provides a stricter binding than v2 alone (it commits
-   *    to "we moved file F from blob A to blob B", not just "we ended
-   *    up at blob B"). Accepted alongside v1 (diffHash) + v2 (contentHash)
-   *    during the triple-hash window — the verifier OR's the three legs.
+   * Why this is the only content binding in v3:
+   *  - `diffHash` (legacy v1, sha256 of literal `git diff` text) broke on
+   *    every rebase because `@@` hunk headers shift even when the
+   *    post-apply file content doesn't change.
+   *  - `contentHash` (AISDLC-94, sha256 of `(path, head_blob_sha)` per
+   *    file) was rebase-tolerant for the no-overlap case but broke in the
+   *    AISDLC-93 / PR #102 sibling-overlap case (the rebased file's HEAD
+   *    blob contained the sibling's contributions, so the head blob SHA
+   *    changed even though OUR contribution was unchanged).
+   *  - `contentHashV3` commits to the (base, head) blob-pair TRANSITION
+   *    per file ("we moved file F from blob A to blob B"). Stable when
+   *    paired with the producer-side pre-sign rebase from AISDLC-102 even
+   *    in the sibling-overlap case, and a genuine content tampering still
+   *    flips the head blob SHA → fileDeltaHash flips → reject (threat
+   *    model preserved).
    *
-   * Optional in v1 for Phase 2 backward compatibility — envelopes signed
-   * before this field landed only carry `diffHash` + (optionally) `contentHash`,
-   * and the verifier still accepts them on either of those two legs. A
-   * later schema bump (separate follow-up task) will require `contentHashV3`
-   * and drop the legacy legs.
+   * Required for v3 envelopes. The dual-hash (v1 → AISDLC-94) and
+   * triple-hash (AISDLC-94 → AISDLC-101) windows kept this optional under
+   * schemaVersion `v1`; AISDLC-103 narrows the accepted-schema-versions
+   * allowlist to `['v3']` and makes `contentHashV3` mandatory in
+   * `validatePredicateShape`. Legacy envelopes carrying only `diffHash`
+   * and/or `contentHash` are rejected with a schemaVersion-allowlist reason.
    */
-  contentHashV3?: string;
+  contentHashV3: string;
   /** sha256 of `.ai-sdlc/review-policy.md` at attestation time. */
   policyHash: string;
   /** Reviewer entries — typically 3 (code/test/security). */
@@ -222,8 +219,11 @@ export type VerifyResult =
 // value — never give the attacker a way to smuggle their payload past
 // us by burying it in our reason text.
 //
-// Mirror of `.ai-sdlc/schemas/attestation.v1.schema.json` — kept in
-// sync by the `validatePredicateShape` test ('schema mirror in sync').
+// Mirror of `.ai-sdlc/schemas/attestation.v3.schema.json` — the v3 schema
+// requires `contentHashV3` and forbids the legacy `diffHash` / `contentHash`
+// fields. AISDLC-103 (Verifier Phase 3) narrowed the schemaVersion allowlist
+// to `['v3']` only; envelopes carrying the legacy hashes (= v1/v2 envelopes
+// smuggling themselves into the v3 window) are rejected with a fixed reason.
 
 /** sha1 git commit (40 lowercase hex chars). */
 const SHA1_HEX = /^[0-9a-f]{40}$/;
@@ -248,13 +248,18 @@ const SEMVER = /^[0-9]+\.[0-9]+\.[0-9]+(-[a-z0-9.]+)?$/;
 const SAFE_TEXT = /^[^\r\n]*$/;
 
 /**
- * Validate a parsed predicate against the v1 schema regex patterns.
+ * Validate a parsed predicate against the v3 schema regex patterns.
  *
  * Returns `null` when the predicate is shape-valid; otherwise returns
  * a static failure reason that does NOT embed any user-controlled
  * value (just the field path). This is the load-bearing property:
  * the malicious value never reaches the `reason` string, so it can't
  * propagate to GITHUB_OUTPUT or commit-status descriptions.
+ *
+ * AISDLC-103 (Verifier Phase 3): `contentHashV3` is now required, and the
+ * legacy `diffHash` / `contentHash` fields are FORBIDDEN — a predicate
+ * carrying either is treated as a v1/v2 envelope smuggling itself into the
+ * v3 window and rejected with a static reason.
  */
 export function validatePredicateShape(parsed: unknown): string | null {
   if (parsed === null || typeof parsed !== 'object') {
@@ -287,30 +292,29 @@ export function validatePredicateShape(parsed: unknown): string | null {
     return 'schema validation failed: subject.digest.sha1 does not match pattern';
   }
 
-  // diffHash + policyHash — 64 hex chars each. Required.
-  for (const field of ['diffHash', 'policyHash'] as const) {
-    const v = p[field];
+  // policyHash — 64 hex chars. Required.
+  {
+    const v = p['policyHash'];
     if (typeof v !== 'string' || !SHA256_HEX.test(v)) {
-      return `schema validation failed: ${field} does not match pattern`;
+      return 'schema validation failed: policyHash does not match pattern';
     }
   }
 
-  // contentHash (AISDLC-94) — optional in Phase 1 (dual-hash mode). When
-  // present, must be a 64-char hex sha256. Absence is OK (legacy v1
-  // envelopes signed before this field landed). Phase 2 will make it
-  // required and drop diffHash.
+  // AISDLC-103 (Phase 3): legacy `diffHash` (v1) and `contentHash` (v2)
+  // are FORBIDDEN in v3 envelopes. A predicate that claims `schemaVersion:
+  // 'v3'` but carries either field is a v1/v2 envelope smuggling itself
+  // into the v3 window — reject with a fixed reason that doesn't embed
+  // the bad value.
+  if (p['diffHash'] !== undefined) {
+    return 'schema validation failed: diffHash is forbidden in v3 envelopes (legacy v1 field)';
+  }
   if (p['contentHash'] !== undefined) {
-    const ch = p['contentHash'];
-    if (typeof ch !== 'string' || !SHA256_HEX.test(ch)) {
-      return 'schema validation failed: contentHash does not match pattern';
-    }
+    return 'schema validation failed: contentHash is forbidden in v3 envelopes (legacy v2 field)';
   }
 
-  // contentHashV3 (AISDLC-101) — optional in Phase 2 (triple-hash mode).
-  // Same pattern + rationale as contentHash: when present, must be a
-  // 64-char hex sha256. Absence is OK for envelopes signed before
-  // AISDLC-101 landed (they fall back to v1 `diffHash` or v2 `contentHash`).
-  if (p['contentHashV3'] !== undefined) {
+  // contentHashV3 (AISDLC-101) — REQUIRED in v3 envelopes. Must be a
+  // 64-char hex sha256.
+  {
     const ch3 = p['contentHashV3'];
     if (typeof ch3 !== 'string' || !SHA256_HEX.test(ch3)) {
       return 'schema validation failed: contentHashV3 does not match pattern';
@@ -455,7 +459,6 @@ export interface ChangedFileDeltaEntry {
 /** Inputs for building an attestation predicate. */
 export interface BuildPredicateInputs {
   commitSha: string;
-  diff: string | Buffer;
   policy: string | Buffer;
   reviewers: Array<{
     agentId: string;
@@ -478,20 +481,13 @@ export interface BuildPredicateInputs {
   /** Override `signedAt` for deterministic tests. */
   signedAt?: string;
   /**
-   * Changed-file set for `contentHash` (AISDLC-94). Optional in Phase 1
-   * — when omitted, the predicate's `contentHash` field is also omitted
-   * and the verifier falls back to the legacy `diffHash` match.
+   * Per-file-delta set for `contentHashV3` (AISDLC-101 / AISDLC-103).
+   * REQUIRED for v3 envelopes — captures the (base_blob_sha →
+   * head_blob_sha) transition per file. Pass `[]` for no-op PRs (the
+   * resulting `contentHashV3` is `sha256('')`, which is well-defined and
+   * still verifiable).
    */
-  changedFiles?: ChangedFileEntry[];
-  /**
-   * Per-file-delta set for `contentHashV3` (AISDLC-101). Optional in
-   * Phase 2 — when omitted, the predicate's `contentHashV3` field is
-   * also omitted and the verifier falls back to either of the legacy
-   * legs (`diffHash` or `contentHash`). When provided, captures the
-   * (base_blob_sha → head_blob_sha) transition per file rather than just
-   * the head blob SHA.
-   */
-  changedFileDeltas?: ChangedFileDeltaEntry[];
+  changedFileDeltas: ChangedFileDeltaEntry[];
 }
 
 /**
@@ -853,6 +849,11 @@ export function collectChangedFileDeltaEntries(
  * Build the predicate payload from raw inputs. Pure function — no I/O,
  * no signing. The caller (`/ai-sdlc execute` Step 10) reads files and git
  * output, then hands them here.
+ *
+ * AISDLC-103 (Verifier Phase 3): always emits a v3 envelope. The caller
+ * MUST provide `changedFileDeltas` (use `[]` for no-op PRs); the legacy
+ * `diff` + `changedFiles` inputs were dropped along with the legacy
+ * `diffHash` + `contentHash` fields.
  */
 export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredicate {
   if (!/^[0-9a-f]{40}$/i.test(inputs.commitSha)) {
@@ -860,13 +861,13 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
       `buildPredicate: commitSha must be a 40-char hex SHA-1, got ${inputs.commitSha}`,
     );
   }
-  // AISDLC-94 dual-hash mode: include `contentHash` when the caller
-  // provided a changed-file set. Omitted otherwise so v1 envelopes
-  // remain backward-compatible.
+  if (!Array.isArray(inputs.changedFileDeltas)) {
+    throw new Error(`buildPredicate: changedFileDeltas must be an array (pass [] for no-op PRs)`);
+  }
   const predicate: AttestationPredicate = {
-    schemaVersion: 'v1',
+    schemaVersion: 'v3',
     subject: { digest: { sha1: inputs.commitSha.toLowerCase() } },
-    diffHash: sha256Hex(inputs.diff),
+    contentHashV3: computeContentHashV3(inputs.changedFileDeltas),
     policyHash: sha256Hex(inputs.policy),
     reviewers: inputs.reviewers.map((r) => ({
       agentId: r.agentId,
@@ -880,18 +881,10 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
     harnessNote: inputs.harnessNote,
     signedAt: inputs.signedAt ?? new Date().toISOString(),
   };
-  if (Array.isArray(inputs.changedFiles)) {
-    predicate.contentHash = computeContentHash(inputs.changedFiles);
-  }
-  // AISDLC-101 Phase 2 triple-hash: include `contentHashV3` when the caller
-  // provided a per-file-delta set. Omitted otherwise — verifier falls back
-  // to the v1 (`diffHash`) or v2 (`contentHash`) leg.
-  if (Array.isArray(inputs.changedFileDeltas)) {
-    predicate.contentHashV3 = computeContentHashV3(inputs.changedFileDeltas);
-  }
   // AISDLC-100.6: include `pipelineVersion` only when the caller provided
-  // it. Omitted otherwise so legacy v1 envelopes (signed before pipeline-cli
-  // existed) still round-trip identically through validatePredicateShape.
+  // it. Omitted otherwise so envelopes signed in environments without
+  // pipeline-cli installed still round-trip identically through
+  // validatePredicateShape.
   if (typeof inputs.pipelineVersion === 'string' && inputs.pipelineVersion.length > 0) {
     predicate.pipelineVersion = inputs.pipelineVersion;
   }
@@ -968,8 +961,9 @@ export interface VerifyOptions {
    */
   trustedReviewers: TrustedReviewer[];
   /**
-   * What the predicate's `subject.digest.sha1`, `diffHash`, `policyHash`,
-   * and `reviewers[].agentFileHash` MUST equal. Mismatch = invalid.
+   * What the predicate's `subject.digest.sha1`, `contentHashV3`,
+   * `policyHash`, and `reviewers[].agentFileHash` MUST equal. Mismatch =
+   * invalid.
    *
    * `expectedAgentFileHashes` is a map from agentId to its sha256 — we
    * tolerate the predicate listing fewer or more reviewers than the map,
@@ -977,26 +971,9 @@ export interface VerifyOptions {
    */
   expected: {
     commitSha: string;
-    diffHash: string;
+    contentHashV3: string;
     policyHash: string;
     expectedAgentFileHashes: Record<string, string>;
-    /**
-     * Phase-1 dual-hash acceptance (AISDLC-94). When the envelope has a
-     * `contentHash` field AND this expected value is set, a match here
-     * also satisfies the binding even if `diffHash` differs (typical
-     * post-rebase shape: file content unchanged but `@@` hunk headers
-     * shifted because a sibling PR already touched the same files).
-     * Omit to disable contentHash acceptance.
-     */
-    contentHash?: string;
-    /**
-     * Phase-2 triple-hash acceptance (AISDLC-101). When the envelope has a
-     * `contentHashV3` field AND this expected value is set, a match here
-     * ALSO satisfies the binding (in addition to the v1 `diffHash` and v2
-     * `contentHash` legs). The verifier OR's the three legs — any single
-     * leg matching is enough to accept. Omit to disable v3 acceptance.
-     */
-    contentHashV3?: string;
   };
   /**
    * Override the accepted-schema-versions allowlist (for tests). Defaults
@@ -1106,36 +1083,18 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
       reason: `subject digest mismatch (envelope was signed for a different commit)`,
     };
   }
-  // AISDLC-94 + AISDLC-101 triple-hash acceptance: accept if ANY of the
-  // three legs match.
-  //
-  //   - v1 (`diffHash`): legacy literal-diff hash. Breaks on rebase.
-  //   - v2 (`contentHash`): post-apply blob SHA per file (AISDLC-94).
-  //     Stable when the rebase target didn't touch the same files.
-  //   - v3 (`contentHashV3`): per-file (base, head) blob-pair transition
-  //     (AISDLC-101). Stricter binding than v2 — commits to "we moved
-  //     file F from blob A to blob B" rather than just "we ended up at
-  //     blob B".
-  //
-  // Both v2 and v3 require the CALLER to opt in (by setting the
-  // corresponding `expected.*` field). A genuine content change still
-  // flips every file's head blob SHA → all three legs reject. Future
-  // schema bump (separate follow-up task) will require v3 and drop the
-  // legacy legs.
-  const hasContentHashMatch =
-    typeof predicate.contentHash === 'string' &&
-    typeof opts.expected.contentHash === 'string' &&
-    predicate.contentHash === opts.expected.contentHash;
-  const hasContentHashV3Match =
-    typeof predicate.contentHashV3 === 'string' &&
-    typeof opts.expected.contentHashV3 === 'string' &&
-    predicate.contentHashV3 === opts.expected.contentHashV3;
-  if (
-    !hasContentHashMatch &&
-    !hasContentHashV3Match &&
-    predicate.diffHash !== opts.expected.diffHash
-  ) {
-    return { valid: false, reason: 'diffHash mismatch (PR diff changed since attestation)' };
+  // AISDLC-103 (Verifier Phase 3): v3-only content binding. The legacy
+  // `diffHash` and `contentHash` legs were removed along with the
+  // schemaVersion narrowing — only `contentHashV3` is consulted now.
+  // The producer-side pre-sign rebase (AISDLC-102) + per-file (base,
+  // head) blob-pair binding give us a strict "we moved file F from blob
+  // A to blob B" check; any genuine tampering still flips the head blob
+  // SHA, fileDeltaHash flips, and the verifier rejects.
+  if (predicate.contentHashV3 !== opts.expected.contentHashV3) {
+    return {
+      valid: false,
+      reason: 'contentHashV3 mismatch (PR content changed since attestation)',
+    };
   }
   if (predicate.policyHash !== opts.expected.policyHash) {
     return {

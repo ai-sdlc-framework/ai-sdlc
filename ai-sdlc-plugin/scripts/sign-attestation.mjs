@@ -13,17 +13,23 @@
  *     --iteration-count 1 \
  *     --harness-note ""
  *
- *   # AISDLC-102 oracle mode (no signing key required, prints contentHash):
+ *   # AISDLC-102 oracle mode (no signing key required, prints contentHashV3):
  *   node ai-sdlc-plugin/scripts/sign-attestation.mjs --print-content-hash
  *
  * Inputs (CLI flags):
  *   --review-verdicts  path to JSON: [{ agentId, harness, approved, findings }]
  *   --iteration-count  integer (1 = single dev pass; 2 = one iteration ran)
  *   --harness-note     string (empty = independence enforced; non-empty = warning text)
- *   --print-content-hash  bool: compute + print AISDLC-94 contentHash for the
- *                         current worktree (origin/main...HEAD) and exit.
+ *   --print-content-hash  bool: compute + print AISDLC-101 contentHashV3 for
+ *                         the current worktree (origin/main...HEAD) and exit.
  *                         Used by /ai-sdlc execute Step 10.5 (AISDLC-102) to
  *                         decide whether reviewers must re-run after rebase.
+ *                         AISDLC-103: switched from v2 contentHash to v3
+ *                         contentHashV3 — v3 is the only content binding
+ *                         that survives in v3 envelopes, and it answers the
+ *                         "did the (base, head) blob-pair transition change
+ *                         after rebase?" oracle question more strictly than
+ *                         v2 ever could (v2 only saw head blob SHA shifts).
  *                         Does not require a signing key, does not write files.
  *
  * Reads from cwd (the worktree):
@@ -98,9 +104,16 @@ async function main() {
   // whether the post-rebase content materially differs from what the reviewers
   // approved. Same hash → reuse approval; different hash → re-spawn reviewers.
   //
+  // AISDLC-103: switched the oracle from the v2 `contentHash` to the v3
+  // `contentHashV3` (per-file (base, head) blob-pair transition). v3 is the
+  // only content binding still emitted by v3 envelopes, and it gives the
+  // strictest "did the rebase change anything we'd want to re-review?"
+  // signal — a sibling-overlap rebase that shifts the merge-base will move
+  // the per-file delta hash even when the final head blob is unchanged.
+  //
   // This mode does NOT require a signing key, does NOT touch any files, and
   // does NOT call buildPredicate / signAttestation — it just computes
-  // contentHash via the same algorithm AISDLC-94 ships and prints it.
+  // contentHashV3 via the same algorithm AISDLC-101 ships and prints it.
   // ──────────────────────────────────────────────────────────────────
   if (args['print-content-hash']) {
     const orchestratorBarrelRO = join(
@@ -115,7 +128,7 @@ async function main() {
         `${orchestratorBarrelRO} not found. Run \`pnpm --filter @ai-sdlc/orchestrator build\` first.`,
       );
     }
-    const { collectChangedFileEntries: collectRO, computeContentHash } = await import(
+    const { collectChangedFileDeltaEntries: collectRO, computeContentHashV3 } = await import(
       orchestratorBarrelRO
     );
     let entriesRO;
@@ -124,7 +137,7 @@ async function main() {
     } catch (err) {
       fail(err.message ?? String(err));
     }
-    const hash = computeContentHash(entriesRO);
+    const hash = computeContentHashV3(entriesRO);
     process.stdout.write(`${hash}\n`);
     return;
   }
@@ -155,28 +168,17 @@ async function main() {
       `${orchestratorBarrel} not found. Run \`pnpm --filter @ai-sdlc/orchestrator build\` first.`,
     );
   }
-  const {
-    buildPredicate,
-    signAttestation,
-    collectChangedFileEntries,
-    collectChangedFileDeltaEntries,
-  } = await import(orchestratorBarrel);
+  const { buildPredicate, signAttestation, collectChangedFileDeltaEntries } = await import(
+    orchestratorBarrel
+  );
 
   // Gather inputs.
   const headSha = git(['rev-parse', 'HEAD'], repoRoot).trim();
-  const diff = git(['diff', 'origin/main...HEAD'], repoRoot);
-  // AISDLC-94: also collect changed-file blob SHAs for `contentHash`.
-  // The diff range `origin/main...HEAD` matches what we hash for diffHash,
-  // so the two bindings cover the same file set.
-  let changedFiles;
-  try {
-    changedFiles = collectChangedFileEntries('origin/main', 'HEAD', repoRoot);
-  } catch (err) {
-    fail(err.message ?? String(err));
-  }
-  // AISDLC-101: also collect per-file (base, head) blob deltas for
-  // `contentHashV3` (Phase 2 triple-hash). Same diff range as diffHash +
-  // contentHash so all three legs cover the same file set.
+  // AISDLC-103 (Verifier Phase 3): only collect per-file (base, head) blob
+  // deltas for `contentHashV3`. The legacy `diffHash` (sha256 of literal
+  // git diff) and `contentHash` (head blob SHA per file) are no longer
+  // emitted — see CLAUDE.md "What CI rejects" / "What CI accepts" for the
+  // full backstory of the v1 → v2 → v3 migration.
   let changedFileDeltas;
   try {
     changedFileDeltas = collectChangedFileDeltaEntries('origin/main', 'HEAD', repoRoot);
@@ -233,14 +235,12 @@ async function main() {
 
   const predicate = buildPredicate({
     commitSha: headSha,
-    diff,
     policy,
     reviewers,
     pluginVersion,
     pipelineVersion: pipelineVersion ?? undefined,
     iterationCount,
     harnessNote,
-    changedFiles,
     changedFileDeltas,
   });
 

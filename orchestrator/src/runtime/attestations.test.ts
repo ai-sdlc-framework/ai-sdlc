@@ -36,9 +36,16 @@ import {
 const FIXED_COMMIT = 'a'.repeat(40); // 40 hex chars
 const SECOND_COMMIT = 'b'.repeat(40);
 
+// AISDLC-103 (Verifier Phase 3): default inputs always carry a v3
+// `changedFileDeltas` set since `buildPredicate` requires it. The legacy
+// `diff` / `changedFiles` inputs were dropped along with `diffHash` +
+// `contentHash`. Tests that need empty/zero predicates pass `[]`.
+const DEFAULT_DELTAS = [
+  { path: 'file.ts', baseBlobSha: '1'.repeat(40), headBlobSha: '2'.repeat(40) },
+];
+
 const DEFAULT_INPUTS = {
   commitSha: FIXED_COMMIT,
-  diff: 'diff --git a/file.ts b/file.ts\n+added line\n',
   policy: '# Review policy\nGolden Rule: when in doubt, approve with a suggestion.\n',
   reviewers: [
     {
@@ -67,12 +74,13 @@ const DEFAULT_INPUTS = {
   iterationCount: 1,
   harnessNote: '',
   signedAt: '2026-04-27T12:34:56.000Z',
+  changedFileDeltas: DEFAULT_DELTAS,
 };
 
 function buildExpected(predicate: AttestationPredicate) {
   return {
     commitSha: predicate.subject.digest.sha1,
-    diffHash: predicate.diffHash,
+    contentHashV3: predicate.contentHashV3,
     policyHash: predicate.policyHash,
     expectedAgentFileHashes: Object.fromEntries(
       predicate.reviewers.map((r) => [r.agentId, r.agentFileHash]),
@@ -95,11 +103,11 @@ function makeTrustedReviewer(
 }
 
 describe('buildPredicate', () => {
-  it('produces a v1 predicate with all hashes and the subject sha1', () => {
+  it('produces a v3 predicate with contentHashV3 and the subject sha1', () => {
     const predicate = buildPredicate(DEFAULT_INPUTS);
-    expect(predicate.schemaVersion).toBe('v1');
+    expect(predicate.schemaVersion).toBe('v3');
     expect(predicate.subject.digest.sha1).toBe(FIXED_COMMIT);
-    expect(predicate.diffHash).toBe(sha256Hex(DEFAULT_INPUTS.diff));
+    expect(predicate.contentHashV3).toBe(computeContentHashV3(DEFAULT_DELTAS));
     expect(predicate.policyHash).toBe(sha256Hex(DEFAULT_INPUTS.policy));
     expect(predicate.reviewers).toHaveLength(3);
     expect(predicate.reviewers[0].agentFileHash).toBe(
@@ -109,6 +117,9 @@ describe('buildPredicate', () => {
     expect(predicate.harnessNote).toBe('');
     expect(predicate.signedAt).toBe('2026-04-27T12:34:56.000Z');
     expect(predicate.pluginVersion).toBe('0.7.0');
+    // AISDLC-103: legacy hashes MUST NOT appear in v3 predicates.
+    expect((predicate as unknown as Record<string, unknown>).diffHash).toBeUndefined();
+    expect((predicate as unknown as Record<string, unknown>).contentHash).toBeUndefined();
   });
 
   it('rejects non-sha1 commitSha', () => {
@@ -130,6 +141,19 @@ describe('buildPredicate', () => {
     expect(ts).toBeGreaterThanOrEqual(before);
     expect(ts).toBeLessThanOrEqual(Date.now());
   });
+
+  it('throws when changedFileDeltas is omitted (v3 envelopes require the per-file delta set)', () => {
+    const inputs = { ...DEFAULT_INPUTS } as unknown as Record<string, unknown>;
+    delete inputs.changedFileDeltas;
+    expect(() => buildPredicate(inputs as unknown as Parameters<typeof buildPredicate>[0])).toThrow(
+      /changedFileDeltas must be an array/,
+    );
+  });
+
+  it('accepts an empty changedFileDeltas array (no-op PR)', () => {
+    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFileDeltas: [] });
+    expect(predicate.contentHashV3).toBe(sha256Hex(''));
+  });
 });
 
 describe('signAttestation + verifyAttestation (happy path)', () => {
@@ -149,7 +173,7 @@ describe('signAttestation + verifyAttestation (happy path)', () => {
     });
     expect(result.valid).toBe(true);
     if (result.valid) {
-      expect(result.predicate.schemaVersion).toBe('v1');
+      expect(result.predicate.schemaVersion).toBe('v3');
       expect(result.trustedReviewer.identity).toBe('dev@example.com');
     }
   });
@@ -203,7 +227,7 @@ describe('verifyAttestation (failure modes)', () => {
     if (!result.valid) expect(result.reason).toMatch(/signature did not match/);
   });
 
-  it('rejects diffHash mismatch (replay after force-push, AC #9)', () => {
+  it('rejects contentHashV3 mismatch (replay after force-push, AC #9)', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     const predicate = buildPredicate(DEFAULT_INPUTS);
     const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
@@ -213,11 +237,11 @@ describe('verifyAttestation (failure modes)', () => {
       trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
       expected: {
         ...buildExpected(predicate),
-        diffHash: sha256Hex('something completely different'),
+        contentHashV3: sha256Hex('something completely different'),
       },
     });
     expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
+    if (!result.valid) expect(result.reason).toMatch(/contentHashV3 mismatch/);
   });
 
   it('rejects policyHash mismatch (policy edited after attestation, AC #10)', () => {
@@ -282,7 +306,7 @@ describe('verifyAttestation (failure modes)', () => {
     });
     expect(result.valid).toBe(false);
     if (!result.valid) {
-      expect(result.reason).toMatch(/schemaVersion 'v1' not in allowlist/);
+      expect(result.reason).toMatch(/schemaVersion 'v3' not in allowlist/);
     }
   });
 
@@ -291,12 +315,12 @@ describe('verifyAttestation (failure modes)', () => {
     const predicate = buildPredicate(DEFAULT_INPUTS);
     const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
 
-    // Build a tampered predicate with a different diffHash, but reuse the
-    // original signature. Verify must reject — the PAE-encoded payload no
-    // longer matches what was signed.
+    // Build a tampered predicate with a different contentHashV3, but reuse
+    // the original signature. Verify must reject — the PAE-encoded payload
+    // no longer matches what was signed.
     const tampered: AttestationPredicate = {
       ...predicate,
-      diffHash: sha256Hex('attacker-supplied diff'),
+      contentHashV3: sha256Hex('attacker-supplied content delta'),
     };
     const forged: DsseEnvelope = {
       ...envelope,
@@ -357,7 +381,7 @@ describe('verifyAttestation (failure modes)', () => {
       trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
       expected: {
         commitSha: FIXED_COMMIT,
-        diffHash: 'x',
+        contentHashV3: 'x',
         policyHash: 'y',
         expectedAgentFileHashes: {},
       },
@@ -372,7 +396,7 @@ describe('signAttestation guards', () => {
     const { privateKeyPem } = generateSigningKeyPair();
     const predicate = buildPredicate(DEFAULT_INPUTS);
     // Cast to bypass the type guard so we can assert the runtime check.
-    const tampered = { ...predicate, schemaVersion: 'v99' as unknown as 'v1' };
+    const tampered = { ...predicate, schemaVersion: 'v99' as unknown as 'v3' };
     expect(() => signAttestation({ predicate: tampered, privateKeyPem, keyid: 'k' })).toThrow(
       /not in the accepted allowlist/,
     );
@@ -452,8 +476,11 @@ describe('validateTrustedReviewers', () => {
 });
 
 describe('ACCEPTED_SCHEMA_VERSIONS', () => {
-  it('includes v1', () => {
-    expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v1');
+  it('includes v3 only (AISDLC-103 narrowed allowlist)', () => {
+    expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v3');
+    expect(ACCEPTED_SCHEMA_VERSIONS).not.toContain('v1');
+    expect(ACCEPTED_SCHEMA_VERSIONS).not.toContain('v2');
+    expect(ACCEPTED_SCHEMA_VERSIONS).toHaveLength(1);
   });
 });
 
@@ -470,7 +497,7 @@ describe('validatePredicateShape (regex bound)', () => {
     return buildPredicate(DEFAULT_INPUTS);
   }
 
-  it('accepts a freshly-built v1 predicate', () => {
+  it('accepts a freshly-built v3 predicate', () => {
     expect(validatePredicateShape(goodPredicate())).toBeNull();
   });
 
@@ -483,6 +510,57 @@ describe('validatePredicateShape (regex bound)', () => {
   it('rejects schemaVersion outside the accepted enum', () => {
     const p = { ...goodPredicate(), schemaVersion: 'v9' };
     expect(validatePredicateShape(p)).toMatch(/schemaVersion not in accepted enum/);
+  });
+
+  it('rejects schemaVersion v1 (legacy, dropped by AISDLC-103)', () => {
+    const p = { ...goodPredicate(), schemaVersion: 'v1' };
+    expect(validatePredicateShape(p)).toMatch(/schemaVersion not in accepted enum/);
+  });
+
+  it('AISDLC-103: rejects predicates carrying legacy diffHash field (v1 envelope smuggling)', () => {
+    const p: Record<string, unknown> = { ...goodPredicate(), diffHash: 'a'.repeat(64) };
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/diffHash is forbidden in v3 envelopes/);
+    // The reason must not embed the bad value.
+    expect(reason).not.toContain('a'.repeat(64));
+  });
+
+  it('AISDLC-103: rejects predicates carrying legacy contentHash field (v2 envelope smuggling)', () => {
+    const p: Record<string, unknown> = { ...goodPredicate(), contentHash: 'b'.repeat(64) };
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/contentHash is forbidden in v3 envelopes/);
+    expect(reason).not.toContain('b'.repeat(64));
+  });
+
+  it('AISDLC-103: rejects predicates missing contentHashV3 (required in v3)', () => {
+    const p: Record<string, unknown> = { ...goodPredicate() };
+    delete p.contentHashV3;
+    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
+  });
+
+  it('AISDLC-103: rejects contentHashV3 with wrong length', () => {
+    const p: Record<string, unknown> = { ...goodPredicate(), contentHashV3: 'short' };
+    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
+  });
+
+  it('AISDLC-103: rejects contentHashV3 with non-hex chars', () => {
+    const p: Record<string, unknown> = { ...goodPredicate(), contentHashV3: 'g'.repeat(64) };
+    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
+  });
+
+  it('AISDLC-103: rejects contentHashV3 with embedded CRLF (downstream injection vector)', () => {
+    const p: Record<string, unknown> = {
+      ...goodPredicate(),
+      contentHashV3: 'a'.repeat(30) + '\r\n' + 'b'.repeat(32),
+    };
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/contentHashV3 does not match pattern/);
+    expect(reason).not.toMatch(/\r|\n/);
+  });
+
+  it('AISDLC-103: rejects contentHashV3 that is not a string', () => {
+    const p: Record<string, unknown> = { ...goodPredicate(), contentHashV3: 12345 };
+    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
   });
 
   it('rejects sha1 with embedded newline (the GITHUB_OUTPUT injection vector)', () => {
@@ -510,10 +588,10 @@ describe('validatePredicateShape (regex bound)', () => {
     expect(validatePredicateShape(p)).toMatch(/subject\.digest\.sha1 does not match pattern/);
   });
 
-  it('rejects diffHash with non-hex chars (no colon prefix tolerated)', () => {
+  it('rejects policyHash with non-hex chars (no colon prefix tolerated)', () => {
     const p = goodPredicate();
-    p.diffHash = 'sha256:' + 'a'.repeat(64); // schema is bare hex, not prefixed
-    expect(validatePredicateShape(p)).toMatch(/diffHash does not match pattern/);
+    p.policyHash = 'sha256:' + 'a'.repeat(64); // schema is bare hex, not prefixed
+    expect(validatePredicateShape(p)).toMatch(/policyHash does not match pattern/);
   });
 
   it('rejects policyHash with embedded CRLF', () => {
@@ -611,7 +689,7 @@ describe('verifyAttestation (post-review hardening)', () => {
       trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
       expected: {
         commitSha: FIXED_COMMIT,
-        diffHash: predicate.diffHash,
+        contentHashV3: predicate.contentHashV3,
         policyHash: predicate.policyHash,
         expectedAgentFileHashes: {},
       },
@@ -659,12 +737,12 @@ describe('verifyAttestation (post-review hardening)', () => {
     expect(result.valid).toBe(true);
   });
 
-  it('rejects schemaVersion v0 (boundary case below v1)', () => {
+  it('rejects schemaVersion v0 (boundary case below v3)', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     const predicate = buildPredicate(DEFAULT_INPUTS);
     // Mutate the payload to claim v0 then re-sign so the signature is
     // valid — then verify must reject on schema grounds.
-    const mutated = { ...predicate, schemaVersion: 'v0' as unknown as 'v1' };
+    const mutated = { ...predicate, schemaVersion: 'v0' as unknown as 'v3' };
     // signAttestation refuses, so build the envelope manually.
     const payloadJson = Buffer.from(JSON.stringify(mutated), 'utf-8');
     const pae = paeEncode('application/vnd.ai-sdlc.attestation+json', payloadJson);
@@ -892,157 +970,18 @@ describe('collectChangedFileEntries (AISDLC-94)', () => {
   });
 });
 
-describe('buildPredicate with contentHash (AISDLC-94)', () => {
-  const CHANGED_FILES = [
-    { path: 'src/a.ts', blobSha: 'a'.repeat(40) },
-    { path: 'src/b.ts', blobSha: 'b'.repeat(40) },
-  ];
-
-  it('omits contentHash when changedFiles is not provided (legacy v1 envelope)', () => {
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    expect(predicate.contentHash).toBeUndefined();
-    // diffHash is still required by the schema, regardless.
-    expect(predicate.diffHash).toMatch(/^[0-9a-f]{64}$/);
-  });
-
-  it('includes contentHash when changedFiles is provided (Phase 1 dual-hash envelope)', () => {
-    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
-    expect(predicate.contentHash).toBe(computeContentHash(CHANGED_FILES));
-    expect(predicate.diffHash).toBe(sha256Hex(DEFAULT_INPUTS.diff));
-  });
-
-  it('includes contentHash for empty changedFiles array (no-op PR)', () => {
-    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: [] });
-    expect(predicate.contentHash).toBe(sha256Hex(''));
-  });
-});
-
-describe('validatePredicateShape with contentHash (AISDLC-94)', () => {
-  function dualHashPredicate(): AttestationPredicate {
-    return buildPredicate({
-      ...DEFAULT_INPUTS,
-      changedFiles: [{ path: 'src/x.ts', blobSha: 'a'.repeat(40) }],
-    });
-  }
-
-  it('accepts a v1 predicate with contentHash present (Phase 1 dual-hash)', () => {
-    expect(validatePredicateShape(dualHashPredicate())).toBeNull();
-  });
-
-  it('accepts a v1 predicate with contentHash absent (legacy)', () => {
-    expect(validatePredicateShape(buildPredicate(DEFAULT_INPUTS))).toBeNull();
-  });
-
-  it('rejects contentHash with wrong length', () => {
-    const p: Record<string, unknown> = { ...dualHashPredicate(), contentHash: 'short' };
-    expect(validatePredicateShape(p)).toMatch(/contentHash does not match pattern/);
-  });
-
-  it('rejects contentHash with non-hex chars', () => {
-    const p: Record<string, unknown> = { ...dualHashPredicate(), contentHash: 'g'.repeat(64) };
-    expect(validatePredicateShape(p)).toMatch(/contentHash does not match pattern/);
-  });
-
-  it('rejects contentHash with embedded CRLF (downstream injection vector)', () => {
-    const p: Record<string, unknown> = {
-      ...dualHashPredicate(),
-      contentHash: 'a'.repeat(30) + '\r\n' + 'b'.repeat(32),
-    };
-    const reason = validatePredicateShape(p);
-    expect(reason).toMatch(/contentHash does not match pattern/);
-    expect(reason).not.toMatch(/\r|\n/);
-  });
-
-  it('rejects contentHash that is not a string', () => {
-    const p: Record<string, unknown> = { ...dualHashPredicate(), contentHash: 12345 };
-    expect(validatePredicateShape(p)).toMatch(/contentHash does not match pattern/);
-  });
-});
-
-describe('verifyAttestation with contentHash dual-hash mode (AISDLC-94)', () => {
-  const CHANGED_FILES = [
-    { path: 'src/a.ts', blobSha: 'a'.repeat(40) },
-    { path: 'src/b.ts', blobSha: 'b'.repeat(40) },
-  ];
-
-  it('accepts when contentHash matches even though diffHash diverges (rebase scenario)', () => {
-    // The headline regression-fix scenario: PR was signed at base B1.
-    // After a clean rebase onto B2 (where a sibling PR already touched
-    // the same files), `git diff B2...HEAD` produces different text
-    // (different `@@` hunk headers, different context lines), so
-    // diffHash diverges. But every file's blob SHA at HEAD is unchanged
-    // (the rebase had no conflicts), so contentHash still matches. The
-    // verifier must accept on the contentHash leg of the dual hash.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        // diffHash diverges (post-rebase shape), but contentHash matches.
-        diffHash: sha256Hex('different diff text after rebase'),
-        contentHash: predicate.contentHash,
-      },
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it('falls back to diffHash matching when envelope has no contentHash (legacy v1)', () => {
-    // Envelope signed before AISDLC-94 landed — only carries diffHash.
-    // The verifier MUST still accept it on the diffHash leg.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate(DEFAULT_INPUTS); // no changedFiles
-    expect(predicate.contentHash).toBeUndefined();
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: buildExpected(predicate),
-    });
-    expect(result.valid).toBe(true);
-  });
-
-  it('rejects when both diffHash AND contentHash diverge (real content change)', () => {
-    // The threat-model case: a rebase that genuinely resolved a conflict
-    // differently DOES change blob SHAs → contentHash diverges → reject.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        diffHash: sha256Hex('different diff'),
-        contentHash: sha256Hex('completely different tree state'),
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
-  });
-
-  it('does NOT accept on contentHash when expected.contentHash is omitted (callers must opt in)', () => {
-    // Defensive check: the dual-hash acceptance only kicks in when the
-    // CALLER passes expected.contentHash. A caller that hasn't yet been
-    // updated for AISDLC-94 still gets the old diffHash-only behavior.
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        diffHash: sha256Hex('shifted diff'),
-        // contentHash deliberately NOT set — caller hasn't opted in.
-      },
-    });
-    expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
-  });
-});
+// AISDLC-103 (Verifier Phase 3): the legacy `buildPredicate with contentHash`,
+// `validatePredicateShape with contentHash`, and `verifyAttestation with
+// contentHash dual-hash mode` test suites were deleted along with the
+// predicate-level `contentHash` field. v3 envelopes carry `contentHashV3`
+// only; the schema validator now REJECTS predicates carrying `diffHash` or
+// `contentHash` (covered by the AISDLC-103 cases in the
+// `validatePredicateShape (regex bound)` suite above, and by the
+// `verifyAttestation` rejection tests in the AISDLC-101 → AISDLC-103
+// inverted block below). The standalone `computeContentHash` /
+// `collectChangedFileEntries` library functions remain exported for
+// backward source compat (the verifier no longer calls them) and are
+// covered by the original AISDLC-94 unit suites at the top of this file.
 
 describe('REQUIRED_REVIEWER_AGENT_IDS', () => {
   it('lists all three reviewers (code, test, security)', () => {
@@ -1483,18 +1422,13 @@ describe('collectChangedFileDeltaEntries (AISDLC-101)', () => {
   });
 });
 
-describe('buildPredicate with contentHashV3 (AISDLC-101)', () => {
+describe('buildPredicate with contentHashV3 (AISDLC-101 → AISDLC-103)', () => {
   const CHANGED_FILE_DELTAS = [
     { path: 'src/a.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
     { path: 'src/b.ts', baseBlobSha: 'c'.repeat(40), headBlobSha: 'd'.repeat(40) },
   ];
 
-  it('omits contentHashV3 when changedFileDeltas is not provided', () => {
-    const predicate = buildPredicate(DEFAULT_INPUTS);
-    expect(predicate.contentHashV3).toBeUndefined();
-  });
-
-  it('includes contentHashV3 when changedFileDeltas is provided (Phase 2 triple-hash envelope)', () => {
+  it('always emits contentHashV3 (required in v3 envelopes)', () => {
     const predicate = buildPredicate({
       ...DEFAULT_INPUTS,
       changedFileDeltas: CHANGED_FILE_DELTAS,
@@ -1502,99 +1436,46 @@ describe('buildPredicate with contentHashV3 (AISDLC-101)', () => {
     expect(predicate.contentHashV3).toBe(computeContentHashV3(CHANGED_FILE_DELTAS));
   });
 
-  it('includes contentHashV3 for empty changedFileDeltas array (no-op PR)', () => {
-    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFileDeltas: [] });
-    expect(predicate.contentHashV3).toBe(sha256Hex(''));
-  });
-
-  it('emits all three hashes when both changedFiles + changedFileDeltas provided (triple-hash)', () => {
-    // Verifies the additive triple-hash window: an envelope built from a
-    // post-AISDLC-101 sign run carries diffHash + contentHash + contentHashV3
-    // simultaneously. Verifier OR's the three legs at verify time.
+  it('AISDLC-103: predicate type no longer carries diffHash / contentHash fields', () => {
     const predicate = buildPredicate({
       ...DEFAULT_INPUTS,
-      changedFiles: [
-        { path: 'src/a.ts', blobSha: 'b'.repeat(40) },
-        { path: 'src/b.ts', blobSha: 'd'.repeat(40) },
-      ],
       changedFileDeltas: CHANGED_FILE_DELTAS,
     });
-    expect(predicate.diffHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(predicate.contentHash).toMatch(/^[0-9a-f]{64}$/);
-    expect(predicate.contentHashV3).toMatch(/^[0-9a-f]{64}$/);
-    // Independence: v3 differs from v2 (different canonical encoding +
-    // different domain — v2 hashes head blob, v3 hashes base→head delta).
-    expect(predicate.contentHash).not.toBe(predicate.contentHashV3);
+    // Defense in depth — the BREAKING type change is enforced statically
+    // at the TS layer, but assert at runtime as well so a future revert
+    // doesn't silently bring the legacy hashes back.
+    expect((predicate as unknown as Record<string, unknown>).diffHash).toBeUndefined();
+    expect((predicate as unknown as Record<string, unknown>).contentHash).toBeUndefined();
   });
 });
 
-describe('validatePredicateShape with contentHashV3 (AISDLC-101)', () => {
-  function tripleHashPredicate(): AttestationPredicate {
+describe('validatePredicateShape with contentHashV3 (AISDLC-101 → AISDLC-103)', () => {
+  function v3Predicate(): AttestationPredicate {
     return buildPredicate({
       ...DEFAULT_INPUTS,
-      changedFiles: [{ path: 'src/x.ts', blobSha: 'a'.repeat(40) }],
       changedFileDeltas: [
         { path: 'src/x.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
       ],
     });
   }
 
-  it('accepts a v1 predicate with contentHashV3 present (Phase 2 triple-hash)', () => {
-    expect(validatePredicateShape(tripleHashPredicate())).toBeNull();
-  });
-
-  it('accepts a v1 predicate with contentHashV3 absent (legacy + Phase 1)', () => {
-    expect(validatePredicateShape(buildPredicate(DEFAULT_INPUTS))).toBeNull();
-  });
-
-  it('rejects contentHashV3 with wrong length', () => {
-    const p: Record<string, unknown> = { ...tripleHashPredicate(), contentHashV3: 'short' };
-    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
-  });
-
-  it('rejects contentHashV3 with non-hex chars', () => {
-    const p: Record<string, unknown> = { ...tripleHashPredicate(), contentHashV3: 'g'.repeat(64) };
-    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
-  });
-
-  it('rejects contentHashV3 with embedded CRLF (downstream injection vector)', () => {
-    const p: Record<string, unknown> = {
-      ...tripleHashPredicate(),
-      contentHashV3: 'a'.repeat(30) + '\r\n' + 'b'.repeat(32),
-    };
-    const reason = validatePredicateShape(p);
-    expect(reason).toMatch(/contentHashV3 does not match pattern/);
-    expect(reason).not.toMatch(/\r|\n/);
-  });
-
-  it('rejects contentHashV3 that is not a string', () => {
-    const p: Record<string, unknown> = { ...tripleHashPredicate(), contentHashV3: 12345 };
-    expect(validatePredicateShape(p)).toMatch(/contentHashV3 does not match pattern/);
+  it('accepts a v3 predicate with contentHashV3 present', () => {
+    expect(validatePredicateShape(v3Predicate())).toBeNull();
   });
 });
 
-describe('verifyAttestation with contentHashV3 triple-hash mode (AISDLC-101)', () => {
-  const CHANGED_FILES = [
-    { path: 'src/a.ts', blobSha: 'a'.repeat(40) },
-    { path: 'src/b.ts', blobSha: 'b'.repeat(40) },
-  ];
+describe('verifyAttestation with contentHashV3 (AISDLC-101 → AISDLC-103)', () => {
   const CHANGED_FILE_DELTAS = [
     { path: 'src/a.ts', baseBlobSha: 'x'.repeat(40), headBlobSha: 'a'.repeat(40) },
     { path: 'src/b.ts', baseBlobSha: 'y'.repeat(40), headBlobSha: 'b'.repeat(40) },
   ];
 
-  it('accepts when contentHashV3 matches even though diffHash AND contentHash diverge (sibling-overlap scenario)', () => {
-    // The headline AISDLC-101 fix scenario: the v2 contentHash diverges
-    // because the rebased head's blob now contains a sibling PR's
-    // contributions (= different head blob SHA), AND the diff text
-    // shifted (= different diffHash). v3 still matches because the
-    // (base, head) blob-pair transition was preserved across the
-    // producer-side pre-sign rebase (AISDLC-102) — the verifier accepts
-    // on the v3 leg.
+  it('accepts a v3 envelope when contentHashV3 matches the expected value', () => {
+    // Happy path: producer + verifier compute the same per-file (base,
+    // head) blob-pair transition.
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     const predicate = buildPredicate({
       ...DEFAULT_INPUTS,
-      changedFiles: CHANGED_FILES,
       changedFileDeltas: CHANGED_FILE_DELTAS,
     });
     const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
@@ -1603,23 +1484,19 @@ describe('verifyAttestation with contentHashV3 triple-hash mode (AISDLC-101)', (
       trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
       expected: {
         ...buildExpected(predicate),
-        diffHash: sha256Hex('different diff text after rebase'),
-        contentHash: sha256Hex('different post-apply blob SHAs'),
         contentHashV3: predicate.contentHashV3,
       },
     });
     expect(result.valid).toBe(true);
   });
 
-  it('rejects when ALL three legs diverge (genuine content change → reject)', () => {
+  it('rejects when contentHashV3 diverges (genuine content tampering → reject)', () => {
     // Threat-model boundary: a malicious rebase that changed the
     // post-apply file content flips the head blob SHA → fileDeltaHash
-    // flips → contentHashV3 flips. With v1 + v2 + v3 ALL diverging,
-    // the verifier MUST reject.
+    // flips → contentHashV3 flips. The verifier MUST reject.
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     const predicate = buildPredicate({
       ...DEFAULT_INPUTS,
-      changedFiles: CHANGED_FILES,
       changedFileDeltas: CHANGED_FILE_DELTAS,
     });
     const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
@@ -1628,60 +1505,46 @@ describe('verifyAttestation with contentHashV3 triple-hash mode (AISDLC-101)', (
       trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
       expected: {
         ...buildExpected(predicate),
-        diffHash: sha256Hex('different diff'),
-        contentHash: sha256Hex('different content'),
         contentHashV3: sha256Hex('different delta'),
       },
     });
     expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
+    if (!result.valid) expect(result.reason).toMatch(/contentHashV3 mismatch/);
   });
 
-  it('does NOT accept on contentHashV3 when expected.contentHashV3 is omitted (callers must opt in)', () => {
-    // Defensive check: a caller that hasn't been updated for AISDLC-101
-    // (passes only diffHash + contentHash in `expected`) gets the
-    // dual-hash behavior, not a silent triple-hash acceptance. Forces
-    // explicit opt-in at every verify site.
+  // AISDLC-103 inversion of the legacy AISDLC-101 "Phase-1 envelope still
+  // verifies via dual-hash leg" test: the dual-hash leg is gone. A v3
+  // envelope is required; an attacker can't smuggle a legacy v1 / v2
+  // envelope into the v3 window. We can't construct a v1/v2 envelope
+  // through `buildPredicate` anymore (the type system rejects it), so
+  // the test below directly hand-crafts a tampered payload that claims
+  // schemaVersion 'v1' and asserts the verifier rejects with the
+  // schemaVersion-allowlist reason.
+  it('AISDLC-103: rejects a hand-crafted v1 envelope (legacy → no longer accepted)', () => {
     const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
     const predicate = buildPredicate({
       ...DEFAULT_INPUTS,
-      changedFiles: CHANGED_FILES,
       changedFileDeltas: CHANGED_FILE_DELTAS,
     });
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    // Tamper the schemaVersion to claim v1, then build a hand-crafted
+    // envelope (signAttestation refuses the bad version, so we PAE-encode
+    // and sign manually here). The verifier's schema check must reject.
+    const tampered = { ...predicate, schemaVersion: 'v1' as unknown as 'v3' };
+    const payloadJson = Buffer.from(JSON.stringify(tampered), 'utf-8');
+    const envelope: DsseEnvelope = {
+      payloadType: 'application/vnd.ai-sdlc.attestation+json',
+      payload: payloadJson.toString('base64'),
+      signatures: [{ keyid: 'k', sig: Buffer.alloc(64).toString('base64') }],
+    };
     const result = verifyAttestation({
       envelope,
       trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        diffHash: sha256Hex('shifted diff'),
-        contentHash: sha256Hex('shifted content'),
-        // contentHashV3 deliberately NOT set — caller hasn't opted in.
-      },
+      expected: buildExpected(predicate),
     });
     expect(result.valid).toBe(false);
-    if (!result.valid) expect(result.reason).toMatch(/diffHash mismatch/);
-  });
-
-  it('still accepts a Phase-1 envelope (no contentHashV3) via contentHash leg when v3 expected is set', () => {
-    // Backward-compat: envelopes signed BEFORE AISDLC-101 landed only
-    // carry diffHash + contentHash. The verifier MUST still accept them
-    // on the contentHash leg even when the caller passes a v3 expected
-    // value (which won't match the absent envelope field).
-    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
-    const predicate = buildPredicate({ ...DEFAULT_INPUTS, changedFiles: CHANGED_FILES });
-    expect(predicate.contentHashV3).toBeUndefined();
-    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
-    const result = verifyAttestation({
-      envelope,
-      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
-      expected: {
-        ...buildExpected(predicate),
-        diffHash: sha256Hex('shifted diff'),
-        contentHash: predicate.contentHash, // v2 leg matches
-        contentHashV3: sha256Hex('something v3'), // unused; envelope has no v3
-      },
-    });
-    expect(result.valid).toBe(true);
+    if (!result.valid) {
+      expect(result.reason).toMatch(/schemaVersion not in accepted enum/);
+    }
+    void privateKeyPem;
   });
 });

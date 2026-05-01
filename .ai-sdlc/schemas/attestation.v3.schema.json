@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://ai-sdlc.io/schemas/attestation.v1.schema.json",
-  "title": "AI-SDLC Review Attestation v1",
-  "description": "DSSE envelope (https://github.com/secure-systems-lab/dsse) carrying a v1 review-attestation predicate. Schema for /ai-sdlc execute Step 10 outputs at .ai-sdlc/attestations/<commit-sha>.dsse.json — verified by .github/workflows/verify-attestation.yml.",
+  "$id": "https://ai-sdlc.io/schemas/attestation.v3.schema.json",
+  "title": "AI-SDLC Review Attestation v3",
+  "description": "DSSE envelope (https://github.com/secure-systems-lab/dsse) carrying a v3 review-attestation predicate. AISDLC-103 (Verifier Phase 3) narrows the schemaVersion allowlist to `['v3']` and drops the legacy `diffHash` (v1, AISDLC-74/-84) and `contentHash` (v2, AISDLC-94) content bindings — only `contentHashV3` (per-file (base, head) blob-pair transition, AISDLC-101) remains. Predicates carrying `diffHash` or `contentHash` are explicitly rejected by the in-process shape validator (= a v1/v2 envelope smuggling itself in as v3). Schema for /ai-sdlc execute Step 10 outputs at .ai-sdlc/attestations/<commit-sha>.dsse.json — verified by .github/workflows/verify-attestation.yml.",
   "type": "object",
   "required": ["payloadType", "payload", "signatures"],
   "additionalProperties": false,
@@ -45,7 +45,7 @@
       "required": [
         "schemaVersion",
         "subject",
-        "diffHash",
+        "contentHashV3",
         "policyHash",
         "reviewers",
         "pluginVersion",
@@ -57,8 +57,8 @@
       "properties": {
         "schemaVersion": {
           "type": "string",
-          "enum": ["v1"],
-          "description": "MANDATORY. Allowlist enforced by CI — currently only 'v1' is accepted."
+          "enum": ["v3"],
+          "description": "MANDATORY. Allowlist enforced by CI — AISDLC-103 narrowed to ['v3'] only. v1 (pre-AISDLC-94) and v2 (the AISDLC-94 dual-hash window) envelopes are now rejected with a schemaVersion-allowlist reason."
         },
         "subject": {
           "type": "object",
@@ -79,10 +79,10 @@
             }
           }
         },
-        "diffHash": {
+        "contentHashV3": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
-          "description": "sha256 of `git diff origin/main...HEAD` at attestation time. Mismatch = PR diff changed since signing."
+          "description": "MANDATORY. sha256 over a sorted canonical line-per-file string of `<path>\\t<fileDeltaHash>\\n` for every changed file in `<base>...<head>`, where `fileDeltaHash[path] = sha256(<base_blob_sha> + ' -> ' + <head_blob_sha>)`. Base blob SHA is read at the merge-base of <baseRef>+<headRef>; head blob SHA at <headRef>. Survives sibling-overlap rebases via the per-file delta binding. AISDLC-101 introduced the field; AISDLC-103 made it required."
         },
         "policyHash": {
           "type": "string",
@@ -132,6 +132,11 @@
           "type": "string",
           "minLength": 1,
           "description": "Version of ai-sdlc-plugin/plugin.json at attestation time."
+        },
+        "pipelineVersion": {
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(-[a-z0-9.]+)?$",
+          "description": "Optional. Semver-shaped version of @ai-sdlc/pipeline-cli at attestation time (AISDLC-100.6 / RFC-0012 Phase 6). Forensic / audit purpose only — verifier logs but does NOT enforce."
         },
         "iterationCount": {
           "type": "integer",
