@@ -110,3 +110,9 @@ console.log(enforcement.allowed); // true
 ## Adapter Interfaces
 
 See [adapters.md](../../spec/adapters.md#2-interface-contracts) for the full normative interface contracts.
+
+## Cross-Cutting Concerns
+
+| Topic | Reference | Spec |
+|---|---|---|
+| Cost governance | [cost.md](cost.md) | [RFC-0004](../../spec/rfcs/RFC-0004-cost-governance-and-attribution.md) |

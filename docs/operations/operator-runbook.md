@@ -442,5 +442,5 @@ without review (it's just file relocation), but the human approves it.
 - [RFC-0010 — Parallel Execution and Worktree Pooling](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) — full normative spec for everything this runbook references
 - [RFC-0005 — Product Priority Algorithm](../../spec/rfcs/RFC-0005-product-priority-algorithm.md) — foundational PPA spec defining the seven dimensions, composite formula, and calibration loop the operator interprets but doesn't tune
 - [RFC-0008 — PPA Triad Integration](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md) — admission-time integration of RFC-0005 across Product / Design / Engineering pillars
-- [RFC-0004 — Cost Governance and Attribution](../../spec/rfcs/RFC-0004-cost-governance-and-attribution.md) — `costBudget` semantics
+- [RFC-0004 — Cost Governance and Attribution](../../spec/rfcs/RFC-0004-cost-governance-and-attribution.md) — `costBudget` semantics; see also [Tutorial: Cost Governance](../tutorials/cost-governance.md) and [API Reference: Cost Governance](../api-reference/cost.md)
 - [Project Slack Integration](../../../.claude/projects/-Users-dominique-Documents-dev-ai-sdlc/memory/project_slack_integration.md) — how digest entries reach the operator
