@@ -252,6 +252,21 @@ The `scripts/check-backlog-ascii.sh` pre-commit hook (wired in `.husky/pre-commi
 
 For any internal task, default to `/ai-sdlc execute`. The orchestrator-driven path is reserved for unattended/programmatic use.
 
+#### Dual-tier pipeline architecture (RFC-0012)
+
+The Step 0-13 pipeline shared by all three execution paths above lives in `pipeline-cli/` (`@ai-sdlc/pipeline-cli`) — a workspace package that exposes the same step functions three ways:
+
+- **Tier 1 — slash command body** (`/ai-sdlc execute`): the slash command body in `ai-sdlc-plugin/commands/execute.md` interleaves `ai-sdlc-pipeline <subcommand>` invocations (CLI shape) with main-session `Agent` tool calls for the LLM dispatch boundaries (Step 5b developer, Step 7b three reviewers in parallel). Subscription billing.
+- **Tier 2 — `executePipeline()` composite** (TypeScript library): a single `import { executePipeline } from '@ai-sdlc/pipeline-cli'` + one async call drives Step 0-13 end-to-end. The two LLM dispatch boundaries go through an injected `SubagentSpawner` (subscription via `claude --print`, API key via `@anthropic-ai/claude-code` SDK, or `MockSpawner` for tests). Designed for unattended programmatic use: webhooks, cron, GitHub Actions, the `pnpm watch` flow.
+
+Both tiers run the same step functions, so behaviour is identical — only the LLM dispatch boundary differs.
+
+Reference docs:
+- [`pipeline-cli/README.md`](pipeline-cli/README.md) — package overview, install, Tier 1 + Tier 2 quickstarts.
+- [`pipeline-cli/docs/spawner.md`](pipeline-cli/docs/spawner.md) — `SubagentSpawner` selection guide (`ShellClaudePSpawner` / `ClaudeCodeSDKSpawner` / `defaultSpawner()` / `MockSpawner` / custom), lazy SDK import, Q5 resolution (`--agent <type>` not `--subagent <type>`).
+- [`pipeline-cli/docs/steps.md`](pipeline-cli/docs/steps.md) — per-step contract / inputs / outputs / side effects for Step 0 through Step 13.
+- [`spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md`](spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md) — full design.
+
 ### Done semantics — `/ai-sdlc execute` vs other paths
 
 - **`/ai-sdlc execute` path**: Done = "reviews-approved-and-PR-opened". The command marks Done + runs `task_complete` (moving the file to `backlog/completed/`) BEFORE pushing the PR, so the entire task lifecycle lands atomically in one PR. No follow-up workflow needed.
