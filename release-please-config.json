@@ -25,7 +25,8 @@
         "conformance/runner",
         "sdk-typescript",
         "orchestrator",
-        "mcp-advisor"
+        "mcp-advisor",
+        "pipeline-cli"
       ]
     }
   ],
@@ -49,6 +50,10 @@
     "mcp-advisor": {
       "release-type": "node",
       "component": "mcp-advisor"
+    },
+    "pipeline-cli": {
+      "release-type": "node",
+      "component": "pipeline-cli"
     },
     "sdk-python": {
       "release-type": "python",

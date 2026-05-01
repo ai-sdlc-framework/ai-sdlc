@@ -1,7 +1,6 @@
 {
   "name": "@ai-sdlc/pipeline-cli",
   "version": "0.1.0",
-  "private": true,
   "description": "AI-SDLC pipeline shared core library — RFC-0012 Phase 1 (Step 0-13 pure functions + CLI router + composite executePipeline)",
   "license": "Apache-2.0",
   "repository": {
@@ -34,6 +33,10 @@
       "types": "./dist/runtime/index.d.ts",
       "import": "./dist/runtime/index.js"
     }
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
   },
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
