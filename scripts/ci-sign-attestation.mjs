@@ -30,9 +30,12 @@
  *   4. Optional `--skip-if-valid` flag: when set, the script first invokes
  *      the verifier in-process; if it returns valid for the current PR
  *      state, this script exits 0 with a notice and writes nothing. This
- *      is the AC #8 / AC #9 short-circuit — we never redundantly sign on
- *      top of a valid local attestation, BUT we WILL sign additively
- *      alongside an INVALID local one (multi-envelope scan handles it).
+ *      is the AC #8 short-circuit — we never redundantly sign on top of
+ *      a valid local attestation. AISDLC-111 update: when the verifier
+ *      reports invalid (or missing), the script falls through, PURGES any
+ *      stale `<other-sha>.dsse.json` envelopes from the attestations dir
+ *      (so the branch never accumulates orphans across rebases), and
+ *      writes a fresh envelope at `<head-sha>.dsse.json`.
  *
  * Usage (from CI):
  *   node scripts/ci-sign-attestation.mjs \
@@ -65,7 +68,13 @@
  *   - .ai-sdlc/attestations/*.dsse.json (only if --skip-if-valid)
  *
  * Writes:
- *   - .ai-sdlc/attestations/<head-sha>.dsse.json (CI envelope, additive)
+ *   - .ai-sdlc/attestations/<head-sha>.dsse.json (CI envelope, replaces stale)
+ *
+ * Deletes (AISDLC-111):
+ *   - .ai-sdlc/attestations/<other-sha>.dsse.json — any envelope whose
+ *     filename SHA differs from the current head SHA, before writing the
+ *     fresh envelope. Keeps the branch from accumulating orphans across
+ *     rebases.
  *
  * On success prints the written path to stdout. On `--skip-if-valid` no-op
  * prints `skipped: <reason>` to stdout and exits 0.
@@ -75,7 +84,14 @@
  * PRs stuck without an attestation and the operator wouldn't notice.
  */
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, resolve } from 'node:path';
 
@@ -121,6 +137,51 @@ function git(args, cwd) {
     encoding: 'utf-8',
     maxBuffer: 64 * 1024 * 1024,
   });
+}
+
+/**
+ * AISDLC-111: idempotently remove any `.dsse.json` envelope on disk whose
+ * filename SHA is NOT the current head SHA. Returns the absolute paths that
+ * were deleted (for logging + workflow staging).
+ *
+ * Why: when a PR is rebased onto a main commit that touches the same files,
+ * the prior envelope at `.ai-sdlc/attestations/<old-head>.dsse.json` becomes
+ * stale (its `contentHashV3` no longer matches current HEAD). The verifier
+ * scans every envelope and reports `invalid` because the stale one's bindings
+ * mismatch. Re-signing at `<new-head>.dsse.json` writes a fresh valid
+ * envelope, but leaves the stale file behind — every subsequent rebase adds
+ * another orphan, and the branch accumulates dead envelopes that clutter
+ * `git diff` for reviewers (and waste CI time on each verifier scan).
+ *
+ * This purge runs BEFORE writing the new envelope so the workflow can stage
+ * `git add -A .ai-sdlc/attestations/` and commit a single
+ * "delete-old + add-new" diff atomically. We only delete envelopes whose
+ * filename SHA differs from the current head SHA — on the same-SHA case
+ * (re-running CI on an unchanged HEAD), the file is left in place and the
+ * write below replaces it idempotently.
+ *
+ * Exported for testing.
+ */
+export function purgeStaleEnvelopes(attestationsDir, currentHeadSha) {
+  if (!existsSync(attestationsDir)) return [];
+  const keep = `${currentHeadSha.toLowerCase()}.dsse.json`;
+  const removed = [];
+  for (const name of readdirSync(attestationsDir)) {
+    if (!name.endsWith('.dsse.json')) continue;
+    if (name.toLowerCase() === keep) continue;
+    const fullPath = join(attestationsDir, name);
+    try {
+      unlinkSync(fullPath);
+      removed.push(fullPath);
+    } catch (err) {
+      // Surface but don't abort — the workflow will still git-add what we
+      // can; a leftover envelope is annoying, not catastrophic.
+      process.stderr.write(
+        `warning: failed to remove stale envelope ${fullPath}: ${err.message ?? err}\n`,
+      );
+    }
+  }
+  return removed;
 }
 
 /**
@@ -280,12 +341,17 @@ async function main() {
         process.stdout.write(`skipped: ${result.reason}\n`);
         process.exit(0);
       }
-      // Invalid (or missing) → fall through and sign additively. AC #9:
-      // an INVALID local attestation does NOT block CI from signing a
-      // fresh, valid one alongside it. The verifier's multi-envelope
-      // scan picks the valid one.
+      // Invalid (or missing) → fall through and sign. AISDLC-111: when
+      // we sign, purgeStaleEnvelopes (below) deletes any
+      // `<other-sha>.dsse.json` envelopes from the attestations dir
+      // before writing the fresh one, so the branch carries exactly one
+      // envelope (= the current head's). This both fixes the rebase
+      // re-sign reliability problem (the verifier was previously
+      // counting both stale + fresh envelopes during its multi-envelope
+      // scan, which slowed CI and made the chore-commit allowlist diff
+      // noisier than necessary) and satisfies AC #2.
       process.stderr.write(
-        `notice: existing attestation status=${result.status} (${result.reason}); CI will sign additively\n`,
+        `notice: existing attestation status=${result.status} (${result.reason}); CI will sign and purge stale envelopes\n`,
       );
     }
   }
@@ -384,6 +450,15 @@ async function main() {
 
   const outDir = join(repoRoot, '.ai-sdlc', 'attestations');
   mkdirSync(outDir, { recursive: true });
+  // AISDLC-111: idempotently delete any stale envelopes (different SHA in
+  // the filename) BEFORE writing the new one. This lets the workflow's
+  // `git add -A .ai-sdlc/attestations/` stage a single atomic
+  // "delete-stale + add-new" diff instead of leaving orphaned envelopes
+  // that confuse the verifier and clutter the branch.
+  const removed = purgeStaleEnvelopes(outDir, headSha);
+  for (const r of removed) {
+    process.stderr.write(`notice: removed stale envelope ${r}\n`);
+  }
   const outPath = join(outDir, `${headSha}.dsse.json`);
   writeFileSync(outPath, JSON.stringify(envelope, null, 2) + '\n');
   process.stdout.write(`${outPath}\n`);

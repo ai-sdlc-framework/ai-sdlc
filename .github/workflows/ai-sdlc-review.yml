@@ -270,6 +270,17 @@ jobs:
       # produce a trust signal verify-attestation.yml will accept on the
       # next sync.
       #
+      # AISDLC-111: this step also re-signs reliably on rebase. After a
+      # rebase that invalidates the prior envelope's `contentHashV3`, the
+      # gate sees `attestation_valid != 'true'` (because verify-attestation
+      # set the commit status to `failure`), the analyze job re-runs the 3
+      # reviewers on the rebased content, and ci-sign-attestation.mjs
+      # idempotently REPLACES the stale envelope (deletes
+      # `<old-head-sha>.dsse.json`, writes `<new-head-sha>.dsse.json`)
+      # before pushing the chore commit. Step 4 then posts
+      # `ai-sdlc/attestation=success` directly on the chore-commit SHA so
+      # the required check resolves without operator intervention.
+      #
       # Gates:
       #   - analyze succeeded (we have verdicts)
       #   - all 3 verdicts approved
@@ -344,8 +355,8 @@ jobs:
           '
 
           # Sign — script no-ops cleanly when --skip-if-valid + valid
-          # local attestation already exists, signs additively when an
-          # invalid one is present, signs fresh when none exist.
+          # local attestation already exists; signs fresh + purges any
+          # stale envelopes (AISDLC-111) when invalid or missing.
           OUT_PATH=$(node scripts/ci-sign-attestation.mjs \
             --review-verdicts /tmp/ci-review-verdicts.json \
             --iteration-count 1 \
@@ -372,7 +383,14 @@ jobs:
           git fetch origin "$PR_HEAD_REF":"$PR_HEAD_REF" 2>/dev/null || true
           git checkout "$PR_HEAD_REF" 2>/dev/null || git switch -c "$PR_HEAD_REF"
 
-          git add "$OUT_PATH"
+          # AISDLC-111: stage additions AND deletions across the whole
+          # attestations directory. The script deletes any stale
+          # `<old-head-sha>.dsse.json` files BEFORE writing the fresh
+          # envelope (purgeStaleEnvelopes), so we need `-A` to capture
+          # those deletions in the same chore commit. Without `-A`, the
+          # branch would accumulate orphan envelope files across every
+          # rebase that re-signs.
+          git add -A -- .ai-sdlc/attestations/
           if git diff --cached --quiet; then
             echo "::notice::Attestation envelope already on branch — nothing to commit."
             exit 0
