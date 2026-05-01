@@ -82,7 +82,30 @@ with entries grouped under a release heading or `Unreleased` while in flight.
   functions (the marketplace clone of the plugin still works without
   `pnpm install` — esbuild rolls every runtime dep into `dist/bin.js`,
   the AISDLC-75 contract). (AISDLC-100.3)
-
+- **`@ai-sdlc/pipeline-cli` documentation pass** (AISDLC-100.7 / RFC-0012
+  Phase 7): three new contributor + operator references covering the post-100.1
+  / 100.2 architecture. (1) `pipeline-cli/README.md` rewritten with the dual-tier
+  framing — Tier 1 (slash command body interleaves CLI subcommands with main-
+  session `Agent` tool calls) vs Tier 2 (`executePipeline()` composite + injected
+  `SubagentSpawner`) — plus an explicit install matrix (plugin-bundled today,
+  `pnpm add @ai-sdlc/pipeline-cli` post-Phase-8) and runnable Tier 1 + Tier 2
+  quickstarts. (2) New `pipeline-cli/docs/spawner.md` deep-dive: when to pick
+  `ShellClaudePSpawner` (subscription) vs `ClaudeCodeSDKSpawner` (API key) vs
+  `MockSpawner` (tests) vs a custom implementation; the `defaultSpawner()`
+  resolution order (which→shell, env→sdk, else throw); the lazy SDK import
+  rationale (~50MB SDK is opt-in, only the API-key path needs it on disk); the
+  Q5 (RFC §15) empirical resolution that the actual CLI flag is `--agent <type>`
+  not `--subagent <type>` (verified 2026-04-30 against the installed CLI); a
+  worked custom-spawner howto with the four implementation rules of thumb (never
+  throw, honour cwd + timeout, populate `parsed`, `spawnParallel` may serialise).
+  (3) New `pipeline-cli/docs/steps.md` per-step contract reference with one
+  short section each for Step 0 through Step 13 — function name, CLI subcommand,
+  contract paragraph, input + output type signatures, side effects list, and
+  "when it runs" notes — sourced from the per-step JSDoc + `pipeline-cli/src/types.ts`.
+  Also updated `CLAUDE.md`'s canonical-execution-paths section with a new
+  "Dual-tier pipeline architecture (RFC-0012)" subsection that cross-links the
+  three new docs and notes that all three execution paths share the same step
+  functions. No code changes — docs only. (AISDLC-100.7)
 - **rebase-resolver subagent + `/ai-sdlc rebase` slash command** (AISDLC-105) —
   new `agents/rebase-resolver.md` plugin subagent + `commands/rebase.md` slash
   command body that automate the mechanical 80% of PR rebase + conflict

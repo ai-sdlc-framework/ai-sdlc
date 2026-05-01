@@ -1,16 +1,190 @@
 # @ai-sdlc/pipeline-cli
 
-Shared core library for the AI-SDLC pipeline. Implements RFC-0012 Phase 1.
+Shared core library for the AI-SDLC pipeline. Implements **RFC-0012** —
+extracts Step 0-13 logic from `ai-sdlc-plugin/agents/execute-orchestrator.md`
+(now superseded by the inline `commands/execute.md` slash command body —
+AISDLC-98) and `orchestrator/src/` into pure step functions exposed three ways:
 
-## Status
+1. **TypeScript library** — `import { executePipeline, ... } from '@ai-sdlc/pipeline-cli'`
+2. **CLI subcommands** — `ai-sdlc-pipeline <command>` (yargs-driven, JSON on stdout)
+3. **MCP tools** — Phase 3 (AISDLC-100.3) wraps each step as an MCP tool from
+   the plugin's MCP server
 
-**Phases 1-2 of RFC-0012** — extracts Step 0-13 logic from `ai-sdlc-plugin/agents/execute-orchestrator.md` and `orchestrator/src/` into pure step functions exposed three ways, plus the production `SubagentSpawner` implementations (Phase 2):
+The package is **`private: true`** in Phase 1. Phase 8 (AISDLC-100.8) flips
+that, adds the `publishConfig` block, and publishes to npm.
 
-1. **TypeScript library** — `import { validateTask, executePipeline, ... } from '@ai-sdlc/pipeline-cli'`
-2. **CLI subcommands** — `ai-sdlc-pipeline <command>` (yargs-driven)
-3. **MCP tools** — Phase 3 (AISDLC-100.3) wraps each step as an MCP tool from the plugin's MCP server
+## Why two tiers?
 
-The package is **`private: true`** in Phase 1. Phase 8 (AISDLC-100.8) flips that, adds the `publishConfig` block, and publishes to npm.
+The pipeline ships in two tiers (RFC-0012 §2):
+
+- **Tier 1 — slash command body.** `/ai-sdlc execute <task-id>` runs in the
+  main Claude Code session. The slash command body interleaves CLI subcommands
+  (`ai-sdlc-pipeline validate-task ...`, `... compute-branch ...`) with `Agent`
+  tool calls for the LLM dispatch boundaries (Step 5b developer, Step 7b three
+  reviewers in parallel). Subscription billing via Claude Code Max-20x.
+  Operator-driven and interactive.
+
+- **Tier 2 — `executePipeline()` composite.** A single `import` + one async
+  call drives Step 0-13 end-to-end. The two LLM dispatch boundaries go through
+  an injected `SubagentSpawner` (subscription via `claude --print`, API key via
+  `@anthropic-ai/claude-code` SDK, or `MockSpawner` for tests). Designed for
+  unattended programmatic use: CLI invocation, GitHub Actions, webhooks, cron,
+  and the existing `pnpm watch` flow once Phase 5 (AISDLC-100.5) migrates
+  `dogfood/src/watch.ts` to call it.
+
+**Both tiers run the same Step 0-13 functions from this package**, so behaviour
+is identical — only the LLM dispatch boundary differs. See
+[`docs/spawner.md`](./docs/spawner.md) for the SubagentSpawner deep-dive and
+[`docs/steps.md`](./docs/steps.md) for the per-step contract reference.
+
+## Install
+
+### As part of the plugin (recommended, today)
+
+If you've installed `ai-sdlc-plugin` in Claude Code, `@ai-sdlc/pipeline-cli` is
+already available — the plugin's MCP server depends on it (Phase 3) and the
+slash command body shells out to its CLI. No separate install needed.
+
+### As a workspace dependency (monorepo / dogfood)
+
+The package lives at `pipeline-cli/` in the `ai-sdlc-framework/ai-sdlc` monorepo:
+
+```bash
+git clone https://github.com/ai-sdlc-framework/ai-sdlc.git
+cd ai-sdlc
+pnpm install
+pnpm --filter @ai-sdlc/pipeline-cli build
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs --help
+```
+
+Add it to a sibling workspace package's `package.json`:
+
+```jsonc
+{
+  "dependencies": {
+    "@ai-sdlc/pipeline-cli": "workspace:*"
+  }
+}
+```
+
+### From npm (Phase 8)
+
+Once Phase 8 (AISDLC-100.8) ships, `@ai-sdlc/pipeline-cli` will publish
+publicly:
+
+```bash
+pnpm add @ai-sdlc/pipeline-cli
+# Optional: only when using the API-key-billed ClaudeCodeSDKSpawner.
+pnpm add @anthropic-ai/claude-code
+```
+
+The `@anthropic-ai/claude-code` SDK is a **lazy import** (NOT a hard
+dependency) so subscription-only consumers don't pay for ~50MB of SDK code
+they'll never use. See [`docs/spawner.md`](./docs/spawner.md#the-lazy-sdk-import--why-and-how)
+for the lazy-import rationale and how the failure surfaces when the SDK isn't
+installed.
+
+## Quickstart — Tier 1 (slash command body)
+
+The `/ai-sdlc execute` slash command body (in `ai-sdlc-plugin/commands/execute.md`)
+calls the CLI directly. To rebuild a fragment of that flow by hand:
+
+```bash
+# Always passes JSON on stdout.
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs --help
+
+# Step 0 — sweep merged worktrees.
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs sweep-worktrees
+
+# Step 1 — validate the task is ready to execute.
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs validate-task AISDLC-100.7
+
+# Step 2 — compute the branch name + worktree path.
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs compute-branch AISDLC-100.7
+
+# Step 3 — create the worktree.
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs setup-worktree AISDLC-100.7
+
+# Step 4 — flip status + write .active-task sentinel.
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs begin-task AISDLC-100.7
+
+# Step 5 — render the developer subagent prompt (caller dispatches separately).
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs build-dev-prompt AISDLC-100.7
+```
+
+Tier 1's distinctive trait is that the LLM dispatch boundaries (Step 5b — spawn
+developer, Step 7b — spawn 3 reviewers) are NOT calls into pipeline-cli — they
+are direct `Agent(developer, code-reviewer, test-reviewer, security-reviewer)`
+tool calls in the main Claude Code session. The slash command body parses the
+JSON each pipeline-cli subcommand emits and feeds the next step.
+
+## Quickstart — Tier 2 (`executePipeline()`)
+
+For unattended use — webhooks, cron, GitHub Actions, custom dashboards —
+import the composite and pass a spawner:
+
+```ts
+import { executePipeline, defaultSpawner } from '@ai-sdlc/pipeline-cli';
+
+const spawner = await defaultSpawner();
+//   ↳ resolves to ShellClaudePSpawner if `claude` CLI is on PATH
+//     (subscription, no tokens spent), otherwise to ClaudeCodeSDKSpawner
+//     if ANTHROPIC_API_KEY is set (API key billing), otherwise throws.
+
+const result = await executePipeline({
+  taskId: 'AISDLC-100.7',
+  workDir: process.cwd(),
+  spawner,
+  // optional: cap on TOTAL review iterations (default 2 — initial + 1 retry)
+  maxReviewIterations: 2,
+  // optional: progress callback per iteration
+  onProgress: (iteration, verdict) => {
+    console.log(`iteration ${iteration}: ${verdict.decision}`);
+  },
+});
+
+console.log(result.outcome);
+//   ↳ 'approved' | 'needs-human-attention' | 'developer-failed' | 'aborted'
+console.log(result.prUrl);          // string | null
+console.log(result.siblingPrUrls);  // string[]
+```
+
+This **is** the canonical Tier 2 pattern. Phase 5 (AISDLC-100.5) migrates the
+existing `dogfood/src/watch.ts` to call `executePipeline()` directly instead of
+re-implementing the orchestration in TypeScript prose. New unattended consumers
+(webhooks, cron, GitHub Actions) should follow the same shape: build a
+`SubagentSpawner` once, then `await executePipeline({ taskId, workDir, spawner })`
+per task.
+
+For tests, swap `defaultSpawner()` for `MockSpawner`:
+
+```ts
+import { executePipeline, MockSpawner } from '@ai-sdlc/pipeline-cli';
+
+const spawner = new MockSpawner({
+  developer: {
+    type: 'developer',
+    output: '...',
+    parsed: { /* DeveloperReturn shape */ },
+    status: 'success',
+    durationMs: 0,
+  },
+  'code-reviewer':     { /* ReviewerVerdict shape */ },
+  'test-reviewer':     { /* ... */ },
+  'security-reviewer': { /* ... */ },
+});
+
+const result = await executePipeline({
+  taskId: 'AISDLC-EXAMPLE',
+  workDir: tmpProjectRoot,
+  spawner,
+  skipFinalizeCommit: true, // tests usually don't have a real git repo
+});
+```
+
+See [`docs/spawner.md`](./docs/spawner.md) for the full SubagentSpawner
+catalogue (`ShellClaudePSpawner`, `ClaudeCodeSDKSpawner`, `defaultSpawner()`,
+`MockSpawner`, custom spawner howto).
 
 ## Layout
 
@@ -21,6 +195,9 @@ The integration test for the Tier 2 composite is colocated with `execute-pipelin
 pipeline-cli/
 ├── package.json
 ├── README.md                       (this file)
+├── docs/
+│   ├── spawner.md                  # SubagentSpawner deep-dive (when to use which, custom-spawner howto)
+│   └── steps.md                    # Per-step contract / inputs / outputs / side effects
 ├── tsconfig.json
 ├── vitest.config.ts
 ├── bin/
@@ -35,11 +212,11 @@ pipeline-cli/
     │   └── make-task.ts
     ├── runtime/
     │   ├── index.ts                # barrel — exports SubagentSpawner + Runner surface
-    │   ├── exec.ts + exec.test.ts                                    # Runner abstraction over child_process.execFile
-    │   ├── subagent-spawner.ts + subagent-spawner.test.ts            # SubagentSpawner interface + MockSpawner
-    │   ├── shell-claude-p-spawner.ts + .test.ts                      # Tier 2 default — `claude --print --agent <type>` shell-out (subscription)
-    │   ├── claude-code-sdk-spawner.ts + .test.ts                     # Tier 2 alternative — @anthropic-ai/claude-code SDK (API key)
-    │   └── default-spawner.ts + default-spawner.test.ts              # `defaultSpawner()` resolver: which→shell, env→sdk, else throw
+    │   ├── exec.ts                                                   # Runner abstraction over child_process.execFile
+    │   ├── subagent-spawner.ts                                       # SubagentSpawner interface + MockSpawner
+    │   ├── shell-claude-p-spawner.ts                                 # Tier 2 default — `claude --print --agent <type>` shell-out (subscription)
+    │   ├── claude-code-sdk-spawner.ts                                # Tier 2 alternative — @anthropic-ai/claude-code SDK (API key)
+    │   └── default-spawner.ts                                        # `defaultSpawner()` resolver: which→shell, env→sdk, else throw
     ├── steps/                      # each step.ts has a colocated step.test.ts
     │   ├── index.ts                # barrel
     │   ├── 00-sweep.ts             # Step 0 — sweep merged worktrees
@@ -60,65 +237,12 @@ pipeline-cli/
         └── index.ts                # yargs subcommand router
 ```
 
-## CLI quickstart
-
-```bash
-# After `pnpm build` in this package:
-node ./bin/ai-sdlc-pipeline.mjs --help
-node ./bin/ai-sdlc-pipeline.mjs validate-task AISDLC-100.1
-node ./bin/ai-sdlc-pipeline.mjs sweep-worktrees
-```
-
-Every subcommand emits JSON on stdout. Tier 1 (the slash command body) parses that JSON to drive subsequent steps.
-
-## TypeScript usage
-
-```ts
-import {
-  executePipeline,
-  MockSpawner,
-} from '@ai-sdlc/pipeline-cli';
-
-const result = await executePipeline({
-  taskId: 'AISDLC-100.1',
-  workDir: process.cwd(),
-  spawner: new MockSpawner({
-    developer: { type: 'developer', output: '...', parsed: {/* DeveloperReturn */}, status: 'success', durationMs: 0 },
-    'code-reviewer': { ... },
-    'test-reviewer': { ... },
-    'security-reviewer': { ... },
-  }),
-});
-console.log(result.outcome);  // 'approved' | 'needs-human-attention' | 'developer-failed' | 'aborted'
-```
-
-The production spawners ship as of **Phase 2 — AISDLC-100.2**:
-
-- **`ShellClaudePSpawner`** (subscription billing) — shells out to the operator's installed `claude` CLI with `claude --print --output-format json --permission-mode bypassPermissions --agent <type> <prompt>`. No API tokens consumed; reuses the operator's logged-in Claude Code session. NB: the RFC §8.2 sketch said `--subagent <type>` but the actual flag is **`--agent <type>`** (verified empirically against the installed CLI on 2026-04-30); see the spawner JSDoc for full Q5 (RFC §15) resolution notes.
-- **`ClaudeCodeSDKSpawner`** (API-key billing) — uses `@anthropic-ai/claude-code` SDK programmatically. The SDK is **lazy-imported** (NOT a hard dependency of `pipeline-cli`) so subscription-only consumers don't have to install ~50MB of SDK code they'll never use; install it with `pnpm add @anthropic-ai/claude-code` only when you need API-key billing.
-- **`defaultSpawner()`** — convenience resolver: prefers `claude` CLI on PATH (subscription), falls back to `ANTHROPIC_API_KEY` (API key), throws with an instructional error if neither is available.
-
-## SubagentSpawner contract
-
-The pipeline is purely deterministic except for two LLM dispatch points:
-
-- **Step 5b** — spawn the `developer` subagent with the prompt rendered in Step 5
-- **Step 7b** — spawn `code-reviewer`, `test-reviewer`, `security-reviewer` in parallel
-
-Both go through the `SubagentSpawner` interface (RFC-0012 §8). That's the only piece of the pipeline that varies between Tier 1 (Agent tool from main session), Tier 2 subscription (`claude -p`), Tier 2 API key (Claude Code SDK), and tests (`MockSpawner`).
-
-```ts
-interface SubagentSpawner {
-  spawn(opts: SpawnOpts): Promise<SubagentResult>;
-  spawnParallel(opts: SpawnOpts[]): Promise<SubagentResult[]>;
-}
-```
-
-`MockSpawner` (shipped here for tests) accepts either fixed results per subagent type or a callback per type so iteration N>1 can return different fixtures than iteration 1.
-
 ## Step contracts
 
-Every step exports a pure async function. The return shape is documented in `src/types.ts` + the per-step JSDoc. The JSON returned by the CLI subcommands matches the TypeScript return shape exactly.
+Every step exports a pure async function. The return shape is documented in
+`src/types.ts` + the per-step JSDoc and consolidated in
+[`docs/steps.md`](./docs/steps.md). The JSON returned by the CLI subcommands
+matches the TypeScript return shape exactly.
 
 | # | Step | Function | CLI command |
 |---|------|----------|-------------|
@@ -136,6 +260,51 @@ Every step exports a pure async function. The return shape is documented in `src
 | 11 | Push + open PR | `pushAndPr` | `push-and-pr <id> --developer-return <json> --verdict <json>` |
 | 12 | Sibling PRs | `siblingPrs` | `sibling-prs <id> --developer-return <json> --main-pr-url <url>` |
 | 13 | Cleanup sentinel | `cleanupTask` | `cleanup-task <id>` |
+
+## SubagentSpawner contract (LLM dispatch boundary)
+
+The pipeline is purely deterministic except for two LLM dispatch points:
+
+- **Step 5b** — spawn the `developer` subagent with the prompt rendered in Step 5
+- **Step 7b** — spawn `code-reviewer`, `test-reviewer`, `security-reviewer` in parallel
+
+Both go through the `SubagentSpawner` interface (RFC-0012 §8). That's the only
+piece of the pipeline that varies between Tier 1 (`Agent` tool from the main
+session), Tier 2 subscription (`claude --print`), Tier 2 API key (Claude Code
+SDK), and tests (`MockSpawner`).
+
+```ts
+interface SubagentSpawner {
+  spawn(opts: SpawnOpts): Promise<SubagentResult>;
+  spawnParallel(opts: SpawnOpts[]): Promise<SubagentResult[]>;
+}
+```
+
+Production spawners (Phase 2 — AISDLC-100.2):
+
+- **`ShellClaudePSpawner`** (subscription billing) — shells out to the
+  operator's installed `claude` CLI with
+  `claude --print --output-format json --permission-mode bypassPermissions --agent <type> <prompt>`.
+  No API tokens consumed; reuses the operator's logged-in Claude Code session.
+  RFC §8.2's sketch said `--subagent <type>` but the actual flag is
+  **`--agent <type>`** (verified empirically against the installed CLI on
+  2026-04-30). See [`docs/spawner.md`](./docs/spawner.md#q5-rfc-15-resolution--agent-type-not---subagent-type)
+  for the full Q5 (RFC §15) resolution.
+- **`ClaudeCodeSDKSpawner`** (API-key billing) — uses `@anthropic-ai/claude-code`
+  programmatically. The SDK is **lazy-imported** (NOT a hard dependency of
+  `pipeline-cli`) so subscription-only consumers don't have to install ~50MB
+  of SDK code they'll never use; install it with
+  `pnpm add @anthropic-ai/claude-code` only when you need API-key billing.
+- **`defaultSpawner()`** — convenience resolver: prefers `claude` CLI on PATH
+  (subscription), falls back to `ANTHROPIC_API_KEY` (API key), throws with an
+  instructional error if neither is available.
+
+`MockSpawner` (shipped here for tests) accepts either fixed results per
+subagent type or a callback per type so iteration N>1 can return different
+fixtures than iteration 1.
+
+Full deep-dive — selection guide, custom spawner howto, lazy-import mechanics,
+Q5 resolution: [`docs/spawner.md`](./docs/spawner.md).
 
 ## Hard rules (NEVER violated by any step)
 
@@ -161,16 +330,28 @@ pnpm test:coverage         # with v8 coverage + thresholds
 pnpm test:watch            # iteration mode
 ```
 
-## Future phases
+## Documentation
 
-| Phase | Task | What changes |
-|---|---|---|
-| 2 | AISDLC-100.2 | `ShellClaudePSpawner` (subscription) + `ClaudeCodeSDKSpawner` (API key) + `defaultSpawner()` resolver — **shipped** |
-| 3 | AISDLC-100.3 | Wrap each step function as an MCP tool in `ai-sdlc-plugin/mcp-server/` |
-| 4 | AISDLC-100.4 | Refactor `commands/execute.md` to use the CLI; delete `agents/execute-orchestrator.md` |
-| 5 | AISDLC-100.5 | Migrate `dogfood/src/watch.ts` to call `executePipeline()` |
-| 6 | AISDLC-100.6 | Add `pipelineVersion` to attestation envelope |
-| 7 | AISDLC-100.7 | Documentation pass — this file gets the per-step deep-dive |
-| 8 | AISDLC-100.8 | Flip `private: false`, add `publishConfig`, ship to npm |
+- [`docs/spawner.md`](./docs/spawner.md) — SubagentSpawner selection guide
+  (when to use ShellClaudeP / ClaudeCodeSDK / Mock / custom), lazy SDK import,
+  Q5 resolution.
+- [`docs/steps.md`](./docs/steps.md) — per-step contract, inputs, outputs,
+  side effects, when each step runs.
+- [`spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md`](../spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md)
+  — the full design.
 
-See [`spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md`](../spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md) for the full design.
+## Phases
+
+| Phase | Task | What changes | Status |
+|---|---|---|---|
+| 1 | AISDLC-100.1 | Create `pipeline-cli/` — Step 0-13 pure functions + CLI router + `executePipeline()` composite | shipped |
+| 2 | AISDLC-100.2 | `ShellClaudePSpawner` + `ClaudeCodeSDKSpawner` + `defaultSpawner()` | shipped |
+| 3 | AISDLC-100.3 | Wrap each step function as an MCP tool in `ai-sdlc-plugin/mcp-server/` | in flight |
+| 4 | AISDLC-100.4 | Refactor `commands/execute.md` to use the CLI; delete `agents/execute-orchestrator.md` | in flight |
+| 5 | AISDLC-100.5 | Migrate `dogfood/src/watch.ts` to call `executePipeline()` | in flight |
+| 6 | AISDLC-100.6 | Add `pipelineVersion` to attestation envelope | shipped |
+| 7 | AISDLC-100.7 | Documentation pass — README + spawner doc + per-step docs | this PR |
+| 8 | AISDLC-100.8 | Flip `private: false`, add `publishConfig`, ship to npm | future |
+
+See [`spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md`](../spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md)
+for the full design.
