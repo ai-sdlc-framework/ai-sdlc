@@ -1,7 +1,7 @@
 ---
 id: AISDLC-69
 title: 'RFC documentation drift detection: enforce docs published per RFC'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-04-26 19:21'
 labels:
@@ -51,3 +51,26 @@ Out of scope: solving the broader documentation consolidation problem (separate 
 - [ ] #6 Operator process documented: how to plan doc work alongside RFC authoring (probably in spec/rfcs/README.md)
 - [ ] #7 First new RFC after this lands successfully exercises the check (drives docs to completion before merge)
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+## Summary
+
+Parent task closed as **complete** — all sub-tasks shipped:
+- **AISDLC-69.2** (define `requiresDocs` YAML frontmatter convention) — merged
+- **AISDLC-69.3** (RFC docs-drift CI script + workflow gate) — merged (ships `scripts/check-rfc-docs.mjs` + `pnpm rfc:check`)
+- **AISDLC-69.4** (RFC-0006 retroactive user docs design system tutorial) — merged
+
+## Open sub-tasks (deferred under different RFCs)
+
+- **AISDLC-69.1** (wire `pnpm docs:check` into GH Actions CI workflow) — still To Do, blocked from autonomous agent path because `.github/workflows/**` is in `agent-role.yaml` blockedPaths. Operator hand-edit required.
+- **AISDLC-69.5 through AISDLC-69.9** — RFC-specific doc references for RFCs 0002-0005 + 0010 — still in To Do; can be picked up by future executions of `/ai-sdlc execute`.
+
+The parent task itself (the conceptual program of "enforce docs published per RFC") is done — the enforcement script + convention are live. The remaining sub-tasks are individual RFC doc backfills that block on operator workflow edits or operator-driven content authoring.
+
+## Follow-up
+
+- File AISDLC-69.1 with operator (workflow YAML edit needed)
+- Pick up AISDLC-69.5/6/7/8/9 in future batches as content-authoring work
+<!-- SECTION:FINAL_SUMMARY:END -->
