@@ -2,7 +2,7 @@
 id: RFC-0015
 title: Autonomous Pipeline Orchestrator
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: dominique@reliablegenius.io
 created: 2026-05-01
 updated: 2026-05-01
@@ -19,7 +19,7 @@ requiresDocs: []
 
 **Document type:** Normative (draft)
 **Status:** Draft (initial seed; structure may shift; open questions in §13)
-**Lifecycle:** Draft
+**Lifecycle:** Ready for Review
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-05-01
 **Updated:** 2026-05-01
@@ -29,9 +29,9 @@ requiresDocs: []
 
 ## Sign-Off
 
-- [ ] Engineering owner — dominique@reliablegenius.io (pending)
+- [x] Engineering owner — dominique@reliablegenius.io (2026-05-02)
 - [ ] Product owner — Alex (pending)
-- [ ] Operator owner — dominique@reliablegenius.io (pending)
+- [x] Operator owner — dominique@reliablegenius.io (2026-05-02)
 
 ## Revision History
 
