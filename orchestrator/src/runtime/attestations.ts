@@ -592,9 +592,8 @@ export interface CollectChangedFileEntriesOptions {
  * malicious or pathological inputs can't smuggle entries past the binding.
  *
  * Extracted from the previously-duplicated helpers in
- * `ai-sdlc-plugin/scripts/sign-attestation.mjs` and
- * `scripts/ci-sign-attestation.mjs` so a single source of truth applies the
- * same parsing + validation to every signing site.
+ * `ai-sdlc-plugin/scripts/sign-attestation.mjs` so a single source of truth
+ * applies the same parsing + validation at every signing site.
  */
 export function collectChangedFileEntries(
   baseRef: string,
@@ -752,8 +751,7 @@ export function computeContentHashV3(entries: ChangedFileDeltaEntry[]): string {
  * enumeration.
  *
  * Extracted so a single source of truth handles the two ls-tree lookups
- * (one per endpoint) at every signing site — `sign-attestation.mjs` and
- * `ci-sign-attestation.mjs`.
+ * (one per endpoint) at every signing site (`sign-attestation.mjs`).
  */
 export function collectChangedFileDeltaEntries(
   baseRef: string,
