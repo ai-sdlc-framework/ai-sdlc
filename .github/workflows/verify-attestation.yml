@@ -17,11 +17,25 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
+    # AISDLC-132: skip verification on docs-only PRs so the
+    # `ai-sdlc/attestation` required check doesn't block merge when the
+    # CI-side attestor (gated on 3 reviewer approvals) didn't fire.
+    # Mirrors ai-sdlc-review.yml's filter so docs-only PRs cleanly bypass
+    # the entire review+attestation pipeline.
+    paths-ignore:
+      - 'spec/rfcs/**'
+      - 'docs/**'
+      - 'backlog/tasks/**'
+      - 'backlog/completed/**'
+      - '*.md'
   # AISDLC-113: also verify inside the merge-queue's gh-readonly-queue branch
   # so a sibling PR merging into the same files between PR-head verification
   # and merge-queue execution can't ship a stale-attestation PR. The triple-
   # hash window (AISDLC-101) handles most legitimate cases, but verifying
   # against the actual merge result is defense-in-depth.
+  # NOTE (AISDLC-132): merge_group is intentionally NOT filtered — once a PR
+  # enters the queue we want the verifier to run against the queue head
+  # regardless of file types, for AISDLC-113's sibling-overlap defense.
   merge_group:
     types: [checks_requested]
 

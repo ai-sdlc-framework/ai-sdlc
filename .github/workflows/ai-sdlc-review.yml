@@ -12,10 +12,13 @@ on:
     # mixed PRs (docs + code) still trigger normally. To force a review on a
     # docs-only PR (e.g. external contributor scrutiny), use:
     #   gh workflow run ai-sdlc-review.yml --ref <branch>
-    # Note: `verify-attestation.yml` is intentionally NOT filtered — it must
-    # keep running on docs-only PRs to maintain the `ai-sdlc/attestation`
-    # status check. AISDLC-132 handles the resulting "no attestation signed"
-    # side-effect for docs-only PRs.
+    # Note (AISDLC-132): `verify-attestation.yml`'s pull_request trigger
+    # carries the same paths-ignore so the `ai-sdlc/attestation` status
+    # check doesn't post for docs-only PRs (the CI-side attestor is gated
+    # on 3 reviewer approvals which never fire when the analyze job is
+    # skipped, so a posted-but-invalid status would block merge with no
+    # recovery path). The merge_group trigger remains unfiltered for
+    # AISDLC-113 defense-in-depth verification against the queue head.
     paths-ignore:
       - 'spec/rfcs/**'
       - 'docs/**'
