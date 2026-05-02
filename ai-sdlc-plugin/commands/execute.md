@@ -395,11 +395,15 @@ After Step 10.5 completes successfully, proceed to Step 10. The signed attestati
 
 > **Coordination with AISDLC-101 (verifier-side defense).** Step 10.5 closes the *producer-side* failure mode (we sign stale state then push fresh). AISDLC-101 (per-file delta hashing in the verifier) closes the *post-push* failure mode (sibling merges between our push and our merge). Both layers reduce the attestation-invalidation rate; neither alone closes both gaps.
 
-## Step 10 — Mark task Done + sign attestation + commit (BEFORE push)
+## Step 10 — Mark task Done + write verdicts file + commit (BEFORE push)
 
-This step lands the entire task lifecycle inside a single PR — Done state, file move, the signed review attestation, and the implementation work all merge atomically. Per CLAUDE.md (this command's authority): for tasks shipped via `/ai-sdlc execute`, **Done = "reviews-approved-and-PR-opened"**, not "merged."
+This step lands the entire task lifecycle inside a single PR — Done state, file move, the implementation work, and (after the pre-push hook fires in Step 11) the signed review attestation all merge atomically. Per CLAUDE.md (this command's authority): for tasks shipped via `/ai-sdlc execute`, **Done = "reviews-approved-and-PR-opened"**, not "merged."
 
 Skip this step entirely if the iteration cap was exceeded (the PR is `[needs-human-attention]` — let the human flip Done after they're satisfied via `/ai-sdlc complete <task-id>` or by hand).
+
+> **AISDLC-133 — signing has moved to the pre-push hook.** Prior versions of this command shelled out to `node ai-sdlc-plugin/scripts/sign-attestation.mjs` from this step and committed the resulting envelope alongside the task-Done chore commit. That coupled a deterministic mechanical operation (sign → commit envelope) to a successful main-session turn AND consumed model context for it. The pipeline now writes the aggregated reviewer verdicts to `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` (per-worktree, survives session restart) and stops. The husky `pre-push` hook (`.husky/pre-push` → `scripts/check-attestation-sign.sh`) detects the verdict file at push time, signs the DSSE envelope against the actual HEAD SHA being pushed, commits the envelope as a follow-up chore, and exits 1 to prompt a re-`git push` (which is then a no-op because the idempotent check inside the hook sees the envelope at the new HEAD). See CLAUDE.md "## Hooks → Auto-signed attestations" for the full contract.
+>
+> The slash command is now responsible for ONE durable artifact at sign time: the verdict file. Everything else is the hook's job.
 
 If reviews approved cleanly:
 
@@ -427,50 +431,63 @@ If reviews approved cleanly:
    ```
 3. **Call `mcp__plugin_ai-sdlc_ai-sdlc__task_edit`** with `id: $TASK_ID`, `status: 'Done'`, `acceptanceCriteriaCheck: [...]`, `finalSummary: '...'`.
 4. **Call `mcp__plugin_ai-sdlc_ai-sdlc__task_complete`** with `id: $TASK_ID` — this physically moves `backlog/tasks/<file>.md` → `backlog/completed/<file>.md`.
-5. **Build + sign the review attestation** (AISDLC-74). Before staging the chore commit, write a DSSE envelope at `.ai-sdlc/attestations/<head-sha>.dsse.json` so CI can verify the local review and skip its own duplicate review run:
+5. **Write the per-worktree reviewer verdicts file** (AISDLC-133). The husky pre-push hook reads this file in Step 11 to decide whether to auto-sign:
 
    ```bash
    cd "$WORKTREE_PATH"
 
    # Refuse early if the contributor hasn't onboarded their signing key yet —
-   # /ai-sdlc init-signing-key is a one-time setup pointing at ~/.ai-sdlc/signing-key.pem.
+   # the pre-push hook will fail loudly otherwise. /ai-sdlc init-signing-key
+   # is a one-time setup pointing at ~/.ai-sdlc/signing-key.pem.
    if [ ! -f "$HOME/.ai-sdlc/signing-key.pem" ]; then
      echo "ERROR: No signing key at ~/.ai-sdlc/signing-key.pem."
      echo "       Run /ai-sdlc init-signing-key once, open the printed onboarding PR"
      echo "       adding your pubkey to .ai-sdlc/trusted-reviewers.yaml, then re-run."
+     echo "       (The pre-push hook will refuse to sign without this key.)"
      exit 1
    fi
 
-   # Compute predicate inputs the verifier will re-derive on CI:
-   #   - HEAD_SHA       = git rev-parse HEAD (the commit being attested)
-   #   - DIFF           = git diff origin/main...HEAD
-   #   - POLICY         = .ai-sdlc/review-policy.md
-   #   - AGENT_HASHES   = sha256 of each ai-sdlc-plugin/agents/{code,test,security}-reviewer.md
-   #   - PLUGIN_VERSION = ai-sdlc-plugin/plugin.json `.version`
-   # The helper does this in one call (it imports buildPredicate +
-   # signAttestation from `@ai-sdlc/orchestrator/runtime`), reading the developer
-   # commit's HEAD, the three reviewer verdicts (counts only — full JSON stays in
-   # the PR body), $iteration_count, and $HARNESS_NOTE.
+   # AISDLC-133: write the aggregated reviewer verdicts to the per-worktree
+   # verdicts dir (NOT /tmp/ — the previous location did not survive session
+   # restart). The pre-push hook reads from this exact path. The directory
+   # is .gitignore'd; the durable artifact is the signed envelope at
+   # `.ai-sdlc/attestations/<sha>.dsse.json` once the hook signs.
    #
-   # The helper writes `.ai-sdlc/attestations/<head-sha>.dsse.json` and prints the
-   # path on stdout. If iteration cap was exceeded, the helper is NOT called
-   # (the PR is `[needs-human-attention]` per the iteration loop).
-   node "${CLAUDE_PLUGIN_ROOT}/scripts/sign-attestation.mjs" \
-     --review-verdicts /tmp/review-verdicts-${TASK_ID}.json \
-     --iteration-count "$iteration_count" \
-     --harness-note "$HARNESS_NOTE"
+   # Verdict JSON shape (same as the legacy /tmp/ form, unchanged):
+   #   [{ agentId, harness, approved,
+   #      findings: { critical, major, minor, suggestion } }, ...]
+   #
+   # Reviewer's full line-level findings live in the PR body for human
+   # consumption — only the aggregated structure goes here.
+   TASK_ID_LOWER=$(printf '%s' "$TASK_ID" | tr '[:upper:]' '[:lower:]')
+   mkdir -p .ai-sdlc/verdicts
+   cat > ".ai-sdlc/verdicts/${TASK_ID_LOWER}.json" <<EOF
+   <aggregated reviewer verdicts JSON from Step 8>
+   EOF
+
+   # Export the iteration count + harness note so the pre-push hook picks
+   # them up in Step 11 (the hook reads AI_SDLC_ITERATION_COUNT and
+   # AI_SDLC_HARNESS_NOTE from the environment, defaulting to 1 and "" if
+   # unset).
+   export AI_SDLC_ITERATION_COUNT="$iteration_count"
+   export AI_SDLC_HARNESS_NOTE="$HARNESS_NOTE"
+
    cd -
    ```
 
-   The verdict JSON written to `/tmp/review-verdicts-${TASK_ID}.json` is the aggregated structure from Step 8 — `[{ agentId, harness, approved, findings: { critical, major, minor, suggestion } }, ...]`. Reviewer's full line-level findings live in the PR body for human consumption.
+   The slash command body MUST NOT call `node ai-sdlc-plugin/scripts/sign-attestation.mjs` here anymore — the pre-push hook owns signing. If you find yourself re-adding that call, stop: you'll end up with two attestations (one bound to the dev commit pre-task-Done, one bound to the chore commit post-task-Done) and the hook's idempotency check at the post-task-Done HEAD will skip cleanly only by accident.
 
-6. **Stage and commit the move + attestation** in the worktree as a separate chore commit so the developer's commit stays clean.
+6. **Stage and commit the task-Done file move** in the worktree as a separate chore commit so the developer's commit stays clean. The attestation envelope is NOT staged here — the pre-push hook adds it on its own follow-up commit after step 11.
 
    Before composing the commit message, **sanitise any GitHub Actions CI-skip magic tokens** out of every interpolated value (`$TASK_ID`, the developer summary, etc.) — see Hard Rule 7 above. The five literal tokens GH Actions parses are `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` (case-insensitive). The chore-commit message we author here MUST NOT contain any of them — `verify-attestation.yml` and `ai-sdlc-review.yml` need to fire on this very commit. Replace each occurrence with its paren-quoted equivalent (`[skip ci]` → `(skip ci marker)`) before piping into `git commit -m`. The `.husky/pre-push` gate (`scripts/check-skip-ci-marker.sh`, AISDLC-88) is the belt-and-braces backstop, but Step 10 catches it cheaper.
 
    ```bash
    cd "$WORKTREE_PATH"
-   git add backlog/tasks backlog/completed .ai-sdlc/attestations
+   # AISDLC-133: stage backlog/* only here. The attestation file (formerly
+   # included in this `git add` line) is now produced by the pre-push hook
+   # on a SEPARATE chore commit after Step 11 — `.ai-sdlc/attestations/`
+   # is intentionally NOT in the add list.
+   git add backlog/tasks backlog/completed
 
    # AISDLC-88: sanitise the chore-commit message body. The five magic
    # tokens GH Actions parses are listed above. We use `sed -E` to
@@ -482,7 +499,8 @@ If reviews approved cleanly:
    CHORE_BODY="chore: mark $TASK_ID complete
 
    Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in this PR.
-   Signed review attestation included at .ai-sdlc/attestations/<head-sha>.dsse.json
+   The signed review attestation lands on a follow-up chore commit auto-produced by
+   the husky pre-push hook (AISDLC-133) at .ai-sdlc/attestations/<head-sha>.dsse.json
    (AISDLC-74) so CI's verify-attestation workflow can skip the duplicate review run.
 
    Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
@@ -497,18 +515,62 @@ If reviews approved cleanly:
    cd -
    ```
 
-When the PR merges, the file is already in `backlog/completed/` on `main` — no race with the post-merge workflow. The attestation file stays in the repo as audit trail (~1-2KB per PR; not a secret — the private key never left the contributor's machine).
+When the PR merges, the file is already in `backlog/completed/` on `main` — no race with the post-merge workflow. The attestation file (added by the pre-push hook on a separate commit in Step 11) stays in the repo as audit trail (~1-2KB per PR; not a secret — the private key never left the contributor's machine).
 
 ## Step 11 — Push and open PR
 
 ```bash
 cd "$WORKTREE_PATH"
-git push -u origin "$BRANCH"
+
+# AISDLC-133: the husky pre-push hook (`.husky/pre-push`) auto-signs the
+# attestation when it sees the verdict file from Step 10. The signing path is:
+#
+#   1st `git push` → coverage gate passes → attestation hook spots the verdict
+#       file at .ai-sdlc/verdicts/<task-id-lower>.json + sees no envelope at
+#       current HEAD → signs the envelope at .ai-sdlc/attestations/<sha>.dsse.json
+#       → git-add + git-commit (no-verify, single-file) the envelope as a
+#       follow-up chore → exits 1 with "re-push required" message.
+#
+#   2nd `git push` → coverage gate passes → attestation hook sees the envelope
+#       file already present at the new HEAD → exits 0 (idempotent) → push
+#       proceeds normally to origin.
+#
+# So this step is a `git push` LOOP capped at 2 attempts. Anything beyond 2
+# is a real push failure (network, permissions, non-fast-forward) — escalate.
+PUSH_ATTEMPTS=0
+LAST_PUSH_RC=0
+while [ "$PUSH_ATTEMPTS" -lt 2 ]; do
+  PUSH_ATTEMPTS=$((PUSH_ATTEMPTS + 1))
+  git push -u origin "$BRANCH"
+  LAST_PUSH_RC=$?
+  if [ "$LAST_PUSH_RC" -eq 0 ]; then
+    break
+  fi
+  # Hook exited 1 (added attestation chore commit and asked us to re-push)?
+  # The new commit is on HEAD; loop and re-push. Anything else (real
+  # network/auth failure, non-fast-forward) will surface on the second
+  # attempt as the same non-zero exit code and we'll escalate below.
+done
+# AISDLC-133 round-2 fix: track the actual `git push` exit code rather than
+# inferring success from `git ls-remote | grep -q "$BRANCH"`. The remote
+# branch can exist (created by the first attempt's hook-sign-then-exit-1
+# cycle) even when the second push genuinely failed, which silently
+# suppressed the error message. Direct exit-code check is the correct
+# success oracle. Also avoids the unanchored-grep false-positive on
+# similar branch names (e.g. `feat` matching `feat-foo`).
+if [ "$LAST_PUSH_RC" -ne 0 ]; then
+  echo "ERROR: 2 push attempts failed (last exit code: $LAST_PUSH_RC); aborting."
+  echo "       The most recent failure is unrelated to AISDLC-133 attestation"
+  echo "       auto-sign (the hook is idempotent on the second push). Diagnose:"
+  echo "       \`git push -u origin $BRANCH\` directly to surface the underlying"
+  echo "       error (network, non-fast-forward, auth)."
+  exit 1
+fi
 ```
 
 If push fails with non-fast-forward (someone else pushed to the same branch), abort with `outcome: aborted` and populate `notes` for the user (e.g. "non-fast-forward push to `$BRANCH`; cleanup is to delete the remote branch and rerun, but that's destructive — confirm with the operator first"). Do NOT force-push, do NOT delete the remote branch yourself.
 
-> **Husky `pre-push` serialises across parallel runs.** When N concurrent `/ai-sdlc execute` invocations all reach Step 11 at roughly the same moment, the husky `pre-push` hook (a flock-based serialiser in `.husky/pre-push`) ensures only one push is in flight at a time. This keeps the local git index from being clobbered, but does NOT serialise the rest of the pipeline — Steps 5-10 still run fully in parallel across runs.
+> **Husky `pre-push` serialises across parallel runs.** When N concurrent `/ai-sdlc execute` invocations all reach Step 11 at roughly the same moment, the husky `pre-push` hook (a flock-based serialiser in `.husky/pre-push`) ensures only one push is in flight at a time. This keeps the local git index from being clobbered, but does NOT serialise the rest of the pipeline — Steps 5-10 still run fully in parallel across runs. AISDLC-133's auto-sign step in the hook is also serialised by the same boundary — a second concurrent push waiting on the lock will see the first run's attestation chore commit already in HEAD and exit 0 idempotently.
 
 Compose the PR title from `.ai-sdlc/pipeline-backlog.yaml` `pullRequest.titleTemplate` (today: `feat: {issueTitle} ({issueId})`).
 

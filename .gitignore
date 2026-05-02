@@ -47,6 +47,12 @@ pnpm-debug.log*
 .ai-sdlc/state.db-wal
 .ai-sdlc/state/
 .ai-sdlc/memory/
+# AISDLC-133: per-task reviewer verdict files written by /ai-sdlc execute
+# Step 10 and consumed by `.husky/pre-push` (scripts/check-attestation-sign.sh)
+# to auto-sign the DSSE attestation. Ephemeral, per-worktree — never
+# committed; the signed envelope at .ai-sdlc/attestations/<sha>.dsse.json is
+# the durable artifact.
+.ai-sdlc/verdicts/
 .enterprise.yaml
 
 # AISDLC-122: pipeline-cli writes the DoR calibration log to
