@@ -19,7 +19,9 @@
   "types": "dist/index.d.ts",
   "bin": {
     "ai-sdlc-pipeline": "bin/ai-sdlc-pipeline.mjs",
-    "cli-deps": "bin/cli-deps.mjs"
+    "cli-deps": "bin/cli-deps.mjs",
+    "cli-dor-stats": "bin/cli-dor-stats.mjs",
+    "cli-dor-digest": "bin/cli-dor-digest.mjs"
   },
   "exports": {
     ".": {
