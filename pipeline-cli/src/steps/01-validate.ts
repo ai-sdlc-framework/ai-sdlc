@@ -180,6 +180,23 @@ export async function validateTask(opts: ValidateTaskOptions): Promise<ValidateR
   if (task.status === 'Draft') {
     return { ok: false, reason: `status is 'Draft' — task not ready for execution`, task };
   }
+  if (task.status === 'Needs Clarification') {
+    // RFC-0011 §7.3 + Phase 4 (AISDLC-115.5) — refuse with a pointer to
+    // the DoR clarification comment in the task body so the operator can
+    // resolve before re-running. The actual gate list / link is rendered
+    // by `refusalMessage()` in `pipeline-cli/src/dor/ingress-claude.ts`
+    // when the slash command body has access to the loaded verdict; here
+    // we surface a stable reason string the slash command reuses verbatim.
+    return {
+      ok: false,
+      reason: [
+        `status is 'Needs Clarification' — task blocked by the Definition-of-Ready gate (RFC-0011).`,
+        `See the DoR clarification thread in the task file (look for the`,
+        `'<!-- ai-sdlc:dor-comment -->' marker) and address the questions, then re-run.`,
+      ].join(' '),
+      task,
+    };
+  }
   if (task.status !== 'To Do' && task.status !== 'In Progress') {
     return {
       ok: false,

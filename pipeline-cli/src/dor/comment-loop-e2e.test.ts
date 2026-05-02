@@ -30,6 +30,7 @@ const enforceConfig: DorConfig = {
   evaluationMode: 'enforce',
   notifications: { authorChannel: true },
   staleness: { warnAfterDays: 14, closeAfterDays: 28, closedLabel: 'closed-as-stale-dor' },
+  autoPassRules: [],
 };
 
 class InMemoryPoster implements CommentPoster {

@@ -47,6 +47,21 @@ describe('Step 1 — validateTask', () => {
     expect(r.reason).toMatch(/Draft/);
   });
 
+  it('refuses Needs Clarification with a pointer to the DoR comment marker (RFC-0011 §7.3)', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-4-NC',
+      title: 'unready',
+      status: 'Needs Clarification',
+    });
+    const r = await validateTask({ taskId: 'AISDLC-4-NC', workDir: tmp });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/Needs Clarification/);
+    expect(r.reason).toMatch(/Definition-of-Ready/);
+    expect(r.reason).toMatch(/ai-sdlc:dor-comment/);
+    // Returns the parsed task so callers can render a richer refusal.
+    expect(r.task?.id).toBe('AISDLC-4-NC');
+  });
+
   it('refuses unknown statuses', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-5', title: 'weird', status: 'Blocked' });
     const r = await validateTask({ taskId: 'AISDLC-5', workDir: tmp });

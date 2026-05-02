@@ -25,7 +25,7 @@ import { evaluateGate4 } from './gates/gate-4-scope.js';
 import { evaluateGate5 } from './gates/gate-5-surface.js';
 import { evaluateGate6 } from './gates/gate-6-done-state.js';
 import { evaluateGate7 } from './gates/gate-7-deps.js';
-import type { GateEvaluation, IssueInput, StageAVerdict } from './types.js';
+import type { GateEvaluation, GateId, IssueInput, StageAVerdict } from './types.js';
 
 export interface EvaluateOpts {
   /**
@@ -40,6 +40,19 @@ export interface EvaluateOpts {
   now?: () => Date;
   /** Override evaluator version for snapshotting. */
   evaluatorVersion?: string;
+  /**
+   * Phase 4 (RFC §6.4 + AISDLC-115.5) — gate IDs (1-7) that should be
+   * short-circuited to `verdict: 'skip'` with `finding: 'auto-pass'`.
+   * Resolved by `applyAutoPass()` from the `dor-config.yaml` rule set;
+   * callers may also pass an explicit list (e.g. tests).
+   */
+  gatesSkipped?: number[];
+  /**
+   * Optional human-readable reason attached to skipped gates' `finding`
+   * field. Defaults to `'auto-pass'`. Useful for surfacing the matched
+   * rule kind in the verdict (e.g. `'auto-pass: signal-pipeline-generated'`).
+   */
+  autoPassReason?: string;
 }
 
 const EVALUATOR_VERSION = 'stage-a-2026.05.01';
@@ -49,15 +62,25 @@ export async function evaluateIssue(
   opts: EvaluateOpts = {},
 ): Promise<StageAVerdict> {
   const startedAt = Date.now();
+  const skipSet = new Set<number>(opts.gatesSkipped ?? []);
+  const autoPassReason = opts.autoPassReason ?? 'auto-pass';
+
+  const evalOrSkip = async (
+    gateId: GateId,
+    runner: () => Promise<GateEvaluation> | GateEvaluation,
+  ): Promise<GateEvaluation> => {
+    if (skipSet.has(gateId)) return autoPassedGate(gateId, autoPassReason);
+    return runner();
+  };
 
   const gates: GateEvaluation[] = [
-    evaluateGate1(input),
-    evaluateGate2(input),
-    await evaluateGate3Hermetic(input, opts),
-    evaluateGate4(input),
-    evaluateGate5(input),
-    evaluateGate6(input),
-    evaluateGate7(input),
+    await evalOrSkip(1, () => evaluateGate1(input)),
+    await evalOrSkip(2, () => evaluateGate2(input)),
+    await evalOrSkip(3, () => evaluateGate3Hermetic(input, opts)),
+    await evalOrSkip(4, () => evaluateGate4(input)),
+    await evalOrSkip(5, () => evaluateGate5(input)),
+    await evalOrSkip(6, () => evaluateGate6(input)),
+    await evalOrSkip(7, () => evaluateGate7(input)),
   ];
 
   // Aggregate
@@ -86,6 +109,24 @@ export async function evaluateIssue(
     questions,
     overallConfidence,
     durationMs: Date.now() - startedAt,
+  };
+}
+
+/**
+ * Build a synthetic `GateEvaluation` for a gate that an auto-pass rule
+ * (RFC §6.4) skipped. `verdict: 'skip'` carries the same neutral semantics
+ * as Stage A's existing skip for fully-semantic gates (4, 6) — the gate
+ * does not contribute to blocking, and the calibration log records the
+ * `auto-pass` reason in the `finding` field for forensics.
+ */
+function autoPassedGate(gateId: GateId, reason: string): GateEvaluation {
+  return {
+    gateId,
+    verdict: 'skip',
+    confidence: 'high',
+    severity: 'block',
+    stage: 'A',
+    finding: reason,
   };
 }
 

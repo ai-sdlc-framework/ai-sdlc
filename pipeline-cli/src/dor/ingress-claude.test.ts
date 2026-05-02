@@ -55,6 +55,7 @@ const enforceConfig: DorConfig = {
   evaluationMode: 'enforce',
   notifications: { authorChannel: true },
   staleness: { warnAfterDays: 14, closeAfterDays: 28, closedLabel: 'closed-as-stale-dor' },
+  autoPassRules: [],
 };
 
 const warnOnlyConfig: DorConfig = { ...enforceConfig, evaluationMode: 'warn-only' };
@@ -223,8 +224,8 @@ TBD - we'll figure it out. Make search faster somehow.
 });
 
 describe('refusalMessage', () => {
-  it('lists the failed gates inline', () => {
-    const msg = refusalMessage('AISDLC-7', {
+  function verdict(): import('./types.js').RefinementVerdict {
+    return {
       issueId: 'AISDLC-7',
       rubricVersion: 'v1',
       overallVerdict: 'needs-clarification',
@@ -235,10 +236,141 @@ describe('refusalMessage', () => {
       ],
       signedAt: '2026-05-01T00:00:00.000Z',
       evaluatorVersion: 't',
-    });
+    };
+  }
+
+  it('lists the failed gates inline', () => {
+    const msg = refusalMessage('AISDLC-7', verdict());
     expect(msg).toContain('Refused: AISDLC-7');
     expect(msg).toContain('Gate 1');
     expect(msg).toContain('Gate 5');
     expect(msg).not.toContain('Gate 2');
+  });
+
+  it('falls back to dor-comment marker when no commentLink is supplied (RFC-0011 §7.3)', () => {
+    const msg = refusalMessage('AISDLC-7', verdict());
+    expect(msg).toContain('ai-sdlc:dor-comment');
+  });
+
+  it('honors a supplied commentLink', () => {
+    const msg = refusalMessage('AISDLC-7', verdict(), {
+      commentLink: 'https://github.com/owner/repo/issues/7#issuecomment-9',
+    });
+    expect(msg).toContain('https://github.com/owner/repo/issues/7#issuecomment-9');
+    expect(msg).not.toContain('ai-sdlc:dor-comment');
+  });
+});
+
+describe('refineBacklogTask — Phase 4 auto-pass (RFC §6.4 + AISDLC-115.5)', () => {
+  const enforce: DorConfig = {
+    rubricVersion: 'v1',
+    evaluationMode: 'enforce',
+    notifications: { authorChannel: true },
+    staleness: { warnAfterDays: 14, closeAfterDays: 28, closedLabel: 'closed-as-stale-dor' },
+    autoPassRules: [],
+  };
+
+  it('signal-pipeline auto-pass admits an otherwise-vague task', async () => {
+    // Body would normally fail gates 1 (no AC), 5 (no surface), 6 (no done-state).
+    // With the signal-pipeline rule, gates 1/4/5/6 are skipped and the retained
+    // gates (2/3/7) all pass, so the issue admits.
+    writeTask(
+      'AISDLC-9',
+      "id: AISDLC-9\ntitle: 'auto-task'\ncreated_by: 'ai-sdlc/signal-pipeline'",
+      'Generated automatically.\n',
+    );
+    const config: DorConfig = {
+      ...enforce,
+      autoPassRules: [
+        {
+          kind: 'signal-pipeline-generated',
+          sources: ['ai-sdlc/signal-pipeline'],
+          gatesSkipped: [1, 4, 5, 6],
+          gatesRetained: [2, 3, 7],
+        },
+      ],
+    };
+    const result = await refineBacklogTask('AISDLC-9', {
+      workDir: tmp,
+      config,
+      artifactsDir: join(tmp, 'artifacts'),
+    });
+    expect(result.verdict.overallVerdict).toBe('admit');
+    expect(result.shouldRefuseExecution).toBe(false);
+    // Assert the auto-pass markers are surfaced in the verdict.
+    const skipped = result.verdict.gates.filter(
+      (g) => g.verdict === 'skip' && g.finding?.startsWith('auto-pass:'),
+    );
+    expect(skipped.map((g) => g.gateId).sort()).toEqual([1, 4, 5, 6]);
+  });
+
+  it('signal-pipeline auto-pass still blocks on retained gates that fail', async () => {
+    writeTask(
+      'AISDLC-10',
+      "id: AISDLC-10\ntitle: 'leaky'\ncreated_by: 'ai-sdlc/signal-pipeline'",
+      'Generated. The plan is TBD - we will figure it out.\n',
+    );
+    const config: DorConfig = {
+      ...enforce,
+      autoPassRules: [
+        {
+          kind: 'signal-pipeline-generated',
+          sources: ['ai-sdlc/signal-pipeline'],
+          gatesSkipped: [1, 4, 5, 6],
+          gatesRetained: [2, 3, 7],
+        },
+      ],
+    };
+    const result = await refineBacklogTask('AISDLC-10', {
+      workDir: tmp,
+      config,
+      artifactsDir: join(tmp, 'artifacts'),
+    });
+    // Gate 2 (markers) is retained → TBD trips it.
+    expect(result.verdict.overallVerdict).toBe('needs-clarification');
+    expect(result.verdict.gates.find((g) => g.gateId === 2)?.verdict).toBe('fail');
+  });
+
+  it('issue from non-signal-pipeline author runs full rubric', async () => {
+    writeTask(
+      'AISDLC-11',
+      "id: AISDLC-11\ntitle: 'human task'\ncreated_by: 'dominique'",
+      'Generated. Make the dashboard faster.\n',
+    );
+    const config: DorConfig = {
+      ...enforce,
+      autoPassRules: [
+        {
+          kind: 'signal-pipeline-generated',
+          sources: ['ai-sdlc/signal-pipeline'],
+          gatesSkipped: [1, 4, 5, 6],
+          gatesRetained: [2, 3, 7],
+        },
+      ],
+    };
+    const result = await refineBacklogTask('AISDLC-11', {
+      workDir: tmp,
+      config,
+      artifactsDir: join(tmp, 'artifacts'),
+    });
+    // No rule matches → full Stage A runs. Vague body fails on multiple gates.
+    expect(result.verdict.overallVerdict).toBe('needs-clarification');
+    // No auto-pass findings.
+    const autoPassed = result.verdict.gates.filter((g) => g.finding?.startsWith('auto-pass'));
+    expect(autoPassed).toHaveLength(0);
+  });
+});
+
+describe('stripFrontmatter — created_by extraction (Phase 4)', () => {
+  it('extracts created_by when present', () => {
+    const raw = "---\nid: AISDLC-1\ntitle: 'X'\ncreated_by: 'ai-sdlc/signal-pipeline'\n---\nbody";
+    const out = stripFrontmatter(raw);
+    expect(out.createdBy).toBe('ai-sdlc/signal-pipeline');
+  });
+
+  it('omits createdBy when missing from frontmatter', () => {
+    const raw = "---\nid: AISDLC-1\ntitle: 'X'\n---\nbody";
+    const out = stripFrontmatter(raw);
+    expect(out.createdBy).toBeUndefined();
   });
 });

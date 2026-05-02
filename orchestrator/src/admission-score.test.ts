@@ -340,6 +340,25 @@ describe('mapIssueToPriorityInput — backlog context', () => {
     expect(out.soulAlignment).toBe(0);
   });
 
+  it('vetoes Needs Clarification tasks via soulAlignment=0 (RFC-0011 Phase 4)', () => {
+    // PPA admission must skip issues the DoR gate flagged as needs-clarification —
+    // running the composite scorer against an unready issue burns scoring effort
+    // that gets invalidated on clarification (RFC §2.3 + §7.2).
+    const out = mapIssueToPriorityInput(
+      backlogInput({ backlogContext: { status: 'Needs Clarification' } }),
+    );
+    expect(out.soulAlignment).toBe(0);
+  });
+
+  it('Needs Clarification veto produces a non-admitted scoreIssueForAdmission result', () => {
+    const result = scoreIssueForAdmission(
+      backlogInput({ backlogContext: { status: 'Needs Clarification' } }),
+      { minimumScore: 0.05, minimumConfidence: 0.2 },
+    );
+    expect(result.admitted).toBe(false);
+    expect(result.score.composite).toBe(0);
+  });
+
   it('uses backlog priority for explicitPriority when no high/low label set', () => {
     const high = mapIssueToPriorityInput(backlogInput({ backlogContext: { priority: 'high' } }));
     expect(high.explicitPriority).toBe(0.8);
