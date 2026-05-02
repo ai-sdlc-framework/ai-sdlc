@@ -46,17 +46,3 @@ reviewers:
       -----BEGIN PUBLIC KEY-----
       MCowBQYDK2VwAyEA7RfNqQjnRnt7dG0gjIWIkqyfvn+/aMycmbaEbq7lS7E=
       -----END PUBLIC KEY-----
-  # ci-attestor pubkey will be added in a follow-up bootstrap PR — see CLAUDE.md
-  # (AISDLC-87 / "Bootstrap CI-side attestor"). Until that PR merges, CI-signed
-  # attestations from `.github/workflows/ai-sdlc-review.yml`'s ci-sign step
-  # will be rejected by `verify-attestation.yml` with `signature did not match
-  # any trusted reviewer pubkey` — which is the SAFE default (CI signing is
-  # additive, never weakens the trust model).
-  # - identity: 'ci-attestor'
-  #   machine: 'github-actions'
-  #   addedAt: '<bootstrap-date>'
-  #   addedBy: '<maintainer-handle>'
-  #   pubkey: |
-  #     -----BEGIN PUBLIC KEY-----
-  #     <pubkey-pem-here>
-  #     -----END PUBLIC KEY-----
