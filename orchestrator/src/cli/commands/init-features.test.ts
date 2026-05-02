@@ -16,6 +16,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   ALL_FEATURES,
   applyBranchProtection,
@@ -369,6 +372,55 @@ describe('applyBranchProtection', () => {
     expect(result.error).toContain('gh repo view failed');
     expect(result.error).toContain('not authenticated');
   });
+
+  it('round-2 MAJOR fix: handles projectDir with a literal space without word-splitting', async () => {
+    // Reviewer flagged that the prior `execSync(\`${cmd} ${args.join(' ')}\`)`
+    // form ran the command through `/bin/sh -c`, which word-splits on
+    // unquoted whitespace. On macOS, projectDir often lives under a path
+    // like `~/Documents/My Project/`, so the `--input <tmpPath>` arg to
+    // `gh api` was getting split into `--input /Users/foo/My` + the
+    // stray token `Project/.ai-sdlc/branch-protection-body.json`. `gh`
+    // would then either fail with a confusing error or apply the wrong
+    // body.
+    //
+    // This test pins the contract that callers pass the tmpPath as a
+    // SINGLE argv element (no whitespace shenanigans), which combined
+    // with the production runCommand using `execFileSync` (no shell)
+    // means the path-with-space case is now correct end-to-end. The
+    // production-adapter half of the proof lives in the
+    // `buildProductionAdapters` describe block below.
+    const { state, adapters } = makeStub({
+      runResponses: new Map([
+        ['gh repo view', { stdout: 'owner/repo\n', exitCode: 0 }],
+        ['gh api', { stdout: '{}', exitCode: 0 }],
+      ]),
+    });
+    const projectDir = mkdtempSync(join(tmpdir(), 'init-with space-'));
+    try {
+      expect(projectDir).toContain(' '); // sanity: tmpdir really has a space
+      const result = await applyBranchProtection(projectDir, baseFlags, adapters);
+      expect(result.applied).toBe(true);
+
+      const apiCall = state.runCommandCalls.find((c) => c.cmd === 'gh' && c.args[0] === 'api');
+      expect(apiCall).toBeDefined();
+      const inputIdx = apiCall!.args.indexOf('--input');
+      expect(inputIdx).toBeGreaterThan(-1);
+      const tmpPathArg = apiCall!.args[inputIdx + 1];
+      // The tmpPath MUST be passed as a single argv element containing
+      // the literal space — not split across two args.
+      expect(tmpPathArg).toContain(projectDir);
+      expect(tmpPathArg).toContain(' ');
+      expect(tmpPathArg).toMatch(/branch-protection-body\.json$/);
+
+      // And the body file must actually exist + be valid JSON, since
+      // the implementation writes it via writeFileSync (not through the
+      // adapter). Reads it back to ensure no path corruption.
+      const written = readFileSync(tmpPathArg, 'utf-8');
+      expect(JSON.parse(written)).toEqual(RECOMMENDED_BRANCH_PROTECTION_BODY);
+    } finally {
+      rmSync(projectDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // ── renderNextSteps ──────────────────────────────────────────────────────
@@ -497,5 +549,25 @@ describe('buildProductionAdapters', () => {
     expect(typeof adapters.exists).toBe('function');
     expect(typeof adapters.runCommand).toBe('function');
     expect(typeof adapters.log).toBe('function');
+  });
+
+  it('round-2 MAJOR fix: runCommand passes args as argv (no shell word-splitting)', () => {
+    // Pre-fix, runCommand built a shell string via
+    // `execSync(\`${cmd} ${args.join(' ')}\`)`, which `/bin/sh -c`
+    // word-splits on whitespace. We exercise the post-fix `execFileSync`
+    // path with a single arg containing a literal space + a literal
+    // shell metacharacter (`$`). If runCommand were still going through
+    // the shell, the metacharacter would expand and the space would
+    // split the arg into two — neither happens with the argv form.
+    const adapters = buildProductionAdapters();
+    const argWithSpaceAndDollar = 'has space and $HOME literal';
+    const result = adapters.runCommand(process.execPath, [
+      '-e',
+      'process.stdout.write(process.argv[1])',
+      argWithSpaceAndDollar,
+    ]);
+    expect(result.exitCode).toBe(0);
+    // Must round-trip the literal — no word-splitting, no $HOME expansion.
+    expect(result.stdout).toBe(argWithSpaceAndDollar);
   });
 });
