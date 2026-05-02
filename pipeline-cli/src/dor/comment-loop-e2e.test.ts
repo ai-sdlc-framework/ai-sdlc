@@ -31,6 +31,8 @@ const enforceConfig: DorConfig = {
   notifications: { authorChannel: true },
   staleness: { warnAfterDays: 14, closeAfterDays: 28, closedLabel: 'closed-as-stale-dor' },
   autoPassRules: [],
+  escalation: { maxRoundsBeforeHumanTriage: 3 },
+  bypassRequiresRole: 'maintainer',
 };
 
 class InMemoryPoster implements CommentPoster {

@@ -27,6 +27,9 @@ export * from './dor-config.js';
 export * from './auto-pass.js';
 export * from './stats.js';
 export * from './slack-digest.js';
+export * from './bypass.js';
+export * from './escalation.js';
+export * from './trusted-reviewers-check.js';
 export * from './gates/index.js';
 export {
   DEFAULT_RESOLVERS,

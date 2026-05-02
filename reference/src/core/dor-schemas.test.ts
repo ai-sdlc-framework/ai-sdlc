@@ -212,6 +212,48 @@ describe('validate(DorConfig)', () => {
     const result = validate('DorConfig', doc);
     expect(result.valid).toBe(true);
   });
+
+  it('accepts escalation with the simple triager string (Phase 6)', () => {
+    const doc = {
+      ...VALID_MINIMAL_DOR_CONFIG,
+      spec: {
+        ...VALID_MINIMAL_DOR_CONFIG.spec,
+        escalation: {
+          maxRoundsBeforeHumanTriage: 3,
+          triager: '@ai-sdlc-framework/triage',
+        },
+      },
+    };
+    const result = validate('DorConfig', doc);
+    expect(result.valid).toBe(true);
+  });
+
+  it('accepts escalation with a Slack channel triager (Phase 6)', () => {
+    const doc = {
+      ...VALID_MINIMAL_DOR_CONFIG,
+      spec: {
+        ...VALID_MINIMAL_DOR_CONFIG.spec,
+        escalation: {
+          maxRoundsBeforeHumanTriage: 5,
+          triager: '#ai-sdlc-triage',
+        },
+      },
+    };
+    const result = validate('DorConfig', doc);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects escalation.triager with empty string (Phase 6)', () => {
+    const doc = {
+      ...VALID_MINIMAL_DOR_CONFIG,
+      spec: {
+        ...VALID_MINIMAL_DOR_CONFIG.spec,
+        escalation: { triager: '' },
+      },
+    };
+    const result = validate('DorConfig', doc);
+    expect(result.valid).toBe(false);
+  });
 });
 
 // ── RefinementVerdict tests ───────────────────────────────────────────

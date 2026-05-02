@@ -353,3 +353,49 @@ describe('renderPrTasksComment', () => {
     expect(body).toContain('[REDACTED:ANTHROPIC]');
   });
 });
+
+describe('round-counter helpers (RFC-0011 §6.3 + Phase 6)', () => {
+  it('dorRoundMarker stamps the round number into a stable marker', async () => {
+    const { dorRoundMarker } = await import('./comment-loop.js');
+    expect(dorRoundMarker(1)).toBe('<!-- ai-sdlc:dor-round n="1" -->');
+    expect(dorRoundMarker(7)).toBe('<!-- ai-sdlc:dor-round n="7" -->');
+  });
+
+  it('countClarificationRounds returns 0 when no markers are present', async () => {
+    const { countClarificationRounds } = await import('./comment-loop.js');
+    expect(countClarificationRounds([])).toBe(0);
+    expect(countClarificationRounds([{ id: '1', body: 'no marker here' }])).toBe(0);
+    expect(
+      countClarificationRounds([
+        { id: '1', body: '<!-- ai-sdlc:dor-comment -->\n## Issue not yet ready' },
+      ]),
+    ).toBe(0);
+  });
+
+  it('countClarificationRounds finds the highest round number across comments', async () => {
+    const { countClarificationRounds, dorRoundMarker } = await import('./comment-loop.js');
+    const comments = [
+      { id: '1', body: `${dorRoundMarker(1)}\nfirst pass` },
+      { id: '2', body: 'unrelated comment' },
+      { id: '3', body: `${dorRoundMarker(3)}\nthird pass` },
+      { id: '4', body: `${dorRoundMarker(2)}\nsecond pass (out of order)` },
+    ];
+    expect(countClarificationRounds(comments)).toBe(3);
+  });
+
+  it('countClarificationRounds handles multiple markers within one body', async () => {
+    const { countClarificationRounds, dorRoundMarker } = await import('./comment-loop.js');
+    const body = [dorRoundMarker(1), '...', dorRoundMarker(5), '...', dorRoundMarker(2)].join('\n');
+    expect(countClarificationRounds([{ id: '1', body }])).toBe(5);
+  });
+
+  it('countClarificationRounds ignores malformed markers', async () => {
+    const { countClarificationRounds } = await import('./comment-loop.js');
+    expect(
+      countClarificationRounds([
+        { id: '1', body: '<!-- ai-sdlc:dor-round -->' },
+        { id: '2', body: '<!-- ai-sdlc:dor-round n="abc" -->' },
+      ]),
+    ).toBe(0);
+  });
+});

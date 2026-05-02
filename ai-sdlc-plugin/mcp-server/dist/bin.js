@@ -22978,6 +22978,10 @@ import { existsSync as existsSync19, readFileSync as readFileSync16 } from "node
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
+// ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
+import { existsSync as existsSync20, readFileSync as readFileSync17 } from "node:fs";
+import { join as join21 } from "node:path";
+
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {
   sweepMergedWorktrees,

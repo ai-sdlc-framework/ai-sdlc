@@ -56,6 +56,8 @@ const enforceConfig: DorConfig = {
   notifications: { authorChannel: true },
   staleness: { warnAfterDays: 14, closeAfterDays: 28, closedLabel: 'closed-as-stale-dor' },
   autoPassRules: [],
+  escalation: { maxRoundsBeforeHumanTriage: 3 },
+  bypassRequiresRole: 'maintainer',
 };
 
 const warnOnlyConfig: DorConfig = { ...enforceConfig, evaluationMode: 'warn-only' };
@@ -268,6 +270,8 @@ describe('refineBacklogTask — Phase 4 auto-pass (RFC §6.4 + AISDLC-115.5)', (
     notifications: { authorChannel: true },
     staleness: { warnAfterDays: 14, closeAfterDays: 28, closedLabel: 'closed-as-stale-dor' },
     autoPassRules: [],
+    escalation: { maxRoundsBeforeHumanTriage: 3 },
+    bypassRequiresRole: 'maintainer',
   };
 
   it('signal-pipeline auto-pass admits an otherwise-vague task', async () => {
