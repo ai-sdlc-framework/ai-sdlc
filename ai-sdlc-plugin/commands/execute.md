@@ -234,7 +234,7 @@ The developer returns a JSON object. Parse it and check:
 - If any of `verifications.{build,test,lint}` is `failed`, treat as developer failure (same rollback as above).
 - Otherwise proceed to review.
 
-## Step 7 — Run three reviews in parallel
+## Step 7 — Run conditional reviews (classifier-gated subset)
 
 Build the review context once, share across all reviewers:
 
@@ -244,6 +244,45 @@ git diff origin/main...HEAD > "/tmp/pr-diff-${TASK_ID}.txt"
 git diff --name-only origin/main...HEAD > "/tmp/pr-files-${TASK_ID}.txt"
 cd -
 ```
+
+### Step 7a — Classify the PR (AISDLC-141)
+
+Pre-AISDLC-141 every push fan-outs to all 3 reviewers (testing/critic/security) regardless of PR contents. Now we run the deterministic classifier (RFC-0010 §12) first and only spawn the subset it returns. The classifier is **fail-open**: if the binary is missing, the input is unreadable, or confidence is below 0.7 it returns ALL_REVIEWERS so we never silently skip a review we should have done.
+
+The CLI is shipped from `@ai-sdlc/pipeline-cli` (build it once with `pnpm --filter @ai-sdlc/pipeline-cli build` if the binary is missing). It accepts a unified-diff file, a `git diff --numstat` file, or a paths-only file; we use the paths file we just produced because the deterministic ruleset only cares about paths.
+
+```bash
+ARTIFACTS_DIR="${ARTIFACTS_DIR:-$WORKTREE_PATH/.ai-sdlc/artifacts}"
+mkdir -p "$ARTIFACTS_DIR"
+
+# AC-4 + AC-5: classify, write the calibration log entry, capture the JSON.
+# A non-zero exit from the CLI itself would abort, but the CLI is designed
+# to fall open and exit 0 with a fellOpen=true decision instead — see
+# pipeline-cli/src/cli/classify-pr.ts.
+CLASSIFIER_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-classify-pr classify \
+  --paths-file "/tmp/pr-files-${TASK_ID}.txt" \
+  --issue-id "$TASK_ID" \
+  --artifacts-dir "$ARTIFACTS_DIR" 2>/dev/null || echo '{"reviewers":["testing","critic","security"],"fellOpen":true,"fellOpenReason":"invocation-failed","confidence":0}')
+
+# Parse the reviewer subset (one of: 0, 1, 2, or 3 names from
+# {testing, critic, security}) plus confidence + fellOpen for PR-body display
+# (AC-8). `jq` is available on every operator environment we ship to.
+SELECTED=$(printf '%s' "$CLASSIFIER_JSON" | jq -r '.reviewers | join(" ")')
+CONFIDENCE=$(printf '%s' "$CLASSIFIER_JSON" | jq -r '.confidence')
+FELL_OPEN=$(printf '%s' "$CLASSIFIER_JSON" | jq -r '.fellOpen')
+
+echo "[ai-sdlc-progress] Step 7a: classifier decision: [$SELECTED] (confidence: $CONFIDENCE, fellOpen: $FELL_OPEN)"
+```
+
+The classifier reviewer names map to the reviewer subagents like this (the agents themselves keep their existing types — no rename needed):
+
+| Classifier name | Subagent type        |
+| --------------- | -------------------- |
+| `testing`       | `test-reviewer`      |
+| `critic`        | `code-reviewer`      |
+| `security`      | `security-reviewer`  |
+
+### Step 7b — Spawn the selected subset
 
 Detect Codex availability once (the reviewer agents declare `harness: codex`):
 
@@ -255,11 +294,7 @@ else
 fi
 ```
 
-Spawn **three subagents in parallel** (single message, three Agent tool calls):
-
-- `subagent_type: code-reviewer`
-- `subagent_type: test-reviewer`
-- `subagent_type: security-reviewer`
+Spawn **only the reviewers in `$SELECTED`** in parallel (single message, N Agent tool calls where 0 ≤ N ≤ 3). For each name in `$SELECTED`, dispatch the matching subagent type per the table above. If `$SELECTED` is empty (e.g. the classifier saw an empty diff), skip Step 7b entirely and treat the gate as APPROVED with zero findings.
 
 Each prompt should contain:
 
@@ -268,9 +303,11 @@ Each prompt should contain:
 - Contents of `.ai-sdlc/review-policy.md` if present (project-specific calibration)
 - The branch name + base (`main`)
 
-Each returns a verdict JSON: `{ approved, findings, summary }`.
+Each returns a verdict JSON: `{ approved, findings, summary }`. When the classifier fell open (`fellOpen: true`), spawn ALL 3 — the existing safety semantics are preserved (AC-4).
 
-> **Reviewer concurrency at scale.** N parallel `/ai-sdlc execute` runs each spawn 3 reviewer subagents in parallel, so the worst-case concurrent reviewer count is `3N`. Reviewers are read-only (`disallowedTools: [Edit, Write, Bash?]`) and the only shared resource is the file system, which is safe for concurrent reads. The husky `pre-push` hook (in `.husky/pre-push`) does serialise across runs if multiple finish at the same moment, but the per-run review fan-out itself does not block on anything cross-run.
+> **Cost note (AC-8).** The classifier-decision line is also surfaced in the PR body (Step 11) as `Classifier decision: [<reviewers>] (confidence: <N.NN>)`. That gives the operator a per-PR view of how often we successfully scope down vs. fall open — feedback for the calibration log.
+
+> **Reviewer concurrency at scale.** N parallel `/ai-sdlc execute` runs each spawn AT MOST 3 reviewer subagents in parallel, so the worst-case concurrent reviewer count is `3N` (unchanged from the pre-AISDLC-141 ceiling — the classifier only ever shrinks fan-out, never grows it). Reviewers are read-only (`disallowedTools: [Edit, Write, Bash?]`) and the only shared resource is the file system, which is safe for concurrent reads. The husky `pre-push` hook (in `.husky/pre-push`) does serialise across runs if multiple finish at the same moment, but the per-run review fan-out itself does not block on anything cross-run.
 
 ## Step 8 — Aggregate verdicts
 
@@ -592,6 +629,7 @@ Compose the PR body from:
 - The developer's `summary` field
 - A list of changed files (`git diff --name-only origin/main...HEAD`)
 - A `<details>` block with the code-reviewer verdict
+- **AISDLC-141 — classifier decision line**: `Classifier decision: [<reviewers>] (confidence: <N.NN>)` (or `Classifier decision: [testing critic security] (fellOpen: <reason>)` when the classifier fell open). This gives the operator per-PR visibility into how often we successfully scope review fan-out down vs. fall open. Use the `$SELECTED`/`$CONFIDENCE`/`$FELL_OPEN` shell vars captured in Step 7a.
 - A footer: `References $TASK_ID` (NOT `Closes` — backlog tasks aren't auto-closed by GitHub PR merges; the `.github/workflows/backlog-task-complete.yml` workflow handles it)
 
 ```bash

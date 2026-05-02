@@ -44,6 +44,12 @@ jobs:
       testing: ${{ steps.review.outputs.testing }}
       critic: ${{ steps.review.outputs.critic }}
       security: ${{ steps.review.outputs.security }}
+      # AISDLC-141: classifier decision surfaced to the report job so the
+      # PR body shows "Classifier decision: [<reviewers>] (confidence: N.NN)"
+      # — operator visibility into when fan-out was scoped down vs. fell open.
+      classifier_selected: ${{ steps.classify.outputs.selected }}
+      classifier_confidence: ${{ steps.classify.outputs.confidence }}
+      classifier_fell_open: ${{ steps.classify.outputs.fell_open }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,12 +72,48 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Generate the diff
+          # Generate the diff + a paths-only file for the classifier (AISDLC-141).
           git diff "$BASE_SHA"..."$HEAD_SHA" > /tmp/pr-diff.txt
+          git diff --name-only "$BASE_SHA"..."$HEAD_SHA" > /tmp/pr-files.txt
 
           # Extract linked issue number from PR body (matches "Closes #N" pattern)
           ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '(?:Closes|Fixes|Resolves)\s+#\K\d+' | head -1 || true)
           echo "issue_number=${ISSUE_NUM:-}" >> "$GITHUB_OUTPUT"
+
+      # ── AISDLC-141: conditional review classifier (RFC-0010 §12) ─────
+      # Decide which subset of {testing, critic, security} to run. The CLI
+      # is fail-open: missing input → ALL_REVIEWERS; confidence < 0.7 →
+      # ALL_REVIEWERS. So we never silently skip a review we should have
+      # done. The calibration log entry is appended to
+      # /tmp/classifier-artifacts/_classifier/calibration.jsonl for
+      # offline inspection (uploaded as artifact below for cross-PR audit).
+      - name: Classify PR (decide reviewer subset)
+        id: classify
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          mkdir -p /tmp/classifier-artifacts
+          # `--silent` suppresses pnpm's progress noise so we capture clean JSON.
+          # `|| echo ...` is the belt-and-braces fallback in case the binary is
+          # missing — emits a fellOpen=true ALL_REVIEWERS decision and we proceed.
+          CLASSIFIER_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-classify-pr classify \
+            --paths-file /tmp/pr-files.txt \
+            --issue-id "PR-${PR_NUMBER}" \
+            --artifacts-dir /tmp/classifier-artifacts 2>/tmp/classifier-stderr.txt \
+            || echo '{"reviewers":["testing","critic","security"],"fellOpen":true,"fellOpenReason":"invocation-failed","confidence":0}')
+          if [ -s /tmp/classifier-stderr.txt ]; then
+            echo "::group::classifier stderr"
+            cat /tmp/classifier-stderr.txt
+            echo "::endgroup::"
+          fi
+
+          SELECTED=$(printf '%s' "$CLASSIFIER_JSON" | jq -r '.reviewers | join(" ")')
+          CONFIDENCE=$(printf '%s' "$CLASSIFIER_JSON" | jq -r '.confidence')
+          FELL_OPEN=$(printf '%s' "$CLASSIFIER_JSON" | jq -r '.fellOpen')
+          echo "selected=${SELECTED}" >> "$GITHUB_OUTPUT"
+          echo "confidence=${CONFIDENCE}" >> "$GITHUB_OUTPUT"
+          echo "fell_open=${FELL_OPEN}" >> "$GITHUB_OUTPUT"
+          echo "Classifier decision: [${SELECTED}] (confidence: ${CONFIDENCE}, fellOpen: ${FELL_OPEN})"
 
       - name: Fetch linked issue context
         if: steps.context.outputs.issue_number
@@ -84,40 +126,55 @@ jobs:
       - name: Create empty issue file if not fetched
         run: test -f /tmp/linked-issue.json || echo '{}' > /tmp/linked-issue.json
 
-      - name: Run parallel review agents
+      - name: Run conditional review agents (classifier-gated subset)
         id: review
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # AISDLC-141: only spawn the reviewers the classifier selected. The
+          # subset is space-separated names from {testing, critic, security}.
+          # Empty subset means the classifier scoped review entirely down (e.g.
+          # 0 files changed) — we treat un-selected reviewers as auto-approved
+          # with empty findings so the report job's gate logic stays unchanged.
+          SELECTED: ${{ steps.classify.outputs.selected }}
         run: |
-          # Run all three review agents in parallel
-          pnpm --filter @ai-sdlc/dogfood review \
-            --pr "$PR_NUMBER" \
-            --diff-file /tmp/pr-diff.txt \
-            --issue-file /tmp/linked-issue.json \
-            --type testing > /tmp/review-testing.txt 2>/tmp/review-testing-stderr.txt &
-          PID_TESTING=$!
+          # Helper: spawn the dogfood reviewer for $TYPE in background.
+          run_review() {
+            local TYPE="$1"
+            pnpm --filter @ai-sdlc/dogfood review \
+              --pr "$PR_NUMBER" \
+              --diff-file /tmp/pr-diff.txt \
+              --issue-file /tmp/linked-issue.json \
+              --type "$TYPE" > "/tmp/review-${TYPE}.txt" 2>"/tmp/review-${TYPE}-stderr.txt"
+          }
 
-          pnpm --filter @ai-sdlc/dogfood review \
-            --pr "$PR_NUMBER" \
-            --diff-file /tmp/pr-diff.txt \
-            --issue-file /tmp/linked-issue.json \
-            --type critic > /tmp/review-critic.txt 2>/tmp/review-critic-stderr.txt &
-          PID_CRITIC=$!
+          # Auto-approve verdict for un-selected reviewers (empty findings).
+          # The schema must match what dogfood produces so the report job's
+          # parser accepts it as a valid verdict.
+          AUTO_APPROVED='{"approved":true,"findings":[],"summary":"Skipped by classifier (RFC-0010 §12) — change does not require this review type."}'
 
-          pnpm --filter @ai-sdlc/dogfood review \
-            --pr "$PR_NUMBER" \
-            --diff-file /tmp/pr-diff.txt \
-            --issue-file /tmp/linked-issue.json \
-            --type security > /tmp/review-security.txt 2>/tmp/review-security-stderr.txt &
-          PID_SECURITY=$!
+          # Spawn each reviewer iff in $SELECTED; otherwise write the
+          # auto-approved verdict directly. This preserves the existing
+          # downstream contract (3 outputs: testing, critic, security) while
+          # cutting the number of LLM invocations to len($SELECTED).
+          PIDS=""
+          for TYPE in testing critic security; do
+            if printf ' %s ' "$SELECTED" | grep -qF " $TYPE "; then
+              run_review "$TYPE" &
+              PIDS="$PIDS $!"
+            else
+              printf '%s\n' "$AUTO_APPROVED" > "/tmp/review-${TYPE}.txt"
+              : > "/tmp/review-${TYPE}-stderr.txt"
+              echo "Skipping $TYPE reviewer — not in classifier subset [$SELECTED]"
+            fi
+          done
 
-          # Wait for all — don't fail if one agent errors
-          wait $PID_TESTING || true
-          wait $PID_CRITIC || true
-          wait $PID_SECURITY || true
+          # Wait for all spawned reviewers — don't fail if one errors.
+          for PID in $PIDS; do
+            wait "$PID" || true
+          done
 
-          # Log stderr in collapsed groups
+          # Log stderr in collapsed groups (only for reviewers that actually ran).
           for TYPE in testing critic security; do
             if [ -s "/tmp/review-${TYPE}-stderr.txt" ]; then
               echo "::group::${TYPE} review stderr"
@@ -126,7 +183,8 @@ jobs:
             fi
           done
 
-          # Capture last line of each output (the JSON verdict)
+          # Capture last line of each output (the JSON verdict). For skipped
+          # reviewers this is the AUTO_APPROVED line we wrote above.
           TESTING=$(tail -1 /tmp/review-testing.txt 2>/dev/null || echo '{}')
           CRITIC=$(tail -1 /tmp/review-critic.txt 2>/dev/null || echo '{}')
           SECURITY=$(tail -1 /tmp/review-security.txt 2>/dev/null || echo '{}')
@@ -134,6 +192,15 @@ jobs:
           echo "testing=$TESTING" >> "$GITHUB_OUTPUT"
           echo "critic=$CRITIC" >> "$GITHUB_OUTPUT"
           echo "security=$SECURITY" >> "$GITHUB_OUTPUT"
+
+      - name: Upload classifier calibration log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: classifier-calibration-${{ github.event.pull_request.number }}
+          path: /tmp/classifier-artifacts/_classifier/
+          if-no-files-found: ignore
+          retention-days: 30
 
   # ── Job 2: Post Reviews (write access, no LLM) ──────────────────
   # Has GitHub write access but NO ANTHROPIC_API_KEY.
@@ -158,6 +225,9 @@ jobs:
           TESTING_JSON: ${{ needs.analyze.outputs.testing }}
           CRITIC_JSON: ${{ needs.analyze.outputs.critic }}
           SECURITY_JSON: ${{ needs.analyze.outputs.security }}
+          CLASSIFIER_SELECTED: ${{ needs.analyze.outputs.classifier_selected }}
+          CLASSIFIER_CONFIDENCE: ${{ needs.analyze.outputs.classifier_confidence }}
+          CLASSIFIER_FELL_OPEN: ${{ needs.analyze.outputs.classifier_fell_open }}
         with:
           script: |
             // ── Parse and validate all three verdicts ─────────
@@ -221,6 +291,20 @@ jobs:
 
             // ── Build summary body ─────────────────────────────
             let body = `## AI-SDLC: Automated PR Review\n\n`;
+
+            // AISDLC-141 (AC-8): surface the classifier decision so operators
+            // see the fan-out savings (or the safety fall-open). Format:
+            //   Classifier decision: [testing critic security] (confidence: 0.80)
+            // or fell-open variant:
+            //   Classifier decision: [testing critic security] (fellOpen: invocation-failed)
+            const cSelected = (process.env.CLASSIFIER_SELECTED || '').trim();
+            const cConfidence = (process.env.CLASSIFIER_CONFIDENCE || '').trim();
+            const cFellOpen = (process.env.CLASSIFIER_FELL_OPEN || '').trim();
+            if (cSelected || cConfidence) {
+              const fellOpenSuffix = cFellOpen === 'true' ? ' (fellOpen)' : '';
+              body += `_Classifier decision: [${cSelected}] (confidence: ${cConfidence})${fellOpenSuffix}_\n\n`;
+            }
+
             body += allApproved
               ? `All three review agents **approved** this PR.\n\n`
               : `One or more review agents found issues.\n\n`;
