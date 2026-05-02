@@ -12,6 +12,20 @@
  *    orchestrator version that ran init, with an inline opt-out hint.
  *  - Skip `.cursor/mcp.json` unless Cursor is detected (project-local
  *    `.cursor/`, user-global `~/.cursor/`) or `--cursor` is passed.
+ *
+ * AISDLC-143 enhancements (Q4(b) of the quality-gate redesign):
+ *  - Default invocation is now an interactive WIZARD (DoR / attestation /
+ *    classifier / branch-protection prompts) so adopters get a guided
+ *    bootstrap instead of having to read the docs to discover features.
+ *  - `--yes` short-circuits all prompts to "accept defaults" (CI/scripts).
+ *  - `--with-X` flags opt into individual features without prompting.
+ *  - `--add <feature>` extends an already-initialized repo with a single
+ *    feature, idempotently — re-running on an initialized repo is safe.
+ *  - `.github/workflows/ai-sdlc-gate.yml` is scaffolded UNCONDITIONALLY
+ *    so every adopter gets the `ai-sdlc/pr-ready` rollup check on day one
+ *    (Q1: prescriptive default).
+ *  - A "next steps" summary closes the run with operator action items
+ *    conditional on which features were chosen.
  */
 
 import { Command } from 'commander';
@@ -21,6 +35,16 @@ import { detectAgentsDetailed, installMcpServer } from './mcp-setup.js';
 import { detectWorkspace, generateWorkspaceYaml, type WorkspaceRepo } from './workspace-detect.js';
 import { detectGitRemote, applyRemoteToPipelineYaml } from './git-remote.js';
 import { resolveVersions, formatVersionBlock } from '../versions.js';
+import {
+  applyFeatureSelection,
+  buildProductionAdapters,
+  ensureClaudeMdPointer,
+  renderNextSteps,
+  resolveFeatureSelection,
+  type FeatureAdapters,
+  type FeatureSelection,
+  type WizardFlags,
+} from './init-features.js';
 
 const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
@@ -356,6 +380,50 @@ function initWorkspaceRoot(
   }
 }
 
+/**
+ * Build the WizardFlags struct from Commander's parsed options. Pulled
+ * out into a function so tests can drive the wizard pipeline directly
+ * without going through Commander's stateful option store.
+ */
+export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
+  const addRaw = typeof opts.add === 'string' ? opts.add : undefined;
+  const addNormalized = addRaw === 'branch-protection' ? 'branch-protection' : addRaw;
+  let add: WizardFlags['add'];
+  if (
+    addNormalized === 'dor' ||
+    addNormalized === 'attestation' ||
+    addNormalized === 'classifier' ||
+    addNormalized === 'branch-protection'
+  ) {
+    add = addNormalized;
+  }
+  return {
+    yes: !!opts.yes,
+    withDor: !!opts.withDor,
+    withAttestation: !!opts.withAttestation,
+    withClassifier: !!opts.withClassifier,
+    withBranchProtection: !!opts.withBranchProtection,
+    add,
+    dryRun: !!opts.dryRun,
+  };
+}
+
+/** Validate a `--add` arg and return either the normalized value or null+error. */
+function validateAddArg(
+  addRaw: unknown,
+): { ok: true; value?: WizardFlags['add'] } | { ok: false; error: string } {
+  if (addRaw === undefined || addRaw === null || addRaw === false) return { ok: true };
+  if (typeof addRaw !== 'string') return { ok: false, error: `--add must be a string` };
+  const allowed = ['dor', 'attestation', 'classifier', 'branch-protection'];
+  if (!allowed.includes(addRaw)) {
+    return {
+      ok: false,
+      error: `--add: unknown feature '${addRaw}'. Expected one of: ${allowed.join(', ')}.`,
+    };
+  }
+  return { ok: true, value: addRaw as WizardFlags['add'] };
+}
+
 export const initCommand = new Command('init')
   .description('Initialize AI-SDLC configuration in the current project')
   .option('--dry-run', 'Show what would be created without writing files')
@@ -366,6 +434,19 @@ export const initCommand = new Command('init')
     '--role <tier>',
     `Agent-role tool tier: ${AGENT_ROLE_TIERS.join(' | ')} (default: coding)`,
     'coding',
+  )
+  // ── AISDLC-143 wizard flags ─────────────────────────────────────────
+  .option('-y, --yes', 'Accept all defaults (non-interactive; CI/scripts)')
+  .option('--with-dor', 'Scaffold Definition-of-Ready gate config + workflow')
+  .option('--with-attestation', 'Scaffold attestation infrastructure (audit-only)')
+  .option('--with-classifier', 'Scaffold review classifier config stub')
+  .option(
+    '--with-branch-protection',
+    'Apply recommended branch-protection rule to main (requires gh)',
+  )
+  .option(
+    '--add <feature>',
+    'Extend an already-initialized repo with a single feature: dor | attestation | classifier | branch-protection',
   )
   .action(async (opts) => {
     const projectDir = process.cwd();
@@ -381,6 +462,31 @@ export const initCommand = new Command('init')
     }
     const tier = tierInput as AgentRoleTier;
     const cursorOptIn = !!opts.cursor;
+
+    // ── Validate --add early so we error before doing any work. ────────
+    const addCheck = validateAddArg(opts.add);
+    if (!addCheck.ok) {
+      console.error(`Error: ${addCheck.error}`);
+      process.exitCode = 1;
+      return;
+    }
+    const flags = buildWizardFlags(opts);
+
+    // ── --add path: extend an already-initialized repo ────────────────
+    // AC #7: skip the "always-scaffold-baseline" path entirely; the
+    // wizard dispatcher's `--add` branch knows to write only the chosen
+    // feature's templates (no pipeline.yaml, no MCP setup, no workspace
+    // detection). This is the safe re-run path on a repo that already
+    // ran `ai-sdlc init` once.
+    if (flags.add) {
+      const adapters: FeatureAdapters = buildProductionAdapters();
+      const selection: FeatureSelection = await resolveFeatureSelection(flags, adapters);
+      console.log(`Extending AI-SDLC config with --add ${flags.add}:`);
+      console.log('');
+      const result = await applyFeatureSelection(projectDir, selection, flags, adapters);
+      renderNextSteps(selection, result, adapters);
+      return;
+    }
 
     // ── version provenance (AC #1) ────────────────────────────────────
     const versions = resolveVersions({ workDir: projectDir });
@@ -449,6 +555,14 @@ export const initCommand = new Command('init')
       }
 
       console.log(`\nAI-SDLC workspace initialized in ${projectDir}/`);
+
+      // ── AISDLC-143 wizard (workspace root) ────────────────────────
+      // The wizard runs ONCE at the workspace root: the baseline gate
+      // workflow + per-feature workflows live at `<workspace-root>/.github/`,
+      // not in each child repo. Children share the same CI from the
+      // root since GHA workflows always live at the repo root anyway.
+      await runWizardStage(projectDir, flags);
+
       console.log(`Run 'ai-sdlc health' to verify your configuration.`);
     } else {
       // Single-repo mode (original behavior)
@@ -474,6 +588,33 @@ export const initCommand = new Command('init')
       }
 
       console.log(`\nAI-SDLC config initialized in ${join(projectDir, configDirName)}/`);
+
+      // ── AISDLC-143 wizard (single-repo) ──────────────────────────
+      await runWizardStage(projectDir, flags);
+
       console.log(`Run 'ai-sdlc health' to verify your configuration.`);
     }
   });
+
+/**
+ * Run the AISDLC-143 wizard stage: prompt the user (or short-circuit on
+ * --yes / --with-X), apply the chosen feature templates, append the
+ * CLAUDE.md pointer, and render the "next steps" summary.
+ *
+ * Pulled out of the inline action body so both the single-repo and
+ * workspace-root branches share the same wiring. Adapters are built
+ * once here (production = real disk writes; tests inject stubs by
+ * calling `applyFeatureSelection`/`renderNextSteps` directly).
+ */
+async function runWizardStage(projectDir: string, flags: WizardFlags): Promise<void> {
+  const adapters: FeatureAdapters = buildProductionAdapters();
+  console.log('');
+  console.log('━━━ Feature wizard ━━━');
+  console.log('');
+  const selection: FeatureSelection = await resolveFeatureSelection(flags, adapters);
+  console.log('');
+  console.log('Scaffolding selected features:');
+  const result = await applyFeatureSelection(projectDir, selection, flags, adapters);
+  ensureClaudeMdPointer(projectDir, adapters, flags.dryRun);
+  renderNextSteps(selection, result, adapters);
+}
