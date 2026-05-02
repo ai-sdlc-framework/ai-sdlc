@@ -16,29 +16,51 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+  rmSync,
+  realpathSync,
+} from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 
 /**
  * Initialize `dir` as a real git repo (with no remote) so detectGitRemote
- * sees a valid `.git/` and reports the no-remote fallback path. We use a
- * real `git init` instead of `mkdirSync('.git')` so git doesn't walk UP
- * looking for a parent repository (AISDLC-104) — an empty `.git/` is not
- * a valid repository, and on a developer laptop where the test is invoked
- * from inside the ai-sdlc-framework checkout, that walk-up silently
- * resolves to the host repo's origin and breaks the fallback assertion.
+ * sees a valid `.git/` and reports the no-remote fallback path. We write the
+ * minimal layout directly instead of spawning `git init` because under heavy
+ * parallel CPU contention (e.g. `pnpm -r test:coverage` running every
+ * package's coverage suite concurrently) `git init --quiet` was observed to
+ * exit 0 without producing `.git/config`, breaking 10 of 14 tests
+ * deterministically. Direct fs writes are immune to subprocess contention.
  *
- * AISDLC-134: belt-and-braces — also assert the `.git/config` file
- * actually exists after init so a silently failing `git` (e.g. broken
- * PATH, sandbox restrictions, exec returning code 0 without writing)
- * surfaces here instead of as a confusing org-bleed assertion later.
+ * The layout is enough for `git rev-parse --show-toplevel`, `git remote add`,
+ * and `git remote get-url origin` to function — verified manually. An empty
+ * `.git/` is NOT enough (git walks UP looking for a real repo and finds the
+ * ai-sdlc-framework host checkout, breaking the AISDLC-104 fallback
+ * assertion); the GIT_CEILING_DIRECTORIES pin in beforeEach further protects
+ * against that walk-up.
+ *
+ * AISDLC-134: belt-and-braces — assert `.git/config` exists post-write so a
+ * silently failing `writeFileSync` surfaces here instead of as a confusing
+ * org-bleed assertion later.
  */
 function initBareRepo(dir: string): void {
-  execSync('git init --quiet', { cwd: dir, stdio: 'ignore' });
-  if (!existsSync(join(dir, '.git', 'config'))) {
-    throw new Error(`initBareRepo: \`git init\` did not create .git/config in ${dir}`);
+  const gitDir = join(dir, '.git');
+  mkdirSync(join(gitDir, 'refs', 'heads'), { recursive: true });
+  mkdirSync(join(gitDir, 'objects', 'info'), { recursive: true });
+  mkdirSync(join(gitDir, 'objects', 'pack'), { recursive: true });
+  writeFileSync(
+    join(gitDir, 'config'),
+    '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n',
+  );
+  writeFileSync(join(gitDir, 'HEAD'), 'ref: refs/heads/main\n');
+  if (!existsSync(join(gitDir, 'config'))) {
+    throw new Error(`initBareRepo: failed to write .git/config in ${dir}`);
   }
 }
 
@@ -46,6 +68,10 @@ let tmpDir: string;
 let prevCwd: string;
 let prevHome: string | undefined;
 let prevCeiling: string | undefined;
+let prevGitDir: string | undefined;
+let prevGitWorkTree: string | undefined;
+let prevGitCommonDir: string | undefined;
+let prevGitIndexFile: string | undefined;
 let consoleSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
@@ -70,6 +96,21 @@ beforeEach(() => {
   // /private/var/... canonical form by git.
   prevCeiling = process.env.GIT_CEILING_DIRECTORIES;
   process.env.GIT_CEILING_DIRECTORIES = realpathSync(tmpdir());
+  // Unset GIT_DIR / GIT_WORK_TREE / GIT_COMMON_DIR / GIT_INDEX_FILE — when
+  // this test suite runs under a `git push` pre-push hook (husky),
+  // GIT_DIR is set to the worktree's `.git/` and inherited by every
+  // subprocess. Subsequent `execSync('git ...', { cwd: tmpDir })` calls
+  // then operate on the worktree's repo (ignoring `cwd`) instead of the
+  // hand-crafted `.git/` we just wrote, breaking detectGitRemote and
+  // `git remote add`.
+  prevGitDir = process.env.GIT_DIR;
+  delete process.env.GIT_DIR;
+  prevGitWorkTree = process.env.GIT_WORK_TREE;
+  delete process.env.GIT_WORK_TREE;
+  prevGitCommonDir = process.env.GIT_COMMON_DIR;
+  delete process.env.GIT_COMMON_DIR;
+  prevGitIndexFile = process.env.GIT_INDEX_FILE;
+  delete process.env.GIT_INDEX_FILE;
   consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   process.exitCode = undefined;
 });
@@ -80,6 +121,14 @@ afterEach(() => {
   else process.env.HOME = prevHome;
   if (prevCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
   else process.env.GIT_CEILING_DIRECTORIES = prevCeiling;
+  if (prevGitDir === undefined) delete process.env.GIT_DIR;
+  else process.env.GIT_DIR = prevGitDir;
+  if (prevGitWorkTree === undefined) delete process.env.GIT_WORK_TREE;
+  else process.env.GIT_WORK_TREE = prevGitWorkTree;
+  if (prevGitCommonDir === undefined) delete process.env.GIT_COMMON_DIR;
+  else process.env.GIT_COMMON_DIR = prevGitCommonDir;
+  if (prevGitIndexFile === undefined) delete process.env.GIT_INDEX_FILE;
+  else process.env.GIT_INDEX_FILE = prevGitIndexFile;
   rmSync(tmpDir, { recursive: true, force: true });
   consoleSpy.mockRestore();
   process.exitCode = undefined;
@@ -144,8 +193,10 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     // ceiling pin, git stops at proj/ and reports the no-remote fallback.
     const hostDir = mkdtempSync(join(tmpdir(), 'aisdlc-104-host-'));
     try {
-      // Build the host repo with a fake origin.
-      execSync('git init --quiet', { cwd: hostDir, stdio: 'ignore' });
+      // Build the host repo with a fake origin. Use the same direct-write
+      // layout as initBareRepo so this path is also immune to the parallel
+      // `git init` flake.
+      initBareRepo(hostDir);
       execSync('git remote add origin git@github.com:acme-host/host-repo.git', {
         cwd: hostDir,
         stdio: 'ignore',
@@ -287,10 +338,13 @@ describe('init — workspace cascade (multi-repo parent dir)', () => {
       try {
         // Re-init properly so config commands work (the bare .git dir
         // we created is enough for detectWorkspace but not for `git
-        // remote`).
-        execSync('git init -q', { cwd: join(tmpDir, repo), stdio: 'ignore' });
+        // remote`). Use the direct-write helper to dodge the parallel
+        // `git init` flake under coverage runs.
+        const repoDir = join(tmpDir, repo);
+        rmSync(join(repoDir, '.git'), { recursive: true, force: true });
+        initBareRepo(repoDir);
         execSync(`git remote add origin ${url}`, {
-          cwd: join(tmpDir, repo),
+          cwd: repoDir,
           stdio: 'ignore',
         });
         return true;
