@@ -234,7 +234,7 @@ The developer returns a JSON object. Parse it and check:
 - If any of `verifications.{build,test,lint}` is `failed`, treat as developer failure (same rollback as above).
 - Otherwise proceed to review.
 
-## Step 7 — Run conditional reviews (classifier-gated subset)
+## Step 7 — Run conditional reviews (classifier-gated subset, incremental delta)
 
 Build the review context once, share across all reviewers:
 
@@ -282,6 +282,88 @@ The classifier reviewer names map to the reviewer subagents like this (the agent
 | `critic`        | `code-reviewer`      |
 | `security`      | `security-reviewer`  |
 
+### Step 7a-bis — Incremental review gate (AISDLC-142)
+
+Pre-AISDLC-142 every push fed each spawned reviewer the FULL PR diff, even when only 5 lines changed since the prior approval. Now we layer a content-hash gate ON TOP of the classifier subset: the same `contentHashV3` algorithm CI uses for attestation tells us whether anything materially changed since the last review.
+
+The gate has three branches (decided by `cli-incremental-decide`, which is fail-open in the same shape as `cli-classify-pr`):
+
+- **`unchanged`** — content-hash matches the marker → SKIP all spawned reviewers, write auto-approved verdicts directly. Update marker with the same hash + new SHA. (AC #3)
+- **`delta-only`** — hash differs AND delta is within the safety threshold (default 200 lines, no new top-level dirs) → spawn the classifier-selected reviewers against `git diff <last-reviewed-sha>...HEAD` (delta only) PLUS a "the FULL PR diff was reviewed earlier; this incremental review only covers the delta from <sha>" preamble. Reviewer verdicts STILL apply to the whole PR. (AC #4)
+- **`no-marker` / `delta-too-large` / `new-top-level-dir`** — fall back to FULL review against `/tmp/pr-diff-${TASK_ID}.txt`. (AC #5, plus first-push)
+
+Marker storage: a single PR comment whose body contains `<!-- ai-sdlc:last-reviewed-contenthash:<base64url-json> -->`. Mirrors the idempotent-marker pattern from `<!-- ai-sdlc:dor-comment ... -->` and `<!-- ai-sdlc:attestation-fallback-comment -->`.
+
+```bash
+# Fetch existing PR comments (if any) so the gate can read the prior marker.
+# `gh pr view --json comments` is cheap (one API call) and works against the
+# branch's open PR. Empty file when no PR exists yet (first push) — the gate
+# treats that as `no-marker` → FULL review.
+PR_COMMENTS_FILE="/tmp/pr-comments-${TASK_ID}.txt"
+gh pr view "$BRANCH" --json comments --jq '.comments[].body' \
+  > "$PR_COMMENTS_FILE" 2>/dev/null || : > "$PR_COMMENTS_FILE"
+
+# Compute the delta numstat ONLY when a marker exists; the CLI no-ops it
+# otherwise. We extract the prior reviewedSha from the marker, then run
+# `git diff <sha>...HEAD --numstat`. If `gh` returned nothing, `jq` returns
+# empty and the numstat step is skipped — the gate falls through to no-marker.
+PRIOR_SHA=$(grep -oE '<!-- ai-sdlc:last-reviewed-contenthash:[A-Za-z0-9_-]+ -->' "$PR_COMMENTS_FILE" 2>/dev/null \
+  | tail -1 \
+  | sed -E 's/.*contenthash:([A-Za-z0-9_-]+) -->/\1/' \
+  | { read B64 && [ -n "$B64" ] && printf '%s' "$B64" \
+      | base64 -d 2>/dev/null \
+      | jq -r '.reviewedSha' 2>/dev/null; } || echo "")
+
+DELTA_NUMSTAT_FILE="/tmp/pr-delta-numstat-${TASK_ID}.txt"
+: > "$DELTA_NUMSTAT_FILE"
+if [ -n "$PRIOR_SHA" ]; then
+  cd "$WORKTREE_PATH"
+  # Cap the diff against PRIOR_SHA at the merge-base of HEAD if PRIOR_SHA isn't
+  # in the current history (rebase changed history). On failure we leave the
+  # numstat file empty — the CLI will treat unreadable input as the safer
+  # `delta-too-large` branch and route to FULL review.
+  git diff "$PRIOR_SHA"...HEAD --numstat > "$DELTA_NUMSTAT_FILE" 2>/dev/null || : > "$DELTA_NUMSTAT_FILE"
+  cd - >/dev/null
+fi
+
+INCREMENTAL_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide decide \
+  --comments-file "$PR_COMMENTS_FILE" \
+  --base-ref origin/main \
+  --head-ref HEAD \
+  --repo-root "$WORKTREE_PATH" \
+  --numstat-file "$DELTA_NUMSTAT_FILE" \
+  --full-diff-paths-file "/tmp/pr-files-${TASK_ID}.txt" 2>/dev/null \
+  || echo '{"skip":false,"deltaOnly":false,"reason":"no-marker","currentContentHash":"","priorContentHash":null,"lastReviewedSha":null,"deltaSize":0}')
+
+INCR_SKIP=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.skip')
+INCR_DELTA_ONLY=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.deltaOnly')
+INCR_REASON=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.reason')
+INCR_LAST_SHA=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.lastReviewedSha // empty')
+INCR_CONTENT_HASH=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.currentContentHash')
+INCR_DELTA_SIZE=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.deltaSize')
+
+echo "[ai-sdlc-progress] Step 7a-bis: incremental decision: $INCR_REASON (skip=$INCR_SKIP, deltaOnly=$INCR_DELTA_ONLY, deltaSize=$INCR_DELTA_SIZE, lastReviewedSha=${INCR_LAST_SHA:-none})"
+```
+
+When `INCR_SKIP=true` (AC #3): write the auto-approved verdict for EVERY reviewer in `$SELECTED` directly (no Agent calls), aggregate as APPROVED in Step 8, set the PR-body note to `> Incremental review (AISDLC-142): prior approval reused (no content change since SHA $INCR_LAST_SHA)`, then proceed to Step 8 / Step 10.
+
+When `INCR_DELTA_ONLY=true` (AC #4): the spawned reviewers in Step 7b receive the DELTA diff (`git diff $INCR_LAST_SHA...HEAD`) instead of the full PR diff, plus the preamble described above. Build the delta diff once into a separate file:
+
+```bash
+if [ "$INCR_DELTA_ONLY" = "true" ]; then
+  cd "$WORKTREE_PATH"
+  git diff "$INCR_LAST_SHA"...HEAD > "/tmp/pr-delta-diff-${TASK_ID}.txt" 2>/dev/null \
+    || cp "/tmp/pr-diff-${TASK_ID}.txt" "/tmp/pr-delta-diff-${TASK_ID}.txt"
+  cd - >/dev/null
+fi
+```
+
+Reviewers ALWAYS read from `/tmp/pr-delta-diff-${TASK_ID}.txt` when `INCR_DELTA_ONLY=true`, otherwise from `/tmp/pr-diff-${TASK_ID}.txt`.
+
+> **Composes with Step 7a (AISDLC-141, AC #7).** The classifier runs FIRST and decides WHICH reviewers to spawn (the `$SELECTED` subset). The incremental gate then decides WHAT each one reads (skip / delta / full). When the classifier scoped review to e.g. just `[security]` and the incremental gate says `unchanged`, we spawn 0 reviewers AND auto-approve only `security` — the other two are still skipped by the classifier with their AISDLC-141 auto-approved verdicts. Net: minimum work that still satisfies the safety contract.
+
+> **Marker update happens after Step 8 (post-aggregation).** See Step 8 below for the `gh pr comment` upsert. We do NOT update the marker before the reviewers report their verdicts — a marker update before the verdict gate would let a CHANGES_REQUESTED finding silently bind the marker to an un-approved SHA.
+
 ### Step 7b — Spawn the selected subset
 
 Detect Codex availability once (the reviewer agents declare `harness: codex`):
@@ -296,9 +378,14 @@ fi
 
 Spawn **only the reviewers in `$SELECTED`** in parallel (single message, N Agent tool calls where 0 ≤ N ≤ 3). For each name in `$SELECTED`, dispatch the matching subagent type per the table above. If `$SELECTED` is empty (e.g. the classifier saw an empty diff), skip Step 7b entirely and treat the gate as APPROVED with zero findings.
 
-Each prompt should contain:
+**AISDLC-142 — incremental short-circuit:** if `INCR_SKIP=true`, do NOT spawn any reviewers in `$SELECTED`. Write the auto-approved verdict (from `cli-incremental-decide auto-approved-verdict --reviewed-sha $INCR_LAST_SHA`) for each one and skip directly to Step 8 aggregation. The classifier-skipped reviewers' AISDLC-141 auto-approved verdicts still apply for the others.
 
-- The PR diff (from `/tmp/pr-diff-${TASK_ID}.txt`)
+Each spawned-reviewer prompt should contain:
+
+- The review diff:
+  - if `INCR_DELTA_ONLY=true` → the delta diff from `/tmp/pr-delta-diff-${TASK_ID}.txt` PLUS a preamble:
+    > **Incremental review (AISDLC-142):** the FULL PR diff was reviewed earlier at SHA `$INCR_LAST_SHA`. This incremental review only covers the delta from `$INCR_LAST_SHA` to HEAD ($INCR_DELTA_SIZE lines). Your verdict still applies to the WHOLE PR — only the diff you read is scoped down.
+  - otherwise → the full PR diff from `/tmp/pr-diff-${TASK_ID}.txt`
 - The task title, description, AC list
 - Contents of `.ai-sdlc/review-policy.md` if present (project-specific calibration)
 - The branch name + base (`main`)
@@ -316,10 +403,45 @@ Combine the three verdicts:
 - Count findings by severity across all reviewers (`critical`, `major`, `minor`, `suggestion`).
 - If `HARNESS_NOTE` is non-empty, prepend it to the aggregated summary so the operator sees the independence warning every time it applies.
 - Compute the gate decision:
-  - **APPROVED**: all three reviewers approved AND no `critical`/`major` findings → proceed to PR (Step 10).
-  - **CHANGES REQUESTED**: any `critical` or `major` findings → enter the iteration loop (Step 9).
+  - **APPROVED**: all three reviewers approved AND no `critical`/`major` findings → proceed to Step 8.5 marker update, then Step 10.
+  - **CHANGES REQUESTED**: any `critical` or `major` findings → enter the iteration loop (Step 9). Do NOT update the marker on this branch — the marker only ever binds to APPROVED states.
 
 Print the aggregation summary to the user before proceeding.
+
+## Step 8.5 — Update the incremental-review marker (AISDLC-142)
+
+ONLY if the gate decision is APPROVED (skip when `[needs-human-attention]` is being shipped from Step 9). Update the PR-comment marker with the freshly-computed contentHash + the SHA we just reviewed against. Subsequent pushes that don't change content can then short-circuit at Step 7a-bis.
+
+```bash
+HEAD_SHA=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
+MARKER_BODY=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide format-marker \
+  --content-hash "$INCR_CONTENT_HASH" \
+  --reviewed-sha "$HEAD_SHA")
+
+# Idempotent upsert: search existing PR comments for the marker prefix; update
+# in-place if present, else create new. Mirrors the pattern at
+# .github/workflows/dor-ingress.yml around `<!-- ai-sdlc:dor-comment ... -->`.
+EXISTING_COMMENT_ID=$(gh pr view "$BRANCH" --json comments \
+  --jq '.comments[] | select(.body | contains("<!-- ai-sdlc:last-reviewed-contenthash:")) | .id' \
+  2>/dev/null | tail -1)
+
+COMMENT_BODY=$(printf '%s\n\n%s\n\n%s\n' \
+  '## AI-SDLC: incremental review state' \
+  '_Auto-managed by `/ai-sdlc execute`. Editing this comment will break incremental review for this PR until the next full review re-creates it._' \
+  "$MARKER_BODY")
+
+if [ -n "$EXISTING_COMMENT_ID" ]; then
+  gh api "repos/{owner}/{repo}/issues/comments/${EXISTING_COMMENT_ID}" \
+    -X PATCH \
+    -f body="$COMMENT_BODY" >/dev/null \
+    || echo "[ai-sdlc-progress] Step 8.5: marker update failed (non-fatal — next push will re-create)"
+else
+  gh pr comment "$BRANCH" --body "$COMMENT_BODY" >/dev/null \
+    || echo "[ai-sdlc-progress] Step 8.5: marker create failed (non-fatal — next push will re-try)"
+fi
+```
+
+The marker write is best-effort. A failure here at worst forces the next push back through a FULL review — never a SAFETY regression. The actual review verdicts already landed in the PR via Step 11.
 
 ## Step 9 — Iteration loop (max 2 dev iterations on review failure)
 
