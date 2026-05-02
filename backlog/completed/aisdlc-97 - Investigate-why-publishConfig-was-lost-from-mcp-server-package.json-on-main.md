@@ -17,7 +17,7 @@ references:
   - ai-sdlc-plugin/mcp-server/package.json
   - release-please-config.json
   - .release-please-manifest.json
-  - backlog/completed/aisdlc-75*
+  - backlog/completed/aisdlc-75 - Fix-ai-sdlc-plugin-distribution-mcp-server-ships-without-dist-node_modules-breaks-all-governance-hooks-on-cached-install.md
 priority: medium
 ---
 

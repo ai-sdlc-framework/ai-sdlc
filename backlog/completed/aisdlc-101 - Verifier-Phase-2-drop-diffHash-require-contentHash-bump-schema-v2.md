@@ -17,7 +17,7 @@ references:
   - scripts/ci-sign-attestation.mjs
   - orchestrator/src/runtime/attestations.ts
   - .ai-sdlc/schemas/attestation.v1.schema.json
-  - backlog/completed/aisdlc-94*
+  - backlog/completed/aisdlc-94 - Verifier-diffHash-should-be-rebase-tolerant-hash-post-apply-tree-state-not-literal-diff-text.md
 priority: medium
 ---
 

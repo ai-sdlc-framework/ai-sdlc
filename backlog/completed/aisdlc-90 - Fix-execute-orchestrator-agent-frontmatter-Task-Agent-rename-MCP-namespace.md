@@ -15,7 +15,7 @@ references:
   - ai-sdlc-plugin/.claude-plugin/plugin.json
   - ai-sdlc-plugin/agents/developer.md
   - ai-sdlc-plugin/agents/agents.test.mjs
-  - backlog/completed/aisdlc-82*
+  - backlog/completed/aisdlc-82 - Refactor-ai-sdlc-execute-to-a-self-contained-orchestrator-subagent-so-parallel-runs-are-first-class.md
 priority: high
 ---
 

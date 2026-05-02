@@ -16,8 +16,8 @@ references:
   - scripts/ci-sign-attestation.mjs
   - .github/workflows/verify-attestation.yml
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - backlog/completed/aisdlc-87*
-  - backlog/completed/aisdlc-93*
+  - backlog/completed/aisdlc-87 - CI-side-attestor-GH-Action-signs-attestation-after-duplicate-review-approves-unblocks-remote-agents-external-contributor-PRs.md
+  - backlog/completed/aisdlc-93 - ai-sdlc-review.yml-skip-attestation-valid-path-must-re-post-bot-approval-after-force-push.md
 priority: high
 ---
 
