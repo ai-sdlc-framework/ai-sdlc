@@ -21,7 +21,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   ATTESTATION_TEMPLATES,
   BASELINE_WORKFLOW_TEMPLATES,
@@ -155,11 +155,19 @@ export function buildProductionAdapters(): FeatureAdapters {
     exists: (path) => existsSync(path),
     runCommand: (cmd, args) => {
       try {
-        // Suppress stderr noise (e.g. `gh auth login` instructions when
-        // gh isn't authenticated); we surface errors via the exit-code +
-        // returned stdout / error payload instead, so users get a clean
-        // single-line error from `applyBranchProtection`.
-        const stdout = execSync(`${cmd} ${args.join(' ')}`, {
+        // Use `execFileSync` (no shell) so args are passed as a true
+        // argv array — never word-split or shell-interpreted. The prior
+        // `execSync(\`${cmd} ${args.join(' ')}\`)` form ran the command
+        // through `/bin/sh -c` and silently broke whenever any argument
+        // contained whitespace (e.g. macOS users with `~/Documents/My
+        // Project/` in their projectDir, where the `--input <tmpPath>`
+        // arg to `gh api` would word-split and `gh` would see two
+        // unrelated tokens — branch protection would silently fail or
+        // apply wrong content). Switching to `execFileSync` eliminates
+        // both word-splitting AND any shell-injection surface in one
+        // change. Stderr stays muted so users still get the clean
+        // single-line error rendered by `applyBranchProtection`.
+        const stdout = execFileSync(cmd, args, {
           encoding: 'utf-8',
           stdio: ['ignore', 'pipe', 'ignore'],
         });
