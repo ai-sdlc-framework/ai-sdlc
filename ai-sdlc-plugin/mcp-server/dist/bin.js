@@ -22968,6 +22968,12 @@ import { join as join19 } from "node:path";
 import { existsSync as existsSync18, readFileSync as readFileSync15, readdirSync as readdirSync7 } from "node:fs";
 import { join as join20 } from "node:path";
 
+// ../../pipeline-cli/dist/dor/stats.js
+import { existsSync as existsSync19, readFileSync as readFileSync16 } from "node:fs";
+
+// ../../pipeline-cli/dist/dor/slack-digest.js
+var MS_PER_DAY = 24 * 60 * 60 * 1e3;
+
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {
   sweepMergedWorktrees,

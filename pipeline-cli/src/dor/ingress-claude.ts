@@ -178,11 +178,16 @@ export async function refineBacklogTask(
   const verdict = await evaluateIssueE2E(input, evaluateOpts);
 
   // Calibration log — always written, regardless of mode (RFC §5.5).
+  // Author plumbed through (AISDLC-115.6) so `cli-dor-stats --by-author`
+  // can attribute admit / needs-clarification rates without spelunking the
+  // issue snapshot. `created_by` is the Backlog frontmatter field; absent
+  // entries land in the `(unknown)` bucket — that's fine.
   const calib = appendCalibrationEntry(
     {
       issue: { id: taskId, source: 'backlog', title: input.title, body },
       verdict,
       outcome: verdict.overallVerdict,
+      ...(createdBy ? { author: createdBy } : {}),
     },
     opts.artifactsDir ? { artifactsDir: opts.artifactsDir } : {},
   );
