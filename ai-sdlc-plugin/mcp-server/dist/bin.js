@@ -22942,6 +22942,9 @@ async function cleanupTask(opts) {
 import { existsSync as existsSync14, readdirSync as readdirSync4, readFileSync as readFileSync12 } from "node:fs";
 import { join as join15 } from "node:path";
 
+// ../../pipeline-cli/dist/incremental-review/incremental.js
+import { createHash } from "node:crypto";
+
 // ../../pipeline-cli/dist/classifier/classifier.js
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname as dirname4, join as join16 } from "node:path";

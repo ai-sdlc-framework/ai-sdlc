@@ -18,6 +18,28 @@ export * from './steps/index.js';
 export * from './deps/index.js';
 export { executePipeline } from './execute-pipeline.js';
 
+// AISDLC-142 — incremental review primitives (skip / delta-only / full).
+export {
+  buildAutoApprovedVerdict,
+  collectChangedFileDeltaEntries,
+  computeContentHashV3,
+  decideIncrementalReview,
+  DEFAULT_MAX_DELTA_LINES,
+  findMarkerInComments,
+  formatMarker,
+  MARKER_PREFIX,
+  MARKER_SUFFIX,
+  parseMarker,
+  parseNumstatForDelta,
+  type ChangedFileDeltaEntry,
+  type DecideInputs,
+  type DeltaStats,
+  type IncrementalDecision,
+  type IncrementalReason,
+  type MarkerPayload,
+  type RunGit,
+} from './incremental-review/incremental.js';
+
 // AISDLC-141 — conditional review classifier (RFC-0010 §12).
 export {
   ALL_REVIEWERS,
