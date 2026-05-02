@@ -1,0 +1,81 @@
+name: Auto-rebase open PRs on main push
+
+# AISDLC-138: when a PR lands on main, rebase all OTHER open non-draft same-repo
+# PRs onto current main. Mirrors dependabot's "always-current" behavior so PRs
+# never sit BEHIND in the GitHub UI.
+#
+# Why: today's session had 3 PRs (#166/#162/#172) go BEHIND simultaneously after
+# one merge; operator had to manually rebase each. This eliminates that toil.
+#
+# Failure modes (intentional):
+# - PR has conflicts → gh pr update-branch --rebase fails for that PR; loop
+#   continues; operator handles the conflict manually
+# - PR is from a fork → skipped by head-repository filter (token can't push)
+# - Concurrent main pushes → concurrency group serializes
+# - The PR was already up-to-date → gh pr update-branch returns gracefully
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+# Serialize across overlapping main pushes; do NOT cancel in-progress runs
+# (we want every push's rebase pass to complete).
+concurrency:
+  group: auto-rebase-open-prs
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    name: Rebase open PRs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rebase all open same-repo non-draft PRs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+        run: |
+          set -euo pipefail
+
+          # List open non-draft PRs from same repo (forks excluded — workflow
+          # token can't push to fork branches).
+          PRS=$(gh pr list \
+            --repo "$REPO" \
+            --state open \
+            --json number,isDraft,headRepositoryOwner,title \
+            --jq ".[] | select(.isDraft == false) | select(.headRepositoryOwner.login == \"$OWNER\") | \"\(.number)\t\(.title)\"")
+
+          if [ -z "$PRS" ]; then
+            echo "No open non-draft same-repo PRs to rebase."
+            exit 0
+          fi
+
+          REBASED=0
+          SKIPPED=0
+          FAILED=0
+          while IFS=$'\t' read -r PR TITLE; do
+            [ -z "$PR" ] && continue
+            echo ""
+            echo "=== PR #$PR — $TITLE ==="
+            if gh pr update-branch --repo "$REPO" --rebase "$PR" 2>&1; then
+              REBASED=$((REBASED + 1))
+            else
+              # Could be: already up-to-date (treated as success by gh in some
+              # versions), conflicts, branch-protection, etc. Log and continue.
+              RC=$?
+              if [ "$RC" -eq 0 ]; then
+                SKIPPED=$((SKIPPED + 1))
+              else
+                echo "  (skipped — likely already up-to-date or has conflicts; check PR for details)"
+                FAILED=$((FAILED + 1))
+              fi
+            fi
+          done <<< "$PRS"
+
+          echo ""
+          echo "Summary: rebased=$REBASED skipped=$SKIPPED failed=$FAILED"
