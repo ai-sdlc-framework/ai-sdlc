@@ -387,15 +387,14 @@ function initWorkspaceRoot(
  */
 export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
   const addRaw = typeof opts.add === 'string' ? opts.add : undefined;
-  const addNormalized = addRaw === 'branch-protection' ? 'branch-protection' : addRaw;
   let add: WizardFlags['add'];
   if (
-    addNormalized === 'dor' ||
-    addNormalized === 'attestation' ||
-    addNormalized === 'classifier' ||
-    addNormalized === 'branch-protection'
+    addRaw === 'dor' ||
+    addRaw === 'attestation' ||
+    addRaw === 'classifier' ||
+    addRaw === 'branch-protection'
   ) {
-    add = addNormalized;
+    add = addRaw;
   }
   return {
     yes: !!opts.yes,
@@ -485,6 +484,20 @@ export const initCommand = new Command('init')
       console.log('');
       const result = await applyFeatureSelection(projectDir, selection, flags, adapters);
       renderNextSteps(selection, result, adapters);
+      // Reviewer feedback (round 2, suggestion #5): when the operator
+      // explicitly requested branch-protection via a non-interactive flag
+      // (--add branch-protection here; --yes / --with-branch-protection
+      // in runWizardStage) and the apply failed (gh missing, not
+      // authenticated, etc.), surface a non-zero exit so CI scripts can
+      // detect failure instead of seeing the silent log line.
+      if (
+        flags.add === 'branch-protection' &&
+        result.branchProtection &&
+        !result.branchProtection.applied &&
+        result.branchProtection.error
+      ) {
+        process.exitCode = 1;
+      }
       return;
     }
 
@@ -617,4 +630,21 @@ async function runWizardStage(projectDir: string, flags: WizardFlags): Promise<v
   const result = await applyFeatureSelection(projectDir, selection, flags, adapters);
   ensureClaudeMdPointer(projectDir, adapters, flags.dryRun);
   renderNextSteps(selection, result, adapters);
+
+  // Reviewer feedback (round 2, suggestion #5): when branch-protection
+  // was non-interactively requested (--with-branch-protection or --yes,
+  // both used by CI scripts) and the apply failed (gh missing, not
+  // authenticated, etc.), surface a non-zero exit so CI can detect
+  // failure instead of seeing the silent log line. Interactive prompt
+  // answers don't trip this — the human already saw the error and can
+  // re-run `ai-sdlc init --add branch-protection` themselves.
+  const branchProtectionRequestedNonInteractively = flags.yes || flags.withBranchProtection;
+  if (
+    branchProtectionRequestedNonInteractively &&
+    result.branchProtection &&
+    !result.branchProtection.applied &&
+    result.branchProtection.error
+  ) {
+    process.exitCode = 1;
+  }
 }
