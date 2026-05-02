@@ -39,7 +39,11 @@ jobs:
     name: Analyze PR
     runs-on: ubuntu-latest
     if: "!startsWith(github.head_ref, 'release-please--')"
-    permissions: {} # Fully sandboxed — no GitHub access
+    # AISDLC-142: analyze needs `pull-requests: read` to fetch existing PR
+    # comments for the incremental-review marker. Read-only — write happens
+    # in the `report` job (which already has `pull-requests: write`).
+    permissions:
+      pull-requests: read
     outputs:
       testing: ${{ steps.review.outputs.testing }}
       critic: ${{ steps.review.outputs.critic }}
@@ -50,6 +54,14 @@ jobs:
       classifier_selected: ${{ steps.classify.outputs.selected }}
       classifier_confidence: ${{ steps.classify.outputs.confidence }}
       classifier_fell_open: ${{ steps.classify.outputs.fell_open }}
+      # AISDLC-142: incremental-review decision so the report job can update
+      # the marker comment after posting the verdicts.
+      incremental_skip: ${{ steps.incremental.outputs.skip }}
+      incremental_delta_only: ${{ steps.incremental.outputs.delta_only }}
+      incremental_reason: ${{ steps.incremental.outputs.reason }}
+      incremental_content_hash: ${{ steps.incremental.outputs.content_hash }}
+      incremental_last_reviewed_sha: ${{ steps.incremental.outputs.last_reviewed_sha }}
+      incremental_delta_size: ${{ steps.incremental.outputs.delta_size }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -126,6 +138,83 @@ jobs:
       - name: Create empty issue file if not fetched
         run: test -f /tmp/linked-issue.json || echo '{}' > /tmp/linked-issue.json
 
+      # ── AISDLC-142: incremental review gate ─────────────────────────
+      # Read the prior `<!-- ai-sdlc:last-reviewed-contenthash:... -->` marker
+      # comment (if any) and decide whether to:
+      #   - SKIP the review (contentHash unchanged since prior approval)
+      #   - DELTA-ONLY review (`git diff <last-reviewed-sha>...HEAD`)
+      #   - FULL review (first push, no marker, or delta over the safety cap)
+      # The CLI is fail-open in the same shape as cli-classify-pr: any error
+      # routes to FULL review so we never silently skip a review we should
+      # have done.
+      - name: Decide incremental review mode
+        id: incremental
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Fetch existing PR comments. Empty file when we can't / no comments.
+          gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
+            > /tmp/pr-comments.txt 2>/dev/null || : > /tmp/pr-comments.txt
+
+          # Extract prior reviewedSha from the marker (if any) so we can
+          # compute the delta numstat against it. Failure is fine — empty
+          # PRIOR_SHA → no numstat → CLI takes the no-marker / full path.
+          PRIOR_SHA=$(grep -oE '<!-- ai-sdlc:last-reviewed-contenthash:[A-Za-z0-9_-]+ -->' /tmp/pr-comments.txt 2>/dev/null \
+            | tail -1 \
+            | sed -E 's/.*contenthash:([A-Za-z0-9_-]+) -->/\1/' \
+            | { read B64 && [ -n "$B64" ] && printf '%s' "$B64" \
+                | base64 -d 2>/dev/null \
+                | jq -r '.reviewedSha' 2>/dev/null; } || echo "")
+
+          : > /tmp/pr-delta-numstat.txt
+          if [ -n "$PRIOR_SHA" ]; then
+            # If PRIOR_SHA isn't reachable (rebase rewrote history), the diff
+            # silently fails and the CLI routes to delta-too-large → FULL.
+            git diff "$PRIOR_SHA"...HEAD --numstat > /tmp/pr-delta-numstat.txt 2>/dev/null \
+              || : > /tmp/pr-delta-numstat.txt
+          fi
+
+          INCREMENTAL_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide decide \
+            --comments-file /tmp/pr-comments.txt \
+            --base-ref "${{ github.event.pull_request.base.sha }}" \
+            --head-ref HEAD \
+            --repo-root . \
+            --numstat-file /tmp/pr-delta-numstat.txt \
+            --full-diff-paths-file /tmp/pr-files.txt 2>/tmp/incremental-stderr.txt \
+            || echo '{"skip":false,"deltaOnly":false,"reason":"no-marker","currentContentHash":"","priorContentHash":null,"lastReviewedSha":null,"deltaSize":0}')
+          if [ -s /tmp/incremental-stderr.txt ]; then
+            echo "::group::incremental-decide stderr"
+            cat /tmp/incremental-stderr.txt
+            echo "::endgroup::"
+          fi
+
+          SKIP=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.skip')
+          DELTA_ONLY=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.deltaOnly')
+          REASON=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.reason')
+          CONTENT_HASH=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.currentContentHash')
+          LAST_SHA=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.lastReviewedSha // ""')
+          DELTA_SIZE=$(printf '%s' "$INCREMENTAL_JSON" | jq -r '.deltaSize')
+          echo "skip=${SKIP}" >> "$GITHUB_OUTPUT"
+          echo "delta_only=${DELTA_ONLY}" >> "$GITHUB_OUTPUT"
+          echo "reason=${REASON}" >> "$GITHUB_OUTPUT"
+          echo "content_hash=${CONTENT_HASH}" >> "$GITHUB_OUTPUT"
+          echo "last_reviewed_sha=${LAST_SHA}" >> "$GITHUB_OUTPUT"
+          echo "delta_size=${DELTA_SIZE}" >> "$GITHUB_OUTPUT"
+          echo "Incremental decision: ${REASON} (skip=${SKIP}, deltaOnly=${DELTA_ONLY}, deltaSize=${DELTA_SIZE}, lastReviewedSha=${LAST_SHA:-none})"
+
+          # Build the actual review-input file the next step uses. Skip path:
+          # empty file (review step writes auto-approved verdicts directly).
+          # Delta path: `git diff <prior-sha>...HEAD`. Full path: copy /tmp/pr-diff.txt.
+          if [ "$SKIP" = "true" ]; then
+            : > /tmp/review-diff.txt
+          elif [ "$DELTA_ONLY" = "true" ] && [ -n "$LAST_SHA" ]; then
+            git diff "$LAST_SHA"...HEAD > /tmp/review-diff.txt 2>/dev/null \
+              || cp /tmp/pr-diff.txt /tmp/review-diff.txt
+          else
+            cp /tmp/pr-diff.txt /tmp/review-diff.txt
+          fi
+
       - name: Run conditional review agents (classifier-gated subset)
         id: review
         env:
@@ -137,13 +226,41 @@ jobs:
           # 0 files changed) — we treat un-selected reviewers as auto-approved
           # with empty findings so the report job's gate logic stays unchanged.
           SELECTED: ${{ steps.classify.outputs.selected }}
+          # AISDLC-142: incremental gate decision. When SKIP=true we spawn 0
+          # reviewers (auto-approved with the prior-approval-reused summary).
+          # When DELTA_ONLY=true the review reads /tmp/review-diff.txt
+          # (computed by the `incremental` step) instead of /tmp/pr-diff.txt.
+          INCR_SKIP: ${{ steps.incremental.outputs.skip }}
+          INCR_DELTA_ONLY: ${{ steps.incremental.outputs.delta_only }}
+          INCR_LAST_SHA: ${{ steps.incremental.outputs.last_reviewed_sha }}
+          INCR_DELTA_SIZE: ${{ steps.incremental.outputs.delta_size }}
         run: |
-          # Helper: spawn the dogfood reviewer for $TYPE in background.
+          # Helper: spawn the dogfood reviewer for $TYPE in background. Reads
+          # from /tmp/review-diff.txt — that file holds the FULL PR diff
+          # (default), the DELTA diff (incremental delta-only), or is empty
+          # (incremental skip). When delta-only, prepend a preamble so the
+          # reviewer knows the prior full review still binds.
           run_review() {
             local TYPE="$1"
+            local DIFF_FILE=/tmp/review-diff.txt
+            if [ "$INCR_DELTA_ONLY" = "true" ]; then
+              DIFF_FILE="/tmp/review-diff-${TYPE}.txt"
+              {
+                echo "## INCREMENTAL REVIEW (AISDLC-142)"
+                echo ""
+                echo "The FULL PR diff was reviewed earlier at SHA ${INCR_LAST_SHA}."
+                echo "This incremental review only covers the delta from ${INCR_LAST_SHA} to HEAD"
+                echo "(${INCR_DELTA_SIZE} lines). Your verdict still applies to the WHOLE PR — only"
+                echo "the diff you read is scoped down."
+                echo ""
+                echo "## DELTA DIFF"
+                echo ""
+                cat /tmp/review-diff.txt
+              } > "$DIFF_FILE"
+            fi
             pnpm --filter @ai-sdlc/dogfood review \
               --pr "$PR_NUMBER" \
-              --diff-file /tmp/pr-diff.txt \
+              --diff-file "$DIFF_FILE" \
               --issue-file /tmp/linked-issue.json \
               --type "$TYPE" > "/tmp/review-${TYPE}.txt" 2>"/tmp/review-${TYPE}-stderr.txt"
           }
@@ -152,6 +269,29 @@ jobs:
           # The schema must match what dogfood produces so the report job's
           # parser accepts it as a valid verdict.
           AUTO_APPROVED='{"approved":true,"findings":[],"summary":"Skipped by classifier (RFC-0010 §12) — change does not require this review type."}'
+
+          # AISDLC-142: when the incremental gate says SKIP, write the
+          # incremental auto-approved verdict for EVERY reviewer (whether or
+          # not the classifier selected them). The report job's gate
+          # semantics stay unchanged — three approved verdicts → APPROVE.
+          if [ "$INCR_SKIP" = "true" ]; then
+            INCR_AUTO_APPROVED=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide auto-approved-verdict \
+              --reviewed-sha "$INCR_LAST_SHA" 2>/dev/null \
+              || printf '%s' '{"approved":true,"findings":[],"summary":"Skipped by incremental review (AISDLC-142) — content unchanged."}')
+            for TYPE in testing critic security; do
+              printf '%s\n' "$INCR_AUTO_APPROVED" > "/tmp/review-${TYPE}.txt"
+              : > "/tmp/review-${TYPE}-stderr.txt"
+              echo "Incremental SKIP: writing auto-approved verdict for $TYPE (no reviewer agent invoked)"
+            done
+            # Skip the classifier-spawn loop entirely.
+            TESTING=$(tail -1 /tmp/review-testing.txt 2>/dev/null || echo '{}')
+            CRITIC=$(tail -1 /tmp/review-critic.txt 2>/dev/null || echo '{}')
+            SECURITY=$(tail -1 /tmp/review-security.txt 2>/dev/null || echo '{}')
+            echo "testing=$TESTING" >> "$GITHUB_OUTPUT"
+            echo "critic=$CRITIC" >> "$GITHUB_OUTPUT"
+            echo "security=$SECURITY" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
           # Spawn each reviewer iff in $SELECTED; otherwise write the
           # auto-approved verdict directly. This preserves the existing
@@ -450,6 +590,97 @@ jobs:
               } else {
                 throw err;
               }
+            }
+
+      # ── AISDLC-142: update the incremental-review marker ─────────────
+      # Idempotent upsert of the `<!-- ai-sdlc:last-reviewed-contenthash:... -->`
+      # PR comment. Only fires when ALL reviewers approved (contentHash binds
+      # to APPROVED states only — never to CHANGES_REQUESTED). Best-effort:
+      # marker write failure at worst forces the next push back through a
+      # FULL review; never a SAFETY regression.
+      - name: Update incremental-review marker
+        if: always() && needs.analyze.result == 'success' && needs.analyze.outputs.incremental_content_hash != ''
+        uses: actions/github-script@v7
+        env:
+          TESTING_JSON: ${{ needs.analyze.outputs.testing }}
+          CRITIC_JSON: ${{ needs.analyze.outputs.critic }}
+          SECURITY_JSON: ${{ needs.analyze.outputs.security }}
+          INCR_CONTENT_HASH: ${{ needs.analyze.outputs.incremental_content_hash }}
+        with:
+          script: |
+            // Verify all three reviewers approved before binding the marker.
+            // A marker bound to a CHANGES_REQUESTED state would silently
+            // suppress the next push's review.
+            let allApproved = true;
+            for (const key of ['TESTING_JSON', 'CRITIC_JSON', 'SECURITY_JSON']) {
+              try {
+                const v = JSON.parse(process.env[key] || '{}');
+                if (!v.approved) allApproved = false;
+              } catch { allApproved = false; }
+            }
+            if (!allApproved) {
+              core.info('Skipping marker update — at least one reviewer did not approve.');
+              return;
+            }
+
+            const headSha = context.payload.pull_request.head.sha;
+            const contentHash = process.env.INCR_CONTENT_HASH;
+            if (!/^[0-9a-f]{64}$/.test(contentHash || '')) {
+              core.info(`Skipping marker update — invalid contentHash (${contentHash})`);
+              return;
+            }
+
+            const payload = {
+              contentHash,
+              reviewedSha: headSha.toLowerCase(),
+              reviewedAt: new Date().toISOString(),
+            };
+            const b64 = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
+            const marker = `<!-- ai-sdlc:last-reviewed-contenthash:${b64} -->`;
+            const body =
+              `## AI-SDLC: incremental review state\n\n` +
+              `_Auto-managed by \`ai-sdlc-review.yml\` (AISDLC-142). ` +
+              `Editing this comment will break incremental review for this PR ` +
+              `until the next full review re-creates it._\n\n` +
+              `${marker}\n`;
+
+            const issue_number = context.payload.pull_request.number;
+            // Idempotent: search existing comments for the marker prefix; update
+            // in place if found, else create new. Mirrors `dor-ingress.yml`.
+            const existing = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+            const prior = existing.find(
+              (c) => c.body && c.body.includes('<!-- ai-sdlc:last-reviewed-contenthash:'),
+            );
+            try {
+              if (prior) {
+                if ((prior.body || '').includes(marker)) {
+                  core.info('Marker unchanged — no-op.');
+                  return;
+                }
+                await github.rest.issues.updateComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  comment_id: prior.id,
+                  body,
+                });
+                core.notice(`Updated incremental-review marker comment ${prior.id} on PR #${issue_number}`);
+              } else {
+                const { data: created } = await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number,
+                  body,
+                });
+                core.notice(`Created incremental-review marker comment ${created.id} on PR #${issue_number}`);
+              }
+            } catch (err) {
+              // Best-effort: don't fail the workflow if the comment write fails.
+              core.warning(`Failed to upsert marker comment: ${err.message}`);
             }
 
       - name: Notify Slack that PR is ready for review
