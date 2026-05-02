@@ -84,3 +84,4 @@ __pycache__/
 build/
 *.pyz
 orchestrator/.gitignore
+.worktrees/

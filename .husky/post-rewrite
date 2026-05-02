@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# Husky post-rewrite hook (AISDLC-137).
+#
+# Fires after `git rebase` (and `git commit --amend`). When a worktree rebases
+# onto origin/main, that's the moment we just consumed the latest main, so it's
+# the cheapest moment to also update the orchestrator parent's local
+# refs/heads/main to match — avoiding the "main 10↓" stale state in editors.
+#
+# Non-blocking: if the parent's ref update fails (e.g. concurrent op, parent
+# missing) we log but don't fail the rebase.
+
+set -uo pipefail
+
+# Only act on rebase rewrites (the most common case where origin/main moved)
+if [ "${1:-}" != "rebase" ]; then
+  exit 0
+fi
+
+# Resolve the parent (orchestrator) repo. git-common-dir is always the parent's
+# .git when invoked from inside a worktree.
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
+if [ -z "$GIT_COMMON_DIR" ]; then
+  exit 0
+fi
+
+GIT_COMMON_DIR_ABS=$(cd "$GIT_COMMON_DIR" 2>/dev/null && pwd)
+if [ -z "$GIT_COMMON_DIR_ABS" ]; then
+  exit 0
+fi
+
+PARENT_ROOT=$(dirname "$GIT_COMMON_DIR_ABS")
+
+# Try to update parent's refs/heads/main to match origin/main.
+# Use git -C to operate in the parent without changing this hook's cwd.
+ORIGIN_MAIN=$(git -C "$PARENT_ROOT" rev-parse refs/remotes/origin/main 2>/dev/null || echo "")
+if [ -z "$ORIGIN_MAIN" ]; then
+  exit 0
+fi
+
+LOCAL_MAIN=$(git -C "$PARENT_ROOT" rev-parse refs/heads/main 2>/dev/null || echo "")
+if [ "$LOCAL_MAIN" = "$ORIGIN_MAIN" ]; then
+  exit 0  # already current
+fi
+
+# Update — fast-forward only via update-ref (atomic).
+if git -C "$PARENT_ROOT" update-ref refs/heads/main "$ORIGIN_MAIN" 2>/dev/null; then
+  echo "[post-rewrite] parent refs/heads/main updated: ${LOCAL_MAIN:0:7} -> ${ORIGIN_MAIN:0:7}"
+fi
+
+exit 0
