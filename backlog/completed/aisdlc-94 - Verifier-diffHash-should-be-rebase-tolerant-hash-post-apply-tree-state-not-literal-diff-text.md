@@ -18,8 +18,8 @@ references:
   - scripts/sign-attestation.mjs
   - orchestrator/src/runtime/buildPredicate.ts
   - .ai-sdlc/schemas/attestation.v1.schema.json
-  - backlog/completed/aisdlc-84*
-  - backlog/completed/aisdlc-85*
+  - backlog/completed/aisdlc-84 - Make-attestation-verifier-rebase-stable-—-match-by-predicate-content-not-by-commit-SHA.md
+  - backlog/completed/aisdlc-85 - Verifier-compute-diffHash-from-envelope-subject-SHA-not-PR-head-chore-commit-on-top-regression-from-AISDLC-84.md
 priority: high
 ---
 

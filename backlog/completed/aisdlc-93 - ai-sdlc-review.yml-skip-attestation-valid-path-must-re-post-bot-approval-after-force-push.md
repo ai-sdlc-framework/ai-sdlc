@@ -16,9 +16,9 @@ dependencies: []
 references:
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/auto-enable-auto-merge.yml
-  - backlog/completed/aisdlc-74*
-  - backlog/completed/aisdlc-84*
-  - backlog/completed/aisdlc-87*
+  - backlog/completed/aisdlc-74 - Cryptographic-review-attestations-skip-duplicate-CI-review-runs-when-local-ai-sdlc-execute-reviews-are-signed.md
+  - backlog/completed/aisdlc-84 - Make-attestation-verifier-rebase-stable-—-match-by-predicate-content-not-by-commit-SHA.md
+  - backlog/completed/aisdlc-87 - CI-side-attestor-GH-Action-signs-attestation-after-duplicate-review-approves-unblocks-remote-agents-external-contributor-PRs.md
 priority: high
 ---
 
