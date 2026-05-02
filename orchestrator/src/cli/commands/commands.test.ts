@@ -52,6 +52,10 @@ vi.mock('../../defaults.js', async () => {
 const mockExistsSync = vi.fn<(p: string) => boolean>(() => false);
 const mockMkdirSync = vi.fn<(p: string, opts?: object) => void>();
 const mockWriteFileSync = vi.fn<(p: string, data: string, enc?: string) => void>();
+// AISDLC-143: the wizard's appendOnce reads existing file content via
+// readFileSync to honor the idempotency sentinel. Mock it so tests that
+// flip mockExistsSync to "true" don't crash on a missing real file.
+const mockReadFileSync = vi.fn<(p: string, enc?: string) => string>(() => '');
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
@@ -60,6 +64,7 @@ vi.mock('node:fs', async () => {
     existsSync: (p: string) => mockExistsSync(p),
     mkdirSync: (p: string, opts?: object) => mockMkdirSync(p, opts),
     writeFileSync: (p: string, data: string, enc?: string) => mockWriteFileSync(p, data, enc),
+    readFileSync: (p: string, enc?: string) => mockReadFileSync(p, enc),
   };
 });
 
@@ -105,10 +110,32 @@ async function getInitProgram() {
   return initCommand;
 }
 
+/**
+ * Reset all initCommand option state. AISDLC-143 added several new flags
+ * (--yes, --with-X, --add) on top of the original --dry-run/--role/etc.;
+ * Commander caches parsed options on the singleton instance, so each test
+ * needs a clean slate. Centralized so future flag additions only need one
+ * place to add.
+ */
+function resetInitCommandOptions(cmd: Awaited<ReturnType<typeof getInitProgram>>): void {
+  cmd.setOptionValue('dryRun', undefined);
+  cmd.setOptionValue('role', undefined);
+  cmd.setOptionValue('cursor', undefined);
+  cmd.setOptionValue('skipMcp', undefined);
+  cmd.setOptionValue('yes', undefined);
+  cmd.setOptionValue('withDor', undefined);
+  cmd.setOptionValue('withAttestation', undefined);
+  cmd.setOptionValue('withClassifier', undefined);
+  cmd.setOptionValue('withBranchProtection', undefined);
+  cmd.setOptionValue('add', undefined);
+}
+
 describe('init command', () => {
   it('respects --dry-run flag', async () => {
     const cmd = await getInitProgram();
-    await cmd.parseAsync(['--dry-run'], { from: 'user' });
+    resetInitCommandOptions(cmd);
+    // --yes so the wizard doesn't prompt for stdin in a test env
+    await cmd.parseAsync(['--dry-run', '--yes'], { from: 'user' });
 
     expect(consoleSpy).toHaveBeenCalled();
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
@@ -121,23 +148,41 @@ describe('init command', () => {
     mockExistsSync.mockReturnValue(false);
 
     const cmd = await getInitProgram();
-    // Commander caches parsed options on the same instance.
-    // Reset options to clear any --dry-run from prior test.
-    cmd.setOptionValue('dryRun', undefined);
-    await cmd.parseAsync(['--skip-mcp'], { from: 'user' });
+    resetInitCommandOptions(cmd);
+    await cmd.parseAsync(['--skip-mcp', '--yes'], { from: 'user' });
 
     expect(mockMkdirSync).toHaveBeenCalled();
-    expect(mockWriteFileSync).toHaveBeenCalledTimes(4);
+    // The legacy single-repo init writes 4 files (pipeline.yaml,
+    // agent-role.yaml, quality-gate.yaml, autonomy-policy.yaml). The
+    // AISDLC-143 wizard adds more (gate workflow, dor, attestation,
+    // classifier templates, husky, CLAUDE.md). With --yes the full
+    // baseline + every feature is on, so we assert ≥ the legacy count.
+    expect(mockWriteFileSync.mock.calls.length).toBeGreaterThanOrEqual(4);
   });
 
   it('skips files that already exist', async () => {
     mockExistsSync.mockReturnValue(true);
 
     const cmd = await getInitProgram();
-    cmd.setOptionValue('dryRun', undefined);
-    await cmd.parseAsync(['--skip-mcp'], { from: 'user' });
+    resetInitCommandOptions(cmd);
+    await cmd.parseAsync(['--skip-mcp', '--yes'], { from: 'user' });
 
-    expect(mockWriteFileSync).not.toHaveBeenCalled();
+    // The legacy 4-file scaffold writes nothing (everything already exists).
+    // The wizard's appendOnce (husky + CLAUDE.md) writes if our sentinel
+    // is missing — and on this mock every file "exists" but has no content
+    // tracked, so appendOnce DOES write. Assert that the LEGACY files were
+    // skipped (the original behavior the test guards) and ignore wizard
+    // append calls.
+    const legacyFileWrites = mockWriteFileSync.mock.calls.filter((c) => {
+      const path = String(c[0] ?? '');
+      return (
+        path.endsWith('/pipeline.yaml') ||
+        path.endsWith('/agent-role.yaml') ||
+        path.endsWith('/quality-gate.yaml') ||
+        path.endsWith('/autonomy-policy.yaml')
+      );
+    });
+    expect(legacyFileWrites).toHaveLength(0);
     const output = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(output).toContain('skip');
   });
@@ -158,10 +203,9 @@ describe('init command — agent-role tiers (AISDLC-79)', () => {
     mockExistsSync.mockReturnValue(false);
 
     const { initCommand } = await import('./init.js');
-    initCommand.setOptionValue('dryRun', undefined);
-    initCommand.setOptionValue('role', undefined);
+    resetInitCommandOptions(initCommand);
 
-    await initCommand.parseAsync(['--skip-mcp', ...argv], { from: 'user' });
+    await initCommand.parseAsync(['--skip-mcp', '--yes', ...argv], { from: 'user' });
 
     const call = mockWriteFileSync.mock.calls.find(
       (c) => typeof c[0] === 'string' && (c[0] as string).endsWith('agent-role.yaml'),
@@ -226,9 +270,12 @@ describe('init command — agent-role tiers (AISDLC-79)', () => {
     mockExistsSync.mockReturnValue(false);
 
     const { initCommand } = await import('./init.js');
-    initCommand.setOptionValue('dryRun', undefined);
-    initCommand.setOptionValue('role', undefined);
+    resetInitCommandOptions(initCommand);
 
+    // No --yes here: invalid --role exits before the wizard runs, so the
+    // test never blocks on stdin even without --yes. We deliberately do
+    // NOT pass --yes so that an early-exit regression (validating --role
+    // AFTER the wizard runs) would surface as a hung test.
     await initCommand.parseAsync(['--skip-mcp', '--role', 'bogus'], { from: 'user' });
 
     expect(process.exitCode).toBe(1);
