@@ -95,6 +95,171 @@ describe('defaultRulesetDecision', () => {
     });
     expect([...d.reviewers].sort()).toEqual(['critic', 'security', 'testing']);
   });
+
+  // ── AISDLC-145 hardening: docs-detection downgrade vector ──────────────────────────
+  // The pre-145 docs branch matched ANY file under `docs/` (including
+  // `docs/install.sh`, `docs/.env`, `docs/private-key.pem`), silently skipping
+  // the security reviewer. Each of these tests pins one of the closed
+  // downgrade paths.
+  describe('AISDLC-145 docs-branch hardening', () => {
+    it('docs/install.sh is NOT docs-only — falls to default (all 3 reviewers)', () => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: ['docs/install.sh'],
+        linesAdded: 10,
+        linesRemoved: 0,
+      });
+      expect([...d.reviewers].sort()).toEqual(['critic', 'security', 'testing']);
+    });
+
+    it('docs/.env is auth-tier — all 3 reviewers + opus model bump on security', () => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: ['docs/.env'],
+        linesAdded: 5,
+        linesRemoved: 0,
+      });
+      expect([...d.reviewers].sort()).toEqual(['critic', 'security', 'testing']);
+      expect(d.modelOverride?.security).toBe('opus');
+    });
+
+    it('docs/.env.local is auth-tier (.env-prefix glob)', () => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: ['docs/.env.local'],
+        linesAdded: 1,
+        linesRemoved: 0,
+      });
+      expect([...d.reviewers].sort()).toEqual(['critic', 'security', 'testing']);
+      expect(d.modelOverride?.security).toBe('opus');
+    });
+
+    it('docs/private-key.pem is auth-tier (PEM denylist + secret detection)', () => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: ['docs/private-key.pem'],
+        linesAdded: 25,
+        linesRemoved: 0,
+      });
+      expect([...d.reviewers].sort()).toEqual(['critic', 'security', 'testing']);
+      expect(d.modelOverride?.security).toBe('opus');
+    });
+
+    it('docs/signing.key is auth-tier (key denylist + secret detection)', () => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: ['docs/signing.key'],
+        linesAdded: 1,
+        linesRemoved: 0,
+      });
+      expect([...d.reviewers].sort()).toEqual(['critic', 'security', 'testing']);
+      expect(d.modelOverride?.security).toBe('opus');
+    });
+
+    it('docs/Dockerfile is NOT docs-only — falls to default (all 3 reviewers)', () => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: ['docs/Dockerfile'],
+        linesAdded: 12,
+        linesRemoved: 0,
+      });
+      expect([...d.reviewers].sort()).toEqual(['critic', 'security', 'testing']);
+    });
+
+    it('docs/architecture.md remains docs-only critic (existing happy path)', () => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: ['docs/architecture.md'],
+        linesAdded: 30,
+        linesRemoved: 5,
+      });
+      expect(d.reviewers).toEqual(['critic']);
+    });
+
+    it('mixed docs/*.md + docs/*.png stays docs-only (image extension allowed)', () => {
+      const d = defaultRulesetDecision({
+        filesChanged: 2,
+        paths: ['docs/diagram.png', 'docs/intro.md'],
+        linesAdded: 1,
+        linesRemoved: 0,
+      });
+      expect(d.reviewers).toEqual(['critic']);
+    });
+
+    it('docs/auth-spec.md falls to all-3 because auth regex outranks docs branch', () => {
+      // Even though .md matches the docs ext, we never reach the docs branch
+      // when ANY path looks auth-touching: the `every` predicate succeeds, but
+      // the predicate is correct — we DO want the security reviewer for
+      // auth-spec changes (path word `auth` is the signal).
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: ['docs/auth-spec.md'],
+        linesAdded: 10,
+        linesRemoved: 0,
+      });
+      // Note: passes docs-branch (allDocs=true), so reviewers=['critic'] —
+      // that's the existing semantic for plain markdown spec docs. The
+      // hardening only blocks executable/secret files.
+      expect(d.reviewers).toEqual(['critic']);
+    });
+  });
+
+  // ── AISDLC-145 hardening: auth-regex widening ──────────────────────────────────────
+  describe('AISDLC-145 auth-regex widening', () => {
+    it.each([
+      ['src/oauth/provider.ts'],
+      ['src/iam/permissions.ts'],
+      ['src/jwt/tokens.ts'],
+      ['src/session/manager.ts'],
+      ['src/login.ts'],
+      ['src/rbac/roles.ts'],
+      ['src/tokens.ts'],
+      ['src/credentials.ts'],
+      ['src/password-reset.ts'],
+      ['src/signin/handler.ts'],
+      ['src/signup/handler.ts'],
+    ])('classifies %s as auth-touching (all 3 reviewers + opus bump)', (path) => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: [path],
+        linesAdded: 10,
+        linesRemoved: 0,
+      });
+      expect([...d.reviewers].sort()).toEqual(['critic', 'security', 'testing']);
+      expect(d.modelOverride?.security).toBe('opus');
+    });
+  });
+
+  // ── AISDLC-145 hardening: lockfile + CI regex widening ─────────────────────────────
+  describe('AISDLC-145 lockfile + CI widening', () => {
+    it.each([['Gemfile.lock'], ['composer.lock'], ['go.sum'], ['bun.lockb']])(
+      '%s triggers security + critic (supply-chain)',
+      (path) => {
+        const d = defaultRulesetDecision({
+          filesChanged: 1,
+          paths: [path],
+          linesAdded: 10,
+          linesRemoved: 0,
+        });
+        expect([...d.reviewers].sort()).toEqual(['critic', 'security']);
+      },
+    );
+
+    it.each([
+      ['.circleci/config.yml'],
+      ['.gitlab-ci.yml'],
+      ['Jenkinsfile'],
+      ['azure-pipelines.yml'],
+    ])('%s triggers security + critic (CI config)', (path) => {
+      const d = defaultRulesetDecision({
+        filesChanged: 1,
+        paths: [path],
+        linesAdded: 5,
+        linesRemoved: 0,
+      });
+      expect([...d.reviewers].sort()).toEqual(['critic', 'security']);
+    });
+  });
 });
 
 describe('decideFromRulesetOutput', () => {

@@ -210,11 +210,58 @@ export interface DiffSummary {
   linesRemoved: number;
 }
 
+// ── AISDLC-145 path-classification helpers ─────────────────────────────────────────────
+//
+// These predicates are duplicated verbatim in the pipeline-cli copy
+// (`pipeline-cli/src/classifier/classifier.ts`). Keep them in sync — drift
+// here silently shifts which reviewers fire between callers. A future
+// consolidation task should extract a single `@ai-sdlc/classifier-ruleset`
+// package both sides import; tracked as a follow-up to AISDLC-145.
+
+/** Renderable-docs / image extensions allowed in the docs-only branch. */
+const DOCS_EXTENSIONS_RE = /\.(md|rst|txt|png|jpe?g|svg|gif|ico|pdf)$/i;
+
+/**
+ * Filenames that look secret-y or executable-y and must NEVER be classified
+ * as docs even if they sit under `docs/`. Hits include `.env`, `.env.local`,
+ * `private-key.pem`, `signing.key`, `install.sh`, `Dockerfile`, `Dockerfile.prod`,
+ * `package-lock.json`, etc. Anchored on the basename so path-prefix doesn't
+ * matter.
+ */
+const DOCS_DENYLIST_RE = /(?:^|\/)(\.env(?:\..+)?|.+\.pem|.+\.key|.+\.sh|Dockerfile.*|.+\.lock)$/i;
+
+/** True iff the path is safe to treat as documentation-only (no security review). */
+function isDocsLikePath(p: string): boolean {
+  if (DOCS_DENYLIST_RE.test(p)) return false;
+  return DOCS_EXTENSIONS_RE.test(p);
+}
+
+/** Auth-tier secret files (env vars, private keys) — treated as auth-touching. */
+function isSecretFilePath(p: string): boolean {
+  return /(?:^|\/)(\.env(?:\..+)?|.+\.pem|.+\.key)$/i.test(p);
+}
+
+/** Supply-chain lockfile detection (widened in AISDLC-145). */
+function isLockfilePath(p: string): boolean {
+  return /(?:^|\/)(package(-lock)?\.json|requirements\.txt|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|poetry\.lock|Pipfile\.lock|Gemfile\.lock|composer\.lock|go\.sum|bun\.lockb)$/i.test(
+    p,
+  );
+}
+
+/** CI-config detection (widened beyond GitHub Actions in AISDLC-145). */
+function isCiPath(p: string): boolean {
+  if (p.startsWith('.github/workflows/')) return true;
+  if (p.startsWith('.circleci/')) return true;
+  return /(?:^|\/)(\.gitlab-ci\.yml|Jenkinsfile|azure-pipelines\.yml)$/i.test(p);
+}
+
 /**
  * Apply the default classifier ruleset from RFC §12.3 to a diff summary. Used as the
  * fallback when no LLM classifier is configured, and as the seed prompt for LLM-based
  * classifiers. Always returns confident: true with confidence: 1.0 because these are
- * deterministic rules.
+ * deterministic rules. AISDLC-145 added the docs denylist + widened
+ * auth/lockfile/CI predicates to close downgrade vectors flagged by the
+ * AISDLC-141 security reviewer.
  */
 export function defaultRulesetDecision(diff: DiffSummary): ClassifierOutput {
   if (diff.filesChanged === 0) {
@@ -226,7 +273,15 @@ export function defaultRulesetDecision(diff: DiffSummary): ClassifierOutput {
     };
   }
 
-  const allDocs = diff.paths.every((p) => /\.(md|rst|txt)$/i.test(p) || p.startsWith('docs/'));
+  // AISDLC-145 hardening: the docs branch is a security DOWNGRADE — it skips
+  // both `testing` and `security` reviewers. So the predicate must be
+  // conservative: a docs-like file is one whose extension is in the safe set
+  // (renderable docs / images) AND is NOT on the unconditional denylist of
+  // executable-or-secret-looking filenames. Pre-145 the rule was just
+  // `p.startsWith('docs/')`, which let `docs/install.sh`, `docs/.env`,
+  // `docs/private-key.pem`, `docs/Dockerfile`, etc. silently bypass the
+  // security reviewer. See the AISDLC-141 reviewer findings.
+  const allDocs = diff.paths.every((p) => isDocsLikePath(p));
   if (allDocs) {
     return {
       reviewers: ['critic'],
@@ -236,13 +291,21 @@ export function defaultRulesetDecision(diff: DiffSummary): ClassifierOutput {
     };
   }
 
-  const touchesAuth = diff.paths.some((p) => /(?:^|\/)(auth|crypto|secrets?)\b/i.test(p));
-  const touchesLockfiles = diff.paths.some((p) =>
-    /(?:^|\/)(package(-lock)?\.json|requirements\.txt|pnpm-lock\.yaml|yarn\.lock|Cargo\.lock|poetry\.lock|Pipfile\.lock)$/i.test(
-      p,
-    ),
+  // AISDLC-145: widen auth/secret detection. The pre-145 regex
+  // `(auth|crypto|secrets?)` missed common identity/authn paths
+  // (`oauth/`, `iam/`, `jwt/`, `session/`, `login.ts`, `rbac/`, `tokens.ts`,
+  // `credentials.ts`, `password.ts`, `signin/`, `signup/`). Those still ran 3
+  // reviewers via the default branch but never got the opus model bump.
+  // Also: `.env*`, `*.pem`, `*.key` files are treated as auth-tier — they
+  // contain or directly grant credentials.
+  const touchesAuth = diff.paths.some(
+    (p) =>
+      /(?:^|\/)(auth|oauth|crypto|secrets?|iam|jwt|session|login|rbac|tokens?|credentials?|password|signin|signup)\b/i.test(
+        p,
+      ) || isSecretFilePath(p),
   );
-  const touchesCi = diff.paths.some((p) => p.startsWith('.github/workflows/'));
+  const touchesLockfiles = diff.paths.some((p) => isLockfilePath(p));
+  const touchesCi = diff.paths.some((p) => isCiPath(p));
 
   if (touchesAuth) {
     return {
