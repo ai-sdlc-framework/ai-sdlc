@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, existsSync, rmSync, realpathSync } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -29,14 +29,23 @@ import { tmpdir } from 'node:os';
  * a valid repository, and on a developer laptop where the test is invoked
  * from inside the ai-sdlc-framework checkout, that walk-up silently
  * resolves to the host repo's origin and breaks the fallback assertion.
+ *
+ * AISDLC-134: belt-and-braces — also assert the `.git/config` file
+ * actually exists after init so a silently failing `git` (e.g. broken
+ * PATH, sandbox restrictions, exec returning code 0 without writing)
+ * surfaces here instead of as a confusing org-bleed assertion later.
  */
 function initBareRepo(dir: string): void {
   execSync('git init --quiet', { cwd: dir, stdio: 'ignore' });
+  if (!existsSync(join(dir, '.git', 'config'))) {
+    throw new Error(`initBareRepo: \`git init\` did not create .git/config in ${dir}`);
+  }
 }
 
 let tmpDir: string;
 let prevCwd: string;
 let prevHome: string | undefined;
+let prevCeiling: string | undefined;
 let consoleSpy: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
@@ -46,6 +55,21 @@ beforeEach(() => {
   // in the real ~/.cursor on a developer laptop and contaminate output.
   prevHome = process.env.HOME;
   process.env.HOME = tmpDir;
+  // AISDLC-134: defense-in-depth against host-repo origin bleed when these
+  // tests run from inside a worktree whose `.git/config` has a real origin
+  // (e.g. /Users/.../ai-sdlc/.worktrees/<task>/). detectGitRemote already
+  // guards via `git -C <cwd> rev-parse --show-toplevel` (AISDLC-104), but
+  // that check only fires when `--show-toplevel` reports an ANCESTOR. If
+  // the production check is ever weakened or sidestepped, this ceiling pin
+  // ensures git physically cannot walk above the OS tmpdir to reach the
+  // host repo. Semantics: GIT_CEILING_DIRECTORIES blocks walk-up THROUGH
+  // (not into) listed dirs — pinning to the realpath of the OS tmpdir
+  // means git stops at the per-test mkdtemp dir rather than continuing
+  // up to the worktree root. realpath() is required because macOS aliases
+  // /tmp to /private/tmp and the per-test tmpdir is reported under the
+  // /private/var/... canonical form by git.
+  prevCeiling = process.env.GIT_CEILING_DIRECTORIES;
+  process.env.GIT_CEILING_DIRECTORIES = realpathSync(tmpdir());
   consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
   process.exitCode = undefined;
 });
@@ -54,6 +78,8 @@ afterEach(() => {
   process.chdir(prevCwd);
   if (prevHome === undefined) delete process.env.HOME;
   else process.env.HOME = prevHome;
+  if (prevCeiling === undefined) delete process.env.GIT_CEILING_DIRECTORIES;
+  else process.env.GIT_CEILING_DIRECTORIES = prevCeiling;
   rmSync(tmpDir, { recursive: true, force: true });
   consoleSpy.mockRestore();
   process.exitCode = undefined;
