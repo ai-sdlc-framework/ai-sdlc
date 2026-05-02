@@ -4,6 +4,24 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
+    # AISDLC-131: docs-only PRs (RFC drafts, backlog edits, READMEs) skip the
+    # 3-reviewer subagent fan-out — those iterations don't need code review and
+    # were burning ~3 reviewer-agent invocations per push (verified: 8 review
+    # runs in ~1 hour on a single design-session PR = ~24 wasted invocations).
+    # `paths-ignore` only skips the workflow when ALL changed files match, so
+    # mixed PRs (docs + code) still trigger normally. To force a review on a
+    # docs-only PR (e.g. external contributor scrutiny), use:
+    #   gh workflow run ai-sdlc-review.yml --ref <branch>
+    # Note: `verify-attestation.yml` is intentionally NOT filtered — it must
+    # keep running on docs-only PRs to maintain the `ai-sdlc/attestation`
+    # status check. AISDLC-132 handles the resulting "no attestation signed"
+    # side-effect for docs-only PRs.
+    paths-ignore:
+      - 'spec/rfcs/**'
+      - 'docs/**'
+      - 'backlog/tasks/**'
+      - 'backlog/completed/**'
+      - '*.md'
 
 concurrency:
   group: review-${{ github.event.pull_request.number }}
