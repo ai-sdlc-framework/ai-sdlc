@@ -168,9 +168,19 @@ export function buildEntry(
  * Apply `redactSecrets()` to the LLM-derived free-text fields inside a
  * verdict (`finding`, `clarificationQuestion` per gate, plus the
  * top-level `summary` and `questions[]`). Returns a new verdict object;
- * the input is not mutated so callers can keep their unredacted copy
- * for in-memory consumers (e.g. comment-loop ingress that posts the
- * clarifying question back to GitHub before the redaction layer cares).
+ * the input is not mutated.
+ *
+ * **Important contract (AISDLC-127 / AISDLC-115.4)**: every egress path
+ * that writes verdict text outside of in-memory consumption MUST apply
+ * its own `redactSecrets()` pass — do NOT rely on this function having
+ * already redacted upstream. The comment-loop renderers
+ * (`renderClarificationComment`, `renderAdmitComment`,
+ * `renderPrTasksComment` in `comment-loop.ts`) call `redactSecrets()`
+ * directly on each free-text field they emit; both `dor-render-comment`
+ * and `dor-render-pr-summary` CLI subcommands (used by the GH Action
+ * ingress in `dor-ingress.yml`) inherit that guarantee. Future egress
+ * surfaces (Slack digest per RFC-0011 Phase 5; observability events per
+ * RFC-0015 §7) MUST follow the same pattern.
  */
 function redactVerdict(verdict: RefinementVerdict): RefinementVerdict {
   return {
