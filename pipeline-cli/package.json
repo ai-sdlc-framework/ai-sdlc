@@ -21,7 +21,8 @@
     "ai-sdlc-pipeline": "bin/ai-sdlc-pipeline.mjs",
     "cli-deps": "bin/cli-deps.mjs",
     "cli-dor-stats": "bin/cli-dor-stats.mjs",
-    "cli-dor-digest": "bin/cli-dor-digest.mjs"
+    "cli-dor-digest": "bin/cli-dor-digest.mjs",
+    "cli-classify-pr": "bin/cli-classify-pr.mjs"
   },
   "exports": {
     ".": {
@@ -39,6 +40,10 @@
     "./deps": {
       "types": "./dist/deps/index.d.ts",
       "import": "./dist/deps/index.js"
+    },
+    "./classifier": {
+      "types": "./dist/classifier/index.d.ts",
+      "import": "./dist/classifier/index.js"
     }
   },
   "publishConfig": {

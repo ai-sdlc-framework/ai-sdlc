@@ -18,6 +18,24 @@ export * from './steps/index.js';
 export * from './deps/index.js';
 export { executePipeline } from './execute-pipeline.js';
 
+// AISDLC-141 — conditional review classifier (RFC-0010 §12).
+export {
+  ALL_REVIEWERS,
+  appendCalibrationEntry,
+  decideFromInvocationFailure,
+  decideFromRulesetOutput,
+  defaultRulesetDecision,
+  parseNumstat,
+  parsePathsFile,
+  parseUnifiedDiff,
+  type CalibrationLogEntry,
+  type ClassifierDecision,
+  type ClassifierOutput,
+  type DiffSummary,
+  type FellOpenReason,
+  type ReviewerName,
+} from './classifier/classifier.js';
+
 // RFC-0011 Phase 2a — Definition-of-Ready Stage A.
 export {
   evaluateIssue,

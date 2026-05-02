@@ -6796,7 +6796,7 @@ var require_dist = __commonJS({
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
 import { existsSync as existsSync15, readdirSync as readdirSync5, statSync as statSync3 } from "node:fs";
-import { join as join16 } from "node:path";
+import { join as join17 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
     "use strict";
@@ -22942,13 +22942,17 @@ async function cleanupTask(opts) {
 import { existsSync as existsSync14, readdirSync as readdirSync4, readFileSync as readFileSync12 } from "node:fs";
 import { join as join15 } from "node:path";
 
+// ../../pipeline-cli/dist/classifier/classifier.js
+import { appendFile, mkdir } from "node:fs/promises";
+import { dirname as dirname4, join as join16 } from "node:path";
+
 // ../../pipeline-cli/dist/dor/resolvers/index.js
 init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
 import { existsSync as existsSync16, readFileSync as readFileSync13, readdirSync as readdirSync6, statSync as statSync4 } from "node:fs";
-import { basename as basename3, join as join17, relative } from "node:path";
+import { basename as basename3, join as join18, relative } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
 var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
@@ -22958,15 +22962,15 @@ var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/calibration-log.js
 import { appendFileSync, mkdirSync as mkdirSync4 } from "node:fs";
-import { dirname as dirname4, join as join18 } from "node:path";
+import { dirname as dirname5, join as join19 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/dor-config.js
 import { existsSync as existsSync17, readFileSync as readFileSync14 } from "node:fs";
-import { join as join19 } from "node:path";
+import { join as join20 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/ingress-claude.js
 import { existsSync as existsSync18, readFileSync as readFileSync15, readdirSync as readdirSync7 } from "node:fs";
-import { join as join20 } from "node:path";
+import { join as join21 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stats.js
 import { existsSync as existsSync19, readFileSync as readFileSync16 } from "node:fs";
