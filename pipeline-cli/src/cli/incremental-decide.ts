@@ -59,10 +59,13 @@ import {
   decideIncrementalReview,
   DEFAULT_MAX_DELTA_LINES,
   findMarkerInComments,
+  findTrustedMarkerInComments,
   formatMarker,
   parseNumstatForDelta,
+  type CommentWithAuthor,
   type DeltaStats,
   type IncrementalDecision,
+  type MarkerPayload,
   type RunGit,
 } from '../incremental-review/incremental.js';
 
@@ -115,7 +118,18 @@ export function buildIncrementalDecideCli(opts: BuildOptions = {}): Argv {
         y
           .option('comments-file', {
             type: 'string',
-            describe: 'File of prior PR comment bodies (search target for the marker).',
+            describe:
+              'File of prior PR comment bodies (search target for the marker). ' +
+              'IMPORTANT: callers MUST pre-filter to trusted authors at the fetch ' +
+              'site (gh pr view --jq) — this flag does NOT verify authorship. ' +
+              'Prefer --comments-json-file for defense-in-depth.',
+          })
+          .option('comments-json-file', {
+            type: 'string',
+            describe:
+              'Structured comments JSON: array of {authorLogin, authorAssociation, body}. ' +
+              'When passed, the CLI applies the trusted-author filter (Layer 1 + ' +
+              'Layer 2 of the AISDLC-142 round-2 fix) before searching for the marker.',
           })
           .option('base-ref', {
             type: 'string',
@@ -149,6 +163,7 @@ export function buildIncrementalDecideCli(opts: BuildOptions = {}): Argv {
       (parsed) => {
         const decision = decide({
           commentsFile: parsed['comments-file'] as string | undefined,
+          commentsJsonFile: parsed['comments-json-file'] as string | undefined,
           baseRef: parsed['base-ref'] as string,
           headRef: parsed['head-ref'] as string,
           repoRoot: parsed['repo-root'] as string,
@@ -215,6 +230,18 @@ export function buildIncrementalDecideCli(opts: BuildOptions = {}): Argv {
  */
 export interface DecideArgs {
   commentsFile?: string;
+  /**
+   * Path to a JSON file containing an array of `CommentWithAuthor` objects.
+   * When provided, the CLI applies the trusted-author filter
+   * (`filterTrustedComments`) BEFORE searching for the marker — defending
+   * against the AISDLC-142 round-2 forged-marker authorization bypass.
+   *
+   * Takes precedence over `commentsFile` when both are passed (the JSON
+   * variant is strictly more secure). The string-body variant is retained
+   * for backward compatibility but emits a warning to nudge callers
+   * toward the safer path.
+   */
+  commentsJsonFile?: string;
   baseRef: string;
   headRef: string;
   repoRoot: string;
@@ -224,18 +251,106 @@ export interface DecideArgs {
   runGit: RunGit;
 }
 
+/**
+ * Coerce a raw JSON-parsed comments record into a `CommentWithAuthor`. Tolerates
+ * both GraphQL (`author.login` + `authorAssociation`) and REST
+ * (`user.login` + `author_association`) shapes so callers can pass `gh pr
+ * view --json comments | jq '.comments'` output OR `github.rest.issues.listComments`
+ * output without a normalisation step. Drops malformed records.
+ */
+function coerceComment(raw: unknown): CommentWithAuthor | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const r = raw as Record<string, unknown>;
+  const body = typeof r.body === 'string' ? r.body : '';
+  // Author login: prefer GraphQL `author.login`, fall back to REST `user.login`,
+  // fall back to top-level `authorLogin` (when callers already pre-normalise).
+  let authorLogin = '';
+  if (typeof r.authorLogin === 'string') {
+    authorLogin = r.authorLogin;
+  } else if (r.author && typeof r.author === 'object') {
+    const a = r.author as Record<string, unknown>;
+    if (typeof a.login === 'string') authorLogin = a.login;
+  } else if (r.user && typeof r.user === 'object') {
+    const u = r.user as Record<string, unknown>;
+    if (typeof u.login === 'string') authorLogin = u.login;
+  }
+  // Author association: GraphQL `authorAssociation` OR REST `author_association`
+  // OR pre-normalised top-level field.
+  let authorAssociation = '';
+  if (typeof r.authorAssociation === 'string') {
+    authorAssociation = r.authorAssociation;
+  } else if (typeof r.author_association === 'string') {
+    authorAssociation = r.author_association;
+  }
+  // Reject records with no author info — never safe to trust.
+  if (!authorLogin && !authorAssociation) return null;
+  return { authorLogin, authorAssociation, body };
+}
+
+/**
+ * Parse a comments-JSON file into a list of `CommentWithAuthor`. The file
+ * MUST be a JSON array (not the wrapping `{comments: [...]}` shape from `gh
+ * pr view`); callers pre-extract the array via `--jq '.comments'` to keep
+ * the CLI input simple.
+ *
+ * Errors fall through with an empty list — the calling decision then
+ * sees `prior: null` and routes to FULL review, preserving the safe-side
+ * default.
+ */
+function readCommentsJsonFile(path: string): CommentWithAuthor[] {
+  let text: string;
+  try {
+    text = readFileSync(path, 'utf-8');
+  } catch (err) {
+    warn(`failed to read --comments-json-file: ${(err as Error).message}`);
+    return [];
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch (err) {
+    warn(`failed to parse --comments-json-file as JSON: ${(err as Error).message}`);
+    return [];
+  }
+  if (!Array.isArray(parsed)) {
+    warn(`--comments-json-file is not a JSON array (got ${typeof parsed})`);
+    return [];
+  }
+  const out: CommentWithAuthor[] = [];
+  for (const raw of parsed) {
+    const c = coerceComment(raw);
+    if (c !== null) out.push(c);
+  }
+  return out;
+}
+
 export function decide(args: DecideArgs): IncrementalDecision {
   // ── Locate prior marker (if any) ─────────────────────────────────
-  let priorMarkerBody = '';
-  if (args.commentsFile) {
+  let prior: MarkerPayload | null = null;
+  if (args.commentsJsonFile) {
+    // Preferred path (Layer 1 defense-in-depth): structured comments with
+    // author info → trust-filter → marker search.
+    const comments = readCommentsJsonFile(args.commentsJsonFile);
+    prior = findTrustedMarkerInComments(comments);
+  } else if (args.commentsFile) {
+    // Legacy path: bodies-only file. The CALLER (workflow `gh pr view --jq`
+    // filter, or slash-command body) is responsible for ensuring only
+    // trusted-author comments end up in this file. We warn so misuse is
+    // visible in CI logs.
+    warn(
+      '--comments-file is the legacy bodies-only input; ensure the FETCH ' +
+        'site filters by trusted author (CRITICAL — AISDLC-142 round 2). ' +
+        'Prefer --comments-json-file for in-CLI verification.',
+    );
+    let priorMarkerBody = '';
     try {
       priorMarkerBody = readFileSync(args.commentsFile, 'utf-8');
     } catch (err) {
       warn(`failed to read --comments-file: ${(err as Error).message}`);
       // Fall through with empty body → no marker → FULL review.
     }
+    prior = findMarkerInComments([priorMarkerBody]);
   }
-  const prior = findMarkerInComments([priorMarkerBody]);
 
   // ── Compute current contentHashV3 ───────────────────────────────
   let currentContentHash = '';

@@ -15,11 +15,16 @@ import {
   computeContentHashV3,
   DEFAULT_MAX_DELTA_LINES,
   decideIncrementalReview,
+  filterTrustedComments,
   findMarkerInComments,
+  findTrustedMarkerInComments,
   formatMarker,
   MARKER_PREFIX,
   parseMarker,
   parseNumstatForDelta,
+  TRUSTED_MARKER_AUTHOR_ASSOCIATIONS,
+  TRUSTED_MARKER_AUTHOR_LOGINS,
+  type CommentWithAuthor,
   type DeltaStats,
   type MarkerPayload,
   type RunGit,
@@ -473,6 +478,178 @@ describe('decideIncrementalReview — AC #8 scenarios', () => {
       const d = decideIncrementalReview(inp);
       expect(d.skip && d.deltaOnly).toBe(false);
     }
+  });
+});
+
+// ── Trusted-author filter (AISDLC-142 round-2 CRITICAL fix) ────────
+//
+// Threat model: an external GitHub user (or a fork-PR contributor) posts a
+// PR comment whose body contains a forged
+// `<!-- ai-sdlc:last-reviewed-contenthash:<base64url> -->` marker carrying
+// the publicly-computable current contentHashV3. Without an author filter,
+// the next push reads the marker, sees `prior.contentHash === current` →
+// SKIP review → auto-approves all 3 reviewers → satisfies the
+// required-merge-gate check. Authorization bypass with the same blast
+// radius as a forged review approval.
+//
+// Defense (Layer 1 in this module): `filterTrustedComments` drops every
+// comment whose `authorLogin` is not in `TRUSTED_MARKER_AUTHOR_LOGINS` AND
+// whose `authorAssociation` is not in `TRUSTED_MARKER_AUTHOR_ASSOCIATIONS`.
+// `findTrustedMarkerInComments` chains the filter with the marker search
+// so callers can't accidentally skip the filter.
+
+describe('TRUSTED_MARKER_AUTHOR_LOGINS / TRUSTED_MARKER_AUTHOR_ASSOCIATIONS', () => {
+  it('includes both flavors of the github-actions login (GraphQL + REST)', () => {
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('github-actions')).toBe(true);
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('github-actions[bot]')).toBe(true);
+  });
+
+  it('includes both flavors of the ai-sdlc-ci-attestor login', () => {
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('ai-sdlc-ci-attestor')).toBe(true);
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('ai-sdlc-ci-attestor[bot]')).toBe(true);
+  });
+
+  it('does NOT trust unrelated bots (codecov, dependabot, etc.)', () => {
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('codecov')).toBe(false);
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('codecov[bot]')).toBe(false);
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('dependabot[bot]')).toBe(false);
+  });
+
+  it('trusts only push-access associations (OWNER / MEMBER / COLLABORATOR)', () => {
+    for (const a of ['OWNER', 'MEMBER', 'COLLABORATOR']) {
+      expect(TRUSTED_MARKER_AUTHOR_ASSOCIATIONS.has(a)).toBe(true);
+    }
+    for (const a of ['CONTRIBUTOR', 'NONE', 'FIRST_TIME_CONTRIBUTOR', 'FIRST_TIMER']) {
+      expect(TRUSTED_MARKER_AUTHOR_ASSOCIATIONS.has(a)).toBe(false);
+    }
+  });
+});
+
+describe('filterTrustedComments', () => {
+  const validMarker = formatMarker({
+    contentHash: 'a'.repeat(64),
+    reviewedSha: '1'.repeat(40),
+    reviewedAt: '2026-05-01T00:00:00.000Z',
+  });
+
+  it('keeps comments authored by github-actions (workflow-authored markers)', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'github-actions', authorAssociation: 'CONTRIBUTOR', body: validMarker },
+    ];
+    expect(filterTrustedComments(comments)).toEqual([validMarker]);
+  });
+
+  it('keeps comments authored by ai-sdlc-ci-attestor (CI-side attestor bot)', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'ai-sdlc-ci-attestor[bot]', authorAssociation: 'NONE', body: validMarker },
+    ];
+    expect(filterTrustedComments(comments)).toEqual([validMarker]);
+  });
+
+  it('keeps comments from OWNER / MEMBER / COLLABORATOR even with unknown logins', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'maintainer-1', authorAssociation: 'OWNER', body: 'a' },
+      { authorLogin: 'maintainer-2', authorAssociation: 'MEMBER', body: 'b' },
+      { authorLogin: 'maintainer-3', authorAssociation: 'COLLABORATOR', body: 'c' },
+    ];
+    expect(filterTrustedComments(comments)).toEqual(['a', 'b', 'c']);
+  });
+
+  it('AC #2 — DROPS comments authored by external-attacker carrying a forged marker', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'external-attacker', authorAssociation: 'NONE', body: validMarker },
+      { authorLogin: 'fork-pr-contributor', authorAssociation: 'CONTRIBUTOR', body: validMarker },
+      {
+        authorLogin: 'first-timer',
+        authorAssociation: 'FIRST_TIME_CONTRIBUTOR',
+        body: validMarker,
+      },
+    ];
+    expect(filterTrustedComments(comments)).toEqual([]);
+  });
+
+  it('drops unrelated bots (codecov, dependabot) even when they post lookalike bodies', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'codecov', authorAssociation: 'NONE', body: validMarker },
+      { authorLogin: 'codecov[bot]', authorAssociation: 'NONE', body: validMarker },
+      { authorLogin: 'dependabot[bot]', authorAssociation: 'CONTRIBUTOR', body: validMarker },
+    ];
+    expect(filterTrustedComments(comments)).toEqual([]);
+  });
+
+  it('preserves input order (idempotent against the freshest-wins findMarker scan)', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'github-actions', authorAssociation: 'CONTRIBUTOR', body: 'first' },
+      { authorLogin: 'external', authorAssociation: 'NONE', body: 'attacker' },
+      { authorLogin: 'github-actions', authorAssociation: 'CONTRIBUTOR', body: 'second' },
+    ];
+    expect(filterTrustedComments(comments)).toEqual(['first', 'second']);
+  });
+
+  it('returns an empty list for an empty input (no crash)', () => {
+    expect(filterTrustedComments([])).toEqual([]);
+  });
+
+  it('treats missing authorLogin / authorAssociation as untrusted (defense-in-depth)', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: '', authorAssociation: '', body: validMarker },
+    ];
+    expect(filterTrustedComments(comments)).toEqual([]);
+  });
+});
+
+describe('findTrustedMarkerInComments — end-to-end safety check', () => {
+  const trustedMarker = formatMarker({
+    contentHash: 'a'.repeat(64),
+    reviewedSha: '1'.repeat(40),
+    reviewedAt: '2026-05-01T00:00:00.000Z',
+  });
+  const forgedMarker = formatMarker({
+    contentHash: 'f'.repeat(64),
+    reviewedSha: '2'.repeat(40),
+    reviewedAt: '2026-05-02T00:00:00.000Z',
+  });
+
+  it('AC #2 — IGNORES a forged marker authored by external-attacker (returns null)', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'external-attacker', authorAssociation: 'NONE', body: forgedMarker },
+    ];
+    expect(findTrustedMarkerInComments(comments)).toBeNull();
+  });
+
+  it('AC #3 — HONORS a marker authored by github-actions[bot] normally', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'github-actions', authorAssociation: 'CONTRIBUTOR', body: trustedMarker },
+    ];
+    const m = findTrustedMarkerInComments(comments);
+    expect(m).not.toBeNull();
+    expect(m?.contentHash).toBe('a'.repeat(64));
+    expect(m?.reviewedSha).toBe('1'.repeat(40));
+  });
+
+  it('AC #2+#3 mixed — picks the LATEST trusted marker, ignores attacker comments interleaved', () => {
+    // Threat scenario: attacker posts AFTER the bot, trying to override.
+    // Without the filter, findMarkerInComments would return the attacker's
+    // forged marker (LAST-occurrence wins). With the filter, the attacker
+    // is dropped and the bot's earlier marker survives.
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'github-actions', authorAssociation: 'CONTRIBUTOR', body: trustedMarker },
+      { authorLogin: 'external-attacker', authorAssociation: 'NONE', body: forgedMarker },
+    ];
+    const m = findTrustedMarkerInComments(comments);
+    expect(m?.contentHash).toBe('a'.repeat(64)); // trusted, not 'f'.repeat(64)
+  });
+
+  it('returns null when ALL trusted comments are non-marker (no false positive)', () => {
+    const comments: CommentWithAuthor[] = [
+      { authorLogin: 'github-actions', authorAssociation: 'CONTRIBUTOR', body: 'CI build status' },
+      { authorLogin: 'maintainer', authorAssociation: 'OWNER', body: 'LGTM' },
+    ];
+    expect(findTrustedMarkerInComments(comments)).toBeNull();
+  });
+
+  it('returns null when comment list is empty', () => {
+    expect(findTrustedMarkerInComments([])).toBeNull();
   });
 });
 

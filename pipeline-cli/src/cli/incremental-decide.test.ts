@@ -316,3 +316,237 @@ describe('cli-incremental-decide — yargs router', () => {
     expect(d.reason).toBe('no-marker');
   });
 });
+
+// ── --comments-json-file (AISDLC-142 round-2 CRITICAL fix) ─────────
+//
+// The structured-JSON path is the safe-by-default input — the CLI applies
+// the trusted-author filter (`filterTrustedComments`) BEFORE searching for
+// the marker. These tests assert the bypass scenarios from the round-2
+// security finding.
+
+describe('decide() — --comments-json-file applies trusted-author filter', () => {
+  function baseArgsJson(over: Partial<DecideArgs>): DecideArgs {
+    return {
+      baseRef: 'origin/main',
+      headRef: 'HEAD',
+      repoRoot: '/tmp/repo',
+      maxDeltaLines: 200,
+      runGit: makeRunGit({
+        'merge-base origin/main HEAD': BASE_SHA + '\n',
+        'diff --name-only --no-renames origin/main...HEAD': 'src/foo.ts\n',
+        [`ls-tree -r ${BASE_SHA} -- src/foo.ts`]: `100644 blob ${HEAD_SHA_A}\tsrc/foo.ts\n`,
+        'ls-tree -r HEAD -- src/foo.ts': `100644 blob ${HEAD_SHA_B}\tsrc/foo.ts\n`,
+      }),
+      ...over,
+    };
+  }
+
+  it('AC #2 — IGNORES a forged marker authored by external-attacker (returns no-marker)', () => {
+    // Compute the actual current contentHash so the forged marker carries
+    // the value an attacker would derive from the public PR diff.
+    const probe = decide(baseArgsJson({}));
+    const forgedMarker = formatMarker({
+      contentHash: probe.currentContentHash, // attacker computes this from the PR
+      reviewedSha: SHA_A,
+      reviewedAt: '2026-05-01T00:00:00.000Z',
+    });
+    const commentsJsonFile = join(tmp, 'comments.json');
+    writeFileSync(
+      commentsJsonFile,
+      JSON.stringify([
+        {
+          authorLogin: 'external-attacker',
+          authorAssociation: 'NONE',
+          body: `## Looks legit\n\n${forgedMarker}\n`,
+        },
+      ]),
+    );
+    const d = decide(baseArgsJson({ commentsJsonFile }));
+    // Without the filter, this would return skip:true / unchanged — that's
+    // the CRITICAL bypass. With the filter, the attacker comment is dropped
+    // and the gate routes through `no-marker` → FULL review.
+    expect(d.skip).toBe(false);
+    expect(d.reason).toBe('no-marker');
+  });
+
+  it('AC #3 — HONORS a marker authored by github-actions normally (skip path works)', () => {
+    const probe = decide(baseArgsJson({}));
+    const trustedMarker = formatMarker({
+      contentHash: probe.currentContentHash,
+      reviewedSha: SHA_A,
+      reviewedAt: '2026-05-01T00:00:00.000Z',
+    });
+    const commentsJsonFile = join(tmp, 'comments.json');
+    writeFileSync(
+      commentsJsonFile,
+      JSON.stringify([
+        // GraphQL shape (gh pr view): author.login WITHOUT [bot] suffix.
+        {
+          authorLogin: 'github-actions',
+          authorAssociation: 'CONTRIBUTOR',
+          body: `## AI-SDLC: incremental review state\n\n${trustedMarker}\n`,
+        },
+      ]),
+    );
+    const d = decide(baseArgsJson({ commentsJsonFile }));
+    expect(d.skip).toBe(true);
+    expect(d.reason).toBe('unchanged');
+    expect(d.lastReviewedSha).toBe(SHA_A);
+  });
+
+  it('AC #2+#3 mixed — bot marker present + attacker marker present → bot wins', () => {
+    const probe = decide(baseArgsJson({}));
+    const trustedMarker = formatMarker({
+      contentHash: probe.currentContentHash,
+      reviewedSha: SHA_A,
+      reviewedAt: '2026-05-01T00:00:00.000Z',
+    });
+    const forgedMarker = formatMarker({
+      contentHash: 'f'.repeat(64), // mismatching hash that would NOT trigger skip anyway
+      reviewedSha: '2'.repeat(40),
+      reviewedAt: '2026-05-02T00:00:00.000Z',
+    });
+    const commentsJsonFile = join(tmp, 'comments.json');
+    // Attacker post is AFTER the bot post — without the filter, the
+    // freshest-wins findMarker scan would return the attacker's forged
+    // marker (which has a mismatching hash, so it wouldn't trigger skip
+    // here, but in the AC #2 test above an attacker who copies the bot's
+    // CURRENT hash succeeds). With the filter, the attacker is dropped
+    // and the bot's marker survives → skip:true.
+    writeFileSync(
+      commentsJsonFile,
+      JSON.stringify([
+        { authorLogin: 'github-actions', authorAssociation: 'CONTRIBUTOR', body: trustedMarker },
+        { authorLogin: 'external-attacker', authorAssociation: 'NONE', body: forgedMarker },
+      ]),
+    );
+    const d = decide(baseArgsJson({ commentsJsonFile }));
+    expect(d.skip).toBe(true);
+    expect(d.priorContentHash).toBe(probe.currentContentHash); // trusted hash, not 'f'*64
+  });
+
+  it('accepts the REST API shape (user.login + author_association) too', () => {
+    const probe = decide(baseArgsJson({}));
+    const trustedMarker = formatMarker({
+      contentHash: probe.currentContentHash,
+      reviewedSha: SHA_A,
+      reviewedAt: '2026-05-01T00:00:00.000Z',
+    });
+    const commentsJsonFile = join(tmp, 'comments.json');
+    // REST API shape: `user.login` WITH [bot] suffix + `author_association`.
+    writeFileSync(
+      commentsJsonFile,
+      JSON.stringify([
+        {
+          user: { login: 'github-actions[bot]' },
+          author_association: 'CONTRIBUTOR',
+          body: trustedMarker,
+        },
+      ]),
+    );
+    const d = decide(baseArgsJson({ commentsJsonFile }));
+    expect(d.skip).toBe(true);
+    expect(d.reason).toBe('unchanged');
+  });
+
+  it('treats unparseable JSON as empty list (safe-side: no-marker → FULL)', () => {
+    const commentsJsonFile = join(tmp, 'comments.json');
+    writeFileSync(commentsJsonFile, '{not valid json');
+    const d = decide(baseArgsJson({ commentsJsonFile }));
+    expect(d.reason).toBe('no-marker');
+    expect(stderrChunks.join('')).toMatch(/failed to parse --comments-json-file/);
+  });
+
+  it('treats non-array JSON as empty list (defensive)', () => {
+    const commentsJsonFile = join(tmp, 'comments.json');
+    writeFileSync(commentsJsonFile, '{"comments": []}'); // wrong shape — should be the array directly
+    const d = decide(baseArgsJson({ commentsJsonFile }));
+    expect(d.reason).toBe('no-marker');
+    expect(stderrChunks.join('')).toMatch(/--comments-json-file is not a JSON array/);
+  });
+
+  it('falls back to no-marker when --comments-json-file is unreadable', () => {
+    const d = decide(baseArgsJson({ commentsJsonFile: join(tmp, 'missing.json') }));
+    expect(d.reason).toBe('no-marker');
+    expect(stderrChunks.join('')).toMatch(/failed to read --comments-json-file/);
+  });
+
+  it('drops malformed records (no author info) without crashing', () => {
+    const probe = decide(baseArgsJson({}));
+    const trustedMarker = formatMarker({
+      contentHash: probe.currentContentHash,
+      reviewedSha: SHA_A,
+      reviewedAt: '2026-05-01T00:00:00.000Z',
+    });
+    const commentsJsonFile = join(tmp, 'comments.json');
+    writeFileSync(
+      commentsJsonFile,
+      JSON.stringify([
+        null,
+        'not an object',
+        { body: 'no author info at all' },
+        { authorLogin: 'github-actions', authorAssociation: 'CONTRIBUTOR', body: trustedMarker },
+      ]),
+    );
+    const d = decide(baseArgsJson({ commentsJsonFile }));
+    // The valid trusted comment still wins.
+    expect(d.skip).toBe(true);
+  });
+
+  it('--comments-json-file takes precedence over --comments-file when both are passed', () => {
+    // Set up: --comments-file carries an UNFILTERED bot-marker (legacy
+    // path). --comments-json-file carries an attacker comment. The newer
+    // safer path should win — and since the attacker comment is filtered
+    // out, the result is no-marker (NOT the legacy file's marker).
+    const probe = decide(baseArgsJson({}));
+    const validMarker = formatMarker({
+      contentHash: probe.currentContentHash,
+      reviewedSha: SHA_A,
+      reviewedAt: '2026-05-01T00:00:00.000Z',
+    });
+    const commentsFile = join(tmp, 'comments.txt');
+    writeFileSync(commentsFile, validMarker);
+    const commentsJsonFile = join(tmp, 'comments.json');
+    writeFileSync(
+      commentsJsonFile,
+      JSON.stringify([
+        { authorLogin: 'external-attacker', authorAssociation: 'NONE', body: validMarker },
+      ]),
+    );
+    const d = decide(baseArgsJson({ commentsFile, commentsJsonFile }));
+    expect(d.reason).toBe('no-marker');
+  });
+});
+
+describe('cli-incremental-decide — --comments-json-file CLI plumbing', () => {
+  it('CLI accepts --comments-json-file and routes through the filter', async () => {
+    const commentsJsonFile = join(tmp, 'comments.json');
+    // No prior trusted marker → no-marker on the JSON path.
+    writeFileSync(
+      commentsJsonFile,
+      JSON.stringify([
+        {
+          authorLogin: 'external-attacker',
+          authorAssociation: 'NONE',
+          body: formatMarker({
+            contentHash: HASH_A,
+            reviewedSha: SHA_A,
+            reviewedAt: '2026-05-01T00:00:00.000Z',
+          }),
+        },
+      ]),
+    );
+    const cli = buildIncrementalDecideCli({
+      argv: ['decide', '--comments-json-file', commentsJsonFile, '--repo-root', '/tmp/repo'],
+      runGit: makeRunGit({
+        'merge-base origin/main HEAD': BASE_SHA + '\n',
+        'diff --name-only --no-renames origin/main...HEAD': 'src/foo.ts\n',
+        [`ls-tree -r ${BASE_SHA} -- src/foo.ts`]: `100644 blob ${HEAD_SHA_A}\tsrc/foo.ts\n`,
+        'ls-tree -r HEAD -- src/foo.ts': `100644 blob ${HEAD_SHA_B}\tsrc/foo.ts\n`,
+      }),
+    });
+    await cli.parseAsync();
+    const d = stdoutJson<IncrementalDecision>();
+    expect(d.reason).toBe('no-marker'); // attacker filtered out → no marker
+  });
+});
