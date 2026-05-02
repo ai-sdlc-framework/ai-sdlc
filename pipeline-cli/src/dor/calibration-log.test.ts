@@ -16,6 +16,7 @@ import { join } from 'node:path';
 import {
   appendCalibrationEntry,
   buildEntry,
+  recordOverride,
   resolveCalibrationLogPath,
   type CalibrationEntry,
 } from './calibration-log.js';
@@ -162,6 +163,55 @@ describe('buildEntry', () => {
   it('omits issue snapshot when no issue provided', () => {
     const e = buildEntry({ verdict: verdict() });
     expect(e.issue).toBeUndefined();
+  });
+
+  it('passes author through and omits the field when undefined (AISDLC-115.6)', () => {
+    const eWith = buildEntry({ verdict: verdict(), author: 'alice@example.com' });
+    expect(eWith.author).toBe('alice@example.com');
+
+    const eWithout = buildEntry({ verdict: verdict() });
+    // Top-level field is intentionally absent (not just undefined) so the
+    // serialised JSONL line stays tight.
+    expect('author' in eWithout).toBe(false);
+  });
+
+  it('redacts secret-shaped author strings (defense-in-depth)', () => {
+    const fakePat = `ghp_${'a'.repeat(36)}`;
+    const e = buildEntry({ verdict: verdict(), author: fakePat });
+    expect(e.author).toContain('[REDACTED:GITHUB_PAT]');
+    expect(e.author).not.toContain(fakePat);
+  });
+});
+
+describe('recordOverride', () => {
+  it('writes an override-outcome entry with author + reason', () => {
+    const target = join(tmp, 'cal.jsonl');
+    const { entry, path } = recordOverride(
+      { issueId: 'AISDLC-90', author: 'maintainer-jane', reason: 'context-only PR — bypass DoR' },
+      { filePath: target },
+    );
+    expect(path).toBe(target);
+    expect(entry.outcome).toBe('override');
+    expect(entry.author).toBe('maintainer-jane');
+    expect(entry.notes).toBe('context-only PR — bypass DoR');
+    expect(entry.issueId).toBe('AISDLC-90');
+    // Synthetic verdict — no real evaluator run was attached.
+    expect(entry.verdict.evaluatorVersion).toBe('override-synthetic');
+  });
+
+  it('preserves the supplied verdict when one is provided', () => {
+    const target = join(tmp, 'cal.jsonl');
+    const realVerdict = verdict({
+      gates: [{ gateId: 1, verdict: 'fail', severity: 'block', stage: 'A', confidence: 'high' }],
+      overallVerdict: 'needs-clarification',
+    });
+    const { entry } = recordOverride(
+      { issueId: 'AISDLC-91', author: 'maintainer-jane', verdict: realVerdict },
+      { filePath: target },
+    );
+    expect(entry.failedGates).toEqual([1]);
+    expect(entry.verdict.evaluatorVersion).toBe('test');
+    expect(entry.outcome).toBe('override');
   });
 });
 

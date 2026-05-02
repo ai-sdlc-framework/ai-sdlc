@@ -37,6 +37,17 @@ export interface CalibrationEntryInput {
   outcome?: 'admit' | 'needs-clarification' | 'override' | '';
   /** Optional free-text annotation. */
   notes?: string;
+  /**
+   * Author identity (RFC-0011 §5.5 + §8). Top-level for cheap per-author
+   * aggregation in `cli-dor-stats --by-author` (no JOIN against `issue`
+   * required, and works even when no issue snapshot was attached).
+   *
+   * Typical sources: `issue.authorIdentity` (GitHub), Backlog frontmatter
+   * `created_by`, or the maintainer identity for `outcome: 'override'`
+   * entries. Entries with no author land in the `(unknown)` bucket — we
+   * intentionally don't try to backfill historical entries.
+   */
+  author?: string;
 }
 
 export interface CalibrationLogOpts {
@@ -79,6 +90,12 @@ export interface CalibrationEntry {
   /** Full verdict object — schema-shaped, no internal fields. */
   verdict: RefinementVerdict;
   notes?: string;
+  /**
+   * Author identity (when the caller provided one). Top-level so
+   * `cli-dor-stats --by-author` doesn't need to spelunk `issue` or the
+   * verdict object. Absent when the upstream payload didn't carry one.
+   */
+  author?: string;
 }
 
 /**
@@ -130,7 +147,7 @@ export function buildEntry(
   input: CalibrationEntryInput,
   opts: CalibrationLogOpts = {},
 ): CalibrationEntry {
-  const { verdict, issue, outcome, notes } = input;
+  const { verdict, issue, outcome, notes, author } = input;
   const now = opts.now ?? (() => new Date());
 
   const failedGates = verdict.gates
@@ -149,6 +166,12 @@ export function buildEntry(
       }
     : undefined;
 
+  // Author is identity metadata (not free-text) — but redact anyway as
+  // defense-in-depth. A caller who hands us "alice@example.com" stays
+  // intact; one who hands us a token-shaped string gets sanitised before
+  // it lands on disk.
+  const authorClean = author !== undefined ? redactSecrets(author) : author;
+
   return {
     ts: now().toISOString(),
     issueId: verdict.issueId,
@@ -161,7 +184,60 @@ export function buildEntry(
     issue: issueSnapshot,
     verdict: redactVerdict(verdict),
     notes: notes !== undefined ? redactSecrets(notes) : notes,
+    ...(authorClean !== undefined ? { author: authorClean } : {}),
   };
+}
+
+/**
+ * Record a maintainer-applied override (RFC-0011 §7.4 + §5.5). The
+ * canonical path is the `dor-bypass` mechanism shipped in Phase 6
+ * (AISDLC-115.7); this helper is the writer that callsite plugs into,
+ * and exists now so Phase 7 soak (AISDLC-115.8) can compute false-positive
+ * rate from the calibration log without waiting on Phase 6 to land.
+ *
+ * The override is logged as an `outcome: 'override'` entry against a
+ * synthetic verdict (the caller may not have a fresh evaluator run for
+ * the bypass — the maintainer just decided "ship it anyway"). When a
+ * real verdict is available (the typical case after a `dor-bypass` label
+ * is applied to an already-evaluated issue), pass it via the `verdict`
+ * argument so the per-gate breakdown survives into the override row.
+ */
+export function recordOverride(
+  input: {
+    issueId: string;
+    /** Maintainer identity — required so per-author override stats are meaningful. */
+    author: string;
+    /** Free-text reason the maintainer supplied with the override. */
+    reason?: string;
+    /**
+     * Verdict snapshot at the moment of override. When omitted, a synthetic
+     * `admit`-shaped verdict is logged so the entry has a stable schema.
+     */
+    verdict?: RefinementVerdict;
+    /** Issue snapshot at override time. */
+    issue?: Pick<IssueInput, 'id' | 'source' | 'title' | 'body'>;
+  },
+  opts: CalibrationLogOpts = {},
+): { path: string; entry: CalibrationEntry } {
+  const verdict: RefinementVerdict = input.verdict ?? {
+    issueId: input.issueId,
+    rubricVersion: 'v1',
+    overallVerdict: 'admit',
+    overallConfidence: 'low',
+    gates: [],
+    signedAt: (opts.now ?? (() => new Date()))().toISOString(),
+    evaluatorVersion: 'override-synthetic',
+    summary: 'maintainer override — no evaluator run attached',
+    questions: [],
+  };
+  const entryInput: CalibrationEntryInput = {
+    verdict,
+    outcome: 'override',
+    author: input.author,
+    ...(input.reason !== undefined ? { notes: input.reason } : {}),
+    ...(input.issue !== undefined ? { issue: input.issue } : {}),
+  };
+  return appendCalibrationEntry(entryInput, opts);
 }
 
 /**
