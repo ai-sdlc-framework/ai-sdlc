@@ -282,6 +282,124 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     assert.match(log, /--iteration-count 2/, `signer log must reflect iteration count: ${log}`);
   });
 
+  it('AISDLC-135: loop prevention — second push with HEAD as auto-sign chore is a no-op', () => {
+    // Reproduction of PR #168's loop. First push:
+    //   HEAD = dev commit, no envelope, no chore subject — hook fires,
+    //   signs envelope, commits chore, exits 1.
+    // Second push (HEAD is now the chore the first push added):
+    //   The envelope-at-HEAD check MISSES (the envelope was bound to the
+    //   parent's SHA, not the chore commit's own SHA — committing the
+    //   envelope changes HEAD). Without the AISDLC-135 subject predicate,
+    //   the hook re-fires here, signs again, commits another chore,
+    //   exits 1 — and loops indefinitely. With the predicate, the second
+    //   push falls through with exit 0 and zero side-effects.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-135\n');
+    writeVerdictFile(root, 'AISDLC-135');
+
+    // ── First push ────────────────────────────────────────────────
+    const devHead = git(['rev-parse', 'HEAD'], root).trim();
+    const { cmd, logPath } = installFakeSigner(root);
+    const r1 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    assert.equal(r1.status, 1, `first push: expected 1, got ${r1.status}: ${r1.stderr}`);
+
+    const choreHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(choreHead, devHead, 'first push must add a chore commit');
+    const choreSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(choreSubject, /^chore: auto-sign attestation for AISDLC-135/);
+    const envelopePath = join(root, '.ai-sdlc', 'attestations', `${devHead}.dsse.json`);
+    assert.equal(existsSync(envelopePath), true, 'envelope must exist at dev-commit SHA');
+
+    // Snapshot signer-log size + commit count so we can prove the second
+    // push doesn't write an envelope or add a commit.
+    const logBefore = execFileSync('cat', [logPath], { encoding: 'utf-8' });
+    const commitCountBefore = git(['rev-list', '--count', 'HEAD'], root).trim();
+
+    // ── Second push (HEAD is the chore commit) ────────────────────
+    const r2 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    assert.equal(
+      r2.status,
+      0,
+      `second push (HEAD is auto-sign chore) must be a no-op; got ${r2.status}: ${r2.stderr}`,
+    );
+
+    // No new commit landed.
+    const commitCountAfter = git(['rev-list', '--count', 'HEAD'], root).trim();
+    assert.equal(
+      commitCountAfter,
+      commitCountBefore,
+      `second push must NOT add another chore commit (${commitCountBefore} -> ${commitCountAfter})`,
+    );
+    // Signer was NOT re-invoked.
+    const logAfter = execFileSync('cat', [logPath], { encoding: 'utf-8' });
+    assert.equal(
+      logAfter,
+      logBefore,
+      'signer must NOT be invoked on the second push (HEAD is auto-sign chore)',
+    );
+    // No new envelope at the chore-commit SHA.
+    const choreEnvelope = join(root, '.ai-sdlc', 'attestations', `${choreHead}.dsse.json`);
+    assert.equal(
+      existsSync(choreEnvelope),
+      false,
+      'no envelope must be written at the chore-commit SHA',
+    );
+  });
+
+  it('AISDLC-135: hook STILL fires on a brand-new dev commit even when prior auto-sign chore commits exist in history', () => {
+    // History: dev1 → chore1 (auto-sign for dev1) → dev2 (HEAD).
+    // Subject of HEAD is "feat: ..." not "chore: auto-sign ..." so the
+    // AISDLC-135 predicate must NOT short-circuit. The envelope-at-HEAD
+    // check also misses (no envelope at dev2 yet). Hook should fire
+    // normally: sign + commit + exit 1.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-135\n');
+    writeVerdictFile(root, 'AISDLC-135');
+
+    // ── Build dev1 → chore1 → dev2 history ────────────────────────
+    // Step 1: dev1 — first sign cycle.
+    writeFileSync(join(root, 'feature1.txt'), 'first feature\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: first feature'], root);
+    const dev1 = git(['rev-parse', 'HEAD'], root).trim();
+    const { cmd, logPath } = installFakeSigner(root);
+    const rA = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    assert.equal(rA.status, 1, `chore1 sign cycle: expected 1, got ${rA.status}: ${rA.stderr}`);
+    const chore1 = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(chore1, dev1);
+    const chore1Subject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(chore1Subject, /^chore: auto-sign attestation for AISDLC-135/);
+
+    // Step 2: dev2 — brand-new dev commit ON TOP of chore1.
+    writeFileSync(join(root, 'feature2.txt'), 'second feature\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: second feature'], root);
+    const dev2 = git(['rev-parse', 'HEAD'], root).trim();
+    const dev2Subject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(dev2Subject, /^feat: second feature/);
+
+    // ── Hook must fire for dev2 ──────────────────────────────────
+    const logBefore = execFileSync('cat', [logPath], { encoding: 'utf-8' });
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    assert.equal(
+      r.status,
+      1,
+      `hook must fire on a brand-new dev commit even when chore1 is in history; got ${r.status}: ${r.stderr}`,
+    );
+
+    // New envelope at dev2's SHA.
+    const dev2Envelope = join(root, '.ai-sdlc', 'attestations', `${dev2}.dsse.json`);
+    assert.equal(existsSync(dev2Envelope), true, 'new envelope must exist at dev2 SHA');
+
+    // New chore commit on top.
+    const newHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(newHead, dev2, 'a new chore commit must have been added on top of dev2');
+    const newSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(newSubject, /^chore: auto-sign attestation for AISDLC-135/);
+
+    // Signer was invoked again (log grew).
+    const logAfter = execFileSync('cat', [logPath], { encoding: 'utf-8' });
+    assert.notEqual(logAfter, logBefore, 'signer must be re-invoked for the brand-new dev commit');
+  });
+
   it('the chore commit body does NOT contain a CI-skip magic token (AISDLC-88 contract)', () => {
     // The auto-sign chore commit body would re-trigger every workflow on the
     // resulting PR if it carried [skip ci]/[ci skip]/etc. The check-skip-ci-marker
