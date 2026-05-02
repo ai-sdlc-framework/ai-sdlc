@@ -23,6 +23,36 @@ export interface DorConfigStaleness {
   closedLabel: string;
 }
 
+/**
+ * Escalation policy (RFC-0011 §6.3 + Phase 6 / AISDLC-115.7).
+ *
+ * Triggers:
+ *   - Author hasn't responded after `maxRoundsBeforeHumanTriage` clarification
+ *     rounds (default 3 per RFC §6.3).
+ *   - Verdict is `overallConfidence: 'low'` (per Q4 — never auto-act on low
+ *     confidence; route to a human triager via the same path as the round-
+ *     limit escalation).
+ *
+ * `triager` is the routing target — a Slack channel, a Slack user mention, a
+ * GitHub team handle, or a free-form string the orchestration layer knows
+ * how to interpret. When escalation fires but no triager is configured, the
+ * `decideEscalation()` helper still returns the decision but stamps
+ * `unrouted: true` so the calling shim can surface a loud warning instead
+ * of silently dropping the alert.
+ */
+export interface DorConfigEscalation {
+  /** Round count at which to escalate. Default 3 (RFC §6.3). */
+  maxRoundsBeforeHumanTriage: number;
+  /**
+   * Human / channel to ping when the escalation fires. Free-form so the
+   * orchestration layer can resolve `@github-team`, `#slack-channel`, or
+   * a plain user identity uniformly. Optional — a missing triager makes
+   * the escalation `unrouted` rather than throwing, so the gate never
+   * blocks the pipeline solely on a missing config field.
+   */
+  triager?: string;
+}
+
 export interface DorConfigDedicatedChannel {
   slack?: string;
   github_team?: string;
@@ -70,6 +100,10 @@ export interface DorConfig {
   staleness: DorConfigStaleness;
   /** Auto-pass shortcuts (RFC §6.4 + Phase 4). Order matters — first match wins. */
   autoPassRules: AutoPassRule[];
+  /** Escalation policy (RFC §6.3 + Phase 6). */
+  escalation: DorConfigEscalation;
+  /** Trusted-reviewer role required to apply the dor-bypass label (RFC §7.4). */
+  bypassRequiresRole: string;
 }
 
 /**
@@ -89,6 +123,10 @@ export const DOR_CONFIG_DEFAULTS: DorConfig = {
     closedLabel: 'closed-as-stale-dor',
   },
   autoPassRules: [],
+  escalation: {
+    maxRoundsBeforeHumanTriage: 3,
+  },
+  bypassRequiresRole: 'maintainer',
 };
 
 export interface LoadDorConfigOpts {
@@ -134,7 +172,9 @@ export function loadDorConfig(opts: LoadDorConfigOpts = {}): DorConfig {
  *   - Nested `spec.rubricVersion`, `spec.evaluationMode`,
  *     `spec.notifications.authorChannel`,
  *     `spec.notifications.dedicatedChannel.slack/github_team`,
- *     `spec.staleness.warnAfterDays/closeAfterDays/closedLabel`.
+ *     `spec.staleness.warnAfterDays/closeAfterDays/closedLabel`,
+ *     `spec.escalation.maxRoundsBeforeHumanTriage/triager`,
+ *     `spec.bypassRequiresRole` (RFC §6.3 + §7.4 + Phase 6).
  *   - Booleans (`true`/`false`), integers, and quoted/unquoted scalars.
  *
  * Anything else is silently ignored — the schema validator catches
@@ -332,6 +372,21 @@ function applyValue(target: DorConfig, path: string[], raw: string): void {
     if (c === 'warnAfterDays') target.staleness.warnAfterDays = parseIntStrict(raw);
     else if (c === 'closeAfterDays') target.staleness.closeAfterDays = parseIntStrict(raw);
     else if (c === 'closedLabel') target.staleness.closedLabel = raw;
+    return;
+  }
+  if (a === 'spec' && b === 'escalation' && c) {
+    if (c === 'maxRoundsBeforeHumanTriage') {
+      const n = parseIntStrict(raw);
+      // Schema requires minimum 1; silently keep the default for nonsense values.
+      if (n >= 1) target.escalation.maxRoundsBeforeHumanTriage = n;
+    } else if (c === 'triager') {
+      target.escalation.triager = raw;
+    }
+    return;
+  }
+  if (a === 'spec' && b === 'bypassRequiresRole') {
+    target.bypassRequiresRole = raw;
+    return;
   }
 }
 

@@ -315,6 +315,46 @@ export function bodyForChannel(body: string, channel: PostResult['channel']): st
 }
 
 /**
+ * HTML round marker — appended to clarification comment bodies so the
+ * round counter survives across re-posts without needing a sidecar
+ * datastore. Format: `<!-- ai-sdlc:dor-round n="3" -->`.
+ *
+ * The orchestration layer (`refineBacklogTask`, the GitHub Action shim)
+ * counts existing markers in the comment thread to derive the next
+ * round number. Phase 6 (AISDLC-115.7) consumes the count via
+ * `decideEscalation()` to fire the 3-round escalation per RFC §6.3.
+ */
+const ROUND_MARKER_RE = /<!--\s*ai-sdlc:dor-round\s+n="(\d+)"\s*-->/g;
+
+export function dorRoundMarker(round: number): string {
+  return `<!-- ai-sdlc:dor-round n="${round}" -->`;
+}
+
+/**
+ * Inspect a list of existing comments and return the highest round
+ * number observed. Returns `0` when no round markers are present (i.e.
+ * the agent has never posted on this issue before).
+ *
+ * Used by the orchestration layer to decide what number to stamp into
+ * the next clarification comment AND to feed `decideEscalation()` per
+ * RFC §6.3 (escalate after 3 rounds without resolution).
+ */
+export function countClarificationRounds(comments: ExistingComment[]): number {
+  let max = 0;
+  for (const c of comments) {
+    // reset lastIndex — this is a /g regex used inside a loop.
+    ROUND_MARKER_RE.lastIndex = 0;
+    let m: RegExpExecArray | null = ROUND_MARKER_RE.exec(c.body);
+    while (m !== null) {
+      const n = Number.parseInt(m[1] ?? '0', 10);
+      if (Number.isFinite(n) && n > max) max = n;
+      m = ROUND_MARKER_RE.exec(c.body);
+    }
+  }
+  return max;
+}
+
+/**
  * Re-export the dedicated-channel shape so shim code can import the
  * type alongside the comment-loop helpers.
  */

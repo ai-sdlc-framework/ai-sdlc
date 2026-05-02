@@ -2193,15 +2193,25 @@ export const dorConfigV1Schema = {
         escalation: {
           type: 'object',
           description:
-            'Optional escalation policy (RFC §6.3) — populated in later phases. Schema-only here.',
+            "Escalation policy (RFC §6.3 + Phase 6 / AISDLC-115.7). Fires on round-cap (author hasn't responded after maxRoundsBeforeHumanTriage clarification rounds) OR on a low-confidence verdict (per Q4 — never auto-act on low confidence). Routing target is the free-form `triager` string OR the structured `triageRouters` array.",
           properties: {
             maxRoundsBeforeHumanTriage: {
               type: 'integer',
               minimum: 1,
               default: 3,
+              description:
+                'Round count at which to escalate (RFC §6.3). One round = one clarification post + one expected author edit.',
+            },
+            triager: {
+              type: 'string',
+              minLength: 1,
+              description:
+                'Free-form routing target — Slack channel ID/#name, GitHub team handle (@org/team), or plain user identity. The orchestration layer interprets the string. When omitted, escalations are flagged as `unrouted` rather than throwing.',
             },
             triageRouters: {
               type: 'array',
+              description:
+                'Structured routing targets (legacy / multi-channel). Prefer the simpler `triager` string for new configs.',
               items: {
                 type: 'object',
                 properties: {

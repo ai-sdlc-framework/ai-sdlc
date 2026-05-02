@@ -209,3 +209,64 @@ describe('parseDorConfigYaml — autoPassRules (RFC-0011 Phase 4)', () => {
     expect(cfg.autoPassRules[0]!.gatesSkipped).toEqual([3]);
   });
 });
+
+describe('parseDorConfigYaml — escalation + bypass (RFC-0011 Phase 6)', () => {
+  it('defaults escalation.maxRoundsBeforeHumanTriage to 3', () => {
+    expect(DOR_CONFIG_DEFAULTS.escalation.maxRoundsBeforeHumanTriage).toBe(3);
+  });
+
+  it('defaults bypassRequiresRole to "maintainer"', () => {
+    expect(DOR_CONFIG_DEFAULTS.bypassRequiresRole).toBe('maintainer');
+  });
+
+  it('defaults escalation.triager to undefined (alerts surface as unrouted)', () => {
+    expect(DOR_CONFIG_DEFAULTS.escalation.triager).toBeUndefined();
+  });
+
+  it('parses escalation.maxRoundsBeforeHumanTriage', () => {
+    const cfg = parseDorConfigYaml('spec:\n  escalation:\n    maxRoundsBeforeHumanTriage: 5\n');
+    expect(cfg.escalation.maxRoundsBeforeHumanTriage).toBe(5);
+  });
+
+  it('parses escalation.triager (Slack channel form)', () => {
+    const cfg = parseDorConfigYaml("spec:\n  escalation:\n    triager: '#ai-sdlc-triage'\n");
+    expect(cfg.escalation.triager).toBe('#ai-sdlc-triage');
+  });
+
+  it('parses escalation.triager (GitHub team form)', () => {
+    const cfg = parseDorConfigYaml(
+      "spec:\n  escalation:\n    triager: '@ai-sdlc-framework/triage'\n",
+    );
+    expect(cfg.escalation.triager).toBe('@ai-sdlc-framework/triage');
+  });
+
+  it('keeps the default round cap when an invalid value is supplied', () => {
+    const cfg = parseDorConfigYaml('spec:\n  escalation:\n    maxRoundsBeforeHumanTriage: 0\n');
+    expect(cfg.escalation.maxRoundsBeforeHumanTriage).toBe(3);
+  });
+
+  it('parses bypassRequiresRole', () => {
+    const cfg = parseDorConfigYaml('spec:\n  bypassRequiresRole: release-manager\n');
+    expect(cfg.bypassRequiresRole).toBe('release-manager');
+  });
+
+  it('preserves prior fields when escalation + bypassRequiresRole are added', () => {
+    const yaml = `spec:
+  evaluationMode: enforce
+  staleness:
+    warnAfterDays: 7
+    closeAfterDays: 21
+    closedLabel: 'stale'
+  escalation:
+    maxRoundsBeforeHumanTriage: 4
+    triager: '@ops'
+  bypassRequiresRole: release-manager
+`;
+    const cfg = parseDorConfigYaml(yaml);
+    expect(cfg.evaluationMode).toBe('enforce');
+    expect(cfg.staleness.warnAfterDays).toBe(7);
+    expect(cfg.escalation.maxRoundsBeforeHumanTriage).toBe(4);
+    expect(cfg.escalation.triager).toBe('@ops');
+    expect(cfg.bypassRequiresRole).toBe('release-manager');
+  });
+});
