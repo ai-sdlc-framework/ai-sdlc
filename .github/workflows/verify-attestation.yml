@@ -2,26 +2,24 @@ name: AI-SDLC Verify Review Attestation
 
 # Reads the DSSE attestation at .ai-sdlc/attestations/<head-sha>.dsse.json,
 # verifies the signature against any-of-N pubkeys in
-# .ai-sdlc/trusted-reviewers.yaml, verifies all predicate fields against
+# .ai-sdlc/trusted-reviewers.yaml, and verifies all predicate fields against
 # current PR state (commit SHA, diff hash, policy hash, agent file hashes,
-# schema version), and sets the commit status `ai-sdlc/attestation` to
-# `valid` or `invalid (<reason>)`.
+# schema version).
 #
-# Downstream effect (AISDLC-74):
-#  - `ai-sdlc-review.yml` Post Review Results checks this status; when valid,
-#    it short-circuits cleanly (no duplicate review run).
-#  - When missing/invalid, this workflow ALSO posts a friendly educational
-#    PR comment via `scripts/post-attestation-comment.mjs` (idempotent).
+# AISDLC-140 sub-4: this workflow is now AUDIT-ONLY. It logs verification
+# results (success/failure with reason) for forensic purposes but does NOT
+# post the `ai-sdlc/attestation` commit status — attestation is no longer a
+# merge gate. The `re-actors/alls-green` aggregator (`ai-sdlc/pr-ready`) is
+# the single merge gate; `ai-sdlc-review.yml`'s `Post Review Results` is the
+# only review-tier required check.
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
-    # AISDLC-132: skip verification on docs-only PRs so the
-    # `ai-sdlc/attestation` required check doesn't block merge when the
-    # CI-side attestor (gated on 3 reviewer approvals) didn't fire.
-    # Mirrors ai-sdlc-review.yml's filter so docs-only PRs cleanly bypass
-    # the entire review+attestation pipeline.
+    # AISDLC-132: skip verification on docs-only PRs (mirrors
+    # ai-sdlc-review.yml's filter so docs-only PRs cleanly bypass the entire
+    # review+attestation pipeline).
     paths-ignore:
       - 'spec/rfcs/**'
       - 'docs/**'
@@ -30,12 +28,7 @@ on:
       - '*.md'
   # AISDLC-113: also verify inside the merge-queue's gh-readonly-queue branch
   # so a sibling PR merging into the same files between PR-head verification
-  # and merge-queue execution can't ship a stale-attestation PR. The triple-
-  # hash window (AISDLC-101) handles most legitimate cases, but verifying
-  # against the actual merge result is defense-in-depth.
-  # NOTE (AISDLC-132): merge_group is intentionally NOT filtered — once a PR
-  # enters the queue we want the verifier to run against the queue head
-  # regardless of file types, for AISDLC-113's sibling-overlap defense.
+  # and merge-queue execution is still surfaced in the audit log.
   merge_group:
     types: [checks_requested]
 
@@ -52,8 +45,6 @@ jobs:
     if: "!startsWith(github.head_ref, 'release-please--') && !contains(github.event.merge_group.head_ref || '', 'release-please--')"
     permissions:
       contents: read
-      statuses: write
-      pull-requests: write
     steps:
       # AISDLC-113: derive head/base SHAs from whichever event triggered us.
       # pull_request → github.event.pull_request.{head,base}.sha
@@ -99,38 +90,17 @@ jobs:
           PR_BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
         run: node scripts/verify-attestation.mjs
 
-      - name: Set commit status (ai-sdlc/attestation)
-        uses: actions/github-script@v7
+      # AISDLC-140 sub-4: log-only — no commit status, no PR comment. The
+      # verifier's outputs are surfaced through the workflow run log so
+      # operators can audit failures without the workflow gating merge.
+      - name: Log audit result
         env:
           STATUS: ${{ steps.verify.outputs.status }}
           REASON: ${{ steps.verify.outputs.reason }}
           HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
-        with:
-          script: |
-            const status = process.env.STATUS;
-            const reason = process.env.REASON || '';
-            const sha = process.env.HEAD_SHA;
-            const description =
-              status === 'valid'
-                ? 'attestation valid — Post Review Results will skip CI review'
-                : `invalid (${reason})`.slice(0, 140); // GitHub status descriptions cap at 140 chars
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha,
-              state: status === 'valid' ? 'success' : 'failure',
-              context: 'ai-sdlc/attestation',
-              description,
-            });
-
-      - name: Post friendly fallback comment when invalid (idempotent, PR only)
-        # Merge-queue runs have no PR to comment on; skip comment but still
-        # rely on the commit status above to gate the merge.
-        if: steps.verify.outputs.status != 'valid' && steps.resolve.outputs.is_merge_group != 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          ATTESTATION_REASON: ${{ steps.verify.outputs.reason }}
-          PR_HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
-        run: node scripts/post-attestation-comment.mjs
+        run: |
+          if [ "$STATUS" = "valid" ]; then
+            echo "::notice::ai-sdlc attestation AUDIT — valid envelope on $HEAD_SHA"
+          else
+            echo "::warning::ai-sdlc attestation AUDIT — $STATUS ($REASON) on $HEAD_SHA"
+          fi

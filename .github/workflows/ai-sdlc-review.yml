@@ -12,13 +12,6 @@ on:
     # mixed PRs (docs + code) still trigger normally. To force a review on a
     # docs-only PR (e.g. external contributor scrutiny), use:
     #   gh workflow run ai-sdlc-review.yml --ref <branch>
-    # Note (AISDLC-132): `verify-attestation.yml`'s pull_request trigger
-    # carries the same paths-ignore so the `ai-sdlc/attestation` status
-    # check doesn't post for docs-only PRs (the CI-side attestor is gated
-    # on 3 reviewer approvals which never fire when the analyze job is
-    # skipped, so a posted-but-invalid status would block merge with no
-    # recovery path). The merge_group trigger remains unfiltered for
-    # AISDLC-113 defense-in-depth verification against the queue head.
     paths-ignore:
       - 'spec/rfcs/**'
       - 'docs/**'
@@ -31,68 +24,21 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ── Job 0: Check for valid local attestation (AISDLC-74) ────────
-  # `verify-attestation.yml` sets the `ai-sdlc/attestation` commit status.
-  # If it's `success` (= attestation valid), we skip the duplicate review
-  # run that this workflow would otherwise do — `/ai-sdlc execute` already
-  # ran the same three reviewer subagents locally and signed the verdicts.
-  # If absent or `failure`, we run review normally (and verify-attestation.yml
-  # has already posted the friendly fallback comment).
-  check_attestation:
-    name: Check local-review attestation
-    runs-on: ubuntu-latest
-    if: "!startsWith(github.head_ref, 'release-please--')"
-    permissions:
-      statuses: read
-    outputs:
-      attestation_valid: ${{ steps.check.outputs.valid }}
-    steps:
-      - id: check
-        uses: actions/github-script@v7
-        env:
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        with:
-          script: |
-            const sha = process.env.HEAD_SHA;
-            // Poll briefly: verify-attestation.yml runs in parallel, so the
-            // status may not yet exist when this job starts. We give it a few
-            // attempts before falling back to "not valid → run CI review".
-            const maxAttempts = 12; // ~60s total
-            let valid = 'false';
-            for (let i = 0; i < maxAttempts; i++) {
-              const { data } = await github.rest.repos.getCombinedStatusForRef({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                ref: sha,
-              });
-              const att = data.statuses.find((s) => s.context === 'ai-sdlc/attestation');
-              if (att && att.state === 'success') {
-                valid = 'true';
-                core.notice(
-                  `ai-sdlc/attestation status is success — SKIPPING duplicate CI review (AISDLC-74)`,
-                );
-                break;
-              }
-              if (att && att.state !== 'pending') {
-                core.notice(
-                  `ai-sdlc/attestation status is ${att.state} (${att.description ?? ''}) — running CI review normally`,
-                );
-                break;
-              }
-              if (i < maxAttempts - 1) await new Promise((r) => setTimeout(r, 5000));
-            }
-            core.setOutput('valid', valid);
-
   # ── Job 1: Parallel Review Analysis (sandboxed) ──────────────────
   # Has ANTHROPIC_API_KEY but NO GitHub write access.
   # Defense: even if the LLM is compromised, it cannot modify the repo.
+  #
+  # AISDLC-140 sub-4: removed the `check_attestation` short-circuit and the
+  # CI-side attestor signing step. Attestation is now audit-only — the local
+  # DSSE envelope (auto-signed by `.husky/pre-push`) is a provenance record,
+  # not a merge gate. CI always runs the duplicate review so `Post Review
+  # Results` posts deterministically and the `re-actors/alls-green` aggregator
+  # (`ai-sdlc/pr-ready`) is the single merge gate. The `[skip ci]` chore-commit
+  # loop that deadlocked PRs #176/#177 disappears with the attestor step.
   analyze:
     name: Analyze PR
     runs-on: ubuntu-latest
-    needs: check_attestation
-    # Skip release-please PRs AND skip when a valid local attestation exists
-    # (AISDLC-74): `/ai-sdlc execute` already ran the same three reviewers.
-    if: "!startsWith(github.head_ref, 'release-please--') && needs.check_attestation.outputs.attestation_valid != 'true'"
+    if: "!startsWith(github.head_ref, 'release-please--')"
     permissions: {} # Fully sandboxed — no GitHub access
     outputs:
       testing: ${{ steps.review.outputs.testing }}
@@ -195,293 +141,14 @@ jobs:
   report:
     name: Post Review Results
     runs-on: ubuntu-latest
-    needs: [check_attestation, analyze]
+    needs: [analyze]
     if: always()
     permissions:
       pull-requests: write
       issues: read
-      # AISDLC-87: contents:write is required for the CI-side attestor step
-      # to commit + push the signed envelope back to the PR branch. The push
-      # target is gated to same-repo PRs (head.repo.full_name ==
-      # github.repository) — fork PRs can't push to their head ref via
-      # GITHUB_TOKEN even with contents:write, and we explicitly skip the
-      # step in that case.
-      contents: write
-      # AISDLC-87 round-2 fix: statuses:write lets the CI-side attestor step
-      # post the `ai-sdlc/attestation` commit status DIRECTLY on the new
-      # chore-commit SHA instead of relying on `verify-attestation.yml` to
-      # re-run on the synchronize event. The chore commit uses `[skip ci]`
-      # to prevent the review-loop, but `[skip ci]` ALSO suppresses
-      # `verify-attestation.yml` for the same SHA — so the status would
-      # never be posted. The CI-sign step KNOWS the envelope is valid (it
-      # just signed it against current PR state), so it can post the status
-      # itself without re-running the verifier. See CLAUDE.md → "Bootstrap
-      # CI-side attestor" step 4 for the full flow.
-      statuses: write
-    # The push step needs git + node available — the report job otherwise
-    # only ran github-script. Provide a checkout so the workflow has the
-    # repo state to commit attestations against.
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
-
-      # AISDLC-87 round-2 fix: pin pnpm version to repo's `packageManager`
-      # field via pnpm/action-setup (matches `analyze` job above) instead of
-      # `npm install -g pnpm` which floats to whatever the latest is. The
-      # `cache: pnpm` on setup-node also requires pnpm to be installed before
-      # setup-node runs, so the order matters.
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-
-      # AISDLC-93: this step ALSO posts a fresh `gh pr review --approve`.
-      #
-      # Why: branch protection has `dismiss_stale_reviews: true`, so any
-      # force-push (rebase, content-preserving fix like AISDLC-92's unicode
-      # filename rename, etc.) dismisses the prior bot approval. The new CI
-      # run on the new HEAD sees the local attestation is still valid
-      # (AISDLC-84 verifier matches by content hashes, not filename SHA) and
-      # short-circuits the duplicate LLM review per AISDLC-74 — but pre-fix,
-      # this short-circuit didn't carry the bot approval through. Result: PR
-      # had no approval, auto-merge stuck even with all required checks
-      # green. AISDLC-90's PR #101 surfaced this; needed manual
-      # `gh pr review --approve` to unblock.
-      #
-      # Why this is safe: the local attestation is verified by
-      # `verify-attestation.yml` against current PR state (commit SHA, diff
-      # hash, policy hash, agent file hashes, plugin version, schema
-      # version) and surfaced as the `ai-sdlc/attestation` commit status.
-      # Posting a bot approval here is functionally equivalent to a
-      # maintainer manually clicking "Approve" because they trust the same
-      # attestation — no new trust, just resilience to dismissal.
-      - name: Skip if attestation valid (AISDLC-74 — local /ai-sdlc execute review trusted)
-        if: needs.check_attestation.outputs.attestation_valid == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo "::notice::Local review attestation is valid — Post Review Results SKIPPING duplicate CI review (AISDLC-74)."
-          echo "::notice::See .ai-sdlc/attestations/<head-sha>.dsse.json for the signed envelope."
-          # Re-establish the bot approval on the latest HEAD. dismiss_stale_reviews:
-          # true means any prior approval was dismissed on this push; we need a fresh
-          # one so auto-merge can fire. The local attestation is already verified by
-          # ai-sdlc/attestation status check (AISDLC-84/85), so this approval is
-          # backed by the same trust chain as a freshly-run LLM review (AISDLC-93).
-          gh pr review "${{ github.event.pull_request.number }}" --approve --body "$(cat <<'EOF'
-          ## AI-SDLC: local review attestation accepted
-
-          The author signed a local review attestation (3 reviewer subagents approved during /ai-sdlc execute).
-          CI's verify-attestation workflow validated the envelope against current PR state — see the
-          `ai-sdlc/attestation` commit status for the audit trail.
-
-          Per AISDLC-74, when the local attestation is valid, CI skips its duplicate LLM review.
-          Per AISDLC-93, this skip path now also posts this bot approval so auto-merge can fire after a force-push
-          (which would otherwise dismiss the prior approval via branch protection's dismiss_stale_reviews rule).
-          EOF
-          )"
-
-      # AISDLC-87: CI-side attestor.
-      # When all 3 reviewer agents approved AND there's no valid local
-      # attestation, sign one with the CI-attestor key and push it back to
-      # the PR branch. Lets remote-agent and external-contributor PRs
-      # produce a trust signal verify-attestation.yml will accept on the
-      # next sync.
-      #
-      # AISDLC-111: this step also re-signs reliably on rebase. After a
-      # rebase that invalidates the prior envelope's `contentHashV3`, the
-      # gate sees `attestation_valid != 'true'` (because verify-attestation
-      # set the commit status to `failure`), the analyze job re-runs the 3
-      # reviewers on the rebased content, and ci-sign-attestation.mjs
-      # idempotently REPLACES the stale envelope (deletes
-      # `<old-head-sha>.dsse.json`, writes `<new-head-sha>.dsse.json`)
-      # before pushing the chore commit. Step 4 then posts
-      # `ai-sdlc/attestation=success` directly on the chore-commit SHA so
-      # the required check resolves without operator intervention.
-      #
-      # Gates:
-      #   - analyze succeeded (we have verdicts)
-      #   - all 3 verdicts approved
-      #   - no valid local attestation already exists (decision delegated
-      #     to ci-sign-attestation.mjs --skip-if-valid which calls the
-      #     verifier)
-      #   - the CI-attestor private key is configured
-      #   - PR is from the same repo (not a fork — token can't push to a
-      #     fork's branch). Forked-PR contributors get the friendly
-      #     fallback comment from verify-attestation.yml.
-      - name: CI-side attestor — sign + push when reviewers approved
-        if: |
-          needs.analyze.result == 'success' &&
-          needs.check_attestation.outputs.attestation_valid != 'true' &&
-          github.event.pull_request.head.repo.full_name == github.repository
-        env:
-          AI_SDLC_CI_ATTESTOR_PRIVATE_KEY: ${{ secrets.AI_SDLC_CI_ATTESTOR_PRIVATE_KEY }}
-          TESTING_JSON: ${{ needs.analyze.outputs.testing }}
-          CRITIC_JSON: ${{ needs.analyze.outputs.critic }}
-          SECURITY_JSON: ${{ needs.analyze.outputs.security }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-        run: |
-          # Hard precondition: secret must be set. Without it we can't sign
-          # — exit cleanly with a notice (the friendly fallback comment from
-          # verify-attestation.yml will already have explained the situation).
-          if [ -z "${AI_SDLC_CI_ATTESTOR_PRIVATE_KEY}" ]; then
-            echo "::notice::AI_SDLC_CI_ATTESTOR_PRIVATE_KEY secret not set — skipping CI-side attestor (run the bootstrap PR first; see CLAUDE.md)."
-            exit 0
-          fi
-
-          # Decide approval gate from the parsed verdicts the analyze job
-          # already extracted. Skip if any reviewer didn't approve — the
-          # script enforces this too, but we want to avoid the install +
-          # build cost when we know we'd no-op.
-          ALL_APPROVED=$(node -e '
-            try {
-              const t = JSON.parse(process.env.TESTING_JSON || "{}");
-              const c = JSON.parse(process.env.CRITIC_JSON || "{}");
-              const s = JSON.parse(process.env.SECURITY_JSON || "{}");
-              const ok = [t, c, s].every(v => v && v.approved === true);
-              process.stdout.write(ok ? "true" : "false");
-            } catch { process.stdout.write("false"); }
-          ')
-          if [ "$ALL_APPROVED" != "true" ]; then
-            echo "::notice::Not all reviewers approved — CI-side attestor skipped."
-            exit 0
-          fi
-
-          # The orchestrator + verifier need to be installed and built so
-          # ci-sign-attestation.mjs can import the runtime barrel. pnpm is
-          # already installed via `pnpm/action-setup@v4` at job start.
-          # `--ignore-scripts` (security hardening, AISDLC-87 round-2):
-          # this job has the CI-attestor private key in env, so we refuse
-          # to run dependency postinstall scripts that could exfiltrate it.
-          # The orchestrator + verifier don't depend on any postinstall side
-          # effects (pure TS → JS build), so this is safe.
-          pnpm install --frozen-lockfile --ignore-scripts
-          pnpm --filter "@ai-sdlc/orchestrator..." build
-
-          # Compose the verdicts JSON the script expects.
-          node -e '
-            const fs = require("fs");
-            const verdicts = [
-              { type: "testing",  ...JSON.parse(process.env.TESTING_JSON || "{}") },
-              { type: "critic",   ...JSON.parse(process.env.CRITIC_JSON  || "{}") },
-              { type: "security", ...JSON.parse(process.env.SECURITY_JSON|| "{}") },
-            ];
-            fs.writeFileSync("/tmp/ci-review-verdicts.json", JSON.stringify(verdicts));
-          '
-
-          # Sign — script no-ops cleanly when --skip-if-valid + valid
-          # local attestation already exists; signs fresh + purges any
-          # stale envelopes (AISDLC-111) when invalid or missing.
-          OUT_PATH=$(node scripts/ci-sign-attestation.mjs \
-            --review-verdicts /tmp/ci-review-verdicts.json \
-            --iteration-count 1 \
-            --harness-note "" \
-            --skip-if-valid \
-            --pr-base-sha "$PR_BASE_SHA" \
-            --pr-head-sha "$PR_HEAD_SHA")
-          echo "ci-sign-attestation output: $OUT_PATH"
-
-          # If the script skipped (output starts with "skipped:") there's
-          # nothing to commit.
-          case "$OUT_PATH" in
-            skipped:*) echo "::notice::CI-side attestor skipped — local attestation already valid."; exit 0;;
-          esac
-
-          # Commit + push the new envelope to the PR branch with [skip ci]
-          # so we don't trigger another review run on the chore commit.
-          git config user.name  "ai-sdlc-ci-attestor[bot]"
-          git config user.email "ci-attestor@ai-sdlc.local"
-
-          # Fetch + check out the PR branch so the push lands on the right ref.
-          # checkout@v4 already fetched the PR head; we just need to align
-          # local HEAD with the branch name.
-          git fetch origin "$PR_HEAD_REF":"$PR_HEAD_REF" 2>/dev/null || true
-          git checkout "$PR_HEAD_REF" 2>/dev/null || git switch -c "$PR_HEAD_REF"
-
-          # AISDLC-111: stage additions AND deletions across the whole
-          # attestations directory. The script deletes any stale
-          # `<old-head-sha>.dsse.json` files BEFORE writing the fresh
-          # envelope (purgeStaleEnvelopes), so we need `-A` to capture
-          # those deletions in the same chore commit. Without `-A`, the
-          # branch would accumulate orphan envelope files across every
-          # rebase that re-signs.
-          git add -A -- .ai-sdlc/attestations/
-          if git diff --cached --quiet; then
-            echo "::notice::Attestation envelope already on branch — nothing to commit."
-            exit 0
-          fi
-          # Commit message: keep on a single line with literal \n separators
-          # (passed via printf) so the YAML `|` block scalar's indentation
-          # rules don't conflict with multi-line shell-string literals. Git
-          # accepts repeated -m flags as separate paragraphs which is
-          # cleaner than printf-substitution for fixed text.
-          #
-          # `[skip ci]` is intentional: prevents `ai-sdlc-review.yml` from
-          # re-running on its own commit (would loop forever — re-review,
-          # re-approve, re-sign, ...). It ALSO skips `verify-attestation.yml`
-          # for the same SHA, which is why the next step posts the
-          # `ai-sdlc/attestation` commit status DIRECTLY (AISDLC-87 round-2
-          # fix — the original implementation relied on verify-attestation
-          # re-running on the chore-commit synchronize event, which never
-          # happens with `[skip ci]`).
-          git commit \
-            -m "chore(ci): sign review attestation [skip ci]" \
-            -m "CI-side attestor (AISDLC-87) signed an envelope at $OUT_PATH after all three CI reviewer agents approved this PR. The verifier accepts CI-signed envelopes identically to maintainer-signed ones, as long as the ci-attestor pubkey is in .ai-sdlc/trusted-reviewers.yaml." \
-            -m "Co-Authored-By: ai-sdlc-ci-attestor[bot] <ci-attestor@ai-sdlc.local>"
-          git push origin "HEAD:$PR_HEAD_REF"
-
-          # Capture the chore-commit SHA so the next step can post the
-          # `ai-sdlc/attestation` status directly against it. We do this
-          # AFTER push so a failed push doesn't leave a misleading status.
-          CHORE_SHA=$(git rev-parse HEAD)
-          echo "chore_sha=$CHORE_SHA" >> "$GITHUB_OUTPUT"
-          echo "envelope_path=$OUT_PATH" >> "$GITHUB_OUTPUT"
-        id: ci_sign
-
-      # AISDLC-87 round-2 fix (Option B per reviewer feedback): set the
-      # `ai-sdlc/attestation` commit status directly on the chore commit
-      # SHA we just pushed. The chore commit message contains `[skip ci]`,
-      # which prevents `ai-sdlc-review.yml` from re-running (intentional —
-      # avoids signing-loop) BUT also prevents `verify-attestation.yml`
-      # from running on the chore SHA. Without this step, the chore SHA
-      # would have NO `ai-sdlc/attestation` status, and the PR would
-      # appear to be missing the attestation check forever.
-      #
-      # We can post `success` directly because we just signed the envelope
-      # against the current PR state — the verifier would also report
-      # `valid` if it ran. This is functionally identical to the verifier
-      # reporting valid, just without the round trip.
-      - name: Post ai-sdlc/attestation status on chore-commit SHA
-        if: steps.ci_sign.outputs.chore_sha != ''
-        uses: actions/github-script@v7
-        env:
-          CHORE_SHA: ${{ steps.ci_sign.outputs.chore_sha }}
-          ENVELOPE_PATH: ${{ steps.ci_sign.outputs.envelope_path }}
-        with:
-          script: |
-            const sha = process.env.CHORE_SHA;
-            const envelopePath = process.env.ENVELOPE_PATH || '';
-            await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              sha,
-              state: 'success',
-              context: 'ai-sdlc/attestation',
-              description:
-                'attestation valid (CI-signed) — Post Review Results will skip duplicate review',
-            });
-            core.notice(
-              `Posted ai-sdlc/attestation=success on ${sha} for envelope ${envelopePath}`,
-            );
-
       - name: Skip if analyze was skipped (release-please PRs)
-        if: needs.analyze.result == 'skipped' && needs.check_attestation.outputs.attestation_valid != 'true'
+        if: needs.analyze.result == 'skipped'
         run: echo "Skipping review for release-please PR"
 
       - name: Validate and post reviews

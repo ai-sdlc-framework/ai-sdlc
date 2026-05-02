@@ -43,31 +43,9 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 
 - TypeScript strict, ESM. Prettier + ESLint. No premature abstractions — three similar lines beat one wrong abstraction.
 
-## Review attestations (AISDLC-74)
+## Review attestations
 
-`/ai-sdlc execute` runs three reviewer subagents (code/test/security) locally and signs a DSSE envelope CI verifies; valid envelope skips the duplicate CI review run.
-
-**Bootstrap** (one time per machine): `/ai-sdlc init-signing-key` generates `~/.ai-sdlc/signing-key.pem` (ed25519, mode 0600, never committed). It prints a YAML block — open a PR adding it to `.ai-sdlc/trusted-reviewers.yaml`.
-
-**Files**:
-- `~/.ai-sdlc/signing-key.pem` — private key (operator only)
-- `.ai-sdlc/trusted-reviewers.yaml` — pubkey allowlist (committed)
-- `.ai-sdlc/attestations/<commit-sha>.dsse.json` — per-commit signed envelopes (committed audit trail, ~1-2KB)
-- `.ai-sdlc/schemas/attestation.v3.schema.json` — current allowlist `['v3']`
-
-**Verifier behavior** (`verify-attestation.yml` on `pull_request` + `merge_group`): scans `.ai-sdlc/attestations/*.dsse.json`, recomputes content bindings (`contentHashV3`, policy hash, agent file hashes, plugin/schema versions) against current PR state. Sets commit status `ai-sdlc/attestation` to `valid` or `invalid (<reason>)`. Posts an idempotent fallback PR comment on missing/invalid (marker: `<!-- ai-sdlc:attestation-fallback-comment -->`).
-
-**`contentHashV3`** is the single content binding: `sha256({path, fileDeltaHash} per changed file, sorted)` where `fileDeltaHash[path] = sha256(<base_blob_sha> + ' -> ' + <head_blob_sha>)` and base = `git merge-base(<baseRef>, <headRef>)`. Rebase-stable, sibling-overlap-tolerant. Re-runs of `/ai-sdlc execute` produce fresh envelopes.
-
-**Docs-only PRs** (paths matching `spec/rfcs/**`, `docs/**`, `backlog/{tasks,completed}/**`, root `*.md`) skip both reviewer fan-out (`ai-sdlc-review.yml`) and attestation verification (`verify-attestation.yml`) via `paths-ignore`. To prevent merge deadlock from the required `Post Review Results` check never posting, the orthogonal `ai-sdlc-review-docs-only.yml` workflow detects docs-only changesets and posts `Post Review Results: success` directly. Mixed PRs take the normal review path. The `verify-attestation.yml` `merge_group` trigger remains unfiltered for queue-head defense in depth. To force a real review on a docs-only PR, push a tiny non-docs change (no `workflow_dispatch` trigger today).
-
-**Force-push recovery**: PRs with valid attestations get a fresh `gh pr review --approve` posted by the skip-when-attestation-valid step so branch protection's `dismiss_stale_reviews: true` doesn't strand auto-merge.
-
-## CI-side attestor (AISDLC-87)
-
-For PRs without a local key (forks, remote-agent runs, external contributors): `ai-sdlc-review.yml` calls `scripts/ci-sign-attestation.mjs` after the 3 CI reviewer agents all approve, signs with `AI_SDLC_CI_ATTESTOR_PRIVATE_KEY`, and pushes a `chore(ci): sign review attestation [skip ci]` commit (the only allowed `[skip ci]` use; authored by `ai-sdlc-ci-attestor[bot]`). Same DSSE format as maintainer-signed. Same-repo PRs only — fork PRs need a maintainer to pull into a same-repo branch first. Bootstrap is one-time maintainer-only setup (ed25519 keypair → `AI_SDLC_CI_ATTESTOR_PRIVATE_KEY` GH secret + pubkey added under `ci-attestor` in `.ai-sdlc/trusted-reviewers.yaml`); see `scripts/ci-sign-attestation.mjs` and `.github/workflows/ai-sdlc-review.yml` for the exact env vars + permissions.
-
-**Trust model**: CI-attestor key has the same trust as a maintainer key. Rotate on suspected leak. Refuses to sign on `CHANGES_REQUESTED`.
+**Attestation is audit-only.** `/ai-sdlc execute` runs three reviewer subagents locally and writes a DSSE envelope to `.ai-sdlc/attestations/<sha>.dsse.json` as a provenance record. CI's `verify-attestation.yml` validates the envelope and logs failures, but does NOT post a required-status check or block merge. The `re-actors/alls-green` aggregator (`ai-sdlc/pr-ready`) is the single merge gate; `ai-sdlc-review.yml`'s `Post Review Results` is the only review-tier required check. `contentHashV3` (sha256 of `{path, fileDeltaHash}` per changed file, base = `git merge-base(baseRef, headRef)`) is the rebase-stable content binding. Docs-only PRs (`spec/rfcs/**`, `docs/**`, `backlog/{tasks,completed}/**`, root `*.md`) skip both `ai-sdlc-review.yml` and `verify-attestation.yml` via `paths-ignore`; `ai-sdlc-review-docs-only.yml` posts the `Post Review Results` status directly so merge isn't deadlocked.
 
 ## Remote agents (`/schedule`) — read-only by design
 
