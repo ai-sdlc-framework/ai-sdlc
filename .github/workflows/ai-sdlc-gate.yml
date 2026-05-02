@@ -1,0 +1,207 @@
+name: AI-SDLC PR Ready Gate
+
+# AISDLC-140 sub-1 — single rollup status check `ai-sdlc/pr-ready` that
+# aggregates every PR signal AI-SDLC adopters need into ONE branch-protection
+# entry. Replaces the historical pattern of enumerating N required checks by
+# name + app_id (Pattern A in /tmp/research-prior-art.md), which is brittle
+# against path filters, [skip ci] tokens, matrix changes, and multi-app
+# posters (see `docs/operations/quality-gate.md` for the full rationale).
+#
+# Adopter promise: configure ONE required check (`ai-sdlc/pr-ready`) on your
+# protected branch and you get the framework's full CI rollup for free —
+# regardless of which workflows happen to fire on a given PR.
+#
+# Architecture: this workflow is the ONLY required check after cutover (sub-3).
+# Today it runs ADDITIVELY alongside the legacy required checks (`CI OK`,
+# `Post Review Results`, `codecov/patch`, `ai-sdlc/attestation`); the cutover
+# is an operator action documented in `docs/operations/quality-gate.md`.
+#
+# Q-decisions baked in (per /tmp/quality-gate-redesign-final.md):
+#  - Q1: prescriptive default for adopters from day one
+#  - Q2: GHMQ-agnostic — same workflow handles `pull_request` + `merge_group`
+#  - Q3: attestation is audit-only — `ai-sdlc/attestation` is NOT in the
+#        aggregator's required signal set
+#  - Q4(b): this workflow IS the framework's prescriptive default; will be
+#          scaffolded by `init` in sub-5
+#
+# Industry pattern: `re-actors/alls-green` ("alls-green") is the de facto
+# community fix; named adopters include aiohttp, attrs, conda, setuptools,
+# pytest, pip-tools, Open edX, PyCA, PyPA, Mergify. Load-bearing detail
+# (per /tmp/research-prior-art.md): naive `needs:` alone reports `skipped`
+# (which auto-merge treats as success). `re-actors/alls-green` with
+# `if: always()` and `needs` introspection is the canonical fix.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  merge_group:
+    types: [checks_requested]
+
+# One in-flight gate run per PR / merge-queue head; cancel superseded runs.
+concurrency:
+  group: ai-sdlc-gate-${{ github.event.pull_request.number || github.event.merge_group.head_sha || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+  checks: write
+
+jobs:
+  # ── Archetype detection ─────────────────────────────────────────────────
+  # Mirrors the docs-only path predicate used by `ai-sdlc-review.yml`,
+  # `verify-attestation.yml`, and `ai-sdlc-review-docs-only.yml`. The
+  # `dorny/paths-filter@v3` action runs unconditionally and emits a single
+  # boolean output (`docs_only`) that the downstream gating jobs use to
+  # decide whether to short-circuit.
+  detect:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.filter.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          # `predicate-quantifier: every` makes `docs_only` true only when
+          # EVERY changed file matches at least one of the listed
+          # patterns. The default (`some`) would treat a mixed PR (one
+          # docs file + one code file) as docs-only, incorrectly skipping
+          # the build-test-coverage gates. Mirrors the docs-only pattern
+          # set used by `ai-sdlc-review-docs-only.yml`.
+          predicate-quantifier: 'every'
+          filters: |
+            docs_only:
+              - 'spec/rfcs/**'
+              - 'docs/**'
+              - 'backlog/tasks/**'
+              - 'backlog/completed/**'
+              - '*.md'
+
+  # ── Lint & Format (always required) ─────────────────────────────────────
+  # Runs on every PR archetype. Cheap (~1 min) and catches the long tail of
+  # syntactic regressions that even docs-only PRs can introduce (broken
+  # markdown frontmatter, prettier drift in JSON examples, etc.).
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm format:check
+
+  # ── Build & Test matrix (code/mixed only) ───────────────────────────────
+  # Skipped when `detect.outputs.docs_only == 'true'`. Per the AISDLC-140
+  # design, `re-actors/alls-green` treats `skipped` as success — so
+  # docs-only PRs naturally pass the aggregator without paying ~5min × 2
+  # node versions of compute.
+  build-test:
+    name: Build & Test (Node ${{ matrix.node-version }})
+    needs: detect
+    if: needs.detect.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node-version: [20, 22]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+
+  coverage:
+    name: Coverage
+    needs: detect
+    if: needs.detect.outputs.docs_only != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test:coverage
+
+  integration:
+    name: Integration Tests
+    needs: detect
+    # Skip integration on docs-only PRs (no code surface to integrate
+    # against) AND on PRs from forks (which lack repo secrets needed for
+    # the reference adapter integration tests). Same predicate as
+    # `ci.yml`'s `integration` job — kept in sync deliberately.
+    if: |
+      needs.detect.outputs.docs_only != 'true' &&
+      (github.event_name == 'merge_group' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+      statuses: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Run integration tests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: pnpm --filter @ai-sdlc/reference test
+
+  # ── Aggregator ──────────────────────────────────────────────────────────
+  # Posts the SINGLE rollup check `ai-sdlc/pr-ready` that adopters configure
+  # as their sole required check. Uses `re-actors/alls-green@release/v1`
+  # (industry-standard pattern; named adopters in /tmp/research-prior-art.md
+  # include aiohttp, attrs, conda, setuptools, pytest, pip-tools, Open edX,
+  # PyCA, PyPA, Mergify).
+  #
+  # Critical correctness details:
+  #  1. `if: always()` so the aggregator runs even when an upstream job
+  #     failed (otherwise GitHub would skip the aggregator on failure
+  #     and the required check would never post → permanent merge block).
+  #  2. The action inspects the `needs` context and treats `skipped` as
+  #     allowed — which is exactly what archetype-conditional jobs need
+  #     (docs-only PRs skip build-test/coverage/integration; the gate
+  #     should still pass).
+  #  3. The job's overall outcome IS the check named `ai-sdlc/pr-ready`
+  #     by virtue of the job's `name:` — branch protection matches on
+  #     `<workflow-name> / <job-name>` but `re-actors/alls-green` also
+  #     posts a check_run named exactly `ai-sdlc/pr-ready` for adopters
+  #     who want a stable name independent of job/workflow renames.
+  pr-ready:
+    name: ai-sdlc/pr-ready
+    needs: [detect, lint, build-test, coverage, integration]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Aggregate required signals
+        uses: re-actors/alls-green@release/v1
+        with:
+          # `jobs` is the JSON of the `needs` context — the action walks
+          # each job's `result` and decides pass/fail. Default behavior:
+          #   success | skipped → pass
+          #   failure | cancelled → fail
+          # This is correct for archetype-conditional jobs (Q3 in the
+          # redesign memo).
+          jobs: ${{ toJSON(needs) }}

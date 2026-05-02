@@ -17,6 +17,7 @@ export default tseslint.config(
       'dashboard/next-env.d.ts',
       '**/scripts/',
       '**/vitest.config.ts',
+      '.github/workflows/__tests__/',
       '.claude/hooks/',
       'ai-sdlc-plugin/hooks/',
       'ai-sdlc-plugin/agents/',

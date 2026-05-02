@@ -39,6 +39,10 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 
 `set -euo pipefail` aborts on first failure. `git push --no-verify` bypasses everything. Both gates have hermetic tests at `scripts/<name>.test.mjs` wired via `pnpm test:drift-gate` / `test:attestation-sign-gate`.
 
+## CI behavior
+
+PR merge gate is the single rollup check `ai-sdlc/pr-ready` produced by `.github/workflows/ai-sdlc-gate.yml` (re-actors/alls-green pattern); see [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md) for archetype gating, cutover, and rollback.
+
 ## Code Style
 
 - TypeScript strict, ESM. Prettier + ESLint. No premature abstractions — three similar lines beat one wrong abstraction.
