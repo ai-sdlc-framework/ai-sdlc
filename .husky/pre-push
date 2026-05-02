@@ -1,1 +1,20 @@
+#!/usr/bin/env bash
+# Husky pre-push hook. Order matters:
+#
+#   1. Coverage gate (existing) — fails fast on under-tested code so we don't
+#      sign an attestation for a build we'd reject anyway.
+#   2. Auto-sign attestation (AISDLC-133) — when the worktree has an active
+#      task + reviewer verdict file but no attestation at current HEAD, signs
+#      a chore commit on top + exits 1 with "re-push required". This removes
+#      the sign-attestation step from /ai-sdlc execute's LLM responsibility
+#      (per the 2026-05-01 "mechanical → hook, never LLM" design discussion).
+#
+# Skip individual gates with their respective env vars
+# (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1) or skip all
+# pre-push hooks via `git push --no-verify` (use sparingly — these gates
+# exist because the things they guard have failed silently in the past).
+
+set -euo pipefail
+
 ./scripts/check-coverage.sh
+./scripts/check-attestation-sign.sh
