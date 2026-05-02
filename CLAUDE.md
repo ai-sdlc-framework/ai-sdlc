@@ -93,6 +93,43 @@ The `auto-enable-auto-merge.yml` workflow enables GitHub's auto-merge on every P
 - Hook scripts (`.js` in `ai-sdlc-plugin/hooks/`) are tested via Node built-in test runner (`.test.mjs`), not Vitest.
 - MCP server and orchestrator use Vitest.
 
+## Hooks
+
+### Husky pre-push gates
+
+`.husky/pre-push` chains shell-script gates in deterministic order:
+
+1. **`scripts/check-coverage.sh`** — pre-existing coverage gate (80% lines threshold per package). Skip: `AI_SDLC_SKIP_COVERAGE_GATE=1 git push`.
+2. **`scripts/check-attestation-sign.sh`** — auto-signed attestation (AISDLC-133, see below). Skip: `AI_SDLC_SKIP_ATTESTATION_SIGN=1 git push`.
+
+The `set -euo pipefail` at the top makes any gate's failure abort the push immediately — coverage failure short-circuits before the attestation hook runs (no point signing for a build we'd reject anyway). Each gate has its own env-var escape; `git push --no-verify` bypasses every gate (use sparingly).
+
+Both gates are tested via `node --test scripts/<name>.test.mjs` — hermetic temp-repo tests that exercise the bash scripts end-to-end with a stubbed signer/checker. The tests are wired into `pnpm test` via `package.json` `test:drift-gate` / `test:attestation-sign-gate` scripts.
+
+### Auto-signed attestations (AISDLC-133)
+
+The husky pre-push hook auto-signs DSSE attestations when ALL of the following hold:
+
+1. The worktree has an `.active-task` sentinel (per AISDLC-81 — `<worktree>/.active-task` carrying the task ID).
+2. A verdict file exists at `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` (per-worktree, gitignored — written by `/ai-sdlc execute` Step 10 in lieu of the legacy `/tmp/review-verdicts-<task-id>.json` location, which did not survive session restart).
+3. No attestation envelope exists yet at `<worktree>/.ai-sdlc/attestations/<head-sha>.dsse.json` for the current HEAD (idempotency check).
+
+When all three conditions are met, the hook:
+
+- Invokes `node ai-sdlc-plugin/scripts/sign-attestation.mjs --review-verdicts <verdict-path> --iteration-count <count> --harness-note <note>` (the same signer that previously ran inline from `/ai-sdlc execute` Step 10).
+- Stages + commits the resulting envelope as a `chore: auto-sign attestation for <task-id> (AISDLC-133)` commit using `git commit --no-verify -- .ai-sdlc/attestations/<sha>.dsse.json` (single-file scope, no re-entrant lint-staged).
+- Exits 1 with an actionable "re-run `git push` to send it" message — the new commit is local only; the operator (or `/ai-sdlc execute` Step 11's push loop) must invoke `git push` again. The next push is a no-op for the hook (idempotent: the envelope at the new HEAD satisfies condition #3 immediately).
+
+The hook falls through gracefully when:
+
+- The active-task sentinel is absent (chore PRs, ad-hoc fix commits, docs-only PRs all push without an attestation; the verifier's fallback comment + AISDLC-87 CI-side attestor handle the PR side).
+- The sentinel is present but the verdict file is missing (reviewers haven't run yet, or `/ai-sdlc execute` exited before Step 10).
+- The attestation already exists at HEAD (the most common case on the second push of an auto-sign cycle).
+
+Skip the gate entirely with `AI_SDLC_SKIP_ATTESTATION_SIGN=1 git push` (rare — only when deferring sign for an operator hand-resign with a different key).
+
+Why this lives in the hook, not the slash command body: signing is purely deterministic once verdicts exist (no model judgment to add), and pulling it out of the LLM responsibility removed 1 of the 13 finalize steps in `/ai-sdlc execute` while making the attestation flow survive session restarts and parallel-run races. The slash command body is now responsible for ONE durable artifact at the end of Step 10: the verdict JSON file. The hook does the rest.
+
 ## Code Style
 
 - TypeScript strict mode, ESM modules.
