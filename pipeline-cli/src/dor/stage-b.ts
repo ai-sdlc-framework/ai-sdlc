@@ -122,8 +122,18 @@ export interface StageBResult {
  *     because the orchestrator already has a definitive verdict.
  */
 export function pickStageBGates(stageA: StageAVerdict): GateId[] {
-  const out = new Set<GateId>(STAGE_B_OWNED_GATES);
+  // Auto-pass (RFC §6.4 / Phase 4) — gates short-circuited by an
+  // `autoPassRules` match must NOT be re-evaluated by Stage B; the
+  // matched rule already declared them out of scope. Detect via the
+  // sentinel `finding: 'auto-pass...'` written by `evaluate.ts`.
+  const autoPassed = new Set<GateId>(
+    stageA.gates
+      .filter((g) => g.verdict === 'skip' && g.finding?.startsWith('auto-pass'))
+      .map((g) => g.gateId),
+  );
+  const out = new Set<GateId>(STAGE_B_OWNED_GATES.filter((g) => !autoPassed.has(g)));
   for (const g of stageA.gates) {
+    if (autoPassed.has(g.gateId)) continue;
     if (g.verdict === 'pass' && g.confidence !== 'high') {
       out.add(g.gateId);
     }

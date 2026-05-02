@@ -114,3 +114,98 @@ describe('validateDorConfig', () => {
     expect(violations[0]).toContain('closeAfterDays');
   });
 });
+
+describe('parseDorConfigYaml — autoPassRules (RFC-0011 Phase 4)', () => {
+  it('defaults autoPassRules to []', () => {
+    expect(DOR_CONFIG_DEFAULTS.autoPassRules).toEqual([]);
+  });
+
+  it('parses a single signal-pipeline-generated rule', () => {
+    const yaml = `spec:
+  evaluationMode: enforce
+  autoPassRules:
+    - kind: signal-pipeline-generated
+      sources: ['ai-sdlc/signal-pipeline']
+      gatesSkipped: [1, 4, 5, 6]
+      gatesRetained: [2, 3, 7]
+`;
+    const cfg = parseDorConfigYaml(yaml);
+    expect(cfg.autoPassRules).toHaveLength(1);
+    const r = cfg.autoPassRules[0]!;
+    expect(r.kind).toBe('signal-pipeline-generated');
+    expect(r.sources).toEqual(['ai-sdlc/signal-pipeline']);
+    expect(r.gatesSkipped).toEqual([1, 4, 5, 6]);
+    expect(r.gatesRetained).toEqual([2, 3, 7]);
+  });
+
+  it('parses multiple rules in declared order', () => {
+    const yaml = `spec:
+  autoPassRules:
+    - kind: dependency-bump
+      sources: ['dependabot[bot]']
+      titlePattern: '^bump'
+      gatesSkipped: []
+      gatesRetained: []
+    - kind: doc-typo
+      sources: ['somebot']
+      maxBodyDiffLines: 50
+      gatesSkipped: [1, 4, 5]
+      gatesRetained: []
+`;
+    const cfg = parseDorConfigYaml(yaml);
+    expect(cfg.autoPassRules).toHaveLength(2);
+    expect(cfg.autoPassRules[0]!.kind).toBe('dependency-bump');
+    expect(cfg.autoPassRules[0]!.titlePattern).toBe('^bump');
+    expect(cfg.autoPassRules[1]!.kind).toBe('doc-typo');
+    expect(cfg.autoPassRules[1]!.maxBodyDiffLines).toBe(50);
+    expect(cfg.autoPassRules[1]!.gatesSkipped).toEqual([1, 4, 5]);
+  });
+
+  it('preserves staleness + autoPassRules when both present', () => {
+    const yaml = `spec:
+  evaluationMode: enforce
+  autoPassRules:
+    - kind: signal-pipeline-generated
+      sources: ['ai-sdlc/signal-pipeline']
+      gatesSkipped: [1, 4, 5, 6]
+      gatesRetained: [2, 3, 7]
+  staleness:
+    warnAfterDays: 7
+    closeAfterDays: 14
+    closedLabel: 'stale'
+`;
+    const cfg = parseDorConfigYaml(yaml);
+    expect(cfg.autoPassRules).toHaveLength(1);
+    expect(cfg.staleness.warnAfterDays).toBe(7);
+    expect(cfg.staleness.closeAfterDays).toBe(14);
+    expect(cfg.evaluationMode).toBe('enforce');
+  });
+
+  it('handles empty inline arrays', () => {
+    const yaml = `spec:
+  autoPassRules:
+    - kind: full-skip
+      sources: ['allbot']
+      gatesSkipped: []
+      gatesRetained: []
+`;
+    const cfg = parseDorConfigYaml(yaml);
+    expect(cfg.autoPassRules[0]!.gatesSkipped).toEqual([]);
+    expect(cfg.autoPassRules[0]!.gatesRetained).toEqual([]);
+  });
+
+  it('ignores unknown autoPassRules fields silently', () => {
+    const yaml = `spec:
+  autoPassRules:
+    - kind: x
+      sources: ['s']
+      somethingNew: blah
+      gatesSkipped: [3]
+      gatesRetained: []
+`;
+    const cfg = parseDorConfigYaml(yaml);
+    expect(cfg.autoPassRules).toHaveLength(1);
+    expect(cfg.autoPassRules[0]!.kind).toBe('x');
+    expect(cfg.autoPassRules[0]!.gatesSkipped).toEqual([3]);
+  });
+});
