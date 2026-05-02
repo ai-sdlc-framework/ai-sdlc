@@ -175,6 +175,15 @@ export function parseMarker(commentBody: string): MarkerPayload | null {
  * `null` when none of them carry the marker. When more than one comment
  * carries a marker (shouldn't happen with the idempotent update path, but
  * defensively), the LAST occurrence wins — that's the freshest marker.
+ *
+ * **Author-filter at the call site is REQUIRED.** This function does NOT
+ * verify who authored the comment — pass only bodies you've already
+ * filtered to trusted identities (see `filterTrustedComments`). Calling
+ * with raw, unfiltered comment bodies is a CRITICAL authorization bypass:
+ * any GitHub user (including external fork-PR contributors) can post a
+ * comment carrying a forged marker that this function would happily honor.
+ * The fix lives at the FETCH boundary — see the `gh pr view --jq` filter
+ * in `.github/workflows/ai-sdlc-review.yml` and `ai-sdlc-plugin/commands/execute.md`.
  */
 export function findMarkerInComments(commentBodies: string[]): MarkerPayload | null {
   for (let i = commentBodies.length - 1; i >= 0; i--) {
@@ -182,6 +191,99 @@ export function findMarkerInComments(commentBodies: string[]): MarkerPayload | n
     if (m !== null) return m;
   }
   return null;
+}
+
+/**
+ * Trusted-author identities that are allowed to author the incremental-review
+ * marker comment. Compiled into a Set so callers can do O(1) membership
+ * checks. Two flavors of GitHub-Actions login are listed because the GraphQL
+ * surface (`gh pr view --json comments`) returns `author.login` WITHOUT the
+ * `[bot]` suffix while the REST API (`github.rest.issues.listComments`)
+ * returns `user.login` WITH the suffix — both forms map to the same actor.
+ *
+ * Any login NOT in this set is treated as untrusted; comments authored by
+ * untrusted identities are filtered out before `findMarkerInComments` is
+ * called. This is the defense-in-depth Layer 1 fix for the AISDLC-142
+ * round-2 CRITICAL finding (forged-marker authorization bypass).
+ *
+ * To rotate or extend this list, update BOTH this constant AND the
+ * `gh pr view --jq 'select(.author.login == ...)'` filters in:
+ *   - `.github/workflows/ai-sdlc-review.yml` (analyze + report jobs)
+ *   - `ai-sdlc-plugin/commands/execute.md` (Step 7a-bis)
+ */
+export const TRUSTED_MARKER_AUTHOR_LOGINS: ReadonlySet<string> = new Set([
+  'github-actions',
+  'github-actions[bot]',
+  'ai-sdlc-ci-attestor',
+  'ai-sdlc-ci-attestor[bot]',
+]);
+
+/**
+ * Trusted `authorAssociation` values (GitHub's relationship-to-repo enum).
+ * Repo OWNER, members of the org, and explicit collaborators are allowed
+ * to author the marker — they have push access, so they could already
+ * write the marker via the workflow itself; honoring their direct comments
+ * is no escalation. CONTRIBUTOR / NONE / FIRST_TIME_* are external and
+ * MUST NOT be trusted to author markers.
+ */
+export const TRUSTED_MARKER_AUTHOR_ASSOCIATIONS: ReadonlySet<string> = new Set([
+  'OWNER',
+  'MEMBER',
+  'COLLABORATOR',
+]);
+
+/**
+ * One PR comment with the metadata needed to verify it was authored by a
+ * trusted identity. Both APIs surface roughly this shape; callers normalise
+ * to this struct before calling `filterTrustedComments`:
+ *
+ *   - GraphQL `gh pr view --json comments`: `{author: {login}, authorAssociation, body}`
+ *   - REST `github.rest.issues.listComments`: `{user: {login}, author_association, body}`
+ */
+export interface CommentWithAuthor {
+  /** Author login (may be `<name>` from GraphQL or `<name>[bot]` from REST). */
+  authorLogin: string;
+  /** `authorAssociation` (GraphQL) / `author_association` (REST), uppercase enum. */
+  authorAssociation: string;
+  body: string;
+}
+
+/**
+ * Filter PR comments down to those authored by trusted identities. Returns
+ * the bodies of the surviving comments in the SAME order as the input, ready
+ * to hand to `findMarkerInComments`.
+ *
+ * Trust criteria (either gate is sufficient):
+ *   1. `authorLogin` is in `TRUSTED_MARKER_AUTHOR_LOGINS` (the bot allowlist), OR
+ *   2. `authorAssociation` is in `TRUSTED_MARKER_AUTHOR_ASSOCIATIONS`
+ *      (push-access humans).
+ *
+ * Defense-in-depth Layer 1 — the primary defense is the `gh pr view --jq`
+ * filter at the fetch boundary; calling this helper after fetch is a
+ * belt-and-braces guard for callers that go through the GitHub REST API
+ * (where filtering at fetch time is awkward).
+ */
+export function filterTrustedComments(comments: readonly CommentWithAuthor[]): string[] {
+  const out: string[] = [];
+  for (const c of comments) {
+    const loginTrusted = TRUSTED_MARKER_AUTHOR_LOGINS.has(c.authorLogin);
+    const assocTrusted = TRUSTED_MARKER_AUTHOR_ASSOCIATIONS.has(c.authorAssociation);
+    if (loginTrusted || assocTrusted) {
+      out.push(c.body);
+    }
+  }
+  return out;
+}
+
+/**
+ * One-call helper that filters by author and then locates the freshest
+ * marker. Equivalent to `findMarkerInComments(filterTrustedComments(...))`
+ * but documents the safe-by-default contract in a single name.
+ */
+export function findTrustedMarkerInComments(
+  comments: readonly CommentWithAuthor[],
+): MarkerPayload | null {
+  return findMarkerInComments(filterTrustedComments(comments));
 }
 
 // ── ContentHashV3 (mirror of orchestrator/src/runtime/attestations.ts) ─

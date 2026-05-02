@@ -299,9 +299,50 @@ Marker storage: a single PR comment whose body contains `<!-- ai-sdlc:last-revie
 # `gh pr view --json comments` is cheap (one API call) and works against the
 # branch's open PR. Empty file when no PR exists yet (first push) — the gate
 # treats that as `no-marker` → FULL review.
+#
+# ── AISDLC-142 round-2 CRITICAL fix ────────────────────────────────────
+# Filter PR comments to TRUSTED AUTHORS at the jq boundary BEFORE the marker
+# is parsed. Without this filter ANY GitHub user could post a comment
+# carrying a forged `<!-- ai-sdlc:last-reviewed-contenthash:<base64url> -->`
+# marker (the contentHash is publicly computable from the PR diff), causing
+# the next push to skip all 3 reviewers + auto-approve + satisfy the
+# required-merge-gate check. This is an authorization-bypass with the same
+# blast radius as a forged review approval — keep the filter in lock-step
+# with the workflow analyzer's filter.
+#
+# Trust criteria (either gate is sufficient):
+#   - login == "github-actions" or "ai-sdlc-ci-attestor" (workflow-authored
+#     markers from the `ai-sdlc-review.yml` upsert step)
+#   - authorAssociation in {OWNER, MEMBER, COLLABORATOR} (push-access humans
+#     — they could write the marker via the workflow itself; honoring their
+#     direct comment is no escalation)
+#
+# We emit a STRUCTURED JSON file so the CLI's `--comments-json-file` flag
+# can re-apply the same filter as defense-in-depth (Layer 2).
+PR_COMMENTS_JSON="/tmp/pr-comments-${TASK_ID}.json"
 PR_COMMENTS_FILE="/tmp/pr-comments-${TASK_ID}.txt"
-gh pr view "$BRANCH" --json comments --jq '.comments[].body' \
-  > "$PR_COMMENTS_FILE" 2>/dev/null || : > "$PR_COMMENTS_FILE"
+gh pr view "$BRANCH" --json comments --jq '
+  [
+    .comments[]
+    | select(
+        .author.login == "github-actions"
+        or .author.login == "ai-sdlc-ci-attestor"
+        or .authorAssociation == "OWNER"
+        or .authorAssociation == "MEMBER"
+        or .authorAssociation == "COLLABORATOR"
+      )
+    | {
+        authorLogin: .author.login,
+        authorAssociation: .authorAssociation,
+        body: .body
+      }
+  ]
+' > "$PR_COMMENTS_JSON" 2>/dev/null || echo '[]' > "$PR_COMMENTS_JSON"
+
+# Bodies-only mirror for the PRIOR_SHA grep below (already author-filtered
+# upstream — only trusted bodies make it here).
+jq -r '.[].body' "$PR_COMMENTS_JSON" > "$PR_COMMENTS_FILE" 2>/dev/null \
+  || : > "$PR_COMMENTS_FILE"
 
 # Compute the delta numstat ONLY when a marker exists; the CLI no-ops it
 # otherwise. We extract the prior reviewedSha from the marker, then run
@@ -326,8 +367,10 @@ if [ -n "$PRIOR_SHA" ]; then
   cd - >/dev/null
 fi
 
+# Pass --comments-json-file (NOT --comments-file) so the CLI's trusted-author
+# filter runs as defense-in-depth on top of the gh --jq filter above.
 INCREMENTAL_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide decide \
-  --comments-file "$PR_COMMENTS_FILE" \
+  --comments-json-file "$PR_COMMENTS_JSON" \
   --base-ref origin/main \
   --head-ref HEAD \
   --repo-root "$WORKTREE_PATH" \
@@ -421,8 +464,30 @@ MARKER_BODY=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-
 # Idempotent upsert: search existing PR comments for the marker prefix; update
 # in-place if present, else create new. Mirrors the pattern at
 # .github/workflows/dor-ingress.yml around `<!-- ai-sdlc:dor-comment ... -->`.
+#
+# ── AISDLC-142 round-2 CRITICAL fix ────────────────────────────────────
+# Filter to TRUSTED authors before selecting the prior marker. Without
+# this filter an attacker-planted comment (containing the marker prefix
+# substring) could be selected as `EXISTING_COMMENT_ID` and either (a)
+# overwritten by the PATCH below — silently destroying the attacker's
+# evidence — OR more importantly (b) preserved in place when the
+# attacker's comment is "newer" than the bot's (`tail -1` keeps the
+# latest), which would let the next push's incremental gate read the
+# attacker's marker instead of the legitimate one. Same trust criteria
+# as the analyze-job's gh --jq filter — keep them in lock-step.
 EXISTING_COMMENT_ID=$(gh pr view "$BRANCH" --json comments \
-  --jq '.comments[] | select(.body | contains("<!-- ai-sdlc:last-reviewed-contenthash:")) | .id' \
+  --jq '
+    .comments[]
+    | select(
+        .author.login == "github-actions"
+        or .author.login == "ai-sdlc-ci-attestor"
+        or .authorAssociation == "OWNER"
+        or .authorAssociation == "MEMBER"
+        or .authorAssociation == "COLLABORATOR"
+      )
+    | select(.body | contains("<!-- ai-sdlc:last-reviewed-contenthash:"))
+    | .id
+  ' \
   2>/dev/null | tail -1)
 
 COMMENT_BODY=$(printf '%s\n\n%s\n\n%s\n' \

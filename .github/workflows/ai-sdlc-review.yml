@@ -153,9 +153,49 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          # Fetch existing PR comments. Empty file when we can't / no comments.
-          gh pr view "$PR_NUMBER" --json comments --jq '.comments[].body' \
-            > /tmp/pr-comments.txt 2>/dev/null || : > /tmp/pr-comments.txt
+          # ── AISDLC-142 round-2 CRITICAL fix ────────────────────────
+          # Fetch existing PR comments WITH author metadata, then filter to
+          # trusted authors at the jq boundary. The unfiltered version
+          # honored a forged `<!-- ai-sdlc:last-reviewed-contenthash:... -->`
+          # marker posted by ANY GitHub user (including external fork-PR
+          # contributors), letting them carry the publicly-computable
+          # current contentHash → CLI returns skip:true → CI skips all
+          # 3 reviewers → auto-approves → satisfies the required-merge-gate
+          # check. The author-filter below is the primary defense (Layer 1).
+          #
+          # Trust criteria (either gate is sufficient):
+          #   - login == "github-actions" (workflow-authored markers) OR
+          #     "ai-sdlc-ci-attestor" (CI-side attestor bot, AISDLC-87)
+          #   - authorAssociation in {OWNER, MEMBER, COLLABORATOR}
+          #     (push-access humans — they could write the marker via the
+          #     workflow itself; honoring their direct comment is no escalation)
+          #
+          # Note: GraphQL `gh pr view --json comments` returns author.login
+          # WITHOUT the [bot] suffix; the bot whitelist below matches that
+          # form. Layer 2 (defense-in-depth) is the in-CLI re-filter via
+          # --comments-json-file (`filterTrustedComments`).
+          gh pr view "$PR_NUMBER" --json comments --jq '
+            [
+              .comments[]
+              | select(
+                  .author.login == "github-actions"
+                  or .author.login == "ai-sdlc-ci-attestor"
+                  or .authorAssociation == "OWNER"
+                  or .authorAssociation == "MEMBER"
+                  or .authorAssociation == "COLLABORATOR"
+                )
+              | {
+                  authorLogin: .author.login,
+                  authorAssociation: .authorAssociation,
+                  body: .body
+                }
+            ]
+          ' > /tmp/pr-comments.json 2>/dev/null || echo '[]' > /tmp/pr-comments.json
+
+          # Bodies-only mirror for the PRIOR_SHA grep below (already
+          # author-filtered upstream — only trusted bodies make it here).
+          jq -r '.[].body' /tmp/pr-comments.json > /tmp/pr-comments.txt 2>/dev/null \
+            || : > /tmp/pr-comments.txt
 
           # Extract prior reviewedSha from the marker (if any) so we can
           # compute the delta numstat against it. Failure is fine — empty
@@ -175,8 +215,12 @@ jobs:
               || : > /tmp/pr-delta-numstat.txt
           fi
 
+          # Use the structured --comments-json-file path so the CLI applies
+          # the trusted-author filter (Layer 2 defense-in-depth) on top of
+          # the gh --jq filter above. Even if the jq filter is bypassed
+          # somehow, the CLI-side filter still rejects forged markers.
           INCREMENTAL_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide decide \
-            --comments-file /tmp/pr-comments.txt \
+            --comments-json-file /tmp/pr-comments.json \
             --base-ref "${{ github.event.pull_request.base.sha }}" \
             --head-ref HEAD \
             --repo-root . \
@@ -647,6 +691,36 @@ jobs:
             const issue_number = context.payload.pull_request.number;
             // Idempotent: search existing comments for the marker prefix; update
             // in place if found, else create new. Mirrors `dor-ingress.yml`.
+            //
+            // ── AISDLC-142 round-2 CRITICAL fix (Layer 1) ──────────────
+            // Filter to TRUSTED authors before selecting the prior marker.
+            // Without this filter an attacker-planted comment (containing the
+            // marker prefix substring) could be selected as `prior` and
+            // either (a) mutated by our updateComment call OR (b) left in
+            // place when the attacker's comment is "newer" than the bot's,
+            // which would let the next push's analyze-job read the
+            // attacker's marker first.
+            //
+            // REST API surface uses `user.login` (WITH `[bot]` suffix) +
+            // `author_association` — different from the GraphQL surface
+            // used in the analyze job's gh pr view step. Both flavors of
+            // the github-actions login (`github-actions` and
+            // `github-actions[bot]`) are listed for safety.
+            const TRUSTED_LOGINS = new Set([
+              'github-actions',
+              'github-actions[bot]',
+              'ai-sdlc-ci-attestor',
+              'ai-sdlc-ci-attestor[bot]',
+            ]);
+            const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+            const isTrustedComment = (c) => {
+              const login = c.user && c.user.login;
+              const assoc = c.author_association;
+              return (
+                (login && TRUSTED_LOGINS.has(login)) ||
+                (assoc && TRUSTED_ASSOCIATIONS.has(assoc))
+              );
+            };
             const existing = await github.paginate(github.rest.issues.listComments, {
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -654,7 +728,10 @@ jobs:
               per_page: 100,
             });
             const prior = existing.find(
-              (c) => c.body && c.body.includes('<!-- ai-sdlc:last-reviewed-contenthash:'),
+              (c) =>
+                c.body &&
+                c.body.includes('<!-- ai-sdlc:last-reviewed-contenthash:') &&
+                isTrustedComment(c),
             );
             try {
               if (prior) {
