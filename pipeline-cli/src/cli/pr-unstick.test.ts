@@ -38,6 +38,7 @@ import {
   resolveRepoSlug,
   runForAllPrs,
   runForOnePr,
+  splitConcatenatedJsonObjects,
 } from './pr-unstick.js';
 import type { ExecResult, Runner } from '../runtime/exec.js';
 
@@ -465,6 +466,53 @@ describe('resolveAll', () => {
     expect(fake.calls).toHaveLength(0);
   });
 
+  // Round-2 regression: the resolver MUST honor the same predicate the
+  // detector used (`headState !== 'success' && parentState === 'success'`),
+  // not blindly iterate REQUIRED_STATUS_CONTEXTS. Without this the resolver
+  // would force-green a context that was still pending at the parent (e.g.
+  // codecov/patch when the AISDLC-87 attestor commit landed before coverage
+  // finished), silently bypassing the gate.
+  it('chore-status-forwarding only forwards contexts that are missing AND success-at-parent', async () => {
+    const fake = makeFakeRunner();
+    const pr = makePr({
+      headSubject: `${CI_ATTESTOR_SUBJECT_PREFIX} (skip ci marker)`,
+      // `CI OK` already success at HEAD → must NOT be re-posted.
+      // `Post Review Results` missing at HEAD AND success at parent → MUST forward.
+      // `codecov/patch` missing at HEAD but PENDING at parent → must NOT be forwarded
+      //   (this is the bug fix — old code would force-green it).
+      statusesAtHead: new Map([['CI OK', 'success']]),
+      statusesAtParent: new Map([
+        ['CI OK', 'success'],
+        ['Post Review Results', 'success'],
+        ['codecov/patch', 'pending'],
+      ]),
+    });
+    const matches = detectAll({ pr });
+    expect(matches.map((m) => m.id)).toContain('chore-status-forwarding');
+    // Detector itself should only flag the one truly-missing context.
+    const choreMatch = matches.find((m) => m.id === 'chore-status-forwarding')!;
+    expect(choreMatch.actions).toHaveLength(1);
+    expect(choreMatch.actions[0]).toContain('Post Review Results');
+
+    const outcomes = await resolveAll({
+      pr,
+      matches,
+      repoSlug: 'org/repo',
+      cwd: '/tmp',
+      dryRun: false,
+      runner: fake.runner,
+    });
+    expect(outcomes[0].status).toBe('applied');
+    // Resolver should make exactly ONE gh api status POST — for Post Review
+    // Results only. NOT for `CI OK` (already success at HEAD), NOT for
+    // `codecov/patch` (parent is pending).
+    expect(fake.calls).toHaveLength(1);
+    expect(fake.calls[0].args).toContain('context=Post Review Results');
+    const allContexts = fake.calls.map((c) => c.args.find((a) => a.startsWith('context=')));
+    expect(allContexts).not.toContain('context=codecov/patch');
+    expect(allContexts).not.toContain('context=CI OK');
+  });
+
   it('captures runner errors into outcome.error without throwing', async () => {
     const fake = makeFakeRunner();
     fake.on('gh', (a) => a[0] === 'pr' && a[1] === 'update-branch', {
@@ -545,10 +593,13 @@ describe('fetchPrInfo', () => {
       'gh',
       (a) => a[0] === 'api' && a[1].includes('/check-runs') && a[1].includes('13744ed8'),
       {
-        stdout: JSON.stringify([
-          { name: 'ai-sdlc/attestation', conclusion: 'failure' },
-          { name: 'Backlog Drift', conclusion: 'success' },
-        ]),
+        stdout: JSON.stringify({
+          total_count: 2,
+          check_runs: [
+            { name: 'ai-sdlc/attestation', conclusion: 'failure' },
+            { name: 'Backlog Drift', conclusion: 'success' },
+          ],
+        }),
       },
     );
 
@@ -564,6 +615,84 @@ describe('fetchPrInfo', () => {
     // they collapse out → only b, c approving = 2). Drives the doc that the
     // function is per-author-latest, not raw count.
     expect(pr.approvingReviewCount).toBe(2);
+  });
+
+  // Round-2 regression: `gh api --paginate` emits the raw response from each
+  // page CONCATENATED with no separator. With the old `--jq` filter we got
+  // `[{...}][{...}]`, which `JSON.parse` rejects, and the catch silently
+  // returned an empty Map — losing every check-run on busy PRs (>100 runs
+  // after force-push matrix builds). Verify the new splitter handles it.
+  it('fetchCheckRuns returns full set when --paginate emits multi-page concatenated JSON', async () => {
+    const fake = makeFakeRunner();
+    fake.on('gh', (a) => a[0] === 'pr' && a[1] === 'view', {
+      stdout: JSON.stringify({
+        number: 1,
+        headRefOid: 'abc',
+        files: [],
+        reviews: [],
+      }),
+    });
+    fake.on('gh', (a) => a[0] === 'api' && a[1].endsWith('/commits/abc'), {
+      stdout: JSON.stringify({ message: 'feat: x', parents: [] }),
+    });
+    fake.on('gh', (a) => a[0] === 'api' && a[1].endsWith('/status'), {
+      stdout: JSON.stringify({ statuses: [] }),
+    });
+    // Two pages of 2 check-runs each, concatenated as `{...}{...}` with NO
+    // separator (matches gh's actual --paginate output shape).
+    const page1 = JSON.stringify({
+      total_count: 4,
+      check_runs: [
+        { name: 'CI / build', conclusion: 'success' },
+        { name: 'ai-sdlc/attestation', conclusion: 'failure' },
+      ],
+    });
+    const page2 = JSON.stringify({
+      total_count: 4,
+      check_runs: [
+        { name: 'Backlog Drift', conclusion: 'failure' },
+        { name: 'codecov/project', conclusion: 'success' },
+      ],
+    });
+    fake.on('gh', (a) => a[0] === 'api' && a[1].includes('/check-runs'), {
+      stdout: page1 + page2,
+    });
+
+    const pr = await fetchPrInfo(1, 'org/repo', fake.runner, '/tmp');
+    // Without the splitter all 4 would be lost (silent empty Map).
+    expect(pr.checkRunsAtHead.size).toBe(4);
+    expect(pr.checkRunsAtHead.get('ai-sdlc/attestation')).toBe('failure');
+    expect(pr.checkRunsAtHead.get('Backlog Drift')).toBe('failure');
+    expect(pr.checkRunsAtHead.get('CI / build')).toBe('success');
+    expect(pr.checkRunsAtHead.get('codecov/project')).toBe('success');
+  });
+
+  // Same pattern with whitespace between pages (some gh versions add a newline).
+  it('fetchCheckRuns tolerates whitespace between concatenated pages', async () => {
+    const fake = makeFakeRunner();
+    fake.on('gh', (a) => a[0] === 'pr' && a[1] === 'view', {
+      stdout: JSON.stringify({ number: 2, headRefOid: 'def', files: [], reviews: [] }),
+    });
+    fake.on('gh', (a) => a[0] === 'api' && a[1].endsWith('/commits/def'), {
+      stdout: JSON.stringify({ message: 'feat: y', parents: [] }),
+    });
+    fake.on('gh', (a) => a[0] === 'api' && a[1].endsWith('/status'), {
+      stdout: JSON.stringify({ statuses: [] }),
+    });
+    const page1 = JSON.stringify({
+      total_count: 2,
+      check_runs: [{ name: 'a', conclusion: 'success' }],
+    });
+    const page2 = JSON.stringify({
+      total_count: 2,
+      check_runs: [{ name: 'b', conclusion: 'failure' }],
+    });
+    fake.on('gh', (a) => a[0] === 'api' && a[1].includes('/check-runs'), {
+      stdout: `${page1}\n${page2}\n`,
+    });
+    const pr = await fetchPrInfo(2, 'org/repo', fake.runner, '/tmp');
+    expect(pr.checkRunsAtHead.size).toBe(2);
+    expect(pr.checkRunsAtHead.get('b')).toBe('failure');
   });
 
   it('tolerates empty status / check-runs payloads (returns empty maps)', async () => {
@@ -651,7 +780,7 @@ function stubAllRunner(views: Record<number, string>): FakeRunnerHandle {
     stdout: JSON.stringify({ statuses: [] }),
   });
   stubs.on('gh', (a) => a[0] === 'api' && a[1].includes('/check-runs'), {
-    stdout: JSON.stringify([]),
+    stdout: JSON.stringify({ total_count: 0, check_runs: [] }),
   });
   return stubs;
 }
@@ -696,7 +825,7 @@ describe('runForAllPrs', () => {
       stdout: JSON.stringify({ statuses: [] }),
     });
     fake.on('gh', (a) => a[0] === 'api' && a[1].includes('/check-runs'), {
-      stdout: JSON.stringify([]),
+      stdout: JSON.stringify({ total_count: 0, check_runs: [] }),
     });
 
     const results = await runForAllPrs({
@@ -801,6 +930,52 @@ describe('renderJsonResult', () => {
       results: Array<{ pr: { statusesAtHead: Record<string, string> } }>;
     };
     expect(parsed.results[0].pr.statusesAtHead['CI OK']).toBe('success');
+  });
+});
+
+// ── splitConcatenatedJsonObjects (used by fetchCheckRuns) ────────────
+
+describe('splitConcatenatedJsonObjects', () => {
+  it('returns [] for empty input', () => {
+    expect(splitConcatenatedJsonObjects('')).toEqual([]);
+    expect(splitConcatenatedJsonObjects('   \n')).toEqual([]);
+  });
+
+  it('splits two adjacent objects with no separator', () => {
+    expect(splitConcatenatedJsonObjects('{"a":1}{"b":2}')).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
+  it('handles whitespace between objects', () => {
+    expect(splitConcatenatedJsonObjects('{"a":1}\n  {"b":2}\n')).toEqual(['{"a":1}', '{"b":2}']);
+  });
+
+  it('does not split on braces inside string literals', () => {
+    // The `{` and `}` inside the string value must NOT be treated as object boundaries.
+    const input = '{"msg":"contains } and { braces"}{"x":1}';
+    expect(splitConcatenatedJsonObjects(input)).toEqual([
+      '{"msg":"contains } and { braces"}',
+      '{"x":1}',
+    ]);
+  });
+
+  it('handles escaped quotes inside string literals', () => {
+    // An escaped quote `\"` must NOT close the string state, so the brace
+    // inside it is still ignored.
+    const input = '{"msg":"he said \\"hi}\\" yesterday"}{"x":1}';
+    const parts = splitConcatenatedJsonObjects(input);
+    expect(parts).toHaveLength(2);
+    // Each part should be valid JSON.
+    expect(JSON.parse(parts[0])).toEqual({ msg: 'he said "hi}" yesterday' });
+    expect(JSON.parse(parts[1])).toEqual({ x: 1 });
+  });
+
+  it('handles nested objects (only splits at top level)', () => {
+    const input = '{"outer":{"inner":1}}{"k":2}';
+    expect(splitConcatenatedJsonObjects(input)).toEqual(['{"outer":{"inner":1}}', '{"k":2}']);
+  });
+
+  it('returns a single object when input has no concatenation', () => {
+    expect(splitConcatenatedJsonObjects('{"a":1}')).toEqual(['{"a":1}']);
   });
 });
 

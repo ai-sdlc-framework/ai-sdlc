@@ -298,6 +298,7 @@ async function resolveOne(match: CheckMatch, opts: ResolveOptions): Promise<Chec
         match,
         REQUIRED_STATUS_CONTEXTS,
         'AISDLC-87 (skip ci marker) chore gap',
+        { requireParentSuccess: true },
       );
     } else if (match.id === 'rebase-when-behind') {
       await applyRebase(opts);
@@ -322,16 +323,30 @@ async function resolveOne(match: CheckMatch, opts: ResolveOptions): Promise<Chec
 /**
  * POST a commit status for each `context` whose HEAD entry is missing/non-success.
  * Used by both #1 (chore-status-forwarding) and #3 (docs-only-fallback).
+ *
+ * For #1 (`requireParentSuccess: true`) we ALSO require the context to be
+ * `success` at the parent commit — mirroring the detector's predicate. This
+ * matters when an AISDLC-87 attestor commit lands while one parent context
+ * (e.g. `codecov/patch`) is still pending: without this guard the resolver
+ * would force-green a check that was not actually green at the parent and
+ * silently bypass the gate.
  */
 async function applyStatusForwarding(
   opts: ResolveOptions,
   _match: CheckMatch,
   contexts: readonly string[],
   description: string,
+  config: { requireParentSuccess?: boolean } = {},
 ): Promise<void> {
   for (const ctx of contexts) {
     const headState = opts.pr.statusesAtHead.get(ctx);
     if (headState === 'success') continue; // already good
+    if (config.requireParentSuccess) {
+      const parentState = opts.pr.statusesAtParent.get(ctx);
+      // Only forward what the detector would have flagged as `missing`. If the
+      // parent isn't success, we'd be inventing a green status from nothing.
+      if (parentState !== 'success') continue;
+    }
     await opts.runner(
       'gh',
       [
@@ -542,29 +557,80 @@ async function fetchCheckRuns(
   runner: Runner,
   cwd?: string,
 ): Promise<Map<string, string>> {
+  // We deliberately keep `--paginate` so PRs with >100 check runs (busy PRs
+  // after a force-push matrix build) don't lose runs. We DROP `--jq` though:
+  // with `--paginate`, gh applies the jq filter PER PAGE and emits the
+  // results back-to-back as concatenated JSON arrays (`[...][...]`), which
+  // `JSON.parse` rejects. Instead we ask gh for the raw response per page
+  // (each is a valid JSON object `{check_runs:[...], total_count}`) and
+  // split the concatenated stream of top-level objects ourselves.
   const out = await runner(
     'gh',
-    [
-      'api',
-      `repos/${repoSlug}/commits/${sha}/check-runs`,
-      '--paginate',
-      '--jq',
-      '[.check_runs[]? | {name, conclusion}]',
-    ],
+    ['api', `repos/${repoSlug}/commits/${sha}/check-runs?per_page=100`, '--paginate'],
     { cwd, allowFailure: true },
   );
   const result = new Map<string, string>();
   if (out.code !== 0) return result;
   try {
-    const parsed = JSON.parse(out.stdout) as Array<{ name: string; conclusion: string | null }>;
-    for (const r of parsed) {
-      // Latest run wins (last write); GH returns runs in start-time order.
-      result.set(r.name, r.conclusion ?? '');
+    for (const page of splitConcatenatedJsonObjects(out.stdout)) {
+      const parsed = JSON.parse(page) as {
+        check_runs?: Array<{ name: string; conclusion: string | null }>;
+      };
+      for (const r of parsed.check_runs ?? []) {
+        // Latest run wins (last write); GH returns runs in start-time order.
+        result.set(r.name, r.conclusion ?? '');
+      }
     }
   } catch {
-    // ignore
+    // ignore — empty map signals "no check-runs".
   }
   return result;
+}
+
+/**
+ * Split a string of concatenated top-level JSON objects (`{...}{...}{...}`)
+ * into individual object substrings. Used to handle `gh api --paginate`
+ * output, which emits one raw response per page back-to-back without a
+ * separator. Tracks brace depth + string state so braces inside string
+ * literals don't fool the splitter.
+ *
+ * Tolerates leading/trailing whitespace between objects. Yields nothing for
+ * an empty input. Handles escaped quotes (`\"`) inside strings.
+ */
+export function splitConcatenatedJsonObjects(input: string): string[] {
+  const out: string[] = [];
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  let start = -1;
+  for (let i = 0; i < input.length; i++) {
+    const ch = input[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+      } else if (ch === '\\') {
+        escape = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === '}') {
+      depth--;
+      if (depth === 0 && start >= 0) {
+        out.push(input.slice(start, i + 1));
+        start = -1;
+      }
+    }
+  }
+  return out;
 }
 
 function countApprovingReviews(reviews: RawReview[]): number {
