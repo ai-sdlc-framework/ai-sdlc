@@ -133,6 +133,35 @@ if [ -f "$ATT_FILE" ]; then
   exit 0
 fi
 
+# ── Step 4b: upstream auto-sign chore detection (AISDLC-135) ─────────
+# When this hook signs + commits an envelope (Step 6 below), exit 1 aborts
+# the push. The operator (or `/ai-sdlc execute` Step 11 push loop) then
+# re-runs `git push`. Normally the second push hits the envelope-exists
+# idempotency check above and short-circuits cleanly.
+#
+# But there's a window where it doesn't: if the operator amends, rebases,
+# or otherwise rewrites HEAD between the two pushes such that the
+# attestation file moves but the chore-commit subject line stays in place,
+# the envelope-at-HEAD check misses and the hook re-fires — signing a
+# second envelope on top, adding another chore commit, and looping forever
+# until the operator escapes with AI_SDLC_SKIP_ATTESTATION_SIGN=1.
+#
+# Reproduction: PR #168 cycled twice on AISDLC-115.6 before the operator
+# broke the loop manually.
+#
+# Defense: if HEAD's commit subject line is itself the auto-sign chore
+# we just produced, treat it as a "second push of the same cycle" and
+# fall through with exit 0. The next dev commit on top will not match
+# this prefix and the hook will fire normally.
+LAST_COMMIT_SUBJECT=$(git log -1 --format=%s HEAD 2>/dev/null || echo '')
+if [[ "${LAST_COMMIT_SUBJECT:-}" == "chore: auto-sign attestation for "* ]]; then
+  # HEAD is an auto-sign chore commit from a previous run of this hook.
+  # The corresponding envelope was committed AS this commit, so it lives
+  # at the PARENT's HEAD-sha — not at the chore commit's own SHA. Skipping
+  # here is correct: signing again would just produce a redundant envelope.
+  exit 0
+fi
+
 # ── Step 5: invoke the signer ────────────────────────────────────────
 # The default signer is the same script `/ai-sdlc execute` Step 10 used to
 # call directly. Tests inject a stub via AI_SDLC_SIGN_ATTESTATION_CMD so
