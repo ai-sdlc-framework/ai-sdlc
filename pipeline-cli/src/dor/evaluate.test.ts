@@ -143,3 +143,59 @@ describe('evaluateIssue (Stage A only)', () => {
     expect(elapsed).toBeLessThan(100);
   });
 });
+
+describe('evaluateIssue — auto-pass via gatesSkipped (RFC-0011 Phase 4)', () => {
+  it('skips listed gates with finding "auto-pass"', async () => {
+    // Body would normally fail gates 1 (no AC) and 5 (no surface). With
+    // gates 1 + 5 skipped, the remaining gates pass and the verdict is admit.
+    const v = await evaluateIssue(input('## Description\nMake the dashboard faster.', 'speedup'), {
+      hermetic: true,
+      gatesSkipped: [1, 4, 5, 6],
+    });
+    expect(v.overallVerdict).toBe('admit');
+    const skipped = v.gates.filter((g) => g.verdict === 'skip' && g.finding === 'auto-pass');
+    expect(skipped.map((g) => g.gateId).sort()).toEqual([1, 4, 5, 6]);
+  });
+
+  it('retained gates still block when they fail (signal-pipeline retains 2/3/7)', async () => {
+    const v = await evaluateIssue(
+      input('## Description\nMake the dashboard faster. The plan is TBD.', 'signal-pipeline task'),
+      { hermetic: true, gatesSkipped: [1, 4, 5, 6] },
+    );
+    // Gate 2 (markers) was retained — TBD trips it.
+    expect(v.overallVerdict).toBe('needs-clarification');
+    expect(v.gates.find((g) => g.gateId === 2)?.verdict).toBe('fail');
+  });
+
+  it('uses custom autoPassReason when provided', async () => {
+    const v = await evaluateIssue(input('plain body', 'x'), {
+      hermetic: true,
+      gatesSkipped: [1, 4, 5, 6],
+      autoPassReason: 'auto-pass: signal-pipeline-generated',
+    });
+    const skipped = v.gates.filter((g) => g.finding === 'auto-pass: signal-pipeline-generated');
+    expect(skipped.length).toBe(4);
+  });
+
+  it('signal-pipeline auto-pass: clean retained gates produce admit', async () => {
+    // Issue has no AC, no surface, but valid refs and no markers — should
+    // admit because gates 1/4/5/6 are skipped and gates 2/3/7 are clean.
+    const v = await evaluateIssue(
+      input(
+        '## Description\nGenerated signal-pipeline task.\nReferences `pipeline-cli/x.ts`.\n- [ ] #1 fix it',
+        'auto-task',
+      ),
+      { hermetic: true, gatesSkipped: [1, 4, 5, 6] },
+    );
+    expect(v.overallVerdict).toBe('admit');
+  });
+
+  it('full auto-pass (all gates skipped) admits regardless of body', async () => {
+    const v = await evaluateIssue(input('totally vague body without anything', 'x'), {
+      hermetic: true,
+      gatesSkipped: [1, 2, 3, 4, 5, 6, 7],
+    });
+    expect(v.overallVerdict).toBe('admit');
+    expect(v.gates.every((g) => g.verdict === 'skip')).toBe(true);
+  });
+});

@@ -22156,6 +22156,17 @@ async function validateTask(opts) {
   if (task.status === "Draft") {
     return { ok: false, reason: `status is 'Draft' \u2014 task not ready for execution`, task };
   }
+  if (task.status === "Needs Clarification") {
+    return {
+      ok: false,
+      reason: [
+        `status is 'Needs Clarification' \u2014 task blocked by the Definition-of-Ready gate (RFC-0011).`,
+        `See the DoR clarification thread in the task file (look for the`,
+        `'<!-- ai-sdlc:dor-comment -->' marker) and address the questions, then re-run.`
+      ].join(" "),
+      task
+    };
+  }
   if (task.status !== "To Do" && task.status !== "In Progress") {
     return {
       ok: false,
@@ -22948,6 +22959,14 @@ var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 // ../../pipeline-cli/dist/dor/calibration-log.js
 import { appendFileSync, mkdirSync as mkdirSync4 } from "node:fs";
 import { dirname as dirname4, join as join18 } from "node:path";
+
+// ../../pipeline-cli/dist/dor/dor-config.js
+import { existsSync as existsSync17, readFileSync as readFileSync14 } from "node:fs";
+import { join as join19 } from "node:path";
+
+// ../../pipeline-cli/dist/dor/ingress-claude.js
+import { existsSync as existsSync18, readFileSync as readFileSync15, readdirSync as readdirSync7 } from "node:fs";
+import { join as join20 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {

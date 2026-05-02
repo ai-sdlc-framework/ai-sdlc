@@ -80,7 +80,7 @@ TASK_FILE=$(ls "backlog/tasks/${TASK_ID_LOWER} -"* 2>/dev/null | head -1)
 
 Read the task with `mcp__backlog__task_view` to render its full structure. Then verify:
 
-- **Status** is `To Do` or `In Progress` (not `Draft`, not `Done`). If `Done`, refuse — already shipped. If `Draft`, refuse — not ready.
+- **Status** is `To Do` or `In Progress` (not `Draft`, not `Done`, not `Needs Clarification`). If `Done`, refuse — already shipped. If `Draft`, refuse — not ready. If `Needs Clarification` (RFC-0011 §7.3 + Phase 4 / AISDLC-115.5), refuse — the Definition-of-Ready gate flagged the task as not yet executable. Print the refusal message naming the blocked gates and point the operator at the DoR clarification thread (look for the `<!-- ai-sdlc:dor-comment -->` marker in the task body or issue comments). The operator must address the questions, edit the task, and re-run `/ai-sdlc dor-recheck <task-id>` (or wait for the auto-recheck on body edit) before `/ai-sdlc execute` can proceed. Do NOT bypass — the Definition-of-Ready gate is the contract that issues entering execution have been judged actionable.
 - **At least one acceptance criterion** exists. If none, refuse — task isn't actionable.
 - **Not all ACs already checked** while status is `In Progress` — that's a stale-Done shape; abort with `outcome: aborted`, populate `notes` for the user (e.g. "stale-Done shape: status=In Progress with all ACs checked — needs triage").
 

@@ -166,7 +166,13 @@ export function mapIssueToPriorityInput(input: AdmissionInput): PriorityInput {
 
   // ── Backlog status veto ─────────────────────────────────────
   // Drafts aren't ready to admit; orchestrator should ignore them.
-  if (backlog?.status === 'Draft') {
+  // RFC-0011 Phase 4 (AISDLC-115.5): the same veto applies to
+  // `Needs Clarification` — running PPA on an unready issue burns
+  // scoring effort that gets invalidated on clarification (RFC §2.3 +
+  // §7.2). The PPA admission step short-circuits with soulAlignment=0
+  // so the composite scorer treats the issue as not-admissible without
+  // calling out to the design / autonomy / trust enrichment layers.
+  if (backlog?.status === 'Draft' || backlog?.status === 'Needs Clarification') {
     return {
       itemId: `#${input.issueNumber}`,
       title: input.title,

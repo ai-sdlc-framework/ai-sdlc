@@ -37,11 +37,39 @@ export interface DorConfigNotifications {
 
 export type DorEvaluationMode = 'warn-only' | 'enforce';
 
+/**
+ * Auto-pass rule (RFC §6.4 + Phase 4 / AISDLC-115.5).
+ *
+ * Each rule names an issue shape that doesn't need full rubric evaluation.
+ * Per Alex's Addition 1 (Product sign-off) the rule may EITHER skip every
+ * gate (legacy behaviour — empty `gatesSkipped` + empty `gatesRetained`)
+ * OR carve out a specific subset (e.g. `signal-pipeline-generated` skips
+ * gates 1/4/5/6 — surface naming, AC testability, scope, done-state — but
+ * retains 2/3/7 — markers, references, dependencies — because those still
+ * apply to auto-generated tasks).
+ */
+export interface AutoPassRule {
+  /** Stable rule identifier — `signal-pipeline-generated`, `dependency-bump`, etc. */
+  kind: string;
+  /** Author identities that trigger this rule (may match `IssueInput.authorIdentity`). */
+  sources: string[];
+  /** Optional regex (JS flavour) the issue title must match. */
+  titlePattern?: string;
+  /** Optional cap on body diff size in lines (used by doc-typo). */
+  maxBodyDiffLines?: number;
+  /** Gate IDs (1-7) the rule auto-passes (skips). Empty array = skip all gates. */
+  gatesSkipped: number[];
+  /** Gate IDs (1-7) still evaluated when the rule matches. Empty array = retain none. */
+  gatesRetained: number[];
+}
+
 export interface DorConfig {
   rubricVersion: 'v1';
   evaluationMode: DorEvaluationMode;
   notifications: DorConfigNotifications;
   staleness: DorConfigStaleness;
+  /** Auto-pass shortcuts (RFC §6.4 + Phase 4). Order matters — first match wins. */
+  autoPassRules: AutoPassRule[];
 }
 
 /**
@@ -60,6 +88,7 @@ export const DOR_CONFIG_DEFAULTS: DorConfig = {
     closeAfterDays: 28,
     closedLabel: 'closed-as-stale-dor',
   },
+  autoPassRules: [],
 };
 
 export interface LoadDorConfigOpts {
@@ -118,8 +147,35 @@ export function parseDorConfigYaml(yaml: string): DorConfig {
   // shape and rejects nothing — schema validation lives in CI.
   const lines = yaml.split('\n');
   const stack: { indent: number; key: string }[] = [];
+  // Auto-pass rules are list-of-objects — a shape the simple flat parser
+  // doesn't handle. Buffer the `autoPassRules:` section verbatim and
+  // delegate to a small dedicated reader (see `parseAutoPassRules`).
+  const autoPassBuffer: string[] = [];
+  let autoPassBaseIndent = -1;
 
-  for (const rawLine of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const rawLine = lines[i]!;
+    // Detect entry into the autoPassRules block (the key is opened with
+    // no inline value and the next non-blank lines are list items at a
+    // greater indent). Buffer until the indent drops back to the parent.
+    if (autoPassBaseIndent >= 0) {
+      const indent = rawLine.length - rawLine.trimStart().length;
+      const isBlank = !rawLine.trim();
+      if (isBlank) {
+        autoPassBuffer.push(rawLine);
+        continue;
+      }
+      if (indent > autoPassBaseIndent) {
+        autoPassBuffer.push(rawLine);
+        continue;
+      }
+      // Section ended — flush.
+      out.autoPassRules = parseAutoPassRules(autoPassBuffer);
+      autoPassBuffer.length = 0;
+      autoPassBaseIndent = -1;
+      // Fall through to process this line normally.
+    }
+
     if (!rawLine.trim() || rawLine.trim().startsWith('#')) continue;
     const indent = rawLine.length - rawLine.trimStart().length;
     while (stack.length > 0 && stack[stack.length - 1]!.indent >= indent) stack.pop();
@@ -130,6 +186,11 @@ export function parseDorConfigYaml(yaml: string): DorConfig {
     const valueRaw = line.slice(colonIdx + 1).trim();
     const path = stack.map((s) => s.key);
 
+    if (key === 'autoPassRules' && path.length === 1 && path[0] === 'spec' && !valueRaw) {
+      autoPassBaseIndent = indent;
+      continue;
+    }
+
     if (!valueRaw) {
       stack.push({ indent, key });
       continue;
@@ -137,7 +198,114 @@ export function parseDorConfigYaml(yaml: string): DorConfig {
 
     applyValue(out, [...path, key], stripQuotes(valueRaw));
   }
+
+  if (autoPassBaseIndent >= 0) {
+    out.autoPassRules = parseAutoPassRules(autoPassBuffer);
+  }
+
   return out;
+}
+
+/**
+ * Parse the `spec.autoPassRules:` list block. Accepts the documented
+ * subset:
+ *
+ *   - kind: signal-pipeline-generated
+ *     sources: ['ai-sdlc/signal-pipeline']
+ *     gatesSkipped: [1, 4, 5, 6]
+ *     gatesRetained: [2, 3, 7]
+ *
+ * (Inline-flow arrays only; nested block lists aren't worth the parser
+ * complexity for the rule shape we ship.)
+ */
+function parseAutoPassRules(lines: string[]): AutoPassRule[] {
+  const rules: AutoPassRule[] = [];
+  let current: Partial<AutoPassRule> | null = null;
+
+  const flush = (): void => {
+    if (!current) return;
+    rules.push({
+      kind: String(current.kind ?? ''),
+      sources: current.sources ?? [],
+      titlePattern: current.titlePattern,
+      maxBodyDiffLines: current.maxBodyDiffLines,
+      gatesSkipped: current.gatesSkipped ?? [],
+      gatesRetained: current.gatesRetained ?? [],
+    });
+    current = null;
+  };
+
+  for (const rawLine of lines) {
+    if (!rawLine.trim() || rawLine.trim().startsWith('#')) continue;
+    const trimmed = rawLine.trim();
+    if (trimmed.startsWith('- ')) {
+      flush();
+      current = {};
+      const after = trimmed.slice(2);
+      // Inline `- key: value` form.
+      const colonIdx = after.indexOf(':');
+      if (colonIdx > 0) {
+        const k = after.slice(0, colonIdx).trim();
+        const v = after.slice(colonIdx + 1).trim();
+        applyAutoPassField(current, k, v);
+      }
+      continue;
+    }
+    if (!current) continue;
+    const colonIdx = trimmed.indexOf(':');
+    if (colonIdx < 0) continue;
+    const k = trimmed.slice(0, colonIdx).trim();
+    const v = trimmed.slice(colonIdx + 1).trim();
+    applyAutoPassField(current, k, v);
+  }
+  flush();
+  return rules;
+}
+
+function applyAutoPassField(target: Partial<AutoPassRule>, key: string, valueRaw: string): void {
+  const value = stripQuotes(valueRaw);
+  switch (key) {
+    case 'kind':
+      target.kind = value;
+      return;
+    case 'sources':
+      target.sources = parseInlineStringArray(valueRaw);
+      return;
+    case 'titlePattern':
+      target.titlePattern = value;
+      return;
+    case 'maxBodyDiffLines':
+      target.maxBodyDiffLines = parseIntStrict(value);
+      return;
+    case 'gatesSkipped':
+      target.gatesSkipped = parseInlineIntArray(valueRaw);
+      return;
+    case 'gatesRetained':
+      target.gatesRetained = parseInlineIntArray(valueRaw);
+      return;
+    default:
+      // Silently ignore unknown keys (CI schema validator catches them).
+      return;
+  }
+}
+
+function parseInlineStringArray(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return [];
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner) return [];
+  return inner.split(',').map((s) => stripQuotes(s.trim()));
+}
+
+function parseInlineIntArray(raw: string): number[] {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith('[') || !trimmed.endsWith(']')) return [];
+  const inner = trimmed.slice(1, -1).trim();
+  if (!inner) return [];
+  return inner
+    .split(',')
+    .map((s) => parseIntStrict(s.trim()))
+    .filter((n) => Number.isFinite(n));
 }
 
 function applyValue(target: DorConfig, path: string[], raw: string): void {

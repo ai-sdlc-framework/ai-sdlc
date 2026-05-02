@@ -26,6 +26,7 @@
 
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { applyAutoPass } from './auto-pass.js';
 import { evaluateIssueE2E, type EvaluateE2EOpts } from './composite.js';
 import { appendCalibrationEntry } from './calibration-log.js';
 import {
@@ -102,8 +103,16 @@ function readdirOrEmpty(dir: string): string[] {
  * Strip Backlog.md frontmatter to get just the task body. The DoR rubric
  * scores the body, not the YAML preamble. Returns the input unchanged if
  * no frontmatter is present.
+ *
+ * Also extracts `created_by` (the Backlog.md authorship marker) so the
+ * auto-pass dispatcher can match rules whose `sources` reference the
+ * generator identity (e.g. `ai-sdlc/signal-pipeline`) — RFC §6.4 + Phase 4.
  */
-export function stripFrontmatter(raw: string): { title: string; body: string } {
+export function stripFrontmatter(raw: string): {
+  title: string;
+  body: string;
+  createdBy?: string;
+} {
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
   if (!fmMatch) return { title: '', body: raw };
   const fm = fmMatch[1] ?? '';
@@ -112,7 +121,11 @@ export function stripFrontmatter(raw: string): { title: string; body: string } {
   const titleRaw = titleMatch?.[1] ?? '';
   // Strip surrounding single/double quotes.
   const title = titleRaw.replace(/^['"]|['"]$/g, '');
-  return { title, body };
+  const createdByMatch = fm.match(/^created_by:\s*(.+?)\s*$/m);
+  const createdByRaw = createdByMatch?.[1]?.replace(/^['"]|['"]$/g, '');
+  const out: { title: string; body: string; createdBy?: string } = { title, body };
+  if (createdByRaw) out.createdBy = createdByRaw;
+  return out;
 }
 
 /**
@@ -137,7 +150,7 @@ export async function refineBacklogTask(
     );
   }
   const raw = readFileSync(taskFile, 'utf8');
-  const { title, body } = stripFrontmatter(raw);
+  const { title, body, createdBy } = stripFrontmatter(raw);
 
   const config = opts.config ?? loadDorConfig({ workDir });
 
@@ -148,8 +161,21 @@ export async function refineBacklogTask(
     body,
     workDir,
   };
+  if (createdBy) input.authorIdentity = createdBy;
 
-  const verdict = await evaluateIssueE2E(input, opts.evaluateOpts ?? {});
+  // Phase 4 (RFC-0011 §6.4 + AISDLC-115.5) — resolve the auto-pass match
+  // against the project's configured rules. When a rule matches, fold its
+  // `gatesSkipped` set into `evaluateIssueE2E()` opts so the corresponding
+  // gates short-circuit to `verdict: 'skip'` with the matched rule kind
+  // surfaced in the finding text.
+  const autoPass = applyAutoPass(input, config.autoPassRules ?? []);
+  const evaluateOpts: EvaluateE2EOpts = { ...(opts.evaluateOpts ?? {}) };
+  if (autoPass.gatesSkipped.length > 0) {
+    evaluateOpts.gatesSkipped = autoPass.gatesSkipped;
+    evaluateOpts.autoPassReason = `auto-pass: ${autoPass.matched?.kind ?? 'matched'}`;
+  }
+
+  const verdict = await evaluateIssueE2E(input, evaluateOpts);
 
   // Calibration log — always written, regardless of mode (RFC §5.5).
   const calib = appendCalibrationEntry(
@@ -185,14 +211,31 @@ export async function refineBacklogTask(
 
 /**
  * Compose the human-readable refusal message printed by `/ai-sdlc execute`
- * when the shim returns `shouldRefuseExecution: true` (per RFC §7.3).
+ * when the shim returns `shouldRefuseExecution: true` (per RFC §7.3 + Phase
+ * 4 / AISDLC-115.5). The message MUST name the offending gates AND point
+ * the operator at the DoR clarification comment so they can resolve
+ * without spelunking through the task file.
+ *
+ * `commentLink` is optional so callers without a known link (Backlog
+ * shim renders the comment inline; GitHub shim has a permalink) can omit
+ * it and surface the marker fallback.
  */
-export function refusalMessage(taskId: string, verdict: RefinementVerdict): string {
+export function refusalMessage(
+  taskId: string,
+  verdict: RefinementVerdict,
+  opts: { commentLink?: string } = {},
+): string {
   const failed = verdict.gates
     .filter((g) => g.verdict === 'fail' && g.severity === 'block')
     .map((g) => `Gate ${g.gateId}`)
     .join(', ');
-  return `Refused: ${taskId} is in Needs Clarification (blocks: ${failed || 'unknown'}).\nAddress the questions in the issue thread, then re-run.`;
+  const link =
+    opts.commentLink ??
+    `the DoR clarification comment in this issue (look for the '<!-- ai-sdlc:dor-comment -->' marker)`;
+  return [
+    `Refused: ${taskId} is in Needs Clarification (blocks: ${failed || 'unknown'}).`,
+    `Address the questions in ${link}, then re-run.`,
+  ].join('\n');
 }
 
 /** Re-export defaults so callers don't need a second import path. */
