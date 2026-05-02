@@ -40,9 +40,23 @@ Step 4 below writes the active-task sentinel at `<worktree>/.active-task` (per-w
 
 If you find yourself trying to write `.worktrees/.active-task` at the project root, stop — that's the wrong path and would race with parallel runs.
 
-## Step 0 — Sweep merged worktrees (auto-cleanup)
+## Step 0 — Self-heal orchestrator state + sweep merged worktrees
 
-Before doing anything else, scan `.worktrees/` and remove any whose branch's PR has merged into `main`. This is the eventual-cleanup mechanism — running `/ai-sdlc execute` regularly keeps the worktree directory tidy without any manual intervention.
+First, ensure the parent (orchestrator) repo is in the right state for worktree creation. The parent's working tree on `main` is **read-only** by Pattern C contract (project memory `project_orchestrator_repo_layout.md`) — all edits happen in `.worktrees/<task-id>/`. This makes it safe to auto-sync the parent to current `origin/main` at the start of every dispatch.
+
+```bash
+./scripts/check-orchestrator-state.sh
+```
+
+The script (AISDLC-137):
+- Auto-corrects `core.bare=true` → `false` (some local editor extensions flip it back periodically)
+- Fetches `origin/main`
+- If parent's working tree is clean: `git reset --hard origin/main` (untracked files like `.worktrees/` survive)
+- If parent's working tree is dirty: warns + skips (operator-protective; never destroys in-progress work)
+
+Skip with `AI_SDLC_SKIP_ORCHESTRATOR_STATE_CHECK=1` (rare — only when you intentionally want a stale parent for debugging).
+
+Then scan `.worktrees/` and remove any whose branch's PR has merged into `main`. This is the eventual-cleanup mechanism — running `/ai-sdlc execute` regularly keeps the worktree directory tidy without any manual intervention.
 
 ```bash
 if [ -d .worktrees ]; then
