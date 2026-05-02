@@ -18,7 +18,7 @@ references:
   - /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/constants/tools.ts
   - /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/loadPluginAgents.ts
   - ai-sdlc-plugin/agents/execute-orchestrator.md
-  - backlog/tasks/aisdlc-90 - *
+  - backlog/completed/aisdlc-90 - Fix-execute-orchestrator-agent-frontmatter-Task-Agent-rename-MCP-namespace.md
 priority: high
 ---
 

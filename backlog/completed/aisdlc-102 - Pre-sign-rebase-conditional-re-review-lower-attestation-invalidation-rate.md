@@ -13,8 +13,8 @@ labels:
   - pipeline
 dependencies: []
 references:
-  - backlog/completed/aisdlc-94*
-  - backlog/completed/aisdlc-93*
+  - backlog/completed/aisdlc-94 - Verifier-diffHash-should-be-rebase-tolerant-hash-post-apply-tree-state-not-literal-diff-text.md
+  - backlog/completed/aisdlc-93 - ai-sdlc-review.yml-skip-attestation-valid-path-must-re-post-bot-approval-after-force-push.md
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
   - ai-sdlc-plugin/commands/execute.md
   - ai-sdlc-plugin/scripts/sign-attestation.mjs

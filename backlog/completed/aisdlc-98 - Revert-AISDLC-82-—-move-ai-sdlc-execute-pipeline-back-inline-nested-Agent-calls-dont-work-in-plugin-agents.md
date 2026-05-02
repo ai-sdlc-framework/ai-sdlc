@@ -17,8 +17,8 @@ references:
   - ai-sdlc-plugin/commands/execute.md
   - ai-sdlc-plugin/commands/execute.test.mjs
   - ai-sdlc-plugin/agents/agents.test.mjs
-  - backlog/completed/aisdlc-82*
-  - backlog/completed/aisdlc-90*
+  - backlog/completed/aisdlc-82 - Refactor-ai-sdlc-execute-to-a-self-contained-orchestrator-subagent-so-parallel-runs-are-first-class.md
+  - backlog/completed/aisdlc-90 - Fix-execute-orchestrator-agent-frontmatter-Task-Agent-rename-MCP-namespace.md
   - CLAUDE.md
 priority: high
 ---
