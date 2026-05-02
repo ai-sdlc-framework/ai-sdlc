@@ -69,8 +69,27 @@ import {
   type RunGit,
 } from '../incremental-review/incremental.js';
 
+/**
+ * Emit a CLI result as a single line of JSON followed by `\n`.
+ *
+ * CRITICAL — DO NOT pretty-print (AISDLC-142 round 3): the `analyze` job in
+ * `.github/workflows/ai-sdlc-review.yml` consumes the `auto-approved-verdict`
+ * subcommand output via `tail -1 /tmp/review-${TYPE}.txt`. If the output is
+ * multi-line pretty-printed JSON, `tail -1` extracts only the trailing `}`
+ * and the report job's `JSON.parse('}')` throws → every reviewer is reported
+ * as FAILED → gate computes CHANGES_REQUESTED → PR is BLOCKED. That defeats
+ * the entire SKIP path the incremental-review feature exists to provide,
+ * AND because the marker step then sees `allApproved=false` the marker is
+ * never refreshed, so the next push hits the same problem (PR permanently
+ * stuck).
+ *
+ * The `decide` subcommand consumer (`printf '%s' | jq -r`) works fine with
+ * either single-line or multi-line — single-line is strictly more compatible.
+ *
+ * Workflow contract: every JSON line emitted by this CLI is exactly one line.
+ */
 function emit(result: unknown): void {
-  process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+  process.stdout.write(JSON.stringify(result) + '\n');
 }
 
 function warn(message: string): void {

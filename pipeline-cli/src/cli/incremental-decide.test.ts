@@ -9,7 +9,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildIncrementalDecideCli, decide, type DecideArgs } from './incremental-decide.js';
@@ -299,6 +299,94 @@ describe('cli-incremental-decide — yargs router', () => {
     expect(v.approved).toBe(true);
     expect(v.findings).toEqual([]);
     expect(v.summary).toContain(SHA_A);
+  });
+
+  // ── AISDLC-142 round-3 CRITICAL: SKIP-path JSON serialization ─────
+  //
+  // The `analyze` job in `.github/workflows/ai-sdlc-review.yml` consumes
+  // the auto-approved-verdict output via `tail -1 /tmp/review-${TYPE}.txt`.
+  // If the CLI emits pretty-printed multi-line JSON, `tail -1` extracts
+  // only `}` and the report job's `JSON.parse('}')` throws → all reviewers
+  // FAILED → CHANGES_REQUESTED → PR BLOCKED → marker never refreshed →
+  // PR permanently stuck.
+  //
+  // These tests assert the workflow contract: every JSON line is exactly
+  // one line, and the `tail -1 → JSON.parse` shell pipeline yields a valid
+  // verdict with `approved: true`.
+
+  it('auto-approved-verdict emits SINGLE-LINE JSON (no embedded newlines) — tail -1 must yield the full verdict', async () => {
+    const cli = buildIncrementalDecideCli({
+      argv: ['auto-approved-verdict', '--reviewed-sha', SHA_A],
+    });
+    await cli.parseAsync();
+    const printed = stdoutChunks.join('');
+    // Strict: the entire emitted payload must be exactly ONE line of JSON
+    // followed by exactly ONE trailing newline. No embedded newlines, no
+    // pretty-print whitespace.
+    expect(printed.endsWith('\n')).toBe(true);
+    const trimmed = printed.replace(/\n$/, '');
+    expect(trimmed).not.toContain('\n');
+    // Sanity: it parses, and the shape is what the report job expects.
+    const parsed = JSON.parse(trimmed);
+    expect(parsed.approved).toBe(true);
+  });
+
+  it('decide subcommand also emits SINGLE-LINE JSON (workflow contract: every JSON line is one line)', async () => {
+    const commentsFile = join(tmp, 'comments.txt');
+    writeFileSync(commentsFile, '');
+    const cli = buildIncrementalDecideCli({
+      argv: ['decide', '--comments-file', commentsFile, '--repo-root', '/tmp/repo'],
+      runGit: makeRunGit({
+        'merge-base origin/main HEAD': BASE_SHA + '\n',
+        'diff --name-only --no-renames origin/main...HEAD': '',
+      }),
+    });
+    await cli.parseAsync();
+    const printed = stdoutChunks.join('');
+    expect(printed.endsWith('\n')).toBe(true);
+    const trimmed = printed.replace(/\n$/, '');
+    expect(trimmed).not.toContain('\n');
+    const parsed = JSON.parse(trimmed);
+    expect(parsed.reason).toBe('no-marker');
+  });
+
+  // Workflow-pipeline regression: simulate the EXACT shell flow the
+  // `analyze` job runs — CLI stdout → tmpfile → `tail -1` → JSON.parse.
+  // This is the path the round 1+2 tests didn't exercise, which let the
+  // pretty-print regression slip through.
+  it('workflow-pipeline regression: CLI → tmpfile → tail -1 → JSON.parse yields valid verdict for every reviewer type', async () => {
+    for (const type of ['testing', 'critic', 'security']) {
+      // Reset stdout capture between iterations (mimicking three separate
+      // CLI invocations the workflow runs in a loop).
+      stdoutChunks = [];
+      const cli = buildIncrementalDecideCli({
+        argv: ['auto-approved-verdict', '--reviewed-sha', SHA_A],
+      });
+      await cli.parseAsync();
+
+      // Step 1: write the CLI output to a tmpfile (mirrors `> "/tmp/review-${TYPE}.txt"`).
+      const reviewFile = join(tmp, `review-${type}.txt`);
+      writeFileSync(reviewFile, stdoutChunks.join(''));
+
+      // Step 2: apply `tail -1` semantics — last non-empty line.
+      // (POSIX `tail -1` returns the final line; on a file ending with `\n`
+      // there's a trailing empty token after split, which `tail -1` skips.)
+      const lines = readFileSync(reviewFile, 'utf-8').split('\n');
+      // Drop the trailing empty token from the final newline, if present.
+      while (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+      const lastLine = lines[lines.length - 1] ?? '';
+
+      // Step 3: JSON.parse — must yield a valid verdict (the bug was that
+      // pretty-print made this `}` and threw).
+      const verdict = JSON.parse(lastLine) as {
+        approved: boolean;
+        findings: unknown[];
+        summary: string;
+      };
+      expect(verdict.approved, `reviewer=${type}`).toBe(true);
+      expect(verdict.findings, `reviewer=${type}`).toEqual([]);
+      expect(verdict.summary, `reviewer=${type}`).toContain(SHA_A);
+    }
   });
 
   it('decide defaults work even when only --comments-file is passed (no marker → no-marker)', async () => {
