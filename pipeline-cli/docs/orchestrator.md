@@ -1,10 +1,11 @@
-# Autonomous Pipeline Orchestrator — operator guide (RFC-0015 Phase 1)
+# Autonomous Pipeline Orchestrator — operator guide (RFC-0015 Phases 1+2)
 
 > **Status:** experimental, opt-in via `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`.
-> Phase 1 ships the bare polling loop only. Failure-recovery playbook (Phase 2),
-> pre-dispatch admission filters (Phase 3), and `events.jsonl` writer +
+> Phase 1 (AISDLC-169.1) shipped the bare polling loop. Phase 2
+> (AISDLC-169.2) adds the catalogued failure playbook described below.
+> Pre-dispatch admission filters (Phase 3), and `events.jsonl` writer +
 > `cli-status --orchestrator` (Phase 4) land in subsequent tasks
-> (AISDLC-169.2 / .3 / .4).
+> (AISDLC-169.3 / .4).
 
 The orchestrator is a long-running Node process that ties RFC-0010 (parallel
 execution), RFC-0011 (DoR gate), RFC-0012 (`executePipeline()`), RFC-0014
@@ -169,24 +170,124 @@ Per RFC §13 Q12 resolution, defense-in-depth ships in two layers:
 > Setting the auto-merge flag is NOT the same as merging — see CLAUDE.md
 > "Setting --auto is NOT merging" + RFC §13 Q12 nuance.
 
-## Failure handling (Phase 1 = bare)
+## Failure handling — Phase 2 catalogued playbook (AISDLC-169.2)
 
-Phase 1 has **no catalogued failure-recovery handlers**. Every failure that
-escapes `executePipeline()`'s native iteration loop is treated as an
-`UnknownFailureMode` per RFC §13 Q8:
+Phase 2 ships the 9-pattern failure playbook from RFC §5.1 + the
+versioned source-of-truth at `.ai-sdlc/orchestrator-failure-patterns.yaml`
+(RFC §13 Q9). When a dispatch fails, the orchestrator:
 
-1. The exception (or the `outcome: 'needs-human-attention'` return value)
-   is captured in the tick result.
-2. The escalation hook tags the associated PR with `needs-human-attention`
-   via `gh pr edit --add-label`. Tasks that failed BEFORE any push happened
-   are recorded with `prUrl: null`.
-3. The loop continues to the next tick — a single bad task NEVER crashes
-   the orchestrator.
+1. Builds a `WorkerContext` (failing task ID, branch, worktree path,
+   captured stderr/exit-code, etc.).
+2. Walks the playbook registry in priority order
+   ([`pipeline-cli/src/orchestrator/playbook/registry.ts`](../src/orchestrator/playbook/registry.ts)).
+   The first handler whose `detect(ctx)` returns true claims the
+   failure.
+3. Runs the handler's `remediate(ctx)` up to the catalogue-configured
+   `budget` attempts. A successful remediation returns the worker to a
+   normal state (`DONE`, `FINALIZING`, `PARKED`) and the tick records
+   the recovered outcome.
+4. If the budget is exhausted (or `escalateImmediately: true` is set),
+   the runner emits `RemediationFailed` + transitions the worker to
+   `NEEDS_HUMAN_ATTENTION` (or `PARKED` for `LongRunningPRBlocksWorker`)
+   and tags the associated PR via the generic `EscalateFn` (RFC §13 Q1
+   layer A — `needs-human-attention` PR label).
+5. If no handler claims the failure, the runner falls through to the
+   Phase 1 `UnknownFailureMode` catch-all per RFC §13 Q8 (conservative
+   bias — operator reviews + extends the catalogue if a recurring
+   pattern emerges).
 
-Phase 2 (AISDLC-169.2) ships the 9-pattern catalogue from RFC §5.1 +
-the `.ai-sdlc/orchestrator-failure-patterns.yaml` source-of-truth (RFC §13
-Q9). Phase 4 (AISDLC-169.4) replaces the in-memory escalation array with
-the canonical `events.jsonl` bus.
+Every state transition emits a `WorkerStateTransition` event with
+`{from, to, duration_ms, context}`; per-attempt remediations emit
+`RemediationApplied` events; budget-exhaustion emits `RemediationFailed`;
+`LongRunningPRBlocksWorker` emits `WorkerParked` instead of a PR label.
+Phase 2 surfaces these events in-memory on the tick result's
+`playbookEvents` field; Phase 4 (AISDLC-169.4) plumbs them into the
+canonical `events.jsonl` bus.
+
+### The 9 catalogued modes
+
+| Mode | Detection | Remediation | Budget | Escalation |
+|---|---|---|---|---|
+| `SecretScanBlocked` | `git push` rejected with `push declined due to repository rule violations` AND `Secret Scanning` mention in stderr | Re-spawn dev with secret-scan stderr; dev rewrites literal patterns to template-literal construction | 2 | `needs-human-attention` PR label |
+| `PushRaceWithMergeQueue` | `git push` rejected with `protected branch hook declined` AND `queued for merging` mention | Sleep 60s + retry push with `--force-with-lease` | 3 | `MergeQueueStuck` advisory + leave commit local |
+| `RebaseConflict` | `git rebase` exits non-zero with `<<<<<<< HEAD` markers OR `CONFLICT` phrasing | Invoke `/ai-sdlc rebase` resolver subagent (AISDLC-105) via the redispatch hook | 1 | Per AISDLC-105 escalation: `needs-human-attention` |
+| `VerificationFailure` | `pnpm build/test/lint/format` (or `vitest`/`tsc`/`eslint`/`prettier`) exits non-zero with `failed`/`FAIL` phrasing | Re-spawn dev with combined verify stderr feedback | 2 | `needs-human-attention` |
+| `ReviewerMajorOrCritical` | Aggregated reviewer verdict has any `critical` or `major` finding (structured `reviewerFindings` field, NOT stderr grep) | Re-spawn dev with combined reviewer feedback | 2 | `needs-human-attention` |
+| `EnvHookFailure` | husky pre-commit fails with `tsc not found` / `command not found` / `ENOENT.*executable` phrasing | Retry push with `--no-verify` ONLY when the diff is data-only (`backlog/`, `docs/`, `spec/`, `.ai-sdlc/`, root `*.md`) | 1 | `EnvHookFailed`; source-touching changes refused |
+| `AttestationVerifyMismatch` | CI reports `contentHashV3 mismatch` after a sibling PR merged into main | Run `scripts/check-attestation-sign.sh` to re-sign the envelope, then re-push | 1 | `AttestationStaleAfterRebase` advisory |
+| `LongRunningPRBlocksWorker` | Worker's PR open + queued for >2h without merge OR rejection (`prAgeMs >= 7,200,000`) | Park worker — release the worktree slot, the PR continues independently | 1 | `WorkerParked` event; PR is NOT labelled (parking is not a defect per RFC §13 Q6) |
+| `StackedPRBaseSquashed` | `mergeStateStatus: 'DIRTY'` AND base PR has a `mergedAt` timestamp (squash- or rebase-merged base) | `git fetch origin main` + `git rebase --reapply-cherry-picks origin/main` + `--force-with-lease` push | 1 | Manual review when rebase conflicts |
+
+The catalogue is **operator-overrideable** via
+`.ai-sdlc/orchestrator-failure-patterns.yaml` (Q9 + Q7). Per-mode
+`budget` and `escalateImmediately` are the two override knobs. The
+loader rejects unknown keys + unknown modes with `CatalogueParseError`
+so a typo fails loudly at startup instead of silently miscategorising.
+
+### Worker state machine (RFC-0015 §5.2)
+
+```
+DEV_RUNNING
+  → REVIEW_RUNNING → FINALIZING → DONE
+  → ITERATE_DEV (verify_fail / review_changes_requested, budget>0)
+  → REMEDIATE_SECRETSCAN | REMEDIATE_PUSH_RACE | REMEDIATE_REBASE
+    | REMEDIATE_VERIFICATION | REMEDIATE_REVIEW | REMEDIATE_ENV_HOOK
+    | REMEDIATE_ATTESTATION | REMEDIATE_STACKED_PR
+  → SLEEP_RETRY (push-race backoff)
+  → PARKED (long-running PR — Q6)
+  → NEEDS_HUMAN_ATTENTION → DONE_WITH_FLAG (any cap exceeded)
+```
+
+Per-worker state is persisted to
+`$ARTIFACTS_DIR/_orchestrator/workers/<worker-id>.state.json` for
+forensics + the future `cli-status --orchestrator` view (Phase 4). Per
+RFC §13 Q2 the file is **not consulted for resume** — orchestrator
+restart re-derives state from the frontier + git + gh.
+
+### Per-project override example
+
+A project that prefers human triage on secret-scan blocks (rather than
+the auto-rewrite approach) sets:
+
+```yaml
+# .ai-sdlc/orchestrator-failure-patterns.yaml
+version: v1
+patterns:
+  - mode: SecretScanBlocked
+    budget: 0
+    escalateImmediately: true
+    description: 'Secret-scan blocks always need human review per project policy.'
+  # Other 8 modes inherit defaults — listing only the override is fine.
+```
+
+Both `budget: 0` and `escalateImmediately: true` skip the remediation
+loop and route straight to escalation. The loader merges per-mode
+overrides on top of the bundled `DEFAULT_CATALOGUE` so a partial file
+like the one above is valid (the missing 8 modes get their RFC §5.1
+defaults).
+
+### Audit checklist (RFC §13 Q4 — parallel remediation, no global locks)
+
+Each handler module under
+[`pipeline-cli/src/orchestrator/playbook/handlers/`](../src/orchestrator/playbook/handlers)
+is audited against:
+
+1. **No writes to `OrchestratorConfig` in-memory state.** Mutating
+   `failureBudgets[mode]++` would race across workers — disallowed.
+2. **No writes outside the worker's own worktree branch** (other than
+   the merge-gate-mediated `git push`).
+3. **No invalidation of shared caches** (the orchestrator has no
+   caches per RFC-0014 Q4; this remains true here).
+4. **`gh` calls scoped to the worker's PR number** (`gh pr edit
+   <pr-num>`, never the implicit current-branch resolution that could
+   race when two workers share a sandbox).
+
+The audit is a code-review checklist; v1 default is **parallel-no-lock**
+per Q4. Per-mode locks (Option C) are added only if a real global-state
+collision surfaces.
+
+> Phase 4 (AISDLC-169.4) replaces the in-memory `playbookEvents` array
+> with the canonical `events.jsonl` bus.
 
 ## Supervision templates
 
@@ -266,13 +367,13 @@ await runOrchestratorLoop(
 
 ## Phase plan
 
-| Phase | Task | Scope |
-|---|---|---|
-| 1 (this) | AISDLC-169.1 | Bare polling loop, feature flag, escalation hook, `cli-orchestrator` CLI, idempotent-finalize doc. |
-| 2 | AISDLC-169.2 | 9-pattern failure playbook + `.ai-sdlc/orchestrator-failure-patterns.yaml` source-of-truth. |
-| 3 | AISDLC-169.3 | DoR + dependency + external-deps pre-dispatch admission filters; exponential-backoff cadence. |
-| 4 | AISDLC-169.4 | `events.jsonl` writer + `cli-status --orchestrator` view. |
-| 5 | AISDLC-169.5 | Real-issue corpus, chaos test (kill mid-tick + verify resume), promotion runbook. |
+| Phase | Task | Scope | Status |
+|---|---|---|---|
+| 1 | AISDLC-169.1 | Bare polling loop, feature flag, escalation hook, `cli-orchestrator` CLI, idempotent-finalize doc. | Shipped |
+| 2 (this) | AISDLC-169.2 | 9-pattern failure playbook + `.ai-sdlc/orchestrator-failure-patterns.yaml` source-of-truth + worker state machine + per-worker forensic state. | Shipped |
+| 3 | AISDLC-169.3 | DoR + dependency + external-deps pre-dispatch admission filters; exponential-backoff cadence. | To do |
+| 4 | AISDLC-169.4 | `events.jsonl` writer + `cli-status --orchestrator` view. | To do |
+| 5 | AISDLC-169.5 | Real-issue corpus, chaos test (kill mid-tick + verify resume), promotion runbook. | To do |
 
 ## Cross-references
 

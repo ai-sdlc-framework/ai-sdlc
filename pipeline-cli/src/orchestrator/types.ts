@@ -44,6 +44,14 @@ export interface OrchestratorTickResult {
   escalations: EscalationRecord[];
   /** Whether the tick saw an empty frontier. */
   empty: boolean;
+  /**
+   * RFC-0015 Phase 2 — playbook events emitted while handling failures
+   * in this tick (`WorkerStateTransition`, `RemediationApplied`,
+   * `RemediationFailed`, `WorkerParked`). Phase 4 plumbs these into the
+   * `events.jsonl` writer; Phase 2 returns them in-memory so callers can
+   * inspect/forward without coupling to the file format.
+   */
+  playbookEvents?: import('./playbook/types.js').PlaybookEvent[];
 }
 
 export interface TaskDispatchOutcome {
@@ -57,17 +65,36 @@ export interface TaskDispatchOutcome {
 }
 
 /**
- * Phase 1 escalation record (RFC §13 Q8). Phase 4 expands this into the
- * `UnknownFailureMode` event in `events.jsonl`. For Phase 1 we keep the
- * shape collocated with the orchestrator so consumers can read it without
- * waiting on the full event-schema work.
+ * Escalation record carrying either Phase 1's `UnknownFailureMode`
+ * catch-all (RFC §13 Q8) or one of the Phase 2 catalogued failure modes
+ * (RFC-0015 §5.1) when the playbook runner exhausted its budget without
+ * recovering. Phase 4 (AISDLC-169.4) expands this into the `events.jsonl`
+ * stream; Phase 2 keeps the in-memory shape stable for downstream consumers.
+ *
+ * The `event` field is widened from the Phase 1 `'UnknownFailureMode'`
+ * literal to the union of all catalogued modes so callers can reason
+ * about which mode escalated without re-parsing `reason`.
  */
 export interface EscalationRecord {
   taskId: string;
   /** ISO timestamp. */
   ts: string;
-  /** `UnknownFailureMode` for Phase 1 — Phase 2 introduces catalogued modes. */
-  event: 'UnknownFailureMode';
+  /**
+   * Failure-mode tag for the escalation. Catalogued modes ship in
+   * `playbook/types.ts#FailureMode`; the Phase 1 catch-all
+   * `'UnknownFailureMode'` is the conservative fall-through (Q8).
+   */
+  event:
+    | 'UnknownFailureMode'
+    | 'SecretScanBlocked'
+    | 'PushRaceWithMergeQueue'
+    | 'RebaseConflict'
+    | 'VerificationFailure'
+    | 'ReviewerMajorOrCritical'
+    | 'EnvHookFailure'
+    | 'AttestationVerifyMismatch'
+    | 'LongRunningPRBlocksWorker'
+    | 'StackedPRBaseSquashed';
   /** Short human-readable reason — usually the exception message. */
   reason: string;
   /** Optional PR URL when escalation tagged an existing PR. */

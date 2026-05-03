@@ -1,0 +1,57 @@
+# RFC-0015 §13 Q9 — versioned failure-pattern catalogue.
+#
+# Source-of-truth for the autonomous orchestrator's playbook (Phase 2 /
+# AISDLC-169.2). Ships with the 9 default patterns from §5.1 (8 original +
+# `StackedPRBaseSquashed` from the post-iteration addition).
+#
+# Per-project overrides extend or replace entries via the same shape;
+# see `pipeline-cli/docs/orchestrator.md` for the override walkthrough.
+#
+# Validated against `.ai-sdlc/schemas/orchestrator-failure-patterns.v1.schema.json`
+# at orchestrator startup — schema-violation = orchestrator refuses to start.
+#
+# Per-mode `budget` is the retry cap before escalation. Setting `budget: 0`
+# OR `escalateImmediately: true` skips the remediation loop and goes
+# straight to `needs-human-attention` — useful for projects that prefer
+# human triage on (e.g.) secret-scan blocks.
+#
+# IMPORTANT: keys must be exactly `mode`, `budget`, `escalateImmediately`,
+# `description`. Unknown keys are a hard validation failure (Q9 strict).
+version: v1
+patterns:
+  - mode: SecretScanBlocked
+    budget: 2
+    escalateImmediately: false
+    description: 'git push rejected with `push declined due to repository rule violations` + `Secret Scanning` mention. Reformat literal-secret patterns to template-literal construction; recommit; retry push.'
+  - mode: PushRaceWithMergeQueue
+    budget: 3
+    escalateImmediately: false
+    description: 'git push rejected with `protected branch hook declined` + `queued for merging`. Sleep 60s and retry push.'
+  - mode: RebaseConflict
+    budget: 1
+    escalateImmediately: false
+    description: 'git rebase origin/main exits non-zero with conflict markers. Invoke /ai-sdlc rebase (AISDLC-105) to attempt mechanical resolution.'
+  - mode: VerificationFailure
+    budget: 2
+    escalateImmediately: false
+    description: 'pnpm build/test/lint/format exits non-zero in dev verify stage. Re-spawn dev with combined verification stderr feedback.'
+  - mode: ReviewerMajorOrCritical
+    budget: 2
+    escalateImmediately: false
+    description: 'Aggregated reviewer verdict has any critical or major finding. Re-spawn dev with combined reviewer feedback.'
+  - mode: EnvHookFailure
+    budget: 1
+    escalateImmediately: false
+    description: 'husky pre-commit fails with tsc/command-not-found. Retry with --no-verify ONLY if change is data-only (backlog/, docs/, spec/, root *.md).'
+  - mode: AttestationVerifyMismatch
+    budget: 1
+    escalateImmediately: false
+    description: 'CI reports contentHashV3 mismatch after a sibling PR merged. Re-sign attestation per AISDLC-102; re-spawn 3 reviewers if contentHashV3 changed.'
+  - mode: LongRunningPRBlocksWorker
+    budget: 1
+    escalateImmediately: false
+    description: "Worker's PR open + queued for >2h without merge OR rejection. Park worker; release worktree; emit WorkerParked."
+  - mode: StackedPRBaseSquashed
+    budget: 1
+    escalateImmediately: false
+    description: "Previously-opened PR's mergeStateStatus flips to DIRTY AND base PR was merged via squash/rebase strategy. git fetch origin main && git rebase --reapply-cherry-picks; force-push."

@@ -142,6 +142,48 @@ The orchestrator surfaces structured events to `$ARTIFACTS_DIR/_events.jsonl` an
 | `EstimateBootstrapped` | Info | Rolling estimate replaced cold-start default | Audit. Significant divergence (>3×) may warrant declaring `estimatedTokens` in YAML |
 | `EstimateVariance` | Warning | Observed tokens deviated from estimate by >50% | Investigate. Persistent variance → stale estimate or model/prompt change |
 
+### Autonomous orchestrator playbook events (RFC-0015 Phase 2)
+
+The autonomous orchestrator (opt-in via `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`)
+ships a 9-pattern catalogued failure playbook from RFC-0015 §5.1 (AISDLC-169.2).
+Per-mode events are emitted by the playbook runner; Phase 4 (AISDLC-169.4)
+plumbs them into the canonical `events.jsonl` bus. Until Phase 4 ships
+they're returned in-memory on each tick result's `playbookEvents` field
+and persisted forensically to
+`$ARTIFACTS_DIR/_orchestrator/workers/<worker-id>.state.json`.
+
+| Event | Severity | Meaning | Response |
+|---|---|---|---|
+| `WorkerStateTransition` | Info | Worker moved between states (e.g. `DEV_RUNNING → REVIEW_RUNNING`). Carries `{from, to, duration_ms, context}` | Audit only — feeds the `cli-status --orchestrator` view (Phase 4) |
+| `RemediationApplied` | Info | A handler attempted remediation. Carries `{mode, attempt, outcome, note}` | Audit only. Frequent retries on the same mode → catalogue tuning candidate |
+| `RemediationFailed` | Warning | A handler exhausted its retry budget. Carries `{mode, attempts, reason}` | Investigate the per-mode entry below for the right operator action |
+| `WorkerParked` | Advisory | `LongRunningPRBlocksWorker` released a worker slot whose PR was open >2h. PR continues independently | No action — operator may merge the PR manually if it's been blocked on a non-CI factor |
+
+#### Per-mode escalation reference
+
+When a `RemediationFailed` event fires, the `mode` field tells you what
+to do:
+
+| Mode | What it means escalated | Operator action |
+|---|---|---|
+| `SecretScanBlocked` | Dev couldn't rewrite the literal-secret pattern in 2 attempts | Review the PR's diff. The literal value lives in source as a string — refactor to template-literal construction or move to env. PR is labelled `needs-human-attention` |
+| `PushRaceWithMergeQueue` | Push still rejected after 3 × 60s retries | Likely a merge-queue jam. Run `gh pr view <pr> --json state,mergeStateStatus`; check the queue. Push manually once the queue drains |
+| `RebaseConflict` | `/ai-sdlc rebase` resolver couldn't auto-resolve | Manual rebase per CLAUDE.md "Git Flow" section. Resolve markers, run verify, `git push --force-with-lease` |
+| `VerificationFailure` | Dev re-implementation failed verify on both attempts | Review the verify output in the PR. May indicate AC was wrong, env mismatch, or genuine code issue — engineering judgment call |
+| `ReviewerMajorOrCritical` | Reviewer flagged critical/major findings on both dev attempts | Read the reviewer feedback in the PR body. Re-spawn dev manually with sharpened guidance, or hand-fix |
+| `EnvHookFailure` | `--no-verify` retry refused (source-touching change) OR push still failed | Investigate the env (PATH, husky, tooling). Source-touching changes require a working hook environment; never bypass |
+| `AttestationVerifyMismatch` | Re-sign + re-push failed | Manually run `bash scripts/check-attestation-sign.sh` then `git push --force-with-lease`. If still mismatched, run `/ai-sdlc rebase <pr>` |
+| `LongRunningPRBlocksWorker` | (Not an escalation — this is the parked-worker terminal state) | Check why the PR is stuck (CI? branch protection? merge queue?). Merge manually if appropriate, or resolve the blocker |
+| `StackedPRBaseSquashed` | Rebase onto main produced conflicts after the base PR was squash/rebase-merged | Either resolve the rebase conflicts manually, OR open a fresh PR from the rebased branch with `--base main` (drops the implicit chain). See [`docs/operations/stacked-prs.md`](./stacked-prs.md) |
+| `UnknownFailureMode` | No catalogued handler matched (RFC §13 Q8 catch-all) | Read the captured stderr in the PR comment. If it's a recurring shape, propose a new catalogue entry via PR against `.ai-sdlc/orchestrator-failure-patterns.yaml` + a new handler under `pipeline-cli/src/orchestrator/playbook/handlers/` |
+
+The 9 catalogued modes ship with default budgets in
+`.ai-sdlc/orchestrator-failure-patterns.yaml`; per-project operators
+override per-mode `budget` and `escalateImmediately` via the same file
+(RFC §13 Q7). Schema validation is at
+`.ai-sdlc/schemas/orchestrator-failure-patterns.v1.schema.json` —
+malformed catalogues refuse the orchestrator at startup.
+
 ---
 
 ## CLI Commands
