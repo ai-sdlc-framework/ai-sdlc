@@ -11,9 +11,16 @@ labels:
   - follow-up
 dependencies: []
 references:
-  - .github/workflows/auto-rebase-open-prs.yml (new)
   - .github/workflows/auto-enable-auto-merge.yml
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/auto-rebase-open-prs.yml (new)
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

@@ -14,8 +14,13 @@ references:
   - orchestrator/src/runtime/parallelism-flag.ts
   - spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md
   - backlog/completed/aisdlc-70.8 - Phase-5-Hardening.md
-  - CHANGELOG.md
 priority: medium
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: CHANGELOG.md'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

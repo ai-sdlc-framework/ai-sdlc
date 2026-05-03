@@ -15,7 +15,6 @@ milestone: m-3
 dependencies: []
 references:
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
-  - 'https://github.com/ai-sdlc-framework/ai-sdlc/pull/157'
 priority: low
 ---
 

@@ -11,11 +11,9 @@ labels:
   - M1
 milestone: m-1
 dependencies: []
-references:
-  - spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md
-  - spec/schemas/design-system-binding.schema.json
-  - spec/schemas/common.schema.json
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

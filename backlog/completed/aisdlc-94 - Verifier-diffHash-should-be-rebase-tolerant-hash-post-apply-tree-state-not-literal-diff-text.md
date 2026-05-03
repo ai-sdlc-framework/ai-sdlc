@@ -13,14 +13,40 @@ labels:
   - attestation
   - rebase
 dependencies: []
-references:
-  - scripts/verify-attestation.mjs
-  - scripts/sign-attestation.mjs
-  - orchestrator/src/runtime/buildPredicate.ts
-  - .ai-sdlc/schemas/attestation.v1.schema.json
-  - backlog/completed/aisdlc-84 - Make-attestation-verifier-rebase-stable-—-match-by-predicate-content-not-by-commit-SHA.md
-  - backlog/completed/aisdlc-85 - Verifier-compute-diffHash-from-envelope-subject-SHA-not-PR-head-chore-commit-on-top-regression-from-AISDLC-84.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/sign-attestation.mjs'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      orchestrator/src/runtime/buildPredicate.ts
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .ai-sdlc/schemas/attestation.v1.schema.json
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-84 -
+      Make-attestation-verifier-rebase-stable-—-match-by-predicate-content-not-by-commit-SHA.md
+      was modified after task was completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-85 -
+      Verifier-compute-diffHash-from-envelope-subject-SHA-not-PR-head-chore-commit-on-top-regression-from-AISDLC-84.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

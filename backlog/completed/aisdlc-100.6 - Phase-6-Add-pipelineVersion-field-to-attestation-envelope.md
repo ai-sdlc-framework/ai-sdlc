@@ -13,11 +13,23 @@ dependencies:
 references:
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - orchestrator/src/runtime/buildPredicate.ts
   - scripts/verify-attestation.mjs
-  - .ai-sdlc/schemas/attestation.v1.schema.json
 parent_task_id: AISDLC-100
 priority: medium
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      orchestrator/src/runtime/buildPredicate.ts
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .ai-sdlc/schemas/attestation.v1.schema.json
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

@@ -12,15 +12,10 @@ labels:
   - aisdlc-69
 dependencies:
   - AISDLC-69.2
-references:
-  - scripts/check-docs-sync.mjs
-  - scripts/verify-attestation.mjs
-  - spec/rfcs/
-  - docs/
-  - .github/workflows/
-  - package.json
 parent_task_id: AISDLC-69
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

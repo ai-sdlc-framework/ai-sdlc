@@ -10,12 +10,9 @@ labels:
   - infrastructure
   - tech-debt
 dependencies: []
-references:
-  - /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/docs/
-  - /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc-io/content/
-  - >-
-    /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

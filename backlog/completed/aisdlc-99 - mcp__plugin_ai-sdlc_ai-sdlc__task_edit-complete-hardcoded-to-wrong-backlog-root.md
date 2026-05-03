@@ -13,12 +13,17 @@ labels:
   - mcp-server
   - backlog-tools
 dependencies: []
-references:
-  - ai-sdlc-plugin/mcp-server/src/
-  - ai-sdlc-plugin/.claude-plugin/plugin.json
-  - ai-sdlc-plugin/mcp-server/dist/bin.js
-  - backlog/completed/aisdlc-83 - Wire-ai-sdlc-execute-and-other-commands-to-use-mcp__ai-sdlc-plugin__task_edit-task_complete-instead-of-upstream.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-83 -
+      Wire-ai-sdlc-execute-and-other-commands-to-use-mcp__ai-sdlc-plugin__task_edit-task_complete-instead-of-upstream.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

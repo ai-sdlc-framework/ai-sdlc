@@ -13,13 +13,17 @@ labels:
 milestone: m-2
 dependencies:
   - AISDLC-70.6
-references:
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#15-database-isolation
-  - spec/examples/database-branch-pools/
-  - docs/operations/operator-runbook.md
 parent_task_id: AISDLC-70
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#15-database-isolation
+    resolution: flagged
 ---
 
 ## Description

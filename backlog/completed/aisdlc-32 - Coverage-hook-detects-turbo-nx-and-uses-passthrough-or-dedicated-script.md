@@ -11,9 +11,9 @@ labels:
   - turbo
   - dx
 dependencies: []
-references:
-  - ai-sdlc-plugin/hooks/deferred-coverage-check.js
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

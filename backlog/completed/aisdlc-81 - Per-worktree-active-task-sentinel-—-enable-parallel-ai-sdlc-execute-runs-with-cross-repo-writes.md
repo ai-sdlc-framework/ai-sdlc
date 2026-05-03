@@ -14,14 +14,17 @@ labels:
   - sentinel
   - follow-up
 dependencies: []
-references:
-  - ai-sdlc-plugin/hooks/enforce-blocked-actions.js
-  - ai-sdlc-plugin/commands/execute.md
-  - ai-sdlc-plugin/commands/cleanup.md
-  - >-
-    backlog/completed/aisdlc-71 -
-    Replace-orchestrator-driven-dogfood-pipeline-with-ai-sdlc-execute-plugin-command.md
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-71 -
+      Replace-orchestrator-driven-dogfood-pipeline-with-ai-sdlc-execute-plugin-command.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

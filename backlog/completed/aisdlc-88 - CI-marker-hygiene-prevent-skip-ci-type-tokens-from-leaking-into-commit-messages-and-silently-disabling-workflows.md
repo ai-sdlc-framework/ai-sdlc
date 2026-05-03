@@ -14,16 +14,23 @@ labels:
   - follow-up
   - footgun
 dependencies: []
-references:
-  - ai-sdlc-plugin/commands/execute.md
-  - ai-sdlc-plugin/agents/developer.md
-  - ai-sdlc-plugin/agents/execute-orchestrator.md
-  - .husky/pre-push
-  - .github/workflows/ai-sdlc-review.yml
-  - >-
-    backlog/completed/aisdlc-87 -
-    CI-side-attestor-GH-Action-signs-attestation-after-duplicate-review-approves-unblocks-remote-agents-external-contributor-PRs.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/agents/execute-orchestrator.md
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-87 -
+      CI-side-attestor-GH-Action-signs-attestation-after-duplicate-review-approves-unblocks-remote-agents-external-contributor-PRs.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

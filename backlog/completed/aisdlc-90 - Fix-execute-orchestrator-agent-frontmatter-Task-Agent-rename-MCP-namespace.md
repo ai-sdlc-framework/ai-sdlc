@@ -10,13 +10,23 @@ labels:
   - bug
   - orchestrator
 dependencies: []
-references:
-  - ai-sdlc-plugin/agents/execute-orchestrator.md
-  - ai-sdlc-plugin/.claude-plugin/plugin.json
-  - ai-sdlc-plugin/agents/developer.md
-  - ai-sdlc-plugin/agents/agents.test.mjs
-  - backlog/completed/aisdlc-82 - Refactor-ai-sdlc-execute-to-a-self-contained-orchestrator-subagent-so-parallel-runs-are-first-class.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/agents/execute-orchestrator.md
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-82 -
+      Refactor-ai-sdlc-execute-to-a-self-contained-orchestrator-subagent-so-parallel-runs-are-first-class.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

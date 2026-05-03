@@ -13,9 +13,14 @@ dependencies: []
 references:
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
   - orchestrator/src/
-  - pipeline-cli/ (new workspace)
 parent_task_id: AISDLC-100
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/ (new workspace)'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

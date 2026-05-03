@@ -14,9 +14,16 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0003-infrastructure-adapters.md
-  - spec/rfcs/RFC-0003-product-first-implementation-strategy.md
   - scripts/check-rfc-docs.mjs
 priority: low
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0003-product-first-implementation-strategy.md
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

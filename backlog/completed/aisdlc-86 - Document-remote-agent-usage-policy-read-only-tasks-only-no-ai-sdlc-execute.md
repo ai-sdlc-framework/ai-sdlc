@@ -11,13 +11,17 @@ labels:
   - policy
   - follow-up
 dependencies: []
-references:
-  - CLAUDE.md
-  - ai-sdlc-plugin/commands/execute.md
-  - >-
-    backlog/completed/aisdlc-85 -
-    Verifier-compute-diffHash-from-envelope-subject-SHA-not-PR-head-chore-commit-on-top-regression-from-AISDLC-84.md
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-85 -
+      Verifier-compute-diffHash-from-envelope-subject-SHA-not-PR-head-chore-commit-on-top-regression-from-AISDLC-84.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

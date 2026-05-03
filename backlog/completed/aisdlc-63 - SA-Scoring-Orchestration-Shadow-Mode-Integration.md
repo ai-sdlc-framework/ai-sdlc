@@ -14,10 +14,9 @@ dependencies:
   - AISDLC-60
   - AISDLC-62
   - AISDLC-48
-references:
-  - orchestrator/src/admission-score.ts
-  - orchestrator/src/sa-scoring/composite.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

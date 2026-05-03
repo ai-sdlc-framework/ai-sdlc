@@ -12,13 +12,21 @@ labels:
 milestone: m-2
 dependencies:
   - AISDLC-70.7
-references:
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#19-implementation-plan
-  - docs/operations/operator-runbook.md
-  - CHANGELOG.md
 parent_task_id: AISDLC-70
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#19-implementation-plan
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: CHANGELOG.md'
+    resolution: flagged
 ---
 
 ## Description

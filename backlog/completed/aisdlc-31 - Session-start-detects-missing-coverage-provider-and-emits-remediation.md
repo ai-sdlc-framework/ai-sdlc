@@ -11,10 +11,9 @@ labels:
   - dx
   - bug
 dependencies: []
-references:
-  - ai-sdlc-plugin/hooks/deferred-coverage-check.js
-  - ai-sdlc-plugin/hooks/session-start.sh
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

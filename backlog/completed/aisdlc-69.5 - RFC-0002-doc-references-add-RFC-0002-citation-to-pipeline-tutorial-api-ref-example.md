@@ -1,6 +1,8 @@
 ---
 id: AISDLC-69.5
-title: RFC-0002 doc references — add RFC-0002 citation to pipeline tutorial / api-ref / example
+title: >-
+  RFC-0002 doc references — add RFC-0002 citation to pipeline tutorial / api-ref
+  / example
 status: To Do
 assignee: []
 created_date: '2026-04-30 17:35'
@@ -21,6 +23,13 @@ references:
   - docs/examples/complete-pipeline.yaml
 parent_task_id: AISDLC-69
 priority: low
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: dep-resolved
+    detail: Dependency AISDLC-69.2 has been completed
+    resolution: flagged
 ---
 
 ## Description

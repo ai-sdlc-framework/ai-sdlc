@@ -14,11 +14,22 @@ labels:
   - developer-experience
   - orchestrator-mode
 dependencies: []
-references:
-  - ai-sdlc-plugin/hooks/quality-gate-stop.sh
-  - ai-sdlc-plugin/hooks/quality-gate-stop.js
-  - .claude/settings.json
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/quality-gate-stop.sh
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/hooks/quality-gate-stop.js
+    resolution: flagged
 ---
 
 ## Description

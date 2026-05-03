@@ -13,10 +13,9 @@ milestone: m-1
 dependencies:
   - AISDLC-42
   - AISDLC-40
-references:
-  - orchestrator/src/admission-enrichment.ts
-  - spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

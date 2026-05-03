@@ -12,10 +12,14 @@ labels:
 milestone: m-1
 dependencies:
   - AISDLC-38
-references:
-  - spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md
-  - backlog/completed/aisdlc-8.4
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: backlog/completed/aisdlc-8.4'
+    resolution: flagged
 ---
 
 ## Description
