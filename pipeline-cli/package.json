@@ -27,7 +27,8 @@
     "cli-classify-pr": "bin/cli-classify-pr.mjs",
     "cli-incremental-decide": "bin/cli-incremental-decide.mjs",
     "cli-classify-budget": "bin/cli-classify-budget.mjs",
-    "cli-pr-unstick": "bin/cli-pr-unstick.mjs"
+    "cli-pr-unstick": "bin/cli-pr-unstick.mjs",
+    "cli-orchestrator": "bin/cli-orchestrator.mjs"
   },
   "exports": {
     ".": {
@@ -61,6 +62,10 @@
     "./deps-corpus": {
       "types": "./dist/cli/deps-corpus.d.ts",
       "import": "./dist/cli/deps-corpus.js"
+    },
+    "./orchestrator": {
+      "types": "./dist/orchestrator/index.d.ts",
+      "import": "./dist/orchestrator/index.js"
     }
   },
   "publishConfig": {

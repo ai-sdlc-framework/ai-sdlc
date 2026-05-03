@@ -18,6 +18,29 @@ export * from './steps/index.js';
 export * from './deps/index.js';
 export { executePipeline } from './execute-pipeline.js';
 
+// RFC-0015 Phase 1 — autonomous-pipeline orchestrator (AISDLC-169.1).
+export {
+  buildOrchestratorStatus,
+  defaultOrchestratorConfig,
+  DEFAULT_MAX_CONCURRENT as ORCHESTRATOR_DEFAULT_MAX_CONCURRENT,
+  DEFAULT_TICK_INTERVAL_SEC as ORCHESTRATOR_DEFAULT_TICK_INTERVAL_SEC,
+  isOrchestratorEnabled,
+  ORCHESTRATOR_FLAG,
+  orchestratorDisabledMessage,
+  OrchestratorDisabledError,
+  runOrchestratorLoop,
+  runOrchestratorTick,
+  type DispatchFn as OrchestratorDispatchFn,
+  type EscalateFn as OrchestratorEscalateFn,
+  type EscalationRecord as OrchestratorEscalationRecord,
+  type FrontierFn as OrchestratorFrontierFn,
+  type OrchestratorAdapters,
+  type OrchestratorConfig,
+  type OrchestratorStatus,
+  type OrchestratorTickResult,
+  type TaskDispatchOutcome,
+} from './orchestrator/index.js';
+
 // AISDLC-142 — incremental review primitives (skip / delta-only / full).
 // AISDLC-146 — HMAC-signed v2 markers (Layer 2 defense-in-depth).
 export {
