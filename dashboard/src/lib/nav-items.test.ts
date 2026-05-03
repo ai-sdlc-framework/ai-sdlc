@@ -9,26 +9,32 @@ describe('nav-items', () => {
   });
 
   describe('coreNavItems', () => {
-    it('has 6 core navigation items', () => {
-      expect(coreNavItems).toHaveLength(6);
+    it('has 7 core navigation items', () => {
+      expect(coreNavItems).toHaveLength(7);
     });
 
     it('includes Overview as the first item', () => {
       expect(coreNavItems[0]).toEqual({ href: '/', label: 'Overview' });
     });
 
-    it('includes Cost, Autonomy, Codebase, Audit, and DoR Calibration', () => {
+    it('includes Cost, Autonomy, Codebase, Audit, DoR Calibration, and Dependency Graph', () => {
       const labels = coreNavItems.map((item) => item.label);
       expect(labels).toContain('Cost');
       expect(labels).toContain('Autonomy');
       expect(labels).toContain('Codebase');
       expect(labels).toContain('Audit');
       expect(labels).toContain('DoR Calibration');
+      expect(labels).toContain('Dependency Graph');
     });
 
     it('routes DoR Calibration to /dor', () => {
       const dor = coreNavItems.find((i) => i.label === 'DoR Calibration');
       expect(dor).toEqual({ href: '/dor', label: 'DoR Calibration' });
+    });
+
+    it('routes Dependency Graph to /deps (RFC-0014 Phase 4)', () => {
+      const deps = coreNavItems.find((i) => i.label === 'Dependency Graph');
+      expect(deps).toEqual({ href: '/deps', label: 'Dependency Graph' });
     });
 
     it('all items have href and label', () => {

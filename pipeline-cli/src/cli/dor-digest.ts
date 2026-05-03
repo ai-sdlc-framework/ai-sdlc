@@ -46,6 +46,13 @@ export function buildDorDigestCli(): Argv {
       default: false,
       describe: 'Emit as a markdown dashboard dump instead of Slack Block Kit JSON.',
     })
+    .option('include-critical-path', {
+      type: 'boolean',
+      describe:
+        'RFC-0014 Phase 4 — append the "🛤️ Critical Path" section (top 5 by effectivePriority). ' +
+        'Defaults to the AI_SDLC_DEPS_COMPOSITION feature flag — pass --include-critical-path / ' +
+        '--no-include-critical-path to override.',
+    })
     .command(
       '$0',
       'Emit the weekly DoR digest as Slack Block Kit JSON (or markdown).',
@@ -54,8 +61,10 @@ export function buildDorDigestCli(): Argv {
         const logPath = argv.log as string | undefined;
         const sinceDays = argv['since-days'] as number;
         const markdown = argv.markdown as boolean;
+        const includeCriticalPath = argv['include-critical-path'] as boolean | undefined;
         const opts: Parameters<typeof buildWeeklyDigest>[0] = { sinceDays };
         if (logPath !== undefined) opts.logPath = logPath;
+        if (includeCriticalPath !== undefined) opts.includeCriticalPath = includeCriticalPath;
         if (markdown) {
           emitText(renderMarkdownDigest(opts));
         } else {

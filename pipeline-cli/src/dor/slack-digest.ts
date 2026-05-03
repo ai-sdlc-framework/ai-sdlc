@@ -29,6 +29,12 @@ import {
   type StatsBucket,
 } from './stats.js';
 import type { CalibrationEntry } from './calibration-log.js';
+import {
+  buildCriticalPathSlackSection,
+  type BuildCriticalPathSlackSectionOpts,
+  type CriticalPathSlackSection,
+} from '../deps/critical-path.js';
+import { isCompositionEnabled } from '../deps/snapshot.js';
 
 export interface BuildDigestOpts {
   /** Calibration log path. Defaults to the conventional artifactsDir path. */
@@ -41,6 +47,20 @@ export interface BuildDigestOpts {
    * `new Date()`.
    */
   now?: Date;
+  /**
+   * RFC-0014 Phase 4 — when true, append the "🛤️ Critical Path" section
+   * (top 3-5 by `effectivePriority`) at the end of the digest. Defaults to
+   * the `AI_SDLC_DEPS_COMPOSITION` feature flag — ON when the composition
+   * layer is enabled, OFF otherwise. Tests pass an explicit boolean to drive
+   * both branches without env mutation.
+   */
+  includeCriticalPath?: boolean;
+  /**
+   * Critical-path section options forwarded to `buildCriticalPathSlackSection`
+   * (workDir, artifactsDir, tag, limit, openOnly, emitInsufficientDataHint).
+   * Tests use this to point the loader at a fixture artifacts dir.
+   */
+  criticalPathOpts?: BuildCriticalPathSlackSectionOpts;
 }
 
 export interface DigestAggregate {
@@ -159,11 +179,32 @@ function countOverrides(entries: CalibrationEntry[]): number {
 }
 
 /**
+ * Resolve whether to include the critical-path section.
+ *
+ * Precedence:
+ *   1. Explicit `opts.includeCriticalPath` boolean if provided.
+ *   2. `AI_SDLC_DEPS_COMPOSITION` env flag (truthy = include, else skip).
+ *
+ * Pure function — exposed for tests + the CLI's `--include-critical-path`
+ * flag handler so the precedence is documented in one place.
+ */
+export function shouldIncludeCriticalPath(opts: BuildDigestOpts = {}): boolean {
+  if (opts.includeCriticalPath !== undefined) return opts.includeCriticalPath;
+  return isCompositionEnabled();
+}
+
+/**
  * Render the digest as a Slack Block Kit payload. Three section blocks:
  *   1. Header — window dates + pass rate
  *   2. Metrics — top 3 gates as a numbered list, override count + Δ
  *   3. Divider
  * Plus a `fallbackText` for narrow clients.
+ *
+ * RFC-0014 Phase 4 — when `includeCriticalPath` resolves to true (see
+ * {@link shouldIncludeCriticalPath}), the digest appends a "🛤️ Critical Path"
+ * section after the divider. Per AC #2 the section is omitted entirely when
+ * the graph has no qualifying items (flat / all-leaves); per task spec Part
+ * A.5 the no-snapshot case shows an "insufficient data" hint instead.
  */
 export function buildWeeklyDigest(opts: BuildDigestOpts = {}): SlackDigest {
   const agg = buildDigestAggregate(opts);
@@ -195,12 +236,33 @@ export function buildWeeklyDigest(opts: BuildDigestOpts = {}): SlackDigest {
     { type: 'divider' },
   ];
 
-  const fallbackText =
+  let fallbackText =
     `DoR digest ${startLabel}→${endLabel}: ` +
     `${passPct}% pass, ${totals.override} overrides (${trend}), ` +
     `top gates: ${topGates.map((g) => g.key).join(', ') || 'none'}`;
 
+  if (shouldIncludeCriticalPath(opts)) {
+    const cp = buildCriticalPathSlackSection(opts.criticalPathOpts ?? {});
+    if (cp.blocks.length > 0) {
+      // Append the critical-path blocks AFTER the existing divider so the
+      // section reads as its own coherent block group.
+      blocks.push(...cp.blocks);
+      fallbackText += cp.fallbackSuffix;
+    }
+  }
+
   return { blocks, fallbackText };
+}
+
+/**
+ * Convenience export — same shape as `buildCriticalPathSlackSection` but
+ * lives on the digest module so callers (CLI, tests) only need one import
+ * path for "everything weekly digest".
+ */
+export function buildCriticalPathSection(
+  opts: BuildCriticalPathSlackSectionOpts = {},
+): CriticalPathSlackSection {
+  return buildCriticalPathSlackSection(opts);
 }
 
 /**
@@ -259,5 +321,13 @@ export function renderMarkdownDigest(opts: BuildDigestOpts = {}): string {
   lines.push('');
   lines.push(`Trend: ${trend}`);
   lines.push('');
+
+  if (shouldIncludeCriticalPath(opts)) {
+    const cp = buildCriticalPathSlackSection(opts.criticalPathOpts ?? {});
+    if (cp.markdown.length > 0) {
+      lines.push(cp.markdown);
+    }
+  }
+
   return lines.join('\n');
 }
