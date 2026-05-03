@@ -7,9 +7,10 @@
  * algorithm parity with the orchestrator copy.
  */
 
-import { createHash } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { createHash, createHmac } from 'node:crypto';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  _resetWarnLatchForTests,
   buildAutoApprovedVerdict,
   collectChangedFileDeltaEntries,
   computeContentHashV3,
@@ -19,7 +20,9 @@ import {
   findMarkerInComments,
   findTrustedMarkerInComments,
   formatMarker,
+  MARKER_HMAC_SECRET_ENV,
   MARKER_PREFIX,
+  MARKER_SUFFIX,
   parseMarker,
   parseNumstatForDelta,
   TRUSTED_MARKER_AUTHOR_ASSOCIATIONS,
@@ -29,6 +32,15 @@ import {
   type MarkerPayload,
   type RunGit,
 } from './incremental.js';
+
+// Reset module-level warn latch + env between tests so the v1-deprecation /
+// v2-no-secret / format-no-secret warnings fire deterministically on demand.
+// Without these resets the latch state leaks across test files in vitest's
+// shared-module mode and the "warns once" assertions become order-dependent.
+beforeEach(() => {
+  _resetWarnLatchForTests();
+  delete process.env[MARKER_HMAC_SECRET_ENV];
+});
 
 // ── Marker parse / format round-trip ────────────────────────────────
 
@@ -662,5 +674,270 @@ describe('buildAutoApprovedVerdict', () => {
     expect(v.findings).toEqual([]);
     expect(v.summary).toMatch(/Skipped by incremental review/);
     expect(v.summary).toContain('1'.repeat(40));
+  });
+});
+
+// ── HMAC-signed v2 markers (AISDLC-146 — Layer 2 defense-in-depth) ──
+//
+// Threat model: a TRUSTED COLLABORATOR (login passes the AISDLC-142
+// Layer-1 trusted-author filter) posts a forged marker comment binding
+// the publicly-computable current contentHashV3. Without HMAC, the
+// next push would honor that comment, skip review, and auto-approve.
+// With HMAC the forgery has to also produce a valid SHA-256 keyed by
+// the bot's secret — a key the attacker doesn't possess.
+//
+// Coverage matrix (AC #4):
+//   1. v2 with valid HMAC                              → parses
+//   2. v2 with tampered HMAC (single-bit flip)         → null
+//   3. v2 with payload tampered, HMAC re-signed under
+//      a DIFFERENT secret                              → null
+//   4. v1 marker                                       → parses with warn
+//   5. Missing secret env var:
+//        formatMarker → v1 + console.warn
+//        parseMarker  → rejects v2 entirely
+//   6. Operator v1 marker by trusted author + valid
+//      contentHash                                     → still respected
+
+const SECRET_A = 'a'.repeat(64); // primary secret (test fixture)
+const SECRET_B = 'b'.repeat(64); // attacker's "guess" secret
+
+const v2Payload: MarkerPayload = {
+  contentHash: 'd'.repeat(64),
+  reviewedSha: 'e'.repeat(40),
+  reviewedAt: '2026-05-01T12:00:00.000Z',
+};
+
+/** Reference HMAC computer pinned to Node's `crypto` for parity assertions. */
+function refHmac(json: string, secret: string): string {
+  return createHmac('sha256', secret).update(json, 'utf-8').digest('hex');
+}
+
+describe('formatMarker — version selection (AISDLC-146 AC #1)', () => {
+  it('emits v2 by default when MARKER_HMAC_SECRET env is set', () => {
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    const body = formatMarker(v2Payload);
+    expect(body.startsWith(`${MARKER_PREFIX}v2:`)).toBe(true);
+    expect(body.endsWith(MARKER_SUFFIX)).toBe(true);
+    // Wire shape: `<prefix>v2:<base64>:<hmac><suffix>` — verify the HMAC
+    // segment is exactly 64 hex chars (sha256 hex digest).
+    const inner = body.slice(MARKER_PREFIX.length, body.length - MARKER_SUFFIX.length);
+    const lastColon = inner.lastIndexOf(':');
+    const hmacPart = inner.slice(lastColon + 1);
+    expect(/^[0-9a-f]{64}$/.test(hmacPart)).toBe(true);
+  });
+
+  it('emits v1 with one-time console.warn when env secret is missing', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const body = formatMarker(v2Payload);
+    expect(body.startsWith(`${MARKER_PREFIX}v1:`)).toBe(true);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/MARKER_HMAC_SECRET/);
+    // Second call within the same process must NOT re-warn — the latch
+    // ensures CI logs aren't flooded on multi-step pushes.
+    formatMarker(v2Payload);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('honors explicit opts.version=1 even when secret is set (escape hatch)', () => {
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    const body = formatMarker(v2Payload, { version: 1 });
+    expect(body.startsWith(`${MARKER_PREFIX}v1:`)).toBe(true);
+    // No warn — explicit `opts.version` short-circuits the missing-secret
+    // banner branch.
+  });
+
+  it('honors explicit opts.secret override (env-independent)', () => {
+    // No env, but caller passes a secret directly → v2 still emitted.
+    const body = formatMarker(v2Payload, { secret: SECRET_A });
+    expect(body.startsWith(`${MARKER_PREFIX}v2:`)).toBe(true);
+  });
+
+  it('throws when v2 is requested but no secret is available (no silent v2-without-key)', () => {
+    expect(() => formatMarker(v2Payload, { version: 2 })).toThrow(
+      /v2 requires a non-empty MARKER_HMAC_SECRET/,
+    );
+  });
+
+  it('treats empty-string secret as missing (CI-env "" handling)', () => {
+    process.env[MARKER_HMAC_SECRET_ENV] = '';
+    const body = formatMarker(v2Payload);
+    // Empty string ≠ "secret present" — fall back to v1, not crash.
+    expect(body.startsWith(`${MARKER_PREFIX}v1:`)).toBe(true);
+  });
+});
+
+describe('parseMarker — v2 HMAC validation (AISDLC-146 AC #2)', () => {
+  it('parses a v2 marker with a valid HMAC under the same secret', () => {
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    const body = formatMarker(v2Payload);
+    const parsed = parseMarker(body);
+    expect(parsed).toEqual(v2Payload);
+  });
+
+  it('rejects a v2 marker whose HMAC has been tampered with (single-char flip)', () => {
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    const body = formatMarker(v2Payload);
+    // Flip the LAST hex char of the HMAC — minimal corruption that any
+    // honest verifier must catch. base64url + hmac segments are
+    // delimited by `:`; the suffix ` -->` is fixed.
+    const suffix = MARKER_SUFFIX;
+    const lastChar = body.charAt(body.length - suffix.length - 1);
+    const flipped = lastChar === 'f' ? '0' : 'f';
+    const tampered = body.slice(0, body.length - suffix.length - 1) + flipped + suffix;
+    expect(parseMarker(tampered)).toBeNull();
+  });
+
+  it('rejects a v2 marker whose payload was tampered + HMAC re-signed under a DIFFERENT secret', () => {
+    // Attacker controls the wire — they MUTATE the payload (flip a
+    // contentHash bit) AND recompute the HMAC under their best-guess
+    // secret. Without timing-safe HMAC verification under the bot's
+    // real secret, this would parse cleanly. We must reject.
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    const tamperedPayload: MarkerPayload = {
+      ...v2Payload,
+      contentHash: 'f'.repeat(64), // attacker's chosen hash
+    };
+    const json = JSON.stringify(tamperedPayload);
+    const b64 = Buffer.from(json, 'utf-8').toString('base64url');
+    const hmacUnderWrongSecret = refHmac(json, SECRET_B);
+    const forged = `${MARKER_PREFIX}v2:${b64}:${hmacUnderWrongSecret}${MARKER_SUFFIX}`;
+    expect(parseMarker(forged)).toBeNull();
+  });
+
+  it('rejects a v2 marker when the verifier has no secret (cannot verify)', () => {
+    // Bot signed the marker with SECRET_A, but the verifier process
+    // doesn't have MARKER_HMAC_SECRET set — must reject (do not parse
+    // an unverifiable signed payload).
+    const body = formatMarker(v2Payload, { secret: SECRET_A });
+    expect(parseMarker(body)).toBeNull(); // no env → reject
+  });
+
+  it('warns ONCE when rejecting v2 markers due to missing secret (operator visibility)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const body = formatMarker(v2Payload, { secret: SECRET_A });
+    parseMarker(body);
+    parseMarker(body);
+    parseMarker(body);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/v2 marker.*MARKER_HMAC_SECRET/);
+    warnSpy.mockRestore();
+  });
+
+  it('rejects v2 marker whose HMAC segment is the wrong length (structural guard)', () => {
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    const json = JSON.stringify(v2Payload);
+    const b64 = Buffer.from(json, 'utf-8').toString('base64url');
+    // 32-hex-char HMAC (half-length) — rejected by the regex guard
+    // before timingSafeEqual.
+    const shortHmac = '1234567890abcdef'.repeat(2);
+    const body = `${MARKER_PREFIX}v2:${b64}:${shortHmac}${MARKER_SUFFIX}`;
+    expect(parseMarker(body)).toBeNull();
+  });
+
+  it('rejects v2 marker missing the hmac segment entirely', () => {
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    const json = JSON.stringify(v2Payload);
+    const b64 = Buffer.from(json, 'utf-8').toString('base64url');
+    // No `:hmac` segment after the base64.
+    const body = `${MARKER_PREFIX}v2:${b64}${MARKER_SUFFIX}`;
+    expect(parseMarker(body)).toBeNull();
+  });
+
+  it('honors opts.secret override on parse (test ergonomics + custom-source callers)', () => {
+    // Caller threads the secret in directly (e.g. read from a vault
+    // rather than env). Symmetry with formatMarker's opts.secret.
+    const body = formatMarker(v2Payload, { secret: SECRET_A });
+    expect(parseMarker(body, { secret: SECRET_A })).toEqual(v2Payload);
+    expect(parseMarker(body, { secret: SECRET_B })).toBeNull(); // wrong secret
+  });
+});
+
+describe('parseMarker — v1 backward-compat (AISDLC-146 AC #2 + #6)', () => {
+  it('AC #4 + #6 — parses an explicit v1 marker (transition compat) with deprecation warn', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const body = formatMarker(v2Payload, { version: 1 });
+    // No env secret needed; v1 has no HMAC.
+    const parsed = parseMarker(body);
+    expect(parsed).toEqual(v2Payload);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0][0]).toMatch(/v1 .*deprecated/);
+    warnSpy.mockRestore();
+  });
+
+  it('parses pre-AISDLC-146 markers (no version prefix) as v1 for transition', () => {
+    // Wire shape PRE-AISDLC-146 was `<prefix><base64><suffix>` (no
+    // `v1:` segment). PRs that already carry such a marker must NOT
+    // strand on the next push — accept silently as v1.
+    const json = JSON.stringify(v2Payload);
+    const b64 = Buffer.from(json, 'utf-8').toString('base64url');
+    const legacyBody = `${MARKER_PREFIX}${b64}${MARKER_SUFFIX}`;
+    const parsed = parseMarker(legacyBody);
+    expect(parsed).toEqual(v2Payload);
+  });
+
+  it('warns ONCE about v1 deprecation across multiple parses (no log spam)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const body = formatMarker(v2Payload, { version: 1 });
+    parseMarker(body);
+    parseMarker(body);
+    parseMarker(body);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    warnSpy.mockRestore();
+  });
+
+  it('AC #6 — operator-posted v1 marker by trusted author + valid contentHash is still respected', () => {
+    // Threat-model adjacent assertion: a trusted-author v1 marker (e.g.
+    // an in-flight marker written by the previous workflow run before
+    // AISDLC-146 deployed) MUST still be honoured during the transition
+    // window. Otherwise every PR with a pre-existing v1 marker re-runs
+    // FULL review on the first post-deploy push (mass cost regression).
+    const v1Body = formatMarker(v2Payload, { version: 1 });
+    const comments: CommentWithAuthor[] = [
+      {
+        authorLogin: 'github-actions',
+        authorAssociation: 'CONTRIBUTOR',
+        body: v1Body,
+      },
+    ];
+    const m = findTrustedMarkerInComments(comments);
+    expect(m).not.toBeNull();
+    expect(m?.contentHash).toBe(v2Payload.contentHash);
+    expect(m?.reviewedSha).toBe(v2Payload.reviewedSha);
+  });
+});
+
+describe('findMarkerInComments — HMAC-aware filtering (AISDLC-146 AC #3)', () => {
+  it('returns null when the only candidate marker fails HMAC validation', () => {
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    // Forged marker — payload signed under SECRET_B, but verifier has SECRET_A.
+    const json = JSON.stringify(v2Payload);
+    const b64 = Buffer.from(json, 'utf-8').toString('base64url');
+    const forged = `${MARKER_PREFIX}v2:${b64}:${refHmac(json, SECRET_B)}${MARKER_SUFFIX}`;
+    expect(findMarkerInComments([forged])).toBeNull();
+  });
+
+  it('skips a forged v2 marker and returns the older valid v2 marker beneath it', () => {
+    // findMarkerInComments scans newest-first (last-occurrence-wins).
+    // If the freshest comment carries a forged marker, it must be
+    // rejected and the search must continue to the next candidate —
+    // NOT short-circuit "freshest-wins" into "freshest-attacker-wins".
+    process.env[MARKER_HMAC_SECRET_ENV] = SECRET_A;
+    const validBody = formatMarker(v2Payload); // valid v2
+    const forgedJson = JSON.stringify({
+      ...v2Payload,
+      contentHash: '9'.repeat(64),
+    });
+    const forgedB64 = Buffer.from(forgedJson, 'utf-8').toString('base64url');
+    const forgedBody = `${MARKER_PREFIX}v2:${forgedB64}:${refHmac(forgedJson, SECRET_B)}${MARKER_SUFFIX}`;
+    const out = findMarkerInComments([validBody, forgedBody]);
+    // Forged marker rejected; older valid marker survives.
+    expect(out?.contentHash).toBe(v2Payload.contentHash);
+  });
+
+  it('threads opts.secret through to parseMarker (no env reliance)', () => {
+    const body = formatMarker(v2Payload, { secret: SECRET_A });
+    expect(findMarkerInComments([body], { secret: SECRET_A })).toEqual(v2Payload);
+    expect(findMarkerInComments([body], { secret: SECRET_B })).toBeNull();
   });
 });

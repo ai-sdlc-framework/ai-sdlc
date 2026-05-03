@@ -19,6 +19,7 @@ export * from './deps/index.js';
 export { executePipeline } from './execute-pipeline.js';
 
 // AISDLC-142 — incremental review primitives (skip / delta-only / full).
+// AISDLC-146 — HMAC-signed v2 markers (Layer 2 defense-in-depth).
 export {
   buildAutoApprovedVerdict,
   collectChangedFileDeltaEntries,
@@ -27,6 +28,7 @@ export {
   DEFAULT_MAX_DELTA_LINES,
   findMarkerInComments,
   formatMarker,
+  MARKER_HMAC_SECRET_ENV,
   MARKER_PREFIX,
   MARKER_SUFFIX,
   parseMarker,
@@ -37,6 +39,7 @@ export {
   type IncrementalDecision,
   type IncrementalReason,
   type MarkerPayload,
+  type MarkerVersion,
   type RunGit,
 } from './incremental-review/incremental.js';
 
