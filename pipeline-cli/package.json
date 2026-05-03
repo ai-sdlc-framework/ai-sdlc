@@ -23,7 +23,8 @@
     "cli-dor-stats": "bin/cli-dor-stats.mjs",
     "cli-dor-digest": "bin/cli-dor-digest.mjs",
     "cli-classify-pr": "bin/cli-classify-pr.mjs",
-    "cli-incremental-decide": "bin/cli-incremental-decide.mjs"
+    "cli-incremental-decide": "bin/cli-incremental-decide.mjs",
+    "cli-classify-budget": "bin/cli-classify-budget.mjs"
   },
   "exports": {
     ".": {
