@@ -115,6 +115,97 @@ export interface AggregateReport {
 export interface CorpusReport {
   perGate: PerGateStats[];
   aggregate: AggregateReport;
+  /**
+   * RFC-0014 §6.3 Phase 3 — optional blast-radius distribution per gate.
+   * Populated only when `--blast-radius` is set on the CLI (or
+   * `aggregateCorpus` is called with `opts.blastRadius: true`). Absent
+   * by default to keep the JSON envelope tight for callers that don't
+   * need the distribution.
+   */
+  blastRadius?: BlastRadiusReport;
+}
+
+export interface BlastRadiusBucket {
+  /**
+   * Inclusive lower bound of the bucket. Buckets are documented in
+   * `BLAST_RADIUS_BUCKETS` — leaf (0), shallow (1-2), medium (3-5),
+   * deep (6-10), critical-path (11+).
+   */
+  min: number;
+  /**
+   * Inclusive upper bound of the bucket. `Infinity` for the open-ended
+   * top bucket so JSON consumers serialise as `null`.
+   */
+  max: number;
+  /** Human-friendly label for table rendering. */
+  label: string;
+  /** Total entries in this bucket across the corpus (any outcome). */
+  n: number;
+  /** Override-outcome entries in this bucket. */
+  overrides: number;
+  /** needs-clarification verdicts in this bucket. */
+  needsClarification: number;
+}
+
+export interface BlastRadiusGateStats {
+  gate: number;
+  /** Histogram across the bucket set. Always 5 entries (one per bucket). */
+  buckets: BlastRadiusBucket[];
+  /** Mean blast radius across all entries that failed this gate. 0 when n=0. */
+  meanRadius: number;
+  /** Maximum blast radius observed against this gate. 0 when n=0. */
+  maxRadius: number;
+}
+
+export interface BlastRadiusReport {
+  /** Per-gate distribution. Empty array when no gates have data. */
+  perGate: BlastRadiusGateStats[];
+  /** Histogram across all entries (regardless of gate). */
+  overall: BlastRadiusBucket[];
+  /** Total entries that carry blastRadius data. */
+  withRadius: number;
+  /** Total entries that lack blastRadius data (older entries pre-Phase 3). */
+  withoutRadius: number;
+}
+
+/**
+ * Bucket layout for blast-radius distributions. The bands are chosen to
+ * surface the operationally-meaningful clusters:
+ *  - 0     — graph leaves (no callout fires)
+ *  - 1-2   — shallow chains (below the default Q5 bypass threshold)
+ *  - 3-5   — medium chains (default threshold tier)
+ *  - 6-10  — deep chains
+ *  - 11+   — critical-path roots
+ */
+const BLAST_RADIUS_BUCKETS: ReadonlyArray<{
+  min: number;
+  max: number;
+  label: string;
+}> = [
+  { min: 0, max: 0, label: 'leaf (0)' },
+  { min: 1, max: 2, label: 'shallow (1-2)' },
+  { min: 3, max: 5, label: 'medium (3-5)' },
+  { min: 6, max: 10, label: 'deep (6-10)' },
+  { min: 11, max: Number.POSITIVE_INFINITY, label: 'critical (11+)' },
+];
+
+function emptyBucketSet(): BlastRadiusBucket[] {
+  return BLAST_RADIUS_BUCKETS.map((b) => ({
+    min: b.min,
+    max: b.max,
+    label: b.label,
+    n: 0,
+    overrides: 0,
+    needsClarification: 0,
+  }));
+}
+
+function bucketIndexFor(count: number): number {
+  for (let i = 0; i < BLAST_RADIUS_BUCKETS.length; i++) {
+    const b = BLAST_RADIUS_BUCKETS[i]!;
+    if (count >= b.min && count <= b.max) return i;
+  }
+  return BLAST_RADIUS_BUCKETS.length - 1; // fallback to the open-ended top bucket
 }
 
 export interface AggregateOpts {
@@ -124,6 +215,12 @@ export interface AggregateOpts {
   fpThreshold?: number;
   /** Aggregate override rate ceiling for `safe-to-enforce`. */
   overrideThreshold?: number;
+  /**
+   * RFC-0014 §6.3 Phase 3 — when true, attach the
+   * {@link BlastRadiusReport} to the aggregate output. Pure addition;
+   * the per-gate FP-rate math is unchanged.
+   */
+  blastRadius?: boolean;
 }
 
 /**
@@ -328,7 +425,7 @@ export function aggregateCorpus(
     reason = `n=${entries.length} ≥ ${minSamples}, all gates fpRate < ${(fpThreshold * 100).toFixed(1)}%, aggregate override rate=${(overrideRate * 100).toFixed(1)}% < ${(overrideThreshold * 100).toFixed(1)}% — dispatch AISDLC-115.9`;
   }
 
-  return {
+  const report: CorpusReport = {
     perGate,
     aggregate: {
       n: entries.length,
@@ -341,6 +438,72 @@ export function aggregateCorpus(
       filesRead: meta.filesRead ?? 0,
     },
   };
+  if (opts.blastRadius) {
+    report.blastRadius = computeBlastRadiusReport(entries);
+  }
+  return report;
+}
+
+/**
+ * RFC-0014 §6.3 Phase 3 — compute the blast-radius distribution per
+ * gate + overall. Pure function over the calibration entries; entries
+ * without a `blastRadius` field count toward `withoutRadius` and are
+ * skipped from the histograms.
+ *
+ * Bucket boundaries are documented in `BLAST_RADIUS_BUCKETS` above.
+ * Per-gate stats only fire for entries that BOTH carry blastRadius AND
+ * fail at least one gate; an admit-with-radius entry contributes to
+ * the `overall` histogram only.
+ */
+export function computeBlastRadiusReport(entries: CalibrationEntry[]): BlastRadiusReport {
+  const overall = emptyBucketSet();
+  const perGateBuckets = new Map<number, BlastRadiusBucket[]>();
+  const perGateRadii = new Map<number, number[]>();
+  let withRadius = 0;
+  let withoutRadius = 0;
+
+  for (const e of entries) {
+    if (!e.blastRadius) {
+      withoutRadius += 1;
+      continue;
+    }
+    withRadius += 1;
+    const idx = bucketIndexFor(e.blastRadius.count);
+    const bucket = overall[idx]!;
+    bucket.n += 1;
+    if (e.outcome === 'override') bucket.overrides += 1;
+    if (e.overallVerdict === 'needs-clarification') bucket.needsClarification += 1;
+
+    for (const g of e.failedGates) {
+      let buckets = perGateBuckets.get(g);
+      if (!buckets) {
+        buckets = emptyBucketSet();
+        perGateBuckets.set(g, buckets);
+      }
+      const gb = buckets[idx]!;
+      gb.n += 1;
+      if (e.outcome === 'override') gb.overrides += 1;
+      if (e.overallVerdict === 'needs-clarification') gb.needsClarification += 1;
+
+      let radii = perGateRadii.get(g);
+      if (!radii) {
+        radii = [];
+        perGateRadii.set(g, radii);
+      }
+      radii.push(e.blastRadius.count);
+    }
+  }
+
+  const perGate: BlastRadiusGateStats[] = Array.from(perGateBuckets.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([gate, buckets]) => {
+      const radii = perGateRadii.get(gate) ?? [];
+      const meanRadius = radii.length === 0 ? 0 : radii.reduce((s, r) => s + r, 0) / radii.length;
+      const maxRadius = radii.length === 0 ? 0 : radii.reduce((m, r) => (r > m ? r : m), 0);
+      return { gate, buckets, meanRadius, maxRadius };
+    });
+
+  return { perGate, overall, withRadius, withoutRadius };
 }
 
 function emit(result: unknown): void {
@@ -384,7 +547,58 @@ function renderTable(report: CorpusReport): string {
       : '\nWorst gate: (none — no gates fired)') +
     `\nRecommendation: ${a.recommendation}` +
     `\nReason: ${a.reason}\n`;
-  return tbl + '\n' + summary;
+  const radiusSection = report.blastRadius ? renderBlastRadiusTable(report.blastRadius) : '';
+  return tbl + '\n' + summary + radiusSection;
+}
+
+/**
+ * RFC-0014 §6.3 Phase 3 — render the blast-radius distribution as a
+ * compact ASCII section appended to the per-gate FP-rate table. Same
+ * layout conventions as the FP-rate table so the operator's eye can
+ * scan both with one mental model.
+ */
+function renderBlastRadiusTable(report: BlastRadiusReport): string {
+  const headers = ['bucket', 'n', 'overrides', 'needs-clarif'];
+  const widths = headers.map((h) => h.length);
+  const overallRows = report.overall.map((b) => [
+    b.label,
+    String(b.n),
+    String(b.overrides),
+    String(b.needsClarification),
+  ]);
+  for (const r of overallRows)
+    for (let i = 0; i < r.length; i++) widths[i] = Math.max(widths[i]!, r[i]!.length);
+  const fmt = (cells: string[]): string =>
+    cells
+      .map((c, i) => (c ?? '').padEnd(widths[i]!))
+      .join('  ')
+      .trimEnd();
+  const sep = widths.map((w) => '-'.repeat(w)).join('  ');
+  const overallTbl = [fmt(headers), sep, ...overallRows.map(fmt)].join('\n');
+
+  let perGateSection = '';
+  if (report.perGate.length > 0) {
+    const lines: string[] = [];
+    for (const g of report.perGate) {
+      lines.push(
+        `\n  gate-${g.gate}: meanRadius=${g.meanRadius.toFixed(1)} maxRadius=${g.maxRadius}`,
+      );
+      for (const b of g.buckets) {
+        if (b.n === 0) continue;
+        lines.push(
+          `    ${b.label.padEnd(16)} n=${b.n}  overrides=${b.overrides}  needs-clarif=${b.needsClarification}`,
+        );
+      }
+    }
+    perGateSection = '\n\nPer-gate distribution:' + lines.join('');
+  }
+
+  return (
+    `\nBlast-radius distribution (RFC-0014 Phase 3) — withRadius=${report.withRadius}, withoutRadius=${report.withoutRadius}\n` +
+    overallTbl +
+    perGateSection +
+    '\n'
+  );
 }
 
 export function buildDorCorpusCli(): Argv {
@@ -420,6 +634,12 @@ export function buildDorCorpusCli(): Argv {
             describe:
               'Aggregate override-rate ceiling. Above this, recommendation becomes `continue-soak` (maintainers are punching past the rubric routinely).',
           })
+          .option('blast-radius', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Attach the RFC-0014 §6.3 blast-radius distribution per gate (histogram + mean + max). Adds a `blastRadius` field to the JSON envelope and a separate section in `--format table`.',
+          })
           .option('format', {
             type: 'string',
             choices: ['json', 'table'] as const,
@@ -435,6 +655,7 @@ export function buildDorCorpusCli(): Argv {
             minSamples: argv['min-samples'] as number,
             fpThreshold: argv['fp-threshold'] as number,
             overrideThreshold: argv['override-threshold'] as number,
+            blastRadius: Boolean(argv['blast-radius']),
           },
           { skipped, filesRead: files.length },
         );

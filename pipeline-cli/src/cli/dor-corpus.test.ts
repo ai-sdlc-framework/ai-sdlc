@@ -23,6 +23,7 @@ import { join } from 'node:path';
 import {
   aggregateCorpus,
   buildDorCorpusCli,
+  computeBlastRadiusReport,
   findCalibrationFiles,
   isValidEntry,
   loadCorpus,
@@ -100,6 +101,7 @@ function entry(opts: {
   outcome?: 'admit' | 'needs-clarification' | 'override' | '';
   overallVerdict?: 'admit' | 'needs-clarification';
   ts?: string;
+  blastRadius?: { count: number; downstreamSampleIds: string[] };
 }): CalibrationEntry {
   return {
     ts: opts.ts ?? '2026-05-01T00:00:00.000Z',
@@ -119,6 +121,7 @@ function entry(opts: {
       summary: '',
       questions: [],
     },
+    ...(opts.blastRadius ? { blastRadius: opts.blastRadius } : {}),
   };
 }
 
@@ -463,4 +466,185 @@ describe('cli-dor-corpus router', () => {
   // out-of-process by the `bin-invocation.test.ts` cohort if/when this
   // CLI is wired into a workflow; for now the production guarantee is
   // the `.demandCommand(1, ...)` line in `dor-corpus.ts` itself.
+});
+
+// ── RFC-0014 Phase 3 — blast-radius distribution ──────────────────────
+
+describe('computeBlastRadiusReport (pure)', () => {
+  it('returns empty buckets for an empty corpus', () => {
+    const r = computeBlastRadiusReport([]);
+    expect(r.withRadius).toBe(0);
+    expect(r.withoutRadius).toBe(0);
+    expect(r.perGate).toEqual([]);
+    expect(r.overall.every((b) => b.n === 0)).toBe(true);
+  });
+
+  it('counts entries lacking blastRadius separately as withoutRadius', () => {
+    const entries: CalibrationEntry[] = [
+      entry({ issueId: '1', outcome: 'admit' }), // no blastRadius
+      entry({
+        issueId: '2',
+        outcome: 'admit',
+        blastRadius: { count: 3, downstreamSampleIds: ['A', 'B', 'C'] },
+      }),
+    ];
+    const r = computeBlastRadiusReport(entries);
+    expect(r.withRadius).toBe(1);
+    expect(r.withoutRadius).toBe(1);
+  });
+
+  it('buckets entries by blast-radius count (leaf, shallow, medium, deep, critical)', () => {
+    const entries: CalibrationEntry[] = [
+      entry({ issueId: 'l', outcome: 'admit', blastRadius: { count: 0, downstreamSampleIds: [] } }),
+      entry({
+        issueId: 's',
+        outcome: 'admit',
+        blastRadius: { count: 2, downstreamSampleIds: ['A', 'B'] },
+      }),
+      entry({
+        issueId: 'm',
+        outcome: 'admit',
+        blastRadius: { count: 4, downstreamSampleIds: ['A', 'B', 'C', 'D'] },
+      }),
+      entry({
+        issueId: 'd',
+        outcome: 'admit',
+        blastRadius: { count: 8, downstreamSampleIds: ['A'] },
+      }),
+      entry({
+        issueId: 'c',
+        outcome: 'admit',
+        blastRadius: { count: 25, downstreamSampleIds: ['A'] },
+      }),
+    ];
+    const r = computeBlastRadiusReport(entries);
+    // Each bucket should have exactly 1 entry.
+    const bucketCounts = r.overall.map((b) => b.n);
+    expect(bucketCounts).toEqual([1, 1, 1, 1, 1]);
+  });
+
+  it('counts overrides + needs-clarification per bucket', () => {
+    const entries: CalibrationEntry[] = [
+      entry({
+        issueId: 'ovr',
+        outcome: 'override',
+        overallVerdict: 'needs-clarification',
+        failedGates: [1],
+        blastRadius: { count: 7, downstreamSampleIds: ['A'] },
+      }),
+      entry({
+        issueId: 'nc',
+        outcome: 'needs-clarification',
+        overallVerdict: 'needs-clarification',
+        failedGates: [1],
+        blastRadius: { count: 8, downstreamSampleIds: ['B'] },
+      }),
+    ];
+    const r = computeBlastRadiusReport(entries);
+    // Both fall into the deep (6-10) bucket.
+    const deep = r.overall.find((b) => b.label.startsWith('deep'))!;
+    expect(deep.n).toBe(2);
+    expect(deep.overrides).toBe(1);
+    expect(deep.needsClarification).toBe(2);
+  });
+
+  it('computes per-gate mean + max blast radius', () => {
+    const entries: CalibrationEntry[] = [
+      entry({
+        issueId: 'a',
+        outcome: 'needs-clarification',
+        overallVerdict: 'needs-clarification',
+        failedGates: [3],
+        blastRadius: { count: 4, downstreamSampleIds: ['A'] },
+      }),
+      entry({
+        issueId: 'b',
+        outcome: 'needs-clarification',
+        overallVerdict: 'needs-clarification',
+        failedGates: [3],
+        blastRadius: { count: 12, downstreamSampleIds: ['B'] },
+      }),
+    ];
+    const r = computeBlastRadiusReport(entries);
+    const g3 = r.perGate.find((g) => g.gate === 3)!;
+    expect(g3.meanRadius).toBe(8);
+    expect(g3.maxRadius).toBe(12);
+  });
+});
+
+describe('aggregateCorpus with --blast-radius', () => {
+  it('omits the blastRadius field when opts.blastRadius is false (default)', () => {
+    const r = aggregateCorpus([
+      entry({
+        issueId: '1',
+        outcome: 'admit',
+        blastRadius: { count: 3, downstreamSampleIds: ['A'] },
+      }),
+    ]);
+    expect(r.blastRadius).toBeUndefined();
+  });
+
+  it('attaches the blastRadius field when opts.blastRadius is true', () => {
+    const r = aggregateCorpus(
+      [
+        entry({
+          issueId: '1',
+          outcome: 'admit',
+          blastRadius: { count: 3, downstreamSampleIds: ['A'] },
+        }),
+      ],
+      { blastRadius: true },
+    );
+    expect(r.blastRadius).toBeDefined();
+    expect(r.blastRadius?.withRadius).toBe(1);
+  });
+});
+
+describe('cli-dor-corpus router — --blast-radius flag', () => {
+  it('JSON output gains the blastRadius field when --blast-radius is set', async () => {
+    writeJsonl('a.jsonl', [
+      entry({
+        issueId: '1',
+        outcome: 'admit',
+        blastRadius: { count: 3, downstreamSampleIds: ['A', 'B', 'C'] },
+      }),
+    ]);
+    setArgv('aggregate', tmp, '--blast-radius');
+    await buildDorCorpusCli().parseAsync();
+    const r = stdoutJson() as CorpusReport;
+    expect(r.blastRadius).toBeDefined();
+    expect(r.blastRadius?.withRadius).toBe(1);
+  });
+
+  it('JSON output omits the blastRadius field by default', async () => {
+    writeJsonl('a.jsonl', [
+      entry({
+        issueId: '1',
+        outcome: 'admit',
+        blastRadius: { count: 3, downstreamSampleIds: ['A'] },
+      }),
+    ]);
+    setArgv('aggregate', tmp);
+    await buildDorCorpusCli().parseAsync();
+    const r = stdoutJson() as CorpusReport;
+    expect(r.blastRadius).toBeUndefined();
+  });
+
+  it('table output renders the blast-radius section when --blast-radius is set', async () => {
+    writeJsonl('a.jsonl', [
+      entry({
+        issueId: '1',
+        outcome: 'needs-clarification',
+        overallVerdict: 'needs-clarification',
+        failedGates: [3],
+        blastRadius: { count: 7, downstreamSampleIds: ['A'] },
+      }),
+    ]);
+    setArgv('aggregate', tmp, '--blast-radius', '--format', 'table');
+    await buildDorCorpusCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toContain('Blast-radius distribution (RFC-0014 Phase 3)');
+    expect(out).toContain('Per-gate distribution:');
+    expect(out).toContain('gate-3');
+  });
 });
