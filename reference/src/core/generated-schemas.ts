@@ -992,6 +992,103 @@ export const databaseBranchPoolSchema = {
   additionalProperties: false,
 } as const;
 
+export const depsSnapshotV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/deps-snapshot.v1.schema.json',
+  title: 'AI-SDLC DependencyGraphSnapshotRecord',
+  description:
+    "One JSONL line written by `cli-deps snapshot` (RFC-0014 Phase 1) — a per-task projection of the in-memory dependency graph computed by AISDLC-117. The artifact lives at $ARTIFACTS_DIR/_deps/snapshot.<isoTimestamp>.<tag>.jsonl. Per RFC-0014 §4.1 the record set is the bridge from the graph computer to the composition layers (PPA priority, DoR blast-radius, Slack/dashboard digests). Per RFC-0014 §12 Q6 the writer follows a 'best-effort consistency, validated by consumer' contract — dangling edges in `dependencies` / `dependents` are possible if a task file moved mid-walk, and consumers (`cli-deps validate`) catch them rather than the writer locking the on-disk graph.",
+  type: 'object',
+  required: [
+    'id',
+    'dependencies',
+    'dependents',
+    'depth',
+    'criticalPathLength',
+    'externalDependencies',
+    'lastModified',
+  ],
+  properties: {
+    id: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Canonical task ID (case preserved from the on-disk frontmatter), e.g. 'AISDLC-117' or 'AISDLC-100.1'.",
+    },
+    dependencies: {
+      type: 'array',
+      description:
+        'IDs this task lists in its `dependencies:` frontmatter (forward edges). Order preserved from the file. May contain dangling entries if a referenced task vanished between graph builds — `cli-deps validate` reports those.',
+      items: {
+        type: 'string',
+        minLength: 1,
+      },
+    },
+    dependents: {
+      type: 'array',
+      description:
+        'IDs whose `dependencies:` list points back at this task (reverse edges). Computed at snapshot time from the full graph, sorted natural-numeric.',
+      items: {
+        type: 'string',
+        minLength: 1,
+      },
+    },
+    depth: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Longest dependency chain length BACK from this task — number of hops along the deepest `dependencies` path. Tasks with no dependencies have depth 0. RFC-0014 §4.1.',
+    },
+    criticalPathLength: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Longest chain length FORWARD from this task via the reverse edge set (impact closure). Leaf tasks (nothing depends on them) have CPL 0. Per RFC-0014 §12 Q1 this is the secondary dispatcher tiebreak after `effectivePriority` and before recency.',
+    },
+    externalDependencies: {
+      type: 'array',
+      description:
+        "Out-of-graph blockers declared by the task's `externalDependencies:` frontmatter (RFC-0014 §8 + Q3). Pure signal in v1 — surfaced in this snapshot, in `cli-deps blockers`, and (Phase 3) in the DoR comment, but the dispatcher does NOT block on them.",
+      items: {
+        type: 'object',
+        required: ['id', 'description', 'kind'],
+        properties: {
+          id: {
+            type: 'string',
+            minLength: 1,
+            description:
+              "Stable identifier for the external dep, e.g. 'npm-foo-2.0' or 'pr-bar-123'. Caller-chosen; no enforcement on shape.",
+          },
+          description: {
+            type: 'string',
+            minLength: 1,
+            description: "Human-readable description ('wait for foo v2 to publish').",
+          },
+          kind: {
+            type: 'string',
+            enum: ['npm-version', 'github-pr', 'url-head', 'manual', 'other'],
+            description:
+              'Pre-staged enum so a future v2 can dispatch to a per-kind resolver. Unknown kinds are normalised to `other` by the parser.',
+          },
+          resolverHint: {
+            type: 'string',
+            minLength: 1,
+            description:
+              'Optional resolver-specific argument — registry URL for `npm-version`, PR number for `github-pr`, etc. Free-form in v1.',
+          },
+        },
+        additionalProperties: false,
+      },
+    },
+    lastModified: {
+      type: 'string',
+      description:
+        'ISO-8601 mtime of the on-disk task file at snapshot time. Best-effort — empty string when the stat failed (file was moved mid-walk per the Q6 consistency contract).',
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const designIntentDocumentSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/design-intent-document.schema.json',
@@ -4199,6 +4296,7 @@ export const SCHEMAS: Record<string, object> = {
   'autonomy-policy.schema.json': autonomyPolicySchema,
   'common.schema.json': commonSchema,
   'database-branch-pool.schema.json': databaseBranchPoolSchema,
+  'deps-snapshot.v1.schema.json': depsSnapshotV1Schema,
   'design-intent-document.schema.json': designIntentDocumentSchema,
   'design-system-binding.schema.json': designSystemBindingSchema,
   'dor-config.v1.schema.json': dorConfigV1Schema,

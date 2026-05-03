@@ -240,4 +240,112 @@ describe('cli-deps router', () => {
     expect(stderr).toMatch(/warning: stale task: AISDLC-1/);
     expect(stderr).toMatch(/git mv/);
   });
+
+  // RFC-0014 Phase 1 — snapshot / gc / inspect smoke tests through the router.
+  // The deeper functional tests live in `src/deps/snapshot.test.ts`; here we
+  // only assert the wiring (subcommand parses, flag is respected, JSON shape).
+  describe('RFC-0014 Phase 1 subcommands', () => {
+    let priorFlag: string | undefined;
+
+    beforeEach(() => {
+      priorFlag = process.env.AI_SDLC_DEPS_COMPOSITION;
+    });
+
+    afterEach(() => {
+      if (priorFlag === undefined) delete process.env.AI_SDLC_DEPS_COMPOSITION;
+      else process.env.AI_SDLC_DEPS_COMPOSITION = priorFlag;
+    });
+
+    it('snapshot is a no-op when AI_SDLC_DEPS_COMPOSITION is unset', async () => {
+      delete process.env.AI_SDLC_DEPS_COMPOSITION;
+      writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
+      setArgv('snapshot', '--tag', 'rolling', '--work-dir', tmp);
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as { ok: boolean; written: boolean; reason: string };
+      expect(r.ok).toBe(true);
+      expect(r.written).toBe(false);
+      expect(r.reason).toMatch(/AI_SDLC_DEPS_COMPOSITION/);
+    });
+
+    it('snapshot writes a file when the flag is ON', async () => {
+      process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+      writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
+      setArgv(
+        'snapshot',
+        '--tag',
+        'dispatch',
+        '--work-dir',
+        tmp,
+        '--artifacts-dir',
+        `${tmp}/artifacts`,
+      );
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        ok: boolean;
+        written: boolean;
+        recordCount: number;
+        path: string;
+      };
+      expect(r.ok).toBe(true);
+      expect(r.written).toBe(true);
+      expect(r.recordCount).toBe(1);
+      expect(r.path).toMatch(/\.dispatch\.jsonl$/);
+    });
+
+    it('gc reports counts even when the dir is empty', async () => {
+      setArgv('gc', '--work-dir', tmp, '--artifacts-dir', `${tmp}/artifacts`);
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        ok: boolean;
+        trimmedCount: number;
+        keptCount: number;
+        bytesFreed: number;
+      };
+      expect(r.ok).toBe(true);
+      expect(r.trimmedCount).toBe(0);
+      expect(r.keptCount).toBe(0);
+      expect(r.bytesFreed).toBe(0);
+    });
+
+    it('inspect returns an empty list when the dir is empty', async () => {
+      setArgv('inspect', '--work-dir', tmp, '--artifacts-dir', `${tmp}/artifacts`);
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as { ok: boolean; snapshots: unknown[] };
+      expect(r.ok).toBe(true);
+      expect(r.snapshots).toEqual([]);
+    });
+
+    it('inspect --format table renders headers', async () => {
+      setArgv(
+        'inspect',
+        '--format',
+        'table',
+        '--work-dir',
+        tmp,
+        '--artifacts-dir',
+        `${tmp}/artifacts`,
+      );
+      await buildDepsCli().parseAsync();
+      const text = stdoutText();
+      expect(text).toContain('Timestamp');
+      expect(text).toContain('Tag');
+      expect(text).toContain('Records');
+    });
+
+    it('snapshot accepts every known tag value', async () => {
+      process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+      writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
+      // Smoke through every member of the SnapshotTag enum so a typo in the
+      // yargs `choices` array would surface here. We don't assert on the file
+      // path (timestamp-dependent), only that the call resolves with ok=true.
+      for (const tag of ['rolling', 'dispatch', 'calibration', 'lifecycle-transition']) {
+        stdoutChunks = [];
+        setArgv('snapshot', '--tag', tag, '--work-dir', tmp, '--artifacts-dir', `${tmp}/artifacts`);
+        await buildDepsCli().parseAsync();
+        const r = stdoutJson() as { ok: boolean; tag: string };
+        expect(r.ok).toBe(true);
+        expect(r.tag).toBe(tag);
+      }
+    });
+  });
 });

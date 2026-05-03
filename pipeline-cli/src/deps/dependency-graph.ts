@@ -19,11 +19,32 @@
  * @module deps/dependency-graph
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { parseSimpleYaml } from '../steps/01-validate.js';
 
 export type TaskStatus = 'open' | 'completed';
+
+/**
+ * RFC-0014 §8 + Q3 resolution — kinds of external (non-backlog) dependencies a
+ * task may declare. Pure signal in v1; the dispatcher does NOT block on them.
+ *
+ * Future v2 may add a resolver registry that turns each kind into a poll, at
+ * which point `resolverHint` becomes the resolver-specific argument (e.g. the
+ * npm package name for `npm-version`). For v1 the hint is a free-form string.
+ */
+export type ExternalDependencyKind = 'npm-version' | 'github-pr' | 'url-head' | 'manual' | 'other';
+
+export interface ExternalDependency {
+  /** Stable identifier for the external dep (e.g. "npm-foo-2.0"). */
+  id: string;
+  /** Human-readable description ("wait for foo v2 to publish"). */
+  description: string;
+  /** Kind of external dep — one of the five v1 enum values. */
+  kind: ExternalDependencyKind;
+  /** Optional resolver-specific argument (registry URL, PR number, etc.). */
+  resolverHint?: string;
+}
 
 export interface DependencyNode {
   /** Canonical (case-preserving) task ID, e.g. "AISDLC-100.1". */
@@ -43,6 +64,19 @@ export interface DependencyNode {
   title: string;
   /** Outgoing edges — IDs this task depends on. */
   dependencies: string[];
+  /**
+   * RFC-0014 §8 + Q3 — out-of-graph blockers ("wait for npm v2 to publish",
+   * "wait for upstream PR to merge", etc.). Surfaced in the snapshot artifact +
+   * (Phase 3) the DoR comment + `cli-deps blockers`. Empty array when the task
+   * declares none. Dispatcher behaviour is unchanged in v1; pure signal.
+   */
+  externalDependencies: ExternalDependency[];
+  /**
+   * File mtime as ISO-8601 (when the on-disk task file was last touched).
+   * Best-effort; empty string if the stat failed. Used by the snapshot
+   * artifact's `lastModified` field for recency tie-break heuristics.
+   */
+  lastModified: string;
   /** Path to the on-disk task file. */
   filePath: string;
 }
@@ -172,7 +206,8 @@ export function parseTaskFrontmatter(
   const raw = readFileSync(filePath, 'utf8');
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
   if (!fmMatch) return null;
-  const fm = parseSimpleYaml(fmMatch[1]);
+  const fmRaw = fmMatch[1];
+  const fm = parseSimpleYaml(fmRaw);
 
   const id = String(fm.id ?? '').trim();
   if (!id) return null;
@@ -187,6 +222,21 @@ export function parseTaskFrontmatter(
       .filter((v) => v.length > 0);
   }
 
+  // `externalDependencies:` is a list of nested objects which `parseSimpleYaml`
+  // can't represent — re-parse this single key with a focused walker. Empty
+  // array when the field is absent.
+  const externalDependencies = parseExternalDependenciesBlock(fmRaw);
+
+  // mtime — best-effort; if the stat fails (file vanished mid-walk per the
+  // RFC-0014 Q6 "best-effort consistency" contract) we degrade to '' rather
+  // than crashing the whole snapshot.
+  let lastModified = '';
+  try {
+    lastModified = statSync(filePath).mtime.toISOString();
+  } catch {
+    // ignore — surfaced as empty string in the snapshot
+  }
+
   return {
     id,
     status: fileLocation,
@@ -194,8 +244,113 @@ export function parseTaskFrontmatter(
     frontmatterStatus,
     title,
     dependencies,
+    externalDependencies,
+    lastModified,
     filePath,
   };
+}
+
+/**
+ * RFC-0014 §8 + Q3 — parse the `externalDependencies:` frontmatter block.
+ *
+ * `parseSimpleYaml` only handles flat scalars + lists of scalars; it can't
+ * represent a list of objects. Rather than overhaul that helper (which is
+ * shared by every step in the pipeline) we re-walk the raw frontmatter looking
+ * specifically for the `externalDependencies:` block and parse its child
+ * mappings. Format expected:
+ *
+ *     externalDependencies:
+ *       - id: npm-foo-2.0
+ *         description: 'wait for foo v2 to publish'
+ *         kind: npm-version
+ *         resolverHint: registry.npmjs.org/foo
+ *       - id: pr-bar-123
+ *         description: 'wait for upstream PR'
+ *         kind: github-pr
+ *
+ * Returns `[]` when the block is absent or empty. Drops entries that lack
+ * `id` / `description` / `kind` (best-effort tolerance — a malformed entry
+ * shouldn't break the whole snapshot). Unknown `kind` values fall back to
+ * `'other'` so we don't silently throw away data.
+ */
+export function parseExternalDependenciesBlock(fmRaw: string): ExternalDependency[] {
+  const lines = fmRaw.split('\n');
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (/^externalDependencies\s*:\s*$/.test(line)) break;
+    i++;
+  }
+  if (i >= lines.length) return [];
+  i++; // step past the `externalDependencies:` opener
+
+  const out: ExternalDependency[] = [];
+  // Accumulate each in-progress entry as a free-form string map; we narrow to
+  // the typed shape only when we push it via `pushIfValid`. Avoids fighting
+  // TS's `keyof ExternalDependency` indexed-write narrowing.
+  let current: Record<string, string> | null = null;
+  let baseIndent = -1;
+
+  for (; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.trim() === '') continue;
+    const indent = line.length - line.trimStart().length;
+    if (baseIndent === -1) baseIndent = indent;
+    // Dedent below baseIndent OR a top-level (non-indented) key signals the
+    // block has ended — push the in-progress entry and stop.
+    if (indent < baseIndent) break;
+
+    const itemMatch = line.match(/^(\s*)-\s+([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
+    if (itemMatch) {
+      // New item opener: `- key: value`
+      if (current) pushIfValid(current, out);
+      current = {};
+      current[itemMatch[2]] = stripFmQuotes(itemMatch[3]);
+      continue;
+    }
+    const kvMatch = line.match(/^\s+([A-Za-z_][\w-]*)\s*:\s*(.*)$/);
+    if (kvMatch && current) {
+      current[kvMatch[1]] = stripFmQuotes(kvMatch[2]);
+      continue;
+    }
+    // Unrecognised line — treat as block terminator (the next top-level frontmatter key).
+    break;
+  }
+  if (current) pushIfValid(current, out);
+  return out;
+}
+
+function pushIfValid(entry: Record<string, string>, out: ExternalDependency[]): void {
+  const id = (entry.id ?? '').trim();
+  const description = (entry.description ?? '').trim();
+  const kindRaw = (entry.kind ?? '').trim();
+  if (!id || !description || !kindRaw) return;
+  const kind: ExternalDependencyKind = isKnownKind(kindRaw) ? kindRaw : 'other';
+  const resolverHint = entry.resolverHint ? entry.resolverHint.trim() : undefined;
+  const built: ExternalDependency = { id, description, kind };
+  if (resolverHint) built.resolverHint = resolverHint;
+  out.push(built);
+}
+
+function isKnownKind(value: string): value is ExternalDependencyKind {
+  return (
+    value === 'npm-version' ||
+    value === 'github-pr' ||
+    value === 'url-head' ||
+    value === 'manual' ||
+    value === 'other'
+  );
+}
+
+function stripFmQuotes(s: string): string {
+  const trimmed = s.trim();
+  if (
+    (trimmed.startsWith("'") && trimmed.endsWith("'") && trimmed.length >= 2) ||
+    (trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length >= 2)
+  ) {
+    return trimmed.slice(1, -1);
+  }
+  return trimmed;
 }
 
 // ── Frontier ──────────────────────────────────────────────────────────
