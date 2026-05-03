@@ -1,6 +1,8 @@
 /**
  * Anthropic API budget-exhaustion classifier (AISDLC-147 patch 2;
- * AISDLC-149 added valid-verdict-finding inspection).
+ * AISDLC-149 added valid-verdict-finding inspection; AISDLC-154 widened
+ * the substring fallback to use the WHOLE stdout instead of just the
+ * last line).
  *
  * The CI reviewer fan-out in `.github/workflows/ai-sdlc-review.yml`'s `analyze`
  * job spawns up to 3 reviewer agents (testing, critic, security) against
@@ -62,9 +64,22 @@ export interface ReviewerRawOutput {
    * The reviewer's verdict-line stdout (typically the last line of
    * /tmp/review-<type>.txt — what the existing parser already consumes).
    * Empty string when the reviewer produced no stdout (e.g. crashed before
-   * emitting anything).
+   * emitting anything). Used for `tryParseVerdict` (the AISDLC-149 path).
    */
   verdictLine: string;
+  /**
+   * The reviewer's WHOLE stdout (entire contents of /tmp/review-<type>.txt),
+   * not just the last line. Used by the substring fallback path when the
+   * verdict failed to parse — AISDLC-154: `cli-review` writes pretty-printed
+   * multi-line JSON when it captures an Anthropic API error, so the last
+   * line is just `}` and the credit-exhaustion text lives in the body.
+   * The substring fallback must inspect the whole stdout, not just the
+   * verdict line, or it misses the budget signature entirely.
+   *
+   * Optional for back-compat with older callers, but the CI path always
+   * supplies it.
+   */
+  stdoutRaw?: string;
   /**
    * The reviewer's stderr (entire contents of /tmp/review-<type>-stderr.txt).
    * The Anthropic SDK writes the API error body here on failure, including
@@ -198,9 +213,10 @@ function verdictContainsBudgetSignature(verdict: ParsedVerdict): boolean {
  *   - `budget-exhausted`   — EITHER (a) verdict parses but a finding's
  *                            message embeds both budget substrings (the
  *                            cli-review packaging path — AISDLC-149), OR
- *                            (b) verdict invalid AND combined stdout+stderr
- *                            contains both budget substrings (the original
- *                            AISDLC-147 path)
+ *                            (b) verdict invalid AND combined whole-stdout
+ *                            +stderr contains both budget substrings (the
+ *                            AISDLC-147 path, widened by AISDLC-154 to use
+ *                            the whole stdout instead of just the last line)
  *   - `other-failure`      — verdict invalid for some other reason (the
  *                            existing parser will surface it as a parsing
  *                            error in CHANGES_REQUESTED)
@@ -219,9 +235,17 @@ export function classifyOneReviewer(input: ReviewerRawOutput): ReviewerClassific
     return 'ok';
   }
   // Verdict didn't parse — fall back to the AISDLC-147 stdout+stderr path.
-  // Inspect both stdout (verdict line, in case the SDK printed the API
-  // error body to stdout instead of stderr) AND stderr.
-  const combined = `${input.verdictLine}\n${input.stderr}`;
+  // AISDLC-154: when `cli-review` writes a pretty-printed multi-line JSON
+  // verdict that fails this strict shape check (e.g. extra fields, or the
+  // verdict line read by the CLI is just the closing `}` of multi-line
+  // JSON), the credit-exhaustion text still lives somewhere in the WHOLE
+  // stdout body, not just the last line. Prefer `stdoutRaw` (the entire
+  // file contents) when supplied; fall back to `verdictLine` for older
+  // callers that don't pass it. Stderr is always considered too — the
+  // Anthropic SDK normally writes the API error body there on connection
+  // failure paths that don't go through the cli-review wrapper.
+  const stdoutForSubstring = input.stdoutRaw ?? input.verdictLine;
+  const combined = `${stdoutForSubstring}\n${input.stderr}`;
   if (isBudgetExhaustedFailure(combined)) {
     return 'budget-exhausted';
   }
