@@ -6,3 +6,4 @@
  * still reports on the actual logic.
  */
 export * from './classifier.js';
+export * from './budget-classifier.js';
