@@ -233,6 +233,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # AISDLC-146 Layer 2 defense-in-depth: HMAC-SHA256 secret used by
+          # cli-incremental-decide to verify v2 marker signatures. When set,
+          # the CLI accepts v2 markers (rejecting any with mismatched HMAC);
+          # when unset, v2 markers are rejected entirely + v1 markers parse
+          # with a deprecation warning. The secret MUST be 32+ random bytes
+          # — generate with `openssl rand -hex 32` and add via
+          # `gh secret set MARKER_HMAC_SECRET`.
+          MARKER_HMAC_SECRET: ${{ secrets.MARKER_HMAC_SECRET }}
         run: |
           # ── AISDLC-142 round-2 CRITICAL fix ────────────────────────
           # Fetch existing PR comments WITH author metadata, then filter to
@@ -281,9 +289,37 @@ jobs:
           # Extract prior reviewedSha from the marker (if any) so we can
           # compute the delta numstat against it. Failure is fine — empty
           # PRIOR_SHA → no numstat → CLI takes the no-marker / full path.
-          PRIOR_SHA=$(grep -oE '<!-- ai-sdlc:last-reviewed-contenthash:[A-Za-z0-9_-]+ -->' /tmp/pr-comments.txt 2>/dev/null \
+          #
+          # Wire formats handled (AISDLC-146):
+          #   v0 (legacy AISDLC-142): <prefix><base64> -->
+          #   v1 (transition):        <prefix>v1:<base64> -->
+          #   v2 (HMAC):              <prefix>v2:<base64>:<hmac-hex> -->
+          #
+          # The regex captures everything between the prefix and ` -->` as
+          # the "inner". A small awk strips the optional `vN:` prefix and
+          # the trailing `:<hmac>` segment (v2 only) before base64-decoding.
+          # Best-effort throughout — any failure routes to empty PRIOR_SHA
+          # and the CLI takes the safe no-marker → FULL path.
+          PRIOR_SHA=$(grep -oE '<!-- ai-sdlc:last-reviewed-contenthash:[^ ]+ -->' /tmp/pr-comments.txt 2>/dev/null \
             | tail -1 \
-            | sed -E 's/.*contenthash:([A-Za-z0-9_-]+) -->/\1/' \
+            | sed -E 's/^<!-- ai-sdlc:last-reviewed-contenthash:(.+) -->$/\1/' \
+            | awk '
+                {
+                  inner = $0
+                  # Strip leading "vN:" version tag (v1 + v2). v0 markers
+                  # have no tag and pass through.
+                  if (match(inner, /^v[12]:/)) {
+                    inner = substr(inner, RLENGTH + 1)
+                  }
+                  # For v2, the HMAC segment is appended after the LAST `:`.
+                  # base64url alphabet ([A-Za-z0-9_-]) never contains `:`,
+                  # so the last colon is unambiguous. Strip it.
+                  if ((idx = match(inner, /:[0-9a-fA-F]{64}$/)) > 0) {
+                    inner = substr(inner, 1, idx - 1)
+                  }
+                  print inner
+                }
+              ' \
             | { read B64 && [ -n "$B64" ] && printf '%s' "$B64" \
                 | base64 -d 2>/dev/null \
                 | jq -r '.reviewedSha' 2>/dev/null; } || echo "")
@@ -863,6 +899,14 @@ jobs:
           CRITIC_JSON: ${{ needs.analyze.outputs.critic }}
           SECURITY_JSON: ${{ needs.analyze.outputs.security }}
           INCR_CONTENT_HASH: ${{ needs.analyze.outputs.incremental_content_hash }}
+          # AISDLC-146 Layer 2 defense-in-depth: when set, the marker is
+          # written in v2 wire format with an HMAC-SHA256 signature over
+          # the JSON payload. When unset, falls back to v1 (no HMAC) so
+          # operators who haven't provisioned the secret still get the
+          # incremental-review savings — they just lose the HMAC integrity
+          # gate. The v1→v2 cutover is per-PR (next push under v2 secret
+          # rewrites the marker in v2), so no migration step is needed.
+          MARKER_HMAC_SECRET: ${{ secrets.MARKER_HMAC_SECRET }}
         with:
           script: |
             // Verify all three reviewers approved before binding the marker.
@@ -892,8 +936,30 @@ jobs:
               reviewedSha: headSha.toLowerCase(),
               reviewedAt: new Date().toISOString(),
             };
-            const b64 = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
-            const marker = `<!-- ai-sdlc:last-reviewed-contenthash:${b64} -->`;
+            const json = JSON.stringify(payload);
+            const b64 = Buffer.from(json, 'utf-8').toString('base64url');
+            // AISDLC-146 Layer 2 defense-in-depth: emit v2 (HMAC-SHA256
+            // signed) when MARKER_HMAC_SECRET is provisioned, fall back
+            // to v1 (no HMAC) when not. The HMAC input is the EXACT JSON
+            // string we just base64'd so the verifier can re-derive it
+            // by base64-decoding + recomputing HMAC under the shared
+            // secret. Mirrors `formatMarker()` in
+            // `pipeline-cli/src/incremental-review/incremental.ts` —
+            // any change to the wire format here MUST be made there too.
+            const hmacSecret = process.env.MARKER_HMAC_SECRET || '';
+            let marker;
+            if (hmacSecret.length > 0) {
+              const { createHmac } = require('node:crypto');
+              const hmac = createHmac('sha256', hmacSecret).update(json, 'utf-8').digest('hex');
+              marker = `<!-- ai-sdlc:last-reviewed-contenthash:v2:${b64}:${hmac} -->`;
+            } else {
+              core.warning(
+                'MARKER_HMAC_SECRET is not set — writing v1 (no HMAC) marker. ' +
+                  'Provision via `gh secret set MARKER_HMAC_SECRET --body "$(openssl rand -hex 32)"` ' +
+                  'to enable v2 integrity (AISDLC-146).',
+              );
+              marker = `<!-- ai-sdlc:last-reviewed-contenthash:v1:${b64} -->`;
+            }
             const body =
               `## AI-SDLC: incremental review state\n\n` +
               `_Auto-managed by \`ai-sdlc-review.yml\` (AISDLC-142). ` +

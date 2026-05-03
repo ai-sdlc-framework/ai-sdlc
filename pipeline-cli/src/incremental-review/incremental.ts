@@ -38,12 +38,61 @@
  * @module incremental-review/incremental
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 
 /** Marker substring used to locate the last-reviewed-contenthash PR comment. */
 export const MARKER_PREFIX = '<!-- ai-sdlc:last-reviewed-contenthash:';
 /** Closing token for the marker so the parser can isolate the encoded payload. */
 export const MARKER_SUFFIX = ' -->';
+
+/**
+ * Env var name holding the HMAC-SHA256 secret used to sign + verify v2
+ * markers (AISDLC-146). When present, `formatMarker` defaults to v2; when
+ * missing, `formatMarker` falls back to v1 with a warning. `parseMarker`
+ * REQUIRES the secret to accept any v2 marker — without it, v2 markers are
+ * rejected (cannot verify the signature).
+ *
+ * Operator setup (one time): generate 32+ random bytes and add as a GitHub
+ * secret on the repo:
+ *
+ *   gh secret set MARKER_HMAC_SECRET --body "$(openssl rand -hex 32)"
+ *
+ * Then ensure the `analyze` + `report` jobs in `.github/workflows/ai-sdlc-review.yml`
+ * forward the secret via env (already wired by AISDLC-146).
+ */
+export const MARKER_HMAC_SECRET_ENV = 'MARKER_HMAC_SECRET';
+
+/**
+ * Marker version tags. v1 is the legacy AISDLC-142 wire format (no HMAC);
+ * v2 is the AISDLC-146 HMAC-signed wire format. New writes default to v2
+ * when `MARKER_HMAC_SECRET` is set; v1 stays accepted on read for one or
+ * two PR cycles so the trusted-author-posted v1 markers in the wild
+ * self-migrate without an abrupt cutover.
+ */
+export type MarkerVersion = 1 | 2;
+
+/**
+ * Module-level latch so the v1 deprecation warning (and v2-without-secret
+ * warnings) only fire ONCE per process. The pre-flight, the workflow, and
+ * the slash-command body all reach into this module repeatedly per push;
+ * without the latch, CI logs get spammed with the same banner.
+ *
+ * Exported `_resetWarnLatchForTests` resets the latch so tests can assert
+ * the "warns once" semantic deterministically without process-isolation
+ * acrobatics.
+ */
+const warnLatch: { v1Deprecation: boolean; v2NoSecret: boolean; missingSecretFormat: boolean } = {
+  v1Deprecation: false,
+  v2NoSecret: false,
+  missingSecretFormat: false,
+};
+
+/** Test-only — reset the warning latch between cases. NOT for production code. */
+export function _resetWarnLatchForTests(): void {
+  warnLatch.v1Deprecation = false;
+  warnLatch.v2NoSecret = false;
+  warnLatch.missingSecretFormat = false;
+}
 
 /**
  * Default delta-size threshold (lines). When the delta diff exceeds this, fall
@@ -119,55 +168,260 @@ export type IncrementalReason =
 // ── Marker parse / format ────────────────────────────────────────────
 
 /**
- * Encode the marker payload as a single-line HTML comment. Format (load-bearing
- * — the workflows search for the prefix substring to locate the comment):
- *
- *   <!-- ai-sdlc:last-reviewed-contenthash:<base64url(json)> -->
- *
- * base64url avoids `+/=` chars that markdown sometimes mangles in comments,
- * and JSON-inside-base64 keeps the marker forward-compatible (we can add
- * fields without breaking parsers that only key off the comment prefix).
+ * Compute the HMAC-SHA256 of `payloadJson` keyed by `secret`, returning the
+ * lowercase hex digest. Wrapped so call sites stay one-liners + the unit
+ * tests have a reference impl to pin the algorithm. NOT exported by the
+ * package barrel — internal helper only.
  */
-export function formatMarker(payload: MarkerPayload): string {
+function computeMarkerHmac(payloadJson: string, secret: string): string {
+  return createHmac('sha256', secret).update(payloadJson, 'utf-8').digest('hex');
+}
+
+/**
+ * Constant-time comparison of two equal-length lowercase-hex digests.
+ * Resilient to length mismatch (returns false rather than throwing) so
+ * callers don't have to wrap every check in try/catch.
+ *
+ * SECURITY: `string === string` is variable-time and leaks timing info on a
+ * sufficiently determined attacker, even for short hex strings. We pay the
+ * cost of `timingSafeEqual` here because the marker check is the v2
+ * authorization gate.
+ */
+function safeHmacEquals(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(Buffer.from(a, 'utf-8'), Buffer.from(b, 'utf-8'));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Encode the marker payload as a single-line HTML comment. Format
+ * (load-bearing — the workflows search for the prefix substring to locate
+ * the comment):
+ *
+ *   v1 (legacy):  <!-- ai-sdlc:last-reviewed-contenthash:v1:<base64url(json)> -->
+ *   v2 (HMAC):    <!-- ai-sdlc:last-reviewed-contenthash:v2:<base64url(json)>:<hmac-sha256-hex> -->
+ *
+ * v2 is the default when `process.env.MARKER_HMAC_SECRET` is set. When the
+ * env var is missing, we fall back to v1 with a one-time `console.warn` so
+ * the operator can plumb the secret in. base64url avoids `+/=` chars that
+ * markdown sometimes mangles in comments; JSON-inside-base64 keeps the
+ * payload schema forward-compatible.
+ *
+ * The HMAC input is the EXACT `JSON.stringify(payload)` string we just
+ * encoded — so verifying re-decodes the base64, re-stringifies the JSON,
+ * and recomputes the HMAC. The 4th `:`-segment is the lowercase hex
+ * digest.
+ *
+ * @param payload The contentHash + reviewedSha + reviewedAt to encode.
+ * @param opts    Test/override hooks. `version` forces v1/v2 (skipping the
+ *                env-driven default). `secret` overrides the env var (used
+ *                in tests + by callers that read the secret from a
+ *                different source).
+ */
+export function formatMarker(
+  payload: MarkerPayload,
+  opts: { version?: MarkerVersion; secret?: string } = {},
+): string {
   const json = JSON.stringify(payload);
   const b64 = Buffer.from(json, 'utf-8').toString('base64url');
-  return `${MARKER_PREFIX}${b64}${MARKER_SUFFIX}`;
+
+  // Resolve the HMAC secret. Explicit override wins; env fallback is the
+  // production path. An empty string is treated as "no secret" — yargs/CI
+  // env handling sometimes hands through "" and we don't want a zero-length
+  // HMAC key to silently sign a v2 marker.
+  const secret =
+    typeof opts.secret === 'string' && opts.secret.length > 0
+      ? opts.secret
+      : (process.env[MARKER_HMAC_SECRET_ENV] ?? '');
+
+  // Default version: v2 when we have a secret, v1 otherwise. Explicit
+  // `opts.version` short-circuits both branches (test ergonomics).
+  const version: MarkerVersion = opts.version ?? (secret.length > 0 ? 2 : 1);
+
+  if (version === 2) {
+    if (secret.length === 0) {
+      // Caller asked for v2 but didn't supply a secret. Refuse to emit an
+      // unverifiable marker — it'd be wire-compatible with v2 but every
+      // verifier would reject it (defense-in-depth path is "drop on
+      // unverifiable", not "treat as v1"). Throw so the caller fixes the
+      // env wiring rather than silently degrading to a marker that always
+      // fails downstream.
+      throw new Error(
+        'formatMarker: v2 requires a non-empty MARKER_HMAC_SECRET (env or opts.secret).',
+      );
+    }
+    const hmac = computeMarkerHmac(json, secret);
+    return `${MARKER_PREFIX}v2:${b64}:${hmac}${MARKER_SUFFIX}`;
+  }
+
+  // v1 fallback. When we got here because no secret was provisioned, warn
+  // once per process so the operator can spot the gap in CI logs without
+  // drowning every push in a banner.
+  if (secret.length === 0 && opts.version === undefined && !warnLatch.missingSecretFormat) {
+    warnLatch.missingSecretFormat = true;
+    console.warn(
+      `[incremental-review] MARKER_HMAC_SECRET env var is not set; ` +
+        `formatMarker is emitting v1 (no HMAC integrity). Set MARKER_HMAC_SECRET ` +
+        `via 'gh secret set MARKER_HMAC_SECRET --body "$(openssl rand -hex 32)"' ` +
+        `and forward it to the analyze + report jobs to enable v2 (AISDLC-146).`,
+    );
+  }
+  return `${MARKER_PREFIX}v1:${b64}${MARKER_SUFFIX}`;
+}
+
+/**
+ * Validate the JSON-decoded payload conforms to the `MarkerPayload` schema.
+ * Pure helper — no side effects, no warnings — so we can call it from both
+ * v1 + v2 parse branches.
+ */
+function validatePayload(parsed: Record<string, unknown>): MarkerPayload | null {
+  if (
+    typeof parsed.contentHash !== 'string' ||
+    !/^[0-9a-f]{64}$/i.test(parsed.contentHash) ||
+    typeof parsed.reviewedSha !== 'string' ||
+    !/^[0-9a-f]{40}$/i.test(parsed.reviewedSha) ||
+    typeof parsed.reviewedAt !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    contentHash: parsed.contentHash.toLowerCase(),
+    reviewedSha: parsed.reviewedSha.toLowerCase(),
+    reviewedAt: parsed.reviewedAt,
+  };
 }
 
 /**
  * Locate + parse the marker inside `commentBody`. Returns `null` when no
- * marker is present OR when the encoded payload is malformed (defensive —
- * a corrupted marker should fall back to full review, NOT crash the
- * workflow).
+ * marker is present, the encoded payload is malformed, OR (v2) the HMAC
+ * signature does not verify. Defensive — a corrupted/tampered marker
+ * should fall back to full review, NOT crash the workflow.
+ *
+ * Version handling (AISDLC-146):
+ *   - v1 markers (no HMAC) parse normally + emit a one-time deprecation
+ *     warning. Acceptance window is intentionally narrow: drop v1 support
+ *     after the in-flight markers self-migrate (one or two PR cycles).
+ *   - v2 markers REQUIRE a `MARKER_HMAC_SECRET` env var (or `opts.secret`
+ *     override). Without it the parser cannot verify the signature, so
+ *     the marker is rejected.
+ *   - Tampered v2 markers (any single hex char of the HMAC flipped, or
+ *     payload mutated under the same secret, or payload + HMAC re-signed
+ *     under a DIFFERENT secret) all return `null`.
+ *
+ * @param commentBody The PR comment body text to scan.
+ * @param opts        `secret` overrides the env var (test ergonomics).
  */
-export function parseMarker(commentBody: string): MarkerPayload | null {
+export function parseMarker(
+  commentBody: string,
+  opts: { secret?: string } = {},
+): MarkerPayload | null {
   const start = commentBody.indexOf(MARKER_PREFIX);
   if (start === -1) return null;
   const payloadStart = start + MARKER_PREFIX.length;
   const end = commentBody.indexOf(MARKER_SUFFIX, payloadStart);
   if (end === -1) return null;
-  const b64 = commentBody.slice(payloadStart, end).trim();
+  const inner = commentBody.slice(payloadStart, end).trim();
+  if (inner.length === 0) return null;
+
+  // Resolve secret the same way formatMarker does — explicit override
+  // wins; empty string treated as missing.
+  const secret =
+    typeof opts.secret === 'string' && opts.secret.length > 0
+      ? opts.secret
+      : (process.env[MARKER_HMAC_SECRET_ENV] ?? '');
+
+  // ── Version dispatch ────────────────────────────────────────────────
+  // The wire format starts with `v1:` or `v2:` followed by base64url. We
+  // accept ALSO the AISDLC-142 pre-version format (no `vN:` prefix) by
+  // treating it as v1 — that's the one-comment-on-an-old-PR transition
+  // case. Without that compat hop, the very first push under v2 against
+  // a PR with an existing AISDLC-142 marker would fail the parse and the
+  // skip path would silently regress to FULL review.
+  let version: MarkerVersion;
+  let rest: string;
+  if (inner.startsWith('v2:')) {
+    version = 2;
+    rest = inner.slice(3);
+  } else if (inner.startsWith('v1:')) {
+    version = 1;
+    rest = inner.slice(3);
+  } else {
+    // Pre-AISDLC-146 format — treat as v1 for backward compat (silent;
+    // the v1 deprecation warning handles operator notification).
+    version = 1;
+    rest = inner;
+  }
+
+  let b64: string;
+  let providedHmac = '';
+  if (version === 2) {
+    // Wire shape: <base64>:<hmac-hex>. Split on the LAST `:` so a base64url
+    // string (which never contains `:`, but we belt-and-brace it) can't
+    // shift the hmac segment.
+    const lastColon = rest.lastIndexOf(':');
+    if (lastColon === -1) return null;
+    b64 = rest.slice(0, lastColon);
+    providedHmac = rest.slice(lastColon + 1).toLowerCase();
+    if (!/^[0-9a-f]{64}$/.test(providedHmac)) return null;
+  } else {
+    b64 = rest;
+  }
   if (b64.length === 0) return null;
+
+  // Decode + structural validate.
+  let json: string;
+  let parsed: Record<string, unknown>;
   try {
-    const json = Buffer.from(b64, 'base64url').toString('utf-8');
-    const parsed = JSON.parse(json) as Record<string, unknown>;
-    if (
-      typeof parsed.contentHash !== 'string' ||
-      !/^[0-9a-f]{64}$/i.test(parsed.contentHash) ||
-      typeof parsed.reviewedSha !== 'string' ||
-      !/^[0-9a-f]{40}$/i.test(parsed.reviewedSha) ||
-      typeof parsed.reviewedAt !== 'string'
-    ) {
-      return null;
-    }
-    return {
-      contentHash: parsed.contentHash.toLowerCase(),
-      reviewedSha: parsed.reviewedSha.toLowerCase(),
-      reviewedAt: parsed.reviewedAt,
-    };
+    json = Buffer.from(b64, 'base64url').toString('utf-8');
+    parsed = JSON.parse(json) as Record<string, unknown>;
   } catch {
     return null;
   }
+  const validated = validatePayload(parsed);
+  if (validated === null) return null;
+
+  if (version === 2) {
+    if (secret.length === 0) {
+      // Cannot verify a v2 marker without the key. Reject, but warn ONCE so
+      // the operator sees the gap rather than silently regressing to FULL
+      // reviews on every push.
+      if (!warnLatch.v2NoSecret) {
+        warnLatch.v2NoSecret = true;
+        console.warn(
+          `[incremental-review] received v2 marker but ${MARKER_HMAC_SECRET_ENV} ` +
+            `is not set; rejecting (cannot verify signature). Set the env var to ` +
+            `restore incremental-review skip path (AISDLC-146).`,
+        );
+      }
+      return null;
+    }
+    const expected = computeMarkerHmac(json, secret);
+    if (!safeHmacEquals(expected, providedHmac)) {
+      // Signature mismatch — payload tampered, wrong secret, or both.
+      // Silent rejection: the trusted-author filter is Layer 1; HMAC is
+      // Layer 2. A noisy warning here would let a malicious-but-trusted
+      // collaborator probe for the secret by watching CI logs. Any v2
+      // failure routes to "no marker → FULL review", the safe default.
+      return null;
+    }
+    return validated;
+  }
+
+  // v1 — emit the deprecation warning once per process. The warning is
+  // operator-facing only (CI log line); the parse still succeeds so
+  // in-flight markers don't strand the next push in FULL-review mode.
+  if (!warnLatch.v1Deprecation) {
+    warnLatch.v1Deprecation = true;
+    console.warn(
+      `[incremental-review] parsed a v1 (no-HMAC) marker — v1 is deprecated and will ` +
+        `be removed in a future release (AISDLC-146). New writes default to v2 when ` +
+        `${MARKER_HMAC_SECRET_ENV} is set.`,
+    );
+  }
+  return validated;
 }
 
 /**
@@ -185,9 +439,12 @@ export function parseMarker(commentBody: string): MarkerPayload | null {
  * The fix lives at the FETCH boundary — see the `gh pr view --jq` filter
  * in `.github/workflows/ai-sdlc-review.yml` and `ai-sdlc-plugin/commands/execute.md`.
  */
-export function findMarkerInComments(commentBodies: string[]): MarkerPayload | null {
+export function findMarkerInComments(
+  commentBodies: string[],
+  opts: { secret?: string } = {},
+): MarkerPayload | null {
   for (let i = commentBodies.length - 1; i >= 0; i--) {
-    const m = parseMarker(commentBodies[i]);
+    const m = parseMarker(commentBodies[i], opts);
     if (m !== null) return m;
   }
   return null;
@@ -282,8 +539,9 @@ export function filterTrustedComments(comments: readonly CommentWithAuthor[]): s
  */
 export function findTrustedMarkerInComments(
   comments: readonly CommentWithAuthor[],
+  opts: { secret?: string } = {},
 ): MarkerPayload | null {
-  return findMarkerInComments(filterTrustedComments(comments));
+  return findMarkerInComments(filterTrustedComments(comments), opts);
 }
 
 // ── ContentHashV3 (mirror of orchestrator/src/runtime/attestations.ts) ─
