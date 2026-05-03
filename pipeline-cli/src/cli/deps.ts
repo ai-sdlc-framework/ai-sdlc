@@ -32,6 +32,14 @@ import {
   renderGraph,
   validate,
 } from '../deps/dependency-graph.js';
+import {
+  gcRollingSnapshots,
+  inspectSnapshots,
+  isCompositionEnabled,
+  SNAPSHOT_TAGS,
+  type SnapshotTag,
+  writeSnapshot,
+} from '../deps/snapshot.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -209,6 +217,117 @@ export function buildDepsCli(): Argv {
           dangling: r.dangling,
         });
         if (!r.ok) process.exit(1);
+      },
+    )
+    .command(
+      'snapshot',
+      'RFC-0014 Phase 1 — write a JSONL snapshot of the dependency graph to $ARTIFACTS_DIR/_deps/. No-op when AI_SDLC_DEPS_COMPOSITION is unset.',
+      (y) =>
+        y
+          .option('tag', {
+            type: 'string',
+            describe: 'Event tag (rolling | dispatch | calibration | lifecycle-transition)',
+            choices: SNAPSHOT_TAGS as unknown as readonly string[],
+            default: 'rolling',
+          })
+          .option('artifacts-dir', {
+            type: 'string',
+            describe: 'Override $ARTIFACTS_DIR for this invocation',
+          }),
+      async (argv) => {
+        const tag = argv.tag as SnapshotTag;
+        const workDir = argv['work-dir'] as string;
+        const artifactsDir = argv['artifacts-dir'] as string | undefined;
+        if (!isCompositionEnabled()) {
+          // Phase 1 is opt-in. Surface a clear noop message + the env var so the
+          // operator can flip it on without re-reading the runbook.
+          emit({
+            ok: true,
+            written: false,
+            reason: 'AI_SDLC_DEPS_COMPOSITION is OFF — snapshot skipped (set to 1 to enable)',
+            tag,
+          });
+          return;
+        }
+        const r = writeSnapshot(tag, { workDir, artifactsDir, onWarn: warnToStderr });
+        emit({
+          ok: true,
+          written: r.written,
+          path: r.path,
+          tag: r.tag,
+          recordCount: r.recordCount,
+          bytes: r.bytes,
+        });
+      },
+    )
+    .command(
+      'gc',
+      'RFC-0014 Phase 1 — trim rolling-tagged snapshots older than --max-age-days (default 30). Event-tagged snapshots are preserved.',
+      (y) =>
+        y
+          .option('max-age-days', {
+            type: 'number',
+            default: 30,
+            describe: 'Age cutoff in days for rolling-tagged snapshots',
+          })
+          .option('artifacts-dir', {
+            type: 'string',
+            describe: 'Override $ARTIFACTS_DIR for this invocation',
+          }),
+      async (argv) => {
+        const maxAgeDays = argv['max-age-days'] as number;
+        const workDir = argv['work-dir'] as string;
+        const artifactsDir = argv['artifacts-dir'] as string | undefined;
+        const r = gcRollingSnapshots({
+          workDir,
+          artifactsDir,
+          maxAgeDays,
+          onWarn: warnToStderr,
+        });
+        emit({
+          ok: true,
+          trimmedCount: r.trimmed.length,
+          keptCount: r.kept.length,
+          bytesFreed: r.bytesFreed,
+          trimmed: r.trimmed,
+        });
+      },
+    )
+    .command(
+      'inspect',
+      'RFC-0014 Phase 1 — list snapshots by tag, sorted by embedded ISO timestamp.',
+      (y) =>
+        y
+          .option('tag', {
+            type: 'string',
+            describe: 'Filter by tag (omit for all)',
+            choices: SNAPSHOT_TAGS as unknown as readonly string[],
+          })
+          .option('artifacts-dir', {
+            type: 'string',
+            describe: 'Override $ARTIFACTS_DIR for this invocation',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'table'] as const,
+            default: 'json' as const,
+          }),
+      async (argv) => {
+        const tag = argv.tag as SnapshotTag | undefined;
+        const workDir = argv['work-dir'] as string;
+        const artifactsDir = argv['artifacts-dir'] as string | undefined;
+        const list = inspectSnapshots({ workDir, artifactsDir, tag });
+        if ((argv.format as string) === 'table') {
+          const rows = list.map((e) => [
+            e.isoTimestamp,
+            e.tag,
+            String(e.recordCount),
+            String(e.size),
+          ]);
+          emitText(renderTable(['Timestamp', 'Tag', 'Records', 'Bytes'], rows));
+        } else {
+          emit({ ok: true, snapshots: list });
+        }
       },
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')
