@@ -1,12 +1,16 @@
 /**
- * Shared types for the autonomous-pipeline orchestrator (RFC-0015 Phase 1).
+ * Shared types for the autonomous-pipeline orchestrator (RFC-0015 Phase 1
+ * extended through Phase 3).
  *
- * Phase 1 ships the bare loop + dispatch + escalation surface only. Phases 2-5
- * extend the same shapes (failure playbook, pre-dispatch admission filters,
- * events.jsonl writer, soak-corpus harness).
+ * Phase 1 ships the bare loop + dispatch + escalation surface. Phase 3 adds
+ * the pre-dispatch admission filters (dependency / DoR / external-deps),
+ * the per-task stuck-candidate counter, and the global exponential-backoff
+ * cadence state. Phases 4-5 extend the same shapes (events.jsonl writer,
+ * soak-corpus harness).
  */
 
 import type { PipelineOutcome, PipelineResult } from '../types.js';
+import type { FilterChainResult } from './filters/types.js';
 
 /** Configuration knobs for one orchestrator run. */
 export interface OrchestratorConfig {
@@ -52,7 +56,113 @@ export interface OrchestratorTickResult {
    * inspect/forward without coupling to the file format.
    */
   playbookEvents?: import('./playbook/types.js').PlaybookEvent[];
+  /**
+   * RFC-0015 Phase 3 — per-candidate filter chain trace + Phase 3 events
+   * for any candidate the chain rejected. The order matches the order in
+   * which the loop walked candidates (post-priority-sort). Empty when no
+   * candidates were considered (empty frontier OR `--dry-run`).
+   */
+  filterEvents: OrchestratorFilterEvent[];
+  /**
+   * RFC-0015 Phase 3 — `OrchestratorIdle*` event (one per tick when nothing
+   * was dispatched; null when dispatched.length > 0). Distinguishes the
+   * "no work" reason from the "off-peak" reason so operators can grep
+   * events.jsonl by type once Phase 4 ships the writer.
+   */
+  idleEvent: OrchestratorIdleEvent | null;
+  /**
+   * RFC-0015 Phase 3 — global polling cadence after this tick. Reset to
+   * the configured base interval on dispatch OR new-task arrival;
+   * otherwise doubled per consecutive idle tick, capped at 5 min.
+   */
+  nextSleepSec: number;
 }
+
+/**
+ * RFC-0015 Phase 3 — every candidate the chain evaluated produces one of
+ * these. Admitted candidates carry `event: null`; rejected candidates carry
+ * the matching `OrchestratorBlockedBy*` / `OrchestratorAwaitingExternal`
+ * payload. Stuck-candidate detection (>5 ticks skipped for the same reason)
+ * appends `OrchestratorStuckCandidate` to the same record.
+ */
+export interface OrchestratorFilterEvent {
+  /** ISO timestamp of the filter run. */
+  ts: string;
+  /** Candidate task ID. */
+  taskId: string;
+  /** Full chain trace — every filter the chain walked, in order. */
+  trace: FilterChainResult;
+  /** Stuck-candidate event when this candidate has been skipped >5 ticks. */
+  stuckEvent: OrchestratorStuckCandidateEvent | null;
+  /**
+   * Distinguished event derived from the chain failure (when present).
+   * `null` when the chain admitted the candidate.
+   */
+  blockedEvent: OrchestratorBlockedEvent | null;
+}
+
+/**
+ * Discriminated union for the three RFC §4.3 admission-block events.
+ * Phase 4 (AISDLC-169.4) plumbs these into `events.jsonl`; Phase 3
+ * surfaces them in the tick result + via the logger.
+ */
+export type OrchestratorBlockedEvent =
+  | OrchestratorBlockedByDependencyEvent
+  | OrchestratorBlockedByDorEvent
+  | OrchestratorAwaitingExternalEvent;
+
+export interface OrchestratorBlockedByDependencyEvent {
+  type: 'OrchestratorBlockedByDependency';
+  ts: string;
+  taskId: string;
+  /** Open task IDs gating dispatch (lowercased, sorted). */
+  blockers: string[];
+}
+
+export interface OrchestratorBlockedByDorEvent {
+  type: 'OrchestratorBlockedByDor';
+  ts: string;
+  taskId: string;
+  /** Always `needs-clarification` in v1 (the only blocking verdict). */
+  verdict: 'needs-clarification';
+  /** ISO timestamp of the blocking verdict (null when unknown). */
+  signedAt: string | null;
+}
+
+export interface OrchestratorAwaitingExternalEvent {
+  type: 'OrchestratorAwaitingExternal';
+  ts: string;
+  taskId: string;
+  /**
+   * External deps that gated dispatch (`kind: 'manual'` AND no
+   * operator-supplied clearance per the RFC §13 Q3 resolution).
+   */
+  externalDeps: Array<{ id: string; kind: string }>;
+  /**
+   * Full external-deps list (informational — non-blocking kinds are
+   * surfaced here so operators see the complete picture).
+   */
+  allExternalDeps: Array<{ id: string; kind: string }>;
+}
+
+export interface OrchestratorStuckCandidateEvent {
+  type: 'OrchestratorStuckCandidate';
+  ts: string;
+  taskId: string;
+  /** Reason from the most-recent skip — usually the failing filter name. */
+  reason: string;
+  /** Number of ticks since this candidate first started skipping. */
+  ticksSinceFirstSkip: number;
+}
+
+/**
+ * RFC-0015 Phase 3 (Q3 + Q5) — emitted on a tick that dispatched nothing.
+ * The reason distinguishes "no candidates ready" from "candidates rejected
+ * by filters" so operators can grep events.jsonl for the actual cause.
+ */
+export type OrchestratorIdleEvent =
+  | { type: 'OrchestratorIdleNoWork'; ts: string; idleStreak: number }
+  | { type: 'OrchestratorIdleAllFiltered'; ts: string; idleStreak: number; rejectedCount: number };
 
 export interface TaskDispatchOutcome {
   taskId: string;

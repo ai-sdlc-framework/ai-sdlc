@@ -1,14 +1,15 @@
-# Autonomous Pipeline Orchestrator — operator guide (RFC-0015 Phases 1+2+4+5)
+# Autonomous Pipeline Orchestrator — operator guide (RFC-0015 Phases 1, 2, 3, 4 + 5)
 
 > **Status:** experimental, opt-in via `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`.
 > Phase 1 (AISDLC-169.1) shipped the bare polling loop. Phase 2
 > (AISDLC-169.2) adds the catalogued failure playbook described below.
-> Phase 4 (AISDLC-169.4) adds the canonical `events.jsonl` writer,
-> the `cli-status --orchestrator` view, and the schema for downstream
-> consumers. Pre-dispatch admission filters (Phase 3) ship in parallel
-> (AISDLC-169.3); the soak corpus aggregator + chaos-test harness +
-> promotion runbook (Phase 5) is AISDLC-169.5 and lives below in the
-> "Promotion to default-on" section.
+> Phase 3 (AISDLC-169.3) wires the three §4.3 pre-dispatch admission
+> filters, the in-memory stuck-candidate counter, and the exponential-backoff
+> sleep cadence (Q3 + Q5). Phase 4 (AISDLC-169.4) adds the canonical
+> `events.jsonl` writer, the `cli-status --orchestrator` view, and the
+> schema for downstream consumers. Phase 5 (AISDLC-169.5) ships the
+> soak corpus aggregator + chaos-test harness + promotion runbook —
+> see "Promotion to default-on" below.
 
 The orchestrator is a long-running Node process that ties RFC-0010 (parallel
 execution), RFC-0011 (DoR gate), RFC-0012 (`executePipeline()`), RFC-0014
@@ -133,6 +134,159 @@ Returns JSON of the form:
 `status` does NOT require the feature flag — it's a read-only inspection
 surface so operators can preview what the loop would pick up before turning
 the flag on.
+
+## Pre-dispatch admission filters (RFC-0015 Phase 3 / §4.3)
+
+Every tick, BEFORE calling `executePipeline()`, the orchestrator walks each
+candidate through three filters in order. The chain short-circuits on the
+first failure so downstream filters don't waste work on a candidate that's
+already going to be skipped.
+
+| # | Filter | Reads | Skip event |
+|---|---|---|---|
+| 1 | **DependencyReadiness** | In-memory dependency graph | `OrchestratorBlockedByDependency{blockers}` |
+| 2 | **DorReadiness** | `<artifactsDir>/_dor/calibration.jsonl` (latest entry per task) + frontmatter `labels:` for `dor-bypass` | `OrchestratorBlockedByDor{verdict, signedAt}` |
+| 3 | **ExternalDependencies** | Task frontmatter `externalDependencies:` + `<artifactsDir>/_orchestrator/cleared-external-deps.json` | `OrchestratorAwaitingExternal{externalDeps, allExternalDeps}` |
+
+### Filter 1 — DependencyReadiness
+
+Wraps `cli-deps blockers <id>` in-process. A candidate clears the filter
+when EVERY upstream task is `Done` (or `Cancelled`) per the dependency
+graph. In production this is normally a no-op because `cli-deps frontier`
+already only returns ready candidates — the filter exists as
+defense-in-depth for non-frontier dispatch sources (manual-dispatch surfaces,
+the Phase 4 dashboard, race conditions where a sibling worker just shipped
+an upstream task between `frontier()` and the dispatch call).
+
+### Filter 2 — DoR readiness
+
+Reads the candidate's most recent `RefinementVerdict` from the calibration
+log. The candidate is admitted when:
+
+- `overallVerdict === 'admit'` (the rubric cleared the issue), OR
+- `outcome === 'override'` (a maintainer applied `dor-bypass` per
+  RFC-0011 §7.4 — the override entry is admitted regardless of the gate
+  verdicts), OR
+- the task carries `dor-bypass` in its frontmatter `labels:` (backlog
+  tasks declare bypass via frontmatter since they have no GH-issue label
+  surface).
+
+**No verdict in the log = no admission decision was ever made for this
+candidate.** Phase 3 treats that as PASS in v1: the orchestrator's
+candidate source is `cli-deps frontier`, and `frontier()` doesn't know
+anything about DoR. Adding a hard "must have a verdict" gate would
+effectively require every backlog task to be funneled through the GH
+Action ingress before dispatch — a bigger change than this RFC promises
+(RFC-0011 §6 covers the GitHub Issue path; backlog tasks are out of scope
+for the comment-loop). Phase 5 soak will surface whether "no-verdict-found"
+is a real source of false admits; if so, a future config knob
+(`requireVerdict: true`) can flip the default.
+
+### Filter 3 — External dependencies
+
+Parses the candidate's `externalDependencies:` frontmatter (already
+materialised on the dependency graph node by `buildDependencyGraph()` —
+see RFC-0014 §8 + Q3) and gates dispatch on entries with `kind: 'manual'`
+AND no operator-supplied clearance signal. Other v1 kinds
+(`npm-version`, `github-pr`, `url-head`, `other`) are surfaced in the
+event payload so operators see what the task is waiting on, but they do
+NOT block dispatch — the v1 resolver registry is "informational signal
+only" per RFC-0014 Q3.
+
+Operator clearance lives in
+`<artifactsDir>/_orchestrator/cleared-external-deps.json` — a JSON array
+of `{taskId, externalDepId}` records the operator appends manually:
+
+```jsonc
+[
+  { "taskId": "AISDLC-92", "externalDepId": "sec-review" },
+  { "taskId": "AISDLC-95", "externalDepId": "stakeholder-signoff" }
+]
+```
+
+Phase 3 reads the file when present and treats missing-or-malformed file
+as "nothing cleared" — the safe default that never silently admits a task
+it shouldn't. A future `cli-orchestrator clear-external <task> <dep-id>`
+helper is deferred to Phase 4 alongside the events.jsonl writer; for now
+operators edit the JSON file directly.
+
+### Filter trace logging
+
+Every evaluated candidate writes a structured trace block to the logger:
+
+```text
+[orchestrator] filter trace for AISDLC-92:
+  - Dependency check: passed
+  - DoR readiness: passed
+  - External deps: failed (1 manual external dep(s) unresolved: sec-review)
+  → skipped, awaiting external
+```
+
+The Phase 4 events.jsonl writer (AISDLC-169.4) plumbs these decisions into
+the structured event stream; Phase 3 surfaces them via
+`logger.info(...)` + the `tickResult.filterEvents` array.
+
+### Stuck-candidate detection
+
+A candidate skipped >5 consecutive ticks for the same reason emits a
+single `OrchestratorStuckCandidate{taskId, reason, ticksSinceFirstSkip}`
+event so the operator knows to investigate. The counter:
+
+- Increments per skip, scoped per `taskId.toLowerCase()`.
+- Resets to zero on the candidate's next admission OR when the candidate
+  drops out of the frontier (e.g. file moved to `backlog/completed/` —
+  `cli-deps frontier` no longer returns it).
+- Emits `OrchestratorStuckCandidate` exactly ONCE per streak (the next
+  cross of the threshold re-emits only after the streak resets).
+
+**v1 stores the counter in memory.** A restart wipes the streak and
+restarts the count from zero on the next skip. Persistence to
+`<artifactsDir>/_orchestrator/state.json` is deferred to Phase 4
+alongside the events.jsonl writer — Phase 3's contract is "operators see
+the signal during a single orchestrator session"; cross-session forensics
+require Phase 4.
+
+## Backoff sleep cadence (RFC-0015 §13 Q3 + Q5)
+
+Phase 3 replaces the static `tickIntervalSec` sleep with an
+exponential-backoff curve per the §13 Q3 + Q5 resolutions. Same curve for
+both "no work" and "all candidates filtered" cases — the cause distinction
+lives in the EVENT TYPE, not the cadence:
+
+```
+state: { currentIntervalSec: tickIntervalSec, idleStreak: 0, lastFrontierIds: {} }
+
+on every tick:
+  if dispatch succeeded:
+    currentIntervalSec = tickIntervalSec   # reset
+    idleStreak = 0
+    emit no idle event
+  else if frontier is empty:
+    idleStreak += 1
+    currentIntervalSec = min(5min, max(base, currentIntervalSec * 2))
+    emit OrchestratorIdleNoWork
+  else:                                    # candidates present but none admitted
+    idleStreak += 1
+    currentIntervalSec = min(5min, max(base, currentIntervalSec * 2))
+    emit OrchestratorIdleAllFiltered
+
+on every tick (regardless of outcome):
+  if any candidate ID is NEW since last tick (= a fresh task landed):
+    reset cadence to base interval BEFORE applying the idle increment
+```
+
+Operators can grep `events.jsonl` (Phase 4) by event type for forensic
+distinction; Phase 3 surfaces them on `tickResult.idleEvent`.
+
+| Tick | Cumulative idle ticks | `nextSleepSec` (with `tickIntervalSec=30`) |
+|---|---|---|
+| First idle | 1 | 60 |
+| 2 | 2 | 120 |
+| 3 | 3 | 240 |
+| 4 | 4 | 300 (cap) |
+| 5+ | 5+ | 300 (cap) |
+| Dispatch | reset to 0 | 30 |
+| New task arrives | reset to 0 (then +1 if this tick was idle) | 60 |
 
 ## Idempotent finalize (RFC-0015 §13 Q2)
 
@@ -590,13 +744,13 @@ RFC-driven flag promotions can copy it verbatim.
 
 ## Phase plan
 
-| Phase | Task | Scope | Status |
+| Phase | Task | Status | Scope |
 |---|---|---|---|
-| 1 | AISDLC-169.1 | Bare polling loop, feature flag, escalation hook, `cli-orchestrator` CLI, idempotent-finalize doc. | Shipped |
-| 2 | AISDLC-169.2 | 9-pattern failure playbook + `.ai-sdlc/orchestrator-failure-patterns.yaml` source-of-truth + worker state machine + per-worker forensic state. | Shipped |
-| 3 | AISDLC-169.3 | DoR + dependency + external-deps pre-dispatch admission filters; exponential-backoff cadence. | In flight |
-| 4 | AISDLC-169.4 | `events.jsonl` writer + `cli-status --orchestrator` view + canonical schema for downstream consumers. | Shipped |
-| 5 (this) | AISDLC-169.5 | Soak corpus aggregator (`cli-orchestrator-corpus`), chaos test harness, hybrid promotion runbook. | Shipped |
+| 1 | AISDLC-169.1 | Shipped | Bare polling loop, feature flag, escalation hook, `cli-orchestrator` CLI, idempotent-finalize doc. |
+| 2 | AISDLC-169.2 | Shipped | 9-pattern failure playbook + `.ai-sdlc/orchestrator-failure-patterns.yaml` source-of-truth + worker state machine + per-worker forensic state. |
+| 3 | AISDLC-169.3 | Shipped | DoR + dependency + external-deps pre-dispatch admission filters; in-memory stuck-candidate counter; exponential-backoff cadence (Q3 + Q5). Filter rejection + idle + stuck events emit through Phase 4's `writeEvent()` so the events.jsonl stream is the single observability path. |
+| 4 | AISDLC-169.4 | Shipped | `events.jsonl` writer + `cli-status --orchestrator` view + canonical schema for downstream consumers. |
+| 5 | AISDLC-169.5 | Shipped | Soak corpus aggregator (`cli-orchestrator-corpus`), chaos test harness, hybrid promotion runbook. |
 
 ## Cross-references
 

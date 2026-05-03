@@ -172,7 +172,12 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
     });
   });
 
-  it('empty frontier: Tick only', async () => {
+  it('empty frontier: Tick + IdleNoWork', async () => {
+    // Per the merged Phase 3 + Phase 4 wiring, the empty-frontier branch
+    // also surfaces an `OrchestratorIdleNoWork` event on the bus so
+    // operators can grep one stream for the idle cause (no work vs all
+    // candidates filtered). The in-process `tickResult.idleEvent` carries
+    // the same data for the `cli-orchestrator status` view.
     const { events, sink } = captureSink();
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1, maxTicks: 1 });
     const adapters: OrchestratorAdapters = {
@@ -183,15 +188,23 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
     };
     await runOrchestratorTick(config, adapters, 1);
 
-    expect(events).toHaveLength(1);
+    expect(events.map((e) => e.type)).toEqual(['OrchestratorTick', 'OrchestratorIdleNoWork']);
     expect(events[0]).toMatchObject({
       type: 'OrchestratorTick',
       tick: 1,
       candidates: 0,
     });
+    expect(events[1]).toMatchObject({
+      type: 'OrchestratorIdleNoWork',
+      tick: 1,
+      runId: 'r4',
+    });
   });
 
-  it('dry-run: Tick only (no Dispatched even when the frontier has candidates)', async () => {
+  it('dry-run: Tick + IdleNoWork (no Dispatched even when the frontier has candidates)', async () => {
+    // Dry-run short-circuits before the filter chain + dispatch; the loop
+    // still emits the matching idle event so the events stream stays
+    // honest about the orchestrator's heartbeat.
     const { events, sink } = captureSink();
     const config = defaultOrchestratorConfig({
       workDir: '/tmp',
@@ -208,8 +221,12 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
     };
     await runOrchestratorTick(config, adapters, 1);
 
-    expect(events.map((e) => e.type)).toEqual(['OrchestratorTick']);
+    expect(events.map((e) => e.type)).toEqual(['OrchestratorTick', 'OrchestratorIdleNoWork']);
     expect(events[0]).toMatchObject({ candidates: 2 });
+    expect(events[1]).toMatchObject({
+      type: 'OrchestratorIdleNoWork',
+      runId: 'r5',
+    });
   });
 
   it('best-effort: a thrown sink is swallowed (loop completes successfully)', async () => {

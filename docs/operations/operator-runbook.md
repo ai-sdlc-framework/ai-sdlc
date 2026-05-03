@@ -184,6 +184,49 @@ override per-mode `budget` and `escalateImmediately` via the same file
 `.ai-sdlc/schemas/orchestrator-failure-patterns.v1.schema.json` —
 malformed catalogues refuse the orchestrator at startup.
 
+### Autonomous orchestrator pre-dispatch filter events (RFC-0015 Phase 3)
+
+Phase 3 (AISDLC-169.3) ships these on the in-process tick result; the
+Phase 4 events.jsonl writer (AISDLC-169.4) plumbs them into the structured
+event stream that downstream consumers (Slack digest, dashboard) tail. See
+[`pipeline-cli/docs/orchestrator.md`](../../pipeline-cli/docs/orchestrator.md)
+for the per-filter behaviour + the backoff state machine.
+
+| Event | Severity | Meaning | Response |
+|---|---|---|---|
+| `OrchestratorBlockedByDependency` | Info | A candidate skipped because an upstream task is still open. Auto-clears when the upstream task lands in `backlog/completed/` | Audit only. Persistent skips on the same task → check `cli-deps blockers <id>` for an unexpected dangling reference |
+| `OrchestratorBlockedByDor` | Advisory | Latest `RefinementVerdict` for the candidate is `needs-clarification`. The DoR comment-loop ingress (RFC-0011 §6) is the canonical resolution path; the orchestrator only consumes the verdict | Address the clarification questions in the issue (or apply `dor-bypass` per RFC-0011 §7.4 with a documented reason) |
+| `OrchestratorAwaitingExternal` | Advisory | Candidate declares one or more `externalDependencies` of `kind: 'manual'` AND no operator clearance is recorded | When the external prerequisite is satisfied, append `{ "taskId": "<id>", "externalDepId": "<dep-id>" }` to `<artifactsDir>/_orchestrator/cleared-external-deps.json` |
+| `OrchestratorIdleNoWork` | Info | Tick saw an empty frontier — no candidates to consider. Backoff curve advances per RFC-0015 §13 Q5 | Audit only. Sustained idle → backlog is fully drained or every open task has unresolved dependencies |
+| `OrchestratorIdleAllFiltered` | Advisory | Tick saw N candidates but every one was rejected by the filter chain. Backoff curve advances per RFC-0015 §13 Q3 | Inspect the per-tick `filterEvents` to see which filter is rejecting which candidate; act on the matching `OrchestratorBlockedBy*` row |
+| `OrchestratorStuckCandidate` | Warning | A single candidate was skipped >5 consecutive ticks for the same reason. Emits ONCE per streak (re-emits only after the streak resets) | Resolve the gating condition (close the dependency, address the DoR clarification, or clear the external dep). The streak resets on the next admission |
+
+#### `OrchestratorAwaitingExternal` — operator response template
+
+Phase 3 reads operator clearance from a JSON file at
+`<artifactsDir>/_orchestrator/cleared-external-deps.json`. With Phase 4
+(AISDLC-169.4) now shipped, the same filter events also land on the
+`events.jsonl` stream, so operators have a single grep target. To clear
+an external dep manually:
+
+```bash
+# 1. Inspect the awaiting events on the events stream:
+jq 'select(.type == "OrchestratorAwaitingExternal")' \
+  artifacts/_orchestrator/events-*.jsonl
+
+# 2. Append a clearance record (create the file if missing — it's a JSON array):
+jq '. += [{taskId: "AISDLC-92", externalDepId: "sec-review"}]' \
+  artifacts/_orchestrator/cleared-external-deps.json \
+  > /tmp/cleared.json && mv /tmp/cleared.json artifacts/_orchestrator/cleared-external-deps.json
+
+# 3. The next tick's external-deps filter sees the entry and admits the candidate.
+```
+
+A `cli-orchestrator clear-external <task-id> <external-dep-id>` helper
+is on the Phase 5+ roadmap; until then operators edit the JSON file
+directly. The file is read fresh on every tick — no orchestrator
+restart required.
+
 ### Orchestrator-specific failure-mode runbook (RFC-0015 Phase 5)
 
 Phase 5 (AISDLC-169.5) ships the soak corpus + chaos-test harness and
