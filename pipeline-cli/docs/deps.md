@@ -1,12 +1,13 @@
-# `cli-deps` snapshot artifact + dispatcher + DoR composition (RFC-0014 Phase 1 + 2 + 3)
+# `cli-deps` snapshot artifact + dispatcher + DoR composition (RFC-0014 Phase 1 + 2 + 3 + 5)
 
 The dependency-graph snapshot artifact is the bridge from AISDLC-117's
 in-memory graph (see `pipeline-cli/docs/dependency-graph.md`) to the
 RFC-0014 composition layers — depth-aware PPA priority (Phase 2),
 DoR blast-radius surfacing (Phase 3 — this page also documents),
-and Slack/dashboard digests (Phase 4). All phases ship behind the
-shared `AI_SDLC_DEPS_COMPOSITION` feature flag; Phases 1 + 2 + 3 are
-live, Phase 4+ remain future-facing.
+Slack/dashboard digests (Phase 4), and the corpus-driven promotion
+infrastructure (Phase 5 — also documented here). All phases ship
+behind the shared `AI_SDLC_DEPS_COMPOSITION` feature flag; Phases
+1 + 2 + 3 + 5 are live, Phase 4 remains future-facing.
 
 This page covers:
 
@@ -20,6 +21,10 @@ This page covers:
   comparator that re-orders `cli-deps frontier` per RFC-0014 §5 + §12 Q1.
 - **Phase 3** — DoR blast-radius callouts + calibration log extension
   + `cli-dor-corpus --blast-radius` per RFC-0014 §6 + §12 Q5.
+- **Phase 5** — corpus aggregator (`cli-deps-corpus`), operator
+  override capture (`cli-deps log-override` + `cli-deps list-overrides`),
+  and the hybrid corpus-OR-override promotion path that flips the
+  flag's default OFF → ON per RFC-0014 §11.
 
 ## Feature flag — `AI_SDLC_DEPS_COMPOSITION`
 
@@ -382,18 +387,19 @@ const everything = rankAllByEffectivePriority(g);
 See `pipeline-cli/src/deps/effective-priority.ts` and
 `pipeline-cli/src/deps/dispatch.ts` for the full type reference.
 
-## What Phases 1-3 deliberately don't ship
+## What's not yet shipped
 
-Per RFC-0014 §11 the following are scheduled for later phases:
+Per RFC-0014 §11 the following remains scheduled for a later phase:
 
-- **Slack digest + dashboard graph view** (Phase 4).
-- **Soak + flag promotion** (Phase 5 — corpus-driven, not calendar-gated).
+- **Slack digest + dashboard graph view** (Phase 4 / AISDLC-167.4).
 
 The snapshot artifact (Phase 1), the dispatcher composition (Phase 2),
-and the DoR composition (Phase 3) are all live, all behind
+the DoR composition (Phase 3), and the corpus-driven promotion
+infrastructure (Phase 5 — see below) are all live, all behind
 `AI_SDLC_DEPS_COMPOSITION`. The Phase 4 dashboard will consume the
-same `effectivePriority` records this page documents and the same
-blast-radius helpers Phase 3 ships.
+same `effectivePriority` records this page documents, the same
+blast-radius helpers Phase 3 ships, and the same override log Phase 5
+captures.
 
 ## Phase 3 — DoR composition (AISDLC-167.3, RFC-0014 §6)
 
@@ -558,3 +564,190 @@ The renderers + library helpers are pure (no I/O); the consumer
 (typically `evaluateAndCommentBacklogTaskClaude` in
 `ingress-claude.ts`) is the integration point for stitching snapshot →
 verdict → comment → log.
+
+## Phase 5 — soak corpus + hybrid promotion (AISDLC-167.5, RFC-0014 §11)
+
+Phase 5 ships the measurement infrastructure that closes the RFC-0014
+loop: aggregator + override capture + runbook. The actual flag flip
+(default OFF → ON) is operator-decision-gated and lives in
+[`docs/operations/deps-composition-promotion.md`](../../docs/operations/deps-composition-promotion.md);
+this page documents the CLI surface that runbook drives.
+
+### Soak measurement methodology
+
+Per RFC-0014 §11 Phase 5 the promotion criteria are corpus-driven, not
+calendar-gated:
+
+- **Dispatch correctness > 95%** (composition top-of-frontier matches
+  the baseline top-of-frontier across the snapshot corpus), AND
+- **No operator override-rate spike** (operators aren't routinely
+  picking past the dispatcher's top — measured via the override log).
+
+The aggregator computes both signals from the canonical surfaces this
+page documents. The same pattern carries forward to any future phase
+that needs a corpus-driven exit criterion (mirror of RFC-0011 / AISDLC-161).
+
+### Operator override capture — `cli-deps log-override`
+
+When an operator dispatches a task that ISN'T the dispatcher's
+top-of-frontier, the override is logged so the next aggregator run
+can incorporate the signal:
+
+```bash
+$ cli-deps log-override --picked AISDLC-XYZ --reason "downstream PR just merged"
+{
+  "ok": true,
+  "entry": {
+    "schemaVersion": 1,
+    "ts": "2026-05-02T15:21:48.103Z",
+    "snapshotPath": "",
+    "dispatcherTopId": "AISDLC-AAA",
+    "operatorPickedId": "AISDLC-XYZ",
+    "ranking": [
+      { "id": "AISDLC-AAA", "position": 1 },
+      { "id": "AISDLC-XYZ", "position": 4 }
+    ],
+    "reason": "downstream PR just merged",
+    "mode": "composition"
+  }
+}
+```
+
+The CLI:
+
+- Recomputes the current ranked frontier (composition mode, regardless
+  of `AI_SDLC_DEPS_COMPOSITION` — the override IS the soak signal,
+  even when the env flag isn't set yet).
+- **Refuses** if `picked` is already the dispatcher's top pick (no
+  override happened — would just pollute the corpus).
+- **Refuses** if `picked` isn't on the ranked frontier at all
+  (operator typo, or task isn't ready yet).
+- Else appends one JSONL line to `$ARTIFACTS_DIR/_deps/overrides.jsonl`.
+
+To list logged overrides for a quick eyeball without spawning the
+aggregator:
+
+```bash
+$ cli-deps list-overrides --format table
+Timestamp                       Dispatcher top  Operator picked  Reason
+------------------------------  --------------  ---------------  -------------------
+2026-05-02T15:21:48.103Z        AISDLC-AAA      AISDLC-XYZ       downstream PR ...
+```
+
+### Override log shape
+
+Each override is one JSONL line under `$ARTIFACTS_DIR/_deps/overrides.jsonl`:
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "ts": "2026-05-02T15:21:48.103Z",
+  "snapshotPath": "",                        // optional join key against corpus
+  "dispatcherTopId": "AISDLC-AAA",           // what composition picked
+  "operatorPickedId": "AISDLC-XYZ",          // what the operator dispatched
+  "ranking": [                               // capped at top 10 entries
+    { "id": "AISDLC-AAA", "position": 1 },
+    { "id": "AISDLC-XYZ", "position": 4 }
+  ],
+  "reason": "downstream PR just merged",     // optional free-text
+  "mode": "composition"                       // 'composition' | 'baseline'
+}
+```
+
+The schema is forward-versioned (`schemaVersion: 1`); future
+revisions can add fields without breaking the aggregator's permissive
+parser.
+
+### Snapshot corpus aggregator — `cli-deps-corpus aggregate`
+
+Sister CLI to `cli-dor-corpus` (AISDLC-161). Reads N downloaded
+snapshot artifacts + the override log into a dispatch-quality envelope:
+
+```bash
+# Operator workflow (corpus path):
+$ mkdir -p ./deps-corpus
+$ cp -r ./artifacts/_deps/* ./deps-corpus/
+$ cli-deps-corpus aggregate ./deps-corpus --format table
+snapshot                     records  baseline-top   composition-top  agree
+---------------------------  -------  -------------  ---------------  -----
+2026-04-15T03-12-51.420Z     138      AISDLC-001     AISDLC-001       yes
+2026-04-22T09-01-08.011Z     142      AISDLC-001     AISDLC-002       NO
+2026-04-29T17-55-42.103Z     149      AISDLC-001     AISDLC-001       yes
+...
+
+Corpus: snapshots=50  files=50  skippedFiles=0  skippedLines=0
+Dispatch agreement: 96.0%
+Operator overrides: total=4  matchedToCorpus=3  rate=6.0%  distinctPickedIds=2
+Recommendation: safe-to-promote
+Reason: snapshotCount=50 ≥ 30, dispatchAgreementRate=96.0% ≥ 95.0%, override rate=6.0% < 10.0% — flip AI_SDLC_DEPS_COMPOSITION default OFF → ON
+```
+
+Tunables (defaults match RFC-0014 §11 Phase 5):
+
+- `--min-snapshots` — corpus-size floor (default 30; below this,
+  recommendation forces to `insufficient-data`)
+- `--correctness-threshold` — dispatch-agreement floor (default 0.95)
+- `--override-threshold` — operator override-rate ceiling (default 0.10)
+
+The aggregator auto-detects an `overrides.jsonl` under the input root
+(or pass `--overrides-file` for an explicit path).
+
+### Recommendation envelope
+
+Three values drive the operator decision per the runbook:
+
+| `recommendation` | Meaning | Operator action |
+|---|---|---|
+| `safe-to-promote` | All gates green | Dispatch the flag-flip PR (corpus path) |
+| `continue-soak` | Corpus has data but at least one gate failed; `reason` names it | Wait for more data, or tune the offending metric |
+| `insufficient-data` | `snapshotCount < minSnapshots` | Wait for more activity, or use the override path in the runbook |
+
+### Aggregator semantics — proxy caveat
+
+Snapshot records carry `criticalPathLength`, `dependencies`, `id`, and
+`lastModified` but **not** the per-task `priority:` field. The
+aggregator's "composition top pick" is therefore a **proxy** that uses
+only snapshot-resident structural signal (`criticalPathLength` DESC →
+`lastModified` DESC → `id` ASC). This is conservative: the real
+dispatcher's `effectivePriority` only ADDS a primary sort key, so a
+real disagreement implies a proxy disagreement (and a proxy agreement
+implies real-mode is also likely to agree). The override rate from
+the live operator log is the math-rigorous ground-truth signal;
+dispatch agreement is a secondary "is the proxy noisy?" check.
+
+### Library API (Phase 5)
+
+```ts
+import {
+  appendOverrideEntry,
+  loadOverrides,
+  type OverrideEntry,
+} from '@ai-sdlc/pipeline-cli/deps';
+import {
+  aggregateDispatchCorpus,
+  compareTopPicks,
+  loadSnapshotCorpus,
+  findSnapshotFiles,
+} from '@ai-sdlc/pipeline-cli/deps-corpus';
+
+// Operator override (e.g. from a slash command body):
+const entry = appendOverrideEntry({
+  snapshotPath: '/abs/path/snapshot.<iso>.dispatch.jsonl',
+  dispatcherTopId: 'AISDLC-AAA',
+  operatorPickedId: 'AISDLC-XYZ',
+  ranking: [{ id: 'AISDLC-AAA', position: 1 }],
+  reason: 'downstream PR just merged',
+});
+
+// Dashboard / soak A/B comparison:
+const files = findSnapshotFiles('./deps-corpus');
+const { snapshots, skippedFiles, skippedLines } = loadSnapshotCorpus(files);
+const { entries: overrides } = loadOverrides({ artifactsDir: './deps-corpus' });
+const report = aggregateDispatchCorpus(snapshots, { overrides });
+console.log(report.aggregate.recommendation);
+```
+
+See `pipeline-cli/src/deps/override-log.ts` and
+`pipeline-cli/src/cli/deps-corpus.ts` for the full type reference. The
+runbook at [`docs/operations/deps-composition-promotion.md`](../../docs/operations/deps-composition-promotion.md)
+walks operators through both promotion paths end-to-end.

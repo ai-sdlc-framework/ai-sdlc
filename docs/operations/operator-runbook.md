@@ -291,6 +291,15 @@ The `lastVerified` date on a SubscriptionPlan is more than 30 days old. Check cu
 4. Create their pipeline YAML referencing the SubscriptionPlan via `WorktreePool.spec.subscriptionPlans[]`.
 5. Start with `parallelism.maxConcurrent: 1` for the first few runs. Bump to tier-aware default once you have observed clean execution.
 
+### "RFC-0014 dependency-graph composition is acting up"
+
+The composition layer (`AI_SDLC_DEPS_COMPOSITION`) ships behind a flag — these are the failure modes worth knowing while it's in soak (and after promotion):
+
+- **Snapshot validation failures**: `cli-deps validate` reports cycles or dangling refs. Snapshots are best-effort consistency per RFC-0014 §12 Q6, so transient dangling edges (a task moved between `tasks/` and `completed/` mid-walk) are expected. Persistent failures across multiple runs point at a real cycle in `dependencies:` frontmatter — fix the cycle in the offending task file. The dispatcher refuses via `cli-deps preflight`, so a dangling edge surfaces as a refusal, not a wrong dispatch.
+- **Dispatch ordering anomalies**: `cli-deps frontier` returns a top pick that surprises the operator. First check `effectivePriority` + `criticalPathLength` columns in `--format table` — the rationale usually drops out of the metadata ("oh, this leaf unblocks a critical-tagged chain"). If unexplained, log an override via `cli-deps log-override --picked <id> --reason <text>`; the override log is the soak signal that drives [`docs/operations/deps-composition-promotion.md`](deps-composition-promotion.md).
+- **Blast-radius callout misfires**: the DoR clarification comment cites the wrong N (or fires when it shouldn't). Lower the per-project threshold via `dor-config.yaml`'s `blastRadiusThreshold` (default 3); see `pipeline-cli/docs/deps.md` Phase 3 section for tuning. False-positive bypass-tone comments are a calibration signal — log them and tune the rubric, don't suppress the comment.
+- **Override log polluting the corpus**: `cli-deps log-override` refuses no-op overrides (operator picked the dispatcher's top) and unknown picks (id not on the ranked frontier). If the log accumulates entries you don't trust, it's safe to truncate `$ARTIFACTS_DIR/_deps/overrides.jsonl` — the file is append-only with no other consumer than the aggregator, and the aggregator tolerates missing files.
+
 ---
 
 ## Skills and Onboarding

@@ -20,6 +20,7 @@
   "bin": {
     "ai-sdlc-pipeline": "bin/ai-sdlc-pipeline.mjs",
     "cli-deps": "bin/cli-deps.mjs",
+    "cli-deps-corpus": "bin/cli-deps-corpus.mjs",
     "cli-dor-stats": "bin/cli-dor-stats.mjs",
     "cli-dor-digest": "bin/cli-dor-digest.mjs",
     "cli-dor-corpus": "bin/cli-dor-corpus.mjs",
@@ -56,6 +57,10 @@
     "./dor-corpus": {
       "types": "./dist/cli/dor-corpus.d.ts",
       "import": "./dist/cli/dor-corpus.js"
+    },
+    "./deps-corpus": {
+      "types": "./dist/cli/deps-corpus.d.ts",
+      "import": "./dist/cli/deps-corpus.js"
     }
   },
   "publishConfig": {
