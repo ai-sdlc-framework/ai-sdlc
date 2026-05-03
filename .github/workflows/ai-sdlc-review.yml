@@ -186,10 +186,18 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           mkdir -p /tmp/classifier-artifacts
-          # `--silent` suppresses pnpm's progress noise so we capture clean JSON.
-          # `|| echo ...` is the belt-and-braces fallback in case the binary is
-          # missing — emits a fellOpen=true ALL_REVIEWERS decision and we proceed.
-          CLASSIFIER_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-classify-pr classify \
+          # AISDLC-156: invoke the bin shim DIRECTLY via `node` instead of
+          # `pnpm --filter ... exec`. `pnpm exec` does NOT resolve a workspace
+          # package's OWN bin entries (only its DEPENDENCIES' bins are
+          # symlinked into node_modules/.bin/), so the previous form silently
+          # failed with `Command "cli-classify-pr" not found` and the
+          # `|| echo` fallback fired on EVERY run — defeating the AISDLC-141
+          # cost optimization. Direct node invocation removes the pnpm layer
+          # and makes the fallback fire only on real CLI errors.
+          # `|| echo ...` is the belt-and-braces fallback in case the binary
+          # genuinely errors — emits a fellOpen=true ALL_REVIEWERS decision
+          # and we proceed.
+          CLASSIFIER_JSON=$(node pipeline-cli/bin/cli-classify-pr.mjs classify \
             --paths-file /tmp/pr-files.txt \
             --issue-id "PR-${PR_NUMBER}" \
             --artifacts-dir /tmp/classifier-artifacts 2>/tmp/classifier-stderr.txt \
@@ -364,7 +372,11 @@ jobs:
           # the trusted-author filter (Layer 2 defense-in-depth) on top of
           # the gh --jq filter above. Even if the jq filter is bypassed
           # somehow, the CLI-side filter still rejects forged markers.
-          INCREMENTAL_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide decide \
+          #
+          # AISDLC-156: direct `node ./pipeline-cli/bin/...` invocation (NOT
+          # `pnpm --filter ... exec`). See the matching note on the classify
+          # step above + pipeline-cli/README.md "Invoking from CI" section.
+          INCREMENTAL_JSON=$(node pipeline-cli/bin/cli-incremental-decide.mjs decide \
             --comments-json-file /tmp/pr-comments.json \
             --base-ref "${{ github.event.pull_request.base.sha }}" \
             --head-ref HEAD \
@@ -464,7 +476,9 @@ jobs:
           # not the classifier selected them). The report job's gate
           # semantics stay unchanged — three approved verdicts → APPROVE.
           if [ "$INCR_SKIP" = "true" ]; then
-            INCR_AUTO_APPROVED=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide auto-approved-verdict \
+            # AISDLC-156: direct `node ./pipeline-cli/bin/...` invocation —
+            # see notes on the classify + decide steps above.
+            INCR_AUTO_APPROVED=$(node pipeline-cli/bin/cli-incremental-decide.mjs auto-approved-verdict \
               --reviewed-sha "$INCR_LAST_SHA" 2>/dev/null \
               || printf '%s' '{"approved":true,"findings":[],"summary":"Skipped by incremental review (AISDLC-142) — content unchanged."}')
             for TYPE in testing critic security; do
@@ -539,7 +553,16 @@ jobs:
           # safety net). The classifier guarantees `proceed-as-normal` on
           # any partial input set so a workflow regression can't silently
           # suppress a real failure.
-          BUDGET_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-classify-budget \
+          #
+          # AISDLC-156: direct `node ./pipeline-cli/bin/...` invocation —
+          # see notes on the classify + decide steps above. Pre-AISDLC-156
+          # this used `pnpm --filter ... exec cli-classify-budget` which
+          # silently failed (`Command not found`) on every run because pnpm
+          # exec doesn't resolve workspace own-bins → the fallback below
+          # fired unconditionally → `proceed-as-normal` aggregate → noisy
+          # CHANGES_REQUESTED on every PR when the API key was exhausted
+          # (defeating the AISDLC-147/154 circuit breaker entirely).
+          BUDGET_JSON=$(node pipeline-cli/bin/cli-classify-budget.mjs \
             --testing-stdout /tmp/review-testing.txt \
             --testing-stderr /tmp/review-testing-stderr.txt \
             --critic-stdout /tmp/review-critic.txt \
