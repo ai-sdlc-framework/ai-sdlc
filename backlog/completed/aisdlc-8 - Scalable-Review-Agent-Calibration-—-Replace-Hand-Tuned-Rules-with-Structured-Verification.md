@@ -20,11 +20,17 @@ references:
   - .ai-sdlc/review-policy.md
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/ci.yml
-  - >-
-    https://venturebeat.com/orchestration/metas-new-structured-prompting-technique-makes-llms-significantly-better-at
 documentation:
   - docs/prd-claude-code-native-integration.md
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      https://venturebeat.com/orchestration/metas-new-structured-prompting-technique-makes-llms-significantly-better-at
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

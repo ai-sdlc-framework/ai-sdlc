@@ -13,11 +13,18 @@ labels:
 milestone: m-3
 dependencies: []
 references:
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#9-schema-changes
   - spec/schemas/refinement-verdict.v1.schema.json
   - .ai-sdlc/dor-config.yaml
 parent_task_id: AISDLC-115
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#9-schema-changes
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

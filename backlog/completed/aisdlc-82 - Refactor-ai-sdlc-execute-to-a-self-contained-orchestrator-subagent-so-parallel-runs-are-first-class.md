@@ -14,17 +14,23 @@ labels:
   - design
   - follow-up
 dependencies: []
-references:
-  - ai-sdlc-plugin/commands/execute.md
-  - ai-sdlc-plugin/agents/developer.md
-  - ai-sdlc-plugin/agents/code-reviewer.md
-  - >-
-    backlog/completed/aisdlc-71 -
-    Replace-orchestrator-driven-dogfood-pipeline-with-ai-sdlc-execute-plugin-command.md
-  - >-
-    backlog/tasks/aisdlc-81 -
-    Per-worktree-active-task-sentinel-—-enable-parallel-ai-sdlc-execute-runs-with-cross-repo-writes.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: backlog/tasks/aisdlc-81 -
+      Per-worktree-active-task-sentinel-—-enable-parallel-ai-sdlc-execute-runs-with-cross-repo-writes.md
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-71 -
+      Replace-orchestrator-driven-dogfood-pipeline-with-ai-sdlc-execute-plugin-command.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

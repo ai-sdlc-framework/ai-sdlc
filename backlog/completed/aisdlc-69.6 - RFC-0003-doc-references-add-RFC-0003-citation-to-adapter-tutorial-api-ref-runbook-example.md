@@ -1,6 +1,8 @@
 ---
 id: AISDLC-69.6
-title: RFC-0003 doc references — add RFC-0003 citation to adapter tutorial / api-ref / runbook / example
+title: >-
+  RFC-0003 doc references — add RFC-0003 citation to adapter tutorial / api-ref
+  / runbook / example
 status: Done
 assignee: []
 created_date: '2026-04-30 17:35'
@@ -13,15 +15,10 @@ labels:
   - aisdlc-69
 dependencies:
   - AISDLC-69.2
-references:
-  - spec/rfcs/RFC-0003-infrastructure-adapters.md
-  - docs/tutorials/04-custom-adapter.md
-  - docs/tutorials/06-openshell-sandbox.md
-  - docs/api-reference/adapters.md
-  - docs/operations/adapter-authoring.md
-  - docs/examples/adapter-implementation.ts
 parent_task_id: AISDLC-69
 priority: low
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

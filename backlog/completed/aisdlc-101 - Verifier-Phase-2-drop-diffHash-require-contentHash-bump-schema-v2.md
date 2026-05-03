@@ -1,7 +1,6 @@
 ---
 id: AISDLC-101
-title: >-
-  Verifier Phase 2 — drop diffHash, require contentHash, bump schema to v2
+title: 'Verifier Phase 2 — drop diffHash, require contentHash, bump schema to v2'
 status: Done
 assignee: []
 labels:
@@ -14,11 +13,23 @@ dependencies:
 references:
   - scripts/verify-attestation.mjs
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - scripts/ci-sign-attestation.mjs
   - orchestrator/src/runtime/attestations.ts
-  - .ai-sdlc/schemas/attestation.v1.schema.json
-  - backlog/completed/aisdlc-94 - Verifier-diffHash-should-be-rebase-tolerant-hash-post-apply-tree-state-not-literal-diff-text.md
+  - >-
+    backlog/completed/aisdlc-94 -
+    Verifier-diffHash-should-be-rebase-tolerant-hash-post-apply-tree-state-not-literal-diff-text.md
 priority: medium
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/ci-sign-attestation.mjs'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .ai-sdlc/schemas/attestation.v1.schema.json
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

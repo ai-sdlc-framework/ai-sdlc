@@ -13,11 +13,21 @@ labels:
 dependencies: []
 references:
   - .husky/pre-commit
-  - 'https://github.com/ReliableGenius/backlog.md-drift'
-  - >-
-    backlog/tasks/aisdlc-117 -
-    Compute-backlog-task-dependency-graph-integrate-into-dispatch-frontier.md
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      https://github.com/ReliableGenius/backlog.md-drift
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: backlog/tasks/aisdlc-117 -
+      Compute-backlog-task-dependency-graph-integrate-into-dispatch-frontier.md
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

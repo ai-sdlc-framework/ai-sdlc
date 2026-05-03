@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-01 23:41'
+updated_date: '2026-05-03 00:24'
 labels:
   - ci
   - infrastructure
@@ -16,8 +17,21 @@ dependencies: []
 references:
   - .github/workflows/auto-enable-auto-merge.yml
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
-  - 'https://github.com/ai-sdlc-framework/ai-sdlc/pull/159'
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      https://github.com/ai-sdlc-framework/ai-sdlc/pull/159
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      https://github.com/ai-sdlc-framework/ai-sdlc/pull/159
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

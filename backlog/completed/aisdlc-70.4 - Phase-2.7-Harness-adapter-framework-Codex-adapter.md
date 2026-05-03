@@ -12,13 +12,21 @@ labels:
 milestone: m-2
 dependencies:
   - AISDLC-70.1
-references:
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#13-harness-selection
-  - ai-sdlc-plugin/agents/critic-reviewer.md
-  - ai-sdlc-plugin/agents/security-reviewer.md
 parent_task_id: AISDLC-70
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#13-harness-selection
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: ai-sdlc-plugin/agents/critic-reviewer.md'
+    resolution: flagged
 ---
 
 ## Description

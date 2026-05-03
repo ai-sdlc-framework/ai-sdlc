@@ -15,12 +15,23 @@ dependencies:
   - AISDLC-100.5
 references:
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
-  - pipeline-cli/README.md (new)
-  - pipeline-cli/docs/ (new)
   - CLAUDE.md
-  - ai-sdlc-plugin/README.md
 parent_task_id: AISDLC-100
 priority: medium
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/README.md (new)'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: pipeline-cli/docs/ (new)'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: ai-sdlc-plugin/README.md'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

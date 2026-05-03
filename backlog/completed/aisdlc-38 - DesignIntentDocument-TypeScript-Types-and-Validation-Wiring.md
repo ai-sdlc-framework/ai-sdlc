@@ -12,11 +12,9 @@ labels:
 milestone: m-1
 dependencies:
   - AISDLC-37
-references:
-  - reference/src/core/types.ts
-  - reference/src/core/validation.ts
-  - reference/scripts/generate-schemas.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

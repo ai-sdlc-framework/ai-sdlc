@@ -19,6 +19,13 @@ references:
   - docs/operations/operator-runbook.md
 parent_task_id: AISDLC-69
 priority: low
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: dep-resolved
+    detail: Dependency AISDLC-69.2 has been completed
+    resolution: flagged
 ---
 
 ## Description

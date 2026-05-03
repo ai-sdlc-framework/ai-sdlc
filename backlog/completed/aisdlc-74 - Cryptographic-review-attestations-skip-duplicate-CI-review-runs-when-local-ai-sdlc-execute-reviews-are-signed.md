@@ -15,24 +15,43 @@ labels:
   - cost-reduction
   - attestation
 dependencies: []
-references:
-  - >-
-    backlog/completed/aisdlc-71 -
-    Replace-orchestrator-driven-dogfood-pipeline-with-ai-sdlc-execute-plugin-command.md
-  - >-
-    backlog/completed/aisdlc-68 -
-    Documentation-consolidation-ai-sdlc-docs-↔-ai-sdlc-io-content.md
-  - >-
-    backlog/completed/aisdlc-72 -
-    Strip-GIT_DIR-GIT_WORK_TREE-GIT_INDEX_FILE-from-all-execSyncgit-...-sites-in-orchestrator-tests.md
-  - ai-sdlc-plugin/commands/execute.md
-  - ai-sdlc-plugin/agents/code-reviewer.md
-  - ai-sdlc-plugin/agents/test-reviewer.md
-  - ai-sdlc-plugin/agents/security-reviewer.md
-  - .ai-sdlc/review-policy.md
-  - .github/workflows/post-review-results.yml
-  - 'https://github.com/secure-systems-lab/dsse'
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/post-review-results.yml
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      https://github.com/secure-systems-lab/dsse
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-71 -
+      Replace-orchestrator-driven-dogfood-pipeline-with-ai-sdlc-execute-plugin-command.md
+      was modified after task was completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-68 -
+      Documentation-consolidation-ai-sdlc-docs-↔-ai-sdlc-io-content.md was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-72 -
+      Strip-GIT_DIR-GIT_WORK_TREE-GIT_INDEX_FILE-from-all-execSyncgit-...-sites-in-orchestrator-tests.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

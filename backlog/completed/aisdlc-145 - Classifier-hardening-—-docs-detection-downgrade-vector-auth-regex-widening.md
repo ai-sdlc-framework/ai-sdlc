@@ -12,8 +12,15 @@ dependencies:
   - AISDLC-141
 references:
   - pipeline-cli/src/classifier/classifier.ts
-  - orchestrator/src/models/classifier.ts (also has copy)
 priority: medium
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: orchestrator/src/models/classifier.ts
+      (also has copy)
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

@@ -8,11 +8,21 @@ labels:
   - cleanup
   - follow-up
 dependencies: []
-references:
-  - scripts/ci-sign-attestation.mjs
-  - scripts/ci-sign-attestation.test.mjs
-  - scripts/post-attestation-comment.mjs
 priority: low
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/ci-sign-attestation.mjs'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/ci-sign-attestation.test.mjs'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/post-attestation-comment.mjs'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

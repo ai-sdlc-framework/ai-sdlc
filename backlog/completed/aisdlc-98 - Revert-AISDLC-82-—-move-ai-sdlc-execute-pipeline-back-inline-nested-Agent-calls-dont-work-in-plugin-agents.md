@@ -13,14 +13,25 @@ labels:
   - execute-pipeline
 dependencies: []
 references:
-  - ai-sdlc-plugin/agents/execute-orchestrator.md
   - ai-sdlc-plugin/commands/execute.md
   - ai-sdlc-plugin/commands/execute.test.mjs
   - ai-sdlc-plugin/agents/agents.test.mjs
-  - backlog/completed/aisdlc-82 - Refactor-ai-sdlc-execute-to-a-self-contained-orchestrator-subagent-so-parallel-runs-are-first-class.md
-  - backlog/completed/aisdlc-90 - Fix-execute-orchestrator-agent-frontmatter-Task-Agent-rename-MCP-namespace.md
+  - >-
+    backlog/completed/aisdlc-82 -
+    Refactor-ai-sdlc-execute-to-a-self-contained-orchestrator-subagent-so-parallel-runs-are-first-class.md
+  - >-
+    backlog/completed/aisdlc-90 -
+    Fix-execute-orchestrator-agent-frontmatter-Task-Agent-rename-MCP-namespace.md
   - CLAUDE.md
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/agents/execute-orchestrator.md
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

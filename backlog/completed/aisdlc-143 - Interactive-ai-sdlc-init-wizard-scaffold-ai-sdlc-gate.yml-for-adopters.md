@@ -14,8 +14,15 @@ references:
   - orchestrator/src/cli/commands/init.ts
   - .github/workflows/ai-sdlc-gate.yml
   - docs/operations/quality-gate.md
-  - 'memory: feedback_design_for_adopters_first.md'
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: memory:
+      feedback_design_for_adopters_first.md
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

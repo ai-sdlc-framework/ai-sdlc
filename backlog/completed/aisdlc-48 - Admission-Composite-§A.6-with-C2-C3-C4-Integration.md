@@ -15,9 +15,9 @@ dependencies:
   - AISDLC-44
   - AISDLC-45
   - AISDLC-47
-references:
-  - orchestrator/src/admission-score.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

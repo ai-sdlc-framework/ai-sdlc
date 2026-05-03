@@ -10,10 +10,9 @@ labels:
   - hooks
   - investigation
 dependencies: []
-references:
-  - ai-sdlc-plugin/plugin.json
-  - ai-sdlc-plugin/hooks/deferred-coverage-check.sh
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

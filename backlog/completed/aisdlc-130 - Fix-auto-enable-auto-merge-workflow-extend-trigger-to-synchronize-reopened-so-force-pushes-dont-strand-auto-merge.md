@@ -16,7 +16,6 @@ dependencies: []
 references:
   - .github/workflows/auto-enable-auto-merge.yml
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
-  - 'https://github.com/ai-sdlc-framework/ai-sdlc/pull/159'
 priority: high
 ---
 

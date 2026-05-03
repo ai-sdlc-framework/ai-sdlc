@@ -12,10 +12,21 @@ labels:
 milestone: m-3
 dependencies:
   - AISDLC-115.8
-references:
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#10-backward-compatibility
 parent_task_id: AISDLC-115
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#10-backward-compatibility
+    resolution: flagged
+  - date: '2026-05-03'
+    type: refs-orphaned
+    detail: All referenced files have been deleted
+    resolution: flagged
 ---
 
 ## Description

@@ -17,9 +17,17 @@ dependencies:
 references:
   - .github/workflows/ai-sdlc-review.yml
   - .github/workflows/verify-attestation.yml
-  - branch-protection rules on main
-  - 'PR #166 (real-world deadlock case)'
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: branch-protection rules on main'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: PR #166 (real-world deadlock case)'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

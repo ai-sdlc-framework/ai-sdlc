@@ -17,8 +17,15 @@ dependencies:
 references:
   - pipeline-cli/src/dor/calibration-log.ts
   - .gitignore
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#5.5
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#5.5
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

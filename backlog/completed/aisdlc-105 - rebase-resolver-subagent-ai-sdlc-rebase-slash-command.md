@@ -14,9 +14,14 @@ dependencies: []
 references:
   - ai-sdlc-plugin/agents/
   - ai-sdlc-plugin/commands/
-  - scripts/sign-attestation.mjs
   - scripts/check-skip-ci-marker.sh
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/sign-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

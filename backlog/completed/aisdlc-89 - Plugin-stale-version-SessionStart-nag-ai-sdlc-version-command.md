@@ -10,13 +10,14 @@ labels:
   - ux
   - ops
 dependencies: []
-references:
-  - ai-sdlc-plugin/.claude-plugin/plugin.json
-  - ai-sdlc-plugin/hooks/
-  - ai-sdlc-plugin/commands/
-  - ai-sdlc-plugin/README.md
-  - .claude-plugin/marketplace.json
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: ai-sdlc-plugin/README.md'
+    resolution: flagged
 ---
 
 ## Description

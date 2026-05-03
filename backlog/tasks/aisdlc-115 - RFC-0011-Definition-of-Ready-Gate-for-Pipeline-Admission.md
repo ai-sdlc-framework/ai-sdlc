@@ -4,6 +4,7 @@ title: 'RFC-0011: Definition-of-Ready Gate for Pipeline Admission'
 status: To Do
 assignee: []
 created_date: '2026-05-01 16:22'
+updated_date: '2026-05-03 00:24'
 labels:
   - rfc-0011
   - architecture
@@ -13,11 +14,18 @@ milestone: m-3
 dependencies: []
 references:
   - spec/rfcs/RFC-0011-definition-of-ready-gate.md
-  - backlog/docs/ppa-product-signoff-rfc0011.md
   - ai-sdlc-plugin/agents/refinement-reviewer.md
   - .ai-sdlc/dor-config.yaml
   - spec/schemas/refinement-verdict.v1.schema.json
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      backlog/docs/ppa-product-signoff-rfc0011.md
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

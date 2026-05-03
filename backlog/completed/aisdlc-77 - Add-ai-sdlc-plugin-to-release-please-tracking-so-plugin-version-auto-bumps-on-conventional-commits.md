@@ -14,19 +14,23 @@ labels:
   - infra
   - follow-up
 dependencies: []
-references:
-  - release-please-config.json
-  - .release-please-manifest.json
-  - ai-sdlc-plugin/plugin.json
-  - ai-sdlc-plugin/.claude-plugin/plugin.json
-  - .claude-plugin/marketplace.json
-  - ai-sdlc-plugin/mcp-server/package.json
-  - >-
-    backlog/completed/aisdlc-75 -
-    Fix-ai-sdlc-plugin-distribution-mcp-server-ships-without-dist-node_modules-breaks-all-governance-hooks-on-cached-install.md
-  - >-
-    https://github.com/googleapis/release-please/blob/main/docs/customizing.md#updating-arbitrary-files
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      https://github.com/googleapis/release-please/blob/main/docs/customizing.md#updating-arbitrary-files
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-75 -
+      Fix-ai-sdlc-plugin-distribution-mcp-server-ships-without-dist-node_modules-breaks-all-governance-hooks-on-cached-install.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

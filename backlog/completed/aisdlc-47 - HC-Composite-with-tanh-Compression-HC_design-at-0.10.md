@@ -12,10 +12,9 @@ labels:
 milestone: m-1
 dependencies:
   - AISDLC-46
-references:
-  - orchestrator/src/admission-score.ts
-  - orchestrator/src/priority.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description
