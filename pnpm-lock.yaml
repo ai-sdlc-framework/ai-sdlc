@@ -91,6 +91,9 @@ importers:
       '@ai-sdlc/orchestrator':
         specifier: workspace:*
         version: link:../orchestrator
+      '@ai-sdlc/pipeline-cli':
+        specifier: workspace:*
+        version: link:../pipeline-cli
       better-sqlite3:
         specifier: ^11.0.0
         version: 11.10.0

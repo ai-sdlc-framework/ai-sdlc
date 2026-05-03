@@ -9,20 +9,26 @@ describe('nav-items', () => {
   });
 
   describe('coreNavItems', () => {
-    it('has 5 core navigation items', () => {
-      expect(coreNavItems).toHaveLength(5);
+    it('has 6 core navigation items', () => {
+      expect(coreNavItems).toHaveLength(6);
     });
 
     it('includes Overview as the first item', () => {
       expect(coreNavItems[0]).toEqual({ href: '/', label: 'Overview' });
     });
 
-    it('includes Cost, Autonomy, Codebase, and Audit', () => {
+    it('includes Cost, Autonomy, Codebase, Audit, and DoR Calibration', () => {
       const labels = coreNavItems.map((item) => item.label);
       expect(labels).toContain('Cost');
       expect(labels).toContain('Autonomy');
       expect(labels).toContain('Codebase');
       expect(labels).toContain('Audit');
+      expect(labels).toContain('DoR Calibration');
+    });
+
+    it('routes DoR Calibration to /dor', () => {
+      const dor = coreNavItems.find((i) => i.label === 'DoR Calibration');
+      expect(dor).toEqual({ href: '/dor', label: 'DoR Calibration' });
     });
 
     it('all items have href and label', () => {
