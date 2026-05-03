@@ -324,6 +324,30 @@ jobs:
                 | base64 -d 2>/dev/null \
                 | jq -r '.reviewedSha' 2>/dev/null; } || echo "")
 
+          # AISDLC-151 (defense-in-depth follow-up to AISDLC-142 round 3):
+          # Shell-side validate PRIOR_SHA BEFORE it enters any subprocess
+          # invocation (`git diff PRIOR_SHA…HEAD` below). The TS-side
+          # parseMarker enforces /^[0-9a-f]{40}$/i, but the bash-side jq
+          # extraction trusts whatever the marker JSON carries. A trusted
+          # COLLABORATOR could theoretically craft a marker with a
+          # `reviewedSha` containing git-option-injection content (e.g.
+          # `--upload-pack=evil`). The `...HEAD` suffix mitigates pure
+          # option injection (git rejects the malformed arg), but explicit
+          # shell-side hex-only validation is cheap insurance. On invalid
+          # SHA we log a `::warning::` (operator visibility) and clear
+          # PRIOR_SHA so the no-prior-SHA path runs (FULL review).
+          #
+          # Implementation note: we use bash `[[ =~ ]]` rather than
+          # `printf | grep`. The `grep` form treats embedded newlines as
+          # line separators, so a payload like `<40 valid hex>\n--evil`
+          # matches line-1 against `^[0-9a-f]{40}$` and passes — letting
+          # the rest smuggle through. `[[ =~ ]]` matches against the
+          # whole string atomically.
+          if [ -n "$PRIOR_SHA" ] && ! [[ "$PRIOR_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::warning::PRIOR_SHA from incremental-review marker failed shell-side hex validation (\"$PRIOR_SHA\"); falling back to FULL review"
+            PRIOR_SHA=""
+          fi
+
           : > /tmp/pr-delta-numstat.txt
           if [ -n "$PRIOR_SHA" ]; then
             # If PRIOR_SHA isn't reachable (rebase rewrote history), the diff
