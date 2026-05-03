@@ -140,6 +140,104 @@ describe('classifyOneReviewer', () => {
     });
     expect(result).toBe('other-failure');
   });
+
+  // ---- AISDLC-149: cli-review packages API errors into valid verdicts ----
+
+  it('AISDLC-149: returns budget-exhausted for valid verdict whose finding embeds the API error body', () => {
+    // Real-world shape from CI run 25265922400 (PR #182): cli-review
+    // caught the Anthropic API error and wrapped it into a well-formed
+    // verdict with a critical finding. Original AISDLC-147 classifier
+    // missed this and reported `ok`, posting CHANGES_REQUESTED.
+    const verdictLine = JSON.stringify({
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message:
+            'Review agent failed: Anthropic API error 400: {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits."},"request_id":"req_abc123"}',
+        },
+      ],
+      summary: 'testing review could not be completed',
+    });
+    const result = classifyOneReviewer({
+      type: 'testing',
+      verdictLine,
+      stderr: '',
+    });
+    expect(result).toBe('budget-exhausted');
+  });
+
+  it('AISDLC-149: returns ok when valid verdict has a non-budget critical finding (existing behavior preserved)', () => {
+    // Defends the AND-of-two rule on the verdict-finding path too:
+    // a critical finding about, say, a security issue must NOT be
+    // misclassified as budget-exhausted just because the reviewer flagged
+    // something serious.
+    const verdictLine = JSON.stringify({
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message: 'SQL injection vulnerability in src/db.ts:42 — unsanitized user input',
+        },
+        {
+          severity: 'major',
+          message: 'Missing rate-limit on /api/login',
+        },
+      ],
+      summary: 'security issues found',
+    });
+    const result = classifyOneReviewer({
+      type: 'security',
+      verdictLine,
+      stderr: '',
+    });
+    expect(result).toBe('ok');
+  });
+
+  it('AISDLC-149: case-insensitive match inside a valid-verdict finding', () => {
+    // The Anthropic body occasionally arrives with different casing; the
+    // verdict-finding inspection path must match case-insensitively just
+    // like the stdout/stderr path.
+    const verdictLine = JSON.stringify({
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message: 'Anthropic returned INVALID_REQUEST_ERROR — Credit Balance Is Too Low.',
+        },
+      ],
+      summary: 'agent failed',
+    });
+    const result = classifyOneReviewer({
+      type: 'critic',
+      verdictLine,
+      stderr: '',
+    });
+    expect(result).toBe('budget-exhausted');
+  });
+
+  it('AISDLC-149: returns ok when only ONE substring appears in a finding (AND-of-two enforced)', () => {
+    // Mirrors the existing other-failure single-substring tests on the
+    // valid-verdict path: a finding that mentions only `invalid_request_error`
+    // (e.g. a real schema-validation failure surfaced by the reviewer) must
+    // NOT be mistaken for budget exhaustion.
+    const verdictLine = JSON.stringify({
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message: 'Anthropic API error 400 invalid_request_error: messages.0: too long',
+        },
+      ],
+      summary: 'agent failed',
+    });
+    const result = classifyOneReviewer({
+      type: 'testing',
+      verdictLine,
+      stderr: '',
+    });
+    expect(result).toBe('ok');
+  });
 });
 
 describe('classifyReviewerOutputs (aggregate decision)', () => {
@@ -224,5 +322,60 @@ describe('classifyReviewerOutputs (aggregate decision)', () => {
     expect(BUDGET_EXHAUSTED_SUBSTRINGS).toContain('credit balance is too low');
     expect(BUDGET_EXHAUSTED_SUBSTRINGS).toContain('invalid_request_error');
     expect(BUDGET_EXHAUSTED_SUBSTRINGS.length).toBe(2);
+  });
+
+  // ---- AISDLC-149: aggregate behavior with valid-verdict-budget-finding inputs ----
+
+  it('AISDLC-149: all 3 reviewers report valid-verdict-budget-finding → skip-with-budget-comment', () => {
+    // The exact scenario from CI run 25265922400 (PR #182): all 3
+    // reviewers caught the API error and packaged it. Aggregate must
+    // recognize the pattern and suppress CHANGES_REQUESTED.
+    const budgetVerdict = JSON.stringify({
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message:
+            'Review agent failed: Anthropic API error 400: {"type":"error","error":{"type":"invalid_request_error","message":"Your credit balance is too low to access the Anthropic API."}}',
+        },
+      ],
+      summary: 'review could not be completed',
+    });
+    const result = classifyReviewerOutputs([
+      r('testing', budgetVerdict),
+      r('critic', budgetVerdict),
+      r('security', budgetVerdict),
+    ]);
+    expect(result.aggregate).toBe('skip-with-budget-comment');
+    expect(result.budgetExhaustedCount).toBe(3);
+  });
+
+  it('AISDLC-149: mixed (1 valid-budget + 1 valid-ok + 1 stderr-budget) → proceed-as-normal', () => {
+    // Mixed-mode budget hits across the verdict-finding path AND the
+    // stdout/stderr fallback path still aggregate to proceed-as-normal
+    // (mixed could be transient — only uniform 3/3 budget-exhaustion
+    // warrants suppression).
+    const budgetVerdict = JSON.stringify({
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message: 'Anthropic API error 400 invalid_request_error: Your credit balance is too low.',
+        },
+      ],
+      summary: 'agent failed',
+    });
+    const result = classifyReviewerOutputs([
+      r('testing', budgetVerdict),
+      r('critic', validVerdict(true)),
+      r('security', '', budgetExhaustedStderr),
+    ]);
+    expect(result.aggregate).toBe('proceed-as-normal');
+    expect(result.budgetExhaustedCount).toBe(2);
+    expect(result.perReviewer.map((p) => p.classification)).toEqual([
+      'budget-exhausted',
+      'ok',
+      'budget-exhausted',
+    ]);
   });
 });

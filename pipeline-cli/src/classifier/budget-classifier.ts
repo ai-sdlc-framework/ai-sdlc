@@ -1,5 +1,6 @@
 /**
- * Anthropic API budget-exhaustion classifier (AISDLC-147 patch 2).
+ * Anthropic API budget-exhaustion classifier (AISDLC-147 patch 2;
+ * AISDLC-149 added valid-verdict-finding inspection).
  *
  * The CI reviewer fan-out in `.github/workflows/ai-sdlc-review.yml`'s `analyze`
  * job spawns up to 3 reviewer agents (testing, critic, security) against
@@ -10,10 +11,22 @@
  * CHANGES_REQUESTED review on every PR — noise that masks real failures and
  * teaches operators to ignore the bot.
  *
- * This module classifies each reviewer's combined stdout+stderr into one of
- * three buckets and returns an aggregate decision:
- *   - `ok`               — verdict parsed, used as-is by the existing path
+ * AISDLC-149: in production we observed that `cli-review` actually CATCHES
+ * the Anthropic API error and PACKAGES it into a well-formed verdict JSON
+ * (with `approved: false` and a critical finding whose `message` embeds the
+ * raw error body). The original AISDLC-147 classifier short-circuited on
+ * any well-formed verdict and never looked at the finding contents — so
+ * the budget signal was missed and CHANGES_REQUESTED still posted. The
+ * classifier now also inspects each parsed verdict's findings for the
+ * same two-substring signature.
+ *
+ * This module classifies each reviewer's outputs into one of three buckets
+ * and returns an aggregate decision:
+ *   - `ok`               — verdict parsed AND no finding carries the budget
+ *                          signature; used as-is by the existing path
  *   - `budget-exhausted` — both required substrings present (case-insensitive)
+ *                          either inside a parsed verdict's findings OR in
+ *                          the combined stdout+stderr fallback
  *   - `other-failure`    — verdict didn't parse but isn't budget-related
  *
  * Aggregate decision rules:
@@ -100,19 +113,31 @@ export const BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
 /**
  * Try to parse the reviewer's verdict line as a valid JSON verdict (matching
  * the existing report-job schema: `approved: boolean`, `findings: array`,
- * `summary: string`). Returns `true` when the verdict is well-formed,
- * regardless of approved/changes-requested — both are "ok" outcomes from
- * the budget-classifier's perspective.
+ * `summary: string`). Returns the parsed verdict when well-formed (so callers
+ * can introspect `findings` for embedded API-error packaging), or `null`
+ * otherwise. A parsed verdict with `approved: false` is still "well-formed"
+ * — it's the schema we care about, not the verdict's polarity.
  */
-function isValidVerdict(verdictLine: string): boolean {
-  if (!verdictLine || verdictLine.trim().length === 0) return false;
+interface ParsedVerdict {
+  approved: boolean;
+  findings: Array<Record<string, unknown>>;
+  summary: string;
+}
+
+function tryParseVerdict(verdictLine: string): ParsedVerdict | null {
+  if (!verdictLine || verdictLine.trim().length === 0) return null;
   try {
     const v = JSON.parse(verdictLine) as Record<string, unknown>;
-    return (
-      typeof v.approved === 'boolean' && Array.isArray(v.findings) && typeof v.summary === 'string'
-    );
+    if (
+      typeof v.approved === 'boolean' &&
+      Array.isArray(v.findings) &&
+      typeof v.summary === 'string'
+    ) {
+      return v as unknown as ParsedVerdict;
+    }
+    return null;
   } catch {
-    return false;
+    return null;
   }
 }
 
@@ -128,10 +153,54 @@ function isBudgetExhaustedFailure(combined: string): boolean {
 }
 
 /**
+ * Test whether a parsed verdict's findings contain the budget-exhaustion
+ * signature embedded in any finding's `message` field.
+ *
+ * The AISDLC-149 fix path: `cli-review` catches Anthropic API errors and
+ * packages them into a well-formed verdict with `approved: false` and a
+ * critical finding whose `message` includes the raw error body, e.g.:
+ *
+ *   {
+ *     "approved": false,
+ *     "findings": [{
+ *       "severity": "critical",
+ *       "message": "Review agent failed: Anthropic API error 400: {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"Your credit balance is too low...\"}}"
+ *     }],
+ *     "summary": "review could not be completed"
+ *   }
+ *
+ * Without this check we'd accept the verdict as `ok` and miss the budget
+ * signal entirely — which is the AISDLC-147 bug AISDLC-149 fixes. We use
+ * the SAME `BUDGET_EXHAUSTED_SUBSTRINGS` constant as the stdout/stderr
+ * path so the match rule stays in lock-step.
+ *
+ * Inspects all string-typed fields on each finding (typically `message`,
+ * but defensive against future schema additions) — the substring test is
+ * cheap and the false-positive surface is unchanged from the AND-of-two
+ * rule.
+ */
+function verdictContainsBudgetSignature(verdict: ParsedVerdict): boolean {
+  for (const finding of verdict.findings) {
+    if (!finding || typeof finding !== 'object') continue;
+    for (const value of Object.values(finding)) {
+      if (typeof value === 'string' && isBudgetExhaustedFailure(value)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Classify a single reviewer's outcome into one of three buckets:
- *   - `ok`                 — verdict line parses as a valid verdict
- *   - `budget-exhausted`   — verdict invalid AND combined output contains
- *                            both budget-exhaustion substrings
+ *   - `ok`                 — verdict line parses as a valid verdict AND
+ *                            no finding carries the budget signature
+ *   - `budget-exhausted`   — EITHER (a) verdict parses but a finding's
+ *                            message embeds both budget substrings (the
+ *                            cli-review packaging path — AISDLC-149), OR
+ *                            (b) verdict invalid AND combined stdout+stderr
+ *                            contains both budget substrings (the original
+ *                            AISDLC-147 path)
  *   - `other-failure`      — verdict invalid for some other reason (the
  *                            existing parser will surface it as a parsing
  *                            error in CHANGES_REQUESTED)
@@ -139,9 +208,17 @@ function isBudgetExhaustedFailure(combined: string): boolean {
  * Pure — no I/O. Exported for direct testing of the per-reviewer rule.
  */
 export function classifyOneReviewer(input: ReviewerRawOutput): ReviewerClassification {
-  if (isValidVerdict(input.verdictLine)) {
+  const parsed = tryParseVerdict(input.verdictLine);
+  if (parsed !== null) {
+    // AISDLC-149: even a well-formed verdict can carry the budget
+    // signature inside a finding's message when cli-review caught an
+    // Anthropic API error and packaged it. Check before declaring ok.
+    if (verdictContainsBudgetSignature(parsed)) {
+      return 'budget-exhausted';
+    }
     return 'ok';
   }
+  // Verdict didn't parse — fall back to the AISDLC-147 stdout+stderr path.
   // Inspect both stdout (verdict line, in case the SDK printed the API
   // error body to stdout instead of stderr) AND stderr.
   const combined = `${input.verdictLine}\n${input.stderr}`;
