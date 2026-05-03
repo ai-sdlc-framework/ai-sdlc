@@ -67,6 +67,46 @@ Add it to a sibling workspace package's `package.json`:
 }
 ```
 
+### Invoking from CI / GitHub Actions (AISDLC-156)
+
+**Always invoke pipeline-cli CLIs via `node ./pipeline-cli/bin/<bin>.mjs`,
+never via `pnpm --filter @ai-sdlc/pipeline-cli exec <bin>`.**
+
+`pnpm exec` resolves binaries via the package's `node_modules/.bin/`
+symlink directory, but a workspace package's OWN `bin` entries are NOT
+symlinked into its own `node_modules/.bin/` — only its DEPENDENCIES'
+bins are. Invoking via `pnpm exec` from the workspace itself therefore
+returns:
+
+```
+ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "cli-classify-budget" not found
+```
+
+…on every invocation. In the AISDLC-156 incident, this silent failure
+caused the `|| echo '<fallback-json>'` safety net in
+`.github/workflows/ai-sdlc-review.yml` to fire on every PR for the three
+cost-saver CLIs (`cli-classify-pr`, `cli-incremental-decide`,
+`cli-classify-budget`), defeating the AISDLC-141/142/147/149/154
+optimizations entirely — every PR ran full-budget reviewers, blowing
+through Anthropic credits and posting `CHANGES_REQUESTED` whenever the
+key was exhausted.
+
+The workflow now invokes each CLI as:
+
+```yaml
+RESULT=$(node pipeline-cli/bin/cli-classify-pr.mjs classify --paths-file ... \
+  || echo '{"reviewers":["testing","critic","security"],"fellOpen":true,...}')
+```
+
+`pipeline-cli/src/cli/bin-invocation.test.ts` is the regression guard:
+it spawns each `bin/cli-*.mjs` via `node` and asserts `--help` exits 0,
+AND asserts that the broken `pnpm --filter ... exec` form still fails
+(so a future operator who reverts the workflow trips a loud test
+failure instead of re-introducing the silent regression). When pnpm
+eventually fixes own-bin resolution — or we move to a different package
+manager — that test will fail and force a deliberate re-evaluation of
+whether the simpler form can be reintroduced.
+
 ### From npm (Phase 8)
 
 Once Phase 8 (AISDLC-100.8) ships, `@ai-sdlc/pipeline-cli` will publish
