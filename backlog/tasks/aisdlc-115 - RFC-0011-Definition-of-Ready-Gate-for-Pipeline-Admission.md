@@ -4,7 +4,7 @@ title: 'RFC-0011: Definition-of-Ready Gate for Pipeline Admission'
 status: To Do
 assignee: []
 created_date: '2026-05-01 16:22'
-updated_date: '2026-05-03 00:24'
+updated_date: '2026-05-03 17:00'
 labels:
   - rfc-0011
   - architecture
@@ -72,10 +72,10 @@ Whichever comes first. Calendar duration is a side-effect, not a gate.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 All 9 phase sub-tasks (AISDLC-115.1 through 115.9) reach Done status
-- [ ] #2 Feature flag `AI_SDLC_DOR_GATE` promoted from `warn-only` → `enforce` after Phase 7 soak validates < 10% per-gate false-positive rate (NOT time-gated; corpus-validated)
-- [ ] #3 Dogfood pipeline runs with DoR gate ENFORCING for at least one full week of real issue stream without operator override-rate spike
-- [ ] #4 Both Alex's additions delivered: signal-pipeline auto-pass (in Phase 4) + tessellated-platform shard naming (in Phase 7)
-- [ ] #5 DoR calibration log written to `$ARTIFACTS_DIR/_dor/calibration.jsonl` (Section 5.5 of RFC) and feeds the metrics dashboard
-- [ ] #6 Operator runbook extended with DoR-specific failure modes (refusal flow, bypass mechanism, escalation paths)
+- [ ] #1 All 9 phase sub-tasks (AISDLC-115.1 through 115.9) reach Done status — 115.1–115.7 + 115.9 are Done; 115.8 partial-shipped (tessellated-platform shard naming committed for Gate 5; soak/tune work continues post-flip and 115.8 closes after the 1-week soak window validates ACs #1, #2, #5)
+- [x] #2 Feature flag `AI_SDLC_DOR_GATE` promoted from `warn-only` → `enforce` — DONE in AISDLC-115.9 via operator-override path (per `docs/operations/dor-promotion.md`); calendar-driven gate dropped per maintainer directive 2026-05-01, replaced by hybrid corpus-OR-operator-override model (AISDLC-161)
+- [ ] #3 Dogfood pipeline runs with DoR gate ENFORCING for at least one full week of real issue stream without operator override-rate spike — soak window opens 2026-05-03 (the day this PR merges); re-evaluate 2026-05-10
+- [x] #4 Both Alex's additions delivered: signal-pipeline auto-pass (in Phase 4 / AISDLC-115.5) + tessellated-platform shard naming (Gate 5 regex bundle, AISDLC-115.8 partial-ship)
+- [ ] #5 DoR calibration log written to `$ARTIFACTS_DIR/_dor/calibration.jsonl` (Section 5.5 of RFC) and feeds the metrics dashboard — calibration log writes (AISDLC-115.6); CI persistence + aggregator CLI shipped in AISDLC-161; metrics dashboard ships in AISDLC-162 (parallel work, in flight)
+- [ ] #6 Operator runbook extended with DoR-specific failure modes (refusal flow, bypass mechanism, escalation paths) — ships in AISDLC-163 (parallel work, in flight); the override-promotion runbook itself is at `docs/operations/dor-promotion.md` (AISDLC-161)
 <!-- AC:END -->
