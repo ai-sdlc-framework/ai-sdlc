@@ -118,3 +118,24 @@ leaking a real token.
   before sharing — the calibration-log writer redacts at write time, but
   a downstream consumer might re-introduce raw text from a different
   source. Apply the same registry there.
+
+## Composition with the dependency graph (RFC-0014 Phase 3)
+
+The DoR clarification comment + calibration log gain optional
+blast-radius surfacing when `AI_SDLC_DEPS_COMPOSITION` is ON. Behind
+that flag the comment template appends "this issue gates N downstream
+tasks" callouts (or a separate maintainer-tone FYI for `dor-bypass`-
+admitted high-radius tasks per RFC-0014 §12 Q5), and the calibration
+log gains a `blastRadius` field so the soak loop can distinguish
+false-positives on graph leaves (low cost) from false-positives on
+chain roots (high cost).
+
+When the flag is OFF, the comment + log shapes match the RFC-0011
+baseline byte-for-byte.
+
+See [`pipeline-cli/docs/deps.md`](./deps.md#phase-3--dor-composition-aisdlc-1673-rfc-0014-6) for:
+
+- The two comment templates (standard + bypass FYI).
+- The `--blast-radius` flag on `cli-dor-corpus`.
+- The `dor-config.yaml` `blastRadiusThreshold` knob.
+- The library API for stitching snapshot → verdict → comment → log.

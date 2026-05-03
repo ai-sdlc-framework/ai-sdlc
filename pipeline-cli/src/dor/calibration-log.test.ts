@@ -181,6 +181,57 @@ describe('buildEntry', () => {
     expect(e.author).toContain('[REDACTED:GITHUB_PAT]');
     expect(e.author).not.toContain(fakePat);
   });
+
+  // RFC-0014 §6.3 Phase 3 — blastRadius + highestDownstreamPriority
+
+  it('persists blastRadius when supplied (count + sample ids)', () => {
+    const e = buildEntry({
+      verdict: verdict(),
+      blastRadius: { count: 7, downstreamSampleIds: ['AISDLC-101', 'AISDLC-102'] },
+    });
+    expect(e.blastRadius).toEqual({
+      count: 7,
+      downstreamSampleIds: ['AISDLC-101', 'AISDLC-102'],
+    });
+  });
+
+  it('caps the persisted downstreamSampleIds at 5 entries (defense-in-depth)', () => {
+    const e = buildEntry({
+      verdict: verdict(),
+      blastRadius: {
+        count: 12,
+        downstreamSampleIds: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+      },
+    });
+    expect(e.blastRadius?.downstreamSampleIds).toHaveLength(5);
+    expect(e.blastRadius?.downstreamSampleIds).toEqual(['A', 'B', 'C', 'D', 'E']);
+    // Count is preserved even when the sample is truncated.
+    expect(e.blastRadius?.count).toBe(12);
+  });
+
+  it('omits the blastRadius field when not supplied (backward-compatible)', () => {
+    const e = buildEntry({ verdict: verdict() });
+    expect('blastRadius' in e).toBe(false);
+  });
+
+  it('redacts secret-shaped sample ids (defense-in-depth)', () => {
+    const fakePat = `ghp_${'a'.repeat(36)}`;
+    const e = buildEntry({
+      verdict: verdict(),
+      blastRadius: { count: 1, downstreamSampleIds: [fakePat] },
+    });
+    expect(e.blastRadius?.downstreamSampleIds[0]).toContain('[REDACTED:GITHUB_PAT]');
+  });
+
+  it('persists highestDownstreamPriority when supplied', () => {
+    const e = buildEntry({ verdict: verdict(), highestDownstreamPriority: 85 });
+    expect(e.highestDownstreamPriority).toBe(85);
+  });
+
+  it('omits highestDownstreamPriority when not supplied', () => {
+    const e = buildEntry({ verdict: verdict() });
+    expect('highestDownstreamPriority' in e).toBe(false);
+  });
 });
 
 describe('recordOverride', () => {

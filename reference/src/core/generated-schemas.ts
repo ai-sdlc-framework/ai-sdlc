@@ -2333,6 +2333,13 @@ export const dorConfigV1Schema = {
           description: 'Trusted-reviewer role required to apply the dor-bypass label (RFC §7.4).',
           default: 'maintainer',
         },
+        blastRadiusThreshold: {
+          type: 'integer',
+          minimum: 1,
+          default: 3,
+          description:
+            "RFC-0014 §12 Q5 Phase 3 — blast-radius count above which a dor-bypass-admitted task triggers the maintainer-tone FYI comment. Below this, the bypass is treated as routine (no FYI). Tunable per project; the default 3 matches the rolled-up-three-tasks-or-deeper bar that empirically distinguishes 'dispatch leaf bypass' from 'foundation-task bypass that should have been rubric-tuned instead'.",
+        },
       },
       additionalProperties: false,
     },

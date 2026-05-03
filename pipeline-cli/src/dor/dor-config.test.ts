@@ -270,3 +270,34 @@ describe('parseDorConfigYaml — escalation + bypass (RFC-0011 Phase 6)', () => 
     expect(cfg.bypassRequiresRole).toBe('release-manager');
   });
 });
+
+describe('parseDorConfigYaml — blastRadiusThreshold (RFC-0014 Phase 3)', () => {
+  it('defaults to 3 when the field is absent', () => {
+    const cfg = parseDorConfigYaml(
+      'apiVersion: ai-sdlc.io/v1alpha1\nkind: DorConfig\nspec:\n  evaluationMode: warn-only\n',
+    );
+    expect(cfg.blastRadiusThreshold).toBe(3);
+  });
+
+  it('parses a custom integer value', () => {
+    const yaml = `apiVersion: ai-sdlc.io/v1alpha1
+kind: DorConfig
+spec:
+  evaluationMode: warn-only
+  blastRadiusThreshold: 7
+`;
+    const cfg = parseDorConfigYaml(yaml);
+    expect(cfg.blastRadiusThreshold).toBe(7);
+  });
+
+  it('keeps the default when the value is below the schema minimum (1)', () => {
+    const yaml = `apiVersion: ai-sdlc.io/v1alpha1
+kind: DorConfig
+spec:
+  evaluationMode: warn-only
+  blastRadiusThreshold: 0
+`;
+    const cfg = parseDorConfigYaml(yaml);
+    expect(cfg.blastRadiusThreshold).toBe(3);
+  });
+});

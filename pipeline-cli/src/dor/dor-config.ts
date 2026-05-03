@@ -104,6 +104,21 @@ export interface DorConfig {
   escalation: DorConfigEscalation;
   /** Trusted-reviewer role required to apply the dor-bypass label (RFC §7.4). */
   bypassRequiresRole: string;
+  /**
+   * RFC-0014 §12 Q5 Phase 3 — blast-radius threshold above which the
+   * maintainer-tone bypass FYI comment fires when a `dor-bypass` admit
+   * lands on a high-radius task. Below this count the bypass is treated
+   * as routine (no FYI posted). Default 3 — tunable per project.
+   *
+   * Optional in the public type so existing test fixtures + adopter
+   * configs that don't know about Phase 3 keep type-checking against a
+   * fresh `DorConfig` literal. Callers that need a concrete value
+   * should fall back to {@link DEFAULT_HIGH_BLAST_RADIUS_THRESHOLD} from
+   * `comment-loop.ts`; the loaded config from `loadDorConfig` always
+   * populates this from the schema default (3) so production reads
+   * never see `undefined`.
+   */
+  blastRadiusThreshold?: number;
 }
 
 /**
@@ -127,6 +142,7 @@ export const DOR_CONFIG_DEFAULTS: DorConfig = {
     maxRoundsBeforeHumanTriage: 3,
   },
   bypassRequiresRole: 'maintainer',
+  blastRadiusThreshold: 3,
 };
 
 export interface LoadDorConfigOpts {
@@ -386,6 +402,14 @@ function applyValue(target: DorConfig, path: string[], raw: string): void {
   }
   if (a === 'spec' && b === 'bypassRequiresRole') {
     target.bypassRequiresRole = raw;
+    return;
+  }
+  if (a === 'spec' && b === 'blastRadiusThreshold') {
+    // RFC-0014 §12 Q5 Phase 3 — schema requires minimum 1; silently keep
+    // the default for nonsense values rather than throwing during config
+    // load (the schema validator catches malformed configs at PR time).
+    const n = parseIntStrict(raw);
+    if (n >= 1) target.blastRadiusThreshold = n;
     return;
   }
 }

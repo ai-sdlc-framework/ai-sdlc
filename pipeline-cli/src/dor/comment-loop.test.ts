@@ -2,7 +2,7 @@
  * Comment loop tests — render + idempotent posting + dual-fanout (RFC-0011 §6).
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   bodyForChannel,
   DOR_COMMENT_MARKER,
@@ -12,12 +12,14 @@ import {
   gateName,
   postIdempotent,
   renderAdmitComment,
+  renderBypassBlastRadiusComment,
   renderClarificationComment,
   renderPrTasksComment,
   type CommentPoster,
   type ExistingComment,
   type PrTaskVerdict,
 } from './comment-loop.js';
+import type { BlastRadius } from './blast-radius.js';
 import type { RefinementVerdict } from './types.js';
 
 function blockedVerdict(): RefinementVerdict {
@@ -130,6 +132,146 @@ describe('renderClarificationComment', () => {
     const body = renderClarificationComment(blockedVerdict(), { channel: 'dedicated-slack' });
     expect(body).toContain(dorCommentMarkerFor('dedicated-slack'));
     expect(body).not.toContain(dorCommentMarkerFor('author'));
+  });
+});
+
+// ── RFC-0014 Phase 3 — blast-radius + external-deps callouts ──────────
+
+const radius = (count: number, downstream: string[] = [], truncated = 0): BlastRadius => ({
+  count,
+  downstream,
+  truncated,
+  targetExists: true,
+});
+
+describe('renderClarificationComment — RFC-0014 Phase 3 callouts', () => {
+  let priorFlag: string | undefined;
+  beforeEach(() => {
+    priorFlag = process.env.AI_SDLC_DEPS_COMPOSITION;
+  });
+  afterEach(() => {
+    if (priorFlag === undefined) delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    else process.env.AI_SDLC_DEPS_COMPOSITION = priorFlag;
+  });
+
+  it('appends the blast-radius callout when flag ON and count > 0 (root-of-chain)', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const body = renderClarificationComment(blockedVerdict(), {
+      blastRadius: radius(7, ['AISDLC-101', 'AISDLC-102', 'AISDLC-103']),
+    });
+    expect(body).toContain('⚠ This issue currently gates 7 downstream tasks');
+    expect(body).toContain('AISDLC-101, AISDLC-102, AISDLC-103');
+  });
+
+  it('omits the callout when flag OFF (RFC-0011 baseline preserved)', () => {
+    delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    const body = renderClarificationComment(blockedVerdict(), {
+      blastRadius: radius(7, ['AISDLC-101']),
+    });
+    expect(body).not.toContain('downstream task');
+    expect(body).not.toContain('⚠ This issue currently gates');
+  });
+
+  it('omits the callout for graph leaves (count = 0) even with flag ON', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const body = renderClarificationComment(blockedVerdict(), {
+      blastRadius: radius(0, []),
+    });
+    expect(body).not.toContain('downstream task');
+  });
+
+  it('appends the truncated form for high-radius (>10) issues', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const body = renderClarificationComment(blockedVerdict(), {
+      blastRadius: radius(15, ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J'], 5),
+    });
+    expect(body).toContain('15 downstream tasks');
+    expect(body).toContain('... (and 5 more)');
+  });
+
+  it('appends the external-deps callout when count > 0 and flag ON', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const body = renderClarificationComment(blockedVerdict(), {
+      externalDependencyCount: 2,
+    });
+    expect(body).toContain('External dependencies tracked: 2');
+  });
+
+  it('omits the external-deps callout when count is 0', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const body = renderClarificationComment(blockedVerdict(), {
+      externalDependencyCount: 0,
+    });
+    expect(body).not.toContain('External dependencies tracked');
+  });
+
+  it('renders both callouts together when both signals present', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const body = renderClarificationComment(blockedVerdict(), {
+      blastRadius: radius(3, ['A', 'B', 'C']),
+      externalDependencyCount: 1,
+    });
+    expect(body).toContain('gates 3 downstream tasks');
+    expect(body).toContain('External dependencies tracked: 1');
+  });
+});
+
+describe('renderBypassBlastRadiusComment — RFC-0014 Phase 3 / Q5', () => {
+  let priorFlag: string | undefined;
+  beforeEach(() => {
+    priorFlag = process.env.AI_SDLC_DEPS_COMPOSITION;
+  });
+  afterEach(() => {
+    if (priorFlag === undefined) delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    else process.env.AI_SDLC_DEPS_COMPOSITION = priorFlag;
+  });
+
+  it('returns empty string when flag is OFF (no FYI fired)', () => {
+    delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    const out = renderBypassBlastRadiusComment('AISDLC-100', radius(5, ['A', 'B', 'C', 'D', 'E']));
+    expect(out).toBe('');
+  });
+
+  it('returns empty string below threshold (default 3) even with flag ON', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const out = renderBypassBlastRadiusComment('AISDLC-100', radius(2, ['A', 'B']));
+    expect(out).toBe('');
+  });
+
+  it('renders the maintainer-tone variant at or above threshold with flag ON', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const out = renderBypassBlastRadiusComment('AISDLC-100', radius(5, ['A', 'B', 'C', 'D', 'E']));
+    expect(out).toContain(dorCommentMarkerFor('author'));
+    expect(out).toContain('DoR bypass — high blast radius FYI (AISDLC-100)');
+    expect(out).toContain('ℹ This bypass admits a task gating 5 downstream items');
+    expect(out).toContain('rubric may be missing something');
+  });
+
+  it('honors a per-call threshold override (used by config wiring)', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const radius2 = radius(2, ['A', 'B']);
+    expect(renderBypassBlastRadiusComment('AISDLC-100', radius2, { highRadiusThreshold: 5 })).toBe(
+      '',
+    );
+    expect(
+      renderBypassBlastRadiusComment('AISDLC-100', radius2, { highRadiusThreshold: 2 }),
+    ).toContain('admits a task gating 2 downstream items');
+  });
+
+  it('uses the dedicated-slack channel marker when requested', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const out = renderBypassBlastRadiusComment('AISDLC-100', radius(5, ['A', 'B', 'C', 'D', 'E']), {
+      channel: 'dedicated-slack',
+    });
+    expect(out).toContain(dorCommentMarkerFor('dedicated-slack'));
+  });
+
+  it('redacts secret-shaped task ids defensively', () => {
+    process.env.AI_SDLC_DEPS_COMPOSITION = '1';
+    const fakePat = `ghp_${'a'.repeat(36)}`;
+    const out = renderBypassBlastRadiusComment(fakePat, radius(5, ['A', 'B', 'C', 'D', 'E']));
+    expect(out).not.toContain(fakePat);
+    expect(out).toContain('[REDACTED:GITHUB_PAT]');
   });
 });
 

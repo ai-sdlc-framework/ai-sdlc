@@ -1,11 +1,12 @@
-# `cli-deps` snapshot artifact + dispatcher composition (RFC-0014 Phase 1 + 2)
+# `cli-deps` snapshot artifact + dispatcher + DoR composition (RFC-0014 Phase 1 + 2 + 3)
 
 The dependency-graph snapshot artifact is the bridge from AISDLC-117's
 in-memory graph (see `pipeline-cli/docs/dependency-graph.md`) to the
-RFC-0014 composition layers — depth-aware PPA priority (Phase 2 — this
-page), DoR blast-radius surfacing (Phase 3), and Slack/dashboard digests
-(Phase 4). All phases ship behind the shared `AI_SDLC_DEPS_COMPOSITION`
-feature flag; Phase 1 + 2 are live, Phase 3+ remain future-facing.
+RFC-0014 composition layers — depth-aware PPA priority (Phase 2),
+DoR blast-radius surfacing (Phase 3 — this page also documents),
+and Slack/dashboard digests (Phase 4). All phases ship behind the
+shared `AI_SDLC_DEPS_COMPOSITION` feature flag; Phases 1 + 2 + 3 are
+live, Phase 4+ remain future-facing.
 
 This page covers:
 
@@ -17,6 +18,8 @@ This page covers:
   RFC-0014 §12 Q6.
 - **Phase 2** — `effectivePriority` + the depth-aware dispatcher
   comparator that re-orders `cli-deps frontier` per RFC-0014 §5 + §12 Q1.
+- **Phase 3** — DoR blast-radius callouts + calibration log extension
+  + `cli-dor-corpus --blast-radius` per RFC-0014 §6 + §12 Q5.
 
 ## Feature flag — `AI_SDLC_DEPS_COMPOSITION`
 
@@ -379,16 +382,179 @@ const everything = rankAllByEffectivePriority(g);
 See `pipeline-cli/src/deps/effective-priority.ts` and
 `pipeline-cli/src/deps/dispatch.ts` for the full type reference.
 
-## What Phase 2 deliberately doesn't ship
+## What Phases 1-3 deliberately don't ship
 
 Per RFC-0014 §11 the following are scheduled for later phases:
 
-- **DoR comment template extension** (Phase 3 — blast-radius callout).
 - **Slack digest + dashboard graph view** (Phase 4).
 - **Soak + flag promotion** (Phase 5 — corpus-driven, not calendar-gated).
 
-The snapshot artifact (Phase 1) and the dispatcher composition
-(Phase 2) are both live, both behind `AI_SDLC_DEPS_COMPOSITION`. The
-Phase 4 dashboard will consume the same `effectivePriority` records
-this page documents; the Phase 3 DoR template will read `dependents`
-from the snapshot to compute blast-radius.
+The snapshot artifact (Phase 1), the dispatcher composition (Phase 2),
+and the DoR composition (Phase 3) are all live, all behind
+`AI_SDLC_DEPS_COMPOSITION`. The Phase 4 dashboard will consume the
+same `effectivePriority` records this page documents and the same
+blast-radius helpers Phase 3 ships.
+
+## Phase 3 — DoR composition (AISDLC-167.3, RFC-0014 §6)
+
+Phase 3 wires the snapshot artifact into the Definition-of-Ready
+clarification comment + calibration log so authors see "this gates N
+downstream tasks" and the calibration loop can distinguish
+false-positives on graph leaves (low cost) from false-positives on
+chain roots (high cost). Like Phase 1, every Phase 3 surface is gated
+on `AI_SDLC_DEPS_COMPOSITION` — when the flag is OFF the comment + log
+shape match the RFC-0011 baseline byte-for-byte.
+
+### Comment templates
+
+Two templates fire depending on the admission verdict source (per
+RFC-0014 §12 Q5 resolution):
+
+#### Standard verdict (`needs-clarification` from rubric evaluation)
+
+The clarification comment gains an additional callout block when the
+target's blast radius is > 0 (graph leaves get no callout — there's no
+point telling the author "this gates 0 tasks"):
+
+```
+> ⚠ This issue currently gates 7 downstream tasks (AISDLC-101, AISDLC-102, AISDLC-103, ...). Resolving the questions above unblocks the entire chain.
+```
+
+For high-radius issues (>10 downstream), the listed ids cap at 10 and
+the rest fold into "(and N more)".
+
+#### Bypass verdict (`dor-bypass` maintainer override)
+
+A separate maintainer-tone FYI comment fires when `dor-bypass` is
+applied to a high-radius task (configurable threshold; default 3):
+
+```
+> ℹ This bypass admits a task gating 5 downstream items (AISDLC-101, AISDLC-102, AISDLC-103, AISDLC-104, AISDLC-105). Confirm intentional — high blast radius is a strong calibration signal that the rubric may be missing something.
+```
+
+Different audience (the maintainer who applied the bypass), different
+tone (FYI not "do this"), same data. Pairs naturally with RFC-0011
+§7.4's per-maintainer override-rate metric.
+
+### External-deps callout (Q3 resolution)
+
+The clarification comment also appends `> ⚠ External dependencies
+tracked: N` when the task's `externalDependencies:` frontmatter is
+non-empty. Pure signal in v1; the dispatcher does not block on
+externals.
+
+### Calibration log extension
+
+Each entry in `$ARTIFACTS_DIR/_dor/calibration.jsonl` gains two
+optional fields:
+
+```jsonc
+{
+  // ... existing fields ...
+  "blastRadius": {
+    "count": 7,
+    "downstreamSampleIds": ["AISDLC-101", "AISDLC-102", "AISDLC-103", "AISDLC-104", "AISDLC-105"]
+  },
+  "highestDownstreamPriority": 85
+}
+```
+
+The sample is capped at 5 ids per entry to keep the JSONL line tight;
+the full closure is rebuildable from the snapshot. Backward-compatible
+— existing readers (`cli-dor-stats`, `cli-dor-corpus`) ignore unknown
+fields gracefully.
+
+### `cli-dor-corpus --blast-radius`
+
+The corpus aggregator gains a `--blast-radius` flag that attaches a
+distribution to the JSON envelope (and renders an extra section under
+`--format table`):
+
+```bash
+$ cli-dor-corpus aggregate ./downloaded --blast-radius --format table
+# (per-gate FP-rate table omitted)
+
+Blast-radius distribution (RFC-0014 Phase 3) — withRadius=120, withoutRadius=0
+bucket           n   overrides  needs-clarif
+---------------  --  ---------  ------------
+leaf (0)         62  3          0
+shallow (1-2)    34  4          12
+medium (3-5)     14  5          14
+deep (6-10)      7   3          7
+critical (11+)   3   1          3
+
+Per-gate distribution:
+  gate-1: meanRadius=4.2 maxRadius=18
+    leaf (0)         n=22  overrides=2  needs-clarif=0
+    shallow (1-2)    n=14  overrides=2  needs-clarif=12
+    medium (3-5)     n=8   overrides=2  needs-clarif=8
+    deep (6-10)      n=3   overrides=1  needs-clarif=3
+    critical (11+)   n=2   overrides=1  needs-clarif=2
+```
+
+Buckets:
+
+- `leaf (0)` — graph leaves; no comment callout fires
+- `shallow (1-2)` — below the default Q5 bypass threshold (3)
+- `medium (3-5)` — default bypass-FYI threshold tier
+- `deep (6-10)` — chain depth that warrants attention
+- `critical (11+)` — chain root; rubric tuning candidate
+
+Entries lacking the `blastRadius` field (older entries pre-Phase 3)
+count toward `withoutRadius` and are skipped from the histograms — the
+bucket math stays clean as the corpus rolls forward.
+
+### `dor-config.yaml` — `blastRadiusThreshold`
+
+The Q5 bypass FYI threshold is per-project tunable:
+
+```yaml
+spec:
+  # ... other fields ...
+  # RFC-0014 §12 Q5 — bypass FYI fires only when blast radius >= this.
+  # Default 3; raise on noisier projects, lower on a project where
+  # every task is structurally part of a chain.
+  blastRadiusThreshold: 5
+```
+
+Schema-validated against [`spec/schemas/dor-config.v1.schema.json`](../../spec/schemas/dor-config.v1.schema.json).
+
+### Library API
+
+```ts
+import {
+  blastRadiusForCalibration,
+  computeBlastRadius,
+  renderBypassBlastRadiusComment,
+  renderClarificationComment,
+} from '@ai-sdlc/pipeline-cli';
+import { computeSnapshotRecords, buildDependencyGraph } from '@ai-sdlc/pipeline-cli';
+
+// In your DoR ingress shim:
+const records = computeSnapshotRecords(buildDependencyGraph({ workDir }));
+const radius = computeBlastRadius(taskId, records);
+
+// Standard `needs-clarification` flow:
+const body = renderClarificationComment(verdict, {
+  blastRadius: radius,
+  externalDependencyCount: task.externalDependencies.length,
+});
+
+// `dor-bypass` flow (separate comment, only when threshold met):
+const fyi = renderBypassBlastRadiusComment(taskId, radius, {
+  highRadiusThreshold: dorConfig.blastRadiusThreshold,
+});
+if (fyi) await poster.create(fyi);
+
+// Calibration log:
+appendCalibrationEntry({
+  verdict,
+  blastRadius: blastRadiusForCalibration(radius),
+});
+```
+
+See `pipeline-cli/src/dor/blast-radius.ts` for the full type reference.
+The renderers + library helpers are pure (no I/O); the consumer
+(typically `evaluateAndCommentBacklogTaskClaude` in
+`ingress-claude.ts`) is the integration point for stitching snapshot →
+verdict → comment → log.

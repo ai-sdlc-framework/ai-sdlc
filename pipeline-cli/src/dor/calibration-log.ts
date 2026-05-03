@@ -48,6 +48,26 @@ export interface CalibrationEntryInput {
    * intentionally don't try to backfill historical entries.
    */
   author?: string;
+  /**
+   * RFC-0014 §6.3 Phase 3 — blast-radius signal at verdict time. Lets the
+   * calibration loop distinguish a false-positive on a graph leaf (low
+   * cost) from a false-positive on a chain root (high cost). The
+   * downstream sample is capped at 5 ids by the caller (see
+   * `blastRadiusForCalibration`); the full closure lives in the snapshot
+   * artifact and is rebuildable.
+   *
+   * Optional + additive: existing readers (`cli-dor-stats`,
+   * `cli-dor-corpus`) ignore the field gracefully when absent.
+   */
+  blastRadius?: { count: number; downstreamSampleIds: string[] };
+  /**
+   * RFC-0014 §6.3 Phase 3 — highest PPA priority among downstream tasks,
+   * if the caller has computed it. Defers to PPA composition (Phase 2)
+   * for the actual scoring; the calibration log just records the peak so
+   * the soak metrics can compute "false-positive on a high-PPA root"
+   * without re-walking the graph.
+   */
+  highestDownstreamPriority?: number;
 }
 
 export interface CalibrationLogOpts {
@@ -96,6 +116,19 @@ export interface CalibrationEntry {
    * verdict object. Absent when the upstream payload didn't carry one.
    */
   author?: string;
+  /**
+   * RFC-0014 §6.3 Phase 3 — blast-radius signal at verdict time. Drives
+   * the soak distinction between low-cost (leaf) and high-cost (chain
+   * root) false positives. Capped at 5 sample ids per entry to keep the
+   * JSONL line tight; the full closure is rebuildable from the snapshot.
+   */
+  blastRadius?: { count: number; downstreamSampleIds: string[] };
+  /**
+   * RFC-0014 §6.3 Phase 3 — peak PPA priority among downstream tasks
+   * when the caller has it. Optional; absent entries land in the
+   * "(unknown)" bucket in `cli-dor-corpus --blast-radius`.
+   */
+  highestDownstreamPriority?: number;
 }
 
 /**
@@ -147,7 +180,7 @@ export function buildEntry(
   input: CalibrationEntryInput,
   opts: CalibrationLogOpts = {},
 ): CalibrationEntry {
-  const { verdict, issue, outcome, notes, author } = input;
+  const { verdict, issue, outcome, notes, author, blastRadius, highestDownstreamPriority } = input;
   const now = opts.now ?? (() => new Date());
 
   const failedGates = verdict.gates
@@ -172,6 +205,21 @@ export function buildEntry(
   // it lands on disk.
   const authorClean = author !== undefined ? redactSecrets(author) : author;
 
+  // RFC-0014 §6.3 Phase 3 — sample ids are operator-supplied (not
+  // free-text from the issue body) but defense-in-depth: pass each
+  // through `redactSecrets()` in case a maliciously-named task slips
+  // a token-shaped string into its `id`. Cap at 5 here so callers who
+  // pass a longer slice get pruned to the documented limit.
+  const blastRadiusClean =
+    blastRadius !== undefined
+      ? {
+          count: blastRadius.count,
+          downstreamSampleIds: blastRadius.downstreamSampleIds
+            .slice(0, 5)
+            .map((s) => redactSecrets(s)),
+        }
+      : undefined;
+
   return {
     ts: now().toISOString(),
     issueId: verdict.issueId,
@@ -185,6 +233,8 @@ export function buildEntry(
     verdict: redactVerdict(verdict),
     notes: notes !== undefined ? redactSecrets(notes) : notes,
     ...(authorClean !== undefined ? { author: authorClean } : {}),
+    ...(blastRadiusClean !== undefined ? { blastRadius: blastRadiusClean } : {}),
+    ...(highestDownstreamPriority !== undefined ? { highestDownstreamPriority } : {}),
   };
 }
 

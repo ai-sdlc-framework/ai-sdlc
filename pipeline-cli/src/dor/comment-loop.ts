@@ -20,6 +20,13 @@
  * composition + idempotency logic and only differ in I/O.
  */
 
+import {
+  renderBlastRadiusCallout,
+  renderBypassBlastRadiusCallout,
+  renderExternalDependenciesCallout,
+  type BlastRadius,
+} from './blast-radius.js';
+import { isCompositionEnabled } from '../deps/snapshot.js';
 import { redactSecrets } from './secret-redact.js';
 import type { DorConfigDedicatedChannel, DorConfigNotifications } from './dor-config.js';
 import type { RefinementVerdict } from './types.js';
@@ -44,6 +51,22 @@ export interface RenderCommentOpts {
   rubricUrl?: string;
   /** Channel marker scoping (defaults to 'author'). */
   channel?: 'author' | 'dedicated-slack' | 'dedicated-github';
+  /**
+   * RFC-0014 Phase 3 — blast-radius callout data. When provided AND
+   * `AI_SDLC_DEPS_COMPOSITION` is ON AND `radius.count > 0`, the
+   * standard verdict template is appended with the §6.2 callout. When
+   * the flag is OFF the radius is silently ignored so behaviour matches
+   * the RFC-0011 baseline.
+   */
+  blastRadius?: BlastRadius;
+  /**
+   * RFC-0014 Phase 3 / Q3 — external-dependency count from the snapshot.
+   * Same flag-gating as `blastRadius`; appended as a separate callout
+   * when > 0. The integer comes from the snapshot's
+   * `externalDependencies` field length so the comment renderer doesn't
+   * need the full external-dep array.
+   */
+  externalDependencyCount?: number;
 }
 
 /**
@@ -88,10 +111,80 @@ export function renderClarificationComment(
     sections.push('');
   }
 
+  // RFC-0014 Phase 3 — blast-radius + external-deps callouts. Only fire
+  // when the AI_SDLC_DEPS_COMPOSITION flag is ON; off-flag callers see
+  // the unmodified RFC-0011 baseline so this is a backward-compatible
+  // additive change. The renderer takes the inputs as-is — it's the
+  // caller's job to compute the blast radius from the snapshot.
+  if (isCompositionEnabled()) {
+    const callout = opts.blastRadius ? renderBlastRadiusCallout(opts.blastRadius) : '';
+    if (callout) {
+      sections.push(callout);
+      sections.push('');
+    }
+    const externalCallout =
+      opts.externalDependencyCount !== undefined
+        ? renderExternalDependenciesCallout(opts.externalDependencyCount)
+        : '';
+    if (externalCallout) {
+      sections.push(externalCallout);
+      sections.push('');
+    }
+  }
+
   sections.push(
     "Edit the issue to address these, then comment `/dor-recheck` (or just edit and wait — I'll re-check on the next edit).",
   );
   return sections.join('\n');
+}
+
+export interface RenderBypassCommentOpts {
+  /** Channel marker scoping (defaults to 'author'). */
+  channel?: 'author' | 'dedicated-slack' | 'dedicated-github';
+  /**
+   * Per-config threshold above which the bypass callout fires. Defaults
+   * to {@link DEFAULT_HIGH_BLAST_RADIUS_THRESHOLD}. A bypass on a leaf
+   * or shallow-chain task isn't worth nagging the maintainer about; the
+   * threshold is intentionally tunable via `dor-config.yaml`.
+   */
+  highRadiusThreshold?: number;
+}
+
+/**
+ * Default blast-radius threshold for the maintainer-tone bypass FYI
+ * comment. RFC-0014 §12 Q5 reframed: the bypass-admitted high-radius
+ * case is a strong calibration signal; below this count it's just
+ * noise. Tunable via `dor-config.yaml` (`spec.blastRadiusThreshold`).
+ */
+export const DEFAULT_HIGH_BLAST_RADIUS_THRESHOLD = 3;
+
+/**
+ * RFC-0014 Phase 3 / §12 Q5 — render the maintainer-tone FYI comment
+ * fired on `dor-bypass`-admitted high-radius tasks. Different audience
+ * (the maintainer who applied the bypass), different tone (FYI not
+ * "do this"), same data (count + sample ids + rubric calibration link).
+ *
+ * Returns the empty string when the radius is below the threshold OR
+ * `AI_SDLC_DEPS_COMPOSITION` is OFF — the caller can fold that into
+ * "nothing to post" without branching on the flag itself.
+ */
+export function renderBypassBlastRadiusComment(
+  taskId: string,
+  radius: BlastRadius,
+  opts: RenderBypassCommentOpts = {},
+): string {
+  if (!isCompositionEnabled()) return '';
+  const threshold = opts.highRadiusThreshold ?? DEFAULT_HIGH_BLAST_RADIUS_THRESHOLD;
+  const callout = renderBypassBlastRadiusCallout(radius, threshold);
+  if (!callout) return '';
+  const marker = dorCommentMarkerFor(opts.channel ?? 'author');
+  // The taskId is operator-supplied (typically from a YAML frontmatter
+  // `id` field) — redact defensively so a maliciously-named task can't
+  // reflect a token into the maintainer comment thread.
+  const safeTaskId = redactSecrets(taskId);
+  return [marker, '', `## DoR bypass — high blast radius FYI (${safeTaskId})`, '', callout].join(
+    '\n',
+  );
 }
 
 /**
