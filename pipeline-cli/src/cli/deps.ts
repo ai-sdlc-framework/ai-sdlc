@@ -32,6 +32,7 @@ import {
   validate,
 } from '../deps/dependency-graph.js';
 import { sortFrontierByEffectivePriority, type RankedFrontierEntry } from '../deps/dispatch.js';
+import { appendOverrideEntry, loadOverrides } from '../deps/override-log.js';
 import {
   gcRollingSnapshots,
   inspectSnapshots,
@@ -350,6 +351,117 @@ export function buildDepsCli(): Argv {
           emitText(renderTable(['Timestamp', 'Tag', 'Records', 'Bytes'], rows));
         } else {
           emit({ ok: true, snapshots: list });
+        }
+      },
+    )
+    .command(
+      'log-override',
+      "RFC-0014 Phase 5 — log a dispatch override (operator picked a task other than the dispatcher's top-of-frontier). Writes to $ARTIFACTS_DIR/_deps/overrides.jsonl. Consumed by `cli-deps-corpus aggregate`.",
+      (y) =>
+        y
+          .option('picked', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Backlog task ID the operator actually dispatched.',
+          })
+          .option('reason', {
+            type: 'string',
+            describe: 'Optional free-text rationale for the override (operator note).',
+          })
+          .option('snapshot-path', {
+            type: 'string',
+            describe:
+              'Path of the snapshot artifact the operator was looking at. Defaults to "" (the aggregator still counts the override but cannot join to a specific snapshot).',
+          })
+          .option('artifacts-dir', {
+            type: 'string',
+            describe: 'Override $ARTIFACTS_DIR for this invocation',
+          }),
+      async (argv) => {
+        const picked = String(argv.picked);
+        const workDir = argv['work-dir'] as string;
+        const artifactsDir = argv['artifacts-dir'] as string | undefined;
+        const reason = argv.reason as string | undefined;
+        const snapshotPath = (argv['snapshot-path'] as string | undefined) ?? '';
+
+        const g = buildDependencyGraph({ workDir }, warnToStderr);
+        // Use the EFFECTIVE-PRIORITY (composition) sort for the dispatcher
+        // top-pick — this is the surface the operator is overriding when
+        // they pick something else. Forced ON regardless of the env flag
+        // because the override IS the soak signal we're collecting; we
+        // need to record what composition would have picked even when
+        // the env flag isn't set yet.
+        const ranked = sortFrontierByEffectivePriority(g, frontier(g), {
+          forceComposition: true,
+        });
+
+        const dispatcherTopId = ranked[0]?.id ?? '';
+        const ranking = ranked.slice(0, 10).map((r, i) => ({ id: r.id, position: i + 1 }));
+
+        // Refuse to log a no-op override (operator picked the same thing
+        // the dispatcher would have). Surface a clear error so the
+        // operator doesn't accidentally pollute the corpus with non-
+        // overrides.
+        if (dispatcherTopId !== '' && dispatcherTopId === picked) {
+          fail(
+            `picked=${picked} is already the dispatcher's top pick — nothing to override. Use \`cli-deps frontier\` to inspect the ranking.`,
+          );
+        }
+
+        // Refuse to log an override for a task that isn't even on the
+        // ranked frontier (operator typo, or task isn't ready yet).
+        if (!ranking.some((r) => r.id === picked)) {
+          fail(
+            `picked=${picked} is not on the current ranked frontier — refusing to log. Use \`cli-deps frontier\` to inspect the ranking.`,
+          );
+        }
+
+        const entry = appendOverrideEntry(
+          {
+            snapshotPath,
+            dispatcherTopId,
+            operatorPickedId: picked,
+            ranking,
+            ...(reason ? { reason } : {}),
+            mode: 'composition',
+          },
+          { artifactsDir },
+        );
+        emit({ ok: true, entry });
+      },
+    )
+    .command(
+      'list-overrides',
+      'RFC-0014 Phase 5 — list logged dispatch overrides from $ARTIFACTS_DIR/_deps/overrides.jsonl. Useful for quick eyeballing without spawning the aggregator.',
+      (y) =>
+        y
+          .option('artifacts-dir', {
+            type: 'string',
+            describe: 'Override $ARTIFACTS_DIR for this invocation',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'table'] as const,
+            default: 'json' as const,
+          }),
+      async (argv) => {
+        const artifactsDir = argv['artifacts-dir'] as string | undefined;
+        const result = loadOverrides({ artifactsDir });
+        if ((argv.format as string) === 'table') {
+          const rows = result.entries.map((e) => [
+            e.ts,
+            e.dispatcherTopId || '(none)',
+            e.operatorPickedId,
+            e.reason ?? '',
+          ]);
+          emitText(renderTable(['Timestamp', 'Dispatcher top', 'Operator picked', 'Reason'], rows));
+        } else {
+          emit({
+            ok: true,
+            entries: result.entries,
+            skipped: result.skipped,
+            count: result.entries.length,
+          });
         }
       },
     )
