@@ -16,7 +16,7 @@
 
 | Person | Role | Status | Date |
 |--------|------|--------|------|
-| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏸ Pending review of v3.4 | — |
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v3.4 (Engineering + Operator) | 2026-05-04 |
 | Morgan Hirtle | Chief of Design / Design Authority | ⏸ Pending review of v3.4 | — |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✍️ Authored v3.2 | 2026-04-27 |
 
