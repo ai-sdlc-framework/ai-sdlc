@@ -524,9 +524,12 @@ describe('TRUSTED_MARKER_AUTHOR_LOGINS / TRUSTED_MARKER_AUTHOR_ASSOCIATIONS', ()
     expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('github-actions[bot]')).toBe(true);
   });
 
-  it('includes both flavors of the ai-sdlc-ci-attestor login', () => {
-    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('ai-sdlc-ci-attestor')).toBe(true);
-    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('ai-sdlc-ci-attestor[bot]')).toBe(true);
+  it('does NOT trust the legacy ai-sdlc-ci-attestor login (removed in AISDLC-152)', () => {
+    // The AISDLC-87 CI-side attestor was removed in AISDLC-140 sub-4
+    // (attestation made audit-only) and AISDLC-152 (this task) ripped
+    // the remaining wiring including the trust allowlist entries.
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('ai-sdlc-ci-attestor')).toBe(false);
+    expect(TRUSTED_MARKER_AUTHOR_LOGINS.has('ai-sdlc-ci-attestor[bot]')).toBe(false);
   });
 
   it('does NOT trust unrelated bots (codecov, dependabot, etc.)', () => {
@@ -559,11 +562,15 @@ describe('filterTrustedComments', () => {
     expect(filterTrustedComments(comments)).toEqual([validMarker]);
   });
 
-  it('keeps comments authored by ai-sdlc-ci-attestor (CI-side attestor bot)', () => {
+  it('drops comments authored by the legacy ai-sdlc-ci-attestor bot (AISDLC-152)', () => {
+    // The CI-side attestor was retired (AISDLC-140 sub-4 + AISDLC-152);
+    // its login is no longer in TRUSTED_MARKER_AUTHOR_LOGINS, so a
+    // comment carrying NONE / OUTSIDE_COLLABORATOR association from
+    // that login is now correctly filtered out.
     const comments: CommentWithAuthor[] = [
       { authorLogin: 'ai-sdlc-ci-attestor[bot]', authorAssociation: 'NONE', body: validMarker },
     ];
-    expect(filterTrustedComments(comments)).toEqual([validMarker]);
+    expect(filterTrustedComments(comments)).toEqual([]);
   });
 
   it('keeps comments from OWNER / MEMBER / COLLABORATOR even with unknown logins', () => {

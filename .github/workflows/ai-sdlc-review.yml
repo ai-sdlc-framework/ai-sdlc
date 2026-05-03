@@ -253,13 +253,18 @@ jobs:
           # check. The author-filter below is the primary defense (Layer 1).
           #
           # Trust criteria (either gate is sufficient):
-          #   - login == "github-actions" (workflow-authored markers) OR
-          #     "ai-sdlc-ci-attestor" (CI-side attestor bot, AISDLC-87)
+          #   - login == "github-actions" (workflow-authored markers)
           #   - authorAssociation in {OWNER, MEMBER, COLLABORATOR}
           #     (push-access humans — they could write the marker via the
           #     workflow itself; honoring their direct comment is no escalation)
           #
-          # Note: GraphQL `gh pr view --json comments` returns author.login
+          # Note: AISDLC-152 removed the legacy `ai-sdlc-ci-attestor` login
+          # from this filter alongside the rest of the AISDLC-87 attestor
+          # wiring. AISDLC-140 sub-4 made attestation audit-only; the bot
+          # is no longer signing or commenting, so trusting its login here
+          # is dead code.
+          #
+          # GraphQL `gh pr view --json comments` returns author.login
           # WITHOUT the [bot] suffix; the bot whitelist below matches that
           # form. Layer 2 (defense-in-depth) is the in-CLI re-filter via
           # --comments-json-file (`filterTrustedComments`).
@@ -268,7 +273,6 @@ jobs:
               .comments[]
               | select(
                   .author.login == "github-actions"
-                  or .author.login == "ai-sdlc-ci-attestor"
                   or .authorAssociation == "OWNER"
                   or .authorAssociation == "MEMBER"
                   or .authorAssociation == "COLLABORATOR"
@@ -1009,11 +1013,15 @@ jobs:
             // used in the analyze job's gh pr view step. Both flavors of
             // the github-actions login (`github-actions` and
             // `github-actions[bot]`) are listed for safety.
+            //
+            // AISDLC-152: removed the legacy `ai-sdlc-ci-attestor` /
+            // `ai-sdlc-ci-attestor[bot]` entries alongside the rest of
+            // the AISDLC-87 attestor wiring (AISDLC-140 sub-4 made
+            // attestation audit-only; the bot is no longer signing or
+            // commenting).
             const TRUSTED_LOGINS = new Set([
               'github-actions',
               'github-actions[bot]',
-              'ai-sdlc-ci-attestor',
-              'ai-sdlc-ci-attestor[bot]',
             ]);
             const TRUSTED_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
             const isTrustedComment = (c) => {
