@@ -1,11 +1,11 @@
-# `cli-deps` snapshot artifact (RFC-0014 Phase 1)
+# `cli-deps` snapshot artifact + dispatcher composition (RFC-0014 Phase 1 + 2)
 
 The dependency-graph snapshot artifact is the bridge from AISDLC-117's
 in-memory graph (see `pipeline-cli/docs/dependency-graph.md`) to the
-RFC-0014 composition layers — depth-aware PPA priority (Phase 2),
-DoR blast-radius surfacing (Phase 3), and Slack/dashboard digests
-(Phase 4). Phase 1 only ships the writer + lifecycle commands; the
-downstream consumers come in later phases behind the same feature flag.
+RFC-0014 composition layers — depth-aware PPA priority (Phase 2 — this
+page), DoR blast-radius surfacing (Phase 3), and Slack/dashboard digests
+(Phase 4). All phases ship behind the shared `AI_SDLC_DEPS_COMPOSITION`
+feature flag; Phase 1 + 2 are live, Phase 3+ remain future-facing.
 
 This page covers:
 
@@ -15,6 +15,8 @@ This page covers:
 - The `AI_SDLC_DEPS_COMPOSITION` feature flag.
 - The "best-effort consistency, validated by consumer" contract per
   RFC-0014 §12 Q6.
+- **Phase 2** — `effectivePriority` + the depth-aware dispatcher
+  comparator that re-orders `cli-deps frontier` per RFC-0014 §5 + §12 Q1.
 
 ## Feature flag — `AI_SDLC_DEPS_COMPOSITION`
 
@@ -242,15 +244,151 @@ if (isCompositionEnabled()) {
 
 See `pipeline-cli/src/deps/snapshot.ts` for the full type reference.
 
-## What Phase 1 deliberately doesn't ship
+## Phase 2 — depth-aware dispatcher composition (AISDLC-167.2)
+
+Phase 2 ships the **PPA × Graph composition** described in RFC-0014 §5.
+It re-orders the output of `cli-deps frontier` so a low-priority leaf
+that unblocks a critical chain bubbles to the top of the dispatch
+queue automatically. Per-task PPA scores are **unchanged** — the
+composition is read-only for PPA per RFC-0014 §5.3; only the
+dispatcher's sort order is affected.
+
+### `effectivePriority` definition
+
+For a task `T` with priority `priority(T)` (read from the Backlog.md
+`priority:` frontmatter — `low | medium | high | critical` mapped to
+`1 | 2 | 3 | 4` with default `2` for missing/unknown values):
+
+```
+effectivePriority(T) = max(
+  priority(T),
+  max(priority(D) for D in transitive_downstream(T))
+)
+```
+
+Where `transitive_downstream(T)` is the closure of the reverse edge set
+(every task that depends on `T`, directly or via a chain). Per RFC-0014
+§5.3 the aggregation is `MAX`, **not sum** — a 20-task chain doesn't
+get a 20× boost.
+
+### Sort order — RFC-0014 §12 Q1
+
+When `AI_SDLC_DEPS_COMPOSITION` is ON, `cli-deps frontier` sorts by:
+
+1. `effectivePriority` DESC (primary)
+2. `criticalPathLength` DESC (secondary — structural signal dominates
+   arbitrary signal when effective priority ties)
+3. `lastModified` DESC (tertiary — newer file wins on full tie)
+4. `id` ASC (final — keeps output deterministic)
+
+When `AI_SDLC_DEPS_COMPOSITION` is OFF (the default), `cli-deps
+frontier` returns the baseline `id`-ASC order from `frontier()` —
+exactly the pre-Phase-2 behaviour. Operators can A/B compare the two
+modes inside one process via the `forceComposition` / `forceBaseline`
+options on `sortFrontierByEffectivePriority` (see Library API below).
+
+### Output shape — flag ON vs OFF
+
+The JSON shape is **stable across the flag** so consumers don't have
+to branch:
+
+```jsonc
+{
+  "ok": true,
+  "compositionEnabled": true,            // mirrors the env flag for transparency
+  "frontier": [                          // backwards-compat: same shape pre-Phase-2
+    { "id": "AISDLC-DROOT", "title": "...", "dependencies": [] },
+    { "id": "AISDLC-SROOT", "title": "...", "dependencies": [] },
+    { "id": "AISDLC-ALONE", "title": "...", "dependencies": [] }
+  ],
+  "ranked": [                            // new: same order as `frontier`, with metadata
+    {
+      "id": "AISDLC-DROOT",
+      "title": "...",
+      "dependencies": [],
+      "basePriority": 2,                 // medium — what the author wrote
+      "effectivePriority": 4,            // critical — inherited from a critical leaf
+      "criticalPathLength": 2,           // 2 forward steps to the deepest leaf
+      "lastModified": "2026-04-30T17:14:09.871Z"
+    },
+    ...
+  ]
+}
+```
+
+`frontier[0]` is always the dispatcher's first pick — old consumers
+that index `frontier[0]` automatically benefit from the composition
+without any code change.
+
+`--format table` renders the same data as columns:
+
+```
+$ AI_SDLC_DEPS_COMPOSITION=1 cli-deps frontier --format table
+ID            Title             EffPri  CPL  Dependencies (all completed)
+------------  ----------------  ------  ---  ----------------------------
+AISDLC-DROOT  d-root            4       2    (none)
+AISDLC-SROOT  s-root            3       1    (none)
+AISDLC-ALONE  alone             2       0    (none)
+```
+
+### No cache — RFC-0014 §12 Q4
+
+`computeEffectivePriorities` recomputes from scratch every call. At
+current scale (~150 tasks, ~200 edges) the two memoised DFS passes
+total sub-millisecond. Adding a TTL cache would invite invalidation
+bugs (stale cache → wrong dispatch decision) for negative measured
+benefit; revisit only if profiling under realistic load shows
+recompute > 5% of decision time.
+
+### Monotonicity
+
+Adding a new dependency edge can only INCREASE the effective priority
+of upstream tasks, never decrease it (max-aggregation is idempotent).
+This is asserted in `effective-priority.test.ts` and lets operators
+reason about the sort order across edits without surprise inversions.
+
+### Library API (Phase 2)
+
+```ts
+import {
+  buildDependencyGraph,
+  computeEffectivePriorities,
+  frontier,
+  isCompositionEnabled,
+  rankAllByEffectivePriority,
+  sortFrontierByEffectivePriority,
+} from '@ai-sdlc/pipeline-cli/deps';
+
+const g = buildDependencyGraph({ workDir: process.cwd() });
+
+// Pure record set — useful for dashboards, soak A/B comparison, etc.
+const records = computeEffectivePriorities(g);
+
+// Re-rank the ready frontier (honours the env flag).
+const ranked = sortFrontierByEffectivePriority(g, frontier(g));
+
+// Force ON regardless of env (e.g. soak mode).
+const composed = sortFrontierByEffectivePriority(g, frontier(g), {
+  forceComposition: true,
+});
+
+// Whole-graph sort, not just the ready frontier.
+const everything = rankAllByEffectivePriority(g);
+```
+
+See `pipeline-cli/src/deps/effective-priority.ts` and
+`pipeline-cli/src/deps/dispatch.ts` for the full type reference.
+
+## What Phase 2 deliberately doesn't ship
 
 Per RFC-0014 §11 the following are scheduled for later phases:
 
-- **PPA composition** (Phase 2 — `effectivePriority` sort).
 - **DoR comment template extension** (Phase 3 — blast-radius callout).
 - **Slack digest + dashboard graph view** (Phase 4).
 - **Soak + flag promotion** (Phase 5 — corpus-driven, not calendar-gated).
 
-Today, all snapshot consumers are **future-facing**. The Phase 1
-artifact exists so those consumers have something stable to read
-once they ship.
+The snapshot artifact (Phase 1) and the dispatcher composition
+(Phase 2) are both live, both behind `AI_SDLC_DEPS_COMPOSITION`. The
+Phase 4 dashboard will consume the same `effectivePriority` records
+this page documents; the Phase 3 DoR template will read `dependents`
+from the snapshot to compute blast-radius.
