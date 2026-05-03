@@ -60,6 +60,15 @@ export interface DependencyNode {
   fileLocation: TaskStatus;
   /** Raw `status:` value from frontmatter (best-effort; empty if missing). */
   frontmatterStatus: string;
+  /**
+   * Raw `priority:` value from frontmatter, lowercased + trimmed. Empty string
+   * when the field is absent. Per RFC-0014 §5.2 this is the per-task
+   * `priority(T)` signal the Phase 2 dispatcher consumes via
+   * `effectivePriority`. Surfacing as a string (not a numeric weight) keeps
+   * the parser dumb — the weight mapping lives in `deps/effective-priority.ts`
+   * so it can evolve without forcing a frontmatter rewrite.
+   */
+  priority: string;
   /** On-disk title from the frontmatter (best-effort; empty string if missing). */
   title: string;
   /** Outgoing edges — IDs this task depends on. */
@@ -214,6 +223,13 @@ export function parseTaskFrontmatter(
 
   const title = String(fm.title ?? '').trim();
   const frontmatterStatus = String(fm.status ?? '').trim();
+  // RFC-0014 Phase 2 — surface the raw `priority:` frontmatter value so the
+  // dispatcher comparator can read it without re-walking disk. Lowercased +
+  // trimmed; empty string when absent. Numeric weight mapping lives in
+  // `deps/effective-priority.ts`.
+  const priority = String(fm.priority ?? '')
+    .trim()
+    .toLowerCase();
 
   let dependencies: string[] = [];
   if (Array.isArray(fm.dependencies)) {
@@ -242,6 +258,7 @@ export function parseTaskFrontmatter(
     status: fileLocation,
     fileLocation,
     frontmatterStatus,
+    priority,
     title,
     dependencies,
     externalDependencies,

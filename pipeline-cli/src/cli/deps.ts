@@ -26,12 +26,12 @@ import {
   buildDependencyGraph,
   type DependencyNode,
   frontier,
-  type FrontierEntry,
   impact,
   preflight,
   renderGraph,
   validate,
 } from '../deps/dependency-graph.js';
+import { sortFrontierByEffectivePriority, type RankedFrontierEntry } from '../deps/dispatch.js';
 import {
   gcRollingSnapshots,
   inspectSnapshots,
@@ -100,7 +100,7 @@ export function buildDepsCli(): Argv {
     })
     .command(
       'frontier',
-      'List open tasks whose dependencies are all in backlog/completed/ (ready to dispatch).',
+      'List open tasks whose dependencies are all in backlog/completed/ (ready to dispatch). When AI_SDLC_DEPS_COMPOSITION is ON, sorted by effectivePriority DESC → criticalPathLength DESC → recency DESC.',
       (y) =>
         y.option('format', {
           type: 'string',
@@ -109,16 +109,39 @@ export function buildDepsCli(): Argv {
         }),
       async (argv) => {
         const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
-        const f = frontier(g);
+        const baseline = frontier(g);
+        // RFC-0014 Phase 2 — when the feature flag is OFF this is a no-op
+        // re-render of the baseline order; when ON the depth-aware sort
+        // bubbles critical-path leaves to the top per §12 Q1.
+        const ranked = sortFrontierByEffectivePriority(g, baseline);
+        const compositionOn = isCompositionEnabled();
         if ((argv.format as string) === 'table') {
-          const rows = f.map((e: FrontierEntry) => [
+          const rows = ranked.map((e: RankedFrontierEntry) => [
             e.id,
             e.title || '(no title)',
+            String(e.effectivePriority),
+            String(e.criticalPathLength),
             e.dependencies.length === 0 ? '(none)' : e.dependencies.join(', '),
           ]);
-          emitText(renderTable(['ID', 'Title', 'Dependencies (all completed)'], rows));
+          emitText(
+            renderTable(['ID', 'Title', 'EffPri', 'CPL', 'Dependencies (all completed)'], rows),
+          );
         } else {
-          emit({ ok: true, frontier: f });
+          // Compatibility: keep the same `frontier` array shape callers
+          // already parse, plus a new `ranked` field that includes the
+          // composition metadata. `frontier` order matches `ranked` order
+          // so consumers that still index into `frontier[0]` get the
+          // dispatcher's first pick automatically.
+          emit({
+            ok: true,
+            compositionEnabled: compositionOn,
+            frontier: ranked.map((r) => ({
+              id: r.id,
+              title: r.title,
+              dependencies: r.dependencies,
+            })),
+            ranked,
+          });
         }
       },
     )
