@@ -184,6 +184,141 @@ override per-mode `budget` and `escalateImmediately` via the same file
 `.ai-sdlc/schemas/orchestrator-failure-patterns.v1.schema.json` —
 malformed catalogues refuse the orchestrator at startup.
 
+### Orchestrator-specific failure-mode runbook (RFC-0015 Phase 5)
+
+Phase 5 (AISDLC-169.5) ships the soak corpus + chaos-test harness and
+this runbook section. The four failure modes below are
+**orchestrator-scoped** (not per-task) — they describe what to do when
+the orchestrator itself is the thing that surprised you, rather than
+a worker hitting a known catalogued mode.
+
+#### `UnknownFailureMode` escalation triage
+
+The catch-all (RFC §13 Q8). When an `OrchestratorFailed` event has
+`mode: 'UnknownFailureMode'`, the catalogued handlers all declined to
+match the failure shape. Operator workflow:
+
+1. **Pull the captured stderr** from the events stream:
+
+   ```bash
+   node dogfood/dist/cli-status.js --orchestrator --json --limit 100 \
+     | jq '[.[] | select(.type == "OrchestratorFailed" and .mode == "UnknownFailureMode")]'
+   ```
+
+   The `reason` field is the captured stderr/exit-code from the failing
+   dispatch. The `taskId` + `prUrl` fields tell you which worker was
+   affected.
+
+2. **Decide if it's a one-off or a pattern.** A single
+   `UnknownFailureMode` for a novel shape is fine — the conservative
+   bias (Q8 Resolution Option A) means the operator does the hand-fix,
+   the orchestrator continues. Two or more occurrences of the same
+   shape across distinct tasks → catalogue extension candidate.
+
+3. **Extend the catalogue** when the shape recurs. The source-of-truth
+   is `.ai-sdlc/orchestrator-failure-patterns.yaml` (RFC §13 Q9). Add
+   a new entry with the regex shape + a TypeScript handler under
+   `pipeline-cli/src/orchestrator/playbook/handlers/<mode>.ts`, then
+   PR. The catalogue loader validates against
+   `.ai-sdlc/schemas/orchestrator-failure-patterns.v1.schema.json` so
+   typos fail loudly at startup.
+
+4. **Hand-fix the parked task**: the worker's PR carries the
+   `needs-human-attention` label per the catch-all escalation; address
+   it directly (rebase, re-spawn dev, manual edit, etc.) and re-push.
+
+#### Parked-worker investigation
+
+A `WorkerParked` event (or a worker whose persisted state is `PARKED`
+in `artifacts/_orchestrator/workers/<id>.state.json`) means
+`LongRunningPRBlocksWorker` released the worker slot because the
+worker's PR sat open >2h without merge or rejection (RFC §13 Q6). The
+PR continues independently; the slot freed up.
+
+Investigation workflow:
+
+1. **Find parked workers**:
+
+   ```bash
+   for f in artifacts/_orchestrator/workers/*.state.json; do
+     state=$(jq -r '.state' "$f")
+     if [[ "$state" == "PARKED" ]]; then
+       echo "$f"
+       jq '{taskId, branch, lastFailure, history: (.history | length)}' "$f"
+     fi
+   done
+   ```
+
+2. **Check why the PR stalled.** Common causes:
+   - **CI flake** — a required check is stuck in queue or failed
+     transiently. Re-run via `gh pr view <url>` + `gh run rerun`.
+   - **Branch protection / required reviews** — auto-merge is on but
+     a human reviewer hasn't approved. Tag the right reviewer.
+   - **Merge queue jam** — `gh pr view --json mergeStateStatus` shows
+     `BLOCKED` or `BEHIND`. Run `/ai-sdlc rebase <pr>` if behind.
+   - **Genuinely abandoned** — the work is moot (RFC pivot, sibling
+     PR superseded). Close the PR + the parked state file is just
+     forensic exhaust; safe to leave.
+
+3. **No automatic action** — orchestrator design (Q6 Option A) is
+   "park, do not nag." Auto-rebase during human review would dismiss
+   reviews + auto-merge enablement.
+
+#### `OrchestratorStuckCandidate` triage
+
+`OrchestratorStuckCandidate` is a future-Phase-4 event reserved in
+RFC §7.1's enum (currently unwired). Detected when the same task ID
+appears as the top of frontier across many consecutive ticks without
+ever being dispatched — usually because the DoR / dependency / quota
+filters keep declining. Triage steps:
+
+1. **Confirm the stuck shape** — the task is at frontier head but
+   never dispatches. Check via:
+
+   ```bash
+   node dogfood/dist/cli-status.js --orchestrator --limit 200 \
+     | grep "candidates=" | head -20
+   ```
+
+2. **Identify which filter blocked it.** Phase 3
+   (AISDLC-169.3) exposes the filter trace via
+   `OrchestratorAwaitingExternal{reason, context}` events. The
+   `reason` field names the filter (DoR rejection, dependency gate,
+   external-dep block, subscription scheduling).
+
+3. **Resolve the underlying gate**:
+   - **DoR rejection** → fix the task's DoR profile (see
+     `docs/operations/dor-promotion.md`) or apply `dor-bypass` label.
+   - **Dependency gate** → drive the upstream task to completion.
+   - **External-dep block** → address the external dependency
+     (npm publish, third-party PR merge, etc.).
+   - **Subscription scheduler** → `cli-status --subscriptions` shows
+     which window is blocked; wait for off-peak or upgrade tier.
+
+4. **Force-progress** is operator judgment — the orchestrator
+   correctly refuses to dispatch when a gate says no, so "stuck" is
+   diagnostic, not a defect.
+
+#### Chaos-test rerun procedure
+
+The Phase 5 chaos test (hermetic, in
+`pipeline-cli/src/orchestrator/chaos.test.ts`) runs as part of
+`pnpm --filter @ai-sdlc/pipeline-cli test`. If a regression in the
+orchestrator's resume contract is suspected:
+
+```bash
+# Hermetic harness — runs in seconds, deterministic.
+pnpm --filter @ai-sdlc/pipeline-cli test src/orchestrator/chaos.test.ts
+```
+
+A failure here MUST be treated as a release-blocker — the recovery
+contract (RFC §13 Q2 idempotent finalize) is what makes
+`AI_SDLC_AUTONOMOUS_ORCHESTRATOR=on` safe.
+
+For end-to-end validation against a real orchestrator instance, see
+the procedure in
+[`docs/operations/orchestrator-promotion.md`](orchestrator-promotion.md#chaos-test-rerun-procedure).
+
 ---
 
 ## CLI Commands
