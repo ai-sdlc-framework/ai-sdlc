@@ -549,9 +549,10 @@ export function renderNextSteps(
     lines.push('     a) Bootstrap your signing key: /ai-sdlc init-signing-key');
     lines.push('     b) Open a PR adding the printed YAML block to');
     lines.push('        .ai-sdlc/trusted-reviewers.yaml');
-    lines.push('     c) (Optional CI-side signer for PRs without a local key)');
-    lines.push('        Set the AI_SDLC_CI_ATTESTOR_PRIVATE_KEY GitHub Actions secret:');
-    lines.push('          gh secret set AI_SDLC_CI_ATTESTOR_PRIVATE_KEY < ci-key.pem');
+    // AISDLC-152: removed the optional CI-side signer step (the AISDLC-87
+    // CI-attestor was retired in AISDLC-140 sub-4 alongside attestation
+    // becoming audit-only). New adopters no longer need to provision the
+    // AI_SDLC_CI_ATTESTOR_PRIVATE_KEY secret.
     lines.push('');
     stepN++;
   }

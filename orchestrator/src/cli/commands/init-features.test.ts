@@ -448,9 +448,12 @@ describe('renderNextSteps', () => {
     expect(out.toLowerCase()).toContain('warn-only');
     expect(out).toContain('evaluationMode: enforce');
 
-    // Attestation includes the gh secret command
-    expect(out).toContain('gh secret set AI_SDLC_CI_ATTESTOR_PRIVATE_KEY');
+    // Attestation step still mentions the local-key bootstrap; the
+    // CI-attestor `gh secret set AI_SDLC_CI_ATTESTOR_PRIVATE_KEY` line
+    // was removed in AISDLC-152 (the AISDLC-87 attestor was retired in
+    // AISDLC-140 sub-4 — attestation is audit-only).
     expect(out).toContain('init-signing-key');
+    expect(out).not.toContain('AI_SDLC_CI_ATTESTOR_PRIVATE_KEY');
 
     // Classifier callout pointing at AISDLC-141
     expect(out).toContain('AISDLC-141');
