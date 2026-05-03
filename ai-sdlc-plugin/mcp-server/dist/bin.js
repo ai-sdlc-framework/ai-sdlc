@@ -6795,7 +6795,7 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync17, readdirSync as readdirSync6, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync18, readdirSync as readdirSync6, statSync as statSync5 } from "node:fs";
 import { join as join19 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
@@ -22955,8 +22955,11 @@ var PRIORITY_WEIGHT = {
 };
 var DEFAULT_PRIORITY_WEIGHT = PRIORITY_WEIGHT.medium;
 
+// ../../pipeline-cli/dist/deps/critical-path.js
+import { existsSync as existsSync16, readFileSync as readFileSync14 } from "node:fs";
+
 // ../../pipeline-cli/dist/deps/override-log.js
-import { appendFileSync, existsSync as existsSync16, mkdirSync as mkdirSync5, readFileSync as readFileSync14 } from "node:fs";
+import { appendFileSync, existsSync as existsSync17, mkdirSync as mkdirSync5, readFileSync as readFileSync15 } from "node:fs";
 import { dirname as dirname4, join as join17 } from "node:path";
 
 // ../../pipeline-cli/dist/incremental-review/incremental.js
@@ -22977,7 +22980,7 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync18, readFileSync as readFileSync15, readdirSync as readdirSync7, statSync as statSync6 } from "node:fs";
+import { existsSync as existsSync19, readFileSync as readFileSync16, readdirSync as readdirSync7, statSync as statSync6 } from "node:fs";
 import { basename as basename3, join as join20, relative } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
@@ -22991,21 +22994,21 @@ import { appendFileSync as appendFileSync2, mkdirSync as mkdirSync6 } from "node
 import { dirname as dirname6, join as join21 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync19, readFileSync as readFileSync16 } from "node:fs";
+import { existsSync as existsSync20, readFileSync as readFileSync17 } from "node:fs";
 import { join as join22 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync20, readFileSync as readFileSync17, readdirSync as readdirSync8 } from "node:fs";
+import { existsSync as existsSync21, readFileSync as readFileSync18, readdirSync as readdirSync8 } from "node:fs";
 import { join as join23 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync21, readFileSync as readFileSync18 } from "node:fs";
+import { existsSync as existsSync22, readFileSync as readFileSync19 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync22, readFileSync as readFileSync19 } from "node:fs";
+import { existsSync as existsSync23, readFileSync as readFileSync20 } from "node:fs";
 import { join as join24 } from "node:path";
 
 // src/tools/pipeline-tools.ts
