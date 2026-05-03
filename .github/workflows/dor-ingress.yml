@@ -65,10 +65,18 @@ jobs:
 
       - name: Run Stage A evaluation (hermetic)
         id: evaluate
+        # AISDLC-161: ARTIFACTS_DIR points the calibration-log writer at a
+        # known path that survives the job (the upload-artifact step below
+        # globs `<ARTIFACTS_DIR>/_dor/calibration.jsonl`). Pre-AISDLC-161
+        # the writer fell through to `./artifacts` under the runner's CWD —
+        # technically writeable but never collected, so the corpus stayed
+        # empty for months despite this workflow firing on every issue.
         env:
           ISSUE_TITLE: ${{ github.event.issue.title }}
           ISSUE_NUM: ${{ github.event.issue.number }}
+          ARTIFACTS_DIR: /tmp/dor/artifacts
         run: |
+          mkdir -p "$ARTIFACTS_DIR/_dor"
           set +e
           OUT=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
             dor-evaluate "gh#${ISSUE_NUM}" \
@@ -86,6 +94,22 @@ jobs:
           fi
           VERDICT=$(node -e "process.stdout.write(require('/tmp/dor/verdict.json').overallVerdict)")
           echo "verdict=$VERDICT" >> "$GITHUB_OUTPUT"
+
+      - name: Upload DoR calibration entry as workflow artifact
+        # AISDLC-161 — persist `<ARTIFACTS_DIR>/_dor/calibration.jsonl` so
+        # the operator can `gh run download` a corpus and feed it into
+        # `cli-dor-corpus aggregate` for the FP-rate digest. Without this
+        # step the runner's tmpdir gets thrown away at job end and the
+        # corpus stays empty forever (the original AISDLC-161 bug).
+        # Retention 90 days matches the AISDLC-115.8 soak window.
+        # `if: always()` so failed evaluations still leave a forensic trail.
+        if: always() && hashFiles('/tmp/dor/artifacts/_dor/calibration.jsonl') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dor-calibration-issue-${{ github.event.issue.number }}-${{ github.run_attempt }}
+          path: /tmp/dor/artifacts/_dor/calibration.jsonl
+          retention-days: 90
+          if-no-files-found: ignore
 
       - name: Render clarification comment via pipeline-cli
         if: steps.evaluate.outputs.verdict == 'needs-clarification'
@@ -237,11 +261,16 @@ jobs:
 
       - name: Evaluate each changed task
         if: steps.changed.outputs.no-changes != 'true'
+        # AISDLC-161: ARTIFACTS_DIR exported so each `dor-evaluate` invocation
+        # below appends its calibration entry to the same path the upload
+        # step picks up. Same rationale as the issues job — pre-AISDLC-161,
+        # the calibration log went to the runner's CWD and was discarded.
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           FILES: ${{ steps.changed.outputs.files }}
+          ARTIFACTS_DIR: /tmp/dor/artifacts
         run: |
-          mkdir -p /tmp/dor
+          mkdir -p /tmp/dor "$ARTIFACTS_DIR/_dor"
           : > /tmp/dor/results.jsonl
           while IFS= read -r f; do
             [ -z "$f" ] && continue
@@ -333,3 +362,17 @@ jobs:
               });
               core.notice(`Created DoR PR comment ${created.id}`);
             }
+
+      - name: Upload DoR calibration entries as workflow artifact
+        # AISDLC-161 — same rationale as the issues job: persist the JSONL
+        # so `gh run download` + `cli-dor-corpus aggregate` can build the
+        # FP-rate digest. PR job evaluates N tasks per run, so the JSONL
+        # may contain N entries (one per changed `backlog/tasks/*.md`).
+        # `if: always()` so partial failures still leave a trail.
+        if: always() && hashFiles('/tmp/dor/artifacts/_dor/calibration.jsonl') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: dor-calibration-pr-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: /tmp/dor/artifacts/_dor/calibration.jsonl
+          retention-days: 90
+          if-no-files-found: ignore

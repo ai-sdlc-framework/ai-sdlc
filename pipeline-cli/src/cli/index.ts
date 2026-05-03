@@ -34,6 +34,7 @@ import { runStageACorpus } from '../dor/corpus.js';
 import { refineBacklogTask } from '../dor/ingress-claude.js';
 import { decideStaleness } from '../dor/staleness.js';
 import { loadDorConfig } from '../dor/dor-config.js';
+import { appendCalibrationEntry } from '../dor/calibration-log.js';
 import {
   renderClarificationComment,
   renderAdmitComment,
@@ -471,6 +472,34 @@ export function buildCli(): Argv {
             workDir: argv['work-dir'] as string,
           };
           const verdict = await evaluateIssue(input, { hermetic: argv.hermetic as boolean });
+          // AISDLC-161: persist a calibration entry on EVERY evaluation so the
+          // GitHub Action ingress (`dor-ingress.yml`) accumulates a corpus the
+          // FP-rate aggregator can chew on. Pre-AISDLC-161, only the
+          // `dor-refine-task` (backlog) path wrote calibration; the
+          // `dor-evaluate` (GitHub issues + PR-tasks) path silently produced
+          // ZERO calibration data. The workflow is responsible for setting
+          // ARTIFACTS_DIR to a path that survives the job (then uploads
+          // `<ARTIFACTS_DIR>/_dor/calibration.jsonl` as a workflow artifact).
+          // Wrapped in try/catch so a calibration log failure never poisons
+          // the verdict — the verdict is the user-facing contract; the log
+          // is observability infrastructure.
+          try {
+            appendCalibrationEntry({
+              issue: { id: input.id, source: input.source, title: input.title, body },
+              // StageAVerdict is a structural superset of RefinementVerdict
+              // (same fields + `durationMs` extra); rubricVersion is `'v1'`
+              // by construction in evaluate.ts. The cast launders the
+              // wider StageAVerdict.rubricVersion typing for the calibration
+              // log writer.
+              verdict: verdict as unknown as RefinementVerdict,
+              outcome: verdict.overallVerdict,
+              ...(input.authorIdentity ? { author: input.authorIdentity } : {}),
+            });
+          } catch (err) {
+            process.stderr.write(
+              `[ai-sdlc/dor] calibration log append failed (non-fatal): ${(err as Error).message}\n`,
+            );
+          }
           emit(verdict);
           if (verdict.overallVerdict === 'needs-clarification') process.exit(2);
         },
