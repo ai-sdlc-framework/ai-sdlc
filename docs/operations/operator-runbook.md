@@ -390,6 +390,128 @@ The orchestrator does NOT auto-reclaim — every option above requires operator 
 2. If sweep doesn't free enough: lower `WorktreePool.spec.parallelism.maxConcurrent` temporarily.
 3. Long-term: upgrade the vendor quota tier (Neon, Supabase, RDS).
 
+## Definition-of-Ready (DoR) Gate
+
+The DoR gate runs the seven-gate rubric (RFC-0011 §4.1) against every new issue or backlog task before it enters PPA scoring. When a gate fails, the issue is parked in `Needs Clarification` and a comment is posted to the author's native channel with the specific gates that blocked admission. The runbook below covers what the operator sees, where to look, and what to do for the three failure modes specific to the gate's operation: **refusal**, **bypass**, and **escalation**.
+
+For the warn-only → enforce promotion procedure (a separate operational concern), see [`docs/operations/dor-promotion.md`](./dor-promotion.md). The normative spec is [RFC-0011 — Definition-of-Ready Gate](../../spec/rfcs/RFC-0011-definition-of-ready-gate.md).
+
+**When the gate is active.** Behavior is gated by `evaluationMode` in `.ai-sdlc/dor-config.yaml` (RFC-0011 §10):
+
+| Mode | Behavior |
+|---|---|
+| `disabled` | Gate runs but does not block; verdicts logged to calibration log only |
+| `warn-only` | Comments posted with findings; issues NOT moved to `Needs Clarification` |
+| `enforce` | Full gate behavior — refusal, comment, status transition |
+
+The failure modes below describe `enforce` behavior. In `warn-only` the comment posts but no refusal fires; the operator's job in `warn-only` is calibration spot-checks (see `dor-promotion.md`), not failure-mode triage.
+
+### Refusal flow (Stage A or Stage B gate failure)
+
+**Symptoms (what operator sees).**
+
+- Slack daily-digest entry naming the issue + the gate(s) that failed (e.g., "Gate 1 — AC not binary-testable").
+- Issue / backlog task transitions from `Draft` (or `To Do`) to `Needs Clarification`.
+- A `<!-- ai-sdlc:dor-comment -->` comment is posted to the author's native channel (GitHub issue comment, backlog task `## Clarifications Requested` section, or Slack thread per RFC-0011 §6.2).
+- If the operator (or anyone) tries `/ai-sdlc execute <task-id>` on the parked issue, the command refuses with: `Refused: <ID> is in Needs Clarification (blocks: Gate N, Gate M). Address the questions in the issue thread, then re-run.` (RFC-0011 §7.3).
+- PPA admission silently skips the issue — it does NOT score `Needs Clarification` issues (RFC-0011 §7.2).
+
+**Diagnosis (where to look).**
+
+1. **The DoR comment itself.** It names the failing gates with concrete findings and a checklist of clarifying questions. `gh issue view N --comments` or open the backlog task file under its `## Clarifications Requested` section.
+2. **Calibration log.** `$ARTIFACTS_DIR/_dor/calibration.jsonl` records every verdict with `{issueId, verdict, gateResults, confidence, stage}`. Useful for confirming which stage (A deterministic vs B LLM) produced the refusal and the agent's confidence.
+3. **CI workflow run.** For GitHub-issue ingress, the `dor-ingress.yml` workflow run carries the full evaluator output; download the `dor-calibration-issue-N-A` artifact for the raw JSONL.
+
+**Resolution (what to do).**
+
+The agent recovers automatically — no operator action is required for the happy path:
+
+1. Author reads the comment, edits the issue body to address the clarifying questions.
+2. The edit fires a re-check (debounced 60 seconds per RFC-0011 §7.1) OR the author runs `/ai-sdlc dor-recheck <issue>` manually.
+3. If the verdict is now `ready`, status transitions back to `To Do`, the comment is updated (idempotent via the HTML marker), and PPA picks the issue up on the next admission tick.
+
+The operator only intervenes when:
+
+- The verdict is a **false positive** (the issue is genuinely fine but the agent keeps blocking) — apply `dor-bypass` per the next subsection.
+- The author has gone silent — escalation handles this; see "Escalation paths" below.
+- Refusal cycles repeatedly on the same gates across many authors → the rubric needs tuning; surface in the weekly calibration review (the per-gate failure rate is the most operationally useful metric per RFC-0011 §8.2).
+
+### Bypass mechanism (`dor-bypass` label)
+
+**Symptoms (when to reach for the bypass).**
+
+- A specific issue is genuinely actionable but the rubric keeps refusing it (e.g., the gate is mis-firing on a domain the agent doesn't understand, or the AC is binary-testable in context but doesn't surface that way to the gate).
+- Urgent work is blocked behind a verdict the operator has confirmed is wrong.
+- Round 3 escalation has reached the operator and the operator's judgment is "yes, admit this issue" (vs split / close / coach the author).
+
+**Diagnosis (confirm before bypassing).**
+
+1. Read the DoR comment. Confirm the agent's findings are wrong, not just inconvenient. The bypass exists for false positives; using it to skip valid clarifications defeats the gate.
+2. Check the calibration log entry's `confidence` field. `low`-confidence verdicts should be bypassed only with explicit operator review (per RFC-0011 Q4 they auto-escalate via the same path as round 3).
+3. Confirm the bypass actor is in the trusted-reviewer role per `.ai-sdlc/trusted-reviewers.yaml` (RFC-0009). Non-trusted actors applying the label are rejected by the bypass handler.
+
+**Resolution (how to apply).**
+
+1. Apply the `dor-bypass` label to the issue (GitHub) OR add the label to the backlog task frontmatter.
+2. Provide a **reason** in the bypass comment — required, not optional. The bypass handler logs `{issueId, actor, reason, originalVerdict}` to the calibration log with `event: 'override'` (RFC-0011 §7.4).
+3. The handler sets the verdict to `ready (manual override by <maintainer>)` and the issue advances to PPA scoring.
+
+**What the bypass overrides.**
+
+- The seven DoR rubric gates (Gates 1-7).
+- The `Needs Clarification` status block on PPA admission and `/ai-sdlc execute`.
+
+**What the bypass does NOT override.**
+
+- Security gates (review-security, attestation verification, signing-key checks).
+- Schema validation (`ArtifactSchemaInvalid`, `MigrationFailed` — these are downstream of admission and have nothing to do with DoR).
+- The trusted-reviewer role check itself — the label is ignored when applied by a non-trusted actor.
+- The audit trail. Every override is permanently logged to the calibration log and counted in per-maintainer override-rate metrics.
+
+A high override rate per maintainer is a signal that either (a) the rubric is too aggressive and needs tuning, or (b) the maintainer is gaming the gate. Surface persistent override-rate spikes in the weekly calibration review.
+
+### Escalation paths (3-round + low-confidence)
+
+Two distinct triggers route to the same human triager:
+
+1. **Round-cap escalation** — the issue has cycled through `Needs Clarification` 3 times without passing (configurable via `escalation.maxRoundsBeforeHumanTriage`, default 3, per RFC-0011 §6.3).
+2. **Low-confidence escalation** — the agent's verdict carries `confidence: low`, regardless of round number (RFC-0011 Q4 — never auto-act on low confidence).
+
+**Symptoms (what operator sees).**
+
+- A Slack mention or GitHub team ping naming the configured triager (per `escalation.triager` in `.ai-sdlc/dor-config.yaml`; legacy `escalation.triageRouters[]` array also accepted for backward compat).
+- The escalation comment summarizes the agent's findings across all rounds + the author's responses, framed as a soft handoff.
+- The issue remains in `Needs Clarification` — escalation does NOT auto-admit. The triager owns the decision.
+
+**Diagnosis (where to look).**
+
+1. **The escalation comment** itself — names the round count, the per-round gate findings, and the agent's confidence on the most recent verdict.
+2. **The full clarification thread.** Each round of agent comments + author responses is in the issue / task thread, marked by the `<!-- ai-sdlc:dor-round-N -->` round counter (per `comment-loop.ts` `dorRoundMarker`).
+3. **Calibration log.** Filter for the issue ID to see the verdict trajectory across rounds; the override-or-not decision is the next entry the triager appends.
+
+**Resolution (what the operator does at round 3 — soft handoff per RFC-0011 §6.3).**
+
+The operator chooses one of four:
+
+| Decision | Action | Logged as |
+|---|---|---|
+| **Approve manually** | Apply `dor-bypass` per the previous subsection with reason `escalation: false-positive after N rounds` | Override |
+| **Close as not actionable** | Standard issue close + comment explaining why (no override flag — the gate was right) | Close (no override) |
+| **Split** | File N replacement issues, each scoped narrowly enough to pass DoR independently. Close the original referencing the splits | Split (no override) |
+| **Coach the author** | Direct message / pairing session — work with the author to revise the issue. Then `/ai-sdlc dor-recheck` once the body is updated | No log entry until next verdict |
+
+**Tuning the trigger.** If round-3 escalations are firing too often:
+
+- Tighten the rubric (the per-gate false-positive rate in the calibration log identifies the offending gate).
+- Increase `escalation.maxRoundsBeforeHumanTriage` if the data shows authors typically resolve within 4-5 rounds (be cautious — the cap exists to surface genuinely-stuck issues, not to extend friction indefinitely).
+- If low-confidence escalations dominate, the LLM evaluator (Stage B) prompt may need refinement; surface to the rubric maintainer.
+
+**Cross-references.**
+
+- Normative spec: [RFC-0011 §6.3 (escalation), §7.4 (bypass), §10 (evaluation modes)](../../spec/rfcs/RFC-0011-definition-of-ready-gate.md).
+- Promotion procedure (warn-only → enforce): [`dor-promotion.md`](./dor-promotion.md).
+- Trusted-reviewer role definition: [RFC-0009 — Trusted Reviewer Role](../../spec/rfcs/) (the `.ai-sdlc/trusted-reviewers.yaml` registry the bypass handler reads).
+
 ## Chaos test plan (Phase 5 hardening)
 
 Per RFC §17 Phase 5, before promoting `AI_SDLC_PARALLELISM=experimental` to default-on, the dogfood pipeline MUST pass three chaos scenarios:
@@ -443,4 +565,6 @@ without review (it's just file relocation), but the human approves it.
 - [RFC-0005 — Product Priority Algorithm](../../spec/rfcs/RFC-0005-product-priority-algorithm.md) — foundational PPA spec defining the seven dimensions, composite formula, and calibration loop the operator interprets but doesn't tune
 - [RFC-0008 — PPA Triad Integration](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md) — admission-time integration of RFC-0005 across Product / Design / Engineering pillars
 - [RFC-0004 — Cost Governance and Attribution](../../spec/rfcs/RFC-0004-cost-governance-and-attribution.md) — `costBudget` semantics; see also [Tutorial: Cost Governance](../tutorials/cost-governance.md) and [API Reference: Cost Governance](../api-reference/cost.md)
+- [RFC-0011 — Definition-of-Ready Gate](../../spec/rfcs/RFC-0011-definition-of-ready-gate.md) — normative spec for the seven-gate rubric, refusal flow (§6, §7.3), bypass (§7.4), escalation (§6.3), and `evaluationMode` lifecycle (§10) the "Definition-of-Ready (DoR) Gate" section above operationalizes
+- [DoR promotion runbook](./dor-promotion.md) — warn-only → enforce promotion procedure (corpus-driven exit criterion + override path)
 - [Project Slack Integration](../../../.claude/projects/-Users-dominique-Documents-dev-ai-sdlc/memory/project_slack_integration.md) — how digest entries reach the operator
