@@ -1,7 +1,7 @@
 ---
 id: AISDLC-148
 title: Bulk-clean backlog-drift references — unblock stuck PRs
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-02 17:30'
 labels:
