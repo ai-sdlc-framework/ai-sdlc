@@ -20,8 +20,8 @@ drift_checked: '2026-05-03'
 <!-- SECTION:DESCRIPTION:BEGIN -->
 Two parallel documentation trees exist with overlapping content and divergence risk:
 
-- `/Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/docs/` — source `.md` files (architecture, getting-started, tutorials, troubleshooting, api-reference, examples)
-- `/Users/dominique/Documents/dev/ai-sdlc/ai-sdlc-io/content/docs/` and `/content/spec/` — published `.mdx` files served by the Next.js site
+- `docs/` — source `.md` files (architecture, getting-started, tutorials, troubleshooting, api-reference, examples)
+- `ai-sdlc-io/content/docs/` and `/content/spec/` — published `.mdx` files served by the Next.js site
 
 The trees mirror each other structurally but use different formats (md vs mdx) and there is no automated sync. RFC-0006 was published without source-tree documentation, surfacing the drift risk.
 

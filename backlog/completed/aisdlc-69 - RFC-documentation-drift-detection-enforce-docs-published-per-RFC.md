@@ -10,11 +10,10 @@ labels:
   - rfc-process
 dependencies: []
 references:
-  - /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/spec/rfcs/
-  - >-
-    /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/spec/rfcs/RFC-0006-design-system-governance-v5-final.md
-  - /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/spec/rfcs/README.md
-  - /Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/docs/
+  - spec/rfcs/
+  - spec/rfcs/RFC-0006-design-system-governance-v5-final.md
+  - spec/rfcs/README.md
+  - docs/
 priority: medium
 ---
 

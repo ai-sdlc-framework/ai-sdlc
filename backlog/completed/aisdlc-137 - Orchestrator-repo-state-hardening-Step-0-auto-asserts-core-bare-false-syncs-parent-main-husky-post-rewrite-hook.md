@@ -30,7 +30,7 @@ drift_checked: '2026-05-03'
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-**Caught when the parent repo at `/Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/` was found 10 commits behind origin/main and `core.bare=true` (preventing `git status`).** This is the recurring problem the operator flagged 2026-05-02: every few sessions, an editor extension or external tool flips `core.bare` back to `true`, the parent's working tree falls out of sync, and worktree creation starts from a stale base.
+**Caught when the parent repo at `` was found 10 commits behind origin/main and `core.bare=true` (preventing `git status`).** This is the recurring problem the operator flagged 2026-05-02: every few sessions, an editor extension or external tool flips `core.bare` back to `true`, the parent's working tree falls out of sync, and worktree creation starts from a stale base.
 
 **Contract** (saved as memory `project_orchestrator_repo_layout.md`): the parent dir at the orchestrator root uses Pattern C — non-bare with worktrees, parent's working tree on main is **read-only**. All edits happen in `.worktrees/<task-id>/`. This makes it safe to auto-sync the parent's working tree to current `origin/main` because nobody edits there directly.
 

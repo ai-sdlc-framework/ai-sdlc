@@ -46,7 +46,7 @@ The bug has TWO surfaces, both of which need fixes:
 
 ## Bug A — Verifier doesn't disable git path-quoting
 
-**Location:** `/Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/scripts/verify-attestation.mjs` ~line 380, the `git()` helper.
+**Location:** `scripts/verify-attestation.mjs` ~line 380, the `git()` helper.
 
 **Current code:**
 
@@ -109,7 +109,7 @@ In addition to fixing the verifier (Bug A), add a CI check or pre-push hook that
 - AISDLC-90 — the originating PR that surfaced this
 - AISDLC-85 — the chore-commit allowlist that this verifier mechanism comes from
 - AISDLC-84 — the predicate-content-based attestation matching
-- `/Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/scripts/verify-attestation.mjs` (the verifier file to fix)
+- `scripts/verify-attestation.mjs` (the verifier file to fix)
 - Backlog.md upstream: https://github.com/MrLesk/Backlog.md
 - AISDLC-90's PR #101 chore-commit force-push as evidence of the workaround
 <!-- SECTION:DESCRIPTION:END -->

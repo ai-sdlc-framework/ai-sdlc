@@ -24,8 +24,6 @@ references:
   - ai-sdlc-plugin/commands/review.md
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.sh
   - ai-sdlc-plugin/plugin.json
-  - >-
-    /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/tools/AgentTool/runAgent.ts
   - .github/workflows/backlog-task-complete.yml
   - CLAUDE.md
 priority: high

@@ -69,7 +69,7 @@ Co-Authored-By: Claude <noreply@anthropic.com>
 
 ✖ eslint --fix:
 
-/Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/orchestrator/src/adapters.test.ts
+orchestrator/src/adapters.test.ts
   31:8  error  'BackendRoute' is defined but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
 
 ✖ 1 problem (1 error, 0 warnings)
