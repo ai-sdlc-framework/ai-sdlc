@@ -1,17 +1,27 @@
 /**
- * Public surface for the autonomous-pipeline orchestrator (RFC-0015 Phase 1).
+ * Public surface for the autonomous-pipeline orchestrator (RFC-0015
+ * Phase 1 + Phase 3).
  *
- * Phase 1 ships:
+ * Phase 1 shipped:
  *   - The bare polling loop (`runOrchestratorLoop`) + per-tick driver
  *     (`runOrchestratorTick`).
  *   - Status inspection (`buildOrchestratorStatus`) for `cli-orchestrator status`.
  *   - Feature-flag predicate (`isOrchestratorEnabled`).
  *
- * Phase 2 (AISDLC-169.2) extends this with the catalogued failure playbook;
- * Phase 3 (AISDLC-169.3) wires the pre-dispatch admission filters (DoR +
- * dependency + external-deps) and the exponential-backoff cadence; Phase 4
- * (AISDLC-169.4) replaces the in-memory escalation array with the
- * `events.jsonl` writer + `cli-status --orchestrator` view.
+ * Phase 3 (this revision) adds:
+ *   - Pre-dispatch admission filter chain (DependencyReadiness, DoR
+ *     readiness, external-deps gate). Re-exported from `./filters/`.
+ *   - In-memory stuck-candidate counter + `OrchestratorStuckCandidate`
+ *     event surface. Persistence to `$ARTIFACTS_DIR/_orchestrator/state.json`
+ *     is deferred to Phase 4.
+ *   - Exponential-backoff sleep cadence (Q3 + Q5) — `MAX_IDLE_SLEEP_SEC`
+ *     + `makeInitialCadenceState` for callers that want to share state.
+ *
+ * Phase 2 (AISDLC-169.2 — in-flight on PR #224) lands the catalogued
+ * failure playbook. Phase 4 (AISDLC-169.4) replaces the in-memory event
+ * arrays with the `events.jsonl` writer + `cli-status --orchestrator`
+ * view; Phase 5 (AISDLC-169.5) wires the soak corpus + chaos test +
+ * promotion runbook.
  */
 
 export {
@@ -19,10 +29,15 @@ export {
   defaultOrchestratorConfig,
   DEFAULT_MAX_CONCURRENT,
   DEFAULT_TICK_INTERVAL_SEC,
+  makeInitialCadenceState,
+  MAX_IDLE_SLEEP_SEC,
   OrchestratorDisabledError,
   runOrchestratorLoop,
   runOrchestratorTick,
+  STUCK_CANDIDATE_THRESHOLD,
+  type CadenceState,
   type OrchestratorAdapters,
+  type StuckCounterEntry,
 } from './loop.js';
 export {
   isOrchestratorEnabled,
@@ -44,8 +59,15 @@ export type {
   EscalateFn,
   EscalationRecord,
   FrontierFn,
+  OrchestratorAwaitingExternalEvent,
+  OrchestratorBlockedByDependencyEvent,
+  OrchestratorBlockedByDorEvent,
+  OrchestratorBlockedEvent,
   OrchestratorConfig,
+  OrchestratorFilterEvent,
+  OrchestratorIdleEvent,
   OrchestratorStatus,
+  OrchestratorStuckCandidateEvent,
   OrchestratorTickResult,
   TaskDispatchOutcome,
 } from './types.js';
@@ -98,3 +120,24 @@ export {
   type WorkerState,
   type WorkerStateTransitionEvent,
 } from './playbook/index.js';
+
+// RFC-0015 Phase 3 — pre-dispatch admission filters (AISDLC-169.3).
+export {
+  checkDependencyReadiness,
+  checkDorReadiness,
+  checkExternalDependencies,
+  DOR_BYPASS_LABEL,
+  formatFilterTrace,
+  runFilterChain,
+  type AwaitingExternalDetail,
+  type CheckDependencyReadinessOpts,
+  type CheckDorReadinessOpts,
+  type CheckExternalDependenciesOpts,
+  type DependencyBlockedDetail,
+  type DorBlockedDetail,
+  type FilterChainResult,
+  type FilterDetail,
+  type FilterName,
+  type FilterResult,
+  type RunFilterChainOpts,
+} from './filters/index.js';

@@ -34,8 +34,15 @@ import type { PipelineLogger } from '../types.js';
 // ── Event type ────────────────────────────────────────────────────────
 
 /**
- * Discriminator for the seven Phase 4 event types. Future phases / RFCs
- * extend this without a schema bump — see `spec/schemas/orchestrator-events.v1.schema.json`.
+ * Discriminator for the orchestrator event types. Phase 4 (AISDLC-169.4)
+ * shipped the seven core types covering tick lifecycle + dispatch
+ * outcomes + worker-state transitions + the external-deps filter
+ * rejection. Phase 3 (AISDLC-169.3) extends the union with the remaining
+ * five filter-rejection / idle / stuck event types so the events.jsonl
+ * stream is the single observability path (matches the integration goal
+ * documented in `pipeline-cli/docs/orchestrator.md` Phase plan).
+ *
+ * Schema source of truth: `spec/schemas/orchestrator-events.v1.schema.json`.
  */
 export type OrchestratorEventType =
   | 'OrchestratorTick'
@@ -44,6 +51,11 @@ export type OrchestratorEventType =
   | 'OrchestratorFailed'
   | 'OrchestratorRecovered'
   | 'OrchestratorAwaitingExternal'
+  | 'OrchestratorBlockedByDependency'
+  | 'OrchestratorBlockedByDor'
+  | 'OrchestratorIdleNoWork'
+  | 'OrchestratorIdleAllFiltered'
+  | 'OrchestratorStuckCandidate'
   | 'WorkerStateTransition';
 
 /**

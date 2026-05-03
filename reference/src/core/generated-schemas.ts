@@ -2444,13 +2444,75 @@ export const orchestratorEventsV1Schema = {
         'Free-form structured context bag for the event. Schema-less by design so future event types can carry per-type payload without a v2 bump.',
       additionalProperties: true,
     },
+    blockers: {
+      type: 'array',
+      items: { type: 'string', minLength: 1 },
+      description:
+        'Upstream task IDs blocking the candidate — present on `OrchestratorBlockedByDependency` (RFC-0015 Phase 3 / AISDLC-169.3).',
+    },
+    verdict: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'DoR verdict tag (`pass`, `fail`, `not-run`, ...) — present on `OrchestratorBlockedByDor`.',
+    },
+    signedAt: {
+      type: ['string', 'null'],
+      description:
+        'ISO-8601 timestamp of the most recent DoR calibration signature for the task — present on `OrchestratorBlockedByDor`. Null when no signature exists.',
+    },
+    externalDeps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id', 'kind'],
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          kind: { type: 'string', minLength: 1 },
+        },
+        additionalProperties: true,
+      },
+      description: 'Currently-blocking external deps — present on `OrchestratorAwaitingExternal`.',
+    },
+    allExternalDeps: {
+      type: 'array',
+      items: {
+        type: 'object',
+        required: ['id', 'kind'],
+        properties: {
+          id: { type: 'string', minLength: 1 },
+          kind: { type: 'string', minLength: 1 },
+        },
+        additionalProperties: true,
+      },
+      description:
+        'All declared external deps for this candidate (cleared + uncleared) — present on `OrchestratorAwaitingExternal`.',
+    },
+    idleStreak: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Consecutive idle ticks since the last dispatch — present on `OrchestratorIdleNoWork` / `OrchestratorIdleAllFiltered`.',
+    },
+    rejectedCount: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Number of candidates rejected by the filter chain this tick — present on `OrchestratorIdleAllFiltered`.',
+    },
+    ticksSinceFirstSkip: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Consecutive-skip count for the candidate at the moment the stuck event fires — present on `OrchestratorStuckCandidate`.',
+    },
   },
   additionalProperties: false,
   $defs: {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 ships the seven core types listed; future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -2458,6 +2520,11 @@ export const orchestratorEventsV1Schema = {
         'OrchestratorFailed',
         'OrchestratorRecovered',
         'OrchestratorAwaitingExternal',
+        'OrchestratorBlockedByDependency',
+        'OrchestratorBlockedByDor',
+        'OrchestratorIdleNoWork',
+        'OrchestratorIdleAllFiltered',
+        'OrchestratorStuckCandidate',
         'WorkerStateTransition',
       ],
     },

@@ -41,6 +41,28 @@ function fakeFrontier(ids: string[]): () => Array<{ id: string; title: string }>
   return () => ids.map((id) => ({ id, title: `Task ${id}` }));
 }
 
+/**
+ * Phase 3 adds three pre-dispatch filters that read disk by default
+ * (graph from `<workDir>/backlog/`, DoR verdicts from
+ * `$ARTIFACTS_DIR/_dor/calibration.jsonl`, etc.). These Phase 1 tests
+ * use a synthetic `frontier` adapter and expect those candidates to be
+ * dispatched without consulting disk. Inject hermetic filter adapters so
+ * the chain admits everything from the synthetic frontier without
+ * reading any real-on-disk state.
+ */
+function hermeticFilterAdapters(): Pick<
+  OrchestratorAdapters,
+  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath'
+> {
+  return {
+    graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
+    taskLabelsLoader: () => [],
+    // Pointing at an absent path makes the DoR filter return PASS by
+    // construction (per its module-level docstring's no-log default).
+    calibrationLogPath: '/nonexistent-phase1-tests-bypass.jsonl',
+  };
+}
+
 function approvedResult(taskId: string, prUrl: string | null = null): PipelineResult {
   return {
     taskId,
@@ -147,6 +169,7 @@ describe('runOrchestratorTick — happy path', () => {
           dispatched.push(taskId);
           return approvedResult(taskId, `https://github.com/x/y/pull/1#${taskId}`);
         },
+        ...hermeticFilterAdapters(),
       },
       1,
     );
@@ -174,6 +197,7 @@ describe('runOrchestratorTick — happy path', () => {
           dispatchedCount += 1;
           return approvedResult(taskId);
         },
+        ...hermeticFilterAdapters(),
       },
       1,
     );
@@ -209,6 +233,7 @@ describe('runOrchestratorTick — failure escalation', () => {
             prUrl,
           });
         },
+        ...hermeticFilterAdapters(),
       },
       1,
     );
@@ -237,6 +262,7 @@ describe('runOrchestratorTick — failure escalation', () => {
         escalate: async (taskId, _reason, prUrl) => {
           labelled.push({ taskId, prUrl });
         },
+        ...hermeticFilterAdapters(),
       },
       1,
     );
@@ -262,6 +288,7 @@ describe('runOrchestratorTick — failure escalation', () => {
         escalate: async () => {
           throw new Error('gh pr edit network down');
         },
+        ...hermeticFilterAdapters(),
       },
       1,
     );
@@ -286,6 +313,7 @@ describe('runOrchestratorTick — failure escalation', () => {
         // returns nullish doesn't silently drop the task.
         dispatch: (async () => undefined) as unknown as OrchestratorAdapters['dispatch'],
         escalate: async () => {},
+        ...hermeticFilterAdapters(),
       },
       1,
     );
@@ -330,6 +358,7 @@ describe('runOrchestratorLoop — fixture queue acceptance (criterion #10)', () 
         return approvedResult(taskId, `https://github.com/x/y/pull/${taskId}`);
       },
       escalate: async () => {},
+      ...hermeticFilterAdapters(),
     };
 
     const ticks = await runOrchestratorLoop(config, adapters);
@@ -388,6 +417,7 @@ describe('runOrchestratorLoop — fixture queue acceptance (criterion #10)', () 
           prUrl,
         });
       },
+      ...hermeticFilterAdapters(),
     };
 
     const ticks = await runOrchestratorLoop(config, adapters);
@@ -441,6 +471,7 @@ describe('runOrchestratorLoop — SIGTERM drain', () => {
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      ...hermeticFilterAdapters(),
     };
     const ticks = await runOrchestratorLoop(config, adapters);
     expect(dispatched).toBeGreaterThanOrEqual(1);

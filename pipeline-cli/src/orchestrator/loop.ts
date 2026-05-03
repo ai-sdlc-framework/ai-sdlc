@@ -1,15 +1,33 @@
 /**
- * Bare orchestrator loop — RFC-0015 Phase 1.
+ * Orchestrator polling loop — RFC-0015 Phase 1 (bare loop) + Phase 3
+ * (pre-dispatch admission filters).
  *
  * Polling driver that reads the dispatch frontier (AISDLC-117 / RFC-0014),
- * dispatches up to `maxConcurrent` tasks via `executePipeline()` (RFC-0012
- * Tier 2), and escalates unknown failures by tagging the relevant PR with
- * `needs-human-attention` (RFC-0015 §13 Q1 layer A + Q8 catch-all).
+ * runs the three §4.3 admission filters against each candidate, dispatches
+ * the survivors via `executePipeline()` (RFC-0012 Tier 2), and escalates
+ * unknown failures by tagging the relevant PR with `needs-human-attention`
+ * (RFC-0015 §13 Q1 layer A + Q8 catch-all).
  *
- * Phase 1 keeps the loop deliberately bare:
- *   - No catalogued failure-recovery handlers (that's Phase 2 / AISDLC-169.2).
- *   - No DoR / dependency / external-deps pre-dispatch admission filters
- *     beyond what `cli-deps frontier` already enforces (Phase 3 / AISDLC-169.3).
+ * Phase 1 shipped the bare loop. Phase 3 (this revision) adds:
+ *   - Three pre-dispatch filters (dependency / DoR / external-deps) per
+ *     RFC §4.3 — see `./filters/`.
+ *   - Filter-trace logging on every evaluated candidate (Part B of the
+ *     Phase 3 task spec).
+ *   - `OrchestratorAwaitingExternal` + sibling `OrchestratorBlockedBy*`
+ *     events on the tick result (Part C; Phase 4 / AISDLC-169.4 plumbs
+ *     these into `events.jsonl`).
+ *   - In-memory stuck-candidate counter (>5 ticks of the same skip → emit
+ *     `OrchestratorStuckCandidate`). Persistence to
+ *     `$ARTIFACTS_DIR/_orchestrator/state.json` is deferred to Phase 4
+ *     alongside the events.jsonl writer; v1 resets the counter on restart.
+ *   - Exponential-backoff sleep cadence (Q3 + Q5 resolution): base
+ *     `tickIntervalSec` doubled per consecutive idle tick, capped at 5min,
+ *     reset on dispatch OR new-task arrival. Idle reasons distinguished by
+ *     event type (`OrchestratorIdleNoWork` vs `OrchestratorIdleAllFiltered`).
+ *
+ * Out of scope (deferred):
+ *   - No catalogued failure-recovery handlers (Phase 2 / AISDLC-169.2 —
+ *     in-flight on PR #224).
  *   - No events.jsonl writer or `cli-status --orchestrator` view
  *     (Phase 4 / AISDLC-169.4).
  *
@@ -34,13 +52,15 @@
  */
 
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { buildDependencyGraph, frontier } from '../deps/dependency-graph.js';
+import { buildDependencyGraph, frontier, type DependencyGraph } from '../deps/dependency-graph.js';
 import { sortFrontierByEffectivePriority } from '../deps/dispatch.js';
 import { executePipeline } from '../execute-pipeline.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
+import { findTaskFile, parseSimpleYaml } from '../steps/01-validate.js';
 import {
   DEFAULT_LOGGER,
   type PipelineLogger,
@@ -49,6 +69,8 @@ import {
 } from '../types.js';
 import { writeEvent, type OrchestratorEvent } from './events.js';
 import { isOrchestratorEnabled, orchestratorDisabledMessage } from './feature-flag.js';
+import { formatFilterTrace, runFilterChain } from './filters/index.js';
+import type { FilterChainResult } from './filters/types.js';
 import {
   loadFailurePatternCatalogue,
   runPlaybook,
@@ -63,14 +85,22 @@ import type {
   EscalateFn,
   EscalationRecord,
   FrontierFn,
+  OrchestratorBlockedEvent,
   OrchestratorConfig,
+  OrchestratorFilterEvent,
+  OrchestratorIdleEvent,
   OrchestratorStatus,
+  OrchestratorStuckCandidateEvent,
   OrchestratorTickResult,
   TaskDispatchOutcome,
 } from './types.js';
 
 export const DEFAULT_TICK_INTERVAL_SEC = 30;
 export const DEFAULT_MAX_CONCURRENT = 1;
+/** RFC-0015 Phase 3 (Q3/Q5) — exponential backoff caps the idle sleep at 5min. */
+export const MAX_IDLE_SLEEP_SEC = 5 * 60;
+/** RFC-0015 §4.3 — emit `OrchestratorStuckCandidate` after this many consecutive skips. */
+export const STUCK_CANDIDATE_THRESHOLD = 5;
 
 /** Build the default config — callers can override individual fields. */
 export function defaultOrchestratorConfig(
@@ -139,11 +169,90 @@ export interface OrchestratorAdapters {
    */
   emitEvent?: (event: OrchestratorEvent) => void;
   /**
-   * RFC-0015 Phase 4 — artifacts directory override forwarded to the
-   * default events writer. Falls back to env then `./artifacts`. Tests
-   * point this at a tmpdir.
+   * RFC-0015 Phase 3 + Phase 4 — artifacts directory override. Used by:
+   *   - the default events writer (Phase 4) for the JSONL rotation root.
+   *   - the DoR + external-deps filters (Phase 3) to scope the calibration
+   *     log + clearance file.
+   * Falls back to `$ARTIFACTS_DIR` env then `<workDir>/artifacts`. Tests
+   * point this at a tmpdir to keep filter state + events out of the
+   * operator's real `./artifacts/`.
    */
   artifactsDir?: string;
+  /**
+   * RFC-0015 Phase 3 — graph loader for the pre-dispatch filter chain.
+   * Defaults to building a fresh graph from disk on every tick (matches the
+   * baseline frontier loader). Tests inject a pre-built graph so they
+   * don't have to materialise backlog/ files.
+   */
+  graphLoader?: () => DependencyGraph;
+  /**
+   * RFC-0015 Phase 3 — frontmatter `labels:` loader for the DoR filter's
+   * `dor-bypass` check. Defaults to reading the on-disk task file. Tests
+   * inject a pure map so they don't have to materialise backlog files.
+   */
+  taskLabelsLoader?: (taskId: string) => readonly string[];
+  /** RFC-0015 Phase 3 — wall-clock for event timestamps. Defaults to `Date.now()`. */
+  now?: () => Date;
+  /**
+   * RFC-0015 Phase 3 — pre-loaded operator clearance set for external deps
+   * (`<artifactsDir>/_orchestrator/cleared-external-deps.json` content as a
+   * pre-built `Set<'<taskIdLower>::<externalDepId>'>`). When undefined the
+   * external-deps filter walks the file directly.
+   */
+  clearedExternalKeys?: ReadonlySet<string>;
+  /**
+   * RFC-0015 Phase 3 — explicit calibration log path used by the DoR
+   * filter. When undefined the DoR filter resolves
+   * `<artifactsDir>/_dor/calibration.jsonl` per the conventional layout.
+   */
+  calibrationLogPath?: string;
+  /**
+   * RFC-0015 Phase 3 — per-task stuck-candidate counter shared across ticks.
+   * The loop increments per skip + emits `OrchestratorStuckCandidate` once
+   * the count crosses `STUCK_CANDIDATE_THRESHOLD`. Reset on the candidate's
+   * next admission (or removal from the frontier). v1 keeps this in memory;
+   * Phase 4 will persist to `$ARTIFACTS_DIR/_orchestrator/state.json`.
+   */
+  stuckCounters?: Map<string, StuckCounterEntry>;
+  /**
+   * RFC-0015 Phase 3 — global polling cadence state shared across ticks.
+   * Tracks the current sleep interval + the previous frontier task IDs
+   * (so a fresh task arrival can reset the backoff). v1 in-memory.
+   */
+  cadenceState?: CadenceState;
+}
+
+/**
+ * RFC-0015 Phase 3 — per-task stuck counter row. Tracks how many
+ * consecutive ticks the candidate has been skipped + the most recent
+ * skip reason (for the `OrchestratorStuckCandidate` event payload).
+ * Reset to zero (entry deleted) on the next admission or a removal from
+ * the frontier.
+ */
+export interface StuckCounterEntry {
+  /** Number of consecutive ticks the candidate has been skipped. */
+  ticks: number;
+  /** Most recent skip reason — usually the failing filter name. */
+  reason: string;
+  /** Whether `OrchestratorStuckCandidate` already fired for this streak. */
+  emittedStuckEvent: boolean;
+}
+
+/**
+ * RFC-0015 Phase 3 — global polling cadence state. Mutated in place by
+ * `runOrchestratorTick` so the loop can compute the next sleep without
+ * re-deriving the streak from prior tick results.
+ */
+export interface CadenceState {
+  /** Current sleep interval in seconds (next inter-tick pause). */
+  currentIntervalSec: number;
+  /** Idle ticks since the last dispatch. Reset to 0 on dispatch. */
+  idleStreak: number;
+  /**
+   * Frontier IDs as of the previous tick — used to reset the backoff
+   * when a NEW task lands in the queue (Q3 wake condition).
+   */
+  lastFrontierIds: ReadonlySet<string>;
 }
 
 /** Run a single tick. Exposed so `cli-orchestrator tick` can call it directly. */
@@ -164,6 +273,12 @@ export async function runOrchestratorTick(
   // gated + best-effort (swallows write errors); the helper wraps it in
   // a try/catch so a thrown injected sink never crashes the tick.
   const emit = buildEmitter(config, adapters, tickNumber);
+  // RFC-0015 Phase 3 — wall-clock + per-task stuck counter + cadence
+  // state are shared across ticks via the adapters bag (see
+  // `adaptersWithSharedState` in `runOrchestratorLoop`).
+  const now = adapters.now ?? (() => new Date());
+  const stuckCounters = adapters.stuckCounters ?? new Map<string, StuckCounterEntry>();
+  const cadenceState = adapters.cadenceState ?? makeInitialCadenceState(config.tickIntervalSec);
 
   const candidates = frontierFn();
   logger.progress(
@@ -177,6 +292,16 @@ export async function runOrchestratorTick(
   });
 
   if (candidates.length === 0) {
+    pruneStuckCounters(stuckCounters, []);
+    const idleEvent = recordIdleTick(cadenceState, config, 'OrchestratorIdleNoWork', 0, now);
+    // RFC-0015 Phase 3 + Phase 4 — surface the idle event on the
+    // events.jsonl bus so downstream consumers (cli-status, dashboards)
+    // see the same signal the in-process tickResult.idleEvent already
+    // carries. Single events.jsonl path per the merged Phase plan.
+    emit({
+      type: idleEvent.type,
+      idleStreak: idleEvent.idleStreak,
+    });
     return {
       tick: tickNumber,
       candidates: 0,
@@ -184,13 +309,23 @@ export async function runOrchestratorTick(
       outcomes: [],
       escalations: [],
       empty: true,
+      filterEvents: [],
+      idleEvent,
+      nextSleepSec: cadenceState.currentIntervalSec,
     };
   }
 
-  const budget = Math.max(0, config.maxConcurrent);
-  const picks = candidates.slice(0, budget).map((c) => c.id);
+  // Reset the backoff streak when ANY new task has appeared since the last
+  // tick (Q3 wake condition). The streak is also reset on dispatch below.
+  applyNewTaskWakeIfApplicable(cadenceState, config, candidates);
 
-  if (config.dryRun || picks.length === 0) {
+  const budget = Math.max(0, config.maxConcurrent);
+  const candidateIds = candidates.map((c) => c.id);
+  pruneStuckCounters(stuckCounters, candidateIds);
+
+  if (config.dryRun) {
+    const idleEvent = recordIdleTick(cadenceState, config, 'OrchestratorIdleNoWork', 0, now);
+    emit({ type: idleEvent.type, idleStreak: idleEvent.idleStreak });
     return {
       tick: tickNumber,
       candidates: candidates.length,
@@ -198,6 +333,90 @@ export async function runOrchestratorTick(
       outcomes: [],
       escalations: [],
       empty: false,
+      filterEvents: [],
+      idleEvent,
+      nextSleepSec: cadenceState.currentIntervalSec,
+    };
+  }
+
+  // ── Pre-dispatch filter chain (RFC-0015 Phase 3 §4.3) ─────────────────
+  const graphLoader = adapters.graphLoader ?? buildDefaultGraphLoader(config);
+  const labelsLoader = adapters.taskLabelsLoader ?? buildDefaultLabelsLoader(config.workDir);
+  const graph = graphLoader();
+  const filterEvents: OrchestratorFilterEvent[] = [];
+  const picks: string[] = [];
+
+  for (const candidate of candidates) {
+    if (picks.length >= budget) break;
+    const labels = labelsLoader(candidate.id);
+    const chainResult = runFilterChain({
+      graph,
+      taskId: candidate.id,
+      taskLabels: labels,
+      ...(adapters.clearedExternalKeys !== undefined
+        ? { clearedExternalKeys: adapters.clearedExternalKeys }
+        : {}),
+      ...(adapters.artifactsDir !== undefined ? { artifactsDir: adapters.artifactsDir } : {}),
+      ...(adapters.calibrationLogPath !== undefined
+        ? { calibrationLogPath: adapters.calibrationLogPath }
+        : {}),
+    });
+    logger.info(formatFilterTrace(candidate.id, chainResult));
+    const event = recordFilterEvent({
+      taskId: candidate.id,
+      chainResult,
+      stuckCounters,
+      now,
+    });
+    filterEvents.push(event);
+    // RFC-0015 Phase 3 + Phase 4 — forward the structured filter
+    // rejection + stuck-streak signals to the events.jsonl bus so
+    // operators only have to grep one stream. The in-process
+    // `tickResult.filterEvents[]` continues to carry the same data for
+    // the cli-orchestrator status surface.
+    if (event.blockedEvent) {
+      emit(toEmittableBlockedEvent(event.blockedEvent));
+    }
+    if (event.stuckEvent) {
+      emit({
+        type: 'OrchestratorStuckCandidate',
+        taskId: event.stuckEvent.taskId,
+        reason: event.stuckEvent.reason,
+        ticksSinceFirstSkip: event.stuckEvent.ticksSinceFirstSkip,
+      });
+    }
+    if (chainResult.passed) {
+      picks.push(candidate.id);
+    }
+  }
+
+  if (picks.length === 0) {
+    // Nothing dispatched — emit the matching idle event. If we evaluated
+    // candidates and rejected them all, that's `OrchestratorIdleAllFiltered`
+    // (a distinct cause from `OrchestratorIdleNoWork` so operators can grep
+    // by type — Phase 4's events.jsonl writer surfaces it on the bus).
+    const reason: OrchestratorIdleEvent['type'] =
+      filterEvents.length > 0 ? 'OrchestratorIdleAllFiltered' : 'OrchestratorIdleNoWork';
+    const idleEvent = recordIdleTick(cadenceState, config, reason, filterEvents.length, now);
+    if (idleEvent.type === 'OrchestratorIdleAllFiltered') {
+      emit({
+        type: 'OrchestratorIdleAllFiltered',
+        idleStreak: idleEvent.idleStreak,
+        rejectedCount: idleEvent.rejectedCount,
+      });
+    } else {
+      emit({ type: 'OrchestratorIdleNoWork', idleStreak: idleEvent.idleStreak });
+    }
+    return {
+      tick: tickNumber,
+      candidates: candidates.length,
+      dispatched: [],
+      outcomes: [],
+      escalations: [],
+      empty: false,
+      filterEvents,
+      idleEvent,
+      nextSleepSec: cadenceState.currentIntervalSec,
     };
   }
 
@@ -411,6 +630,11 @@ export async function runOrchestratorTick(
     }
   }
 
+  // Successful dispatch resets the backoff curve immediately (Q3 + Q5
+  // resolution). Even if every dispatch escalated, the loop made forward
+  // progress this tick — no need to slow polling.
+  resetCadence(cadenceState, config);
+
   return {
     tick: tickNumber,
     candidates: candidates.length,
@@ -419,6 +643,9 @@ export async function runOrchestratorTick(
     escalations,
     empty: false,
     playbookEvents,
+    filterEvents,
+    idleEvent: null,
+    nextSleepSec: cadenceState.currentIntervalSec,
   };
 }
 
@@ -502,6 +729,204 @@ async function tryPlaybookOnError(args: TryPlaybookArgs): Promise<TryPlaybookRes
   };
 }
 
+// ── RFC-0015 Phase 3 helpers ──────────────────────────────────────────
+
+/** Build a cadence state initialised at the configured base interval. */
+export function makeInitialCadenceState(baseSec: number): CadenceState {
+  return {
+    currentIntervalSec: Math.max(0, baseSec),
+    idleStreak: 0,
+    lastFrontierIds: new Set(),
+  };
+}
+
+/**
+ * Reset the backoff curve to the configured base interval. Called on
+ * dispatch (the loop made forward progress) AND on new-task arrival
+ * (the queue gained work since the last tick). Also wipes the idle
+ * streak counter so the next idle tick starts the curve fresh.
+ */
+function resetCadence(state: CadenceState, config: OrchestratorConfig): void {
+  state.currentIntervalSec = Math.max(0, config.tickIntervalSec);
+  state.idleStreak = 0;
+}
+
+/**
+ * Apply the Q3 wake condition: if any candidate ID in this tick wasn't
+ * present last tick, treat it as a new arrival + reset the backoff. The
+ * cadence's `lastFrontierIds` is then refreshed so the NEXT tick can do
+ * the same comparison.
+ */
+function applyNewTaskWakeIfApplicable(
+  state: CadenceState,
+  config: OrchestratorConfig,
+  candidates: ReadonlyArray<{ id: string }>,
+): void {
+  const currentIds = new Set(candidates.map((c) => c.id));
+  const hasNew = [...currentIds].some((id) => !state.lastFrontierIds.has(id));
+  if (hasNew) resetCadence(state, config);
+  state.lastFrontierIds = currentIds;
+}
+
+/**
+ * Record an idle-tick event + advance the backoff curve. Returns the
+ * event so the caller can pin it to the tick result.
+ */
+function recordIdleTick(
+  state: CadenceState,
+  config: OrchestratorConfig,
+  reasonType: OrchestratorIdleEvent['type'],
+  rejectedCount: number,
+  now: () => Date,
+): OrchestratorIdleEvent {
+  state.idleStreak += 1;
+  const base = Math.max(1, config.tickIntervalSec);
+  const doubled = state.currentIntervalSec * 2;
+  state.currentIntervalSec = Math.min(MAX_IDLE_SLEEP_SEC, Math.max(base, doubled));
+  const ts = now().toISOString();
+  if (reasonType === 'OrchestratorIdleAllFiltered') {
+    return { type: 'OrchestratorIdleAllFiltered', ts, idleStreak: state.idleStreak, rejectedCount };
+  }
+  return { type: 'OrchestratorIdleNoWork', ts, idleStreak: state.idleStreak };
+}
+
+/**
+ * Drop stuck-counter rows for IDs no longer in the frontier (their owning
+ * task has either landed in `completed/`, been cancelled, or been removed
+ * from the dispatch queue for some other reason). Keeps the in-memory map
+ * bounded by frontier size rather than orchestrator lifetime.
+ */
+function pruneStuckCounters(
+  counters: Map<string, StuckCounterEntry>,
+  candidateIds: ReadonlyArray<string>,
+): void {
+  const keep = new Set(candidateIds.map((id) => id.toLowerCase()));
+  for (const key of [...counters.keys()]) {
+    if (!keep.has(key)) counters.delete(key);
+  }
+}
+
+interface RecordFilterEventOpts {
+  taskId: string;
+  chainResult: FilterChainResult;
+  stuckCounters: Map<string, StuckCounterEntry>;
+  now: () => Date;
+}
+
+/**
+ * Convert a filter chain result into an `OrchestratorFilterEvent` and
+ * (when the chain rejected the candidate) bump the stuck-counter +
+ * conditionally emit `OrchestratorStuckCandidate`. Resets the counter
+ * when the chain admitted the candidate.
+ */
+function recordFilterEvent(opts: RecordFilterEventOpts): OrchestratorFilterEvent {
+  const ts = opts.now().toISOString();
+  const counterKey = opts.taskId.toLowerCase();
+
+  if (opts.chainResult.passed) {
+    // Admitted — wipe the stuck streak so a future skip starts clean.
+    opts.stuckCounters.delete(counterKey);
+    return {
+      ts,
+      taskId: opts.taskId,
+      trace: opts.chainResult,
+      stuckEvent: null,
+      blockedEvent: null,
+    };
+  }
+
+  const failure = opts.chainResult.failure;
+  const blockedEvent = failure ? toBlockedEvent(opts.taskId, failure, ts) : null;
+
+  // Bump the per-task stuck counter; emit the stuck event the first tick
+  // we cross the threshold so operators see the signal exactly once per
+  // streak (not on every subsequent tick).
+  const reason = failure?.filter ?? 'unknown';
+  const prior = opts.stuckCounters.get(counterKey);
+  const next: StuckCounterEntry = {
+    ticks: (prior?.ticks ?? 0) + 1,
+    reason,
+    emittedStuckEvent: prior?.emittedStuckEvent ?? false,
+  };
+  opts.stuckCounters.set(counterKey, next);
+
+  let stuckEvent: OrchestratorStuckCandidateEvent | null = null;
+  if (next.ticks > STUCK_CANDIDATE_THRESHOLD && !next.emittedStuckEvent) {
+    stuckEvent = {
+      type: 'OrchestratorStuckCandidate',
+      ts,
+      taskId: opts.taskId,
+      reason,
+      ticksSinceFirstSkip: next.ticks,
+    };
+    next.emittedStuckEvent = true;
+  }
+
+  return { ts, taskId: opts.taskId, trace: opts.chainResult, stuckEvent, blockedEvent };
+}
+
+/** Map a filter-chain failure to the matching RFC §7.1 event payload. */
+function toBlockedEvent(
+  taskId: string,
+  failure: FilterChainResult['trace'][number],
+  ts: string,
+): OrchestratorBlockedEvent | null {
+  const detail = failure.detail;
+  if (!detail) return null;
+  switch (detail.kind) {
+    case 'dependency-blocked':
+      return { type: 'OrchestratorBlockedByDependency', ts, taskId, blockers: detail.blockers };
+    case 'dor-blocked':
+      return {
+        type: 'OrchestratorBlockedByDor',
+        ts,
+        taskId,
+        verdict: detail.verdict,
+        signedAt: detail.signedAt,
+      };
+    case 'awaiting-external':
+      return {
+        type: 'OrchestratorAwaitingExternal',
+        ts,
+        taskId,
+        externalDeps: detail.blocking.map((d) => ({ id: d.id, kind: d.kind })),
+        allExternalDeps: detail.all.map((d) => ({ id: d.id, kind: d.kind })),
+      };
+  }
+}
+
+/**
+ * RFC-0015 Phase 3 + Phase 4 — strip the redundant `ts` from a structured
+ * blocked event (the emitter stamps a fresh `ts` from the wall clock at
+ * append time) and forward the per-type payload to `writeEvent()`. Keeps
+ * the events.jsonl payload shape identical to the schema-validated
+ * canonical form per `spec/schemas/orchestrator-events.v1.schema.json`.
+ */
+function toEmittableBlockedEvent(blocked: OrchestratorBlockedEvent): Omit<OrchestratorEvent, 'ts'> {
+  switch (blocked.type) {
+    case 'OrchestratorBlockedByDependency':
+      return {
+        type: 'OrchestratorBlockedByDependency',
+        taskId: blocked.taskId,
+        blockers: [...blocked.blockers],
+      };
+    case 'OrchestratorBlockedByDor':
+      return {
+        type: 'OrchestratorBlockedByDor',
+        taskId: blocked.taskId,
+        verdict: blocked.verdict,
+        signedAt: blocked.signedAt,
+      };
+    case 'OrchestratorAwaitingExternal':
+      return {
+        type: 'OrchestratorAwaitingExternal',
+        taskId: blocked.taskId,
+        externalDeps: blocked.externalDeps.map((d) => ({ id: d.id, kind: d.kind })),
+        allExternalDeps: blocked.allExternalDeps.map((d) => ({ id: d.id, kind: d.kind })),
+      };
+  }
+}
+
 /**
  * Run the orchestrator loop until shutdown. Returns the array of completed
  * tick results (useful for test assertions + cron invocations that pass
@@ -516,13 +941,23 @@ export async function runOrchestratorLoop(
   }
   const logger = adapters.logger ?? DEFAULT_LOGGER;
   const sleep = adapters.sleep ?? defaultSleep;
-  // RFC-0015 Phase 4 — mint a stable runId for the entire loop session so
-  // every emitted event is correlatable across the date-rotated file
-  // boundary. Tests that pre-set `adapters.runId` (for deterministic
-  // assertions) win over the random mint.
-  const sessionAdapters: OrchestratorAdapters = {
+  // RFC-0015 Phase 3 + Phase 4 — build a single adapter bag shared across
+  // all ticks in this loop session:
+  //   - Phase 4: mint a stable runId so every emitted event is correlatable
+  //     across the date-rotated file boundary. Tests that pre-set
+  //     `adapters.runId` win over the random mint.
+  //   - Phase 3: pre-allocate the cadence + stuck-counter state so the
+  //     backoff curve advances continuously and stuck-candidate streaks
+  //     survive between ticks. Tests can pre-populate via the adapters
+  //     bag; production starts fresh on every loop start (per RFC §13 Q2's
+  //     stateless-recovery model — Phase 4 will eventually persist the
+  //     stuck counters to `$ARTIFACTS_DIR/_orchestrator/state.json` for
+  //     resume-across-restart).
+  const sharedAdapters: OrchestratorAdapters = {
     ...adapters,
     runId: adapters.runId ?? randomUUID(),
+    stuckCounters: adapters.stuckCounters ?? new Map<string, StuckCounterEntry>(),
+    cadenceState: adapters.cadenceState ?? makeInitialCadenceState(config.tickIntervalSec),
   };
 
   const ticks: OrchestratorTickResult[] = [];
@@ -543,11 +978,14 @@ export async function runOrchestratorLoop(
   try {
     while (!shouldStop) {
       tickNumber += 1;
-      const tick = await runOrchestratorTick(config, sessionAdapters, tickNumber);
+      const tick = await runOrchestratorTick(config, sharedAdapters, tickNumber);
       ticks.push(tick);
       if (config.maxTicks !== null && tickNumber >= config.maxTicks) break;
       if (shouldStop) break;
-      await sleep(config.tickIntervalSec * 1000);
+      // RFC-0015 Phase 3 (Q3 + Q5) — sleep the backoff-aware interval, NOT
+      // the static `config.tickIntervalSec`. The tick result carries the
+      // computed value so tests can assert the curve from the result alone.
+      await sleep(tick.nextSleepSec * 1000);
     }
   } finally {
     process.removeListener('SIGINT', onSignal);
@@ -642,6 +1080,44 @@ function buildDefaultFrontier(config: OrchestratorConfig): FrontierFn {
     const baseline = frontier(graph);
     const ranked = sortFrontierByEffectivePriority(graph, baseline);
     return ranked.map((r) => ({ id: r.id, title: r.title }));
+  };
+}
+
+/**
+ * RFC-0015 Phase 3 — default graph loader for the filter chain. Builds a
+ * fresh `DependencyGraph` from the on-disk backlog directories; matches
+ * the convention `buildDefaultFrontier` uses so both callers see the same
+ * snapshot when invoked back-to-back in a single tick.
+ */
+function buildDefaultGraphLoader(config: OrchestratorConfig): () => DependencyGraph {
+  return () => buildDependencyGraph({ workDir: config.workDir }, () => undefined);
+}
+
+/**
+ * RFC-0015 Phase 3 — default frontmatter labels loader for the DoR
+ * filter's `dor-bypass` check. Reads the on-disk task file via the same
+ * helpers `cli-deps` uses and returns the parsed `labels:` array
+ * (lowercased for case-insensitive comparison). Returns `[]` on any
+ * read / parse error — a missing-or-malformed file should never SILENTLY
+ * admit a task that lacks a real bypass label.
+ */
+function buildDefaultLabelsLoader(workDir: string): (taskId: string) => readonly string[] {
+  return (taskId): readonly string[] => {
+    try {
+      const path = findTaskFile(taskId, workDir);
+      if (!path || !existsSync(path)) return [];
+      const raw = readFileSync(path, 'utf8');
+      const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+      if (!fmMatch) return [];
+      const fm = parseSimpleYaml(fmMatch[1]);
+      const labels = fm.labels;
+      if (!Array.isArray(labels)) return [];
+      return labels
+        .filter((l): l is string => typeof l === 'string')
+        .map((l) => l.trim().toLowerCase());
+    } catch {
+      return [];
+    }
   };
 }
 
