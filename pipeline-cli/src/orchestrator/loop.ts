@@ -33,6 +33,9 @@
  * @module orchestrator/loop
  */
 
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+
 import { buildDependencyGraph, frontier } from '../deps/dependency-graph.js';
 import { sortFrontierByEffectivePriority } from '../deps/dispatch.js';
 import { executePipeline } from '../execute-pipeline.js';
@@ -44,6 +47,7 @@ import {
   type PipelineResult,
   type SubagentSpawner,
 } from '../types.js';
+import { writeEvent, type OrchestratorEvent } from './events.js';
 import { isOrchestratorEnabled, orchestratorDisabledMessage } from './feature-flag.js';
 import {
   loadFailurePatternCatalogue,
@@ -114,6 +118,32 @@ export interface OrchestratorAdapters {
    * set false to keep state in memory.
    */
   persistWorkerState?: boolean;
+  /**
+   * RFC-0015 Phase 4 — orchestrator session UUID. Stable across all
+   * ticks within a single `runOrchestratorLoop()` invocation; stamped
+   * onto every emitted `OrchestratorEvent` so consumers can correlate
+   * events from one process even when the date-rotated events file
+   * rolls over mid-run. Tests inject a deterministic value;
+   * `runOrchestratorLoop()` mints one via `crypto.randomUUID()` when
+   * unset.
+   */
+  runId?: string;
+  /**
+   * RFC-0015 Phase 4 — events sink. Defaults to the on-disk
+   * date-rotated `events.jsonl` writer (`writeEvent()` from `./events.js`).
+   * Tests inject a synchronous capturer to assert the per-tick event
+   * sequence without touching the filesystem.
+   *
+   * Best-effort by contract: a thrown sink is swallowed so the
+   * orchestrator hot loop is never crashed by an observability hiccup.
+   */
+  emitEvent?: (event: OrchestratorEvent) => void;
+  /**
+   * RFC-0015 Phase 4 — artifacts directory override forwarded to the
+   * default events writer. Falls back to env then `./artifacts`. Tests
+   * point this at a tmpdir.
+   */
+  artifactsDir?: string;
 }
 
 /** Run a single tick. Exposed so `cli-orchestrator tick` can call it directly. */
@@ -130,12 +160,21 @@ export async function runOrchestratorTick(
   // small file read + in-process validation; doing it per tick keeps
   // operator edits to the YAML hot-reloadable without a daemon restart.
   const catalogue = adapters.catalogue ?? loadFailurePatternCatalogue({ workDir: config.workDir });
+  // RFC-0015 Phase 4 — events sink. The default writer is feature-flag
+  // gated + best-effort (swallows write errors); the helper wraps it in
+  // a try/catch so a thrown injected sink never crashes the tick.
+  const emit = buildEmitter(config, adapters, tickNumber);
 
   const candidates = frontierFn();
   logger.progress(
     'orchestrator-tick',
     `tick=${tickNumber} frontier=${candidates.length} maxConcurrent=${config.maxConcurrent}`,
   );
+  emit({
+    type: 'OrchestratorTick',
+    candidates: candidates.length,
+    dispatched: 0,
+  });
 
   if (candidates.length === 0) {
     return {
@@ -170,6 +209,12 @@ export async function runOrchestratorTick(
   // wrapped in its own try/catch so one task's escape never crashes the loop.
   const settled = await Promise.allSettled(
     picks.map(async (taskId) => {
+      // RFC-0015 Phase 4 — pre-dispatch event. Emitting BEFORE the
+      // dispatch (rather than after) means a dispatch that hard-crashes
+      // the orchestrator (theoretically impossible per the catch below,
+      // but defensive) still leaves a forensic trace of "this task
+      // started" on the events bus.
+      emit({ type: 'OrchestratorDispatched', taskId });
       try {
         const result = await dispatchFn(taskId);
         return { taskId, result };
@@ -189,15 +234,23 @@ export async function runOrchestratorTick(
       // Promise.allSettled never rejects the outer promise, so this branch
       // is defensive — a future refactor that throws synchronously inside
       // the inner async still surfaces here as a clean escalation.
+      const reason = s.reason instanceof Error ? s.reason.message : String(s.reason);
       escalations.push(
         await pushEscalation(escalateFn, {
           taskId: '(unknown)',
           ts: new Date().toISOString(),
           event: 'UnknownFailureMode',
-          reason: s.reason instanceof Error ? s.reason.message : String(s.reason),
+          reason,
           prUrl: null,
         }),
       );
+      emit({
+        type: 'OrchestratorFailed',
+        taskId: '(unknown)',
+        mode: 'UnknownFailureMode',
+        reason,
+        prUrl: null,
+      });
       continue;
     }
     const value = s.value;
@@ -214,12 +267,36 @@ export async function runOrchestratorTick(
         logger,
       });
       playbookEvents.push(...playbook.events);
+      // Phase 4: forward each playbook state-machine transition to the
+      // events bus so the cli-status view + future dashboard see the
+      // same per-worker forensic trail the in-memory `playbookEvents`
+      // array already carries.
+      for (const ev of playbook.events) {
+        if (ev.event === 'WorkerStateTransition') {
+          emit({
+            type: 'WorkerStateTransition',
+            taskId: ev.taskId,
+            workerId: ev.workerId,
+            from: ev.from,
+            to: ev.to,
+            duration_ms: ev.duration_ms,
+            context: ev.context,
+          });
+        }
+      }
       if (playbook.outcome === 'recovered' && playbook.result) {
         outcomes.push({
           taskId: playbook.result.taskId,
           outcome: playbook.result.outcome,
           prUrl: playbook.result.prUrl,
           notes: playbook.result.notes,
+        });
+        emit({
+          type: 'OrchestratorRecovered',
+          taskId: playbook.result.taskId,
+          mode: playbook.matchedMode ?? undefined,
+          outcome: playbook.result.outcome,
+          prUrl: playbook.result.prUrl,
         });
         continue;
       }
@@ -238,6 +315,13 @@ export async function runOrchestratorTick(
           error: playbook.note ?? value.error,
           notes: `playbook handled ${playbook.matchedMode}`,
         });
+        emit({
+          type: 'OrchestratorFailed',
+          taskId: value.taskId,
+          mode: playbook.matchedMode,
+          reason: playbook.note ?? value.error,
+          prUrl: null,
+        });
         continue;
       }
       // Fall-through: no catalogued mode matched → Phase 1 catch-all.
@@ -254,6 +338,13 @@ export async function runOrchestratorTick(
         outcome: 'unknown-failure',
         prUrl: null,
         error: value.error,
+      });
+      emit({
+        type: 'OrchestratorFailed',
+        taskId: value.taskId,
+        mode: 'UnknownFailureMode',
+        reason: value.error,
+        prUrl: null,
       });
       continue;
     }
@@ -274,6 +365,13 @@ export async function runOrchestratorTick(
         prUrl: null,
         error: record.reason,
       });
+      emit({
+        type: 'OrchestratorFailed',
+        taskId: value.taskId,
+        mode: 'UnknownFailureMode',
+        reason: record.reason,
+        prUrl: null,
+      });
       continue;
     }
     const result = value.result;
@@ -282,6 +380,12 @@ export async function runOrchestratorTick(
       outcome: result.outcome,
       prUrl: result.prUrl,
       notes: result.notes,
+    });
+    emit({
+      type: 'OrchestratorCompleted',
+      taskId: result.taskId,
+      outcome: result.outcome,
+      prUrl: result.prUrl,
     });
     // Phase 1 also escalates the executePipeline native `needs-human-attention`
     // outcome — that flag means the task is parked for a human anyway and
@@ -297,6 +401,13 @@ export async function runOrchestratorTick(
           prUrl: result.prUrl,
         }),
       );
+      emit({
+        type: 'OrchestratorFailed',
+        taskId: result.taskId,
+        mode: 'UnknownFailureMode',
+        reason: result.notes ?? 'needs-human-attention from executePipeline',
+        prUrl: result.prUrl,
+      });
     }
   }
 
@@ -405,6 +516,14 @@ export async function runOrchestratorLoop(
   }
   const logger = adapters.logger ?? DEFAULT_LOGGER;
   const sleep = adapters.sleep ?? defaultSleep;
+  // RFC-0015 Phase 4 — mint a stable runId for the entire loop session so
+  // every emitted event is correlatable across the date-rotated file
+  // boundary. Tests that pre-set `adapters.runId` (for deterministic
+  // assertions) win over the random mint.
+  const sessionAdapters: OrchestratorAdapters = {
+    ...adapters,
+    runId: adapters.runId ?? randomUUID(),
+  };
 
   const ticks: OrchestratorTickResult[] = [];
   let tickNumber = 0;
@@ -424,7 +543,7 @@ export async function runOrchestratorLoop(
   try {
     while (!shouldStop) {
       tickNumber += 1;
-      const tick = await runOrchestratorTick(config, adapters, tickNumber);
+      const tick = await runOrchestratorTick(config, sessionAdapters, tickNumber);
       ticks.push(tick);
       if (config.maxTicks !== null && tickNumber >= config.maxTicks) break;
       if (shouldStop) break;
@@ -468,6 +587,43 @@ export class OrchestratorDisabledError extends Error {
 }
 
 // ── Default adapters ──────────────────────────────────────────────────
+
+/**
+ * RFC-0015 Phase 4 — build a per-tick emitter that stamps each event
+ * with the orchestrator's runId + the current tick number, then forwards
+ * to either the injected sink (tests) or the on-disk events writer
+ * (production).
+ *
+ * Returns a synchronous fire-and-forget — emission is best-effort per
+ * RFC §7.3 and a thrown sink is swallowed so the orchestrator hot loop
+ * is never crashed by an observability hiccup.
+ */
+function buildEmitter(
+  config: OrchestratorConfig,
+  adapters: OrchestratorAdapters,
+  tickNumber: number,
+): (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void {
+  const artifactsDir =
+    adapters.artifactsDir ?? process.env.ARTIFACTS_DIR ?? join(config.workDir, 'artifacts');
+  const sink =
+    adapters.emitEvent ??
+    ((event: OrchestratorEvent): void => {
+      writeEvent(event, { artifactsDir });
+    });
+  return (event): void => {
+    const enriched: OrchestratorEvent = {
+      ...event,
+      ts: event.ts || new Date().toISOString(),
+      tick: tickNumber,
+      runId: adapters.runId,
+    } as OrchestratorEvent;
+    try {
+      sink(enriched);
+    } catch {
+      // Swallow — observability must never crash the loop.
+    }
+  };
+}
 
 function defaultSleep(ms: number): Promise<void> {
   if (ms <= 0) return Promise.resolve();
