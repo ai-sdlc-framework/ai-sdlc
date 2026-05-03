@@ -22949,6 +22949,12 @@ import { createHash } from "node:crypto";
 import { appendFile, mkdir } from "node:fs/promises";
 import { dirname as dirname4, join as join16 } from "node:path";
 
+// ../../pipeline-cli/dist/classifier/budget-classifier.js
+var BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
+  "credit balance is too low",
+  "invalid_request_error"
+]);
+
 // ../../pipeline-cli/dist/dor/resolvers/index.js
 init_file_existence();
 init_file_existence();
@@ -22983,7 +22989,7 @@ var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
 import { existsSync as existsSync20, readFileSync as readFileSync17 } from "node:fs";
-import { join as join21 } from "node:path";
+import { join as join22 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {

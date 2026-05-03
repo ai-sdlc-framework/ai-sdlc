@@ -58,6 +58,18 @@ export {
   type ReviewerName,
 } from './classifier/classifier.js';
 
+// AISDLC-147 patch 2 — Anthropic API budget-exhaustion classifier.
+export {
+  BUDGET_EXHAUSTED_SUBSTRINGS,
+  classifyOneReviewer,
+  classifyReviewerOutputs,
+  type AggregateDecision,
+  type BudgetClassification,
+  type ClassifiedReviewer,
+  type ReviewerClassification,
+  type ReviewerRawOutput,
+} from './classifier/budget-classifier.js';
+
 // RFC-0011 Phase 2a — Definition-of-Ready Stage A.
 export {
   evaluateIssue,
