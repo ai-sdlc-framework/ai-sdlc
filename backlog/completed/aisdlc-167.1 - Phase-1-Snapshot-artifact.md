@@ -1,7 +1,7 @@
 ---
 id: AISDLC-167.1
 title: 'Phase 1: Snapshot artifact'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-03'
 labels:
@@ -36,12 +36,16 @@ Phase 1 of RFC-0014. Emit a graph snapshot artifact at `$ARTIFACTS_DIR/_deps/sna
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Snapshot writer emits `$ARTIFACTS_DIR/_deps/snapshot.<timestamp>.jsonl` per pipeline tick, one JSONL line per task with fields `{id, status, dependsOn, unblocks, depth, reach}` per RFC §4.1
-- [ ] #2 `depth` (longest chain from a graph root) and `reach` (transitive closure of `unblocks`) computed in O(V+E) per snapshot
-- [ ] #3 Snapshot validates against a JSON schema published under `spec/schemas/deps-snapshot.v1.schema.json`; readable + parseable by Phase 2/3/4 consumers
-- [ ] #4 Q2 retention: snapshot writer accepts `tag: 'rolling' | 'dispatch' | 'calibration' | 'lifecycle-transition'`; `cli-deps gc` trims rolling > 30d mtime; `cli-deps inspect --tag <name>` enumerates event-tagged snapshots
-- [ ] #5 Q3 external deps: per-task `externalDependencies:` frontmatter array (entries `{ id, description, kind: 'npm-version'|'github-pr'|'url-head'|'manual'|'other', resolverHint? }`) is parsed and rendered into the snapshot per task
-- [ ] #6 Q6 consistency contract: per-task atomic `readFile` + sequential walk implementation; documented in `pipeline-cli/docs/deps.md` ("best-effort consistency, validated by consumer")
-- [ ] #7 Hermetic tests cover snapshot fields, tag-based retention, external-deps rendering, and dangling-edge tolerance (validated downstream, NOT during write)
-- [ ] #8 New code reaches 80%+ patch coverage; full workspace `pnpm build && pnpm test && pnpm lint && pnpm format:check` clean
+- [x] #1 Snapshot writer emits `$ARTIFACTS_DIR/_deps/snapshot.<timestamp>.jsonl` per pipeline tick, one JSONL line per task with fields `{id, status, dependsOn, unblocks, depth, reach}` per RFC §4.1
+- [x] #2 `depth` (longest chain from a graph root) and `reach` (transitive closure of `unblocks`) computed in O(V+E) per snapshot
+- [x] #3 Snapshot validates against a JSON schema published under `spec/schemas/deps-snapshot.v1.schema.json`; readable + parseable by Phase 2/3/4 consumers
+- [x] #4 Q2 retention: snapshot writer accepts `tag: 'rolling' | 'dispatch' | 'calibration' | 'lifecycle-transition'`; `cli-deps gc` trims rolling > 30d mtime; `cli-deps inspect --tag <name>` enumerates event-tagged snapshots
+- [x] #5 Q3 external deps: per-task `externalDependencies:` frontmatter array (entries `{ id, description, kind: 'npm-version'|'github-pr'|'url-head'|'manual'|'other', resolverHint? }`) is parsed and rendered into the snapshot per task
+- [x] #6 Q6 consistency contract: per-task atomic `readFile` + sequential walk implementation; documented in `pipeline-cli/docs/deps.md` ("best-effort consistency, validated by consumer")
+- [x] #7 Hermetic tests cover snapshot fields, tag-based retention, external-deps rendering, and dangling-edge tolerance (validated downstream, NOT during write)
+- [x] #8 New code reaches 80%+ patch coverage; full workspace `pnpm build && pnpm test && pnpm lint && pnpm format:check` clean
 <!-- AC:END -->
+
+## Closure note (2026-05-02)
+
+This sub-task was created for tree-completeness (parent AISDLC-167 needed the canonical 5-phase decomposition) AFTER work on Phase 1 had already been dispatched directly against AISDLC-166. AISDLC-166 merged to `main` as commit `bbb7472` ("feat(deps): rfc-0014 phase 1 deps snapshot artifact + GC + externalDependencies"), satisfying every acceptance criterion above. Closing here in the AISDLC-167.2 PR rather than re-implementing.
