@@ -1,4 +1,4 @@
-# Autonomous Pipeline Orchestrator — operator guide (RFC-0015 Phases 1+2+4)
+# Autonomous Pipeline Orchestrator — operator guide (RFC-0015 Phases 1+2+4+5)
 
 > **Status:** experimental, opt-in via `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`.
 > Phase 1 (AISDLC-169.1) shipped the bare polling loop. Phase 2
@@ -6,8 +6,9 @@
 > Phase 4 (AISDLC-169.4) adds the canonical `events.jsonl` writer,
 > the `cli-status --orchestrator` view, and the schema for downstream
 > consumers. Pre-dispatch admission filters (Phase 3) ship in parallel
-> (AISDLC-169.3); soak corpus + promotion runbook (Phase 5) is
-> AISDLC-169.5.
+> (AISDLC-169.3); the soak corpus aggregator + chaos-test harness +
+> promotion runbook (Phase 5) is AISDLC-169.5 and lives below in the
+> "Promotion to default-on" section.
 
 The orchestrator is a long-running Node process that ties RFC-0010 (parallel
 execution), RFC-0011 (DoR gate), RFC-0012 (`executePipeline()`), RFC-0014
@@ -479,15 +480,123 @@ await runOrchestratorLoop(
 );
 ```
 
+## Promotion to default-on (RFC-0015 Phase 5)
+
+Phase 5 ships the soak corpus aggregator + chaos-test harness + the
+hybrid promotion runbook. Same pattern as
+RFC-0014 (`AI_SDLC_DEPS_COMPOSITION`) and RFC-0011 (DoR `enforce`
+mode): build measurement infrastructure + write a runbook with two
+paths (corpus path for math-rigorous evidence, operator-override path
+for spot-check evidence), then operator dispatches the flag flip from
+the runbook once either path's evidence supports it.
+
+### Corpus aggregator — `cli-orchestrator-corpus`
+
+Aggregates downloaded `events.jsonl` artifacts into an
+unattended-completion + quota-burn report and a recommendation
+envelope (`safe-to-promote | continue-soak | insufficient-data`).
+
+```bash
+# Collect events from local + CI runs.
+mkdir -p ./orchestrator-corpus
+cp -r ./artifacts/_orchestrator/* ./orchestrator-corpus/
+gh run list --limit 100 --json databaseId \
+  | jq -r '.[].databaseId' \
+  | while read run_id; do
+      gh run download "$run_id" --pattern '*-orchestrator-events' --dir ./orchestrator-corpus 2>/dev/null || true
+    done
+
+# Ask: are we safe to promote?
+node pipeline-cli/bin/cli-orchestrator-corpus.mjs aggregate ./orchestrator-corpus --format table
+```
+
+The `--format table` output is operator-eyeball friendly; default
+JSON output is for CI pipelines / `jq`-driven dispatch decisions. See
+[`docs/operations/orchestrator-promotion.md`](../../docs/operations/orchestrator-promotion.md)
+for the full runbook including the override path, the flag-flip PR
+template, and the rollback procedure.
+
+### Soak measurement methodology
+
+The aggregator buckets events by `runId` (the orchestrator session
+UUID stamped on every event) so multi-day runs that span date-rotated
+files are counted once rather than once-per-rotation. Per-run metrics:
+
+| Metric | Definition | Promotion gate |
+|---|---|---|
+| `dispatched` | Count of `OrchestratorDispatched` events | ≥20 across the corpus (RFC §11 Phase 5) |
+| `distinctTaskIds` | Distinct task IDs dispatched | ≥3 across the corpus (RFC §11 "≥3 RFCs" operationalised) |
+| `unattendedRate` | `(completed + recovered) / dispatched` | ≥0.95 (RFC §11 "95%+ tasks complete without human intervention") |
+| `quotaBurnRatio` | `tokensConsumed / tokensProjected` (per run) | ≤1.10 — runs above this count as a "surprise" |
+| `quotaBurnSurprises` | Count of runs with `quotaBurnRatio > threshold` | Must be `0` for `safe-to-promote` |
+| `failureModes` | Per-mode tally from `OrchestratorFailed` events | Forensic — guides catalogue extension |
+
+The `tokensConsumed` is summed from `context.tokens` on completion +
+failure events (Phase 4 `additionalProperties: true` on
+`OrchestratorEvent.context` makes this opt-in extensible). Older runs
+that lack token data are excluded from the burn-rate denominator —
+they don't poison the signal but also don't contribute to it.
+
+### Chaos test — `chaos.test.ts`
+
+Hermetic harness covering the three RFC §11 Phase 5 scenarios from
+the AISDLC-169.5 brief:
+
+1. **Mid-dispatch kill** — dispatch throws; loop catches, escalates
+   `UnknownFailureMode`, events.jsonl integrity preserved, next tick
+   re-dispatches cleanly.
+2. **Mid-finalize kill** — events sink throws on completion; loop
+   absorbs the throw (writer is best-effort), tick result still
+   propagates the dispatch outcome.
+3. **Mid-remediation kill** — worker state file persisted atomically
+   after every transition; the most recent transition is always
+   visible to a post-mortem reader (`readPersistedWorkerState`).
+
+Plus events.jsonl append-only integrity (subsequent tick failures do
+not corrupt prior events) and the SIGTERM drain → fresh-orchestrator
+contract (one orchestrator's events file appended-to by the next
+orchestrator's runId, never truncated).
+
+Runs as part of `pnpm --filter @ai-sdlc/pipeline-cli test`. A
+failure here MUST block promotion — the recovery contract (RFC §13
+Q2 idempotent finalize) is what makes the autonomous mode safe.
+
+### Promotion-decision template
+
+This is the format AISDLC-169.5's PR description follows; future
+RFC-driven flag promotions can copy it verbatim.
+
+```markdown
+## Promotion: AI_SDLC_AUTONOMOUS_ORCHESTRATOR default OFF → ON
+
+### Evidence
+
+**Path:** corpus | override (pick one)
+
+**Corpus:** [paste `cli-orchestrator-corpus aggregate ./corpus --format table` output]
+
+**Spot-check:** [paste `cli-status --orchestrator --limit 50` highlights, OR explain why corpus path was sufficient]
+
+**Chaos test:** `pnpm --filter @ai-sdlc/pipeline-cli test src/orchestrator/chaos.test.ts` — clean (paste excerpt)
+
+### Change
+
+[Option A diff — flip parser default in `feature-flag.ts`, OR Option B — add env to workflow/unit]
+
+### Rollback
+
+[Single-line revert command]
+```
+
 ## Phase plan
 
 | Phase | Task | Scope | Status |
 |---|---|---|---|
 | 1 | AISDLC-169.1 | Bare polling loop, feature flag, escalation hook, `cli-orchestrator` CLI, idempotent-finalize doc. | Shipped |
-| 2 (this) | AISDLC-169.2 | 9-pattern failure playbook + `.ai-sdlc/orchestrator-failure-patterns.yaml` source-of-truth + worker state machine + per-worker forensic state. | Shipped |
+| 2 | AISDLC-169.2 | 9-pattern failure playbook + `.ai-sdlc/orchestrator-failure-patterns.yaml` source-of-truth + worker state machine + per-worker forensic state. | Shipped |
 | 3 | AISDLC-169.3 | DoR + dependency + external-deps pre-dispatch admission filters; exponential-backoff cadence. | In flight |
-| 4 (this) | AISDLC-169.4 | `events.jsonl` writer + `cli-status --orchestrator` view + canonical schema for downstream consumers. | Shipped |
-| 5 | AISDLC-169.5 | Real-issue corpus, chaos test (kill mid-tick + verify resume), promotion runbook. | To do |
+| 4 | AISDLC-169.4 | `events.jsonl` writer + `cli-status --orchestrator` view + canonical schema for downstream consumers. | Shipped |
+| 5 (this) | AISDLC-169.5 | Soak corpus aggregator (`cli-orchestrator-corpus`), chaos test harness, hybrid promotion runbook. | Shipped |
 
 ## Cross-references
 
@@ -495,3 +604,5 @@ await runOrchestratorLoop(
 - [`pipeline-cli/docs/spawner.md`](./spawner.md) — picking the right `SubagentSpawner` for your environment.
 - [`pipeline-cli/docs/dependency-graph.md`](./dependency-graph.md) — the cli-deps frontier query the orchestrator drives.
 - [`docs/operations/deps-composition.md`](../../docs/operations/deps-composition.md) — RFC-0014 composition layer + `AI_SDLC_DEPS_COMPOSITION`.
+- [`docs/operations/orchestrator-promotion.md`](../../docs/operations/orchestrator-promotion.md) — Phase 5 hybrid promotion runbook (corpus path + override path + flag flip + rollback).
+- [`docs/operations/operator-runbook.md`](../../docs/operations/operator-runbook.md) — orchestrator-specific failure-mode triage (UnknownFailureMode, parked-worker, OrchestratorStuckCandidate, chaos-test rerun).
