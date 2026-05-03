@@ -5,9 +5,17 @@
  * delta-only; large-refactor → full; first-push → full) plus the marker
  * parse/format round-trip + the delta-size predicate + contentHashV3
  * algorithm parity with the orchestrator copy.
+ *
+ * AISDLC-151 also exercises the bash-side defense-in-depth validator that
+ * lives in `.github/workflows/ai-sdlc-review.yml` (analyze job) — see the
+ * final `describe('AISDLC-151 …')` block at the bottom of this file.
  */
 
+import { spawnSync } from 'node:child_process';
 import { createHash, createHmac } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   _resetWarnLatchForTests,
@@ -939,5 +947,169 @@ describe('findMarkerInComments — HMAC-aware filtering (AISDLC-146 AC #3)', () 
     const body = formatMarker(v2Payload, { secret: SECRET_A });
     expect(findMarkerInComments([body], { secret: SECRET_A })).toEqual(v2Payload);
     expect(findMarkerInComments([body], { secret: SECRET_B })).toBeNull();
+  });
+});
+
+// ── AISDLC-151: bash-side PRIOR_SHA validation in ai-sdlc-review.yml ───
+//
+// Defense-in-depth follow-up to the AISDLC-142 round-3 security review.
+// The analyze job extracts PRIOR_SHA from the marker JSON via
+// `jq -r '.reviewedSha'` and interpolates it into a git command. The
+// TS-side `parseMarker` validates SHA shape, but the bash side cannot
+// trust `jq`'s output blindly — a trusted COLLABORATOR could in principle
+// craft a marker with a `reviewedSha` containing git-option-injection
+// content (e.g. `--upload-pack=evil`). These tests verify the workflow
+// carries the shell-side hex-only validator AND that the validator
+// behaves correctly under a real bash interpreter for several adversarial
+// inputs.
+
+const __filename_test = fileURLToPath(import.meta.url);
+const __dirname_test = dirname(__filename_test);
+const WORKFLOW_PATH = resolve(__dirname_test, '../../../.github/workflows/ai-sdlc-review.yml');
+
+/**
+ * Runs the bash-side PRIOR_SHA validator in isolation against `input` and
+ * returns the resulting PRIOR_SHA value (empty string when rejected).
+ *
+ * Mirrors the snippet in `.github/workflows/ai-sdlc-review.yml` exactly:
+ *
+ *   if [ -n "$PRIOR_SHA" ] && ! [[ "$PRIOR_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+ *     echo "::warning::…" >&2
+ *     PRIOR_SHA=""
+ *   fi
+ */
+function runBashValidator(input: string): { priorSha: string; warned: boolean } {
+  // Pass the input via env to avoid quoting hassles with embedded newlines
+  // / single quotes — exactly matching how `$PRIOR_SHA` reaches the
+  // workflow validator (a shell variable populated from a subprocess).
+  const script = [
+    `if [ -n "$PRIOR_SHA" ] && ! [[ "$PRIOR_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then`,
+    `  echo "::warning::PRIOR_SHA from incremental-review marker failed shell-side hex validation (\\"$PRIOR_SHA\\"); falling back to FULL review" >&2`,
+    `  PRIOR_SHA=""`,
+    `fi`,
+    `printf '%s' "$PRIOR_SHA"`,
+  ].join('\n');
+  const r = spawnSync('bash', ['-c', script], {
+    encoding: 'utf8',
+    env: { ...process.env, PRIOR_SHA: input },
+  });
+  if (r.status !== 0) {
+    throw new Error(`bash validator exited ${r.status}: ${r.stderr}`);
+  }
+  return { priorSha: r.stdout, warned: r.stderr.includes('::warning::') };
+}
+
+// Skip on Windows runners (no bash). All AI-SDLC dev + CI runs on
+// macOS/Linux, but vitest is occasionally invoked on Windows for
+// editor-driven workflows; better to skip than throw spurious failures.
+const describeBash = process.platform === 'win32' ? describe.skip : describe;
+
+describeBash('AISDLC-151 — workflow carries bash-side PRIOR_SHA validator', () => {
+  const yaml = readFileSync(WORKFLOW_PATH, 'utf8');
+
+  it('the analyze job contains the hex-only validator regex', () => {
+    // Anchored on the literal bash `[[ =~ ]]` test used by the validator.
+    // If anyone refactors the workflow and drops the validator, this test
+    // breaks loudly (intentional drift gate).
+    expect(yaml).toContain('"$PRIOR_SHA" =~ ^[0-9a-fA-F]{40}$');
+  });
+
+  it('the validator clears PRIOR_SHA on rejection (no silent pass-through)', () => {
+    expect(yaml).toMatch(/PRIOR_SHA=""/);
+  });
+
+  it('the validator emits a ::warning:: annotation for operator visibility', () => {
+    expect(yaml).toContain('::warning::PRIOR_SHA');
+  });
+
+  it('the validator runs BEFORE the git diff invocation (AC #4)', () => {
+    // The validator block must appear textually before the
+    // `git diff "$PRIOR_SHA"...HEAD --numstat` invocation in the
+    // workflow. Otherwise an unvalidated value could reach git.
+    const validatorIdx = yaml.indexOf('"$PRIOR_SHA" =~ ^[0-9a-fA-F]{40}$');
+    // Match the actual invocation (`--numstat` suffix), not the prose
+    // mention of `git diff PRIOR_SHA…HEAD` in surrounding comments.
+    const gitDiffIdx = yaml.indexOf('git diff "$PRIOR_SHA"...HEAD --numstat');
+    expect(validatorIdx).toBeGreaterThan(-1);
+    expect(gitDiffIdx).toBeGreaterThan(-1);
+    expect(validatorIdx).toBeLessThan(gitDiffIdx);
+  });
+});
+
+describeBash('AISDLC-151 — bash validator behavior (real shell)', () => {
+  it('accepts a valid lowercase 40-char hex SHA', () => {
+    const sha = 'a'.repeat(40);
+    const { priorSha, warned } = runBashValidator(sha);
+    expect(priorSha).toBe(sha);
+    expect(warned).toBe(false);
+  });
+
+  it('accepts a valid uppercase 40-char hex SHA (case-insensitive)', () => {
+    const sha = 'ABCDEF0123456789'.padEnd(40, 'A');
+    const { priorSha, warned } = runBashValidator(sha);
+    expect(priorSha).toBe(sha);
+    expect(warned).toBe(false);
+  });
+
+  it('accepts a realistic mixed-case 40-char hex SHA', () => {
+    const sha = 'DeadBeefCafe1234567890abcdefABCDEF012345';
+    const { priorSha, warned } = runBashValidator(sha);
+    expect(priorSha).toBe(sha);
+    expect(warned).toBe(false);
+  });
+
+  it('rejects empty string as no-prior-SHA (no warning, just empty)', () => {
+    // Empty input is the "no marker found" path — not adversarial,
+    // shouldn't generate a noisy warning.
+    const { priorSha, warned } = runBashValidator('');
+    expect(priorSha).toBe('');
+    expect(warned).toBe(false);
+  });
+
+  it('rejects a SHA that is too short (39 chars)', () => {
+    const { priorSha, warned } = runBashValidator('a'.repeat(39));
+    expect(priorSha).toBe('');
+    expect(warned).toBe(true);
+  });
+
+  it('rejects a SHA that is too long (41 chars)', () => {
+    const { priorSha, warned } = runBashValidator('a'.repeat(41));
+    expect(priorSha).toBe('');
+    expect(warned).toBe(true);
+  });
+
+  it('rejects git option-injection attempt (--upload-pack=evil padded to 40)', () => {
+    // The headline AISDLC-151 threat. Reject anything beginning with `--`.
+    const { priorSha, warned } = runBashValidator('--upload-pack=evil-payload-padded-toooo40');
+    expect(priorSha).toBe('');
+    expect(warned).toBe(true);
+  });
+
+  it('rejects a 40-char string containing non-hex characters (g-z)', () => {
+    const { priorSha, warned } = runBashValidator('z'.repeat(40));
+    expect(priorSha).toBe('');
+    expect(warned).toBe(true);
+  });
+
+  it('rejects a SHA with a trailing newline (defeats anchored ^…$)', () => {
+    // Embedded newlines could otherwise smuggle a second arg to git.
+    const { priorSha, warned } = runBashValidator(`${'a'.repeat(40)}\n--evil`);
+    expect(priorSha).toBe('');
+    expect(warned).toBe(true);
+  });
+
+  it('rejects whitespace-padded valid hex (leading space)', () => {
+    const { priorSha, warned } = runBashValidator(` ${'a'.repeat(39)}`);
+    expect(priorSha).toBe('');
+    expect(warned).toBe(true);
+  });
+
+  it('rejects shell-metacharacter injection (`$(whoami)` padded)', () => {
+    // The single-quoted assignment inside runBashValidator already prevents
+    // shell expansion, but this confirms the validator itself rejects the
+    // literal payload — defense in depth.
+    const { priorSha, warned } = runBashValidator('$(whoami)aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
+    expect(priorSha).toBe('');
+    expect(warned).toBe(true);
   });
 });
