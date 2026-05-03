@@ -2,10 +2,10 @@
 id: RFC-0016
 title: Estimation Calibration with T-Shirt Sizes
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: dominique@reliablegenius.io
 created: 2026-05-01
-updated: 2026-05-01
+updated: 2026-05-03
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0011
@@ -15,21 +15,21 @@ requiresDocs: []
 
 # RFC-0016: Estimation Calibration with T-Shirt Sizes
 
-**Document type:** Normative (draft)
-**Status:** Draft (initial seed; structure may shift; open questions in §13)
-**Lifecycle:** Draft
+**Document type:** Normative
+**Status:** Ready for Product owner sign-off (Engineering + Operator signed off 2026-05-03; 8 open questions resolved per §15)
+**Lifecycle:** Ready for Review
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-05-01
-**Updated:** 2026-05-01
+**Updated:** 2026-05-03
 **Target Spec Version:** v1alpha1
 
 ---
 
 ## Sign-Off
 
-- [ ] Engineering owner — dominique@reliablegenius.io (pending)
-- [ ] Product owner — Alex (pending)
-- [ ] Operator owner — dominique@reliablegenius.io (pending)
+- [x] Engineering owner — dominique@reliablegenius.io (2026-05-03)
+- [ ] Product owner — Alex (pending review)
+- [x] Operator owner — dominique@reliablegenius.io (2026-05-03)
 
 ## Revision History
 
@@ -37,6 +37,7 @@ requiresDocs: []
 |---|---|---|---|
 | v1 | 2026-05-01 | dominique | Initial draft. Captures the systematic-overestimate-bias problem observed during the 2026-05-01 session and proposes a t-shirt-size + 2x-deviation calibration loop, mirroring how human teams calibrate story points. |
 | v2 | 2026-05-01 | dominique | Restructured around the **deterministic-first / LLM-as-last-resort** pattern (mirrors RFC-0011 DoR Stage A/B). New §5 catalogues 8 Stage A deterministic signals (file scope, LOC delta, coverage threshold, historical actuals, dependency depth, blocked-paths-touched, file-type breakdown, reviewer-iteration history). New §6 reframes the LLM as a tie-breaker that runs ONLY when Stage A signals disagree or are missing, with the deterministic inputs as context. Renumbered §5-§9 → §7-§11; updated §1 + §2.2 to lead with the Stage A/B framing; added Q8 (which Stage A signals ship in Phase 1). |
+| v3 | 2026-05-03 | dominique | Operator walkthrough resolved 8 open questions (Q1-Q8); Q3 / Q5 / Q6 received substantive design upgrades beyond the original lean — see new §15 Resolutions section. Q3 collapses the 10-class taxonomy to a 3-class convergent core (`bug` / `feature` / `chore`) with full ontology structure (definition + exemplars + anti_patterns + synonyms) and confidence-gated LLM classification (auto / log-for-review / fall-back); Q5 replaces the single-shot EstimateRevised model with content-hash-keyed ensemble sampling (median bucket + variance signal); Q6 introduces a 3-state token enum (`uncalibrated` / `warming` / `calibrated`) with appendable variance qualifier shared across PR comment / CLI / dashboard / Slack surfaces. Q7 PR surfacing now ships as a bot comment with the AISDLC-142 idempotent-marker pattern; Q8 ships 6 cheap signals + a class-default fallback (= 7 signals) in Phase 1. Lifecycle flipped Draft → Ready for Review; Engineering + Operator signoffs added (Product owner Alex pending review). |
 
 ---
 
@@ -56,7 +57,7 @@ Pattern: 1.5-2x overestimate, especially on small tasks. Predictable bias is cor
 
 This RFC proposes adopting the t-shirt-size pattern (XS / S / M / L / XL) with explicit wall-clock buckets, capturing every estimate structurally (not in conversational prose), measuring actuals from existing data sources (`events.jsonl` per RFC-0015, git timestamps, PR `createdAt`/`mergedAt`), and applying per-class bias multipliers to future estimates so the system learns from its own track record.
 
-**Architectural principle (mirrors RFC-0011 DoR Stage A/B)**: estimation is deterministic-first, LLM-as-last-resort. Stage A collects 8 measurable signals about the task (file scope, historical actuals, dependency depth, blocked-paths-touched, etc.) and produces a candidate bucket from a pure-function lookup. Stage B (LLM) runs ONLY when Stage A signals disagree across buckets, when a class has no historical data, or when the operator explicitly requests an override — and even then receives all Stage A inputs as deterministic context, not as freeform "guess from intuition."
+**Architectural principle (mirrors RFC-0011 DoR Stage A/B)**: estimation is deterministic-first, LLM-as-last-resort. Stage A collects up to 9 measurable signals about the task (file scope, historical actuals, dependency depth, blocked-paths-touched, the class-default fallback for cold-start, etc.) and produces a candidate bucket from a pure-function lookup. Stage B (LLM) runs ONLY when Stage A signals disagree across buckets or when ensemble variance ≥ 2 buckets per §8.4 — and even then receives all Stage A inputs as deterministic context, not as freeform "guess from intuition." Class assignment itself is LLM-based (per §6.1) but happens once per task, gets cached, and is a separate fuzzy-classification step from Stage A bucket lookup.
 
 The mechanism mirrors human agile teams: estimate → measure → compute deviation → adjust → re-estimate. With Stage A in front of the LLM, the LLM's job becomes "apply the calibration table to these signals" not "guess wall-clock from training intuition."
 
@@ -141,7 +142,7 @@ An estimate may be a single bucket (high confidence) or a 2-bucket range (lower 
 
 ## 5. Stage A — Deterministic Pre-Estimation Analytics
 
-Stage A runs BEFORE any LLM call. It collects 8 measurable signals about the task and produces a candidate bucket via a pure-function lookup table per task class. The LLM is not in this loop.
+Stage A runs BEFORE any LLM call. It collects up to 9 measurable signals about the task (8 original + 1 class-default fallback per Q8 resolution) and produces a candidate bucket via a pure-function lookup table per task class. The LLM is not in this loop. Class assignment itself IS LLM-based (per Q3 resolution, §6.1) but happens once per task and gets cached — Stage A bucket lookup remains deterministic.
 
 ### 5.1 Stage A signal catalogue
 
@@ -155,15 +156,16 @@ Stage A runs BEFORE any LLM call. It collects 8 measurable signals about the tas
 | 6 | **Blocked-paths touched** | path glob match against `.github/workflows/**`, `.ai-sdlc/**`, schema files | +1 bucket for caution (review-cycle iterations on these paths are systematically longer) |
 | 7 | **File-type breakdown** | extension count from references / draft diff | Pure markdown changes are XS-S regardless of file count; pure TS code follows the standard bucket math; YAML edits sit between |
 | 8 | **Reviewer-iteration history (per class)** | `events.jsonl` `ITERATE_DEV` count for tasks of this class | Classes with mean iteration count >1 systematically take longer; pushes bucket up |
+| 9 | **Class-default fallback** (Q8) | seed catalogue: `bug` → S, `feature` → M, `chore` → S | Fires only when signal #2 returns `unknown` (n<5 for the class). Cheap-specific signals override class-default when they disagree. Retires gracefully as real signal #2 calibration data flows in Phase 3. |
 
 ### 5.2 Stage A → bucket lookup
 
 Each signal returns a candidate bucket (XS / S / M / L / XL) via a pure-function rule. Stage A's output is the **multiset of candidate buckets** plus a confidence rating:
 
-- **All 8 signals point at the same bucket** → confidence = high; bucket = unanimous choice; **LLM is not invoked**.
+- **All resolved signals point at the same bucket** → confidence = high; bucket = unanimous choice; **LLM is not invoked**.
 - **Signals split across 2 adjacent buckets** → confidence = medium; bucket = range estimate (`S-M`); **LLM is not invoked**.
 - **Signals split across 2 non-adjacent buckets, OR 3+ buckets** → confidence = low; **escalate to Stage B with the disagreement spelled out**.
-- **Class has n<5 historical samples** → signal #2 returns `unknown`; if remaining 7 signals agree, use them; if they don't, escalate to Stage B.
+- **Class has n<5 historical samples (cold-start)** → signal #2 returns `unknown` AND **signal #9 (class-default fallback) activates** with the seed bucket per Q8. The remaining 7 cheap signals + the class-default vote on the bucket; cheap-specific signals override the class-default on direct disagreement (per Q8 ordering rule). Escalate to Stage B only if the cheap signals AND class-default still split across non-adjacent buckets.
 - **Reference unresolvable (file doesn't exist, missing planning data)** → signal returns `unknown`; treated the same as cold-start for that signal.
 
 ### 5.3 Worked example (AISDLC-123 retrospective)
@@ -173,15 +175,16 @@ Applying Stage A to AISDLC-123 (shadow-mode test exact-count):
 | Signal | Value | Bucket |
 |---|---|---|
 | File scope count | 1 (just `shadow-mode.test.ts`) | XS |
-| Historical actuals | n=4 for `single-file-test-fix` (cold-start; signal=unknown) | unknown |
+| Historical actuals | n=4 for `bug` class (warming; signal=unknown until n≥5) | unknown |
 | LOC delta (planning estimate) | ~25 lines | XS |
 | Test coverage requirement | 80% patch threshold; test-only file | no bump |
 | Dependency depth | 0 (no blockers) | no bump |
 | Blocked paths touched | none | no bump |
 | File-type breakdown | 1 .ts test file | XS-S |
-| Reviewer-iteration history | n=4 mean=1.0 (cold-start) | unknown |
+| Reviewer-iteration history | n=4 mean=1.0 (warming) | unknown |
+| Class-default fallback (Q8) | class=`bug` → seed bucket S (overruled by file-scope XS, the cheap-specific signal) | S |
 
-→ 6 of 6 resolved signals point at XS or XS-S. Stage A confidence: high. Bucket: **XS**. **No LLM call needed.** Actual was 8 min (XS bucket = <10 min). ✓
+→ 6 of 6 cheap-specific signals point at XS or XS-S; class-default fallback (S) is overruled by the cheap-specific signals per the Q8 ordering rule. Stage A confidence: high. Bucket: **XS**. **No LLM call needed.** Actual was 8 min (XS bucket = <10 min). ✓
 
 Compare to the LLM's original "15 min" guess (M bucket) — Stage A would have caught the overestimate before it was made.
 
@@ -197,13 +200,14 @@ TASK CLASS: <class>
 
 DETERMINISTIC SIGNALS (Stage A):
   1. File scope count: 8 files → bucket M
-  2. Historical actuals (n=12 for rfc-phase): median L
+  2. Historical actuals (n=12 for `feature` class): median L
   3. LOC delta (planning): ~400 lines → bucket M
   4. Test coverage requirement: 80%; high test coverage required → +1 bucket
   5. Dependency depth: 2 blockers (per cli-deps) → +0
   6. Blocked paths touched: .github/workflows/** YES → +1 bucket
   7. File-type breakdown: 5 .ts + 2 .yaml + 1 .md → no extra bump
-  8. Reviewer-iteration history (n=8 for rfc-phase): mean iterations 1.4 → +0-1 bucket
+  8. Reviewer-iteration history (n=8 for `feature`): mean iterations 1.4 → +0-1 bucket
+  9. Class-default fallback (Q8): class=`feature` → seed bucket M (signal #2 already populated, fallback inactive)
 
 DISAGREEMENT: signals split between M and L (file scope says M; historical median says L; coverage + blocked-paths bumps push M → L; iteration history straddles).
 
@@ -225,7 +229,7 @@ Stored alongside Stage A signals in `_estimates/log.jsonl`:
 {
   "ts": "2026-05-01T22:30:00Z",
   "taskId": "AISDLC-115.4",
-  "class": "rfc-phase",
+  "class": "feature",
   "stageA": {
     "signals": [...],
     "candidateBucket": "M-L",
@@ -235,7 +239,7 @@ Stored alongside Stage A signals in `_estimates/log.jsonl`:
     "invoked": true,
     "promptHash": "sha256:...",
     "bucket": "L",
-    "justification": "rfc-phase historical median + workflow YAML touch + 1.4 mean iterations all push toward L; file scope alone (M) is overruled by 3 stronger signals."
+    "justification": "feature-class historical median + workflow YAML touch + 1.4 mean iterations all push toward L; file scope alone (M) is overruled by 3 stronger signals."
   },
   "finalBucket": "L"
 }
@@ -252,7 +256,7 @@ For task classes where Stage A has high-confidence (≥6 of 8 signals agreeing) 
 Every estimate the agent makes is captured to `$ARTIFACTS_DIR/_estimates/log.jsonl` at the moment of utterance:
 
 ```jsonl
-{"ts":"2026-05-01T22:30:00Z","predictedBy":"claude-opus-4-7","taskId":"AISDLC-123","class":"single-file-test-fix","bucket":"S","scopeFactors":["test-only","corpus-fixture-already-shipped"],"context":"dispatch-decision"}
+{"ts":"2026-05-01T22:30:00Z","predictedBy":"claude-opus-4-7","taskId":"AISDLC-123","class":"bug","bucket":"S","scopeFactors":["test-only","corpus-fixture-already-shipped"],"context":"dispatch-decision","estimateInputHash":"sha256:abc...","runIndex":1}
 ```
 
 ### 5.2 Capture trigger
@@ -280,20 +284,79 @@ Optional fields:
 
 ## 8. Measurement
 
-### 6.1 Task-class taxonomy
+### 6.1 Task-class ontology (Q3 resolution)
 
-Calibration is **conditional on task class**. Bias on infra cleanup is different from bias on RFC implementation. Initial classes (extensible via Q3):
+Calibration is **conditional on task class**. Bias on a `bug` is different from bias on a `feature`. Per the Q3 resolution (§15), the ontology ships **3 starter classes** — `bug`, `feature`, `chore` — chosen as the **empirical convergent core** (≥6 of 10 popular PM tools default-ship these three; nothing else converges across the survey). The triad theme also mirrors the 3-reviewer triad (RFC-0011) and the 3-stage pipeline (Stage A signals / Stage B LLM / Phase-3 calibration).
 
-- `single-file-test-fix` — modify one test file, no code changes
-- `single-file-code-fix` — modify one source file (no new files)
-- `multi-file-refactor` — refactor across 2-5 files, no new architecture
-- `single-feature` — implement one cohesive feature (≤10 files)
-- `rfc-phase` — one phase of an RFC implementation chain
-- `rfc-design` — write or iterate on an RFC document
-- `infra-cleanup` — backlog drift, attestation cleanup, workflow YAML edits
-- `review-cycle` — 3-reviewer fan-out + aggregation (always M for now)
-- `bug-investigation` — diagnose-then-fix where the diagnosis is the work
-- `cron-batch` — wake-tick + sweep + dispatch + log
+The original v2 list of 10 classes (`single-file-test-fix`, `single-file-code-fix`, `multi-file-refactor`, `single-feature`, `rfc-phase`, `rfc-design`, `infra-cleanup`, `review-cycle`, `bug-investigation`, `cron-batch`) is **dropped**. Operators may add project-specific classes via the LLM-proposes / operator-approves workflow described below — but the calibration math doesn't pay off until per-class n ≥ 5, and 10 narrowly-scoped classes never reach that threshold in a single-operator dogfood project.
+
+#### Class structure
+
+Each class in `.ai-sdlc/estimate-classes.yaml` carries the **full ontology shape** (definition + exemplars + anti_patterns + synonyms):
+
+```yaml
+classes:
+  bug:
+    definition: "Restore expected behavior in code that previously worked or was specified to work."
+    exemplars:
+      - "Fix null-pointer crash in PaymentValidator.validate() when amount is undefined"
+      - "Restore Auth header propagation through the proxy after middleware refactor"
+    anti_patterns:
+      - "Add new validation rule that didn't exist before (this is feature)"
+      - "Rename internal helper for clarity (this is refactor)"
+    synonyms: ["regression", "hotfix", "patch"]
+  feature:
+    definition: "Add capability that did not previously exist or was not previously specified."
+    exemplars:
+      - "Add t-shirt-size estimate field to backlog task schema"
+      - "Add /ai-sdlc estimate CLI command"
+    anti_patterns:
+      - "Restore behavior that regressed (this is bug)"
+      - "Update CHANGELOG before release (this is chore)"
+    synonyms: ["enhancement", "capability", "new"]
+  chore:
+    definition: "Maintenance work with no user-visible behavior change — dependency bumps, formatting, doc nits, infra cleanup."
+    exemplars:
+      - "Bump @types/node from 22.10.0 to 22.10.5"
+      - "Run prettier across the orchestrator package"
+    anti_patterns:
+      - "Add a missing test for behavior that already shipped (this is bug — covers a gap)"
+      - "Restructure CHARTER.md to add a new section (this is feature — new content)"
+    synonyms: ["maintenance", "tidy", "infra"]
+```
+
+#### Class assignment is LLM-based (NOT deterministic)
+
+Stage A's deterministic-first principle (§5) governs **bucket lookup once the class is known**. Class assignment itself is a **separate fuzzy-language classification step** that happens once per task at estimate time and gets cached:
+
+- The LLM reads the task title + description.
+- It outputs `{class: <name>, confidence: 0.0–1.0, rationale: <one line>}`.
+- The result is written to the task's frontmatter (`class:`) so downstream Stage A bucket lookup, calibration recording, and the PR comment (§8a) all agree on which class this task belongs to.
+- Re-classification only fires when title/description change materially (covered by the §6.5 content-hash machinery — class assignment IS one of the inputs to `estimateInputHash`).
+
+#### Confidence gates
+
+| Confidence | Behavior |
+|---|---|
+| **≥ 0.90** | Auto-approve. If the LLM returned an existing class, use it directly. If the LLM proposed a brand-new class (with full structure it generates), append it to `.ai-sdlc/estimate-classes.yaml` automatically and use it. |
+| **0.70 – 0.89** | Assign the existing class the LLM picked, but log the assignment to the operator-review queue: write to Slack `#estimation-review` channel + the `cli-estimate-classes review` dashboard. Operator confirms or reassigns within the next batch sweep. |
+| **< 0.70** | Fall back to the synthetic `uncategorized` class. Warn in the calibration log. **Do NOT calibrate** against this class until the operator decides what it actually is — `uncategorized` samples are excluded from per-class bias math. |
+
+#### Operator approval workflow for proposed-new-classes
+
+When the LLM proposes a brand-new class (any confidence below the auto-approve threshold), append it to `.ai-sdlc/estimate-classes-proposed.jsonl` (append-only):
+
+```jsonl
+{"ts":"2026-05-04T10:00:00Z","taskId":"AISDLC-200","proposedClass":"docs-rewrite","structure":{"definition":"...","exemplars":["..."],"anti_patterns":["..."],"synonyms":["..."]},"confidence":0.78,"rationale":"task is a structural rewrite of multiple .md files; doesn't fit chore (behaviour-impacting) or feature (no new capability)"}
+```
+
+The operator runs `cli-estimate-classes review`, which opens a diff (proposed vs nearest existing class) and asks accept/reject. Accepted proposals are merged into `.ai-sdlc/estimate-classes.yaml`.
+
+**Auto-promotion rule:** when ≥ N proposals (default 3) of the same shape (similar definition + exemplar overlap) accumulate within one weekly batch, the next batch sweep auto-promotes the most-frequent shape to a full class. Operator can roll back via the same `cli-estimate-classes` command.
+
+#### Whole-replace semantics for bucket boundaries
+
+Per the Q1 resolution (§15), the operator-tunable `.ai-sdlc/estimate-buckets.yaml` is a **whole replacement** of the catalogue defaults — no merge with §4.1's defaults. Either the operator hasn't shipped a yaml (defaults apply) or they have (their yaml is the full bucket set). This eliminates a class of "did this bucket override merge correctly?" debugging.
 
 ### 6.2 Actuals collection
 
@@ -303,11 +366,13 @@ Three sources, in priority order:
 2. **Git timestamps** — first commit on branch → merge commit on main. Coarser (includes review wait time).
 3. **PR `createdAt` → `mergedAt`** — for tasks shipped via the pipeline. Includes human review wait time.
 
-The collector runs periodically (cron or post-merge hook), joins each completed task to its captured estimate, computes the actual bucket, writes to `$ARTIFACTS_DIR/_estimates/calibration.jsonl`:
+The collector runs periodically (cron or post-merge hook), joins each completed task to its captured estimate, computes the actual bucket, writes to `$ARTIFACTS_DIR/_estimates/calibration.jsonl` (rotated monthly per Q4 resolution: `_estimates/calibration-2026-05.jsonl` etc.):
 
 ```jsonl
-{"ts":"2026-05-01T23:00:00Z","taskId":"AISDLC-123","class":"single-file-test-fix","predictedBucket":"S","actualBucket":"XS","bucketMiss":1,"actualWallClockSec":480,"source":"events.jsonl"}
+{"ts":"2026-05-01T23:00:00Z","taskId":"AISDLC-123","class":"bug","predictedBucket":"S","actualBucket":"XS","bucketMiss":1,"actualWallClockSec":480,"source":"events.jsonl","estimateInputHash":"sha256:abc...","runIndex":1,"estimateVariance":0}
 ```
+
+The new fields `estimateInputHash`, `runIndex`, and `estimateVariance` come from the Q5 ensemble model (§8.4). Monthly rotation gives a future roll-up natural batch boundaries; per Q4 the roll-up is **spec'd but NOT built in Phase 2** — raw queryability beats premature aggregation, and the per-class median over the last 30 days OR last 20 estimates from §9.1 streams line-by-line just fine over raw JSONL.
 
 ### 6.3 Excluding non-work time
 
@@ -317,6 +382,51 @@ Actual wall-clock should EXCLUDE:
 - Time blocked on operator decisions (e.g. mid-RFC Q&A)
 
 Inclusion of these inflates the "actual" and trains the bias adjustment in the wrong direction. The collector subtracts these gaps using `events.jsonl` `WorkerParked` / `WorkerResumed` events.
+
+### 8.4 Ensemble sampling with content hashing (Q5 resolution)
+
+LLM estimates are non-deterministic — a probability matrix being qualified, not a one-shot prediction. The naive "EstimateRevised event when the agent changes its mind" model from the v2 draft conflated three distinct things: (a) the same prompt run twice giving two answers (sampling noise), (b) the task itself materially changing mid-flight (scope drift), and (c) the agent re-evaluating with new information (legitimate revision). Q5's resolution separates these via **content hashing**.
+
+#### Content hash
+
+```
+estimateInputHash = sha256(taskTitle + taskDescription + stageA_signals + classAssignment)
+```
+
+Every input that materially changes the LLM's bucket choice contributes to the hash. Rationale: same hash = same prompt-shape; different hash = different prompt-shape (which is the only legitimate reason to expect a different answer beyond sampling noise).
+
+#### Same-hash multiple estimates → ensemble
+
+When the same `estimateInputHash` shows up multiple times in `_estimates/log.jsonl` (because the agent re-ran the estimate, or a deliberate sampling pass fired N times for variance estimation):
+
+- Aggregate as **datapoints**, not revisions. The log keeps every entry; no overwrite.
+- Calibration uses the **median bucket** across the same-hash batch (robust to a single outlier sample).
+- **Variance signal:**
+  - `estimateVariance = (maxBucketIndex − minBucketIndex)` across the batch (XS=0, S=1, M=2, L=3, XL=4)
+  - **Variance ≥ 2 buckets** → escalate to Stage B with the full inputs (LLM tie-breaker), OR flag for operator review when Stage B already ran. Variance is a free confidence proxy — wide spread means the model itself is uncertain.
+  - **Variance ≤ 1 bucket** → accept the median; record `estimateVariance` as a low-cost calibration signal.
+
+#### Different-hash → new estimate cycle
+
+When `estimateInputHash` changes (because task title/description was edited, Stage A signals changed, or class assignment flipped), a fresh ensemble starts. Previous-hash estimates stay in the log forever for forensic value but **don't aggregate** with the new hash's batch. This naturally handles "task was modified mid-flight" without revision-vs-fresh ambiguity — the hash is the disambiguator.
+
+The transition is logged via a new `EstimateInputChanged` event:
+
+```jsonl
+{"ts":"2026-05-01T22:45:00Z","taskId":"AISDLC-200","oldHash":"sha256:abc...","newHash":"sha256:def...","changedFields":["taskDescription","classAssignment"]}
+```
+
+Operators can audit input transitions in the same way RFC-0015 audits other event-stream transitions.
+
+#### Schema additions
+
+The `_estimates/calibration.jsonl` writer (§8.2) gains three fields:
+
+- `estimateInputHash: <sha256>` — which prompt-shape produced this row
+- `runIndex: <N>` — 1, 2, 3 for repeated runs against the same hash
+- `estimateVariance: <number>` — computed at the BATCH level, written when input hash changes or task hits Done (lazy aggregation; one batch-summary row per hash transition)
+
+This unifies "single-shot estimate" (n=1, variance=0) with "deliberate ensemble sampling" (n≥2, variance≥0) under the same schema — the analytics queries don't have to special-case ensemble vs solo.
 
 ## 9. Bias Adjustment
 
@@ -336,24 +446,87 @@ When the agent makes a new estimate of class C:
 2. If `|mean_miss| ≥ 1.0 bucket` AND `n ≥ 5 samples`, apply correction:
    - Predicted bucket = agent's raw estimate
    - Adjusted bucket = predicted bucket - mean_miss (rounded)
-3. Surface BOTH the raw and adjusted estimate to the operator: "Estimate: M (raw L, adjusted -1 for infra-cleanup overestimate bias)"
+3. Surface BOTH the raw and adjusted estimate to the operator: "Estimate: M (raw L, adjusted -1 for `chore`-class overestimate bias)"
 4. Capture both in the log so future calibration can detect when the adjustment itself drifts
 
-### 7.3 Cold-start
+### 7.3 Cold-start (Q6 resolution — state token enum)
 
-When n < 5 for a class: no adjustment. Log raw estimate only. Adjustment kicks in once 5 samples accumulate.
+Confidence in any estimate gets surfaced via a **3-state token enum** that's appendable across all four surfaces (PR comment §8a / CLI output / dashboard / Slack). The original draft used a `(n=3/5)` denominator that became confusing once `n` exceeded the threshold; Q6 drops the denominator and adopts these state tokens instead:
+
+| State | Condition | Format |
+|---|---|---|
+| `uncalibrated` | `n = 0` for the class | `(uncalibrated)` |
+| `warming` | `1 ≤ n < 5` for the class | `(warming, n=N)` |
+| `calibrated` | `n ≥ 5` for the class | `(calibrated, n=N, bias=±X%)` |
+
+#### Variance qualifier (Q5 connection)
+
+When the §8.4 `estimateVariance ≥ 2`, append `; high-variance` to the state token even when calibrated:
+
+```
+(calibrated, n=23, bias=+15%, high-variance)
+```
+
+This composes with §8.4's escalation behavior — the human reading the surface sees both "we have enough samples to trust the bias number" AND "this particular estimate has wide LLM disagreement, take the bucket with extra salt."
+
+#### Operator overrides count as samples
+
+When the operator overrides a bucket (via the calibration log, recorded as `outcome: 'override'`), that override counts as a calibration sample with `source: 'override'`. Bias-multiplier math weights overrides equally with model-produced samples. Rationale: the operator IS the ground truth (Q2 resolution); refusing to learn from operator corrections would defeat the calibration loop.
+
+#### Single-source-of-truth formatting
+
+All four surfaces (PR comment §8a / `cli-estimates show` CLI / dashboard / Slack `#estimation-review`) render the state token via one shared formatter — there's no surface-specific parsing, just one string substituted into each surface's templating.
+
+Adjustment math stays the same: when `state = calibrated` AND `|mean_miss| ≥ 1.0 bucket`, apply correction per §7.2. When `warming` or `uncalibrated`, the raw estimate ships unmodified — log it, don't adjust.
 
 ### 7.4 Drift detection
 
 If after adjustment the mean miss flips sign (consistently underestimated post-adjustment), the bias multiplier was over-corrected. Phase 3 emits a `EstimateBiasOverCorrected` event when this pattern persists for ≥3 consecutive estimates.
 
+## 9a. PR Surfacing — bot comment (Q7 resolution)
+
+Estimates appear on every PR via a **bot-posted PR comment** (NOT a PR template field, NOT freeform agent body text). This pattern reuses two well-tested AISDLC-142 ergonomics:
+
+1. **Idempotent marker:** `<!-- ai-sdlc:estimate -->` at the top of the comment body. The comment writer scans the PR's existing comments for this marker and either edits the existing comment or posts a fresh one. There's never more than one estimate comment per PR.
+2. **Trusted-author filter:** the writer is the same `ai-sdlc-bot` GitHub identity that posts the AISDLC-142 review-results comment, so external contributors can't forge a fake "estimated XS" comment and have it taken seriously by downstream tooling that reads this comment as ground truth.
+
+#### Comment payload
+
+```
+<!-- ai-sdlc:estimate -->
+**Estimated:** M (calibrated, n=23, bias=+15%)
+**Class:** feature
+**Stage A signals:** 6 of 6 agreed (file scope, dep depth, ...)
+**Variance across runs:** 0 buckets (single estimate, n=1)
+
+*Last updated: <isoTimestamp>*
+```
+
+The state token (Q6 resolution, §7.3) renders identically to the CLI / dashboard / Slack surfaces — single source of truth.
+
+#### Why bot comment beats PR template field
+
+- **Survives PR-description rewrites.** The Q5 ensemble model (§8.4) produces a fresh estimate when `estimateInputHash` changes; that becomes a comment EDIT, not a PR-description rewrite that fights with the operator's own description text.
+- **Visible diff history.** GitHub shows comment edit history; "the estimate started M, drifted to L, settled at L on the third run" is auditable inline without grepping the JSONL.
+- **No forgery surface.** A PR template field is whatever the PR opener types; a bot-authored comment with a known identity is verifiable.
+- **Doesn't deadlock docs-only PRs.** The AISDLC-131 / AISDLC-132 docs-only PR ergonomics keep working — the estimate comment is purely informational, not a required check.
+
+#### When the comment fires
+
+- On `pull_request: opened` — write the initial estimate comment with current Stage A signals + class assignment + state token.
+- On `pull_request: synchronize` (force-push, push-to-PR-branch) — recompute `estimateInputHash`; if changed, edit the comment with the new estimate + bump the timestamp.
+- On `pull_request: closed` (merged) — append the actual bucket + final variance summary in the same edit.
+
 ## 10. Schema Changes
 
-- New `$ARTIFACTS_DIR/_estimates/log.jsonl` — captured estimates
-- New `$ARTIFACTS_DIR/_estimates/calibration.jsonl` — predicted vs actual paired records
-- New `.ai-sdlc/schemas/estimate.v1.schema.json` — JSON Schema for both files
-- New `.ai-sdlc/estimate-classes.yaml` — operator-extensible taxonomy of task classes (per Q3)
-- Extension to RFC-0015 `events.jsonl`: new event types `EstimateCaptured`, `EstimateBiasApplied`, `EstimateBiasOverCorrected`
+- New `$ARTIFACTS_DIR/_estimates/log.jsonl` — captured estimates (raw entries; same-hash batches identified by `estimateInputHash`)
+- New `$ARTIFACTS_DIR/_estimates/calibration-YYYY-MM.jsonl` — predicted vs actual paired records, **rotated monthly per Q4** so future roll-up has natural batch boundaries
+- New `$ARTIFACTS_DIR/_estimates/EstimateInputChanged.jsonl` — content-hash-transition log (Q5)
+- New `.ai-sdlc/schemas/estimate.v1.schema.json` — JSON Schema for log + calibration files
+- New `.ai-sdlc/estimate-classes.yaml` — class ontology with full structure (definition + exemplars + anti_patterns + synonyms) per Q3; ships with 3 starter classes (`bug` / `feature` / `chore`)
+- New `.ai-sdlc/estimate-classes-proposed.jsonl` — append-only log of LLM-proposed new classes pending operator review (Q3)
+- New `.ai-sdlc/estimate-buckets.yaml` — operator-tunable bucket boundaries per Q1; **whole-replace** semantics (no merge with §4.1 defaults)
+- Extension to RFC-0015 `events.jsonl`: new event types `EstimateCaptured`, `EstimateInputChanged`, `EstimateBiasApplied`, `EstimateBiasOverCorrected`
 
 ## 11. Backward Compatibility
 
@@ -388,12 +561,12 @@ Sequential phases, each behind feature flag `AI_SDLC_ESTIMATION_CALIBRATION=expe
 
 | Phase | Wall-clock | Components | Acceptance |
 |---|---|---|---|
-| **Phase 1: Stage A signals (deterministic)** | 1.5 wk | `cli-estimate stage-a <task-id>` command; collectors for the 6 cheap signals (file scope, blocked paths, file-type breakdown, dependency depth, coverage requirement, LOC delta from planning); pure-function bucket-lookup table per class | `cli-estimate stage-a AISDLC-X` returns the candidate bucket + per-signal breakdown for any task in the backlog. No LLM calls. |
-| **Phase 2: Capture** | 0.5 wk | Estimate-log writer; record both Stage A multiset + final bucket; wire to RFC-0015 events.jsonl | 100% of agent estimates appear in log.jsonl with stageA + finalBucket fields |
-| **Phase 3: Measurement** | 1 wk | Actuals collector; calibration.jsonl writer; non-work-time exclusion logic; signal #2 (historical actuals) becomes populated as data flows in | For ≥10 completed tasks, calibration.jsonl has paired predicted/actual records; signal #2 starts producing non-`unknown` values once n≥5 per class |
-| **Phase 4: Stage B (LLM tie-breaker)** | 1 wk | Stage B prompt builder; only invoked when Stage A escalates per §5.2; full Stage A signal table passed as context per §6.1 | When Stage A signals split across non-adjacent buckets, Stage B receives the full table + returns one bucket or 2-bucket range with justification |
-| **Phase 5: Per-class bias adjustment** | 1 wk | Bias-multiplier computation across Stage A + Stage B verdicts; class-taxonomy YAML + JSON Schema; `cli-estimates show <class>` command | `cli-estimates show single-file-test-fix` returns mean/median bucket-miss + Stage-A-vs-Stage-B accuracy comparison |
-| **Phase 6: Soak + drift detection** | corpus-driven, NOT calendar-gated | `EstimateBiasOverCorrected` event; weekly calibration digest; metrics on Stage-A-coverage (% of estimates that bypass Stage B entirely) | Promotion when 95%+ of 1-bucket misses + < 5% of 3-bucket misses across 50 estimates AND Stage-A-coverage >70% |
+| **Phase 1: Stage A signals (deterministic) + class-default fallback** | 1.5 wk | `cli-estimate stage-a <task-id>` command; collectors for the **6 cheap signals** (file scope, blocked paths, file-type breakdown, dependency depth, coverage requirement, LOC delta from planning) **PLUS signal #9: class-default fallback** (Q8 resolution — when historical actuals signal #2 returns `unknown`, fall back to the catalogue median per class); pure-function bucket-lookup table; seed class-default buckets for the 3 starter classes (`bug` → S, `feature` → M, `chore` → S) | `cli-estimate stage-a AISDLC-X` returns the candidate bucket + per-signal breakdown for any task in the backlog. No LLM calls. Class-default fallback fires when n<5 for the class. |
+| **Phase 2: Capture** | 0.5 wk | Estimate-log writer; record Stage A multiset + final bucket + `estimateInputHash` (Q5); wire to RFC-0015 events.jsonl; class-assignment LLM call cached on first use (Q3) | 100% of agent estimates appear in log.jsonl with stageA + finalBucket + estimateInputHash + class fields |
+| **Phase 3: Measurement** | 1 wk | Actuals collector; **monthly-rotated** calibration.jsonl writer (Q4); non-work-time exclusion logic; signal #2 (historical actuals) becomes populated as data flows in; class-default seed values **retire gracefully** as real signal #2 takes over | For ≥10 completed tasks, calibration-YYYY-MM.jsonl has paired predicted/actual records; signal #2 starts producing non-`unknown` values once n≥5 per class; class-default fallback rate drops as calibration data accumulates |
+| **Phase 4: Stage B (LLM tie-breaker) + Q5 ensemble** | 1 wk | Stage B prompt builder; only invoked when Stage A escalates per §5.2 OR when same-hash variance ≥ 2 buckets per §8.4; full Stage A signal table passed as context per §6.1; ensemble batch aggregation writes `estimateVariance` per hash transition | When Stage A signals split across non-adjacent buckets OR ensemble variance ≥ 2, Stage B receives the full table + returns one bucket or 2-bucket range with justification |
+| **Phase 5: Per-class bias adjustment + state token + PR comment** | 1 wk | Bias-multiplier computation across Stage A + Stage B verdicts; per-agent stratification via `predictedBy` (Q2); `cli-estimates show <class>` command; **3-state token enum formatter** (Q6 — `uncalibrated`/`warming`/`calibrated`) shared across CLI/dashboard/Slack/PR-comment surfaces; **bot PR comment writer** with `<!-- ai-sdlc:estimate -->` marker (Q7) | `cli-estimates show feature` returns mean/median bucket-miss + Stage-A-vs-Stage-B accuracy comparison; PR opened from worktree gets a bot estimate comment within 30s of `pull_request: opened` |
+| **Phase 6: Soak + drift detection + class proposals** | corpus-driven, NOT calendar-gated | `EstimateBiasOverCorrected` event; weekly calibration digest; metrics on Stage-A-coverage (% of estimates that bypass Stage B entirely); `cli-estimate-classes review` for operator approval of LLM-proposed new classes (Q3); auto-promotion when ≥3 proposals of same shape accumulate | Promotion when 95%+ of 1-bucket misses + < 5% of 3-bucket misses across 50 estimates AND Stage-A-coverage >70% AND class-proposal queue is operator-actionable |
 
 Total wall-clock: ~5 weeks for Phase 1-5. Phase 6 corpus-driven per maintainer directive 2026-05-01.
 
@@ -406,23 +579,20 @@ Critical path: Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5 → Phase
 - **RFC-0015** (orchestrator) — `events.jsonl` is the actuals source; orchestrator's capacity planner uses calibrated estimates for "can I fit 3 more M-bucket tasks before off-peak ends?"
 - **RFC-0010** (subscription scheduling) — bucket-class × calibrated time = predicted token cost per task; SubscriptionLedger uses this for window planning
 
-## 15. Open Questions
+## 15. Resolutions
 
-1. **Q1: Should the bucket boundaries be operator-tunable per project?** A small embedded team's "L" might be 4 hours; a startup's "L" might be 30 min. Lean: yes — `.ai-sdlc/estimate-buckets.yaml` carries per-project boundaries; defaults from §4.1 ship as the catalogue. Decide before Phase 1.
+The 8 open questions from v2 were walked through in operator session on 2026-05-03. All 8 are resolved. Q1, Q2, Q4, Q7, Q8 ACCEPT the v2 lean (with refinements noted below). **Q3, Q5, Q6 are SUBSTANTIVE UPGRADES that change the design** — see the corresponding section updates in §6.1 (Q3), §8.4 (Q5), §7.3 (Q6), and §9a (Q7). Summary table:
 
-2. **Q2: How does the bias adjustment handle multi-agent estimates?** When operator + Claude both estimate, do we calibrate each separately, blend, or pick one? Lean: calibrate each separately (per-agent bias is a real signal); operator's estimate stays uncalibrated (humans self-calibrate via experience). Decide before Phase 4.
-
-3. **Q3: Is the task-class taxonomy fixed in §6.1 or operator-extensible?** Lean: extensible via `.ai-sdlc/estimate-classes.yaml` (same pattern as RFC-0015 Q9 failure-pattern catalogue). Default 10 classes ship; operators add project-specific classes. Decide before Phase 3.
-
-4. **Q4: Should the calibration log retain individual estimates forever, or roll up after N days?** Lean: keep raw entries 90 days; roll up to per-class aggregates monthly thereafter (forensic + bounded storage). Decide before Phase 2.
-
-5. **Q5: How do we handle estimates the agent makes mid-task (e.g. "now I think this is L not M")?** Lean: capture as a NEW `EstimateRevised` event, not overwrite — the revision is itself a signal of mid-task scope discovery. Calibration uses the LATEST estimate but tracks revision count. Decide before Phase 1.
-
-6. **Q6: When no actuals exist for a class (cold-start), how confident is the agent in raw estimates?** Lean: agent surfaces the estimate with a "no calibration data — confidence low" suffix. Decide before Phase 4.
-
-7. **Q7: Should estimates appear in PR descriptions automatically?** A standardized "Estimated: M; will track actual on merge" line gives operators visibility per-PR. Lean: yes, but as a lint-checkable PR template field rather than agent-injected freeform text. Decide before Phase 4.
-
-8. **Q8: Which Stage A signals ship in Phase 1?** §5.1 catalogues 8 signals but some are cheaper than others. Lean: ship the 6 cheap ones (file scope, blocked paths, file-type breakdown, dependency depth, coverage requirement, LOC delta from planning) in Phase 1; defer the 2 expensive ones (historical actuals — needs §8 measurement first; reviewer-iteration history — same dependency) to Phase 3 once data flows in. Decide before Phase 1 ships. Open question: do we ship a 7th cheap signal as a fallback when historical actuals are unknown? E.g., `task-class default bucket from §6.1 wall-clock table`?
+| # | Question | Resolution |
+|---|---|---|
+| Q1 | Operator-tunable bucket boundaries | **ACCEPT lean.** `.ai-sdlc/estimate-buckets.yaml` ships as the operator-control surface. **Whole-replace semantics** — operator yaml is the full bucket set, no merge with §4.1 defaults. Eliminates a "did this override merge correctly?" debugging class. |
+| Q2 | Multi-agent estimate calibration | **ACCEPT (a) per-agent.** Operator estimate stays uncalibrated **forever** — operator IS the ground truth, not a calibration target. Schema's `predictedBy` field enables per-agent stratification. Don't blend across agents until n ≥ 30 paired estimates per agent. |
+| Q3 | Task-class taxonomy | **SUBSTANTIVE UPGRADE — ontology pattern with confidence gates.** See updated §6.1. Ship **3 starter classes** (`bug` / `feature` / `chore` — empirical convergent core), each with full ontology structure (definition + exemplars + anti_patterns + synonyms). Class assignment is **LLM-based** (separate fuzzy-classification step from Stage A bucket lookup). LLM output: `{class, confidence, rationale}`. **Confidence gates:** ≥0.90 auto, 0.70–0.89 log-for-review, <0.70 fall-back to `uncategorized` (excluded from calibration). LLM may PROPOSE new classes; operator approves via `cli-estimate-classes review`; auto-promote on weekly batch when ≥3 same-shape proposals accumulate. Triad theme (3 classes ↔ 3 reviewers ↔ 3 stages) preserved. |
+| Q4 | Calibration log retention | **ACCEPT structural intent, defer roll-up.** Raw forever in practice; roll-up spec'd but **NOT built in Phase 2**. `calibration.jsonl` writer rotates monthly (`_estimates/calibration-2026-05.jsonl`) so a future roll-up has natural batch boundaries. Per-class median over the last 30 days OR last 20 estimates from §9.1 doesn't need roll-up — JSONL streamed line-by-line handles it fine. If/when storage becomes a real constraint, build the roll-up; until then, raw queryability beats premature aggregation. |
+| Q5 | Mid-task estimate revisions | **SUBSTANTIVE UPGRADE — ensemble sampling with content hashing.** See new §8.4. Replace single-shot `EstimateRevised` event with `estimateInputHash = sha256(taskTitle + taskDescription + stageA_signals + classAssignment)`. Same-hash multiple estimates aggregate as ensemble (median bucket; `estimateVariance = max−min`). Variance ≥ 2 buckets escalates to Stage B or operator review (variance-as-confidence-proxy). Variance ≤ 1 bucket accepts the median. Different-hash starts a fresh ensemble; previous-hash entries stay in log but don't aggregate. `EstimateInputChanged` event logs hash transitions. Schema gains `estimateInputHash`, `runIndex`, `estimateVariance`. |
+| Q6 | Cold-start confidence messaging | **SUBSTANTIVE UPGRADE — Option B (revised) with state token enum.** See updated §7.3. **Three states:** `uncalibrated` (n=0), `warming` (1≤n<5, format `(warming, n=N)`), `calibrated` (n≥5, format `(calibrated, n=N, bias=±X%)`). **Drops the `/5` denominator** that confused once n exceeded threshold. **Variance qualifier appendable** (Q5 connection): when `estimateVariance ≥ 2`, append `; high-variance` even when calibrated. **Operator overrides count as samples** with `source: 'override'` weighted equally with model samples. **Three surfaces share one format** (PR comment Q7, CLI, dashboard, Slack). |
+| Q7 | Estimates surfaced in PRs | **ACCEPT — Option D (bot comment).** See new §9a. **Bot-posted PR comment** (NOT PR template field, NOT freeform body text). Idempotent marker `<!-- ai-sdlc:estimate -->` (re-uses AISDLC-142 marker pattern). Trusted-author filter reuse from AISDLC-142 (external contributors can't forge fake estimates). Comment payload renders the Q6 state token. Comment EDITS naturally support Q5 ensemble revisions (no PR-description rewrite needed). |
+| Q8 | Stage A signals shipped in Phase 1 | **ACCEPT — Option B with class-default fallback.** See updated §13 Phase 1. Ship the **6 cheap signals** (file scope, blocked paths, file-type breakdown, dep depth, coverage requirement, planning LOC delta) **PLUS new signal #9: class-default fallback** — when historical actuals (signal #2) returns `unknown`, fall back to the catalogue median per class. **Seed values:** `bug` → S, `feature` → M, `chore` → S. These retire gracefully once real signal #2 calibration data flows in Phase 3 — no architectural debt. Cheap-specific signals (file scope, etc.) override class-default when they disagree. |
 
 ## 16. References
 
