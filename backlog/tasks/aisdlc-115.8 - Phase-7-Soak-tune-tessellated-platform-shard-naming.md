@@ -41,6 +41,10 @@ drift_log:
     type: refs-orphaned
     detail: All referenced files have been deleted
     resolution: flagged
+  - date: '2026-05-03'
+    type: dep-resolved
+    detail: Dependency AISDLC-115.7 has been completed
+    resolution: flagged
 ---
 
 ## Description

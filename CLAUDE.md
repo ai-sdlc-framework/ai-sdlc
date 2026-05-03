@@ -72,7 +72,7 @@ Tasks live in `backlog/tasks/` (open) and `backlog/completed/` (closed); managed
 
 ### Drift gate
 
-`backlog-drift` checks every reference in task frontmatter resolves. Strict on commit (per-task pre-commit) + CI (full repo, defense-in-depth via `backlog-drift` job). Skip just the gate: `AI_SDLC_SKIP_DRIFT_GATE=1`. Auto-fix: `npx backlog-drift fix --task AISDLC-N`.
+`backlog-drift` checks every reference in task frontmatter resolves. **Required** on commit (per-task pre-commit, fails on any drift in staged tasks) + CI (full repo, fails on `error`-severity issues only — `info`/`warning` are surfaced but non-blocking, AISDLC-125). Local-only escape: `AI_SDLC_SKIP_DRIFT_GATE=1` (pre-commit hook only — NOT honored in CI). Auto-fix: `npx backlog-drift fix --task AISDLC-N`.
 
 ### Canonical execution paths
 
