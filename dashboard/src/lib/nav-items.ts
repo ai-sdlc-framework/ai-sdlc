@@ -16,6 +16,7 @@ export const coreNavItems: NavItem[] = [
   { href: '/codebase', label: 'Codebase' },
   { href: '/audit', label: 'Audit' },
   { href: '/dor', label: 'DoR Calibration' },
+  { href: '/deps', label: 'Dependency Graph' },
 ];
 
 let _cachedItems: NavItem[] | null = null;
