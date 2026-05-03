@@ -55,7 +55,7 @@ The bug is structural: the AISDLC-74 optimization (skip duplicate CI review when
 
 ## Root cause location
 
-`/Users/dominique/Documents/dev/ai-sdlc/ai-sdlc/.github/workflows/ai-sdlc-review.yml` lines 221-224:
+`.github/workflows/ai-sdlc-review.yml` lines 221-224:
 
 ```yaml
 - name: Skip if attestation valid (AISDLC-74 — local /ai-sdlc execute review trusted)

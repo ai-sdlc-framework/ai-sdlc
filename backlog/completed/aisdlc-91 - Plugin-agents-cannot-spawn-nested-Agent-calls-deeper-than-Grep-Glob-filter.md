@@ -12,8 +12,7 @@ labels:
   - claude-code-upstream
 dependencies:
   - AISDLC-90
-references:
-  - /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/constants/tools.ts
+references: []
 priority: high
 drift_status: flagged
 drift_checked: '2026-05-03'
@@ -22,19 +21,19 @@ drift_log:
     type: ref-deleted
     detail: >-
       Referenced file no longer exists:
-      /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/agentToolUtils.ts
+      claude-code/src/agentToolUtils.ts
     resolution: flagged
   - date: '2026-05-03'
     type: ref-deleted
     detail: >-
       Referenced file no longer exists:
-      /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/runAgent.ts
+      claude-code/src/runAgent.ts
     resolution: flagged
   - date: '2026-05-03'
     type: ref-deleted
     detail: >-
       Referenced file no longer exists:
-      /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/loadPluginAgents.ts
+      claude-code/src/loadPluginAgents.ts
     resolution: flagged
   - date: '2026-05-03'
     type: ref-deleted
@@ -114,8 +113,8 @@ Cons: not a near-term fix.
 
 ## References
 
-- `/Users/dominique/Documents/dev/ai-sdlc/claude-code/src/agentToolUtils.ts` (the filter source)
-- `/Users/dominique/Documents/dev/ai-sdlc/claude-code/src/loadPluginAgents.ts`
+- `claude-code/src/agentToolUtils.ts` (the filter source)
+- `claude-code/src/loadPluginAgents.ts`
 - AISDLC-69.2's orchestrator return JSON (this session) — primary empirical evidence
 - AISDLC-82 — the architecture this would have enabled
 - AISDLC-90 — the frontmatter fixes that PARTIALLY worked (agent loaded, but Agent tool still filtered at runtime)
