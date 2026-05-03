@@ -1,3 +1,15 @@
+---
+id: RFC-0009
+title: Tessellated Design Intent Documents for Multi-Soul Platforms
+status: Draft
+lifecycle: Draft
+author: alex@reliablegenius.io
+created: 2026-04-24
+updated: 2026-05-04
+targetSpecVersion: v1alpha1
+requiresDocs: []
+---
+
 # RFC-0009: Tessellated Design Intent Documents for Multi-Soul Platforms
 
 **Document type:** Normative (draft)
