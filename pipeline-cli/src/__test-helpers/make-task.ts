@@ -25,6 +25,13 @@ export interface MakeTaskOptions {
    */
   dependencies?: string[];
   /**
+   * Backlog.md `priority:` value (low | medium | high | critical). Optional —
+   * when omitted the file's frontmatter has no `priority:` field, mirroring
+   * the on-disk shape of older tasks. Tests for RFC-0014 Phase 2 use this to
+   * drive the dispatcher comparator without injecting a custom resolver.
+   */
+  priority?: string;
+  /**
    * If true, write the task into `backlog/completed/` instead of
    * `backlog/tasks/`. Used by dependency-graph tests to simulate the
    * frontier-readiness check (a dependency is "satisfied" when it lives in
@@ -67,6 +74,9 @@ export function writeTaskFile(workDir: string, opts: MakeTaskOptions): string {
   const status = opts.status ?? (opts.completed ? 'Done' : 'To Do');
 
   const fmLines: string[] = [`id: ${opts.id}`, `title: '${opts.title}'`, `status: ${status}`];
+  if (opts.priority) {
+    fmLines.push(`priority: ${opts.priority}`);
+  }
   if (opts.references && opts.references.length > 0) {
     fmLines.push('references:');
     for (const r of opts.references) fmLines.push(`  - ${r}`);

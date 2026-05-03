@@ -4,3 +4,5 @@
  */
 export * from './dependency-graph.js';
 export * from './snapshot.js';
+export * from './effective-priority.js';
+export * from './dispatch.js';
