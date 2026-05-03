@@ -238,6 +238,114 @@ describe('classifyOneReviewer', () => {
     });
     expect(result).toBe('ok');
   });
+
+  // ---- AISDLC-154: substring fallback uses WHOLE stdout, not last line ----
+
+  it('AISDLC-154: multi-line pretty-printed verdict whose body has both budget substrings → budget-exhausted', () => {
+    // The exact failure mode from PR #196 CI run 25267752415: cli-review
+    // wrote pretty-printed multi-line JSON to /tmp/review-<type>.txt. The
+    // CLI's `lastLine` extracts only `}`, which fails `tryParseVerdict`
+    // (just a closing brace isn't a valid verdict). The original AISDLC-149
+    // valid-verdict-finding inspection path is therefore SKIPPED, and the
+    // substring fallback runs against `verdictLine + stderr` where
+    // verdictLine is `}` and stderr is empty — missing the budget signature
+    // that's sitting in the multi-line stdout body.
+    //
+    // With AISDLC-154, the CLI now passes the WHOLE stdout via stdoutRaw,
+    // and the substring fallback inspects the entire body, catching the
+    // signature.
+    const stdoutRaw = `{
+  "approved": false,
+  "findings": [
+    {
+      "severity": "critical",
+      "message": "Review agent failed: Anthropic API error 400: {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"Your credit balance is too low to access the Anthropic API.\\"}}"
+    }
+  ],
+  "summary": "review could not be completed"
+}`;
+    const result = classifyOneReviewer({
+      type: 'testing',
+      // lastLine of the multi-line JSON above is `}` — fails tryParseVerdict.
+      verdictLine: '}',
+      stdoutRaw,
+      stderr: '',
+    });
+    expect(result).toBe('budget-exhausted');
+  });
+
+  it('AISDLC-154: multi-line stdout with NON-budget critical finding → other-failure (no false positive)', () => {
+    // Same multi-line shape (last line is `}`, verdict fails to parse), but
+    // the body contains a regular critical finding — must NOT trip the
+    // budget classifier.
+    const stdoutRaw = `{
+  "approved": false,
+  "findings": [
+    {
+      "severity": "critical",
+      "message": "SQL injection vulnerability in src/db.ts:42 — unsanitized user input"
+    }
+  ],
+  "summary": "security issues found"
+}`;
+    const result = classifyOneReviewer({
+      type: 'security',
+      verdictLine: '}',
+      stdoutRaw,
+      stderr: '',
+    });
+    // verdictLine doesn't parse → falls into substring path → no budget
+    // signature → other-failure (the existing CHANGES_REQUESTED safety net
+    // surfaces the parse problem rather than silently swallowing it).
+    expect(result).toBe('other-failure');
+  });
+
+  it('AISDLC-154: budget substrings split across DIFFERENT stdout lines → budget-exhausted (whole-stdout match)', () => {
+    // Pathological case where the two substrings would each appear on
+    // their own line. The original AISDLC-147 single-line check would have
+    // missed this; the AISDLC-154 whole-stdout match catches it naturally
+    // because the combined string spans every line.
+    const stdoutRaw = [
+      '[review/critic] starting…',
+      'Anthropic API responded with invalid_request_error',
+      'request_id: req_abc123',
+      'message body: Your credit balance is too low to access the Anthropic API.',
+      '}',
+    ].join('\n');
+    const result = classifyOneReviewer({
+      type: 'critic',
+      verdictLine: '}',
+      stdoutRaw,
+      stderr: '',
+    });
+    expect(result).toBe('budget-exhausted');
+  });
+
+  it('AISDLC-154: stdoutRaw absent (back-compat) — falls back to verdictLine for substring match', () => {
+    // Older callers / tests that don't supply `stdoutRaw` must still work:
+    // the AISDLC-147 path inspected `verdictLine + stderr`, and with
+    // stdoutRaw undefined we preserve that exact behavior.
+    const result = classifyOneReviewer({
+      type: 'testing',
+      verdictLine: 'invalid_request_error: credit balance is too low',
+      // intentionally no stdoutRaw — back-compat path
+      stderr: '',
+    });
+    expect(result).toBe('budget-exhausted');
+  });
+
+  it('AISDLC-154: empty stdoutRaw + budget signature in stderr → budget-exhausted (existing AISDLC-147 path preserved)', () => {
+    // The original failure mode where the Anthropic SDK aborts before
+    // cli-review writes anything to stdout still has to work. stderr alone
+    // must be enough.
+    const result = classifyOneReviewer({
+      type: 'security',
+      verdictLine: '',
+      stdoutRaw: '',
+      stderr: budgetExhaustedStderr,
+    });
+    expect(result).toBe('budget-exhausted');
+  });
 });
 
 describe('classifyReviewerOutputs (aggregate decision)', () => {

@@ -1,5 +1,6 @@
 /**
- * `cli-classify-budget` subcommand router (AISDLC-147 patch 2).
+ * `cli-classify-budget` subcommand router (AISDLC-147 patch 2;
+ * AISDLC-154 widened substring fallback to whole stdout).
  *
  * Wraps the budget-exhaustion classifier from
  * `../classifier/budget-classifier.ts` so the `report` job in
@@ -95,20 +96,31 @@ export async function runClassifyBudgetCli(): Promise<void> {
     .help()
     .parseAsync();
 
+  // Read each stdout file once and supply BOTH the last-line view (for
+  // `tryParseVerdict` — matches the existing `tail -1` shape the parser
+  // expects) AND the whole-file view (for the AISDLC-154 substring fallback
+  // — `cli-review`'s pretty-printed multi-line JSON puts the credit-
+  // exhaustion text in the body, not the last line).
+  const testingStdout = readSafe(argv['testing-stdout']);
+  const criticStdout = readSafe(argv['critic-stdout']);
+  const securityStdout = readSafe(argv['security-stdout']);
   const inputs: ReviewerRawOutput[] = [
     {
       type: 'testing',
-      verdictLine: lastLine(readSafe(argv['testing-stdout'])),
+      verdictLine: lastLine(testingStdout),
+      stdoutRaw: testingStdout,
       stderr: readSafe(argv['testing-stderr']),
     },
     {
       type: 'critic',
-      verdictLine: lastLine(readSafe(argv['critic-stdout'])),
+      verdictLine: lastLine(criticStdout),
+      stdoutRaw: criticStdout,
       stderr: readSafe(argv['critic-stderr']),
     },
     {
       type: 'security',
-      verdictLine: lastLine(readSafe(argv['security-stdout'])),
+      verdictLine: lastLine(securityStdout),
+      stdoutRaw: securityStdout,
       stderr: readSafe(argv['security-stderr']),
     },
   ];
