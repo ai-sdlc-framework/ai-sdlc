@@ -13,14 +13,23 @@ labels:
 milestone: m-2
 dependencies:
   - AISDLC-70.2
-references:
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#9-concurrency-and-admission-control
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#10-merge-coordination
-  - orchestrator/src/execute.ts
 parent_task_id: AISDLC-70
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#9-concurrency-and-admission-control
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#10-merge-coordination
+    resolution: flagged
 ---
 
 ## Description

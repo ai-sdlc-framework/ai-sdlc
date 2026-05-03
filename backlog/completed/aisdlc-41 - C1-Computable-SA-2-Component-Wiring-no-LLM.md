@@ -13,10 +13,9 @@ milestone: m-1
 dependencies:
   - AISDLC-38
   - AISDLC-40
-references:
-  - orchestrator/src/admission-score.ts
-  - orchestrator/src/priority.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

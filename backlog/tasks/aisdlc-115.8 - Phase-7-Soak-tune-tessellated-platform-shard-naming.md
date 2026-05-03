@@ -4,6 +4,7 @@ title: 'Phase 7: Soak + tune + tessellated-platform shard naming'
 status: To Do
 assignee: []
 created_date: '2026-05-01 16:26'
+updated_date: '2026-05-03 00:24'
 labels:
   - rfc-0011
   - phase-7
@@ -14,10 +15,32 @@ milestone: m-3
 dependencies:
   - AISDLC-115.7
 references:
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#12-implementation-plan
-  - backlog/docs/ppa-product-signoff-rfc0011.md
+  - spec/rfcs/RFC-0011-definition-of-ready-gate.md
 parent_task_id: AISDLC-115
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#12-implementation-plan
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      backlog/docs/ppa-product-signoff-rfc0011.md
+    resolution: flagged
+  - date: '2026-05-03'
+    type: dep-resolved
+    detail: Dependency AISDLC-115.7 has been completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: refs-orphaned
+    detail: All referenced files have been deleted
+    resolution: flagged
 ---
 
 ## Description

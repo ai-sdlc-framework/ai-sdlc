@@ -14,16 +14,17 @@ labels:
   - follow-up
   - aisdlc-74
 dependencies: []
-references:
-  - >-
-    backlog/completed/aisdlc-74 -
-    Cryptographic-review-attestations-skip-duplicate-CI-review-runs-when-local-ai-sdlc-execute-reviews-are-signed.md
-  - scripts/verify-attestation.mjs
-  - scripts/verify-attestation.test.mjs
-  - ai-sdlc-plugin/commands/execute.md
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - orchestrator/src/runtime/attestations.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-74 -
+      Cryptographic-review-attestations-skip-duplicate-CI-review-runs-when-local-ai-sdlc-execute-reviews-are-signed.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

@@ -15,8 +15,15 @@ dependencies:
 references:
   - ai-sdlc-plugin/commands/execute.md
   - .github/workflows/ai-sdlc-review.yml
-  - orchestrator/src/runtime/attestations.ts (contentHashV3)
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: orchestrator/src/runtime/attestations.ts
+      (contentHashV3)
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

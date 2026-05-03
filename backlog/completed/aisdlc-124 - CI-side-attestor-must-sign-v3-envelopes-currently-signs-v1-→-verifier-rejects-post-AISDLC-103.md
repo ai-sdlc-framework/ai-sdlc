@@ -14,12 +14,20 @@ labels:
 milestone: m-3
 dependencies: []
 references:
-  - scripts/ci-sign-attestation.mjs
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
   - .ai-sdlc/schemas/attestation.v3.schema.json
   - .github/workflows/ai-sdlc-review.yml
-  - spec/rfcs/RFC-0009-trusted-reviewers.md
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/ci-sign-attestation.mjs'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: spec/rfcs/RFC-0009-trusted-reviewers.md'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

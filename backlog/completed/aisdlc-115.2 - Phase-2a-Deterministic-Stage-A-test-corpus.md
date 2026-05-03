@@ -13,12 +13,23 @@ milestone: m-3
 dependencies:
   - AISDLC-115.1
 references:
-  - >-
-    spec/rfcs/RFC-0011-definition-of-ready-gate.md#44-deterministic-first-evaluation-order
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#56-corpus
   - spec/dor-corpus/
 parent_task_id: AISDLC-115
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#44-deterministic-first-evaluation-order
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#56-corpus
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

@@ -12,11 +12,22 @@ labels:
 milestone: m-3
 dependencies:
   - AISDLC-115.5
-references:
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#8-metrics-and-observability
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#55-calibration-log
 parent_task_id: AISDLC-115
 priority: medium
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#8-metrics-and-observability
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#55-calibration-log
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

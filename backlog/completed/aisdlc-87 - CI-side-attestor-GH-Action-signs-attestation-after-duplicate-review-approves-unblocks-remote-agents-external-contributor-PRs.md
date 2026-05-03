@@ -15,16 +15,16 @@ labels:
   - remote-agents
   - external-contributors
 dependencies: []
-references:
-  - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/verify-attestation.yml
-  - scripts/verify-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - .ai-sdlc/trusted-reviewers.yaml
-  - >-
-    backlog/completed/aisdlc-74 -
-    cryptographic-review-attestations-for-skip-duplicate-CI.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: backlog/completed/aisdlc-74 -
+      cryptographic-review-attestations-for-skip-duplicate-CI.md
+    resolution: flagged
 ---
 
 ## Description

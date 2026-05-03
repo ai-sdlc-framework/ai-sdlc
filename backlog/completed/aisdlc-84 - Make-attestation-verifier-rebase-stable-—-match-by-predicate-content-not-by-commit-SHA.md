@@ -13,16 +13,16 @@ labels:
   - attestation
   - follow-up
 dependencies: []
-references:
-  - scripts/verify-attestation.mjs
-  - orchestrator/src/runtime/attestations.ts
-  - .github/workflows/verify-attestation.yml
-  - .github/workflows/ai-sdlc-review.yml
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - >-
-    backlog/completed/aisdlc-76 -
-    Verifier-walks-parents-to-match-attestation-against-dev-commit.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: backlog/completed/aisdlc-76 -
+      Verifier-walks-parents-to-match-attestation-against-dev-commit.md
+    resolution: flagged
 ---
 
 ## Description

@@ -13,10 +13,9 @@ milestone: m-1
 dependencies:
   - AISDLC-39
   - AISDLC-40
-references:
-  - reference/src/reconciler/design-system-reconciler.ts
-  - reference/src/reconciler/types.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

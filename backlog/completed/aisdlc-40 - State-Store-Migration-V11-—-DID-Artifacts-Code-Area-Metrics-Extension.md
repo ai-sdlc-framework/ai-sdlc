@@ -12,11 +12,9 @@ labels:
 milestone: m-1
 dependencies:
   - AISDLC-38
-references:
-  - orchestrator/src/state/schema.ts
-  - orchestrator/src/state/types.ts
-  - orchestrator/src/state/store.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

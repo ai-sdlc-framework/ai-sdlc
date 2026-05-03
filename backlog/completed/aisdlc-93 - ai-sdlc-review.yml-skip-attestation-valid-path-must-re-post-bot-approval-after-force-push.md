@@ -13,13 +13,31 @@ labels:
   - workflow
   - auto-merge
 dependencies: []
-references:
-  - .github/workflows/ai-sdlc-review.yml
-  - .github/workflows/auto-enable-auto-merge.yml
-  - backlog/completed/aisdlc-74 - Cryptographic-review-attestations-skip-duplicate-CI-review-runs-when-local-ai-sdlc-execute-reviews-are-signed.md
-  - backlog/completed/aisdlc-84 - Make-attestation-verifier-rebase-stable-—-match-by-predicate-content-not-by-commit-SHA.md
-  - backlog/completed/aisdlc-87 - CI-side-attestor-GH-Action-signs-attestation-after-duplicate-review-approves-unblocks-remote-agents-external-contributor-PRs.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-74 -
+      Cryptographic-review-attestations-skip-duplicate-CI-review-runs-when-local-ai-sdlc-execute-reviews-are-signed.md
+      was modified after task was completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-84 -
+      Make-attestation-verifier-rebase-stable-—-match-by-predicate-content-not-by-commit-SHA.md
+      was modified after task was completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-87 -
+      CI-side-attestor-GH-Action-signs-attestation-after-duplicate-review-approves-unblocks-remote-agents-external-contributor-PRs.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

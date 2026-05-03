@@ -17,8 +17,13 @@ dependencies:
 references:
   - .github/workflows/verify-attestation.yml
   - .github/workflows/ai-sdlc-review.yml
-  - scripts/ci-sign-attestation.mjs
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/ci-sign-attestation.mjs'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

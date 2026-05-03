@@ -12,10 +12,9 @@ labels:
 milestone: m-1
 dependencies:
   - AISDLC-49
-references:
-  - orchestrator/src/cli/
-  - .github/workflows/ai-sdlc-admit.yml
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

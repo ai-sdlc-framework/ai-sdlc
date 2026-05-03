@@ -13,11 +13,9 @@ labels:
   - follow-up
   - aisdlc-73
 dependencies: []
-references:
-  - ai-sdlc-plugin/commands/execute.md
-  - ai-sdlc-plugin/mcp-server/src/tools/task-edit.ts
-  - ai-sdlc-plugin/mcp-server/src/tools/task-complete.ts
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

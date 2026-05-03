@@ -4,6 +4,7 @@ title: Bulk-clean 297 backlog-drift issues + promote gate from advisory to requi
 status: To Do
 assignee: []
 created_date: '2026-05-01 21:24'
+updated_date: '2026-05-03 00:24'
 labels:
   - ci
   - infrastructure
@@ -14,10 +15,15 @@ dependencies: []
 references:
   - .github/workflows/ci.yml
   - docs/upstream-bug-reports/backlog-drift-url-fragment-false-positive.md
-  - >-
-    backlog/completed/aisdlc-119 -
-    Tighten-the-backlog-drift-husky-pre-commit-hook-to-FAIL-on-errors-not-just-warn.md
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: backlog/completed/aisdlc-119 -
+      Tighten-the-backlog-drift-husky-pre-commit-hook-to-FAIL-on-errors-not-just-warn.md
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

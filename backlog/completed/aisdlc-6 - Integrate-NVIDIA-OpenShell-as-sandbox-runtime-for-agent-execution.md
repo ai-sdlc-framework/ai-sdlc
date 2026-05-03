@@ -11,8 +11,6 @@ labels:
   - integration
 dependencies: []
 references:
-  - 'https://github.com/NVIDIA/OpenShell'
-  - 'https://docs.nvidia.com/openshell/latest/reference/policy-schema.html'
   - reference/src/security/interfaces.ts
   - reference/src/security/docker-sandbox.ts
   - orchestrator/src/execute.ts
@@ -22,6 +20,18 @@ documentation:
   - >-
     https://developer.nvidia.com/blog/run-autonomous-self-evolving-agents-more-safely-with-nvidia-openshell/
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: https://github.com/NVIDIA/OpenShell'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      https://docs.nvidia.com/openshell/latest/reference/policy-schema.html
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

@@ -14,16 +14,23 @@ labels:
   - regression
   - follow-up
 dependencies: []
-references:
-  - scripts/verify-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - >-
-    backlog/completed/aisdlc-84 -
-    Make-attestation-verifier-rebase-stable-—-match-by-predicate-content-not-by-commit-SHA.md
-  - >-
-    backlog/completed/aisdlc-76 -
-    Verifier-walks-parents-to-match-attestation-against-dev-commit.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: backlog/completed/aisdlc-76 -
+      Verifier-walks-parents-to-match-attestation-against-dev-commit.md
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-84 -
+      Make-attestation-verifier-rebase-stable-—-match-by-predicate-content-not-by-commit-SHA.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

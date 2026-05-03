@@ -17,15 +17,34 @@ dependencies:
   - AISDLC-94
   - AISDLC-101
   - AISDLC-102
-references:
-  - scripts/verify-attestation.mjs
-  - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - scripts/ci-sign-attestation.mjs
-  - orchestrator/src/runtime/attestations.ts
-  - .ai-sdlc/schemas/attestation.v1.schema.json
-  - backlog/completed/aisdlc-94 - Verifier-diffHash-should-be-rebase-tolerant-hash-post-apply-tree-state-not-literal-diff-text.md
-  - backlog/completed/aisdlc-101 - Verifier-Phase-2-drop-diffHash-require-contentHash-bump-schema-v2.md
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/ci-sign-attestation.mjs'
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .ai-sdlc/schemas/attestation.v1.schema.json
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-94 -
+      Verifier-diffHash-should-be-rebase-tolerant-hash-post-apply-tree-state-not-literal-diff-text.md
+      was modified after task was completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-101 -
+      Verifier-Phase-2-drop-diffHash-require-contentHash-bump-schema-v2.md was
+      modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

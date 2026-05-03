@@ -13,13 +13,17 @@ labels:
   - aisdlc-69
 dependencies:
   - AISDLC-69.2
-references:
-  - spec/rfcs/RFC-0006-design-system-governance-v5-final.md
-  - docs/tutorials/
-  - docs/operations/
-  - ai-sdlc-io/content/spec/rfcs/RFC-0006-design-system-governance-v5-final.mdx
 parent_task_id: AISDLC-69
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-io/content/spec/rfcs/RFC-0006-design-system-governance-v5-final.mdx
+    resolution: flagged
 ---
 
 ## Description

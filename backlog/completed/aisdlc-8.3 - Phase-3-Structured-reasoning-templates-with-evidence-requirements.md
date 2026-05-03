@@ -13,10 +13,16 @@ dependencies:
   - AISDLC-8.1
 references:
   - orchestrator/src/runners/review-agent.ts
-  - >-
-    https://venturebeat.com/orchestration/metas-new-structured-prompting-technique-makes-llms-significantly-better-at
 parent_task_id: AISDLC-8
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      https://venturebeat.com/orchestration/metas-new-structured-prompting-technique-makes-llms-significantly-better-at
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

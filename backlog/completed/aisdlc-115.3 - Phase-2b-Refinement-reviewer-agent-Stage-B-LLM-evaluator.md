@@ -14,11 +14,17 @@ labels:
 milestone: m-3
 dependencies:
   - AISDLC-115.2
-references:
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#5-the-dor-reviewer-agent
-  - ai-sdlc-plugin/agents/refinement-reviewer.md
 parent_task_id: AISDLC-115
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#5-the-dor-reviewer-agent
+    resolution: flagged
 ---
 
 ## Description

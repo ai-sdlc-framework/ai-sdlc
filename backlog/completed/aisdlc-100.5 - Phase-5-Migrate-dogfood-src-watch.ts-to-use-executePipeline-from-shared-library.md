@@ -16,10 +16,15 @@ dependencies:
   - AISDLC-100.2
 references:
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
-  - dogfood/src/watch.ts
   - dogfood/package.json
 parent_task_id: AISDLC-100
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: dogfood/src/watch.ts'
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

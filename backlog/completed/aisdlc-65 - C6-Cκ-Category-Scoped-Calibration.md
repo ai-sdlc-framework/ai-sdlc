@@ -12,9 +12,9 @@ labels:
 milestone: m-1
 dependencies:
   - AISDLC-64
-references:
-  - orchestrator/src/priority.ts
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

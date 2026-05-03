@@ -13,15 +13,23 @@ labels:
 milestone: m-2
 dependencies:
   - AISDLC-70.4
-references:
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#14-subscription-aware-scheduling
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#11-per-stage-model-routing
-  - orchestrator/src/cost-governance.ts
-  - spec/examples/subscription-plans/
 parent_task_id: AISDLC-70
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#14-subscription-aware-scheduling
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#11-per-stage-model-routing
+    resolution: flagged
 ---
 
 ## Description

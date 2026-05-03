@@ -16,8 +16,15 @@ references:
   - ai-sdlc-plugin/commands/execute.md
   - .husky/post-rewrite
   - scripts/check-orchestrator-state.sh
-  - 'memory: project_orchestrator_repo_layout.md'
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: memory:
+      project_orchestrator_repo_layout.md
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

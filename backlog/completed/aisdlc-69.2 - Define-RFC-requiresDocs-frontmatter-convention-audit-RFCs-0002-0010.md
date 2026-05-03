@@ -11,17 +11,27 @@ labels:
   - follow-up
   - aisdlc-69
 dependencies: []
-references:
-  - spec/rfcs/RFC-0001-template.md
-  - spec/rfcs/README.md
-  - spec/rfcs/RFC-0002-pipeline-orchestration-policy.md
-  - spec/rfcs/RFC-0003a-infrastructure-provider-adapters.md
-  - spec/rfcs/RFC-0006-design-system-governance-v5-final.md
-  - spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md
-  - docs/
-  - ai-sdlc-io/content/docs/
 parent_task_id: AISDLC-69
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0002-pipeline-orchestration-policy.md
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0003a-infrastructure-provider-adapters.md
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: ai-sdlc-io/content/docs/'
+    resolution: flagged
 ---
 
 ## Description

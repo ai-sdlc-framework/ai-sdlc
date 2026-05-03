@@ -1,6 +1,8 @@
 ---
 id: AISDLC-69.9
-title: RFC-0010 parallel execution — add api-ref doc for worktree pool / harness adapter
+title: >-
+  RFC-0010 parallel execution — add api-ref doc for worktree pool / harness
+  adapter
 status: Done
 assignee: []
 created_date: '2026-04-30 17:35'
@@ -13,13 +15,10 @@ labels:
   - aisdlc-69
 dependencies:
   - AISDLC-69.2
-references:
-  - spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md
-  - docs/api-reference/
-  - docs/operations/operator-runbook.md
-  - docs/operations/adapter-authoring.md
 parent_task_id: AISDLC-69
 priority: low
+drift_status: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

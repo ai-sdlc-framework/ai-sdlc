@@ -13,13 +13,42 @@ labels:
 dependencies:
   - AISDLC-90
 references:
-  - /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/agentToolUtils.ts
-  - /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/runAgent.ts
   - /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/constants/tools.ts
-  - /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/loadPluginAgents.ts
-  - ai-sdlc-plugin/agents/execute-orchestrator.md
-  - backlog/completed/aisdlc-90 - Fix-execute-orchestrator-agent-frontmatter-Task-Agent-rename-MCP-namespace.md
 priority: high
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/agentToolUtils.ts
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/runAgent.ts
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      /Users/dominique/Documents/dev/ai-sdlc/claude-code/src/loadPluginAgents.ts
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/agents/execute-orchestrator.md
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-90 -
+      Fix-execute-orchestrator-agent-frontmatter-Task-Agent-rename-MCP-namespace.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description

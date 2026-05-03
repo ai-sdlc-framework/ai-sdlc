@@ -13,14 +13,23 @@ labels:
 milestone: m-2
 dependencies:
   - AISDLC-70.6
-references:
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#16-artifact-directory-convention
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#17-observability-requirements
-  - spec/schemas/artifacts/
 parent_task_id: AISDLC-70
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#16-artifact-directory-convention
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#17-observability-requirements
+    resolution: flagged
 ---
 
 ## Description

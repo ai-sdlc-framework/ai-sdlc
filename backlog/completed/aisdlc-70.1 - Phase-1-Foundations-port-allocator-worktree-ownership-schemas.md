@@ -11,15 +11,28 @@ labels:
   - runtime
 milestone: m-2
 dependencies: []
-references:
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#7-worktree-pool-manager
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#8-deterministic-port-allocator
-  - >-
-    spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#6-schema-amendments
 parent_task_id: AISDLC-70
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#7-worktree-pool-manager
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#8-deterministic-port-allocator
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md#6-schema-amendments
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

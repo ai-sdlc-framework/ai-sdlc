@@ -16,8 +16,15 @@ dependencies:
   - AISDLC-115.3
 references:
   - pipeline-cli/src/dor/stage-b.ts
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#5-the-dor-reviewer-agent
 priority: medium
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#5-the-dor-reviewer-agent
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

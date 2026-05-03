@@ -13,11 +13,23 @@ milestone: m-3
 dependencies:
   - AISDLC-115.4
 references:
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#7-pipeline-integration
-  - backlog/docs/ppa-product-signoff-rfc0011.md
   - spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md
 parent_task_id: AISDLC-115
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#7-pipeline-integration
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      backlog/docs/ppa-product-signoff-rfc0011.md
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

@@ -12,12 +12,22 @@ labels:
 milestone: m-3
 dependencies:
   - AISDLC-115.3
-references:
-  - spec/rfcs/RFC-0011-definition-of-ready-gate.md#52-ingress-shims
-  - >-
-    spec/rfcs/RFC-0011-definition-of-ready-gate.md#62-comment-format-and-idempotency
 parent_task_id: AISDLC-115
 priority: high
+drift_log:
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#52-ingress-shims
+    resolution: flagged
+  - date: '2026-05-03'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      spec/rfcs/RFC-0011-definition-of-ready-gate.md#62-comment-format-and-idempotency
+    resolution: flagged
+drift_checked: '2026-05-03'
 ---
 
 ## Description

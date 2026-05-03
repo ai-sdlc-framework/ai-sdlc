@@ -13,12 +13,17 @@ labels:
   - operational-friction
 dependencies:
   - AISDLC-96
-references:
-  - ai-sdlc-plugin/mcp-server/package.json
-  - release-please-config.json
-  - .release-please-manifest.json
-  - backlog/completed/aisdlc-75 - Fix-ai-sdlc-plugin-distribution-mcp-server-ships-without-dist-node_modules-breaks-all-governance-hooks-on-cached-install.md
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file backlog/completed/aisdlc-75 -
+      Fix-ai-sdlc-plugin-distribution-mcp-server-ships-without-dist-node_modules-breaks-all-governance-hooks-on-cached-install.md
+      was modified after task was completed
+    resolution: flagged
 ---
 
 ## Description
