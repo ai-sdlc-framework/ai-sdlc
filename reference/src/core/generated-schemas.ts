@@ -2347,6 +2347,123 @@ export const dorConfigV1Schema = {
   additionalProperties: false,
 } as const;
 
+export const orchestratorEventsV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/orchestrator-events.v1.schema.json',
+  title: 'AI-SDLC OrchestratorEvent',
+  description:
+    "One JSONL line written by the autonomous-pipeline orchestrator's events writer (RFC-0015 Phase 4 / AISDLC-169.4). Lines accrete to date-rotated files at $ARTIFACTS_DIR/_orchestrator/events-YYYY-MM-DD.jsonl. The stream is the canonical bus for downstream consumers (cli-status --orchestrator, future web dashboard, Slack push, etc.) per RFC §7.3 — 'the file exists, it's append-only, it's schema-stable.' Phase 4 ships the writer + the loop wiring + the cli-status view + this schema; Phase 5 (AISDLC-169.5) adds the corpus + chaos-test surface.\n\nDiscriminator: the `type` field. Common envelope fields (`ts`, optional `taskId`, optional `runId`) ride on every event; per-type properties live in their own oneOf branch. The schema is intentionally extensible — new event types added by future RFC-0015 phases (or downstream RFCs) extend the `OrchestratorEventType` enum without requiring a v2 bump, since unknown `type` values are rejected by validators that enforce the enum strictly + permitted by validators that don't.",
+  type: 'object',
+  required: ['ts', 'type'],
+  properties: {
+    ts: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        "ISO-8601 timestamp the event was minted at. Always set by the writer at append time so consumers don't need to derive it from the rotated file's date suffix.",
+    },
+    type: {
+      $ref: '#/$defs/OrchestratorEventType',
+    },
+    taskId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Canonical task ID this event refers to, e.g. 'AISDLC-169.4'. Optional — orchestrator-level events (`OrchestratorTick`) have no task scope.",
+    },
+    runId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Orchestrator session UUID — stable across all ticks within one `runOrchestratorLoop()` invocation. Lets consumers correlate the events emitted by a single orchestrator process even when the date-rotated file rolls over mid-run.',
+    },
+    tick: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Tick number this event was emitted in (0-indexed). Present on tick + dispatch + completion/failure events, omitted on out-of-band events (e.g. `WorkerStateTransition` emitted by a long-poll handler outside the tick loop).',
+    },
+    workerId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Worker identifier (e.g. `w-aisdlc-169.4`). Present on worker-scoped events (`WorkerStateTransition`).',
+    },
+    from: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Previous WorkerState — present on `WorkerStateTransition` only. See `pipeline-cli/src/orchestrator/playbook/types.ts#WorkerState` for the canonical state list.',
+    },
+    to: {
+      type: 'string',
+      minLength: 1,
+      description: 'New WorkerState — present on `WorkerStateTransition` only.',
+    },
+    duration_ms: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Wall-clock duration the worker spent in `from` before transitioning to `to`. Present on `WorkerStateTransition`.',
+    },
+    outcome: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Pipeline outcome enum value (`approved`, `needs-human-attention`, `unknown-failure`, etc.) — present on `OrchestratorCompleted`.',
+    },
+    prUrl: {
+      type: ['string', 'null'],
+      description:
+        'PR URL associated with the event when one exists — present on `OrchestratorCompleted` / `OrchestratorFailed` / `OrchestratorRecovered`.',
+    },
+    reason: {
+      type: 'string',
+      description:
+        'Free-form human-readable reason — present on `OrchestratorFailed` (escalation reason) / `OrchestratorAwaitingExternal` (filter trace).',
+    },
+    candidates: {
+      type: 'integer',
+      minimum: 0,
+      description: 'Frontier candidate count — present on `OrchestratorTick`.',
+    },
+    dispatched: {
+      type: 'integer',
+      minimum: 0,
+      description: 'Tasks actually dispatched in this tick — present on `OrchestratorTick`.',
+    },
+    mode: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Failure-mode tag (e.g. `SecretScanBlocked`, `RebaseConflict`, `UnknownFailureMode`) — present on `OrchestratorFailed` / `OrchestratorRecovered`.',
+    },
+    context: {
+      type: 'object',
+      description:
+        'Free-form structured context bag for the event. Schema-less by design so future event types can carry per-type payload without a v2 bump.',
+      additionalProperties: true,
+    },
+  },
+  additionalProperties: false,
+  $defs: {
+    OrchestratorEventType: {
+      type: 'string',
+      description:
+        "Discriminator. Phase 4 ships the seven core types listed; future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+      enum: [
+        'OrchestratorTick',
+        'OrchestratorDispatched',
+        'OrchestratorCompleted',
+        'OrchestratorFailed',
+        'OrchestratorRecovered',
+        'OrchestratorAwaitingExternal',
+        'WorkerStateTransition',
+      ],
+    },
+  },
+} as const;
+
 export const pipelineSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/pipeline.schema.json',
@@ -4307,6 +4424,7 @@ export const SCHEMAS: Record<string, object> = {
   'design-intent-document.schema.json': designIntentDocumentSchema,
   'design-system-binding.schema.json': designSystemBindingSchema,
   'dor-config.v1.schema.json': dorConfigV1Schema,
+  'orchestrator-events.v1.schema.json': orchestratorEventsV1Schema,
   'pipeline.schema.json': pipelineSchema,
   'quality-gate.schema.json': qualityGateSchema,
   'refinement-verdict.v1.schema.json': refinementVerdictV1Schema,

@@ -1,11 +1,13 @@
-# Autonomous Pipeline Orchestrator — operator guide (RFC-0015 Phases 1+2)
+# Autonomous Pipeline Orchestrator — operator guide (RFC-0015 Phases 1+2+4)
 
 > **Status:** experimental, opt-in via `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`.
 > Phase 1 (AISDLC-169.1) shipped the bare polling loop. Phase 2
 > (AISDLC-169.2) adds the catalogued failure playbook described below.
-> Pre-dispatch admission filters (Phase 3), and `events.jsonl` writer +
-> `cli-status --orchestrator` (Phase 4) land in subsequent tasks
-> (AISDLC-169.3 / .4).
+> Phase 4 (AISDLC-169.4) adds the canonical `events.jsonl` writer,
+> the `cli-status --orchestrator` view, and the schema for downstream
+> consumers. Pre-dispatch admission filters (Phase 3) ship in parallel
+> (AISDLC-169.3); soak corpus + promotion runbook (Phase 5) is
+> AISDLC-169.5.
 
 The orchestrator is a long-running Node process that ties RFC-0010 (parallel
 execution), RFC-0011 (DoR gate), RFC-0012 (`executePipeline()`), RFC-0014
@@ -287,7 +289,119 @@ per Q4. Per-mode locks (Option C) are added only if a real global-state
 collision surfaces.
 
 > Phase 4 (AISDLC-169.4) replaces the in-memory `playbookEvents` array
-> with the canonical `events.jsonl` bus.
+> with the canonical `events.jsonl` bus — see the next section.
+
+## Observability — Phase 4 events.jsonl + cli-status (AISDLC-169.4)
+
+Phase 4 ships the canonical event stream and the operator-facing
+viewer.
+
+### Event stream — `events.jsonl`
+
+Every tick, the orchestrator emits one or more events to a date-rotated
+JSONL file at `$ARTIFACTS_DIR/_orchestrator/events-YYYY-MM-DD.jsonl`.
+The writer:
+
+- is **append-only** — never rewrites or reorders existing lines (RFC §7.3 contract);
+- **rotates by UTC date** — operators in any timezone get deterministic file naming;
+- **creates parent dirs** on demand;
+- is **feature-flag gated** — when `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` is unset the writer no-ops, so accidental imports never leak observability traffic;
+- is **best-effort** — write failures (disk full, EBADF) are swallowed; the orchestrator hot loop is never crashed by an observability hiccup.
+
+### Event types (Phase 4 surface)
+
+| Type | When | Required fields | Notes |
+|---|---|---|---|
+| `OrchestratorTick` | Top of every tick, after the frontier read | `ts`, `type`, `tick`, `runId`, `candidates`, `dispatched` | Heartbeat — the loop is alive even with an empty frontier. |
+| `OrchestratorDispatched` | Before each `executePipeline()` call | `ts`, `type`, `taskId`, `tick`, `runId` | Forensic anchor — proves a task started even if dispatch hard-crashes. |
+| `OrchestratorCompleted` | After a successful dispatch return | `ts`, `type`, `taskId`, `tick`, `runId`, `outcome`, `prUrl` | `outcome` is the `PipelineOutcome` enum value. |
+| `OrchestratorFailed` | Caught error OR escalated playbook OR `needs-human-attention` outcome | `ts`, `type`, `taskId`, `tick`, `runId`, `mode`, `reason`, `prUrl` | `mode` is the `FailureMode` (catalogued) or `UnknownFailureMode` (catch-all). |
+| `OrchestratorRecovered` | Phase 2 playbook handler succeeded | `ts`, `type`, `taskId`, `tick`, `runId`, `mode`, `outcome`, `prUrl` | Wires to AISDLC-169.2 — emitted on the recovered branch of the playbook runner. |
+| `OrchestratorAwaitingExternal` | Phase 3 admission filter held the task | `ts`, `type`, `taskId`, `runId`, `reason`, `context` | Reserved for AISDLC-169.3; schema accepts it now so the loop wiring is non-breaking when Phase 3 lands. |
+| `WorkerStateTransition` | Every Phase 2 state-machine transition | `ts`, `type`, `taskId`, `workerId`, `runId`, `from`, `to`, `duration_ms`, `context?` | Forwarded from the in-memory `playbookEvents` array Phase 2 already emits. Mirrors RFC §7.1. |
+
+The schema is canonical at
+[`spec/schemas/orchestrator-events.v1.schema.json`](../../spec/schemas/orchestrator-events.v1.schema.json).
+Future RFC-0015 phases (or other RFCs) extend the `OrchestratorEventType`
+enum without a v2 bump — consumers that enforce the enum strictly will
+reject unknown types + log; consumers that don't will tolerate them.
+
+### Common envelope
+
+Every event carries:
+
+- **`ts`** — ISO-8601 timestamp set by the writer at append time.
+- **`type`** — discriminator (the `OrchestratorEventType` enum).
+- **`runId`** (optional) — orchestrator session UUID. Stable across all ticks within one `runOrchestratorLoop()` invocation; lets consumers correlate events from one process even when the date-rotated file rolls over mid-run.
+- **`tick`** (optional) — tick number this event was emitted in (0-indexed).
+- **`taskId`** (optional) — present on task-scoped events; absent on `OrchestratorTick`.
+- **`workerId`** (optional) — present on `WorkerStateTransition`.
+
+### Consumer guide — tail + filter
+
+The recommended consumer pattern is **tail + filter** — a downstream
+process tails the latest `events-YYYY-MM-DD.jsonl` file (rolling over at
+UTC midnight) and applies its own filtering. Examples:
+
+- **Slack push** (RFC §13 Q1 layer C): tail, filter for `type === 'OrchestratorFailed'` AND `mode === 'UnknownFailureMode'`, post to a webhook with the task ID + reason.
+- **Web dashboard** (RFC §7.3 — future task): tail via `inotify` / `fs.watch` → SSE, render the four §7.2 panels (workers table, candidate queue, recent transitions, burn-down).
+- **Replay / chaos-test fixtures** (RFC §11 Phase 5 — AISDLC-169.5): record a session's `events-YYYY-MM-DD.jsonl` as a corpus, replay against a mock orchestrator to assert recovery semantics.
+
+The schema's `additionalProperties: false` on the top-level envelope
+combined with the `[k: string]: unknown` per-type properties keeps the
+contract honest: consumers can validate the envelope strictly + tolerate
+new per-type fields.
+
+### `cli-status --orchestrator`
+
+Operator-facing landing page for the events stream. Lives in
+`@ai-sdlc/dogfood` (already-shipped binary), gains a new `--orchestrator`
+flag in Phase 4:
+
+```bash
+node dogfood/dist/cli-status.js --orchestrator
+node dogfood/dist/cli-status.js --orchestrator --json --limit 20
+node dogfood/dist/cli-status.js --orchestrator --artifacts-dir .ai-sdlc/artifacts
+```
+
+Renders the last 50 events (configurable via `--limit`) in chronological
+order, color-coded by type:
+
+- **green** — `OrchestratorCompleted`, `OrchestratorRecovered` (terminal success)
+- **red** — `OrchestratorFailed` (escalation surface)
+- **yellow** — `OrchestratorAwaitingExternal` (Phase 3 admission filter)
+- **cyan** — `OrchestratorDispatched` (worker started)
+- **magenta** — `WorkerStateTransition` (in-flight forensic trail)
+- **gray** — `OrchestratorTick` (loop heartbeat — low-information by design)
+
+Each line is `<ts> <type> taskId=<id> runId=<short-uuid>`. Color
+auto-disables on non-TTY stdout (CI-safe). `--json` emits the raw event
+array for piping into `jq` / dashboards.
+
+### Dashboard mock
+
+Phase 4 ships the schema, NOT the dashboard view. The schema is the
+locked-in contract; a future task wires a web dashboard (or the
+`inotify` → SSE replication suggested in RFC §7.3) against it. Until
+then `cli-status --orchestrator` is the operator's UI; consumers
+prototype against the schema directly.
+
+### Programmatic consumer API
+
+```ts
+import { readRecentEvents, type OrchestratorEvent } from '@ai-sdlc/pipeline-cli/orchestrator';
+
+const events: OrchestratorEvent[] = readRecentEvents({
+  artifactsDir: '/srv/ai-sdlc/.ai-sdlc/artifacts',
+  limit: 50,
+});
+
+for (const e of events) {
+  if (e.type === 'OrchestratorFailed') {
+    // ... post to Slack, file an issue, etc.
+  }
+}
+```
 
 ## Supervision templates
 
@@ -371,8 +485,8 @@ await runOrchestratorLoop(
 |---|---|---|---|
 | 1 | AISDLC-169.1 | Bare polling loop, feature flag, escalation hook, `cli-orchestrator` CLI, idempotent-finalize doc. | Shipped |
 | 2 (this) | AISDLC-169.2 | 9-pattern failure playbook + `.ai-sdlc/orchestrator-failure-patterns.yaml` source-of-truth + worker state machine + per-worker forensic state. | Shipped |
-| 3 | AISDLC-169.3 | DoR + dependency + external-deps pre-dispatch admission filters; exponential-backoff cadence. | To do |
-| 4 | AISDLC-169.4 | `events.jsonl` writer + `cli-status --orchestrator` view. | To do |
+| 3 | AISDLC-169.3 | DoR + dependency + external-deps pre-dispatch admission filters; exponential-backoff cadence. | In flight |
+| 4 (this) | AISDLC-169.4 | `events.jsonl` writer + `cli-status --orchestrator` view + canonical schema for downstream consumers. | Shipped |
 | 5 | AISDLC-169.5 | Real-issue corpus, chaos test (kill mid-tick + verify resume), promotion runbook. | To do |
 
 ## Cross-references
