@@ -7,3 +7,4 @@ export * from './snapshot.js';
 export * from './effective-priority.js';
 export * from './dispatch.js';
 export * from './critical-path.js';
+export * from './override-log.js';

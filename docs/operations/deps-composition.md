@@ -23,9 +23,11 @@ snapshot writer is read-only — flipping the flag on adds a small disk
 cost (one JSONL file per pipeline tick under
 `$ARTIFACTS_DIR/_deps/`) and changes nothing about dispatch behaviour.
 
-Enable in production once Phase 5's soak window confirms downstream
+Enable in production once Phase 5's corpus-driven soak confirms downstream
 composition behaves as designed (RFC-0014 §11 Phase 5 acceptance:
-dispatch correctness > 95% AND no operator override-rate spike).
+dispatch correctness > 95% AND no operator override-rate spike). The
+hybrid promotion runbook — corpus path or operator-override spot-check —
+lives at [`deps-composition-promotion.md`](deps-composition-promotion.md).
 
 ## How to enable
 
