@@ -208,7 +208,7 @@ Sequential phases, each behind feature flag `AI_SDLC_DEPS_COMPOSITION`.
 | **Phase 2: PPA composition** | 1 wk | Extend dispatcher's priority comparator to use `effectivePriority`; integration test with chain fixtures | Critical-path leaves bubble to top; PPA per-task scores unchanged |
 | **Phase 3: DoR composition** | 0.5 wk | Extend DoR comment template + calibration log with blast-radius fields | Vague root-of-chain issue gets blast-radius callout in DoR comment |
 | **Phase 4: Slack + dashboard digest** | 1 wk | Critical-path section in weekly digest; dashboard graph view | Digest renders top 3-5; dashboard interactive |
-| **Phase 5: Soak + flag promotion** | corpus-driven, NOT calendar-gated | Run with flag off → operators opt in → measure dispatch quality vs PPA-only baseline | Promotion when dispatch correctness > 95% AND no operator override-rate spike |
+| **Phase 5: Soak + flag promotion** (AISDLC-167.5) | corpus-driven, NOT calendar-gated | Snapshot corpus aggregator (`cli-deps-corpus aggregate`) + operator override capture (`cli-deps log-override`) + hybrid promotion runbook ([`docs/operations/deps-composition-promotion.md`](../../docs/operations/deps-composition-promotion.md)) — corpus path or operator-override spot-check, both produce the same default-on end-state | Promotion when dispatch correctness > 95% AND no operator override-rate spike |
 
 Total wall-clock: ~3 weeks (Phase 5 is corpus-driven per maintainer directive 2026-05-01).
 
