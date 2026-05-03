@@ -29,6 +29,16 @@ export {
   ORCHESTRATOR_FLAG,
   orchestratorDisabledMessage,
 } from './feature-flag.js';
+export {
+  eventsDirPath,
+  eventsFilePath,
+  readRecentEvents,
+  writeEvent,
+  type OrchestratorEvent,
+  type OrchestratorEventType,
+  type ReadEventsOpts,
+  type WriteEventOpts,
+} from './events.js';
 export type {
   DispatchFn,
   EscalateFn,
