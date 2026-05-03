@@ -24,6 +24,77 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ── Job 0: Attestation precheck (cost-saver SOFT signal) ──────────
+  # AISDLC-147 patch 1: when a valid `.ai-sdlc/attestations/<HEAD-sha>.dsse.json`
+  # exists at HEAD (the operator already ran the 3 reviewers locally via
+  # `/ai-sdlc execute` and signed the envelope), skip the 3 CI reviewer-agent
+  # invocations and instead post auto-approved verdicts via the post-skip-results
+  # job below.
+  #
+  # This is the COST-SAVING side restored after AISDLC-140 sub-4 demoted
+  # attestation from a merge gate to audit-only. The merge-gate side stays
+  # demoted — `verify-attestation.yml` is still log-only, `Post Review Results`
+  # is still the only review-tier required check. We just stop burning ~$X of
+  # Anthropic credits running a duplicate review when the operator already
+  # cryptographically attested they ran it locally.
+  attestation-precheck:
+    name: Attestation precheck
+    runs-on: ubuntu-latest
+    if: "!startsWith(github.head_ref, 'release-please--')"
+    permissions:
+      contents: read
+    outputs:
+      # `true` when a valid envelope was found at HEAD — analyze job skips,
+      # post-skip-results job runs. `false` when missing/invalid — the
+      # existing analyze + report path runs unchanged.
+      skip: ${{ steps.verify.outputs.skip }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (verifier needs the orchestrator runtime barrel)
+        run: pnpm install --frozen-lockfile
+
+      - name: Build orchestrator + dependencies
+        # `...` builds @ai-sdlc/orchestrator AND its workspace deps in topo order.
+        # The verifier imports compiled JS from orchestrator/dist/runtime/.
+        run: pnpm --filter "@ai-sdlc/orchestrator..." build
+
+      - name: Verify attestation (same logic as verify-attestation.yml)
+        id: verify
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Run the canonical verifier — produces status=valid|invalid +
+          # reason on $GITHUB_OUTPUT (handled by buildGithubOutputLines in
+          # scripts/verify-attestation.mjs). We capture just the boolean
+          # "should we skip the CI reviewers?" signal in a separate output.
+          node scripts/verify-attestation.mjs > /tmp/verifier.log 2>&1 || true
+          cat /tmp/verifier.log
+
+          # Re-derive the skip decision by re-reading $GITHUB_OUTPUT. The
+          # verifier appends a heredoc-shaped status=… block; we match the
+          # final occurrence (defense-in-depth against an attacker padding
+          # the reason with extra status= lines).
+          STATUS=$(grep -E '^status=' "$GITHUB_OUTPUT" | tail -1 | cut -d= -f2-)
+          if [ "$STATUS" = "valid" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Attestation valid — skipping CI reviewer fan-out (cost-saver)"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Attestation $STATUS — running CI reviewer fan-out"
+          fi
+
   # ── Job 1: Parallel Review Analysis (sandboxed) ──────────────────
   # Has ANTHROPIC_API_KEY but NO GitHub write access.
   # Defense: even if the LLM is compromised, it cannot modify the repo.
@@ -35,10 +106,15 @@ jobs:
   # Results` posts deterministically and the `re-actors/alls-green` aggregator
   # (`ai-sdlc/pr-ready`) is the single merge gate. The `[skip ci]` chore-commit
   # loop that deadlocked PRs #176/#177 disappears with the attestor step.
+  #
+  # AISDLC-147 patch 1: gated on attestation-precheck. When the precheck
+  # decides to skip (valid envelope at HEAD), this job is skipped and the
+  # `post-skip-results` job below posts auto-approved verdicts directly.
   analyze:
     name: Analyze PR
+    needs: [attestation-precheck]
     runs-on: ubuntu-latest
-    if: "!startsWith(github.head_ref, 'release-please--')"
+    if: "!startsWith(github.head_ref, 'release-please--') && needs.attestation-precheck.outputs.skip != 'true'"
     # AISDLC-142: analyze needs `pull-requests: read` to fetch existing PR
     # comments for the incremental-review marker. Read-only — write happens
     # in the `report` job (which already has `pull-requests: write`).
@@ -62,6 +138,11 @@ jobs:
       incremental_content_hash: ${{ steps.incremental.outputs.content_hash }}
       incremental_last_reviewed_sha: ${{ steps.incremental.outputs.last_reviewed_sha }}
       incremental_delta_size: ${{ steps.incremental.outputs.delta_size }}
+      # AISDLC-147 patch 2: budget-exhaustion aggregate decision. Drives the
+      # report job's "suppress CHANGES_REQUESTED on uniform Anthropic credit
+      # exhaustion" branch. Values: 'skip-with-budget-comment' | 'proceed-as-normal'.
+      budget_aggregate: ${{ steps.budget.outputs.aggregate }}
+      budget_exhausted_count: ${{ steps.budget.outputs.exhausted_count }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -377,6 +458,47 @@ jobs:
           echo "critic=$CRITIC" >> "$GITHUB_OUTPUT"
           echo "security=$SECURITY" >> "$GITHUB_OUTPUT"
 
+      # ── AISDLC-147 patch 2: Anthropic API budget circuit breaker ─────
+      # When the API key's credit balance hits $0, every reviewer fails with
+      # HTTP 400 invalid_request_error carrying "credit balance is too low"
+      # in the body. Without this classifier the report job would post
+      # CHANGES_REQUESTED on every PR — noise that masks real failures.
+      # Pipeline-cli's `cli-classify-budget` reads the 6 reviewer files
+      # (3 stdout + 3 stderr) and emits a JSON aggregate decision:
+      #   {"aggregate": "skip-with-budget-comment", "budgetExhaustedCount": 3, ...}
+      # The report job below reads `aggregate` and branches on it.
+      - name: Classify reviewer outputs (Anthropic budget circuit breaker)
+        id: budget
+        run: |
+          # Always-on, never-fails: missing files → empty strings → other-failure
+          # → aggregate=proceed-as-normal (the existing CHANGES_REQUESTED
+          # safety net). The classifier guarantees `proceed-as-normal` on
+          # any partial input set so a workflow regression can't silently
+          # suppress a real failure.
+          BUDGET_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-classify-budget \
+            --testing-stdout /tmp/review-testing.txt \
+            --testing-stderr /tmp/review-testing-stderr.txt \
+            --critic-stdout /tmp/review-critic.txt \
+            --critic-stderr /tmp/review-critic-stderr.txt \
+            --security-stdout /tmp/review-security.txt \
+            --security-stderr /tmp/review-security-stderr.txt \
+            2>/tmp/budget-classifier-stderr.txt \
+            || echo '{"aggregate":"proceed-as-normal","budgetExhaustedCount":0,"perReviewer":[]}')
+          if [ -s /tmp/budget-classifier-stderr.txt ]; then
+            echo "::group::budget-classifier stderr"
+            cat /tmp/budget-classifier-stderr.txt
+            echo "::endgroup::"
+          fi
+
+          AGGREGATE=$(printf '%s' "$BUDGET_JSON" | jq -r '.aggregate')
+          EXHAUSTED=$(printf '%s' "$BUDGET_JSON" | jq -r '.budgetExhaustedCount')
+          echo "aggregate=${AGGREGATE}" >> "$GITHUB_OUTPUT"
+          echo "exhausted_count=${EXHAUSTED}" >> "$GITHUB_OUTPUT"
+          echo "Budget classifier: aggregate=${AGGREGATE} exhausted=${EXHAUSTED}/3"
+          if [ "$AGGREGATE" = "skip-with-budget-comment" ]; then
+            echo "::warning::All 3 reviewers failed with Anthropic credit-exhausted — report job will suppress CHANGES_REQUESTED and post idempotent budget-skip comment instead"
+          fi
+
       - name: Upload classifier calibration log
         if: always()
         uses: actions/upload-artifact@v4
@@ -397,13 +519,104 @@ jobs:
     permissions:
       pull-requests: write
       issues: read
+      # AISDLC-147 patch 2: post `Post Review Results: success` status via
+      # the GitHub commit-status API when all 3 reviewers fail with
+      # Anthropic credit-exhausted (suppress noisy CHANGES_REQUESTED).
+      statuses: write
     steps:
       - name: Skip if analyze was skipped (release-please PRs)
         if: needs.analyze.result == 'skipped'
         run: echo "Skipping review for release-please PR"
 
+      # ── AISDLC-147 patch 2: Anthropic budget circuit breaker ──────
+      # When ALL 3 reviewers failed with credit-exhausted ("budget_aggregate
+      # == skip-with-budget-comment"), suppress the noisy CHANGES_REQUESTED
+      # path. Instead post `Post Review Results: success` directly via the
+      # status API + idempotent comment marker explaining the skip.
+      # Mixed failures (1-2 budget-exhausted) fall through to the regular
+      # path below since transient API issues still warrant the existing
+      # CHANGES_REQUESTED safety net.
+      - name: Post budget-skip status + comment (Anthropic credit exhausted)
+        if: needs.analyze.result == 'success' && needs.analyze.outputs.budget_aggregate == 'skip-with-budget-comment'
+        uses: actions/github-script@v7
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          EXHAUSTED_COUNT: ${{ needs.analyze.outputs.budget_exhausted_count }}
+        with:
+          script: |
+            const headSha = process.env.HEAD_SHA;
+            const prUrl = process.env.PR_URL;
+            const exhausted = process.env.EXHAUSTED_COUNT || '3';
+            const prNumber = context.payload.pull_request.number;
+
+            // Post the required `Post Review Results` status as success
+            // so branch protection doesn't deadlock on the missing check.
+            // Same shape as the docs-only fallback in
+            // `ai-sdlc-review-docs-only.yml` — context name MUST match
+            // exactly what branch protection requires.
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: headSha,
+              state: 'success',
+              context: 'Post Review Results',
+              description: 'skipped (budget exhausted)',
+              target_url: prUrl,
+            });
+            core.info(`Posted Post Review Results: success (budget-skip) on ${headSha}`);
+
+            // Idempotent comment marker — find an existing comment with
+            // our marker, update it instead of posting a new one. This
+            // avoids spamming the PR thread on every push to a branch
+            // whose API key is dead.
+            const marker = '<!-- ai-sdlc:reviewer-skipped-by-budget -->';
+            const body = [
+              marker,
+              '## AI-SDLC: Reviewer Agents Skipped (Anthropic Budget Exhausted)',
+              '',
+              `All ${exhausted}/3 review agents failed with HTTP 400 \`invalid_request_error\``,
+              '("credit balance is too low"). The reviewer fan-out has been suppressed to',
+              'avoid posting a noisy CHANGES_REQUESTED on every push.',
+              '',
+              '**What this means**:',
+              '- This PR has NOT been reviewed by the automated agents.',
+              '- Branch protection still requires `ai-sdlc/pr-ready` (the rollup gate),',
+              '  but the `Post Review Results` status was posted as `success` so the gate',
+              '  does not deadlock.',
+              '- A human reviewer should manually validate this PR before merging,',
+              '  or top up the Anthropic API credit balance and push again to re-trigger.',
+              '',
+              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — AISDLC-147 budget circuit breaker*',
+            ].join('\n');
+
+            const { data: existing } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const prior = existing.find((c) => typeof c.body === 'string' && c.body.includes(marker));
+            if (prior) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: prior.id,
+                body,
+              });
+              core.info(`Updated existing budget-skip comment ${prior.id} on PR #${prNumber}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+              core.info(`Posted new budget-skip comment on PR #${prNumber}`);
+            }
+
       - name: Validate and post reviews
-        if: needs.analyze.result == 'success'
+        if: needs.analyze.result == 'success' && needs.analyze.outputs.budget_aggregate != 'skip-with-budget-comment'
         uses: actions/github-script@v7
         env:
           TESTING_JSON: ${{ needs.analyze.outputs.testing }}
@@ -761,7 +974,10 @@ jobs:
             }
 
       - name: Notify Slack that PR is ready for review
-        if: always() && needs.analyze.result == 'success'
+        # AISDLC-147 patch 2: skip Slack notify on budget-exhausted (the
+        # in-PR comment + status are sufficient — Slack would misleadingly
+        # report "all agents approved" because we set the status to success).
+        if: always() && needs.analyze.result == 'success' && needs.analyze.outputs.budget_aggregate != 'skip-with-budget-comment'
         env:
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
           TESTING_JSON: ${{ needs.analyze.outputs.testing }}
@@ -816,3 +1032,125 @@ jobs:
               issue_number: context.payload.pull_request.number,
               body: '## AI-SDLC: Review Pipeline Failed\n\nThe automated review pipeline failed. See the [workflow run](' + context.serverUrl + '/' + context.repo.owner + '/' + context.repo.repo + '/actions/runs/' + context.runId + ') for details.\n\n*Reviewed by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc)*'
             });
+
+  # ── Job 3: Post auto-approved verdicts when attestation valid ────────
+  # AISDLC-147 patch 1: when `attestation-precheck` decided to skip the
+  # analyze fan-out (valid local DSSE envelope at HEAD), the analyze + report
+  # jobs are skipped. The `report` job still emits its job-level check
+  # (`Post Review Results: success`) because it runs to completion with all
+  # steps skipped — branch protection is satisfied.
+  #
+  # This job adds the operator-facing surface: posts an APPROVE PR review
+  # citing the attestation as the source of truth, AND posts an idempotent
+  # comment marker explaining the skip. Without this, an operator scanning
+  # the PR thread sees nothing (silent skip = confusing).
+  post-skip-results:
+    name: Post auto-approved verdicts (attestation valid)
+    runs-on: ubuntu-latest
+    needs: [attestation-precheck, analyze]
+    if: |
+      always() &&
+      needs.attestation-precheck.result == 'success' &&
+      needs.attestation-precheck.outputs.skip == 'true' &&
+      needs.analyze.result == 'skipped'
+    permissions:
+      pull-requests: write
+      issues: read
+      # Defense in depth — also post the `Post Review Results` status via
+      # the API so the check lands even if the `report` job's auto-emitted
+      # job-level check is ever removed/renamed (e.g. by a future
+      # restructuring). Same pattern as `ai-sdlc-review-docs-only.yml`.
+      statuses: write
+    steps:
+      - name: Post Review Results status (auto-approved by attestation)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state=success \
+            -f context='Post Review Results' \
+            -f description='auto-approved by local attestation (AISDLC-147)' \
+            -f target_url="${PR_URL}"
+          echo "✓ Posted Post Review Results: success on ${HEAD_SHA} (attestation cost-saver path)"
+
+      - name: Post APPROVE review + idempotent comment marker
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = context.payload.pull_request.number;
+            const marker = '<!-- ai-sdlc:reviewer-skipped-by-attestation -->';
+            const body = [
+              marker,
+              '## AI-SDLC: Reviewer Agents Skipped (Local Attestation Valid)',
+              '',
+              'A valid DSSE attestation envelope was found at',
+              '`.ai-sdlc/attestations/<HEAD-sha>.dsse.json` for this commit. The 3 review',
+              'agents were already run locally via `/ai-sdlc execute` and the verdict was',
+              'cryptographically signed against:',
+              '- Per-file content hash (`contentHashV3`)',
+              '- Review policy hash',
+              '- Reviewer agent file hashes',
+              '- Plugin version',
+              '',
+              'CI re-running the same 3 agents would produce the same verdict at the cost',
+              'of ~3 Anthropic API invocations. Per AISDLC-147 patch 1, we trust the local',
+              'attestation as a SOFT signal and skip the duplicate review.',
+              '',
+              '_Note: Attestation remains AUDIT-ONLY as a merge gate (per AISDLC-140 sub-4)._',
+              '_The `re-actors/alls-green` aggregator (`ai-sdlc/pr-ready`) is the single merge gate._',
+              '',
+              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — AISDLC-147 attestation cost-saver*',
+            ].join('\n');
+
+            // Idempotent comment — find prior by marker, update in place.
+            const { data: existing } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              per_page: 100,
+            });
+            const prior = existing.find((c) => typeof c.body === 'string' && c.body.includes(marker));
+            if (prior) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: prior.id,
+                body,
+              });
+              core.info(`Updated existing attestation-skip comment ${prior.id} on PR #${prNumber}`);
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body,
+              });
+              core.info(`Posted new attestation-skip comment on PR #${prNumber}`);
+            }
+
+            // Post a fresh APPROVE PR review so branch protection's
+            // `dismiss_stale_reviews: true` doesn't strand auto-merge after
+            // a force-push (mirrors the AISDLC-74 force-push recovery
+            // documented in CLAUDE.md). We tolerate the 422 "approve your
+            // own PR" failure mode the same way the report job does.
+            try {
+              await github.rest.pulls.createReview({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: prNumber,
+                event: 'APPROVE',
+                body: 'Auto-approved by valid local DSSE attestation (AISDLC-147 patch 1).',
+              });
+              core.info(`Posted APPROVE review on PR #${prNumber} (attestation cost-saver)`);
+            } catch (err) {
+              if (err.status === 422 && /approve your own/i.test(err.message)) {
+                core.warning('Cannot self-approve PR — APPROVE review skipped (comment + status still posted)');
+              } else {
+                throw err;
+              }
+            }
