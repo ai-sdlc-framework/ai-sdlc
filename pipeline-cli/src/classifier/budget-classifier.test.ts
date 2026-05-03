@@ -7,10 +7,11 @@
  *     budget-exhausted with both substrings present, budget-exhausted
  *     when only one substring is present (must NOT classify), other-failure
  *     for non-budget invalid JSON.
- *   - Aggregate rule (`classifyReviewerOutputs`) — all-3-budget triggers
- *     `skip-with-budget-comment`, mixed (1 ok + 2 budget) preserves
- *     `proceed-as-normal`, all-3-ok stays `proceed-as-normal`, partial
- *     input set (workflow regression) falls through to `proceed-as-normal`.
+ *   - Aggregate rule (`classifyReviewerOutputs`) — AISDLC-157 broadened
+ *     the gate from "all 3 budget-exhausted" to "≥1 budget-exhausted AND
+ *     0 other-failure". Coverage spans the 5 canonical aggregate cases
+ *     (3/3 budget, 2/3 budget + 1 ok, 2/3 budget + 1 other-failure,
+ *     1/3 budget + 2 ok, all-ok), plus the partial-input regression guard.
  *   - Case-insensitivity — Anthropic occasionally returns the substring
  *     with different casing ("Credit balance is too low"); we match
  *     case-insensitively per the canonical Anthropic error body shape.
@@ -380,17 +381,67 @@ describe('classifyReviewerOutputs (aggregate decision)', () => {
     expect(result.budgetExhaustedCount).toBe(0);
   });
 
-  it('mixed (2 budget + 1 ok) → proceed-as-normal (AC-3 — could be transient)', () => {
+  it('AISDLC-157 case 2: 2/3 budget-exhausted + 1/3 ok (AISDLC-141 classifier-skipped) → skip-with-budget-comment', () => {
+    // Exact failing case from PR #202's analyze run (the bug AISDLC-157 fixes):
+    // AISDLC-141 classifier selected [security, critic] and AUTO_APPROVED
+    // testing. Both selected reviewers then failed with credit exhaustion.
+    // Under the original AISDLC-147 "all 3 must be exhausted" rule this
+    // fell through to proceed-as-normal and posted CHANGES_REQUESTED noise.
+    // Under the AISDLC-157 rule the ok-stub is treated as success and the
+    // remaining non-OK reviewers are uniformly budget-exhausted → skip.
     const result = classifyReviewerOutputs([
       r('testing', validVerdict(true)),
       r('critic', '', budgetExhaustedStderr),
       r('security', '', budgetExhaustedStderr),
     ]);
-    expect(result.aggregate).toBe('proceed-as-normal');
+    expect(result.aggregate).toBe('skip-with-budget-comment');
     expect(result.budgetExhaustedCount).toBe(2);
+    expect(result.perReviewer.map((p) => p.classification)).toEqual([
+      'ok',
+      'budget-exhausted',
+      'budget-exhausted',
+    ]);
   });
 
-  it('mixed (1 budget + 2 other-failure) → proceed-as-normal', () => {
+  it('AISDLC-157 case 3: 2/3 budget-exhausted + 1/3 other-failure → proceed-as-normal', () => {
+    // The other-failure reviewer is a real signal we must surface (could
+    // be a parse failure, a reviewer crash, or something else worth a
+    // CHANGES_REQUESTED). Even with budget-exhausted reviewers in the
+    // mix, the presence of ANY other-failure suppresses the skip branch.
+    const result = classifyReviewerOutputs([
+      r('testing', '{ broken'),
+      r('critic', '', budgetExhaustedStderr),
+      r('security', '', budgetExhaustedStderr),
+    ]);
+    expect(result.aggregate).toBe('proceed-as-normal');
+    expect(result.budgetExhaustedCount).toBe(2);
+    expect(result.perReviewer.map((p) => p.classification)).toEqual([
+      'other-failure',
+      'budget-exhausted',
+      'budget-exhausted',
+    ]);
+  });
+
+  it('AISDLC-157 case 4: 1/3 budget-exhausted + 2/3 ok → skip-with-budget-comment', () => {
+    // Partial budget exhaustion with the rest succeeding. The ok reviewers'
+    // verdicts already capture the real assessment; the lone budget-exhausted
+    // reviewer is just noise (we couldn't get a reading on that dimension).
+    // Better to use the comment-skip branch than to overlay CHANGES_REQUESTED.
+    const result = classifyReviewerOutputs([
+      r('testing', validVerdict(true)),
+      r('critic', validVerdict(false)),
+      r('security', '', budgetExhaustedStderr),
+    ]);
+    expect(result.aggregate).toBe('skip-with-budget-comment');
+    expect(result.budgetExhaustedCount).toBe(1);
+    expect(result.perReviewer.map((p) => p.classification)).toEqual([
+      'ok',
+      'ok',
+      'budget-exhausted',
+    ]);
+  });
+
+  it('AISDLC-157: mixed (1 budget + 2 other-failure) → proceed-as-normal', () => {
     const result = classifyReviewerOutputs([
       r('testing', '{ broken'),
       r('critic', '{ also broken'),
@@ -458,11 +509,12 @@ describe('classifyReviewerOutputs (aggregate decision)', () => {
     expect(result.budgetExhaustedCount).toBe(3);
   });
 
-  it('AISDLC-149: mixed (1 valid-budget + 1 valid-ok + 1 stderr-budget) → proceed-as-normal', () => {
+  it('AISDLC-149 + AISDLC-157: mixed (1 valid-budget + 1 valid-ok + 1 stderr-budget) → skip-with-budget-comment', () => {
     // Mixed-mode budget hits across the verdict-finding path AND the
-    // stdout/stderr fallback path still aggregate to proceed-as-normal
-    // (mixed could be transient — only uniform 3/3 budget-exhaustion
-    // warrants suppression).
+    // stdout/stderr fallback path. Under the AISDLC-157 rule this is a
+    // "≥1 budget + 0 other-failure" pattern — the ok reviewer captured
+    // a real verdict and the two budget-exhausted reviewers are noise
+    // we want to suppress.
     const budgetVerdict = JSON.stringify({
       approved: false,
       findings: [
@@ -478,12 +530,51 @@ describe('classifyReviewerOutputs (aggregate decision)', () => {
       r('critic', validVerdict(true)),
       r('security', '', budgetExhaustedStderr),
     ]);
-    expect(result.aggregate).toBe('proceed-as-normal');
+    expect(result.aggregate).toBe('skip-with-budget-comment');
     expect(result.budgetExhaustedCount).toBe(2);
     expect(result.perReviewer.map((p) => p.classification)).toEqual([
       'budget-exhausted',
       'ok',
       'budget-exhausted',
     ]);
+  });
+
+  // ---- AISDLC-157: explicit coverage of the 5-case truth table ----
+  // Some of the 5 cases overlap with existing tests above; we re-state them
+  // here as a single dedicated block so future readers don't have to chase
+  // them across the file. Naming convention mirrors the AISDLC-157 task file.
+
+  it('AISDLC-157 case 1: 3/3 budget-exhausted → skip-with-budget-comment (existing behavior preserved)', () => {
+    const result = classifyReviewerOutputs([
+      r('testing', '', budgetExhaustedStderr),
+      r('critic', '', budgetExhaustedStderr),
+      r('security', '', budgetExhaustedStderr),
+    ]);
+    expect(result.aggregate).toBe('skip-with-budget-comment');
+    expect(result.budgetExhaustedCount).toBe(3);
+  });
+
+  it('AISDLC-157 case 5: 0 budget-exhausted (all ok) → proceed-as-normal (existing behavior preserved)', () => {
+    const result = classifyReviewerOutputs([
+      r('testing', validVerdict(true)),
+      r('critic', validVerdict(true)),
+      r('security', validVerdict(true)),
+    ]);
+    expect(result.aggregate).toBe('proceed-as-normal');
+    expect(result.budgetExhaustedCount).toBe(0);
+  });
+
+  it('AISDLC-157 partial-input regression guard: only 2 of 3 reviewers present + both budget-exhausted → proceed-as-normal', () => {
+    // The 3-input guard MUST still fire under the AISDLC-157 rule. A
+    // partial input set is itself a workflow regression we want to
+    // surface via CHANGES_REQUESTED rather than silently skip — even if
+    // every reviewer we DID receive was budget-exhausted (which under
+    // the new rule would otherwise satisfy ≥1-budget AND 0-other-failure).
+    const result = classifyReviewerOutputs([
+      r('testing', '', budgetExhaustedStderr),
+      r('critic', '', budgetExhaustedStderr),
+    ]);
+    expect(result.aggregate).toBe('proceed-as-normal');
+    expect(result.budgetExhaustedCount).toBe(2);
   });
 });

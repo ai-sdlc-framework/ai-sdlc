@@ -43,6 +43,8 @@ When ALL 3 reviewer agents fail with credit-exhaustion (substring match: `"credi
 
 When only 1-2 fail with budget exhaustion (mixed), preserve current behavior — mixed could be transient.
 
+> **AISDLC-157 update (2026-05-02):** the "all 3 budget-exhausted" gate above was broadened to "every NON-OK reviewer is budget-exhausted" (i.e. ≥1 budget-exhausted AND 0 other-failure). This was forced by the AISDLC-141 conditional classifier going LIVE in CI (AISDLC-156): when the classifier AUTO_APPROVES an unselected reviewer, that reviewer's stub verdict counts as `ok`, so a truly credit-exhausted run can have count<3 even when there's nothing real to surface. Mixed budget+other-failure still falls through to proceed-as-normal (the other-failure carries a real signal). See AISDLC-157 task file for the full truth table.
+
 Classifier lives in pipeline-cli (`src/classifier/budget-classifier.ts` exporting `classifyReviewerOutputs()`) so it has hermetic Vitest coverage.
 
 ## Acceptance criteria
@@ -56,8 +58,8 @@ Classifier lives in pipeline-cli (`src/classifier/budget-classifier.ts` exportin
 
 ### Patch 2
 1. New step in report job classifies all reviewer outputs into `{ok, budget-exhausted, other-failure}` via pipeline-cli `classifyReviewerOutputs()`
-2. All-3-budget-exhausted → success status + idempotent comment, no CHANGES_REQUESTED
-3. Mixed → current behavior preserved
+2. All-3-budget-exhausted → success status + idempotent comment, no CHANGES_REQUESTED *(broadened to "every non-OK reviewer is budget-exhausted" by AISDLC-157)*
+3. Mixed → current behavior preserved *(AISDLC-157 refinement: "mixed budget+ok" now skips, "mixed budget+other-failure" still proceeds — see addendum above)*
 4. Idempotent PR comment marker `<!-- ai-sdlc:reviewer-skipped-by-budget -->`
 5. Hermetic Vitest test for the classifier in `pipeline-cli/src/classifier/budget-classifier.test.ts`
 
@@ -87,7 +89,7 @@ Shipped both AISDLC-147 cost-saver patches in a single PR. Patch 1 restores the 
 
 ## Design decisions
 - **Budget-exhaustion AND-of-two-substrings match** (`"credit balance is too low"` AND `"invalid_request_error"` both required): defends against false positives — `invalid_request_error` alone fires on schema-rejection bugs that should still surface CHANGES_REQUESTED; `credit balance is too low` alone could in principle appear in PR commentary.
-- **All-3-budget gate (not 2-of-3)**: mixed failures could be transient API issues affecting one reviewer's connection; the surviving reviewers' verdicts still warrant CHANGES_REQUESTED. Only a uniform credit-exhaustion is the unambiguous "API key is dead" signal.
+- **All-3-budget gate (not 2-of-3)**: mixed failures could be transient API issues affecting one reviewer's connection; the surviving reviewers' verdicts still warrant CHANGES_REQUESTED. Only a uniform credit-exhaustion is the unambiguous "API key is dead" signal. *(Superseded by AISDLC-157 once AISDLC-141's classifier started writing AUTO_APPROVED stubs — the old gate then misclassified valid skip cases as proceed-as-normal. New rule: "all NON-OK reviewers are budget-exhausted." See AISDLC-157.)*
 - **Classifier in pipeline-cli (not inline github-script)**: pure functions get hermetic Vitest coverage (100% lines on budget-classifier.ts) and the workflow YAML stays a thin adapter.
 - **`post-skip-results` job posts `Post Review Results` status via API even though the `report` job emits the job-level check**: defense-in-depth — if a future restructuring renames/removes the report job, the status check still lands and branch protection doesn't deadlock.
 
