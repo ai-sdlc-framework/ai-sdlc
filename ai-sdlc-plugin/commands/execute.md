@@ -32,7 +32,7 @@ The Step 0-13 pipeline used to live here, then briefly moved to an `execute-orch
 4. **Never delete branches.** No `git branch -D` / `-d`.
 5. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.** Configuration and CI are out of scope for task work — the PreToolUse hook also blocks this, but you must not even try.
 6. **Never run destructive git operations.** No `git reset --hard`, `git checkout -- .`, `git restore .`.
-7. **Never write GitHub Actions CI-skip magic tokens into commit messages (AISDLC-88).** GitHub Actions parses five literal substrings — `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` — case-insensitively, and SUPPRESSES every workflow on commits that carry any of them. That silently disables verify-attestation, ai-sdlc-review, and the CI-side attestor in one stroke. If you genuinely need to mention these tokens in a commit body, use the **paren-quoted form**: `(skip ci marker)` instead of `[skip ci]`. Backtick-wrapping (`` `[skip ci]` ``) does NOT defeat the parser — the literal bracketed substring is still present. The `.husky/pre-push` `check-skip-ci-marker.sh` gate (AISDLC-88) blocks pushes that violate this; only the AISDLC-87 CI-side attestor's own `chore(ci): sign review attestation [skip ci]` commit (authored by `ai-sdlc-ci-attestor[bot]` per `.github/workflows/ai-sdlc-review.yml`; legacy `github-actions[bot]` retained as a fallback) is exempt. Step 10 below additionally sanitises any leaked tokens out of the chore-commit body before staging, as defense-in-depth.
+7. **Never write GitHub Actions CI-skip magic tokens into commit messages (AISDLC-88).** GitHub Actions parses five literal substrings — `[skip ci]`, `[ci skip]`, `[no ci]`, `[skip actions]`, `[actions skip]` — case-insensitively, and SUPPRESSES every workflow on commits that carry any of them. That silently disables verify-attestation and ai-sdlc-review in one stroke. If you genuinely need to mention these tokens in a commit body, use the **paren-quoted form**: `(skip ci marker)` instead of `[skip ci]`. Backtick-wrapping (`` `[skip ci]` ``) does NOT defeat the parser — the literal bracketed substring is still present. The `.husky/pre-push` `check-skip-ci-marker.sh` gate (AISDLC-88) blocks pushes that violate this. The legacy AISDLC-87 CI-side attestor's `chore(ci): sign review attestation [skip ci]` commits (authored by `ai-sdlc-ci-attestor[bot]`; legacy `github-actions[bot]` retained as a fallback) are still exempted so historical commits replayed via auto-rebase don't strand pushes — but the attestor itself was removed in AISDLC-140 sub-4 (attestation is now audit-only) and AISDLC-152 (this task), so no NEW chore commits should be produced. Step 10 below additionally sanitises any leaked tokens out of the chore-commit body before staging, as defense-in-depth.
 
 ## Hard dependency — per-worktree sentinel (AISDLC-81)
 
@@ -311,11 +311,16 @@ Marker storage: a single PR comment whose body contains `<!-- ai-sdlc:last-revie
 # with the workflow analyzer's filter.
 #
 # Trust criteria (either gate is sufficient):
-#   - login == "github-actions" or "ai-sdlc-ci-attestor" (workflow-authored
-#     markers from the `ai-sdlc-review.yml` upsert step)
+#   - login == "github-actions" (workflow-authored markers from the
+#     `ai-sdlc-review.yml` upsert step)
 #   - authorAssociation in {OWNER, MEMBER, COLLABORATOR} (push-access humans
 #     — they could write the marker via the workflow itself; honoring their
 #     direct comment is no escalation)
+#
+# Note: AISDLC-152 removed the `ai-sdlc-ci-attestor` login from this list
+# alongside the AISDLC-87 attestor itself (AISDLC-140 sub-4 made attestation
+# audit-only, AISDLC-152 ripped the remaining wiring). Push-access humans +
+# the github-actions login cover every legitimate marker author.
 #
 # We emit a STRUCTURED JSON file so the CLI's `--comments-json-file` flag
 # can re-apply the same filter as defense-in-depth (Layer 2).
@@ -326,7 +331,6 @@ gh pr view "$BRANCH" --json comments --jq '
     .comments[]
     | select(
         .author.login == "github-actions"
-        or .author.login == "ai-sdlc-ci-attestor"
         or .authorAssociation == "OWNER"
         or .authorAssociation == "MEMBER"
         or .authorAssociation == "COLLABORATOR"
@@ -480,7 +484,6 @@ EXISTING_COMMENT_ID=$(gh pr view "$BRANCH" --json comments \
     .comments[]
     | select(
         .author.login == "github-actions"
-        or .author.login == "ai-sdlc-ci-attestor"
         or .authorAssociation == "OWNER"
         or .authorAssociation == "MEMBER"
         or .authorAssociation == "COLLABORATOR"

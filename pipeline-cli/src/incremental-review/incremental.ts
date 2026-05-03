@@ -463,6 +463,12 @@ export function findMarkerInComments(
  * called. This is the defense-in-depth Layer 1 fix for the AISDLC-142
  * round-2 CRITICAL finding (forged-marker authorization bypass).
  *
+ * AISDLC-152: removed the legacy `ai-sdlc-ci-attestor` /
+ * `ai-sdlc-ci-attestor[bot]` entries alongside the rest of the AISDLC-87
+ * attestor wiring. AISDLC-140 sub-4 already made attestation audit-only;
+ * the bot is no longer signing or commenting, so trusting its login here
+ * was dead code.
+ *
  * To rotate or extend this list, update BOTH this constant AND the
  * `gh pr view --jq 'select(.author.login == ...)'` filters in:
  *   - `.github/workflows/ai-sdlc-review.yml` (analyze + report jobs)
@@ -471,8 +477,6 @@ export function findMarkerInComments(
 export const TRUSTED_MARKER_AUTHOR_LOGINS: ReadonlySet<string> = new Set([
   'github-actions',
   'github-actions[bot]',
-  'ai-sdlc-ci-attestor',
-  'ai-sdlc-ci-attestor[bot]',
 ]);
 
 /**

@@ -503,7 +503,10 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
     expect(out).toContain('Commit the scaffolded files');
     expect(out).toContain('Definition-of-Ready');
     expect(out).toContain('init-signing-key');
-    expect(out).toContain('AI_SDLC_CI_ATTESTOR_PRIVATE_KEY');
+    // AISDLC-152: AI_SDLC_CI_ATTESTOR_PRIVATE_KEY scaffolding removed
+    // alongside the AISDLC-87 attestor itself (AISDLC-140 sub-4 made
+    // attestation audit-only). Asserted-absent here as a regression guard.
+    expect(out).not.toContain('AI_SDLC_CI_ATTESTOR_PRIVATE_KEY');
     expect(out).toContain('AISDLC-141');
     expect(out).toContain('ai-sdlc health');
   });

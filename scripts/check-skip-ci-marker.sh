@@ -9,17 +9,29 @@
 # and `[actions skip]` — and SUPPRESSES every workflow on commits that
 # carry any of them. Half the AI-SDLC governance rails (verify-attestation,
 # ai-sdlc-review) are workflow-driven, so a leaked token disables review
-# attestation verification, the duplicate-review safety net, and the
-# CI-side attestor's PR-status posting in one stroke.
+# attestation verification and the duplicate-review safety net in one
+# stroke.
 #
-# AISDLC-87's CI-side attestor uses `[skip ci]` ON PURPOSE in its chore
-# commit (`chore(ci): sign review attestation [skip ci]`) to avoid the
-# review-loop — that one commit is the documented exception, gated by
-# author identity (`ai-sdlc-ci-attestor[bot]` per the production
-# `ai-sdlc-review.yml` `git config user.name/email` block; the legacy
-# `github-actions[bot]` patterns are kept too as a harmless fallback)
-# AND subject prefix (`chore(ci): sign review attestation`). Every
-# other commit must be clean.
+# AISDLC-87's CI-side attestor used to push `[skip ci]` chore commits
+# (`chore(ci): sign review attestation [skip ci]`) ON PURPOSE — that
+# attestor was RETIRED in AISDLC-140 sub-4 (attestation became audit-only)
+# and AISDLC-152 (rest of the wiring removed). The author + subject
+# exemption below is RETAINED as a defensive measure: in-flight PR
+# branches may still contain those historical chore commits, and
+# auto-rebase replays them onto the new HEAD. Without the exemption,
+# pushing a rebased branch that picked up a stale chore commit would be
+# rejected at pre-push. Once the in-flight PRs cycle through, this
+# exemption becomes harmless dead code (no producer of new chore
+# commits → no commits ever match the gate) and can be deleted.
+#
+# Exemption gate (both must hold):
+#   - Author is `ai-sdlc-ci-attestor[bot]` (the production identity that
+#     used to be configured in `ai-sdlc-review.yml`'s
+#     `git config user.name/email` block) or its `ci-attestor@ai-sdlc.local`
+#     email. The legacy `github-actions[bot]` patterns are kept as a
+#     harmless fallback for the same historical-commit reason.
+#   - Subject starts with `chore(ci): sign review attestation`.
+# Every other commit must be clean.
 #
 # Activation: invoked from `.husky/pre-push`. Operator must wire it
 # into the husky hook (the agent that authors AISDLC-88 cannot edit
@@ -78,12 +90,15 @@ scan_commits() {
       continue
     fi
 
-    # Bot-author exemption (AISDLC-87 CI-side attestor):
-    #   - Author is `ai-sdlc-ci-attestor[bot]` (the production identity
-    #     configured in `.github/workflows/ai-sdlc-review.yml`'s
-    #     `git config user.name/email` block) or its `ci-attestor@ai-sdlc.local`
-    #     email. The legacy `github-actions[bot]` patterns are kept as a
-    #     harmless fallback in case future CI work reverts to that identity.
+    # Bot-author exemption (legacy AISDLC-87 CI-side attestor):
+    #   - Author is `ai-sdlc-ci-attestor[bot]` — the historical identity
+    #     used to be configured in `.github/workflows/ai-sdlc-review.yml`'s
+    #     `git config user.name/email` block before AISDLC-140 sub-4
+    #     retired the attestor. AISDLC-152 removed the rest of the wiring;
+    #     the attestor itself no longer runs, so this exemption only
+    #     matches old chore commits replayed via auto-rebase. Or its
+    #     `ci-attestor@ai-sdlc.local` email. The legacy `github-actions[bot]`
+    #     patterns are kept as a harmless fallback for the same reason.
     #   - Subject starts with `chore(ci): sign review attestation`
     # Both must hold; either alone is not enough.
     local is_bot_author=0
