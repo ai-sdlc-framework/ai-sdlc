@@ -46,6 +46,12 @@ import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import type { CalibrationEntry } from '../dor/calibration-log.js';
 
+// Re-export so consumers (e.g. AISDLC-162 dashboard) can import the
+// CalibrationEntry shape alongside the aggregator without a second
+// import path. The aggregator's full surface — pure functions + this
+// type — is the dashboard's contract.
+export type { CalibrationEntry };
+
 /**
  * Default minimum sample count for the `safe-to-enforce` recommendation.
  * Below this, we return `insufficient-data` regardless of the FP rate
