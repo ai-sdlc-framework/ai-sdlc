@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/orchestrator-failure-patterns.v1.schema.json",
+  "title": "AI-SDLC Orchestrator Failure-Pattern Catalogue v1",
+  "description": "RFC-0015 §13 Q9 source-of-truth for the autonomous-orchestrator playbook (Phase 2 / AISDLC-169.2). Validated at orchestrator startup; schema-violation = orchestrator refuses to start.",
+  "type": "object",
+  "required": ["version", "patterns"],
+  "additionalProperties": false,
+  "properties": {
+    "version": {
+      "type": "string",
+      "enum": ["v1"],
+      "description": "Catalogue schema version. v1 ships the 9 default patterns from RFC-0015 §5.1 (8 original + StackedPRBaseSquashed)."
+    },
+    "patterns": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/pattern" }
+    }
+  },
+  "$defs": {
+    "pattern": {
+      "type": "object",
+      "required": ["mode", "budget"],
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": [
+            "SecretScanBlocked",
+            "PushRaceWithMergeQueue",
+            "RebaseConflict",
+            "VerificationFailure",
+            "ReviewerMajorOrCritical",
+            "EnvHookFailure",
+            "AttestationVerifyMismatch",
+            "LongRunningPRBlocksWorker",
+            "StackedPRBaseSquashed"
+          ],
+          "description": "Catalogued failure mode. Must match a registered handler in `pipeline-cli/src/orchestrator/playbook/handlers/<mode>.ts`."
+        },
+        "budget": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-worker retry cap before escalation. 0 = escalate immediately (equivalent to escalateImmediately: true)."
+        },
+        "escalateImmediately": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, skip remediation and tag PR with needs-human-attention immediately. Useful for projects that prefer human triage over autonomous fix attempts (per RFC §13 Q7)."
+        },
+        "description": {
+          "type": "string",
+          "description": "Operator-facing description of the mode + remediation."
+        }
+      }
+    }
+  }
+}

@@ -45,6 +45,15 @@ import {
   type SubagentSpawner,
 } from '../types.js';
 import { isOrchestratorEnabled, orchestratorDisabledMessage } from './feature-flag.js';
+import {
+  loadFailurePatternCatalogue,
+  runPlaybook,
+  WorkerStateTracker,
+  type FailurePatternCatalogue,
+  type FailureSignal,
+  type PlaybookEvent,
+  type WorkerContext,
+} from './playbook/index.js';
 import type {
   DispatchFn,
   EscalateFn,
@@ -91,6 +100,20 @@ export interface OrchestratorAdapters {
   spawner?: SubagentSpawner;
   /** Optional injected `Runner` for the default frontier + escalate paths. */
   runner?: Runner;
+  /**
+   * RFC-0015 Phase 2 — failure-pattern catalogue. Defaults to the
+   * on-disk `.ai-sdlc/orchestrator-failure-patterns.yaml` (or the bundled
+   * default catalogue when the file is missing). Tests inject a
+   * synthetic catalogue with overridden budgets.
+   */
+  catalogue?: FailurePatternCatalogue;
+  /**
+   * RFC-0015 Phase 2 — when true, the loop persists per-worker state
+   * files to `$ARTIFACTS_DIR/_orchestrator/workers/<id>.state.json` for
+   * forensic + Phase 4 `cli-status --orchestrator` consumption. Tests
+   * set false to keep state in memory.
+   */
+  persistWorkerState?: boolean;
 }
 
 /** Run a single tick. Exposed so `cli-orchestrator tick` can call it directly. */
@@ -103,6 +126,10 @@ export async function runOrchestratorTick(
   const frontierFn = adapters.frontier ?? buildDefaultFrontier(config);
   const dispatchFn = adapters.dispatch ?? buildDefaultDispatch(config, adapters);
   const escalateFn = adapters.escalate ?? buildDefaultEscalate(config, adapters);
+  // RFC-0015 Phase 2 — load the catalogue once per tick. The loader is a
+  // small file read + in-process validation; doing it per tick keeps
+  // operator edits to the YAML hot-reloadable without a daemon restart.
+  const catalogue = adapters.catalogue ?? loadFailurePatternCatalogue({ workDir: config.workDir });
 
   const candidates = frontierFn();
   logger.progress(
@@ -153,6 +180,10 @@ export async function runOrchestratorTick(
     }),
   );
 
+  // Aggregate playbook events so the tick result carries a forensic
+  // trail (Phase 4 will surface this via events.jsonl).
+  const playbookEvents: PlaybookEvent[] = [];
+
   for (const s of settled) {
     if (s.status !== 'fulfilled') {
       // Promise.allSettled never rejects the outer promise, so this branch
@@ -170,7 +201,46 @@ export async function runOrchestratorTick(
       continue;
     }
     const value = s.value;
+
     if ('error' in value && value.error) {
+      // Phase 2: try the playbook before falling through to the catch-all.
+      const playbook = await tryPlaybookOnError({
+        taskId: value.taskId,
+        reason: value.error,
+        config,
+        adapters,
+        catalogue,
+        escalateFn,
+        logger,
+      });
+      playbookEvents.push(...playbook.events);
+      if (playbook.outcome === 'recovered' && playbook.result) {
+        outcomes.push({
+          taskId: playbook.result.taskId,
+          outcome: playbook.result.outcome,
+          prUrl: playbook.result.prUrl,
+          notes: playbook.result.notes,
+        });
+        continue;
+      }
+      if (playbook.outcome === 'escalated' && playbook.matchedMode) {
+        escalations.push({
+          taskId: value.taskId,
+          ts: new Date().toISOString(),
+          event: playbook.matchedMode,
+          reason: playbook.note ?? value.error,
+          prUrl: null,
+        });
+        outcomes.push({
+          taskId: value.taskId,
+          outcome: 'unknown-failure',
+          prUrl: null,
+          error: playbook.note ?? value.error,
+          notes: `playbook handled ${playbook.matchedMode}`,
+        });
+        continue;
+      }
+      // Fall-through: no catalogued mode matched → Phase 1 catch-all.
       const record: EscalationRecord = {
         taskId: value.taskId,
         ts: new Date().toISOString(),
@@ -237,6 +307,87 @@ export async function runOrchestratorTick(
     outcomes,
     escalations,
     empty: false,
+    playbookEvents,
+  };
+}
+
+// ── Phase 2 playbook bridge ──────────────────────────────────────────
+
+interface TryPlaybookArgs {
+  taskId: string;
+  reason: string;
+  config: OrchestratorConfig;
+  adapters: OrchestratorAdapters;
+  catalogue: FailurePatternCatalogue;
+  escalateFn: EscalateFn;
+  logger: PipelineLogger;
+}
+
+interface TryPlaybookResult {
+  outcome: 'recovered' | 'escalated' | 'unknown';
+  matchedMode: import('./playbook/types.js').FailureMode | null;
+  events: PlaybookEvent[];
+  result?: PipelineResult;
+  note?: string;
+}
+
+/**
+ * Build a `WorkerContext` from a thrown dispatch error and run the
+ * playbook against it. Returns whatever the playbook decided so the
+ * caller can either skip ahead (recovered), record a catalogued
+ * escalation (escalated), or fall through to the Phase 1 catch-all
+ * (unknown).
+ */
+async function tryPlaybookOnError(args: TryPlaybookArgs): Promise<TryPlaybookResult> {
+  // Thrown dispatch errors carry no exit code — we synthesise `1` because
+  // a non-throw return path means success; reaching `tryPlaybookOnError`
+  // means the underlying step exited non-zero (or the dispatcher itself
+  // raised). Specific handlers that REQUIRE a real exit code (e.g.
+  // `EnvHookFailure` keys on 127) can still validate via stderr.
+  const failure: FailureSignal = {
+    stderr: args.reason,
+    exitCode: 1,
+  };
+  const ctx: WorkerContext = {
+    workerId: `w-${args.taskId.toLowerCase()}`,
+    taskId: args.taskId,
+    branch: `ai-sdlc/${args.taskId.toLowerCase()}`,
+    worktreePath: `${args.config.workDir}/.worktrees/${args.taskId.toLowerCase()}`,
+    state: 'DEV_RUNNING',
+    prUrl: null,
+    failure,
+    attempts: 0,
+    dispatchedAt: new Date().toISOString(),
+  };
+  const tracker = new WorkerStateTracker({
+    workerId: ctx.workerId,
+    taskId: ctx.taskId,
+    branch: ctx.branch,
+    worktreePath: ctx.worktreePath,
+    initialState: 'DEV_RUNNING',
+    inMemoryOnly: !args.adapters.persistWorkerState,
+  });
+  const dispatchFn = args.adapters.dispatch ?? buildDefaultDispatch(args.config, args.adapters);
+  const playbook = await runPlaybook(ctx, {
+    catalogue: args.catalogue,
+    escalate: args.escalateFn,
+    state: tracker,
+    deps: {
+      runner: args.adapters.runner ?? defaultRunner,
+      sleep: args.adapters.sleep ?? defaultSleep,
+      logger: args.logger,
+      // The playbook's redispatch hook reuses the same dispatcher the
+      // orchestrator built for normal flow — handlers that re-spawn the
+      // dev get the SAME pipeline path, just executed again.
+      redispatch: dispatchFn,
+    },
+  });
+  return {
+    outcome: playbook.outcome,
+    matchedMode: playbook.matchedMode,
+    events: [...playbook.events],
+    result: playbook.pipelineResult,
+    note: playbook.note,
   };
 }
 
