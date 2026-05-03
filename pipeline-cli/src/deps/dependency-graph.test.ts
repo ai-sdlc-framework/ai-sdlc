@@ -432,3 +432,130 @@ describe('renderGraph', () => {
     expect(dot).toContain('"AISDLC-A" -> "AISDLC-MISSING"');
   });
 });
+
+// ── AISDLC-153: status field consulted alongside file location ──────────
+//
+// Bug fixed here: frontier was treating any file in `backlog/tasks/` as open,
+// even when its frontmatter `status: Done` said otherwise. Stale entries (PRs
+// merged with the `mark complete` chore but without the file move) poisoned
+// the dispatch picture. The fix reclassifies stale entries as completed for
+// dispatch + emits a one-line stderr warning so the operator can `git mv`.
+describe('frontier — status field is consulted (AISDLC-153)', () => {
+  it('file in completed/ → completed (no warning)', () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'done', completed: true });
+    writeTaskFile(tmp, { id: 'AISDLC-2', title: 'next', dependencies: ['AISDLC-1'] });
+    const warnings: string[] = [];
+    const g = buildDependencyGraph({ workDir: tmp }, (m) => warnings.push(m));
+    const f = frontier(g);
+    expect(f.map((e) => e.id)).toEqual(['AISDLC-2']);
+    expect(g.nodes.get('aisdlc-1')?.status).toBe('completed');
+    expect(g.nodes.get('aisdlc-1')?.fileLocation).toBe('completed');
+    expect(warnings.filter((w) => w.includes('AISDLC-1'))).toEqual([]);
+  });
+
+  it('file in tasks/ + status: Done → completed + warning (stale entry)', () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'stale', status: 'Done' });
+    writeTaskFile(tmp, { id: 'AISDLC-2', title: 'next', dependencies: ['AISDLC-1'] });
+    const warnings: string[] = [];
+    const g = buildDependencyGraph({ workDir: tmp }, (m) => warnings.push(m));
+
+    const node = g.nodes.get('aisdlc-1');
+    expect(node?.status).toBe('completed');
+    expect(node?.fileLocation).toBe('open');
+    expect(node?.frontmatterStatus).toBe('Done');
+    expect(g.completedIds).toContain('aisdlc-1');
+    expect(g.openIds).not.toContain('aisdlc-1');
+
+    // AISDLC-1 should NOT show up on the frontier — it's reclassified as done.
+    // AISDLC-2 SHOULD now show up because its only blocker is satisfied.
+    const f = frontier(g);
+    expect(f.map((e) => e.id)).toEqual(['AISDLC-2']);
+
+    // And the operator should see a single, actionable stale-task warning.
+    const stale = warnings.filter((w) => w.includes('AISDLC-1'));
+    expect(stale.length).toBe(1);
+    expect(stale[0]).toMatch(/stale task/);
+    expect(stale[0]).toMatch(/Done/);
+    expect(stale[0]).toMatch(/git mv/);
+    expect(stale[0]).toMatch(/backlog\/completed\//);
+  });
+
+  it("file in tasks/ + status: 'To Do' → open (frontier candidate)", () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'todo', status: 'To Do' });
+    const warnings: string[] = [];
+    const g = buildDependencyGraph({ workDir: tmp }, (m) => warnings.push(m));
+    const node = g.nodes.get('aisdlc-1');
+    expect(node?.status).toBe('open');
+    expect(node?.frontmatterStatus).toBe('To Do');
+    expect(frontier(g).map((e) => e.id)).toEqual(['AISDLC-1']);
+    expect(warnings).toEqual([]);
+  });
+
+  it("file in tasks/ + status: 'In Progress' → open (still actively-claimed)", () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'wip', status: 'In Progress' });
+    const warnings: string[] = [];
+    const g = buildDependencyGraph({ workDir: tmp }, (m) => warnings.push(m));
+    const node = g.nodes.get('aisdlc-1');
+    expect(node?.status).toBe('open');
+    expect(node?.frontmatterStatus).toBe('In Progress');
+    expect(frontier(g).map((e) => e.id)).toEqual(['AISDLC-1']);
+    expect(warnings).toEqual([]);
+  });
+
+  it('stale-Done synonyms (case-insensitive) also reclassify', () => {
+    // Operators occasionally type 'done' / 'DONE' / 'Completed' / 'Shipped'
+    // by hand. We accept the obvious synonyms so the dispatch picture stays
+    // honest without forcing them to learn one canonical spelling.
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'lower', status: 'done' });
+    writeTaskFile(tmp, { id: 'AISDLC-2', title: 'upper', status: 'DONE' });
+    writeTaskFile(tmp, { id: 'AISDLC-3', title: 'completed', status: 'Completed' });
+    writeTaskFile(tmp, { id: 'AISDLC-4', title: 'shipped', status: 'Shipped' });
+    const warnings: string[] = [];
+    const g = buildDependencyGraph({ workDir: tmp }, (m) => warnings.push(m));
+    expect(g.nodes.get('aisdlc-1')?.status).toBe('completed');
+    expect(g.nodes.get('aisdlc-2')?.status).toBe('completed');
+    expect(g.nodes.get('aisdlc-3')?.status).toBe('completed');
+    expect(g.nodes.get('aisdlc-4')?.status).toBe('completed');
+    expect(warnings.length).toBe(4);
+    expect(frontier(g)).toEqual([]); // none of them is open
+  });
+
+  it('blockers/preflight respect the reclassified status', () => {
+    // A is stale-Done in tasks/, B depends on A. B should be dispatch-ready.
+    writeTaskFile(tmp, { id: 'AISDLC-A', title: 'stale-done', status: 'Done' });
+    writeTaskFile(tmp, {
+      id: 'AISDLC-B',
+      title: 'next',
+      status: 'To Do',
+      dependencies: ['AISDLC-A'],
+    });
+    const g = buildDependencyGraph({ workDir: tmp });
+    expect(blockers(g, 'AISDLC-B')).toEqual([]);
+    const p = preflight(g, 'AISDLC-B');
+    expect(p.ok).toBe(true);
+    expect(p.blockers).toEqual([]);
+  });
+
+  it('preflight refuses a stale-Done target as already shipped', () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'stale', status: 'Done' });
+    const g = buildDependencyGraph({ workDir: tmp });
+    const p = preflight(g, 'AISDLC-1');
+    expect(p.ok).toBe(false);
+    expect(p.reason).toMatch(/already shipped/);
+  });
+
+  it('completed/ entry wins over a stale tasks/ entry with the same ID', () => {
+    // Pathological: both files exist (rare data bug). The completed/ copy is
+    // canonical; we must not double-warn or double-count.
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'stale-open', status: 'Done' });
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'real-done', completed: true });
+    const warnings: string[] = [];
+    const g = buildDependencyGraph({ workDir: tmp }, (m) => warnings.push(m));
+    expect(g.nodes.get('aisdlc-1')?.status).toBe('completed');
+    expect(g.nodes.get('aisdlc-1')?.fileLocation).toBe('completed');
+    // completedIds may not contain 'aisdlc-1' twice
+    expect(g.completedIds.filter((id) => id === 'aisdlc-1').length).toBe(1);
+    // Stale warning still surfaces — the file IS in tasks/ and should move.
+    expect(warnings.filter((w) => w.includes('AISDLC-1')).length).toBe(1);
+  });
+});

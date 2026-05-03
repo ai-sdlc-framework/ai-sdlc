@@ -48,6 +48,15 @@ function fail(reason: string, code = 1): never {
 }
 
 /**
+ * Print one-line warnings (e.g. stale-task notices from the dependency graph
+ * builder) to stderr so they don't pollute machine-readable JSON on stdout but
+ * still surface to the human operator.
+ */
+function warnToStderr(msg: string): void {
+  process.stderr.write(`warning: ${msg}\n`);
+}
+
+/**
  * Render a small ASCII table for human-readable output. We intentionally avoid
  * a third-party table dependency — three columns and right-padding is enough
  * for the cli-deps surface.
@@ -91,7 +100,7 @@ export function buildDepsCli(): Argv {
           default: 'json' as const,
         }),
       async (argv) => {
-        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string });
+        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
         const f = frontier(g);
         if ((argv.format as string) === 'table') {
           const rows = f.map((e: FrontierEntry) => [
@@ -121,7 +130,7 @@ export function buildDepsCli(): Argv {
             default: 'json' as const,
           }),
       async (argv) => {
-        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string });
+        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
         const target = String(argv['task-id']);
         if (!g.nodes.has(target.toLowerCase())) fail(`unknown task ${target}`);
         const list = blockers(g, target);
@@ -143,7 +152,7 @@ export function buildDepsCli(): Argv {
           default: 'json' as const,
         }),
       async (argv) => {
-        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string });
+        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
         const target = String(argv['task-id']);
         if (!g.nodes.has(target.toLowerCase())) fail(`unknown task ${target}`);
         const list = impact(g, target);
@@ -160,7 +169,7 @@ export function buildDepsCli(): Argv {
       'Detect cycles + dangling references in the dependency graph. Exit 0 if clean, 1 otherwise.',
       (y) => y,
       async (argv) => {
-        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string });
+        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
         const r = validate(g);
         emit({ ok: r.ok, cycles: r.cycles, dangling: r.dangling });
         if (!r.ok) process.exit(1);
@@ -176,7 +185,7 @@ export function buildDepsCli(): Argv {
           default: 'mermaid' as const,
         }),
       async (argv) => {
-        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string });
+        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
         const out = renderGraph(g, argv.format as 'mermaid' | 'dot');
         process.stdout.write(out);
       },
@@ -191,7 +200,7 @@ export function buildDepsCli(): Argv {
           demandOption: true,
         }),
       async (argv) => {
-        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string });
+        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
         const r = preflight(g, String(argv['task-id']));
         emit({
           ok: r.ok,

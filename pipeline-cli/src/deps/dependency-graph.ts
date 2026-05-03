@@ -28,8 +28,17 @@ export type TaskStatus = 'open' | 'completed';
 export interface DependencyNode {
   /** Canonical (case-preserving) task ID, e.g. "AISDLC-100.1". */
   id: string;
-  /** Whether the task file lives in `backlog/tasks/` (open) or `backlog/completed/` (completed). */
+  /**
+   * Effective dispatch status. A task is `'completed'` if EITHER its file lives
+   * in `backlog/completed/`, OR it lives in `backlog/tasks/` but has
+   * `status: Done` in frontmatter (a stale entry that hasn't been moved yet —
+   * see AISDLC-153). Pure file-location signal lives on `fileLocation`.
+   */
   status: TaskStatus;
+  /** Where the file actually lives on disk, regardless of status field. */
+  fileLocation: TaskStatus;
+  /** Raw `status:` value from frontmatter (best-effort; empty if missing). */
+  frontmatterStatus: string;
   /** On-disk title from the frontmatter (best-effort; empty string if missing). */
   title: string;
   /** Outgoing edges — IDs this task depends on. */
@@ -56,6 +65,11 @@ export interface BuildOptions {
  * frontmatter, and assemble a DependencyGraph. Files that don't parse are
  * silently skipped (with a warning if `onWarn` is provided) so a single
  * malformed task doesn't break the whole graph.
+ *
+ * Stale entries (file in `backlog/tasks/` but `status: Done` in frontmatter,
+ * AISDLC-153) are reclassified as `completed` for dispatch purposes and
+ * surface a one-line warning via `onWarn`. The file location is preserved on
+ * `fileLocation` so callers can still report on the on-disk picture.
  */
 export function buildDependencyGraph(
   opts: BuildOptions,
@@ -70,14 +84,34 @@ export function buildDependencyGraph(
 
   for (const node of readDir(tasksDir, 'open', onWarn)) {
     const key = node.id.toLowerCase();
-    nodes.set(key, node);
-    openIds.push(key);
+    if (isDoneStatus(node.frontmatterStatus)) {
+      // Stale entry — frontmatter says Done but file hasn't been moved.
+      // Reclassify as completed so the frontier doesn't re-dispatch it, and
+      // surface a warning so the operator can `git mv` + commit when they
+      // get a chance.
+      const reclassified: DependencyNode = { ...node, status: 'completed' };
+      nodes.set(key, reclassified);
+      completedIds.push(key);
+      onWarn?.(
+        `stale task: ${node.id} has status: ${node.frontmatterStatus} but file is still in backlog/tasks/ — ` +
+          `move with: git mv "${node.filePath}" backlog/completed/`,
+      );
+    } else {
+      nodes.set(key, node);
+      openIds.push(key);
+    }
   }
   for (const node of readDir(completedDir, 'completed', onWarn)) {
     const key = node.id.toLowerCase();
     // If a duplicate ID exists in BOTH directories (rare data bug), prefer the
     // completed entry as the canonical source — this matches dispatch intent
-    // (the frontier check needs to know "is it done?").
+    // (the frontier check needs to know "is it done?"). If the open-side entry
+    // was reclassified above, we also drop it from completedIds before re-adding
+    // to keep the list dedup'd.
+    if (nodes.has(key)) {
+      const idx = completedIds.indexOf(key);
+      if (idx >= 0) completedIds.splice(idx, 1);
+    }
     nodes.set(key, node);
     completedIds.push(key);
   }
@@ -85,9 +119,19 @@ export function buildDependencyGraph(
   return { nodes, openIds, completedIds };
 }
 
+/**
+ * Backlog.md status values that mean "this task is done". Case-insensitive +
+ * trims whitespace. We accept the canonical 'Done' plus a couple of common
+ * synonyms operators sometimes type by hand.
+ */
+function isDoneStatus(status: string): boolean {
+  const s = status.trim().toLowerCase();
+  return s === 'done' || s === 'completed' || s === 'shipped';
+}
+
 function readDir(
   dir: string,
-  status: TaskStatus,
+  fileLocation: TaskStatus,
   onWarn?: (msg: string) => void,
 ): DependencyNode[] {
   if (!existsSync(dir)) return [];
@@ -102,7 +146,7 @@ function readDir(
     if (!name.endsWith('.md')) continue;
     const filePath = join(dir, name);
     try {
-      const node = parseTaskFrontmatter(filePath, status);
+      const node = parseTaskFrontmatter(filePath, fileLocation);
       if (node) out.push(node);
     } catch (err) {
       onWarn?.(`failed to parse ${filePath}: ${(err as Error).message}`);
@@ -115,8 +159,16 @@ function readDir(
  * Parse the YAML frontmatter of a backlog task file and return a DependencyNode.
  * Returns null if the file lacks frontmatter or has no `id` field — those aren't
  * graph nodes and shouldn't poison the build.
+ *
+ * The `fileLocation` argument records where the file actually lives. The
+ * returned node's `status` mirrors `fileLocation` here; `buildDependencyGraph`
+ * is responsible for reclassifying stale entries (file in tasks/ but
+ * frontmatter `status: Done`) per AISDLC-153.
  */
-export function parseTaskFrontmatter(filePath: string, status: TaskStatus): DependencyNode | null {
+export function parseTaskFrontmatter(
+  filePath: string,
+  fileLocation: TaskStatus,
+): DependencyNode | null {
   const raw = readFileSync(filePath, 'utf8');
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n/);
   if (!fmMatch) return null;
@@ -126,6 +178,7 @@ export function parseTaskFrontmatter(filePath: string, status: TaskStatus): Depe
   if (!id) return null;
 
   const title = String(fm.title ?? '').trim();
+  const frontmatterStatus = String(fm.status ?? '').trim();
 
   let dependencies: string[] = [];
   if (Array.isArray(fm.dependencies)) {
@@ -134,7 +187,15 @@ export function parseTaskFrontmatter(filePath: string, status: TaskStatus): Depe
       .filter((v) => v.length > 0);
   }
 
-  return { id, status, title, dependencies, filePath };
+  return {
+    id,
+    status: fileLocation,
+    fileLocation,
+    frontmatterStatus,
+    title,
+    dependencies,
+    filePath,
+  };
 }
 
 // ── Frontier ──────────────────────────────────────────────────────────

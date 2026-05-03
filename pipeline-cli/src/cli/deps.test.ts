@@ -217,4 +217,27 @@ describe('cli-deps router', () => {
     const r = stdoutJson() as { reason: string };
     expect(r.reason).toMatch(/unknown task/);
   });
+
+  // AISDLC-153: stale tasks (file in tasks/ but status: Done) get reclassified
+  // as completed AND surface a one-line warning on stderr so the operator can
+  // `git mv` + commit without blocking the dispatch loop.
+  it('frontier emits a stderr warning for stale-Done tasks but still treats them as completed', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'stale', status: 'Done' });
+    writeTaskFile(tmp, {
+      id: 'AISDLC-2',
+      title: 'next',
+      status: 'To Do',
+      dependencies: ['AISDLC-1'],
+    });
+    setArgv('frontier', '--work-dir', tmp);
+    await buildDepsCli().parseAsync();
+    const r = stdoutJson() as { ok: boolean; frontier: Array<{ id: string }> };
+    expect(r.ok).toBe(true);
+    // AISDLC-1 is treated as done, so AISDLC-2 unblocks; AISDLC-1 itself is not
+    // listed (not open).
+    expect(r.frontier.map((e) => e.id)).toEqual(['AISDLC-2']);
+    const stderr = stderrChunks.join('');
+    expect(stderr).toMatch(/warning: stale task: AISDLC-1/);
+    expect(stderr).toMatch(/git mv/);
+  });
 });
