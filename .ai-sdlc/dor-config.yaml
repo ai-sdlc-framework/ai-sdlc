@@ -11,10 +11,15 @@ metadata:
   name: ai-sdlc-dor
 spec:
   rubricVersion: v1
-  # Phase 3 ships in warn-only mode — the gate posts comments but does
-  # NOT block /ai-sdlc execute on a needs-clarification verdict. Flip to
-  # 'enforce' after the soak window confirms false-positive rate is low.
-  evaluationMode: warn-only
+  # Phase 8 (AISDLC-115.9) flipped this from warn-only to enforce on
+  # 2026-05-03 via the operator-override path documented in
+  # docs/operations/dor-promotion.md (operator judgment based on current
+  # evidence; corpus-rigorous path unblocks once enough data accumulates
+  # post-AISDLC-161). In enforce mode the gate refuses /ai-sdlc execute
+  # and PPA admission for issues whose verdict is needs-clarification.
+  # To revert: flip back to warn-only — calibration log keeps writing in
+  # either mode, nothing else needs undoing.
+  evaluationMode: enforce
 
   notifications:
     # Always post the clarification comment to where the issue was authored

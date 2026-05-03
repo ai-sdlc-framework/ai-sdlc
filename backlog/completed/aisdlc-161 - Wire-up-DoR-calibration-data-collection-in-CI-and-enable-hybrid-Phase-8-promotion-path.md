@@ -16,7 +16,7 @@ dependencies:
 references:
   - spec/rfcs/RFC-0011-definition-of-ready-gate.md
   - backlog/tasks/aisdlc-115.8 - Phase-7-Soak-tune-tessellated-platform-shard-naming.md
-  - backlog/tasks/aisdlc-115.9 - Phase-8-Enforce-flip-AI_SDLC_DOR_GATE-warn-only-→-enforce.md
+  - backlog/completed/aisdlc-115.9 - Phase-8-Enforce-flip-AI_SDLC_DOR_GATE-warn-only-→-enforce.md
   - docs/operations/dor-promotion.md
 priority: high
 ---
