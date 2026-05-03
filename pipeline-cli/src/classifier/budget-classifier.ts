@@ -31,12 +31,28 @@
  *                          the combined stdout+stderr fallback
  *   - `other-failure`    — verdict didn't parse but isn't budget-related
  *
- * Aggregate decision rules:
- *   - All three reviewers `budget-exhausted` → `skip-with-budget-comment`
- *     (post `Post Review Results: success`, idempotent comment, no review)
- *   - Anything else → `proceed-as-normal` (existing report path runs unchanged,
- *     including CHANGES_REQUESTED for partial failures since mixed could be
- *     transient and still warrants human attention)
+ * Aggregate decision rules (AISDLC-157 — broadened from the AISDLC-147
+ * "all 3 must be budget-exhausted" rule):
+ *   - At least one `budget-exhausted` AND zero `other-failure` →
+ *     `skip-with-budget-comment` (post `Post Review Results: success`,
+ *     idempotent comment, no review). i.e. every reviewer that DIDN'T succeed
+ *     only failed due to budget. The `ok` reviewers' verdicts already
+ *     capture the truth; the budget-exhausted ones are pure noise.
+ *   - Anything else → `proceed-as-normal` (existing report path runs
+ *     unchanged, including CHANGES_REQUESTED). This covers: zero
+ *     budget-exhaustion, OR ANY `other-failure` present (a real failure
+ *     exists — surface it).
+ *
+ * Why this rule (vs the original AISDLC-147 "all 3 exhausted" gate):
+ *   AISDLC-141's classifier (LIVE in CI as of AISDLC-156) selectively skips
+ *   reviewers and writes AUTO_APPROVED stub verdicts for the unselected
+ *   ones. The budget classifier sees those stubs as `ok`. So a real
+ *   credit-exhausted run with [security, critic] selected (testing
+ *   AUTO_APPROVED) yields `[ok, budget-exhausted, budget-exhausted]` —
+ *   which under the old AND-of-3 rule fell through to `proceed-as-normal`
+ *   and posted CHANGES_REQUESTED noise the operator had to dismiss
+ *   manually. The new "all NON-OK reviewers are budget-exhausted" rule
+ *   handles this case correctly while still surfacing genuine failures.
  *
  * Why the AND-of-two-substrings match (vs. just one):
  *   "invalid_request_error" alone fires on schema-rejection bugs that are NOT
@@ -99,7 +115,11 @@ export interface ClassifiedReviewer {
 
 /** Top-level decision the report job acts on. */
 export type AggregateDecision =
-  | 'skip-with-budget-comment' // all 3 budget-exhausted → no CHANGES_REQUESTED
+  // AISDLC-157: previously "all 3 budget-exhausted"; broadened to "all NON-OK
+  // reviewers are budget-exhausted" so the AISDLC-141 classifier-skipped
+  // reviewer (AUTO_APPROVED stub → counted as `ok`) doesn't keep this branch
+  // from firing on otherwise-uniform credit exhaustion.
+  | 'skip-with-budget-comment' // ≥1 budget + 0 other-failure → no CHANGES_REQUESTED
   | 'proceed-as-normal'; // existing path unchanged
 
 /** Aggregate result returned by `classifyReviewerOutputs`. */
@@ -256,23 +276,33 @@ export function classifyOneReviewer(input: ReviewerRawOutput): ReviewerClassific
  * Classify all 3 reviewer outputs and emit the aggregate decision the
  * report job branches on.
  *
- * Behaviour summary (mirrors the AC list on the AISDLC-147 task file):
- *   - All 3 budget-exhausted → `skip-with-budget-comment`
- *   - Anything else (all-ok, mixed budget+ok, mixed budget+other-failure,
- *     all-other-failure) → `proceed-as-normal`
+ * Behaviour summary (AISDLC-157 — broadened from the AISDLC-147 "all 3
+ * exhausted" gate so the AISDLC-141 conditional classifier doesn't break
+ * the suppression branch when it AUTO_APPROVES an unselected reviewer):
+ *   - ≥1 budget-exhausted AND 0 other-failure → `skip-with-budget-comment`
+ *     (every reviewer that DIDN'T succeed only failed due to budget; the
+ *     ok verdicts already capture the truth, the budget ones are noise)
+ *   - 0 budget-exhausted (all ok or any other-failure-only mix) →
+ *     `proceed-as-normal` (existing path unchanged)
+ *   - ≥1 budget-exhausted AND ≥1 other-failure → `proceed-as-normal`
+ *     (a real failure exists — surface it via CHANGES_REQUESTED)
  *
- * The "all 3 must be budget-exhausted" gate is intentional. Mixed failures
- * could be a transient outage on the API side affecting one reviewer's
- * connection, in which case the operator still wants the surviving
- * reviewer's verdict to surface as CHANGES_REQUESTED. Only a uniform
- * budget-exhaustion across all 3 is the unambiguous "API key is dead"
- * signal that warrants suppressing the noisy CHANGES_REQUESTED.
+ * The relaxation is safe because `other-failure` already means "the
+ * reviewer reported a real signal we can't suppress" and `ok` means "the
+ * reviewer reported a verdict we want to surface as-is". The only mode
+ * we suppress is "every non-success was budget exhaustion" — i.e.
+ * nothing real is being silenced.
+ *
+ * The 3-reviewer-input guard is preserved: receiving fewer than 3 inputs
+ * is a workflow regression and falls through to `proceed-as-normal` so
+ * the existing CHANGES_REQUESTED safety net surfaces the bug rather than
+ * silently passing.
  */
 export function classifyReviewerOutputs(inputs: ReviewerRawOutput[]): BudgetClassification {
   // Defensive: the contract is "exactly 3 inputs" but we tolerate
   // shorter arrays (just classify what we got + emit `proceed-as-normal`
-  // unless ALL reviewers are budget-exhausted, which requires at least
-  // 3 to be conservative).
+  // when the input set is partial, since a missing reviewer is itself a
+  // bug we want to surface rather than silently suppress).
   const perReviewer: ClassifiedReviewer[] = inputs.map((input) => ({
     type: input.type,
     classification: classifyOneReviewer(input),
@@ -280,12 +310,13 @@ export function classifyReviewerOutputs(inputs: ReviewerRawOutput[]): BudgetClas
   const budgetExhaustedCount = perReviewer.filter(
     (r) => r.classification === 'budget-exhausted',
   ).length;
-  // The gate is "all reviewers AND we received a full 3-reviewer set".
-  // Receiving fewer than 3 inputs is a workflow regression — fall through
-  // to `proceed-as-normal` so the existing CHANGES_REQUESTED safety net
-  // surfaces the bug rather than silently passing.
+  const otherFailureCount = perReviewer.filter((r) => r.classification === 'other-failure').length;
+  // AISDLC-157: skip when every NON-OK reviewer was budget-exhausted (i.e.
+  // ≥1 budget + 0 other-failure). The 3-input guard still applies — a
+  // partial input set is itself a regression and never warrants the skip
+  // branch, even if the reviewers we DID receive were all budget-exhausted.
   const aggregate: AggregateDecision =
-    inputs.length === 3 && budgetExhaustedCount === 3
+    inputs.length === 3 && budgetExhaustedCount > 0 && otherFailureCount === 0
       ? 'skip-with-budget-comment'
       : 'proceed-as-normal';
   return { perReviewer, aggregate, budgetExhaustedCount };

@@ -583,7 +583,11 @@ jobs:
           echo "exhausted_count=${EXHAUSTED}" >> "$GITHUB_OUTPUT"
           echo "Budget classifier: aggregate=${AGGREGATE} exhausted=${EXHAUSTED}/3"
           if [ "$AGGREGATE" = "skip-with-budget-comment" ]; then
-            echo "::warning::All 3 reviewers failed with Anthropic credit-exhausted — report job will suppress CHANGES_REQUESTED and post idempotent budget-skip comment instead"
+            # AISDLC-157: the gate fires when EVERY non-OK reviewer was
+            # budget-exhausted (≥1 budget + 0 other-failure), not strictly
+            # all 3. AISDLC-141's classifier may AUTO_APPROVE an unselected
+            # reviewer (counted as ok), so the count below can be < 3.
+            echo "::warning::${EXHAUSTED}/3 reviewers failed with Anthropic credit-exhausted (the rest succeeded — no real failures to surface). Report job will suppress CHANGES_REQUESTED and post idempotent budget-skip comment instead."
           fi
 
       - name: Upload classifier calibration log
@@ -606,23 +610,36 @@ jobs:
     permissions:
       pull-requests: write
       issues: read
-      # AISDLC-147 patch 2: post `Post Review Results: success` status via
-      # the GitHub commit-status API when all 3 reviewers fail with
-      # Anthropic credit-exhausted (suppress noisy CHANGES_REQUESTED).
+      # AISDLC-147 patch 2 + AISDLC-157: post `Post Review Results: success`
+      # status via the GitHub commit-status API when every NON-OK reviewer
+      # failed with Anthropic credit-exhausted (suppress noisy
+      # CHANGES_REQUESTED). The classifier-skipped reviewers
+      # (AUTO_APPROVED stubs from AISDLC-141) count as ok, so this branch
+      # can fire with as few as 1 budget-exhausted reviewer.
       statuses: write
     steps:
       - name: Skip if analyze was skipped (release-please PRs)
         if: needs.analyze.result == 'skipped'
         run: echo "Skipping review for release-please PR"
 
-      # ── AISDLC-147 patch 2: Anthropic budget circuit breaker ──────
-      # When ALL 3 reviewers failed with credit-exhausted ("budget_aggregate
-      # == skip-with-budget-comment"), suppress the noisy CHANGES_REQUESTED
-      # path. Instead post `Post Review Results: success` directly via the
-      # status API + idempotent comment marker explaining the skip.
-      # Mixed failures (1-2 budget-exhausted) fall through to the regular
-      # path below since transient API issues still warrant the existing
-      # CHANGES_REQUESTED safety net.
+      # ── AISDLC-147 patch 2 + AISDLC-157: Anthropic budget circuit breaker ─
+      # When every NON-OK reviewer failed with credit-exhausted (i.e.
+      # `budget_aggregate == skip-with-budget-comment` — at least one
+      # budget-exhausted reviewer AND zero other-failure reviewers),
+      # suppress the noisy CHANGES_REQUESTED path. Instead post
+      # `Post Review Results: success` directly via the status API +
+      # idempotent comment marker explaining the skip.
+      #
+      # Mixed budget + other-failure (or zero budget) fall through to the
+      # regular path below — the other-failure reviewer carries a real
+      # signal (parse failure, reviewer crash, etc.) that the operator
+      # needs to see surfaced as CHANGES_REQUESTED.
+      #
+      # AISDLC-157 broadened the gate from "all 3 budget-exhausted" because
+      # AISDLC-141's classifier (LIVE since AISDLC-156) can AUTO_APPROVE an
+      # unselected reviewer — that AUTO_APPROVED stub counts as `ok` here,
+      # so a truly credit-exhausted run can have count<3 even when there's
+      # nothing real to surface. The new rule handles that case cleanly.
       - name: Post budget-skip status + comment (Anthropic credit exhausted)
         if: needs.analyze.result == 'success' && needs.analyze.outputs.budget_aggregate == 'skip-with-budget-comment'
         uses: actions/github-script@v7
@@ -662,19 +679,21 @@ jobs:
               marker,
               '## AI-SDLC: Reviewer Agents Skipped (Anthropic Budget Exhausted)',
               '',
-              `All ${exhausted}/3 review agents failed with HTTP 400 \`invalid_request_error\``,
-              '("credit balance is too low"). The reviewer fan-out has been suppressed to',
-              'avoid posting a noisy CHANGES_REQUESTED on every push.',
+              `${exhausted}/3 review agents failed with HTTP 400 \`invalid_request_error\``,
+              '("credit balance is too low"). The remaining agent(s) either succeeded or were',
+              'skipped by the AISDLC-141 conditional classifier. Since every reviewer that',
+              'DIDN\'T succeed only failed due to budget, the noisy CHANGES_REQUESTED has been',
+              'suppressed.',
               '',
               '**What this means**:',
-              '- This PR has NOT been reviewed by the automated agents.',
+              '- This PR has been only partially reviewed by the automated agents.',
               '- Branch protection still requires `ai-sdlc/pr-ready` (the rollup gate),',
               '  but the `Post Review Results` status was posted as `success` so the gate',
               '  does not deadlock.',
               '- A human reviewer should manually validate this PR before merging,',
               '  or top up the Anthropic API credit balance and push again to re-trigger.',
               '',
-              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — AISDLC-147 budget circuit breaker*',
+              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — AISDLC-147 budget circuit breaker (AISDLC-157 broadened gate)*',
             ].join('\n');
 
             const { data: existing } = await github.rest.issues.listComments({

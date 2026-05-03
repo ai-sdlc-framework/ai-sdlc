@@ -98,14 +98,33 @@ describe('cli-classify-budget', () => {
     expect(parsed.budgetExhaustedCount).toBe(0);
   });
 
-  it('mixed (2 budget + 1 ok) → proceed-as-normal', async () => {
+  it('AISDLC-157: mixed (2 budget + 1 ok) → skip-with-budget-comment (broadened from AISDLC-147 all-3 rule)', async () => {
+    // Reproduces the PR #202 case where AISDLC-141's classifier wrote
+    // an AUTO_APPROVED stub for the unselected reviewer and the other 2
+    // hit credit exhaustion. Under the AISDLC-147 "all 3 must be exhausted"
+    // gate this fell through to proceed-as-normal and posted a noisy
+    // CHANGES_REQUESTED. The AISDLC-157 rule "≥1 budget + 0 other-failure"
+    // catches this correctly.
     const { parsed } = await runWith({
       testingStdout: validVerdict,
       criticStderr: budgetStderr,
       securityStderr: budgetStderr,
     });
-    expect(parsed.aggregate).toBe('proceed-as-normal');
+    expect(parsed.aggregate).toBe('skip-with-budget-comment');
     expect(parsed.budgetExhaustedCount).toBe(2);
+  });
+
+  it('AISDLC-157: mixed (1 budget + 1 other-failure + 1 ok) → proceed-as-normal (other-failure surfaces real signal)', async () => {
+    // The presence of any other-failure forces proceed-as-normal so the
+    // existing CHANGES_REQUESTED safety net surfaces the real failure
+    // (here: a malformed verdict that's NOT budget-related).
+    const { parsed } = await runWith({
+      testingStdout: validVerdict,
+      criticStdout: '{ broken json',
+      securityStderr: budgetStderr,
+    });
+    expect(parsed.aggregate).toBe('proceed-as-normal');
+    expect(parsed.budgetExhaustedCount).toBe(1);
   });
 
   it('missing input files tolerated as empty (workflow regression safety)', async () => {
