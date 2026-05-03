@@ -53,14 +53,36 @@ jobs:
     # against the entire backlog so PRs that introduce repository-wide
     # drift fail at PR time rather than accumulating silently.
     #
-    # SEQUENCING NOTE (AISDLC-119 review feedback): main currently has
-    # 259 pre-existing drift issues (from before AISDLC-119 shipped).
-    # `continue-on-error: true` keeps this job advisory until the
-    # one-time cleanup task lands; remove the flag after cleanup so
-    # this becomes a hard gate via `ci-ok`'s needs.
+    # AISDLC-125: PROMOTED FROM ADVISORY → REQUIRED.
+    # PR #192 (AISDLC-148) bulk-cleaned the 297 pre-existing drift
+    # issues that motivated the original advisory framing. Two changes
+    # promote the gate:
+    #   1. `continue-on-error: true` removed (failure now propagates).
+    #   2. `backlog-drift` added to `ci-ok`'s `needs[]` (in this file)
+    #      so a drift failure cascades into the legacy required check.
+    # Operator action (separate, documented in PR body): add
+    # `Backlog Drift` to `required_status_checks.contexts` via
+    # `gh api ... PATCH .../branches/main/protection` so the check
+    # surfaces as an independently-named required entry on the PR
+    # checks tab. Cross-workflow `needs:` is not supported by GitHub
+    # Actions, so adding `backlog-drift` to `ai-sdlc-gate.yml`'s
+    # `ai-sdlc/pr-ready` rollup would require duplicating the job —
+    # the explicit branch-protection context is the cheaper path.
+    #
+    # SEVERITY-AWARE FAILURE MODEL: `backlog-drift@0.1.3` exits 1 on
+    # ANY issue including `info` (e.g. "dependency completed") and
+    # `warning` (e.g. "referenced file modified after task was
+    # completed"). For a CI gate, only `error` severity should block
+    # — info/warning are informational signals that don't represent
+    # the dangling-reference / orphan-placeholder failure modes the
+    # gate exists to catch. We filter `--json` output via `jq` and
+    # exit non-zero only when at least one `error`-severity issue is
+    # present. Local pre-commit (`scripts/check-backlog-drift.sh`)
+    # remains strict-on-staged-tasks: `AI_SDLC_SKIP_DRIFT_GATE=1` is
+    # honored ONLY there, NOT in CI (this job has no env-based
+    # short-circuit by design).
     name: Backlog Drift
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -69,7 +91,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - name: Run backlog-drift check (full repo)
+      - name: Run backlog-drift check (full repo, error-severity gate)
         # `backlog-drift` is not a workspace dep — it's a standalone CLI
         # used as project tooling (parity with how `backlog-cli` itself
         # is invoked). `npx` (without --no-install) downloads it on
@@ -80,7 +102,32 @@ jobs:
         # (refs like `spec/rfc.md#section` no longer false-positive as
         # missing files). Pre-0.1.3 produced ~70% noise on our backlog.
         # See docs/upstream-bug-reports/backlog-drift-url-fragment-false-positive.md
-        run: npx backlog-drift@0.1.3 check
+        #
+        # Exit semantics:
+        #  - 0 → no `error`-severity issues (info/warning OK, printed)
+        #  - 1 → one or more `error`-severity issues (e.g. dangling
+        #        file reference, orphan `(new)` placeholder) — block
+        #        the PR with the issue list in the job output.
+        run: |
+          set -euo pipefail
+          # Capture JSON output (always exits 1 if any issue, regardless
+          # of severity — that's why we don't fail-fast on the npx call).
+          # `|| true` keeps the pipeline alive so we can post-process.
+          json="$(npx backlog-drift@0.1.3 check --json 2>/dev/null || true)"
+          # Pretty-print every issue for the job log so reviewers see
+          # context regardless of which severity gates the run.
+          npx backlog-drift@0.1.3 check || true
+          # Count error-severity entries. `jq -e` returns non-zero when
+          # the result is null/false/0, but we want explicit branching
+          # so the message is readable in the GitHub UI.
+          errors="$(printf '%s' "$json" | jq '[.[] | select(.severity == "error")] | length')"
+          echo ""
+          echo "[backlog-drift] error-severity issues: ${errors}"
+          if [ "${errors}" != "0" ]; then
+            echo "::error::Backlog drift gate failed: ${errors} error-severity issue(s) detected. Run \`npx backlog-drift check\` locally and \`npx backlog-drift fix --task <id>\` to auto-fix."
+            exit 1
+          fi
+          echo "[backlog-drift] gate passed (info/warning issues are informational, not blocking)"
 
   build-and-test:
     name: Build & Test (Node ${{ matrix.node-version }})
@@ -184,14 +231,17 @@ jobs:
   ci-ok:
     name: CI OK
     if: always()
-    needs: [lint, build-and-test, test-python, test-go]
+    needs: [lint, build-and-test, test-python, test-go, backlog-drift]
     runs-on: ubuntu-latest
     steps:
       - run: |
-          # AISDLC-119: backlog-drift intentionally excluded from ci-ok
-          # aggregation until the 259-issue cleanup ships. Job still runs
-          # for visibility but its FAILURE result must not block merges.
-          results=("${{ needs.lint.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}")
+          # AISDLC-125: backlog-drift promoted from advisory to required
+          # (PR #192/AISDLC-148 cleared the 297-issue backlog that
+          # justified the exclusion). The job's `error`-severity-only
+          # gate runs in `backlog-drift` above; failure of that job now
+          # blocks `ci-ok` and therefore blocks merges via the standard
+          # required-checks chain.
+          results=("${{ needs.lint.result }}" "${{ needs.build-and-test.result }}" "${{ needs.test-python.result }}" "${{ needs.test-go.result }}" "${{ needs.backlog-drift.result }}")
           for result in "${results[@]}"; do
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               echo "CI failed: found job with result '$result'"

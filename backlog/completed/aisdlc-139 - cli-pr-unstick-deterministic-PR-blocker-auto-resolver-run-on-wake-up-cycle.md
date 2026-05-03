@@ -11,11 +11,9 @@ labels:
   - infrastructure
 dependencies: []
 references:
-  - pipeline-cli/bin/cli-pr-unstick.mjs (new)
+  - pipeline-cli/bin/cli-pr-unstick.mjs
   - scripts/check-orchestrator-state.sh
   - .github/workflows/auto-rebase-open-prs.yml
-  - scripts/ci-sign-attestation.mjs
-  - 'memory: feedback_autonomous_orchestration_pattern.md'
 priority: high
 ---
 

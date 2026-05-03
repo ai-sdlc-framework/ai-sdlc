@@ -17,6 +17,27 @@ references:
   - pipeline-cli/src/incremental-review/incremental.test.ts
   - .github/workflows/ai-sdlc-review.yml
 priority: medium
+drift_status: flagged
+drift_checked: '2026-05-03'
+drift_log:
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file pipeline-cli/src/incremental-review/incremental.ts was
+      modified after task was completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file pipeline-cli/src/incremental-review/incremental.test.ts
+      was modified after task was completed
+    resolution: flagged
+  - date: '2026-05-03'
+    type: post-complete-change
+    detail: >-
+      Referenced file .github/workflows/ai-sdlc-review.yml was modified after
+      task was completed
+    resolution: flagged
 ---
 
 ## Description
