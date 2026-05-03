@@ -1,9 +1,9 @@
 # RFC-0009: Tessellated Design Intent Documents for Multi-Soul Platforms
 
 **Document type:** Normative (draft)
-**Status:** Draft v3.3 — Operator walkthrough resolved 5 of 13 open questions (OQ-1 through OQ-5) and re-affirmed OQ-13. Variant + journey patterns carved out to RFC-0017 (In-Shard Variant Pattern) and RFC-0018 (In-Shard Journey Pattern) — both reserved per AISDLC-165, pending normative spec when practitioner validation exists. Triad object is now required-with-defaults everywhere (BREAKING CHANGE acknowledged; small user base = right time to break). `crossSoulScoringRule` default is `min` with affected-souls scope filter (computed from dependency graph). Eρ₅ Compliance Clearance is gating on hard regulatory frameworks only (GDPR, HIPAA, SOC2, PCI-DSS, FedRAMP, regional data-residency, regulated-industry rules — anything with formal external-audit consequences). Naming landed on **Tessellated Platform / Soul / Tessellation** with `soul sharding` retained as the mechanism verb form; `shard` retired as a noun. OQ-6 through OQ-12 remain open for future operator walkthrough. Lifecycle remains Draft pending OQ-6-12 + Engineering + Design sign-off.
+**Status:** Draft v3.4 — Operator walkthrough resolved the remaining 7 of 13 open questions (OQ-6 through OQ-12); all 13 OQs now resolved (OQ-1-5 + OQ-13 in v3.3; OQ-6-12 in v3.4). §13.5 (session-bug + severity scoring rule) and §13.6 (incident monitoring + root-cause analysis) carved out to RFC-0020 (Draft) and RFC-0021 (Reserved) respectively per OQ-7 reversal of Position-stated. Eτ_tessellation_drift detection is orchestrator-side (OQ-6) — rule #1 (AST scan) ships in RFC-0009 implementation phase; rule #2 (embedding distance) deferred to RFC-0019 implementation; rule #3 (cross-soul provenance) deferred to RFC-0009 implementation phase. OQ-8 + OQ-9 filed as standalone framework bugs AISDLC-171 + AISDLC-172. OQ-10 affirmed: Operator role is platform-scoped, not tessellated. OQ-11: shared+RLS pool default with explicit per-shard trigger checklist (regulatory hard requirement, customer contract, operator security review) cross-referencing RFC-0022 (Compliance Posture + Audit Surface). OQ-12: new `HC_cost` channel (operator-tunable, default 1.0) gated on RFC-0016 calibration data quality for accurate per-task cost prediction. Lifecycle remains Draft pending Engineering + Design sign-off.
 **Created:** 2026-04-24
-**Revised:** 2026-05-03
+**Revised:** 2026-05-04
 **Authors:** Alexander Kline (Product Authority, author of PPA v1.0 + RFC-0005)
 **Reviewers:** [Engineering Authority — Pending], [Design Authority — Pending], [Product Authority — Authored]
 **Spec version:** v1alpha1
@@ -16,8 +16,8 @@
 
 | Person | Role | Status | Date |
 |--------|------|--------|------|
-| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏸ Pending review of v3.3 | — |
-| Morgan Hirtle | Chief of Design / Design Authority | ⏸ Pending review of v3.3 | — |
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏸ Pending review of v3.4 | — |
+| Morgan Hirtle | Chief of Design / Design Authority | ⏸ Pending review of v3.4 | — |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✍️ Authored v3.2 | 2026-04-27 |
 
 ---
@@ -32,7 +32,8 @@
 | v3 | 2026-04-26 | Product-pillar voice strengthened. Reframes RFC-0009 as a PPA architectural amendment (not just RFC-0008 schema additions): explicitly closes PPA v1.0 §8 "Multi-Product Portfolio" open question and RFC-0005 "Multi-product portfolio-level resource allocation" non-goal. Open questions where the implementation has a strong product position now state that position with reasoning instead of hedging; pure-naming questions (OQ-4) remain genuinely open. New §16 PPA v1.1 Direction section mirroring RFC-0008 §17 pattern adds v1.1-6 (per-soul Sα vector) and v1.1-7 (per-soul Cκ tensor). Reference Implementation appendix reframed as empirical proof-by-existence, not framework-supplicant. |
 | v3.1 | 2026-04-27 | Additive-only patch acknowledging upstream's RFC-0010 (Parallel Execution + Worktree Pooling, published 2026-04-27 by Dom). New §7.3 Eρ₆ Cost Clearance gating sub-component (parallel to Eρ₅ Compliance Clearance) honoring RFC-0010 `tenantQuotaShare` per soul. New §8.5 SubscriptionPlan, §8.6 WorktreePool, §8.7 DatabaseBranchPool, §8.8 Operator role scope sections enumerating RFC-0010 resource interaction at platform vs soul scopes. New OQ-10 (Operator role tessellation), OQ-11 (DatabaseBranchPool per-soul policy), OQ-12 (Eρ₆ vs Dπ₃ — which dimension cost-pressure feeds into). No changes to v3's normative spec. |
 | v3.2 | 2026-04-27 | Parity pass with PPA v1.1 (Alexander, same day). Strengthens §4 Fractal Triad with the Identity / Expression / Coherence framing for the structural pillar asymmetry — Product declares identity, Design expresses identity, Engineering maintains coherence between Identity and Expression at runtime; the asymmetry is a structural property of the basis, not a gap to fix. Strengthens §5.1 design vertex with explicit DID ownership-model parallel to PPA v1.1 §4 (Product owns mission/experientialTargets feeding SA1; Design owns designPrinciples/brandIdentity/visualIdentity feeding SA2; Engineering reviews and may block only on technical infeasibility of measurable signals). Adds §7.3 explicit acknowledgment of PPA v1.1's C8 Cost Governance Integration as the operational channel wiring SubscriptionPlan.tenantQuotaShare → Eρ₆. Marks OQ-13 resolved-against-rename: PPA v1.1 landed on "multi-soul scoring" terminology in body + title; "soul sharding" survives as accurate vocabulary for the *pattern itself* (mechanism), complementing "multi-soul platform" which describes the *architectural shape* (output). Adds PPA v1.1 to References. No normative content changed from v3 or v3.1; v3.2 is purely strengthening + cross-reference parity. |
-| **v3.3** | **2026-05-03** | **Operator walkthrough resolved 5 of 13 open questions: OQ-1 (Option D — required-with-defaults), OQ-2 (Option A — `min` with affected-souls scope filter), OQ-3 (REVERSAL — variant + journey carved out to RFC-0017/0018, NOT bundled here), OQ-4 (Variant B — Tessellated Platform / Soul / Tessellation; retire `shard` as noun), OQ-5 (Option A — gating, hard regulatory only). OQ-6 through OQ-12 remain open for future walkthrough. OQ-13 re-affirmed unchanged. Lifecycle remains Draft pending OQ-6-12 + Engineering + Design sign-off. Rename pass applied throughout: `shard` (noun) → `soul`; `Shard DID` → `Soul DID`; `crossShardScoringRule` → `crossSoulScoringRule`; `shardId/shardScope/shardOverrides/shardBindings/targetedShards` → `soulId/soulScope/soulOverrides/soulBindings/targetedSouls`; example slugs `shard-a/b/c` → `soul-a/b/c`; DID URI segments `did:platform-x:shard:*` → `did:platform-x:soul:*`. `soul sharding` retained as mechanism verb form per OQ-13. Sections of v3.2 main that normatively spec variant + journey patterns deleted and replaced with pointer to RFC-0017/0018.** |
+| v3.3 | 2026-05-03 | Operator walkthrough resolved 5 of 13 open questions: OQ-1 (Option D — required-with-defaults), OQ-2 (Option A — `min` with affected-souls scope filter), OQ-3 (REVERSAL — variant + journey carved out to RFC-0017/0018, NOT bundled here), OQ-4 (Variant B — Tessellated Platform / Soul / Tessellation; retire `shard` as noun), OQ-5 (Option A — gating, hard regulatory only). OQ-6 through OQ-12 remain open for future walkthrough. OQ-13 re-affirmed unchanged. Lifecycle remains Draft pending OQ-6-12 + Engineering + Design sign-off. Rename pass applied throughout: `shard` (noun) → `soul`; `Shard DID` → `Soul DID`; `crossShardScoringRule` → `crossSoulScoringRule`; `shardId/shardScope/shardOverrides/shardBindings/targetedShards` → `soulId/soulScope/soulOverrides/soulBindings/targetedSouls`; example slugs `shard-a/b/c` → `soul-a/b/c`; DID URI segments `did:platform-x:shard:*` → `did:platform-x:soul:*`. `soul sharding` retained as mechanism verb form per OQ-13. Sections of v3.2 main that normatively spec variant + journey patterns deleted and replaced with pointer to RFC-0017/0018. |
+| **v3.4** | **2026-05-04** | **Operator walkthrough resolved remaining 7 of 13 open questions: OQ-6 (Option A — orchestrator-side detection; rule #1 ships, rule #2 awaits RFC-0019, rule #3 awaits RFC-0009 impl), OQ-7 (REVERSAL — §13.5+§13.6 carved to RFC-0020+RFC-0021), OQ-8 (filed as AISDLC-171 bug), OQ-9 (filed as AISDLC-172 bug), OQ-10 (Option A — platform-scoped), OQ-11 (Option A — shared+RLS default with trigger checklist; cross-references RFC-0022), OQ-12 (Option B — new HC_cost channel with RFC-0016 data dependency). All 13 OQs now resolved (OQ-1-12 active + OQ-13 already resolved against title rename). Lifecycle remains Draft pending Engineering + Design sign-off.** |
 
 ---
 
@@ -393,7 +394,7 @@ Anything with **formal external-audit consequences** qualifies. Internal best-pr
 
 **Customer-audit-by-proxy qualifies:** when a customer's own SOC2 (or equivalent) audit asks vendors about their data-handling policy, that qualifies as regulatory-by-proxy and falls inside Eρ₅. The transitive audit-trail consequence is what matters, not the direct regulatory relationship.
 
-### 7.2 Eτ_tessellation_drift (proposed)
+### 7.2 Eτ_tessellation_drift — ORCHESTRATOR-SIDE DETECTION [RESOLVED 2026-05-04 — Option A with sub-decision]
 
 A new sub-dimension under Eτ (Entropy Tax). Fires when a work item:
 
@@ -402,7 +403,17 @@ A new sub-dimension under Eτ (Entropy Tax). Fires when a work item:
 - Causes two Soul DIDs to converge (voice register drift, anti-goal overlap, success-metric overlap) without explicit merge decision recorded as a tessellation amendment
 - Silently extends one Soul DID's domain into another's territory
 
-Detection signals available without new infrastructure: AST analysis of shared substrate code for soul-name string literals, embedding distance between Soul DIDs over time, cross-soul provenance audits.
+**Detection lives orchestrator-side, not adapter-side** (per OQ-6 resolution). Adapter-side detection puts the burden on every adapter author to instrument drift signals consistently; the framework cannot guarantee detection coverage if it depends on N adapter implementations correctly tagging soul-affecting work. Orchestrator-side is the only path to framework-wide consistency. Adapter-side detection MAY supplement (adapters can volunteer additional drift signals) but is not the primary detection layer.
+
+**Sub-decision (v3.4) — three detection rules with staggered ship dates:**
+
+| Rule | Mechanism | Ships when |
+|---|---|---|
+| **Rule #1: AST scan for soul-name string literals** | Scan shared substrate code for soul-slug string literals + `if (soul === '<slug>')` conditionals. Static analysis at admission time. | **Ships now in RFC-0009 implementation phase** — no new infrastructure required; AST tooling is already a framework primitive. |
+| **Rule #2: Embedding distance between Soul DIDs over time** | Compute embedding vectors for each Soul DID; track inter-soul distance across versions; flag convergence below configured threshold without explicit merge amendment. | **Deferred to RFC-0019 implementation** (Embedding Provider Adapter Framework). RFC-0019 has just landed to main as Draft (2026-05-03); rule #2 becomes ship-able when RFC-0019's adapter surface lands and `embedDocument(text)` is callable from orchestrator. |
+| **Rule #3: Cross-soul provenance audits** | Walk provenance records (§8.3) and flag work items whose `targetedSouls` set crosses tessellation boundaries without recorded amendment; flag substrate work whose downstream provenance shows soul-distinct outcomes diverge sharply. | **Deferred to RFC-0009 implementation phase** (provenance tagging needs the substrate-vs-soul partition to exist in code first). Ships once §8.3 ProvenanceRecord extension lands and the first generation of tessellated provenance records accumulates. |
+
+The staggered roll-out means RFC-0009's implementation phase ships rule #1 immediately (covers the highest-frequency drift mode — soul-name leakage in substrate); rule #3 follows naturally as provenance data accumulates; rule #2 unlocks once RFC-0019's embedding adapter is implementable.
 
 ### 7.3 Eρ₆ Cost Clearance (proposed; v3.1 — interaction with RFC-0010)
 
@@ -418,11 +429,50 @@ Where `s.tenantQuotaShare` is sourced from RFC-0010's `SubscriptionPlan.spec.ten
 
 A work item targeting a soul whose burn-down for the current billing period would be exceeded by this work receives Eρ₆ = 0, gating execution reality regardless of soul alignment, demand pressure, or compliance clearance. This composes with the cross-soul scoring rules (§5) — substrate work scored under `min` rule against Eρ₆ honors every affected soul's cost ceiling.
 
-Cost clearance is categorical (gating), not graduated, consistent with Eρ's existing semantics. Soft cost-pressure handling (work that *could* run but *should not* given budget burn rate) belongs in either Dπ₃ Bug Urgency (urgent + costly = different signal than urgent alone) or as a new HC channel — see §13 OQ-12 for the open question.
+Cost clearance is categorical (gating), not graduated, consistent with Eρ's existing semantics. Soft cost-pressure handling (work that *could* run but *should not* given budget burn rate) is handled by the new **HC_cost channel** added per OQ-12 resolution — see §7.4 below.
 
 For single-product platforms, Eρ₆ = 1 always (no tenant share to exceed); for Tessellated Platforms without RFC-0010 SubscriptionPlan declared, Eρ₆ = 1 always (no tenantQuotaShare data); both degenerate cases preserve v3.0 scoring behavior.
 
 **v3.2 acknowledgment of PPA v1.1 C8 wiring:** PPA v1.1 §7 introduces **C8 Cost Governance Integration** as the eighth triad-edge connection, formally wiring `SubscriptionPlan.spec.tenants[<soul-slug>].quotaShare` (RFC-0010) → ER6 Cost Clearance (PPA v1.1 §3) → §7.3 Eρ₆ (this RFC). C8 is the operational channel that makes §7.3 implementable; without C8, §7.3 has no source of `tenantQuotaShare` data. C8's implementation sequence (PPA v1.1 §7 Phase 3, weeks 9+) coincides with RFC-0010's cost governance adoption. Adopters implementing tessellation without RFC-0010 cost governance can adopt §7.3 as a no-op (Eρ₆ = 1.0 always); adopters implementing both get gating cost-clearance as a structural property of execution reality.
+
+### 7.4 HC_cost channel — SOFT COST-PRESSURE LEVER [RESOLVED 2026-05-04 — Option B with RFC-0016 dependency]
+
+A new HC (Human Choice) channel — `HC_cost` — added per OQ-12 resolution. Where §7.3 Eρ₆ Cost Clearance is **gating** (categorical 0/1 — refuses if hard-budget exceeded), `HC_cost` is **soft pressure** — operator-tunable multiplier on cost-sensitive tasks that defers expensive work without refusing it.
+
+**Definition:**
+
+```
+HC_cost ∈ [0.0, 1.0]
+  default 1.0   = neutral; no cost-based de-prioritization
+  ratchet down  = the operator wants to defer expensive work
+  HC_cost = 0.5 = halve the priority signal contribution from cost-sensitive tasks
+  HC_cost = 0.0 = fully suppress cost-sensitive tasks (advisory; not gating)
+
+For a work item w, applied as multiplicative weight in the HC composite:
+  HC_total(w) ← HC_total(w) × HC_cost^isCostSensitive(w)
+  where isCostSensitive(w) = 1 if w carries Stage.maxBudgetUsd (RFC-0010 §11.4); 0 otherwise.
+```
+
+**Sub-decisions (v3.4):**
+
+- **What counts as a cost-sensitive task?** Tasks that carry `Stage.maxBudgetUsd` (RFC-0010 §11.4 — the per-stage hard budget cap that admission already reads). `HC_cost` is a **no-op** for tasks without that field. This keeps the channel scoped to work where cost is already declared as load-bearing; it does not insinuate cost into work the operator hasn't explicitly tagged as cost-sensitive.
+- **Interaction with Eρ₆ (the §7.3 hard gate)?** Independent. Eρ₆ refuses execution when the hard `tenantQuotaShare` budget would be exceeded; `HC_cost` reduces priority but does not refuse. **Eρ₆ wins on hard exceedance** — the operator cannot un-gate a regulatory-or-cost-hard-cap by lowering `HC_cost`. The two mechanisms are orthogonal: Eρ₆ enforces the floor; `HC_cost` shapes the slope.
+- **Configuration:** `Pipeline.spec.humanChoice.cost: 1.0` (default neutral); env override `AI_SDLC_HC_COST=0.5`.
+- **Orchestrator (RFC-0015) integration:** the orchestrator emits an `OrchestratorCostPolicyApplied` event whenever `HC_cost ≠ 1.0` is in effect (per RFC-0015 §7 observability surface). The event carries the current `HC_cost` value, the count of cost-sensitive tasks affected this tick, and the priority delta induced by the multiplier — making the soft-pressure intervention visible in the same observability stream as Eρ₆ refusals.
+
+**Critical RFC-0016 dependency — what `HC_cost` reads as the cost estimate:**
+
+`HC_cost` ships as the **lever** (the operator's tuning surface); the **per-task cost-data quality** that the lever multiplies against grows with RFC-0016 (Estimation Calibration with T-Shirt Sizes) calibration maturity. Today the lever is crude because the data is crude; as RFC-0016 calibration ripens, the same lever produces increasingly accurate cost-shaped priority signals without any change to `HC_cost` semantics.
+
+| RFC-0016 phase | What `HC_cost` reads | Quality |
+|---|---|---|
+| **Today** (RFC-0016 lifecycle: Ready for Review; no calibration data yet) | `Stage.maxBudgetUsd` only — the hard-cap value, not a per-task estimate | Crude — `HC_cost` either applies because the field exists, or doesn't. No graduated cost signal. |
+| **RFC-0016 Phase 1** (Stage A signals shipped, class-default fallback active per RFC-0016 §6.1) | Class-default cost estimate from RFC-0016 §6.1: `wall_clock_minutes × token_rate` for the work item's class | Moderate — work classes get default estimates that already differentiate "small refactor" from "large feature build." `HC_cost` produces meaningful per-class priority shaping. |
+| **RFC-0016 Phase 3+** (calibration log flowing, per-class bias multipliers active) | Accurate per-task cost prediction from RFC-0016 calibration tensor (per-class × per-soul bias multipliers) | High — `HC_cost` produces accurate per-task cost-shaped priority signals; the operator's lever produces predictable, calibrated outcomes. |
+
+This dependency is **explicit and load-bearing**: shipping `HC_cost` before RFC-0016 Phase 1 is fine — adopters get the lever and the no-op-without-`Stage.maxBudgetUsd` semantics — but the lever's accuracy is bounded by RFC-0016's calibration quality. Operators tuning `HC_cost` before RFC-0016 Phase 1 should treat it as a coarse override; once Phase 3+ ships, the same configuration produces precise results.
+
+For Tessellated Platforms specifically, `HC_cost` composes with RFC-0010's `tenantQuotaShare`: the operator may tune `HC_cost` globally (platform-wide soft pressure) while per-soul Eρ₆ enforces hard caps from `tenantQuotaShare`. Per-soul `HC_cost` overrides are **not in scope for v3.4** — global `HC_cost` is sufficient for the soft-pressure use case; per-soul tuning is a future extension if practitioner demand surfaces.
 
 ---
 
@@ -515,14 +565,16 @@ spec:
 
 Product-pillar position: per-soul worktree pools are **opt-in escape valve**, not default. Most Tessellated Platforms benefit from a single shared pool; per-soul pools serve unusual cases (compliance regimes requiring physical worktree isolation, e.g., one soul's substrate access must not commingle).
 
-### 8.7 DatabaseBranchPool (RFC-0010; v3.1 interaction)
+### 8.7 DatabaseBranchPool — SHARED+RLS DEFAULT WITH PER-SOUL OPT-IN [RESOLVED 2026-05-04 — Option A with trigger checklist]
 
-RFC-0010's `DatabaseBranchPool` provides per-branch DB isolation for parallel pipelines with `databaseAccess: write/migrate`. Tessellation policy depends on the platform's tenant model — see OQ-11 below for the genuinely open question.
+RFC-0010's `DatabaseBranchPool` provides per-branch DB isolation for parallel pipelines with `databaseAccess: write/migrate`.
+
+**Resolution (Option A — shared pool + RLS isolation default; per-soul pool opt-in via init wizard):** the default is shared pool with row-level-security (RLS) isolation; per-soul pools are an opt-in escape valve walked by the `init` wizard.
 
 ```yaml
 # database-branch-pools/<adapter>.yaml
 spec:
-  soulScope: <soul-did-uri>          # optional; absent = platform-shared pool
+  soulScope: <soul-did-uri>          # optional; absent = platform-shared pool (default)
   adapter: supabase | neon | rds
   upstream: <project-ref>
   lifecycle:
@@ -535,18 +587,43 @@ Two patterns supported, both backwards-compatible:
 
 | Pattern | Tessellation | When |
 |---|---|---|
-| Shared pool, RLS isolation | `soulScope` absent | Souls are RLS-isolated within one DB project (default for early-stage Tessellated Platforms) |
-| Per-soul pool | `soulScope` present | Souls are physically separate DB projects (mature Tessellated Platforms with strict tenant isolation requirements) |
+| Shared pool, RLS isolation | `soulScope` absent | **DEFAULT.** Souls are RLS-isolated within one DB project. Sufficient for the vast majority of Tessellated Platforms regardless of maturity. |
+| Per-soul pool | `soulScope` present | Souls are physically separate DB projects. Required only when one or more triggers below fires. |
 
-Product-pillar position: the **shared pool with RLS isolation** is the default; **per-soul pools opt-in** when audit/compliance/cost-attribution requirements demand physical separation. See OQ-11 for the boundary condition.
+**Trigger checklist — when shared+RLS is INSUFFICIENT and per-soul pool is REQUIRED:**
 
-### 8.8 Operator role scope (RFC-0010; v3.1 interaction)
+The framework defaults to shared+RLS because RLS-with-correctly-configured-policies provides logical tenant isolation that satisfies the majority of compliance and engineering requirements. The trigger checklist below enumerates the exhaustive set of conditions under which an operator MUST switch to per-soul pools. **If ANY trigger fires, the operator switches to per-soul.** The framework cannot auto-detect these triggers (they are adopter-declared, not orchestrator-observable); the `init` wizard walks the checklist and the operator declares.
 
-RFC-0010 defines a fourth pillar role: **Operator** (config + cost posture + calibration + event triage; explicitly NOT engineer/reviewer/PM/SRE/maintainer). Product-pillar position on tessellation:
+1. **Regulatory hard requirement.** A regulatory framework the platform operates under explicitly requires tenant *physical* isolation (not logical/RLS). The exhaustive in-scope list:
+   - HIPAA covered entity status (PHI separation requirement)
+   - PCI-DSS Level 1 merchant (cardholder data physical-isolation control)
+   - FedRAMP Moderate or High (system boundary controls)
+   - SOC2 with a formal physical-isolation control declared in the audit boundary
+   - Regional data residency (GDPR Art. 49 cross-border restrictions, Schrems II EU data-localization, China PIPL, Canadian PIPEDA cross-border) — when the regulatory requirement is *physical region pinning* rather than RLS-policy-region-flag
 
-**The Operator role is platform-scoped, NOT tessellated.** One operator per platform, judging the *pipeline* not the *product soul*. Souls inherit operator decisions (subscription posture, calibration drift policy, event triage rules). Soul DIDs do NOT carry an operator vertex on their fractal triad.
+2. **Customer contract.** A vendor agreement with a specific customer explicitly requires tenant physical isolation as a contractual term, regardless of regulatory baseline. The contract supersedes the framework's default.
+
+3. **Operator security review.** An explicit risk identified during operator security review that RLS cannot mitigate (e.g., side-channel concerns, supply-chain compromise scenarios, regulator-pre-approval where the regulator has formally stated RLS is insufficient for the specific data class).
+
+If ANY trigger fires → operator MUST switch to per-soul pool. The framework can advise via the `init` wizard checklist but cannot auto-detect (adopter declares the regimes + contracts; operator declares the security-review outcome).
+
+**Cross-reference to RFC-0022 (Compliance Posture + Audit Surface):** RFC-0022 (just drafted via AISDLC-173) is the canonical surface for declaring regulatory regimes. When an adopter declares HIPAA / PCI-DSS Level 1 / FedRAMP / SOC2-with-physical-isolation / regional-data-residency in their RFC-0022 `CompliancePosture` resource, the OQ-11 trigger checklist above becomes a **derivedGate computation** in RFC-0022's regime → DerivedGates mapping — the framework reads the declared posture and surfaces the per-soul-pool requirement automatically. Operators using RFC-0022 do not re-declare the trigger conditions; the regime declaration drives the gate.
+
+For platforms not yet on RFC-0022, the operator declares the per-soul-pool decision directly via the `init` wizard checklist and persists it in the pipeline configuration.
+
+Product-pillar position: the **shared pool with RLS isolation** is the default; **per-soul pools opt-in** when one of the three triggers above fires. The default protects the majority of adopters from operational complexity they don't need; the trigger checklist makes the escape valve explicit and audit-traceable.
+
+### 8.8 Operator role scope — PLATFORM-SCOPED, NOT TESSELLATED [RESOLVED 2026-05-04 — Option A]
+
+RFC-0010 defines a fourth pillar role: **Operator** (config + cost posture + calibration + event triage; explicitly NOT engineer/reviewer/PM/SRE/maintainer).
+
+**Resolution (Option A — accept Alex's position):** The Operator role is **platform-scoped**, NOT tessellated per soul. One operator per platform, judging the *pipeline* not the *product soul*. Souls inherit operator decisions (subscription posture, calibration drift policy, event triage rules). Soul DIDs do NOT carry an operator vertex on their fractal triad.
 
 Justification: the three pillars in v3 (`design`, `engineering`, `product`) describe the **product soul** of a soul — what the soul is, who it serves, how it speaks. Operator describes the **pipeline operation** — burn rate, harness availability, calibration drift. Pipeline operation is a property of the platform, not of any individual soul.
+
+**Per-soul operational differences are tuned via the existing RFC-0010 mechanisms** — `SubscriptionPlan.spec.tenants[<soul-slug>].quotaShare` (per-soul cost allocation) and per-soul `costBudget` declarations (per-soul stage caps). Even radically-different operational profiles (e.g., one soul high-volume cheap-stage; another soul low-volume expensive-stage) are tuned via these knobs rather than by separate operator humans.
+
+A per-soul Operator role can be added later via a future RFC if/when enterprise demand surfaces (e.g., a Tessellated Platform with so many souls that a single human operator cannot retain context across all of them, requiring delegation). For v3.4, the platform-scoped Operator is sufficient and matches the reference implementation pattern (Engineering Authority + Operator role collapse to the same person).
 
 Implication for v3 §4 (Fractal Triad): triad remains `{ design, engineering, product }`; Operator is acknowledged as a **platform-only role** that operates on the pipeline running across all souls. Where RFC-0008 §A.8 defined design-authority signal monitoring per Soul DID, Operator decisions (e.g., "raise this soul's hardCap" or "extend off-peak window for this soul") are made at the platform-pipeline level by referencing soul slugs in the pipeline.yaml, not by adding fields to the Soul DID itself.
 
@@ -594,8 +671,11 @@ Steps 2-5 are reversible at any step. A platform that authors Soul DIDs but late
 ### Phase 4 — Sub-Dimensions Activation (Week 4+)
 
 - Eρ₅ Compliance Clearance activates when souls declare `complianceRegimes` against the hard-regulatory-only scope (OQ-5 sub-decision)
-- Eτ_tessellation_drift activates with the substrate-conditional detection rules
-- Both gated on adopter opt-in initially; promotion to default behavior subject to ecosystem feedback
+- Eτ_tessellation_drift **rule #1 (AST scan)** activates orchestrator-side per §7.2 (OQ-6 sub-decision); **rule #3 (cross-soul provenance audits)** activates once the §8.3 ProvenanceRecord extension lands and tessellated provenance accumulates; **rule #2 (embedding distance)** is deferred to RFC-0019 implementation
+- HC_cost channel ships per §7.4 (OQ-12 resolution) as the operator-tunable lever; per-task cost-data quality grows with RFC-0016 calibration phases (crude → moderate → high)
+- DatabaseBranchPool default = shared+RLS per §8.7 (OQ-11 resolution); init wizard walks the trigger checklist for per-soul opt-in; RFC-0022 declarations drive the gate automatically when adopters use it
+- Operator role wiring confirmed platform-scoped per §8.8 (OQ-10 resolution); no soul-vertex Operator field shipped
+- All sub-dimension activations are gated on adopter opt-in initially; promotion to default behavior subject to ecosystem feedback
 
 ---
 
@@ -714,9 +794,11 @@ When a substrate work item targets multiple souls with conflicting compliance re
 
 ## 13. Open Questions
 
-> **Status (v3.3, 2026-05-03):** OQ-1 through OQ-5 + OQ-13 RESOLVED 2026-05-03 (see resolution markers per question). OQ-6 through OQ-12 remain open for future operator walkthrough.
+> **Status (v3.4, 2026-05-04):** ALL 13 open questions RESOLVED. OQ-1 through OQ-5 + OQ-13 resolved 2026-05-03; OQ-6 through OQ-12 resolved 2026-05-04 (see resolution markers per question). RFC-0009 is now structurally complete pending Engineering + Design pillar sign-off.
 
-The following require resolution before final sign-off. Resolved questions retain the original framing followed by an explicit `[RESOLVED ...]` marker and the operator decision.
+The following list is preserved as historical record. Each question retains the original framing followed by an explicit `[RESOLVED ...]` marker and the operator decision.
+
+> **§13.5 + §13.6 carve-out notice (OQ-7 resolution, v3.4):** Earlier drafts of this RFC referenced a §13.5 (session-bug + severity scoring rule) and a §13.6 (incident monitoring + root-cause analysis) as candidate sub-sections to fold into RFC-0009 main. Per OQ-7 reversal of Position-stated, both have been carved out. **See RFC-0020 (Session-bug + severity scoring rule, Draft) and RFC-0021 (Incident monitoring + root-cause analysis, RESERVED — pending adopter incident data) — both carved out per OQ-7 reversal of Position-stated stance.** RFC-0009 stays focused on tessellation/multi-soul architecture; Dπ₃ refinements + generic PPA additions belong in their own RFCs.
 
 ### OQ-1 [RESOLVED 2026-05-03 — Option D]: The `triad` object — required everywhere with auto-fillable defaults
 
@@ -766,47 +848,87 @@ Other rules (`max`, `weighted-traffic`, `weighted-revenue`, `mean`) ship as opt-
 
 See §7.1 for the normative scope and the exhaustive in-scope list.
 
-### OQ-6 (Position-stated; OPEN): Eτ_tessellation_drift detection is orchestrator-side
+### OQ-6 [RESOLVED 2026-05-04 — Option A with sub-decision]: Eτ_tessellation_drift detection is orchestrator-side
 
-**Position**: Orchestrator-side detection rules (AST scan for soul-name string literals in shared substrate, embedding distance between Soul DIDs over time, cross-soul provenance audits). **Reasoning**: adapter-side detection puts the burden on every adapter author to instrument drift signals consistently. The framework cannot guarantee detection coverage if it depends on N adapter implementations correctly tagging soul-affecting work. Orchestrator-side is the only path to framework-wide consistency. Adapter-side detection can supplement (adapters can volunteer additional drift signals) but cannot be the primary detection layer.
+**Original position**: Orchestrator-side detection rules (AST scan for soul-name string literals in shared substrate, embedding distance between Soul DIDs over time, cross-soul provenance audits). **Reasoning**: adapter-side detection puts the burden on every adapter author to instrument drift signals consistently. The framework cannot guarantee detection coverage if it depends on N adapter implementations correctly tagging soul-affecting work. Orchestrator-side is the only path to framework-wide consistency. Adapter-side detection can supplement (adapters can volunteer additional drift signals) but cannot be the primary detection layer.
 
-**OPEN — pending future operator walkthrough.**
+**Resolution (Option A — orchestrator-side, with sub-decision on staggered rule ship dates):** Detection lives orchestrator-side, not adapter-side. Sub-decision on which rules ship when:
 
-### OQ-7 (Position-stated; OPEN): §13.5 folds into RFC-0009 main as Addendum A; §13.6 ships as RFC-0009.2
+- **Rule #1 (AST scan for soul-name string literals in shared substrate):** ships now in the RFC-0009 implementation phase. No new infrastructure required — AST tooling is already a framework primitive. Covers the highest-frequency drift mode (soul-name leakage in substrate code).
+- **Rule #2 (embedding distance between Soul DIDs over time):** deferred to RFC-0019 (Embedding Provider Adapter Framework, just shipped to main as Draft 2026-05-03). When RFC-0019's adapter surface lands and `embedDocument(text)` is callable from the orchestrator, rule #2 becomes ship-able.
+- **Rule #3 (cross-soul provenance audits):** deferred to the RFC-0009 implementation phase itself — provenance tagging needs the substrate-vs-soul partition to exist in code (per §8.3 ProvenanceRecord extension) before cross-soul provenance can be audited. Ships once the first generation of tessellated provenance records accumulates.
 
-**Position**: §13.5 (session-bug + severity scoring rule) is a Dπ₃ refinement with practitioner validation (caught a real P1→P0 mis-prioritization in a live backlog scoring pass). It belongs in RFC-0009 main as Addendum A (parallel to RFC-0008's Addendum A pattern). §13.6 (incident monitoring + root-cause analysis) requires post-pilot adopter incident volume to validate; ship as RFC-0009.2 follow-on, deferred until that data exists. **Reasoning**: §13.5 has the same evidence quality as the main RFC; §13.6 is correctly speculative until live load arrives.
+See §7.2 for the normative table and per-rule mechanism.
 
-**OPEN — pending future operator walkthrough.**
+### OQ-7 [RESOLVED 2026-05-04 — Carve out; reverses Position-stated]: §13.5 + §13.6 carve out to separate RFCs
 
-### OQ-8 (Practitioner observation, separate framework issue; OPEN): HC composite stewardship.designAuthority → HC_design wiring
+**Original position**: §13.5 (session-bug + severity scoring rule) is a Dπ₃ refinement with practitioner validation (caught a real P1→P0 mis-prioritization in a live backlog scoring pass). It belongs in RFC-0009 main as Addendum A (parallel to RFC-0008's Addendum A pattern). §13.6 (incident monitoring + root-cause analysis) requires post-pilot adopter incident volume to validate; ship as RFC-0009.2 follow-on, deferred until that data exists. **Reasoning**: §13.5 has the same evidence quality as the main RFC; §13.6 is correctly speculative until live load arrives.
 
-When an adopter's DSB carries `stewardship.designAuthority.principals: [name]`, the orchestrator's `pillarBreakdown.shared.hcComposite.design` value did not populate. May be: (a) an orchestrator wiring gap in `enrichAdmissionInput`, (b) an unspecified explicit signal channel requirement, or (c) intentional behavior misunderstood by the adopter. Resolution affects how soul-level design authority signals into HC for soul-bounded work. **Track as a separate framework issue; not gating for RFC-0009.**
+**Resolution (Carve out to separate RFCs — REVERSAL of Position-stated stance):** Same scope-creep principle as OQ-3 (variant + journey carve-out). Both §13.5 and §13.6 carve out:
 
-**OPEN — pending future operator walkthrough.**
+- **§13.5 (session-bug + severity scoring rule)** → **RFC-0020** (Draft, has practitioner validation per Alex). RFC-0020 file ships in a follow-on PR; this PR reserves the registry slot.
+- **§13.6 (incident monitoring + root-cause analysis)** → **RFC-0021** (RESERVED placeholder, no draft yet — pending adopter incident data).
 
-### OQ-9 (Practitioner observation, separate framework issue; OPEN): admit confidence ceiling at 0.5 with all readers loaded
+Sections of v3.2 that referenced §13.5 + §13.6 as candidate sub-sections to fold into RFC-0009 main have been removed. Replaced with the single notice line in §13's header: **"See RFC-0020 (Session-bug + severity scoring rule, Draft) and RFC-0021 (Incident monitoring + root-cause analysis, RESERVED — pending adopter incident data) — both carved out per OQ-7 reversal of Position-stated stance."**
 
-With DID + DSB + maintainers + soul-tracks all loaded, admit confidence stayed at 0.5 (expected ≥0.7 given enrichment richness). Suggests confidence is computed from `PriorityInput` field defaults rather than enrichment success. **Track as a separate framework issue; not gating for RFC-0009.**
+**Reasoning (operator):** RFC-0009 stays focused on tessellation/multi-soul architecture. Dπ₃ refinements + generic PPA additions belong in their own RFCs. The same coherence-vs-scope-creep tension that drove OQ-3's reversal applies here — RFC-0009's normative claim is about tessellation; bundling unrelated PPA refinements gives reviewers an excuse to defer the whole thing while the unrelated material gets re-debated.
 
-**OPEN — pending future operator walkthrough.**
+**This is a REVERSAL of the original Position-stated stance.** Recorded explicitly so future readers see that the operator weighed the original "same evidence quality" argument against the scope-creep argument and chose scope-creep avoidance.
 
-### OQ-10 (v3.1; Position-stated; OPEN): Operator role is platform-scoped, NOT tessellated per soul
+### OQ-8 [RESOLVED 2026-05-04 — Filed as standalone bug]: HC composite stewardship.designAuthority → HC_design wiring
 
-Product-pillar position: RFC-0010's Operator role describes pipeline operation (burn rate, harness availability, calibration drift, event triage) which is a property of the platform-level pipeline, not of any individual soul. The fractal triad in §4 stays `{ design, engineering, product }`; Operator is acknowledged as a fourth pillar role that operates at platform scope. Counter-position: souls with radically different operational profiles (e.g., one soul high-volume cheap-stage; another soul low-volume expensive-stage) might warrant per-soul operator overrides. Position-stated rationale: in practice, even radically-different operational profiles are tuned via SubscriptionPlan `tenantQuotaShare` and per-soul `costBudget` declarations rather than by separate operator humans. See §8.8.
+When an adopter's DSB carries `stewardship.designAuthority.principals: [name]`, the orchestrator's `pillarBreakdown.shared.hcComposite.design` value did not populate. May be: (a) an orchestrator wiring gap in `enrichAdmissionInput`, (b) an unspecified explicit signal channel requirement, or (c) intentional behavior misunderstood by the adopter. Resolution affects how soul-level design authority signals into HC for soul-bounded work.
 
-**OPEN — pending future operator walkthrough.**
+**Resolution (Filed as standalone framework bug):** Confirmed Alex's triage. Bug filed as **AISDLC-171 (HC composite design pillar wiring)** against RFC-0008/orchestrator. Not in scope for RFC-0009 — RFC-0009 inherits the wiring contract from RFC-0008 unchanged; if the contract has a defect, it gets fixed against RFC-0008 + orchestrator code, not by encoding a workaround in RFC-0009.
 
-### OQ-11 (v3.1; Genuinely open; OPEN): DatabaseBranchPool tessellation policy default
+### OQ-9 [RESOLVED 2026-05-04 — Filed as standalone bug]: admit confidence ceiling at 0.5 with all readers loaded
 
-When should `DatabaseBranchPool` carry `soulScope`? Two patterns are both valid: (a) shared pool with RLS isolation (default for early-stage Tessellated Platforms), (b) per-soul pool with physical isolation (mature platforms with strict tenant audit/compliance/cost-attribution requirements). The boundary condition — at what platform maturity does (b) become required, not optional — is genuinely open. Engineering pillar (Dom-as-Operator) is the right authority on this; product-pillar has no firm position. See §8.7.
+With DID + DSB + maintainers + soul-tracks all loaded, admit confidence stayed at 0.5 (expected ≥0.7 given enrichment richness). Suggests confidence is computed from `PriorityInput` field defaults rather than enrichment success.
 
-**OPEN — pending future operator walkthrough.**
+**Resolution (Filed as standalone framework bug):** Confirmed Alex's triage. Bug filed as **AISDLC-172 (Admit confidence stuck at 0.5 ceiling)** against RFC-0008/orchestrator. Not in scope for RFC-0009 — admit confidence is a PriorityInput-layer concern; RFC-0009's tessellation extensions feed enriched data into that layer but do not change confidence computation. The fix lives against the confidence-computation code path, separable from RFC-0009 acceptance.
 
-### OQ-12 (v3.1; Genuinely open; OPEN): Where does soft cost-pressure feed into the composite?
+### OQ-10 [RESOLVED 2026-05-04 — Option A]: Operator role is platform-scoped, NOT tessellated per soul
 
-§7.3 Eρ₆ Cost Clearance is **gating** (categorical 0/1) — work that would exhaust `tenantQuotaShare` is denied. But what about **soft** cost pressure — work that *could* run but *should not* given burn-rate trends? Three candidates: (a) extend Dπ₃ Bug Urgency semantics to include cost-urgency (urgent + costly → different signal than urgent alone), (b) add a new HC channel `HC_cost` that the operator can ratchet to defer expensive work without changing soul/demand scoring, (c) accept that soft cost-pressure is purely operator-managed via `cli-tier-recommendation` + `costBudget` adjustments and doesn't enter the composite at all. Genuinely open; product-pillar has no preference. Engineering authority + Operator (Dom) decides.
+**Original position (Alex)**: RFC-0010's Operator role describes pipeline operation (burn rate, harness availability, calibration drift, event triage) which is a property of the platform-level pipeline, not of any individual soul. The fractal triad in §4 stays `{ design, engineering, product }`; Operator is acknowledged as a fourth pillar role that operates at platform scope. Counter-position: souls with radically different operational profiles (e.g., one soul high-volume cheap-stage; another soul low-volume expensive-stage) might warrant per-soul operator overrides. Position-stated rationale: in practice, even radically-different operational profiles are tuned via SubscriptionPlan `tenantQuotaShare` and per-soul `costBudget` declarations rather than by separate operator humans. See §8.8.
 
-**OPEN — pending future operator walkthrough.**
+**Resolution (Option A — accept Alex's position):** Operator role is **platform-scoped**, NOT tessellated per soul. Per-soul operational differences are tuned via the existing RFC-0010 `SubscriptionPlan.tenantQuotaShare` + per-soul `costBudget` mechanisms. A per-soul Operator role can be added later via a future RFC if/when enterprise demand surfaces (e.g., a Tessellated Platform with so many souls that a single human operator cannot retain context across all of them).
+
+See §8.8 for the normative spec.
+
+### OQ-11 [RESOLVED 2026-05-04 — Option A with trigger checklist]: DatabaseBranchPool tessellation policy default
+
+**Original framing**: When should `DatabaseBranchPool` carry `soulScope`? Two patterns are both valid: (a) shared pool with RLS isolation (default for early-stage Tessellated Platforms), (b) per-soul pool with physical isolation (mature platforms with strict tenant audit/compliance/cost-attribution requirements). The boundary condition — at what platform maturity does (b) become required, not optional — is genuinely open. Engineering pillar (Dom-as-Operator) is the right authority on this; product-pillar has no firm position. See §8.7.
+
+**Resolution (Option A — shared+RLS default; per-shard opt-in via init wizard, with explicit trigger checklist):** Default = shared pool with RLS isolation. Per-shard opt-in is walked by the `init` wizard. Three triggers REQUIRE switching to per-shard:
+
+1. **Regulatory hard requirement** — HIPAA covered entity, PCI-DSS Level 1 merchant, FedRAMP Moderate or High, SOC2 with formal physical-isolation control, regional data residency (GDPR Art. 49, Schrems II, China PIPL, Canadian PIPEDA cross-border).
+2. **Customer contract** — vendor agreement explicitly requires tenant physical isolation.
+3. **Operator security review** — explicit risk identified that RLS cannot mitigate.
+
+If ANY trigger fires → operator MUST switch to per-shard pool. The framework can advise via the `init` wizard checklist but cannot auto-detect (adopter declares regimes + contracts; operator declares the security-review outcome).
+
+**Cross-reference to RFC-0022 (Compliance Posture + Audit Surface):** RFC-0022 (just drafted via AISDLC-173) is the canonical surface for declaring regulatory regimes; the OQ-11 trigger checklist becomes a **derivedGate computation** in RFC-0022's regime → DerivedGates mapping when adopters use RFC-0022. See §8.7 for the normative spec and the RFC-0022 wiring detail.
+
+### OQ-12 [RESOLVED 2026-05-04 — Option B with RFC-0016 dependency]: Where does soft cost-pressure feed into the composite?
+
+**Original framing**: §7.3 Eρ₆ Cost Clearance is **gating** (categorical 0/1) — work that would exhaust `tenantQuotaShare` is denied. But what about **soft** cost pressure — work that *could* run but *should not* given burn-rate trends? Three candidates: (a) extend Dπ₃ Bug Urgency semantics to include cost-urgency (urgent + costly → different signal than urgent alone), (b) add a new HC channel `HC_cost` that the operator can ratchet to defer expensive work without changing soul/demand scoring, (c) accept that soft cost-pressure is purely operator-managed via `cli-tier-recommendation` + `costBudget` adjustments and doesn't enter the composite at all. Genuinely open; product-pillar has no preference. Engineering authority + Operator (Dom) decides.
+
+**Resolution (Option B — new HC_cost channel, with RFC-0016 data dependency):** New HC channel `HC_cost`. Operator-tunable (default `1.0` = neutral; ratchet down to defer expensive work). Range `0.0–1.0` multiplier on cost-sensitive tasks.
+
+Sub-decisions:
+
+- **What counts as a cost-sensitive task?** Tasks carrying `Stage.maxBudgetUsd` (RFC-0010 §11.4); `HC_cost` is a no-op for tasks without that field.
+- **Interaction with Eρ₆ (hard gate)?** Independent — Eρ₆ refuses if hard-budget exceeded; `HC_cost` reduces priority but doesn't refuse. Eρ₆ wins on hard exceedance.
+- **Configuration**: `Pipeline.spec.humanChoice.cost: 1.0` (default neutral); env override `AI_SDLC_HC_COST=0.5`.
+- **Orchestrator (RFC-0015) integration**: emits `OrchestratorCostPolicyApplied` event when `HC_cost ≠ 1.0` (per RFC-0015 §7 observability).
+
+**Critical RFC-0016 dependency:** `HC_cost` ships as the **lever**; per-task cost data quality grows with RFC-0016 calibration:
+
+- **Today** (RFC-0016 Ready for Review, no calibration data yet): `HC_cost` reads `Stage.maxBudgetUsd` only — crude.
+- **RFC-0016 Phase 1** (Stage A signals shipped, class-default fallback): `HC_cost` reads class-default cost estimate from §6.1 wall-clock × token-rate.
+- **RFC-0016 Phase 3+** (calibration log flowing, per-class bias multipliers active): `HC_cost` reads accurate per-task cost prediction.
+
+This dependency is explicit and load-bearing. See §7.4 for the normative spec including the per-RFC-0016-phase data quality table.
 
 ### OQ-13 [RESOLVED 2026-05-03 — re-affirmed unchanged; Resolved against title rename]: Taxonomy — "multi-soul" + "soul sharding" coexist
 
@@ -825,8 +947,14 @@ The mechanism is fixed; both naming surfaces are accepted. No title rename in v3
 - **RFC-0005**: Product Priority Algorithm (Alexander Kline, AI-SDLC Contributors). The framework's PPA spec embedding PPA v1.0 as `Pipeline.spec.priorityPolicy`. Lists "Multi-product portfolio-level resource allocation" as a Non-Goal / future work; this RFC is that future work.
 - **RFC-0008**: PPA Triad Integration. The DID resource, three-pillar architecture, admission composite, design system binding. §17 PPA v1.1 Direction is the pattern §16 below mirrors.
 - **RFC-0010**: Parallel Execution + Worktree Pooling (Dom Legault, April 2026). The cost governance substrate (`SubscriptionPlan`, `WorktreePool`, `DatabaseBranchPool`, `tenantQuotaShare`) that §7.3 Eρ₆ + PPA v1.1 §7 C8 wire into. Operator role specification (operator runbook).
+- **RFC-0015** (Autonomous Pipeline Orchestrator, Ready for Review): the orchestrator surface that emits the `OrchestratorCostPolicyApplied` event when §7.4 `HC_cost ≠ 1.0` is in effect (per OQ-12 resolution).
+- **RFC-0016** (Estimation Calibration with T-Shirt Sizes, Ready for Review): the calibration substrate that supplies per-task cost predictions to §7.4 `HC_cost`. The data quality of `HC_cost`'s lever effect grows through RFC-0016's phases (crude `Stage.maxBudgetUsd`-only → class-default → calibrated per-task). Critical dependency per OQ-12 resolution.
 - **RFC-0017** (reserved per AISDLC-165): In-Shard Variant Pattern. Carved out of RFC-0009 main per OQ-3 (v3.3). Pending normative spec when practitioner validation exists.
 - **RFC-0018** (reserved per AISDLC-165): In-Shard Journey Pattern. Carved out of RFC-0009 main per OQ-3 (v3.3). Pending normative spec when practitioner validation exists.
+- **RFC-0019** (Embedding Provider Adapter Framework, Draft): supplies the embedding adapter surface that §7.2 detection rule #2 (embedding distance between Soul DIDs over time) depends on. Rule #2 ships when RFC-0019's `embedDocument(text)` adapter call is implementable from the orchestrator (per OQ-6 sub-decision).
+- **RFC-0020** (Session-bug + Severity Scoring Rule, Draft — file ships in follow-on PR): carved out of RFC-0009 §13.5 per OQ-7 reversal. Dπ₃ refinement with practitioner validation.
+- **RFC-0021** (Incident Monitoring + Root-Cause Analysis, Reserved): carved out of RFC-0009 §13.6 per OQ-7 reversal. Pending adopter incident data before normative spec.
+- **RFC-0022** (Compliance Posture + Audit Surface, Draft): canonical surface for declaring regulatory regimes; §8.7 OQ-11 trigger checklist becomes a derivedGate computation in RFC-0022's regime → DerivedGates mapping when adopters use it.
 - **RFC-0006**: Design System Governance. The DSB resource's broader governance context.
 - **RFC-0001**: Template. Format conventions followed by this RFC.
 
@@ -895,4 +1023,6 @@ The implementation team commits to:
 
 ---
 
-*v3.3 authored 2026-05-03 by Dominique (operator walkthrough). Resolved OQ-1 through OQ-5 + re-affirmed OQ-13. OQ-6 through OQ-12 remain open for future operator walkthrough. Variant + journey patterns carved out to RFC-0017/0018 (REVERSAL of Alex's original Position-stated stance per OQ-3). Naming landed on Tessellated Platform / Soul / Tessellation; `shard` retired as noun, `soul sharding` retained as mechanism verb form. Triad now required everywhere with `init`-scaffolded defaults (BREAKING CHANGE acknowledged). Eρ₅ scope clarified to hard regulatory frameworks only with formal external-audit consequences. crossSoulScoringRule default `min` now explicitly scoped to dependency-graph-computed affected souls, not all souls in the platform. Awaits Engineering + Design pillar review.*
+*v3.3 authored 2026-05-03 by Dominique (operator walkthrough). Resolved OQ-1 through OQ-5 + re-affirmed OQ-13. Variant + journey patterns carved out to RFC-0017/0018 (REVERSAL of Alex's original Position-stated stance per OQ-3). Naming landed on Tessellated Platform / Soul / Tessellation; `shard` retired as noun, `soul sharding` retained as mechanism verb form. Triad now required everywhere with `init`-scaffolded defaults (BREAKING CHANGE acknowledged). Eρ₅ scope clarified to hard regulatory frameworks only with formal external-audit consequences. crossSoulScoringRule default `min` now explicitly scoped to dependency-graph-computed affected souls, not all souls in the platform.*
+
+*v3.4 authored 2026-05-04 by Dominique (operator walkthrough). Resolved the remaining 7 of 13 open questions: OQ-6 (Option A — orchestrator-side detection with staggered rule ship dates: rule #1 in RFC-0009 impl, rule #2 awaits RFC-0019 impl, rule #3 awaits RFC-0009 impl provenance), OQ-7 (REVERSAL — §13.5 + §13.6 carved to RFC-0020 + RFC-0021 per same scope-creep principle as OQ-3), OQ-8 (filed as AISDLC-171 framework bug), OQ-9 (filed as AISDLC-172 framework bug), OQ-10 (Option A — Operator role platform-scoped, not tessellated), OQ-11 (Option A — shared+RLS pool default with explicit trigger checklist; cross-references RFC-0022 for adopters using compliance-posture declarations), OQ-12 (Option B — new HC_cost soft-pressure channel, lever-and-data-quality split with RFC-0016 calibration dependency). All 13 OQs now resolved (OQ-1-12 active + OQ-13 already resolved against title rename in v3.2). RFC-0009 is structurally complete; awaits Engineering + Design pillar sign-off.*
