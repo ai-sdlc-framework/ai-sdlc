@@ -53,6 +53,13 @@ pnpm-debug.log*
 # committed; the signed envelope at .ai-sdlc/attestations/<sha>.dsse.json is
 # the durable artifact.
 .ai-sdlc/verdicts/
+# AISDLC-155: per-worktree active-task sentinel (AISDLC-81). The sentinel
+# lives INSIDE each worktree at `<worktree>/.active-task` and is read by the
+# PreToolUse hook to resolve which task's `permittedExternalPaths` apply for
+# cross-repo writes. Ephemeral, per-worktree — never committed. Was tracked
+# by accident in earlier commits and kept causing merge conflicts on every
+# rebase as parallel worktrees each tried to write their own task ID.
+.active-task
 .enterprise.yaml
 
 # AISDLC-122: pipeline-cli writes the DoR calibration log to
