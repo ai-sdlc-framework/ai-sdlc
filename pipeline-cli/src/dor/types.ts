@@ -55,6 +55,51 @@ export interface IssueInput {
    * Defaults to `process.cwd()`.
    */
   workDir?: string;
+  /**
+   * Optional project-scoped shard manifest (RFC-0011 Phase 7 / Alex's
+   * Addition 2 — AISDLC-115.8). When the project's Design Intent Document
+   * ("DID", per RFC-0008 §4.2) describes a *tessellated* platform —
+   * multiple independently-deliverable shards under one product umbrella
+   * (e.g. customer-app | admin-app | public-api) — Gate 5 ALSO requires
+   * the issue to name which shard it targets. Single-shard or absent
+   * manifests behave exactly as before (no additional check).
+   *
+   * Plumbed through {@link IssueInput} as the per-evaluation carrier so
+   * tests + ingress shims can pass it explicitly without depending on a
+   * full DID loader (which doesn't exist in-tree yet — see RFC-0008
+   * Addendum B for the upstream DID shape this scaffold anticipates).
+   */
+  shardManifest?: ProjectShardManifest;
+}
+
+/**
+ * Minimal project-shard descriptor (RFC-0011 Phase 7 scaffold for Alex's
+ * Addition 2). Names the shards of a tessellated platform so Gate 5 can
+ * ask "which shard?" when the issue fails to identify one.
+ *
+ * **Scope intentionally narrow.** The upstream Design Intent Document
+ * (RFC-0008 §4.2 + Addendum B) is a richer object — `soulPurpose`,
+ * `experientialTargets`, `brandIdentity`, etc. — but Gate 5 only needs
+ * the shard list. Keeping the interface tiny lets a future DID loader
+ * project into this shape without a breaking API change. When the DID
+ * abstraction lands (tracked separately), `shardManifest` becomes a
+ * derived view of `did.platform.shards[]` and this interface stays the
+ * same.
+ */
+export interface ProjectShardManifest {
+  /**
+   * Ordered list of shard identifiers (lowercase, kebab-case
+   * recommended). Examples: `['customer-app', 'admin-app', 'public-api']`.
+   * A list of length 0 or 1 makes the manifest a no-op for Gate 5 — the
+   * "tessellated" check is gated on `shards.length > 1`.
+   */
+  shards: string[];
+  /**
+   * Optional reference to where the manifest was loaded from (a DID file
+   * path, a `dor-config.yaml` slice, etc.). Surfaced in clarification
+   * findings so operators can audit how Gate 5 reached its conclusion.
+   */
+  manifestRef?: string;
 }
 
 /**
