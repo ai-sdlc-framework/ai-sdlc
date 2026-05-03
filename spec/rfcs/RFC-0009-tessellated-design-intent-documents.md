@@ -1,9 +1,9 @@
 # RFC-0009: Tessellated Design Intent Documents for Multi-Soul Platforms
 
 **Document type:** Normative (draft)
-**Status:** Draft v3.2 — Product-pillar authored amendment to PPA v1.0's single-soul architecture. Closes PPA v1.0 §8 "Multi-Product Portfolio" open question and RFC-0005 "Multi-product portfolio-level resource allocation (future work)" non-goal. v3.2 strengthens fractal-triad framing (Identity / Expression / Coherence) per PPA v1.1, expands §5.1 design vertex with DID ownership-model parallel, marks OQ-13 resolved against title rename ("multi-soul" + "soul sharding" coexist), and adds explicit acknowledgment of PPA v1.1's C8 Cost Governance Integration wiring SubscriptionPlan.tenantQuotaShare → §7.3 Eρ₆. v1 + v2 + v3 + v3.1 superseded; see Revision History.
+**Status:** Draft v3.3 — Operator walkthrough resolved 5 of 13 open questions (OQ-1 through OQ-5) and re-affirmed OQ-13. Variant + journey patterns carved out to RFC-0017 (In-Shard Variant Pattern) and RFC-0018 (In-Shard Journey Pattern) — both reserved per AISDLC-165, pending normative spec when practitioner validation exists. Triad object is now required-with-defaults everywhere (BREAKING CHANGE acknowledged; small user base = right time to break). `crossSoulScoringRule` default is `min` with affected-souls scope filter (computed from dependency graph). Eρ₅ Compliance Clearance is gating on hard regulatory frameworks only (GDPR, HIPAA, SOC2, PCI-DSS, FedRAMP, regional data-residency, regulated-industry rules — anything with formal external-audit consequences). Naming landed on **Tessellated Platform / Soul / Tessellation** with `soul sharding` retained as the mechanism verb form; `shard` retired as a noun. OQ-6 through OQ-12 remain open for future operator walkthrough. Lifecycle remains Draft pending OQ-6-12 + Engineering + Design sign-off.
 **Created:** 2026-04-24
-**Revised:** 2026-04-27
+**Revised:** 2026-05-03
 **Authors:** Alexander Kline (Product Authority, author of PPA v1.0 + RFC-0005)
 **Reviewers:** [Engineering Authority — Pending], [Design Authority — Pending], [Product Authority — Authored]
 **Spec version:** v1alpha1
@@ -16,8 +16,8 @@
 
 | Person | Role | Status | Date |
 |--------|------|--------|------|
-| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏸ Pending review of v3.2 | — |
-| Morgan Hirtle | Chief of Design / Design Authority | ⏸ Pending review of v3.2 | — |
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏸ Pending review of v3.3 | — |
+| Morgan Hirtle | Chief of Design / Design Authority | ⏸ Pending review of v3.3 | — |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✍️ Authored v3.2 | 2026-04-27 |
 
 ---
@@ -26,12 +26,13 @@
 
 | Version | Date | Summary |
 |---------|------|---------|
-| v1 | 2026-04-24 | Initial proposal. Introduces Tessellated DID + Shard DID + Fractal Triad as backwards-compatible additive extension to RFC-0008. Surfaced from practitioner pass against a real multi-shard platform implementation. |
+| v1 | 2026-04-24 | Initial proposal. Introduces Tessellated DID + Soul DID + Fractal Triad as backwards-compatible additive extension to RFC-0008. Surfaced from practitioner pass against a real multi-soul platform implementation. |
 | v1.1 | 2026-04-25 | Two follow-on candidate sections added: §13.5 session-bug + severity scoring rule, §13.6 incident monitoring + root-cause analysis. Asymmetric-risk closing argument added to §1. |
 | v2 | 2026-04-26 | Rewritten in-place per Engineering review feedback (S190): reference-implementation-specific terminology stripped from normative body, format aligned to RFC-0008 convention, open questions enumerated, implementation sequencing made discrete. |
-| v3 | 2026-04-26 | Product-pillar voice strengthened. Reframes RFC-0009 as a PPA architectural amendment (not just RFC-0008 schema additions): explicitly closes PPA v1.0 §8 "Multi-Product Portfolio" open question and RFC-0005 "Multi-product portfolio-level resource allocation" non-goal. Open questions where the implementation has a strong product position now state that position with reasoning instead of hedging; pure-naming questions (OQ-4) remain genuinely open. New §16 PPA v1.1 Direction section mirroring RFC-0008 §17 pattern adds v1.1-6 (per-shard Sα vector) and v1.1-7 (per-shard Cκ tensor). Reference Implementation appendix reframed as empirical proof-by-existence, not framework-supplicant. |
-| v3.1 | 2026-04-27 | Additive-only patch acknowledging upstream's RFC-0010 (Parallel Execution + Worktree Pooling, published 2026-04-27 by Dom). New §7.3 Eρ₆ Cost Clearance gating sub-component (parallel to Eρ₅ Compliance Clearance) honoring RFC-0010 `tenantQuotaShare` per shard. New §8.5 SubscriptionPlan, §8.6 WorktreePool, §8.7 DatabaseBranchPool, §8.8 Operator role scope sections enumerating RFC-0010 resource interaction at platform vs shard scopes. New OQ-10 (Operator role tessellation), OQ-11 (DatabaseBranchPool per-shard policy), OQ-12 (Eρ₆ vs Dπ₃ — which dimension cost-pressure feeds into). No changes to v3's normative spec. |
-| **v3.2** | **2026-04-27** | **Parity pass with PPA v1.1 (Alexander, same day). Strengthens §4 Fractal Triad with the Identity / Expression / Coherence framing for the structural pillar asymmetry — Product declares identity, Design expresses identity, Engineering maintains coherence between Identity and Expression at runtime; the asymmetry is a structural property of the basis, not a gap to fix. Strengthens §5.1 design vertex with explicit DID ownership-model parallel to PPA v1.1 §4 (Product owns mission/experientialTargets feeding SA1; Design owns designPrinciples/brandIdentity/visualIdentity feeding SA2; Engineering reviews and may block only on technical infeasibility of measurable signals). Adds §7.3 explicit acknowledgment of PPA v1.1's C8 Cost Governance Integration as the operational channel wiring SubscriptionPlan.tenantQuotaShare → Eρ₆. Marks OQ-13 resolved-against-rename: PPA v1.1 landed on "multi-soul scoring" terminology in body + title; "soul sharding" survives as accurate vocabulary for the *pattern itself* (mechanism), complementing "multi-soul platform" which describes the *architectural shape* (output). Adds PPA v1.1 to References. No normative content changed from v3 or v3.1; v3.2 is purely strengthening + cross-reference parity.** |
+| v3 | 2026-04-26 | Product-pillar voice strengthened. Reframes RFC-0009 as a PPA architectural amendment (not just RFC-0008 schema additions): explicitly closes PPA v1.0 §8 "Multi-Product Portfolio" open question and RFC-0005 "Multi-product portfolio-level resource allocation" non-goal. Open questions where the implementation has a strong product position now state that position with reasoning instead of hedging; pure-naming questions (OQ-4) remain genuinely open. New §16 PPA v1.1 Direction section mirroring RFC-0008 §17 pattern adds v1.1-6 (per-soul Sα vector) and v1.1-7 (per-soul Cκ tensor). Reference Implementation appendix reframed as empirical proof-by-existence, not framework-supplicant. |
+| v3.1 | 2026-04-27 | Additive-only patch acknowledging upstream's RFC-0010 (Parallel Execution + Worktree Pooling, published 2026-04-27 by Dom). New §7.3 Eρ₆ Cost Clearance gating sub-component (parallel to Eρ₅ Compliance Clearance) honoring RFC-0010 `tenantQuotaShare` per soul. New §8.5 SubscriptionPlan, §8.6 WorktreePool, §8.7 DatabaseBranchPool, §8.8 Operator role scope sections enumerating RFC-0010 resource interaction at platform vs soul scopes. New OQ-10 (Operator role tessellation), OQ-11 (DatabaseBranchPool per-soul policy), OQ-12 (Eρ₆ vs Dπ₃ — which dimension cost-pressure feeds into). No changes to v3's normative spec. |
+| v3.2 | 2026-04-27 | Parity pass with PPA v1.1 (Alexander, same day). Strengthens §4 Fractal Triad with the Identity / Expression / Coherence framing for the structural pillar asymmetry — Product declares identity, Design expresses identity, Engineering maintains coherence between Identity and Expression at runtime; the asymmetry is a structural property of the basis, not a gap to fix. Strengthens §5.1 design vertex with explicit DID ownership-model parallel to PPA v1.1 §4 (Product owns mission/experientialTargets feeding SA1; Design owns designPrinciples/brandIdentity/visualIdentity feeding SA2; Engineering reviews and may block only on technical infeasibility of measurable signals). Adds §7.3 explicit acknowledgment of PPA v1.1's C8 Cost Governance Integration as the operational channel wiring SubscriptionPlan.tenantQuotaShare → Eρ₆. Marks OQ-13 resolved-against-rename: PPA v1.1 landed on "multi-soul scoring" terminology in body + title; "soul sharding" survives as accurate vocabulary for the *pattern itself* (mechanism), complementing "multi-soul platform" which describes the *architectural shape* (output). Adds PPA v1.1 to References. No normative content changed from v3 or v3.1; v3.2 is purely strengthening + cross-reference parity. |
+| **v3.3** | **2026-05-03** | **Operator walkthrough resolved 5 of 13 open questions: OQ-1 (Option D — required-with-defaults), OQ-2 (Option A — `min` with affected-souls scope filter), OQ-3 (REVERSAL — variant + journey carved out to RFC-0017/0018, NOT bundled here), OQ-4 (Variant B — Tessellated Platform / Soul / Tessellation; retire `shard` as noun), OQ-5 (Option A — gating, hard regulatory only). OQ-6 through OQ-12 remain open for future walkthrough. OQ-13 re-affirmed unchanged. Lifecycle remains Draft pending OQ-6-12 + Engineering + Design sign-off. Rename pass applied throughout: `shard` (noun) → `soul`; `Shard DID` → `Soul DID`; `crossShardScoringRule` → `crossSoulScoringRule`; `shardId/shardScope/shardOverrides/shardBindings/targetedShards` → `soulId/soulScope/soulOverrides/soulBindings/targetedSouls`; example slugs `shard-a/b/c` → `soul-a/b/c`; DID URI segments `did:platform-x:shard:*` → `did:platform-x:soul:*`. `soul sharding` retained as mechanism verb form per OQ-13. Sections of v3.2 main that normatively spec variant + journey patterns deleted and replaced with pointer to RFC-0017/0018.** |
 
 ---
 
@@ -60,27 +61,17 @@
 
 PPA v1.0 §3 defines Soul Alignment (Sα) as a scalar function `Sα(w)` computed against "the soul purpose definition document" — singular. RFC-0005 §"Pipeline.spec.priorityPolicy" wires this to a single `soulPurpose` string. RFC-0008 §3-§4 makes this DID a shared artifact between Product and Design pillars. **The single-soul assumption that flows from PPA v1.0 → RFC-0005 → RFC-0008 is structurally incompatible with multi-product platforms** — a category of adopter that PPA v1.0 §8 explicitly identifies as an open question and RFC-0005 explicitly defers to "future work."
 
-This RFC is that future work. It amends the PPA architecture (and consequently the DID schema, the admission composite, the resource type definitions) to support platforms running multiple soul-distinct products on shared engineering substrate. The amendment is strictly additive: single-product adopters of RFC-0005 + RFC-0008 require zero changes; their PPA scoring continues unchanged.
+This RFC is that future work. It amends the PPA architecture (and consequently the DID schema, the admission composite, the resource type definitions) to support platforms running multiple soul-distinct products on shared engineering substrate. The amendment introduces three concepts:
 
-Three concepts are introduced:
+- **Tessellated DID** — a parent DID describing a platform whose soul is composed of multiple Soul DIDs tiled together. Carries platform-level invariants and a tessellation manifest enumerating child souls.
+- **Soul DID** — a soul-complete DID for one product face of a Tessellated Platform. Inherits substrate invariants from its parent Tessellated DID; specializes its own Sα / compliance / audience.
+- **Fractal Triad** — every DID (Tessellated OR Soul) carries a required `triad: { design, engineering, product }` object. The triad is fractal: it exists at the platform level AND at each soul level, with inheritance from parent to child.
 
-- **Tessellated DID** — a parent DID describing a platform whose soul is composed of multiple Shard DIDs tiled together. Carries platform-level invariants and a tessellation manifest enumerating child shards.
-- **Shard DID** — a soul-complete DID for one product face of a tessellated platform. Inherits substrate invariants from its parent Tessellated DID; specializes its own Sα / compliance / audience.
-- **Fractal Triad** — every DID (Tessellated OR Shard) carries a required `triad: { design, engineering, product }` object. The triad is fractal: it exists at the platform level AND at each shard level, with inheritance from parent to child.
+**Note on backwards compatibility (v3.3):** Per OQ-1 resolution, the `triad` object is now required everywhere, including on single-product DIDs. This is a BREAKING CHANGE relative to RFC-0008's `triad`-optional draft. The framework's small user base makes this the right time to break. `init` scaffolds defaults for single-product adopters (operator wears all three pillars unless explicit roles for design/engineering/product are present), so the migration cost is one `init` re-run plus one schema validation pass per existing DID.
 
-Closes the architectural gap that locks the Design pillar at platform-aggregate values when work is single-shard-scoped (empirically observed: 0.40 vs the shard-bounded 0.7+ that per-shard DSBs would correctly produce). Per-shard DSBs become authorable; per-shard Sα scoring becomes meaningful; per-shard Cκ calibration becomes possible.
+Closes the architectural gap that locks the Design pillar at platform-aggregate values when work is single-soul-scoped (empirically observed: 0.40 vs the soul-bounded 0.7+ that per-soul DSBs would correctly produce). Per-soul DSBs become authorable; per-soul Sα scoring becomes meaningful; per-soul Cκ calibration becomes possible.
 
 This RFC also queues two PPA v1.1 directions (§16 v1.1-6 + v1.1-7) that formalize what the interim solution embeds structurally.
-
-Three concepts are introduced:
-
-- **Tessellated DID** — a parent DID describing a platform whose soul is composed of multiple Shard DIDs tiled together. Carries platform-level invariants and a tessellation manifest.
-- **Shard DID** — a soul-complete DID for one product face of a tessellated platform. Inherits substrate invariants from its parent Tessellated DID; specializes its own Sα / compliance / audience.
-- **Fractal Triad** — every DID (Tessellated OR Shard) carries a required `triad: { design, engineering, product }` object. The triad is fractal: it exists at the platform level AND at each shard level, with inheritance from parent to child.
-
-All schema additions are optional fields. Single-product adopters of RFC-0008 require zero changes; their DIDs continue to work unchanged.
-
-Closes the architectural gap that locks the Design pillar at platform-aggregate values (e.g., 0.40) when work is single-shard-scoped (e.g., should be 0.7+ against the targeted shard's DSB). Per-shard DSBs become authorable; per-shard Sα scoring becomes meaningful.
 
 ---
 
@@ -92,7 +83,7 @@ RFC-0008 §3 (Triad Architecture) and §4 (Design Intent Document) assume one DI
 
 The assumption breaks when a platform serves multiple soul-distinct products on shared engineering substrate.
 
-Concrete observable failure mode: when a multi-product platform has one DSB (DesignSystemBinding) covering platform-aggregate design system maturity, all single-shard work scores against the platform-aggregate Design pillar value. Empirically observed: Design pillar locked at 0.40 (lifecycle: stabilizing) when product-shard-specific DSBs would correctly score 0.7+ for shard-bounded work. The framework is technically correct; the abstraction is incorrect for the input.
+Concrete observable failure mode: when a multi-product platform has one DSB (DesignSystemBinding) covering platform-aggregate design system maturity, all single-soul work scores against the platform-aggregate Design pillar value. Empirically observed: Design pillar locked at 0.40 (lifecycle: stabilizing) when product-soul-specific DSBs would correctly score 0.7+ for soul-bounded work. The framework is technically correct; the abstraction is incorrect for the input.
 
 ### 2.2 The pattern is general, not implementation-specific
 
@@ -107,9 +98,9 @@ Each of these eventually hits the multi-soul governance wall. Without framework-
 
 ### 2.3 Concrete drift modes single-DID misses
 
-1. **Substrate code encoding shard-specific identity strings as fallbacks.** Single-DID has no way to express "substrate code must not name any specific shard" because there's only one shard in its mental model. Pattern compounds with every new product added.
+1. **Substrate code encoding soul-specific identity strings as fallbacks.** Single-DID has no way to express "substrate code must not name any specific soul" because there's only one soul in its mental model. Pattern compounds with every new product added.
 2. **Persisted state from one product silently appearing in another product's surface during hydration.** Cross-product visual identity bleed at the presentation layer. Single-DID can't model the cross-product isolation invariant.
-3. **Type unification gaps where the same shape is declared multiple times across substrate code paths.** Substrate-vs-product type drift is invisible without the substrate/shard distinction.
+3. **Type unification gaps where the same shape is declared multiple times across substrate code paths.** Substrate-vs-product type drift is invisible without the substrate/soul distinction.
 4. **Compliance regime conflicts** that single-DID can't express simultaneously. Multiple categorically-distinct regimes get forced into one bucket; the framework's QualityGate model either passes everything or blocks everything.
 5. **Per-product Cκ calibration impossible.** Without tessellation, calibration data averages outcomes across categorically different products. The "did this work succeed?" signal becomes noise.
 
@@ -123,93 +114,95 @@ Multi-product platforms with shared substrate are the target market for AI-SDLC 
 
 Three asymmetric costs accrue from inaction, not incidentally but structurally:
 
-1. **Vocabulary leadership transfers to whoever ships first.** Some adopter hits the multi-soul wall in the next 6-18 months. If the framework hasn't adopted RFC-0009, that adopter ships their own version under their own naming — the framework either absorbs a less-coherent proposal later or watches the ecosystem fork. Adopting now means the framework gets to shape the vocabulary while the proposal is mature, backwards-compatible, and field-validated by an existing reference implementation. Adopting later means inheriting the next adopter's compromise.
+1. **Vocabulary leadership transfers to whoever ships first.** Some adopter hits the multi-soul wall in the next 6-18 months. If the framework hasn't adopted RFC-0009, that adopter ships their own version under their own naming — the framework either absorbs a less-coherent proposal later or watches the ecosystem fork. Adopting now means the framework gets to shape the vocabulary while the proposal is mature, backwards-compatible (modulo OQ-1's triad-required break, mitigated by `init` defaults), and field-validated by an existing reference implementation. Adopting later means inheriting the next adopter's compromise.
 
 2. **Adopters that hit the wall route around the framework or abandon it.** Concretely, a team using AI-SDLC for their first product launches successfully → adds a second product → hits single-soul Sα incoherence → has three options: (a) author side-channel governance docs the framework can't see (silent fragmentation; framework loses authority), (b) fork the framework with their own multi-DID extension (loud fragmentation; framework loses ecosystem coherence), or (c) abandon AI-SDLC for something more accommodating (commercial loss). All three reduce the framework's commercial trajectory. RFC-0009 absorbs the growth curve gracefully and keeps adopters inside the framework's authority.
 
 3. **Competitive lead window is narrow.** No competing AI-SDLC-adjacent governance framework (CrewAI, AutoGen, SmythOS, the various agentic-platform startups) has solved multi-product governance. Most haven't even named it as a problem. AI-SDLC adopting RFC-0009 first means the framework has a structural differentiator that takes a competitor 6-12 months to credibly match — and by then the framework has compound-interest credibility from real adopters governing real multi-product platforms on it.
 
-The product-pillar position: **single-soul governance feels safe today and becomes a liability tomorrow.** Tessellation is the cheapest insurance: strictly additive, backwards-compatible, validated by an existing reference implementation, with vocabulary the framework gets to own.
+The product-pillar position: **single-soul governance feels safe today and becomes a liability tomorrow.** Tessellation is the cheapest insurance: validated by an existing reference implementation, with vocabulary the framework gets to own.
 
 ---
 
 ## 3. Definitions
 
-Terms used throughout this RFC. Generic; adopter implementations may use different surface names while preserving the underlying concepts.
+Terms used throughout this RFC. Per OQ-4 resolution (v3.3), the framework canonicalizes on **Tessellated Platform / Soul / Tessellation**. The noun "shard" is retired; "soul sharding" survives as the mechanism verb form (per OQ-13).
 
 | Term | Meaning |
 |---|---|
-| **Tessellated DID** | A parent DID describing a platform composed of N Shard DIDs. Carries platform-level invariants, a tessellation manifest enumerating child shards, and cross-shard governance rules. |
-| **Shard DID** | A soul-complete DID for one product face of a tessellated platform. Conforms to the same `design-intent-document.schema.json` as a single-product DID, with the addition of a `parentTessellation` field. |
-| **Fractal Triad** | The PPA Triad (Engineering × Design × Product) replicated at multiple scopes: at the platform level on the Tessellated DID, and at each shard level on each Shard DID. Each triad vertex inherits from its parent. |
-| **Sub-theme** | A purely cosmetic variant within a Shard DID — token overrides, no character roster change, no compliance change. Smallest sub-structure unit. |
-| **Variant** | A visual + character-roster reskin of a Shard DID that shares the shard's underlying soul. Larger sub-structure than sub-theme; smaller than a separate shard. May add (but never subtract) compliance regimes from the parent shard. |
-| **Journey** | A persona-pathway sub-division within a Shard DID. Same audience domain, same compliance, same engineering substrate; specializes scaffolding, mentor-roster emphasis, stage pacing, and journey-specific seed material for one cohort within the shard's broader audience. |
-| **Tessellation Drift** | A class of Eτ-firing events: substrate code encoding shard-specific identifiers, cross-shard isolation invariant violations, or cross-shard convergence without explicit merge decision. |
+| **Tessellated Platform** | A platform whose soul is composed of multiple soul-distinct product faces tiled together onto shared engineering substrate. The architectural shape that this RFC governs. |
+| **Tessellated DID** | A parent DID describing a Tessellated Platform composed of N Soul DIDs. Carries platform-level invariants, a tessellation manifest enumerating child souls, and cross-soul governance rules. |
+| **Soul DID** | A soul-complete DID for one product face of a Tessellated Platform. Conforms to the same `design-intent-document.schema.json` as a single-product DID, with the addition of a `parentTessellation` field. |
+| **Tessellation** | The pattern by which N Soul DIDs tile into a Tessellated DID, sharing substrate invariants while specializing identity, expression, and compliance. |
+| **Soul sharding** (verb) | The mechanism by which one platform soul shards into N coherent faces — what tessellation *does* internally. Verb form retained per OQ-13; do not use "shard" as a noun. |
+| **Fractal Triad** | The PPA Triad (Engineering × Design × Product) replicated at multiple scopes: at the platform level on the Tessellated DID, and at each soul level on each Soul DID. Each triad vertex inherits from its parent. |
+| **Tessellation Drift** | A class of Eτ-firing events: substrate code encoding soul-specific identifiers, cross-soul isolation invariant violations, or cross-soul convergence without explicit merge decision. |
 
-The sub-theme < journey < variant < shard nesting represents four scopes of in-shard variation, each progressively larger in soul-distinctness.
+In-soul variation patterns (sub-theme, variant, journey) are out of scope for RFC-0009 main per OQ-3 resolution. **See RFC-0017 (In-Shard Variant Pattern, reserved) and RFC-0018 (In-Shard Journey Pattern, reserved) — both pending normative spec when practitioner validation exists.**
 
 ---
 
 ## 4. The Fractal Triad
 
-RFC-0008 §3 establishes the PPA Triad: **Engineering × Design × Product** as the three pillars of governance. RFC-0008 §C5 establishes HC_design as a design-pillar signal channel. This RFC extends the triad concept structurally: **the triad is fractal** — it exists at multiple scopes within a tessellated platform.
+RFC-0008 §3 establishes the PPA Triad: **Engineering × Design × Product** as the three pillars of governance. RFC-0008 §C5 establishes HC_design as a design-pillar signal channel. This RFC extends the triad concept structurally: **the triad is fractal** — it exists at multiple scopes within a Tessellated Platform.
 
 ### 4.1 Geometry
 
 A tessellation of triangles is a canonical mosaic pattern, used here as structural metaphor:
 
-- Every **Shard DID is a triangle** with three vertices: `{ design, engineering, product }`
+- Every **Soul DID is a triangle** with three vertices: `{ design, engineering, product }`
 - Every **Tessellated DID is a larger triangle** with the same three vertices at platform scale
-- Shard triangles tile into the platform triangle; each vertex of each shard triangle inherits from (and may extend) the corresponding platform-vertex
-- A substrate invariant declared at a platform vertex propagates to all shard vertices of the same type
-- A shard-specific specialization declared at a shard vertex remains local unless explicitly promoted to the platform vertex
+- Soul triangles tile into the platform triangle; each vertex of each soul triangle inherits from (and may extend) the corresponding platform-vertex
+- A substrate invariant declared at a platform vertex propagates to all soul vertices of the same type
+- A soul-specific specialization declared at a soul vertex remains local unless explicitly promoted to the platform vertex
 
 ### 4.1.1 The structural pillar asymmetry (v3.2 strengthening — Identity / Expression / Coherence)
 
 The three pillars play structurally distinct roles at every scope of the tessellation. This asymmetry is a structural property of the basis, not a gap to fix:
 
-- **Product declares identity** — what this shard is for, who it serves, what problem it exists to solve. The mission/audience/scope fields on the product vertex are the load-bearing identity declaration.
-- **Design expresses identity** — how this shard appears, feels, and sounds. The design principles, brand identity, visual identity, and voice register on the design vertex are the load-bearing expression of identity that Product declared.
+- **Product declares identity** — what this soul is for, who it serves, what problem it exists to solve. The mission/audience/scope fields on the product vertex are the load-bearing identity declaration.
+- **Design expresses identity** — how this soul appears, feels, and sounds. The design principles, brand identity, visual identity, and voice register on the design vertex are the load-bearing expression of identity that Product declared.
 - **Engineering maintains coherence between Identity and Expression at runtime** — enforcement, quality gates, compliance, drift detection. Engineering's authority at any scope is to maintain what the other two pillars have declared. The compliance regimes, performance budgets, observability requirements, and substrate invariants on the engineering vertex are the load-bearing coherence-maintenance functions.
 
-Engineering's offensive power in the PPA composite is gating, not amplifying — and that is correct. The market decides what is urgent (Product owns Demand Pressure, Market Force, Entropy Tax — dimensions that can amplify priority); Design and Engineering ensure the system only builds what it can build well (gating dimensions: ER₁–ER₆ on Engineering, ER₄ on Design via DesignSystemBinding readiness). The asymmetry replicates fractally: a shard-level Engineering authority maintains shard-level coherence, just as the platform-level Engineering authority maintains platform-level coherence.
+Engineering's offensive power in the PPA composite is gating, not amplifying — and that is correct. The market decides what is urgent (Product owns Demand Pressure, Market Force, Entropy Tax — dimensions that can amplify priority); Design and Engineering ensure the system only builds what it can build well (gating dimensions: ER₁–ER₆ on Engineering, ER₄ on Design via DesignSystemBinding readiness). The asymmetry replicates fractally: a soul-level Engineering authority maintains soul-level coherence, just as the platform-level Engineering authority maintains platform-level coherence.
 
 This asymmetry is the formal structural answer to the question "why does the triad have three pillars in this specific configuration." Identity / Expression / Coherence is not a hierarchy of authority — all three pillars retain veto power through the multiplicative composite — but a hierarchy of what each pillar's authority is *over*. PPA v1.1 §5 ("Fractal Triad") and §9 ("Pillar Perspective Breakdown") formalize this asymmetry in the scoring model.
 
-### 4.2 The three vertices per shard
+### 4.2 The three vertices per soul
 
-For any Shard DID, the triad object specializes:
+For any Soul DID, the triad object specializes:
 
-**Design vertex** — shard-specific design intent:
-- Voice register specific to the shard's audience and domain
+**Design vertex** — soul-specific design intent:
+- Voice register specific to the soul's audience and domain
 - Visual identity specialization (chrome tokens overrides, portrait style, surface aesthetic)
 - Experiential invariants (ceremonies, narrative cadence, micro-interaction patterns)
-- Brand and UX guidelines specific to this shard's audience
+- Brand and UX guidelines specific to this soul's audience
 - Inherits from platform Design vertex (shared design tokens, structural design system axes, accessibility floor)
 
-**Engineering vertex** — shard-specific engineering constraints:
-- Compliance regime(s) specific to the shard's domain (e.g., HIPAA-adjacent, fiduciary, IP-isolation, patent-adjacent, voice-synthesis-legal)
-- Data retention and isolation requirements per shard
-- SLA tier appropriate to shard workload
-- Performance budgets specific to shard workload shape
-- Shard-specific observability and audit requirements
+**Engineering vertex** — soul-specific engineering constraints:
+- Compliance regime(s) specific to the soul's domain (e.g., HIPAA, GDPR, SOC2, PCI-DSS, FedRAMP, regional data-residency)
+- Data retention and isolation requirements per soul
+- SLA tier appropriate to soul workload
+- Performance budgets specific to soul workload shape
+- Soul-specific observability and audit requirements
 - Inherits from platform Engineering vertex (shared substrate invariants, tenancy model, agent-routing infrastructure)
 
-**Product vertex** — shard-specific product direction:
-- Target audience and persona for this shard
-- Problem domain the shard addresses
-- Success metrics for this shard's work
-- Monetization model per shard
+**Product vertex** — soul-specific product direction:
+- Target audience and persona for this soul
+- Problem domain the soul addresses
+- Success metrics for this soul's work
+- Monetization model per soul
 - Endgame phase mapping per platform's lifecycle model
 
 ---
 
 ## 5. Schema Amendments to `design-intent-document.schema.json`
 
-All amendments are additive optional fields. The current `additionalProperties: false` constraint on `spec` requires explicit recognition of the new fields; no other validator changes required.
+### 5.1 The `triad` object — REQUIRED EVERYWHERE WITH AUTO-FILLABLE DEFAULTS [RESOLVED 2026-05-03 — Option D]
 
-### 5.1 The `triad` object (proposed required everywhere; see §13 OQ-1)
+Per OQ-1 resolution (v3.3), the `triad` object is **required on every DID** — single-product DIDs included. This is a BREAKING CHANGE relative to RFC-0008's optional-`triad` draft. The framework's small user base makes this the right time to break.
+
+**`init` scaffolding behavior (single-product DIDs):** the `init` command auto-fills `triad.design.authority`, `triad.engineering.authority`, and `triad.product.authority` with `${operator}` (operator wears all three pillars by default). If explicit roles for design/engineering/product are present in the project's `roles.yaml` (or equivalent), those roles override the operator default for the matching pillars. Tessellation forces the operator to differentiate authority across pillars at the platform level.
 
 ```json
 {
@@ -222,7 +215,9 @@ All amendments are additive optional fields. The current `additionalProperties: 
       "properties": {
         "design": {
           "type": "object",
+          "required": ["authority"],
           "properties": {
+            "authority": { "type": "string", "description": "Principal accountable for the design vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs." },
             "inheritsFrom": { "type": "string", "description": "Path to parent DID's design vertex. Null for top-level Tessellated DID." },
             "imperatives": { "type": "array", "items": { "type": "string" } },
             "overrides": { "type": "object" }
@@ -230,12 +225,14 @@ All amendments are additive optional fields. The current `additionalProperties: 
         },
         "engineering": {
           "type": "object",
+          "required": ["authority"],
           "properties": {
+            "authority": { "type": "string", "description": "Principal accountable for the engineering vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs." },
             "inheritsFrom": { "type": "string" },
             "complianceRegimes": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "Named regulatory or compliance constraints applied at this scope."
+              "description": "Named regulatory or compliance constraints applied at this scope. Eρ₅ scope per §7.1: HARD regulatory frameworks ONLY (GDPR, HIPAA, SOC2, PCI-DSS, FedRAMP, regional data-residency, regulated-industry rules)."
             },
             "performanceBudgets": { "type": "object" },
             "dataRetention": { "type": "object" },
@@ -245,7 +242,9 @@ All amendments are additive optional fields. The current `additionalProperties: 
         },
         "product": {
           "type": "object",
+          "required": ["authority"],
           "properties": {
+            "authority": { "type": "string", "description": "Principal accountable for the product vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs." },
             "inheritsFrom": { "type": "string" },
             "targetAudience": { "type": "string" },
             "problemResonance": { "type": "string", "description": "Source-of-truth for Sα₁ scoring at this DID's scope." },
@@ -272,6 +271,8 @@ The triad object's vertices have categorically different content types and owner
 
 Both Product and Design retain veto power over the full DID through mutual approval requirements. Engineering can block only on technical infeasibility grounds, not on identity or expression preferences (those are Product and Design's authority respectively). The asymmetry — Product and Design have positive authoring authority while Engineering has guardrail-only authority — is the structural manifestation of the Identity / Expression / Coherence framing in §4.1.1.
 
+For single-product DIDs initialized with `${operator}` defaults across all three vertex `authority` fields (per §5.1), the operator implicitly owns all three roles. The asymmetry is preserved — the operator simply wears all three hats — and the moment the operator differentiates (assigns a separate Design Authority, for example), the asymmetric review/approval rules immediately apply per the table above.
+
 Drift between DID versions over time defaults toward the owning pillar's perspective. A DID where Product fields have not been touched in 6 months but Design fields evolved monthly indicates Product's strategic intent has gone stale — surface this via `DesignIntentDrift` reconciliation event (parallel to RFC-0006's `TokenDriftDetected`). Quarterly DID review is a minimum floor, not the primary detection mechanism. Continuous semantic-drift monitoring is the actual mechanism.
 
 ### 5.2 The `tessellation` object (Tessellated DIDs only)
@@ -280,107 +281,132 @@ Drift between DID versions over time defaults toward the owning pillar's perspec
 {
   "tessellation": {
     "type": "object",
-    "description": "Present only on Tessellated DIDs (platform roots). Enumerates child Shard DIDs and cross-shard governance.",
+    "description": "Present only on Tessellated DIDs (platform roots). Enumerates child Soul DIDs and cross-soul governance.",
     "properties": {
-      "shards": {
+      "souls": {
         "type": "array",
         "items": {
           "type": "object",
-          "required": ["shardId", "didUri"],
+          "required": ["soulId", "didUri"],
           "properties": {
-            "shardId": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+            "soulId": { "type": "string", "pattern": "^[a-z0-9-]+$" },
             "didUri": { "type": "string", "format": "uri-reference" },
             "status": { "enum": ["active", "deprecated", "draft"] },
             "inheritsSubstrate": { "type": "boolean", "default": true }
           }
         }
       },
-      "crossShardScoringRule": {
-        "enum": ["min", "weighted-traffic", "weighted-revenue", "max"],
-        "default": "min"
+      "crossSoulScoringRule": {
+        "enum": ["min", "max", "mean", "weighted-traffic", "weighted-revenue"],
+        "default": "min",
+        "description": "Aggregation rule when substrate work affects multiple souls. Default `min` per OQ-2 resolution (v3.3). Other rules ship as opt-in escape valves; weighted variants are advanced — they require a data source the adopter must provide."
       },
       "substrateInvariants": {
         "type": "array",
         "items": { "type": "string" },
-        "description": "Named invariants ALL shards must honor. Violations trigger cross-shard drift detection."
+        "description": "Named invariants ALL souls must honor. Violations trigger cross-soul drift detection."
       }
     },
-    "required": ["shards"]
+    "required": ["souls"]
   }
 }
 ```
 
-### 5.3 The `parentTessellation` field (Shard DIDs only)
+### 5.3 The `parentTessellation` field (Soul DIDs only)
 
 ```json
 {
   "parentTessellation": {
     "type": "string",
-    "description": "Present only on Shard DIDs. References the parent Tessellated DID's URI."
+    "description": "Present only on Soul DIDs. References the parent Tessellated DID's URI."
   }
 }
 ```
 
 ### 5.4 Mutual exclusion
 
-A DID has `tessellation` XOR `parentTessellation` XOR neither. The last is the RFC-0008 base case (single-product DID), fully unchanged. No DID has both.
+A DID has `tessellation` XOR `parentTessellation` XOR neither. The last is the RFC-0008 base case (single-product DID). All three categories now require the `triad` object per §5.1 (v3.3 OQ-1 resolution); only the tessellation/parentTessellation fields differentiate the three.
 
 ---
 
 ## 6. Admission Composite Extension
 
-RFC-0008 Addendum A §A.5 (Admission Scoring Function) and the live admission composite (`SA × D-pi_adjusted × ER × (1+HC)` per the orchestrator implementation) operate on a single DID. The extension preserves single-DID behavior and adds shard-aware scoring when tessellation is present:
+RFC-0008 Addendum A §A.5 (Admission Scoring Function) and the live admission composite (`SA × D-pi_adjusted × ER × (1+HC)` per the orchestrator implementation) operate on a single DID. The extension preserves single-DID behavior and adds soul-aware scoring when tessellation is present:
 
 ```
 For a work item w:
 
-  resolveTargetShards(w) = set of Shard DIDs the work item affects, derived from
-    work_item code-area mappings or explicit shard tags.
+  resolveAffectedSouls(w) = set of Soul DIDs the work item affects, computed from
+    the dependency graph: souls that import or depend on the substrate file/module
+    being changed (NOT all souls in the platform). See OQ-2 resolution
+    [RESOLVED 2026-05-03 — Option A with sub-decision].
 
   If tessellation absent on the resolved DID:
     Behavior unchanged from RFC-0008. Single-DID semantics preserved.
 
-  Else if |resolveTargetShards(w)| == 0:
-    // Platform-scoped substrate work
-    Sα(w) = min over all shards { Sα(w, shard) }                    // applied across each shard
+  Else if |resolveAffectedSouls(w)| == 0:
+    // Pure substrate work touching no soul-importing module
+    Sα(w) = min over all souls { Sα(w, soul) }                          // applied across each soul
 
-  Else if |resolveTargetShards(w)| == 1:
-    Sα(w) = Sα(w, targetShard)                                       // scored against shard's DSB
+  Else if |resolveAffectedSouls(w)| == 1:
+    Sα(w) = Sα(w, targetSoul)                                            // scored against soul's DSB
 
   Else:
-    Sα(w) = crossShardScoringRule(w, affectedShards)                 // per Tessellated DID rule
+    Sα(w) = crossSoulScoringRule(w, affectedSouls)                       // per Tessellated DID rule
+                                                                          // default `min` scoped to AFFECTED souls,
+                                                                          // not all souls in the platform
 ```
 
-The same shard-resolution applies to Eρ₄ (Design System Readiness, RFC-0008 §6) which reads against the targeted shard's DSB rather than the platform-aggregate DSB. Empirically: this is the change that lifts the Design pillar from platform-aggregate values toward shard-specific values for shard-bounded work.
+**OQ-2 sub-decision (v3.3):** "affected" means souls that import or depend on the substrate file/module being changed (computed from the dependency graph). A substrate change to `payment-validator.ts` affects all souls that import payment validation, NOT all souls in the platform. This scope filter prevents the `min` rule from over-pessimizing scores on substrate work that demonstrably touches only a subset of souls.
+
+The same soul-resolution applies to Eρ₄ (Design System Readiness, RFC-0008 §6) which reads against the targeted soul's DSB rather than the platform-aggregate DSB. Empirically: this is the change that lifts the Design pillar from platform-aggregate values toward soul-specific values for soul-bounded work.
 
 ---
 
 ## 7. New Sub-Dimensions
 
-### 7.1 Eρ₅ Compliance Clearance (proposed)
+### 7.1 Eρ₅ Compliance Clearance — GATING, HARD REGULATORY ONLY [RESOLVED 2026-05-03 — Option A with sub-decision]
 
 A new sub-dimension under Eρ:
 
 ```
-Eρ₅ = shard.triad.engineering.complianceRegimes[].clearance(work_item)
+Eρ₅ = soul.triad.engineering.complianceRegimes[].clearance(work_item)
+    = 0 if any named regime is violated
+    = 1 otherwise
 ```
 
-Fires zero (gating) when a work item targeting a shard would violate that shard's named compliance regime. Example: a work item that would leak data subject to a shard's privacy regime to a platform-wide analytics pipe receives Eρ₅ = 0, gating execution reality regardless of resource availability or build complexity.
+**Categorical 0/1, gating** — fires zero when a work item targeting a soul would violate that soul's named compliance regime. Example: a work item that would leak data subject to a soul's privacy regime to a platform-wide analytics pipe receives Eρ₅ = 0, gating execution reality regardless of resource availability or build complexity.
+
+**Sub-decision (v3.3) — what counts as "compliance":** HARD regulatory frameworks ONLY. The exhaustive in-scope list:
+
+- GDPR (EU data protection)
+- HIPAA (US healthcare)
+- SOC2 (audit trust framework)
+- PCI-DSS (payment card data)
+- FedRAMP (US federal cloud)
+- Regional data-residency rules (e.g., Schrems II / EU data-localization, China PIPL, Canadian PIPEDA cross-border)
+- Regulated-industry rules (financial services KYC/AML, healthcare device certification, telecom regulations, etc.)
+
+Anything with **formal external-audit consequences** qualifies. Internal best-practices, code style, architectural preferences, and team conventions are **out of scope** for Eρ₅ — they belong to other mechanisms (code review, lint, separate quality gates).
+
+**Boundary test:** "would an external regulator or auditor have grounds to act on a violation?" Yes → Eρ₅. No → other mechanism.
+
+**Customer-audit-by-proxy qualifies:** when a customer's own SOC2 (or equivalent) audit asks vendors about their data-handling policy, that qualifies as regulatory-by-proxy and falls inside Eρ₅. The transitive audit-trail consequence is what matters, not the direct regulatory relationship.
 
 ### 7.2 Eτ_tessellation_drift (proposed)
 
 A new sub-dimension under Eτ (Entropy Tax). Fires when a work item:
 
-- Introduces shard-specific conditionals into shared substrate code (`if (shard === '<slug>')` patterns in shared modules)
+- Introduces soul-specific conditionals into shared substrate code (`if (soul === '<slug>')` patterns in shared modules)
 - Violates a named `substrateInvariant` from the Tessellated DID
-- Causes two Shard DIDs to converge (voice register drift, anti-goal overlap, success-metric overlap) without explicit merge decision recorded as a tessellation amendment
-- Silently extends one Shard DID's domain into another's territory
+- Causes two Soul DIDs to converge (voice register drift, anti-goal overlap, success-metric overlap) without explicit merge decision recorded as a tessellation amendment
+- Silently extends one Soul DID's domain into another's territory
 
-Detection signals available without new infrastructure: AST analysis of shared substrate code for shard-name string literals, embedding distance between Shard DIDs over time, cross-shard provenance audits.
+Detection signals available without new infrastructure: AST analysis of shared substrate code for soul-name string literals, embedding distance between Soul DIDs over time, cross-soul provenance audits.
 
 ### 7.3 Eρ₆ Cost Clearance (proposed; v3.1 — interaction with RFC-0010)
 
-A new sub-dimension under Eρ, parallel to §7.1 Eρ₅ Compliance Clearance. Introduced in v3.1 to honor RFC-0010's `tenantQuotaShare` semantics for tessellated platforms.
+A new sub-dimension under Eρ, parallel to §7.1 Eρ₅ Compliance Clearance. Introduced in v3.1 to honor RFC-0010's `tenantQuotaShare` semantics for Tessellated Platforms.
 
 ```
 Eρ₆(w, s) = cost_clearance(w, s.tenantQuotaShare, current_period_burn)
@@ -388,89 +414,89 @@ Eρ₆(w, s) = cost_clearance(w, s.tenantQuotaShare, current_period_burn)
             = 1 otherwise
 ```
 
-Where `s.tenantQuotaShare` is sourced from RFC-0010's `SubscriptionPlan.spec.tenants[<shard-slug>].quotaShare`. Product-pillar position: shards in a tessellated platform map to RFC-0010's `tenant` concept; the sum of all shards' `tenantQuotaShare` on a shared vendor account equals 1.0 (RFC-0010 §"TenantShareInvalid" event invariant).
+Where `s.tenantQuotaShare` is sourced from RFC-0010's `SubscriptionPlan.spec.tenants[<soul-slug>].quotaShare`. Product-pillar position: souls in a Tessellated Platform map to RFC-0010's `tenant` concept; the sum of all souls' `tenantQuotaShare` on a shared vendor account equals 1.0 (RFC-0010 §"TenantShareInvalid" event invariant).
 
-A work item targeting a shard whose burn-down for the current billing period would be exceeded by this work receives Eρ₆ = 0, gating execution reality regardless of soul alignment, demand pressure, or compliance clearance. This composes with the four cross-shard scoring rules (§5) — substrate work scored under `min` rule against Eρ₆ honors every shard's cost ceiling.
+A work item targeting a soul whose burn-down for the current billing period would be exceeded by this work receives Eρ₆ = 0, gating execution reality regardless of soul alignment, demand pressure, or compliance clearance. This composes with the cross-soul scoring rules (§5) — substrate work scored under `min` rule against Eρ₆ honors every affected soul's cost ceiling.
 
 Cost clearance is categorical (gating), not graduated, consistent with Eρ's existing semantics. Soft cost-pressure handling (work that *could* run but *should not* given budget burn rate) belongs in either Dπ₃ Bug Urgency (urgent + costly = different signal than urgent alone) or as a new HC channel — see §13 OQ-12 for the open question.
 
-For single-product platforms, Eρ₆ = 1 always (no tenant share to exceed); for tessellated platforms without RFC-0010 SubscriptionPlan declared, Eρ₆ = 1 always (no tenantQuotaShare data); both degenerate cases preserve v3.0 scoring behavior.
+For single-product platforms, Eρ₆ = 1 always (no tenant share to exceed); for Tessellated Platforms without RFC-0010 SubscriptionPlan declared, Eρ₆ = 1 always (no tenantQuotaShare data); both degenerate cases preserve v3.0 scoring behavior.
 
-**v3.2 acknowledgment of PPA v1.1 C8 wiring:** PPA v1.1 §7 introduces **C8 Cost Governance Integration** as the eighth triad-edge connection, formally wiring `SubscriptionPlan.spec.tenants[<shard-slug>].quotaShare` (RFC-0010) → ER6 Cost Clearance (PPA v1.1 §3) → §7.3 Eρ₆ (this RFC). C8 is the operational channel that makes §7.3 implementable; without C8, §7.3 has no source of `tenantQuotaShare` data. C8's implementation sequence (PPA v1.1 §7 Phase 3, weeks 9+) coincides with RFC-0010's cost governance adoption. Adopters implementing tessellation without RFC-0010 cost governance can adopt §7.3 as a no-op (Eρ₆ = 1.0 always); adopters implementing both get gating cost-clearance as a structural property of execution reality.
+**v3.2 acknowledgment of PPA v1.1 C8 wiring:** PPA v1.1 §7 introduces **C8 Cost Governance Integration** as the eighth triad-edge connection, formally wiring `SubscriptionPlan.spec.tenants[<soul-slug>].quotaShare` (RFC-0010) → ER6 Cost Clearance (PPA v1.1 §3) → §7.3 Eρ₆ (this RFC). C8 is the operational channel that makes §7.3 implementable; without C8, §7.3 has no source of `tenantQuotaShare` data. C8's implementation sequence (PPA v1.1 §7 Phase 3, weeks 9+) coincides with RFC-0010's cost governance adoption. Adopters implementing tessellation without RFC-0010 cost governance can adopt §7.3 as a no-op (Eρ₆ = 1.0 always); adopters implementing both get gating cost-clearance as a structural property of execution reality.
 
 ---
 
 ## 8. Resource Type Extensions
 
-Each existing RFC-0008 resource type gains an optional shard-scoping field. All optional; absence preserves single-DID behavior.
+Each existing RFC-0008 resource type gains an optional soul-scoping field. All optional; absence preserves single-DID behavior.
 
 ### 8.1 AgentRole
 
 ```yaml
 spec:
-  scope: platform | shard | tenant       # default: platform
-  shardBindings:                          # array of Shard DID URIs
-    - <shard-did-uri-1>
-    - <shard-did-uri-2>
+  scope: platform | soul | tenant       # default: platform
+  soulBindings:                          # array of Soul DID URIs
+    - <soul-did-uri-1>
+    - <soul-did-uri-2>
 ```
 
-`scope: platform` agents operate across all shards (substrate-scoped roles). `scope: shard` agents are bound to specific Shard DIDs (shard-specific specialists). `scope: tenant` agents are bound to tenant boundaries (orthogonal to shard scoping).
+`scope: platform` agents operate across all souls (substrate-scoped roles). `scope: soul` agents are bound to specific Soul DIDs (soul-specific specialists). `scope: tenant` agents are bound to tenant boundaries (orthogonal to soul scoping).
 
 ### 8.2 AdapterBinding
 
 ```yaml
 spec:
-  shardOverrides:
-    - shard: <shard-did-uri>
+  soulOverrides:
+    - soul: <soul-did-uri>
       config:
-        # Shard-specific adapter config (e.g., per-shard issue tracker
-        # channel, per-shard customer-signal source)
+        # Soul-specific adapter config (e.g., per-soul issue tracker
+        # channel, per-soul customer-signal source)
 ```
 
-Allows the same AdapterBinding to read from different concrete sources per shard. Necessary when, e.g., the issue tracker hosts shard-distinct customer-signal channels.
+Allows the same AdapterBinding to read from different concrete sources per soul. Necessary when, e.g., the issue tracker hosts soul-distinct customer-signal channels.
 
 ### 8.3 ProvenanceRecord
 
 ```yaml
-targetedShards:
-  - <shard-did-uri>
+targetedSouls:
+  - <soul-did-uri>
 substrateScoped: false
 ```
 
-Every provenance record captures which shard(s) the work served. Closes the per-shard Cκ calibration loop: outcomes can be attributed to the correct shard's calibration cells.
+Every provenance record captures which soul(s) the work served. Closes the per-soul Cκ calibration loop: outcomes can be attributed to the correct soul's calibration cells.
 
 ### 8.4 QualityGate
 
 ```yaml
-shardScope: <shard-did-uri>          # optional; absent = platform-scoped
+soulScope: <soul-did-uri>          # optional; absent = platform-scoped
 ```
 
-Allows per-shard quality criteria (e.g., a shard whose voice register is load-bearing can ship a "voice coherence" gate that applies only to that shard's outputs).
+Allows per-soul quality criteria (e.g., a soul whose voice register is load-bearing can ship a "voice coherence" gate that applies only to that soul's outputs).
 
 ### 8.5 SubscriptionPlan (RFC-0010; v3.1 interaction)
 
-RFC-0010 introduces `SubscriptionPlan` (vendor billing model declaration). Tessellated platforms extend it with a `tenants` map keyed by shard slug, with each shard's `quotaShare` summing to 1.0 across the account:
+RFC-0010 introduces `SubscriptionPlan` (vendor billing model declaration). Tessellated Platforms extend it with a `tenants` map keyed by soul slug, with each soul's `quotaShare` summing to 1.0 across the account:
 
 ```yaml
 # subscription-plans/<vendor>.yaml
 spec:
   tenants:
-    <shard-slug-A>:
+    <soul-slug-A>:
       quotaShare: 0.45
-      pipelineRef: pipelines/<shard-A>.yaml
-    <shard-slug-B>:
+      pipelineRef: pipelines/<soul-A>.yaml
+    <soul-slug-B>:
       quotaShare: 0.35
-      pipelineRef: pipelines/<shard-B>.yaml
-    <shard-slug-C>:
+      pipelineRef: pipelines/<soul-B>.yaml
+    <soul-slug-C>:
       quotaShare: 0.20
-      pipelineRef: pipelines/<shard-C>.yaml
+      pipelineRef: pipelines/<soul-C>.yaml
 ```
 
 Product-pillar position: SubscriptionPlan is **platform-scoped** (one per vendor account); the `tenants` map is the tessellation surface. Sum-to-1.0 invariant is enforced by RFC-0010's `TenantShareInvalid` Critical event. This is the source of truth for §7.3 Eρ₆ Cost Clearance scoring.
 
 ### 8.6 WorktreePool (RFC-0010; v3.1 interaction)
 
-RFC-0010's `WorktreePool` manages parallel agent worktrees. **Default platform-scoped** — worktrees are git-level shared substrate; no tessellation per shard required. A tessellated platform may optionally declare per-shard pools if shard-distinct branch-naming or pool-root isolation is required:
+RFC-0010's `WorktreePool` manages parallel agent worktrees. **Default platform-scoped** — worktrees are git-level shared substrate; no tessellation per soul required. A Tessellated Platform may optionally declare per-soul pools if soul-distinct branch-naming or pool-root isolation is required:
 
 ```yaml
 # worktree-pool.yaml (default — platform-shared, recommended)
@@ -479,15 +505,15 @@ spec:
     maxConcurrent: 4
   poolRoot: .worktrees/
 
-# worktree-pool-<shard>.yaml (optional — only if per-shard isolation needed)
+# worktree-pool-<soul>.yaml (optional — only if per-soul isolation needed)
 spec:
-  shardScope: <shard-did-uri>
+  soulScope: <soul-did-uri>
   parallelism:
     maxConcurrent: 2
-  poolRoot: .worktrees/<shard-slug>/
+  poolRoot: .worktrees/<soul-slug>/
 ```
 
-Product-pillar position: per-shard worktree pools are **opt-in escape valve**, not default. Most tessellated platforms benefit from a single shared pool; per-shard pools serve unusual cases (compliance regimes requiring physical worktree isolation, e.g., one shard's substrate access must not commingle).
+Product-pillar position: per-soul worktree pools are **opt-in escape valve**, not default. Most Tessellated Platforms benefit from a single shared pool; per-soul pools serve unusual cases (compliance regimes requiring physical worktree isolation, e.g., one soul's substrate access must not commingle).
 
 ### 8.7 DatabaseBranchPool (RFC-0010; v3.1 interaction)
 
@@ -496,7 +522,7 @@ RFC-0010's `DatabaseBranchPool` provides per-branch DB isolation for parallel pi
 ```yaml
 # database-branch-pools/<adapter>.yaml
 spec:
-  shardScope: <shard-did-uri>          # optional; absent = platform-shared pool
+  soulScope: <soul-did-uri>          # optional; absent = platform-shared pool
   adapter: supabase | neon | rds
   upstream: <project-ref>
   lifecycle:
@@ -509,37 +535,36 @@ Two patterns supported, both backwards-compatible:
 
 | Pattern | Tessellation | When |
 |---|---|---|
-| Shared pool, RLS isolation | `shardScope` absent | Shards are RLS-isolated within one DB project (default for early-stage tessellated platforms) |
-| Per-shard pool | `shardScope` present | Shards are physically separate DB projects (mature tessellated platforms with strict tenant isolation requirements) |
+| Shared pool, RLS isolation | `soulScope` absent | Souls are RLS-isolated within one DB project (default for early-stage Tessellated Platforms) |
+| Per-soul pool | `soulScope` present | Souls are physically separate DB projects (mature Tessellated Platforms with strict tenant isolation requirements) |
 
-Product-pillar position: the **shared pool with RLS isolation** is the default; **per-shard pools opt-in** when audit/compliance/cost-attribution requirements demand physical separation. See OQ-11 for the boundary condition.
+Product-pillar position: the **shared pool with RLS isolation** is the default; **per-soul pools opt-in** when audit/compliance/cost-attribution requirements demand physical separation. See OQ-11 for the boundary condition.
 
 ### 8.8 Operator role scope (RFC-0010; v3.1 interaction)
 
 RFC-0010 defines a fourth pillar role: **Operator** (config + cost posture + calibration + event triage; explicitly NOT engineer/reviewer/PM/SRE/maintainer). Product-pillar position on tessellation:
 
-**The Operator role is platform-scoped, NOT tessellated.** One operator per platform, judging the *pipeline* not the *product soul*. Shards inherit operator decisions (subscription posture, calibration drift policy, event triage rules). Shard DIDs do NOT carry an operator vertex on their fractal triad.
+**The Operator role is platform-scoped, NOT tessellated.** One operator per platform, judging the *pipeline* not the *product soul*. Souls inherit operator decisions (subscription posture, calibration drift policy, event triage rules). Soul DIDs do NOT carry an operator vertex on their fractal triad.
 
-Justification: the four pillars in v3 (`design`, `engineering`, `product`) describe the **product soul** of a shard — what the shard is, who it serves, how it speaks. Operator describes the **pipeline operation** — burn rate, harness availability, calibration drift. Pipeline operation is a property of the platform, not of any individual shard.
+Justification: the three pillars in v3 (`design`, `engineering`, `product`) describe the **product soul** of a soul — what the soul is, who it serves, how it speaks. Operator describes the **pipeline operation** — burn rate, harness availability, calibration drift. Pipeline operation is a property of the platform, not of any individual soul.
 
-Implication for v3 §4 (Fractal Triad): triad remains `{ design, engineering, product }`; Operator is acknowledged as a **platform-only role** that operates on the pipeline running across all shards. Where RFC-0008 §A.8 defined design-authority signal monitoring per Shard DID, Operator decisions (e.g., "raise this shard's hardCap" or "extend off-peak window for this shard") are made at the platform-pipeline level by referencing shard slugs in the pipeline.yaml, not by adding fields to the Shard DID itself.
+Implication for v3 §4 (Fractal Triad): triad remains `{ design, engineering, product }`; Operator is acknowledged as a **platform-only role** that operates on the pipeline running across all souls. Where RFC-0008 §A.8 defined design-authority signal monitoring per Soul DID, Operator decisions (e.g., "raise this soul's hardCap" or "extend off-peak window for this soul") are made at the platform-pipeline level by referencing soul slugs in the pipeline.yaml, not by adding fields to the Soul DID itself.
 
-For tessellated platforms, the Operator role typically aligns with the **Engineering Authority of the platform** (cost posture + calibration are engineering concerns), with Product Authority consulted on cross-shard tradeoffs (e.g., "should we shift quotaShare from Shard-A to Shard-B given the burn-rate trends?"). This is the pattern observed in the reference implementation (Appendix A): Engineering Authority and Operator role collapse to the same person.
+For Tessellated Platforms, the Operator role typically aligns with the **Engineering Authority of the platform** (cost posture + calibration are engineering concerns), with Product Authority consulted on cross-soul tradeoffs (e.g., "should we shift quotaShare from Soul-A to Soul-B given the burn-rate trends?"). This is the pattern observed in the reference implementation (Appendix A): Engineering Authority and Operator role collapse to the same person.
 
 ---
 
 ## 9. Migration Path
 
-Fully backwards-compatible. Single-product RFC-0008 adopters require zero changes; their DIDs continue to validate and admit composite scores compute identically.
+Migration to tessellated governance is opt-in and incremental. The triad-required-everywhere change (OQ-1 resolution, v3.3) is the only breaking step; `init` scaffolds defaults so existing single-product adopters can migrate with one re-run plus one schema-validation pass per existing DID.
 
-Migration to tessellated governance is opt-in and incremental:
+1. **Required for all DIDs (OQ-1, v3.3):** every existing DID must add a `triad: { design.authority, engineering.authority, product.authority }` block. `init` scaffolds defaults: operator wears all three pillars unless explicit roles for design/engineering/product are present in the project's `roles.yaml`. Existing single-product DIDs get the migration mechanically.
+2. Author a Tessellated DID at the platform level (or extend the existing platform DID with a `tessellation` field).
+3. Author Soul DIDs for each soul-distinct product face. Source material may be copied or referenced from existing scattered docs; schema validates either approach.
+4. Extend AgentRole, AdapterBinding, ProvenanceRecord, and QualityGate manifests with soul-scoping where relevant.
+5. Optionally run both single-DID and tessellated scoring in parallel for one sprint cycle; compare results; switch over when confident.
 
-1. Author a Tessellated DID at the platform level (or extend the existing platform DID with a `tessellation` field and the `triad` object).
-2. Author Shard DIDs for each soul-distinct product face. Source material may be copied or referenced from existing scattered docs; schema validates either approach.
-3. Extend AgentRole, AdapterBinding, ProvenanceRecord, and QualityGate manifests with shard-scoping where relevant.
-4. Optionally run both single-DID and tessellated scoring in parallel for one sprint cycle; compare results; switch over when confident.
-
-Migration is reversible at any step. A platform that authors Shard DIDs but later decides single-DID was sufficient can remove the `tessellation` field from the platform DID without removing the `triad` object.
+Steps 2-5 are reversible at any step. A platform that authors Soul DIDs but later decides single-DID was sufficient can remove the `tessellation` field from the platform DID without removing the `triad` object (which is now required regardless).
 
 ---
 
@@ -548,26 +573,27 @@ Migration is reversible at any step. A platform that authors Shard DIDs but late
 ### Phase 1 — Schema PR (Week 1)
 
 - Add `triad`, `tessellation`, `parentTessellation` field definitions to `design-intent-document.schema.json`
-- Widen `additionalProperties` posture on `spec` to admit the new fields
-- Existing fixtures continue to validate; new fixtures with tessellation fields validate
-- Mixed-fixture compatibility test: Tessellated DID with Shard DIDs that omit optional fields validate
-- Reference implementation provides four production fixtures (one Tessellated DID + three Shard DIDs) for the framework's test suite
+- Mark `triad` as required (OQ-1 resolution); ship `init` scaffolding for the required-with-defaults pattern (operator-wears-all-three-pillars baseline; explicit-role override)
+- Existing fixtures gain auto-scaffolded `triad` blocks via `init` re-run; new fixtures with tessellation fields validate
+- Mixed-fixture compatibility test: Tessellated DID with Soul DIDs that omit optional fields validate
+- Reference implementation provides four production fixtures (one Tessellated DID + three Soul DIDs) for the framework's test suite
 
 ### Phase 2 — Admission Composite + Reader Extensions (Week 2)
 
-- Admission composite recognizes `tessellation` and routes Sα + Eρ₄ resolution through shard scope
-- Per-shard DSB authoring becomes possible (one DSB per Shard DID at `.ai-sdlc/shards/<slug>/design-system-binding.yaml`)
-- Reference implementation produces before/after admit invocations demonstrating the Design pillar lift on shard-bounded work
-- Cκ calibration aggregates per-shard, per-dimension (N shards × M dimensions cells)
+- Admission composite recognizes `tessellation` and routes Sα + Eρ₄ resolution through soul scope
+- `resolveAffectedSouls(w)` computed from the dependency graph (OQ-2 sub-decision); substrate-only changes that touch no soul-importing module fall through to the `min`-over-all-souls degenerate case
+- Per-soul DSB authoring becomes possible (one DSB per Soul DID at `.ai-sdlc/souls/<slug>/design-system-binding.yaml`)
+- Reference implementation produces before/after admit invocations demonstrating the Design pillar lift on soul-bounded work
+- Cκ calibration aggregates per-soul, per-dimension (N souls × M dimensions cells)
 
-### Phase 3 — Sub-Structure Resource Extensions (Week 3)
+### Phase 3 — Resource Extensions (Week 3)
 
-- AgentRole, AdapterBinding, ProvenanceRecord, QualityGate gain shard-scoping fields
-- Variant + journey patterns recognized as in-shard sub-structures (proposed as separate optional sub-RFC; see §13 OQ-7)
+- AgentRole, AdapterBinding, ProvenanceRecord, QualityGate gain soul-scoping fields
+- In-soul variation patterns (variant + journey) are NOT in scope for RFC-0009 Phase 3 — see RFC-0017 (In-Shard Variant Pattern) and RFC-0018 (In-Shard Journey Pattern), both reserved per AISDLC-165, pending normative spec when practitioner validation exists.
 
 ### Phase 4 — Sub-Dimensions Activation (Week 4+)
 
-- Eρ₅ Compliance Clearance activates when shards declare `complianceRegimes`
+- Eρ₅ Compliance Clearance activates when souls declare `complianceRegimes` against the hard-regulatory-only scope (OQ-5 sub-decision)
 - Eτ_tessellation_drift activates with the substrate-conditional detection rules
 - Both gated on adopter opt-in initially; promotion to default behavior subject to ecosystem feedback
 
@@ -575,9 +601,9 @@ Migration is reversible at any step. A platform that authors Shard DIDs but late
 
 ## 11. Worked Example
 
-### 11.1 Setup — generic three-shard platform
+### 11.1 Setup — generic three-soul platform
 
-Platform name: Platform-X. Three soul-distinct shards: Shard-A (audience: alpha cohort, compliance: alpha-regime), Shard-B (audience: beta cohort, compliance: beta-regime), Shard-C (audience: gamma cohort, compliance: gamma-regime). All three share the same engineering substrate (event bus, shared knowledge graph, common identity service).
+Platform name: Platform-X. Three soul-distinct souls: Soul-A (audience: alpha cohort, compliance: HIPAA), Soul-B (audience: beta cohort, compliance: SOC2), Soul-C (audience: gamma cohort, compliance: PCI-DSS). All three share the same engineering substrate (event bus, shared knowledge graph, common identity service).
 
 ### 11.2 Tessellated DID for Platform-X
 
@@ -590,165 +616,217 @@ spec:
   did: did:platform-x:platform
   triad:
     design:
+      authority: dominique           # operator wears design pillar at platform scope
       imperatives: ["accessibility-floor: WCAG-AA", "shared-design-tokens-v3"]
     engineering:
+      authority: dominique           # operator wears engineering pillar at platform scope
       substrateInvariants: ["event-bus-v2", "shared-graph-schema-152", "tenant-isolation-rls"]
-      complianceRegimes: []  # Platform-level baseline; shards add their own
+      complianceRegimes: []          # Platform-level baseline; souls add their own
     product:
-      targetAudience: "Platform serving multiple distinct audiences via Shard DIDs"
-      successMetrics: ["per-shard success metrics aggregate; no platform-level metric"]
+      authority: dominique           # operator wears product pillar at platform scope
+      targetAudience: "Platform serving multiple distinct audiences via Soul DIDs"
+      successMetrics: ["per-soul success metrics aggregate; no platform-level metric"]
   tessellation:
-    shards:
-      - shardId: shard-a
-        didUri: did:platform-x:shard:shard-a
+    souls:
+      - soulId: soul-a
+        didUri: did:platform-x:soul:soul-a
         status: active
-      - shardId: shard-b
-        didUri: did:platform-x:shard:shard-b
+      - soulId: soul-b
+        didUri: did:platform-x:soul:soul-b
         status: active
-      - shardId: shard-c
-        didUri: did:platform-x:shard:shard-c
+      - soulId: soul-c
+        didUri: did:platform-x:soul:soul-c
         status: active
-    crossShardScoringRule: min
-    substrateInvariants: ["no-shard-conditionals-in-substrate", "tenant-rls-required"]
+    crossSoulScoringRule: min        # default per OQ-2 (v3.3)
+    substrateInvariants: ["no-soul-conditionals-in-substrate", "tenant-rls-required"]
 ```
 
-### 11.3 Shard DID for Shard-A
+### 11.3 Soul DID for Soul-A
 
 ```yaml
 apiVersion: ai-sdlc.io/v1alpha1
 kind: DesignIntentDocument
 metadata:
-  name: shard-a
+  name: soul-a
 spec:
-  did: did:platform-x:shard:shard-a
+  did: did:platform-x:soul:soul-a
   parentTessellation: did:platform-x:platform
   triad:
     design:
+      authority: dominique
       inheritsFrom: did:platform-x:platform/triad/design
       imperatives: ["voice-register: alpha-specific", "visual-identity: alpha-aesthetic"]
     engineering:
+      authority: dominique
       inheritsFrom: did:platform-x:platform/triad/engineering
-      complianceRegimes: ["alpha-regime"]
+      complianceRegimes: ["HIPAA"]   # hard regulatory framework — Eρ₅ scope per OQ-5
     product:
+      authority: dominique
       inheritsFrom: did:platform-x:platform/triad/product
       targetAudience: "alpha cohort"
       problemResonance: "alpha-cohort problem statement (source-of-truth for Sα₁)"
       successMetrics: ["alpha-specific success metric 1", "alpha-specific success metric 2"]
 ```
 
-### 11.4 Admission for a single-shard work item
+### 11.4 Admission for a single-soul work item
 
-A work item targeting only Shard-A:
+A work item targeting only Soul-A:
 
 ```
-Targeted shard: did:platform-x:shard:shard-a
-Sα(w) = Sα(w, shard-a)              // scored against Shard-A's DSB, not platform-aggregate
-Eρ₄ = readiness(shard-a's DSB)      // shard-specific Design System Readiness
-Eρ₅ = clearance(alpha-regime)       // shard-specific Compliance Clearance
+Affected souls (from dependency graph): { did:platform-x:soul:soul-a }
+Sα(w) = Sα(w, soul-a)              // scored against Soul-A's DSB, not platform-aggregate
+Eρ₄ = readiness(soul-a's DSB)      // soul-specific Design System Readiness
+Eρ₅ = clearance(HIPAA)             // soul-specific Compliance Clearance (hard regulatory)
 ```
 
-If Shard-A's DSB has lifecycle `established` and pattern coverage 0.85, Eρ₄ scores 0.80. The platform-aggregate DSB at lifecycle `stabilizing` and coverage 0.40 would score 0.40. The shard-bounded work correctly receives the higher pillar value.
+If Soul-A's DSB has lifecycle `established` and pattern coverage 0.85, Eρ₄ scores 0.80. The platform-aggregate DSB at lifecycle `stabilizing` and coverage 0.40 would score 0.40. The soul-bounded work correctly receives the higher pillar value.
 
 ### 11.5 Admission for substrate work
 
-A work item targeting platform substrate (no specific shard):
+A work item modifying `payment-validator.ts` (substrate code imported by Soul-B and Soul-C, not Soul-A):
 
 ```
-Targeted shards: []
-Sα(w) = min(Sα(w, shard-a), Sα(w, shard-b), Sα(w, shard-c))
+Affected souls (from dependency graph): { soul-b, soul-c }   // NOT all souls
+Sα(w) = min(Sα(w, soul-b), Sα(w, soul-c))                    // affected-souls scope per OQ-2
 ```
 
-The minimum-over-shards rule forces substrate work to honor every shard's soul. If Shard-A's product vertex would score 0.4 while Shard-B and Shard-C would score 0.9, the substrate work scores 0.4 — surfacing that the work compromises Shard-A's distinct soul even if it serves the others well.
+The minimum-over-affected-souls rule forces substrate work to honor every soul that depends on it. If Soul-B's product vertex would score 0.4 while Soul-C would score 0.9, the substrate work scores 0.4 — surfacing that the work compromises Soul-B's distinct soul even if it serves Soul-C well. Crucially, Soul-A is NOT in the aggregation because it does not depend on `payment-validator.ts`; the dependency-graph filter prevents over-pessimization.
+
+For a pure-substrate change touching no soul-importing module (rare but possible — e.g., infrastructure-only refactor), the affected-souls set is empty and the score falls through to `min` over ALL souls per §6.
 
 ---
 
 ## 12. Security and Authority Considerations
 
-### 12.1 Cross-shard data isolation
+### 12.1 Cross-soul data isolation
 
-Shard DIDs MUST NOT grant implicit read access across tessellation boundaries. A tenant authorized to one shard's data is not implicitly authorized to another shard's data, even on the same Tessellated DID. Existing RFC-0008 tenant-RLS patterns apply unchanged at the shard boundary.
+Soul DIDs MUST NOT grant implicit read access across tessellation boundaries. A tenant authorized to one soul's data is not implicitly authorized to another soul's data, even on the same Tessellated DID. Existing RFC-0008 tenant-RLS patterns apply unchanged at the soul boundary.
 
-### 12.2 Shard authority
+### 12.2 Soul authority
 
-The shard authority pattern (analogous to RFC-0008 §A.8 Design Authority Signal Monitoring) extends per-shard. A shard's design authority signals into HC_design for that shard's work scope, not platform-wide. Implementations choose whether to allow authority cascade (platform authority → shard authority by default) or require explicit shard-authority designation.
+The soul authority pattern (analogous to RFC-0008 §A.8 Design Authority Signal Monitoring) extends per-soul. A soul's design authority signals into HC_design for that soul's work scope, not platform-wide. Implementations choose whether to allow authority cascade (platform authority → soul authority by default) or require explicit soul-authority designation.
 
 ### 12.3 Compliance regime conflicts
 
-When a substrate work item targets multiple shards with conflicting compliance regimes (e.g., one shard's `must-log-all-access` vs another's `must-not-log-personal-content`), the cross-shard scoring rule applied to Eρ₅ produces 0 (gating). The work item cannot proceed without a tessellation amendment explicitly resolving the conflict.
+When a substrate work item targets multiple souls with conflicting compliance regimes (e.g., one soul's `HIPAA must-log-all-access` vs another soul's `GDPR right-to-erasure`), the cross-soul scoring rule applied to Eρ₅ produces 0 (gating). The work item cannot proceed without a tessellation amendment explicitly resolving the conflict. Both regimes are in-scope for Eρ₅ per OQ-5 (hard regulatory frameworks).
 
 ---
 
 ## 13. Open Questions
 
-The following require resolution before Phase 1 schema PR opens. Each carries the implementation's preferred position and the reasoning to motivate review.
+> **Status (v3.3, 2026-05-03):** OQ-1 through OQ-5 + OQ-13 RESOLVED 2026-05-03 (see resolution markers per question). OQ-6 through OQ-12 remain open for future operator walkthrough.
 
-Open Questions are framed in two categories: **Position-stated** (the implementation takes a strong product-pillar stand and asks reviewers to confirm or counter with concrete reasoning) and **Genuinely open** (mechanism is fixed but a surface-level choice — naming, sequencing — remains).
+The following require resolution before final sign-off. Resolved questions retain the original framing followed by an explicit `[RESOLVED ...]` marker and the operator decision.
 
-### OQ-1 (Position-stated): The `triad` object is required everywhere
+### OQ-1 [RESOLVED 2026-05-03 — Option D]: The `triad` object — required everywhere with auto-fillable defaults
 
-**Position**: Required on every DID, including single-product DIDs. **Reasoning**: RFC-0008 §3 establishes the three-pillar architecture (Engineering × Design × Product) as foundational. Making `triad` optional erodes that foundational claim — adopters who omit `triad` operate without the architecture RFC-0008 requires, and the pillar-perspective breakdown (RFC-0008 Amendment 6) becomes unspecified for them. The product-pillar position is that the triad is the framework's structural commitment, not a feature toggle. **Counter-position to defend if rejected**: `triad` is optional initially; single-product DIDs continue without; required-everywhere migration becomes a v1.x bump. Reviewer needs to articulate why erosion of foundational architecture is acceptable.
+**Original position:** Required on every DID, including single-product DIDs. Reasoning: RFC-0008 §3 establishes the three-pillar architecture (Engineering × Design × Product) as foundational. Making `triad` optional erodes that foundational claim — adopters who omit `triad` operate without the architecture RFC-0008 requires.
 
-### OQ-2 (Position-stated): Default `crossShardScoringRule` is `min`
+**Resolution (Option D — required everywhere with auto-fillable defaults):** `triad` is **required on every DID**. `init` scaffolds defaults: `{ design.authority: ${operator}, engineering.authority: ${operator}, product.authority: ${operator} }` for single-product DIDs. The operator wears all three pillars unless explicit roles for design/engineering/product are present (in which case use those). Tessellation forces the operator to differentiate authority across pillars at the platform level.
 
-**Position**: `min`. **Reasoning**: PPA v1.0 §3 establishes that the composite is multiplicative because every dimension is a necessary condition. By the same logic, when substrate work affects multiple shards, every affected shard's soul is a necessary condition — the work cannot be more aligned than its weakest-aligned shard. `min` enforces this. `weighted-traffic` and `weighted-revenue` are post-calibration optimizations; `max` produces incorrect product-pillar behavior (substrate work that breaks one shard while serving others scores high). Other rules supported as opt-in escape valves; `min` is the default the framework should ship.
+**BREAKING CHANGE acknowledged.** The framework's small user base makes this the right time to break. Migration cost: one `init` re-run plus one schema-validation pass per existing DID.
 
-### OQ-3 (Position-stated): Variant and journey patterns belong in RFC-0009 main
+### OQ-2 [RESOLVED 2026-05-03 — Option A with sub-decision]: Default `crossSoulScoringRule` is `min` with affected-souls scope filter
 
-**Position**: Variant pattern and journey pattern are first-class in-shard sub-structures and ship in RFC-0009 main, not as follow-on RFCs. **Reasoning**: separating them gives reviewers an excuse to under-think the in-shard nesting. The complete pattern (sub-theme < journey < variant < shard) is the framework's structural claim about how multi-soul platforms organize internally. Splitting it across RFCs invites partial adoption that loses the pattern's coherence. The fractal triad is the architecture; sub-themes, journeys, variants are how it nests within shards. All belong in the same RFC.
+**Original position:** `min`. Reasoning: PPA v1.0 §3 establishes that the composite is multiplicative because every dimension is a necessary condition. By the same logic, when substrate work affects multiple souls, every affected soul's soul is a necessary condition — the work cannot be more aligned than its weakest-aligned soul.
 
-### OQ-4 (Genuinely open): Naming — "Tessellated" / "Shard" vs alternatives
+**Resolution (Option A with sub-decision):** `min` is the default. **Sub-decision on scope:** "affected" = souls that import or depend on the substrate file/module being changed (computed from the dependency graph). A substrate change to `payment-validator.ts` affects all souls that import payment validation, NOT all souls in the platform. This scope filter prevents the `min` rule from over-pessimizing scores on substrate work that demonstrably touches only a subset of souls.
 
-The implementation has used "Tessellated" and "Shard" internally; the mechanism (parent DID composed of N child DIDs sharing substrate, each soul-complete) is fixed regardless of naming. Alternatives offered for review: faceted/facet, multi-domain/domain, multi-product/product, multi-soul/soul, federated/federation. Whatever the framework prefers; implementation will adopt without resistance. **The vocabulary surface is the only genuinely open question; the structural commitment is product-pillar fixed.**
+Other rules (`max`, `weighted-traffic`, `weighted-revenue`, `mean`) ship as opt-in escape valves with weighted variants documented as **"advanced — requires data source you must provide."**
 
-### OQ-5 (Position-stated): Eρ₅ Compliance Clearance is gating, not weighted
+### OQ-3 [RESOLVED 2026-05-03 — Option B; reverses original Position-stated stance]: Variant + journey patterns carve out to RFC-0017/RFC-0018
 
-**Position**: Eρ₅ = 0 when a violation is detected. **Reasoning**: PPA v1.0 §3 establishes that Eρ is a pure gating function ("can only reduce priority, never increase it"; "the minimum of resource availability, inverse build complexity, and dependency clearance ensures the tightest constraint wins"). Compliance violations are categorical — a work item either satisfies a regulatory regime or it doesn't. Graduated severity tiers fit Dπ₃ Bug Urgency or other demand signals, but Eρ's existing semantics are gating. Adding compliance clearance as a gating sub-dimension preserves PPA's mathematical structure.
+**Original position (Alex, v3):** Variant pattern and journey pattern are first-class in-soul sub-structures and ship in RFC-0009 main, not as follow-on RFCs. Reasoning: separating them gives reviewers an excuse to under-think the in-soul nesting; the complete pattern (sub-theme < journey < variant < soul) is the framework's structural claim about how multi-soul platforms organize internally.
 
-### OQ-6 (Position-stated): Eτ_tessellation_drift detection is orchestrator-side
+**Resolution (Option B — separate follow-on RFCs):** Variant + journey are **NOT in RFC-0009 main**. They ship as **RFC-0017 (In-Shard Variant Pattern)** and **RFC-0018 (In-Shard Journey Pattern)** as separate follow-on RFCs (already reserved per AISDLC-165). Both pending normative spec when practitioner validation exists.
 
-**Position**: Orchestrator-side detection rules (AST scan for shard-name string literals in shared substrate, embedding distance between Shard DIDs over time, cross-shard provenance audits). **Reasoning**: adapter-side detection puts the burden on every adapter author to instrument drift signals consistently. The framework cannot guarantee detection coverage if it depends on N adapter implementations correctly tagging shard-affecting work. Orchestrator-side is the only path to framework-wide consistency. Adapter-side detection can supplement (adapters can volunteer additional drift signals) but cannot be the primary detection layer.
+**Reasoning (operator):** the operator weighed Alex's coherence argument against the scope-creep argument and the latter won because: (a) variant + journey aren't unique to multi-soul — patterns exist in single-product platforms too, so they're not multi-soul-specific; (b) zero practitioner validation in dogfood project; (c) ~700 line bloat unjustified for un-validated patterns; (d) the "fractal triad" architectural claim is about TESSELLATION specifically, not internal organization which is orthogonal — the coherence argument is "broken" anyway by orthogonality to tessellation.
 
-### OQ-7 (Position-stated): §13.5 folds into RFC-0009 main as Addendum A; §13.6 ships as RFC-0009.2
+**This is a REVERSAL of Alex's original Position-stated stance.** Recorded explicitly so future readers see that the operator weighed the original coherence argument against the scope-creep argument and chose scope-creep avoidance.
+
+**Action taken:** sections of v3.2 that normatively spec variant + journey patterns (Definitions §3 sub-theme/variant/journey rows and the four-scope nesting paragraph; Phase 3 sub-RFC pointer) have been deleted and replaced with: "**See RFC-0017 (In-Shard Variant Pattern, reserved) and RFC-0018 (In-Shard Journey Pattern, reserved) — both pending normative spec when practitioner validation exists.**"
+
+### OQ-4 [RESOLVED 2026-05-03 — Variant B]: Naming — Tessellated Platform / Soul / Tessellation (with `soul sharding` as mechanism verb)
+
+**Original framing (v3.2):** the implementation has used "Tessellated" and "Shard" internally; the mechanism is fixed regardless of naming. Genuinely open on the surface vocabulary.
+
+**Resolution (Variant B):** rename `shard` (noun) → `soul` throughout the RFC. Keep "Tessellated Platform" as the parent term. "Tessellation" as the pattern term. **Retire `shard` as a noun entirely;** preserve **"soul sharding"** as the mechanism verb form (per OQ-13 already-resolved framing). Title stays as-is ("RFC-0009: Tessellated Design Intent Documents for Multi-Soul Platforms" — already correct).
+
+**Action taken (v3.3):** rename pass applied throughout the document. `shardId/shardScope/shardOverrides/shardBindings/targetedShards/crossShardScoringRule` → `soulId/soulScope/soulOverrides/soulBindings/targetedSouls/crossSoulScoringRule`. Example slugs `shard-a/b/c` → `soul-a/b/c`. DID URI segments `did:platform-x:shard:*` → `did:platform-x:soul:*`. Compound forms (`per-shard`, `cross-shard`, `single-shard`, `multi-shard`, `shard-aware`, `shard-bounded`, `shard-specific`, `shard-distinct`, `shard-name`, `shard-slug`, `shard-conditionals`, `shard-resolution`) replaced with their `-soul` counterparts.
+
+### OQ-5 [RESOLVED 2026-05-03 — Option A with sub-decision]: Eρ₅ Compliance Clearance is gating, hard regulatory only
+
+**Original position:** Eρ₅ = 0 when a violation is detected. Reasoning: PPA v1.0 §3 establishes that Eρ is a pure gating function ("can only reduce priority, never increase it"). Compliance violations are categorical — a work item either satisfies a regulatory regime or it doesn't.
+
+**Resolution (Option A — gating):** Eρ₅ = 0 when violated (categorical 0/1, gating).
+
+**Sub-decision (v3.3) — what counts as "compliance":** HARD regulatory frameworks ONLY (GDPR, HIPAA, SOC2, PCI-DSS, FedRAMP, regional data-residency, regulated-industry rules — anything with formal external-audit consequences). Internal best-practices, code style, architectural preferences are OUT OF SCOPE for Eρ₅ — they belong to other mechanisms (code review, lint, separate quality gates).
+
+**Boundary test:** "would an external regulator/auditor have grounds to act on a violation?" Yes → Eρ₅. No → other mechanism. **Customer-audit-by-proxy** (e.g., customer's SOC2 audit asks about vendor policy) qualifies as regulatory-by-proxy.
+
+See §7.1 for the normative scope and the exhaustive in-scope list.
+
+### OQ-6 (Position-stated; OPEN): Eτ_tessellation_drift detection is orchestrator-side
+
+**Position**: Orchestrator-side detection rules (AST scan for soul-name string literals in shared substrate, embedding distance between Soul DIDs over time, cross-soul provenance audits). **Reasoning**: adapter-side detection puts the burden on every adapter author to instrument drift signals consistently. The framework cannot guarantee detection coverage if it depends on N adapter implementations correctly tagging soul-affecting work. Orchestrator-side is the only path to framework-wide consistency. Adapter-side detection can supplement (adapters can volunteer additional drift signals) but cannot be the primary detection layer.
+
+**OPEN — pending future operator walkthrough.**
+
+### OQ-7 (Position-stated; OPEN): §13.5 folds into RFC-0009 main as Addendum A; §13.6 ships as RFC-0009.2
 
 **Position**: §13.5 (session-bug + severity scoring rule) is a Dπ₃ refinement with practitioner validation (caught a real P1→P0 mis-prioritization in a live backlog scoring pass). It belongs in RFC-0009 main as Addendum A (parallel to RFC-0008's Addendum A pattern). §13.6 (incident monitoring + root-cause analysis) requires post-pilot adopter incident volume to validate; ship as RFC-0009.2 follow-on, deferred until that data exists. **Reasoning**: §13.5 has the same evidence quality as the main RFC; §13.6 is correctly speculative until live load arrives.
 
-### OQ-8 (Practitioner observation, separate framework issue): HC composite stewardship.designAuthority → HC_design wiring
+**OPEN — pending future operator walkthrough.**
 
-When an adopter's DSB carries `stewardship.designAuthority.principals: [name]`, the orchestrator's `pillarBreakdown.shared.hcComposite.design` value did not populate. May be: (a) an orchestrator wiring gap in `enrichAdmissionInput`, (b) an unspecified explicit signal channel requirement, or (c) intentional behavior misunderstood by the adopter. Resolution affects how shard-level design authority signals into HC for shard-bounded work. **Track as a separate framework issue; not gating for RFC-0009.**
+### OQ-8 (Practitioner observation, separate framework issue; OPEN): HC composite stewardship.designAuthority → HC_design wiring
 
-### OQ-9 (Practitioner observation, separate framework issue): admit confidence ceiling at 0.5 with all readers loaded
+When an adopter's DSB carries `stewardship.designAuthority.principals: [name]`, the orchestrator's `pillarBreakdown.shared.hcComposite.design` value did not populate. May be: (a) an orchestrator wiring gap in `enrichAdmissionInput`, (b) an unspecified explicit signal channel requirement, or (c) intentional behavior misunderstood by the adopter. Resolution affects how soul-level design authority signals into HC for soul-bounded work. **Track as a separate framework issue; not gating for RFC-0009.**
+
+**OPEN — pending future operator walkthrough.**
+
+### OQ-9 (Practitioner observation, separate framework issue; OPEN): admit confidence ceiling at 0.5 with all readers loaded
 
 With DID + DSB + maintainers + soul-tracks all loaded, admit confidence stayed at 0.5 (expected ≥0.7 given enrichment richness). Suggests confidence is computed from `PriorityInput` field defaults rather than enrichment success. **Track as a separate framework issue; not gating for RFC-0009.**
 
-### OQ-10 (v3.1; Position-stated): Operator role is platform-scoped, NOT tessellated per shard
+**OPEN — pending future operator walkthrough.**
 
-Product-pillar position: RFC-0010's Operator role describes pipeline operation (burn rate, harness availability, calibration drift, event triage) which is a property of the platform-level pipeline, not of any individual shard. The fractal triad in §4 stays `{ design, engineering, product }`; Operator is acknowledged as a fourth pillar role that operates at platform scope. Counter-position: shards with radically different operational profiles (e.g., one shard high-volume cheap-stage; another shard low-volume expensive-stage) might warrant per-shard operator overrides. Position-stated rationale: in practice, even radically-different operational profiles are tuned via SubscriptionPlan `tenantQuotaShare` and per-shard `costBudget` declarations rather than by separate operator humans. See §8.8.
+### OQ-10 (v3.1; Position-stated; OPEN): Operator role is platform-scoped, NOT tessellated per soul
 
-### OQ-11 (v3.1; Genuinely open): DatabaseBranchPool tessellation policy default
+Product-pillar position: RFC-0010's Operator role describes pipeline operation (burn rate, harness availability, calibration drift, event triage) which is a property of the platform-level pipeline, not of any individual soul. The fractal triad in §4 stays `{ design, engineering, product }`; Operator is acknowledged as a fourth pillar role that operates at platform scope. Counter-position: souls with radically different operational profiles (e.g., one soul high-volume cheap-stage; another soul low-volume expensive-stage) might warrant per-soul operator overrides. Position-stated rationale: in practice, even radically-different operational profiles are tuned via SubscriptionPlan `tenantQuotaShare` and per-soul `costBudget` declarations rather than by separate operator humans. See §8.8.
 
-When should `DatabaseBranchPool` carry `shardScope`? Two patterns are both valid: (a) shared pool with RLS isolation (default for early-stage tessellated platforms), (b) per-shard pool with physical isolation (mature platforms with strict tenant audit/compliance/cost-attribution requirements). The boundary condition — at what platform maturity does (b) become required, not optional — is genuinely open. Engineering pillar (Dom-as-Operator) is the right authority on this; product-pillar has no firm position. See §8.7.
+**OPEN — pending future operator walkthrough.**
 
-### OQ-12 (v3.1; Genuinely open): Where does soft cost-pressure feed into the composite?
+### OQ-11 (v3.1; Genuinely open; OPEN): DatabaseBranchPool tessellation policy default
+
+When should `DatabaseBranchPool` carry `soulScope`? Two patterns are both valid: (a) shared pool with RLS isolation (default for early-stage Tessellated Platforms), (b) per-soul pool with physical isolation (mature platforms with strict tenant audit/compliance/cost-attribution requirements). The boundary condition — at what platform maturity does (b) become required, not optional — is genuinely open. Engineering pillar (Dom-as-Operator) is the right authority on this; product-pillar has no firm position. See §8.7.
+
+**OPEN — pending future operator walkthrough.**
+
+### OQ-12 (v3.1; Genuinely open; OPEN): Where does soft cost-pressure feed into the composite?
 
 §7.3 Eρ₆ Cost Clearance is **gating** (categorical 0/1) — work that would exhaust `tenantQuotaShare` is denied. But what about **soft** cost pressure — work that *could* run but *should not* given burn-rate trends? Three candidates: (a) extend Dπ₃ Bug Urgency semantics to include cost-urgency (urgent + costly → different signal than urgent alone), (b) add a new HC channel `HC_cost` that the operator can ratchet to defer expensive work without changing soul/demand scoring, (c) accept that soft cost-pressure is purely operator-managed via `cli-tier-recommendation` + `costBudget` adjustments and doesn't enter the composite at all. Genuinely open; product-pillar has no preference. Engineering authority + Operator (Dom) decides.
 
-### OQ-13 (v3.2; Resolved against title rename): Taxonomy — "multi-soul" + "soul sharding" coexist
+**OPEN — pending future operator walkthrough.**
 
-**Initial concern (v3.1):** the framing "soul sharding" arguably more accurately describes the pattern than "multi-soul platform." A tessellated platform is not N independent souls; it is one platform soul that shards into N coherent faces, each retaining the parent platform's substrate inheritance while specializing for a distinct audience.
+### OQ-13 [RESOLVED 2026-05-03 — re-affirmed unchanged; Resolved against title rename]: Taxonomy — "multi-soul" + "soul sharding" coexist
 
-**Resolution (v3.2; PPA v1.1 §12 resolved-against-rename):** product pillar landed on **"multi-soul scoring"** terminology in PPA v1.1 (title + body). The alternate framing **"soul sharding"** survives as accurate vocabulary for the *pattern itself* (mechanism — how it works), complementing **"multi-soul platform"** which describes the *architectural shape* (output — what it produces). Both labels describe the same phenomenon at different abstraction levels and may be used interchangeably depending on emphasis: explain mechanism with "soul sharding"; describe architecture with "multi-soul platform."
+**Initial concern (v3.1):** the framing "soul sharding" arguably more accurately describes the pattern than "multi-soul platform." A Tessellated Platform is not N independent souls; it is one platform soul that shards into N coherent faces, each retaining the parent platform's substrate inheritance while specializing for a distinct audience.
 
-The mechanism is fixed; both naming surfaces are accepted. No title rename in v3.2 or PPA v1.1. Future revisions may converge on a single label after broader adopter feedback; until then, both are canonical. Adopters preferring different terminology entirely (faceted/facet, federated/federation, multi-domain/domain) may substitute; the mechanism is what matters.
+**Resolution (v3.2; PPA v1.1 §12 resolved-against-rename; re-affirmed unchanged in v3.3):** product pillar landed on **"multi-soul scoring"** terminology in PPA v1.1 (title + body). The alternate framing **"soul sharding"** survives as accurate vocabulary for the *pattern itself* (mechanism — how it works), complementing **"multi-soul platform"** which describes the *architectural shape* (output — what it produces). Both labels describe the same phenomenon at different abstraction levels and may be used interchangeably depending on emphasis: explain mechanism with "soul sharding"; describe architecture with "multi-soul platform."
+
+The mechanism is fixed; both naming surfaces are accepted. No title rename in v3.2, v3.3, or PPA v1.1. The OQ-4 v3.3 resolution adds: `shard` is retired as a noun entirely; "soul sharding" survives **only as the verb form**, not as a noun substitute.
 
 ---
 
 ## 14. References
 
 - **PPA v1.0**: Product Priority Algorithm (Alexander Kline, March 2026). The seven-dimension composite formula, per-dimension definitions, and §8 Open Questions including the "Multi-Product Portfolio" question this RFC closes.
-- **PPA v1.1**: Product Priority Algorithm — Triad Integration + Tessellation (Alexander Kline, April 2026). Generalizes PPA v1.0 to shard-indexed scoring P(w, s); §3 ER6 Cost Clearance; §4 Design Intent Document ownership model; §5 Tessellated Platforms Multi-Soul Scoring; §7 C8 Cost Governance Integration; §8 HC_product per shard; §9 Pillar Perspective Breakdown with Identity / Expression / Coherence framing; §11 shard-scoped CK; §12 resolved Multi-Product Portfolio question. This RFC is the framework-substrate companion to PPA v1.1's product-pillar architecture.
+- **PPA v1.1**: Product Priority Algorithm — Triad Integration + Tessellation (Alexander Kline, April 2026). Generalizes PPA v1.0 to soul-indexed scoring P(w, s); §3 ER6 Cost Clearance; §4 Design Intent Document ownership model; §5 Tessellated Platforms Multi-Soul Scoring; §7 C8 Cost Governance Integration; §8 HC_product per soul; §9 Pillar Perspective Breakdown with Identity / Expression / Coherence framing; §11 soul-scoped CK; §12 resolved Multi-Product Portfolio question. This RFC is the framework-substrate companion to PPA v1.1's product-pillar architecture.
 - **RFC-0005**: Product Priority Algorithm (Alexander Kline, AI-SDLC Contributors). The framework's PPA spec embedding PPA v1.0 as `Pipeline.spec.priorityPolicy`. Lists "Multi-product portfolio-level resource allocation" as a Non-Goal / future work; this RFC is that future work.
 - **RFC-0008**: PPA Triad Integration. The DID resource, three-pillar architecture, admission composite, design system binding. §17 PPA v1.1 Direction is the pattern §16 below mirrors.
 - **RFC-0010**: Parallel Execution + Worktree Pooling (Dom Legault, April 2026). The cost governance substrate (`SubscriptionPlan`, `WorktreePool`, `DatabaseBranchPool`, `tenantQuotaShare`) that §7.3 Eρ₆ + PPA v1.1 §7 C8 wire into. Operator role specification (operator runbook).
+- **RFC-0017** (reserved per AISDLC-165): In-Shard Variant Pattern. Carved out of RFC-0009 main per OQ-3 (v3.3). Pending normative spec when practitioner validation exists.
+- **RFC-0018** (reserved per AISDLC-165): In-Shard Journey Pattern. Carved out of RFC-0009 main per OQ-3 (v3.3). Pending normative spec when practitioner validation exists.
 - **RFC-0006**: Design System Governance. The DSB resource's broader governance context.
 - **RFC-0001**: Template. Format conventions followed by this RFC.
 
@@ -758,43 +836,43 @@ The mechanism is fixed; both naming surfaces are accepted. No title rename in v3
 
 > **Pattern mirrored from RFC-0008 §17.** This RFC's interim solution embeds in RFC-0008's DID schema what PPA v1.0's architecture cannot express without modification. These are queued for PPA v1.1. They are documented here rather than in PPA v1.0 directly because this RFC is the source of the requirement. When PPA v1.1 is authored, this section is the requirements input.
 
-### v1.1-6: Per-Shard Sα Vector
+### v1.1-6: Per-Soul Sα Vector
 
-PPA v1.0 §3 defines Sα as a scalar function `Sα(w)` computed against a single soul purpose definition document. This RFC's interim solution embeds shard-aware Sα in the admission composite (§6) using cross-shard scoring rules on Tessellated DIDs. The architecturally-correct long-term shape is Sα as a vector indexed by shard:
-
-```
-Sα(w) → Sα(w, shard_did)
-```
-
-with cross-shard aggregation rules (min, weighted-traffic, weighted-revenue, max) declared on the Tessellated DID's `crossShardScoringRule` field becoming PPA v1.1 first-class scoring policy, not a per-RFC schema field.
-
-**Interim (this RFC):** Shard-aware Sα handled at admission composite via cross-shard scoring rules in tessellation manifest. Sufficient for v1.
-
-**v1.1 work:** Define Sα as a `Map<ShardDid, ScalarScore>` type. Per-shard scoring is the canonical form; scalar `Sα(w)` becomes the single-shard degenerate case. Cross-shard aggregation rules become standard PPA primitives, not RFC-0009 schema.
-
-### v1.1-7: Per-Shard Cκ Tensor
-
-PPA v1.0 §7 defines Cκ as a single scalar calibration coefficient bounded [0.7, 1.3]. RFC-0008 §17 v1.1-2 already proposes per-dimension Cκ. This RFC requires Cκ to additionally be per-shard: each shard's calibration history evolves independently because outcomes can be attributed per-shard via tessellated provenance records (§8.3).
-
-The architecturally-correct long-term shape is Cκ as a tensor indexed by `(shard_did, dimension)`:
+PPA v1.0 §3 defines Sα as a scalar function `Sα(w)` computed against a single soul purpose definition document. This RFC's interim solution embeds soul-aware Sα in the admission composite (§6) using cross-soul scoring rules on Tessellated DIDs. The architecturally-correct long-term shape is Sα as a vector indexed by soul:
 
 ```
-Cκ → Cκ[shard_did][dimension]
+Sα(w) → Sα(w, soul_did)
 ```
 
-For an N-shard, M-dimension PPA, the calibration tensor has N×M cells. Each cell evolves independently, bounded [0.7, 1.3] per cell.
+with cross-soul aggregation rules (`min`, `max`, `mean`, `weighted-traffic`, `weighted-revenue`) declared on the Tessellated DID's `crossSoulScoringRule` field becoming PPA v1.1 first-class scoring policy, not a per-RFC schema field. The affected-souls scope filter (OQ-2 sub-decision) becomes a primitive of the aggregation rule application rather than an admission-composite-only rule.
 
-**Interim (this RFC):** Per-shard Cκ aggregation handled in calibration service via tessellation-aware aggregation. Cell count is N×M when tessellation is present; falls back to RFC-0008 §17 v1.1-2's per-dimension scalar when tessellation is absent.
+**Interim (this RFC):** Soul-aware Sα handled at admission composite via cross-soul scoring rules in tessellation manifest, scoped by dependency-graph affected-souls computation. Sufficient for v1.
 
-**v1.1 work:** Define Cκ as a `Map<(ShardDid, Dimension), CalibrationCoefficient>` type. Per-shard-per-dimension is the canonical form; the v1.0 scalar and v1.1-2 per-dimension cases become degenerate forms.
+**v1.1 work:** Define Sα as a `Map<SoulDid, ScalarScore>` type. Per-soul scoring is the canonical form; scalar `Sα(w)` becomes the single-soul degenerate case. Cross-soul aggregation rules become standard PPA primitives, not RFC-0009 schema.
 
-### v1.1-8 (forward note): HC_product Channel Per Shard
+### v1.1-7: Per-Soul Cκ Tensor
 
-RFC-0008 §A.8 formalizes Design Authority Signal Monitoring as the channel feeding HC_design. The product-pillar parallel — Product Authority Signal Monitoring per shard — is not yet specified in any RFC. PPA v1.1 should define it: each shard's product authority (the human or team accountable for that shard's product direction) signals into HC_product per shard, parallel to how design authority signals into HC_design.
+PPA v1.0 §7 defines Cκ as a single scalar calibration coefficient bounded [0.7, 1.3]. RFC-0008 §17 v1.1-2 already proposes per-dimension Cκ. This RFC requires Cκ to additionally be per-soul: each soul's calibration history evolves independently because outcomes can be attributed per-soul via tessellated provenance records (§8.3).
 
-**Interim (this RFC):** Product authority signals enter the existing HC composite without per-shard differentiation.
+The architecturally-correct long-term shape is Cκ as a tensor indexed by `(soul_did, dimension)`:
 
-**v1.1 work:** Define Product Authority Signal Monitoring per shard. Each Shard DID's `triad.product` may declare a `productAuthority.principals` list; signals from those principals route to HC_product for that shard's work scope.
+```
+Cκ → Cκ[soul_did][dimension]
+```
+
+For an N-soul, M-dimension PPA, the calibration tensor has N×M cells. Each cell evolves independently, bounded [0.7, 1.3] per cell.
+
+**Interim (this RFC):** Per-soul Cκ aggregation handled in calibration service via tessellation-aware aggregation. Cell count is N×M when tessellation is present; falls back to RFC-0008 §17 v1.1-2's per-dimension scalar when tessellation is absent.
+
+**v1.1 work:** Define Cκ as a `Map<(SoulDid, Dimension), CalibrationCoefficient>` type. Per-soul-per-dimension is the canonical form; the v1.0 scalar and v1.1-2 per-dimension cases become degenerate forms.
+
+### v1.1-8 (forward note): HC_product Channel Per Soul
+
+RFC-0008 §A.8 formalizes Design Authority Signal Monitoring as the channel feeding HC_design. The product-pillar parallel — Product Authority Signal Monitoring per soul — is not yet specified in any RFC. PPA v1.1 should define it: each soul's product authority (the human or team accountable for that soul's product direction) signals into HC_product per soul, parallel to how design authority signals into HC_design.
+
+**Interim (this RFC):** Product authority signals enter the existing HC composite without per-soul differentiation.
+
+**v1.1 work:** Define Product Authority Signal Monitoring per soul. Each Soul DID's `triad.product` may declare a `productAuthority.principals` list; signals from those principals route to HC_product for that soul's work scope.
 
 ---
 
@@ -802,19 +880,19 @@ RFC-0008 §A.8 formalizes Design Authority Signal Monitoring as the channel feed
 
 This RFC was authored after observing the framework's current shape fail under multi-soul load on a real production multi-product platform. The Appendix documents that observation as empirical proof-by-existence; it is not the proposal's justification. The proposal stands on its own merits per §1-§13 and §16; the Reference Implementation provides additional empirical evidence for review confidence.
 
-A live multi-product platform implementation has authored a Tessellated DID + four Shard DIDs against the patterns proposed in this RFC. The implementation predates the framework's schema acceptance of these fields; all material currently lives at the architecture layer (not in `.ai-sdlc/` config) because the existing `design-intent-document.schema.json` `additionalProperties: false` constraint rejects `tessellation` / `parentTessellation` / `triad` fields. The implementation has authored ~60 backlog items with shard-scoped work and runs the orchestrator's admit pipeline against the live config.
+A live multi-product platform implementation has authored a Tessellated DID + four Soul DIDs against the patterns proposed in this RFC. The implementation predates the framework's schema acceptance of these fields; all material currently lives at the architecture layer (not in `.ai-sdlc/` config) because the existing `design-intent-document.schema.json` `additionalProperties: false` constraint rejects `tessellation` / `parentTessellation` / `triad` fields. The implementation has authored ~60 backlog items with soul-scoped work and runs the orchestrator's admit pipeline against the live config.
 
-**Empirical observation**: Design pillar locked at 0.40 across all single-shard work. The framework is technically correct given the current schema (one platform-aggregate DSB describing the worst-case shard's coverage); the abstraction is incorrect for the input (single-shard work being scored against platform-aggregate DSB). The implementation's prediction, testable in approximately 5 minutes of admit re-invocation once Phase 1 schema PR lands and per-shard DSBs become authorable: Design pillar lifts from 0.40 → 0.7+ for shard-bounded work. The 0.30-0.30+ delta per-task is the validation evidence.
+**Empirical observation**: Design pillar locked at 0.40 across all single-soul work. The framework is technically correct given the current schema (one platform-aggregate DSB describing the worst-case soul's coverage); the abstraction is incorrect for the input (single-soul work being scored against platform-aggregate DSB). The implementation's prediction, testable in approximately 5 minutes of admit re-invocation once Phase 1 schema PR lands and per-soul DSBs become authorable: Design pillar lifts from 0.40 → 0.7+ for soul-bounded work. The 0.30-0.30+ delta per-task is the validation evidence.
 
 The implementation's fractal-triad ownership surfaced two practitioner observations relevant to OQ-8 and OQ-9; both are framework issues separable from RFC-0009 acceptance.
 
 The implementation team commits to:
-1. Land per-shard DSBs in `.ai-sdlc/shards/<slug>/design-system-binding.yaml` immediately after Phase 1 schema PR merges
-2. Re-run admit invocations against TASK-175 + TASK-176 (single-shard work items) and publish before/after Design pillar values as validation evidence
-3. Run Phase 4 (Cκ flywheel) for one sprint cycle and publish per-shard, per-dimension calibration data
+1. Land per-soul DSBs in `.ai-sdlc/souls/<slug>/design-system-binding.yaml` immediately after Phase 1 schema PR merges
+2. Re-run admit invocations against TASK-175 + TASK-176 (single-soul work items) and publish before/after Design pillar values as validation evidence
+3. Run Phase 4 (Cκ flywheel) for one sprint cycle and publish per-soul, per-dimension calibration data
 
 **The reference implementation does not require special framework consideration; it asks the framework to recognize the structural distinction the implementation has empirically validated.** Multi-product platforms with shared substrate are common (Stripe, Notion, Figma, Shopify cited in §2.2). The implementation's value to the framework is empirical confidence that the proposal works as designed at scale on a real codebase, not a request for accommodation.
 
 ---
 
-*v3 authored 2026-04-26 with strengthened product-pillar voice. PPA v1.0 §8 Multi-Product Portfolio open question explicitly closed. RFC-0005 Multi-product portfolio-level resource allocation non-goal addressed. RFC-0008 §17 PPA v1.1 Direction extended with v1.1-6, v1.1-7, v1.1-8 (forward note). Open questions where implementation has a strong product position state that position with reasoning; pure-naming questions remain open. Reference Implementation reframed as empirical proof-by-existence. Awaits Engineering + Design pillar review.*
+*v3.3 authored 2026-05-03 by Dominique (operator walkthrough). Resolved OQ-1 through OQ-5 + re-affirmed OQ-13. OQ-6 through OQ-12 remain open for future operator walkthrough. Variant + journey patterns carved out to RFC-0017/0018 (REVERSAL of Alex's original Position-stated stance per OQ-3). Naming landed on Tessellated Platform / Soul / Tessellation; `shard` retired as noun, `soul sharding` retained as mechanism verb form. Triad now required everywhere with `init`-scaffolded defaults (BREAKING CHANGE acknowledged). Eρ₅ scope clarified to hard regulatory frameworks only with formal external-audit consequences. crossSoulScoringRule default `min` now explicitly scoped to dependency-graph-computed affected souls, not all souls in the platform. Awaits Engineering + Design pillar review.*
