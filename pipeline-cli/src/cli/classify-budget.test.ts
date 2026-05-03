@@ -132,4 +132,39 @@ describe('cli-classify-budget', () => {
     // testing should be classified `ok` because we read the last line.
     expect((parsed.perReviewer as Array<{ classification: string }>)[0].classification).toBe('ok');
   });
+
+  it('AISDLC-154: passes WHOLE stdout to classifier — multi-line stdout with budget body → all-3-budget', async () => {
+    // PR #196 CI run 25267752415 reproduction: cli-review wrote multi-line
+    // pretty-printed JSON containing the credit-exhaustion text inside the
+    // body. Without AISDLC-154 the CLI sliced off everything except `}` on
+    // the last line, the classifier saw a single `}` plus empty stderr,
+    // and returned `other-failure` for all three reviewers — yielding
+    // proceed-as-normal and a noisy CHANGES_REQUESTED on the PR.
+    //
+    // With AISDLC-154 the CLI passes the whole stdout via stdoutRaw, the
+    // substring fallback inspects the full body, and the aggregate
+    // correctly resolves to skip-with-budget-comment.
+    const multiLineBudgetStdout = `{
+  "approved": false,
+  "findings": [
+    {
+      "severity": "critical",
+      "message": "Review agent failed: Anthropic API error 400: {\\"type\\":\\"error\\",\\"error\\":{\\"type\\":\\"invalid_request_error\\",\\"message\\":\\"Your credit balance is too low to access the Anthropic API.\\"}}"
+    }
+  ],
+  "summary": "review could not be completed"
+}`;
+    const { parsed } = await runWith({
+      testingStdout: multiLineBudgetStdout,
+      criticStdout: multiLineBudgetStdout,
+      securityStdout: multiLineBudgetStdout,
+    });
+    expect(parsed.aggregate).toBe('skip-with-budget-comment');
+    expect(parsed.budgetExhaustedCount).toBe(3);
+    // Sanity — every reviewer classified as budget-exhausted, none as
+    // other-failure (which would indicate the whole-stdout plumbing broke).
+    expect(
+      (parsed.perReviewer as Array<{ classification: string }>).map((p) => p.classification),
+    ).toEqual(['budget-exhausted', 'budget-exhausted', 'budget-exhausted']);
+  });
 });
