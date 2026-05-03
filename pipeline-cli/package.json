@@ -52,6 +52,10 @@
     "./incremental-review": {
       "types": "./dist/incremental-review/index.d.ts",
       "import": "./dist/incremental-review/index.js"
+    },
+    "./dor-corpus": {
+      "types": "./dist/cli/dor-corpus.d.ts",
+      "import": "./dist/cli/dor-corpus.js"
     }
   },
   "publishConfig": {
