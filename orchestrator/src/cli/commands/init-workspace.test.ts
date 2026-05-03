@@ -27,6 +27,7 @@ import {
 } from 'node:fs';
 import { execSync } from 'node:child_process';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 
 /**
@@ -48,6 +49,17 @@ import { tmpdir } from 'node:os';
  * AISDLC-134: belt-and-braces — assert `.git/config` exists post-write so a
  * silently failing `writeFileSync` surfaces here instead of as a confusing
  * org-bleed assertion later.
+ *
+ * AISDLC-159 (this task): hardened the post-write assertion to also check
+ * `.git/HEAD` (writeFileSync silent failure pattern catches both files at
+ * the helper boundary, not in a downstream assertion) and added the
+ * source-level guard at the bottom of this file (`initBareRepo source
+ * shape — AISDLC-159 regression guard`) that fails the suite if a future
+ * edit ever reintroduces `git init` into this helper. The only known way
+ * to reproduce the original `initBareRepo: \`git init\` did not create
+ * .git/config in <dir>` failure shape is to revert AISDLC-189; the
+ * source-level guard catches that revert at vitest collect time, before
+ * any subprocess flake gets a chance to run.
  */
 function initBareRepo(dir: string): void {
   const gitDir = join(dir, '.git');
@@ -59,8 +71,15 @@ function initBareRepo(dir: string): void {
     '[core]\n\trepositoryformatversion = 0\n\tfilemode = true\n\tbare = false\n',
   );
   writeFileSync(join(gitDir, 'HEAD'), 'ref: refs/heads/main\n');
+  // AISDLC-134 + AISDLC-159: assert BOTH critical files exist post-write so
+  // a silent writeFileSync no-op (extremely unlikely on a real fs, but cheap
+  // insurance) surfaces here with a precise message rather than as a confusing
+  // org-bleed / detectWorkspace assertion further down the test.
   if (!existsSync(join(gitDir, 'config'))) {
     throw new Error(`initBareRepo: failed to write .git/config in ${dir}`);
+  }
+  if (!existsSync(join(gitDir, 'HEAD'))) {
+    throw new Error(`initBareRepo: failed to write .git/HEAD in ${dir}`);
   }
 }
 
@@ -509,5 +528,108 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
     expect(out).not.toContain('AI_SDLC_CI_ATTESTOR_PRIVATE_KEY');
     expect(out).toContain('AISDLC-141');
     expect(out).toContain('ai-sdlc health');
+  });
+});
+
+// ── AISDLC-159 regression guard ─────────────────────────────────────────
+//
+// PR #189 (AISDLC-189) replaced `execSync('git init --quiet')` inside
+// `initBareRepo` with direct `mkdirSync + writeFileSync` of the minimal
+// `.git/` layout because under heavy parallel CPU contention (e.g. the full
+// `pnpm -r test:coverage` parallel matrix) the child `git` process was
+// observed to exit 0 without writing `.git/config`, breaking 10 of 14
+// tests deterministically with the obscure error message
+// `initBareRepo: \`git init\` did not create .git/config in <dir>`.
+//
+// That fix has now been reported as regressing in subsequent worktrees.
+// The runtime `existsSync` belt-and-braces (added in AISDLC-134) catches a
+// silent fs-level failure but it does NOT catch the regression at the
+// HELPER-LEVEL — it only catches it after a contention-affected test has
+// already run. Worse, it means the operator only learns about the
+// regression deep inside a `pnpm -r test:coverage` run, after potentially
+// minutes of noise.
+//
+// This source-level meta-test catches the regression at vitest collect
+// time, BEFORE any test runs, with a precise message that points at the
+// fix to re-apply. It reads its own source file via fileURLToPath and
+// pattern-matches the body of `initBareRepo` for any of the known ways
+// to spawn `git init`: `execSync('git init', `execFile('git', ['init'`,
+// `gitExecFile(['init'`, etc. The pattern intentionally errs on the side
+// of false-positives — there is no legitimate reason for ANY git
+// subprocess invocation inside `initBareRepo`.
+describe('initBareRepo source shape — AISDLC-159 regression guard', () => {
+  it('does not spawn any git subprocess (direct fs writes only)', () => {
+    const selfPath = fileURLToPath(import.meta.url);
+    const src = readFileSync(selfPath, 'utf-8');
+
+    // Locate the function body. The opening `function initBareRepo(` and
+    // the next top-level `}` (line starting with `}`) bound the scan
+    // window. Comments and JSDoc above the function are excluded so the
+    // documentation can legitimately mention `git init` in prose.
+    const startIdx = src.indexOf('function initBareRepo(');
+    expect(startIdx).toBeGreaterThan(-1);
+    const after = src.slice(startIdx);
+    // Match the body up to the first `\n}` at column 0 — the function's
+    // own closing brace. JS lacks a multi-line non-greedy anchor so we
+    // do this manually rather than with a regex.
+    const endRel = after.search(/\n\}\n/);
+    expect(endRel).toBeGreaterThan(-1);
+    const body = after.slice(0, endRel);
+
+    // Patterns that would re-introduce the AISDLC-189 flake. Each is the
+    // literal substring or a small regex pattern; the assertion message
+    // names AISDLC-189 + AISDLC-159 so the next maintainer sees the
+    // history without having to dig.
+    const forbiddenPatterns: Array<{ pattern: RegExp; description: string }> = [
+      { pattern: /\bgit\s+init\b/, description: "literal 'git init' string" },
+      {
+        pattern: /execSync\s*\(\s*['"`][^'"`]*\bgit\b/,
+        description: "execSync('git ...')",
+      },
+      {
+        pattern: /execFile(?:Sync)?\s*\(\s*['"`]git['"`]/,
+        description: "execFile(Sync)?('git', ...)",
+      },
+      { pattern: /gitExecFile\s*\(/, description: 'gitExecFile(...)' },
+      { pattern: /spawn(?:Sync)?\s*\(\s*['"`]git['"`]/, description: "spawn(Sync)?('git', ...)" },
+    ];
+
+    for (const { pattern, description } of forbiddenPatterns) {
+      expect(
+        pattern.test(body),
+        `initBareRepo body contains forbidden pattern (${description}). ` +
+          `Spawning git from this helper reintroduces the AISDLC-189 flake ` +
+          `(git init exits 0 without writing .git/config under coverage ` +
+          `contention). Use direct mkdirSync + writeFileSync instead. ` +
+          `See backlog/completed/aisdlc-159-*.md for context.`,
+      ).toBe(false);
+    }
+  });
+
+  it('writes the minimum files needed for downstream git ops without spawning git', () => {
+    // Behavioral equivalent of the source-level guard: actually invoke
+    // initBareRepo and verify the post-state matches what `git init`
+    // would have produced (HEAD pointing at refs/heads/main, a config
+    // file, the objects/refs scaffolding). If a future maintainer
+    // refactors initBareRepo into a helper that DOES spawn git but
+    // happens to satisfy the source-level pattern check (e.g. by aliasing
+    // execSync), the behavioral check still fails-loud the moment that
+    // helper silently no-ops.
+    const checkDir = mkdtempSync(join(tmpdir(), 'aisdlc-159-shape-'));
+    try {
+      initBareRepo(checkDir);
+      expect(existsSync(join(checkDir, '.git', 'config'))).toBe(true);
+      expect(existsSync(join(checkDir, '.git', 'HEAD'))).toBe(true);
+      expect(existsSync(join(checkDir, '.git', 'refs', 'heads'))).toBe(true);
+      expect(existsSync(join(checkDir, '.git', 'objects', 'info'))).toBe(true);
+      expect(existsSync(join(checkDir, '.git', 'objects', 'pack'))).toBe(true);
+      const head = readFileSync(join(checkDir, '.git', 'HEAD'), 'utf-8');
+      expect(head).toMatch(/^ref:\s+refs\/heads\/main/);
+      const config = readFileSync(join(checkDir, '.git', 'config'), 'utf-8');
+      expect(config).toContain('[core]');
+      expect(config).toContain('repositoryformatversion');
+    } finally {
+      rmSync(checkDir, { recursive: true, force: true });
+    }
   });
 });
