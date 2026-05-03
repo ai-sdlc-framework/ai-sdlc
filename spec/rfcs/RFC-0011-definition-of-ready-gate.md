@@ -37,6 +37,7 @@ requiresDocs: []
 | v1 | 2026-04-30 | dominique | Initial draft |
 | v2 | 2026-04-30 | dominique | Deterministic-first evaluation order (Section 4.4), test corpus + 3-tier eval harness (Section 5.6), Phase 2 split into 2a/2b |
 | v3 | 2026-04-30 | dominique | All 10 open questions resolved (Section 13). Library-function-with-shims architecture (Section 5.0-5.2), pluggable resolver registry, dual-fanout notifications, two-stage staleness, three-tier confidence gating, grandfather-on-rubric-revision. Sign-off complete. |
+| v4 | 2026-05-03 | dominique | Promoted from warn-only to enforce in dogfood project on 2026-05-03 via operator-override path (per `docs/operations/dor-promotion.md`). Hybrid promotion model documented in AISDLC-161; corpus-rigorous path unblocks once data accumulates. AISDLC-115.9 ships the one-line `evaluationMode` flip in `.ai-sdlc/dor-config.yaml`. |
 
 ## Table of Contents
 
