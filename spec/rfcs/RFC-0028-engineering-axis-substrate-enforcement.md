@@ -45,12 +45,12 @@ requiresDocs: []
 
 ## 1. Summary
 
-This RFC specifies how the Engineering vertex of the Fractal Triad (RFC-0009 §4) operationalizes substrate enforcement at the platform-implementation layer for multi-soul platforms. RFC-0009 specifies the structural shape of a Tessellated DID, the soul-membership invariants, three §7.2 `Eτ_tessellation_drift` detection rules (Rule #1 AST scan ships now per OQ-6; Rule #2 embedding distance deferred RFC-0019; Rule #3 cross-soul provenance audits deferred implementation phase), and a §15 Appendix A reference-implementation proof-by-existence. RFC-0009 does not specify *how* the engineering vertex's enforcement responsibility is realized at the platform-implementation layer.
+This RFC specifies how the Engineering vertex of the Fractal Triad (RFC-0009 §4) operationalizes substrate enforcement at the platform-implementation layer for multi-soul platforms. RFC-0009 specifies the structural shape of a Tessellated DID, the soul-membership invariants, the §7.2 `Eτ_tessellation_drift` detection rules (AST scan ships now per OQ-6; embedding-distance detection deferred to RFC-0019; cross-soul provenance audits deferred to implementation phase), and a §15 Appendix A reference-implementation proof-by-existence. RFC-0009 does not specify *how* the engineering vertex's enforcement responsibility is realized at the platform-implementation layer.
 
 This RFC proposes:
 
-1. A **Substrate Contract pattern** — a typed, per-Soul-DID configuration object that shared substrate code reads from. Per-soul behavior emerges from contract values; the substrate has no soul-specific conditionals (the §7.2 Rule #1 AST scan target).
-2. A **§7.2 Rule #4 detection candidate** at the type-registry layer — CI integrity assertions complementing the existing three §7.2 detection rules. Rule #4 catches *declared* drift before it ships; Rules #1–3 catch runtime drift after code lands. Together the four rules close authoring + runtime detection across source / semantic / provenance / registry layers.
+1. A **Substrate Contract pattern** — a typed, per-Soul-DID configuration object that shared substrate code reads from. Per-soul behavior emerges from contract values; the substrate has no soul-specific conditionals (the §7.2 AST scan target).
+2. A **§7.2 type-registry layer detection candidate** — CI integrity assertions complementing the existing §7.2 detection rules. Type-registry detection catches *declared* drift before it ships; the existing rules catch runtime drift after code lands. Together they close authoring + runtime detection across source / semantic / provenance / registry layers.
 3. **§7.1 Eρ₅ Compliance Clearance enforcement at the type+CI gate** — categorical compliance locks (vulnerable-audience inviolability, hard regulatory locks per OQ-5) lifted from runtime gating to authoring-time invariants. Complements §7.1 scoring; does not replace it.
 4. **§5.1 tightening-only inheritance enforcement at the type system** — boolean compliance locks typed as literal `true`, numeric caps as bounded discriminated unions, categorical inheritance via TypeScript template-literal types. Loosening becomes impossible to author rather than merely detectable.
 
@@ -62,7 +62,7 @@ The proposal is non-normative for adopters: any multi-soul platform that needs s
 
 RFC-0009 v3.4 closed all 13 OQs and made the Tessellated-DID architecture concrete at the spec layer. But **every multi-soul platform that builds against RFC-0009** must still answer:
 
-- How does shared substrate read per-soul configuration *without* conditional branching (the §7.2 Rule #1 AST scan target)?
+- How does shared substrate read per-soul configuration *without* conditional branching (the §7.2 AST scan target)?
 - How are per-soul compliance regimes (§7.1 Eρ₅, hard regulatory only per OQ-5) enforced before code reaches runtime, instead of merely scoring against runtime gates?
 - How is the §5.1 per-soul triad specialization rule ("inherit-and-tighten, never loosen") made impossible to violate at authoring time?
 - How does the §3 Substrate Invariants invariant ("named constraints ALL souls must honor") get cross-checked against the actual contracts each Soul DID declares?
@@ -73,7 +73,7 @@ Without an answer, each adopter re-derives the substrate-enforcement layer from 
 
 The reference platform deployed RFC-0009 v3.2 across 6 Soul DIDs spanning consumer, professional, and vulnerable-audience compliance regimes for multiple months. The platform is not named; concrete sources are available on request from the author and intentionally not exposed in this RFC. The evidence behind every claim in §3–§6 comes from that operation.
 
-A specific failure mode the dogfood surfaced (§4.2 below) is what motivates the Rule #4 type-registry detection candidate.
+A specific failure mode the dogfood surfaced (§4.2 below) is what motivates the type-registry layer detection candidate.
 
 ## 3. Substrate Contract Pattern
 
@@ -102,15 +102,15 @@ For each field in every sub-contract, the contract MUST document:
 
 A "no-dead-wires" rule applies: a field without a named consumer is admissible-as-dead and must be removed or wired before the contract ships. This complements RFC-0009 §3 Substrate Invariants by ensuring per-Soul-DID contract fields cannot accumulate silent no-ops.
 
-## 4. CI Integrity Gate — proposed §7.2 Rule #4 detection candidate
+## 4. CI Integrity Gate — proposed §7.2 type-registry layer detection candidate
 
-RFC-0009 §7.2 currently specifies three Eτ_tessellation_drift detection rules per OQ-6 resolution (orchestrator-side, staggered):
+RFC-0009 §7.2 specifies orchestrator-side detection rules per OQ-6 resolution (staggered rollout):
 
-- **Rule #1**: AST scan for soul-slug literals + `if (soul === '<slug>')` in shared substrate. Ships now.
-- **Rule #2**: Inter-soul embedding distance convergence detection. Deferred to RFC-0019.
-- **Rule #3**: Cross-soul provenance audits. Deferred to implementation phase.
+- **AST scan** for soul-slug literals + `if (soul === '<slug>')` in shared substrate. Ships now.
+- **Inter-soul embedding distance convergence detection**. Deferred to RFC-0019.
+- **Cross-soul provenance audits**. Deferred to implementation phase.
 
-This RFC proposes a **Rule #4 detection candidate** at the **type-registry layer**, complementing the three existing rules:
+This RFC proposes a **type-registry layer detection candidate**, complementing the existing rules:
 
 For every Substrate Contract registered against a `tessellation.souls[]` entry, a CI assertion suite enforces:
 
@@ -122,24 +122,24 @@ For every Substrate Contract registered against a `tessellation.souls[]` entry, 
 | Director agent ∈ council membership | Cross-soul authority leak | RFC-0009 §12 Cross-Soul Isolation |
 | Substrate marker keys ∈ shared SSOT marker registry | Substrate contamination | RFC-0009 §3 No-Soul-Conditionals-in-Substrate |
 
-These run as a deterministic test suite (no LLM, no integration); they fail the build before the commit lands. They catch a class of drift complementary to Rule #1: cross-file invariants the AST scan cannot see (e.g. a director declared in Soul DID A's contract but registered as a member of Soul DID B; a soul registered with a key that does not match its declared `soulId`).
+These run as a deterministic test suite (no LLM, no integration); they fail the build before the commit lands. They catch a class of drift complementary to the AST scan: cross-file invariants the AST scan cannot see (e.g. a director declared in Soul DID A's contract but registered as a member of Soul DID B; a soul registered with a key that does not match its declared `soulId`).
 
-### 4.1 Why Rule #4 is complementary, not a replacement
+### 4.1 Why type-registry detection is complementary, not a replacement
 
-- **Rule #1 (AST)** catches source-level drift at any file (including third-party adapters not captured in any contract). Rule #4 cannot see those.
-- **Rule #2 (embedding)** catches semantic convergence between Soul DIDs that have drifted toward soul-overlap despite distinct identifiers. Rule #4 cannot see semantic content.
-- **Rule #3 (provenance)** catches cross-boundary work without amendment. Rule #4 catches authoring-time mis-declarations only.
-- **Rule #4 (type-registry)** catches *declared* drift before it ships — the failure modes that Rules #1–3 detect *after* code lands. It runs at CI; the others run at orchestration time.
+- **AST scan** catches source-level drift at any file (including third-party adapters not captured in any contract). Type-registry detection cannot see those.
+- **Embedding distance** catches semantic convergence between Soul DIDs that have drifted toward soul-overlap despite distinct identifiers. Type-registry detection cannot see semantic content.
+- **Cross-soul provenance audits** catch cross-boundary work without amendment. Type-registry detection catches authoring-time mis-declarations only.
+- **Type-registry detection** catches *declared* drift before it ships — the failure modes that the other rules detect *after* code lands. It runs at CI; the others run at orchestration time.
 
-The four rules together close authoring-time + runtime detection, source-level + semantic-level + provenance-level + registry-level coverage.
+The rules together close authoring-time + runtime detection, source-level + semantic-level + provenance-level + registry-level coverage.
 
 ### 4.2 Concrete catch (reference platform)
 
-The reference platform deployed RFC-0009 v3.2 [implementation-anchored, pre-v3.3 rename]. For the full duration of v3.2's deployment, one of the platform's six Soul DIDs had its membership enforcement silently disabled: the Soul DID's identifier was missing from the runtime soul-membership set, so the platform's `assertAgentInSoul()`-equivalent check returned undefined-as-passing for every agent declared to belong to it. None of Rules #1–3 caught it (the source code was syntactically clean; embedding adapter not yet shipped; no provenance amendments triggered).
+The reference platform deployed RFC-0009 v3.2 [implementation-anchored, pre-v3.3 rename]. For the full duration of v3.2's deployment, one of the platform's six Soul DIDs had its membership enforcement silently disabled: the Soul DID's identifier was missing from the runtime soul-membership set, so the platform's `assertAgentInSoul()`-equivalent check returned undefined-as-passing for every agent declared to belong to it. None of the existing §7.2 rules caught it (the source code was syntactically clean; embedding adapter not yet shipped; no provenance amendments triggered).
 
-The Rule #4 type-registry assertion (`soulId` ∈ runtime soul-membership set) catches this exact omission at CI time. After implementation, the silent-bypass was caught and fixed.
+The type-registry assertion (`soulId` ∈ runtime soul-membership set) catches this exact omission at CI time. After implementation, the silent-bypass was caught and fixed.
 
-This is the §7.2 Eτ failure mode under a §3 named-invariant violation — substrate contamination via a Soul DID whose membership constraint was never enforced — caught at authoring time instead of via Rule #2 runtime metric drift (which had not yet shipped) or Rule #3 provenance audit (which had not yet been triggered).
+This is the §7.2 Eτ failure mode under a §3 named-invariant violation — substrate contamination via a Soul DID whose membership constraint was never enforced — caught at authoring time instead of via embedding-distance runtime metric drift (which had not yet shipped) or cross-soul provenance audit (which had not yet been triggered).
 
 ## 5. Eρ₅ Compliance Clearance at type+CI layer
 
@@ -148,7 +148,7 @@ RFC-0009 §7.1 Eρ₅ Compliance Clearance is specified as a per-soul categorica
 This RFC proposes Eρ₅ can be enforced at the type system + CI gate **in addition to** scoring. When a Soul DID's compliance regime declares a categorical lock (e.g. a vulnerable-audience Soul DID locking out high-trigger-risk patterns, or `requiresTenantPhysicalIsolation: true` per RFC-0009 §8.7 OQ-11 trigger checklist), the Substrate Contract makes that lock **inviolable**:
 
 - The field is required at contract authoring time.
-- The Rule #4 CI assertion suite verifies the lock is preserved on every contract update.
+- The type-registry CI assertion suite verifies the lock is preserved on every contract update.
 - Tightening-only inheritance (per RFC-0009 §5.1 per-soul triad specialization + RFC-0006 v5) is enforced at the type level — child Soul DIDs cannot loosen the lock.
 
 The result: a vulnerable-audience Soul DID cannot accidentally regress to high-trigger-risk pattern dispatch even if a downstream contract author tries to override the field. The compliance regime is structurally protected at authoring, not runtime-protected at execution.
@@ -198,9 +198,9 @@ PPA's Internal Compass note: "the architectural slots are placed so centroid com
 
 This RFC does not require centroid computation; it observes the slot is preserved.
 
-### 7.4 Should Rule #4 graduate to normative §7.2 amendment?
+### 7.4 Cross-reference path back to RFC-0009 §7.2
 
-If RFC-0028 is accepted, the natural follow-on is amending RFC-0009 §7.2 to list Rule #4 as a fourth detection rule (alongside the three already declared). Open question: should that graduation happen as an RFC-0009 v3.5 revision, or as a permanent cross-reference from RFC-0009 §7.2 to RFC-0028 §4? The latter keeps RFC-0009 stable; the former unifies §7.2's enumeration.
+Per Engineering Authority guidance ("RFCs should not be patched; addendums become their own RFCs"), this RFC stays standalone rather than amending RFC-0009 §7.2's detection rules in place. Open question: should §7.2 gain a permanent cross-reference pointing at RFC-0028 as a fourth detection mechanism (orchestrator-side rules + type-registry-layer detection), or should the rules and the type-registry layer remain organizationally distinct (orchestrator detection in RFC-0009 §7.2; authoring-time detection in this RFC)?
 
 ## 8. Non-goals
 
@@ -217,7 +217,7 @@ A live reference-platform implementation of this pattern exists. Concrete implem
 Implementation summary:
 
 - Contract type definition: ~870 LOC, 7 sub-contracts, 38 fields
-- Rule #4 CI integrity gate: 5 assertions, ~40 tests, deterministic test-runner-agnostic
+- Type-registry CI integrity gate: 5 assertions, ~40 tests, deterministic test-runner-agnostic
 - Architecture sign-off doc paired with the implementation
 
 ## 10. Convergence — deterministic-first cluster
@@ -249,7 +249,7 @@ For framework reviewers grounded in the PPA Composite (`P(w, s) = SA × D × M �
 | **ER4 Design System Readiness** | — | Out of scope (Design vertex) |
 | **ER5 Compliance Clearance** | **§7.1 Eρ₅** | **PRIMARY** — categorical locks enforced at type+CI |
 | **ER6 Cost Clearance** | **§7.3 Eρ₆** | Substrate may surface per-soul `tenantQuotaShare` (RFC-0009 §8.5 SubscriptionPlan) |
-| **ET Entropy Tax (tessellation drift)** | **§7.2 Eτ_tessellation_drift** | **PRIMARY** — Rule #4 candidate caught at CI |
+| **ET Entropy Tax (tessellation drift)** | **§7.2 Eτ_tessellation_drift** | **PRIMARY** — type-registry layer detection caught at CI |
 | **HC Human Curve** | **§7.4 HC_cost** (cost channel only) | Out of scope (governance, not substrate) |
 | **CK Calibration** | — | Out of scope (post-ship calibration, not substrate authoring) |
 
@@ -261,9 +261,9 @@ This RFC's pattern partially overlaps with RFC-0009 §8 resource extensions. Con
 
 | §8 extension | Substrate Contract intersection |
 |---|---|
-| §8.1 `AgentRole.soulBindings` | Council sub-contract `agentIds` declares the inverse — which agents belong to a Soul DID. Together they form the bidirectional membership graph the Rule #4 assertion validates. |
+| §8.1 `AgentRole.soulBindings` | Council sub-contract `agentIds` declares the inverse — which agents belong to a Soul DID. Together they form the bidirectional membership graph the type-registry assertion validates. |
 | §8.2 `AdapterBinding.soulOverrides` | Substrate Contract values are the read-side of soulOverrides; per-soul values declared in the contract feed into adapter binding overrides at runtime. |
-| §8.3 `ProvenanceRecord.targetedSouls` | Out of scope; provenance is runtime, contract is authoring. Rule #3 §7.2 audits these. |
+| §8.3 `ProvenanceRecord.targetedSouls` | Out of scope; provenance is runtime, contract is authoring. §7.2 cross-soul provenance audits cover these. |
 | §8.4 `QualityGate.soulScope` | Substrate Contract `crossSoulPolicy.scoringRule` is the contract-side companion to QualityGate.soulScope. |
 | §8.5 `SubscriptionPlan.tenants[].quotaShare` | Compliance sub-contract may surface per-soul `tenantQuotaShare` for §7.3 Eρ₆ scoring. |
 | §8.6 `WorktreePool` per-soul opt-in | Out of scope; pool config is infra, contract is per-soul declaration. |
@@ -279,7 +279,7 @@ The Substrate Contract does not duplicate §8 — it complements it by providing
 - **RFC-0006**: Design System Governance v5 — companion deterministic-first design review.
 - **RFC-0007**: Figma Make Pipeline Integration v1 — companion DID-grounded prototype validation.
 - **RFC-0011**: Definition-of-Ready Gate — companion deterministic-first admission gate.
-- **RFC-0019**: Embedding Provider Adapter Framework — supplies §7.2 Rule #2 dependency.
+- **RFC-0019**: Embedding Provider Adapter Framework — supplies §7.2 embedding-distance detection dependency.
 - **RFC-0022**: Compliance Posture + Audit Surface — `derivedGates` upstream for §7.1 Eρ₅ scoring.
 
 ---
