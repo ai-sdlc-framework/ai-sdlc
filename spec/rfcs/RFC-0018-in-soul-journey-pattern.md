@@ -34,7 +34,22 @@ requiresDocs: []
 |--------|------|--------|------|
 | Morgan Hirtle | Chief of Design / Design Authority | ✍️ Authored v0.1 stub | 2026-05-04 |
 | Dominique Legault | CTO / Engineering Authority | ✏️ Engineering pass on v0.2 (pending Design editorial) | 2026-05-04 |
-| Alexander Kline | Head of Product Strategy / Product Authority | ⏸ Pending | — |
+| Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.2 (PPA-composability scope only; full v1.0+ pending Mo's editorial) | 2026-05-04 |
+
+### Product Authority review (PPA-composability scope only)
+
+This RFC is properly Mo's Design-Authority territory; the Product Authority lens is restricted to how Journeys compose with PPA scoring.
+
+**PPA composition observations**:
+
+- **Pillar Perspective Breakdown applies cleanly to journeys**. A journey can have Product HIGH / Design LOW (right need, design system not ready for the journey state) or Engineering HIGH / Product LOW (easy to build, weak strategic value at journey scope). PPA v1.1's per-pillar surfacing already covers this.
+- **SA1 per-stage**: `journey.completionCriteria` and per-state success metrics are SA1 inputs at journey scope. Work items targeting a specific journey state should score against the state's specific completion criteria, not soul-aggregate. PPA v1.1 §5 supports this.
+- **ER4 per-state**: per-journey accessibility floors interact with ER4 (Design System Readiness). When RFC-0027 (Design Coherence Drift Detection) lands, journey-level WCAG conformance feeds ET via the design-coherence drift signal.
+- **Demand cluster routing**: when RFC-0030 lands, demand clusters tagged with journey-completion language (e.g., "onboarding completion regression") should route through the journey's per-state SA1, not the soul's. Cross-reference recommended once 0030 lands.
+
+Endorsement contingent on the v1.0+ normative spec preserving accessibility floors per Mo's RFC-0009 v3.4 C3 commitment.
+
+Position grounded in RFC-0029 Principle 1 + Pillar Perspective Breakdown.
 
 ---
 
