@@ -1,7 +1,7 @@
 ---
 id: AISDLC-188
 title: Flaky timer-race tests in pipeline-cli/src/tui/sources/* hooks
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 20:10'
 labels:
