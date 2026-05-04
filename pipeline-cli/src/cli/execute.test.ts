@@ -472,6 +472,137 @@ describe('runExecuteCommand — real-run mode', () => {
     expect(result.rollback?.quarantineCommitCount).toBe(2);
   });
 
+  it('invokes AISDLC-177 rollback on aborted outcome (Step 11 push/PR-create failed)', async () => {
+    // AISDLC-191: The aborted outcome originates from `execute-pipeline.ts`
+    // around line 229-233 — Step 11 (`pushAndPr`) failed because the push
+    // was rejected (non-fast-forward) or `gh pr create` returned a
+    // transient network error. Either way, Steps 3-4 already created the
+    // worktree + flipped the task status to "In Progress"; without
+    // rollback the task is stuck and the operator has to hand-clean.
+    // This test guards the parity with the orchestrator's `ROLLBACK_OUTCOMES`
+    // (AISDLC-191 AC #1).
+    writeTaskFile(tmp, { id: 'AISDLC-209', title: 'push aborted', status: 'To Do' });
+
+    const fakeExec: typeof import('../execute-pipeline.js').executePipeline = async (
+      pipelineOpts,
+    ) => {
+      return {
+        taskId: pipelineOpts.taskId,
+        branch: 'ai-sdlc/aisdlc-209-aborted',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-209'),
+        outcome: 'aborted',
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 1,
+        finalVerdict: approvedVerdict(),
+        notes: 'gh pr create failed: transient network error',
+      } satisfies PipelineResult;
+    };
+
+    type RollbackArgs = Parameters<
+      typeof import('../orchestrator/rollback.js').rollbackDispatch
+    >[0];
+    const rollbackCalls: RollbackArgs[] = [];
+    const fakeRollback = async (args: RollbackArgs): Promise<RollbackResult> => {
+      rollbackCalls.push(args);
+      return {
+        taskId: args.taskId,
+        fromStatus: args.fromStatus,
+        statusReverted: true,
+        worktreeRemoved: true,
+        branchQuarantined: false,
+        warnings: [],
+      };
+    };
+
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-209',
+      workDir: tmp,
+      spawnerKind: 'mock',
+      maxIterations: 2,
+      dryRun: false,
+      executor: fakeExec,
+      rollback: fakeRollback,
+      logger: silentLogger(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.pipeline?.outcome).toBe('aborted');
+    // Rollback was invoked exactly once with the aborted dispatcher's
+    // branch + worktree + the captured pre-dispatch status.
+    expect(rollbackCalls).toHaveLength(1);
+    expect(rollbackCalls[0]?.taskId).toBe('AISDLC-209');
+    expect(rollbackCalls[0]?.fromStatus).toBe('To Do');
+    expect(rollbackCalls[0]?.branch).toBe('ai-sdlc/aisdlc-209-aborted');
+    expect(rollbackCalls[0]?.worktreePath).toBe(join(tmp, '.worktrees', 'aisdlc-209'));
+    expect(result.rollback?.statusReverted).toBe(true);
+    expect(result.rollback?.worktreeRemoved).toBe(true);
+  });
+
+  it('invokes AISDLC-177 rollback on unknown-failure outcome (orchestrator-synthetic; lockstep guard)', async () => {
+    // AISDLC-191: The `unknown-failure` outcome is synthetic — the umbrella's
+    // `executePipeline()` never returns it directly (only the orchestrator's
+    // catch-all branches in loop.ts manufacture it). But the umbrella's
+    // membership check against `ROLLBACK_OUTCOMES` MUST still cover it so
+    // the two surfaces stay in lockstep: a future refactor that wires
+    // `executePipeline()` to surface `unknown-failure` for a brand-new
+    // failure mode shouldn't silently regress the umbrella's rollback
+    // coverage. The test injects an executor that returns the synthetic
+    // outcome (cast through unknown to bypass `PipelineOutcome`'s narrower
+    // union) to assert membership wins.
+    writeTaskFile(tmp, { id: 'AISDLC-210', title: 'unknown failure', status: 'To Do' });
+
+    const fakeExec: typeof import('../execute-pipeline.js').executePipeline = async (
+      pipelineOpts,
+    ) => {
+      return {
+        taskId: pipelineOpts.taskId,
+        branch: 'ai-sdlc/aisdlc-210-unknown',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-210'),
+        // Synthetic outcome — see test docblock.
+        outcome: 'unknown-failure' as PipelineResult['outcome'],
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+      } as PipelineResult;
+    };
+
+    let rollbackInvoked = false;
+    let rollbackArgs:
+      | Parameters<typeof import('../orchestrator/rollback.js').rollbackDispatch>[0]
+      | null = null;
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-210',
+      workDir: tmp,
+      spawnerKind: 'mock',
+      maxIterations: 2,
+      dryRun: false,
+      executor: fakeExec,
+      rollback: async (args) => {
+        rollbackInvoked = true;
+        rollbackArgs = args;
+        return {
+          taskId: args.taskId,
+          fromStatus: args.fromStatus,
+          statusReverted: true,
+          worktreeRemoved: true,
+          branchQuarantined: false,
+          warnings: [],
+        };
+      },
+      logger: silentLogger(),
+    });
+
+    expect(rollbackInvoked).toBe(true);
+    expect(rollbackArgs).not.toBeNull();
+    expect(rollbackArgs!.taskId).toBe('AISDLC-210');
+    expect(rollbackArgs!.fromStatus).toBe('To Do');
+    expect(rollbackArgs!.branch).toBe('ai-sdlc/aisdlc-210-unknown');
+    expect(result.ok).toBe(true);
+    expect(result.rollback?.statusReverted).toBe(true);
+  });
+
   it('does NOT invoke rollback on approved outcome', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-207', title: 'happy path', status: 'To Do' });
     let rollbackInvoked = false;

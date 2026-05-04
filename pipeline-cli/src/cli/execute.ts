@@ -77,6 +77,7 @@ import { computeBranchName } from '../steps/02-compute-branch.js';
 import { validateTask } from '../steps/01-validate.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
+import { ROLLBACK_OUTCOMES } from '../orchestrator/loop.js';
 import { rollbackDispatch, type RollbackResult } from '../orchestrator/rollback.js';
 import {
   DEFAULT_LOGGER,
@@ -284,11 +285,12 @@ export interface ExecuteCommandResult {
   verdictFilePath?: string;
   /**
    * AISDLC-177 rollback outcome. Populated whenever the wrapper invoked
-   * `rollbackDispatch()` (i.e. on `developer-failed` /
-   * `developer-json-contract-violated` outcomes). Operators read this to
-   * see whether the side-effects from Step 3 (worktree) and Step 4 (status
-   * flip + sentinel) were successfully reversed, and whether any commits
-   * were preserved under a `quarantine/<task>-<ts>` ref.
+   * `rollbackDispatch()` — i.e. on any outcome in `ROLLBACK_OUTCOMES`
+   * (AISDLC-191): `developer-failed`, `developer-json-contract-violated`,
+   * `aborted`. Operators read this to see whether the side-effects from
+   * Step 3 (worktree) and Step 4 (status flip + sentinel) were successfully
+   * reversed, and whether any commits were preserved under a
+   * `quarantine/<task>-<ts>` ref.
    */
   rollback?: RollbackResult;
 }
@@ -432,19 +434,23 @@ export async function runExecuteCommand(
   );
 
   // ── AISDLC-177 rollback wiring ─────────────────────────────────────
-  // On developer-failed / contract-violated outcomes the side-effects of
-  // Step 3 (worktree creation) and Step 4 (status flip + sentinel) must
-  // be reversed so the operator (or a re-dispatch) finds a clean slate.
-  // The orchestrator's loop.ts already does this for the autonomous
-  // path; the umbrella subcommand wires the same helper for the manual
-  // path so consistency is preserved across both invocation surfaces.
+  // On any outcome that left Step 3 (worktree creation) + Step 4 (status
+  // flip + sentinel) side-effects on disk WITHOUT successfully opening a
+  // PR, those side-effects must be reversed so the operator (or a
+  // re-dispatch) finds a clean slate. The full set is sourced from
+  // `ROLLBACK_OUTCOMES` in `orchestrator/loop.ts` (AISDLC-191) so the
+  // umbrella CLI and the autonomous orchestrator stay in lockstep:
+  //   - `developer-failed` — dev subagent returned commitSha:null (AISDLC-177)
+  //   - `developer-json-contract-violated` — dev returned prose twice (AISDLC-176)
+  //   - `aborted` — Step 11 push or `gh pr create` failed mid-flight
+  //   - `unknown-failure` — synthetic; orchestrator-only (executePipeline
+  //     never returns this directly, but the membership check is harmless)
+  // The orchestrator's loop.ts wires rollback for the autonomous path;
+  // the umbrella subcommand wires the same helper for the manual path.
   // (This is the umbrella's CONSISTENCY OVER PARITY value-add over the
   // raw slash command body, which does NOT yet wire rollback.)
   let rollbackResult: RollbackResult | undefined;
-  if (
-    result.outcome === 'developer-failed' ||
-    result.outcome === 'developer-json-contract-violated'
-  ) {
+  if (ROLLBACK_OUTCOMES.has(result.outcome)) {
     logger.progress('execute', `rollback start outcome=${result.outcome} branch=${result.branch}`);
     try {
       rollbackResult = await rollback({
