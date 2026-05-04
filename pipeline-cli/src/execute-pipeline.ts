@@ -187,6 +187,11 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     });
 
     // Step 9 — iteration loop
+    // AISDLC-184 — pass the same `onDeveloperContractRetry` hook the
+    // initial Step 5b/6 dispatch above uses so iteration-path retries
+    // (dev returns prose on iteration N>1, retry helper recovers) emit
+    // the same `DeveloperContractRetry` event. Without this the
+    // events.jsonl stream undercounts drift on the iteration path.
     const loop = await iterateReviewLoop({
       taskId: opts.taskId,
       worktreePath: branch.worktreePath,
@@ -197,6 +202,9 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       maxIterations: opts.maxReviewIterations ?? 2,
       spawner: opts.spawner,
       onIteration: opts.onProgress,
+      ...(opts.onDeveloperContractRetry
+        ? { onDeveloperContractRetry: opts.onDeveloperContractRetry }
+        : {}),
     });
     iterationsTotal = loop.iterations;
     finalAggregated = loop.finalVerdict;

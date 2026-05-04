@@ -5,6 +5,7 @@ import { aggregateVerdicts } from './08-aggregate-verdicts.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import type {
   AggregatedVerdict,
+  DeveloperContractRetryInfo,
   DeveloperReturn,
   ReviewerVerdict,
   SubagentResult,
@@ -223,6 +224,136 @@ describe('Step 9 — iterateReviewLoop', () => {
     // Developer subagent failed → loop bails; iteration counter increments past 1.
     expect(r.iterations).toBeGreaterThanOrEqual(1);
     expect(r.finalVerdict.decision).toBe('CHANGES_REQUESTED');
+  });
+
+  it('fires onDeveloperContractRetry when iteration 2 dev returns prose then retry recovers (AISDLC-184)', async () => {
+    // Sequence on the developer fixture:
+    //   call 0 (iteration 2 initial dispatch from inside the loop) → prose,
+    //     triggering parseDeveloperReturnWithRetry to issue a retry spawn.
+    //   call 1 (the retry spawn) → valid JSON envelope.
+    // Reviewers approve so the loop exits cleanly and we can assert the
+    // event payload.
+    const spawner = new MockSpawner({
+      developer: (_opts, callIndex): SubagentResult => {
+        if (callIndex === 0) {
+          return {
+            type: 'developer',
+            output: 'I worked on this and committed abc1234, here is some prose without JSON.',
+            status: 'success',
+            durationMs: 0,
+          };
+        }
+        return {
+          type: 'developer',
+          output: '',
+          parsed: goodDev,
+          status: 'success',
+          durationMs: 0,
+        };
+      },
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'ok' },
+        status: 'success',
+        durationMs: 0,
+      },
+      'test-reviewer': {
+        type: 'test-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'ok' },
+        status: 'success',
+        durationMs: 0,
+      },
+      'security-reviewer': {
+        type: 'security-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'ok' },
+        status: 'success',
+        durationMs: 0,
+      },
+    });
+    const events: DeveloperContractRetryInfo[] = [];
+    const r = await iterateReviewLoop({
+      taskId: 'AISDLC-1',
+      worktreePath: tmp,
+      task,
+      branch: 'b',
+      initialDeveloperReturn: goodDev,
+      initialVerdict: blockedVerdict(),
+      maxIterations: 2,
+      spawner,
+      onDeveloperContractRetry: (info) => {
+        events.push(info);
+      },
+    });
+    // Loop ran iteration 2; retry recovered; reviewers approved on iter 2.
+    expect(r.iterations).toBe(2);
+    expect(r.finalVerdict.decision).toBe('APPROVED');
+    expect(spawner.getCallCount('developer')).toBe(2); // one prose + one retry
+    expect(events).toHaveLength(1);
+    expect(events[0].taskId).toBe('AISDLC-1');
+    expect(events[0].initialOutputPreview).toContain('prose without JSON');
+    expect(events[0].retryOutputPreview).toBe('<empty>'); // retry fixture's output is ''
+    expect(typeof events[0].durationMs).toBe('number');
+  });
+
+  it('does not throw when onDeveloperContractRetry is omitted and dev returns prose on iter 2', async () => {
+    // Same scenario as above but no callback wired — verifies the helper is
+    // a true no-op when omitted (the iterate loop must not require the hook).
+    const spawner = new MockSpawner({
+      developer: (_opts, callIndex): SubagentResult => {
+        if (callIndex === 0) {
+          return {
+            type: 'developer',
+            output: 'prose-only response, no JSON envelope',
+            status: 'success',
+            durationMs: 0,
+          };
+        }
+        return {
+          type: 'developer',
+          output: '',
+          parsed: goodDev,
+          status: 'success',
+          durationMs: 0,
+        };
+      },
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'ok' },
+        status: 'success',
+        durationMs: 0,
+      },
+      'test-reviewer': {
+        type: 'test-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'ok' },
+        status: 'success',
+        durationMs: 0,
+      },
+      'security-reviewer': {
+        type: 'security-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'ok' },
+        status: 'success',
+        durationMs: 0,
+      },
+    });
+    const r = await iterateReviewLoop({
+      taskId: 'AISDLC-1',
+      worktreePath: tmp,
+      task,
+      branch: 'b',
+      initialDeveloperReturn: goodDev,
+      initialVerdict: blockedVerdict(),
+      maxIterations: 2,
+      spawner,
+    });
+    expect(r.iterations).toBe(2);
+    expect(r.finalVerdict.decision).toBe('APPROVED');
+    expect(spawner.getCallCount('developer')).toBe(2);
   });
 
   it('invokes onIteration callback per iteration', async () => {

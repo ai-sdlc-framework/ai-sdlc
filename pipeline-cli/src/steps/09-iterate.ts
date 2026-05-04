@@ -87,10 +87,27 @@ export async function iterateReviewLoop(
     // on iteration N>1 silently bails out of the loop with the previous
     // verdict (the bug the witnessed AISDLC-70 case exposed at the
     // initial dispatch is just as silent in the iterate path).
+    // AISDLC-184 — forward onRetrySuccess to the optional caller-supplied
+    // `onDeveloperContractRetry` so iteration-path recoveries land on the
+    // same observability bus as the initial-dispatch ones (without it the
+    // event undercounts drift on iteration N>1).
+    const onRetrySuccess = opts.onDeveloperContractRetry;
     const parsedDev = await parseDeveloperReturnWithRetry({
       initialResult: devResult,
       cwd: opts.worktreePath,
       spawner: opts.spawner,
+      ...(onRetrySuccess
+        ? {
+            onRetrySuccess: ({ initialOutputPreview, retryOutputPreview, durationMs }): void => {
+              onRetrySuccess({
+                taskId: opts.taskId,
+                initialOutputPreview,
+                retryOutputPreview,
+                durationMs,
+              });
+            },
+          }
+        : {}),
     });
     if (!parsedDev.ok || !parsedDev.developer) {
       // Treat as developer failure; bail out of the loop with current verdict.
