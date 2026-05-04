@@ -6,12 +6,17 @@ name: AI-SDLC Verify Review Attestation
 # current PR state (commit SHA, diff hash, policy hash, agent file hashes,
 # schema version).
 #
-# AISDLC-140 sub-4: this workflow is now AUDIT-ONLY. It logs verification
-# results (success/failure with reason) for forensic purposes but does NOT
-# post the `ai-sdlc/attestation` commit status — attestation is no longer a
-# merge gate. The `re-actors/alls-green` aggregator (`ai-sdlc/pr-ready`) is
-# the single merge gate; `ai-sdlc-review.yml`'s `Post Review Results` is the
-# only review-tier required check.
+# AISDLC-193: this workflow posts the `ai-sdlc/attestation` commit status
+# again (success when verifier returns valid; failure when invalid with
+# reason in description). Branch protection on `main` requires this status
+# to pass before merge.
+#
+# Stage-2 follow-up: `contentHashV3` is base-dependent (per-file delta hash
+# includes baseBlobSha — see `pipeline-cli/src/incremental-review/incremental.ts:592`).
+# When the merge queue rebases the PR onto a tip where sibling PRs touched
+# the same files, the envelope can invalidate even though the PR's CONTENT
+# is unchanged. AISDLC-193 stage 2 will introduce `contentHashV4` (per-file
+# `{path, headBlobSha}` map, base-independent) to close that rebase gap.
 
 on:
   pull_request:
@@ -45,6 +50,7 @@ jobs:
     if: "!startsWith(github.head_ref, 'release-please--') && !contains(github.event.merge_group.head_ref || '', 'release-please--')"
     permissions:
       contents: read
+      statuses: write
     steps:
       # AISDLC-113: derive head/base SHAs from whichever event triggered us.
       # pull_request → github.event.pull_request.{head,base}.sha
@@ -90,17 +96,36 @@ jobs:
           PR_BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
         run: node scripts/verify-attestation.mjs
 
-      # AISDLC-140 sub-4: log-only — no commit status, no PR comment. The
-      # verifier's outputs are surfaced through the workflow run log so
-      # operators can audit failures without the workflow gating merge.
-      - name: Log audit result
+      # AISDLC-193: post the `ai-sdlc/attestation` commit status. Branch
+      # protection requires it; missing/invalid envelopes block merge.
+      # Posts on BOTH the pull_request HEAD (direct verification) AND the
+      # merge_group tip (queue-time re-verification with sibling-rebase
+      # state) so a sibling PR merging into the same files between PR-head
+      # verification and queue execution surfaces here.
+      - name: Post ai-sdlc/attestation status
         env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
           STATUS: ${{ steps.verify.outputs.status }}
           REASON: ${{ steps.verify.outputs.reason }}
           HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
+          set -euo pipefail
           if [ "$STATUS" = "valid" ]; then
-            echo "::notice::ai-sdlc attestation AUDIT — valid envelope on $HEAD_SHA"
+            STATE=success
+            DESC="valid envelope at HEAD"
+            echo "::notice::ai-sdlc attestation valid on $HEAD_SHA"
           else
-            echo "::warning::ai-sdlc attestation AUDIT — $STATUS ($REASON) on $HEAD_SHA"
+            STATE=failure
+            # GitHub status descriptions are truncated at 140 chars; trim.
+            DESC="${REASON:0:130}"
+            echo "::warning::ai-sdlc attestation $STATUS on $HEAD_SHA: $REASON"
           fi
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state="$STATE" \
+            -f context='ai-sdlc/attestation' \
+            -f description="$DESC" \
+            ${PR_URL:+-f target_url="$PR_URL"}
+          echo "Posted ai-sdlc/attestation: $STATE on $HEAD_SHA"
