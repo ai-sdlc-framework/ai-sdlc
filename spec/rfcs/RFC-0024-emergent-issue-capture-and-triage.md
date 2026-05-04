@@ -358,9 +358,23 @@ Per `project_team_roles.md`:
 | Owner | Role | Status | Date |
 |---|---|---|---|
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏳ Pending walkthrough | — |
-| Alexander Kline | Product Lead | ⏳ Pending walkthrough | — |
+| Alexander Kline | Product Lead | ✅ Signed v0.2 | 2026-05-04 |
 
 Lifecycle: Draft → Ready for Review (after OQ walkthrough) → Signed Off (after all owners sign).
+
+### Product Authority review
+
+**Endorse with PPA integration**: emergent issues bypass DoR (findings from in-flight work, not authored issues) and enter PPA admission directly via `sourceType: emergent` on AdmissionInput. This composition is correct and load-bearing.
+
+**Three-way triage** (quick-fix vs scope-extension vs new strategic Issue) is the right shape. **Suggested fourth disposition**: `parked-as-finding` (or "not actionable but worth recording") — operators discover findings that are real but not work-shaped (e.g., "this whole approach is wrong, file a new RFC instead"). Treating these as "new strategic" creates noise; treating them as "discard" loses the signal. A structured findings log preserves the signal without admission overhead.
+
+**Composition with RFC-0033 governance reporting**: emergent captures feed RFC-0033's `rd.uncertaintiesAddressed` section directly — the synthesis between "what we discovered we didn't know" and "what we addressed" is exactly the shape an emergent capture log produces.
+
+**Composition with RFC-0026 exploration workstreams**: exploration captures (per RFC-0026) are emergent-by-construction — the entire point of an exploration is to convert unknowns into capturable findings. RFC-0024's mechanism IS the on-ramp for RFC-0026's outputs.
+
+**Composition with RFC-0030 Signal Ingestion**: when a captured finding correlates with existing demand-cluster signal (per RFC-0030), the capture should reference the cluster ID. Cross-reference recommended once 0030 lands.
+
+Position grounded in RFC-0029 Part II + Principle 5 (governance by composition).
 
 ## 17. References
 
