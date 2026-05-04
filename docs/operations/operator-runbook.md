@@ -747,15 +747,18 @@ The HC composite includes a `HC_design` channel (RFC-0008 §9, weight `0.10`) th
 
 The normative semantic is in [RFC-0008 §14.2.1](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md#1421-principal-participation-three-state-semantic-aisdlc-171); this section is the operator-facing companion. Both reference the implementation anchors in [`orchestrator/src/admission-hc.ts`](../../orchestrator/src/admission-hc.ts) and [`orchestrator/src/design-authority.ts`](../../orchestrator/src/design-authority.ts).
 
-### The three states
+### The states
 
-The disambiguating signal is the `designAuthorityConfigured` field on `pillarBreakdown.shared.hcComposite`. It is a **diagnostic flag only** — it does not change the score; it just tells you which of the three states produced the score you're looking at.
+The disambiguating signal is the `designAuthorityConfigured` field on `pillarBreakdown.shared.hcComposite`. It is a **diagnostic flag only** — it does not change the score; it just tells you which underlying condition produced the score you're looking at.
 
-| State | `designAuthorityConfigured` | `hcDesign` | What it means |
-|---|---|---|---|
-| **none** — no Design Authority configured | `undefined` (omitted) | `0` | The project has no `DesignSystemBinding` resource at all (the `preDesignSystem` lifecycle phase per RFC-0008 §6.2), OR the DSB exists but its `stewardship.designAuthority.principals` list is empty |
-| **configured-but-silent** — DA configured, did not review | `true` | `0` | The DSB declares one or more principals, but none of them appears as the issue's author or as a commenter. The channel is wired; design leadership simply did not weigh in on this particular issue |
-| **engaged** — DA reviewed | `true` | non-zero (positive or negative) | At least one declared principal participated as the issue's author or as a commenter; the signal type is resolved from issue labels (`design/advances-coherence`, `design/fills-gap`, `design/fragments-catalog`, `design/misaligned-brand`) |
+The implementation surfaces **three distinct flag values** (`undefined`, `false`, `true`) in combination with `hcDesign`, producing four observable states. The two "no Design Authority configured" rows below collapse into a single operator response — they differ only in whether the DSB resource exists at all — but tooling that scans the breakdown must handle both flag values to avoid silently dropping the DSB-with-empty-principals case into an "unknown" bucket.
+
+| State | `designAuthorityConfigured` | `hcDesign` | Distinguishing test | What it means |
+|---|---|---|---|---|
+| **none** — DSB absent | `undefined` (field omitted) | `0` | No `DesignSystemBinding` resource exists for the project (the `preDesignSystem` lifecycle phase per RFC-0008 §6.2). `buildDesignAuthoritySignal` short-circuits to `undefined`, and `computeAdmissionHumanCurve` omits the field entirely | The project has not opted into Design Authority signal routing. Common for early-stage adopters |
+| **none** — DSB present, principals empty | `false` (field present and explicitly `false`) | `0` | A DSB exists but `spec.stewardship.designAuthority.principals` is empty or absent. `buildDesignAuthoritySignal` returns `principalsDeclared: false`, which propagates through to the breakdown | Operationally equivalent to DSB-absent — no Design Authority is declared. The distinct flag value lets you see that a DSB exists but has not been populated with principals yet |
+| **configured-but-silent** — DA configured, did not review | `true` | `0` | DSB declares one or more principals, but none of them appears as the issue's author or as a commenter. The channel is wired; design leadership simply did not weigh in on this particular issue | The operationally interesting case — see "Operator response" below |
+| **engaged** — DA reviewed | `true` | non-zero (positive or negative) | At least one declared principal participated as the issue's author or as a commenter; the signal type is resolved from issue labels (`design/advances-coherence`, `design/fills-gap`, `design/fragments-catalog`, `design/misaligned-brand`) | Steady-state goal for projects with a mature design system |
 
 ### When each state appears
 
@@ -782,38 +785,68 @@ The principal-participation gate (only listed principals may emit full-weight `H
 
 ### How to inspect the flag
 
-The flag surfaces on every admission scoring result. Two convenient inspection paths:
+The flag is computed on every admission scoring result. The framework does not currently persist per-issue admission scores to a queryable artifact tree — there is no `artifacts/_admission/scores/` directory. Two real inspection surfaces exist:
+
+**1. `cli-admit` — recompute the score and inspect the breakdown for a single issue.** The dogfood CLI runs the admission pipeline and writes the full result (including `pillarBreakdown`) as JSON to stdout. Pipe it through `jq` to extract the diagnostic surface:
 
 ```bash
-# 1. Read the most recent admission score for an issue from the artifacts:
-jq '.pillarBreakdown.shared.hcComposite' \
-  artifacts/_admission/scores/issue-<id>.json
+# Backlog task:
+pnpm --filter @ai-sdlc/dogfood admit \
+  --tracker backlog --task-id AISDLC-42 --enrich-from-state \
+  | jq '.pillarBreakdown.shared.hcComposite'
 
-# Output for the configured-but-silent state:
-# {
-#   "hcExplicit": 0,
-#   "hcConsensus": -1,
-#   "hcDecision": 0,
-#   "hcDesign": 0,
-#   "designAuthorityConfigured": true,    ← diagnostic flag
-#   "hcRaw": -0.45,
-#   "hcComposite": -0.4218990...
-# }
-
-# 2. Bulk-scan for configured-but-silent issues across the backlog
-# (signals that DA is paper-only):
-for f in artifacts/_admission/scores/*.json; do
-  state=$(jq -r '
-    .pillarBreakdown.shared.hcComposite as $hc
-    | if   $hc.designAuthorityConfigured == null      then "none"
-      elif $hc.designAuthorityConfigured and $hc.hcDesign == 0 then "configured-but-silent"
-      elif $hc.designAuthorityConfigured                 then "engaged"
-      else "unknown" end' "$f")
-  if [[ "$state" == "configured-but-silent" ]]; then
-    echo "$(basename "$f"): $state"
-  fi
-done
+# GitHub issue (requires the full --title/--body-file/--labels invocation —
+# see `dogfood/src/cli-admit.ts` header comment for the full flag list):
+pnpm --filter @ai-sdlc/dogfood admit \
+  --title "..." --body-file /tmp/body.txt --issue-number 42 \
+  --labels '["bug"]' --reactions 3 --comments 2 \
+  --created-at 2026-01-01T00:00:00Z --enrich-from-state \
+  | jq '.pillarBreakdown.shared.hcComposite'
 ```
+
+Sample output for the configured-but-silent state:
+
+```json
+{
+  "explicit": 0,
+  "consensus": -1,
+  "decision": 0,
+  "design": 0,
+  "value": -0.4218990,
+  "designAuthorityConfigured": true
+}
+```
+
+For the DSB-present-empty-principals state, `designAuthorityConfigured` will be `false` (the field is present but explicitly `false`); for the DSB-absent state, the field is omitted entirely.
+
+**2. `design_lookahead_notifications` SQLite table — historical breakdowns for top-10 issues.** The C7 design-lookahead detector (RFC-0008 §11) persists the full `PillarBreakdown` as JSON in the `pillar_breakdown_json` column whenever it emits a notification (top-10 backlog item, design impact detected, not deduped within the 7-day window). The state DB lives at `.ai-sdlc/state.db`. To pull the breakdown for a specific issue:
+
+```bash
+sqlite3 .ai-sdlc/state.db \
+  "SELECT pillar_breakdown_json FROM design_lookahead_notifications WHERE issue_number = 42;" \
+  | jq '.shared.hcComposite'
+```
+
+To bulk-scan for `configured-but-silent` issues (the operational tell that DA is paper-only):
+
+```bash
+sqlite3 .ai-sdlc/state.db \
+  "SELECT issue_number, pillar_breakdown_json FROM design_lookahead_notifications;" \
+  | while IFS='|' read -r issue json; do
+      state=$(echo "$json" | jq -r '
+        .shared.hcComposite as $hc
+        | if   $hc.designAuthorityConfigured == null  then "none-dsb-absent"
+          elif $hc.designAuthorityConfigured == false then "none-dsb-empty-principals"
+          elif $hc.designAuthorityConfigured == true and $hc.design == 0 then "configured-but-silent"
+          elif $hc.designAuthorityConfigured == true                       then "engaged"
+          else "unknown" end')
+      if [[ "$state" == "configured-but-silent" ]]; then
+        echo "issue $issue: $state"
+      fi
+    done
+```
+
+The classifier above explicitly handles the `false` flag value (DSB-present-empty-principals); a classifier that only branches on truthiness silently bins those issues into `unknown` and you will miss DSBs that exist but have not been populated with principals. Note that this surface only contains the top-N items the lookahead detector observed — for one-off inspection of an issue not in that table, use `cli-admit` (path 1).
 
 A clustered run of `configured-but-silent` results across recent admissions is the operational tell that DA assignment needs review.
 
