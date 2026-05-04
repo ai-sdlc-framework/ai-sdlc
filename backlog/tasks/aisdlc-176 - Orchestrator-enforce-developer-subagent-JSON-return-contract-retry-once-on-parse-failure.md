@@ -15,7 +15,7 @@ dependencies: []
 references:
   - ai-sdlc-plugin/agents/developer.md
   - pipeline-cli/src/cli/orchestrator.ts
-  - pipeline-cli/src/pipeline/steps/06-parse-dev-return.ts
+  - pipeline-cli/src/steps/06-parse-dev-return.ts
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
 priority: high
 ---
