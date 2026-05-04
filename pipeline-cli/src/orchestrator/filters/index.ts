@@ -20,6 +20,7 @@ export {
   checkExternalDependencies,
   type CheckExternalDependenciesOpts,
 } from './external-dependencies.js';
+export { checkOrphanParent, type CheckOrphanParentOpts } from './orphan-parent.js';
 export { formatFilterTrace, runFilterChain, type RunFilterChainOpts } from './chain.js';
 export type {
   AwaitingExternalDetail,
@@ -29,4 +30,5 @@ export type {
   FilterDetail,
   FilterName,
   FilterResult,
+  OrphanParentDetail,
 } from './types.js';

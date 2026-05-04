@@ -135,18 +135,43 @@ Returns JSON of the form:
 surface so operators can preview what the loop would pick up before turning
 the flag on.
 
-## Pre-dispatch admission filters (RFC-0015 Phase 3 / §4.3)
+## Pre-dispatch admission filters (RFC-0015 Phase 3 / §4.3, AISDLC-175)
 
 Every tick, BEFORE calling `executePipeline()`, the orchestrator walks each
-candidate through three filters in order. The chain short-circuits on the
+candidate through four filters in order. The chain short-circuits on the
 first failure so downstream filters don't waste work on a candidate that's
 already going to be skipped.
 
 | # | Filter | Reads | Skip event |
 |---|---|---|---|
+| 0 | **OrphanParent** | In-memory dependency graph (`parent_task_id` reverse-index) | `OrchestratorOrphanParent{completedChildren}` |
 | 1 | **DependencyReadiness** | In-memory dependency graph | `OrchestratorBlockedByDependency{blockers}` |
 | 2 | **DorReadiness** | `<artifactsDir>/_dor/calibration.jsonl` (latest entry per task) + frontmatter `labels:` for `dor-bypass` | `OrchestratorBlockedByDor{verdict, signedAt}` |
 | 3 | **ExternalDependencies** | Task frontmatter `externalDependencies:` + `<artifactsDir>/_orchestrator/cleared-external-deps.json` | `OrchestratorAwaitingExternal{externalDeps, allExternalDeps}` |
+
+### Filter 0 — OrphanParent (AISDLC-175)
+
+Detects parent tasks whose every declared child is already in
+`backlog/completed/`. A candidate X is an orphan parent iff ≥1 OTHER task
+carries `parent_task_id: X` AND every such child has `status === 'completed'`.
+The orchestrator skips these candidates so it stops dispatching developer
+subagents to do bookkeeping closures (parent file `git mv` to `completed/`)
+the framework should handle. Witness: 2026-05-04 dogfood run picked up
+AISDLC-70 (RFC-0010 parent with all 9 sub-tasks already in `completed/`)
+even though PR #231 had already shipped its closure.
+
+The filter ADMITS:
+
+- Candidates with no declared children (a leaf task or top-level task
+  without a phased breakdown).
+- Candidates with mixed children (≥1 still open — there's real downstream
+  work the parent is gating).
+- Candidates that themselves carry `parent_task_id` (closing a sub-task is
+  real dispatch work even if the sub-task has its own grandchildren).
+
+Runs first because it's the cheapest filter (constant-time graph lookup)
+AND the most decisive — there's no point asking the other three filters
+about a candidate that isn't real work at all.
 
 ### Filter 1 — DependencyReadiness
 
@@ -216,6 +241,7 @@ Every evaluated candidate writes a structured trace block to the logger:
 
 ```text
 [orchestrator] filter trace for AISDLC-92:
+  - Orphan-parent check: passed
   - Dependency check: passed
   - DoR readiness: passed
   - External deps: failed (1 manual external dep(s) unresolved: sec-review)

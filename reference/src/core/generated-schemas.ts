@@ -2506,13 +2506,19 @@ export const orchestratorEventsV1Schema = {
       description:
         'Consecutive-skip count for the candidate at the moment the stuck event fires — present on `OrchestratorStuckCandidate`.',
     },
+    completedChildren: {
+      type: 'array',
+      items: { type: 'string', minLength: 1 },
+      description:
+        "IDs of the candidate's children that are all already in `backlog/completed/` (lowercased, sorted). At least one entry by construction. Present on `OrchestratorOrphanParent` (AISDLC-175) — emitted when the orphan-parent filter rejects a parent task whose every declared child has already shipped, so the orchestrator stops dispatching developer subagents for what is bookkeeping (parent file `git mv` to `completed/`) the framework should handle.",
+    },
   },
   additionalProperties: false,
   $defs: {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -2524,6 +2530,7 @@ export const orchestratorEventsV1Schema = {
         'OrchestratorBlockedByDor',
         'OrchestratorIdleNoWork',
         'OrchestratorIdleAllFiltered',
+        'OrchestratorOrphanParent',
         'OrchestratorStuckCandidate',
         'WorkerStateTransition',
       ],

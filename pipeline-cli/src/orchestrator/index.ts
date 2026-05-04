@@ -66,6 +66,7 @@ export type {
   OrchestratorConfig,
   OrchestratorFilterEvent,
   OrchestratorIdleEvent,
+  OrchestratorOrphanParentEvent,
   OrchestratorStatus,
   OrchestratorStuckCandidateEvent,
   OrchestratorTickResult,
@@ -122,10 +123,12 @@ export {
 } from './playbook/index.js';
 
 // RFC-0015 Phase 3 — pre-dispatch admission filters (AISDLC-169.3).
+// AISDLC-175 — orphan-parent filter (parent task whose every child is done).
 export {
   checkDependencyReadiness,
   checkDorReadiness,
   checkExternalDependencies,
+  checkOrphanParent,
   DOR_BYPASS_LABEL,
   formatFilterTrace,
   runFilterChain,
@@ -133,11 +136,13 @@ export {
   type CheckDependencyReadinessOpts,
   type CheckDorReadinessOpts,
   type CheckExternalDependenciesOpts,
+  type CheckOrphanParentOpts,
   type DependencyBlockedDetail,
   type DorBlockedDetail,
   type FilterChainResult,
   type FilterDetail,
   type FilterName,
   type FilterResult,
+  type OrphanParentDetail,
   type RunFilterChainOpts,
 } from './filters/index.js';

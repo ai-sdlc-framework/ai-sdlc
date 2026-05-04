@@ -23,7 +23,12 @@ import type {
 
 function node(
   id: string,
-  opts: { deps?: string[]; ext?: ExternalDependency[]; status?: 'open' | 'completed' } = {},
+  opts: {
+    deps?: string[];
+    ext?: ExternalDependency[];
+    status?: 'open' | 'completed';
+    parent?: string;
+  } = {},
 ): DependencyNode {
   const status = opts.status ?? 'open';
   return {
@@ -37,6 +42,7 @@ function node(
     externalDependencies: opts.ext ?? [],
     lastModified: '2026-05-02T00:00:00Z',
     filePath: `/tmp/${id}.md`,
+    parentTaskId: opts.parent ?? '',
   };
 }
 
@@ -61,7 +67,7 @@ beforeEach(() => {
 });
 
 describe('runFilterChain — all-pass', () => {
-  it('admits a candidate that clears all three filters', () => {
+  it('admits a candidate that clears all four filters', () => {
     const g = graph([node('AISDLC-READY')]);
     const result = runFilterChain({
       graph: g,
@@ -70,8 +76,11 @@ describe('runFilterChain — all-pass', () => {
     });
     expect(result.passed).toBe(true);
     expect(result.failure).toBeNull();
-    expect(result.trace).toHaveLength(3);
+    expect(result.trace).toHaveLength(4);
+    // AISDLC-175 prepended `OrphanParent` to the chain — cheapest +
+    // most decisive filter runs first.
     expect(result.trace.map((r) => r.filter)).toEqual([
+      'OrphanParent',
       'DependencyReadiness',
       'DorReadiness',
       'ExternalDependencies',
@@ -81,7 +90,23 @@ describe('runFilterChain — all-pass', () => {
 });
 
 describe('runFilterChain — short-circuit ordering', () => {
-  it('rejects + stops at filter 1 when a dependency is open (no DoR/external in trace)', () => {
+  it('rejects + stops at OrphanParent when the candidate is a parent with all children done', () => {
+    const g = graph([
+      node('AISDLC-PARENT'),
+      node('AISDLC-PARENT.1', { status: 'completed', parent: 'AISDLC-PARENT' }),
+    ]);
+    const result = runFilterChain({
+      graph: g,
+      taskId: 'AISDLC-PARENT',
+      calibrationLogPath: logPath,
+    });
+    expect(result.passed).toBe(false);
+    expect(result.failure?.filter).toBe('OrphanParent');
+    // Short-circuited at filter 0 → no downstream filters in trace.
+    expect(result.trace).toHaveLength(1);
+  });
+
+  it('rejects + stops at DependencyReadiness when a dependency is open (no DoR/external in trace)', () => {
     const g = graph([node('AISDLC-OPEN'), node('AISDLC-DEP', { deps: ['AISDLC-OPEN'] })]);
     const result = runFilterChain({
       graph: g,
@@ -90,10 +115,13 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('DependencyReadiness');
-    expect(result.trace).toHaveLength(1);
+    // OrphanParent passed (filter 0), DependencyReadiness failed (filter 1).
+    expect(result.trace).toHaveLength(2);
+    expect(result.trace[0].filter).toBe('OrphanParent');
+    expect(result.trace[0].passed).toBe(true);
   });
 
-  it('rejects + stops at filter 2 when the DoR verdict blocks (no external in trace)', () => {
+  it('rejects + stops at DorReadiness when the verdict blocks (no external in trace)', () => {
     writeFileSync(
       logPath,
       JSON.stringify({
@@ -122,13 +150,15 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('DorReadiness');
-    expect(result.trace).toHaveLength(2);
-    expect(result.trace[0].filter).toBe('DependencyReadiness');
+    expect(result.trace).toHaveLength(3);
+    expect(result.trace[0].filter).toBe('OrphanParent');
     expect(result.trace[0].passed).toBe(true);
-    expect(result.trace[1].passed).toBe(false);
+    expect(result.trace[1].filter).toBe('DependencyReadiness');
+    expect(result.trace[1].passed).toBe(true);
+    expect(result.trace[2].passed).toBe(false);
   });
 
-  it('rejects at filter 3 when an external manual dep is unresolved (full trace populated)', () => {
+  it('rejects at ExternalDependencies when an external manual dep is unresolved (full trace populated)', () => {
     const g = graph([
       node('AISDLC-X', {
         ext: [{ id: 'sec-review', description: 'wait', kind: 'manual' }],
@@ -141,10 +171,11 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('ExternalDependencies');
-    expect(result.trace).toHaveLength(3);
+    expect(result.trace).toHaveLength(4);
     expect(result.trace[0].passed).toBe(true);
     expect(result.trace[1].passed).toBe(true);
-    expect(result.trace[2].passed).toBe(false);
+    expect(result.trace[2].passed).toBe(true);
+    expect(result.trace[3].passed).toBe(false);
   });
 });
 
@@ -158,10 +189,26 @@ describe('formatFilterTrace', () => {
     });
     const text = formatFilterTrace('AISDLC-READY', result);
     expect(text).toContain('[orchestrator] filter trace for AISDLC-READY:');
+    expect(text).toContain('Orphan-parent check: passed');
     expect(text).toContain('Dependency check: passed');
     expect(text).toContain('DoR readiness: passed');
     expect(text).toContain('External deps: passed');
     expect(text).toContain('→ admitted');
+  });
+
+  it('renders the orphan-parent case with the → skipped, orphan parent needs closure footer', () => {
+    const g = graph([
+      node('AISDLC-PARENT'),
+      node('AISDLC-PARENT.1', { status: 'completed', parent: 'AISDLC-PARENT' }),
+    ]);
+    const result = runFilterChain({
+      graph: g,
+      taskId: 'AISDLC-PARENT',
+      calibrationLogPath: logPath,
+    });
+    const text = formatFilterTrace('AISDLC-PARENT', result);
+    expect(text).toContain('Orphan-parent check: failed');
+    expect(text).toContain('→ skipped, orphan parent needs closure');
   });
 
   it('renders the external-await case with the → skipped, awaiting external footer (matches the task-spec exemplar)', () => {

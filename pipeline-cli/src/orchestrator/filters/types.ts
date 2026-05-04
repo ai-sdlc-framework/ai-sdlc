@@ -20,11 +20,20 @@
 import type { ExternalDependency } from '../../deps/dependency-graph.js';
 
 /**
- * Names of the three filters in the order RFC §4.3 specifies. Used in trace
+ * Names of the filters in the order the chain runs them. Used in trace
  * lines + event payloads so operators can grep for a specific filter without
  * decoding the human-readable reason string.
+ *
+ * `OrphanParent` (AISDLC-175) is the cheapest filter — a constant-time graph
+ * lookup against the candidate's own node + the already-loaded parent map —
+ * so it runs FIRST and short-circuits before the costlier dependency walk.
+ * The other three filters preserve the RFC §4.3 ordering among themselves.
  */
-export type FilterName = 'DependencyReadiness' | 'DorReadiness' | 'ExternalDependencies';
+export type FilterName =
+  | 'OrphanParent'
+  | 'DependencyReadiness'
+  | 'DorReadiness'
+  | 'ExternalDependencies';
 
 /**
  * Single-filter outcome. `passed: true` clears the candidate; `passed: false`
@@ -51,7 +60,30 @@ export interface FilterResult {
  * narrow safely. Each shape carries only the fields the matching event
  * actually needs (RFC §7.1 event surface).
  */
-export type FilterDetail = DependencyBlockedDetail | DorBlockedDetail | AwaitingExternalDetail;
+export type FilterDetail =
+  | DependencyBlockedDetail
+  | DorBlockedDetail
+  | AwaitingExternalDetail
+  | OrphanParentDetail;
+
+/**
+ * AISDLC-175 — the candidate is a parent task whose every declared child is
+ * already in `backlog/completed/`. The filter rejects so the orchestrator
+ * stops dispatching developer subagents to do bookkeeping closures the
+ * framework should handle (the witness was AISDLC-70 — RFC-0010 parent with
+ * 9 completed children — getting picked up after PR #231 had already shipped
+ * its closure).
+ */
+export interface OrphanParentDetail {
+  kind: 'orphan-parent-needs-closure';
+  /**
+   * IDs of the candidate's children that are all already in
+   * `backlog/completed/` (lowercased, sorted). At least one entry by
+   * construction — a parent with zero children is not an orphan-parent and
+   * the filter admits it.
+   */
+  completedChildren: string[];
+}
 
 export interface DependencyBlockedDetail {
   kind: 'dependency-blocked';

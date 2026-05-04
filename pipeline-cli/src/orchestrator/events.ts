@@ -55,6 +55,7 @@ export type OrchestratorEventType =
   | 'OrchestratorBlockedByDor'
   | 'OrchestratorIdleNoWork'
   | 'OrchestratorIdleAllFiltered'
+  | 'OrchestratorOrphanParent'
   | 'OrchestratorStuckCandidate'
   | 'WorkerStateTransition';
 
