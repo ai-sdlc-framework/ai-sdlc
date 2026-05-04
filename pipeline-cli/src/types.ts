@@ -291,6 +291,16 @@ export interface IterateReviewLoopOptions {
   maxIterations?: number;
   spawner?: SubagentSpawner;
   onIteration?: (iteration: number, verdict: AggregatedVerdict) => Promise<void> | void;
+  /**
+   * AISDLC-184 — fired when the iteration-path Step 6 retry helper recovered
+   * a developer dispatch by re-prompting for the JSON envelope. Mirrors the
+   * `PipelineOptions.onDeveloperContractRetry` hook (which only covers the
+   * initial Step 5b/6 dispatch). Without this wire-up, retries that happen
+   * on iteration N>1 fire `parseDeveloperReturnWithRetry` but never emit a
+   * `DeveloperContractRetry` event — operators grepping recovery frequency
+   * would undercount drift on the iteration path.
+   */
+  onDeveloperContractRetry?: (info: DeveloperContractRetryInfo) => void;
 }
 
 export interface IterateReviewLoopResult {
