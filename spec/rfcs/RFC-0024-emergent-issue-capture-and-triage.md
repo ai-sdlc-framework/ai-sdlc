@@ -13,7 +13,7 @@ requiresDocs: []
 
 # RFC-0024: Emergent Issue Capture + Triage Pattern
 
-**Status:** Draft (initial seed; structure may shift)
+**Status:** Draft v0.2 — abstraction pass: terminology lifted from ai-sdlc-internal (backlog tasks, RFCs) to framework-level (Issues via configured adapter, Feature Issues for upstream-design-work).
 **Lifecycle:** Draft
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-03
@@ -29,12 +29,24 @@ The Decision Engine ([VISION.md](../../VISION.md)) frontloads decisions through 
 
 Today, the framework has no formal pattern for capturing these. The operator either:
 
-- **Drops what they're doing** to file a backlog task or RFC (breaks flow, loses context on the original work)
+- **Drops what they're doing** to file a new Issue or Feature Issue in the configured tracker (breaks flow, loses context on the original work)
 - **Mentally bookmarks** the finding and hopes to remember (often forgotten)
-- **Inlines a fix** into the current work (scope creep; violates "one issue = one contract")
+- **Inlines a fix** into the current work (scope creep; violates "one Issue = one contract")
 - **Leaves a TODO comment** in the code (technical debt that nobody schedules)
 
-This RFC defines a first-class **emergent issue capture pattern** that lets the operator (or an AI agent) record a finding with minimal context-switching, triages it to the right destination (quick-fix task, scope-extension to current work, new RFC, or "not actionable"), and integrates with the DoR + orchestrator loop so emergent work flows into the pipeline without manual translation.
+This RFC defines a first-class **emergent issue capture pattern** that lets the operator (or an AI agent) record a finding with minimal context-switching, triages it to the right destination (quick-fix Issue, scope-extension to current work, new Feature Issue, or "not actionable"), and integrates with the DoR + orchestrator loop so emergent work flows into the pipeline without manual translation.
+
+### 1.1 Terminology — framework-level vs. ai-sdlc-internal
+
+This RFC defines a framework-level pattern. Operators of the framework can configure ANY issue-tracker adapter (per RFC-0003 Infrastructure Adapters) — Linear, Jira, GitHub Issues, backlog.md, etc. The pattern uses these abstract terms:
+
+| Framework-level term | Meaning | ai-sdlc-internal example |
+|---|---|---|
+| **Issue** | A unit of work tracked by the configured issue-tracker adapter | A backlog.md task at `backlog/tasks/aisdlc-NNN-*.md` |
+| **Feature Issue** | An Issue kind that requires upstream design work before execution can be scoped (analogous to a design doc / RFC / spec) | An RFC at `spec/rfcs/RFC-NNNN-*.md` |
+| **Bug Issue** | An Issue kind for framework-quality findings (per RFC-0025 taxonomy) | A bug-labeled task in `backlog/tasks/` |
+
+Adopters' issue trackers may use different vocabulary (Linear has Issues + Projects; Jira has Issues + Epics + Stories; backlog.md has Tasks + Milestones). The framework's adapter contract translates between framework-level terms and the tracker's native vocabulary. Examples in this RFC sometimes show the ai-sdlc-internal incarnation (AISDLC-NNN, RFC-NNNN) but the **normative pattern is adapter-agnostic**.
 
 ## 2. Motivation
 
@@ -52,11 +64,11 @@ Observations from dogfood (the witness test of `cli-orchestrator tick` on 2026-0
 
 | Capture path | Loss mode |
 |---|---|
-| Operator manually files backlog task | Breaks flow; operator forgets details by the time they get to the form; references to the source context are weak |
+| Operator manually files an Issue in the configured tracker | Breaks flow; operator forgets details by the time they get to the form; references to the source context are weak |
 | Operator types into Slack/scratch file | Captured but invisible to pipeline; no auto-triage; manually translated later |
 | AI agent observes problem in passing | No mechanism to surface; observation evaporates with the session |
-| Inline `// TODO:` comment | Captured in code, but invisible to backlog; severity unknown; no owner |
-| GitHub PR comment "we should also..." | Visible but trapped in PR thread; rarely converted to backlog item |
+| Inline `// TODO:` comment | Captured in code, but invisible to issue tracker; severity unknown; no owner |
+| GitHub PR comment "we should also..." | Visible but trapped in PR thread; rarely converted to a tracked Issue |
 
 Each of these loses **either context (the why), urgency (the cost of not fixing), or visibility (does anyone know about it?)**. The framework's quality contract (VISION.md §4) requires self-improvement loops; lossy capture breaks those loops.
 
@@ -66,8 +78,8 @@ When an emergent issue is captured, the next decision is what to do with it:
 
 - **Quick fix**: small scope, can ship with current work or as a tiny standalone PR
 - **Scope extension to current work**: this is genuinely the same contract, expand the AC list
-- **New backlog task**: separate contract, will be scheduled by PPA + DoR
-- **New RFC**: design decision needed before any task can be scoped
+- **New Issue**: separate contract, will be scheduled by PPA + DoR
+- **New Feature Issue**: design decision needed before any execution Issue can be scoped
 - **Not actionable**: known limitation, expected behavior, won't fix
 
 This triage is itself a decision — and per the Decision Engine, decisions should be made by the operator with full context. But the operator only has full context **at the moment of capture** (deep in the original work). Asking them to re-derive the context days later in a triage meeting is exactly the kind of cost-asymmetry violation the framework is supposed to eliminate.
@@ -86,16 +98,16 @@ The pattern must define a **decision-pending → decision-deferred handoff** so 
 2. **Capture-time triage** — operator (or AI agent) applies a lightweight rubric at the moment of finding
 3. **No flow break for the operator** — capture takes < 30 seconds when the operator is mid-work
 4. **AI-agent capture surface** — review/dev subagents can capture findings programmatically
-5. **Pipeline integration** — captured items flow into backlog with appropriate type (task / RFC / extension); the orchestrator recognizes them
+5. **Pipeline integration** — captured items flow into the configured issue tracker with appropriate kind (Issue / Feature Issue / scope-extension); the orchestrator recognizes them
 6. **Decision-pending handoff** — when an emergent finding gates the current work, the orchestrator records it as a deferred decision and surfaces it as an operator blocker
 7. **Audit trail** — every capture is traceable: who captured what, when, from what context, with what triage decision
 
 ## 4. Non-goals
 
 1. **Not a project management tool** — this isn't replacing Jira or Linear; capture is the entry point, not the lifecycle manager
-2. **Not a brainstorming surface** — captures are findings, not ideas (idea capture is a separate concern; consider future RFC if needed)
+2. **Not a brainstorming surface** — captures are findings, not ideas (idea capture is a separate concern; consider a follow-on Feature Issue if needed)
 3. **Not a real-time collaboration surface** — captures are operator-individual; multi-operator merge is out of scope for v1
-4. **Not a change in DoR semantics** — emergent issues that become tasks STILL pass through DoR; this RFC is about the on-ramp, not the gate
+4. **Not a change in DoR semantics** — emergent findings that become Issues STILL pass through DoR; this RFC is about the on-ramp, not the gate
 
 ## 5. Capture sources
 
@@ -109,7 +121,7 @@ For operators in a terminal (the primary path):
 # Inline capture from anywhere in the repo
 cli-capture "auth middleware doesn't refresh tokens before expiry" \
   --severity major \
-  --triage new-task \
+  --triage new-issue \
   --context "found while reviewing PR #234, src/auth/middleware.ts:142"
 
 # With deferred triage (operator captures now, decides later in the TUI)
@@ -117,7 +129,7 @@ cli-capture "consider extracting cookie-handling into shared util" \
   --triage tbd
 
 # AI-agent capture (machine-readable arguments)
-cli-capture --json '{"finding":"unused export in foo.ts","severity":"minor","triage":"new-task","source":"code-reviewer-agent","evidenceFile":"foo.ts","evidenceLine":42}'
+cli-capture --json '{"finding":"unused export in foo.ts","severity":"minor","triage":"new-issue","source":"code-reviewer-agent","evidenceFile":"foo.ts","evidenceLine":42}'
 ```
 
 The CLI writes a capture record to `$ARTIFACTS_DIR/_captures/<timestamp>-<random>.jsonl` (one record per file; never modified after write). Records are never auto-deleted; `cli-capture gc` operates on age + triage-status.
@@ -127,7 +139,7 @@ The CLI writes a capture record to `$ARTIFACTS_DIR/_captures/<timestamp>-<random
 Operator can capture from a GitHub PR review comment by including a marker:
 
 ```
-<!-- ai-sdlc:capture severity=major triage=new-task -->
+<!-- ai-sdlc:capture severity=major triage=new-issue -->
 The session-token rotation logic doesn't handle clock-skew between
 nodes. We should fix this in a follow-up; not blocking this PR.
 ```
@@ -139,7 +151,7 @@ A polling job (or webhook in v2) reads PR comments containing the marker, conver
 Replaces the unstructured `// TODO:` with a triage-bearing marker:
 
 ```typescript
-// ai-sdlc:capture severity=minor triage=new-task
+// ai-sdlc:capture severity=minor triage=new-issue
 // The retry loop here doesn't apply jitter; could thunder-herd on broad outage.
 function retryWithBackoff(...) { ... }
 ```
@@ -152,9 +164,9 @@ Review subagents, the developer subagent, and the orchestrator itself can write 
 
 Examples of agent-driven captures:
 
-- **code-reviewer**: "I noticed unrelated cleanup that would simplify this file" → captures with `triage: new-task`
-- **test-reviewer**: "Test coverage is good but the test name doesn't match its assertion" → captures with `triage: new-task severity: minor`
-- **developer**: "I had to work around an undocumented behavior in dep X" → captures with `triage: new-rfc severity: major` (the workaround is technical debt; needs design decision)
+- **code-reviewer**: "I noticed unrelated cleanup that would simplify this file" → captures with `triage: new-issue`
+- **test-reviewer**: "Test coverage is good but the test name doesn't match its assertion" → captures with `triage: new-issue severity: minor`
+- **developer**: "I had to work around an undocumented behavior in dep X" → captures with `triage: new-feature-issue severity: major` (the workaround is technical debt; needs upstream design decision before an execution Issue can be scoped)
 - **orchestrator**: "Failure mode 'developer-failed' triggered, work was quarantined" → captures with `triage: framework-bug` (routes to RFC-0025 framework-quality flow)
 
 ## 6. Capture record schema
@@ -168,7 +180,7 @@ Every capture is a JSON object conforming to `spec/schemas/capture-record.v1.sch
   "timestamp": "2026-05-03T17:42:03Z",
   "finding": "auth middleware doesn't refresh tokens before expiry",
   "severity": "critical|major|minor|suggestion|unknown",
-  "triage": "new-task|new-rfc|scope-extension|quick-fix|framework-bug|not-actionable|tbd",
+  "triage": "new-issue|new-feature-issue|scope-extension|quick-fix|framework-bug|not-actionable|tbd",
   "source": {
     "type": "operator|ai-agent",
     "agentRole": "code-reviewer|test-reviewer|security-reviewer|developer|orchestrator|null",
@@ -183,12 +195,12 @@ Every capture is a JSON object conforming to `spec/schemas/capture-record.v1.sch
     "commitSha": "abc123|null",
     "additionalContext": "free-text"
   },
-  "relatedTaskId": "AISDLC-176|null",                // if this captures-against an in-flight task
-  "extensionTargetTaskId": "AISDLC-167|null",        // if triage=scope-extension
-  "rfcCarvePath": "spec/rfcs/RFC-0024-…|null",      // if triage=new-rfc and RFC has been drafted
-  "blocksTaskId": "AISDLC-178|null",                 // if this finding gates another task's progress
-  "createdTaskId": null,                              // populated when a backlog task is created from this capture
-  "createdRfcId": null,                               // populated when an RFC is reserved from this capture
+  "relatedIssueId": "AISDLC-176|LIN-1234|null",       // if this captures-against an in-flight Issue (adapter-native ID)
+  "extensionTargetIssueId": "AISDLC-167|null",        // if triage=scope-extension
+  "featureIssueCarveRef": "spec/rfcs/RFC-0024-…|null",// if triage=new-feature-issue and Feature Issue has been drafted (path / URL / adapter-native ref)
+  "blocksIssueId": "AISDLC-178|null",                 // if this finding gates another Issue's progress
+  "createdIssueId": null,                             // populated when an Issue is created from this capture
+  "createdFeatureIssueId": null,                      // populated when a Feature Issue is reserved from this capture
   "resolvedAt": null,                                 // populated when triage flips from tbd to a terminal value
   "resolvedBy": null,
   "auditTrail": [
@@ -197,31 +209,35 @@ Every capture is a JSON object conforming to `spec/schemas/capture-record.v1.sch
 }
 ```
 
-The schema is intentionally rich — capture-time cost is low if the agent fills most fields and the operator only confirms.
+The schema is intentionally rich — capture-time cost is low if the agent fills most fields and the operator only confirms. **Issue ID format is adapter-native**: AISDLC-NNN for backlog.md, LIN-NNN for Linear, ABC-NNN for Jira, `org/repo#NNN` for GitHub Issues, etc. The framework's adapter contract translates between framework-level capture records and the tracker's native ID space.
 
 ## 7. Triage rubric
 
 Each triage value has a precise meaning that the framework can act on:
 
-| Triage | Meaning | Framework action |
+| Triage | Meaning | Framework action (issue-tracker-adapter delegates the create/edit calls) |
 |---|---|---|
 | `tbd` | Captured but operator hasn't decided | Surfaced in TUI Blockers pane until resolved |
-| `quick-fix` | Small scope, ships standalone or with current work | Auto-creates backlog task with `priority: low`, labels `quick-fix` + source-context label |
-| `new-task` | Separate contract, normal scope | Creates backlog task with `status: Draft`; operator refines + flips to `To Do` |
-| `scope-extension` | Belongs in current task's AC list | Appends AC to `extensionTargetTaskId`; emits `CaptureScopeExtended` event |
-| `new-rfc` | Design decision required first | Reserves next RFC slot; creates placeholder file; surfaces in TUI for operator drafting |
-| `framework-bug` | Framework misbehaved (per RFC-0025 taxonomy) | Routes to `framework-bugs/` task subdirectory; auto-fills evidence |
+| `quick-fix` | Small scope, ships standalone or with current work | Adapter creates an Issue with `priority: low`, labels `quick-fix` + source-context label |
+| `new-issue` | Separate contract, normal scope | Adapter creates an Issue in Draft state; operator refines + flips to ready-for-execution |
+| `scope-extension` | Belongs in current Issue's AC list | Adapter appends AC to `extensionTargetIssueId`; emits `CaptureScopeExtended` event |
+| `new-feature-issue` | Upstream design decision required before any execution Issue can be scoped | Adapter creates a Feature Issue (kind=feature, lifecycle=Draft) in the configured tracker; surfaces in TUI for operator drafting. ai-sdlc-internal: reserves next RFC slot + creates placeholder `spec/rfcs/RFC-NNNN-*.md`. |
+| `framework-bug` | Framework misbehaved (per RFC-0025 taxonomy) | Adapter creates a Bug Issue (kind=bug, label=framework-bug); auto-fills evidence |
 | `not-actionable` | Known limitation, expected behavior, won't fix | Records reasoning in capture, archives to `_captures/_archive/` |
 
-The rubric is **fixed enum** (not free-form) so the framework can route deterministically. Adding triage values requires an RFC update.
+The rubric is **fixed enum** (not free-form) so the framework can route deterministically. Adding triage values requires a spec change to RFC-0024 itself.
+
+The issue-tracker adapter contract (per RFC-0003 Infrastructure Adapters) MUST implement the create/edit calls for Issue + Feature Issue + Bug Issue kinds. Adapter-native vocabulary is invisible to the capture pattern — the framework only sees the abstract kinds.
 
 ## 8. Integration with DoR (RFC-0011)
 
-Captures with `triage: new-task` create backlog tasks in `status: Draft`. These tasks must still pass DoR Stage A + Stage B before the orchestrator dispatches them. The capture record's `evidence` + `source` fields populate the initial task description, but the operator (or refinement reviewer) must add open questions, ACs, and dependencies as part of the standard DoR refinement.
+Captures with `triage: new-issue` create Issues in Draft state via the issue-tracker adapter. These Issues must still pass DoR Stage A + Stage B before the orchestrator dispatches them. The capture record's `evidence` + `source` fields populate the initial Issue description, but the operator (or refinement reviewer) must add open questions, ACs, and dependencies as part of the standard DoR refinement.
 
 This means **emergent capture is the on-ramp, not a bypass**. The Decision Engine's frontloading contract is preserved.
 
 For `triage: scope-extension`, the appended AC must itself satisfy the DoR criteria for AC quality (testable, single-purpose, etc.). The DoR re-check fires automatically when an AC is appended (already supported by RFC-0011 Phase 4 / AISDLC-115.5).
+
+For `triage: new-feature-issue`, the resulting Feature Issue itself does not pass through standard DoR (Feature Issues are upstream design work, not execution Issues). Once the Feature Issue resolves to a concrete design, the operator drafts one or more execution Issues that DO pass through DoR. This two-step lifecycle (Feature Issue → execution Issue(s)) preserves DoR's frontloading contract while accommodating designs that aren't fully scoped at capture time.
 
 ## 9. Integration with the autonomous orchestrator (RFC-0015)
 
@@ -233,30 +249,30 @@ The orchestrator's playbook handlers (RFC-0015 Phase 2 / AISDLC-169.2) emit capt
 - Repeated failures of the same kind (calibration drift, infinite-iteration mode)
 - Stuck-candidate counter exceeded (>5 ticks without progress)
 
-These captures land in `$ARTIFACTS_DIR/_captures/` with `triage: framework-bug` and route to AISDLC-NNN bug tasks automatically.
+These captures land in `$ARTIFACTS_DIR/_captures/` with `triage: framework-bug` and route to Bug Issues in the configured tracker automatically.
 
 ### 9.2 Decision-pending → decision-deferred handoff
 
-When a captured finding **gates** an in-flight pipeline run (the `blocksTaskId` field is populated), the orchestrator:
+When a captured finding **gates** an in-flight pipeline run (the `blocksIssueId` field is populated), the orchestrator:
 
-1. Marks the gated task with `Needs Clarification` status (RFC-0011 Phase 4) — pointing at the capture record
-2. Stops dispatching that task; moves to the next frontier candidate
-3. Emits `CaptureBlockedTask` event so the TUI can surface the dependency
-4. Resumes the gated task automatically once the capture's triage becomes terminal AND the resulting task/RFC reaches `Done`/`Implemented`
+1. Marks the gated Issue with `Needs Clarification` status via the issue-tracker adapter (RFC-0011 Phase 4) — pointing at the capture record
+2. Stops dispatching that Issue; moves to the next frontier candidate
+3. Emits `CaptureBlockedIssue` event so the TUI can surface the dependency
+4. Resumes the gated Issue automatically once the capture's triage becomes terminal AND the resulting Issue (or Feature Issue → execution Issue chain) reaches Done/Implemented in the tracker
 
 This is the **decision-deferred** pattern — the operator doesn't have to manually un-stick the original work; the framework reconnects the dependency once the deferred decision lands.
 
 ### 9.3 Capture-pending in dispatch filtering
 
-A new pre-dispatch filter (`filters/captures-pending.ts`) refuses to dispatch a task if it has any unresolved capture (triage=tbd) referencing it. This prevents the orchestrator from re-dispatching work that the operator hasn't yet finished triaging.
+A new pre-dispatch filter (`filters/captures-pending.ts`) refuses to dispatch an Issue if it has any unresolved capture (triage=tbd) referencing it. This prevents the orchestrator from re-dispatching work that the operator hasn't yet finished triaging.
 
 ## 10. Integration with the operator TUI (RFC-0023)
 
 The TUI's Blockers pane surfaces captures with `triage: tbd` as the highest-priority signal (per VISION.md §3 — operator's bottleneck is decisions). Each row offers one-keystroke triage actions:
 
-- `t` → set `triage: new-task` (creates draft task immediately)
-- `e` → set `triage: scope-extension` (prompts for target task ID)
-- `r` → set `triage: new-rfc` (reserves RFC slot)
+- `t` → set `triage: new-issue` (adapter creates draft Issue immediately)
+- `e` → set `triage: scope-extension` (prompts for target Issue ID)
+- `r` → set `triage: new-feature-issue` (adapter creates Feature Issue / reserves Feature Issue slot)
 - `q` → set `triage: quick-fix`
 - `f` → set `triage: framework-bug`
 - `n` → set `triage: not-actionable` (prompts for reason)
@@ -271,8 +287,8 @@ The framework treats captures as immutable records once written. The `auditTrail
 ```jsonc
 "auditTrail": [
   { "action": "captured", "by": "code-reviewer", "at": "2026-05-03T17:42:03Z" },
-  { "action": "triaged", "by": "dominique@reliablegenius.io", "to": "new-task", "at": "2026-05-03T17:45:11Z" },
-  { "action": "task-created", "by": "framework", "taskId": "AISDLC-178", "at": "2026-05-03T17:45:11Z" }
+  { "action": "triaged", "by": "dominique@reliablegenius.io", "to": "new-issue", "at": "2026-05-03T17:45:11Z" },
+  { "action": "issue-created", "by": "framework", "issueId": "AISDLC-178", "via-adapter": "backlog-md", "at": "2026-05-03T17:45:11Z" }
 ]
 ```
 
@@ -286,7 +302,7 @@ This satisfies the framework's quality contract (VISION.md §4 — "self-improve
 - Triage decision distribution
 - Median time-from-capture-to-triage
 - "Stale captures" (triage=tbd > 7 days) — drives operator nudge
-- Capture-to-task conversion rate (how many captures actually become tasks vs not-actionable)
+- Capture-to-Issue conversion rate (how many captures actually become Issues vs not-actionable)
 
 These metrics inform operator throughput optimization (RFC-0023 §10) and surface framework-quality signals (e.g., a spike in `framework-bug` captures from a specific playbook handler is a signal to re-tune that handler — closes the RFC-0025 self-improvement loop).
 
@@ -295,8 +311,8 @@ These metrics inform operator throughput optimization (RFC-0023 §10) and surfac
 | Phase | Scope | Estimated effort |
 |---|---|---|
 | 1 — Schema + capture writer | `capture-record.v1.schema.json`, `cli-capture` binary, JSONL writer to `_captures/`, validator | 4–5 days |
-| 2 — Triage rubric + actions | Triage enum, capture → backlog task creation, capture → RFC reservation, capture → AC append for scope-extension | 1 week |
-| 3 — Pre-dispatch filter | `filters/captures-pending.ts` wired into orchestrator, `CaptureBlockedTask` event, decision-deferred handoff | 4–5 days |
+| 2 — Triage rubric + actions | Triage enum, capture → adapter Issue creation, capture → adapter Feature Issue creation, capture → AC append for scope-extension via adapter | 1 week |
+| 3 — Pre-dispatch filter | `filters/captures-pending.ts` wired into orchestrator, `CaptureBlockedIssue` event, decision-deferred handoff | 4–5 days |
 | 4 — Capture sources beyond CLI | PR-comment marker poller, `lint:captures` rule for in-code markers, agent prompt updates | 1 week |
 | 5 — Operator TUI integration | Blockers pane shows tbd captures with triage actions, recently-triaged pane | 4 days (depends on RFC-0023 progress) |
 | 6 — Corpus aggregator + promotion | `cli-capture-corpus aggregate`, hybrid promotion runbook, soak window | 1 week soak + 3 days runbook |
@@ -325,11 +341,11 @@ These need operator walkthrough before Lifecycle: Draft → Ready for Review.
 
 **OQ-7 — Capture deletion:** Records are immutable per §11. Can the operator EVER delete a capture (e.g., accidentally captured PII)? Recommendation: yes via `cli-capture redact <id> --reason <text>` which scrubs the `finding` field but preserves the audit trail. Hard delete is operator-only via filesystem (not a CLI affordance).
 
-**OQ-8 — Backlog labeling on auto-created tasks:** Should auto-created tasks carry a label distinguishing them from operator-curated tasks (e.g., `emergent-capture`)? Recommendation: yes — useful for analytics + lets operator filter "tasks I personally framed" vs "tasks the framework surfaced."
+**OQ-8 — Issue labeling on auto-created Issues:** Should auto-created Issues carry a label distinguishing them from operator-curated Issues (e.g., `emergent-capture`)? Recommendation: yes — useful for analytics + lets operator filter "Issues I personally framed" vs "Issues the framework surfaced." Adapter implementations MUST surface a `kind: emergent-capture` label or equivalent in the tracker's native label space.
 
-**OQ-9 — Decision-deferred timeout:** A task gated on a `tbd` capture stays in `Needs Clarification`. Should there be a timeout (e.g., capture sits >14 days → escalate notification)? Recommendation: yes, surfaces in TUI with growing-louder visual treatment but no auto-action.
+**OQ-9 — Decision-deferred timeout:** An Issue gated on a `tbd` capture stays in `Needs Clarification`. Should there be a timeout (e.g., capture sits >14 days → escalate notification)? Recommendation: yes, surfaces in TUI with growing-louder visual treatment but no auto-action.
 
-**OQ-10 — Multi-capture from one source:** When an agent finds 5 things in one PR review, are those 5 captures or 1 capture with 5 findings? Recommendation: 5 captures — each must be independently triageable (one might be quick-fix, one new-RFC).
+**OQ-10 — Multi-capture from one source:** When an agent finds 5 things in one PR review, are those 5 captures or 1 capture with 5 findings? Recommendation: 5 captures — each must be independently triageable (one might be quick-fix, one new-feature-issue).
 
 **OQ-11 — Capture during DoR refinement:** When the refinement reviewer (RFC-0011 Stage B) asks an operator question and the operator's answer reveals a NEW concern, is that a capture or a DoR comment edit? Recommendation: capture — preserves the audit trail across the DoR + capture corpora.
 
@@ -349,14 +365,16 @@ Lifecycle: Draft → Ready for Review (after OQ walkthrough) → Signed Off (aft
 ## 17. References
 
 - [VISION.md](../../VISION.md) §4 (quality contract), §5 (emergent gap) — anchoring philosophy
+- [RFC-0003 — Infrastructure Adapters](RFC-0003-infrastructure-adapters.md) — issue-tracker adapter contract that translates between framework-level Issue/Feature Issue/Bug Issue kinds and the tracker's native vocabulary
 - [RFC-0011 — Definition of Ready Gate](RFC-0011-definition-of-ready-gate.md) — captures-as-on-ramp, not bypass
 - [RFC-0015 — Autonomous Pipeline Orchestrator](RFC-0015-autonomous-pipeline-orchestrator.md) — playbook handler integration, decision-deferred
 - [RFC-0023 — Operator TUI](RFC-0023-operator-tui-pipeline-monitoring.md) — Blockers pane, triage actions
-- [RFC-0025 — Framework Quality Monitoring](RFC-0025-framework-quality-monitoring.md) (reserved) — `triage: framework-bug` routing
-- [RFC-0026 — Exploration Workstream Pattern](RFC-0026-exploration-workstream-pattern.md) (reserved) — captures during exploration are first-class
+- [RFC-0025 — Framework Quality Monitoring](RFC-0025-framework-quality-monitoring.md) — `triage: framework-bug` routing
+- [RFC-0026 — Exploration Workstream Pattern](RFC-0026-exploration-workstream-pattern.md) — captures during exploration are first-class
 
 ## 18. Revision history
 
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | v0.1 | 2026-05-03 | dominique@reliablegenius.io | Initial draft seed; 12 open questions |
+| v0.2 | 2026-05-04 | dominique@reliablegenius.io | Abstraction pass: lifted ai-sdlc-internal terminology (backlog tasks, RFCs) to framework-level (Issue, Feature Issue, Bug Issue) routed through the configured issue-tracker adapter (RFC-0003). Triage values renamed: `new-task` → `new-issue`; `new-rfc` → `new-feature-issue`. Capture record schema fields renamed: `relatedTaskId/extensionTargetTaskId/blocksTaskId/createdTaskId/createdRfcId/rfcCarvePath` → `relatedIssueId/extensionTargetIssueId/blocksIssueId/createdIssueId/createdFeatureIssueId/featureIssueCarveRef`. Added §1.1 framework-vs-ai-sdlc-internal terminology table. Added two-step Feature Issue → execution Issue lifecycle clarification in §8. Added RFC-0003 reference. ai-sdlc-internal examples (AISDLC-NNN) preserved as illustrative only. |
