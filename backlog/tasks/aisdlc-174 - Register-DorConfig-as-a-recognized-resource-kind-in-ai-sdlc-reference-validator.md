@@ -14,9 +14,9 @@ dependencies: []
 references:
   - orchestrator/src/config.ts
   - orchestrator/src/config.test.ts
-  - orchestrator/.ai-sdlc/dor-config.yaml
+  - .ai-sdlc/dor-config.yaml
   - spec/schemas/
-  - '@ai-sdlc/reference'
+  - reference/
 priority: medium
 ---
 
