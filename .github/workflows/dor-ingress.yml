@@ -78,7 +78,7 @@ jobs:
         run: |
           mkdir -p "$ARTIFACTS_DIR/_dor"
           set +e
-          OUT=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
+          OUT=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
             dor-evaluate "gh#${ISSUE_NUM}" \
             --body-file /tmp/dor/issue.md \
             --title "$ISSUE_TITLE" \
@@ -124,7 +124,7 @@ jobs:
         # SKIPPED the redaction pass; this step replaces that with a
         # subcommand call so both paths emit identical (redacted) markdown.
         run: |
-          BODY=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
+          BODY=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
             dor-render-comment --verdict-file /tmp/dor/verdict.json --channel author)
           # Multiline output via heredoc so newlines survive into env.
           {
@@ -276,7 +276,7 @@ jobs:
             [ -z "$f" ] && continue
             ID=$(basename "$f" .md | cut -d- -f1-2)
             set +e
-            OUT=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
+            OUT=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
               dor-evaluate "$ID" --body-file "$f" --source backlog --hermetic)
             STATUS=$?
             set -e
@@ -307,7 +307,7 @@ jobs:
         # verbatim, so a leaked token in a task body could reflect into the
         # public PR comment.
         run: |
-          BODY=$(pnpm --filter @ai-sdlc/pipeline-cli --silent exec ai-sdlc-pipeline \
+          BODY=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
             dor-render-pr-summary --verdicts-file /tmp/dor/results.jsonl --channel author)
           {
             echo 'body<<__DOR_END__'
