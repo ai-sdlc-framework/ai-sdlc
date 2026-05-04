@@ -24,8 +24,20 @@ requiresDocs: []
 ## Sign-Off
 
 - [ ] Engineering owner — dominique@reliablegenius.io (pending)
-- [ ] Product owner — Alex (pending)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [ ] Operator owner — dominique@reliablegenius.io (pending)
+
+### Product Authority review
+
+The dispatcher-only positioning is correct. `effectivePriority(task) = priority(task) + maxDownstreamPriority(task)` is **additive** while the PPA composite is **multiplicative**; the RFC handles this correctly by leaving per-task PPA scores unchanged in the calibration log. **Recommend** adding a one-line non-goal: *effectivePriority is a dispatch heuristic, not a composite contributor* — without that line, future readers will be tempted to fold downstream-reach back into the composite and end up double-counting.
+
+When this RFC ships, PPA's ER3 (Dependency Clearance) consumes its graph output rather than relying on manual dependency tracking. ER3's resolution mechanism gets a formal adapter against the snapshot artifact format declared here. No PPA spec changes are required at sign-off; the integration lands when the foundation `cli-deps` (AISDLC-117) ships and ER3 can read from it.
+
+**Multi-soul note**: depth and reach are computed per-task. In a multi-soul platform with cross-soul dependency edges, `effectivePriority` SHOULD respect RFC-0009 §5.2 `crossSoulScoringRule` (default `min`). Currently silent. Recommend a forward-looking cross-reference to RFC-0009 §5.2 in v4.
+
+**Latent contribution to HC_consensus**: blast-radius is an implicit signal of consensus pressure ("many engineers are blocked by this"). RFC-0014 keeps it dispatcher-only by design; surfacing as an open question for the framework — should blast-radius feed HC_consensus, or stay strictly at the dispatch layer? Composes with RFC-0033 governance reporting where blast-radius patterns surface as quality-section signal.
+
+Position grounded in RFC-0029 (Product Pillar Architectural Vision Principle 5 — governance by composition, orthogonal gates).
 
 ## Revision History
 
