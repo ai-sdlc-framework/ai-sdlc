@@ -3,7 +3,7 @@ id: AISDLC-179
 title: >-
   Orchestrator: tick loop re-dispatches tasks already In Progress (no in-flight
   tracking)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 02:48'
 labels:

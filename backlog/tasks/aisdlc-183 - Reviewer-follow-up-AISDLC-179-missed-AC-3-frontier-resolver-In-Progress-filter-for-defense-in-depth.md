@@ -13,7 +13,7 @@ labels:
   - reviewer-finding
 dependencies: []
 references:
-  - pipeline-cli/src/deps/frontier.ts
+  - pipeline-cli/src/cli/deps.ts
   - pipeline-cli/src/orchestrator/in-flight.ts
   - >-
     backlog/completed/aisdlc-179 -
@@ -43,7 +43,7 @@ Add an explicit `status: In Progress` filter to the frontier resolver in `cli-de
 <!-- AC:BEGIN -->
 <!-- SECTION:DESCRIPTION:END -->
 
-- [ ] #1 pipeline-cli/src/deps/frontier.ts (or equivalent) excludes tasks with status: In Progress from the frontier output
+- [ ] #1 pipeline-cli/src/cli/deps.ts (or equivalent) excludes tasks with status: In Progress from the frontier output
 - [ ] #2 Unit test: task in `backlog/tasks/` with status: In Progress is NOT in the frontier (current behavior likely returns it)
 - [ ] #3 Integration test: orchestrator with empty in-flight map (simulating sentinel-loss scenario) does NOT re-dispatch a task whose file shows In Progress
 - [ ] #4 Update AISDLC-179's AC #3 status to RESOLVED in its task file or revision-history note

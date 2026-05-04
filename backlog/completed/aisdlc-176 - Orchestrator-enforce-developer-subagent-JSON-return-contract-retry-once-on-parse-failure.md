@@ -3,7 +3,7 @@ id: AISDLC-176
 title: >-
   Orchestrator: enforce developer subagent JSON return contract (retry once on
   parse failure)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 00:13'
 labels:
