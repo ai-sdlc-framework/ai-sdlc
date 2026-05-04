@@ -15,8 +15,8 @@ requiresDocs: []
 
 # RFC-0011: Definition-of-Ready Gate for Pipeline Admission
 
-**Status:** Awaiting Product owner sign-off (Engineering + Operator signed off 2026-04-30)
-**Lifecycle:** Signed Off (per AISDLC-118 backfill — all three owners signed; design locked)
+**Status:** Signed off (Engineering + Operator 2026-04-30; Product 2026-05-04)
+**Lifecycle:** Signed Off (all three owners signed; design locked)
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-04-30
 **Updated:** 2026-04-30
@@ -27,7 +27,7 @@ requiresDocs: []
 ## Sign-Off
 
 - [x] Engineering owner — dominique@reliablegenius.io (2026-04-30)
-- [ ] Product owner — Alex (pending review)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [x] Operator owner — dominique@reliablegenius.io (2026-04-30)
 
 ## Revision History
