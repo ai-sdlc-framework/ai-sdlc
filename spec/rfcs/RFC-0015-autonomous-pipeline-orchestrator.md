@@ -30,8 +30,26 @@ requiresDocs: []
 ## Sign-Off
 
 - [x] Engineering owner — dominique@reliablegenius.io (2026-05-02)
-- [ ] Product owner — Alex (pending)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [x] Operator owner — dominique@reliablegenius.io (2026-05-02)
+
+### Product Authority review
+
+The orchestrator's positioning as PPA *consumer* (not computer) is correct. The composition pattern (signal ingestion → DoR → PPA admission → execution → review → merge → calibration → DID revision proposal) per RFC-0029 Principle 5 is what the autonomous pipeline orchestrates; the orchestrator is the outer loop, not a separate scoring system.
+
+Three substantive Product-side concerns to track for v2:
+
+1. **HC Override (PPA position 1) propagation is undefined.** PPA's `Override` bypasses the composite formula entirely with a 24h-default ttl. Pre-dispatch filters in §4.3 check DoR readiness and dependency unblock but do not honor an active operator override, and there is no trigger for re-sort when an override expires. **Recommend** adding an explicit override-aware dispatch path with ttl-honoring; the orchestrator MUST re-sort the candidate queue when an override's ttl expires.
+
+2. **HC_cost enforcement boundary.** RFC-0009 §7.4 OQ-12 placed `HC_cost` as an HC channel, but RFC-0032 (Cost-Governance Seam) argues continuous cost-pressure belongs in ER (`ER_cost_effort` modifier). Orchestrator dispatch should consume the cost-adjusted `P_adjusted = P × ER_cost_effort` directly; orchestrator does NOT separately apply HC_cost. RFC-0032 specifies the path; this RFC SHOULD cross-reference once 0032 lands.
+
+3. **Multi-soul dispatch frontier.** Single-sandbox / single-soul is acceptable for v1, but the dispatch frontier is a single ordered list. When multi-soul lands, the frontier needs per-soul or composite-soul ordering governed by RFC-0009 §5.2 `crossSoulScoringRule` (default `min`). **Forward-looking note**: orchestrator's frontier-sort needs a multi-soul mode flag, even if defaulted off.
+
+Event-stream extension: when `BurstSpendRequest` (RFC-0032) approvals affect dispatch decisions, the orchestrator SHOULD emit an `OrchestratorCostPolicyApplied` event capturing the burst-grant + new effective budget. RFC-0032 declares the event; this RFC should add the schema entry to its `events.jsonl` types.
+
+The state-machine playbook + 12 OQs all resolved + deterministic remediation joins the deterministic-first cluster pattern (RFC-0029 Principle 2) at the dispatch layer. Approved.
+
+Position grounded in RFC-0029 Principles 2 + 5; cross-references RFC-0032 (HC_cost seam) and RFC-0033 (governance reporting).
 
 ## Revision History
 
