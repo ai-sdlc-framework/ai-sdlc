@@ -43,6 +43,33 @@ export interface PipelineOptions {
    * the pipeline against a project root that isn't a real git repo (tests).
    */
   skipFinalizeCommit?: boolean;
+  /**
+   * AISDLC-176 — fired when the Step 6 retry helper recovered a
+   * developer dispatch by re-prompting for the JSON envelope. The
+   * orchestrator wires this to the `DeveloperContractRetry`
+   * `events.jsonl` emission so operators can grep recovery frequency
+   * (high frequency → time to strengthen the system prompt; rare → the
+   * retry is doing its job).
+   *
+   * Tier 1 (slash command body) ignores this; only Tier 2 / orchestrator
+   * dispatch consumers fire the events bus.
+   */
+  onDeveloperContractRetry?: (info: DeveloperContractRetryInfo) => void;
+}
+
+/**
+ * AISDLC-176 — payload fired from `executePipeline()`'s Step 6 to the
+ * orchestrator's events bus when the retry helper recovered a JSON
+ * envelope after one prose-then-JSON retry.
+ */
+export interface DeveloperContractRetryInfo {
+  taskId: string;
+  /** Truncated raw output the dev returned on the FIRST (failing) turn. */
+  initialOutputPreview: string;
+  /** Truncated raw output the dev returned on the (successful) retry turn. */
+  retryOutputPreview: string;
+  /** Wall-clock duration of the retry spawn in ms. */
+  durationMs: number;
 }
 
 /**
@@ -60,7 +87,12 @@ export interface PipelineResult {
   notes?: string;
 }
 
-export type PipelineOutcome = 'approved' | 'needs-human-attention' | 'developer-failed' | 'aborted';
+export type PipelineOutcome =
+  | 'approved'
+  | 'needs-human-attention'
+  | 'developer-failed'
+  | 'developer-json-contract-violated'
+  | 'aborted';
 
 // ── Step contracts ───────────────────────────────────────────────────
 
@@ -178,6 +210,15 @@ export interface ParseDeveloperReturnResult {
   ok: boolean;
   reason?: string;
   developer?: DeveloperReturn;
+  /**
+   * AISDLC-176 — distinguishes "the dev returned valid JSON but the work
+   * failed" (e.g. `commitSha: null`) from "the dev returned non-JSON prose
+   * and we cannot even structurally evaluate the work". The retry helper
+   * `parseDeveloperReturnWithRetry()` keys off this flag to decide whether
+   * to issue the one-shot re-emission follow-up. Set when the input could
+   * not be parsed as JSON OR was not an object.
+   */
+  contractViolation?: boolean;
 }
 
 // ── Step 7 — Build review prompts ────────────────────────────────────

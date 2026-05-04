@@ -289,6 +289,13 @@ interface ParseDeveloperReturnResult {
   ok: boolean;
   reason?: string;
   developer?: DeveloperReturn;
+  /** AISDLC-176 — set when the input could not be parsed as JSON OR was not
+   * an object. Distinguishes "envelope contract violated" (callers should
+   * route to `parseDeveloperReturnWithRetry()` for one-shot recovery) from
+   * "schema-violated valid JSON" (the dev followed the envelope contract
+   * but reported failure inside it — e.g. missing keys, `commitSha: null`).
+   */
+  contractViolation?: boolean;
 }
 
 interface DeveloperReturn {
@@ -307,11 +314,29 @@ interface DeveloperReturn {
 }
 ```
 
-**Side effects**: none. Pure.
+**Side effects**: none. `parseDeveloperReturn` is pure;
+`parseDeveloperReturnWithRetry` (sibling helper) issues at most ONE
+follow-up `spawner.spawn()` call when the initial parse failed with
+`contractViolation: true`.
 
-**When it runs**: immediately after Step 5b's developer spawn returns. When
-`ok` is false the composite aborts the pipeline with `outcome: 'developer-failed'`
-and surfaces the reason in `PipelineResult.notes`.
+**When it runs**: immediately after Step 5b's developer spawn returns.
+`executePipeline()` invokes `parseDeveloperReturnWithRetry()` (AISDLC-176
+— retry once on JSON contract violation) and routes the failure based on
+the parsed result:
+
+- `ok=true` — proceed to Step 7.
+- `ok=false`, `contractViolation=true` (the dev returned non-JSON prose
+  AND the retry also failed) — abort with
+  `outcome: 'developer-json-contract-violated'`. The orchestrator emits
+  the new outcome to `events.jsonl` so operators can grep for protocol
+  failures separately from genuine work failures.
+- `ok=false`, `contractViolation=undefined` (the dev returned valid JSON
+  reporting failure — `commitSha: null`, `verifications.X = failed`,
+  missing keys) — abort with `outcome: 'developer-failed'`.
+
+On the recovery path (initial prose, retry succeeds) the helper fires an
+`onRetrySuccess` callback that the orchestrator wires to a
+`DeveloperContractRetry` `events.jsonl` emission for forensic visibility.
 
 ## Step 7 — build review prompts (`buildReviewPrompts`)
 

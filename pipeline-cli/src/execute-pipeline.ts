@@ -23,7 +23,7 @@ import {
   coerceReviewerVerdict,
   finalizeTask,
   iterateReviewLoop,
-  parseDeveloperReturn,
+  parseDeveloperReturnWithRetry,
   pushAndPr,
   setupWorktree,
   siblingPrs,
@@ -116,14 +116,45 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       cwd: branch.worktreePath,
     });
 
-    // Step 6 — parse developer return
-    const parsedDev = await parseDeveloperReturn({
-      developerReturn: devSpawn.parsed ?? devSpawn.output,
+    // Step 6 — parse developer return (AISDLC-176: retry once on JSON
+    // contract violation before failing the dispatch).
+    const parsedDev = await parseDeveloperReturnWithRetry({
+      initialResult: devSpawn,
+      cwd: branch.worktreePath,
+      spawner: opts.spawner,
+      onRetrySuccess: ({ initialOutputPreview, retryOutputPreview, durationMs }): void => {
+        logger.warn(
+          `[ai-sdlc] developer subagent re-emitted JSON envelope on retry ` +
+            `(durationMs=${durationMs}, initial output preview: ` +
+            `${JSON.stringify(initialOutputPreview.slice(0, 200))})`,
+        );
+        logger.progress(
+          'developer-contract-retry',
+          `task=${opts.taskId} recovered after one prose-then-JSON retry`,
+        );
+        // Forward to the orchestrator events bus when wired (Phase 4
+        // events.jsonl). Tier 1 / standalone Tier 2 callers leave this
+        // unset and the retry just shows up in the logger output above.
+        opts.onDeveloperContractRetry?.({
+          taskId: opts.taskId,
+          initialOutputPreview,
+          retryOutputPreview,
+          durationMs,
+        });
+      },
     });
     if (!parsedDev.ok || !parsedDev.developer) {
       aborted = parsedDev.reason ?? 'developer subagent failed';
-      outcome = 'developer-failed';
-      return abort(opts, branch.branch, branch.worktreePath, null, aborted, 'developer-failed');
+      // AISDLC-176 — distinguish "envelope contract violated" (the dev
+      // returned non-JSON prose AND failed the retry) from "developer
+      // reported failure inside a valid envelope" (commitSha:null,
+      // verifications.X:failed, missing keys). The orchestrator + future
+      // playbook handlers route these two failure modes differently.
+      const failOutcome: PipelineOutcome = parsedDev.contractViolation
+        ? 'developer-json-contract-violated'
+        : 'developer-failed';
+      outcome = failOutcome;
+      return abort(opts, branch.branch, branch.worktreePath, null, aborted, failOutcome);
     }
     const initialDev: DeveloperReturn = parsedDev.developer;
 

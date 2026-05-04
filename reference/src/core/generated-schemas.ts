@@ -2518,13 +2518,24 @@ export const orchestratorEventsV1Schema = {
       description:
         "ISO-8601 timestamp the existing in-flight dispatch was started — present on `OrchestratorTaskAlreadyInFlight` (RFC-0015 / AISDLC-179). Lets operators correlate the rejected re-dispatch attempt with the original dispatch's `OrchestratorDispatched` event.",
     },
+    initialOutputPreview: {
+      type: 'string',
+      description:
+        'Truncated (≤1000 chars) raw output the developer subagent returned on the FIRST turn that violated the JSON envelope contract — present on `DeveloperContractRetry` (AISDLC-176). Lets operators see the prose the dev produced before the re-emission retry recovered the dispatch.',
+    },
+    retryDurationMs: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Wall-clock duration in ms the retry spawn took (from re-emission prompt issue to parsed JSON envelope) — present on `DeveloperContractRetry` (AISDLC-176).',
+    },
   },
   additionalProperties: false,
   $defs: {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -2540,6 +2551,7 @@ export const orchestratorEventsV1Schema = {
         'OrchestratorStuckCandidate',
         'OrchestratorTaskAlreadyInFlight',
         'WorkerStateTransition',
+        'DeveloperContractRetry',
       ],
     },
   },
