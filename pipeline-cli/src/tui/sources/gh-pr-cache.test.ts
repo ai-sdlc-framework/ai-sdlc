@@ -30,8 +30,27 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function flushEffects(): Promise<void> {
-  return new Promise<void>((resolve) => setImmediate(resolve));
+/**
+ * Polls `predicate()` until it returns true or `attempts` is exhausted
+ * (each iteration is one setImmediate round-trip). Ink wraps a custom
+ * React reconciler that schedules effects via the scheduler package's
+ * `setImmediate`, so each round-trip yields back AFTER one batch of
+ * effect callbacks fires. Use for assertions that depend on a setState
+ * having committed (e.g. `captured` populated by a `useEffect`, or the
+ * mount-fetch's setState landing in `state`).
+ *
+ * AISDLC-188 root cause: under load on freshly-started CI runners, 1-2
+ * setImmediate round-trips occasionally weren't enough for the React
+ * commit queue to drain a mount-fetch's setState into the capture
+ * effect; a predicate-driven wait adapts to whatever the scheduler
+ * actually takes (each round is a synchronous setImmediate — no
+ * real-clock wait under fake timers).
+ */
+async function waitForFlushed(predicate: () => boolean, attempts = 50): Promise<void> {
+  for (let i = 0; i < attempts; i += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 describe('GH_PR_JSON_FIELDS', () => {
@@ -162,7 +181,7 @@ describe('useGhPrs (hook)', () => {
       React.createElement(HookProbe, { capture: () => {}, fetcher, intervalMs: 100, ttlMs: 0 }),
     );
 
-    await flushEffects();
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1);
 
     await vi.advanceTimersByTimeAsync(100);
@@ -196,7 +215,7 @@ describe('useGhPrs (hook)', () => {
       }),
     );
 
-    await flushEffects();
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1); // mount fetch
 
     // Advance 5 polls — none should re-fetch because we're inside TTL.
@@ -237,16 +256,16 @@ describe('useGhPrs (hook)', () => {
         ttlMs: 1_000_000, // huge — cache is always fresh
       }),
     );
-    // Two effect-flush cycles: the first lets the mount fetch's setState
-    // commit; the second lets the post-setState capture effect fire.
-    await flushEffects();
-    await flushEffects();
+    // Wait for the capture effect to surface the mount-fetch state
+    // (mount fetch's setState must commit + the child capture useEffect
+    // must run after the re-render). AISDLC-188: a fixed flush count
+    // races on cold CI; predicate-based wait is bulletproof.
+    await waitForFlushed(() => captured?.data?.[0]?.number === 1);
     expect(callCount).toBe(1);
     expect(captured!.data[0].number).toBe(1);
 
     captured!.invalidate();
-    await flushEffects();
-    await flushEffects();
+    await waitForFlushed(() => captured?.data?.[0]?.number === 2);
     expect(callCount).toBe(2);
     expect(captured!.data[0].number).toBe(2);
 
@@ -270,7 +289,7 @@ describe('useGhPrs (hook)', () => {
         ttlMs: 0,
       }),
     );
-    await flushEffects();
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1);
     unmount();
     await vi.advanceTimersByTimeAsync(1_000);
@@ -289,7 +308,10 @@ describe('useGhPrs (hook)', () => {
         fetcher,
       }),
     );
-    await flushEffects();
+    // Capture-via-useEffect needs the mount setState to commit AND the
+    // child capture effect to fire — wait for the predicate rather than
+    // a fixed flush count (AISDLC-188).
+    await waitForFlushed(() => captured?.error != null);
     expect(captured!.error).toBe('source-unavailable');
     expect(captured!.data).toEqual([]);
     unmount();

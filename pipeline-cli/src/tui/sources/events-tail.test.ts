@@ -151,14 +151,27 @@ function HookProbe({
 }
 
 /**
- * Flush queued React effects. Ink wraps a custom React reconciler that
- * runs effects in a `setImmediate` (via the scheduler package), so a
- * `setImmediate` callback yields back AFTER the effect callbacks fire.
- * One round-trip suffices for a simple state -> setState -> re-render
- * cycle; tests that drive multiple cycles loop the helper.
+ * Polls `predicate()` until it returns true OR `attempts` is exhausted
+ * (each iteration is a single setImmediate round-trip). Ink wraps a
+ * custom React reconciler that schedules effects via the scheduler
+ * package's `setImmediate`, so each round-trip yields back AFTER one
+ * batch of effect callbacks fires. Use this for assertions that depend
+ * on a setState having committed (typical capture-via-useEffect
+ * pattern, plus the mount-fetch setState in this file's hook).
+ *
+ * AISDLC-188 root cause: under load on freshly-started CI runners,
+ * 1-2 setImmediate round-trips occasionally weren't enough for the
+ * React commit queue to drain a mount-fetch's setState into the
+ * capture effect — the test would assert before the state landed. A
+ * predicate-driven wait removes the dependency on a magic round count
+ * and adapts to whatever the scheduler actually takes (each round is
+ * a synchronous setImmediate, no real-clock wait under fake timers).
  */
-function flushEffects(): Promise<void> {
-  return new Promise<void>((resolve) => setImmediate(resolve));
+async function waitForFlushed(predicate: () => boolean, attempts = 50): Promise<void> {
+  for (let i = 0; i < attempts; i += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 describe('useEvents (hook)', () => {
@@ -179,8 +192,9 @@ describe('useEvents (hook)', () => {
       React.createElement(HookProbe, { capture: () => {}, fetcher, intervalMs: 100 }),
     );
 
-    await flushEffects();
-    // Mount fetch.
+    // Mount fetch — wait for the effect to actually run rather than
+    // assuming a fixed flush count (AISDLC-188 cold-CI race).
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1);
 
     // Advance one interval — second fetch.
@@ -210,7 +224,7 @@ describe('useEvents (hook)', () => {
     const { unmount } = render(
       React.createElement(HookProbe, { capture: () => {}, fetcher, intervalMs: 100 }),
     );
-    await flushEffects();
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1);
     unmount();
     await vi.advanceTimersByTimeAsync(1_000);
@@ -233,7 +247,10 @@ describe('useEvents (hook)', () => {
         fetcher,
       }),
     );
-    await flushEffects();
+    // Capture-via-useEffect needs the mount setState to commit AND the
+    // child capture effect to fire — wait for the predicate rather than
+    // a fixed flush count (AISDLC-188).
+    await waitForFlushed(() => captured?.error != null);
     expect(captured!.error).toBe('source-unavailable');
     expect(captured!.data).toEqual([]);
     expect(captured!.lastFetched).toBeInstanceOf(Date);

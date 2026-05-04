@@ -36,8 +36,27 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function flushEffects(): Promise<void> {
-  return new Promise<void>((resolve) => setImmediate(resolve));
+/**
+ * Polls `predicate()` until it returns true or `attempts` is exhausted
+ * (each iteration is one setImmediate round-trip). Ink wraps a custom
+ * React reconciler that schedules effects via the scheduler package's
+ * `setImmediate`, so each round-trip yields back AFTER one batch of
+ * effect callbacks fires. Use for assertions that depend on a setState
+ * having committed (e.g. `captured` populated by a `useEffect`, or the
+ * mount-fetch's setState landing in `state`).
+ *
+ * AISDLC-188 root cause: under load on freshly-started CI runners, 1-2
+ * setImmediate round-trips occasionally weren't enough for the React
+ * commit queue to drain a mount-fetch's setState into the capture
+ * effect; a predicate-driven wait adapts to whatever the scheduler
+ * actually takes (each round is a synchronous setImmediate — no
+ * real-clock wait under fake timers).
+ */
+async function waitForFlushed(predicate: () => boolean, attempts = 50): Promise<void> {
+  for (let i = 0; i < attempts; i += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 function writeTaskFile(dir: 'tasks' | 'completed', name: string, body: string): string {
@@ -219,7 +238,7 @@ describe('useBacklogTasks (hook)', () => {
     const { unmount } = render(
       React.createElement(HookProbe, { capture: () => {}, walker, intervalMs: 100 }),
     );
-    await flushEffects();
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1);
 
     await vi.advanceTimersByTimeAsync(100);
@@ -247,7 +266,7 @@ describe('useBacklogTasks (hook)', () => {
         intervalMs: 100,
       }),
     );
-    await flushEffects();
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1);
     unmount();
     await vi.advanceTimersByTimeAsync(1_000);
@@ -264,7 +283,10 @@ describe('useBacklogTasks (hook)', () => {
         walker: () => ({ tasks: [], error: 'source-permission-denied' as const }),
       }),
     );
-    await flushEffects();
+    // Capture-via-useEffect needs the mount setState to commit AND the
+    // child capture effect to fire — wait for the predicate rather than
+    // a fixed flush count (AISDLC-188).
+    await waitForFlushed(() => captured?.error != null);
     expect(captured!.error).toBe('source-permission-denied');
     expect(captured!.data).toEqual([]);
     expect(captured!.lastFetched).toBeInstanceOf(Date);
