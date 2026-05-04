@@ -42,6 +42,9 @@ afterEach(() => {
  * cold CI runners where the React commit phase can split across
  * multiple microtask rounds (AISDLC-188).
  */
+// Kept alongside waitForFlushed because the negative-assertion test at L222
+// ("does NOT auto-fetch on mount") needs a fixed-rounds wait — predicates
+// can't assert absence-of-effect (a never-true predicate would just time out).
 function flushEffects(rounds = 4): Promise<void> {
   return new Promise<void>((resolve) => {
     const tick = (n: number): void => {
