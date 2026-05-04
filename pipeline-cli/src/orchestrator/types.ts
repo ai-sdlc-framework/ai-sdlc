@@ -205,6 +205,55 @@ export interface OrchestratorTaskAlreadyInFlightEvent {
 }
 
 /**
+ * AISDLC-177 — emitted after a failed dispatch when the orchestrator has
+ * undone the side-effects Step 4 introduced (status flip + per-worktree
+ * sentinel + worktree directory). The payload tells the operator exactly
+ * what was reverted so a forensic dive into events.jsonl can reconstruct
+ * the cleanup without grepping disk.
+ *
+ * Fired on `developer-failed`, `developer-json-contract-violated`, and
+ * any future failure outcome that left a Step 4 side-effect on disk.
+ * NOT fired when the dispatch never claimed a worktree (e.g.
+ * `task-already-in-flight` rejection — there's nothing to roll back).
+ */
+export interface OrchestratorRollbackEvent {
+  type: 'OrchestratorRollback';
+  ts: string;
+  taskId: string;
+  /** Task status before Step 4 flipped it (typically `To Do`). */
+  fromStatus: string;
+  /** Status the orchestrator restored it to (matches `fromStatus`). */
+  toStatus: string;
+  /** True when `git worktree remove --force <path>` succeeded. */
+  worktreeRemoved: boolean;
+  /** True when the dev's branch had commits we preserved as a quarantine ref. */
+  branchQuarantined: boolean;
+  /** Quarantine ref name (e.g. `quarantine/aisdlc-70-2026-05-04T14-23-44`); set when `branchQuarantined`. */
+  quarantineRef?: string;
+}
+
+/**
+ * AISDLC-177 — companion event to `OrchestratorRollback`, fired only when
+ * the developer's branch carried commits beyond `origin/main` AND the
+ * orchestrator successfully renamed the branch under `quarantine/<ref>`.
+ * Operators can grep for this event type to see every preserved-but-
+ * abandoned dev attempt without parsing the larger rollback payloads.
+ */
+export interface OrchestratorWorkQuarantinedEvent {
+  type: 'OrchestratorWorkQuarantined';
+  ts: string;
+  taskId: string;
+  /** Original branch name the dev was working on. */
+  branch: string;
+  /** Quarantine ref name the orchestrator created. */
+  quarantineRef: string;
+  /** SHA of the tip commit preserved under the quarantine ref. */
+  commitSha: string;
+  /** Number of commits beyond origin/main on the quarantined branch. */
+  commitCount: number;
+}
+
+/**
  * RFC-0015 Phase 3 (Q3 + Q5) — emitted on a tick that dispatched nothing.
  * The reason distinguishes "no candidates ready" from "candidates rejected
  * by filters" so operators can grep events.jsonl for the actual cause.

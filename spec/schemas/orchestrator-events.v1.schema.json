@@ -155,6 +155,44 @@
       "type": "integer",
       "minimum": 0,
       "description": "Wall-clock duration in ms the retry spawn took (from re-emission prompt issue to parsed JSON envelope) — present on `DeveloperContractRetry` (AISDLC-176)."
+    },
+    "fromStatus": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Task status before Step 4 flipped it (typically `To Do`). Present on `OrchestratorRollback` (AISDLC-177)."
+    },
+    "toStatus": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Status the orchestrator restored the task to during rollback (matches `fromStatus`). Present on `OrchestratorRollback` (AISDLC-177)."
+    },
+    "worktreeRemoved": {
+      "type": "boolean",
+      "description": "True when `git worktree remove --force <path>` succeeded during rollback. Present on `OrchestratorRollback` (AISDLC-177)."
+    },
+    "branchQuarantined": {
+      "type": "boolean",
+      "description": "True when the failed dispatch's branch carried commits beyond `origin/main` AND the orchestrator preserved them under a `quarantine/<ref>` ref. Present on `OrchestratorRollback` (AISDLC-177)."
+    },
+    "quarantineRef": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Quarantine ref name (e.g. `quarantine/aisdlc-70-2026-05-04T14-23-44`) the orchestrator created when preserving the failed dispatch's commits. Present on `OrchestratorRollback` (when `branchQuarantined` is true) and on `OrchestratorWorkQuarantined` (AISDLC-177)."
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Original branch name the dev was working on before the rollback. Present on `OrchestratorWorkQuarantined` (AISDLC-177)."
+    },
+    "commitSha": {
+      "type": "string",
+      "minLength": 1,
+      "description": "SHA of the tip commit preserved under the quarantine ref. Present on `OrchestratorWorkQuarantined` (AISDLC-177)."
+    },
+    "commitCount": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of commits beyond `origin/main` on the quarantined branch. Always at least 1 by construction (a zero-commit branch isn't quarantined). Present on `OrchestratorWorkQuarantined` (AISDLC-177)."
     }
   },
   "additionalProperties": false,
@@ -177,7 +215,9 @@
         "OrchestratorStuckCandidate",
         "OrchestratorTaskAlreadyInFlight",
         "DeveloperContractRetry",
-        "WorkerStateTransition"
+        "WorkerStateTransition",
+        "OrchestratorRollback",
+        "OrchestratorWorkQuarantined"
       ]
     }
   }

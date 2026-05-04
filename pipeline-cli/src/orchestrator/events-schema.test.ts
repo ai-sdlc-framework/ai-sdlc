@@ -169,6 +169,49 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts OrchestratorRollback (AISDLC-177, no quarantine)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'OrchestratorRollback',
+      taskId: 'AISDLC-70',
+      runId,
+      tick: 1,
+      fromStatus: 'To Do',
+      toStatus: 'To Do',
+      worktreeRemoved: true,
+      branchQuarantined: false,
+    });
+  });
+
+  it('accepts OrchestratorRollback (AISDLC-177, with quarantine)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'OrchestratorRollback',
+      taskId: 'AISDLC-70',
+      runId,
+      tick: 1,
+      fromStatus: 'To Do',
+      toStatus: 'To Do',
+      worktreeRemoved: true,
+      branchQuarantined: true,
+      quarantineRef: 'quarantine/aisdlc-70-2026-05-04T14-23-44',
+    });
+  });
+
+  it('accepts OrchestratorWorkQuarantined (AISDLC-177)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'OrchestratorWorkQuarantined',
+      taskId: 'AISDLC-70',
+      runId,
+      tick: 1,
+      branch: 'ai-sdlc/aisdlc-70',
+      quarantineRef: 'quarantine/aisdlc-70-2026-05-04T14-23-44',
+      commitSha: 'abc1234deadbeef',
+      commitCount: 2,
+    });
+  });
+
   it('accepts the minimal envelope (only ts + type)', () => {
     expectValid({ ts: baseTs, type: 'OrchestratorTick' });
   });

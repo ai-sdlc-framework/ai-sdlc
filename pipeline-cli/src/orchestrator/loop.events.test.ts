@@ -113,7 +113,14 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
     }
   });
 
-  it('failure path: Tick → Dispatched → Failed (mode=UnknownFailureMode)', async () => {
+  it('failure path: Tick → Dispatched → Failed → Rollback (mode=UnknownFailureMode)', async () => {
+    // AISDLC-177 — the loop now follows every uncatalogued failure with
+    // an `OrchestratorRollback` event so operators can see the side-effect
+    // sweep on the same forensic stream as the failure itself. The
+    // synthetic failure here uses `/tmp` as workDir so the rollback's
+    // task-file lookup, worktree removal, and branch quarantine all
+    // no-op (no backlog/, no .worktrees/, no git repo) — the event
+    // still fires so consumers see the consistent shape.
     const { events, sink } = captureSink();
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1, maxTicks: 1 });
     const adapters: OrchestratorAdapters = {
@@ -129,13 +136,28 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
     await runOrchestratorTick(config, adapters, 1);
 
     const types = events.map((e) => e.type);
-    expect(types).toEqual(['OrchestratorTick', 'OrchestratorDispatched', 'OrchestratorFailed']);
+    expect(types).toEqual([
+      'OrchestratorTick',
+      'OrchestratorDispatched',
+      'OrchestratorFailed',
+      'OrchestratorRollback',
+    ]);
     expect(events[2]).toMatchObject({
       type: 'OrchestratorFailed',
       taskId: 'AISDLC-FAIL',
       mode: 'UnknownFailureMode',
       reason: 'synthetic verification failure',
       prUrl: null,
+    });
+    expect(events[3]).toMatchObject({
+      type: 'OrchestratorRollback',
+      taskId: 'AISDLC-FAIL',
+      // Default fallback is "To Do" — the synthetic /tmp workDir has no
+      // backlog/ so readTaskStatus returns null and maybeRollback uses
+      // the conservative default.
+      fromStatus: 'To Do',
+      toStatus: 'To Do',
+      branchQuarantined: false,
     });
   });
 

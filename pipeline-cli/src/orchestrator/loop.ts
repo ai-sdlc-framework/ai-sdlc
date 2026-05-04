@@ -64,6 +64,7 @@ import { findTaskFile, parseSimpleYaml } from '../steps/01-validate.js';
 import {
   DEFAULT_LOGGER,
   type PipelineLogger,
+  type PipelineOutcome,
   type PipelineResult,
   type SubagentSpawner,
 } from '../types.js';
@@ -88,6 +89,7 @@ import {
   type PlaybookEvent,
   type WorkerContext,
 } from './playbook/index.js';
+import { rollbackDispatch, type RollbackResult } from './rollback.js';
 import type {
   DispatchFn,
   EscalateFn,
@@ -110,6 +112,22 @@ export const DEFAULT_MAX_CONCURRENT = 1;
 export const MAX_IDLE_SLEEP_SEC = 5 * 60;
 /** RFC-0015 §4.3 — emit `OrchestratorStuckCandidate` after this many consecutive skips. */
 export const STUCK_CANDIDATE_THRESHOLD = 5;
+
+/**
+ * AISDLC-177 — pipeline outcomes that left a Step 4 side-effect on disk
+ * (status flip + sentinel + worktree) AND require the orchestrator to
+ * roll the side-effects back. Outcomes NOT in this set either never
+ * dispatched (`task-already-in-flight`, filter rejection) or completed
+ * successfully (`approved`, `needs-human-attention` — the latter parks
+ * the PR for a human and INTENTIONALLY leaves the worktree in place so
+ * the operator can iterate from where the dev stopped).
+ */
+export const ROLLBACK_OUTCOMES: ReadonlySet<PipelineOutcome | 'unknown-failure'> = new Set([
+  'developer-failed',
+  'developer-json-contract-violated',
+  'aborted',
+  'unknown-failure',
+]);
 
 /** Build the default config — callers can override individual fields. */
 export function defaultOrchestratorConfig(
@@ -501,9 +519,18 @@ export async function runOrchestratorTick(
   // sequentially per loop, but defensive against future concurrency) still
   // sees the entry. Release runs in `finally` so the slot is freed on
   // success AND failure paths.
+  //
+  // AISDLC-177 — capture the pre-dispatch task status BEFORE Step 4 flips
+  // it inside the dispatcher. The captured value is the rollback target if
+  // the dispatch fails (`developer-failed`, `developer-json-contract-violated`,
+  // `aborted`, or a thrown error that surfaces as `unknown-failure`). We
+  // read it here rather than inside the dispatcher because by the time
+  // executePipeline returns, Step 4 has already mutated the file to
+  // "In Progress".
   const settled = await Promise.allSettled(
     picks.map(async (taskId) => {
       const startedAt = now().toISOString();
+      const preDispatchStatus = readTaskStatus(config.workDir, taskId) ?? 'To Do';
       const claim = claimInFlight(inFlight, taskId, {
         startedAt,
         worktreePath: join(config.workDir, '.worktrees', taskId.toLowerCase()),
@@ -517,10 +544,10 @@ export async function runOrchestratorTick(
       emit({ type: 'OrchestratorDispatched', taskId });
       try {
         const result = await dispatchFn(taskId);
-        return { taskId, result };
+        return { taskId, result, preDispatchStatus };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        return { taskId, error: message };
+        return { taskId, error: message, preDispatchStatus };
       } finally {
         // Only release the slot if THIS call won the claim — otherwise we'd
         // free a slot owned by a concurrent claimer (defensive; today's
@@ -561,10 +588,14 @@ export async function runOrchestratorTick(
       });
       continue;
     }
-    const value = s.value;
+    const value = s.value as DispatchSettledValue;
 
     if ('error' in value && value.error) {
       // Phase 2: try the playbook before falling through to the catch-all.
+      // The playbook's redispatch path (e.g. RebaseConflict handler) needs
+      // the worktree intact; we defer rollback until the playbook gives up
+      // (escalated / unknown) so we don't pull the rug out from a recovery
+      // attempt mid-flight.
       const playbook = await tryPlaybookOnError({
         taskId: value.taskId,
         reason: value.error,
@@ -630,6 +661,18 @@ export async function runOrchestratorTick(
           reason: playbook.note ?? value.error,
           prUrl: null,
         });
+        // AISDLC-177 — playbook gave up; sweep the worktree + revert
+        // status so the next tick can re-pick cleanly.
+        await maybeRollback({
+          taskId: value.taskId,
+          outcome: 'unknown-failure',
+          preDispatchStatus: value.preDispatchStatus,
+          config,
+          adapters,
+          emit,
+          logger,
+          now,
+        });
         continue;
       }
       // Fall-through: no catalogued mode matched → Phase 1 catch-all.
@@ -653,6 +696,18 @@ export async function runOrchestratorTick(
         mode: 'UnknownFailureMode',
         reason: value.error,
         prUrl: null,
+      });
+      // AISDLC-177 — uncatalogued failure; same sweep as the escalated
+      // branch above.
+      await maybeRollback({
+        taskId: value.taskId,
+        outcome: 'unknown-failure',
+        preDispatchStatus: value.preDispatchStatus,
+        config,
+        adapters,
+        emit,
+        logger,
+        now,
       });
       continue;
     }
@@ -680,6 +735,18 @@ export async function runOrchestratorTick(
         reason: record.reason,
         prUrl: null,
       });
+      // AISDLC-177 — pathological no-result branch still left Step 4's
+      // side-effects on disk. Roll them back.
+      await maybeRollback({
+        taskId: value.taskId,
+        outcome: 'unknown-failure',
+        preDispatchStatus: value.preDispatchStatus,
+        config,
+        adapters,
+        emit,
+        logger,
+        now,
+      });
       continue;
     }
     const result = value.result;
@@ -695,6 +762,25 @@ export async function runOrchestratorTick(
       outcome: result.outcome,
       prUrl: result.prUrl,
     });
+    // AISDLC-177 — failure outcomes from `executePipeline()` (the
+    // witness case: `developer-failed` from a dev subagent that returned
+    // commitSha:null, plus the AISDLC-176 `developer-json-contract-violated`
+    // and the catch-all `aborted`) all left Step 4's side-effects on
+    // disk. Roll them back so the task is re-dispatchable cleanly.
+    if (ROLLBACK_OUTCOMES.has(result.outcome)) {
+      await maybeRollback({
+        taskId: result.taskId,
+        outcome: result.outcome,
+        preDispatchStatus: value.preDispatchStatus,
+        config,
+        adapters,
+        emit,
+        logger,
+        now,
+        branch: result.branch,
+        worktreePath: result.worktreePath,
+      });
+    }
     // Phase 1 also escalates the executePipeline native `needs-human-attention`
     // outcome — that flag means the task is parked for a human anyway and
     // benefits from the durable PR label per RFC §13 Q1 layer A. The label
@@ -737,6 +823,130 @@ export async function runOrchestratorTick(
     nextSleepSec: cadenceState.currentIntervalSec,
     alreadyInFlight: alreadyInFlightEvents,
   };
+}
+
+// ── AISDLC-177 rollback bridge ───────────────────────────────────────
+
+/**
+ * AISDLC-177 — settled-promise payload returned by the per-pick async
+ * lambda. Carries the pre-dispatch status the orchestrator captured
+ * BEFORE Step 4 flipped it, so the rollback target is known regardless
+ * of whether the dispatcher succeeded, failed cleanly, or threw.
+ */
+type DispatchSettledValue =
+  | { taskId: string; preDispatchStatus: string; result: PipelineResult }
+  | { taskId: string; preDispatchStatus: string; error: string; result?: undefined };
+
+interface MaybeRollbackArgs {
+  taskId: string;
+  outcome: PipelineOutcome | 'unknown-failure';
+  preDispatchStatus: string;
+  config: OrchestratorConfig;
+  adapters: OrchestratorAdapters;
+  emit: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void;
+  logger: PipelineLogger;
+  now: () => Date;
+  /** Branch name from the dispatcher's result (when available). */
+  branch?: string;
+  /** Worktree path from the dispatcher's result (when available). */
+  worktreePath?: string;
+}
+
+/**
+ * AISDLC-177 — undo Step 3 + Step 4 side-effects for a failed dispatch
+ * and emit the matching `OrchestratorRollback` (+ optional
+ * `OrchestratorWorkQuarantined`) events.
+ *
+ * Best-effort by design: any failure inside `rollbackDispatch()`
+ * accumulates in `result.warnings` rather than throwing — observability
+ * must not crash the orchestrator hot loop.
+ *
+ * The branch + worktree path can be derived from the canonical task ID
+ * (`ai-sdlc/<id-lower>` and `<workDir>/.worktrees/<id-lower>`), but we
+ * accept overrides from the dispatcher's result so a future change to
+ * the branch-naming convention (e.g. RFC-0010's tier-aware names)
+ * doesn't desync.
+ */
+async function maybeRollback(args: MaybeRollbackArgs): Promise<void> {
+  const idLower = args.taskId.toLowerCase();
+  const branch = args.branch ?? `ai-sdlc/${idLower}`;
+  const worktreePath = args.worktreePath ?? join(args.config.workDir, '.worktrees', idLower);
+
+  let result: RollbackResult;
+  try {
+    result = await rollbackDispatch({
+      workDir: args.config.workDir,
+      taskId: args.taskId,
+      fromStatus: args.preDispatchStatus,
+      worktreePath,
+      branch,
+      runner: args.adapters.runner,
+      logger: args.logger,
+      now: args.now,
+    });
+  } catch (err) {
+    // Defensive: rollbackDispatch is best-effort internally, but a
+    // programming error (e.g. a future refactor that throws) must not
+    // crash the loop. Log + continue.
+    const reason = err instanceof Error ? err.message : String(err);
+    args.logger.error(`[orchestrator-rollback] threw for ${args.taskId}: ${reason}`);
+    return;
+  }
+
+  args.emit({
+    type: 'OrchestratorRollback',
+    taskId: args.taskId,
+    fromStatus: result.fromStatus,
+    toStatus: result.fromStatus,
+    worktreeRemoved: result.worktreeRemoved,
+    branchQuarantined: result.branchQuarantined,
+    ...(result.quarantineRef !== undefined ? { quarantineRef: result.quarantineRef } : {}),
+  });
+
+  if (
+    result.branchQuarantined &&
+    result.quarantineRef &&
+    result.quarantineSha &&
+    result.quarantineCommitCount
+  ) {
+    args.emit({
+      type: 'OrchestratorWorkQuarantined',
+      taskId: args.taskId,
+      branch,
+      quarantineRef: result.quarantineRef,
+      commitSha: result.quarantineSha,
+      commitCount: result.quarantineCommitCount,
+    });
+  }
+
+  if (result.warnings.length > 0) {
+    args.logger.warn(
+      `[orchestrator-rollback] partial rollback for ${args.taskId}: ${result.warnings.join('; ')}`,
+    );
+  }
+}
+
+/**
+ * AISDLC-177 — read the current `status:` value from a task file. Used
+ * by the orchestrator to capture the pre-dispatch status BEFORE Step 4
+ * flips it, so a later rollback knows what to revert TO. Returns null
+ * when the file is missing / malformed (caller falls back to "To Do",
+ * the conservative default).
+ */
+function readTaskStatus(workDir: string, taskId: string): string | null {
+  try {
+    const path = findTaskFile(taskId, workDir);
+    if (!path || !existsSync(path)) return null;
+    const raw = readFileSync(path, 'utf8');
+    const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) return null;
+    const m = fmMatch[1].split('\n').find((line) => /^status:\s*/.test(line));
+    if (!m) return null;
+    const value = m.replace(/^status:\s*/, '').trim();
+    return value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 // ── Phase 2 playbook bridge ──────────────────────────────────────────

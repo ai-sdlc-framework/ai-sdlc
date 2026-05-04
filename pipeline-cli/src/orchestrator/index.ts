@@ -32,6 +32,7 @@ export {
   makeInitialCadenceState,
   MAX_IDLE_SLEEP_SEC,
   OrchestratorDisabledError,
+  ROLLBACK_OUTCOMES,
   runOrchestratorLoop,
   runOrchestratorTick,
   STUCK_CANDIDATE_THRESHOLD,
@@ -39,6 +40,12 @@ export {
   type OrchestratorAdapters,
   type StuckCounterEntry,
 } from './loop.js';
+export {
+  buildQuarantineRef,
+  rollbackDispatch,
+  type RollbackOptions,
+  type RollbackResult,
+} from './rollback.js';
 export {
   isOrchestratorEnabled,
   ORCHESTRATOR_FLAG,
@@ -67,9 +74,11 @@ export type {
   OrchestratorFilterEvent,
   OrchestratorIdleEvent,
   OrchestratorOrphanParentEvent,
+  OrchestratorRollbackEvent,
   OrchestratorStatus,
   OrchestratorStuckCandidateEvent,
   OrchestratorTickResult,
+  OrchestratorWorkQuarantinedEvent,
   TaskDispatchOutcome,
 } from './types.js';
 

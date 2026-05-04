@@ -66,7 +66,22 @@ export type OrchestratorEventType =
    */
   | 'DeveloperContractRetry'
   | 'OrchestratorTaskAlreadyInFlight'
-  | 'WorkerStateTransition';
+  | 'WorkerStateTransition'
+  /**
+   * AISDLC-177 — emitted after a failed dispatch when the orchestrator
+   * has undone the side-effects Step 4 introduced (status flip + per-
+   * worktree sentinel + worktree directory). Per-event fields:
+   * `taskId`, `fromStatus`, `toStatus`, `worktreeRemoved`,
+   * `branchQuarantined`, optional `quarantineRef`.
+   */
+  | 'OrchestratorRollback'
+  /**
+   * AISDLC-177 — companion to `OrchestratorRollback`. Fired only when the
+   * dev's branch had commits beyond `origin/main` AND the orchestrator
+   * successfully renamed the branch under `quarantine/<ref>`. Per-event
+   * fields: `taskId`, `branch`, `quarantineRef`, `commitSha`, `commitCount`.
+   */
+  | 'OrchestratorWorkQuarantined';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional
