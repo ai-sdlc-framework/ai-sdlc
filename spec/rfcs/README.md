@@ -23,6 +23,36 @@ An RFC is **not** required for:
 - Adding informative content to non-normative documents
 - Updating examples or glossary entries
 
+## Addendums — DEPRECATED (create a new RFC instead)
+
+**Do not add new Addendums (Addendum A, Addendum B, etc.) to existing RFCs.** Create a new RFC.
+
+### Why
+
+Historically, several RFCs (RFC-0006, RFC-0007, RFC-0008, RFC-0009) used an "Addendum A / Addendum B / ..." pattern to extend a signed-off RFC with significant additional content. Operator review of this pattern (2026-05-04) found:
+
+- **Review structure suffers** — an Addendum re-opens a signed-off RFC for review of just the new section, but the diff/PR surface conflates "the new content" with "minor edits to the original." Reviewers can't easily separate "I'm endorsing the addition" from "I'm re-endorsing the whole thing."
+- **Sign-off semantics get muddy** — does signing the Addendum re-sign the whole RFC? Different RFCs answered this differently; there's no consistent contract.
+- **Cross-references break** — `RFC-0008 §A.5` is harder to cite + maintain than `RFC-0029` (a hypothetical separate RFC). Internal links in tooling have to handle both `#section-id` and `#addendum-a-section-id` patterns.
+- **RFCs become unbounded** — an Addendum-bearing RFC has no natural "this is done" point; it accretes addendums indefinitely. Separate RFCs are bounded artifacts that can ship + sign-off independently.
+- **Lifecycle drift** — the parent RFC's `lifecycle: Signed Off` is technically correct for the original content but misleading for the Addendum (which may still be Draft). Separate RFCs maintain accurate lifecycle per artifact.
+
+### What to do instead
+
+When you'd be tempted to add an Addendum:
+
+1. **Reserve a new RFC number** in the [Registry](#registry) with `Status: Reserved` + a one-line description of what the new content covers
+2. **Draft the new RFC** with `requires: [<parent-rfc-id>]` in its frontmatter — the dependency is explicit
+3. **Reference the parent** in §1 Summary: "This RFC extends RFC-NNNN with..."
+4. **Open a separate PR** for the new RFC — independent review, independent sign-off, independent lifecycle
+5. **The parent stays signed-off** — no re-opening required
+
+### Historical Addendums (preserved as-is)
+
+The Addendums in RFC-0006 (Addendum A + B), RFC-0007 (cross-references RFC-0006 Addendum A), RFC-0008 (Addendum A + B), and RFC-0009 (RFC-0008 Addendum A reference) are **kept** — they are signed-off normative content. The deprecation applies to NEW addendum creation only.
+
+If a historical Addendum needs revision, prefer to carve it out to its own RFC at that revision pass (operator decision; not required).
+
 ## RFC Lifecycle (AISDLC-118)
 
 The `lifecycle` frontmatter field captures the per-owner sign-off + implementation arc:
