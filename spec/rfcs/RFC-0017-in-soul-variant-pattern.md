@@ -33,7 +33,7 @@ requiresDocs: []
 |--------|------|--------|------|
 | Morgan Hirtle | Chief of Design / Design Authority | ✍️ Authored v0.1 stub | 2026-05-04 |
 | Dominique Legault | CTO / Engineering Authority | ✏️ Engineering pass on v0.2 (pending Design editorial) | 2026-05-04 |
-| Alexander Kline | Head of Product Strategy / Product Authority | ⏸ Pending | — |
+| Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.2 (endorse pending Mo's editorial pass) | 2026-05-04 |
 
 ---
 
