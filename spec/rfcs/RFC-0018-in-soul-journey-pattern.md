@@ -3,7 +3,7 @@ id: RFC-0018
 title: In-Soul Journey Pattern
 status: Draft
 lifecycle: Draft
-author: morgan@sprypoint.com
+author: morgan@reliablegenius.io
 created: 2026-05-04
 updated: 2026-05-04
 targetSpecVersion: v1alpha1
@@ -43,7 +43,7 @@ A Journey is a temporally-ordered user flow within a Soul DID (or within a Varia
 
 This RFC defines the In-Soul Journey Pattern — how journeys are declared on a Soul DID, how they relate to Variants (RFC-0017), and how the admission composite prioritizes work items that advance, repair, or complete a specific journey.
 
-**Practitioner validation source:** InternalAdopter's accessibility audit pipeline provides the reference implementation. The WCAG 2.1 AA audit surface maps naturally to journey-level design intent: each product flow (onboarding, payment, backflow reporting) is a journey with distinct completion criteria and accessibility requirements that cannot be collapsed to soul-level aggregate scoring without losing precision.
+**Practitioner validation source:** A utility software platform's accessibility audit pipeline provides the reference implementation. The WCAG 2.1 AA audit surface maps naturally to journey-level design intent: each product flow is a journey with distinct completion criteria and accessibility requirements that cannot be collapsed to soul-level aggregate scoring without losing precision.
 
 Full normative spec to follow after practitioner validation pass.
 

@@ -3,7 +3,7 @@ id: RFC-0017
 title: In-Soul Variant Pattern
 status: Draft
 lifecycle: Draft
-author: morgan@sprypoint.com
+author: morgan@reliablegenius.io
 created: 2026-05-04
 updated: 2026-05-04
 targetSpecVersion: v1alpha1
@@ -42,7 +42,7 @@ A Variant is a soul-scoped sub-theme within a Soul DID: a named configuration th
 
 This RFC defines the In-Soul Variant Pattern — how variants are declared, how they inherit from their parent Soul DID, and how the admission composite scores work items that target a specific variant rather than the full soul.
 
-**Practitioner validation source:** InternalAdopter's four-product suite (ProductA, ProductB, ProductC, ProductD) provides the reference implementation. Each product is a distinct soul on shared substrate; each soul contains audience-specific variants requiring independent design intent declaration while sharing the soul's compliance floor and design system tokens.
+**Practitioner validation source:** A four-product utility software platform provides the reference implementation. Each product is a distinct soul on shared engineering substrate; each soul contains audience-specific variants requiring independent design intent declaration while sharing the soul's compliance floor and design system tokens.
 
 Full normative spec to follow after practitioner validation pass.
 
