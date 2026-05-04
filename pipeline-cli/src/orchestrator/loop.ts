@@ -72,6 +72,14 @@ import { isOrchestratorEnabled, orchestratorDisabledMessage } from './feature-fl
 import { formatFilterTrace, runFilterChain } from './filters/index.js';
 import type { FilterChainResult } from './filters/types.js';
 import {
+  claimInFlight,
+  isInFlight,
+  makeInFlightMap,
+  reconstructInFlightFromWorktrees,
+  releaseInFlight,
+  type InFlightMap,
+} from './in-flight.js';
+import {
   loadFailurePatternCatalogue,
   runPlaybook,
   WorkerStateTracker,
@@ -91,6 +99,7 @@ import type {
   OrchestratorIdleEvent,
   OrchestratorStatus,
   OrchestratorStuckCandidateEvent,
+  OrchestratorTaskAlreadyInFlightEvent,
   OrchestratorTickResult,
   TaskDispatchOutcome,
 } from './types.js';
@@ -220,6 +229,20 @@ export interface OrchestratorAdapters {
    * (so a fresh task arrival can reset the backoff). v1 in-memory.
    */
   cadenceState?: CadenceState;
+  /**
+   * RFC-0015 / AISDLC-179 — in-flight dispatch tracker shared across
+   * ticks. Pre-dispatch filter consults this map to reject any candidate
+   * already mid-dispatch (prevents the original-bug witness where tick 2
+   * re-dispatches AISDLC-178.1 while tick 1's dev subagent is still
+   * running and trips "branch already exists" at Step 3).
+   *
+   * `runOrchestratorLoop()` reconstructs the map from
+   * `<workDir>/.worktrees/&star;/.active-task` sentinels on cold start so
+   * a restart after a crash doesn't re-dispatch tasks whose worktrees
+   * are still around. Tests that drive `runOrchestratorTick` directly
+   * pre-populate via this adapter to assert the filter fires.
+   */
+  inFlight?: InFlightMap;
 }
 
 /**
@@ -279,6 +302,11 @@ export async function runOrchestratorTick(
   const now = adapters.now ?? (() => new Date());
   const stuckCounters = adapters.stuckCounters ?? new Map<string, StuckCounterEntry>();
   const cadenceState = adapters.cadenceState ?? makeInitialCadenceState(config.tickIntervalSec);
+  // RFC-0015 / AISDLC-179 — in-flight tracker. Direct-tick callers (tests,
+  // `cli-orchestrator tick`) get a fresh map per call; the loop driver
+  // (`runOrchestratorLoop`) injects a shared one + pre-warms it from
+  // worktree sentinels on cold start.
+  const inFlight = adapters.inFlight ?? makeInFlightMap();
 
   const candidates = frontierFn();
   logger.progress(
@@ -312,6 +340,7 @@ export async function runOrchestratorTick(
       filterEvents: [],
       idleEvent,
       nextSleepSec: cadenceState.currentIntervalSec,
+      alreadyInFlight: [],
     };
   }
 
@@ -336,6 +365,7 @@ export async function runOrchestratorTick(
       filterEvents: [],
       idleEvent,
       nextSleepSec: cadenceState.currentIntervalSec,
+      alreadyInFlight: [],
     };
   }
 
@@ -344,9 +374,40 @@ export async function runOrchestratorTick(
   const labelsLoader = adapters.taskLabelsLoader ?? buildDefaultLabelsLoader(config.workDir);
   const graph = graphLoader();
   const filterEvents: OrchestratorFilterEvent[] = [];
+  const alreadyInFlightEvents: OrchestratorTaskAlreadyInFlightEvent[] = [];
   const picks: string[] = [];
 
+  // RFC-0015 / AISDLC-179 — in-flight pre-filter. Before running the
+  // (potentially expensive) §4.3 filter chain we drop any candidate that's
+  // already mid-dispatch. Original-bug witness: with `maxConcurrent: 1` and
+  // a 30s tick interval, every tick re-picked the same task while tick 1's
+  // dev subagent was still running — wasting dispatches and tripping
+  // "branch already exists" at Step 3. Forwarding `OrchestratorTaskAlreadyInFlight`
+  // to both the in-process accumulator + events bus gives operators a
+  // forensic trace of the rejection.
+  const dispatchableCandidates: typeof candidates = [];
   for (const candidate of candidates) {
+    const existing = isInFlight(inFlight, candidate.id);
+    if (existing) {
+      const ts = now().toISOString();
+      const event: OrchestratorTaskAlreadyInFlightEvent = {
+        type: 'OrchestratorTaskAlreadyInFlight',
+        ts,
+        taskId: candidate.id,
+        startedAt: existing.startedAt,
+      };
+      alreadyInFlightEvents.push(event);
+      emit({
+        type: 'OrchestratorTaskAlreadyInFlight',
+        taskId: candidate.id,
+        startedAt: existing.startedAt,
+      });
+      continue;
+    }
+    dispatchableCandidates.push(candidate);
+  }
+
+  for (const candidate of dispatchableCandidates) {
     if (picks.length >= budget) break;
     const labels = labelsLoader(candidate.id);
     const chainResult = runFilterChain({
@@ -417,6 +478,7 @@ export async function runOrchestratorTick(
       filterEvents,
       idleEvent,
       nextSleepSec: cadenceState.currentIntervalSec,
+      alreadyInFlight: alreadyInFlightEvents,
     };
   }
 
@@ -426,8 +488,23 @@ export async function runOrchestratorTick(
   // Phase 1 default `maxConcurrent: 1`. We still use Promise.all so Phase 2
   // can bump the cap without touching this code path. Each dispatch is
   // wrapped in its own try/catch so one task's escape never crashes the loop.
+  //
+  // RFC-0015 / AISDLC-179 — every dispatch is also wrapped in
+  // `claimInFlight`/`releaseInFlight` so concurrent ticks don't re-dispatch
+  // the same task while it's mid-flight. Claim happens BEFORE the
+  // `OrchestratorDispatched` emit so a tick that races in between two ticks
+  // (theoretically impossible since runOrchestratorTick is awaited
+  // sequentially per loop, but defensive against future concurrency) still
+  // sees the entry. Release runs in `finally` so the slot is freed on
+  // success AND failure paths.
   const settled = await Promise.allSettled(
     picks.map(async (taskId) => {
+      const startedAt = now().toISOString();
+      const claim = claimInFlight(inFlight, taskId, {
+        startedAt,
+        worktreePath: join(config.workDir, '.worktrees', taskId.toLowerCase()),
+        dispatchPromise: null,
+      });
       // RFC-0015 Phase 4 — pre-dispatch event. Emitting BEFORE the
       // dispatch (rather than after) means a dispatch that hard-crashes
       // the orchestrator (theoretically impossible per the catch below,
@@ -440,6 +517,14 @@ export async function runOrchestratorTick(
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return { taskId, error: message };
+      } finally {
+        // Only release the slot if THIS call won the claim — otherwise we'd
+        // free a slot owned by a concurrent claimer (defensive; today's
+        // single-threaded tick means `claim.claimed` is always true here
+        // because the in-flight pre-filter already rejected duplicates).
+        if (claim.claimed) {
+          releaseInFlight(inFlight, taskId);
+        }
       }
     }),
   );
@@ -646,6 +731,7 @@ export async function runOrchestratorTick(
     filterEvents,
     idleEvent: null,
     nextSleepSec: cadenceState.currentIntervalSec,
+    alreadyInFlight: alreadyInFlightEvents,
   };
 }
 
@@ -971,6 +1057,12 @@ export async function runOrchestratorLoop(
     runId: adapters.runId ?? randomUUID(),
     stuckCounters: adapters.stuckCounters ?? new Map<string, StuckCounterEntry>(),
     cadenceState: adapters.cadenceState ?? makeInitialCadenceState(config.tickIntervalSec),
+    // RFC-0015 / AISDLC-179 — pre-warm the in-flight map from on-disk
+    // worktree sentinels on cold start so a restart-after-crash doesn't
+    // re-dispatch tasks whose worktrees still exist. Tests that pre-set
+    // `adapters.inFlight` win over the reconstruction (e.g. to assert the
+    // map is empty on a clean cold start, or to inject a synthetic entry).
+    inFlight: adapters.inFlight ?? reconstructInFlightFromWorktrees(config.workDir),
   };
 
   const ticks: OrchestratorTickResult[] = [];

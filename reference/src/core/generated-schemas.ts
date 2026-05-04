@@ -2512,6 +2512,12 @@ export const orchestratorEventsV1Schema = {
       description:
         "IDs of the candidate's children that are all already in `backlog/completed/` (lowercased, sorted). At least one entry by construction. Present on `OrchestratorOrphanParent` (AISDLC-175) — emitted when the orphan-parent filter rejects a parent task whose every declared child has already shipped, so the orchestrator stops dispatching developer subagents for what is bookkeeping (parent file `git mv` to `completed/`) the framework should handle.",
     },
+    startedAt: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        "ISO-8601 timestamp the existing in-flight dispatch was started — present on `OrchestratorTaskAlreadyInFlight` (RFC-0015 / AISDLC-179). Lets operators correlate the rejected re-dispatch attempt with the original dispatch's `OrchestratorDispatched` event.",
+    },
   },
   additionalProperties: false,
   $defs: {
@@ -2532,6 +2538,7 @@ export const orchestratorEventsV1Schema = {
         'OrchestratorIdleAllFiltered',
         'OrchestratorOrphanParent',
         'OrchestratorStuckCandidate',
+        'OrchestratorTaskAlreadyInFlight',
         'WorkerStateTransition',
       ],
     },

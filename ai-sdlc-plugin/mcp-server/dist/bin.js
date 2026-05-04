@@ -6795,8 +6795,8 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync24, readdirSync as readdirSync7, statSync as statSync5 } from "node:fs";
-import { join as join25 } from "node:path";
+import { existsSync as existsSync25, readdirSync as readdirSync8, statSync as statSync6 } from "node:fs";
+import { join as join26 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
     "use strict";
@@ -22964,8 +22964,8 @@ import { dirname as dirname4, join as join17 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync23, readFileSync as readFileSync21 } from "node:fs";
-import { join as join23 } from "node:path";
+import { existsSync as existsSync24, readFileSync as readFileSync22 } from "node:fs";
+import { join as join24 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/events.js
 import { appendFileSync as appendFileSync2, existsSync as existsSync18, mkdirSync as mkdirSync6, readFileSync as readFileSync16, readdirSync as readdirSync6 } from "node:fs";
@@ -22982,16 +22982,20 @@ import { dirname as dirname6, join as join19 } from "node:path";
 import { existsSync as existsSync20, readFileSync as readFileSync18 } from "node:fs";
 import { join as join20 } from "node:path";
 
-// ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
-import { existsSync as existsSync21, readFileSync as readFileSync19 } from "node:fs";
+// ../../pipeline-cli/dist/orchestrator/in-flight.js
+import { existsSync as existsSync21, readdirSync as readdirSync7, readFileSync as readFileSync19, statSync as statSync5 } from "node:fs";
 import { join as join21 } from "node:path";
+
+// ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
+import { existsSync as existsSync22, readFileSync as readFileSync20 } from "node:fs";
+import { join as join22 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/handlers/long-running-pr.js
 var LONG_RUNNING_PR_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/playbook/state-machine.js
-import { existsSync as existsSync22, mkdirSync as mkdirSync8, readFileSync as readFileSync20, writeFileSync as writeFileSync6 } from "node:fs";
-import { dirname as dirname7, join as join22 } from "node:path";
+import { existsSync as existsSync23, mkdirSync as mkdirSync8, readFileSync as readFileSync21, writeFileSync as writeFileSync6 } from "node:fs";
+import { dirname as dirname7, join as join23 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 var MAX_IDLE_SLEEP_SEC = 5 * 60;
@@ -23001,7 +23005,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 // ../../pipeline-cli/dist/classifier/classifier.js
 import { appendFile, mkdir } from "node:fs/promises";
-import { dirname as dirname8, join as join24 } from "node:path";
+import { dirname as dirname8, join as join25 } from "node:path";
 
 // ../../pipeline-cli/dist/classifier/budget-classifier.js
 var BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
@@ -23014,8 +23018,8 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync25, readFileSync as readFileSync22, readdirSync as readdirSync8, statSync as statSync6 } from "node:fs";
-import { basename as basename3, join as join26, relative } from "node:path";
+import { existsSync as existsSync26, readFileSync as readFileSync23, readdirSync as readdirSync9, statSync as statSync7 } from "node:fs";
+import { basename as basename3, join as join27, relative } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
 var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
@@ -23024,22 +23028,22 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync26, readFileSync as readFileSync23 } from "node:fs";
-import { join as join27 } from "node:path";
-
-// ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync27, readFileSync as readFileSync24, readdirSync as readdirSync9 } from "node:fs";
+import { existsSync as existsSync27, readFileSync as readFileSync24 } from "node:fs";
 import { join as join28 } from "node:path";
 
+// ../../pipeline-cli/dist/dor/ingress-claude.js
+import { existsSync as existsSync28, readFileSync as readFileSync25, readdirSync as readdirSync10 } from "node:fs";
+import { join as join29 } from "node:path";
+
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync28, readFileSync as readFileSync25 } from "node:fs";
+import { existsSync as existsSync29, readFileSync as readFileSync26 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync29, readFileSync as readFileSync26 } from "node:fs";
-import { join as join29 } from "node:path";
+import { existsSync as existsSync30, readFileSync as readFileSync27 } from "node:fs";
+import { join as join30 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {

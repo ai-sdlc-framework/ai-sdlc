@@ -76,6 +76,15 @@ export interface OrchestratorTickResult {
    * otherwise doubled per consecutive idle tick, capped at 5 min.
    */
   nextSleepSec: number;
+  /**
+   * RFC-0015 / AISDLC-179 — `OrchestratorTaskAlreadyInFlight` events for
+   * candidates the in-flight filter rejected this tick. Empty array on
+   * ticks where no candidate clashed with an in-flight dispatch.
+   * Surfaces in-process so tests + callers can assert the filter fired
+   * without grepping events.jsonl; the loop also forwards these events
+   * to the on-disk events bus.
+   */
+  alreadyInFlight: OrchestratorTaskAlreadyInFlightEvent[];
 }
 
 /**
@@ -177,6 +186,22 @@ export interface OrchestratorStuckCandidateEvent {
   reason: string;
   /** Number of ticks since this candidate first started skipping. */
   ticksSinceFirstSkip: number;
+}
+
+/**
+ * RFC-0015 / AISDLC-179 — emitted when the pre-dispatch filter rejects a
+ * candidate because the task is already in-flight (either from an earlier
+ * tick in this orchestrator process, or from a previous process whose
+ * worktree sentinel was reconstructed on cold start). Lets operators
+ * correlate the rejected re-dispatch attempt with the original dispatch's
+ * `OrchestratorDispatched` event via `startedAt`.
+ */
+export interface OrchestratorTaskAlreadyInFlightEvent {
+  type: 'OrchestratorTaskAlreadyInFlight';
+  ts: string;
+  taskId: string;
+  /** ISO-8601 timestamp the existing in-flight dispatch was claimed. */
+  startedAt: string;
 }
 
 /**
