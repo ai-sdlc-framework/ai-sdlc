@@ -22,7 +22,7 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 - **Never merge PRs** — only humans merge.
 - **Never close** issues or PRs. **Never force-push to main/master.**
 - Dismiss stale reviews only with documented reason (truncation, API errors).
-- `auto-enable-auto-merge.yml` sets `--auto --rebase` on same-repo PRs (forks excluded; re-fires on synchronize/reopened). Setting `--auto` is NOT merging; GitHub merges once required checks pass.
+- `auto-enable-auto-merge.yml` sets `--auto` (no method flag) on same-repo PRs; the merge queue on `main` owns the method. Setting `--auto` is NOT merging.
 
 ## Testing
 

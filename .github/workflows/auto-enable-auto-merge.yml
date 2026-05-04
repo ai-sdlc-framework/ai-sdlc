@@ -1,8 +1,20 @@
 name: Auto-enable auto-merge on PR open
 
-# Enables GitHub's auto-merge on every new PR from a branch in this repo,
-# using rebase strategy. Once required checks pass and required reviews
-# are satisfied, GitHub merges the PR automatically — no human click needed.
+# Enables GitHub's auto-merge on every new PR from a branch in this repo.
+# Once required checks pass and required reviews are satisfied, GitHub
+# adds the PR to the merge queue (since the queue is enabled on `main`),
+# which then rebases against the queue tip + runs CI on the merge commit
+# + merges if green. No human click needed.
+#
+# Why no `--rebase` (or any explicit method): when the merge queue is
+# enabled on a branch, GitHub OWNS the merge method (configured in repo
+# settings → branch protection → merge queue settings). Recording an
+# explicit method here (e.g. `--rebase`) makes GitHub try to honor that
+# specific intent against a queue-only branch — the merge silently fails
+# to fire and the PR sits in MERGEABLE/UNSTABLE state without entering
+# the queue. Operators then have to disable + re-enable auto-merge
+# without the method flag to unstick. Dropping `--rebase` here means new
+# PRs default to "use whatever the branch policy dictates" → queue path.
 #
 # Why a workflow (vs the per-PR button): the repo-level "Allow auto-merge"
 # setting just enables the BUTTON. It doesn't actually opt PRs into auto-merge.
@@ -34,8 +46,8 @@ jobs:
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - name: Enable auto-merge (rebase)
-        run: gh pr merge --auto --rebase "${{ github.event.pull_request.number }}"
+      - name: Enable auto-merge (queue chooses method)
+        run: gh pr merge --auto "${{ github.event.pull_request.number }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
