@@ -289,9 +289,25 @@ Per `project_team_roles.md`:
 | Owner | Role | Status | Date |
 |---|---|---|---|
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏳ Pending walkthrough | — |
-| Alexander Kline | Product Lead | ⏳ Pending walkthrough | — |
+| Alexander Kline | Product Lead | ✅ Signed v0.1 | 2026-05-04 |
 
 Lifecycle: Draft → Ready for Review (after OQ walkthrough) → Signed Off (after all owners sign).
+
+### Product Authority review
+
+**Endorse with calibration note**: the distinction between `operator-under-decided` (DoR-side fix) and `framework-misbehaved` (framework-side fix) is structurally important for PPA's calibration loop.
+
+**Critical PPA composition concern**: a bad score caused by a framework bug is not evidence of a bad scoring model. When RFC-0025's failure taxonomy identifies a framework failure, the corresponding scoring decision MUST be excluded from CK calibration data. Otherwise the flywheel learns from noise — the calibration loop trains itself to compensate for framework bugs rather than to score better.
+
+**Implementation suggestion**: a one-bit flag on the calibration log entry (`frameworkFailureExcluded: true`) rather than a separate routing pipeline. Keeps the data simple. The calibration aggregator decides whether to honor the flag at aggregation time. RFC-0025's existing taxonomy provides the trigger.
+
+**Composition with RFC-0033 governance reporting**: framework-failure-mode counts feed RFC-0033's `quality.dorCommonFailures` — but distinguished as a separate row (`framework.failureModes`) so operators can see at a glance which 5% slice is operator-under-decided vs framework-misbehaved.
+
+**Composition with RFC-0024 emergent capture**: framework failure events flow into the bugfix backlog via RFC-0024's emergent-capture pattern (already specified in RFC-0025 §5). Endorse.
+
+**Composition with RFC-0030 demand clusters**: framework-failure-mode patterns shouldn't feed D1 demand pressure (they're not customer signal); the clusters explicitly exclude `framework-bug` source-tagged items. Recommend explicit exclusion clause when RFC-0030 ships.
+
+Position grounded in RFC-0029 Principle 5 (governance by composition; orthogonal axes have orthogonal remediations).
 
 ## 15. References
 
