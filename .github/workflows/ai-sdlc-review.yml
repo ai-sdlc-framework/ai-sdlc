@@ -31,12 +31,12 @@ jobs:
   # invocations and instead post auto-approved verdicts via the post-skip-results
   # job below.
   #
-  # This is the COST-SAVING side restored after AISDLC-140 sub-4 demoted
-  # attestation from a merge gate to audit-only. The merge-gate side stays
-  # demoted — `verify-attestation.yml` is still log-only, `Post Review Results`
-  # is still the only review-tier required check. We just stop burning ~$X of
-  # Anthropic credits running a duplicate review when the operator already
-  # cryptographically attested they ran it locally.
+  # This is the COST-SAVING side: when local attestation is valid, we skip
+  # the CI-side reviewer fan-out (~$X of Anthropic credits per run). The
+  # merge-gate side is also restored as of AISDLC-193 — `verify-attestation.yml`
+  # posts `ai-sdlc/attestation` as a required status; `Post Review Results`
+  # remains required as the second-line check that CI-side review fired
+  # successfully when local attestation was missing.
   attestation-precheck:
     name: Attestation precheck
     runs-on: ubuntu-latest
@@ -99,13 +99,14 @@ jobs:
   # Has ANTHROPIC_API_KEY but NO GitHub write access.
   # Defense: even if the LLM is compromised, it cannot modify the repo.
   #
-  # AISDLC-140 sub-4: removed the `check_attestation` short-circuit and the
-  # CI-side attestor signing step. Attestation is now audit-only — the local
-  # DSSE envelope (auto-signed by `.husky/pre-push`) is a provenance record,
-  # not a merge gate. CI always runs the duplicate review so `Post Review
-  # Results` posts deterministically and the `re-actors/alls-green` aggregator
-  # (`ai-sdlc/pr-ready`) is the single merge gate. The `[skip ci]` chore-commit
-  # loop that deadlocked PRs #176/#177 disappears with the attestor step.
+  # AISDLC-193: attestation is REQUIRED again (verify-attestation.yml posts
+  # the `ai-sdlc/attestation` commit status as a required gate). The
+  # `check_attestation` short-circuit + CI-side attestor signing remain
+  # removed (AISDLC-140 sub-4 originally removed them to break a `[skip ci]`
+  # chore-commit loop that deadlocked PRs #176/#177). The CI-side reviewer
+  # fan-out below is now a SECOND-line check: it runs whenever the local
+  # attestation precheck reports invalid/missing, posting `Post Review
+  # Results` deterministically. Both gates are required on `main`.
   #
   # AISDLC-147 patch 1: gated on attestation-precheck. When the precheck
   # decides to skip (valid envelope at HEAD), this job is skipped and the

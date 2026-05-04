@@ -316,10 +316,23 @@ describe('AISDLC-193: verify-attestation.yml posts ai-sdlc/attestation as requir
       /repos\/\$\{REPO\}\/statuses/,
       'status-posting step must POST to /statuses/ endpoint',
     );
+    assert.match(runScript, /-X POST/, 'status-posting step must use HTTP POST');
     assert.match(
       runScript,
       /ai-sdlc\/attestation/,
       'status-posting step must use ai-sdlc/attestation as the context',
+    );
+    // Defense vs hardcoded-success regression: both branches MUST exist so
+    // a verifier-invalid result correctly fails the gate.
+    assert.match(
+      runScript,
+      /STATE=success/,
+      'status-posting step must have a success branch',
+    );
+    assert.match(
+      runScript,
+      /STATE=failure/,
+      'status-posting step must have a failure branch (else verifier-invalid silently passes)',
     );
   });
 
@@ -331,6 +344,22 @@ describe('AISDLC-193: verify-attestation.yml posts ai-sdlc/attestation as requir
       verifyJob.permissions?.statuses,
       'write',
       'verify job must have statuses:write permission to post ai-sdlc/attestation',
+    );
+  });
+
+  it('verify-attestation.yml retains merge_group trigger (AISDLC-113 queue-time re-verification)', () => {
+    // Critical for sibling-rebase scenarios: the queue rebases the PR onto a
+    // fresh tip, content-bound attestation may invalidate. merge_group event
+    // fires verification against the queue tip, surfacing rebase-invalidations
+    // as a blocking status before merge happens.
+    const verifyPath = resolve(__dirname, '..', 'verify-attestation.yml');
+    const verify = loadYaml(verifyPath);
+    // YAML 1.2 quirk: `on` parses to boolean true unless quoted; safe_load may
+    // expose under different keys. Try both.
+    const triggers = verify.on || verify[true] || {};
+    assert.ok(
+      'merge_group' in triggers,
+      'verify-attestation.yml must trigger on merge_group for queue-time re-verification',
     );
   });
 });

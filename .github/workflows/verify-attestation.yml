@@ -103,6 +103,13 @@ jobs:
       # state) so a sibling PR merging into the same files between PR-head
       # verification and queue execution surfaces here.
       - name: Post ai-sdlc/attestation status
+        # `if: always()` so the status is posted even when the prior
+        # `Verify attestation` step throws (uncaught exception, OOM, etc.).
+        # Without this, a verifier crash leaves the gate UN-posted forever
+        # and the PR sits BLOCKED with no surfaced reason. With this, a
+        # crash falls through to STATE=failure with a clear "verifier
+        # crashed" reason — operator sees red status, opens workflow log.
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -116,6 +123,11 @@ jobs:
             STATE=success
             DESC="valid envelope at HEAD"
             echo "::notice::ai-sdlc attestation valid on $HEAD_SHA"
+          elif [ -z "${STATUS:-}" ]; then
+            # Verifier crashed before emitting status= to GITHUB_OUTPUT.
+            STATE=failure
+            DESC="verifier crashed before emitting result — see workflow logs"
+            echo "::error::ai-sdlc attestation verifier crashed on $HEAD_SHA"
           else
             STATE=failure
             # GitHub status descriptions are truncated at 140 chars; trim.
