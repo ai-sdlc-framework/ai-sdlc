@@ -33,7 +33,24 @@ requiresDocs: []
 |--------|------|--------|------|
 | Morgan Hirtle | Chief of Design / Design Authority | ✍️ Authored v0.1 stub | 2026-05-04 |
 | Dominique Legault | CTO / Engineering Authority | ✏️ Engineering pass on v0.2 (pending Design editorial) | 2026-05-04 |
-| Alexander Kline | Head of Product Strategy / Product Authority | ⏸ Pending | — |
+| Alexander Kline | Head of Product Strategy / Product Authority | ✅ Signed v0.2 (PPA-composability scope only; full v1.0+ pending Mo's editorial) | 2026-05-04 |
+
+### Product Authority review (PPA-composability scope only)
+
+This RFC is properly Mo's Design-Authority territory; the Product Authority lens is restricted to how Variants compose with PPA scoring.
+
+**PPA composition observations**:
+
+- **SA1 implication**: Variant-level `targetAudience.segments` + `audienceCharacteristics` feed SA1 (Problem Resonance) when work items target a specific variant. PPA v1.1 §5 already specifies variant scoring inheriting parent-shard SA1; v0.2's `targetedVariants` field on work items operationalizes this. Approved.
+- **SA2 implication**: Variant `designOverrides` (voice, palette, density) are Design-Authority specializations; SA2 (Vibe Coherence) consumes them per the per-variant scoring path. No Product-side concern; Mo's editorial applies.
+- **Compliance tightening invariant**: `complianceFloor: inherit` enforced at type level (per RFC-0028 substrate enforcement pattern) is the right architectural answer — child variants cannot loosen parent compliance regimes. Strong endorse.
+- **Demand cluster routing**: when RFC-0030 (Signal Ingestion Pipeline) lands, demand clusters tagged with variant-specific segments should route through the variant's SA1, not the soul's. Cross-reference recommended once 0030 lands.
+
+**Co-review recognition** per Mo's RFC-0009 v3.4 C2 condition: variants reach into `product.targetAudience` + `product.problemResonance` territory; Product co-review on `targetAudience.segments` declarations is appropriate. Not a veto; recognition that audience definition is co-authorship.
+
+Endorsement is contingent on the v1.0+ normative spec preserving parent-soul tightening-only inheritance for compliance regimes. Variants MUST NOT loosen.
+
+Position grounded in RFC-0029 Principle 1 (three-axis basis) + RFC-0009 §5.1 (per-soul triad specialization, tightening-only).
 
 ---
 
