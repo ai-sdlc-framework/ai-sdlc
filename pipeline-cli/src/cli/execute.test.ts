@@ -30,6 +30,7 @@ import {
 import { buildCli } from './index.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
+import type { RollbackResult } from '../orchestrator/rollback.js';
 import type {
   AggregatedVerdict,
   PipelineLogger,
@@ -174,7 +175,6 @@ describe('runExecuteCommand — dry-run mode', () => {
       workDir: tmp,
       spawnerKind: 'mock',
       maxIterations: 2,
-      skipSweep: false,
       dryRun: true,
       executor: async () => {
         executorCalled = true;
@@ -197,7 +197,6 @@ describe('runExecuteCommand — dry-run mode', () => {
       workDir: tmp,
       spawnerKind: 'mock',
       maxIterations: 2,
-      skipSweep: false,
       dryRun: true,
       logger: silentLogger(),
     });
@@ -247,7 +246,6 @@ describe('runExecuteCommand — real-run mode', () => {
       workDir: tmp,
       spawnerKind: 'mock',
       maxIterations: 2,
-      skipSweep: false,
       dryRun: false,
       executor: fakeExec,
       logger: silentLogger(),
@@ -281,7 +279,6 @@ describe('runExecuteCommand — real-run mode', () => {
       workDir: tmp,
       spawnerKind: 'mock',
       maxIterations: 2,
-      skipSweep: false,
       dryRun: false,
       executor: fakeExec,
       logger: silentLogger(),
@@ -298,7 +295,6 @@ describe('runExecuteCommand — real-run mode', () => {
       workDir: tmp,
       spawnerKind: 'claude-cli', // deferred — should fail fast
       maxIterations: 2,
-      skipSweep: false,
       dryRun: false,
       logger: silentLogger(),
     });
@@ -316,7 +312,6 @@ describe('runExecuteCommand — real-run mode', () => {
       workDir: tmp,
       spawnerKind: 'mock',
       maxIterations: 2,
-      skipSweep: false,
       dryRun: false,
       executor: fakeExec,
       logger: silentLogger(),
@@ -341,7 +336,6 @@ describe('runExecuteCommand — real-run mode', () => {
       workDir: tmp,
       spawnerKind: 'mock',
       maxIterations: 2,
-      skipSweep: false,
       dryRun: true,
       logger: silentLogger(),
       spawnerFactory: async (k) => {
@@ -351,6 +345,205 @@ describe('runExecuteCommand — real-run mode', () => {
     });
     expect(result.ok).toBe(true);
     expect(spawnerKindSeen).toBe('mock');
+  });
+
+  it('invokes AISDLC-177 rollback on developer-failed outcome and surfaces the result', async () => {
+    // Iteration-2 fix: the wrapper used to silently propagate
+    // `developer-failed` outcomes without reversing the Step 3 (worktree) +
+    // Step 4 (status flip + sentinel) side-effects. The orchestrator's
+    // loop.ts already wires `rollbackDispatch` for the autonomous path; the
+    // umbrella subcommand now wires it for the manual path so the operator
+    // (or a re-dispatch) finds a clean slate after a dev failure.
+    writeTaskFile(tmp, { id: 'AISDLC-205', title: 'dev failed', status: 'To Do' });
+
+    const fakeExec: typeof import('../execute-pipeline.js').executePipeline = async (
+      pipelineOpts,
+    ) => {
+      return {
+        taskId: pipelineOpts.taskId,
+        branch: 'ai-sdlc/aisdlc-205-dev-failed',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-205'),
+        outcome: 'developer-failed',
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+      } satisfies PipelineResult;
+    };
+
+    type RollbackArgs = Parameters<
+      typeof import('../orchestrator/rollback.js').rollbackDispatch
+    >[0];
+    const rollbackCalls: RollbackArgs[] = [];
+    const fakeRollback = async (args: RollbackArgs): Promise<RollbackResult> => {
+      rollbackCalls.push(args);
+      return {
+        taskId: args.taskId,
+        fromStatus: args.fromStatus,
+        statusReverted: true,
+        worktreeRemoved: true,
+        branchQuarantined: false,
+        warnings: [],
+      };
+    };
+
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-205',
+      workDir: tmp,
+      spawnerKind: 'mock',
+      maxIterations: 2,
+      dryRun: false,
+      executor: fakeExec,
+      rollback: fakeRollback,
+      logger: silentLogger(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.pipeline?.outcome).toBe('developer-failed');
+
+    // Rollback was invoked exactly once with the captured pre-dispatch
+    // status (`To Do`), the dispatcher's branch+worktree, and the operator's
+    // workDir.
+    expect(rollbackCalls).toHaveLength(1);
+    expect(rollbackCalls[0]?.taskId).toBe('AISDLC-205');
+    expect(rollbackCalls[0]?.fromStatus).toBe('To Do');
+    expect(rollbackCalls[0]?.branch).toBe('ai-sdlc/aisdlc-205-dev-failed');
+    expect(rollbackCalls[0]?.worktreePath).toBe(join(tmp, '.worktrees', 'aisdlc-205'));
+    expect(rollbackCalls[0]?.workDir).toBe(tmp);
+
+    // Result envelope surfaces the rollback outcome so operators can see
+    // whether status was reverted, worktree removed, etc.
+    expect(result.rollback).toBeDefined();
+    expect(result.rollback?.statusReverted).toBe(true);
+    expect(result.rollback?.worktreeRemoved).toBe(true);
+    expect(result.rollback?.branchQuarantined).toBe(false);
+  });
+
+  it('invokes AISDLC-177 rollback on developer-json-contract-violated outcome', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-206',
+      title: 'contract violated',
+      status: 'To Do',
+    });
+
+    const fakeExec: typeof import('../execute-pipeline.js').executePipeline = async (
+      pipelineOpts,
+    ) => {
+      return {
+        taskId: pipelineOpts.taskId,
+        branch: 'ai-sdlc/aisdlc-206-prose-twice',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-206'),
+        outcome: 'developer-json-contract-violated',
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+      } satisfies PipelineResult;
+    };
+
+    let rollbackInvoked = false;
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-206',
+      workDir: tmp,
+      spawnerKind: 'mock',
+      maxIterations: 2,
+      dryRun: false,
+      executor: fakeExec,
+      rollback: async (args) => {
+        rollbackInvoked = true;
+        return {
+          taskId: args.taskId,
+          fromStatus: args.fromStatus,
+          statusReverted: true,
+          worktreeRemoved: true,
+          branchQuarantined: true,
+          quarantineRef: 'quarantine/aisdlc-206-2026-05-04T12-00-00',
+          quarantineSha: 'deadbeef',
+          quarantineCommitCount: 2,
+          warnings: [],
+        };
+      },
+      logger: silentLogger(),
+    });
+
+    expect(rollbackInvoked).toBe(true);
+    expect(result.rollback?.branchQuarantined).toBe(true);
+    expect(result.rollback?.quarantineRef).toBe('quarantine/aisdlc-206-2026-05-04T12-00-00');
+    expect(result.rollback?.quarantineCommitCount).toBe(2);
+  });
+
+  it('does NOT invoke rollback on approved outcome', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-207', title: 'happy path', status: 'To Do' });
+    let rollbackInvoked = false;
+    const fakeExec: typeof import('../execute-pipeline.js').executePipeline = async (
+      pipelineOpts,
+    ) => {
+      if (pipelineOpts.onProgress) {
+        await pipelineOpts.onProgress(1, approvedVerdict());
+      }
+      return {
+        taskId: pipelineOpts.taskId,
+        branch: 'ai-sdlc/aisdlc-207-x',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-207'),
+        outcome: 'approved',
+        prUrl: 'https://github.com/owner/repo/pull/3',
+        siblingPrUrls: [],
+        iterations: 1,
+        finalVerdict: approvedVerdict(),
+      };
+    };
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-207',
+      workDir: tmp,
+      spawnerKind: 'mock',
+      maxIterations: 2,
+      dryRun: false,
+      executor: fakeExec,
+      rollback: async () => {
+        rollbackInvoked = true;
+        throw new Error('rollback should not run on approved outcome');
+      },
+      logger: silentLogger(),
+    });
+    expect(rollbackInvoked).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(result.rollback).toBeUndefined();
+  });
+
+  it('survives a thrown rollback (non-fatal: dev-failed outcome still surfaces)', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-208', title: 'rollback throws', status: 'To Do' });
+    const fakeExec: typeof import('../execute-pipeline.js').executePipeline = async (
+      pipelineOpts,
+    ) => {
+      return {
+        taskId: pipelineOpts.taskId,
+        branch: 'ai-sdlc/aisdlc-208-x',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-208'),
+        outcome: 'developer-failed',
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+      };
+    };
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-208',
+      workDir: tmp,
+      spawnerKind: 'mock',
+      maxIterations: 2,
+      dryRun: false,
+      executor: fakeExec,
+      rollback: async () => {
+        throw new Error('rollback boom');
+      },
+      logger: silentLogger(),
+    });
+    // Wrapper still returns ok=true with the dev-failed pipeline outcome —
+    // rollback failure must not poison the envelope (operator's primary
+    // signal is the developer-failed outcome itself).
+    expect(result.ok).toBe(true);
+    expect(result.pipeline?.outcome).toBe('developer-failed');
+    expect(result.rollback).toBeUndefined();
   });
 });
 
@@ -414,6 +607,21 @@ describe('CLI router integration — `execute` subcommand', () => {
     // the assertion is content, not channel.
     const all = stdoutChunks.join('') + stderrChunks.join('');
     expect(all).toMatch(/execute <task-id>/);
+  });
+
+  it('execute --help no longer advertises the dropped --skip-sweep flag', async () => {
+    // Iteration-2 fix: `--skip-sweep` was inert (never threaded into
+    // executePipeline) and violated the project's no-premature-abstraction
+    // rule. Regression guard so a future re-introduction trips loudly.
+    process.argv = ['node', 'ai-sdlc-pipeline', 'execute', '--help'];
+    try {
+      await buildCli().parseAsync();
+    } catch (err) {
+      expect((err as Error).message).toMatch(/process\.exit/);
+    }
+    const all = stdoutChunks.join('') + stderrChunks.join('');
+    expect(all).not.toMatch(/--skip-sweep/);
+    expect(all).not.toMatch(/skip[- ]sweep/i);
   });
 
   it('dry-run path emits a plan envelope', async () => {

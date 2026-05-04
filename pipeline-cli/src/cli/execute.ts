@@ -77,6 +77,7 @@ import { computeBranchName } from '../steps/02-compute-branch.js';
 import { validateTask } from '../steps/01-validate.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
+import { rollbackDispatch, type RollbackResult } from '../orchestrator/rollback.js';
 import {
   DEFAULT_LOGGER,
   type AggregatedVerdict,
@@ -248,7 +249,6 @@ export interface ExecuteCommandOptions {
   workDir: string;
   spawnerKind: SpawnerKind;
   maxIterations: number;
-  skipSweep: boolean;
   dryRun: boolean;
   /** Override spawner factory — tests inject a stub. */
   spawnerFactory?: (kind: SpawnerKind) => Promise<SubagentSpawner>;
@@ -256,6 +256,12 @@ export interface ExecuteCommandOptions {
   executor?: typeof executePipeline;
   /** Override the verdict-file writer — tests inject a stub. */
   verdictWriter?: typeof writeVerdictFile;
+  /**
+   * Override the AISDLC-177 rollback entry point — tests inject a stub so
+   * the developer-failed → rollback path is exercisable without touching a
+   * real git tree.
+   */
+  rollback?: typeof rollbackDispatch;
   /** Override the logger — tests inject a stub. */
   logger?: PipelineLogger;
 }
@@ -269,7 +275,6 @@ export interface ExecuteCommandResult {
     branch: string;
     worktreePath: string;
     maxIterations: number;
-    skipSweep: boolean;
   };
   /** When the pipeline ran, the `executePipeline()` result. */
   pipeline?: PipelineResult;
@@ -277,6 +282,15 @@ export interface ExecuteCommandResult {
   reason?: string;
   /** Path to the verdict file we wrote (when reviewers ran). */
   verdictFilePath?: string;
+  /**
+   * AISDLC-177 rollback outcome. Populated whenever the wrapper invoked
+   * `rollbackDispatch()` (i.e. on `developer-failed` /
+   * `developer-json-contract-violated` outcomes). Operators read this to
+   * see whether the side-effects from Step 3 (worktree) and Step 4 (status
+   * flip + sentinel) were successfully reversed, and whether any commits
+   * were preserved under a `quarantine/<task>-<ts>` ref.
+   */
+  rollback?: RollbackResult;
 }
 
 /**
@@ -295,6 +309,7 @@ export async function runExecuteCommand(
   const factory = opts.spawnerFactory ?? resolveSpawner;
   const exec = opts.executor ?? executePipeline;
   const writer = opts.verdictWriter ?? writeVerdictFile;
+  const rollback = opts.rollback ?? rollbackDispatch;
 
   logger.progress('execute', `task=${opts.taskId} spawner=${opts.spawnerKind}`);
 
@@ -328,7 +343,6 @@ export async function runExecuteCommand(
         branch: branch.branch,
         worktreePath: branch.worktreePath,
         maxIterations: opts.maxIterations,
-        skipSweep: opts.skipSweep,
       },
     };
   }
@@ -343,10 +357,15 @@ export async function runExecuteCommand(
 
   // Resolve worktreePath up-front so the verdict writer doesn't have to
   // re-derive it from the executePipeline result mid-iteration.
+  // Capture the PRE-DISPATCH status here too — Step 4 (inside executePipeline)
+  // will flip it to "In Progress", and the AISDLC-177 rollback path needs the
+  // ORIGINAL status to revert TO on developer-failed outcomes. The orchestrator
+  // captures the same value for the same reason (see loop.ts maybeRollback).
   const validation = await validateTask({ taskId: opts.taskId, workDir: opts.workDir });
   if (!validation.ok || !validation.task) {
     return { ok: false, reason: validation.reason ?? 'validation failed' };
   }
+  const preDispatchStatus = validation.task.status;
   const branch = await computeBranchName({
     taskId: opts.taskId,
     task: validation.task,
@@ -412,8 +431,52 @@ export async function runExecuteCommand(
     `outcome=${result.outcome} pr=${result.prUrl ?? 'none'} iterations=${result.iterations}`,
   );
 
+  // ── AISDLC-177 rollback wiring ─────────────────────────────────────
+  // On developer-failed / contract-violated outcomes the side-effects of
+  // Step 3 (worktree creation) and Step 4 (status flip + sentinel) must
+  // be reversed so the operator (or a re-dispatch) finds a clean slate.
+  // The orchestrator's loop.ts already does this for the autonomous
+  // path; the umbrella subcommand wires the same helper for the manual
+  // path so consistency is preserved across both invocation surfaces.
+  // (This is the umbrella's CONSISTENCY OVER PARITY value-add over the
+  // raw slash command body, which does NOT yet wire rollback.)
+  let rollbackResult: RollbackResult | undefined;
+  if (
+    result.outcome === 'developer-failed' ||
+    result.outcome === 'developer-json-contract-violated'
+  ) {
+    logger.progress('execute', `rollback start outcome=${result.outcome} branch=${result.branch}`);
+    try {
+      rollbackResult = await rollback({
+        workDir: opts.workDir,
+        taskId: opts.taskId,
+        fromStatus: preDispatchStatus,
+        worktreePath: result.worktreePath,
+        branch: result.branch,
+        logger,
+      });
+      const partial =
+        !rollbackResult.statusReverted ||
+        !rollbackResult.worktreeRemoved ||
+        rollbackResult.warnings.length > 0;
+      logger.progress(
+        'execute',
+        `rollback ${partial ? 'partial' : 'ok'} status=${rollbackResult.statusReverted} ` +
+          `worktree=${rollbackResult.worktreeRemoved} quarantined=${rollbackResult.branchQuarantined}` +
+          (rollbackResult.quarantineRef ? ` ref=${rollbackResult.quarantineRef}` : ''),
+      );
+    } catch (err) {
+      // Defensive: rollbackDispatch is best-effort internally and
+      // accumulates warnings rather than throwing, but a programming
+      // error in a future refactor must not poison our return envelope —
+      // the dev-failed outcome is what the operator cares about.
+      logger.warn(`[ai-sdlc] rollbackDispatch threw (non-fatal): ${(err as Error).message}`);
+    }
+  }
+
   const out: ExecuteCommandResult = { ok: true, pipeline: result };
   if (verdictFilePath) out.verdictFilePath = verdictFilePath;
+  if (rollbackResult) out.rollback = rollbackResult;
   return out;
 }
 
@@ -443,11 +506,6 @@ export function executeCommand(): CommandModule {
           type: 'number',
           default: 2,
         })
-        .option('skip-sweep', {
-          describe: 'Skip Step 0 (worktree sweep). Reserved for future tuning.',
-          type: 'boolean',
-          default: false,
-        })
         .option('spawner', {
           describe:
             'SubagentSpawner: mock (default; plumbing) | api-key (paid Anthropic API) | claude-cli (deferred — see README).',
@@ -466,7 +524,6 @@ export function executeCommand(): CommandModule {
         workDir: String(argv['work-dir']),
         spawnerKind: argv.spawner as SpawnerKind,
         maxIterations: Number(argv['max-iterations']),
-        skipSweep: Boolean(argv['skip-sweep']),
         dryRun: Boolean(argv['dry-run']),
       });
       process.stdout.write(JSON.stringify(result, null, 2) + '\n');
