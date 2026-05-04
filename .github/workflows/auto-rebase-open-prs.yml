@@ -4,8 +4,29 @@ name: Auto-rebase open PRs on main push
 # PRs onto current main. Mirrors dependabot's "always-current" behavior so PRs
 # never sit BEHIND in the GitHub UI.
 #
-# Why: today's session had 3 PRs (#166/#162/#172) go BEHIND simultaneously after
-# one merge; operator had to manually rebase each. This eliminates that toil.
+# AISDLC-189: must use a non-GITHUB_TOKEN credential for the rebase. GitHub's
+# recursive-workflow-prevention rule blocks pushes made with `GITHUB_TOKEN`
+# from triggering downstream workflows. With GITHUB_TOKEN, every rebase pass
+# leaves the PR's new SHA with ZERO CI runs — the required `ai-sdlc/pr-ready`
+# status never fires and the PR sits BLOCKED forever (witnessed today on
+# PRs #299, #300, #302, #303, #304, #306; required manual empty-commit kicks
+# to recover, often re-triggered by subsequent auto-rebase passes).
+#
+# Fix: use `secrets.AUTO_REBASE_TOKEN` (a fine-scoped PAT or GitHub App token).
+# Pushes made with these credentials DO trigger downstream workflows.
+#
+# Operator setup (required after this PR merges):
+# 1. Create a fine-grained PAT at https://github.com/settings/personal-access-tokens/new
+#    with: contents:write + pull-requests:write on this repo, expiration ≤ 1 year
+#    OR install a GitHub App with the same permissions and use actions/create-github-app-token
+# 2. Add the token as a repo secret: `gh secret set AUTO_REBASE_TOKEN -b <token>`
+# 3. Set a calendar reminder for token rotation
+# 4. Verify: open a no-op PR, push to main on another, observe the rebased PR
+#    re-fires its CI within 60s of the auto-rebase
+#
+# Until the secret is set, the workflow falls back to GITHUB_TOKEN and emits
+# a ::warning:: in the run log — operators see degraded behavior (PRs need
+# manual re-kicks) but the workflow doesn't fail outright.
 #
 # Failure modes (intentional):
 # - PR has conflicts → gh pr update-branch --rebase fails for that PR; loop
@@ -13,6 +34,7 @@ name: Auto-rebase open PRs on main push
 # - PR is from a fork → skipped by head-repository filter (token can't push)
 # - Concurrent main pushes → concurrency group serializes
 # - The PR was already up-to-date → gh pr update-branch returns gracefully
+# - AUTO_REBASE_TOKEN unset → fallback to GITHUB_TOKEN with warning
 
 on:
   push:
@@ -35,12 +57,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Rebase all open same-repo non-draft PRs
+        # AISDLC-189: prefer secrets.AUTO_REBASE_TOKEN so the rebase push
+        # triggers downstream workflows. Fall back to github.token (which
+        # does NOT trigger workflows) and warn so operators notice the gap.
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.AUTO_REBASE_TOKEN || github.token }}
+          USING_FALLBACK_TOKEN: ${{ secrets.AUTO_REBASE_TOKEN == '' }}
           REPO: ${{ github.repository }}
           OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
+
+          # AISDLC-189: warn if we fell back to GITHUB_TOKEN — the rebase
+          # will succeed but downstream workflows won't fire on the new SHA.
+          if [ "$USING_FALLBACK_TOKEN" = "true" ]; then
+            echo "::warning::AUTO_REBASE_TOKEN secret unset — falling back to GITHUB_TOKEN. Rebased PR SHAs will NOT trigger downstream workflows; operators must manually re-kick. See .github/workflows/auto-rebase-open-prs.yml header for setup."
+          fi
 
           # List open non-draft PRs from same repo (forks excluded — workflow
           # token can't push to fork branches).
