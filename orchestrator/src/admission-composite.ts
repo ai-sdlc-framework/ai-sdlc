@@ -34,7 +34,6 @@ import {
   computeReadinessFromDesignSystemContext,
 } from './admission-enrichment.js';
 import { computeAdmissionHumanCurve, type AdmissionHumanCurveResult } from './admission-hc.js';
-import { computeConfidence } from './priority.js';
 
 /**
  * Result of the admission composite — returns a `PriorityScore`
@@ -175,7 +174,7 @@ export function computeAdmissionComposite(
       // display continuity but do not multiply it into `composite`.
       calibration: clampCalibration(config?.calibrationCoefficient),
     },
-    confidence: computeConfidence(priorityInput),
+    confidence: computeAdmissionConfidence(input, priorityInput, options),
     timestamp,
   };
 
@@ -193,6 +192,98 @@ export function computeAdmissionComposite(
       humanCurve,
     },
   };
+}
+
+// ── Admission confidence (AISDLC-172) ──────────────────────────────────
+
+/**
+ * `PriorityInput` fields that the admission mapper (`mapIssueToPriorityInput`)
+ * actually populates from issue/backlog signals. The full PPA `SCORABLE_FIELDS`
+ * list (used by `computeConfidence` in `priority.ts`) includes runtime-only
+ * dimensions like `regulatoryUrgency`, `techInflection`, `marketDivergence`,
+ * `meetingDecision`, `budgetUtilization`, and `dependencyClearance` — none of
+ * which the admission mapper ever sets. Counting against the full 16-field
+ * list capped admit confidence at ~9/16 ≈ 0.56 even for fully-shaped issues
+ * (RFC-0009 §13 OQ-9 "0.5 ceiling" bug). The mapper-relevant subset is the
+ * correct denominator for the mapper-evidence half of the blend.
+ */
+const ADMISSION_MAPPER_FIELDS: ReadonlyArray<keyof PriorityInput> = [
+  'soulAlignment',
+  'demandSignal',
+  'teamConsensus',
+  'builderConviction',
+  'complexity',
+  'bugSeverity',
+  'explicitPriority',
+  'competitiveDrift',
+  'customerRequestCount',
+];
+
+/**
+ * RFC-0008 enrichment slots whose presence on `AdmissionInput` indicates
+ * an enrichment reader successfully loaded its context. This is the
+ * "enrichment-success signal" referenced in the OQ-9 hypothesis:
+ *
+ *   - `designSystemContext`     ← DSB loader (catalog/token coverage)
+ *   - `autonomyContext`         ← AutonomyPolicy (DID-driven) loader
+ *   - `codeAreaQuality`         ← code-area metrics loader
+ *   - `designAuthoritySignal`   ← maintainers/principals loader
+ *   - `soulAlignmentOverride`   ← soul-tracks SA-1 loader (M5 path)
+ *
+ * Total slots is `5`. Each loaded slot contributes `1/5` to the
+ * enrichment-evidence half of the confidence blend.
+ */
+const ADMISSION_ENRICHMENT_SLOT_COUNT = 5;
+
+function countLoadedEnrichmentSlots(
+  input: AdmissionInput,
+  options: AdmissionCompositeOptions | undefined,
+): number {
+  let loaded = 0;
+  if (input.designSystemContext) loaded++;
+  if (input.autonomyContext) loaded++;
+  if (input.codeAreaQuality) loaded++;
+  if (input.designAuthoritySignal) loaded++;
+  if (options?.soulAlignmentOverride !== undefined) loaded++;
+  return loaded;
+}
+
+/**
+ * Compute admission confidence in [0, 1] as a 50/50 blend of two
+ * independent evidence channels:
+ *
+ *   1. **Mapper coverage** — fraction of `ADMISSION_MAPPER_FIELDS`
+ *      explicitly populated on the derived `PriorityInput`. Captures
+ *      "how much issue/backlog signal did `mapIssueToPriorityInput`
+ *      extract".
+ *
+ *   2. **Enrichment loaded** — fraction of RFC-0008 enrichment slots
+ *      present on the input (or supplied via `options`). Captures "how
+ *      much external context did the enrichment readers contribute".
+ *
+ * Bug fixed (AISDLC-172 / RFC-0009 §13 OQ-9): previously
+ * `computeConfidence(priorityInput)` from `priority.ts` was used, which
+ * counts against the full 16-field `SCORABLE_FIELDS` list and ignores
+ * enrichment success entirely. The result was a hard ~0.5 ceiling on
+ * admit confidence even when DID + DSB + maintainers + soul-tracks all
+ * loaded — those four positive observations contributed exactly zero
+ * to the formula's denominator and zero to its numerator.
+ */
+export function computeAdmissionConfidence(
+  input: AdmissionInput,
+  priorityInput: PriorityInput,
+  options?: AdmissionCompositeOptions,
+): number {
+  let providedMapper = 0;
+  for (const field of ADMISSION_MAPPER_FIELDS) {
+    if (priorityInput[field] !== undefined) providedMapper++;
+  }
+  const mapperFraction = providedMapper / ADMISSION_MAPPER_FIELDS.length;
+
+  const loadedEnrichment = countLoadedEnrichmentSlots(input, options);
+  const enrichmentFraction = loadedEnrichment / ADMISSION_ENRICHMENT_SLOT_COUNT;
+
+  return 0.5 * mapperFraction + 0.5 * enrichmentFraction;
 }
 
 function clamp01(value: number): number {

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { AdmissionInput } from './admission-score.js';
-import { computeAdmissionComposite } from './admission-composite.js';
+import { mapIssueToPriorityInput } from './admission-score.js';
+import { computeAdmissionComposite, computeAdmissionConfidence } from './admission-composite.js';
+import { computeConfidence } from './priority.js';
 
 function makeInput(overrides: Partial<AdmissionInput> = {}): AdmissionInput {
   return {
@@ -398,5 +400,261 @@ describe('computeAdmissionComposite — override position-1 bypass', () => {
     expect(score.dimensions.calibration).toBe(1.3);
     vi.doUnmock('./admission-score.js');
     vi.resetModules();
+  });
+});
+
+// ── AISDLC-172 / RFC-0009 §13 OQ-9 — admit confidence ceiling ──────────
+describe('admission confidence — OQ-9 0.5 ceiling regression (AISDLC-172)', () => {
+  /**
+   * Construct the OQ-9 fully-loaded scenario: a typical backlog-shaped
+   * issue with all four enrichment readers reporting success
+   * (DID + DSB + maintainers + soul-tracks), plus the code-area metrics
+   * loader. We use a deterministic `createdAt` so `competitiveDrift`
+   * stays predictable across CI runs.
+   */
+  function fullyLoadedReadersInput(): AdmissionInput {
+    return {
+      issueNumber: 9,
+      title: 'Tessellated DID document support',
+      body: '### Complexity\n4\n\n### Acceptance Criteria\n- [ ] AC1\n- [ ] AC2',
+      labels: ['rfc', 'enhancement'],
+      reactionCount: 2,
+      commentCount: 3,
+      createdAt: new Date('2026-04-15T00:00:00Z').toISOString(),
+      authorAssociation: 'OWNER',
+      // DSB loader → designSystemContext populated.
+      designSystemContext: {
+        catalogCoverage: 80,
+        tokenCompliance: 90,
+        baselineCoverage: 0.7,
+        inBootstrapPhase: false,
+        catalogGaps: [],
+      },
+      // DID/AutonomyPolicy loader → autonomyContext populated.
+      autonomyContext: { currentEarnedLevel: 2, requiredLevel: 2 },
+      // Code-area metrics loader → codeAreaQuality populated.
+      codeAreaQuality: {
+        defectDensity: 0.05,
+        churnRate: 0.1,
+        prRejectionRate: 0.05,
+        hasFrontendComponents: false,
+      },
+      // Maintainers loader → designAuthoritySignal populated.
+      designAuthoritySignal: { isDesignAuthority: true, signalType: 'unspecified' },
+    };
+  }
+
+  it('AC #1 (reproduction): old computeConfidence formula caps in the ~0.5 ceiling band under maximum enrichment', () => {
+    // Pre-fix code path: admission used `computeConfidence(priorityInput)`
+    // from priority.ts, which counts against the full 16-field
+    // SCORABLE_FIELDS list and ignores enrichment success. The mapper
+    // populates 7 fields for this fixture (no `bug`/`P0`/`critical`
+    // label → no bugSeverity; no priority label/backlog → no
+    // explicitPriority), capping the old confidence at 7/16 ≈ 0.4375.
+    // Practitioner observation in OQ-9 was "stayed at 0.5" — the
+    // mapper-coverage-bounded ceiling falls in the [0.4, 0.6] band
+    // depending on which optional fields the mapper happened to fill.
+    const input = fullyLoadedReadersInput();
+    const priorityInput = mapIssueToPriorityInput(input);
+    const oldFormulaConfidence = computeConfidence(priorityInput);
+
+    // Smoking gun: enrichment success contributes nothing to the old
+    // formula — confidence is stuck in the mapper-only ceiling band
+    // even though four enrichment readers all reported success.
+    expect(oldFormulaConfidence).toBeGreaterThanOrEqual(0.4);
+    expect(oldFormulaConfidence).toBeLessThanOrEqual(0.6);
+    // Pin the exact value so silent regressions are caught immediately.
+    expect(oldFormulaConfidence).toBeCloseTo(7 / 16, 6); // 0.4375
+  });
+
+  it('AC #3/#4 (fix): admit confidence returns ≥0.7 for the fully-loaded-readers fixture', () => {
+    const input = fullyLoadedReadersInput();
+    const { score } = computeAdmissionComposite(input);
+
+    // Fix shape: 50/50 blend of mapper coverage (7/9 ≈ 0.778) and
+    // enrichment loaded (4/5 = 0.8 — soulAlignmentOverride absent in
+    // this fixture). Combined: 0.5 × 0.778 + 0.5 × 0.8 ≈ 0.789.
+    expect(score.confidence).toBeGreaterThanOrEqual(0.7);
+    // Pin the exact value so silent regressions to the old formula
+    // (which capped at ~0.4-0.5 here) are caught immediately.
+    expect(score.confidence).toBeCloseTo(0.5 * (7 / 9) + 0.5 * (4 / 5), 6);
+  });
+
+  it('AC #4 (regression): adding the fifth enrichment slot (soul-tracks SA-1) pushes confidence higher', () => {
+    const input = fullyLoadedReadersInput();
+    const baseline = computeAdmissionComposite(input);
+    // Soul-tracks loader fires → soulAlignmentOverride supplied.
+    const withSoulTracks = computeAdmissionComposite(input, undefined, {
+      soulAlignmentOverride: 0.85,
+    });
+    expect(withSoulTracks.score.confidence).toBeGreaterThan(baseline.score.confidence);
+    // 7/9 mapper + 5/5 enrichment = 0.5 × 0.778 + 0.5 × 1.0 ≈ 0.889.
+    expect(withSoulTracks.score.confidence).toBeCloseTo(0.5 * (7 / 9) + 0.5, 6);
+  });
+
+  it('AC #2 (root cause documented): no enrichment loaded → confidence reflects mapper signal only', () => {
+    // Same issue shape but stripped of all enrichment context. The
+    // mapper still extracts the same 7 PriorityInput fields, so the
+    // mapper-evidence half is unchanged. The enrichment-evidence half
+    // collapses to 0, halving the resulting confidence.
+    const baseInput = fullyLoadedReadersInput();
+    const stripped: AdmissionInput = {
+      issueNumber: baseInput.issueNumber,
+      title: baseInput.title,
+      body: baseInput.body,
+      labels: baseInput.labels,
+      reactionCount: baseInput.reactionCount,
+      commentCount: baseInput.commentCount,
+      createdAt: baseInput.createdAt,
+      authorAssociation: baseInput.authorAssociation,
+    };
+    const { score } = computeAdmissionComposite(stripped);
+    // 7/9 mapper, 0/5 enrichment → 0.5 × 0.778 + 0 ≈ 0.389.
+    expect(score.confidence).toBeCloseTo(0.5 * (7 / 9), 6);
+    // Below the OQ-9 0.7 expectation — correctly signals "no
+    // enrichment evidence", not the bogus "0.5 ceiling".
+    expect(score.confidence).toBeLessThan(0.5);
+  });
+
+  it('AC #2 (root cause): each enrichment slot contributes 0.1 to confidence (1/5 × 0.5 weight)', () => {
+    // Pin the per-slot increment so future contributors can see the
+    // contract: each loaded enrichment reader = +0.1 confidence.
+    const baseInput = fullyLoadedReadersInput();
+    const stripped: AdmissionInput = {
+      issueNumber: baseInput.issueNumber,
+      title: baseInput.title,
+      body: baseInput.body,
+      labels: baseInput.labels,
+      reactionCount: baseInput.reactionCount,
+      commentCount: baseInput.commentCount,
+      createdAt: baseInput.createdAt,
+      authorAssociation: baseInput.authorAssociation,
+    };
+    const noEnrichment = computeAdmissionComposite(stripped).score.confidence;
+    const oneEnrichment = computeAdmissionComposite({
+      ...stripped,
+      designSystemContext: baseInput.designSystemContext,
+    }).score.confidence;
+    expect(oneEnrichment - noEnrichment).toBeCloseTo(0.1, 6);
+  });
+
+  it('override path preserves confidence=1 (unchanged by the new formula)', async () => {
+    // The override branch in computeAdmissionComposite hard-codes
+    // confidence=1 before invoking the blend, so override semantics
+    // are unaffected by the mapper/enrichment refactor.
+    const input = fullyLoadedReadersInput();
+    vi.resetModules();
+    vi.doMock('./admission-score.js', async () => {
+      const actual =
+        await vi.importActual<typeof import('./admission-score.js')>('./admission-score.js');
+      return {
+        ...actual,
+        mapIssueToPriorityInput: (i: AdmissionInput) => ({
+          ...actual.mapIssueToPriorityInput(i),
+          override: true,
+          overrideReason: 'incident',
+        }),
+      };
+    });
+    const mod = await import('./admission-composite.js');
+    const { score } = mod.computeAdmissionComposite(input);
+    expect(score.confidence).toBe(1);
+    vi.doUnmock('./admission-score.js');
+    vi.resetModules();
+  });
+});
+
+describe('computeAdmissionConfidence — direct unit tests (AISDLC-172)', () => {
+  it('returns 0 when neither mapper fields nor enrichment slots are populated', () => {
+    const c = computeAdmissionConfidence(
+      {
+        issueNumber: 1,
+        title: '',
+        body: '',
+        labels: [],
+        reactionCount: 0,
+        commentCount: 0,
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      { itemId: '#1', title: '', description: '', labels: [] },
+    );
+    expect(c).toBe(0);
+  });
+
+  it('returns 1.0 when all 9 mapper fields populated and all 5 enrichment slots loaded', () => {
+    const c = computeAdmissionConfidence(
+      {
+        issueNumber: 1,
+        title: 't',
+        body: '',
+        labels: [],
+        reactionCount: 0,
+        commentCount: 0,
+        createdAt: '2026-01-01T00:00:00Z',
+        designSystemContext: { catalogCoverage: 50 },
+        autonomyContext: { currentEarnedLevel: 1, requiredLevel: 1 },
+        codeAreaQuality: { hasFrontendComponents: false },
+        designAuthoritySignal: { isDesignAuthority: true },
+      },
+      {
+        itemId: '#1',
+        title: 't',
+        description: '',
+        labels: [],
+        soulAlignment: 0.5,
+        demandSignal: 0.5,
+        teamConsensus: 0.5,
+        builderConviction: 0.5,
+        complexity: 5,
+        bugSeverity: 3,
+        explicitPriority: 0.5,
+        competitiveDrift: 0,
+        customerRequestCount: 0,
+      },
+      { soulAlignmentOverride: 0.7 },
+    );
+    expect(c).toBeCloseTo(1.0, 6);
+  });
+
+  it('mapper and enrichment channels are independent (50/50 weighted)', () => {
+    const baseInput = {
+      issueNumber: 1,
+      title: 't',
+      body: '',
+      labels: [],
+      reactionCount: 0,
+      commentCount: 0,
+      createdAt: '2026-01-01T00:00:00Z',
+    } as AdmissionInput;
+    // Full mapper, no enrichment → 0.5
+    const fullMapperOnly = computeAdmissionConfidence(baseInput, {
+      itemId: '#1',
+      title: 't',
+      description: '',
+      labels: [],
+      soulAlignment: 0.5,
+      demandSignal: 0.5,
+      teamConsensus: 0.5,
+      builderConviction: 0.5,
+      complexity: 5,
+      bugSeverity: 3,
+      explicitPriority: 0.5,
+      competitiveDrift: 0,
+      customerRequestCount: 0,
+    });
+    expect(fullMapperOnly).toBeCloseTo(0.5, 6);
+    // No mapper, full enrichment → 0.5
+    const fullEnrichmentOnly = computeAdmissionConfidence(
+      {
+        ...baseInput,
+        designSystemContext: { catalogCoverage: 0 },
+        autonomyContext: { currentEarnedLevel: 1, requiredLevel: 1 },
+        codeAreaQuality: { hasFrontendComponents: false },
+        designAuthoritySignal: { isDesignAuthority: true },
+      },
+      { itemId: '#1', title: 't', description: '', labels: [] },
+      { soulAlignmentOverride: 0.5 },
+    );
+    expect(fullEnrichmentOnly).toBeCloseTo(0.5, 6);
   });
 });
