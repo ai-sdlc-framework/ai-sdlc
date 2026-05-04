@@ -3,7 +3,7 @@ id: AISDLC-185
 title: >-
   Reviewer follow-up: AISDLC-171 missing AC #5 documentation update (RFC-0008 +
   operator runbook for HC composite three-state semantic)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 18:35'
 labels:
