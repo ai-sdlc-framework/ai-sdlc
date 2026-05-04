@@ -16,8 +16,8 @@ requiresDocs: []
 # RFC-0016: Estimation Calibration with T-Shirt Sizes
 
 **Document type:** Normative
-**Status:** Ready for Product owner sign-off (Engineering + Operator signed off 2026-05-03; 8 open questions resolved per §15)
-**Lifecycle:** Ready for Review
+**Status:** Signed off (Engineering + Operator 2026-05-03; Product 2026-05-04; 8 open questions resolved per §15)
+**Lifecycle:** Signed Off
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-05-01
 **Updated:** 2026-05-03
@@ -28,7 +28,7 @@ requiresDocs: []
 ## Sign-Off
 
 - [x] Engineering owner — dominique@reliablegenius.io (2026-05-03)
-- [ ] Product owner — Alex (pending review)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [x] Operator owner — dominique@reliablegenius.io (2026-05-03)
 
 ## Revision History
