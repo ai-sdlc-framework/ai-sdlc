@@ -3,7 +3,7 @@ id: AISDLC-182
 title: >-
   CLI: add ai-sdlc-pipeline execute umbrella subcommand for end-to-end Step 0-13
   dispatch
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 18:05'
 labels:
