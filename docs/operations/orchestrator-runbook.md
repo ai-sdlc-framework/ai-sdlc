@@ -47,9 +47,12 @@ Either:
   ```bash
   git branch --list 'quarantine/*'
   ```
-  Refs are named `quarantine/<task-id-lower>-<YYYY-MM-DDTHH-MM-SS>`
-  (UTC, sub-second precision dropped). The timestamp suffix is the
-  rollback wall-clock, not the commit's authored time.
+  Refs are named `quarantine/<task-id-lower>-<YYYY-MM-DDTHH-MM-SS-mmm>`
+  (UTC, millisecond precision per AISDLC-186). The timestamp suffix is
+  the rollback wall-clock, not the commit's authored time. Pre-186 refs
+  used second precision (`...T14-23-44`) and may still be present in
+  long-lived repos — both formats sort lexicographically by date so
+  `git branch --list` returns them interleaved as expected.
 
 ### Step 2: inspect the preserved work
 
@@ -113,13 +116,33 @@ warnings accumulate in the `OrchestratorRollback` event's payload
 emit the event so operators see the partial state — the warnings are
 the diagnostic, not the absence of the event.
 
+The event payload itself carries booleans for each side-effect so
+operators can detect a partial rollback without grep'ing logs:
+
+- **`statusReverted`** (AISDLC-186) — `true` when the task file's
+  `status:` line was successfully patched back to `fromStatus`. When
+  `false`, the task file write failed (file disappeared mid-run,
+  frontmatter became unparseable, disk error). Note that `toStatus`
+  reports the INTENDED post-rollback status and mirrors `fromStatus`
+  even on failure — the on-disk reality is in `statusReverted`. When
+  `false`, manually reset the task status (`mcp__backlog__task_edit
+  <id> --status <fromStatus>`).
+- **`worktreeRemoved`** — `true` when `git worktree remove --force`
+  succeeded (or the path was already absent). `false` indicates the
+  worktree directory is still on disk + still registered with git.
+- **`branchQuarantined`** — `true` when the dev's branch carried
+  commits beyond `origin/main` AND the rename to
+  `quarantine/<ref>` succeeded. `false` is the common case (no
+  commits to preserve) but can also indicate a rename failure —
+  cross-reference the warnings to disambiguate.
+
 Common partial-rollback warnings:
 
 | Warning | Cause | Fix |
 |---|---|---|
 | `task file not found for <id>` | Backlog task file moved/deleted between Step 4 and rollback. | Manual `mcp__backlog__task_edit` to set status. |
 | `worktree remove failed: <stderr>` | Worktree directory locked (e.g. an editor has files open) or already unregistered from `git worktree list`. | `git worktree prune` then `rm -rf .worktrees/<id-lower>` manually. |
-| `quarantine rename failed: <stderr>` | Target ref already exists (impossibly-rapid duplicate rollback) or the branch was deleted by an external process between probe + rename. | Inspect `git reflog show ai-sdlc/<id-lower>` to recover the SHA, then `git branch quarantine/<id>-<ts> <sha>`. |
+| `quarantine rename failed: <stderr>` | Target ref already exists (would require two rollbacks for the same task within the same UTC millisecond per AISDLC-186 — practically impossible) or the branch was deleted by an external process between probe + rename. | Inspect `git reflog show ai-sdlc/<id-lower>` to recover the SHA, then `git branch quarantine/<id>-<ts> <sha>`. |
 
 ---
 

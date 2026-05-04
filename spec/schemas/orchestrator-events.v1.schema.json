@@ -174,7 +174,11 @@
     "toStatus": {
       "type": "string",
       "minLength": 1,
-      "description": "Status the orchestrator restored the task to during rollback (matches `fromStatus`). Present on `OrchestratorRollback` (AISDLC-177)."
+      "description": "Status the orchestrator restored the task to during rollback (matches `fromStatus`). Present on `OrchestratorRollback` (AISDLC-177). NOTE: `toStatus` mirrors `fromStatus` even when the file write failed — consult `statusReverted` (AISDLC-186) to know whether the on-disk file actually changed."
+    },
+    "statusReverted": {
+      "type": "boolean",
+      "description": "True when the task file's `status:` line was successfully patched back to `fromStatus`; false when the rollback could not write the file (e.g. task file disappeared mid-run, frontmatter became unparseable). Present on `OrchestratorRollback` (AISDLC-186). When false, the operator must manually reset the task status — `toStatus` reports the INTENDED post-rollback status, not the OBSERVED on-disk value."
     },
     "worktreeRemoved": {
       "type": "boolean",
@@ -187,7 +191,7 @@
     "quarantineRef": {
       "type": "string",
       "minLength": 1,
-      "description": "Quarantine ref name (e.g. `quarantine/aisdlc-70-2026-05-04T14-23-44`) the orchestrator created when preserving the failed dispatch's commits. Present on `OrchestratorRollback` (when `branchQuarantined` is true) and on `OrchestratorWorkQuarantined` (AISDLC-177)."
+      "description": "Quarantine ref name (e.g. `quarantine/aisdlc-70-2026-05-04T14-23-44-123`) the orchestrator created when preserving the failed dispatch's commits. Present on `OrchestratorRollback` (when `branchQuarantined` is true) and on `OrchestratorWorkQuarantined` (AISDLC-177). The timestamp suffix carries millisecond precision (AISDLC-186); legacy second-precision refs from pre-186 rollbacks (`...T14-23-44`) co-exist with the new format."
     },
     "branch": {
       "type": "string",

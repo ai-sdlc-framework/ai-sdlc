@@ -222,13 +222,32 @@ export interface OrchestratorRollbackEvent {
   taskId: string;
   /** Task status before Step 4 flipped it (typically `To Do`). */
   fromStatus: string;
-  /** Status the orchestrator restored it to (matches `fromStatus`). */
+  /**
+   * Status the orchestrator INTENDED to restore the task to (mirrors
+   * `fromStatus`). NOTE: this field reports intent, not the on-disk
+   * reality. Consult `statusReverted` (AISDLC-186) to know whether the
+   * task file was actually patched.
+   */
   toStatus: string;
+  /**
+   * AISDLC-186 — true when the task file's `status:` line was
+   * successfully patched back to `fromStatus`; false when the rollback
+   * could not write the file (task file disappeared, frontmatter
+   * unparseable, disk error). Pre-186 the event payload had no such
+   * field and partial failures only surfaced via `logger.warn`.
+   */
+  statusReverted: boolean;
   /** True when `git worktree remove --force <path>` succeeded. */
   worktreeRemoved: boolean;
   /** True when the dev's branch had commits we preserved as a quarantine ref. */
   branchQuarantined: boolean;
-  /** Quarantine ref name (e.g. `quarantine/aisdlc-70-2026-05-04T14-23-44`); set when `branchQuarantined`. */
+  /**
+   * Quarantine ref name (e.g.
+   * `quarantine/aisdlc-70-2026-05-04T14-23-44-123`); set when
+   * `branchQuarantined`. AISDLC-186 — the timestamp suffix carries
+   * millisecond precision; legacy second-precision refs from pre-186
+   * rollbacks (`...T14-23-44`) co-exist with the new format.
+   */
   quarantineRef?: string;
 }
 

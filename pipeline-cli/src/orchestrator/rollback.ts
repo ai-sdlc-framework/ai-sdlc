@@ -84,20 +84,31 @@ export interface RollbackResult {
 /**
  * Build the quarantine ref name from a task ID + a Date.
  *
- * Format: `quarantine/<task-id-lower>-<YYYY-MM-DDTHH-MM-SS>`. Colons are
- * not legal in git ref names so we substitute hyphens; the rest of ISO
- * 8601 is ref-safe. Sub-second precision dropped — operators don't need
- * to disambiguate at millisecond resolution and the shorter suffix is
- * easier to type.
+ * Format: `quarantine/<task-id-lower>-<YYYY-MM-DDTHH-MM-SS-mmm>`. Colons
+ * are not legal in git ref names so we substitute hyphens; the rest of
+ * ISO 8601 is ref-safe.
+ *
+ * AISDLC-186 — bumped from second-precision to millisecond-precision.
+ * The previous format (`YYYY-MM-DDTHH-MM-SS`) collided when two
+ * rollbacks fired for the same task in the same UTC second — the second
+ * `git branch -m` failed (rename-fails-if-exists semantics), surfaced
+ * only as a logged warning, and the second attempt's commits became
+ * eligible for the throwaway-branch `branch -D` cleanup at the bottom
+ * of `rollbackDispatch()`. Production probability was low but the
+ * failure mode was silent + data-losing. Millisecond precision makes
+ * the collision window 1000x narrower without changing any consumer
+ * contract (git refs accept the longer name, the operator runbook's
+ * `git branch --list 'quarantine/*'` still works, old refs co-exist
+ * with the new format).
  *
  * Exported for unit testing + so callers building related rollback
  * tooling can derive the same ref name.
  */
 export function buildQuarantineRef(taskId: string, when: Date): string {
   const iso = when.toISOString();
-  // Strip milliseconds + the trailing `Z`, then swap colons for hyphens.
-  // 2026-05-04T14:23:44.123Z → 2026-05-04T14-23-44
-  const stamp = iso.replace(/\.\d{3}Z$/, '').replace(/:/g, '-');
+  // Strip the trailing `Z`, then swap colons + the millisecond `.` for
+  // hyphens. 2026-05-04T14:23:44.123Z → 2026-05-04T14-23-44-123
+  const stamp = iso.replace(/Z$/, '').replace(/[:.]/g, '-');
   return `quarantine/${taskId.toLowerCase()}-${stamp}`;
 }
 
@@ -152,9 +163,11 @@ export async function rollbackDispatch(opts: RollbackOptions): Promise<RollbackR
     if (ahead && ahead.count > 0) {
       const ref = buildQuarantineRef(opts.taskId, now());
       // `git branch -m <old> <new>` renames in place. The ref must not
-      // already exist — our timestamp suffix makes a collision effectively
-      // impossible (one rollback per second per task) but we surface any
-      // failure as a warning rather than throwing.
+      // already exist — the millisecond-precision timestamp suffix
+      // (AISDLC-186) makes collisions vanishingly unlikely (would
+      // require two rollbacks for the same task within the same UTC
+      // millisecond) but we surface any failure as a warning rather
+      // than throwing.
       const renamed = await runner('git', ['branch', '-m', opts.branch, ref], {
         cwd: opts.workDir,
         allowFailure: true,

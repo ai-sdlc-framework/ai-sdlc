@@ -194,12 +194,14 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       tick: 1,
       fromStatus: 'To Do',
       toStatus: 'To Do',
+      // AISDLC-186 — explicit per-side-effect boolean.
+      statusReverted: true,
       worktreeRemoved: true,
       branchQuarantined: false,
     });
   });
 
-  it('accepts OrchestratorRollback (AISDLC-177, with quarantine)', () => {
+  it('accepts OrchestratorRollback (AISDLC-177, with quarantine, AISDLC-186 ms-precision ref)', () => {
     expectValid({
       ts: baseTs,
       type: 'OrchestratorRollback',
@@ -208,9 +210,27 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       tick: 1,
       fromStatus: 'To Do',
       toStatus: 'To Do',
+      statusReverted: true,
       worktreeRemoved: true,
       branchQuarantined: true,
-      quarantineRef: 'quarantine/aisdlc-70-2026-05-04T14-23-44',
+      quarantineRef: 'quarantine/aisdlc-70-2026-05-04T14-23-44-123',
+    });
+  });
+
+  it('accepts OrchestratorRollback (AISDLC-186, partial — statusReverted=false)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'OrchestratorRollback',
+      taskId: 'AISDLC-70',
+      runId,
+      tick: 1,
+      fromStatus: 'To Do',
+      toStatus: 'To Do',
+      // AISDLC-186 — task file disappeared between Step 4 and rollback;
+      // event payload must report the partial state explicitly.
+      statusReverted: false,
+      worktreeRemoved: true,
+      branchQuarantined: false,
     });
   });
 
@@ -222,7 +242,7 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       runId,
       tick: 1,
       branch: 'ai-sdlc/aisdlc-70',
-      quarantineRef: 'quarantine/aisdlc-70-2026-05-04T14-23-44',
+      quarantineRef: 'quarantine/aisdlc-70-2026-05-04T14-23-44-123',
       commitSha: 'abc1234deadbeef',
       commitCount: 2,
     });

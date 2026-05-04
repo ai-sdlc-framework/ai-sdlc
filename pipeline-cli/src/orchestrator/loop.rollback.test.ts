@@ -177,6 +177,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       taskId: 'AISDLC-70',
       fromStatus: 'To Do',
       toStatus: 'To Do',
+      // AISDLC-186 — explicit boolean now rides on the event payload.
+      statusReverted: true,
       worktreeRemoved: true,
       branchQuarantined: false,
     });
@@ -367,19 +369,90 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
     const rollback = events.find((e) => e.type === 'OrchestratorRollback');
     expect(rollback).toMatchObject({
       branchQuarantined: true,
-      quarantineRef: 'quarantine/aisdlc-76-2026-05-04T14-23-44',
+      quarantineRef: 'quarantine/aisdlc-76-2026-05-04T14-23-44-000',
     });
     const quarantined = events.find((e) => e.type === 'OrchestratorWorkQuarantined');
     expect(quarantined).toMatchObject({
       type: 'OrchestratorWorkQuarantined',
       taskId: 'AISDLC-76',
       branch: 'ai-sdlc/aisdlc-76',
-      quarantineRef: 'quarantine/aisdlc-76-2026-05-04T14-23-44',
+      quarantineRef: 'quarantine/aisdlc-76-2026-05-04T14-23-44-000',
       commitSha: tipSha,
       commitCount: 2,
     });
     // The throwaway-branch delete must NOT fire when we quarantined.
     expect(calls.some((c) => c.args[0] === 'branch' && c.args[1] === '-D')).toBe(false);
+    rmSync(workDir, { recursive: true, force: true });
+  });
+
+  it('AISDLC-186 — partial rollback (task file disappears) → event payload reflects statusReverted=false', async () => {
+    // Witness scenario: the task file disappeared between Step 4
+    // (status flip) and the rollback (filesystem race, operator
+    // manually deleted, mid-run `git checkout` clobbered the file).
+    // Pre-AISDLC-186 the OrchestratorRollback event reported
+    // `toStatus: <fromStatus>` regardless, falsely implying the
+    // status had been restored — the only signal otherwise was a
+    // `logger.warn` line. Post-fix the event payload carries the
+    // explicit boolean.
+    const workDir = makeWorkDirWithTask('AISDLC-77', 'To Do');
+    const taskFile = join(workDir, 'backlog', 'tasks', 'aisdlc-77 - test-task.md');
+    const wt = join(workDir, '.worktrees', 'aisdlc-77');
+    mkdirSync(wt, { recursive: true });
+
+    const { runner } = makeRunner();
+    const { events, sink } = captureSink();
+    const config = defaultOrchestratorConfig({ workDir, maxConcurrent: 1, maxTicks: 1 });
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      frontier: fakeFrontier(['AISDLC-77']),
+      // Custom dispatcher: flip status, return a failure outcome,
+      // AND delete the task file so the rollback's status revert hits
+      // the "task file disappeared" branch.
+      dispatch: async () => {
+        const raw = readFileSync(taskFile, 'utf8');
+        writeFileSync(taskFile, raw.replace(/^status:.*$/m, 'status: In Progress'), 'utf8');
+        // Now delete the file so the rollback's revert can't write it.
+        rmSync(taskFile, { force: true });
+        return {
+          taskId: 'AISDLC-77',
+          branch: 'ai-sdlc/aisdlc-77',
+          worktreePath: wt,
+          outcome: 'developer-failed',
+          prUrl: null,
+          siblingPrUrls: [],
+          iterations: 0,
+          finalVerdict: null,
+          notes: 'task file vanished mid-run',
+        };
+      },
+      emitEvent: sink,
+      runner,
+      runId: 'aisdlc-186-partial',
+      graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
+      taskLabelsLoader: () => [],
+      calibrationLogPath: '/nonexistent-bypass.jsonl',
+    };
+
+    await runOrchestratorTick(config, adapters, 1);
+
+    const rollback = events.find((e) => e.type === 'OrchestratorRollback');
+    expect(rollback).toBeDefined();
+    // Critical AISDLC-186 assertion: the event payload reports
+    // statusReverted=false, NOT silently true.
+    expect(rollback).toMatchObject({
+      type: 'OrchestratorRollback',
+      taskId: 'AISDLC-77',
+      fromStatus: 'To Do',
+      // toStatus still mirrors fromStatus (intent), but the explicit
+      // boolean tells the operator the file write never happened.
+      toStatus: 'To Do',
+      statusReverted: false,
+      // The OTHER side-effects still rolled back (worktree was
+      // present, no commits to quarantine).
+      worktreeRemoved: true,
+      branchQuarantined: false,
+    });
+
     rmSync(workDir, { recursive: true, force: true });
   });
 });

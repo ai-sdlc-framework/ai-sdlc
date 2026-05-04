@@ -893,11 +893,21 @@ async function maybeRollback(args: MaybeRollbackArgs): Promise<void> {
     return;
   }
 
+  // AISDLC-186 — `statusReverted` is the forensic source of truth for
+  // whether the task file's `status:` line was actually patched back to
+  // `fromStatus`. `toStatus` continues to mirror `fromStatus` for the
+  // common (success) case, but operators reading events.jsonl after a
+  // partial rollback (e.g. task file disappeared mid-run) need this
+  // boolean to know the file write never happened — the pre-186 payload
+  // claimed `toStatus: <fromStatus>` regardless and the warning only
+  // surfaced via `logger.warn`. Adding the field is strictly additive +
+  // lossless (downstream consumers that don't know about it ignore it).
   args.emit({
     type: 'OrchestratorRollback',
     taskId: args.taskId,
     fromStatus: result.fromStatus,
     toStatus: result.fromStatus,
+    statusReverted: result.statusReverted,
     worktreeRemoved: result.worktreeRemoved,
     branchQuarantined: result.branchQuarantined,
     ...(result.quarantineRef !== undefined ? { quarantineRef: result.quarantineRef } : {}),

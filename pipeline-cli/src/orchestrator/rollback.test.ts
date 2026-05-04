@@ -101,17 +101,33 @@ function makeOptions(overrides: Partial<RollbackOptions> = {}): RollbackOptions 
 }
 
 describe('buildQuarantineRef', () => {
-  it('formats `quarantine/<id-lower>-<iso-without-ms-or-colons>`', () => {
+  it('formats `quarantine/<id-lower>-<iso-with-ms-and-without-colons>`', () => {
+    // AISDLC-186 — millisecond precision in the timestamp suffix.
     const ref = buildQuarantineRef('AISDLC-70', new Date('2026-05-04T14:23:44.567Z'));
-    expect(ref).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44');
+    expect(ref).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44-567');
   });
 
-  it('lowercases the task ID + drops sub-second precision deterministically', () => {
+  it('lowercases the task ID + preserves millisecond precision', () => {
     const ref1 = buildQuarantineRef('aisdlc-178.3', new Date('2026-05-05T14:23:44.000Z'));
-    const ref2 = buildQuarantineRef('AISDLC-178.3', new Date('2026-05-05T14:23:44.999Z'));
-    // Same second → same ref, regardless of caller's casing or sub-second drift.
-    expect(ref1).toBe('quarantine/aisdlc-178.3-2026-05-05T14-23-44');
+    const ref2 = buildQuarantineRef('AISDLC-178.3', new Date('2026-05-05T14:23:44.000Z'));
+    // Same instant → same ref, regardless of caller's casing.
+    expect(ref1).toBe('quarantine/aisdlc-178.3-2026-05-05T14-23-44-000');
     expect(ref2).toBe(ref1);
+  });
+
+  it('AISDLC-186 — same UTC second but different ms → unique refs (no collision)', () => {
+    // Witness: pre-AISDLC-186 these two calls produced the same ref
+    // (`quarantine/aisdlc-70-2026-05-04T14-23-44`) and the second
+    // `git branch -m` collided + lost the second attempt's commits.
+    // Post-fix the ms suffix disambiguates.
+    const at000 = buildQuarantineRef('AISDLC-70', new Date('2026-05-04T14:23:44.000Z'));
+    const at500 = buildQuarantineRef('AISDLC-70', new Date('2026-05-04T14:23:44.500Z'));
+    const at999 = buildQuarantineRef('AISDLC-70', new Date('2026-05-04T14:23:44.999Z'));
+    expect(at000).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44-000');
+    expect(at500).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44-500');
+    expect(at999).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44-999');
+    // All three distinct — no `git branch -m` collision possible.
+    expect(new Set([at000, at500, at999]).size).toBe(3);
   });
 });
 
@@ -205,7 +221,8 @@ describe('rollbackDispatch — quarantine path', () => {
     // git branch -m <branch> <quarantineRef> → succeeds
     const tipSha = 'abc1234deadbeef';
     const fixedNow = new Date('2026-05-04T14:23:44.000Z');
-    const expectedRef = 'quarantine/aisdlc-70-2026-05-04T14-23-44';
+    // AISDLC-186 — millisecond-precision ref suffix.
+    const expectedRef = 'quarantine/aisdlc-70-2026-05-04T14-23-44-000';
     const { runner, calls } = makeRunner({
       responses: {
         'git rev-parse --verify ai-sdlc/aisdlc-70': {
@@ -344,7 +361,8 @@ describe('rollbackDispatch — composition (full happy path)', () => {
     const wt = mkdtempSync(join(tmpdir(), 'rollback-wt-'));
     const tipSha = 'feedface00000001';
     const fixedNow = new Date('2026-05-04T14:23:44.000Z');
-    const expectedRef = 'quarantine/aisdlc-70-2026-05-04T14-23-44';
+    // AISDLC-186 — millisecond-precision ref suffix.
+    const expectedRef = 'quarantine/aisdlc-70-2026-05-04T14-23-44-000';
     const { runner, calls } = makeRunner({
       responses: {
         'git rev-parse --verify ai-sdlc/aisdlc-70': {
@@ -392,5 +410,74 @@ describe('rollbackDispatch — composition (full happy path)', () => {
     const branchRenameIdx = calls.findIndex((c) => c.args[0] === 'branch' && c.args[1] === '-m');
     expect(branchRenameIdx).toBeGreaterThanOrEqual(0);
     expect(removeIdx).toBeGreaterThan(branchRenameIdx);
+  });
+});
+
+describe('rollbackDispatch — AISDLC-186 collision avoidance', () => {
+  it('two rapid rollbacks for the same task within the same UTC second produce unique refs', async () => {
+    // Witness scenario: pre-AISDLC-186 the second-precision ref suffix
+    // (`...T14-23-44`) collided when two rollbacks fired within the
+    // same UTC second — the second `git branch -m` failed (rename
+    // semantics require the target ref not to exist) and the second
+    // attempt's commits became eligible for the throwaway-branch
+    // `branch -D` cleanup. Post-fix the ms suffix disambiguates.
+    const fixture1 = makeFakeWorkDir('AISDLC-70', 'In Progress');
+    const fixture2 = makeFakeWorkDir('AISDLC-70', 'In Progress');
+    const wt1 = mkdtempSync(join(tmpdir(), 'rollback-collide-wt1-'));
+    const wt2 = mkdtempSync(join(tmpdir(), 'rollback-collide-wt2-'));
+    // Two timestamps, same UTC second, different milliseconds — the
+    // realistic shape of a back-to-back orchestrator double-tick.
+    const now1 = new Date('2026-05-04T14:23:44.123Z');
+    const now2 = new Date('2026-05-04T14:23:44.456Z');
+
+    // Stub git so the branch carries 1 commit beyond origin/main and
+    // the rename succeeds whatever ref name we ask for.
+    const makeStub = (): { runner: Runner; calls: RecordedCall[] } =>
+      makeRunner({
+        responses: {
+          'git rev-parse --verify ai-sdlc/aisdlc-70': {
+            stdout: 'cafebabe00000001\n',
+            stderr: '',
+            code: 0,
+          },
+          'git rev-parse --verify origin/main': { stdout: 'aaaaaaa\n', stderr: '', code: 0 },
+          'git rev-list --count ai-sdlc/aisdlc-70': { stdout: '1\n', stderr: '', code: 0 },
+          // Accept any `git branch -m` rename target — we want both
+          // rollbacks to "succeed" so we can compare the ref names.
+          'git branch -m': { stdout: '', stderr: '', code: 0 },
+        },
+      });
+
+    const r1 = await rollbackDispatch(
+      makeOptions({
+        workDir: fixture1.workDir,
+        worktreePath: wt1,
+        runner: makeStub().runner,
+        fromStatus: 'To Do',
+        now: () => now1,
+      }),
+    );
+    const r2 = await rollbackDispatch(
+      makeOptions({
+        workDir: fixture2.workDir,
+        worktreePath: wt2,
+        runner: makeStub().runner,
+        fromStatus: 'To Do',
+        now: () => now2,
+      }),
+    );
+
+    rmSync(fixture1.workDir, { recursive: true, force: true });
+    rmSync(fixture2.workDir, { recursive: true, force: true });
+    rmSync(wt1, { recursive: true, force: true });
+    rmSync(wt2, { recursive: true, force: true });
+
+    // Both quarantine refs should exist + be DIFFERENT — pre-186 they
+    // were both `quarantine/aisdlc-70-2026-05-04T14-23-44`.
+    expect(r1.branchQuarantined).toBe(true);
+    expect(r2.branchQuarantined).toBe(true);
+    expect(r1.quarantineRef).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44-123');
+    expect(r2.quarantineRef).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44-456');
+    expect(r1.quarantineRef).not.toBe(r2.quarantineRef);
   });
 });
