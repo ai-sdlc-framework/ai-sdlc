@@ -26,8 +26,28 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function flushEffects(): Promise<void> {
-  return new Promise<void>((resolve) => setImmediate(resolve));
+/**
+ * Polls `predicate()` until it returns true or `attempts` is exhausted
+ * (each iteration is one setImmediate round-trip). Ink wraps a custom
+ * React reconciler that schedules effects via the scheduler package's
+ * `setImmediate`, so each round-trip yields back AFTER one batch of
+ * effect callbacks fires. Use for assertions that depend on a setState
+ * having committed — async fetchers (this file's hook) need both the
+ * awaited promise to resolve AND the subsequent setState to commit
+ * before `state.error`/`state.data` is assertable.
+ *
+ * AISDLC-188 root cause: under load on freshly-started CI runners, 1-2
+ * setImmediate round-trips occasionally weren't enough for the React
+ * commit queue to drain a mount-fetch's setState into the capture
+ * effect; a predicate-driven wait adapts to whatever the scheduler
+ * actually takes (each round is a synchronous setImmediate — no
+ * real-clock wait under fake timers).
+ */
+async function waitForFlushed(predicate: () => boolean, attempts = 50): Promise<void> {
+  for (let i = 0; i < attempts; i += 1) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
 }
 
 describe('fetchOrchestratorStatus (pure)', () => {
@@ -104,9 +124,9 @@ describe('useOrchestratorStatus (hook)', () => {
     const { unmount } = render(
       React.createElement(HookProbe, { capture: () => {}, fetcher, intervalMs: 100 }),
     );
-    // Mount fetch is async — yield twice to let the await + setState resolve.
-    await flushEffects();
-    await flushEffects();
+    // Mount fetch is async — wait for the awaited promise + setState
+    // to settle rather than guessing at a fixed flush count (AISDLC-188).
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1);
 
     await vi.advanceTimersByTimeAsync(100);
@@ -132,8 +152,7 @@ describe('useOrchestratorStatus (hook)', () => {
     const { unmount } = render(
       React.createElement(HookProbe, { capture: () => {}, fetcher, intervalMs: 100 }),
     );
-    await flushEffects();
-    await flushEffects();
+    await waitForFlushed(() => callCount >= 1);
     expect(callCount).toBe(1);
     unmount();
     await vi.advanceTimersByTimeAsync(1_000);
@@ -155,8 +174,10 @@ describe('useOrchestratorStatus (hook)', () => {
         fetcher,
       }),
     );
-    await flushEffects();
-    await flushEffects();
+    // Capture-via-useEffect with an async fetcher needs the awaited
+    // promise to resolve, the setState to commit, AND the child capture
+    // effect to fire — wait for the predicate (AISDLC-188).
+    await waitForFlushed(() => captured?.error != null);
     expect(captured!.error).toBe('source-unavailable');
     expect(captured!.data).toBeNull();
     unmount();
