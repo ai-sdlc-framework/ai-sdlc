@@ -24,6 +24,22 @@ export const GH_PR_CACHE_TTL_MS = 60_000;
 export const GH_PR_POLL_INTERVAL_MS = 60_000;
 
 /**
+ * AISDLC-187 fast-recovery: on a transient `gh` failure (network blip,
+ * rate-limit, single 5xx) we don't want to pin `state.error =
+ * 'source-unavailable'` for the full 60s TTL. Instead, schedule a short
+ * backoff retry so the operator sees recovery within ≤20s once the
+ * underlying source is healthy again.
+ *
+ * Backoff schedule: 5s → 10s → 20s, then settle to the regular
+ * intervalMs cadence. Bounded so persistent failures don't hot-loop —
+ * after the third backoff we're back on the standard 60s tick.
+ *
+ * Exported so tests can drive the recovery dance without recomputing
+ * the schedule by hand.
+ */
+export const GH_PR_ERROR_BACKOFF_SCHEDULE_MS = [5_000, 10_000, 20_000] as const;
+
+/**
  * The fields the TUI consumes from `gh pr list --json`. Kept narrow so we
  * don't carry unused payload across re-renders. Phase 4 (PRs pane) may
  * extend this list; the fetcher then needs the matching `--json` flag.
@@ -163,6 +179,13 @@ export interface UseGhPrsOpts extends FetchGhPrsOpts {
   fetcher?: (opts: FetchGhPrsOpts) => FetchGhPrsResult;
   /** Inject a clock (tests). Defaults `() => Date.now()`. */
   clock?: () => number;
+  /**
+   * Override the error-recovery backoff schedule (ms). Defaults to
+   * `GH_PR_ERROR_BACKOFF_SCHEDULE_MS` (5s → 10s → 20s). Each delay is
+   * additionally capped at `intervalMs` so a tiny intervalMs in tests
+   * doesn't get clobbered by the longer recovery delays.
+   */
+  errorBackoffScheduleMs?: readonly number[];
 }
 
 export interface UseGhPrsState extends SourceState<GhPrSummary[]> {
@@ -185,6 +208,7 @@ export function useGhPrs(opts: UseGhPrsOpts = {}): UseGhPrsState {
   const ttlMs = opts.ttlMs ?? GH_PR_CACHE_TTL_MS;
   const fetcher = opts.fetcher ?? fetchGhPrs;
   const clock = opts.clock ?? ((): number => Date.now());
+  const backoffSchedule = opts.errorBackoffScheduleMs ?? GH_PR_ERROR_BACKOFF_SCHEDULE_MS;
 
   const fetcherRef = useRef(fetcher);
   fetcherRef.current = fetcher;
@@ -194,7 +218,24 @@ export function useGhPrs(opts: UseGhPrsOpts = {}): UseGhPrsState {
   optsRef.current = opts;
   const ttlRef = useRef(ttlMs);
   ttlRef.current = ttlMs;
+  const intervalRef = useRef(intervalMs);
+  intervalRef.current = intervalMs;
+  const backoffScheduleRef = useRef(backoffSchedule);
+  backoffScheduleRef.current = backoffSchedule;
   const cacheRef = useRef<GhPrCache>(makeEmptyCache());
+
+  // AISDLC-187: tracks how many *consecutive* error fetches we've seen
+  // since the last success. Drives the backoff-schedule index so retries
+  // ramp 5s → 10s → 20s → settle to intervalMs cadence.
+  const consecutiveErrorsRef = useRef(0);
+  const backoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearBackoff = useRef((): void => {
+    if (backoffTimerRef.current !== null) {
+      clearTimeout(backoffTimerRef.current);
+      backoffTimerRef.current = null;
+    }
+  });
 
   const [state, setState] = useState<SourceState<GhPrSummary[]>>({
     data: [],
@@ -215,12 +256,40 @@ export function useGhPrs(opts: UseGhPrsOpts = {}): UseGhPrsState {
       return;
     }
     const result = fetcherRef.current(optsRef.current);
-    cacheRef.current = { result, fetchedAt: now };
+    // AISDLC-187: when the fetch errored, record the cache entry as
+    // immediately-stale (`fetchedAt: -Infinity`). The next *any* call to
+    // refetch — interval tick, backoff retry, or manual invalidate — then
+    // bypasses the freshness short-circuit and tries again. Successful
+    // fetches still record `now` so the 60s TTL applies as before.
+    const fetchedAt = result.error ? -Infinity : now;
+    cacheRef.current = { result, fetchedAt };
     setState({
       data: result.prs,
       error: result.error,
+      // `lastFetched` reflects the wall-clock attempt time even on error
+      // so the operator can still see "tried Xs ago" in the UI.
       lastFetched: new Date(now),
     });
+
+    // Schedule next backoff retry (or clear) based on result.
+    clearBackoff.current();
+    if (result.error) {
+      const idx = Math.min(consecutiveErrorsRef.current, backoffScheduleRef.current.length - 1);
+      consecutiveErrorsRef.current += 1;
+      const scheduled = backoffScheduleRef.current[idx] ?? intervalRef.current;
+      // Cap the backoff at intervalMs so a tiny intervalMs (tests, or a
+      // future operator override) doesn't get *lengthened* by recovery.
+      // After the schedule is exhausted we fall back to intervalMs anyway.
+      const delay = Math.min(scheduled, intervalRef.current);
+      backoffTimerRef.current = setTimeout(() => {
+        backoffTimerRef.current = null;
+        refetch.current(false);
+      }, delay);
+    } else {
+      // Fresh success — reset backoff so a future error starts at the
+      // bottom of the schedule again (5s, not whatever index we were at).
+      consecutiveErrorsRef.current = 0;
+    }
   });
 
   useEffect(() => {
@@ -234,11 +303,14 @@ export function useGhPrs(opts: UseGhPrsOpts = {}): UseGhPrsState {
     return (): void => {
       cancelled = true;
       clearInterval(handle);
+      clearBackoff.current();
     };
   }, [intervalMs]);
 
   const invalidate = (): void => {
     cacheRef.current = makeEmptyCache();
+    consecutiveErrorsRef.current = 0;
+    clearBackoff.current();
     refetch.current(true);
   };
 
