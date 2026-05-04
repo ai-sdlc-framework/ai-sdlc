@@ -29,8 +29,18 @@ requiresDocs: []
 | Person | Role | Status | Date |
 |--------|------|--------|------|
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v3.4 (Engineering + Operator) | 2026-05-04 |
-| Morgan Hirtle | Chief of Design / Design Authority | ⏸ Pending review of v3.4 | — |
+| Morgan Hirtle | Chief of Design / Design Authority | ✅ Signed v3.4 with conditions | 2026-05-04 |
 | Alexander Kline | Head of Product Strategy / Product Authority | ✍️ Authored v3.2 | 2026-04-27 |
+
+### Design Authority Sign-Off Conditions
+
+Signed with the following conditions recorded for resolution before `lifecycle: Implemented`:
+
+**C1 — §4.1.1 Identity framing:** "Design expresses identity" should read "Design co-declares and expresses identity." Design authority is not downstream of Product's identity declaration; user research and experience definition are co-authorship functions. Propose amendment to §4.1.1 before spec update lands.
+
+**C2 — §5.1.1 Ownership model:** Design Authority requires co-review rights on `product.targetAudience` and `product.problemResonance`. Sα₁ scoring is grounded in audience definition and problem resonance validation — both are UX research functions. Co-review is not veto; it is recognition that these fields cannot be validly authored without design input.
+
+**C3 — Design vertex underspecification:** The design vertex carries 2 unstructured fields against Engineering's 6 and Product's 5. Design Authority commits to authoring design vertex schema enrichment (accessibility floor, component catalog reference, design token version, voice register structure, interaction principles) as RFC-0027 (reserved below). This is a follow-on commitment, not a blocker on RFC-0009.
 
 ---
 
