@@ -30,7 +30,7 @@ requiresDocs: []
 ## Sign-Off
 
 - [x] Engineering owner — dominique@reliablegenius.io (2026-05-02)
-- [ ] Product owner — Alex (pending)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [x] Operator owner — dominique@reliablegenius.io (2026-05-02)
 
 ## Revision History
