@@ -12,14 +12,14 @@ name: Auto-rebase open PRs on main push
 # PRs #299, #300, #302, #303, #304, #306; required manual empty-commit kicks
 # to recover, often re-triggered by subsequent auto-rebase passes).
 #
-# Fix: use `secrets.AUTO_REBASE_TOKEN` (a fine-scoped PAT or GitHub App token).
+# Fix: use `secrets.AI_SDLC_PAT` (a fine-scoped PAT or GitHub App token).
 # Pushes made with these credentials DO trigger downstream workflows.
 #
 # Operator setup (required after this PR merges):
 # 1. Create a fine-grained PAT at https://github.com/settings/personal-access-tokens/new
 #    with: contents:write + pull-requests:write on this repo, expiration ≤ 1 year
 #    OR install a GitHub App with the same permissions and use actions/create-github-app-token
-# 2. Add the token as a repo secret: `gh secret set AUTO_REBASE_TOKEN -b <token>`
+# 2. Add the token as a repo secret: `gh secret set AI_SDLC_PAT -b <token>`
 # 3. Set a calendar reminder for token rotation
 # 4. Verify: open a no-op PR, push to main on another, observe the rebased PR
 #    re-fires its CI within 60s of the auto-rebase
@@ -34,7 +34,7 @@ name: Auto-rebase open PRs on main push
 # - PR is from a fork → skipped by head-repository filter (token can't push)
 # - Concurrent main pushes → concurrency group serializes
 # - The PR was already up-to-date → gh pr update-branch returns gracefully
-# - AUTO_REBASE_TOKEN unset → fallback to GITHUB_TOKEN with warning
+# - AI_SDLC_PAT unset → fallback to GITHUB_TOKEN with warning
 
 on:
   push:
@@ -57,12 +57,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Rebase all open same-repo non-draft PRs
-        # AISDLC-189: prefer secrets.AUTO_REBASE_TOKEN so the rebase push
+        # AISDLC-189: prefer secrets.AI_SDLC_PAT so the rebase push
         # triggers downstream workflows. Fall back to github.token (which
         # does NOT trigger workflows) and warn so operators notice the gap.
         env:
-          GH_TOKEN: ${{ secrets.AUTO_REBASE_TOKEN || github.token }}
-          USING_FALLBACK_TOKEN: ${{ secrets.AUTO_REBASE_TOKEN == '' }}
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT || github.token }}
+          USING_FALLBACK_TOKEN: ${{ secrets.AI_SDLC_PAT == '' }}
           REPO: ${{ github.repository }}
           OWNER: ${{ github.repository_owner }}
         run: |
@@ -71,7 +71,7 @@ jobs:
           # AISDLC-189: warn if we fell back to GITHUB_TOKEN — the rebase
           # will succeed but downstream workflows won't fire on the new SHA.
           if [ "$USING_FALLBACK_TOKEN" = "true" ]; then
-            echo "::warning::AUTO_REBASE_TOKEN secret unset — falling back to GITHUB_TOKEN. Rebased PR SHAs will NOT trigger downstream workflows; operators must manually re-kick. See .github/workflows/auto-rebase-open-prs.yml header for setup."
+            echo "::warning::AI_SDLC_PAT secret unset — falling back to GITHUB_TOKEN. Rebased PR SHAs will NOT trigger downstream workflows; operators must manually re-kick. See .github/workflows/auto-rebase-open-prs.yml header for setup."
           fi
 
           # List open non-draft PRs from same repo (forks excluded — workflow
