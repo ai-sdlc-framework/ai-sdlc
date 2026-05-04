@@ -16,6 +16,7 @@
 
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { load as yamlLoad } from 'js-yaml';
 import type { TaskSpec, ValidateResult } from '../types.js';
 
 export interface ValidateTaskOptions {
@@ -104,61 +105,37 @@ export function parseTaskFile(filePath: string): TaskSpec {
 }
 
 /**
- * Tiny YAML subset parser sufficient for backlog task frontmatter:
- * scalar `key: value`, `key: 'value'`, `key: "value"`, and YAML list
- * (`key:` followed by `  - item` lines). Doesn't handle nested objects or
- * flow style — Backlog.md doesn't emit those for the keys we read.
+ * Parse a YAML frontmatter block into a flat `Record<string, unknown>`.
+ *
+ * Backed by `js-yaml` (vs. the line-based regex parser that previously lived
+ * here, AISDLC-180) so block-scalar titles (`title: >- \n  long wrapped …`)
+ * decode to the actual string instead of capturing the indicator literal
+ * `>-` as the value. The slug computer in `02-compute-branch.ts` and the
+ * `cli-deps frontier` display both depended on this — the regex parser
+ * silently produced empty slugs and stripped frontier titles to `>-`.
+ *
+ * Returns `{}` for empty / whitespace-only input or when the document parses
+ * to a non-object scalar (e.g. a bare string), so callers can keep treating
+ * the result as a key-lookup map without a typeof guard. Throws on YAML
+ * syntax errors — call sites already wrap parse failures in `try/catch` and
+ * surface a `failed to parse task file` reason.
+ *
+ * Lists of nested objects (e.g. `externalDependencies:`) ARE returned via
+ * js-yaml as arrays of `Record<string, unknown>`, so the dedicated walker
+ * in `parseExternalDependenciesBlock` is no longer strictly necessary —
+ * left in place for backwards-compat while RFC-0014 callers migrate.
  */
 export function parseSimpleYaml(raw: string): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  const lines = raw.split('\n');
-  let currentList: string | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim() || line.trim().startsWith('#')) {
-      currentList = null;
-      continue;
-    }
-
-    // List continuation? `  - <item>`
-    const listItem = line.match(/^\s+- (.*)$/);
-    if (listItem && currentList) {
-      const arr = (out[currentList] as unknown[]) ?? [];
-      arr.push(stripQuotes(listItem[1]));
-      out[currentList] = arr;
-      continue;
-    }
-
-    // Scalar `key: value` or list opener `key:`
-    const kv = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
-    if (!kv) {
-      currentList = null;
-      continue;
-    }
-    const key = kv[1];
-    const value = kv[2].trim();
-    if (value === '') {
-      // Could be opening a list OR opening an object. Initialise as empty list;
-      // stripping unknown nested objects below.
-      out[key] = [];
-      currentList = key;
-    } else {
-      out[key] = stripQuotes(value);
-      currentList = null;
-    }
+  if (!raw.trim()) return {};
+  let parsed: unknown;
+  try {
+    parsed = yamlLoad(raw);
+  } catch (err) {
+    throw new Error(`YAML parse error: ${(err as Error).message}`);
   }
-  return out;
-}
-
-function stripQuotes(s: string): string {
-  const trimmed = s.trim();
-  if (
-    (trimmed.startsWith("'") && trimmed.endsWith("'")) ||
-    (trimmed.startsWith('"') && trimmed.endsWith('"'))
-  ) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
+  if (parsed === null || parsed === undefined) return {};
+  if (typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  return parsed as Record<string, unknown>;
 }
 
 export async function validateTask(opts: ValidateTaskOptions): Promise<ValidateResult> {

@@ -140,6 +140,41 @@ describe('Step 1 — helpers', () => {
     expect(parseSimpleYaml(yaml).id).toBe('X');
   });
 
+  // AISDLC-180 — js-yaml-backed parser handles block-scalar titles correctly.
+  it('parseSimpleYaml decodes folded block-scalar (>-) titles to the unwrapped string', () => {
+    const yaml =
+      `id: AISDLC-178.1\n` +
+      `title: >-\n` +
+      `  Phase 1: Skeleton — cli-tui binary, Ink scaffold, Overview Mode placeholder\n` +
+      `  panes\n` +
+      `status: To Do\n`;
+    const parsed = parseSimpleYaml(yaml);
+    expect(parsed.id).toBe('AISDLC-178.1');
+    // The legacy line-based parser would have captured `>-` here; js-yaml
+    // unwraps the folded scalar into a single-line string with single spaces
+    // joining wrapped lines.
+    expect(parsed.title).toBe(
+      'Phase 1: Skeleton — cli-tui binary, Ink scaffold, Overview Mode placeholder panes',
+    );
+    expect(parsed.status).toBe('To Do');
+  });
+
+  it('parseSimpleYaml decodes literal block-scalar (|-) titles preserving line breaks', () => {
+    const yaml = `title: |-\n  line one\n  line two\n`;
+    const parsed = parseSimpleYaml(yaml);
+    expect(parsed.title).toBe('line one\nline two');
+  });
+
+  it('parseSimpleYaml returns {} for empty input rather than throwing', () => {
+    expect(parseSimpleYaml('')).toEqual({});
+    expect(parseSimpleYaml('   \n  \n')).toEqual({});
+  });
+
+  it('parseSimpleYaml throws on malformed YAML', () => {
+    // Tab indentation in a list — js-yaml rejects this with a clear error.
+    expect(() => parseSimpleYaml('foo:\n\t- bad\n')).toThrow(/YAML parse error/);
+  });
+
   it('parseTaskFile picks up permittedExternalPaths', () => {
     const path = writeTaskFile(tmp, {
       id: 'AISDLC-11',
