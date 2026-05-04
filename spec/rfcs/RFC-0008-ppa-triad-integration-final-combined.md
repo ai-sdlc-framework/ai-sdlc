@@ -53,6 +53,7 @@ requiresDocs:
 | Addendum B | 2026-04-04 | Added Addendum B: Deterministic-First SA Scoring. Three-layer architecture (deterministic → structural BM25 → LLM) replacing embedding-only SA scoring. DID structured fields for Layer 1. spaCy dep-parse rule engine. BM25 scorer for Layer 2. Exemplar bank for Layer 3 calibration. Feedback flywheel and SoulDriftDetected monitoring. |
 | Addendum B CR Resolution | 2026-04-04 | CR-1: corrected SA-2 formula (removed self-multiplication of principleAlignment). CR-2: w_structural floor ≥ 0.20 spec decision. CR-3: detection pattern test tool promoted to Phase 2a deliverable; Phase 2b gate conditions revised with pattern coverage minimums. |
 | v4 (final) | 2026-04-13 | All-pillar sign-off received on all documents. CR patches applied inline to Addendum B (§B.7.2 corrected formula, §B.7.3 weight floor, §B.10 test tool and gate conditions). All Addendum B open questions closed. Three RFC-0008 documents consolidated into this single file. Implementation fully unblocked across all scope. |
+| v4.1 | 2026-05-04 | Documentation backport (AISDLC-185) — adds §14.2.1 making the HC_design principal-participation **three-state semantic** (none / configured-but-silent / engaged) normative. Resolves the documentation gap from AISDLC-171's reviewer follow-up (PR #256 added the `designAuthorityConfigured` diagnostic flag and JSDoc anchors but left the spec + operator runbook unchanged). Cross-references the matching operator-runbook section and the implementation anchors in `orchestrator/src/admission-hc.ts` + `orchestrator/src/design-authority.ts`. Closes the trail from RFC-0009 §13 OQ-8 → AISDLC-171 → operator-visible documentation. No formula or weight changes; documentation-only. |
 
 ---
 
@@ -1187,6 +1188,34 @@ The DID contains strategic product intent that may be considered proprietary. Un
 - All `HC_design` signals are recorded in the audit log with the principal's identity
 - The `tanh` compression and `maxRawSignal` cap prevent any single signal from dominating the composite
 - HC_design is weighted at 0.10 — below consensus (0.45) and deliberated decisions (0.25), preventing any individual design authority signal from overriding collective judgment
+
+#### 14.2.1 Principal-participation three-state semantic (AISDLC-171)
+
+> **v4.1 clarification (2026-05-04, AISDLC-185).** RFC-0009 §13 OQ-8 surfaced an adopter-visible ambiguity: when an issue's `pillarBreakdown.shared.hcComposite.design` value is `0`, the operator could not tell whether the project had no Design Authority configured at all, or whether one was configured but did not participate in this particular issue. Both states produce `hcDesign = 0`, but they have different operational meanings. AISDLC-171 resolved this by surfacing a `designAuthorityConfigured` diagnostic flag rather than altering the HC_design weight; this sub-section makes the three resulting states normative.
+
+`HC_design` exposes three observable states. The `designAuthorityConfigured` diagnostic flag (also surfaced on `pillarBreakdown.shared.hcComposite`) is the operator-facing signal that distinguishes them — it does NOT participate in the weight calculation.
+
+| State | `designAuthorityConfigured` | `hcDesign` | When it appears | Meaning |
+|---|---|---|---|---|
+| **none** (no DA configured) | `undefined` | `0` | The DSB is missing entirely (`preDesignSystem` lifecycle phase per §6.2), OR the DSB exists but `stewardship.designAuthority.principals` is empty | No penalty. The project has not opted into Design Authority signal routing. Operationally indistinguishable from a project that does not yet have a design system. |
+| **configured-but-silent** | `true` | `0` | DSB declares `principals: [...]` (non-empty), but none of those principals appear as the issue's author or commenters | Implicit penalty. The composite reflects "design leadership chose not to weigh in" — the issue scores as if no positive design signal exists, even though the channel is wired. Persistent appearance is a signal that DA assignment or DA notification flow needs review. |
+| **engaged** | `true` | `non-zero` | DSB declares principals AND at least one principal participated as author or commenter; signal type resolved from labels (`design/advances-coherence`, `design/fragments-catalog`, etc. — see `parseDesignSignalType` in `orchestrator/src/design-authority.ts`) | Full HC_design weight applied (positive or negative depending on signal type). |
+
+**Why a diagnostic flag rather than a behavioral change?** Per the §14.2 abuse-resistance rule, only listed principals may emit full-weight `HC_design` — that rule must hold even when the DSB is configured but inactive (otherwise non-principals could trigger the channel by labeling an issue). The operational ambiguity is purely a *reporting* problem, not a scoring problem. `designAuthorityConfigured` lets operators see the configured-but-silent state without weakening the principal-participation gate.
+
+**Implementation anchors.** The three-state semantic is enforced and surfaced in:
+
+- [`orchestrator/src/admission-hc.ts`](../../orchestrator/src/admission-hc.ts) — `AdmissionHumanCurveResult.designAuthorityConfigured` field; `computeAdmissionHumanCurve` plumbs the flag from `DesignAuthoritySignal.principalsDeclared` onto the breakdown surface.
+- [`orchestrator/src/design-authority.ts`](../../orchestrator/src/design-authority.ts) — `checkDesignAuthority` resolves principal participation; the AISDLC-171 anchor JSDoc on this module ties back to this sub-section and to RFC-0009 §13 OQ-8.
+- `orchestrator/src/admission-enrichment.ts` — `buildDesignAuthoritySignal` computes `principalsDeclared` from the resolved DSB; the flag is `undefined` when no DSB is supplied (preserving the "none" state's distinguishing characteristic).
+
+**Operator response.** See [`docs/operations/operator-runbook.md`](../../docs/operations/operator-runbook.md) — the "HC_design three-state diagnostic (AISDLC-171)" section walks through what each state means in practice, how to read it from `pillarBreakdown`, and when `configured-but-silent` warrants reviewing DA assignment.
+
+**Cross-references.**
+
+- RFC-0009 §13 OQ-8 — original adopter report; resolved 2026-05-04 by filing AISDLC-171 against this RFC + the orchestrator. The three-state semantic above is the normative resolution of OQ-8's underlying ambiguity.
+- AISDLC-171 (`backlog/completed/aisdlc-171 - HC-composite-design-pillar-wiring-investigate-stewardship-designAuthority-to-HC_design-propagation-gap.md`) — implementation that surfaced `designAuthorityConfigured`.
+- AISDLC-185 (this PR) — documentation backport that made the three-state semantic normative in RFC-0008 + the operator runbook.
 
 ### 14.3 HC_override Integrity
 

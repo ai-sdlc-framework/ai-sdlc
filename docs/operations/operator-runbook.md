@@ -741,6 +741,95 @@ The operator chooses one of four:
 - Promotion procedure (warn-only → enforce): [`dor-promotion.md`](./dor-promotion.md).
 - Trusted-reviewer role definition: [RFC-0009 — Trusted Reviewer Role](../../spec/rfcs/) (the `.ai-sdlc/trusted-reviewers.yaml` registry the bypass handler reads).
 
+## HC_design three-state diagnostic (AISDLC-171)
+
+The HC composite includes a `HC_design` channel (RFC-0008 §9, weight `0.10`) that carries Design Authority leadership signals. When you read an issue's `pillarBreakdown.shared.hcComposite` and `hcDesign = 0`, that zero is **ambiguous** — three different upstream conditions all produce it, and the operational response differs for each. This section explains what the operator sees, how to read the diagnostic flag that distinguishes the three, and when each warrants action.
+
+The normative semantic is in [RFC-0008 §14.2.1](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md#1421-principal-participation-three-state-semantic-aisdlc-171); this section is the operator-facing companion. Both reference the implementation anchors in [`orchestrator/src/admission-hc.ts`](../../orchestrator/src/admission-hc.ts) and [`orchestrator/src/design-authority.ts`](../../orchestrator/src/design-authority.ts).
+
+### The three states
+
+The disambiguating signal is the `designAuthorityConfigured` field on `pillarBreakdown.shared.hcComposite`. It is a **diagnostic flag only** — it does not change the score; it just tells you which of the three states produced the score you're looking at.
+
+| State | `designAuthorityConfigured` | `hcDesign` | What it means |
+|---|---|---|---|
+| **none** — no Design Authority configured | `undefined` (omitted) | `0` | The project has no `DesignSystemBinding` resource at all (the `preDesignSystem` lifecycle phase per RFC-0008 §6.2), OR the DSB exists but its `stewardship.designAuthority.principals` list is empty |
+| **configured-but-silent** — DA configured, did not review | `true` | `0` | The DSB declares one or more principals, but none of them appears as the issue's author or as a commenter. The channel is wired; design leadership simply did not weigh in on this particular issue |
+| **engaged** — DA reviewed | `true` | non-zero (positive or negative) | At least one declared principal participated as the issue's author or as a commenter; the signal type is resolved from issue labels (`design/advances-coherence`, `design/fills-gap`, `design/fragments-catalog`, `design/misaligned-brand`) |
+
+### When each state appears
+
+- **`none`** is normal for projects in the `preDesignSystem` lifecycle phase (no DSB yet) and for projects whose design system has not been formalized through `stewardship.designAuthority`. There is **no penalty** — the composite simply omits the design-leadership signal. Most early-stage adopters live here.
+- **`configured-but-silent`** appears once the operator (or a maintainer) has declared design authority principals on the DSB but those principals are not actually reviewing issues. The composite reflects "design did not weigh in" — neither positively nor negatively. This is the **operationally interesting state**: it usually means DA assignment is paper-only.
+- **`engaged`** is the steady-state goal for any project whose design system is mature enough to warrant principal review. Both positive (`advances-coherence`, `fills-gap`) and negative (`fragments-catalog`, `misaligned-brand`) signals lift design intent into the prioritization model.
+
+### What triggers the implicit penalty
+
+Strictly speaking there is no separate "penalty" code path — the penalty is structural. In **`configured-but-silent`** the composite includes `0.10 × 0` for the design term, so the issue scores as if no positive design signal exists even though the channel is wired. Issues competing with peers whose design leadership has weighed in (with positive signals) will score below them by exactly the missing weight. The framework deliberately does NOT push `hcDesign` to a negative default value when the DA goes silent — silence is not a vote against, just an absent vote.
+
+### Why a diagnostic flag rather than a behavioral change
+
+The principal-participation gate (only listed principals may emit full-weight `HC_design`) exists to prevent abuse — without it, anyone could trigger the design channel by labeling an issue. That gate must hold even when the DSB is configured but inactive. The ambiguity at `hcDesign = 0` is purely a **reporting** problem, not a scoring problem. `designAuthorityConfigured` lets you see the configured-but-silent state without weakening the gate.
+
+### Operator response
+
+| State | Operator response |
+|---|---|
+| **none** | No action. Expected for early-stage adopters and any project that has not formalized Design Authority |
+| **configured-but-silent** (occasional) | No action. Design leadership simply chose not to weigh in on this particular issue |
+| **configured-but-silent** (persistent across many issues) | **Review your DA assignment.** The most common causes are: (a) the principal list on the DSB names someone who has left the team, (b) the principals are real but were never told about their reviewer role, (c) DA notification is not wired into the principal's working environment (no GitHub `@mentions`, no Slack ping). Confirm the principals listed under `DesignSystemBinding.spec.stewardship.designAuthority.principals` are accurate, then either re-onboard them or update the list |
+| **engaged** | No action — this is the steady-state goal |
+
+### How to inspect the flag
+
+The flag surfaces on every admission scoring result. Two convenient inspection paths:
+
+```bash
+# 1. Read the most recent admission score for an issue from the artifacts:
+jq '.pillarBreakdown.shared.hcComposite' \
+  artifacts/_admission/scores/issue-<id>.json
+
+# Output for the configured-but-silent state:
+# {
+#   "hcExplicit": 0,
+#   "hcConsensus": -1,
+#   "hcDecision": 0,
+#   "hcDesign": 0,
+#   "designAuthorityConfigured": true,    ← diagnostic flag
+#   "hcRaw": -0.45,
+#   "hcComposite": -0.4218990...
+# }
+
+# 2. Bulk-scan for configured-but-silent issues across the backlog
+# (signals that DA is paper-only):
+for f in artifacts/_admission/scores/*.json; do
+  state=$(jq -r '
+    .pillarBreakdown.shared.hcComposite as $hc
+    | if   $hc.designAuthorityConfigured == null      then "none"
+      elif $hc.designAuthorityConfigured and $hc.hcDesign == 0 then "configured-but-silent"
+      elif $hc.designAuthorityConfigured                 then "engaged"
+      else "unknown" end' "$f")
+  if [[ "$state" == "configured-but-silent" ]]; then
+    echo "$(basename "$f"): $state"
+  fi
+done
+```
+
+A clustered run of `configured-but-silent` results across recent admissions is the operational tell that DA assignment needs review.
+
+### Cross-references
+
+- Normative spec: [RFC-0008 §14.2.1 — principal-participation three-state semantic](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md#1421-principal-participation-three-state-semantic-aisdlc-171).
+- HC_design channel definition: [RFC-0008 §9 — Connection 5: HC_design](../../spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md#9-connection-5-hc_design--design-lead-signal-channel).
+- Original adopter report: [RFC-0009 §13 OQ-8](../../spec/rfcs/RFC-0009-tessellated-design-intent-documents.md) — resolved 2026-05-04 by filing AISDLC-171.
+- Implementation anchors:
+  - [`orchestrator/src/admission-hc.ts`](../../orchestrator/src/admission-hc.ts) — `AdmissionHumanCurveResult.designAuthorityConfigured` field; the JSDoc on `hcDesign` ties back to RFC-0008 §14.2.
+  - [`orchestrator/src/design-authority.ts`](../../orchestrator/src/design-authority.ts) — principal participation check; the file-header JSDoc (AISDLC-171 / RFC-0009 §13 OQ-8 anchor) is the canonical inline cross-reference to this section.
+  - `orchestrator/src/admission-enrichment.ts` — `buildDesignAuthoritySignal` computes `principalsDeclared` from the resolved DSB.
+- Implementation history:
+  - AISDLC-171 (`backlog/completed/aisdlc-171 - HC-composite-design-pillar-wiring-investigate-stewardship-designAuthority-to-HC_design-propagation-gap.md`) — surfaced the `designAuthorityConfigured` flag.
+  - AISDLC-185 (this section, RFC-0008 §14.2.1) — documentation backport.
+
 ## Chaos test plan (Phase 5 hardening)
 
 Per RFC §17 Phase 5, before promoting `AI_SDLC_PARALLELISM=experimental` to default-on, the dogfood pipeline MUST pass three chaos scenarios:
