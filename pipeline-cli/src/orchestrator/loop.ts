@@ -286,7 +286,6 @@ export async function runOrchestratorTick(
 ): Promise<OrchestratorTickResult> {
   const logger = adapters.logger ?? DEFAULT_LOGGER;
   const frontierFn = adapters.frontier ?? buildDefaultFrontier(config);
-  const dispatchFn = adapters.dispatch ?? buildDefaultDispatch(config, adapters);
   const escalateFn = adapters.escalate ?? buildDefaultEscalate(config, adapters);
   // RFC-0015 Phase 2 — load the catalogue once per tick. The loader is a
   // small file read + in-process validation; doing it per tick keeps
@@ -296,6 +295,11 @@ export async function runOrchestratorTick(
   // gated + best-effort (swallows write errors); the helper wraps it in
   // a try/catch so a thrown injected sink never crashes the tick.
   const emit = buildEmitter(config, adapters, tickNumber);
+  // AISDLC-176 — the default dispatcher needs the per-tick emit so it
+  // can forward `DeveloperContractRetry` payloads from
+  // `executePipeline()` to the events.jsonl bus. Tests injecting their
+  // own dispatch adapter bypass this entirely.
+  const dispatchFn = adapters.dispatch ?? buildDefaultDispatch(config, adapters, emit);
   // RFC-0015 Phase 3 — wall-clock + per-task stuck counter + cadence
   // state are shared across ticks via the adapters bag (see
   // `adaptersWithSharedState` in `runOrchestratorLoop`).
@@ -791,7 +795,13 @@ async function tryPlaybookOnError(args: TryPlaybookArgs): Promise<TryPlaybookRes
     initialState: 'DEV_RUNNING',
     inMemoryOnly: !args.adapters.persistWorkerState,
   });
-  const dispatchFn = args.adapters.dispatch ?? buildDefaultDispatch(args.config, args.adapters);
+  // Playbook redispatch path doesn't currently surface
+  // `DeveloperContractRetry` events (the redispatch happens inside the
+  // playbook handler, not the per-tick orchestrator emit scope). A
+  // no-op emit keeps the dispatcher signature uniform; if a future
+  // playbook handler needs the retry signal it can wire its own emit.
+  const dispatchFn =
+    args.adapters.dispatch ?? buildDefaultDispatch(args.config, args.adapters, () => undefined);
   const playbook = await runPlaybook(ctx, {
     catalogue: args.catalogue,
     escalate: args.escalateFn,
@@ -1229,6 +1239,7 @@ function buildDefaultLabelsLoader(workDir: string): (taskId: string) => readonly
 function buildDefaultDispatch(
   config: OrchestratorConfig,
   adapters: OrchestratorAdapters,
+  emit: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void,
 ): DispatchFn {
   return async (taskId): Promise<PipelineResult> => {
     const spawner = adapters.spawner ?? (await defaultSpawner());
@@ -1238,6 +1249,21 @@ function buildDefaultDispatch(
       spawner,
       runner: adapters.runner ?? defaultRunner,
       logger: adapters.logger ?? DEFAULT_LOGGER,
+      // AISDLC-176 — forward the `DeveloperContractRetry` recovery
+      // signal from `executePipeline()`'s Step 6 onto the orchestrator
+      // events.jsonl bus. High-frequency emission of this event tells
+      // operators the developer.md system prompt has drifted (the agent
+      // forgot the JSON contract often enough that the retry is doing
+      // more work than it should be); rare emission tells operators the
+      // retry is the safety net it was designed to be.
+      onDeveloperContractRetry: ({ initialOutputPreview, durationMs }): void => {
+        emit({
+          type: 'DeveloperContractRetry',
+          taskId,
+          initialOutputPreview,
+          retryDurationMs: durationMs,
+        });
+      },
     });
   };
 }

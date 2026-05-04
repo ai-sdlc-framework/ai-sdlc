@@ -15,7 +15,7 @@
  */
 
 import { buildDeveloperPrompt } from './05-build-dev-prompt.js';
-import { parseDeveloperReturn } from './06-parse-dev-return.js';
+import { parseDeveloperReturnWithRetry } from './06-parse-dev-return.js';
 import { buildReviewPrompts } from './07-build-review-prompts.js';
 import { aggregateVerdicts, formatFeedback } from './08-aggregate-verdicts.js';
 import type {
@@ -81,8 +81,16 @@ export async function iterateReviewLoop(
       prompt: devPrompt,
       cwd: opts.worktreePath,
     });
-    const parsedDev = await parseDeveloperReturn({
-      developerReturn: devResult.parsed ?? devResult.output,
+    // AISDLC-176 — retry once on JSON envelope contract violation. The
+    // iteration loop honors the same retry contract as the initial Step
+    // 5b/6 dispatch in execute-pipeline; without it a prose-only return
+    // on iteration N>1 silently bails out of the loop with the previous
+    // verdict (the bug the witnessed AISDLC-70 case exposed at the
+    // initial dispatch is just as silent in the iterate path).
+    const parsedDev = await parseDeveloperReturnWithRetry({
+      initialResult: devResult,
+      cwd: opts.worktreePath,
+      spawner: opts.spawner,
     });
     if (!parsedDev.ok || !parsedDev.developer) {
       // Treat as developer failure; bail out of the loop with current verdict.

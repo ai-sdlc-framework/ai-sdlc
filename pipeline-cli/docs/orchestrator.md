@@ -500,6 +500,7 @@ The writer:
 | `OrchestratorRecovered` | Phase 2 playbook handler succeeded | `ts`, `type`, `taskId`, `tick`, `runId`, `mode`, `outcome`, `prUrl` | Wires to AISDLC-169.2 — emitted on the recovered branch of the playbook runner. |
 | `OrchestratorAwaitingExternal` | Phase 3 admission filter held the task | `ts`, `type`, `taskId`, `runId`, `reason`, `context` | Reserved for AISDLC-169.3; schema accepts it now so the loop wiring is non-breaking when Phase 3 lands. |
 | `WorkerStateTransition` | Every Phase 2 state-machine transition | `ts`, `type`, `taskId`, `workerId`, `runId`, `from`, `to`, `duration_ms`, `context?` | Forwarded from the in-memory `playbookEvents` array Phase 2 already emits. Mirrors RFC §7.1. |
+| `DeveloperContractRetry` | Step 6 retry recovered a developer dispatch (AISDLC-176) | `ts`, `type`, `taskId`, `tick`, `runId`, `initialOutputPreview`, `retryDurationMs` | Fired when the dev subagent returned non-JSON prose AND the one-shot retry helper recovered the dispatch by re-prompting for the JSON envelope. Frequent emission → strengthen the developer.md system prompt; rare emission → the retry is the safety net it was designed to be. |
 
 The schema is canonical at
 [`spec/schemas/orchestrator-events.v1.schema.json`](../../spec/schemas/orchestrator-events.v1.schema.json).

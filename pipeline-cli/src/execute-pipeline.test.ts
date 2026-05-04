@@ -232,6 +232,113 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     ).rejects.toThrow(/requires opts.spawner/);
   });
 
+  // ── AISDLC-176 — JSON contract retry semantics ───────────────────
+
+  it('AISDLC-176 AC4: prose-then-JSON dev returns succeeds end-to-end through Step 11', async () => {
+    // Dev's first turn is prose ("Done. AISDLC-176..."), retry turn is
+    // a valid JSON envelope. The pipeline MUST recover the dispatch and
+    // proceed all the way through Step 11 (push + PR open).
+    writeTaskFile(tmp, {
+      id: 'AISDLC-300',
+      title: 'prose-then-json recovery',
+      status: 'To Do',
+      acceptanceCriteria: ['ship the retry'],
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-300'), { recursive: true });
+
+    let devCallIdx = 0;
+    const spawner = new MockSpawner({
+      developer: () => {
+        const idx = devCallIdx++;
+        if (idx === 0) {
+          // First spawn — prose ("Done. AISDLC-300 shipped"). The
+          // orchestrator's Step 6 retry helper should detect the
+          // contract violation and re-prompt.
+          return {
+            type: 'developer',
+            output: 'Done. AISDLC-300 shipped — see commit log.',
+            // Note: NO `parsed` field — the spawner couldn't extract
+            // structured JSON from the raw output.
+            status: 'success',
+            durationMs: 0,
+          };
+        }
+        // Retry spawn — proper JSON envelope.
+        return {
+          type: 'developer',
+          output: '',
+          parsed: goodDev,
+          status: 'success',
+          durationMs: 0,
+        };
+      },
+      'code-reviewer': approvedReviewer('code-reviewer'),
+      'test-reviewer': approvedReviewer('test-reviewer'),
+      'security-reviewer': approvedReviewer('security-reviewer'),
+    });
+
+    const retryEvents: Array<{ taskId: string; durationMs: number }> = [];
+    const result = await executePipeline({
+      taskId: 'AISDLC-300',
+      workDir: tmp,
+      spawner,
+      runner: makeHappyRunner().toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 2,
+      onDeveloperContractRetry: (info): void => {
+        retryEvents.push({ taskId: info.taskId, durationMs: info.durationMs });
+      },
+    });
+
+    // End-to-end success — Step 11 opened the PR.
+    expect(result.outcome).toBe('approved');
+    expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
+    // Exactly ONE retry was issued (Step 5b initial + Step 6 retry = 2 dev spawns).
+    expect(spawner.getCallCount('developer')).toBe(2);
+    // Retry observability fired exactly once.
+    expect(retryEvents).toEqual([{ taskId: 'AISDLC-300', durationMs: expect.any(Number) }]);
+  });
+
+  it('AISDLC-176 AC5: prose-twice fails with developer-json-contract-violated (clear error)', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-301',
+      title: 'prose-twice contract violation',
+      status: 'To Do',
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-301'), { recursive: true });
+
+    const proseResult = {
+      type: 'developer' as const,
+      output: 'Sorry, I cannot return JSON.',
+      status: 'success' as const,
+      durationMs: 0,
+    };
+    const spawner = new MockSpawner({ developer: proseResult });
+
+    const retryEvents: Array<{ taskId: string }> = [];
+    const result = await executePipeline({
+      taskId: 'AISDLC-301',
+      workDir: tmp,
+      spawner,
+      runner: makeHappyRunner().toRunner(),
+      skipFinalizeCommit: true,
+      onDeveloperContractRetry: (info): void => {
+        retryEvents.push({ taskId: info.taskId });
+      },
+    });
+
+    expect(result.outcome).toBe('developer-json-contract-violated');
+    expect(result.prUrl).toBeNull();
+    // Reason MUST be the new clear error, NOT the cryptic
+    // "Unexpected token S in JSON at position 0" from the witnessed bug.
+    expect(result.notes).toMatch(/violated JSON envelope contract on both turns/);
+    // Exactly TWO dev spawns: initial + the one retry. Not three, not zero.
+    expect(spawner.getCallCount('developer')).toBe(2);
+    // No DeveloperContractRetry event — the retry FAILED, the recovery
+    // observability event fires only on successful recovery.
+    expect(retryEvents).toHaveLength(0);
+  });
+
   it('cleanup runs even when push fails (try/finally guarantee)', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-104', title: 'cleanup-after-fail', status: 'To Do' });
     mkdirSync(join(tmp, '.worktrees', 'aisdlc-104'), { recursive: true });

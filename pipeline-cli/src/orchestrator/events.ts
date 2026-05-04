@@ -57,6 +57,14 @@ export type OrchestratorEventType =
   | 'OrchestratorIdleAllFiltered'
   | 'OrchestratorOrphanParent'
   | 'OrchestratorStuckCandidate'
+  /**
+   * AISDLC-176 — emitted on the recovery path when the developer
+   * subagent returned non-JSON prose AND the one-shot retry helper
+   * (`parseDeveloperReturnWithRetry()` in `steps/06-parse-dev-return.ts`)
+   * recovered the dispatch by re-prompting for the JSON envelope.
+   * Per-event fields: `taskId`, `initialOutputPreview`, `retryDurationMs`.
+   */
+  | 'DeveloperContractRetry'
   | 'OrchestratorTaskAlreadyInFlight'
   | 'WorkerStateTransition';
 

@@ -157,6 +157,18 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts DeveloperContractRetry (AISDLC-176)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'DeveloperContractRetry',
+      taskId: 'AISDLC-176',
+      runId,
+      tick: 1,
+      initialOutputPreview: 'Done. AISDLC-176 shipped — see git log.',
+      retryDurationMs: 234,
+    });
+  });
+
   it('accepts the minimal envelope (only ts + type)', () => {
     expectValid({ ts: baseTs, type: 'OrchestratorTick' });
   });
