@@ -172,6 +172,7 @@ async function waitForFlushed(predicate: () => boolean, attempts = 50): Promise<
     if (predicate()) return;
     await new Promise<void>((resolve) => setImmediate(resolve));
   }
+  throw new Error(`waitForFlushed: predicate not satisfied after ${attempts} attempts`);
 }
 
 describe('useEvents (hook)', () => {
