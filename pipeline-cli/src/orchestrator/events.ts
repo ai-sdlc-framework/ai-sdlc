@@ -57,6 +57,7 @@ export type OrchestratorEventType =
   | 'OrchestratorIdleAllFiltered'
   | 'OrchestratorOrphanParent'
   | 'OrchestratorStuckCandidate'
+  | 'OrchestratorTaskAlreadyInFlight'
   | 'WorkerStateTransition';
 
 /**
