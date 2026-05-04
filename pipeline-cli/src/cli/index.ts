@@ -28,6 +28,7 @@
 
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
+import { executeCommand } from './execute.js';
 import { aggregateVerdicts } from '../steps/08-aggregate-verdicts.js';
 import { evaluateIssue, type IssueInput } from '../dor/index.js';
 import { runStageACorpus } from '../dor/corpus.js';
@@ -97,6 +98,10 @@ export function buildCli(): Argv {
         type: 'string',
         default: cwdDefault(),
       })
+      // AISDLC-182 — umbrella execute subcommand. Registered FIRST so it
+      // appears at the top of `--help` (yargs lists subcommands in
+      // registration order). Composes Steps 0-13 via `executePipeline()`.
+      .command(executeCommand())
       // Step 0
       .command(
         'sweep-worktrees',

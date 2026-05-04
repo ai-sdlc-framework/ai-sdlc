@@ -124,6 +124,96 @@ they'll never use. See [`docs/spawner.md`](./docs/spawner.md#the-lazy-sdk-import
 for the lazy-import rationale and how the failure surfaces when the SDK isn't
 installed.
 
+## Choosing an entry point — `execute` (CLI), `/ai-sdlc execute` (slash), `pnpm dogfood watch` (API key)
+
+The Step 0-13 pipeline can be invoked three ways. They differ on **who** can
+call them, **what** drives the LLM dispatch, and **how** the work is billed.
+Pick the row that matches your situation:
+
+| Entry point | Invoker | Spawner | Billing | When to use |
+|---|---|---|---|---|
+| `/ai-sdlc execute <task-id>` (slash command body, `ai-sdlc-plugin/commands/execute.md`) | Operator typing in their Claude Code session | `Agent` tool calls in the SAME session | Subscription (Claude Code Max) | The default for internal dogfood. Operator drives, sees progress in real-time, decisions surface inline. |
+| `ai-sdlc-pipeline execute <task-id>` (this CLI subcommand, AISDLC-182) | Anything that can shell out — AI assistant in operator session, cron, webhook, GitHub Action | Resolved from `--spawner`: `mock` (default; plumbing) / `api-key` (paid SDK) / `claude-cli` (deferred) | Depends on `--spawner` | An AI assistant working alongside the operator (or any non-slash-command context) needs to invoke the FULL pipeline including reviewers + verdict-file write. Until `--spawner claude-cli` ships, `--spawner api-key` is the practical real-work choice; `--spawner mock` is the safe plumbing default. |
+| `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | Cron / GitHub Action / unattended | `ClaudeCodeSDKSpawner` (resolved internally) | API key (paid Anthropic API) | GitHub-issue-driven flow. Designed for unattended use where no operator session is available. |
+
+### Why the `execute` umbrella subcommand exists (AISDLC-182)
+
+Before this subcommand existed, an AI assistant working alongside the
+operator (e.g. Claude in the main conversation, NOT a slash command) had no
+clean way to invoke the full pipeline. The two existing surfaces both had
+gaps:
+
+- **`/ai-sdlc execute`** is a slash command body. Only the operator can
+  type slash commands; an assistant cannot invoke them.
+- **`pnpm dogfood watch`** is API-key-billed. Acceptable for the
+  GitHub-issue path; not appropriate for backlog-task internal dogfood per
+  the dual-workflow architecture (subscription billing).
+
+The per-step subcommands (`validate-task`, `compute-branch`, …) were
+exposed but **no umbrella composed them into the Step 0-13 sequence**. The
+2026-05-04 dogfood incident — ~10 PRs shipped to main without reviewer
+verdicts because the assistant skipped Steps 7 (reviewers), 8 (aggregate),
+and 10 (verdict-file write that triggers DSSE auto-sign in the pre-push
+hook) — happened precisely because manually composing those steps was
+error-prone.
+
+The `execute` subcommand is a **thin wrapper** around the existing
+`executePipeline()` library function. It does NOT re-implement Step 0-13;
+it composes them via the same in-package composite. The wrapper's only
+real responsibilities:
+
+1. Resolve a `SubagentSpawner` from the `--spawner` flag.
+2. Hook into `onProgress` so the per-iteration aggregated verdict lands
+   at `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` — the husky
+   pre-push hook (`scripts/check-attestation-sign.sh`) reads from this
+   exact path to auto-sign the DSSE envelope.
+3. Emit `[ai-sdlc-progress] execute: <stage>` lines so the dispatching
+   session can surface progress.
+
+```bash
+# Plumbing check — does this task pass validation, what branch will it use?
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --dry-run
+
+# Real run with API-key billing (requires ANTHROPIC_API_KEY in env)
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --spawner api-key
+
+# Mock spawner (default) — exercises the dispatch surface end-to-end
+# WITHOUT calling a real LLM. Reviews unconditionally APPROVE; the
+# developer return is a fixture with commitSha=null. Useful for CI
+# integration tests.
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --spawner mock
+```
+
+#### `--spawner` options
+
+| Value | Status | Behaviour |
+|---|---|---|
+| `mock` | shipped (default) | `MockSpawner` with hard-coded approval fixtures. Safe for plumbing checks + integration tests. Does NOT do real work — `commitSha` is `null`. |
+| `api-key` | shipped | Constructs the `ClaudeCodeSDKSpawner` (lazy SDK import). Requires `ANTHROPIC_API_KEY` in env. Same billing model as `pnpm dogfood watch`. |
+| `claude-cli` | DEFERRED — see below | Errors with a documented path-forward message. Cross-session subagent routing is the unsolved problem; until it lands, operators wanting subscription billing should run `/ai-sdlc execute` (slash command) directly. |
+
+The `claude-cli` spawner — whose intent is "use the operator's existing
+Claude Code session for subagent dispatch so billing stays on the
+subscription" — requires solving how a CLI invoked from a parent session
+can dispatch subagents back INTO that parent session. The
+`ShellClaudePSpawner` already exists for the case where the CLI starts
+its own short-lived `claude --print` invocation (which DOES use the
+subscription, but each spawn pays the cold-start tax and produces a
+disconnected session). True same-session dispatch is the harder problem
+that was deferred from the AISDLC-182 v1 scope. Tracked in the AISDLC-182
+follow-up notes.
+
+### Until the `claude-cli` spawner lands — manual composition rule
+
+AI assistants helping the operator MUST manually compose Steps 5 + 7 + 8
++ 10 + 11 (dispatch dev → dispatch 3 reviewers → aggregate → write
+verdict file → push for hook auto-sign) on every dispatch. Skipping
+any of those steps reproduces the 2026-05-04 failure mode (PRs shipped
+without reviewer verdicts). The umbrella `execute` subcommand exists
+precisely so you don't have to compose by hand — once `--spawner
+claude-cli` is wired, the safest path will be `ai-sdlc-pipeline execute
+<task-id> --spawner claude-cli`.
+
 ## Quickstart — Tier 1 (slash command body)
 
 The `/ai-sdlc execute` slash command body (in `ai-sdlc-plugin/commands/execute.md`)
