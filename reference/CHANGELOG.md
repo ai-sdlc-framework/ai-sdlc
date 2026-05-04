@@ -1,5 +1,47 @@
 # @ai-sdlc/reference
 
+## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.9.0...reference-v0.10.0) (2026-05-04)
+
+
+### Features
+
+* add action governance — blockedActions in agent-role.yaml ([#45](https://github.com/ai-sdlc-framework/ai-sdlc/issues/45)) ([eb53342](https://github.com/ai-sdlc-framework/ai-sdlc/commit/eb5334229bfd3f66464c4986efb0c432d1756a3e))
+* add Claude Code plugin and SDK runner for native governance integration ([804f068](https://github.com/ai-sdlc-framework/ai-sdlc/commit/804f06801e388fb356cde716291abc4e3386f050))
+* add credential auto-provisioning, autonomy-level policy mapping, and CI setup ([f89ddfd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f89ddfdb45ea344b1f2a35b50f3c0b10d703f817))
+* add NVIDIA OpenShell sandbox integration ([cac7ab2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cac7ab2000f7a04722a16f21b7ac0bdcfd119a95))
+* add test coverage reporting with Codecov ([f31137a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f31137a52f3c6ec317c68eef50403e05b2b1c19e))
+* address PPA architectural concerns for RFC readiness ([db00094](https://github.com/ai-sdlc-framework/ai-sdlc/commit/db00094b74ed825dc88ddcee885961f01d9a7e17))
+* **deps:** rfc-0014 phase 1 deps snapshot artifact + GC + externalDependencies (AISDLC-166) ([bbb7472](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bbb7472c7a8a093fc09d59095347814c42de0294))
+* **deps:** rfc-0014 phase 3 — DoR blast-radius surfacing (AISDLC-167.3) ([51ca49b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/51ca49bed07d83fb98dd9d59e838e5e4eecf2f6c))
+* **deps:** rfc-0015 phase 3 — pre-dispatch filter chain (AISDLC-169.3) ([c8aad21](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c8aad216573d32813538e89ffcc7ce1791866bff))
+* **deps:** rfc-0015 phase 4 — events.jsonl writer + cli-status --orchestrator (AISDLC-169.4) ([01a4c83](https://github.com/ai-sdlc-framework/ai-sdlc/commit/01a4c83a60a59e0c2862051c9f04398d3a7d1843))
+* implement RFC-0006 Design System Governance Pipeline ([e6dfd4c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e6dfd4c3f9efdf4b6ddb219f02131c206dfdcb67))
+* integrate Product Priority Algorithm (PPA) across all SDKs (AISDLC-7) ([bc4a32d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bc4a32df4de65eb9c853b33e85aac56690092ecf))
+* **orchestrator:** dor bypass + 3-round escalation (AISDLC-115.7) ([f681a68](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f681a68679c18e72a6cf560778d533177bffdbe8))
+* **orchestrator:** implement rfc-0008 ppa triad integration end-to-end ([522950d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/522950d70b566145feb9718ed88495f09b3e9b9a))
+* **orchestrator:** rfc-0010 phase 1 foundations ([9197a0d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9197a0da89916d9a595289cf493a4918b6f1451d))
+* **orchestrator:** rfc-0010 phase 2.5 model routing + classifier ([12b9750](https://github.com/ai-sdlc-framework/ai-sdlc/commit/12b97508db1874b847d4fb40e210cfbef62f3c1a))
+* **orchestrator:** rfc-0010 phase 2.7 harness adapter framework ([847a965](https://github.com/ai-sdlc-framework/ai-sdlc/commit/847a96541f45924f89070c8a106ff83e329d8d12))
+* **orchestrator:** rfc-0010 phase 2.8 subscription-aware scheduling ([ea26d40](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea26d40de0f82c06abb70a4c2b920336ee62e6af))
+* **reference:** add QualityFlag type + PriorityInput.qualityFlags ([3478e14](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3478e14cad32bc3b5c97ff07ccf28cf21415a361))
+* rfc-0011 phase 1 schema + needs-clarification status (AISDLC-115.1) ([385e660](https://github.com/ai-sdlc-framework/ai-sdlc/commit/385e66025d09a64ede15bbf612a73355bb2facaa))
+* **spec:** formalize RFC lifecycle convention - Draft to Implemented (AISDLC-118) ([ca2eb5e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ca2eb5e4cc46662851a6c1897a6154d86c1cd8d1))
+
+
+### Bug Fixes
+
+* address review findings — add schema, audit logging, requireHumanApproval ([e11a79d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e11a79dcacd8ff0f19934e09e18c6e169879a52f))
+* **orchestrator:** address local review findings for RFC-0008 ([3da537b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3da537b7aa1dd2a8c184414fc65368a3b23c94fe))
+* **orchestrator:** enforce dev subagent JSON contract with one retry on parse failure (AISDLC-176) ([26ad8a4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/26ad8a4934681270c755b448f5b618e646396806))
+* **orchestrator:** filter orphan-parent tasks from frontier dispatch (AISDLC-175) ([6e4f8bd](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6e4f8bd57490b77f82f032afa1caa3abab0d0103))
+* **orchestrator:** rollback task status + sweep worktree on developer-failed (AISDLC-177) ([a3af3b8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a3af3b8e12919c22d48f7504f49411edaee72dc5))
+* **orchestrator:** track in-flight dispatches to prevent concurrent re-dispatch (AISDLC-179) ([0450ca1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0450ca16cafd270cb9b9515afb20ac78fadebd70))
+* **reference:** strip GIT_DIR from tokens-studio adapter and test ([65df709](https://github.com/ai-sdlc-framework/ai-sdlc/commit/65df70935cd9b33fe45003ed6dc84a3fd994058e))
+* resolve issue [#29](https://github.com/ai-sdlc-framework/ai-sdlc/issues/29) ([8b74a6d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8b74a6dbe9eee88c85fea40269e79c34ceded39c))
+* run prettier on generated-schemas.ts after generation ([9cf5bc4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9cf5bc4a23861ea6e2083c69c1444a18f89d8efb))
+* stop tracking orchestrator/.gitignore — generated at runtime ([909759b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/909759bd3cd7051f0bb2bdcb6696bc2277ec282b))
+* switch OpenShell to process-level isolation, re-enable in CI ([#31](https://github.com/ai-sdlc-framework/ai-sdlc/issues/31)) ([d340eab](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d340eab03757a9fa725f92f010fcc21a6f0c8c07))
+
 ## [0.9.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/reference-v0.8.0...reference-v0.9.0) (2026-04-30)
 
 

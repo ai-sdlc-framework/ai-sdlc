@@ -1,5 +1,56 @@
 # Changelog
 
+## [0.9.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.8.1...ai-sdlc-plugin-v0.9.0) (2026-05-04)
+
+
+### Features
+
+* add per-file-delta contentHashV3 to attestation predicate (AISDLC-101) ([29da77a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/29da77a20db4b53a2138836ae7cf9ead4cf9df75))
+* add pipelineVersion to attestation predicate (AISDLC-100.6) ([ae0ac8f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ae0ac8f39cfc2891d0f4008b4a17fb0443efa9de))
+* add Stage B LLM-evaluator + composite Stage A+B refinement reviewer (AISDLC-115.3) ([ebccd1f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ebccd1fbbba8808d7aec04510906460cd420a574))
+* **ci:** add RFC docs-drift gate (AISDLC-69.3) ([416cc96](https://github.com/ai-sdlc-framework/ai-sdlc/commit/416cc9699310bf98693d665d4f686327e759823f))
+* **ci:** cost-savers — skip CI reviewers on valid attestation + budget circuit breaker (AISDLC-147) ([c06c17b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c06c17b926727ffe0d37c3d01027b641ed97ff82))
+* **ci:** pre-push hook auto-signs attestation when verdicts exist (AISDLC-133) ([1ae6c88](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1ae6c88e41664b920b77c4ed1efbc9e45bddaf76))
+* **deps:** cli-deps dependency graph + dispatch frontier integration (AISDLC-117) ([974821e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/974821ef8af6a8f98d700b2e2b190e4b17b0ba00))
+* **deps:** incremental review — skip/delta when contenthash unchanged (AISDLC-142) ([c5cea08](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c5cea08929c915a274a561b186a0cdc3667385fa))
+* **deps:** rfc-0014 phase 5 — soak corpus aggregator + hybrid promotion runbook (AISDLC-167.5) ([8a496dc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8a496dc43feb0aa77c86468edad81acaf1c9e07b))
+* **deps:** rfc-0015 phase 3 — pre-dispatch filter chain (AISDLC-169.3) ([c8aad21](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c8aad216573d32813538e89ffcc7ce1791866bff))
+* **deps:** wire conditional review classifier into Step 7 (AISDLC-141) ([fbe160a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fbe160a47ad835686818952286030397e29e4593))
+* migrate dogfood watch CLI to executePipeline() from pipeline-cli (AISDLC-100.5) ([749a832](https://github.com/ai-sdlc-framework/ai-sdlc/commit/749a8323f8f8c2b72b5bd9ced48260b159007724))
+* nag on stale plugin version at session start (AISDLC-89) ([7113213](https://github.com/ai-sdlc-framework/ai-sdlc/commit/71132130e5cf54cfb93552f1ad247a484c7883a1))
+* **orchestrator:** dor bypass + 3-round escalation (AISDLC-115.7) ([f681a68](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f681a68679c18e72a6cf560778d533177bffdbe8))
+* **orchestrator:** dor metrics + slack digest (AISDLC-115.6) ([b840619](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b840619d9fc3c2dcf532547634aa260289873e6d))
+* **orchestrator:** rfc-0011 phase 4 — definition-of-ready composition (AISDLC-115.5) ([8dca1b6](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8dca1b6f42c9dd56bc1e83baf49ebb0a489d0da5))
+* **orchestrator:** self-heal parent repo state at Step 0 (AISDLC-137) ([c0033b1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c0033b18e3223ec289c003d0d349e021ca4c5f90))
+* pre-sign rebase + conditional re-review at Step 10.5 (AISDLC-102) ([f83f58a](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f83f58a1f997ebb70012885b78c67cf947ee4f66))
+* prevent CI-skip magic tokens from disabling workflows (AISDLC-88) ([0a746c9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0a746c9dfaccd03eccda7657369e49d60b945191))
+* rebase-resolver subagent + /ai-sdlc rebase command (AISDLC-105) ([c0dba16](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c0dba16771e01b383b4654d0d4040d47c8ce8d94))
+* **spec:** developer subagent — rebase onto main before push (AISDLC-168) ([204004f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/204004fb504f4531f89deec14184608df4471f51))
+* **spec:** strengthen developer subagent prompt — push + PR are required, not optional (AISDLC-164) ([157b6bc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/157b6bcc5e6e375b4fd8d602510c6e1790ff4202))
+* verifier Phase 3 — require contentHashV3, bump schema to v3 (AISDLC-103) ([c913b48](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c913b48b1dc148d1306ca8bc8e3e72c48792abe7))
+* wrap pipeline-cli step functions as MCP tools (AISDLC-100.3) ([093e612](https://github.com/ai-sdlc-framework/ai-sdlc/commit/093e6128d586371325e49e069aef107f289e5e60))
+
+
+### Bug Fixes
+
+* add publishConfig.access=public to mcp-server (lost from main somehow) ([1c8b584](https://github.com/ai-sdlc-framework/ai-sdlc/commit/1c8b584898c9e5035fc4b8d8267eed888474d115))
+* add rebase-tolerant contentHash to attestation predicate (AISDLC-94) ([e7d4eaa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e7d4eaa4ed571a9d997c78edc01ba268626b7329))
+* address reviewer feedback for AISDLC-105 ([39f5408](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39f5408a401b0aed362fc3621aa048399e83b5c3))
+* address reviewer feedback for AISDLC-88 ([f485a81](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f485a81a7426a159ec2b2b231eed78a420ad9ae2))
+* address reviewer feedback for AISDLC-94 dual-hash ([d159704](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d159704830ade1a320cd0c1cf964335109583086))
+* address round-3 reviewer feedback for AISDLC-88 ([a492bc3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a492bc3ffb8e59dc4841523242aeab15117589ea))
+* also remove agent-Stop hook from .claude-plugin/plugin.json (review feedback) ([8cfe045](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8cfe045acea015099c2cac093917dfc46ce1ea2e))
+* build pipeline-cli before bundling MCP server ([65609ee](https://github.com/ai-sdlc-framework/ai-sdlc/commit/65609ee9b52d2f6a4b0dfa1bace46cf4a84b9c68))
+* **deps:** incremental-review marker requires trusted author (AISDLC-142 round 2 — CRITICAL) ([759657e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/759657e82173c589e23ea563398095d39e1273fd))
+* **orchestrator:** enforce dev subagent JSON contract with one retry on parse failure (AISDLC-176) ([26ad8a4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/26ad8a4934681270c755b448f5b618e646396806))
+* **orchestrator:** track in-flight dispatches to prevent concurrent re-dispatch (AISDLC-179) ([0450ca1](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0450ca16cafd270cb9b9515afb20ac78fadebd70))
+* resolve MCP project root via env-var + cwd-fallback (AISDLC-99) ([3b640fa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3b640fa3995004ce59e6c74b54ea260212b39be3))
+
+
+### Reverts
+
+* move /ai-sdlc execute pipeline back inline (AISDLC-98) ([2352274](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2352274903d632c2a0bcca1e0993d20740f673ed))
+
 ## [0.8.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.8.0...ai-sdlc-plugin-v0.8.1) (2026-04-30)
 
 
