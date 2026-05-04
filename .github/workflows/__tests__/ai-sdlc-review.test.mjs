@@ -324,11 +324,7 @@ describe('AISDLC-193: verify-attestation.yml posts ai-sdlc/attestation as requir
     );
     // Defense vs hardcoded-success regression: both branches MUST exist so
     // a verifier-invalid result correctly fails the gate.
-    assert.match(
-      runScript,
-      /STATE=success/,
-      'status-posting step must have a success branch',
-    );
+    assert.match(runScript, /STATE=success/, 'status-posting step must have a success branch');
     assert.match(
       runScript,
       /STATE=failure/,
