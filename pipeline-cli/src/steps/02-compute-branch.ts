@@ -55,8 +55,30 @@ export function readBranchPattern(workDir: string, fallback: string = DEFAULT_PA
 
 export async function computeBranchName(opts: ComputeBranchOptions): Promise<ComputeBranchResult> {
   const taskIdLower = opts.taskId.toLowerCase();
-  const slug = slugify(opts.task.title);
   const pattern = readBranchPattern(opts.workDir, opts.defaultPattern ?? DEFAULT_PATTERN);
+  const slug = slugify(opts.task.title);
+
+  // AISDLC-180 — fail loud when the slug normalisation strips the title to
+  // an empty string. The previous behaviour silently produced branches like
+  // `ai-sdlc/aisdlc-178.1-` (trailing dash, no slug body), which then broke
+  // worktree creation across multiple tasks (every empty-slug task tried to
+  // claim the same `ai-sdlc/aisdlc-NNN-` branch shape) and made PR titles
+  // unhelpful. The most common trigger was a YAML block-scalar title
+  // (`title: >- \n  long wrapped …`) that the legacy line-based frontmatter
+  // parser captured as the literal indicator `>-` — that path is now fixed
+  // by the js-yaml parser in `parseSimpleYaml`, but we still guard here so
+  // any future title shape that produces an empty slug surfaces with a
+  // clear error rather than a malformed branch name.
+  if (slug === '' && pattern.includes('{slug}')) {
+    throw new Error(
+      `slug normalisation produced empty string from title ${JSON.stringify(opts.task.title)} ` +
+        `(task ${opts.taskId}); branch pattern ${JSON.stringify(pattern)} requires a non-empty {slug}. ` +
+        `The title is missing alphanumeric characters after kebab-case normalisation — ` +
+        `if the title field uses YAML block-scalar (>- or |-), confirm the frontmatter parser ` +
+        `decodes it to the unwrapped string before slugify().`,
+    );
+  }
+
   const branch = pattern.replace(/\{issueIdLower\}/g, taskIdLower).replace(/\{slug\}/g, slug);
   const worktreePath = join(opts.workDir, '.worktrees', taskIdLower);
   return { branch, worktreePath, slug, taskIdLower };
