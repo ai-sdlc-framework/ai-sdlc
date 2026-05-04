@@ -26,6 +26,7 @@ import {
   checkExternalDependencies,
   type CheckExternalDependenciesOpts,
 } from './external-dependencies.js';
+import { checkOrphanParent, type CheckOrphanParentOpts } from './orphan-parent.js';
 import type { FilterChainResult, FilterResult } from './types.js';
 
 export interface RunFilterChainOpts {
@@ -50,12 +51,27 @@ export interface RunFilterChainOpts {
 }
 
 /**
- * Run the three filters in §4.3 order against a single candidate.
+ * Run the four filters in chain order against a single candidate.
  * Short-circuits on the first failure but ALWAYS returns the partial trace
  * so the loop's event emission carries the prefix of cleared filters.
+ *
+ * Order: OrphanParent (AISDLC-175) → DependencyReadiness → DorReadiness →
+ * ExternalDependencies. OrphanParent runs first because it's the cheapest
+ * check (constant-time graph lookup) AND the most decisive — an orphan
+ * parent isn't real work at all, so there's no point asking the other three
+ * filters about it. The other three preserve the RFC §4.3 ordering among
+ * themselves.
  */
 export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const trace: FilterResult[] = [];
+
+  // Filter 0 — orphan-parent detection (AISDLC-175). Cheapest + most
+  // decisive: an orphan parent is bookkeeping work the framework should
+  // handle, not real dispatch.
+  const orphanOpts: CheckOrphanParentOpts = { graph: opts.graph, taskId: opts.taskId };
+  const orphan = checkOrphanParent(orphanOpts);
+  trace.push(orphan);
+  if (!orphan.passed) return { passed: false, trace, failure: orphan };
 
   // Filter 1 — dependency readiness.
   const depOpts: CheckDependencyReadinessOpts = { graph: opts.graph, taskId: opts.taskId };
@@ -113,6 +129,8 @@ export function formatFilterTrace(taskId: string, result: FilterChainResult): st
 
 function humanFilterName(filter: FilterResult['filter']): string {
   switch (filter) {
+    case 'OrphanParent':
+      return 'Orphan-parent check';
     case 'DependencyReadiness':
       return 'Dependency check';
     case 'DorReadiness':
@@ -130,6 +148,8 @@ function terminalNote(failure: FilterResult): string {
       return 'awaiting DoR clarification';
     case 'awaiting-external':
       return 'awaiting external';
+    case 'orphan-parent-needs-closure':
+      return 'orphan parent needs closure';
     default:
       return failure.reason ?? 'filter rejected';
   }

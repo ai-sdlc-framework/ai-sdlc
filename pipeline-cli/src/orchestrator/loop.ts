@@ -892,6 +892,13 @@ function toBlockedEvent(
         externalDeps: detail.blocking.map((d) => ({ id: d.id, kind: d.kind })),
         allExternalDeps: detail.all.map((d) => ({ id: d.id, kind: d.kind })),
       };
+    case 'orphan-parent-needs-closure':
+      return {
+        type: 'OrchestratorOrphanParent',
+        ts,
+        taskId,
+        completedChildren: detail.completedChildren,
+      };
   }
 }
 
@@ -923,6 +930,12 @@ function toEmittableBlockedEvent(blocked: OrchestratorBlockedEvent): Omit<Orches
         taskId: blocked.taskId,
         externalDeps: blocked.externalDeps.map((d) => ({ id: d.id, kind: d.kind })),
         allExternalDeps: blocked.allExternalDeps.map((d) => ({ id: d.id, kind: d.kind })),
+      };
+    case 'OrchestratorOrphanParent':
+      return {
+        type: 'OrchestratorOrphanParent',
+        taskId: blocked.taskId,
+        completedChildren: [...blocked.completedChildren],
       };
   }
 }

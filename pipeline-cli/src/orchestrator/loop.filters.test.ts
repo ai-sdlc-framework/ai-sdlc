@@ -37,6 +37,7 @@ import {
   type OrchestratorAwaitingExternalEvent,
   type OrchestratorBlockedByDependencyEvent,
   type OrchestratorBlockedByDorEvent,
+  type OrchestratorOrphanParentEvent,
   type StuckCounterEntry,
 } from './index.js';
 import type {
@@ -67,7 +68,12 @@ function captureLogger(): { logger: PipelineLogger; lines: string[] } {
 
 function node(
   id: string,
-  opts: { deps?: string[]; ext?: ExternalDependency[]; status?: 'open' | 'completed' } = {},
+  opts: {
+    deps?: string[];
+    ext?: ExternalDependency[];
+    status?: 'open' | 'completed';
+    parent?: string;
+  } = {},
 ): DependencyNode {
   const status = opts.status ?? 'open';
   return {
@@ -81,6 +87,7 @@ function node(
     externalDependencies: opts.ext ?? [],
     lastModified: '2026-05-02T00:00:00Z',
     filePath: `/tmp/${id}.md`,
+    parentTaskId: opts.parent ?? '',
   };
 }
 
@@ -525,5 +532,112 @@ describe('runOrchestratorLoop — uses tick.nextSleepSec for inter-tick sleep', 
     expect(sleepCalls).toHaveLength(2);
     expect(sleepCalls[0]).toBe(60_000);
     expect(sleepCalls[1]).toBe(120_000);
+  });
+});
+
+// ── AISDLC-175 witness regression ─────────────────────────────────────
+
+describe('runOrchestratorTick — AISDLC-175 orphan-parent witness regression', () => {
+  it('skips the orphan parent + dispatches the real bug task instead', async () => {
+    // Witness reproduction: 2026-05-04 dogfood run picked up AISDLC-70
+    // (RFC-0010 parent task with all 9 sub-tasks already in
+    // backlog/completed/) ahead of real work. The fix should make the
+    // orchestrator skip the orphan parent and pick the real bug task.
+    //
+    // Fixture:
+    //   AISDLC-PARENT — parent of two completed children → ORPHAN, skip.
+    //   AISDLC-PARENT.1, .2 — completed children of AISDLC-PARENT.
+    //   AISDLC-BUG    — real open bug task → ADMIT + dispatch.
+    const graph = buildGraph([
+      node('AISDLC-PARENT'),
+      node('AISDLC-PARENT.1', { status: 'completed', parent: 'AISDLC-PARENT' }),
+      node('AISDLC-PARENT.2', { status: 'completed', parent: 'AISDLC-PARENT' }),
+      node('AISDLC-BUG'),
+    ]);
+
+    const dispatched: string[] = [];
+    const config = defaultOrchestratorConfig({
+      workDir: tmp,
+      // maxConcurrent = 2 so the chain considers BOTH the orphan parent
+      // and the real bug task — verifying the orphan is filtered out
+      // (not just deprioritised) and the bug still gets through.
+      maxConcurrent: 2,
+      maxTicks: 1,
+      tickIntervalSec: 0,
+    });
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      sleep: () => Promise.resolve(),
+      // Orphan parent ranked FIRST in the frontier (matches the witness
+      // — AISDLC-70 was picked because it sorts before later IDs). The
+      // filter must reject it even though it tops the queue.
+      frontier: () => [
+        { id: 'AISDLC-PARENT', title: 'PARENT' },
+        { id: 'AISDLC-BUG', title: 'BUG' },
+      ],
+      graphLoader: () => graph,
+      taskLabelsLoader: () => [],
+      dispatch: async (taskId) => {
+        dispatched.push(taskId);
+        return approvedResult(taskId);
+      },
+      escalate: async () => {},
+    };
+    const tick = await runOrchestratorTick(config, adapters, 1);
+
+    // Bug task dispatched, orphan parent skipped.
+    expect(dispatched).toEqual(['AISDLC-BUG']);
+    expect(tick.dispatched).toEqual(['AISDLC-BUG']);
+
+    // Orphan parent surfaces as a structured filter rejection so
+    // operators see it in the events.jsonl bus + cli-status view.
+    const orphanEvt = tick.filterEvents.find((e) => e.taskId === 'AISDLC-PARENT');
+    expect(orphanEvt?.trace.passed).toBe(false);
+    expect(orphanEvt?.trace.failure?.filter).toBe('OrphanParent');
+    const orphanBlocked = orphanEvt?.blockedEvent as OrchestratorOrphanParentEvent;
+    expect(orphanBlocked.type).toBe('OrchestratorOrphanParent');
+    expect(orphanBlocked.completedChildren).toEqual(['aisdlc-parent.1', 'aisdlc-parent.2']);
+
+    // Bug task admitted (no blockedEvent + chain.passed === true).
+    const bugEvt = tick.filterEvents.find((e) => e.taskId === 'AISDLC-BUG');
+    expect(bugEvt?.trace.passed).toBe(true);
+    expect(bugEvt?.blockedEvent).toBeNull();
+  });
+
+  it('emits OrchestratorOrphanParent on the events.jsonl bus when the filter rejects', async () => {
+    // Verify the loop forwards the orphan-parent rejection to the events
+    // sink (the same path the date-rotated events.jsonl writer uses). A
+    // capturing sink keeps the test hermetic.
+    const graph = buildGraph([
+      node('AISDLC-ORPHAN'),
+      node('AISDLC-ORPHAN.1', { status: 'completed', parent: 'AISDLC-ORPHAN' }),
+    ]);
+    const captured: Array<{ type: string; taskId?: string; completedChildren?: string[] }> = [];
+    const config = defaultOrchestratorConfig({
+      workDir: tmp,
+      maxConcurrent: 1,
+      maxTicks: 1,
+      tickIntervalSec: 0,
+    });
+    await runOrchestratorTick(
+      config,
+      {
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        frontier: () => [{ id: 'AISDLC-ORPHAN', title: 'ORPHAN' }],
+        graphLoader: () => graph,
+        taskLabelsLoader: () => [],
+        dispatch: async (id) => approvedResult(id),
+        escalate: async () => {},
+        emitEvent: (event) => {
+          captured.push(event as { type: string; taskId?: string; completedChildren?: string[] });
+        },
+      },
+      1,
+    );
+    const orphanEvent = captured.find((e) => e.type === 'OrchestratorOrphanParent');
+    expect(orphanEvent).toBeDefined();
+    expect(orphanEvent?.taskId).toBe('AISDLC-ORPHAN');
+    expect(orphanEvent?.completedChildren).toEqual(['aisdlc-orphan.1']);
   });
 });

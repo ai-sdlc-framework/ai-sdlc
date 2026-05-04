@@ -38,6 +38,12 @@ export interface MakeTaskOptions {
    * completed/).
    */
   completed?: boolean;
+  /**
+   * Optional `parent_task_id:` frontmatter value. AISDLC-175 — used by
+   * dependency-graph + orphan-parent filter tests to simulate sub-tasks
+   * pointing at a parent (e.g. AISDLC-70.1 → AISDLC-70).
+   */
+  parentTaskId?: string;
 }
 
 /**
@@ -88,6 +94,9 @@ export function writeTaskFile(workDir: string, opts: MakeTaskOptions): string {
   if (opts.dependencies && opts.dependencies.length > 0) {
     fmLines.push('dependencies:');
     for (const d of opts.dependencies) fmLines.push(`  - ${d}`);
+  }
+  if (opts.parentTaskId) {
+    fmLines.push(`parent_task_id: ${opts.parentTaskId}`);
   }
 
   const acLines = acs.map((ac, i) => `- [${checked[i] ? 'x' : ' '}] #${i + 1} ${ac}`).join('\n');

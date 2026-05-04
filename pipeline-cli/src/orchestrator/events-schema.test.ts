@@ -132,6 +132,17 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts OrchestratorOrphanParent (AISDLC-175)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'OrchestratorOrphanParent',
+      taskId: 'AISDLC-70',
+      runId,
+      tick: 1,
+      completedChildren: ['aisdlc-70.1', 'aisdlc-70.2', 'aisdlc-70.3'],
+    });
+  });
+
   it('accepts WorkerStateTransition (Phase 2 forensic forward)', () => {
     expectValid({
       ts: baseTs,

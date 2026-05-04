@@ -76,6 +76,21 @@ describe('buildDependencyGraph', () => {
     expect(g.nodes.get('aisdlc-1')?.dependencies).toEqual(['AISDLC-2', 'AISDLC-3']);
   });
 
+  it('parses parent_task_id frontmatter (AISDLC-175)', () => {
+    // Sub-tasks carry `parent_task_id: AISDLC-X` so the orphan-parent
+    // filter can detect parent tasks whose every child is in completed/.
+    writeTaskFile(tmp, { id: 'AISDLC-70', title: 'parent' });
+    writeTaskFile(tmp, {
+      id: 'AISDLC-70.1',
+      title: 'phase 1',
+      parentTaskId: 'AISDLC-70',
+      completed: true,
+    });
+    const g = buildDependencyGraph({ workDir: tmp });
+    expect(g.nodes.get('aisdlc-70')?.parentTaskId).toBe('');
+    expect(g.nodes.get('aisdlc-70.1')?.parentTaskId).toBe('AISDLC-70');
+  });
+
   it('skips non-md files', () => {
     writeTaskFile(tmp, { id: 'AISDLC-1', title: 'a' });
     writeFileSync(join(tmp, 'backlog', 'tasks', 'README.txt'), 'ignore me\n', 'utf8');

@@ -102,14 +102,16 @@ export interface OrchestratorFilterEvent {
 }
 
 /**
- * Discriminated union for the three RFC §4.3 admission-block events.
- * Phase 4 (AISDLC-169.4) plumbs these into `events.jsonl`; Phase 3
- * surfaces them in the tick result + via the logger.
+ * Discriminated union for the admission-block events. Phase 4
+ * (AISDLC-169.4) plumbs these into `events.jsonl`; Phase 3 surfaces them
+ * in the tick result + via the logger. AISDLC-175 added the
+ * `OrchestratorOrphanParent` arm for parent-task closure detection.
  */
 export type OrchestratorBlockedEvent =
   | OrchestratorBlockedByDependencyEvent
   | OrchestratorBlockedByDorEvent
-  | OrchestratorAwaitingExternalEvent;
+  | OrchestratorAwaitingExternalEvent
+  | OrchestratorOrphanParentEvent;
 
 export interface OrchestratorBlockedByDependencyEvent {
   type: 'OrchestratorBlockedByDependency';
@@ -143,6 +145,28 @@ export interface OrchestratorAwaitingExternalEvent {
    * surfaced here so operators see the complete picture).
    */
   allExternalDeps: Array<{ id: string; kind: string }>;
+}
+
+/**
+ * AISDLC-175 — emitted when the orphan-parent filter rejects a candidate.
+ * The candidate is a parent task whose every declared child is already in
+ * `backlog/completed/`; the orchestrator skips it instead of dispatching a
+ * developer subagent for what is bookkeeping (parent file `git mv` to
+ * `completed/`) the framework should handle. Witness: AISDLC-70 (RFC-0010
+ * parent with all 9 sub-tasks already in `completed/`) was incorrectly
+ * dispatched on 2026-05-04 even though PR #231 had already shipped its
+ * closure.
+ */
+export interface OrchestratorOrphanParentEvent {
+  type: 'OrchestratorOrphanParent';
+  ts: string;
+  taskId: string;
+  /**
+   * IDs of the candidate's children that are all already in
+   * `backlog/completed/` (lowercased, sorted). At least one entry by
+   * construction — a parent with zero children is not an orphan parent.
+   */
+  completedChildren: string[];
 }
 
 export interface OrchestratorStuckCandidateEvent {

@@ -28,6 +28,7 @@ function node(
     externalDependencies: [],
     lastModified: '2026-05-02T00:00:00Z',
     filePath: `/tmp/${id}.md`,
+    parentTaskId: '',
   };
 }
 

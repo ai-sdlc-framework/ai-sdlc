@@ -88,6 +88,15 @@ export interface DependencyNode {
   lastModified: string;
   /** Path to the on-disk task file. */
   filePath: string;
+  /**
+   * RFC-0015 / AISDLC-175 — optional `parent_task_id:` from frontmatter
+   * (e.g. AISDLC-70.1 carries `parent_task_id: AISDLC-70`). Used by the
+   * orphan-parent filter to detect parent tasks whose every sub-task is
+   * already in `backlog/completed/` so the orchestrator stops dispatching
+   * developer subagents to do bookkeeping closures the framework should
+   * handle. Empty string when absent.
+   */
+  parentTaskId: string;
 }
 
 export interface DependencyGraph {
@@ -243,6 +252,12 @@ export function parseTaskFrontmatter(
   // array when the field is absent.
   const externalDependencies = parseExternalDependenciesBlock(fmRaw);
 
+  // RFC-0015 / AISDLC-175 — surface the `parent_task_id:` frontmatter value
+  // so the orphan-parent filter can detect parent tasks whose every sub-task
+  // landed in `backlog/completed/`. Empty string when absent (the common case
+  // for top-level tasks without a phased breakdown).
+  const parentTaskId = String(fm.parent_task_id ?? '').trim();
+
   // mtime — best-effort; if the stat fails (file vanished mid-walk per the
   // RFC-0014 Q6 "best-effort consistency" contract) we degrade to '' rather
   // than crashing the whole snapshot.
@@ -264,6 +279,7 @@ export function parseTaskFrontmatter(
     externalDependencies,
     lastModified,
     filePath,
+    parentTaskId,
   };
 }
 
