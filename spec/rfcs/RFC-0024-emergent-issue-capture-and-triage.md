@@ -358,7 +358,7 @@ Per `project_team_roles.md`:
 | Owner | Role | Status | Date |
 |---|---|---|---|
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏳ Pending walkthrough | — |
-| Alexander Kline | Product Lead | ⏳ Pending walkthrough | — |
+| Alexander Kline | Product Lead | ✅ Signed v0.2 | 2026-05-04 |
 
 Lifecycle: Draft → Ready for Review (after OQ walkthrough) → Signed Off (after all owners sign).
 
