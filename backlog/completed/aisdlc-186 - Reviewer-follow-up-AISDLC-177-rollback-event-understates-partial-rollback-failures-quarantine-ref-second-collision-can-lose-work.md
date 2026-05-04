@@ -3,7 +3,7 @@ id: AISDLC-186
 title: >-
   Reviewer follow-up: AISDLC-177 rollback event understates partial-rollback
   failures + quarantine ref second-collision can lose work
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 18:36'
 labels:
