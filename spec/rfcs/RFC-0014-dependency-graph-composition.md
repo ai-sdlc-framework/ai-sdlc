@@ -24,7 +24,7 @@ requiresDocs: []
 ## Sign-Off
 
 - [ ] Engineering owner — dominique@reliablegenius.io (pending)
-- [ ] Product owner — Alex (pending)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [ ] Operator owner — dominique@reliablegenius.io (pending)
 
 ## Revision History
