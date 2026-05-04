@@ -27,8 +27,18 @@ requiresDocs: []
 ## Sign-Off
 
 - [ ] Engineering owner — dominique@reliablegenius.io (pending)
-- [ ] Product owner — Alex (pending)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [ ] Operator owner — dominique@reliablegenius.io (pending)
+
+### Product Authority review
+
+PPA v1.2's structural layer (Sα₁ Layer 2) uses BM25 — deterministic, model-independent, interpretable. RFC-0019's adapter framework provides the pluggable interface IF embedding-based retrieval is added later as a supplement to BM25.
+
+**Product position**: BM25 remains the primary structural scorer. Embedding providers are enrichment, not replacement. PPA's structural-weight floor (`w_structural >= 0.20`) ensures BM25 always contributes regardless of additional retrieval mechanisms — this is load-bearing for SA scoring's deterministic-first guarantee per RFC-0029 Principle 2.
+
+**Composition with RFC-0030 Signal Ingestion**: when 0030's clustering uses an embedding adapter (optional algorithm), 0019 supplies it. Cluster-level demand routing through embedding-similarity is enrichment of the BM25-default path, not replacement. Same principle as Sα₁.
+
+Engineering domain ownership; Product endorses with the structural-floor + enrichment-not-replacement guardrails.
 
 ## Revision History
 
@@ -620,7 +630,7 @@ The operator (dominique) will walk through these before promoting the RFC out of
 ## 17. Sign-Off
 
 - [ ] Engineering owner — dominique@reliablegenius.io (pending)
-- [ ] Product owner — Alex (pending)
+- [x] Product owner — Alexander Kline (2026-05-04)
 - [ ] Operator owner — dominique@reliablegenius.io (pending)
 
 ## 18. Revision History
