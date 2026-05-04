@@ -341,9 +341,32 @@ Per `project_team_roles.md`:
 | Owner | Role | Status | Date |
 |---|---|---|---|
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏳ Pending walkthrough | — |
-| Alexander Kline | Product Lead | ⏳ Pending walkthrough | — |
+| Alexander Kline | Product Lead | ✅ Signed v0.1 | 2026-05-04 |
 
 Lifecycle: Draft → Ready for Review (after OQ walkthrough) → Signed Off (after all owners sign).
+
+### Product Authority review
+
+**Endorse with PPA integration specified.**
+
+**Philosophical position**: exploration is **pre-strategic** work. Its purpose is to produce the knowledge that makes strategic scoring possible. PPA should not score exploration with the full composite because the full composite requires exactly the inputs exploration is trying to discover (testable criteria, bounded scope, demand signal, execution feasibility). Scoring exploration through the execution-ready composite produces near-zero scores → autonomous pipeline never picks up exploration work. That's wrong.
+
+**PPA integration**:
+
+- Exploration items tagged `workstream: exploration` bypass standard DoR (per this RFC) AND bypass standard PPA admission composite
+- Enter a separate exploration queue scored only by **SA1 × time-box-urgency** (does this exploration serve the product's problem domain? + how close to its time-box deadline is it?)
+- ER6 (Cost Clearance) still applies — exploration can't exhaust the budget. ER1-5 are relaxed
+- Re-entry: when exploration produces its handoff artifact (finding / prototype / decision), the resulting execution work re-enters the standard pipeline through DoR + PPA admission like any other issue. Handoffs feed RFC-0024 emergent capture pattern.
+
+**Composition with RFC-0033 governance reporting**: completed explorations feed `rd.experimentsConducted` count and `rd.hypothesesTested` array directly. The whole governance-report `rd` synthesis section is meaningfully populated by exploration outputs — not by ad-hoc post-hoc narrative.
+
+**Composition with RFC-0024 emergent capture**: explorations produce findings; findings flow through RFC-0024 capture; new execution issues re-enter standard pipeline. The two RFCs are tightly coupled — RFC-0024 IS the on-ramp for RFC-0026 outputs.
+
+**Composition with RFC-0030 demand clusters**: low-SA-resonance demand clusters (per RFC-0030 §9) flagged for Product review may convert to explorations rather than execution issues. ("This demand exists but doesn't fit our identity — explore whether it's a separate-product opportunity vs noise.")
+
+**Composition with RFC-0031 DID Revision Proposal**: ambiguous-classification proposals (per RFC-0031 §7) may benefit from exploration-mode investigation before triad review.
+
+Position grounded in RFC-0029 Part II + Principle 4 (the soul holds — exploration explicitly tests low-SA demand without amplifying it into execution).
 
 ## 18. References
 
