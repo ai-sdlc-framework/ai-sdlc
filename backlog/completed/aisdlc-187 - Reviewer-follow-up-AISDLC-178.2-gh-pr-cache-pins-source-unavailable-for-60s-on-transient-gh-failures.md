@@ -3,7 +3,7 @@ id: AISDLC-187
 title: >-
   Reviewer follow-up: AISDLC-178.2 gh-pr-cache pins source-unavailable for 60s
   on transient gh failures
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 18:36'
 labels:
