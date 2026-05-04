@@ -391,9 +391,26 @@ Per `project_team_roles.md`:
 | Owner | Role | Status | Date |
 |---|---|---|---|
 | Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v0.2 (Engineering + Operator) | 2026-05-03 |
-| Alexander Kline | Product Lead | ⏳ Pending walkthrough | — |
+| Alexander Kline | Product Lead | ✅ Signed v0.2 | 2026-05-04 |
 
 Lifecycle: Ready for Review → Signed Off (after Product Lead signs).
+
+### Product Authority review
+
+**Endorse, no PPA composition concerns** — TUI is a pure observability surface that consumes PPA output (pillar breakdown, burn-down, drift events, DoR verdicts) without influencing scoring.
+
+The "Decision Engine" framing — operator's bottleneck is decisions, not commits — aligns with PPA HC composite prominence (Override + consensus + decision + design + product-authority). Foregrounding decisions-pending over implementation status is the right inversion.
+
+**Recommended TUI surfacings** (Product-side prioritization):
+
+1. **Healthy/unhealthy/ambiguous drift classification** prominently per shard — operators must see at a glance whether drift is the system working (healthy → DID revision proposal incoming) or failing (unhealthy → admission tightening recommendation). When RFC-0031 (Calibration-Driven DID Revision Proposal) lands, surface pending proposals as decision-pending blockers.
+2. **Burst-spend requests** as decision-pending blockers with countdown timer — when RFC-0032 (Cost-Governance Seam) lands, BurstSpendRequest events are 4-hour-decision-required by definition; the TUI is the surface where this lands.
+3. **Governance-report cadence** — when RFC-0033 (Governance Reporting Layer) lands, surface "weekly report due" / "quarterly audit-prep due" as ambient-not-blocking signals.
+4. **Demand cluster top-N** — when RFC-0030 (Signal Ingestion Pipeline) lands, the top 5 demand clusters by D1 contribution become operator-facing context for why the queue looks the way it does.
+
+These are forward-looking surface integrations; this RFC's v0.2 spec is approved as-is.
+
+Position grounded in RFC-0029 Principle 5 (governance by composition; TUI consumes, doesn't influence).
 
 ## 17. References
 
