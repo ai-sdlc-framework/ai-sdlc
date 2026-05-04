@@ -244,6 +244,70 @@ The computed identity is the long-term direction. The DID is the bridge. The gov
 
 ---
 
+## Part IV: Forward-Looking Notes on Adjacent Items
+
+Items that the Product pillar has perspective on but where formal sign-off / authorship sits with another pillar (Engineering or Design) or where the RFC has not yet been authored. Captured here so the Product position is on record for whoever picks them up.
+
+### IV.1 RFC-0034 candidate: Cross-Shard Substrate-Contention Awareness (Engineering domain)
+
+The pattern: when multiple in-flight agents touch the same substrate files, the dispatch layer should deprioritize new work that would create merge conflicts without hard-blocking it. A `substrate_contention(w)` count of in-flight agents touching shared files; an `ER_substrate_modifier = max(0.5, 1.0 - 0.15 × contention)` deprioritization signal.
+
+**Product position**: this is Engineering substrate dispatch optimization. Product domain only insofar as the modifier is an ER-axis component (similar to `ER_cost_effort` in RFC-0032). When this lands, it should:
+
+1. Sit alongside ER6 categorical gating, not within the `min(ER1..ER6)` aggregation — same architectural pattern as RFC-0032
+2. Compose with RFC-0010's merge gate (which remains the authoritative conflict resolver); contention-awareness is a cost-saving heuristic, not a correctness gate
+3. Read in-flight execution state from the worktree pool manager; no new LLM calls
+
+**Authority**: Dom (Engineering / orchestrator). Product reviews for ER-placement consistency only.
+
+### IV.2 RFC-0035 candidate: Independence-Aware Review Classifier (Engineering domain)
+
+The pattern: review classifier (RFC-0010 §12) checks the harness independence constraint graph before routing reviewers. If no valid assignment preserves independence, the orchestrator applies the stage's `onFailure` policy immediately rather than discovering the violation downstream.
+
+**Product position**: this is Engineering classifier hardening. Product domain only insofar as review-confidence calibration consumes the `constraintSatisfied` signal. When this lands:
+
+1. The `constraintSatisfied: { reviewer, independent: bool }` field on classifier output should flow into the calibration log so review-confidence learning excludes constraint-violated reviews
+2. CK calibration should distinguish "review missed the bug" from "review couldn't have caught the bug because of harness collision" — the latter is not a calibration signal
+
+**Authority**: Dom (Engineering / orchestrator). Product reviews for CK-calibration-flag consistency only.
+
+### IV.3 RFC-0027 candidate: Design Coherence Drift Detection (Design domain)
+
+Per Mo's RFC-0009 v3.4 C3 commitment, RFC-0027 is reserved for design vertex schema enrichment + a fourth `Eτ_tessellation_drift` detection rule (delta between a soul's design imperatives and DSB/component-catalog implementation).
+
+**Product position** (already pre-stated in this document Part II):
+
+1. Endorse as `Eτ_tessellation_drift` extension. The drift signal flows into the `SoulDriftDetected.driftSource.expressionDrift` field (per PPA v1.2/v1.3 direction).
+2. When RFC-0027 detection fires, it should compose with RFC-0031's classification logic (healthy / unhealthy / ambiguous) as another evidence source — design-coherence-driven drift may be healthy (legitimate visual evolution) or unhealthy (drift away from soul's expression identity).
+3. The RFC-0030 SA filter applies to demand clusters surfacing design-language gaps — when low-SA design-flavored demand clusters surface, that's the signal RFC-0027 needs to investigate.
+
+**Authority**: Mo (Design). Product reviews for SoulDriftDetected.driftSource.expressionDrift integration only.
+
+### IV.4 In-doc sign-off table reconciliation: RFC-0006, RFC-0007, RFC-0010
+
+These RFCs have Product Authority sign-off recorded as delivered in Product-side records but the in-doc Sign-Off tables may show stale state. The discrepancy is documentation drift, not a substantive disagreement.
+
+**Product position**:
+
+1. **RFC-0006** (Design System Governance v5) — Design Authority's domain (Mo); Product sign-off recorded under PPA v1.1 ER4 + C1-C2 + HC_design integration. Reconciliation is mechanical when Mo or Dom flag.
+2. **RFC-0007** (Figma Make Pipeline Integration v1) — Design + Engineering domain; Product sign-off recorded under PPA v1.3 sourceType: prototype-derived integration + missing-DID penalty mechanism (PPA v1.2 direction). Reconciliation mechanical.
+3. **RFC-0010** (Parallel Execution + Worktree Pooling) — Engineering's domain (Dom); Product analysis delivered. Cost-governance interaction with RFC-0032's `ER_cost_effort` is the substantive Product-side touchpoint. RFC-0010 §14 SubscriptionLedger is the cost data source `ER_cost_effort` reads from; cross-reference recommended in next RFC-0010 revision.
+
+These reconciliations are not blocking. If/when the in-doc tables matter (e.g., audit prep per RFC-0022), file mechanical sign-off PRs at that point.
+
+### IV.5 Standing protocol for future "out-of-scope-but-Product-relevant" items
+
+When future RFCs land that are Engineering- or Design-domain but have PPA composition implications:
+
+1. **Don't sign as Product Authority** unless the in-doc Sign-Off table requires it.
+2. **Do post a forward-looking note** here in Part IV (or a successor "perspectives" surface) so the Product position is on record for the authoring pillar.
+3. **Cite the relevant Principle from Part I** (typically Principle 1 axis-boundary or Principle 5 composition) so the perspective is grounded.
+4. **Surface PPA-side constraints** as composition recommendations, not authority demands.
+
+This protects the three-axis basis from authority-creep while preserving the cross-pillar compositional clarity the framework needs.
+
+---
+
 ## How this document is used
 
 This document is a **standing reference**. Specifically:
@@ -252,6 +316,7 @@ This document is a **standing reference**. Specifically:
 - New RFCs that introduce evaluation mechanisms SHOULD map themselves to Principle 2 (Deterministic-First) and explain any deviation.
 - New RFCs that introduce governance gates SHOULD map themselves to Principle 5 (Governance by Composition) and explain how they compose with the existing chain.
 - New RFCs that introduce intent-layer concepts SHOULD map themselves to Principle 1 (Three-Axis Basis) and clarify which axis they extend.
+- Adjacent items (Engineering- or Design-domain RFCs with PPA implications) SHOULD have a Part IV forward-looking note rather than a Product Authority sign-off — preserves three-axis boundaries while keeping perspective on record.
 - This document is revised when new design principles emerge or existing principles are challenged by production evidence.
 
 ---
