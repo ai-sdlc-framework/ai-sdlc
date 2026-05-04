@@ -1,7 +1,9 @@
 import { describe, it, expect } from 'vitest';
+import type { DesignSystemBinding } from '@ai-sdlc/reference';
 import type { AdmissionInput } from './admission-score.js';
 import { scoreIssueForAdmission, type AdmissionThresholds } from './admission-score.js';
 import { computeAdmissionComposite } from './admission-composite.js';
+import { enrichAdmissionInput } from './admission-enrichment.js';
 import {
   computePillarBreakdown,
   detectTensions,
@@ -237,5 +239,91 @@ describe('scoreIssueForAdmission — pillarBreakdown required (AC #1)', () => {
     expect(result.admitted).toBe(false);
     expect(result.pillarBreakdown).toBeDefined();
     expect(result.pillarBreakdown.product).toBeDefined();
+  });
+});
+
+// AISDLC-171 — end-to-end fixture for Alex's RFC-0009 §13 OQ-8 observation.
+// Reproduces the three observable states of the
+// `pillarBreakdown.shared.hcComposite.{design, designAuthorityConfigured}`
+// surface so adopters can tell the wiring is working as intended (per
+// RFC-0008 §14.2) — even when `design === 0`.
+describe('AISDLC-171 — pillarBreakdown.shared.hcComposite design channel states', () => {
+  const dsbWithPrincipals = (principals: string[]): DesignSystemBinding => ({
+    apiVersion: 'ai-sdlc.io/v1alpha1' as const,
+    kind: 'DesignSystemBinding',
+    metadata: { name: 'ds' },
+    spec: {
+      stewardship: {
+        designAuthority: { principals, scope: [] },
+        engineeringAuthority: { principals: ['eng'], scope: [] },
+      },
+      designToolAuthority: 'collaborative',
+      tokens: {
+        provider: 'p',
+        format: 'w3c-dtcg',
+        source: { repository: 'r' },
+        versionPolicy: 'minor',
+      },
+      catalog: { provider: 'c' },
+      compliance: { coverage: { minimum: 85 } },
+    },
+  });
+
+  it('preDesignSystem (no DSB) → design=0, designAuthorityConfigured undefined', () => {
+    const composite = computeAdmissionComposite(makeInput());
+    const breakdown = computePillarBreakdown(composite);
+    expect(breakdown.shared.hcComposite.design).toBe(0);
+    // Distinct sentinel: undefined means "no DSB at all" — not the
+    // "configured but inactive" state Alex flagged in OQ-8.
+    expect(breakdown.shared.hcComposite.designAuthorityConfigured).toBeUndefined();
+  });
+
+  it('OQ-8 reproduction: DSB has principals, author is not one → design=0, configured=true', () => {
+    // This is exactly the scenario Alex filed in RFC-0009 §13 OQ-8 —
+    // `stewardship.designAuthority.principals: [name]` is declared,
+    // but `pillarBreakdown.shared.hcComposite.design` does not populate.
+    // Per RFC-0008 §14.2 this is intentional behavior (only principals
+    // can emit HC_design); the `designAuthorityConfigured` flag now
+    // surfaces "structure exists but no principal participated" so
+    // operators can distinguish this from preDesignSystem.
+    const dsb = dsbWithPrincipals(['alice']);
+    const enriched = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory', commenterLogins: ['bob'] },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01' },
+    );
+    const composite = computeAdmissionComposite(enriched);
+    const breakdown = computePillarBreakdown(composite);
+    expect(breakdown.shared.hcComposite.design).toBe(0);
+    expect(breakdown.shared.hcComposite.designAuthorityConfigured).toBe(true);
+  });
+
+  it('principal participates → design fires at signalType weight, configured=true', () => {
+    const dsb = dsbWithPrincipals(['alice']);
+    const enriched = enrichAdmissionInput(
+      {
+        ...makeInput(),
+        authorLogin: 'alice',
+        labels: ['design/advances-coherence'],
+      },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01' },
+    );
+    const composite = computeAdmissionComposite(enriched);
+    const breakdown = computePillarBreakdown(composite);
+    // Base weight for advances-design-coherence is 0.6, no compliance
+    // modulation supplied → hcDesign = 0.6.
+    expect(breakdown.shared.hcComposite.design).toBeCloseTo(0.6, 6);
+    expect(breakdown.shared.hcComposite.designAuthorityConfigured).toBe(true);
+  });
+
+  it('empty principals array → design=0, configured=false (DSB without authority structure)', () => {
+    const dsb = dsbWithPrincipals([]);
+    const enriched = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'alice' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01' },
+    );
+    const composite = computeAdmissionComposite(enriched);
+    const breakdown = computePillarBreakdown(composite);
+    expect(breakdown.shared.hcComposite.design).toBe(0);
+    expect(breakdown.shared.hcComposite.designAuthorityConfigured).toBe(false);
   });
 });

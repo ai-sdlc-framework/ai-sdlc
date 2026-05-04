@@ -311,6 +311,15 @@ function buildDesignAuthoritySignal(
   ctx: EnrichmentContext,
 ): DesignAuthoritySignal | undefined {
   if (!ctx.designSystemBinding) return undefined;
+  // AISDLC-171: surface whether the DSB declares any design authority
+  // principals at all. This is a diagnostic flag — it does NOT participate
+  // in the HC_design weight calculation (per RFC-0008 §14.2, only
+  // principals who participate as author/commenter can emit HC_design).
+  // Surfacing it lets pillarBreakdown distinguish "DSB has no design
+  // authority structure" from "DSB has design authority but no principal
+  // participated in this issue".
+  const principalsDeclared =
+    (ctx.designSystemBinding.spec.stewardship.designAuthority.principals?.length ?? 0) > 0;
   const { isDesignAuthority, signalType } = checkDesignAuthority(
     {
       authorLogin: input.authorLogin,
@@ -319,10 +328,13 @@ function buildDesignAuthoritySignal(
     },
     ctx.designSystemBinding,
   );
-  if (!isDesignAuthority) return { isDesignAuthority: false };
+  if (!isDesignAuthority) {
+    return { isDesignAuthority: false, principalsDeclared };
+  }
   return {
     isDesignAuthority: true,
     signalType,
+    principalsDeclared,
     ...(ctx.areaComplianceScore !== undefined
       ? { areaComplianceScore: ctx.areaComplianceScore }
       : {}),

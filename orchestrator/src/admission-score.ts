@@ -128,6 +128,20 @@ export interface DesignAuthoritySignal {
   signalType?: DesignAuthoritySignalType;
   /** The issue's code area compliance score in [0, 1] (used to modulate weight). */
   areaComplianceScore?: number;
+  /**
+   * Diagnostic flag (AISDLC-171) — true when the resolved DSB declared
+   * one or more `stewardship.designAuthority.principals` entries,
+   * regardless of whether any of them participated in this issue.
+   *
+   * This is intentionally NOT consumed by `computeDesignAuthorityWeight`
+   * — RFC-0008 §14.2 requires principal participation for HC_design to
+   * fire at any weight. The flag exists so `pillarBreakdown.shared.
+   * hcComposite.designAuthorityConfigured` can surface "design authority
+   * is configured but absent from this issue" — distinct from "no
+   * design authority structure exists at all" — without violating the
+   * RFC's §14.2 weighting constraint.
+   */
+  principalsDeclared?: boolean;
 }
 
 export interface AdmissionThresholds {

@@ -47,8 +47,32 @@ export interface SharedDimensions {
    * populates this once the SA-1/SA-2/SA-3 decomposition lands.
    */
   saAlpha3?: number;
-  /** Per-channel HC breakdown with the tanh composite for reference. */
-  hcComposite: HcChannelBreakdown & { value: number };
+  /**
+   * Per-channel HC breakdown with the tanh composite for reference.
+   *
+   * `designAuthorityConfigured` (AISDLC-171) — diagnostic flag set when
+   * the resolved DSB declares any `stewardship.designAuthority.principals`
+   * entries, regardless of whether one of them participated in the issue.
+   * Lets operators distinguish three pillarBreakdown states for the design
+   * channel:
+   *   - `design = 0` and `configured === undefined` → no DSB resolved
+   *     (preDesignSystem). HC_design intentionally inert.
+   *   - `design = 0` and `configured === true`     → DSB declares design
+   *     authority but no principal participated as author/commenter.
+   *     HC_design intentionally 0 per RFC-0008 §14.2 (only principals
+   *     emit full-weight HC_design signals; non-principal opinions route
+   *     through HC_consensus, not HC_design).
+   *   - `design ≠ 0` and `configured === true`     → a principal
+   *     participated; signal weight reflects label-derived signalType.
+   *
+   * The `false` case (DSB exists but `principals` is empty) is also
+   * surfaced for completeness — a DSB without designAuthority principals
+   * cannot ever fire HC_design and operators should know.
+   */
+  hcComposite: HcChannelBreakdown & {
+    value: number;
+    designAuthorityConfigured?: boolean;
+  };
 }
 
 export interface TensionFlag {
@@ -149,6 +173,15 @@ export function computePillarBreakdown(composite: AdmissionComposite): PillarBre
       decision: b.humanCurve.hcDecision,
       design: b.humanCurve.hcDesign,
       value: b.humanCurve.hcComposite,
+      // AISDLC-171: only include the flag when the underlying signal
+      // populated it (i.e., a DSB was resolved). Leaving it `undefined`
+      // when no DSB was supplied keeps the preDesignSystem state
+      // distinct from the "configured but inactive" state at the API
+      // surface — operators inspecting `pillarBreakdown.shared` can
+      // tell the three states apart without reading the DSB themselves.
+      ...(b.humanCurve.designAuthorityConfigured !== undefined
+        ? { designAuthorityConfigured: b.humanCurve.designAuthorityConfigured }
+        : {}),
     },
   };
 

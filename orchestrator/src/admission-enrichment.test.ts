@@ -827,7 +827,13 @@ describe('enrichAdmissionInput — designAuthoritySignal population', () => {
       { ...makeInput(), authorLogin: 'mallory' },
       { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
     );
-    expect(out.designAuthoritySignal).toEqual({ isDesignAuthority: false });
+    // AISDLC-171: principalsDeclared surfaces "DSB has design authority
+    // structure but no principal participated" — distinct from "no DSB
+    // at all" (where designAuthoritySignal is undefined entirely).
+    expect(out.designAuthoritySignal).toEqual({
+      isDesignAuthority: false,
+      principalsDeclared: true,
+    });
     expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBe(0);
   });
 
@@ -850,6 +856,7 @@ describe('enrichAdmissionInput — designAuthoritySignal population', () => {
       isDesignAuthority: true,
       signalType: 'advances-design-coherence',
       areaComplianceScore: 0.9,
+      principalsDeclared: true,
     });
     expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBeCloseTo(0.18, 6);
   });
@@ -869,5 +876,99 @@ describe('enrichAdmissionInput — designAuthoritySignal population', () => {
     expect(out.designAuthoritySignal?.signalType).toBe('misaligned-with-brand');
     // Base weight -0.4, no modulation since areaComplianceScore absent
     expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBeCloseTo(-0.4, 6);
+  });
+});
+
+// AISDLC-171 — three-state worked-example fixture for the
+// designAuthority → HC_design propagation contract. RFC-0008 §14.2 requires
+// principal participation for HC_design to fire at any weight; this
+// fixture pins the three observable states so adopters can reproduce
+// Alex's RFC-0009 §13 OQ-8 observation deterministically.
+describe('AISDLC-171 — designAuthority → HC_design propagation states', () => {
+  const dsbWithPrincipals = (principals: string[]): DesignSystemBinding => ({
+    apiVersion: API_VERSION,
+    kind: 'DesignSystemBinding',
+    metadata: { name: 'ds' },
+    spec: {
+      stewardship: {
+        designAuthority: { principals, scope: [] },
+        engineeringAuthority: { principals: ['eng'], scope: [] },
+      },
+      designToolAuthority: 'collaborative',
+      tokens: {
+        provider: 'p',
+        format: 'w3c-dtcg',
+        source: { repository: 'r' },
+        versionPolicy: 'minor',
+      },
+      catalog: { provider: 'c' },
+      compliance: { coverage: { minimum: 85 } },
+    },
+  });
+
+  it('state 1: no DSB resolved → designAuthoritySignal absent (preDesignSystem)', () => {
+    const out = enrichAdmissionInput(makeInput(), {});
+    // Distinct from "configured but inactive" — the entire signal is
+    // absent, signalling preDesignSystem to downstream consumers.
+    expect(out.designAuthoritySignal).toBeUndefined();
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBe(0);
+  });
+
+  it('state 2: DSB has principals but issue author is not one → HC_design=0 + flag=true', () => {
+    // This is exactly Alex's RFC-0009 OQ-8 observation: DSB carries
+    // `stewardship.designAuthority.principals: [name]` but
+    // `pillarBreakdown.shared.hcComposite.design` does not populate.
+    // The fix surfaces the diagnostic flag so operators can tell
+    // "configured but inactive" from "no DSB at all".
+    const dsb = dsbWithPrincipals(['alice']);
+    const out = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory', commenterLogins: ['bob'] },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    expect(out.designAuthoritySignal).toEqual({
+      isDesignAuthority: false,
+      principalsDeclared: true,
+    });
+    // Per RFC-0008 §14.2, HC_design weight is 0 in this state — only
+    // principals can emit HC_design signals. The flag is purely
+    // diagnostic and does NOT alter the weight.
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBe(0);
+  });
+
+  it('state 3: DSB principal participates as author → HC_design fires with signalType weight', () => {
+    const dsb = dsbWithPrincipals(['alice']);
+    const out = enrichAdmissionInput(
+      {
+        ...makeInput(),
+        authorLogin: 'alice',
+        labels: ['design/advances-coherence'],
+      },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    expect(out.designAuthoritySignal).toEqual({
+      isDesignAuthority: true,
+      signalType: 'advances-design-coherence',
+      principalsDeclared: true,
+    });
+    // Base weight 0.6, no compliance modulation.
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBeCloseTo(0.6, 6);
+  });
+
+  it('edge: DSB with empty principals array → flag=false, signal still emitted', () => {
+    // A DSB with `designAuthority.principals: []` is technically valid
+    // (the JSON schema requires minItems:1, but the in-memory type
+    // allows empty arrays). When principals is empty, the structure
+    // exists but cannot fire HC_design — operators should see this
+    // distinct from "principals declared but no participant matched".
+    const dsb = dsbWithPrincipals([]);
+    const out = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'alice' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    expect(out.designAuthoritySignal).toEqual({
+      isDesignAuthority: false,
+      principalsDeclared: false,
+    });
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBe(0);
   });
 });

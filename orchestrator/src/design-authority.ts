@@ -5,6 +5,19 @@
  * `designAuthority` principal on the resolved DesignSystemBinding, and
  * parses the explicit signal type from issue labels (preferred) or
  * structured comment markers.
+ *
+ * AISDLC-171 / RFC-0009 §13 OQ-8 anchor:
+ *   HC_design fires ONLY when one of the issue's participants (author or
+ *   commenter) is a principal listed in
+ *   `DesignSystemBinding.spec.stewardship.designAuthority.principals`.
+ *   Per RFC-0008 §14.2, non-principal participants' design opinions are
+ *   routed through HC_consensus (not HC_design) — this prevents anyone
+ *   from emitting full-weight HC_design signals just by labeling an
+ *   issue. To distinguish "no DSB at all" from "DSB exists but no
+ *   principal participated" at the breakdown surface, see
+ *   `principalsDeclared` on `DesignAuthoritySignal` (set by
+ *   `buildDesignAuthoritySignal` in `admission-enrichment.ts`) and
+ *   `pillarBreakdown.shared.hcComposite.designAuthorityConfigured`.
  */
 
 import type { DesignSystemBinding } from '@ai-sdlc/reference';

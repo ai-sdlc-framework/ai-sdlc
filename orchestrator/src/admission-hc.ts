@@ -44,8 +44,27 @@ export interface AdmissionHumanCurveResult {
   hcConsensus: number;
   /** Signed meeting-decision signal in [-1, 1] (0 = neutral when absent). */
   hcDecision: number;
-  /** Signed design-authority signal in [-1, 1]. */
+  /**
+   * Signed design-authority signal in [-1, 1].
+   *
+   * AISDLC-171: this channel ONLY fires when one of the issue's
+   * participants (author or commenters) is a principal listed in
+   * `DesignSystemBinding.spec.stewardship.designAuthority.principals`.
+   * Per RFC-0008 §14.2, non-principal participants' design opinions
+   * route through `hcConsensus` instead — `hcDesign` carries
+   * specifically the design-authority leadership signal. To distinguish
+   * "no DSB at all" from "DSB exists but no design principal
+   * participated", consult `designAuthorityConfigured` on this result
+   * (and on `pillarBreakdown.shared.hcComposite`).
+   */
   hcDesign: number;
+  /**
+   * Diagnostic flag (AISDLC-171) — true when the resolved DSB declared
+   * `stewardship.designAuthority.principals` entries. Always undefined
+   * when no DSB was supplied (preDesignSystem). Surfaces the
+   * "configured but inactive" state without altering hcDesign weight.
+   */
+  designAuthorityConfigured?: boolean;
   /** Weighted sum before tanh. */
   hcRaw: number;
   /** `tanh(hcRaw)` — the HC value consumed by the admission composite. */
@@ -101,6 +120,9 @@ export function computeAdmissionHumanCurve(input: AdmissionInput): AdmissionHuma
   const hcConsensus = deriveHcConsensus(input);
   const hcDecision = deriveHcDecision(input);
   const hcDesign = deriveHcDesign(input.designAuthoritySignal);
+  // AISDLC-171: surface the diagnostic flag from the enriched signal so
+  // pillarBreakdown can render the "configured but inactive" state.
+  const designAuthorityConfigured = input.designAuthoritySignal?.principalsDeclared;
 
   const hcRaw =
     HC_WEIGHTS.explicit * hcExplicit +
@@ -109,7 +131,15 @@ export function computeAdmissionHumanCurve(input: AdmissionInput): AdmissionHuma
     HC_WEIGHTS.design * hcDesign;
   const hcComposite = Math.tanh(hcRaw);
 
-  return { hcExplicit, hcConsensus, hcDecision, hcDesign, hcRaw, hcComposite };
+  return {
+    hcExplicit,
+    hcConsensus,
+    hcDecision,
+    hcDesign,
+    hcRaw,
+    hcComposite,
+    ...(designAuthorityConfigured !== undefined ? { designAuthorityConfigured } : {}),
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {
