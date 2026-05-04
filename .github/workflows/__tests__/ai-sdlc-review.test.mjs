@@ -291,19 +291,46 @@ describe('Patch 2: budget circuit breaker (AC-1, AC-2, AC-3, AC-4)', () => {
   });
 });
 
-describe('AC-5 (Patch 1): verify-attestation.yml audit-only role unchanged', () => {
-  it('verify-attestation.yml is NOT modified by this PR (sanity guard)', () => {
+describe('AISDLC-193: verify-attestation.yml posts ai-sdlc/attestation as required gate', () => {
+  it('verify-attestation.yml verify job ends with status-posting step (NOT audit-only)', () => {
     const verifyPath = resolve(__dirname, '..', 'verify-attestation.yml');
     const verify = loadYaml(verifyPath);
     assert.ok(verify, 'verify-attestation.yml must still parse');
-    // The verifier's `verify` job must NOT have been turned into a merge gate.
-    // The job's last step is "Log audit result" emitting ::notice / ::warning.
     const verifyJob = verify.jobs.verify;
     const lastStep = verifyJob.steps[verifyJob.steps.length - 1];
-    assert.equal(
+    // AISDLC-193 stage 1 (reverses AISDLC-140 sub-4 audit-only demotion):
+    // the verifier MUST post ai-sdlc/attestation as a commit status so
+    // branch protection can require it. The audit-only "Log audit result"
+    // step is replaced by the status-posting step below.
+    assert.match(
       lastStep.name,
-      'Log audit result',
-      'verify-attestation.yml verify job must still end with audit-only logging',
+      /Post ai-sdlc\/attestation status/i,
+      'verify-attestation.yml verify job must end with the status-posting step (AISDLC-193)',
+    );
+    // Sanity: the run script must invoke `gh api .../statuses/...` with the
+    // ai-sdlc/attestation context so a typo in the step name doesn't silently
+    // bypass the gate.
+    const runScript = String(lastStep.run || '');
+    assert.match(
+      runScript,
+      /repos\/\$\{REPO\}\/statuses/,
+      'status-posting step must POST to /statuses/ endpoint',
+    );
+    assert.match(
+      runScript,
+      /ai-sdlc\/attestation/,
+      'status-posting step must use ai-sdlc/attestation as the context',
+    );
+  });
+
+  it('verify-attestation.yml grants statuses:write permission', () => {
+    const verifyPath = resolve(__dirname, '..', 'verify-attestation.yml');
+    const verify = loadYaml(verifyPath);
+    const verifyJob = verify.jobs.verify;
+    assert.equal(
+      verifyJob.permissions?.statuses,
+      'write',
+      'verify job must have statuses:write permission to post ai-sdlc/attestation',
     );
   });
 });
