@@ -35,10 +35,11 @@
  * # Spawner routing (`--spawner`)
  *
  *   - `mock`       — `MockSpawner` with hard-coded approval fixtures.
- *                    For `--dry-run` plumbing checks + integration tests.
+ *                    For dry-run plumbing checks + integration tests only.
  *                    Default in v1 because the harder spawners (api-key,
  *                    claude-cli) carry billing / cross-session implications
- *                    that need explicit operator opt-in.
+ *                    that need explicit operator opt-in. `--run --spawner
+ *                    mock` refuses before filesystem mutation.
  *   - `api-key`    — `defaultSpawner()`'s SDK path (uses `ANTHROPIC_API_KEY`).
  *                    Burns API credits per dispatch — same billing model as
  *                    `pnpm dogfood watch`. Documented for AI-assistant /
@@ -109,9 +110,9 @@ export const CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE =
 
 /**
  * Build a `MockSpawner` whose fixtures unconditionally APPROVE. Used by
- * `--spawner mock` (default) so the dispatch surface is exercisable
- * end-to-end in dry-run / plumbing / integration contexts without a real
- * LLM. Does NOT actually exercise the developer's work — it returns a
+ * `--spawner mock` so the dispatch surface is exercisable in dry-run /
+ * plumbing / integration contexts without a real LLM. Does NOT actually
+ * exercise the developer's work — it returns a
  * hard-coded `DeveloperReturn` whose `commitSha` is `null` to signal
  * "no real work was done; this is a plumbing check".
  *
@@ -251,6 +252,8 @@ export interface ExecuteCommandOptions {
   spawnerKind: SpawnerKind;
   maxIterations: number;
   dryRun: boolean;
+  /** Explicit operator intent to allow filesystem/network mutation. */
+  run?: boolean;
   /** Override spawner factory — tests inject a stub. */
   spawnerFactory?: (kind: SpawnerKind) => Promise<SubagentSpawner>;
   /** Override the executePipeline invocation — tests inject a stub. */
@@ -299,10 +302,12 @@ export interface ExecuteCommandResult {
  * Run the umbrella `execute` subcommand. Exported so tests can drive it
  * without going through the yargs `process.argv` round-trip.
  *
- * The intent in v1: `dryRun=true` (and `--spawner mock` by extension) is
- * the safe-default plumbing-check exercise — it should NEVER mutate the
- * worktree or push commits. `dryRun=false` + `--spawner api-key` is the
- * real-money path that the operator opts into explicitly.
+ * Safe default: unless `run=true`, this only validates and computes the
+ * branch/worktree plan. It must not resolve a spawner, call `executePipeline`,
+ * create a worktree, flip task status, or push commits. `run=true` +
+ * `--spawner api-key` is the real-money path that the operator opts into
+ * explicitly. `run=true` + `--spawner mock` refuses before validation or any
+ * filesystem mutation because mock is only a plumbing fixture.
  */
 export async function runExecuteCommand(
   opts: ExecuteCommandOptions,
@@ -315,16 +320,7 @@ export async function runExecuteCommand(
 
   logger.progress('execute', `task=${opts.taskId} spawner=${opts.spawnerKind}`);
 
-  // Resolve the spawner FIRST so a misconfigured `--spawner claude-cli` /
-  // missing API key fails fast BEFORE we touch the filesystem.
-  let spawner: SubagentSpawner;
-  try {
-    spawner = await factory(opts.spawnerKind);
-  } catch (err) {
-    return { ok: false, reason: (err as Error).message };
-  }
-
-  if (opts.dryRun) {
+  if (!opts.run || opts.dryRun) {
     // Pre-flight only: validate the task + compute the branch/worktree path
     // so the operator sees what WOULD run. Don't touch the worktree.
     const validation = await validateTask({ taskId: opts.taskId, workDir: opts.workDir });
@@ -347,6 +343,23 @@ export async function runExecuteCommand(
         maxIterations: opts.maxIterations,
       },
     };
+  }
+
+  if (opts.spawnerKind === 'mock') {
+    return {
+      ok: false,
+      reason:
+        '`--spawner mock` is dry-run/plumbing only. Omit `--run` for a safe plan, or pass `--run --spawner api-key` for a real execution.',
+    };
+  }
+
+  // Resolve the spawner after the explicit run gate so default/plumbing
+  // invocations cannot fail through SDK/env probing and cannot mutate state.
+  let spawner: SubagentSpawner;
+  try {
+    spawner = await factory(opts.spawnerKind);
+  } catch (err) {
+    return { ok: false, reason: (err as Error).message };
   }
 
   // Real run — drive `executePipeline` with the verdict-file hook wired into
@@ -499,7 +512,7 @@ export function executeCommand(): CommandModule {
   return {
     command: 'execute <task-id>',
     describe:
-      'AISDLC-182 — umbrella subcommand that drives Steps 0-13 end-to-end via executePipeline().',
+      'AISDLC-182 — safe-by-default umbrella subcommand; use --run for real Step 0-13 execution.',
     builder: (yargs: Argv): Argv =>
       yargs
         .positional('task-id', {
@@ -514,13 +527,20 @@ export function executeCommand(): CommandModule {
         })
         .option('spawner', {
           describe:
-            'SubagentSpawner: mock (default; plumbing) | api-key (paid Anthropic API) | claude-cli (deferred — see README).',
+            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude-cli (deferred — see README).',
           type: 'string',
           choices: SPAWNER_KINDS as unknown as string[],
           default: 'mock' as SpawnerKind,
         })
+        .option('run', {
+          describe:
+            'Explicitly allow filesystem/network mutation. Required for real execution; use with --spawner api-key.',
+          type: 'boolean',
+          default: false,
+        })
         .option('dry-run', {
-          describe: 'Plan + log; skip the actual dispatch.',
+          describe:
+            'Plan + log; skip the actual dispatch. This is also the default when --run is omitted.',
           type: 'boolean',
           default: false,
         }),
@@ -531,6 +551,7 @@ export function executeCommand(): CommandModule {
         spawnerKind: argv.spawner as SpawnerKind,
         maxIterations: Number(argv['max-iterations']),
         dryRun: Boolean(argv['dry-run']),
+        run: Boolean(argv.run),
       });
       process.stdout.write(JSON.stringify(result, null, 2) + '\n');
       if (!result.ok) {

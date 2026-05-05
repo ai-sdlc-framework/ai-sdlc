@@ -8,8 +8,9 @@
  *   2. Verdict-file write — `writeVerdictFile()` lands the JSON at
  *      `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` and the payload
  *      shape matches what `scripts/check-attestation-sign.sh` expects.
- *   3. `runExecuteCommand` dry-run mode — emits a plan WITHOUT calling
- *      executePipeline, useful for plumbing checks.
+ *   3. `runExecuteCommand` safe default / dry-run mode — emits a plan
+ *      WITHOUT resolving spawners or calling executePipeline, useful for
+ *      plumbing checks.
  *   4. `runExecuteCommand` real-run mode — invokes the injected executor
  *      and writes the verdict file via `onProgress` per iteration (AC #6 +
  *      AC #7).
@@ -90,6 +91,19 @@ function approvedVerdict(): AggregatedVerdict {
   };
 }
 
+const stubSpawner: SubagentSpawner = {
+  async spawn() {
+    return { type: 'developer', output: '', status: 'success', durationMs: 0 };
+  },
+  async spawnParallel() {
+    return [];
+  },
+};
+
+async function stubSpawnerFactory(): Promise<SubagentSpawner> {
+  return stubSpawner;
+}
+
 describe('resolveSpawner', () => {
   it('returns a MockSpawner when kind=mock', async () => {
     const spawner = await resolveSpawner('mock');
@@ -167,6 +181,73 @@ describe('writeVerdictFile', () => {
 });
 
 describe('runExecuteCommand — dry-run mode', () => {
+  it('defaults to a safe plan WITHOUT resolving a spawner or calling the executor', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-201', title: 'safe default', status: 'To Do' });
+    const taskPath = join(tmp, 'backlog', 'tasks', 'aisdlc-201 - safe-default.md');
+    const before = readFileSync(taskPath, 'utf8');
+    let spawnerFactoryCalled = false;
+    let executorCalled = false;
+
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-201',
+      workDir: tmp,
+      spawnerKind: 'mock',
+      maxIterations: 2,
+      dryRun: false,
+      run: false,
+      spawnerFactory: async () => {
+        spawnerFactoryCalled = true;
+        return stubSpawner;
+      },
+      executor: async () => {
+        executorCalled = true;
+        throw new Error('executor should not be called by default');
+      },
+      logger: silentLogger(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.planned?.taskId).toBe('AISDLC-201');
+    expect(spawnerFactoryCalled).toBe(false);
+    expect(executorCalled).toBe(false);
+    expect(existsSync(join(tmp, '.worktrees', 'aisdlc-201'))).toBe(false);
+    expect(readFileSync(taskPath, 'utf8')).toBe(before);
+  });
+
+  it('explicit real spawner without --run still plans without resolving or executing', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-211', title: 'api key plan', status: 'To Do' });
+    const taskPath = join(tmp, 'backlog', 'tasks', 'aisdlc-211 - api-key-plan.md');
+    const before = readFileSync(taskPath, 'utf8');
+    let spawnerFactoryCalled = false;
+    let executorCalled = false;
+
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-211',
+      workDir: tmp,
+      spawnerKind: 'api-key',
+      maxIterations: 2,
+      dryRun: false,
+      run: false,
+      spawnerFactory: async () => {
+        spawnerFactoryCalled = true;
+        throw new Error('spawner should not resolve without --run');
+      },
+      executor: async () => {
+        executorCalled = true;
+        throw new Error('executor should not be called without --run');
+      },
+      logger: silentLogger(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.planned?.taskId).toBe('AISDLC-211');
+    expect(result.planned?.spawnerKind).toBe('api-key');
+    expect(spawnerFactoryCalled).toBe(false);
+    expect(executorCalled).toBe(false);
+    expect(existsSync(join(tmp, '.worktrees', 'aisdlc-211'))).toBe(false);
+    expect(readFileSync(taskPath, 'utf8')).toBe(before);
+  });
+
   it('emits a plan WITHOUT calling the executor', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-182', title: 'plumbing check', status: 'To Do' });
     let executorCalled = false;
@@ -206,6 +287,33 @@ describe('runExecuteCommand — dry-run mode', () => {
 });
 
 describe('runExecuteCommand — real-run mode', () => {
+  it('refuses --run with --spawner mock before validation, spawner resolution, or execution', async () => {
+    let spawnerFactoryCalled = false;
+    let executorCalled = false;
+    const result = await runExecuteCommand({
+      taskId: 'AISDLC-DOES-NOT-EXIST',
+      workDir: tmp,
+      spawnerKind: 'mock',
+      maxIterations: 2,
+      dryRun: false,
+      run: true,
+      spawnerFactory: async () => {
+        spawnerFactoryCalled = true;
+        return stubSpawner;
+      },
+      executor: async () => {
+        executorCalled = true;
+        throw new Error('executor should not be called for mock --run');
+      },
+      logger: silentLogger(),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toMatch(/mock.*dry-run\/plumbing only/i);
+    expect(spawnerFactoryCalled).toBe(false);
+    expect(executorCalled).toBe(false);
+  });
+
   it('invokes executor and writes the verdict file via onProgress', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-200', title: 'real run', status: 'To Do' });
 
@@ -244,9 +352,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-200',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       logger: silentLogger(),
     });
@@ -277,9 +387,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-201',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       logger: silentLogger(),
     });
@@ -296,6 +408,7 @@ describe('runExecuteCommand — real-run mode', () => {
       spawnerKind: 'claude-cli', // deferred — should fail fast
       maxIterations: 2,
       dryRun: false,
+      run: true,
       logger: silentLogger(),
     });
     expect(result.ok).toBe(false);
@@ -310,9 +423,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-203',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       logger: silentLogger(),
     });
@@ -323,28 +438,44 @@ describe('runExecuteCommand — real-run mode', () => {
   it('threads injected spawnerFactory through (no real spawner constructed)', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-204', title: 'inject spawner', status: 'To Do' });
     let spawnerKindSeen: string | undefined;
-    const stubSpawner: SubagentSpawner = {
-      async spawn() {
-        return { type: 'developer', output: '', status: 'success', durationMs: 0 };
-      },
-      async spawnParallel() {
-        return [];
-      },
+    const fakeExec: typeof import('../execute-pipeline.js').executePipeline = async (
+      pipelineOpts,
+    ) => {
+      return {
+        taskId: pipelineOpts.taskId,
+        branch: 'ai-sdlc/aisdlc-204-x',
+        worktreePath: join(tmp, '.worktrees', 'aisdlc-204'),
+        outcome: 'developer-failed',
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+      } satisfies PipelineResult;
     };
     const result = await runExecuteCommand({
       taskId: 'AISDLC-204',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
-      dryRun: true,
+      dryRun: false,
+      run: true,
       logger: silentLogger(),
       spawnerFactory: async (k) => {
         spawnerKindSeen = k;
         return stubSpawner;
       },
+      executor: fakeExec,
+      rollback: async (args) => ({
+        taskId: args.taskId,
+        fromStatus: args.fromStatus,
+        statusReverted: true,
+        worktreeRemoved: true,
+        branchQuarantined: false,
+        warnings: [],
+      }),
     });
     expect(result.ok).toBe(true);
-    expect(spawnerKindSeen).toBe('mock');
+    expect(spawnerKindSeen).toBe('api-key');
   });
 
   it('invokes AISDLC-177 rollback on developer-failed outcome and surfaces the result', async () => {
@@ -390,9 +521,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-205',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       rollback: fakeRollback,
       logger: silentLogger(),
@@ -445,9 +578,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-206',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       rollback: async (args) => {
         rollbackInvoked = true;
@@ -518,9 +653,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-209',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       rollback: fakeRollback,
       logger: silentLogger(),
@@ -575,9 +712,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-210',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       rollback: async (args) => {
         rollbackInvoked = true;
@@ -626,9 +765,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-207',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       rollback: async () => {
         rollbackInvoked = true;
@@ -660,9 +801,11 @@ describe('runExecuteCommand — real-run mode', () => {
     const result = await runExecuteCommand({
       taskId: 'AISDLC-208',
       workDir: tmp,
-      spawnerKind: 'mock',
+      spawnerKind: 'api-key',
       maxIterations: 2,
       dryRun: false,
+      run: true,
+      spawnerFactory: stubSpawnerFactory,
       executor: fakeExec,
       rollback: async () => {
         throw new Error('rollback boom');
@@ -753,6 +896,26 @@ describe('CLI router integration — `execute` subcommand', () => {
     const all = stdoutChunks.join('') + stderrChunks.join('');
     expect(all).not.toMatch(/--skip-sweep/);
     expect(all).not.toMatch(/skip[- ]sweep/i);
+    expect(all).toMatch(/--run/);
+    expect(all).toMatch(/d\s*efault when --run is omitted/);
+  });
+
+  it('default invocation emits a plan and leaves task/worktree state untouched', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-301', title: 'cli safe default', status: 'To Do' });
+    const taskPath = join(tmp, 'backlog', 'tasks', 'aisdlc-301 - cli-safe-default.md');
+    const before = readFileSync(taskPath, 'utf8');
+    process.argv = ['node', 'ai-sdlc-pipeline', 'execute', 'AISDLC-301', '--work-dir', tmp];
+
+    await buildCli().parseAsync();
+
+    const out = stdoutChunks.join('');
+    const parsed = JSON.parse(out.slice(out.indexOf('{')));
+    expect(parsed.ok).toBe(true);
+    expect(parsed.planned?.taskId).toBe('AISDLC-301');
+    expect(parsed.planned?.spawnerKind).toBe('mock');
+    expect(parsed.pipeline).toBeUndefined();
+    expect(existsSync(join(tmp, '.worktrees', 'aisdlc-301'))).toBe(false);
+    expect(readFileSync(taskPath, 'utf8')).toBe(before);
   });
 
   it('dry-run path emits a plan envelope', async () => {
