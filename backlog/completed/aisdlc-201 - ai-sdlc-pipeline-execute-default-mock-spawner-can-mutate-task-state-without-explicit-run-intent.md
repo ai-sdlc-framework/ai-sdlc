@@ -6,6 +6,7 @@ title: >-
 status: Done
 assignee: []
 created_date: '2026-05-05 18:02'
+updated_date: '2026-05-05 19:56'
 labels:
   - bug
   - pipeline-cli
@@ -49,4 +50,6 @@ Make the safe path the default. Options include requiring an explicit `--run` fl
 
 ## Final Summary
 
-Implemented a safe-by-default `ai-sdlc-pipeline execute` path: no `--run` now performs only validation/plan output, real execution requires `--run` with a real spawner, and `--run --spawner mock` refuses before validation or filesystem mutation. Updated CLI help, README examples, and regression tests for default non-mutation plus mock refusal.
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Implemented in PR #328. The `ai-sdlc-pipeline execute` command is now safe by default: without `--run`, it validates and returns a plan without creating worktrees, mutating task state, resolving a spawner, or executing the pipeline. Real execution requires `--run` with a real spawner, and `--run --spawner mock` refuses before validation or filesystem mutation. Verification included focused execute CLI tests, prettier check, git diff whitespace check, reviewer subagent approval, and DSSE attestation.
+<!-- SECTION:FINAL_SUMMARY:END -->
