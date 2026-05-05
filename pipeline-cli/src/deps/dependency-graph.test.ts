@@ -506,14 +506,19 @@ describe('frontier — status field is consulted (AISDLC-153)', () => {
     expect(warnings).toEqual([]);
   });
 
-  it("file in tasks/ + status: 'In Progress' → open (still actively-claimed)", () => {
+  it("file in tasks/ + status: 'In Progress' → open node, but excluded from frontier (defense-in-depth, AISDLC-183)", () => {
+    // The node still exists and is still classified `open` (so blockers /
+    // impact / preflight surfaces continue to see it). But the frontier
+    // resolver now filters it out alongside the orchestrator's in-flight
+    // tracker — see the AISDLC-183 defense-in-depth describe block below
+    // for the rationale.
     writeTaskFile(tmp, { id: 'AISDLC-1', title: 'wip', status: 'In Progress' });
     const warnings: string[] = [];
     const g = buildDependencyGraph({ workDir: tmp }, (m) => warnings.push(m));
     const node = g.nodes.get('aisdlc-1');
     expect(node?.status).toBe('open');
     expect(node?.frontmatterStatus).toBe('In Progress');
-    expect(frontier(g).map((e) => e.id)).toEqual(['AISDLC-1']);
+    expect(frontier(g)).toEqual([]);
     expect(warnings).toEqual([]);
   });
 
@@ -572,5 +577,86 @@ describe('frontier — status field is consulted (AISDLC-153)', () => {
     expect(g.completedIds.filter((id) => id === 'aisdlc-1').length).toBe(1);
     // Stale warning still surfaces — the file IS in tasks/ and should move.
     expect(warnings.filter((w) => w.includes('AISDLC-1')).length).toBe(1);
+  });
+});
+
+// ── AISDLC-183: defense-in-depth In Progress filter ─────────────────────
+//
+// AISDLC-179 shipped the in-flight tracker (`orchestrator/in-flight.ts`),
+// which prevents the orchestrator's tick loop from re-dispatching a task
+// already mid-flight. That tracker reconstructs from
+// `<workDir>/.worktrees/&star;/.active-task` sentinels on cold start so
+// restart-recovery is covered too.
+//
+// AC #3 of AISDLC-179 called for a SECOND filter at the frontier resolver
+// itself: tasks with `status: In Progress` should be excluded even when
+// their dependencies are satisfied AND the in-flight tracker is empty.
+// Defense-in-depth — if a sentinel ever vanishes mid-flight (operator
+// runs `/ai-sdlc cleanup`, fs corruption, manual deletion) WITHOUT the
+// task file moving to `backlog/completed/`, the orchestrator can re-
+// dispatch an In Progress task. This filter closes that gap.
+describe('frontier — defense-in-depth In Progress filter (AISDLC-183)', () => {
+  it('defense-in-depth: In Progress task is filtered from frontier even when deps satisfied AND in-flight map is empty', () => {
+    // Setup: dependency satisfied (in completed/), no in-flight map
+    // involvement at all (this test exercises the resolver in isolation —
+    // exactly the failure mode the AC was framed to prevent).
+    writeTaskFile(tmp, { id: 'AISDLC-DEP', title: 'dep', completed: true });
+    writeTaskFile(tmp, {
+      id: 'AISDLC-WIP',
+      title: 'wip',
+      status: 'In Progress',
+      dependencies: ['AISDLC-DEP'],
+    });
+    const g = buildDependencyGraph({ workDir: tmp });
+    // Sanity: deps are satisfied (otherwise we couldn't tell the In Progress
+    // filter from the dependency-readiness filter).
+    expect(g.nodes.get('aisdlc-wip')?.status).toBe('open');
+    expect(g.nodes.get('aisdlc-wip')?.frontmatterStatus).toBe('In Progress');
+    // The defense-in-depth filter excludes it.
+    expect(frontier(g)).toEqual([]);
+  });
+
+  it("defense-in-depth: case-insensitive — 'in progress' / 'IN PROGRESS' also excluded", () => {
+    // Operators occasionally type the canonical state with non-standard
+    // casing. The filter is case-insensitive so the dispatch picture
+    // stays honest regardless of how the operator typed it.
+    writeTaskFile(tmp, { id: 'AISDLC-LOWER', title: 'lower', status: 'in progress' });
+    writeTaskFile(tmp, { id: 'AISDLC-UPPER', title: 'upper', status: 'IN PROGRESS' });
+    writeTaskFile(tmp, { id: 'AISDLC-MIXED', title: 'mixed', status: 'In progress' });
+    const g = buildDependencyGraph({ workDir: tmp });
+    expect(frontier(g)).toEqual([]);
+  });
+
+  it('defense-in-depth: To Do siblings remain on the frontier alongside the excluded In Progress task', () => {
+    // Mixed batch. The filter must NOT blanket-suppress the rest of the
+    // open backlog — only the In Progress entry itself drops out.
+    writeTaskFile(tmp, { id: 'AISDLC-1', title: 'todo', status: 'To Do' });
+    writeTaskFile(tmp, { id: 'AISDLC-2', title: 'wip', status: 'In Progress' });
+    writeTaskFile(tmp, { id: 'AISDLC-3', title: 'todo2', status: 'To Do' });
+    const g = buildDependencyGraph({ workDir: tmp });
+    expect(frontier(g).map((e) => e.id)).toEqual(['AISDLC-1', 'AISDLC-3']);
+  });
+
+  it('defense-in-depth: leaves blockers / preflight surfaces unaffected (operator can still inspect)', () => {
+    // The filter only narrows the frontier resolver; the rest of cli-deps
+    // must continue to surface the In Progress task so an operator running
+    // `cli-deps blockers` or `cli-deps preflight` sees the real picture.
+    writeTaskFile(tmp, {
+      id: 'AISDLC-WIP',
+      title: 'wip',
+      status: 'In Progress',
+    });
+    writeTaskFile(tmp, {
+      id: 'AISDLC-DOWNSTREAM',
+      title: 'downstream',
+      dependencies: ['AISDLC-WIP'],
+    });
+    const g = buildDependencyGraph({ workDir: tmp });
+    // blockers() still reports the In Progress task as a blocker (it's open).
+    expect(blockers(g, 'AISDLC-DOWNSTREAM').map((b) => b.id)).toEqual(['AISDLC-WIP']);
+    // preflight() still refuses the downstream task because its blocker is open.
+    const p = preflight(g, 'AISDLC-DOWNSTREAM');
+    expect(p.ok).toBe(false);
+    expect(p.blockers.map((b) => b.id)).toEqual(['AISDLC-WIP']);
   });
 });

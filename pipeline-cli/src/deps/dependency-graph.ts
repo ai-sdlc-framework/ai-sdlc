@@ -402,18 +402,42 @@ export interface FrontierEntry {
  * Dependency IDs that don't resolve to ANY known node count as "not satisfied"
  * — `validate` will surface them separately as dangling refs, but until the
  * data is fixed, the safe default is to block dispatch.
+ *
+ * Defense-in-depth (AISDLC-183 / AISDLC-179 AC #3): tasks whose frontmatter
+ * `status:` is `In Progress` are excluded even when their dependencies are
+ * satisfied. The orchestrator's primary in-flight tracker
+ * (`orchestrator/in-flight.ts`) already prevents the tick loop from
+ * re-dispatching mid-flight tasks, but that map lives in process memory and
+ * is reconstructed from `<workDir>/.worktrees/&star;/.active-task` sentinels
+ * on cold start. If a sentinel ever vanishes mid-flight (operator runs
+ * `/ai-sdlc cleanup`, fs corruption, manual deletion) WITHOUT the task file
+ * being moved to `backlog/completed/`, the orchestrator could re-dispatch an
+ * In Progress task. Filtering at the resolver layer closes that gap — the
+ * filesystem `status:` field is the second source of truth.
  */
 export function frontier(graph: DependencyGraph): FrontierEntry[] {
   const out: FrontierEntry[] = [];
   for (const openId of graph.openIds) {
     const node = graph.nodes.get(openId);
     if (!node) continue;
+    if (isInProgressStatus(node.frontmatterStatus)) continue;
     if (allDependenciesCompleted(node, graph)) {
       out.push({ id: node.id, title: node.title, dependencies: node.dependencies });
     }
   }
   out.sort((a, b) => a.id.localeCompare(b.id, 'en', { numeric: true }));
   return out;
+}
+
+/**
+ * Backlog.md status values that mean "this task is currently being worked
+ * on by some other dispatch" — defense-in-depth filter for `frontier()` per
+ * AISDLC-183. Case-insensitive + whitespace-tolerant. We intentionally only
+ * match the canonical 'In Progress' (and its case-folded variants) — other
+ * lifecycle states (Draft, To Do, Blocked, Done) get the existing handling.
+ */
+function isInProgressStatus(status: string): boolean {
+  return status.trim().toLowerCase() === 'in progress';
 }
 
 function allDependenciesCompleted(node: DependencyNode, graph: DependencyGraph): boolean {
