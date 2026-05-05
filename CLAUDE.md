@@ -22,7 +22,7 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 - **Never merge PRs** — only humans merge.
 - **Never close** issues or PRs. **Never force-push to main/master.**
 - Dismiss stale reviews only with documented reason (truncation, API errors).
-- `auto-enable-auto-merge.yml` sets `--auto --squash` on same-repo PRs (NOT a real squash — workaround for GitHub's "auto-merge method must differ from queue's REBASE method" trap; queue overrides to REBASE at merge time). Setting `--auto` is NOT merging.
+- `auto-enable-auto-merge.yml` sets `--auto --rebase` on same-repo PRs (NOT a real rebase — workaround for GitHub's "auto-merge method must differ from queue's method" trap; the queue's `mergeMethod` is SQUASH so the workflow flag must be its opposite, and the queue's SQUASH applies at merge time so PRs land as one commit on main). If the queue's method is ever flipped in repo settings, the workflow flag must be flipped to whichever method the queue is NOT using. Setting `--auto` is NOT merging.
 
 ## Testing
 
