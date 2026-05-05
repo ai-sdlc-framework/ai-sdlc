@@ -19,6 +19,7 @@ import {
   defaultOrchestratorConfig,
   ORCHESTRATOR_FLAG,
   OrchestratorDisabledError,
+  ROLLBACK_OUTCOMES,
   runOrchestratorLoop,
   runOrchestratorTick,
   type OrchestratorAdapters,
@@ -495,5 +496,21 @@ describe('buildOrchestratorStatus', () => {
     expect(dispatchSpy).not.toHaveBeenCalled();
     // `enabled` reflects current env — we don't mutate it here, so accept either.
     expect(typeof status.enabled).toBe('boolean');
+  });
+});
+
+describe('ROLLBACK_OUTCOMES contract', () => {
+  // Source-of-truth assertion (AISDLC-195 follow-up to AISDLC-191). The
+  // `unknown-failure` lockstep test in `cli/execute.test.ts` asserts the
+  // consumer-side membership behavior; this test pins the set itself so a
+  // regression where someone changes ROLLBACK_OUTCOMES in `loop.ts` without
+  // updating `cli/execute.ts`'s expectations is caught at the source.
+  it('contains exactly the 4 outcomes that trigger rollback', () => {
+    expect(Array.from(ROLLBACK_OUTCOMES).sort()).toEqual([
+      'aborted',
+      'developer-failed',
+      'developer-json-contract-violated',
+      'unknown-failure',
+    ]);
   });
 });
