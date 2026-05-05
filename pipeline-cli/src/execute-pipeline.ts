@@ -82,7 +82,15 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     runner: opts.runner,
   });
 
-  // Step 4
+  // Step 4 — AISDLC-199: beginTask now patches the worktree-local copy of
+  // the task file (the fresh Step 3 checkout from origin/main) rather than
+  // the operator's parent checkout. `workDir` is still passed as a fallback
+  // for the standalone CLI invocation path; in the umbrella `executePipeline()`
+  // flow the worktree always wins. This keeps the parent's working tree
+  // clean per the orchestrator-repo-layout contract — see
+  // `pipeline-cli/src/steps/04-flip-status.ts` for the full rationale and
+  // the regression test in `execute-pipeline.test.ts` ('Step 4 lifecycle
+  // edits land on worktree, not parent') for the proof.
   logger.progress('04-flip-status', 'flipping status to In Progress + writing sentinel');
   await beginTask({
     taskId: opts.taskId,

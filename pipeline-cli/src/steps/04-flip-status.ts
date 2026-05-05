@@ -12,6 +12,21 @@
  * the task ID. The PreToolUse hook walks up from the developer subagent's
  * cwd to find this sentinel and resolve `permittedExternalPaths`.
  *
+ * **Which checkout owns the lifecycle edit?** The status flip is written
+ * to the per-task **worktree's** copy of the task file (the fresh checkout
+ * Step 3 created from `origin/main`), not the operator's parent checkout
+ * passed in via `workDir`. This keeps the parent's working tree clean per
+ * the orchestrator-repo-layout contract documented in `CLAUDE.md` and the
+ * `project_orchestrator_repo_layout` user-memory note. Step 10 finalize
+ * already prefers the worktree-local copy when patching to Done; Step 4
+ * now matches so both lifecycle edits land in the same commit on the task
+ * branch, never on the operator's main checkout.
+ *
+ * `workDir` is retained as a fallback for the standalone `cli pipeline-cli
+ * begin-task` subcommand (where the operator may invoke the step against a
+ * non-worktree checkout) and for tests that don't materialise a worktree
+ * task file. See AISDLC-199.
+ *
  * @module steps/04-flip-status
  */
 
@@ -59,9 +74,17 @@ export function patchFrontmatterStatus(raw: string, newStatus: string): string {
 
 export async function beginTask(opts: BeginTaskOptions): Promise<BeginTaskResult> {
   const status = opts.status ?? 'In Progress';
-  const taskFile = findTaskFile(opts.taskId, opts.workDir);
+  // AISDLC-199 — prefer the worktree-local copy (the fresh Step 3 checkout
+  // from origin/main). Falls back to the parent `workDir` so the standalone
+  // `pipeline-cli begin-task` CLI subcommand and tests that don't pre-stage
+  // a worktree task file still work. Mirrors the same fallback chain Step 10
+  // finalize already uses, so both lifecycle edits land on the same file.
+  const taskFile =
+    findTaskFile(opts.taskId, opts.worktreePath) ?? findTaskFile(opts.taskId, opts.workDir);
   if (!taskFile) {
-    throw new Error(`Step 4 begin-task: no task file found for ${opts.taskId}`);
+    throw new Error(
+      `Step 4 begin-task: no task file found for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`,
+    );
   }
   const raw = readFileSync(taskFile, 'utf8');
   const patched = patchFrontmatterStatus(raw, status);

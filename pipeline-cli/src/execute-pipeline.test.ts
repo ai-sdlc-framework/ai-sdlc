@@ -7,7 +7,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { executePipeline } from './execute-pipeline.js';
 import { MockSpawner } from './runtime/subagent-spawner.js';
@@ -103,6 +103,80 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     expect(
       existsSync(join(tmp, 'backlog', 'completed', 'aisdlc-100 - integration-demo-task.md')),
     ).toBe(true);
+  });
+
+  // ── AISDLC-199 — worktree-local lifecycle edits ─────────────────────
+  //
+  // Regression: prior to AISDLC-199, Step 4 `beginTask({ workDir })` patched
+  // the OPERATOR'S parent checkout's `backlog/tasks/<id> - *.md`. Step 10
+  // finalize already preferred the worktree-local copy, so a successful
+  // dispatch produced divergent state: PR branch correct, parent checkout
+  // dirty with a stranded `status: In Progress` edit. That dirty parent
+  // blocked `scripts/check-orchestrator-state.sh` from doing its
+  // `git reset --hard origin/main` sync between dispatches.
+  //
+  // This test materialises the realistic "task file in BOTH parent and
+  // worktree" shape (Step 3's `git worktree add ... origin/main` produces
+  // it in production) and asserts:
+  //   AC2: parent's task file is byte-identical pre/post dispatch.
+  //   AC3: worktree-local task file moves to backlog/completed/ and Step 10
+  //        flips the status to Done on the worktree-side copy.
+  it('AISDLC-199: lifecycle edits land on worktree, parent checkout stays clean', async () => {
+    // Parent (operator) checkout — task at status: To Do.
+    const parentTaskPath = writeTaskFile(tmp, {
+      id: 'AISDLC-199',
+      title: 'worktree-isolated lifecycle',
+      status: 'To Do',
+      acceptanceCriteria: ['ship the fix'],
+    });
+    const parentBefore = readFileSync(parentTaskPath, 'utf8');
+
+    // Pre-create the worktree dir AND copy the task file in (mirroring
+    // the real `git worktree add ... origin/main` shape — fresh checkout
+    // with the same backlog/tasks/<id>.md present).
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-199');
+    mkdirSync(join(worktreePath, 'backlog', 'tasks'), { recursive: true });
+    mkdirSync(join(worktreePath, 'backlog', 'completed'), { recursive: true });
+    const worktreeTaskPath = join(
+      worktreePath,
+      'backlog',
+      'tasks',
+      'aisdlc-199 - worktree-isolated-lifecycle.md',
+    );
+    writeFileSync(worktreeTaskPath, parentBefore, 'utf8');
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-199',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: makeHappyRunner().toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 2,
+    });
+    expect(result.outcome).toBe('approved');
+
+    // AC #2 — parent's task file is byte-identical to its pre-dispatch
+    // state. No "status: In Progress" stranded on the operator checkout.
+    expect(readFileSync(parentTaskPath, 'utf8')).toBe(parentBefore);
+    expect(readFileSync(parentTaskPath, 'utf8')).toContain('status: To Do');
+
+    // AC #3 — worktree-local task file moved to backlog/completed/ on
+    // the worktree side; Step 10 flipped the status to Done on that copy.
+    expect(existsSync(worktreeTaskPath)).toBe(false);
+    const worktreeCompletedPath = join(
+      worktreePath,
+      'backlog',
+      'completed',
+      'aisdlc-199 - worktree-isolated-lifecycle.md',
+    );
+    expect(existsSync(worktreeCompletedPath)).toBe(true);
+    expect(readFileSync(worktreeCompletedPath, 'utf8')).toContain('status: Done');
+
+    // Parent's backlog/completed/ MUST stay empty — the lifecycle move
+    // happened on the worktree side only.
+    expect(
+      existsSync(join(tmp, 'backlog', 'completed', 'aisdlc-199 - worktree-isolated-lifecycle.md')),
+    ).toBe(false);
   });
 
   it('developer-failed path: returns developer-failed outcome without opening PR', async () => {
