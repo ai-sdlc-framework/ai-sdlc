@@ -30,6 +30,8 @@ import {
   sweepMergedWorktrees,
   validateTask,
 } from './steps/index.js';
+import { existsSync } from 'node:fs';
+import { defaultRunner } from './runtime/exec.js';
 import {
   DEFAULT_LOGGER,
   type AggregatedVerdict,
@@ -72,41 +74,65 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   logger.progress('02-compute-branch', 'computing branch name');
   const branch = await computeBranchName({ taskId: opts.taskId, task, workDir: opts.workDir });
 
-  // Step 3
-  logger.progress('03-setup-worktree', `creating worktree at ${branch.worktreePath}`);
-  await setupWorktree({
-    taskId: opts.taskId,
-    branch: branch.branch,
-    worktreePath: branch.worktreePath,
-    workDir: opts.workDir,
-    runner: opts.runner,
-  });
-
-  // Step 4 — AISDLC-199: beginTask now patches the worktree-local copy of
-  // the task file (the fresh Step 3 checkout from origin/main) rather than
-  // the operator's parent checkout. `workDir` is still passed as a fallback
-  // for the standalone CLI invocation path; in the umbrella `executePipeline()`
-  // flow the worktree always wins. This keeps the parent's working tree
-  // clean per the orchestrator-repo-layout contract — see
-  // `pipeline-cli/src/steps/04-flip-status.ts` for the full rationale and
-  // the regression test in `execute-pipeline.test.ts` ('Step 4 lifecycle
-  // edits land on worktree, not parent') for the proof.
-  logger.progress('04-flip-status', 'flipping status to In Progress + writing sentinel');
-  await beginTask({
-    taskId: opts.taskId,
-    worktreePath: branch.worktreePath,
-    workDir: opts.workDir,
-  });
-
-  // Wrap Steps 5-13 in a try/finally so Step 13 always cleans up the sentinel.
+  // AISDLC-200 — Wrap Steps 3-13 (NOT just 5-13) in a try/finally so that
+  // any throw from Step 4 (status flip + sentinel write) AFTER Step 3
+  // succeeded triggers Step 13 sentinel cleanup + best-effort worktree
+  // removal. Previously the cleanup boundary started AFTER Step 4, so a
+  // Step 4 throw orphaned the worktree + propagated as an exception
+  // (rather than a structured `PipelineResult`), and the CLI wrapper
+  // never reached its `ROLLBACK_OUTCOMES` membership check.
+  //
+  // Tracking flag: only attempt worktree removal when Step 3 actually
+  // created it. Without this, a Step 3 throw would re-enter the runner
+  // for a `git worktree remove` against a path that doesn't exist.
   let outcome: PipelineResult['outcome'] = 'aborted';
   let prUrl: string | null = null;
   let siblingPrUrls: string[] = [];
   let iterationsTotal = 0;
   let finalAggregated: AggregatedVerdict | null = null;
   let aborted: string | null = null;
+  let worktreeCreated = false;
+  // AISDLC-200 — `setupCompleted` flips true once Steps 3-4 BOTH succeed.
+  // The best-effort worktree removal in the `finally` only fires when this
+  // flag is FALSE — i.e. the gap this fix targets (Step 4 throws after
+  // Step 3 succeeded). For post-setup failures (dev-failed, push-failed,
+  // etc.) the worktree stays on disk so the wrapper's `rollbackDispatch()`
+  // can still inspect the branch for commits beyond origin/main and
+  // quarantine them before tearing down. Without this guard, the finally
+  // would wipe the branch ref out from under rollback's quarantine probe
+  // and any developer commits would be silently lost.
+  let setupCompleted = false;
+  const cleanupWarnings: string[] = [];
 
   try {
+    // Step 3
+    logger.progress('03-setup-worktree', `creating worktree at ${branch.worktreePath}`);
+    await setupWorktree({
+      taskId: opts.taskId,
+      branch: branch.branch,
+      worktreePath: branch.worktreePath,
+      workDir: opts.workDir,
+      runner: opts.runner,
+    });
+    worktreeCreated = true;
+
+    // Step 4 — AISDLC-199: beginTask now patches the worktree-local copy of
+    // the task file (the fresh Step 3 checkout from origin/main) rather than
+    // the operator's parent checkout. `workDir` is still passed as a fallback
+    // for the standalone CLI invocation path; in the umbrella `executePipeline()`
+    // flow the worktree always wins. This keeps the parent's working tree
+    // clean per the orchestrator-repo-layout contract — see
+    // `pipeline-cli/src/steps/04-flip-status.ts` for the full rationale and
+    // the regression test in `execute-pipeline.test.ts` ('Step 4 lifecycle
+    // edits land on worktree, not parent') for the proof.
+    logger.progress('04-flip-status', 'flipping status to In Progress + writing sentinel');
+    await beginTask({
+      taskId: opts.taskId,
+      worktreePath: branch.worktreePath,
+      workDir: opts.workDir,
+    });
+    setupCompleted = true;
+
     // Step 5 — build developer prompt
     logger.progress('05-build-dev-prompt', `iteration 1`);
     const { prompt: devPrompt } = await buildDeveloperPrompt({
@@ -269,9 +295,83 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       });
       siblingPrUrls = sibs.prs.map((p) => p.prUrl).filter((u): u is string => !!u);
     }
+  } catch (err) {
+    // AISDLC-200 — Convert any post-Step-2 throw into a structured
+    // `PipelineResult` so the CLI wrapper (`runExecuteCommand`) reaches
+    // its `ROLLBACK_OUTCOMES` membership check and dispatches
+    // `rollbackDispatch()` with the resolved branch/worktree. The
+    // pre-existing failure path was Step 4 (`beginTask`) throwing on a
+    // missing task file or a frontmatter-patch surprise — that threw all
+    // the way past the wrapper's `try/catch`, surfaced as
+    // `executePipeline threw: ...`, and skipped both Step 13 cleanup AND
+    // rollback. Now the throw is captured here, the structured envelope
+    // is returned with `outcome: 'aborted'` (which IS in
+    // `ROLLBACK_OUTCOMES`), and the wrapper rollback runs as designed.
+    //
+    // Original error reason is preserved verbatim in `notes` so operators
+    // see the same diagnostic they would have on the legacy throw path.
+    aborted = err instanceof Error ? err.message : String(err);
+    outcome = 'aborted';
   } finally {
-    // Step 13 — always cleanup
-    await cleanupTask({ taskId: opts.taskId, worktreePath: branch.worktreePath });
+    // Step 13 — always cleanup the per-worktree sentinel. Safe even when
+    // the sentinel doesn't exist (`cleanupTask` checks first).
+    try {
+      await cleanupTask({ taskId: opts.taskId, worktreePath: branch.worktreePath });
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      cleanupWarnings.push(`sentinel cleanup failed: ${reason}`);
+      logger.warn(`[ai-sdlc] Step 13 sentinel cleanup failed (non-fatal): ${reason}`);
+    }
+
+    // AISDLC-200 — Best-effort worktree removal when:
+    //   1. Step 3 created the worktree (`worktreeCreated === true`), AND
+    //   2. Setup never completed (`setupCompleted === false`) — i.e.
+    //      Step 4 threw AFTER Step 3 succeeded.
+    // For post-setup failures (developer-failed, push-failed,
+    // needs-human-attention, etc.) the worktree intentionally stays on
+    // disk: the wrapper's `rollbackDispatch()` needs the branch ref to
+    // probe for commits beyond `origin/main` and quarantine them before
+    // tearing down (`git worktree remove --force` would also delete the
+    // branch ref). Pre-cleaning the worktree here would silently strand
+    // any developer commits the dev produced before the failure.
+    //
+    // For the Step-4-throw scenario this fix targets, the branch is
+    // EMPTY (Step 4 hasn't even flipped status yet, so the dev never
+    // ran), so removing the worktree here is safe AND covers callers of
+    // the bare `executePipeline()` library function that don't wire
+    // `rollbackDispatch()` themselves. Idempotent: rollback sees
+    // `existsSync(worktreePath) === false` and counts it as success.
+    if (worktreeCreated && !setupCompleted && existsSync(branch.worktreePath)) {
+      const runner = opts.runner ?? defaultRunner;
+      try {
+        const removed = await runner(
+          'git',
+          ['worktree', 'remove', '--force', branch.worktreePath],
+          { cwd: opts.workDir, allowFailure: true },
+        );
+        if (removed.code !== 0) {
+          const reason = (removed.stderr || removed.stdout).trim();
+          cleanupWarnings.push(`worktree remove failed: ${reason}`);
+          logger.warn(
+            `[ai-sdlc] best-effort worktree remove failed for ${branch.worktreePath}: ${reason}`,
+          );
+        }
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        cleanupWarnings.push(`worktree remove threw: ${reason}`);
+        logger.warn(`[ai-sdlc] best-effort worktree remove threw: ${reason}`);
+      }
+    }
+  }
+
+  // AISDLC-200 — When cleanup encountered warnings, surface them in the
+  // returned envelope's `notes` so the CLI wrapper's JSON output gives
+  // the operator visibility into partial-cleanup state. Original abort
+  // reason takes precedence; warnings are appended.
+  let finalNotes: string | undefined = aborted ?? undefined;
+  if (cleanupWarnings.length > 0) {
+    const warnings = `cleanup warnings: ${cleanupWarnings.join('; ')}`;
+    finalNotes = finalNotes ? `${finalNotes} | ${warnings}` : warnings;
   }
 
   return {
@@ -283,7 +383,7 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     siblingPrUrls,
     iterations: iterationsTotal,
     finalVerdict: finalAggregated,
-    notes: aborted ?? undefined,
+    notes: finalNotes,
   };
 }
 

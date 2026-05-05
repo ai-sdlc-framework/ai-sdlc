@@ -449,6 +449,147 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     expect(result.outcome).toBe('aborted');
     expect(existsSync(join(tmp, '.worktrees', 'aisdlc-104', '.active-task'))).toBe(false);
   });
+
+  // ── AISDLC-200 — Step 4 throw after Step 3 success ────────────────
+  // Witness: `executePipeline()` previously wrapped only Steps 5-13 in
+  // try/finally, so a throw from Step 4 (`beginTask`) — which writes the
+  // status patch + the per-worktree `.active-task` sentinel — propagated
+  // as a raw exception. The CLI wrapper's `try/catch` in
+  // `runExecuteCommand` caught it and returned `ok:false`, but never
+  // reached the `ROLLBACK_OUTCOMES` membership check, so the worktree
+  // Step 3 created was orphaned. The fix expands the cleanup boundary to
+  // start AFTER Step 2 + converts the throw to `outcome: 'aborted'` so
+  // the wrapper routes through rollback consistently.
+  it('AISDLC-200: Step 4 throw after Step 3 success cleans up worktree + returns structured envelope', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-200-FIX',
+      title: 'step 4 throw cleanup',
+      status: 'To Do',
+    });
+
+    // To deterministically reproduce "Step 4 throws after Step 3 succeeded"
+    // we need:
+    //   1. A passing `git worktree add` call that ALSO creates the
+    //      worktree dir on disk (so the `existsSync()` guard in the
+    //      finally fires and the remove call is recorded — production's
+    //      real `git worktree add` does this; FakeRunner by default does
+    //      NOT, which would short-circuit the test). The custom handler
+    //      below `mkdirSync`s the worktree dir as a side effect.
+    //   2. A failing condition for `beginTask`. We mutate the task file
+    //      mid-flight (between Step 1 validate and Step 4 begin-task) by
+    //      having the worktree-add handler ALSO corrupt the task file's
+    //      frontmatter. `patchFrontmatterStatus` will then throw
+    //      "task file missing YAML frontmatter".
+    const taskFile = join(tmp, 'backlog', 'tasks', 'aisdlc-200-fix - step-4-throw-cleanup.md');
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-200-fix');
+
+    const runner = new FakeRunner()
+      .on(/^git fetch/, ok())
+      .on(
+        (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+        () => {
+          // Mimic the real `git worktree add` side-effect.
+          mkdirSync(worktreePath, { recursive: true });
+          // Corrupt the task file so `beginTask`'s `patchFrontmatterStatus`
+          // throws (Step 4 fails AFTER Step 3 succeeded — the exact
+          // scenario AISDLC-200 targets).
+          writeFileSync(taskFile, 'no frontmatter here\n', 'utf8');
+          return ok();
+        },
+      )
+      .on(/^git worktree remove/, ok())
+      .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'));
+    const fakeRunner = runner.toRunner();
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-200-FIX',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunner,
+      skipFinalizeCommit: true,
+    });
+
+    // AC #4 — Returned envelope is structured (NOT a thrown exception)
+    // and preserves the original failure reason in `notes`. Outcome is
+    // `aborted` so the CLI wrapper's `ROLLBACK_OUTCOMES` membership check
+    // fires the rollback pass.
+    expect(result.outcome).toBe('aborted');
+    expect(result.prUrl).toBeNull();
+    expect(result.notes).toMatch(/missing YAML frontmatter|cleanup warnings/i);
+    expect(result.branch).toMatch(/^ai-sdlc\/aisdlc-200-fix-/);
+    expect(result.worktreePath).toBe(worktreePath);
+
+    // AC #1 + AC #3 — Step 13 sentinel cleanup ran AND the best-effort
+    // `git worktree remove --force` was invoked because Step 4 threw
+    // BEFORE setupCompleted flipped true. No stale worktree left behind.
+    const removeCalls = runner.calls.filter(
+      (c) => c.command === 'git' && c.args[0] === 'worktree' && c.args[1] === 'remove',
+    );
+    expect(removeCalls).toHaveLength(1);
+    expect(removeCalls[0]?.args).toContain('--force');
+    expect(removeCalls[0]?.args).toContain(worktreePath);
+
+    // No stale sentinel left behind.
+    expect(existsSync(join(worktreePath, '.active-task'))).toBe(false);
+  });
+
+  // AISDLC-200 — Counter-test: post-setup throws (e.g. a buggy step 7
+  // implementation) MUST NOT pre-clean the worktree from inside the
+  // finally. The wrapper's `rollbackDispatch()` needs the branch ref to
+  // probe for commits beyond `origin/main` and quarantine them before
+  // tearing down. This guard preserves any developer commits when a
+  // post-Step-4 step throws.
+  it('AISDLC-200: post-setup throw does NOT pre-clean worktree (rollback owns quarantine)', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-200-POST',
+      title: 'post setup throw',
+      status: 'To Do',
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-200-post'), { recursive: true });
+
+    // Spawner that throws from inside Step 5b (developer dispatch). This
+    // simulates a post-Step-4 throw — Step 3 + Step 4 succeeded, so
+    // `setupCompleted === true` and the finally must NOT attempt
+    // `git worktree remove`.
+    const throwingSpawner = {
+      async spawn(): Promise<never> {
+        throw new Error('simulated post-setup developer dispatch failure');
+      },
+      async spawnParallel(): Promise<never> {
+        throw new Error('simulated post-setup parallel reviewer failure');
+      },
+    };
+
+    const runner = new FakeRunner()
+      .on(/^git fetch/, ok())
+      .on(/^git worktree add/, ok())
+      .on(/^git worktree remove/, ok())
+      .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'));
+    const fakeRunner = runner.toRunner();
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-200-POST',
+      workDir: tmp,
+      spawner: throwingSpawner,
+      runner: fakeRunner,
+      skipFinalizeCommit: true,
+    });
+
+    // Outcome aborted with the spawner's error preserved in notes.
+    expect(result.outcome).toBe('aborted');
+    expect(result.notes).toMatch(/simulated post-setup/);
+
+    // CRITICAL — `git worktree remove` was NOT called from the finally.
+    // Rollback (one layer up, in the CLI wrapper) owns the worktree
+    // teardown for post-setup failures so it can quarantine first.
+    const removeCalls = runner.calls.filter(
+      (c) => c.command === 'git' && c.args[0] === 'worktree' && c.args[1] === 'remove',
+    );
+    expect(removeCalls).toHaveLength(0);
+
+    // Sentinel was cleaned up though (Step 13 always runs).
+    expect(existsSync(join(tmp, '.worktrees', 'aisdlc-200-post', '.active-task'))).toBe(false);
+  });
 });
 
 describe('integration — defaultSpawner picks the right spawner per environment', () => {
