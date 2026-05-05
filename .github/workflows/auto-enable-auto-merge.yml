@@ -6,27 +6,29 @@ name: Auto-enable auto-merge on PR open
 # which then rebases against the queue tip + runs CI on the merge commit
 # + merges if green. No human click needed.
 #
-# Why `--squash` (and not `--rebase` or no flag): the merge queue on
-# `main` is configured for REBASE (queue's `mergeMethod`). When the
-# auto-merge `mergeMethod` MATCHES the queue's method, GitHub interprets
-# it as "merge directly" and silently refuses to enter the queue — the
-# PR sits MERGEABLE/UNSTABLE forever (witnessed on PRs #311 #312 + the
-# original failure mode PR #292 partially diagnosed).
+# Why `--rebase` (and not `--squash` or no flag): the merge queue on
+# `main` is configured for SQUASH (queue's `mergeMethod`, verified via
+# `repository.mergeQueue(branch:"main").configuration.mergeMethod`).
+# When the auto-merge `mergeMethod` MATCHES the queue's method, GitHub
+# interprets it as "merge directly" and silently refuses to enter the
+# queue — the PR sits MERGEABLE/UNSTABLE forever (originally witnessed
+# on PRs #311 #312 #292 when the queue was REBASE; same failure mode
+# observed on PRs #326 #327 #328 after the queue was switched to SQUASH
+# and this workflow was still passing `--squash`).
 #
 # Passing no flag is NOT a fix: `gh pr merge --auto` falls back to the
-# viewer's `viewerDefaultMergeMethod` GraphQL field. On this repo only
-# REBASE is allowed (`mergeCommitAllowed:false squashMergeAllowed:false
-# rebaseMergeAllowed:true`), so the implicit default is REBASE — same
-# trap.
+# viewer's `viewerDefaultMergeMethod`. Whichever the default resolves
+# to, if it matches the queue's method it springs the same trap.
 #
-# Passing `--squash` ARMS the auto-merge with a method that DIFFERS from
-# the queue's REBASE config. GitHub then falls through to the queue,
-# which uses its own REBASE config — so linear history is preserved (no
-# squash actually happens at merge time; verified empirically on PRs
-# #311 + #312). The `--squash` is a workaround for GitHub's
-# "method-must-differ" semantic, not a real merge-strategy change.
-# AISDLC-192 captures the analysis; AISDLC-189 captures the related
-# auto-rebase token bug.
+# Passing `--rebase` ARMS the auto-merge with a method that DIFFERS from
+# the queue's SQUASH config. GitHub then falls through to the queue,
+# which uses its own SQUASH config at merge time — so PRs land as a
+# single squash commit on main. The `--rebase` flag is a workaround for
+# GitHub's "method-must-differ" semantic, NOT the actual merge strategy.
+# Whenever the queue's `mergeMethod` is changed in repo settings, this
+# flag must be re-flipped to whichever method the queue is NOT using.
+# AISDLC-192 captures the original analysis; AISDLC-189 captures the
+# related auto-rebase token bug.
 #
 # Why a workflow (vs the per-PR button): the repo-level "Allow auto-merge"
 # setting just enables the BUTTON. It doesn't actually opt PRs into auto-merge.
@@ -58,8 +60,8 @@ jobs:
       github.event.pull_request.draft == false &&
       github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - name: Enable auto-merge with --squash (queue overrides at merge time)
-        run: gh pr merge --auto --squash "${{ github.event.pull_request.number }}"
+      - name: Enable auto-merge with --rebase (queue's SQUASH overrides at merge time)
+        run: gh pr merge --auto --rebase "${{ github.event.pull_request.number }}"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
