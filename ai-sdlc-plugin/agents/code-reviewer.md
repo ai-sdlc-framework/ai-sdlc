@@ -10,7 +10,7 @@ disallowedTools:
   - Edit
   - Write
   - AgentTool
-model: inherit
+model: sonnet
 harness: codex
 requiresIndependentHarnessFrom:
   - implement

@@ -10,7 +10,7 @@ disallowedTools:
   - Edit
   - Write
   - AgentTool
-model: inherit
+model: opus
 harness: codex
 requiresIndependentHarnessFrom:
   - implement
