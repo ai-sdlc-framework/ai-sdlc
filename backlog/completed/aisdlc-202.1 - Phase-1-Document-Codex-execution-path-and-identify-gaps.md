@@ -14,7 +14,7 @@ labels:
 dependencies: []
 references:
   - spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md
-  - ai-sdlc-plugin/skills/execute.md
+  - ai-sdlc-plugin/commands/execute.md
   - pipeline-cli/src/cli/execute.ts
   - pipeline-cli/src/execute-pipeline.ts
 priority: high
