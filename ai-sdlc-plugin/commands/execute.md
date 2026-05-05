@@ -108,28 +108,28 @@ Before creating the worktree, refuse to start a task whose dependencies aren't a
 # cli-deps is the AISDLC-117 dependency-graph CLI shipped from @ai-sdlc/pipeline-cli.
 # Exits 0 if every dependency is in backlog/completed/; exits non-zero with a
 # JSON `{ok, reason, blockers, dangling}` envelope on stderr otherwise.
-PREFLIGHT_OUT=$(pnpm --filter @ai-sdlc/pipeline-cli exec cli-deps preflight "$TASK_ID" --work-dir "$(pwd)" 2>&1)
+PREFLIGHT_OUT=$(node pipeline-cli/bin/cli-deps.mjs preflight "$TASK_ID" --work-dir "$(pwd)" 2>&1)
 PREFLIGHT_EXIT=$?
 if [ "$PREFLIGHT_EXIT" -ne 0 ]; then
   echo "ERROR: dependency preflight failed for $TASK_ID:"
   echo "$PREFLIGHT_OUT"
   echo ""
-  echo "To inspect the dispatch-ready frontier instead: pnpm --filter @ai-sdlc/pipeline-cli exec cli-deps frontier --format table"
+  echo "To inspect the dispatch-ready frontier instead: node pipeline-cli/bin/cli-deps.mjs frontier --format table"
   exit 1
 fi
 ```
 
-This step is fail-closed: if `cli-deps` itself errors (binary not built, broken JSON, etc.) the slash command still aborts rather than dispatching blindly. Run `pnpm --filter @ai-sdlc/pipeline-cli build` if the binary is missing.
+This step is fail-closed: if `cli-deps` itself errors (binary not built, broken JSON, etc.) the slash command still aborts rather than dispatching blindly. Run `pnpm --filter @ai-sdlc/pipeline-cli build` if the binary is missing. **Never** invoke pipeline-cli binaries via `pnpm --filter @ai-sdlc/pipeline-cli exec cli-X` — `pnpm exec` does not resolve workspace own-bins, the call silently fails with `Command not found`, and any `|| echo <fallback>` safety net fires unconditionally (CLAUDE.md "## CI behavior", AISDLC-156).
 
 ### Step 1.6 — Frontier consultation (operator hint, AISDLC-117)
 
 For `/loop /ai-sdlc execute` runs (and ad-hoc multi-task dispatch), the operator should consult the dispatch-ready frontier before picking a candidate rather than relying on instinct. This is the same data the AISDLC-117 task description called out as the cure for "manual dependency tracing":
 
 ```bash
-pnpm --filter @ai-sdlc/pipeline-cli exec cli-deps frontier --format table
+node pipeline-cli/bin/cli-deps.mjs frontier --format table
 ```
 
-If `$TASK_ID` is on the printed list (or independent of the listed items), proceed. If not, the task's blockers are still open — `cli-deps blockers $TASK_ID --format table` lists what to ship first. The loop driver SHOULD prefer frontier tasks; the slash command body's Step 1.5 is the hard gate that refuses non-ready tasks regardless of where the dispatch decision came from.
+If `$TASK_ID` is on the printed list (or independent of the listed items), proceed. If not, the task's blockers are still open — `node pipeline-cli/bin/cli-deps.mjs blockers $TASK_ID --format table` lists what to ship first. The loop driver SHOULD prefer frontier tasks; the slash command body's Step 1.5 is the hard gate that refuses non-ready tasks regardless of where the dispatch decision came from.
 
 ## Step 2 — Compute branch name
 
@@ -137,8 +137,17 @@ The branch pattern lives in `.ai-sdlc/pipeline-backlog.yaml` under `branching.pa
 
 ```bash
 BRANCH_PATTERN=$(grep -A2 'branching:' .ai-sdlc/pipeline-backlog.yaml | grep 'pattern:' | sed -E "s/.*pattern: *'([^']+)'.*/\1/")
-TITLE=$(grep -E '^title:' "$TASK_FILE" | sed -E 's/title: *"?([^"]+)"?/\1/')
-SLUG=$(echo "$TITLE" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9]+/-/g; s/^-+|-+$//g' | cut -c1-50)
+# AISDLC-180: use ai-sdlc-plugin/scripts/compute-slug.mjs to parse the YAML
+# frontmatter title properly. The previous shell pipeline (`grep ^title: |
+# sed`) returned `>-` literally for any block-scalar title produced by
+# backlog.md (every long-titled task), then normalised to an empty slug,
+# then yielded a malformed branch like `ai-sdlc/aisdlc-178.1-`. The script
+# is dependency-free (no js-yaml), handles every title form the serializer
+# emits, and exits non-zero with a clear error if the slug would be empty.
+SLUG=$(node ai-sdlc-plugin/scripts/compute-slug.mjs "$TASK_FILE") || {
+  echo "ERROR: failed to compute slug for $TASK_ID — see stderr above"
+  exit 1
+}
 BRANCH=$(echo "$BRANCH_PATTERN" | sed "s|{issueIdLower}|$TASK_ID_LOWER|g; s|{slug}|$SLUG|g")
 WORKTREE_PATH=".worktrees/$TASK_ID_LOWER"
 ```
@@ -259,7 +268,7 @@ mkdir -p "$ARTIFACTS_DIR"
 # A non-zero exit from the CLI itself would abort, but the CLI is designed
 # to fall open and exit 0 with a fellOpen=true decision instead — see
 # pipeline-cli/src/cli/classify-pr.ts.
-CLASSIFIER_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-classify-pr classify \
+CLASSIFIER_JSON=$(node pipeline-cli/bin/cli-classify-pr.mjs classify \
   --paths-file "/tmp/pr-files-${TASK_ID}.txt" \
   --issue-id "$TASK_ID" \
   --artifacts-dir "$ARTIFACTS_DIR" 2>/dev/null || echo '{"reviewers":["testing","critic","security"],"fellOpen":true,"fellOpenReason":"invocation-failed","confidence":0}')
@@ -373,7 +382,7 @@ fi
 
 # Pass --comments-json-file (NOT --comments-file) so the CLI's trusted-author
 # filter runs as defense-in-depth on top of the gh --jq filter above.
-INCREMENTAL_JSON=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide decide \
+INCREMENTAL_JSON=$(node pipeline-cli/bin/cli-incremental-decide.mjs decide \
   --comments-json-file "$PR_COMMENTS_JSON" \
   --base-ref origin/main \
   --head-ref HEAD \
@@ -461,7 +470,7 @@ ONLY if the gate decision is APPROVED (skip when `[needs-human-attention]` is be
 
 ```bash
 HEAD_SHA=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
-MARKER_BODY=$(pnpm --silent --filter @ai-sdlc/pipeline-cli exec cli-incremental-decide format-marker \
+MARKER_BODY=$(node pipeline-cli/bin/cli-incremental-decide.mjs format-marker \
   --content-hash "$INCR_CONTENT_HASH" \
   --reviewed-sha "$HEAD_SHA")
 
