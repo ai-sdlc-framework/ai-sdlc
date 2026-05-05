@@ -6,6 +6,19 @@
 
 ---
 
+## Execution Path References
+
+| Path | Status | Reference |
+|---|---|---|
+| Claude Code Tier 1 `/ai-sdlc execute` | Supported attended path | [`ai-sdlc-plugin/commands/execute.md`](../../ai-sdlc-plugin/commands/execute.md) |
+| Tier 2 `executePipeline()` / `ai-sdlc-pipeline execute` | Supported where a real `SubagentSpawner` is configured | [`pipeline-cli/README.md`](../../pipeline-cli/README.md) |
+| Codex CLI orchestration | Design-mapped, experimental until AISDLC-202.2 through AISDLC-202.4 ship | [Codex CLI Execution Path](./codex-execution-path.md) |
+
+Use the Codex path only for explicit dogfood/scoping work until the adapter,
+attestation, finalization, and pilot phases complete.
+
+---
+
 ## What this role is
 
 The Pipeline Operator owns the **policy, posture, and triage layer** of an AI-SDLC pipeline. Three engineering capabilities had to land before this role could exist coherently:
