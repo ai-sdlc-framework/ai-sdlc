@@ -13,7 +13,7 @@ labels:
   - framework-bug
 dependencies: []
 references:
-  - .github/workflows/ai-sdlc-dor-ingress.yml
+  - .github/workflows/dor-ingress.yml
 priority: medium
 ---
 
@@ -26,7 +26,7 @@ Surfaced on PR #325 (AISDLC-183 frontier filter) at 2026-05-05 02:33:44.
 
 ## Problem
 
-The `Evaluate backlog tasks changed by PR` step in `ai-sdlc-dor-ingress.yml` (or wherever the DoR ingress evaluator lives) uses 2-dot diff to enumerate changed files:
+The `Evaluate backlog tasks changed by PR` step in `dor-ingress.yml` (or wherever the DoR ingress evaluator lives) uses 2-dot diff to enumerate changed files:
 
 ```
 git diff --name-only $BASE $HEAD
