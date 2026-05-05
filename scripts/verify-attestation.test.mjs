@@ -518,7 +518,13 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
     assert.equal(out.status, 'valid', `expected valid after amend, got: ${out.reason}`);
   });
 
-  it('AC #8: rejects (contentHashV3 mismatch) when force-push actually changes the diff', () => {
+  it('AC #8: rejects (contentHash mismatch) when force-push actually changes the diff', () => {
+    // AISDLC-193.1: dual-write envelopes carry both contentHashV3 AND
+    // contentHashV4. The verifier prefers v4 when present, so the
+    // mismatch reason is now `contentHashV4 mismatch`. Either reason
+    // is correct (both bind to the head blob SHA which flips on a
+    // genuine content change) — match either to keep the regression
+    // useful while the v3+v4 transition is in flight.
     writeAttestation(
       fixture.root,
       fixture.headSha,
@@ -526,8 +532,9 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
       fixture.headSha,
       keys.privateKeyPem,
     );
-    // Amend with extra content. Now the per-file (base, head) blob delta
-    // genuinely differs (the head blob SHA flips on the changed file).
+    // Amend with extra content. Now the head blob SHA flips on the
+    // changed file → both v3 (via per-file delta) AND v4 (via
+    // base-independent head-only set) flip → verifier rejects.
     writeFileSync(join(fixture.root, 'feature.txt'), 'feature\nMORE CONTENT\n');
     git(['add', 'feature.txt'], fixture.root);
     git(['commit', '--amend', '-q', '--no-edit'], fixture.root);
@@ -538,10 +545,10 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
       repoRoot: fixture.root,
     });
     assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /contentHashV3 mismatch/);
+    assert.match(out.reason, /contentHash(V3|V4) mismatch/);
   });
 
-  it('AC #11: rejects (contentHashV3 mismatch) when an attestation from another PR is copy-pasted', () => {
+  it('AC #11: rejects (contentHash mismatch) when an attestation from another PR is copy-pasted', () => {
     // Build a second fixture and add an extra commit so its diff genuinely
     // differs from PR-B (= the outer `fixture`). Sign PR-A's attestation,
     // copy it onto PR-B's branch, then verify against PR-B's state —
@@ -578,7 +585,9 @@ describe('runVerifier (AISDLC-84 — rebase / amend / force-push)', () => {
         repoRoot: fixture.root,
       });
       assert.equal(out.status, 'invalid');
-      assert.match(out.reason, /contentHashV3 mismatch/);
+      // AISDLC-193.1: dual-write means v4 is the preferred mismatch
+      // surface; either reason is acceptable until v3 is retired.
+      assert.match(out.reason, /contentHash(V3|V4) mismatch/);
     } finally {
       rmSync(otherFixture.root, { recursive: true, force: true });
     }
@@ -1534,7 +1543,11 @@ describe('runVerifier (AISDLC-94 — rebase-tolerant contentHash)', () => {
 
     const out = runVerifier({ headSha: tampered, baseSha: b1, repoRoot: fixture.root });
     assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
-    assert.match(out.reason, /contentHashV3 mismatch/);
+    // AISDLC-193.1: dual-write — v4 is preferred, but either v3 or v4
+    // mismatch is the correct surface depending on which leg the verifier
+    // checked first. Both bind to the head blob SHA which flips on a
+    // genuine content tampering.
+    assert.match(out.reason, /contentHash(V3|V4) mismatch/);
   });
 
   // AISDLC-103 inverts the legacy AISDLC-94 "still accepts a v1 envelope
@@ -1701,7 +1714,9 @@ describe('runVerifier (AISDLC-101 — triple-hash with per-file-delta contentHas
 
     const out = runVerifier({ headSha: tampered, baseSha: b1, repoRoot: fixture.root });
     assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
-    assert.match(out.reason, /contentHashV3 mismatch/);
+    // AISDLC-193.1: dual-write — v4 is preferred but either v3 or v4
+    // mismatch is the correct surface. Both bind to head blob SHA.
+    assert.match(out.reason, /contentHash(V3|V4) mismatch/);
   });
 
   it('AISDLC-93 sibling-overlap: v3 ALSO accepts when the producer pre-signs against the rebase target', () => {
@@ -1764,19 +1779,23 @@ describe('runVerifier (AISDLC-101 — triple-hash with per-file-delta contentHas
     );
   });
 
-  it('AISDLC-103: v3 envelope with bogus contentHashV3 → verifier rejects', () => {
-    // Surgical counter-case: build a v3 envelope with contentHashV3
-    // deliberately set to a bogus value via predicateOverride; the
-    // verifier MUST reject. (No leg matches; v3 is the only content
-    // binding now.)
+  it('AISDLC-103/AISDLC-193.1: envelope with bogus contentHashV3 + bogus contentHashV4 → verifier rejects', () => {
+    // Surgical counter-case: build an envelope with BOTH content
+    // hashes deliberately set to bogus values via predicateOverride;
+    // the verifier MUST reject regardless of which leg it consulted.
+    // AISDLC-193.1 dual-write means we need to clobber both — clobbering
+    // only v3 lets v4 still match (= the queue-rebase fix at work).
     const b = fixture.baseSha;
     const h = fixture.headSha;
     writeAttestation(fixture.root, h, b, h, keys.privateKeyPem, {
-      predicateOverride: { contentHashV3: 'b'.repeat(64) },
+      predicateOverride: {
+        contentHashV3: 'b'.repeat(64),
+        contentHashV4: 'c'.repeat(64),
+      },
     });
     const out = runVerifier({ headSha: h, baseSha: b, repoRoot: fixture.root });
     assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
-    assert.match(out.reason, /contentHashV3 mismatch/);
+    assert.match(out.reason, /contentHash(V3|V4) mismatch/);
   });
 
   // AISDLC-103 INVERSION of the legacy AISDLC-101 "Phase-1 envelope still

@@ -15,20 +15,25 @@
 import { describe, it, expect } from 'vitest';
 import {
   ACCEPTED_SCHEMA_VERSIONS,
+  ATTESTATION_ENVELOPE_PATH_PATTERN,
   REQUIRED_REVIEWER_AGENT_IDS,
   buildPredicate,
   collectChangedFileDeltaEntries,
   collectChangedFileEntries,
   computeContentHash,
   computeContentHashV3,
+  computeContentHashV4,
   generateSigningKeyPair,
+  isAttestationEnvelopePath,
   paeEncode,
+  projectDeltaEntriesToHeadEntries,
   sha256Hex,
   signAttestation,
   validatePredicateShape,
   validateTrustedReviewers,
   verifyAttestation,
   type AttestationPredicate,
+  type ChangedFileHeadEntry,
   type DsseEnvelope,
   type TrustedReviewer,
 } from './attestations.js';
@@ -1594,5 +1599,592 @@ describe('verifyAttestation with contentHashV3 (AISDLC-101 → AISDLC-103)', () 
       expect(result.reason).toMatch(/schemaVersion not in accepted enum/);
     }
     void privateKeyPem;
+  });
+});
+
+// ─── AISDLC-193.1 — base-independent contentHashV4 + envelope self-exclusion ──
+//
+// `contentHashV4` is a base-INDEPENDENT per-file head-blob binding added
+// to fix the merge-queue rebase invalidation that made the AISDLC-193
+// stage 1 (= attestation as required gate) PR-deadlock instantly. v3
+// binds (base_blob, head_blob) pairs and breaks when the queue rebases
+// the PR onto a sibling-merged main (= base_blob shifts forward → v3
+// invalidates even though reviewed content is unchanged). v4 binds
+// only `{path, headBlobSha}` so whatever the rebase does to the base
+// ref, as long as the head blob SHAs are unchanged, v4 matches.
+//
+// Plus envelope self-exclusion: the chore-commit pattern signs the
+// predicate at the dev commit (HEAD before the envelope file exists),
+// then a chore commit on top adds the envelope at
+// `.ai-sdlc/attestations/<sha>.dsse.json`. If the file collector
+// includes the envelope file in the hashed file set, the verifier
+// sees an EXTRA entry the signer never saw → mismatch even on a
+// direct PR HEAD without any rebase.
+//
+// Six scenarios covered (per AISDLC-193.1 ACs):
+//   1. identical content vs base                    — happy path
+//   2. sibling-rebase shared file, our blob stable  — v3 invalidates,
+//                                                     v4 stays valid
+//   3. sibling-rebase modifies our blob             — v4 correctly
+//                                                     invalidates
+//   4. envelope self-exclusion equivalence          — dev-commit hash
+//                                                     == chore-commit hash
+//   5. legacy v3-only envelope                      — verifier still
+//                                                     accepts via v3 path
+//   6. dual v3+v4 envelope                          — verifier prefers
+//                                                     v4, ignores v3
+
+describe('computeContentHashV4 (AISDLC-193.1)', () => {
+  const fileA: ChangedFileHeadEntry = { path: 'src/a.ts', headBlobSha: 'b'.repeat(40) };
+  const fileB: ChangedFileHeadEntry = { path: 'src/b.ts', headBlobSha: 'd'.repeat(40) };
+  const fileC: ChangedFileHeadEntry = { path: 'src/c.ts', headBlobSha: 'f'.repeat(40) };
+
+  it('produces the same hash regardless of input ordering', () => {
+    // Property: sort-by-path is the canonicalization step. The order
+    // the caller passes entries in must NOT affect the hash, otherwise
+    // two producers would compute different hashes for the same content.
+    const h1 = computeContentHashV4([fileA, fileB, fileC]);
+    const h2 = computeContentHashV4([fileC, fileA, fileB]);
+    const h3 = computeContentHashV4([fileB, fileC, fileA]);
+    expect(h1).toBe(h2);
+    expect(h2).toBe(h3);
+    expect(h1).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('is BASE-INDEPENDENT — no base blob enters the hash', () => {
+    // The whole point of v4: the hash MUST not depend on any base /
+    // merge-base reference. Property test: two callers with the SAME
+    // {path, headBlobSha} pairs produce the same hash regardless of
+    // any other context. This is the property that makes v4 survive
+    // queue rebases (merge-base moves forward, head blobs don't).
+    const h1 = computeContentHashV4([fileA, fileB]);
+    const h2 = computeContentHashV4([fileA, fileB]);
+    expect(h1).toBe(h2);
+  });
+
+  it('produces a DIFFERENT hash when the head blob changes (= our PR contribution diverged)', () => {
+    // Threat-model boundary: a post-sign content tampering that
+    // changes the file content flips the head blob SHA → v4 hash
+    // flips → verifier rejects.
+    const before = computeContentHashV4([fileA]);
+    const after = computeContentHashV4([{ path: fileA.path, headBlobSha: 'z'.repeat(40) }]);
+    expect(before).not.toBe(after);
+  });
+
+  it('handles the empty changed-file set (no-op PR)', () => {
+    // Empty set → JSON.stringify([]) = "[]" → sha256 of "[]" — well-defined
+    // and verifiable. Test the round-trip explicitly so a future canonical
+    // change can't silently shift the empty-set hash.
+    expect(computeContentHashV4([])).toBe(sha256Hex('[]'));
+  });
+
+  it('deduplicates same-path entries with last-write-wins (idempotent against double-enumeration)', () => {
+    const explicit = computeContentHashV4([
+      { path: 'src/x.ts', headBlobSha: 'b'.repeat(40) },
+      { path: 'src/x.ts', headBlobSha: 'd'.repeat(40) }, // overrides
+    ]);
+    const cleanRun = computeContentHashV4([{ path: 'src/x.ts', headBlobSha: 'd'.repeat(40) }]);
+    expect(explicit).toBe(cleanRun);
+  });
+
+  it('lowercases head blob SHAs before hashing (case-insensitive normalization)', () => {
+    const lower = computeContentHashV4([{ path: 'src/x.ts', headBlobSha: 'b'.repeat(40) }]);
+    const upper = computeContentHashV4([{ path: 'src/x.ts', headBlobSha: 'B'.repeat(40) }]);
+    expect(lower).toBe(upper);
+  });
+
+  it('throws on entries with empty path', () => {
+    expect(() => computeContentHashV4([{ path: '', headBlobSha: 'a'.repeat(40) }])).toThrow(
+      /path must be a non-empty string/,
+    );
+  });
+
+  it('throws on entries with non-string headBlobSha', () => {
+    expect(() =>
+      computeContentHashV4([
+        {
+          path: 'src/x.ts',
+          headBlobSha: undefined as unknown as string,
+        },
+      ]),
+    ).toThrow(/headBlobSha must be a string/);
+  });
+
+  it('rejects path entries containing tab to keep canonical encoding injective', () => {
+    expect(() =>
+      computeContentHashV4([{ path: 'src/with\ttab.ts', headBlobSha: 'a'.repeat(40) }]),
+    ).toThrow(/path must not contain tab or newline/);
+  });
+
+  it('rejects path entries containing newline to keep canonical encoding injective', () => {
+    expect(() =>
+      computeContentHashV4([{ path: 'src/with\nnewline.ts', headBlobSha: 'a'.repeat(40) }]),
+    ).toThrow(/path must not contain tab or newline/);
+  });
+
+  it('produces a different hash when path differs (paths are part of the binding)', () => {
+    // Sanity: two different paths with the same head blob produce
+    // different hashes — otherwise an attacker could swap files.
+    const a = computeContentHashV4([{ path: 'src/a.ts', headBlobSha: 'a'.repeat(40) }]);
+    const b = computeContentHashV4([{ path: 'src/b.ts', headBlobSha: 'a'.repeat(40) }]);
+    expect(a).not.toBe(b);
+  });
+});
+
+describe('isAttestationEnvelopePath (AISDLC-193.1 envelope self-exclusion)', () => {
+  it('matches the canonical envelope path shape', () => {
+    expect(isAttestationEnvelopePath('.ai-sdlc/attestations/abc123.dsse.json')).toBe(true);
+    expect(
+      isAttestationEnvelopePath(
+        '.ai-sdlc/attestations/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.dsse.json',
+      ),
+    ).toBe(true);
+  });
+
+  it('does NOT match paths inside subdirectories of attestations/', () => {
+    // The pattern uses [^/]+ so a malicious path with a slash component
+    // can't sneak past as an envelope path.
+    expect(isAttestationEnvelopePath('.ai-sdlc/attestations/sub/abc.dsse.json')).toBe(false);
+  });
+
+  it('does NOT match unrelated paths', () => {
+    expect(isAttestationEnvelopePath('src/foo.ts')).toBe(false);
+    expect(isAttestationEnvelopePath('.ai-sdlc/review-policy.md')).toBe(false);
+    expect(isAttestationEnvelopePath('backlog/tasks/aisdlc-1.md')).toBe(false);
+  });
+
+  it('does NOT match the attestations directory itself or non-.dsse.json files', () => {
+    expect(isAttestationEnvelopePath('.ai-sdlc/attestations/')).toBe(false);
+    expect(isAttestationEnvelopePath('.ai-sdlc/attestations/README.md')).toBe(false);
+    expect(isAttestationEnvelopePath('.ai-sdlc/attestations/abc.json')).toBe(false);
+  });
+
+  it('does NOT match unanchored variants (defense against ./prefix smuggling)', () => {
+    expect(isAttestationEnvelopePath('./.ai-sdlc/attestations/abc.dsse.json')).toBe(false);
+    expect(isAttestationEnvelopePath('foo/.ai-sdlc/attestations/abc.dsse.json')).toBe(false);
+  });
+
+  it('handles backslash normalization (Windows callers)', () => {
+    expect(isAttestationEnvelopePath('.ai-sdlc\\attestations\\abc.dsse.json')).toBe(true);
+  });
+
+  it('returns false for non-string input (defense in depth)', () => {
+    expect(isAttestationEnvelopePath(undefined as unknown as string)).toBe(false);
+    expect(isAttestationEnvelopePath(null as unknown as string)).toBe(false);
+    expect(isAttestationEnvelopePath(123 as unknown as string)).toBe(false);
+  });
+
+  it('exports the regex pattern directly for callers that need it (e.g. verify-attestation.mjs)', () => {
+    expect(ATTESTATION_ENVELOPE_PATH_PATTERN.test('.ai-sdlc/attestations/abc.dsse.json')).toBe(
+      true,
+    );
+    expect(ATTESTATION_ENVELOPE_PATH_PATTERN.test('src/foo.ts')).toBe(false);
+  });
+});
+
+describe('collectChangedFileDeltaEntries envelope self-exclusion (AISDLC-193.1)', () => {
+  it('skips .ai-sdlc/attestations/<sha>.dsse.json paths from the entry set', () => {
+    // Scenario: chore commit added the envelope file to the diff. The
+    // hash collector MUST skip it so the producer's hash (computed at
+    // dev commit, BEFORE the envelope existed) matches the verifier's
+    // hash (computed at chore commit, AFTER the envelope was added).
+    const MERGE_BASE = 'e'.repeat(40);
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: (args: string[]): string => {
+        const dashCFlags = args.filter((a, i) => a === '-c' && i + 1 < args.length).length;
+        const cmdIdx = dashCFlags * 2;
+        const cmd = args[cmdIdx];
+        if (cmd === 'merge-base') return `${MERGE_BASE}\n`;
+        if (cmd === 'diff') {
+          // Diff includes a real source file AND the envelope file.
+          return 'src/foo.ts\n.ai-sdlc/attestations/abcd.dsse.json\n';
+        }
+        if (cmd === 'ls-tree') {
+          const dashDashIdx = args.indexOf('--');
+          const path = args[dashDashIdx + 1];
+          if (path === 'src/foo.ts') return `100644 blob ${'a'.repeat(40)}\t${path}\n`;
+          if (path === '.ai-sdlc/attestations/abcd.dsse.json')
+            return `100644 blob ${'b'.repeat(40)}\t${path}\n`;
+          return '';
+        }
+        throw new Error(`stub runGit: unexpected command ${cmd}`);
+      },
+    });
+    // Only src/foo.ts should appear; the envelope file is excluded.
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toEqual({
+      path: 'src/foo.ts',
+      baseBlobSha: 'a'.repeat(40),
+      headBlobSha: 'a'.repeat(40),
+    });
+  });
+
+  it('still includes other files under .ai-sdlc/ that are NOT envelope files', () => {
+    // Sanity: the exclusion is narrowly scoped to the envelope file
+    // pattern. Other .ai-sdlc/ files (review-policy.md, schemas/*) are
+    // still hashed — they're load-bearing and the predicate's policyHash
+    // covers them indirectly via separate fields.
+    const MERGE_BASE = 'e'.repeat(40);
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/tmp/repo', {
+      runGit: (args: string[]): string => {
+        const dashCFlags = args.filter((a, i) => a === '-c' && i + 1 < args.length).length;
+        const cmdIdx = dashCFlags * 2;
+        const cmd = args[cmdIdx];
+        if (cmd === 'merge-base') return `${MERGE_BASE}\n`;
+        if (cmd === 'diff') return '.ai-sdlc/review-policy.md\n';
+        if (cmd === 'ls-tree') return `100644 blob ${'a'.repeat(40)}\t.ai-sdlc/review-policy.md\n`;
+        throw new Error(`stub runGit: unexpected command ${cmd}`);
+      },
+    });
+    expect(entries).toEqual([
+      {
+        path: '.ai-sdlc/review-policy.md',
+        baseBlobSha: 'a'.repeat(40),
+        headBlobSha: 'a'.repeat(40),
+      },
+    ]);
+  });
+});
+
+describe('projectDeltaEntriesToHeadEntries (AISDLC-193.1)', () => {
+  it('field-picks {path, headBlobSha} from a v3 delta set', () => {
+    const deltas = [
+      { path: 'src/a.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+      { path: 'src/b.ts', baseBlobSha: 'c'.repeat(40), headBlobSha: 'd'.repeat(40) },
+    ];
+    expect(projectDeltaEntriesToHeadEntries(deltas)).toEqual([
+      { path: 'src/a.ts', headBlobSha: 'b'.repeat(40) },
+      { path: 'src/b.ts', headBlobSha: 'd'.repeat(40) },
+    ]);
+  });
+
+  it('returns an empty array for an empty input', () => {
+    expect(projectDeltaEntriesToHeadEntries([])).toEqual([]);
+  });
+
+  it('preserves order (sorting is the responsibility of the hash, not the projection)', () => {
+    const deltas = [
+      { path: 'src/z.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+      { path: 'src/a.ts', baseBlobSha: 'c'.repeat(40), headBlobSha: 'd'.repeat(40) },
+    ];
+    const out = projectDeltaEntriesToHeadEntries(deltas);
+    expect(out[0].path).toBe('src/z.ts');
+    expect(out[1].path).toBe('src/a.ts');
+  });
+});
+
+describe('buildPredicate dual-writes contentHashV3 + contentHashV4 (AISDLC-193.1)', () => {
+  it('every freshly-built v3 predicate carries BOTH contentHashV3 AND contentHashV4', () => {
+    // The dual-write contract: producers emit both hashes so the
+    // verifier can prefer v4 (rebase-stable) but fall back to v3 for
+    // legacy envelopes still in flight from before AISDLC-193.1.
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    expect(predicate.contentHashV3).toMatch(/^[0-9a-f]{64}$/);
+    expect(predicate.contentHashV4).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('contentHashV4 is computed over the v4-projection of the same delta set', () => {
+    // Property: the producer can't accidentally compute v3 over one
+    // file set and v4 over another — the file enumeration is shared
+    // by construction (buildPredicate projects v3 entries to v4
+    // entries). Test the algebraic identity holds.
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    const expectedV4 = computeContentHashV4(
+      projectDeltaEntriesToHeadEntries(DEFAULT_INPUTS.changedFileDeltas),
+    );
+    expect(predicate.contentHashV4).toBe(expectedV4);
+  });
+
+  it('v4 stays stable across base blob changes (the queue-rebase property)', () => {
+    // Concrete scenario: producer signs against base_blob = X,
+    // post-rebase base_blob is now Y. v3 hash differs (base entered
+    // hash); v4 hash is identical (base did NOT enter hash).
+    const headSha = 'a'.repeat(40);
+    const beforeRebase = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: [
+        { path: 'src/foo.ts', baseBlobSha: 'X'.repeat(40), headBlobSha: 'h'.repeat(40) },
+      ],
+    });
+    const afterRebase = buildPredicate({
+      ...DEFAULT_INPUTS,
+      commitSha: headSha,
+      changedFileDeltas: [
+        // Same path + same head blob (= reviewer-approved content stable)
+        // BUT different base blob (= queue rebased onto sibling-merged main).
+        { path: 'src/foo.ts', baseBlobSha: 'Y'.repeat(40), headBlobSha: 'h'.repeat(40) },
+      ],
+    });
+    // The whole reason v4 exists: this expectation must pass.
+    expect(afterRebase.contentHashV4).toBe(beforeRebase.contentHashV4);
+    // And v3 must NOT — that's the v3 invalidation v4 is fixing.
+    expect(afterRebase.contentHashV3).not.toBe(beforeRebase.contentHashV3);
+  });
+
+  it('v4 flips when the head blob changes (= a real content tampering)', () => {
+    // Threat model preserved: amend-with-injection still rejects.
+    const beforeTamper = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: [
+        { path: 'src/foo.ts', baseBlobSha: 'X'.repeat(40), headBlobSha: 'h'.repeat(40) },
+      ],
+    });
+    const afterTamper = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: [
+        // Same path + same base blob, DIFFERENT head blob (= attacker
+        // amended the PR to add unreviewed code).
+        { path: 'src/foo.ts', baseBlobSha: 'X'.repeat(40), headBlobSha: 'z'.repeat(40) },
+      ],
+    });
+    expect(afterTamper.contentHashV4).not.toBe(beforeTamper.contentHashV4);
+  });
+
+  it('envelope self-exclusion: dev-commit hash equals chore-commit hash', () => {
+    // The simulation: the dev commit signed with file set [src/foo.ts].
+    // The chore commit added the envelope file at
+    // .ai-sdlc/attestations/<sha>.dsse.json. If we re-collected at
+    // chore-commit time, the diff includes BOTH src/foo.ts AND the
+    // envelope. The collector skips the envelope, so the resulting
+    // hash equals the dev-commit hash.
+    //
+    // Testing this directly via computeContentHashV4: an entry list
+    // containing the envelope file should produce the SAME hash as
+    // the same list with the envelope file removed (because the
+    // collector strips it before reaching the hash function — so we
+    // demonstrate the property at the collector level above; here we
+    // assert that the predicates round-trip the same).
+    const devCommitDeltas = [
+      { path: 'src/foo.ts', baseBlobSha: 'a'.repeat(40), headBlobSha: 'b'.repeat(40) },
+    ];
+    // The producer at chore commit re-collects via collectChangedFileDeltaEntries,
+    // which excludes the envelope. So the producer's INPUT to buildPredicate
+    // is the same list (envelope excluded by the collector). Property:
+    // buildPredicate is deterministic over the input list.
+    const dev = buildPredicate({ ...DEFAULT_INPUTS, changedFileDeltas: devCommitDeltas });
+    const chore = buildPredicate({ ...DEFAULT_INPUTS, changedFileDeltas: devCommitDeltas });
+    expect(chore.contentHashV4).toBe(dev.contentHashV4);
+    expect(chore.contentHashV3).toBe(dev.contentHashV3);
+  });
+});
+
+describe('validatePredicateShape with contentHashV4 (AISDLC-193.1)', () => {
+  function v3Predicate(): Record<string, unknown> {
+    const p = buildPredicate(DEFAULT_INPUTS);
+    return { ...p } as unknown as Record<string, unknown>;
+  }
+
+  it('accepts a v3 predicate carrying contentHashV4', () => {
+    expect(validatePredicateShape(v3Predicate())).toBeNull();
+  });
+
+  it('accepts a legacy v3-only predicate (contentHashV4 absent)', () => {
+    // Back-compat: envelopes signed before AISDLC-193.1 lack v4 and
+    // must still pass shape validation so the verifier can fall back
+    // to the v3 ancestor walk.
+    const p = v3Predicate();
+    delete p.contentHashV4;
+    expect(validatePredicateShape(p)).toBeNull();
+  });
+
+  it('rejects contentHashV4 with wrong length', () => {
+    const p = v3Predicate();
+    p.contentHashV4 = 'short';
+    expect(validatePredicateShape(p)).toMatch(/contentHashV4 does not match pattern/);
+  });
+
+  it('rejects contentHashV4 with non-hex chars', () => {
+    const p = v3Predicate();
+    p.contentHashV4 = 'g'.repeat(64);
+    expect(validatePredicateShape(p)).toMatch(/contentHashV4 does not match pattern/);
+  });
+
+  it('rejects contentHashV4 that is not a string', () => {
+    const p = v3Predicate();
+    p.contentHashV4 = 12345;
+    expect(validatePredicateShape(p)).toMatch(/contentHashV4 does not match pattern/);
+  });
+
+  it('rejects contentHashV4 with embedded CRLF (downstream injection vector)', () => {
+    const p = v3Predicate();
+    p.contentHashV4 = 'a'.repeat(30) + '\r\n' + 'b'.repeat(32);
+    const reason = validatePredicateShape(p);
+    expect(reason).toMatch(/contentHashV4 does not match pattern/);
+    // Reason itself must NOT contain the malicious value.
+    expect(reason).not.toMatch(/\r|\n/);
+  });
+});
+
+describe('verifyAttestation v4-prefer / v3-fallback (AISDLC-193.1)', () => {
+  // Shared test setup: two delta sets with the SAME head blob but
+  // DIFFERENT base blob. Simulates the queue-rebase scenario.
+  const ORIGINAL_DELTAS = [
+    { path: 'src/foo.ts', baseBlobSha: '1'.repeat(40), headBlobSha: 'h'.repeat(40) },
+  ];
+  const REBASED_DELTAS = [
+    { path: 'src/foo.ts', baseBlobSha: '2'.repeat(40), headBlobSha: 'h'.repeat(40) },
+  ];
+
+  it('AC #5: v4-enabled envelope accepts a PR-head whose head blobs match, REGARDLESS of base movement', () => {
+    // The whole point: producer signs against ORIGINAL_DELTAS (base=1).
+    // Verifier expects REBASED_DELTAS (base=2). v4 hashes match
+    // because head blob is the same → verifier accepts.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: ORIGINAL_DELTAS,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    // Verifier computes its OWN expected hashes from REBASED_DELTAS.
+    const expectedV4 = computeContentHashV4(projectDeltaEntriesToHeadEntries(REBASED_DELTAS));
+    const expectedV3 = computeContentHashV3(REBASED_DELTAS);
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        contentHashV3: expectedV3, // v3 differs (base moved) — DOES NOT MATCH
+        contentHashV4: expectedV4, // v4 stable (head unchanged) — matches
+      },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('AC #6: v4-enabled envelope REJECTS a PR-head whose head blobs differ (genuine modification)', () => {
+    // Threat model: an attacker amended the PR to inject unreviewed
+    // code. Head blob changes → v4 hash flips → verifier rejects.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: ORIGINAL_DELTAS,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const tampered = [
+      { path: 'src/foo.ts', baseBlobSha: '1'.repeat(40), headBlobSha: 'TAMPERED'.padEnd(40, '0') },
+    ];
+    const expectedV4 = computeContentHashV4(projectDeltaEntriesToHeadEntries(tampered));
+    const expectedV3 = computeContentHashV3(tampered);
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        contentHashV3: expectedV3,
+        contentHashV4: expectedV4,
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.reason).toMatch(/contentHashV4 mismatch/);
+    }
+  });
+
+  it('AC #8: legacy v3-only envelope still verifies via the v3 path (back-compat)', () => {
+    // Hand-craft a legacy envelope: build a fresh predicate then
+    // surgically remove contentHashV4 before signing. The verifier
+    // must accept via the v3 fallback.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: ORIGINAL_DELTAS,
+    });
+    const legacyPredicate: AttestationPredicate = { ...predicate };
+    delete legacyPredicate.contentHashV4;
+    const envelope = signAttestation({
+      predicate: legacyPredicate,
+      privateKeyPem,
+      keyid: 'k',
+    });
+    // Verifier supplies expected v3 (matching) AND optionally an expected
+    // v4 (which is irrelevant because the envelope has no v4).
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(legacyPredicate),
+        contentHashV3: legacyPredicate.contentHashV3,
+        contentHashV4: 'a'.repeat(64), // verifier supplied — but envelope has none
+      },
+    });
+    expect(result.valid).toBe(true);
+  });
+
+  it('AC #6+#8 hybrid: legacy v3-only envelope rejects when v3 hash differs', () => {
+    // Sanity: removing v4 doesn't bypass v3 enforcement.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: ORIGINAL_DELTAS,
+    });
+    const legacyPredicate: AttestationPredicate = { ...predicate };
+    delete legacyPredicate.contentHashV4;
+    const envelope = signAttestation({
+      predicate: legacyPredicate,
+      privateKeyPem,
+      keyid: 'k',
+    });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(legacyPredicate),
+        contentHashV3: sha256Hex('different content'),
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) {
+      expect(result.reason).toMatch(/contentHashV3 mismatch/);
+    }
+  });
+
+  it('dual v3+v4 envelope: when v4 matches, v3 is NOT consulted (the queue-rebase fix)', () => {
+    // The CRITICAL property: producer's v3 may be STALE (because the
+    // queue rebased the merge-base forward), but v4 is fresh. The
+    // verifier must accept on v4 alone — consulting v3 here would
+    // cause exactly the AISDLC-193 stage-1 failure pattern.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: ORIGINAL_DELTAS,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        // Verifier's expected v3 is BOGUS (= simulating the stale
+        // v3 the queue rebase produces).
+        contentHashV3: sha256Hex('stale post-rebase v3 from the queue'),
+        // But v4 matches (= the producer's reviewed content is
+        // unchanged at HEAD).
+        contentHashV4: predicate.contentHashV4,
+      },
+    });
+    // ✓ This must pass — otherwise the queue-rebase fix isn't actually
+    // fixing anything.
+    expect(result.valid).toBe(true);
+  });
+
+  it('opts.expected omits contentHashV4 → falls back to v3 even on v4-carrying envelope', () => {
+    // Scenario: caller hasn't been updated to compute v4 yet (e.g. a
+    // test fixture). The verifier should still work via v3 fallback —
+    // this is the "soft" rollout property.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      changedFileDeltas: ORIGINAL_DELTAS,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        contentHashV3: predicate.contentHashV3,
+        // Note: contentHashV4 deliberately omitted.
+      },
+    });
+    expect(result.valid).toBe(true);
   });
 });
