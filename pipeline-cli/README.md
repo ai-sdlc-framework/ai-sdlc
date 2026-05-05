@@ -133,7 +133,7 @@ Pick the row that matches your situation:
 | Entry point | Invoker | Spawner | Billing | When to use |
 |---|---|---|---|---|
 | `/ai-sdlc execute <task-id>` (slash command body, `ai-sdlc-plugin/commands/execute.md`) | Operator typing in their Claude Code session | `Agent` tool calls in the SAME session | Subscription (Claude Code Max) | The default for internal dogfood. Operator drives, sees progress in real-time, decisions surface inline. |
-| `ai-sdlc-pipeline execute <task-id>` (this CLI subcommand, AISDLC-182) | Anything that can shell out — AI assistant in operator session, cron, webhook, GitHub Action | Resolved from `--spawner`: `mock` (default; plumbing) / `api-key` (paid SDK) / `claude-cli` (deferred) | Depends on `--spawner` | An AI assistant working alongside the operator (or any non-slash-command context) needs to invoke the FULL pipeline including reviewers + verdict-file write. Until `--spawner claude-cli` ships, `--spawner api-key` is the practical real-work choice; `--spawner mock` is the safe plumbing default. **Wires AISDLC-177 rollback** on every outcome in the orchestrator's `ROLLBACK_OUTCOMES` set — `developer-failed`, `developer-json-contract-violated`, `aborted`, `unknown-failure` (the constant is imported from `orchestrator/loop.ts` so both surfaces stay in lockstep, AISDLC-191) — the slash command body does NOT yet wire rollback, so the umbrella is the consistency-over-parity win when an unattended dispatch fails mid-flight. |
+| `ai-sdlc-pipeline execute <task-id>` (this CLI subcommand, AISDLC-182) | Anything that can shell out — AI assistant in operator session, cron, webhook, GitHub Action | Safe default plan with `mock`; real runs require `--run --spawner api-key` until `claude-cli` ships | Depends on `--spawner` | A bare invocation is non-mutating: it validates the task and prints the planned branch/worktree without calling `executePipeline()`. An AI assistant working alongside the operator (or any non-slash-command context) that needs the FULL pipeline including reviewers + verdict-file write must pass explicit run intent and a real spawner: `--run --spawner api-key`. `--spawner mock` is dry-run/plumbing only and refuses with `--run`. **Wires AISDLC-177 rollback** on every real-run outcome in the orchestrator's `ROLLBACK_OUTCOMES` set — `developer-failed`, `developer-json-contract-violated`, `aborted`, `unknown-failure` (the constant is imported from `orchestrator/loop.ts` so both surfaces stay in lockstep, AISDLC-191) — the slash command body does NOT yet wire rollback, so the umbrella is the consistency-over-parity win when an unattended dispatch fails mid-flight. |
 | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | Cron / GitHub Action / unattended | `ClaudeCodeSDKSpawner` (resolved internally) | API key (paid Anthropic API) | GitHub-issue-driven flow. Designed for unattended use where no operator session is available. |
 
 ### Why the `execute` umbrella subcommand exists (AISDLC-182)
@@ -171,25 +171,29 @@ real responsibilities:
    session can surface progress.
 
 ```bash
-# Plumbing check — does this task pass validation, what branch will it use?
+# Safe default / plumbing check — validates and prints the planned branch/worktree.
+# Does not call executePipeline(), create worktrees, flip task status, or push.
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182
+
+# Equivalent explicit dry-run form.
 node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --dry-run
 
 # Real run with API-key billing (requires ANTHROPIC_API_KEY in env)
-node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --spawner api-key
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --run --spawner api-key
 
-# Mock spawner (default) — exercises the dispatch surface end-to-end
-# WITHOUT calling a real LLM. Reviews unconditionally APPROVE; the
-# developer return is a fixture with commitSha=null. Useful for CI
-# integration tests.
+# Mock spawner (default) is dry-run/plumbing only. This plans safely:
 node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --spawner mock
+
+# This refuses before validation/worktree setup because mock cannot do real work:
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --run --spawner mock
 ```
 
 #### `--spawner` options
 
 | Value | Status | Behaviour |
 |---|---|---|
-| `mock` | shipped (default) | `MockSpawner` with hard-coded approval fixtures. Safe for plumbing checks + integration tests. Does NOT do real work — `commitSha` is `null`. |
-| `api-key` | shipped | Constructs the `ClaudeCodeSDKSpawner` (lazy SDK import). Requires `ANTHROPIC_API_KEY` in env. Same billing model as `pnpm dogfood watch`. |
+| `mock` | shipped (default) | Dry-run/plumbing only. A no-`--run` invocation validates and prints the plan without resolving the spawner or mutating files. `--run --spawner mock` refuses before filesystem mutation. |
+| `api-key` | shipped | Constructs the `ClaudeCodeSDKSpawner` (lazy SDK import). Requires `ANTHROPIC_API_KEY` in env and explicit `--run`. Same billing model as `pnpm dogfood watch`. |
 | `claude-cli` | DEFERRED — see below | Errors with a documented path-forward message. Cross-session subagent routing is the unsolved problem; until it lands, operators wanting subscription billing should run `/ai-sdlc execute` (slash command) directly. |
 
 The `claude-cli` spawner — whose intent is "use the operator's existing
@@ -211,8 +215,8 @@ verdict file → push for hook auto-sign) on every dispatch. Skipping
 any of those steps reproduces the 2026-05-04 failure mode (PRs shipped
 without reviewer verdicts). The umbrella `execute` subcommand exists
 precisely so you don't have to compose by hand — once `--spawner
-claude-cli` is wired, the safest path will be `ai-sdlc-pipeline execute
-<task-id> --spawner claude-cli`.
+claude-cli` is wired, the explicit real-run path will be
+`ai-sdlc-pipeline execute <task-id> --run --spawner claude-cli`.
 
 ## Quickstart — Tier 1 (slash command body)
 
