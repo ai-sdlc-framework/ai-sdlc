@@ -3,7 +3,7 @@ id: AISDLC-183
 title: >-
   Reviewer follow-up: AISDLC-179 missed AC #3 (frontier resolver In-Progress
   filter for defense-in-depth)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 18:35'
 labels:
