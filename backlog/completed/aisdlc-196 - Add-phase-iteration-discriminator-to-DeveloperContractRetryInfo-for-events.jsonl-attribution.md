@@ -3,7 +3,7 @@ id: AISDLC-196
 title: >-
   Add phase/iteration discriminator to DeveloperContractRetryInfo for
   events.jsonl attribution
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-05 00:20'
 labels:
