@@ -134,6 +134,32 @@ export interface AttestationPredicate {
    * and/or `contentHash` are rejected with a schemaVersion-allowlist reason.
    */
   contentHashV3: string;
+  /**
+   * Base-independent per-file head-blob binding (AISDLC-193.1). sha256
+   * over `JSON.stringify(sorted([{path, headBlobSha}]))` for every
+   * changed file in `<base>...<head>`, EXCLUDING the envelope file
+   * itself (`.ai-sdlc/attestations/<sha>.dsse.json` — see
+   * `isAttestationEnvelopePath` for the rationale).
+   *
+   * Why both v3 AND v4 ship side by side during the transition:
+   *  - In-flight envelopes signed before AISDLC-193.1 carry only `v3`.
+   *    Verifier accepts those via the existing v3 ancestor walk so the
+   *    queue doesn't reject envelopes that were valid yesterday.
+   *  - New envelopes carry BOTH so the verifier prefers v4 (skip the
+   *    walk, base-independent) but can fall back to v3 if v4 doesn't
+   *    match (= the rare case where head blobs DID change between
+   *    signing and verification — e.g. amend-after-sign).
+   *
+   * After the transition window, `contentHashV3` will be deprecated
+   * and the verifier will require `contentHashV4`. For now both are
+   * populated by `buildPredicate` so any envelope this code emits is
+   * verifiable on both legs. The TypeScript type marks v4 as OPTIONAL
+   * because envelopes parsed from disk that pre-date AISDLC-193.1 will
+   * not carry the field; `validatePredicateShape` accepts the absence
+   * (= legacy v3 envelope) and the verifier falls back to the v3
+   * ancestor walk in that case.
+   */
+  contentHashV4?: string;
   /** sha256 of `.ai-sdlc/review-policy.md` at attestation time. */
   policyHash: string;
   /** Reviewer entries — typically 3 (code/test/security). */
@@ -321,6 +347,17 @@ export function validatePredicateShape(parsed: unknown): string | null {
     }
   }
 
+  // contentHashV4 (AISDLC-193.1) — OPTIONAL during the v3+v4 dual-write
+  // transition window. When present, MUST be a 64-char hex sha256;
+  // when absent (legacy v3-only envelopes signed before this field
+  // landed), the verifier falls back to the v3 ancestor walk.
+  if (p['contentHashV4'] !== undefined) {
+    const ch4 = p['contentHashV4'];
+    if (typeof ch4 !== 'string' || !SHA256_HEX.test(ch4)) {
+      return 'schema validation failed: contentHashV4 does not match pattern';
+    }
+  }
+
   // pluginVersion — short ID (no CR/LF, no `=`).
   const pluginVersion = p['pluginVersion'];
   if (
@@ -453,6 +490,75 @@ export interface ChangedFileEntry {
 export interface ChangedFileDeltaEntry {
   path: string;
   baseBlobSha: string;
+  headBlobSha: string;
+}
+
+/**
+ * Regex matching the envelope self-exclusion path pattern
+ * `.ai-sdlc/attestations/<sha>.dsse.json`. Used to filter out the
+ * envelope file itself from the file collector for AISDLC-193.1
+ * `contentHashV4` and AISDLC-101 `contentHashV3` purposes.
+ *
+ * The chore-commit pattern signs the predicate at the dev-commit (HEAD
+ * BEFORE the envelope file exists), then the chore commit on top adds
+ * the envelope file at `.ai-sdlc/attestations/<sha>.dsse.json`. If the
+ * collector includes the envelope file in the hashed file set, the
+ * verifier (which runs against PR HEAD = dev-commit + chore commit)
+ * will see an EXTRA entry for the envelope that the signer never saw
+ * → mismatch even on direct PR HEAD without any rebase.
+ *
+ * The exclusion applies to the file COLLECTOR for HASHING purposes
+ * only. The verifier's chore-commit allowlist (`scripts/verify-attestation.mjs`
+ * `CHORE_COMMIT_PATH_ALLOWLIST`) STILL allows the envelope file in the
+ * chore commit's diff — that's a separate concern from "what is in the
+ * file set we hash."
+ *
+ * Anchored with `^...$` against the forward-slash-normalized path so
+ * an attacker cannot bypass with `./.ai-sdlc/attestations/x.dsse.json`
+ * or `foo/.ai-sdlc/attestations/x.dsse.json`. Note that git's
+ * `--name-only` always emits paths relative to the repo root with
+ * forward slashes, so the match is straightforward in practice.
+ */
+export const ATTESTATION_ENVELOPE_PATH_PATTERN = /^\.ai-sdlc\/attestations\/[^/]+\.dsse\.json$/;
+
+/**
+ * Predicate to determine whether a file path identifies an attestation
+ * envelope and should therefore be excluded from `contentHashV3` /
+ * `contentHashV4` file enumeration. Defensive about backslash
+ * normalization (Windows callers).
+ */
+export function isAttestationEnvelopePath(path: string): boolean {
+  if (typeof path !== 'string') return false;
+  const normalized = path.replace(/\\/g, '/');
+  return ATTESTATION_ENVELOPE_PATH_PATTERN.test(normalized);
+}
+
+/**
+ * One entry in the base-independent per-file head-blob set used to
+ * compute `contentHashV4` (AISDLC-193.1). Identical in shape to
+ * `ChangedFileEntry` (AISDLC-94's `contentHash`) but with `headBlobSha`
+ * naming for clarity — v4 binds reviewers' approval to "I approved
+ * THESE files at THESE specific head blobs," nothing about the base.
+ *
+ * Why v4 was added on top of v3:
+ *   - v3 binds the (base_blob, head_blob) PAIR per file. When the
+ *     merge queue rebases the PR onto a sibling-merged main, the base
+ *     blob SHA for shared files changes (the merge-base shifts forward
+ *     to include the sibling's contributions). The fileDeltaHash flips
+ *     even though the post-apply file content the reviewers approved
+ *     hasn't moved → contentHashV3 invalidates → required check fails
+ *     → queue rejects the PR. Net: every queued code-touching PR
+ *     deadlocks at the gate.
+ *   - v4 binds only `{path, headBlobSha}`. The head blob SHA captures
+ *     "this is the EXACT file content the reviewers signed off on."
+ *     Whatever the rebase does to the base ref, as long as the head
+ *     blob SHAs are unchanged, the v4 hash matches.
+ *   - Threat model preserved: any genuine post-sign content tampering
+ *     (someone amends the PR to add unreviewed code) flips the head
+ *     blob SHA → v4 hash flips → verifier rejects.
+ */
+export interface ChangedFileHeadEntry {
+  path: string;
   headBlobSha: string;
 }
 
@@ -736,6 +842,84 @@ export function computeContentHashV3(entries: ChangedFileDeltaEntry[]): string {
 }
 
 /**
+ * Compute the BASE-INDEPENDENT per-file head-blob `contentHashV4`
+ * (AISDLC-193.1) over a set of `{path, headBlobSha}` pairs. The
+ * canonical encoding is `JSON.stringify(sorted-by-path-array-of-{path,
+ * headBlobSha}-objects)`, hashed with sha256.
+ *
+ * Why JSON-of-sorted-array (and not the v3 `<path>\t<fileDeltaHash>\n`
+ * canonical) for v4:
+ *   - JSON's quoting rules already cover delimiter injection
+ *     (a malicious path containing tab/newline can't smuggle through
+ *     because they round-trip as escape sequences). We still reject
+ *     such paths defensively so the canonical stays injective and
+ *     the on-the-wire representation is what readers expect.
+ *   - JSON is unambiguous about field ordering (stringify of a
+ *     `{path, headBlobSha}` literal always emits `path` first,
+ *     `headBlobSha` second — V8's object-key ordering is insertion
+ *     order, and we insert in this order in the .map() below).
+ *   - Easier to extend: future hash versions can add fields
+ *     (`mode`, `executable bit`, etc) to the entry objects without
+ *     breaking the canonical encoding scheme.
+ *
+ * Why this is BASE-INDEPENDENT (= the whole point):
+ *   - v3's per-file delta hashes the (base_blob, head_blob) pair.
+ *     When the merge queue rebases the PR onto current main (which
+ *     advanced past the merge-base the producer signed against), the
+ *     base blob SHA for any shared file changes → v3 invalidates.
+ *   - v4 hashes only `{path, headBlobSha}`. Whatever the rebase does
+ *     to the base ref or the merge-base, as long as the head blob SHA
+ *     (= the actual reviewed file content) is unchanged, v4 matches.
+ *   - The reviewer never approved "base_blob X → head_blob Y"; they
+ *     approved "the file contents at head_blob Y." v4 binds to that
+ *     directly.
+ *
+ * Threat model preserved:
+ *   - Genuine post-sign content tampering (someone amends the PR to
+ *     add unreviewed code) flips the head blob SHA → v4 hash flips →
+ *     verifier rejects. Same threat-model surface as v3.
+ *   - The signing key still has to be a trusted reviewer's; v4
+ *     doesn't change the signature/key flow, just what the predicate
+ *     binds to.
+ *
+ * Pure function. Idempotent against double-enumeration via dedup-by-path
+ * (last-write-wins per path), same as `computeContentHash` and
+ * `computeContentHashV3`.
+ */
+export function computeContentHashV4(entries: ChangedFileHeadEntry[]): string {
+  // Dedup by path (last entry wins) — see computeContentHash and
+  // computeContentHashV3 for the idempotency rationale.
+  const byPath = new Map<string, string>();
+  for (const e of entries) {
+    if (typeof e?.path !== 'string' || e.path.length === 0) {
+      throw new Error(`computeContentHashV4: entry path must be a non-empty string`);
+    }
+    if (typeof e.headBlobSha !== 'string') {
+      throw new Error(
+        `computeContentHashV4: entry headBlobSha must be a string for path ${e.path}`,
+      );
+    }
+    // Reject path entries containing JSON-control characters that we
+    // can't unambiguously round-trip. JSON.stringify would happily
+    // escape these, but our canonical form is supposed to be readable
+    // + reversible — defense in depth keeps the on-the-wire form
+    // injective regardless of caller input. Same rejection list as
+    // computeContentHash / computeContentHashV3 for consistency.
+    if (e.path.includes('\t') || e.path.includes('\n')) {
+      throw new Error(
+        `computeContentHashV4: entry path must not contain tab or newline characters (got ${JSON.stringify(e.path)})`,
+      );
+    }
+    const normalizedPath = e.path.replace(/\\/g, '/');
+    byPath.set(normalizedPath, e.headBlobSha.toLowerCase());
+  }
+  const sorted = [...byPath.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([path, headBlobSha]) => ({ path, headBlobSha }));
+  return sha256Hex(JSON.stringify(sorted));
+}
+
+/**
  * Collect the per-file-delta set used to compute `contentHashV3` (AISDLC-101).
  *
  * Returns one `{ path, baseBlobSha, headBlobSha }` entry per file in
@@ -836,11 +1020,43 @@ export function collectChangedFileDeltaEntries(
         `collectChangedFileDeltaEntries: path must not contain tab or newline characters (got ${JSON.stringify(path)})`,
       );
     }
+    // AISDLC-193.1 envelope self-exclusion: the chore-commit pattern
+    // signs the predicate at the dev commit (HEAD before the envelope
+    // file exists), then a chore commit on top adds the envelope file
+    // at `.ai-sdlc/attestations/<sha>.dsse.json`. If the collector
+    // includes the envelope file in the hashed file set, the verifier
+    // (which runs against PR HEAD = dev-commit + chore commit) will
+    // see an EXTRA entry the signer never saw → contentHashV3 mismatch
+    // even on direct PR HEAD without any rebase.
+    //
+    // Applied to BOTH v3 (this collector) AND v4 (the v4 collector
+    // delegates to this one + projects to head-only) so existing v3
+    // envelopes that touched .ai-sdlc/attestations/ as part of their
+    // diff still work after the dual-write switchover. The verifier's
+    // chore-commit allowlist STILL allows the envelope file to appear
+    // in the chore-commit diff — the exclusion is for HASHING only.
+    if (isAttestationEnvelopePath(path)) continue;
     const baseBlobSha = resolveBlobSha(mergeBase, path);
     const headBlobSha = resolveBlobSha(headRef, path);
     entries.push({ path, baseBlobSha, headBlobSha });
   }
   return entries;
+}
+
+/**
+ * Project a v3 `ChangedFileDeltaEntry` set down to the v4
+ * `ChangedFileHeadEntry` shape (`{path, headBlobSha}`). Convenience
+ * for callers that already collected v3 deltas and want to dual-emit
+ * both hashes from the same file enumeration. Pure function.
+ *
+ * The envelope self-exclusion is enforced upstream by
+ * `collectChangedFileDeltaEntries`, so this projection is a simple
+ * field-pick — no path filtering needed here.
+ */
+export function projectDeltaEntriesToHeadEntries(
+  deltas: ChangedFileDeltaEntry[],
+): ChangedFileHeadEntry[] {
+  return deltas.map((d) => ({ path: d.path, headBlobSha: d.headBlobSha }));
 }
 
 /**
@@ -880,10 +1096,17 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
       throw new Error(`buildPredicate: changedFileDeltas[${i}].headBlobSha must be a string`);
     }
   }
+  // AISDLC-193.1: derive v4 head-entry set from the v3 delta set so
+  // the file enumeration (and the envelope self-exclusion built into
+  // the v3 collector) is shared between both hashes by construction.
+  // Producers therefore can't accidentally compute v3 over one file
+  // set and v4 over another.
+  const headEntries = projectDeltaEntriesToHeadEntries(inputs.changedFileDeltas);
   const predicate: AttestationPredicate = {
     schemaVersion: 'v3',
     subject: { digest: { sha1: inputs.commitSha.toLowerCase() } },
     contentHashV3: computeContentHashV3(inputs.changedFileDeltas),
+    contentHashV4: computeContentHashV4(headEntries),
     policyHash: sha256Hex(inputs.policy),
     reviewers: inputs.reviewers.map((r) => ({
       agentId: r.agentId,
@@ -988,6 +1211,22 @@ export interface VerifyOptions {
   expected: {
     commitSha: string;
     contentHashV3: string;
+    /**
+     * AISDLC-193.1 base-independent per-file head-blob binding.
+     * Optional — callers that want v4-prefer behavior pass it; callers
+     * that only have v3 (legacy) leave it undefined.
+     *
+     * When BOTH this AND the envelope's `contentHashV4` are present,
+     * the verifier prefers v4 (base-independent → survives queue
+     * rebases). When v4 matches, v3 is NOT consulted (this is the
+     * whole point — v3 will mismatch on a queue rebase even though
+     * the reviewed content is unchanged).
+     *
+     * When the envelope is legacy v3-only (no `contentHashV4`), the
+     * verifier falls back to the v3 check unconditionally regardless
+     * of whether `expected.contentHashV4` is supplied.
+     */
+    contentHashV4?: string;
     policyHash: string;
     expectedAgentFileHashes: Record<string, string>;
   };
@@ -1099,18 +1338,46 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
       reason: `subject digest mismatch (envelope was signed for a different commit)`,
     };
   }
-  // AISDLC-103 (Verifier Phase 3): v3-only content binding. The legacy
-  // `diffHash` and `contentHash` legs were removed along with the
-  // schemaVersion narrowing — only `contentHashV3` is consulted now.
-  // The producer-side pre-sign rebase (AISDLC-102) + per-file (base,
-  // head) blob-pair binding give us a strict "we moved file F from blob
-  // A to blob B" check; any genuine tampering still flips the head blob
-  // SHA, fileDeltaHash flips, and the verifier rejects.
-  if (predicate.contentHashV3 !== opts.expected.contentHashV3) {
-    return {
-      valid: false,
-      reason: 'contentHashV3 mismatch (PR content changed since attestation)',
-    };
+  // AISDLC-193.1: v4-prefer, v3-fallback. The verifier prefers
+  // `contentHashV4` (base-independent — survives queue rebases) when
+  // BOTH the envelope and the expected state carry it. v3 is only
+  // consulted when the envelope is legacy v3-only OR when v4 is
+  // present but doesn't match (unusual — implies the head blobs
+  // genuinely changed, which we still reject below).
+  //
+  // Why prefer v4 absolute when both are present:
+  //   - v3 binds to (base_blob, head_blob) per file. The merge queue's
+  //     rebase moves the merge-base forward → base_blob changes for
+  //     shared files → v3 mismatches even though reviewed content is
+  //     unchanged. Net: required check fails on every queued PR.
+  //   - v4 binds only to head_blob per file. Reviewers approved the
+  //     content at head_blob; whatever the rebase did to base, v4
+  //     stays valid.
+  //
+  // Threat model preserved: a genuine post-sign content tampering
+  // (someone amends the PR to add unreviewed code) flips head_blob →
+  // v4 flips → verifier rejects.
+  const envelopeHasV4 = typeof predicate.contentHashV4 === 'string';
+  const expectedHasV4 = typeof opts.expected.contentHashV4 === 'string';
+  if (envelopeHasV4 && expectedHasV4) {
+    if (predicate.contentHashV4 !== opts.expected.contentHashV4) {
+      return {
+        valid: false,
+        reason: 'contentHashV4 mismatch (PR content changed since attestation)',
+      };
+    }
+    // v4 matched → skip the v3 check entirely. The producer's v3 was
+    // computed against a base ref that may have moved on by now (queue
+    // rebase, sibling overlap); the v4 match is the source of truth.
+  } else {
+    // Legacy v3-only envelope OR caller did not supply expected.contentHashV4
+    // → fall back to v3. Same as pre-AISDLC-193.1 behavior.
+    if (predicate.contentHashV3 !== opts.expected.contentHashV3) {
+      return {
+        valid: false,
+        reason: 'contentHashV3 mismatch (PR content changed since attestation)',
+      };
+    }
   }
   if (predicate.policyHash !== opts.expected.policyHash) {
     return {

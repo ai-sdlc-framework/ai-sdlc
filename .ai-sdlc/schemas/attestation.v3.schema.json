@@ -82,7 +82,12 @@
         "contentHashV3": {
           "type": "string",
           "pattern": "^[0-9a-f]{64}$",
-          "description": "MANDATORY. sha256 over a sorted canonical line-per-file string of `<path>\\t<fileDeltaHash>\\n` for every changed file in `<base>...<head>`, where `fileDeltaHash[path] = sha256(<base_blob_sha> + ' -> ' + <head_blob_sha>)`. Base blob SHA is read at the merge-base of <baseRef>+<headRef>; head blob SHA at <headRef>. Survives sibling-overlap rebases via the per-file delta binding. AISDLC-101 introduced the field; AISDLC-103 made it required."
+          "description": "MANDATORY. sha256 over a sorted canonical line-per-file string of `<path>\\t<fileDeltaHash>\\n` for every changed file in `<base>...<head>`, where `fileDeltaHash[path] = sha256(<base_blob_sha> + ' -> ' + <head_blob_sha>)`. Base blob SHA is read at the merge-base of <baseRef>+<headRef>; head blob SHA at <headRef>. Survives sibling-overlap rebases via the per-file delta binding. AISDLC-101 introduced the field; AISDLC-103 made it required. AISDLC-193.1 keeps v3 mandatory during the v3+v4 dual-write transition window."
+        },
+        "contentHashV4": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "OPTIONAL during the v3+v4 dual-write window (AISDLC-193.1). sha256 over `JSON.stringify(sorted-by-path-array-of-{path, headBlobSha}-objects)` for every changed file in `<base>...<head>`, EXCLUDING the envelope file itself (`.ai-sdlc/attestations/<sha>.dsse.json`). Base-independent — survives queue rebases (where v3 invalidates because the merge-base moves forward to include sibling-merged commits). Verifier prefers v4 when present, falls back to v3 ancestor walk for legacy v3-only envelopes."
         },
         "policyHash": {
           "type": "string",
