@@ -3,7 +3,7 @@ id: AISDLC-180
 title: >-
   Pipeline: branch slug computation produces empty/garbled slug for YAML
   block-scalar titles
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 02:49'
 labels:
