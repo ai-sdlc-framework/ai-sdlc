@@ -61,6 +61,13 @@ export interface PipelineOptions {
  * AISDLC-176 — payload fired from `executePipeline()`'s Step 6 to the
  * orchestrator's events bus when the retry helper recovered a JSON
  * envelope after one prose-then-JSON retry.
+ *
+ * AISDLC-196 — adds `phase` + optional `iteration` so operators grepping
+ * `events.jsonl` can attribute recovery events to the initial-dispatch
+ * path (Step 5b/6) versus the iteration-loop path (Step 9, iterations
+ * N>1). Without these the recovery-frequency story is muddled — a
+ * persistent drift in the developer system prompt looks the same as
+ * one rough iteration after a CHANGES_REQUESTED round.
  */
 export interface DeveloperContractRetryInfo {
   taskId: string;
@@ -70,6 +77,19 @@ export interface DeveloperContractRetryInfo {
   retryOutputPreview: string;
   /** Wall-clock duration of the retry spawn in ms. */
   durationMs: number;
+  /**
+   * AISDLC-196 — discriminator identifying which dispatch path emitted
+   * the event. `'initial'` = Step 5b/6 first-call dispatch (iteration 1).
+   * `'iteration'` = Step 9 iteration loop, iterations N>1 (after a
+   * CHANGES_REQUESTED round).
+   */
+  phase: 'initial' | 'iteration';
+  /**
+   * AISDLC-196 — present when `phase === 'iteration'`. The iteration
+   * counter the loop was on when the retry recovered (always >=2;
+   * iteration 1 is the initial dispatch which uses `phase: 'initial'`).
+   */
+  iteration?: number;
 }
 
 /**

@@ -156,6 +156,16 @@
       "minimum": 0,
       "description": "Wall-clock duration in ms the retry spawn took (from re-emission prompt issue to parsed JSON envelope) — present on `DeveloperContractRetry` (AISDLC-176)."
     },
+    "phase": {
+      "type": "string",
+      "enum": ["initial", "iteration"],
+      "description": "Discriminator identifying which dispatch path emitted the retry-recovery event — present on `DeveloperContractRetry` (AISDLC-196). `'initial'` = Step 5b/6 first-call dispatch (iteration 1); `'iteration'` = Step 9 iteration loop, iterations N>1 (after a CHANGES_REQUESTED round). Without this discriminator operators grepping events.jsonl cannot attribute retries to the initial-dispatch path versus the iteration-loop path; the recovery-frequency story is meaningfully different on each (initial-path drift = developer.md system prompt regression; iteration-path drift = post-feedback re-dispatch fragility)."
+    },
+    "iteration": {
+      "type": "integer",
+      "minimum": 2,
+      "description": "Iteration loop counter when the retry recovered — present on `DeveloperContractRetry` events with `phase === 'iteration'` (AISDLC-196). Always >=2 by construction: iteration 1 is the initial dispatch (which emits `phase: 'initial'` instead). Lets operators bucket iteration-path retries by which round of feedback re-dispatch produced the prose."
+    },
     "fromStatus": {
       "type": "string",
       "minLength": 1,
@@ -199,7 +209,7 @@
   "$defs": {
     "OrchestratorEventType": {
       "type": "string",
-      "description": "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+      "description": "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       "enum": [
         "OrchestratorTick",
         "OrchestratorDispatched",

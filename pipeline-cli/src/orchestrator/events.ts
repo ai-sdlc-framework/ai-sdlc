@@ -63,6 +63,9 @@ export type OrchestratorEventType =
    * (`parseDeveloperReturnWithRetry()` in `steps/06-parse-dev-return.ts`)
    * recovered the dispatch by re-prompting for the JSON envelope.
    * Per-event fields: `taskId`, `initialOutputPreview`, `retryDurationMs`.
+   * AISDLC-196 — also carries `phase: 'initial' | 'iteration'` (which
+   * dispatch path emitted the recovery) + optional `iteration` (loop
+   * counter, present when `phase === 'iteration'`, always >=2).
    */
   | 'DeveloperContractRetry'
   | 'OrchestratorTaskAlreadyInFlight'

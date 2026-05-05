@@ -277,7 +277,12 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       'security-reviewer': approvedReviewer('security-reviewer'),
     });
 
-    const retryEvents: Array<{ taskId: string; durationMs: number }> = [];
+    const retryEvents: Array<{
+      taskId: string;
+      durationMs: number;
+      phase: 'initial' | 'iteration';
+      iteration?: number;
+    }> = [];
     const result = await executePipeline({
       taskId: 'AISDLC-300',
       workDir: tmp,
@@ -286,7 +291,12 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       skipFinalizeCommit: true,
       maxReviewIterations: 2,
       onDeveloperContractRetry: (info): void => {
-        retryEvents.push({ taskId: info.taskId, durationMs: info.durationMs });
+        retryEvents.push({
+          taskId: info.taskId,
+          durationMs: info.durationMs,
+          phase: info.phase,
+          ...(info.iteration !== undefined ? { iteration: info.iteration } : {}),
+        });
       },
     });
 
@@ -295,8 +305,12 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
     // Exactly ONE retry was issued (Step 5b initial + Step 6 retry = 2 dev spawns).
     expect(spawner.getCallCount('developer')).toBe(2);
-    // Retry observability fired exactly once.
-    expect(retryEvents).toEqual([{ taskId: 'AISDLC-300', durationMs: expect.any(Number) }]);
+    // Retry observability fired exactly once on the initial-dispatch path
+    // (AISDLC-196 — `phase: 'initial'`, no `iteration` field). The
+    // iteration-path discriminator is asserted in 09-iterate.test.ts.
+    expect(retryEvents).toEqual([
+      { taskId: 'AISDLC-300', durationMs: expect.any(Number), phase: 'initial' },
+    ]);
   });
 
   it('AISDLC-176 AC5: prose-twice fails with developer-json-contract-violated (clear error)', async () => {

@@ -296,6 +296,13 @@ describe('Step 9 — iterateReviewLoop', () => {
     expect(events[0].initialOutputPreview).toContain('prose without JSON');
     expect(events[0].retryOutputPreview).toBe('<empty>'); // retry fixture's output is ''
     expect(typeof events[0].durationMs).toBe('number');
+    // AISDLC-196 — iteration-path discriminator. The retry recovered on
+    // iteration 2 (the loop's first body pass; iteration 1 is the
+    // pre-loop initial dispatch handled by execute-pipeline). Without
+    // this discriminator operators grepping events.jsonl can't tell
+    // initial-dispatch retries from iteration-path retries.
+    expect(events[0].phase).toBe('iteration');
+    expect(events[0].iteration).toBe(2);
   });
 
   it('does not throw when onDeveloperContractRetry is omitted and dev returns prose on iter 2', async () => {

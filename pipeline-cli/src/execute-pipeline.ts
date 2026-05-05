@@ -140,6 +140,11 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
           initialOutputPreview,
           retryOutputPreview,
           durationMs,
+          // AISDLC-196 — initial-dispatch (Step 5b/6) path. The
+          // iteration loop's wire-up emits `phase: 'iteration'` with
+          // the actual iteration number so operators can split the
+          // recovery-frequency story by code path.
+          phase: 'initial',
         });
       },
     });

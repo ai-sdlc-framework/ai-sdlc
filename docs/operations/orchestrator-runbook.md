@@ -120,3 +120,52 @@ Common partial-rollback warnings:
 | `task file not found for <id>` | Backlog task file moved/deleted between Step 4 and rollback. | Manual `mcp__backlog__task_edit` to set status. |
 | `worktree remove failed: <stderr>` | Worktree directory locked (e.g. an editor has files open) or already unregistered from `git worktree list`. | `git worktree prune` then `rm -rf .worktrees/<id-lower>` manually. |
 | `quarantine rename failed: <stderr>` | Target ref already exists (impossibly-rapid duplicate rollback) or the branch was deleted by an external process between probe + rename. | Inspect `git reflog show ai-sdlc/<id-lower>` to recover the SHA, then `git branch quarantine/<id>-<ts> <sha>`. |
+
+---
+
+## Counting developer-contract retries by code path (AISDLC-196)
+
+When the developer subagent returns non-JSON prose, the Step 6 retry
+helper re-prompts for the JSON envelope and — if the dev recovers — the
+orchestrator emits a `DeveloperContractRetry` event onto the
+`events.jsonl` bus. Two code paths fire this event:
+
+- **Initial-dispatch path** (`phase: 'initial'`) — Step 5b/6 of
+  `executePipeline()`, on the very first dev call for the task.
+  Frequent emission here points at developer.md system-prompt drift
+  (the agent forgot the JSON contract often enough that the retry is
+  doing more work than it should).
+- **Iteration-loop path** (`phase: 'iteration'`, plus an `iteration`
+  field carrying the actual loop counter, always >=2) — Step 9 of the
+  iteration loop, when the dev returns prose on a re-dispatch after a
+  CHANGES_REQUESTED round. Frequent emission here points at
+  post-feedback re-dispatch fragility (long feedback prompts pushing
+  the agent off the contract), not initial-prompt drift.
+
+Operator queries against the date-rotated events files:
+
+```bash
+# All DeveloperContractRetry events across every rotated file:
+jq -c 'select(.type == "DeveloperContractRetry")' \
+  artifacts/_orchestrator/events-*.jsonl
+
+# Iteration-path retries only — surfaces post-feedback re-dispatch drift:
+jq -c 'select(.type == "DeveloperContractRetry" and .phase == "iteration")' \
+  artifacts/_orchestrator/events-*.jsonl
+
+# Initial-dispatch retries only — surfaces developer.md prompt drift:
+jq -c 'select(.type == "DeveloperContractRetry" and .phase == "initial")' \
+  artifacts/_orchestrator/events-*.jsonl
+
+# Per-iteration histogram (iteration 2, 3, ... = which feedback round
+# tripped the contract most often):
+jq -r 'select(.type == "DeveloperContractRetry" and .phase == "iteration") | .iteration' \
+  artifacts/_orchestrator/events-*.jsonl | sort | uniq -c
+```
+
+The `phase` + `iteration` discriminators are additive (AISDLC-196):
+events emitted before the discriminator landed simply omit the fields,
+so the queries above implicitly bucket pre-discriminator events into
+neither group. Any persistent imbalance between the two paths is the
+signal — pick the one with the higher count and address its drift
+source first.

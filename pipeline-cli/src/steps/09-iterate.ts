@@ -104,6 +104,12 @@ export async function iterateReviewLoop(
                 initialOutputPreview,
                 retryOutputPreview,
                 durationMs,
+                // AISDLC-196 — iteration-loop path. `iteration` is the
+                // current loop counter (always >=2 by construction:
+                // iteration 1 is the initial dispatch handled in
+                // execute-pipeline, which emits `phase: 'initial'`).
+                phase: 'iteration',
+                iteration,
               });
             },
           }

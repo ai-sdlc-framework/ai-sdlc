@@ -1466,12 +1466,17 @@ function buildDefaultDispatch(
       // forgot the JSON contract often enough that the retry is doing
       // more work than it should be); rare emission tells operators the
       // retry is the safety net it was designed to be.
-      onDeveloperContractRetry: ({ initialOutputPreview, durationMs }): void => {
+      // AISDLC-196 — also forward `phase` + optional `iteration` so
+      // operators can attribute the retry to the initial-dispatch path
+      // (Step 5b/6) versus the iteration-loop path (Step 9, iter N>1).
+      onDeveloperContractRetry: ({ initialOutputPreview, durationMs, phase, iteration }): void => {
         emit({
           type: 'DeveloperContractRetry',
           taskId,
           initialOutputPreview,
           retryDurationMs: durationMs,
+          phase,
+          ...(iteration !== undefined ? { iteration } : {}),
         });
       },
     });

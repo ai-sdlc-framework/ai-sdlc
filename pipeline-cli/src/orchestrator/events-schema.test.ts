@@ -166,6 +166,22 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       tick: 1,
       initialOutputPreview: 'Done. AISDLC-176 shipped — see git log.',
       retryDurationMs: 234,
+      // AISDLC-196 — phase discriminator (initial-dispatch path).
+      phase: 'initial',
+    });
+  });
+
+  it('accepts DeveloperContractRetry with iteration-path discriminator (AISDLC-196)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'DeveloperContractRetry',
+      taskId: 'AISDLC-196',
+      runId,
+      tick: 1,
+      initialOutputPreview: 'Sorry, no JSON envelope on iter 2.',
+      retryDurationMs: 187,
+      phase: 'iteration',
+      iteration: 2,
     });
   });
 
