@@ -247,8 +247,16 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
+          # AISDLC-197: 3-dot diff (`A...B`) finds the merge-base of A and B
+          # then diffs from merge-base to B, scoping to only the changes
+          # introduced ON THE PR SIDE. With 2-dot (`A B`), when a sibling PR
+          # merges to main and moves a backlog file (e.g. `tasks/X.md` →
+          # `completed/X.md`), the diff would include that move in the file
+          # list even when the PR under evaluation didn't touch the file. The
+          # OLD path at `backlog/tasks/X.md` would then ENOENT in the evaluator
+          # below. Witnessed on PR #325 at 2026-05-05 02:33:44.
           # Limit to backlog/tasks/*.md additions/modifications (Added or Modified).
-          FILES=$(git diff --name-only --diff-filter=AM "$BASE_SHA" "$HEAD_SHA" -- 'backlog/tasks/*.md' || true)
+          FILES=$(git diff --name-only --diff-filter=AM "$BASE_SHA"..."$HEAD_SHA" -- 'backlog/tasks/*.md' || true)
           # GitHub Actions multiline output via heredoc.
           {
             echo 'files<<EOF'
@@ -274,6 +282,11 @@ jobs:
           : > /tmp/dor/results.jsonl
           while IFS= read -r f; do
             [ -z "$f" ] && continue
+            # AISDLC-197 defense-in-depth: even with 3-dot diff, skip if the
+            # file doesn't exist on HEAD (e.g. PR deleted it within its own
+            # diff). Prevents ENOENT crash on the dor-evaluate --body-file
+            # call below.
+            [ ! -f "$f" ] && { echo "::notice::Skipping non-existent file from diff: $f"; continue; }
             ID=$(basename "$f" .md | cut -d- -f1-2)
             set +e
             OUT=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
