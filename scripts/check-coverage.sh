@@ -20,6 +20,19 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 echo "[coverage-gate] running pnpm test:coverage (threshold: ${THRESHOLD}% lines)"
 cd "$ROOT"
 
+# Build all workspace packages first so dist artifacts are present.
+# Several packages (orchestrator, sdk-typescript, dogfood) import from
+# workspace dependencies via their compiled dist/ exports. Without a prior
+# build, vitest can't resolve those imports and the tests fail or time out.
+# This was the root cause of AISDLC-212 (dogfood exports.test.ts timing out
+# under concurrent pnpm -r when dist/ was missing).
+echo "[coverage-gate] building workspace packages before coverage run..."
+if ! pnpm -r build > /tmp/ai-sdlc-build.log 2>&1; then
+  echo "[coverage-gate] FAIL: pre-coverage build failed. Last 30 lines:"
+  tail -30 /tmp/ai-sdlc-build.log
+  exit 1
+fi
+
 # Run silently unless it fails — coverage output is verbose.
 if ! pnpm -r test:coverage > /tmp/ai-sdlc-coverage.log 2>&1; then
   echo "[coverage-gate] FAIL: test:coverage exited non-zero. Last 60 lines:"

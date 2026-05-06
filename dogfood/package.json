@@ -20,6 +20,7 @@
   "scripts": {
     "build": "tsc",
     "clean": "rm -rf dist *.tsbuildinfo",
+    "pretest:coverage": "pnpm -w --filter '@ai-sdlc/dogfood...' build",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:watch": "vitest",
