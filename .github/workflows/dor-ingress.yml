@@ -17,7 +17,9 @@ on:
   issues:
     types: [opened, edited]
   pull_request:
-    # AISDLC-218: drop `opened` (draft opens) + add `ready_for_review`.
+    # AISDLC-218 (revised): keep `opened` (direct-ready PRs) + add
+    # `ready_for_review` (draft-to-ready flip). Job-level `if: !draft`
+    # skips draft opens.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'backlog/tasks/*.md'

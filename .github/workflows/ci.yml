@@ -5,9 +5,12 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    # AISDLC-218: explicit types — drop the implicit `opened` (fires on draft
-    # opens), keep `synchronize` + `reopened` (push + reopen events on
-    # ready PRs), add `ready_for_review` (the canonical fire-once trigger).
+    # AISDLC-218 (revised): explicit types — keep `opened` (so direct-ready
+    # PRs without `--draft` fire CI), keep `synchronize` + `reopened` (push +
+    # reopen on ready PRs), add `ready_for_review` (canonical fire-once
+    # trigger when a draft flips to ready). The job-level `draft == false`
+    # guards skip draft opens, so adding `opened` doesn't reintroduce the
+    # original 2-CI-runs-per-draft-PR problem.
     types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 

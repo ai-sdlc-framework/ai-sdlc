@@ -11,8 +11,9 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
-    # AISDLC-218: explicit types — drop implicit `opened` (draft opens),
-    # add `ready_for_review` (canonical fire-once trigger).
+    # AISDLC-218 (revised): explicit types — keep `opened` (so direct-ready
+    # PRs fire) + add `ready_for_review` (draft flip). Job-level `if: !draft`
+    # guard skips draft opens.
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'ai-sdlc-plugin/**'

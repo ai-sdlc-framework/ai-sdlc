@@ -86,7 +86,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     assert.equal(workflow.name, 'AI-SDLC PR Ready Gate');
   });
 
-  it('AC #1: triggers on pull_request (synchronize/reopened/ready_for_review post-AISDLC-218) + merge_group (checks_requested)', () => {
+  it('AC #1: triggers on pull_request (opened/synchronize/reopened/ready_for_review post-AISDLC-218 revision) + merge_group (checks_requested)', () => {
     // YAML's `on:` shorthand can come back as a dict OR as the literal
     // string "on" depending on parser quirks (`on: true` collision with
     // YAML 1.1 boolean coercion). PyYAML 6+ preserves it as the string
