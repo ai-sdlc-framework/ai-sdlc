@@ -86,6 +86,38 @@ For ad-hoc / manual cleanup of a specific task without waiting for the next `/ai
 
 > **Parallel-runs note.** Step 0 races benignly across concurrent `/ai-sdlc execute` invocations (each in its own Claude Code session): `git worktree remove --force` is idempotent and the second invocation simply prints nothing for the already-swept entry. There's no shared mutable state to protect.
 
+## Step 0.5 — Auto-sync untracked parent task files (AISDLC-217)
+
+After Step 0's sweep, scan the parent's working tree for untracked files matching `backlog/{tasks,completed}/aisdlc-N*.md`. These accumulate in the parent when MCP tool writes bypass Pattern C routing (AISDLC-216), or when an operator pastes files directly into the parent's backlog directory.
+
+This step is a **safety net** (backstop). AISDLC-216 is the upstream fix; Step 0.5 catches the residual cases.
+
+**What it does:**
+
+1. `git ls-files --others --exclude-standard` — lists all untracked files in the parent.
+2. Partitions: backlog task files (`backlog/{tasks,completed}/aisdlc-N*.md`) vs. everything else.
+3. If non-backlog untracked files exist → **refuses** with an operator-attention message. The operator must manually clean them up (`git clean -f <file>`) before dispatch can proceed.
+4. For each backlog file, verifies it is not already on `origin/main` (`git ls-tree origin/main <path>`).
+5. Genuinely-new files → creates a temporary sync worktree on a generated branch (`chore/sync-tasks-<sha>`), copies the files, commits, pushes, opens a docs-only PR titled `chore: sync N untracked task files`.
+6. **Does NOT block** — logs the sync PR URL and continues. The sync PR is docs-only (`backlog/tasks/` + `backlog/completed/` are under `paths-ignore` for attestation workflows) so it auto-merges once CI passes.
+7. If all untracked task files are already on `origin/main` → no-op (logs "already there, skipping").
+
+```bash
+SYNC_RESULT=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs sync-parent --work-dir "$(pwd)" 2>&1)
+SYNC_EXIT=$?
+if [ "$SYNC_EXIT" -ne 0 ]; then
+  echo "ERROR (Step 0.5): $SYNC_RESULT"
+  echo "Non-backlog untracked files detected in parent — clean them up and re-run."
+  exit 1
+fi
+# Log sync result (PR URL or no-op message) but don't wait — main dispatch continues.
+echo "[Step 0.5] $SYNC_RESULT"
+```
+
+> **Implementation note.** The `sync-parent` subcommand is backed by `pipeline-cli/src/steps/00-5-sync-parent.ts` (`syncParentUntrackedFiles`). It follows the same `Runner` injection pattern as all other steps so it is fully hermetic under test. Invoke via `node pipeline-cli/bin/ai-sdlc-pipeline.mjs` (never `pnpm exec` — see CLAUDE.md "CI behavior" / AISDLC-156).
+
+> **Non-blocking contract.** Even when the sync PR opens, Step 0.5 returns immediately and Step 1 proceeds. The parent's untracked files remain until the operator runs `git clean -f backlog/tasks/aisdlc-N*.md` (or until the next Step 0 self-heal after the sync PR merges — at that point the files are on `origin/main`, `git reset --hard origin/main` is safe, and the parent is fully clean again).
+
 ## Step 1 — Validate the task
 
 Find the task file and read its frontmatter:

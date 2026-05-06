@@ -5,6 +5,7 @@
  * this barrel.
  */
 export * from './00-sweep.js';
+export * from './00-5-sync-parent.js';
 export * from './01-validate.js';
 export * from './02-compute-branch.js';
 export * from './03-setup-worktree.js';
