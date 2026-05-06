@@ -232,6 +232,19 @@ function safeForReason(v, max = 32) {
     .slice(0, max);
 }
 
+/**
+ * Shorten a 40-char SHA to its 7-char prefix for human-readable embedding
+ * in the verifier's `reason` string (= the GitHub status-description
+ * surface). Falls back to the input when it's not a recognizable SHA so
+ * test fixtures and unusual inputs don't blow up. Used for AISDLC-207's
+ * `no envelope present at <head>` message.
+ */
+function shortSha(sha) {
+  if (typeof sha !== 'string') return String(sha ?? '');
+  if (/^[0-9a-f]{40}$/i.test(sha)) return sha.slice(0, 7);
+  return sha;
+}
+
 export function predicateMatchReason(predicate, expected) {
   // schemaVersion FIRST so an envelope from a non-accepted schema doesn't
   // get confusingly reported as a content-hash mismatch.
@@ -756,9 +769,16 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   // --- Scan envelopes + bucket by predicate-content match ---------------
   const all = loadAllAttestations(repoRoot);
   if (all.length === 0) {
+    // AISDLC-207: distinguish "no envelope on disk at all" from "envelope
+    // present but content mismatches". The previous `missing (no .ai-sdlc/
+    // attestations/*.dsse.json on PR branch — push via /ai-sdlc execute to
+    // generate one)` wording was accurate but verbose; truncated past
+    // GitHub's 140-char status-description cap on real PR URLs. Use the
+    // shorter `no envelope present at <head>` form so the actual failure
+    // mode survives truncation.
     return {
       status: 'invalid',
-      reason: `missing (no .ai-sdlc/attestations/*.dsse.json on PR branch — push via /ai-sdlc execute to generate one)`,
+      reason: `no envelope present at ${shortSha(lowerHead)} (no .ai-sdlc/attestations/*.dsse.json on PR branch — push via /ai-sdlc execute to generate one)`,
     };
   }
 
@@ -805,13 +825,25 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       });
       mismatches.push({
         entry,
+        // AISDLC-207: the reason `detail` here is what surfaces in the
+        // GitHub status description when this envelope happens to be the
+        // closest match. The downstream `closest` selector below
+        // rewrites contentHashV3 → `contentHashV3 mismatch (v3
+        // fallback)` and contentHashV4 → `contentHashV4 mismatch`, so
+        // we keep the predicateMatchReason output verbatim — those
+        // rewrites apply uniformly regardless of which mismatch entry
+        // wins. The `reason ?? {...}` synthesized fallback is only
+        // exercised when predicateMatchReason returns null on the
+        // sentinel inputs (= every check passed except the synthetic
+        // contentHashVx mismatch), in which case we still bucket it as
+        // a content-hash field for the rewrite.
         reason: reason ?? {
           field:
             typeof entry.predicate?.contentHashV4 === 'string' ? 'contentHashV4' : 'contentHashV3',
           detail:
             typeof entry.predicate?.contentHashV4 === 'string'
-              ? 'contentHashV4 mismatch (PR content differs from attested content)'
-              : 'contentHashV3 mismatch (PR content differs from attested content)',
+              ? 'contentHashV4 mismatch'
+              : 'contentHashV3 mismatch (v3 fallback)',
         },
       });
       continue;
@@ -839,6 +871,24 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
 
   // --- Zero matches → reject with most-specific reason ------------------
   if (matched.length === 0) {
+    // AISDLC-207: distinguish failure modes in the `reason` string so the
+    // GitHub status description surfaces what actually went wrong rather
+    // than the generic "contentHashV3 mismatch" used for ALL failures.
+    //
+    // The empty-envelope-dir branch above already handles the "operator
+    // never signed at all" case. Here at least ONE envelope is on disk
+    // but no envelope's content matches the current PR shape. The
+    // distinction we want to surface is which content-hash leg failed:
+    //   - Envelope has v4 + v4 mismatch → `contentHashV4 mismatch`
+    //   - Envelope has no v4 + v3 fallback mismatch → `contentHashV3
+    //     mismatch (v3 fallback)` so the operator can tell the legacy
+    //     v3-only envelope path apart from the v4-aware path during
+    //     the v4 cutover (PR #338's "why is it still doing v3?"
+    //     confusion).
+    //   - Other fields (schemaVersion, policyHash, agentFileHashes,
+    //     pluginVersion) keep their existing wording — they already
+    //     describe the failure mode unambiguously.
+    //
     // "Closest" = lowest mismatch rank = matched the most fields before
     // diverging. Tie-break by envelope filename for determinism.
     mismatches.sort((a, b) => {
@@ -848,9 +898,25 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       return a.entry.fileName.localeCompare(b.entry.fileName);
     });
     const closest = mismatches[0];
+    // For the v3-fallback case, append `(v3 fallback)` so an operator
+    // staring at the status can tell "this is a legacy v3 envelope, the
+    // v4 fast path didn't apply" apart from "this is a v4 envelope with
+    // a real head-blob change". `predicateMatchReason` synthesizes
+    // `contentHashV4` when the envelope carries v4 (regardless of
+    // whether the v3 walk is reached), so we only annotate when the
+    // field is exactly `contentHashV3`.
+    let detail = closest.reason.detail;
+    if (closest.reason.field === 'contentHashV3') {
+      detail = 'contentHashV3 mismatch (v3 fallback)';
+    } else if (closest.reason.field === 'contentHashV4') {
+      // Drop the parenthetical noise — `contentHashV4 mismatch` by
+      // itself is more scannable and the AISDLC-207 ACs spell the
+      // exact wording. Matching tests assert against `/contentHashV4/`.
+      detail = 'contentHashV4 mismatch';
+    }
     return {
       status: 'invalid',
-      reason: closest.reason.detail,
+      reason: detail,
     };
   }
 
@@ -944,9 +1010,33 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       expectedAgentFileHashes,
     },
   });
-  return result.valid
-    ? { status: 'valid', reason: 'ok' }
-    : { status: 'invalid', reason: result.reason };
+  if (result.valid) {
+    return { status: 'valid', reason: 'ok' };
+  }
+  // AISDLC-207: tag signature-class failures explicitly with
+  // `signature invalid: <reason>` so the GitHub status description tells
+  // an operator the failure mode without them having to know which
+  // verifier substring corresponds to a signature problem. The runtime
+  // `verifyAttestation` returns these reasons for sig failures:
+  //   - `'envelope has no signatures'`
+  //   - `'signature did not match any trusted reviewer pubkey'`
+  // (plus `'envelope payload is empty or non-string'` and
+  // `'payload is not valid JSON'` which are signature-prerequisite
+  // shape errors — same operator action required, so we tag them too.)
+  // Other failures (schemaVersion, contentHashVx, policyHash, agentFile
+  // mismatches, reviewer-set incomplete, subject-digest) describe their
+  // own failure mode in the reason already; pass through unchanged.
+  const sigFailureMarkers = [
+    'signature',
+    'envelope has no signatures',
+    'envelope payload is empty',
+    'payload is not valid JSON',
+  ];
+  const isSigFailure = sigFailureMarkers.some((m) => result.reason.includes(m));
+  return {
+    status: 'invalid',
+    reason: isSigFailure ? `signature invalid: ${result.reason}` : result.reason,
+  };
 }
 
 const invokedDirectly = process.argv[1]?.endsWith('verify-attestation.mjs');

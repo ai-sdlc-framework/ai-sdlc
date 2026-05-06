@@ -319,7 +319,14 @@ describe('runVerifier (happy path + existing AISDLC-74 regressions)', () => {
     assert.equal(out.reason, 'ok');
   });
 
-  it('returns invalid (missing) when no envelope file exists', () => {
+  it('AISDLC-207 AC1: returns "no envelope present at <head>" when no envelope file exists', () => {
+    // Pre-AISDLC-207 the verifier surfaced `contentHashV3 mismatch (PR
+    // content differs from attested content)` for this branch even though
+    // there was nothing on disk to mismatch against — observed on PR #338
+    // and confused the operator into thinking the v4-prefer logic was
+    // broken. The new wording calls out the actual failure mode and
+    // includes the short HEAD SHA so an operator can tell at a glance
+    // which commit is missing an envelope.
     const { publicKeyPem } = generateSigningKeyPair();
     writeTrustedReviewersYaml(fixture.root, publicKeyPem);
     const out = runVerifier({
@@ -328,7 +335,18 @@ describe('runVerifier (happy path + existing AISDLC-74 regressions)', () => {
       repoRoot: fixture.root,
     });
     assert.equal(out.status, 'invalid');
-    assert.match(out.reason, /missing/);
+    assert.match(out.reason, /no envelope present at [0-9a-f]{7}/);
+    // Must NOT default to the misleading legacy v3-mismatch wording.
+    assert.equal(
+      out.reason.includes('contentHashV3 mismatch'),
+      false,
+      `AISDLC-207: no-envelope case must not surface contentHashV3 wording, got: ${out.reason}`,
+    );
+    assert.equal(
+      out.reason.includes('contentHashV4 mismatch'),
+      false,
+      `AISDLC-207: no-envelope case must not surface contentHashV4 wording, got: ${out.reason}`,
+    );
   });
 
   it('AC #9: rejects (policyHash mismatch) after .ai-sdlc/review-policy.md edit', () => {
@@ -2006,6 +2024,144 @@ describe('runVerifier (AISDLC-100.6 — pipelineVersion forensic logging)', () =
       result.status,
       'valid',
       `pipelineVersion must NOT be enforced, got: ${result.reason}`,
+    );
+  });
+});
+
+// ─── AISDLC-207 — distinguish verifier failure modes in `reason` ──────
+//
+// Background: pre-AISDLC-207 the `reason` returned by `runVerifier` (which
+// the verify-attestation.yml workflow embeds verbatim into the
+// `ai-sdlc/attestation` GitHub status description) defaulted to
+// `contentHashV3 mismatch (PR content differs from attested content)` for
+// nearly every failure mode — including the no-envelope-on-disk case where
+// there's no v3 hash to mismatch against. This produced misleading
+// descriptions on PR #338: an operator who hadn't signed at all saw "v3
+// mismatch" and reasonably wondered whether the v4-prefer logic from
+// AISDLC-193.1 was misbehaving.
+//
+// AISDLC-207 surfaces the specific failure mode in `reason` so the
+// description is self-explanatory:
+//   AC1 — `no envelope present at <head>` (no envelope file on disk)
+//   AC2 — `contentHashV4 mismatch` (envelope present + v4 mismatch)
+//   AC3 — `contentHashV3 mismatch (v3 fallback)` (legacy v3-only env mismatch)
+//   AC4 — `signature invalid: <reason>` (signature verification failed)
+//
+// Each AC has a dedicated test below. AC1 is also covered by the
+// modified `returns invalid (...)` test in the happy-path block above.
+describe('runVerifier (AISDLC-207 — distinguish failure modes in reason)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('AC2: envelope present + v4 mismatch → reason reads "contentHashV4 mismatch"', () => {
+    // Sign a v4-carrying envelope, then stamp a bogus v4 onto the
+    // predicate via `predicateOverride` so resolution fails on the v4
+    // fast path AND the v3 ancestor walk (we also clobber v3 to be
+    // sure we exercise the v4 mismatch branch). The `closest`
+    // selector picks the v4 mismatch and rewrites it to the cleaner
+    // `contentHashV4 mismatch` form.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+      {
+        predicateOverride: {
+          contentHashV3: 'b'.repeat(64),
+          contentHashV4: 'c'.repeat(64),
+        },
+      },
+    );
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
+    // Must surface the v4 wording explicitly — NOT the legacy generic
+    // "PR content differs from attested content" tail and NOT v3
+    // (since the envelope carried v4).
+    assert.equal(
+      out.reason,
+      'contentHashV4 mismatch',
+      `AC2: expected exact "contentHashV4 mismatch", got: ${out.reason}`,
+    );
+  });
+
+  it('AC3: envelope present without v4 + v3 mismatch → reason reads "contentHashV3 mismatch (v3 fallback)"', () => {
+    // Sign an envelope, then strip its `contentHashV4` field so the
+    // verifier falls back to v3 — and clobber v3 to a bogus value so
+    // the v3 fallback fails too. The `closest` selector must pick the
+    // v3 mismatch and append the `(v3 fallback)` annotation so an
+    // operator can tell legacy v3-only envelopes apart from v4
+    // envelopes (relevant during the v4 cutover — PR #338 confusion).
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      keys.privateKeyPem,
+    );
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+    delete predicate.contentHashV4; // make it legacy v3-only
+    predicate.contentHashV3 = 'b'.repeat(64); // and clobber v3 so it mismatches
+    envelope.payload = Buffer.from(JSON.stringify(predicate), 'utf-8').toString('base64');
+    writeFileSync(envPath, JSON.stringify(envelope, null, 2));
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid', `expected invalid, got: ${out.reason}`);
+    assert.equal(
+      out.reason,
+      'contentHashV3 mismatch (v3 fallback)',
+      `AC3: expected exact "contentHashV3 mismatch (v3 fallback)", got: ${out.reason}`,
+    );
+  });
+
+  it('AC4: envelope present + signature invalid → reason reads "signature invalid: <reason>"', () => {
+    // Sign with an UNTRUSTED key so the envelope's content bindings all
+    // line up (subject SHA reachable, v4 + v3 + policy + agents all
+    // match) and we land in the verifyAttestation step — which then
+    // rejects on signature verification. AISDLC-207 wraps the runtime's
+    // `'signature did not match any trusted reviewer pubkey'` reason
+    // with a `signature invalid: ` prefix so the operator can tell sig
+    // failures apart from content/schema failures at a glance.
+    const { privateKeyPem } = generateSigningKeyPair(); // distinct from `keys`
+    // Re-write trusted-reviewers.yaml with `keys.publicKeyPem` only —
+    // the freshly-generated private key above has NO matching pubkey
+    // entry. (beforeEach already wrote keys.publicKeyPem; we keep that.)
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(
+      out.reason,
+      /^signature invalid: signature did not match any trusted reviewer pubkey$/,
+      `AC4: expected exact "signature invalid: signature did not match any trusted reviewer pubkey", got: ${out.reason}`,
     );
   });
 });
