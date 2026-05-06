@@ -87,6 +87,12 @@ const UMBRELLA_BIN = 'ai-sdlc-pipeline';
 // this list is what we scan workflow YAML for and probe via pnpm.
 const ALL_GUARDED_BINS = [...CI_INVOKED_BINS, UMBRELLA_BIN] as const;
 
+// AISDLC-203: atomic task-completion helpers. Not CI-invoked (operators run
+// them locally or in workflow steps that use the correct direct-node pattern),
+// but we still assert their shims + dist targets exist so a rename/deletion
+// doesn't silently strand the atomic-completion contract.
+const AISDLC_203_BINS = ['cli-task-complete', 'cli-backlog-verify'] as const;
+
 describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbrella bin guard)', () => {
   // The bins import from `dist/cli/*.js` so the dist must exist before we
   // can exercise them. `pnpm test` runs after `pnpm build` in the standard
@@ -305,10 +311,63 @@ describe('AISDLC-156 + AISDLC-181: bin invocation pattern (CI cost-saver + umbre
   });
 });
 
+describe('AISDLC-203: atomic-completion bin shim existence guard', () => {
+  // The AISDLC-203 bins (cli-task-complete, cli-backlog-verify) are NOT
+  // CI-invoked (no workflow YAML references them yet), so we do NOT add
+  // them to ALL_GUARDED_BINS (which drives the static workflow scan and the
+  // pnpm-exec defense-in-depth probe). Instead we assert a simpler property:
+  // the shim file exists at the expected path AND is invokable via
+  // `node <shim> --help` (proving the dist target compiled correctly and
+  // the yargs router is wired up).
+  beforeAll(() => {
+    const distMarkers = [
+      join(PKG_ROOT, 'dist', 'cli', 'complete-task.js'),
+      join(PKG_ROOT, 'dist', 'cli', 'backlog-verify.js'),
+    ];
+    if (distMarkers.some((m) => !existsSync(m))) {
+      const build = spawnSync('pnpm', ['build'], {
+        cwd: PKG_ROOT,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+      if (build.status !== 0) {
+        throw new Error(
+          `pre-test build failed (exit ${build.status}):\n${build.stdout}\n${build.stderr}`,
+        );
+      }
+    }
+  }, 60_000);
+
+  describe.each(AISDLC_203_BINS)('%s', (binName) => {
+    const binPath = join(PKG_ROOT, 'bin', `${binName}.mjs`);
+
+    it('bin shim file exists at the expected path', () => {
+      expect(existsSync(binPath), `missing bin shim: ${binPath}`).toBe(true);
+    });
+
+    it('is invokable via `node <pkg-root>/bin/<bin>.mjs --help` and exits 0', () => {
+      const result = spawnSync(process.execPath, [binPath, '--help'], {
+        cwd: PKG_ROOT,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+        timeout: 10_000,
+      });
+      const detail = `\n--- exit ${result.status} ---\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
+      expect(result.status, `node ${binName}.mjs --help did not exit 0:${detail}`).toBe(0);
+      const out = result.stdout + result.stderr;
+      const looksLikeHelp =
+        /^Usage:/m.test(out) || /Options:/.test(out) || new RegExp(binName).test(out);
+      expect(looksLikeHelp, `--help output didn't look like a yargs banner:${detail}`).toBe(true);
+    });
+  });
+});
+
 // Coverage hint for callers reading this in isolation: the production
 // invocation patterns live in:
 //   - `.github/workflows/ai-sdlc-review.yml` — per-CLI cost-saver bins
 //     (1× cli-classify-pr, 2× cli-incremental-decide, 1× cli-classify-budget).
 //   - `.github/workflows/dor-ingress.yml` — umbrella `ai-sdlc-pipeline`
 //     bin (4 call sites: dor-evaluate ×2, dor-render-comment, dor-render-pr-summary).
+//   - AISDLC-203: cli-task-complete + cli-backlog-verify invoked by operators
+//     locally and in future workflow steps (using the direct-node form).
 // Search for `node pipeline-cli/bin/` to enumerate them.
