@@ -106,7 +106,9 @@ jobs:
             # opposite — --rebase — or GitHub leaves the PR perpetually UNSTABLE in the
             # queue. auto-enable-auto-merge.yml (AISDLC-138) also uses --auto --rebase
             # for the same reason. If the queue method ever flips, flip this flag too.
-            WAS_ARMED=$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')
+            # Soft-fail: if PR closed/deleted between gh pr list and this view,
+            # default to "false" so set -euo pipefail doesn't abort the whole loop.
+            WAS_ARMED=$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null' 2>/dev/null) || WAS_ARMED="false"
             echo "  auto-merge was armed: $WAS_ARMED"
 
             if gh pr update-branch --repo "$REPO" --rebase "$PR" 2>&1; then
