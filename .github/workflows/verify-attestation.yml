@@ -19,18 +19,14 @@ name: AI-SDLC Verify Review Attestation
 # `{path, headBlobSha}` map, base-independent) to close that rebase gap.
 
 on:
+  # AISDLC-214: paths-ignore REMOVED. The required `ai-sdlc/attestation` status
+  # must be posted on EVERY PR head SHA (including docs-only) so branch
+  # protection doesn't deadlock. Docs-only PRs are short-circuited inside the
+  # workflow via the docs-only detect step below — no envelope verify, just
+  # post `success` directly.
   pull_request:
     types: [opened, synchronize, reopened]
     branches: [main]
-    # AISDLC-132: skip verification on docs-only PRs (mirrors
-    # ai-sdlc-review.yml's filter so docs-only PRs cleanly bypass the entire
-    # review+attestation pipeline).
-    paths-ignore:
-      - 'spec/rfcs/**'
-      - 'docs/**'
-      - 'backlog/tasks/**'
-      - 'backlog/completed/**'
-      - '*.md'
   # AISDLC-113: also verify inside the merge-queue's gh-readonly-queue branch
   # so a sibling PR merging into the same files between PR-head verification
   # and merge-queue execution is still surfaced in the audit log.
@@ -73,18 +69,18 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.resolve.outputs.head_sha }}
 
-      # AISDLC-214: short-circuit on docs-only merge_group commits.
-      # `paths-ignore` on `pull_request` skips the workflow entirely for docs-only PRs,
-      # but `paths-ignore` does NOT apply to `merge_group` events. The former fallback
-      # workflow `verify-attestation-docs-only.yml` raced with this workflow on the same
-      # concurrency group → one got CANCELLED → auto-merge blocked. The fix: detect
-      # docs-only changesets inside this workflow and post `ai-sdlc/attestation: success`
-      # directly, then exit. Code PRs and mixed PRs fall through to the full verify.
-      # Only runs on merge_group (pull_request events that would reach here are already
-      # code/mixed — paths-ignore already filtered pure docs events away).
-      - name: Detect docs-only changeset (merge_group only)
+      # AISDLC-214: short-circuit on docs-only changesets (BOTH pull_request AND
+      # merge_group). The former fallback workflow `verify-attestation-docs-only.yml`
+      # used to handle pull_request docs-only by posting `ai-sdlc/attestation:
+      # success` on the PR head SHA. After retiring that workflow, we MUST post
+      # the same status here on docs-only PR HEADs or branch protection
+      # deadlocks the PR (per docs/operations/quality-gate.md: paths-ignore-skipped
+      # workflows leave their required check pending forever).
+      #
+      # Detection runs unconditionally; the short-circuit posts `success` and the
+      # subsequent verify steps skip when all_docs == 'true'.
+      - name: Detect docs-only changeset
         id: docs_only
-        if: steps.resolve.outputs.is_merge_group == 'true'
         env:
           BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
           HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
@@ -92,10 +88,10 @@ jobs:
           set -euo pipefail
           # -c core.quotePath=false emits raw UTF-8 filenames instead of C-quoted
           # form so non-ASCII paths match the DOCS_ONLY_PATTERN correctly
-          # (AISDLC-205 round 3 fix — see verify-attestation-docs-only.yml).
+          # (AISDLC-205 round 3 fix — preserved from the retired fallback workflow).
           FILES=$(git -c core.quotePath=false diff --name-only "${BASE_SHA}...${HEAD_SHA}")
           if [ -z "${FILES}" ]; then
-            echo "No changed files in merge_group commit; treating as docs-only (nothing to attest)"
+            echo "No changed files in changeset; treating as docs-only (nothing to attest)"
             echo "all_docs=true" >> "${GITHUB_OUTPUT}"
           else
             ALL_DOCS=$(printf '%s\n' "${FILES}" | node scripts/is-docs-only-changeset.mjs)
@@ -104,8 +100,8 @@ jobs:
             echo "Files: $(printf '%s\n' "${FILES}" | head -20 | sed 's/^/  - /')"
           fi
 
-      - name: Short-circuit — post ai-sdlc/attestation success (docs-only merge_group)
-        if: steps.resolve.outputs.is_merge_group == 'true' && steps.docs_only.outputs.all_docs == 'true'
+      - name: Short-circuit — post ai-sdlc/attestation success (docs-only)
+        if: steps.docs_only.outputs.all_docs == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
@@ -116,37 +112,35 @@ jobs:
             -X POST \
             -f state=success \
             -f context='ai-sdlc/attestation' \
-            -f description='docs-only merge_group commit — attestation N/A (AISDLC-214)'
+            -f description='docs-only changeset — attestation N/A (AISDLC-214)'
           echo "Posted ai-sdlc/attestation: success (docs-only short-circuit) on ${HEAD_SHA}"
 
       # Skip the full verify pipeline when the docs-only short-circuit already
       # posted the success status above. These steps only run for code PRs or
-      # mixed PRs (pull_request events always reach here because paths-ignore
-      # filtered out pure-docs pull_request events already; merge_group events
-      # with non-docs files also fall through).
+      # mixed PRs.
       - uses: pnpm/action-setup@v4
-        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true'
 
       - uses: actions/setup-node@v4
-        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true'
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install (orchestrator only — verifier needs the runtime barrel)
-        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build orchestrator + dependencies (verifier imports compiled JS)
         # `...` suffix builds @ai-sdlc/orchestrator AND its workspace deps
         # (notably @ai-sdlc/reference) in topological order. Without it the
         # orchestrator build fails with TS2307: cannot find @ai-sdlc/reference.
-        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true'
         run: pnpm --filter "@ai-sdlc/orchestrator..." build
 
       - name: Verify attestation
         id: verify
-        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true'
         env:
           PR_HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
           PR_BASE_SHA: ${{ steps.resolve.outputs.base_sha }}

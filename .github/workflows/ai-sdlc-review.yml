@@ -12,6 +12,11 @@ on:
     # mixed PRs (docs + code) still trigger normally. To force a review on a
     # docs-only PR (e.g. external contributor scrutiny), use:
     #   gh workflow run ai-sdlc-review.yml --ref <branch>
+    # Note (AISDLC-214): unlike `verify-attestation.yml`, this workflow posts
+    # `Post Review Results` which is NOT a required check — paths-ignore
+    # skipping the workflow doesn't deadlock the PR. The docs-only-check job
+    # below still handles merge_group docs-only commits where paths-ignore
+    # doesn't apply.
     paths-ignore:
       - 'spec/rfcs/**'
       - 'docs/**'

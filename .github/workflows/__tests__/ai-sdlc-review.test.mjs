@@ -370,20 +370,26 @@ describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race 
     verifyWorkflow = loadYaml(resolve(__dirname, '..', 'verify-attestation.yml'));
   });
 
-  // AC-1: verify-attestation.yml short-circuits on docs-only merge_group commits
+  // AC-1: verify-attestation.yml short-circuits on docs-only changesets
+  // (BOTH pull_request AND merge_group — paths-ignore was REMOVED so the
+  // workflow always fires on docs-only PRs and posts the required
+  // `ai-sdlc/attestation` status; merge_group case unchanged).
   describe('verify-attestation.yml docs-only short-circuit (AC-1)', () => {
-    it('has a docs-only detection step that runs only on merge_group', () => {
+    it('has a docs-only detection step that runs unconditionally on every event', () => {
       const verifyJob = verifyWorkflow.jobs.verify;
       const docsOnlyStep = verifyJob.steps.find((s) => s.id === 'docs_only');
       assert.ok(docsOnlyStep, 'verify job must have a step with id=docs_only');
-      assert.match(
-        String(docsOnlyStep.if ?? ''),
-        /steps\.resolve\.outputs\.is_merge_group\s*==\s*'true'/,
-        'docs_only step must be gated on is_merge_group == true',
+      // After AISDLC-214 review-fix: detection runs on BOTH pull_request and
+      // merge_group (no is_merge_group gate) so docs-only PR HEADs also get
+      // the required `ai-sdlc/attestation` status posted.
+      assert.equal(
+        docsOnlyStep.if ?? '',
+        '',
+        'docs_only step must run unconditionally (no if gate)',
       );
     });
 
-    it('has a short-circuit step that posts ai-sdlc/attestation: success for docs-only merge_group', () => {
+    it('has a short-circuit step that posts ai-sdlc/attestation: success for any docs-only changeset', () => {
       const verifyJob = verifyWorkflow.jobs.verify;
       const shortCircuitStep = verifyJob.steps.find(
         (s) => typeof s.name === 'string' && s.name.includes('Short-circuit'),
@@ -394,10 +400,10 @@ describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race 
         /steps\.docs_only\.outputs\.all_docs\s*==\s*'true'/,
         'short-circuit step must be gated on all_docs == true',
       );
-      assert.match(
+      assert.doesNotMatch(
         String(shortCircuitStep.if ?? ''),
-        /steps\.resolve\.outputs\.is_merge_group\s*==\s*'true'/,
-        'short-circuit step must also be gated on is_merge_group == true',
+        /steps\.resolve\.outputs\.is_merge_group/,
+        'short-circuit must NOT be gated on is_merge_group (must fire for both event types)',
       );
       // The step must post ai-sdlc/attestation: success via gh api
       const run = String(shortCircuitStep.run ?? '');
