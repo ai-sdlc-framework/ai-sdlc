@@ -35,9 +35,10 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 `.husky/pre-push` chains in order:
 
 1. **`scripts/check-coverage.sh`** — 80% lines coverage threshold per package. Skip: `AI_SDLC_SKIP_COVERAGE_GATE=1`.
-2. **`scripts/check-attestation-sign.sh`** — auto-signs DSSE attestation when `<worktree>/.active-task` exists, `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` exists, and no envelope at HEAD. Commits the envelope as a separate `chore: auto-sign attestation for <task-id>` and exits 1 with "re-run git push". Idempotent on the second push (envelope-at-HEAD or HEAD-is-auto-sign-chore predicate). **Docs-only auto-approve (AISDLC-215):** when the verdict file is missing AND `scripts/is-docs-only-changeset.mjs` reports the changeset is docs-only, the hook synthesizes a transient auto-approved verdicts file (3 reviewer entries, gitignored) and proceeds to sign — no manual step required. Code PRs with a missing verdict file still exit 0 (no-op) as before. Skip: `AI_SDLC_SKIP_ATTESTATION_SIGN=1`.
+2. **`scripts/check-task-moved.sh`** — auto-moves backlog task file from `backlog/tasks/` to `backlog/completed/` when any commit in the push range has `(AISDLC-N)` in its subject and the file is still in tasks/. Invokes the AISDLC-203 atomic helper (`cli-task-complete`), stages the move, commits as `chore: auto-close AISDLC-N (AISDLC-220)`, and exits 1 with "re-run git push". Idempotent on the second push (file already in completed/ or HEAD is auto-close chore predicate). **Order is load-bearing — MUST run BEFORE attestation-sign (item 3):** attestation's contentHashV4 binds `{path, headBlobSha}` per file; if the task move happens after sign, the envelope hashes the old path while the PR diff contains the new path → verify-attestation rejects. Skip: `AI_SDLC_SKIP_TASK_MOVE=1`.
+3. **`scripts/check-attestation-sign.sh`** — auto-signs DSSE attestation when `<worktree>/.active-task` exists, `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` exists, and no envelope at HEAD. Commits the envelope as a separate `chore: auto-sign attestation for <task-id>` and exits 1 with "re-run git push". Idempotent on the second push (envelope-at-HEAD or HEAD-is-auto-sign-chore predicate). **Docs-only auto-approve (AISDLC-215):** when the verdict file is missing AND `scripts/is-docs-only-changeset.mjs` reports the changeset is docs-only, the hook synthesizes a transient auto-approved verdicts file (3 reviewer entries, gitignored) and proceeds to sign — no manual step required. Code PRs with a missing verdict file still exit 0 (no-op) as before. Skip: `AI_SDLC_SKIP_ATTESTATION_SIGN=1`.
 
-`set -euo pipefail` aborts on first failure. `git push --no-verify` bypasses everything. Both gates have hermetic tests at `scripts/<name>.test.mjs` wired via `pnpm test:drift-gate` / `test:attestation-sign-gate`.
+`set -euo pipefail` aborts on first failure. `git push --no-verify` bypasses everything. All gates have hermetic tests at `scripts/<name>.test.mjs` wired via `pnpm test:drift-gate` / `test:task-move-gate` / `test:attestation-sign-gate`.
 
 ## CI behavior
 
@@ -97,8 +98,10 @@ The Step 0-13 pipeline lives in `pipeline-cli/` (`@ai-sdlc/pipeline-cli`). Tier 
 
 ### Done semantics
 
-- **`/ai-sdlc execute` path**: Done = "reviews-approved-and-PR-opened". Task file is moved to `backlog/completed/` BEFORE push.
-- **Other paths**: Done = "merged". `.github/workflows/backlog-task-complete.yml` opens a follow-up PR after merge (idempotent — no-op if file is already in completed/).
+All paths: task file is moved to `backlog/completed/` in the originating PR's own diff via the `scripts/check-task-moved.sh` pre-push hook (AISDLC-220). The hook detects `(AISDLC-N)` in any commit subject in the push range, invokes the AISDLC-203 atomic helper, and commits the move as a chore commit — so the lifecycle close lands atomically with the work commit in the same PR.
+
+- **`/ai-sdlc execute` path**: the developer subagent moves the file to `backlog/completed/` BEFORE push. The hook detects the file is already in completed/ and no-ops (idempotent).
+- **Ad-hoc / external contributor path**: if the file is still in `backlog/tasks/` at push time, the hook auto-moves it. Zero friction, zero learning curve.
 
 ### Cross-repo writes — `permittedExternalPaths`
 
