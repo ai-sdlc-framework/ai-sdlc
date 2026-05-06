@@ -17,11 +17,24 @@ name: Auto-enable auto-merge on PR open
 # longer reproduce because GitHub now serializes auto-merge through the
 # queue's strategy.
 #
+# Verify the current queue strategy via:
+#   gh api graphql -f query='{ repository(owner:"<org>", name:"<repo>") { mergeQueue(branch:"main") { configuration { mergeMethod } } } }'
+# Or: GitHub UI → Settings → Rulesets → main → Merge Queue.
+#
 # By dropping the flag we let the queue dictate. If the queue's strategy
 # is ever flipped from SQUASH to REBASE in repo settings, no workflow
-# change is needed — auto-merge just follows. AISDLC-221 captures the
-# rationale; AISDLC-192 captures the legacy "method-must-differ"
-# analysis (no longer load-bearing).
+# change is needed — auto-merge just follows.
+#
+# CAVEAT: prior to ruleset enforcement, the no-flag path WAS a trap —
+# `gh pr merge --auto` (no flag) fell back to the viewer's
+# `viewerDefaultMergeMethod`, which often matched the queue's method
+# and caused the same MERGEABLE/UNSTABLE deadlock. If GitHub ever
+# weakens ruleset enforcement, restore the explicit-flag workaround
+# (whichever method the queue is NOT using).
+#
+# AISDLC-221 captures the current rationale; AISDLC-192 captures the
+# legacy "method-must-differ" analysis (no longer load-bearing while
+# ruleset enforcement holds).
 #
 # Why a workflow (vs the per-PR button): the repo-level "Allow auto-merge"
 # setting just enables the BUTTON. It doesn't actually opt PRs into auto-merge.
