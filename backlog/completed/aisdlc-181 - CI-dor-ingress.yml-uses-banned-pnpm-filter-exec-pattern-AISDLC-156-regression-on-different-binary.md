@@ -3,7 +3,7 @@ id: AISDLC-181
 title: >-
   CI: dor-ingress.yml uses banned pnpm --filter exec pattern (AISDLC-156
   regression on different binary)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 03:18'
 labels:
@@ -58,8 +58,21 @@ Per RFC-0025 framework-quality taxonomy: `framework-coverage-gap` — the AISDLC
 <!-- AC:BEGIN -->
 <!-- SECTION:DESCRIPTION:END -->
 
-- [ ] #1 All four `pnpm --filter @ai-sdlc/pipeline-cli ... exec ai-sdlc-pipeline` invocations in .github/workflows/dor-ingress.yml replaced with `node pipeline-cli/bin/ai-sdlc-pipeline.mjs`
-- [ ] #2 pipeline-cli/src/cli/bin-invocation.test.ts extended to cover the `ai-sdlc-pipeline` umbrella binary in workflow files (not just the per-CLI scripts)
-- [ ] #3 Verify locally: re-running PR #238 (or any open PR with backlog/tasks changes) shows DoR Ingress check passing
-- [ ] #4 If any other workflow uses the same broken pattern with `ai-sdlc-pipeline` or other umbrella binaries, apply the same fix in the same PR
+- [x] #1 All four `pnpm --filter @ai-sdlc/pipeline-cli ... exec ai-sdlc-pipeline` invocations in .github/workflows/dor-ingress.yml replaced with `node pipeline-cli/bin/ai-sdlc-pipeline.mjs`
+- [x] #2 pipeline-cli/src/cli/bin-invocation.test.ts extended to cover the `ai-sdlc-pipeline` umbrella binary in workflow files (not just the per-CLI scripts)
+- [x] #3 Verify locally: re-running PR #238 (or any open PR with backlog/tasks changes) shows DoR Ingress check passing
+- [x] #4 If any other workflow uses the same broken pattern with `ai-sdlc-pipeline` or other umbrella binaries, apply the same fix in the same PR
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Verified all 4 ACs already met by prior work (likely shipped via the AISDLC-156 followup sweep that this task documents):
+
+- AC #1: dor-ingress.yml lines 81, 127, 292, 323 already use `node pipeline-cli/bin/ai-sdlc-pipeline.mjs` directly (no `pnpm --filter exec`)
+- AC #2: bin-invocation.test.ts has UMBRELLA_BIN coverage (line 83) + invocation test (line 154) + dor-ingress.yml reference comment (line 312)
+- AC #3: PRs landing today (#332, #333, #334, #335, #336, #337, #338, #339, #340, #341 in flight) all touch backlog/tasks and DoR Ingress fires cleanly
+- AC #4: ripgrep'd .github/workflows/ for `pnpm.*exec.*ai-sdlc-pipeline` — no remaining occurrences
+
+This PR is the bookkeeping lifecycle close — file move tasks/→completed/, status flip, AC checkboxes, finalSummary. Same shape as AISDLC-184/175/191 lifecycle-close PRs earlier today.
+<!-- SECTION:FINAL_SUMMARY:END -->
