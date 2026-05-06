@@ -8,7 +8,7 @@ on:
     # AISDLC-218: explicit types — drop the implicit `opened` (fires on draft
     # opens), keep `synchronize` + `reopened` (push + reopen events on
     # ready PRs), add `ready_for_review` (the canonical fire-once trigger).
-    types: [synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 
 concurrency:

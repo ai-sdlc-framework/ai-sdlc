@@ -13,7 +13,7 @@ on:
     branches: [main]
     # AISDLC-218: explicit types — drop implicit `opened` (draft opens),
     # add `ready_for_review` (canonical fire-once trigger).
-    types: [synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'ai-sdlc-plugin/**'
       - '.github/workflows/verify-mcp-bundle.yml'

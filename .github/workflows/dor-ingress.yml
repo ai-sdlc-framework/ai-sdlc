@@ -18,7 +18,7 @@ on:
     types: [opened, edited]
   pull_request:
     # AISDLC-218: drop `opened` (draft opens) + add `ready_for_review`.
-    types: [synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
     paths:
       - 'backlog/tasks/*.md'
 

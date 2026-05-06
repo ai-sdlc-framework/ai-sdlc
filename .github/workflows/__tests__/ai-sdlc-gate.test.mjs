@@ -94,15 +94,17 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     const triggers = workflow.on ?? workflow[true] ?? workflow['on'];
     assert.ok(triggers, `expected triggers under "on:"; got keys: ${Object.keys(workflow)}`);
 
-    // AISDLC-218: `opened` was DROPPED (would fire on draft opens before
-    // attestation signs); `ready_for_review` was ADDED (canonical fire-once
-    // trigger when the operator flips draft → ready). The new draft-PR
-    // flow makes this the correct trigger set; `synchronize` + `reopened`
-    // remain to handle pushes + manual reopens on already-ready PRs.
+    // AISDLC-218 (revised): `opened` was originally dropped under the
+    // assumption that ALL PRs would be opened as draft per the new flow,
+    // but PRs opened directly as ready (e.g. sync chore PRs via
+    // `gh pr create` with no `--draft`) get NO event handling without
+    // `opened`. Workaround: keep `opened` in types AND rely on the
+    // job-level `if: !draft` guards to skip draft opens. `ready_for_review`
+    // is also kept so the canonical draft-flip flow fires once.
     assert.deepEqual(
       triggers.pull_request?.types?.sort(),
-      ['ready_for_review', 'reopened', 'synchronize'],
-      'pull_request must fire on synchronize/reopened/ready_for_review (AISDLC-218: drop opened, add ready_for_review)',
+      ['opened', 'ready_for_review', 'reopened', 'synchronize'],
+      'pull_request must include opened (for direct-ready PRs) + ready_for_review (for draft flips); draft opens are skipped at job level via if: !draft',
     );
     assert.deepEqual(
       triggers.merge_group?.types,

@@ -29,7 +29,7 @@ on:
     # exists at HEAD → spurious `failure` posting). Add `ready_for_review`
     # so the gate fires exactly once per PR, after the envelope is signed
     # and the draft is flipped to ready.
-    types: [synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
   # AISDLC-113: also verify inside the merge-queue's gh-readonly-queue branch
   # so a sibling PR merging into the same files between PR-head verification

@@ -5,7 +5,7 @@ on:
     # AISDLC-218: drop `opened` (would fire on draft opens before reviewers
     # have run + envelope is signed). Add `ready_for_review` so the workflow
     # fires exactly once per PR, after `gh pr ready`.
-    types: [synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
     # AISDLC-131: docs-only PRs (RFC drafts, backlog edits, READMEs) skip the
     # 3-reviewer subagent fan-out — those iterations don't need code review and
