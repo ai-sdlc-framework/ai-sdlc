@@ -86,7 +86,7 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     assert.equal(workflow.name, 'AI-SDLC PR Ready Gate');
   });
 
-  it('AC #1: triggers on pull_request (opened/synchronize/reopened) + merge_group (checks_requested)', () => {
+  it('AC #1: triggers on pull_request (synchronize/reopened/ready_for_review post-AISDLC-218) + merge_group (checks_requested)', () => {
     // YAML's `on:` shorthand can come back as a dict OR as the literal
     // string "on" depending on parser quirks (`on: true` collision with
     // YAML 1.1 boolean coercion). PyYAML 6+ preserves it as the string
@@ -94,10 +94,15 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     const triggers = workflow.on ?? workflow[true] ?? workflow['on'];
     assert.ok(triggers, `expected triggers under "on:"; got keys: ${Object.keys(workflow)}`);
 
+    // AISDLC-218: `opened` was DROPPED (would fire on draft opens before
+    // attestation signs); `ready_for_review` was ADDED (canonical fire-once
+    // trigger when the operator flips draft → ready). The new draft-PR
+    // flow makes this the correct trigger set; `synchronize` + `reopened`
+    // remain to handle pushes + manual reopens on already-ready PRs.
     assert.deepEqual(
       triggers.pull_request?.types?.sort(),
-      ['opened', 'reopened', 'synchronize'],
-      'pull_request must fire on opened/synchronize/reopened',
+      ['ready_for_review', 'reopened', 'synchronize'],
+      'pull_request must fire on synchronize/reopened/ready_for_review (AISDLC-218: drop opened, add ready_for_review)',
     );
     assert.deepEqual(
       triggers.merge_group?.types,
@@ -114,7 +119,23 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
   it('AC #4: pr-ready aggregator uses re-actors/alls-green with if: always() and inspects needs context', () => {
     const agg = workflow.jobs['pr-ready'];
     assert.equal(agg.name, 'ai-sdlc/pr-ready', 'check name must be exactly ai-sdlc/pr-ready');
-    assert.equal(agg.if, 'always()', 'aggregator must run even when upstream jobs fail');
+    // AISDLC-218: `if:` extended with a draft guard — `re-actors/alls-green`
+    // treats all-skipped as failure, so on draft PRs (where every upstream
+    // job is skipped by its own draft guard) the rollup posted FAILURE on
+    // every sync. Skipping the rollup on draft means no required check
+    // posts on draft (which is fine — drafts can't merge); on ready_for_review
+    // the workflow fires fresh and pr-ready posts SUCCESS correctly.
+    // The rollup must STILL run on push/merge_group + non-draft PRs.
+    assert.match(
+      agg.if,
+      /always\(\)/,
+      'aggregator must include always() so it runs even when upstream jobs fail',
+    );
+    assert.match(
+      agg.if,
+      /draft\s*==\s*false/,
+      'aggregator must skip on draft PRs (AISDLC-218 — alls-green treats all-skipped as failure)',
+    );
     // `needs` may be parsed as an array of strings.
     const needs = Array.isArray(agg.needs) ? agg.needs : [agg.needs];
     for (const required of ['detect', 'lint', 'build-test', 'coverage', 'integration']) {
