@@ -10,7 +10,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { extractTaskIdFromFilename, verifyBacklogIntegrity } from './backlog-verify.js';
+import {
+  buildBacklogVerifyCli,
+  extractTaskIdFromFilename,
+  verifyBacklogIntegrity,
+} from './backlog-verify.js';
 
 // ── Fixtures ───────────────────────────────────────────────────────────
 
@@ -153,5 +157,135 @@ describe('verifyBacklogIntegrity — resilience', () => {
     const result = verifyBacklogIntegrity(workDir);
     expect(result.ok).toBe(true);
     expect(result.locations).toHaveLength(0);
+  });
+});
+
+// ── CLI handler tests (yargs router) ───────────────────────────────────
+
+describe('buildBacklogVerifyCli — yargs handler exit codes + output', () => {
+  let savedArgv: string[];
+  let savedExit: typeof process.exit;
+  let savedOut: typeof process.stdout.write;
+  let savedErr: typeof process.stderr.write;
+  let stdoutChunks: string[];
+  let stderrChunks: string[];
+
+  beforeEach(() => {
+    savedArgv = process.argv;
+    savedExit = process.exit;
+    savedOut = process.stdout.write.bind(process.stdout);
+    savedErr = process.stderr.write.bind(process.stderr);
+    stdoutChunks = [];
+    stderrChunks = [];
+    process.stdout.write = ((chunk: string | Uint8Array) => {
+      stdoutChunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      return true;
+    }) as typeof process.stdout.write;
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      return true;
+    }) as typeof process.stderr.write;
+    process.exit = ((code?: number) => {
+      throw new Error(`process.exit(${code})`);
+    }) as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = savedArgv;
+    process.exit = savedExit;
+    process.stdout.write = savedOut;
+    process.stderr.write = savedErr;
+  });
+
+  function setArgv(...args: string[]): void {
+    process.argv = ['node', 'cli-backlog-verify', ...args];
+  }
+
+  async function runCli(): Promise<{ exitCode: number | null; thrown?: unknown }> {
+    try {
+      await buildBacklogVerifyCli().parseAsync();
+      return { exitCode: null };
+    } catch (e) {
+      const m = (e as Error).message?.match(/^process\.exit\((\d+)\)$/);
+      if (m) return { exitCode: Number(m[1]) };
+      return { exitCode: null, thrown: e };
+    }
+  }
+
+  it('clean state — text: exits 0 with OK summary', async () => {
+    writeFileSync(
+      join(workDir, 'backlog', 'tasks', 'aisdlc-1 - foo.md'),
+      '---\nid: AISDLC-1\n---\n',
+      'utf8',
+    );
+    setArgv('--work-dir', workDir);
+    const r = await runCli();
+    expect(r.exitCode).toBe(0);
+    expect(stdoutChunks.join('')).toContain('OK');
+    expect(stdoutChunks.join('')).toContain('1 task file(s) scanned');
+  });
+
+  it('clean state with --quiet: exits 0 with no output', async () => {
+    setArgv('--work-dir', workDir, '--quiet');
+    const r = await runCli();
+    expect(r.exitCode).toBe(0);
+    expect(stdoutChunks.join('')).toBe('');
+  });
+
+  it('clean state with --format json: emits structured ok=true', async () => {
+    writeFileSync(
+      join(workDir, 'backlog', 'tasks', 'aisdlc-1 - foo.md'),
+      '---\nid: AISDLC-1\n---\n',
+      'utf8',
+    );
+    setArgv('--work-dir', workDir, '--format', 'json');
+    const r = await runCli();
+    expect(r.exitCode).toBe(0);
+    const json = JSON.parse(stdoutChunks.join('').trim());
+    expect(json.ok).toBe(true);
+    expect(json.duplicates).toEqual([]);
+    expect(json.locations).toHaveLength(1);
+  });
+
+  it('duplicates detected — text: exits 1 with stderr listing', async () => {
+    writeFileSync(
+      join(workDir, 'backlog', 'tasks', 'aisdlc-1 - dup.md'),
+      '---\nid: AISDLC-1\n---\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(workDir, 'backlog', 'completed', 'aisdlc-1 - dup.md'),
+      '---\nid: AISDLC-1\nstatus: Done\n---\n',
+      'utf8',
+    );
+    setArgv('--work-dir', workDir);
+    const r = await runCli();
+    expect(r.exitCode).toBe(1);
+    const err = stderrChunks.join('');
+    expect(err).toContain('DUPLICATE TASK IDs DETECTED');
+    expect(err).toContain('aisdlc-1');
+    expect(err).toContain('[tasks]');
+    expect(err).toContain('[completed]');
+    expect(err).toContain('cli-task-complete.mjs');
+  });
+
+  it('duplicates detected --format json: exits 1 with structured payload', async () => {
+    writeFileSync(
+      join(workDir, 'backlog', 'tasks', 'aisdlc-1 - dup.md'),
+      '---\nid: AISDLC-1\n---\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(workDir, 'backlog', 'completed', 'aisdlc-1 - dup.md'),
+      '---\nid: AISDLC-1\nstatus: Done\n---\n',
+      'utf8',
+    );
+    setArgv('--work-dir', workDir, '--format', 'json');
+    const r = await runCli();
+    expect(r.exitCode).toBe(1);
+    const json = JSON.parse(stdoutChunks.join('').trim());
+    expect(json.ok).toBe(false);
+    expect(json.duplicates).toContain('aisdlc-1');
+    expect(json.locations).toHaveLength(2);
   });
 });
