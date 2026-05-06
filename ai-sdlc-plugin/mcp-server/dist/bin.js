@@ -25531,7 +25531,19 @@ async function pushAndPr(opts) {
   const titleTemplate = readTitleTemplate(opts.workDir);
   const title = composeTitle(titleTemplate, opts.taskId, opts.task.title, !!opts.needsHumanAttention);
   const body = composeBody(opts);
-  const prResult = await runner("gh", ["pr", "create", "--title", title, "--body", body, "--base", "main", "--head", opts.branch], { cwd: opts.worktreePath, allowFailure: true });
+  const prResult = await runner("gh", [
+    "pr",
+    "create",
+    "--draft",
+    "--title",
+    title,
+    "--body",
+    body,
+    "--base",
+    "main",
+    "--head",
+    opts.branch
+  ], { cwd: opts.worktreePath, allowFailure: true });
   if (prResult.code !== 0) {
     return {
       pushed: true,
