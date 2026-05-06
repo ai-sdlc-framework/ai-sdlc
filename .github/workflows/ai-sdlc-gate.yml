@@ -198,7 +198,15 @@ jobs:
   pr-ready:
     name: ai-sdlc/pr-ready
     needs: [detect, lint, build-test, coverage, integration]
-    if: always()
+    # AISDLC-218: skip the rollup on draft PRs. With all upstream jobs skipped
+    # (per their own draft guards), `re-actors/alls-green` treats all-skipped
+    # as failure → posts `ai-sdlc/pr-ready: failure` on every draft sync.
+    # Skipping the rollup means no required check posts on draft, which is
+    # fine — drafts can't merge anyway, and on `ready_for_review` the
+    # workflow fires fresh and pr-ready posts correctly.
+    if: >-
+      always() &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     steps:
       - name: Aggregate required signals
