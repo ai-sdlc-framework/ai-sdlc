@@ -1,5 +1,5 @@
 /**
- * Project-root discovery for the plugin's MCP server (AISDLC-99).
+ * Project-root discovery for the plugin's MCP server (AISDLC-99, AISDLC-216).
  *
  * The plugin's `plugin.json` sets `AI_SDLC_PROJECT_ROOT=${CLAUDE_PLUGIN_DATA}`
  * which resolves to `~/.claude/plugins/data/<source>-<plugin-name>/` — a
@@ -18,12 +18,20 @@
  *    bound to a project. Same `backlog/` validity check.
  * 3. Walk up from `process.cwd()` looking for the nearest ancestor directory
  *    that contains a `backlog/` subdirectory.
- * 4. If none of the above produce a usable root, throw a clear error so the
+ * 4. **Pattern C check** (AISDLC-216): if the resolved root has a `.worktrees/`
+ *    directory with at least one worktree subdir, it is a Pattern C parent
+ *    (non-bare repo with isolated worktrees). In that case:
+ *    a. Look up the active task via `AI_SDLC_ACTIVE_TASK_ID` env var.
+ *    b. Fall back to reading `<root>/.active-task` file.
+ *    c. If a task ID is found, re-root into `<root>/.worktrees/<task-id-lower>/`.
+ *    d. If no task signal is present, refuse with a helpful error so writes
+ *       do not accumulate untracked debris in the parent's working tree.
+ * 5. If none of the above produce a usable root, throw a clear error so the
  *    caller can surface a useful message instead of operating on a wrong
  *    path.
  */
 
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, resolve } from 'node:path';
 
 export interface ResolveProjectRootOptions {
@@ -36,6 +44,12 @@ export interface ResolveProjectRootOptions {
 const ERROR_MESSAGE =
   'AI-SDLC: could not resolve project root. ' +
   'Set AI_SDLC_PROJECT_ROOT or run from a directory inside a project with a backlog/ subdirectory.';
+
+export const PATTERN_C_ERROR_MESSAGE =
+  'AI-SDLC: Pattern C detected — parent working tree is read-only. ' +
+  'Set AI_SDLC_ACTIVE_TASK_ID env (e.g. export AI_SDLC_ACTIVE_TASK_ID=AISDLC-216) ' +
+  'or ensure a .active-task sentinel exists at the project root ' +
+  'to route writes to the correct worktree.';
 
 /**
  * Returns true when `dir` is an existing directory that contains a
@@ -72,11 +86,73 @@ function walkUpForBacklog(start: string): string | undefined {
 }
 
 /**
+ * Detect whether `root` is a Pattern C parent repo.
+ *
+ * A Pattern C parent has a `.worktrees/` directory that contains at least one
+ * subdirectory (i.e. at least one worktree has been checked out). Any I/O
+ * error is treated as "not Pattern C".
+ */
+export function isPatternCParent(root: string): boolean {
+  try {
+    const worktreesDir = resolve(root, '.worktrees');
+    if (!existsSync(worktreesDir)) return false;
+    if (!statSync(worktreesDir).isDirectory()) return false;
+    const entries = readdirSync(worktreesDir, { withFileTypes: true });
+    return entries.some((e) => e.isDirectory());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Given a Pattern C parent `root` and an optional env mapping, determine
+ * the active task ID (lower-cased) to use for worktree routing.
+ *
+ * Lookup order:
+ * 1. `AI_SDLC_ACTIVE_TASK_ID` env var
+ * 2. `.active-task` file at `root`
+ *
+ * Returns the lower-cased task ID on success, or `undefined` when no signal
+ * is present.
+ */
+export function resolveActiveTaskId(
+  root: string,
+  env: NodeJS.ProcessEnv = process.env,
+): string | undefined {
+  // 1. Env var takes precedence.
+  const envTaskId = env.AI_SDLC_ACTIVE_TASK_ID;
+  if (envTaskId && envTaskId.trim()) {
+    return envTaskId.trim().toLowerCase();
+  }
+
+  // 2. .active-task sentinel file.
+  try {
+    const sentinel = resolve(root, '.active-task');
+    if (existsSync(sentinel) && statSync(sentinel).isFile()) {
+      const contents = readFileSync(sentinel, 'utf-8').trim();
+      if (contents) return contents.toLowerCase();
+    }
+  } catch {
+    // I/O errors → no signal
+  }
+
+  return undefined;
+}
+
+/**
  * Resolve the project root the plugin's MCP tools should operate against.
  *
+ * Includes Pattern C detection (AISDLC-216): when the resolved candidate root
+ * is a Pattern C parent (has `.worktrees/` subdirs), we re-root into the
+ * active worktree instead of the parent. If no active-task signal is present,
+ * we throw the Pattern C error so callers surface a helpful refusal instead
+ * of writing to the parent's read-only working tree.
+ *
  * @throws Error with the canonical "could not resolve project root" message
- * when no valid root is found. Callers should let this propagate so the MCP
- * tool returns it as `isError: true` content.
+ * when no valid root is found, or the Pattern C error message when Pattern C
+ * is detected but no active-task signal is set.
+ * Callers should let this propagate so the MCP tool returns it as
+ * `isError: true` content.
  */
 export function resolveProjectRoot(opts: ResolveProjectRootOptions = {}): string {
   const env = opts.env ?? process.env;
@@ -84,18 +160,53 @@ export function resolveProjectRoot(opts: ResolveProjectRootOptions = {}): string
 
   const envProjectRoot = env.AI_SDLC_PROJECT_ROOT;
   if (envProjectRoot && hasBacklogDir(envProjectRoot)) {
-    return resolve(envProjectRoot);
+    return applyPatternCIfNeeded(resolve(envProjectRoot), env);
   }
 
   const claudeProjectDir = env.CLAUDE_PROJECT_DIR;
   if (claudeProjectDir && hasBacklogDir(claudeProjectDir)) {
-    return resolve(claudeProjectDir);
+    return applyPatternCIfNeeded(resolve(claudeProjectDir), env);
   }
 
   const fromCwd = walkUpForBacklog(cwd);
-  if (fromCwd) return fromCwd;
+  if (fromCwd) return applyPatternCIfNeeded(fromCwd, env);
 
   throw new Error(ERROR_MESSAGE);
+}
+
+/**
+ * Given a candidate project root, apply Pattern C re-routing if needed.
+ *
+ * - If `root` is NOT a Pattern C parent, return it unchanged.
+ * - If it IS a Pattern C parent AND an active-task signal is present, return
+ *   the worktree root `<root>/.worktrees/<task-id-lower>/` (validated to have
+ *   a `backlog/` dir, else fall through with a warning to parent root).
+ * - If it IS a Pattern C parent AND NO active-task signal is present, throw
+ *   the Pattern C error.
+ *
+ * This is exported so tests can drive it directly.
+ */
+export function applyPatternCIfNeeded(root: string, env: NodeJS.ProcessEnv = process.env): string {
+  if (!isPatternCParent(root)) return root;
+
+  const taskId = resolveActiveTaskId(root, env);
+  if (!taskId) {
+    throw new Error(PATTERN_C_ERROR_MESSAGE);
+  }
+
+  const worktreeRoot = resolve(root, '.worktrees', taskId);
+  if (hasBacklogDir(worktreeRoot)) {
+    return worktreeRoot;
+  }
+
+  // Worktree exists in .active-task/AI_SDLC_ACTIVE_TASK_ID but its backlog/
+  // hasn't been created yet (or it's the wrong ID). Throw with a clear message
+  // rather than silently falling back to the parent root.
+  throw new Error(
+    `AI-SDLC: Pattern C active task '${taskId}' found but worktree at ` +
+      `${worktreeRoot} does not contain a backlog/ directory. ` +
+      `Ensure the worktree is fully initialised or update AI_SDLC_ACTIVE_TASK_ID.`,
+  );
 }
 
 export const PROJECT_ROOT_ERROR_MESSAGE = ERROR_MESSAGE;
