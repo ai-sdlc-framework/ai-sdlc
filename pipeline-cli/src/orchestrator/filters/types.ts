@@ -18,6 +18,7 @@
  */
 
 import type { ExternalDependency } from '../../deps/dependency-graph.js';
+import type { BlockedDetail } from './blocked.js';
 
 /**
  * Names of the filters in the order the chain runs them. Used in trace
@@ -27,13 +28,16 @@ import type { ExternalDependency } from '../../deps/dependency-graph.js';
  * `OrphanParent` (AISDLC-175) is the cheapest filter — a constant-time graph
  * lookup against the candidate's own node + the already-loaded parent map —
  * so it runs FIRST and short-circuits before the costlier dependency walk.
- * The other three filters preserve the RFC §4.3 ordering among themselves.
+ * The other four filters preserve the RFC §4.3 ordering among themselves.
+ * `Blocked` (AISDLC-223) runs last — it catches tasks the operator has
+ * explicitly marked as blocked via `blocked.reason` in frontmatter.
  */
 export type FilterName =
   | 'OrphanParent'
   | 'DependencyReadiness'
   | 'DorReadiness'
-  | 'ExternalDependencies';
+  | 'ExternalDependencies'
+  | 'Blocked';
 
 /**
  * Single-filter outcome. `passed: true` clears the candidate; `passed: false`
@@ -64,7 +68,12 @@ export type FilterDetail =
   | DependencyBlockedDetail
   | DorBlockedDetail
   | AwaitingExternalDetail
-  | OrphanParentDetail;
+  | OrphanParentDetail
+  | BlockedDetail;
+
+// Re-export BlockedDetail so callers can narrow the union without a
+// separate import from blocked.ts.
+export type { BlockedDetail } from './blocked.js';
 
 /**
  * AISDLC-175 — the candidate is a parent task whose every declared child is

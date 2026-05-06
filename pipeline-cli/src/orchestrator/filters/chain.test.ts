@@ -2,10 +2,12 @@
  * Filter chain composer (RFC-0015 Phase 3 / AISDLC-169.3) tests.
  *
  * Covers:
- *   - All-pass chain: trace has 3 entries, `passed: true`, `failure: null`.
- *   - Short-circuits at filter 1 (dependency failure → no DoR/external read).
- *   - Short-circuits at filter 2 (DoR failure → no external read).
- *   - Short-circuits at filter 3 (external failure → all 3 in trace).
+ *   - All-pass chain: trace has 5 entries, `passed: true`, `failure: null`.
+ *   - Short-circuits at filter 0 (orphan-parent → single entry in trace).
+ *   - Short-circuits at filter 1 (dependency failure → no DoR/external/blocked read).
+ *   - Short-circuits at filter 2 (DoR failure → no external/blocked read).
+ *   - Short-circuits at filter 3 (external failure → no blocked in trace).
+ *   - Short-circuits at filter 4 (blocked failure → all 5 in trace).
  *   - `formatFilterTrace` renders both the admit and the skip cases per the
  *     RFC §11 Phase 3 task spec's exact format.
  */
@@ -67,7 +69,7 @@ beforeEach(() => {
 });
 
 describe('runFilterChain — all-pass', () => {
-  it('admits a candidate that clears all four filters', () => {
+  it('admits a candidate that clears all five filters', () => {
     const g = graph([node('AISDLC-READY')]);
     const result = runFilterChain({
       graph: g,
@@ -76,14 +78,15 @@ describe('runFilterChain — all-pass', () => {
     });
     expect(result.passed).toBe(true);
     expect(result.failure).toBeNull();
-    expect(result.trace).toHaveLength(4);
+    expect(result.trace).toHaveLength(5);
     // AISDLC-175 prepended `OrphanParent` to the chain — cheapest +
-    // most decisive filter runs first.
+    // most decisive filter runs first. AISDLC-223 appended `Blocked` last.
     expect(result.trace.map((r) => r.filter)).toEqual([
       'OrphanParent',
       'DependencyReadiness',
       'DorReadiness',
       'ExternalDependencies',
+      'Blocked',
     ]);
     expect(result.trace.every((r) => r.passed)).toBe(true);
   });
@@ -158,7 +161,7 @@ describe('runFilterChain — short-circuit ordering', () => {
     expect(result.trace[2].passed).toBe(false);
   });
 
-  it('rejects at ExternalDependencies when an external manual dep is unresolved (full trace populated)', () => {
+  it('rejects at ExternalDependencies when an external manual dep is unresolved (short-circuits before Blocked)', () => {
     const g = graph([
       node('AISDLC-X', {
         ext: [{ id: 'sec-review', description: 'wait', kind: 'manual' }],
@@ -171,11 +174,32 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('ExternalDependencies');
+    // OrphanParent + DependencyReadiness + DorReadiness + ExternalDependencies (fails).
+    // Blocked filter is NOT in the trace because the chain short-circuited.
     expect(result.trace).toHaveLength(4);
     expect(result.trace[0].passed).toBe(true);
     expect(result.trace[1].passed).toBe(true);
     expect(result.trace[2].passed).toBe(true);
     expect(result.trace[3].passed).toBe(false);
+  });
+
+  it('rejects at Blocked when taskBlocked.reason is set (full trace of 5 entries)', () => {
+    const g = graph([node('AISDLC-BLOCKED')]);
+    const result = runFilterChain({
+      graph: g,
+      taskId: 'AISDLC-BLOCKED',
+      calibrationLogPath: logPath,
+      taskBlocked: { reason: 'Soaking — promotion gated on evidence' },
+    });
+    expect(result.passed).toBe(false);
+    expect(result.failure?.filter).toBe('Blocked');
+    // All 5 filters in trace, only last one fails.
+    expect(result.trace).toHaveLength(5);
+    expect(result.trace[0].filter).toBe('OrphanParent');
+    expect(result.trace[0].passed).toBe(true);
+    expect(result.trace[4].filter).toBe('Blocked');
+    expect(result.trace[4].passed).toBe(false);
+    expect(result.trace[4].reason).toBe('Soaking — promotion gated on evidence');
   });
 });
 
@@ -193,6 +217,7 @@ describe('formatFilterTrace', () => {
     expect(text).toContain('Dependency check: passed');
     expect(text).toContain('DoR readiness: passed');
     expect(text).toContain('External deps: passed');
+    expect(text).toContain('Operator-blocked check: passed');
     expect(text).toContain('→ admitted');
   });
 

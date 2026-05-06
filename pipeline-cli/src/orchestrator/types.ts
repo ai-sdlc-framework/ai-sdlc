@@ -115,12 +115,14 @@ export interface OrchestratorFilterEvent {
  * (AISDLC-169.4) plumbs these into `events.jsonl`; Phase 3 surfaces them
  * in the tick result + via the logger. AISDLC-175 added the
  * `OrchestratorOrphanParent` arm for parent-task closure detection.
+ * AISDLC-223 adds `OrchestratorTaskBlocked` for operator-blocked tasks.
  */
 export type OrchestratorBlockedEvent =
   | OrchestratorBlockedByDependencyEvent
   | OrchestratorBlockedByDorEvent
   | OrchestratorAwaitingExternalEvent
-  | OrchestratorOrphanParentEvent;
+  | OrchestratorOrphanParentEvent
+  | OrchestratorTaskBlockedEvent;
 
 export interface OrchestratorBlockedByDependencyEvent {
   type: 'OrchestratorBlockedByDependency';
@@ -154,6 +156,25 @@ export interface OrchestratorAwaitingExternalEvent {
    * surfaced here so operators see the complete picture).
    */
   allExternalDeps: Array<{ id: string; kind: string }>;
+}
+
+/**
+ * AISDLC-223 — emitted on every tick that the `Blocked` admission filter
+ * rejects a candidate. The task has a non-empty `blocked.reason`
+ * frontmatter field — it is ready by all other criteria but the operator
+ * has put it on hold until the unblocking condition clears.
+ */
+export interface OrchestratorTaskBlockedEvent {
+  type: 'TaskBlocked';
+  ts: string;
+  taskId: string;
+  /** The value of `blocked.reason` — the operator-supplied hold reason. */
+  reason: string;
+  /**
+   * Advisory ISO date after which the operator should re-evaluate the
+   * block. Mirrors `blocked.until` when present.
+   */
+  until?: string;
 }
 
 /**
@@ -339,6 +360,14 @@ export interface OrchestratorStatus {
   config: OrchestratorConfig;
   /** Whether the feature flag is enabled. */
   enabled: boolean;
+  /**
+   * AISDLC-223 — tasks that are in the dispatchable frontier (ready by
+   * all criteria) but currently blocked by the operator via
+   * `blocked.reason` frontmatter. Empty array when no tasks are blocked.
+   * Each entry mirrors the `blocked:` frontmatter so operators can see
+   * the full blocked queue without parsing events.jsonl.
+   */
+  blocked: Array<{ taskId: string; reason: string; until?: string }>;
 }
 
 /**

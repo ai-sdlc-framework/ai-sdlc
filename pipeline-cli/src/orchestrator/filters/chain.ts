@@ -1,7 +1,7 @@
 /**
  * Pre-dispatch filter chain composer (RFC-0015 Phase 3 / AISDLC-169.3).
  *
- * Walks the three filters in the order RFC §4.3 specifies and short-circuits
+ * Walks the filters in the order RFC §4.3 specifies and short-circuits
  * on the first failure. The chain is pure — it returns the trace + the
  * verdict; the loop is responsible for emitting the matching event +
  * requeueing the candidate for the next tick.
@@ -9,7 +9,9 @@
  * Order is significant: dependency readiness is the cheapest check (in-memory
  * graph walk, ~µs) and the most common failure mode in practice, so it runs
  * first. DoR readiness is a single log file scan (~ms). External dependencies
- * is a single JSON file read + a frontmatter inspection (~µs). Reordering
+ * is a single JSON file read + a frontmatter inspection (~µs). The `Blocked`
+ * filter (AISDLC-223) runs last — it catches tasks the operator has
+ * explicitly marked as blocked via `blocked.reason` in frontmatter. Reordering
  * would shift cost without changing semantics — the §4.3 order matches both
  * the cost ranking and the human reading order in the RFC, so we keep it.
  *
@@ -17,6 +19,7 @@
  */
 
 import type { DependencyGraph } from '../../deps/dependency-graph.js';
+import { checkBlocked, type BlockedFrontmatter, type CheckBlockedOpts } from './blocked.js';
 import {
   checkDependencyReadiness,
   type CheckDependencyReadinessOpts,
@@ -30,7 +33,7 @@ import { checkOrphanParent, type CheckOrphanParentOpts } from './orphan-parent.j
 import type { FilterChainResult, FilterResult } from './types.js';
 
 export interface RunFilterChainOpts {
-  /** Pre-built graph — shared across all three filters in this tick. */
+  /** Pre-built graph — shared across all filters in this tick. */
   graph: DependencyGraph;
   /** Candidate task ID. */
   taskId: string;
@@ -48,19 +51,26 @@ export interface RunFilterChainOpts {
    * external-deps filter walks `<artifactsDir>/_orchestrator/cleared-external-deps.json`.
    */
   clearedExternalKeys?: ReadonlySet<string>;
+  /**
+   * AISDLC-223 — pre-parsed `blocked:` frontmatter field for the candidate.
+   * When undefined the Blocked filter treats the task as not blocked
+   * (backward-compatible with tasks that predate this field). The loop loads
+   * this alongside `taskLabels` so the chain stays I/O-free.
+   */
+  taskBlocked?: BlockedFrontmatter;
 }
 
 /**
- * Run the four filters in chain order against a single candidate.
+ * Run the five filters in chain order against a single candidate.
  * Short-circuits on the first failure but ALWAYS returns the partial trace
  * so the loop's event emission carries the prefix of cleared filters.
  *
  * Order: OrphanParent (AISDLC-175) → DependencyReadiness → DorReadiness →
- * ExternalDependencies. OrphanParent runs first because it's the cheapest
- * check (constant-time graph lookup) AND the most decisive — an orphan
- * parent isn't real work at all, so there's no point asking the other three
- * filters about it. The other three preserve the RFC §4.3 ordering among
- * themselves.
+ * ExternalDependencies → Blocked (AISDLC-223).
+ * OrphanParent runs first because it's the cheapest check (constant-time
+ * graph lookup) AND the most decisive — an orphan parent isn't real work
+ * at all. The others preserve the RFC §4.3 ordering; Blocked runs last
+ * because it's a pure struct lookup and its position is specified by AC #3.
  */
 export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const trace: FilterResult[] = [];
@@ -95,6 +105,15 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const ext = checkExternalDependencies(extOpts);
   trace.push(ext);
   if (!ext.passed) return { passed: false, trace, failure: ext };
+
+  // Filter 4 — operator-blocked gate (AISDLC-223). Runs last per AC #3.
+  const blockedOpts: CheckBlockedOpts = {
+    taskId: opts.taskId,
+    blocked: opts.taskBlocked,
+  };
+  const blocked = checkBlocked(blockedOpts);
+  trace.push(blocked);
+  if (!blocked.passed) return { passed: false, trace, failure: blocked };
 
   return { passed: true, trace, failure: null };
 }
@@ -137,6 +156,8 @@ function humanFilterName(filter: FilterResult['filter']): string {
       return 'DoR readiness';
     case 'ExternalDependencies':
       return 'External deps';
+    case 'Blocked':
+      return 'Operator-blocked check';
   }
 }
 
@@ -150,6 +171,8 @@ function terminalNote(failure: FilterResult): string {
       return 'awaiting external';
     case 'orphan-parent-needs-closure':
       return 'orphan parent needs closure';
+    case 'blocked':
+      return `operator-blocked: ${failure.reason ?? 'no reason'}`;
     default:
       return failure.reason ?? 'filter rejected';
   }

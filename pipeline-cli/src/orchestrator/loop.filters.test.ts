@@ -641,3 +641,102 @@ describe('runOrchestratorTick — AISDLC-175 orphan-parent witness regression', 
     expect(orphanEvent?.completedChildren).toEqual(['aisdlc-orphan.1']);
   });
 });
+
+// ── AISDLC-223 witness regression — operator-blocked filter ───────────
+
+describe('runOrchestratorTick — AISDLC-223 operator-blocked filter (AC #6 + AC #7)', () => {
+  it('dispatches only the ready task; skips the blocked task; events.jsonl gets a TaskBlocked entry', async () => {
+    // AC #7: tick fixture with one blocked + one ready task →
+    //   - only the ready task is dispatched
+    //   - events.jsonl contains a TaskBlocked entry for the blocked one
+    const graph = buildGraph([node('AISDLC-BLOCKED'), node('AISDLC-READY')]);
+
+    const dispatched: string[] = [];
+    const captured: Array<{ type: string; taskId?: string; reason?: string }> = [];
+    const config = defaultOrchestratorConfig({
+      workDir: tmp,
+      maxConcurrent: 2,
+      maxTicks: 1,
+      tickIntervalSec: 0,
+    });
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      sleep: () => Promise.resolve(),
+      frontier: () => [
+        { id: 'AISDLC-BLOCKED', title: 'BLOCKED' },
+        { id: 'AISDLC-READY', title: 'READY' },
+      ],
+      graphLoader: () => graph,
+      taskLabelsLoader: () => [],
+      // AC #7: inject the blocked frontmatter for AISDLC-BLOCKED
+      taskBlockedLoader: (taskId) => {
+        if (taskId === 'AISDLC-BLOCKED') {
+          return {
+            reason: 'Soaking — promotion gated on AISDLC-116 evidence',
+            until: '2026-05-13',
+          };
+        }
+        return undefined;
+      },
+      dispatch: async (taskId) => {
+        dispatched.push(taskId);
+        return approvedResult(taskId);
+      },
+      escalate: async () => {},
+      emitEvent: (event) => {
+        captured.push(event as { type: string; taskId?: string; reason?: string });
+      },
+    };
+    const tick = await runOrchestratorTick(config, adapters, 1);
+
+    // AC #7a: only the ready task is dispatched.
+    expect(dispatched).toEqual(['AISDLC-READY']);
+    expect(tick.dispatched).toEqual(['AISDLC-READY']);
+
+    // AC #7b: events.jsonl contains a TaskBlocked entry for the blocked one.
+    const blockedEvent = captured.find((e) => e.type === 'TaskBlocked');
+    expect(blockedEvent).toBeDefined();
+    expect(blockedEvent?.taskId).toBe('AISDLC-BLOCKED');
+    expect(blockedEvent?.reason).toBe('Soaking — promotion gated on AISDLC-116 evidence');
+
+    // The blocked task surfaces as a structured filter rejection.
+    const blockedFilterEvt = tick.filterEvents.find((e) => e.taskId === 'AISDLC-BLOCKED');
+    expect(blockedFilterEvt?.trace.passed).toBe(false);
+    expect(blockedFilterEvt?.trace.failure?.filter).toBe('Blocked');
+
+    // The ready task is admitted.
+    const readyEvt = tick.filterEvents.find((e) => e.taskId === 'AISDLC-READY');
+    expect(readyEvt?.trace.passed).toBe(true);
+    expect(readyEvt?.blockedEvent).toBeNull();
+  });
+
+  it('passes when no blocked field is present (backward-compatible)', async () => {
+    // AC #6: task without blocked field → filter returns passed: true
+    const graph = buildGraph([node('AISDLC-OK')]);
+    const dispatched: string[] = [];
+    const config = defaultOrchestratorConfig({
+      workDir: tmp,
+      maxConcurrent: 1,
+      maxTicks: 1,
+      tickIntervalSec: 0,
+    });
+    await runOrchestratorTick(
+      config,
+      {
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        frontier: () => [{ id: 'AISDLC-OK', title: 'OK' }],
+        graphLoader: () => graph,
+        taskLabelsLoader: () => [],
+        // No taskBlockedLoader → defaults to "not blocked".
+        dispatch: async (taskId) => {
+          dispatched.push(taskId);
+          return approvedResult(taskId);
+        },
+        escalate: async () => {},
+      },
+      1,
+    );
+    expect(dispatched).toEqual(['AISDLC-OK']);
+  });
+});

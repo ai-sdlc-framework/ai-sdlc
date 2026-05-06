@@ -84,7 +84,15 @@ export type OrchestratorEventType =
    * successfully renamed the branch under `quarantine/<ref>`. Per-event
    * fields: `taskId`, `branch`, `quarantineRef`, `commitSha`, `commitCount`.
    */
-  | 'OrchestratorWorkQuarantined';
+  | 'OrchestratorWorkQuarantined'
+  /**
+   * AISDLC-223 — emitted on every tick that the `Blocked` admission filter
+   * rejects a candidate (i.e. the task has a non-empty `blocked.reason`
+   * frontmatter field). Per-event fields: `taskId`, `reason`, optional
+   * `until`. Lets operators grep events.jsonl to see the blocked queue
+   * without parsing the full filter trace.
+   */
+  | 'TaskBlocked';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

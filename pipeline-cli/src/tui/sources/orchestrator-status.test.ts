@@ -116,6 +116,7 @@ describe('useOrchestratorStatus (hook)', () => {
         dryRun: true,
       },
       enabled: false,
+      blocked: [],
     };
     const fetcher = async (): Promise<FetchOrchestratorStatusResult> => {
       callCount += 1;

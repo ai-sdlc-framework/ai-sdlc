@@ -2592,13 +2592,18 @@ export const orchestratorEventsV1Schema = {
       description:
         "Number of commits beyond `origin/main` on the quarantined branch. Always at least 1 by construction (a zero-commit branch isn't quarantined). Present on `OrchestratorWorkQuarantined` (AISDLC-177).",
     },
+    until: {
+      type: 'string',
+      description:
+        "Advisory ISO date after which the operator should re-evaluate the block. Present on `TaskBlocked` (AISDLC-223) when the task's `blocked.until` frontmatter field is set.",
+    },
   },
   additionalProperties: false,
   $defs: {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -2617,6 +2622,7 @@ export const orchestratorEventsV1Schema = {
         'WorkerStateTransition',
         'OrchestratorRollback',
         'OrchestratorWorkQuarantined',
+        'TaskBlocked',
       ],
     },
   },

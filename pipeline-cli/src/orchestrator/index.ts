@@ -77,6 +77,7 @@ export type {
   OrchestratorRollbackEvent,
   OrchestratorStatus,
   OrchestratorStuckCandidateEvent,
+  OrchestratorTaskBlockedEvent,
   OrchestratorTickResult,
   OrchestratorWorkQuarantinedEvent,
   TaskDispatchOutcome,
@@ -133,7 +134,9 @@ export {
 
 // RFC-0015 Phase 3 — pre-dispatch admission filters (AISDLC-169.3).
 // AISDLC-175 — orphan-parent filter (parent task whose every child is done).
+// AISDLC-223 — blocked filter (operator-marked tasks with blocked.reason).
 export {
+  checkBlocked,
   checkDependencyReadiness,
   checkDorReadiness,
   checkExternalDependencies,
@@ -142,6 +145,9 @@ export {
   formatFilterTrace,
   runFilterChain,
   type AwaitingExternalDetail,
+  type BlockedDetail,
+  type BlockedFrontmatter,
+  type CheckBlockedOpts,
   type CheckDependencyReadinessOpts,
   type CheckDorReadinessOpts,
   type CheckExternalDependenciesOpts,

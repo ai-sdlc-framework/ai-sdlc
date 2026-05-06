@@ -7,6 +7,7 @@
  * that want to evaluate filters in isolation.
  */
 
+export { checkBlocked, type BlockedFrontmatter, type CheckBlockedOpts } from './blocked.js';
 export {
   checkDependencyReadiness,
   type CheckDependencyReadinessOpts,
@@ -24,6 +25,7 @@ export { checkOrphanParent, type CheckOrphanParentOpts } from './orphan-parent.j
 export { formatFilterTrace, runFilterChain, type RunFilterChainOpts } from './chain.js';
 export type {
   AwaitingExternalDetail,
+  BlockedDetail,
   DependencyBlockedDetail,
   DorBlockedDetail,
   FilterChainResult,

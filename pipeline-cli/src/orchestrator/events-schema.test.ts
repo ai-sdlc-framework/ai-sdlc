@@ -251,6 +251,29 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
   it('accepts the minimal envelope (only ts + type)', () => {
     expectValid({ ts: baseTs, type: 'OrchestratorTick' });
   });
+
+  it('accepts TaskBlocked (AISDLC-223) with required fields only', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'TaskBlocked',
+      taskId: 'AISDLC-115',
+      runId,
+      tick: 1,
+      reason: 'Soaking — feature flag promotion gated on AISDLC-116 evidence',
+    });
+  });
+
+  it('accepts TaskBlocked (AISDLC-223) with optional until field', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'TaskBlocked',
+      taskId: 'AISDLC-115',
+      runId,
+      tick: 1,
+      reason: 'Soaking — feature flag promotion gated on AISDLC-116 evidence',
+      until: '2026-05-13',
+    });
+  });
 });
 
 describe('orchestrator-events.v1.schema.json — rejects malformed events', () => {

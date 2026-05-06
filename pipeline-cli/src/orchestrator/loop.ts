@@ -102,6 +102,7 @@ import type {
   OrchestratorStatus,
   OrchestratorStuckCandidateEvent,
   OrchestratorTaskAlreadyInFlightEvent,
+  OrchestratorTaskBlockedEvent,
   OrchestratorTickResult,
   TaskDispatchOutcome,
 } from './types.js';
@@ -218,6 +219,15 @@ export interface OrchestratorAdapters {
    * inject a pure map so they don't have to materialise backlog files.
    */
   taskLabelsLoader?: (taskId: string) => readonly string[];
+  /**
+   * AISDLC-223 — frontmatter `blocked:` loader for the Blocked filter.
+   * Defaults to reading the on-disk task file. Tests inject a pure map
+   * so they don't have to materialise backlog files. Returns undefined
+   * when the field is absent (backward-compatible).
+   */
+  taskBlockedLoader?: (
+    taskId: string,
+  ) => import('./filters/blocked.js').BlockedFrontmatter | undefined;
   /** RFC-0015 Phase 3 — wall-clock for event timestamps. Defaults to `Date.now()`. */
   now?: () => Date;
   /**
@@ -394,6 +404,7 @@ export async function runOrchestratorTick(
   // ── Pre-dispatch filter chain (RFC-0015 Phase 3 §4.3) ─────────────────
   const graphLoader = adapters.graphLoader ?? buildDefaultGraphLoader(config);
   const labelsLoader = adapters.taskLabelsLoader ?? buildDefaultLabelsLoader(config.workDir);
+  const blockedLoader = adapters.taskBlockedLoader ?? buildDefaultBlockedLoader(config.workDir);
   const graph = graphLoader();
   const filterEvents: OrchestratorFilterEvent[] = [];
   const alreadyInFlightEvents: OrchestratorTaskAlreadyInFlightEvent[] = [];
@@ -432,10 +443,12 @@ export async function runOrchestratorTick(
   for (const candidate of dispatchableCandidates) {
     if (picks.length >= budget) break;
     const labels = labelsLoader(candidate.id);
+    const blockedFm = blockedLoader(candidate.id);
     const chainResult = runFilterChain({
       graph,
       taskId: candidate.id,
       taskLabels: labels,
+      ...(blockedFm !== undefined ? { taskBlocked: blockedFm } : {}),
       ...(adapters.clearedExternalKeys !== undefined
         ? { clearedExternalKeys: adapters.clearedExternalKeys }
         : {}),
@@ -1215,6 +1228,16 @@ function toBlockedEvent(
         taskId,
         completedChildren: detail.completedChildren,
       };
+    case 'blocked': {
+      const ev: OrchestratorTaskBlockedEvent = {
+        type: 'TaskBlocked',
+        ts,
+        taskId,
+        reason: detail.reason,
+      };
+      if (detail.until !== undefined) ev.until = detail.until;
+      return ev;
+    }
   }
 }
 
@@ -1253,6 +1276,15 @@ function toEmittableBlockedEvent(blocked: OrchestratorBlockedEvent): Omit<Orches
         taskId: blocked.taskId,
         completedChildren: [...blocked.completedChildren],
       };
+    case 'TaskBlocked': {
+      const payload: Omit<OrchestratorEvent, 'ts'> = {
+        type: 'TaskBlocked',
+        taskId: blocked.taskId,
+        reason: blocked.reason,
+      };
+      if (blocked.until !== undefined) payload.until = blocked.until;
+      return payload;
+    }
   }
 }
 
@@ -1333,6 +1365,9 @@ export async function runOrchestratorLoop(
 /**
  * Build the read-only orchestrator status (used by `cli-orchestrator status`).
  * Does NOT dispatch anything — purely an inspection surface.
+ *
+ * AISDLC-223: also computes the `blocked` list by walking the frontier and
+ * collecting tasks whose `blocked.reason` frontmatter field is non-empty.
  */
 export async function buildOrchestratorStatus(
   config: OrchestratorConfig,
@@ -1340,14 +1375,34 @@ export async function buildOrchestratorStatus(
   lastTick: OrchestratorTickResult | null = null,
 ): Promise<OrchestratorStatus> {
   const frontierFn = adapters.frontier ?? buildDefaultFrontier(config);
+  const blockedLoader = adapters.taskBlockedLoader ?? buildDefaultBlockedLoader(config.workDir);
   const enabled = isOrchestratorEnabled();
   const front = frontierFn();
+
+  // AISDLC-223 — build the blocked list by inspecting each frontier
+  // candidate's `blocked:` frontmatter. Tasks blocked by this field are
+  // ready by every OTHER criterion but held by the operator.
+  const blocked: OrchestratorStatus['blocked'] = [];
+  for (const candidate of front) {
+    const fm = blockedLoader(candidate.id);
+    const reason = fm?.reason?.trim() ?? '';
+    if (reason !== '') {
+      const entry: { taskId: string; reason: string; until?: string } = {
+        taskId: candidate.id,
+        reason,
+      };
+      if (fm?.until !== undefined) entry.until = fm.until;
+      blocked.push(entry);
+    }
+  }
+
   return {
     frontier: front,
     queueDepth: front.length,
     lastTick,
     config,
     enabled,
+    blocked,
   };
 }
 
@@ -1452,6 +1507,39 @@ function buildDefaultLabelsLoader(workDir: string): (taskId: string) => readonly
         .map((l) => l.trim().toLowerCase());
     } catch {
       return [];
+    }
+  };
+}
+
+/**
+ * AISDLC-223 — default `blocked:` frontmatter loader for the Blocked
+ * filter. Reads the on-disk task file and returns the parsed `blocked:`
+ * object when present. Returns `undefined` on any read / parse error or
+ * when the field is absent — a missing field means "not blocked", which
+ * is the backward-compatible default.
+ */
+function buildDefaultBlockedLoader(
+  workDir: string,
+): (taskId: string) => import('./filters/blocked.js').BlockedFrontmatter | undefined {
+  return (taskId) => {
+    try {
+      const path = findTaskFile(taskId, workDir);
+      if (!path || !existsSync(path)) return undefined;
+      const raw = readFileSync(path, 'utf8');
+      const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+      if (!fmMatch) return undefined;
+      const fm = parseSimpleYaml(fmMatch[1]);
+      const b = fm.blocked;
+      if (!b || typeof b !== 'object' || Array.isArray(b)) return undefined;
+      const br = b as Record<string, unknown>;
+      const reason = typeof br.reason === 'string' ? br.reason : undefined;
+      const until = typeof br.until === 'string' ? br.until : undefined;
+      const unblockedBy = Array.isArray(br.unblockedBy)
+        ? (br.unblockedBy as unknown[]).filter((x: unknown): x is string => typeof x === 'string')
+        : undefined;
+      return { reason, until, unblockedBy };
+    } catch {
+      return undefined;
     }
   };
 }

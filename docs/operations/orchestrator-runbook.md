@@ -132,6 +132,115 @@ is set. The loop refuses to start when the flag is unset.
 
 ---
 
+## Blocking a task from orchestrator dispatch (AISDLC-223)
+
+The orchestrator's `Blocked` admission filter lets operators put a task on
+hold without changing its status, removing it from the backlog, or modifying
+the dependency graph. A blocked task is skipped on every tick until the
+operator removes the `blocked.reason` field.
+
+### When to use
+
+- A task is "ready by all criteria" but you need to wait for an external
+  signal before dispatching it — e.g. a soak window, a human decision, a
+  dependency outside the task graph.
+- AISDLC-115 is the canonical first user: RFC-0011 DoR Gate, soaking for
+  promotion evidence. Mark it blocked until the soak window closes so the
+  orchestrator stops re-picking it every tick.
+
+### Frontmatter shape
+
+Add a `blocked:` field to the task's YAML frontmatter:
+
+```yaml
+---
+id: AISDLC-115
+status: In Progress
+blocked:
+  reason: "Soaking — feature flag promotion gated on AISDLC-116 evidence"  # required
+  until: "2026-05-13"           # optional advisory ISO date
+  unblockedBy: ["AISDLC-116"]   # optional task IDs whose completion unblocks this
+---
+```
+
+- `reason` (string, required) — any non-empty string activates the block.
+  The orchestrator will emit this string verbatim in `TaskBlocked` events.
+- `until` (string, optional) — an advisory ISO date. The orchestrator does
+  NOT auto-unblock on this date (Phase 2 / AC #8); it is informational only
+  and surfaces in `TaskBlocked` events + `cli-orchestrator status` output.
+- `unblockedBy` (array, optional) — advisory task IDs to monitor. Same
+  advisory semantics as `until` — no auto-unblock in v1.
+
+### Editing the blocked field
+
+Use `mcp__backlog__task_edit` or hand-edit the task file:
+
+```bash
+# Set the blocked field
+mcp__backlog__task_edit AISDLC-115 blocked.reason "Soaking — gated on AISDLC-116"
+
+# Or hand-edit the YAML frontmatter in backlog/tasks/aisdlc-115 - *.md
+```
+
+### Unblocking a task
+
+Remove the `blocked` field (or set `blocked.reason` to an empty string):
+
+```bash
+# Remove the field entirely via task_edit
+mcp__backlog__task_edit AISDLC-115 blocked null
+
+# Or hand-edit: delete the blocked: block from the YAML frontmatter
+```
+
+The next orchestrator tick will admit the task normally (all other filters
+still apply).
+
+### Observability: TaskBlocked events
+
+Every tick that the `Blocked` filter rejects a task emits a `TaskBlocked`
+event to `artifacts/_orchestrator/events-YYYY-MM-DD.jsonl`:
+
+```json
+{
+  "type": "TaskBlocked",
+  "ts": "2026-05-06T12:34:56Z",
+  "taskId": "AISDLC-115",
+  "reason": "Soaking — feature flag promotion gated on AISDLC-116 evidence",
+  "until": "2026-05-13"
+}
+```
+
+Grep for blocked tasks across all event files:
+
+```bash
+grep '"TaskBlocked"' artifacts/_orchestrator/events-*.jsonl | jq .
+```
+
+### Observability: cli-orchestrator status
+
+`cli-orchestrator status` includes a `blocked` array in its JSON output:
+
+```json
+{
+  "ok": true,
+  "mode": "status",
+  "status": {
+    "blocked": [
+      {
+        "taskId": "AISDLC-115",
+        "reason": "Soaking — feature flag promotion gated on AISDLC-116 evidence",
+        "until": "2026-05-13"
+      }
+    ]
+  }
+}
+```
+
+An empty `"blocked": []` means no frontier tasks are currently blocked.
+
+---
+
 ## Recovering quarantined work after a failed dispatch (AISDLC-177)
 
 When the orchestrator dispatches a task and the dispatcher (Step 6
