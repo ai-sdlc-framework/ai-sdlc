@@ -58,6 +58,8 @@ Skip with `AI_SDLC_SKIP_ORCHESTRATOR_STATE_CHECK=1` (rare — only when you inte
 
 Then scan `.worktrees/` and remove any whose branch's PR has merged into `main`. This is the eventual-cleanup mechanism — running `/ai-sdlc execute` regularly keeps the worktree directory tidy without any manual intervention.
 
+> **Why `--state all` (AISDLC-204).** The old query used `--state merged`, which returns an empty array once the source branch has been deleted from the remote. This is the normal outcome for squash-merges: this repo's `delete_branch_on_merge: true` policy removes the branch immediately. After deletion, `gh pr list --head <branch> --state merged` finds nothing because `--head` is a current-ref filter, not a historical one. The fix is `--state all` (which finds the PR regardless of source-branch existence) combined with client-side filtering on `.state == "MERGED"` to preserve the original intent: only sweep merged PRs, not abandoned-and-closed ones.
+
 ```bash
 if [ -d .worktrees ]; then
   for wt in .worktrees/*/; do
@@ -65,9 +67,12 @@ if [ -d .worktrees ]; then
     WT_BRANCH=$(git -C "$wt" rev-parse --abbrev-ref HEAD 2>/dev/null)
     [ -z "$WT_BRANCH" ] && continue
     [ "$WT_BRANCH" = "HEAD" ] && continue   # detached, skip
-    # Check if a PR for this branch exists and is merged
-    MERGED_AT=$(gh pr list --head "$WT_BRANCH" --state merged --json mergedAt --jq '.[0].mergedAt' 2>/dev/null)
-    if [ -n "$MERGED_AT" ] && [ "$MERGED_AT" != "null" ]; then
+    # Use --state all so squash-merged PRs with deleted source branches are found.
+    # Filter client-side: only sweep MERGED, not CLOSED (abandoned work).
+    PR_INFO=$(gh pr list --head "$WT_BRANCH" --state all --json number,state,mergedAt --jq '.[0]' 2>/dev/null)
+    PR_STATE=$(echo "$PR_INFO" | jq -r '.state // empty' 2>/dev/null)
+    if [ "$PR_STATE" = "MERGED" ]; then
+      MERGED_AT=$(echo "$PR_INFO" | jq -r '.mergedAt // "unknown"')
       echo "Sweeping merged worktree: $wt (branch $WT_BRANCH merged at $MERGED_AT)"
       git worktree remove --force "$wt" 2>/dev/null || true
     fi

@@ -1,7 +1,7 @@
 /**
  * Step 0 — Sweep merged worktrees.
  *
- * Mirrors `ai-sdlc-plugin/agents/execute-orchestrator.md` Step 0. Walks
+ * Mirrors `ai-sdlc-plugin/commands/execute.md` Step 0. Walks
  * `<workDir>/.worktrees/`, looks up each worktree's branch, and removes
  * the worktree if the corresponding GitHub PR has merged.
  *
@@ -10,6 +10,23 @@
  *
  * Idempotent and parallel-safe: `git worktree remove --force` on an
  * already-swept entry is a no-op.
+ *
+ * ## Why `--state all` instead of `--state merged` (AISDLC-204)
+ *
+ * `gh pr list --head <branch> --state merged` returns an empty array once the
+ * source branch has been deleted from the remote. This is the normal case for
+ * this repo: `delete_branch_on_merge: true` means every squash-merged PR has
+ * its source branch removed immediately. The `--head` filter matches on the
+ * CURRENT remote ref, not on historical head associations, so deleted branches
+ * produce zero results even when the PR itself is `MERGED`.
+ *
+ * The fix is `--state all`, which includes open, closed, and merged PRs
+ * regardless of source-branch existence. We then filter client-side by
+ * `.state === "MERGED"` to keep the same intent (only sweep merged PRs, not
+ * abandoned-and-closed ones).
+ *
+ * Closed (abandoned) PRs are intentionally NOT swept — those need explicit
+ * operator cleanup because the work may be salvageable.
  *
  * @module steps/00-sweep
  */
@@ -22,6 +39,48 @@ import type { SweepResult } from '../types.js';
 export interface SweepOptions {
   workDir: string;
   runner?: Runner;
+}
+
+/**
+ * Look up the PR state for `branch` using `--state all` so squash-merged PRs
+ * (whose source branch was deleted from the remote) are still found.
+ *
+ * Returns `{ state, mergedAt }` where `state` is `"MERGED"`, `"OPEN"`,
+ * `"CLOSED"`, or `null` (no PR found / network failure).
+ */
+export async function lookupPrState(
+  branch: string,
+  workDir: string,
+  runner: Runner,
+): Promise<{ state: string | null; mergedAt: string | null }> {
+  try {
+    const r = await runner(
+      'gh',
+      [
+        'pr',
+        'list',
+        '--head',
+        branch,
+        '--state',
+        'all',
+        '--json',
+        'number,state,mergedAt',
+        '--jq',
+        '.[0]',
+      ],
+      { allowFailure: true, cwd: workDir },
+    );
+    if (r.code !== 0) return { state: null, mergedAt: null };
+    const raw = r.stdout.trim();
+    if (!raw || raw === 'null') return { state: null, mergedAt: null };
+    const parsed = JSON.parse(raw) as { state?: string; mergedAt?: string | null };
+    const state = parsed.state ?? null;
+    const mergedAt = parsed.mergedAt ?? null;
+    return { state, mergedAt };
+  } catch {
+    // network/auth/parse failure — caller skips silently
+    return { state: null, mergedAt: null };
+  }
 }
 
 export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepResult> {
@@ -64,38 +123,18 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
 
     if (!branch || branch === 'HEAD') continue; // detached, skip
 
-    let mergedAt = '';
-    try {
-      const r = await runner(
-        'gh',
-        [
-          'pr',
-          'list',
-          '--head',
-          branch,
-          '--state',
-          'merged',
-          '--json',
-          'mergedAt',
-          '--jq',
-          '.[0].mergedAt',
-        ],
-        { allowFailure: true, cwd: opts.workDir },
-      );
-      if (r.code === 0) mergedAt = r.stdout.trim();
-    } catch {
-      // network/auth failure — skip silently per RFC contract
-      continue;
-    }
+    // Query with --state all so squash-merged PRs with deleted source branches
+    // are found (AISDLC-204). Filter client-side: only remove MERGED, not CLOSED.
+    const { state, mergedAt } = await lookupPrState(branch, opts.workDir, runner);
+    if (state !== 'MERGED') continue;
 
-    if (!mergedAt || mergedAt === 'null') continue;
-
+    const mergedAtStr = mergedAt ?? 'unknown';
     try {
       await runner('git', ['worktree', 'remove', '--force', wt], {
         cwd: opts.workDir,
         allowFailure: true,
       });
-      swept.push({ worktreePath: wt, branch, mergedAt });
+      swept.push({ worktreePath: wt, branch, mergedAt: mergedAtStr });
     } catch {
       // remove may fail if path no longer registered — already swept by sibling run
     }

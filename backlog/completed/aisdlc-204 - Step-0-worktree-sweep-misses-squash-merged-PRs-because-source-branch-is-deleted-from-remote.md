@@ -3,7 +3,7 @@ id: AISDLC-204
 title: >-
   Step 0 worktree sweep misses squash-merged PRs because source branch is
   deleted from remote
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-05 21:30'
 labels:
@@ -84,10 +84,33 @@ fi
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 Step 0 sweep in `ai-sdlc-plugin/commands/execute.md` uses `gh pr list --state all` query so squash-merged PRs (with deleted source branches) are correctly identified as merged
-- [ ] #2 Sweep correctly removes worktrees whose PR is in MERGED state, regardless of whether the source branch still exists on the remote
-- [ ] #3 Sweep does NOT remove worktrees whose PR is CLOSED but not MERGED (e.g., abandoned work) — those need explicit operator cleanup
-- [ ] #4 Sweep does NOT remove worktrees that have no associated PR yet (e.g., dispatch in flight before the PR opens) — those are active
-- [ ] #5 If `pipeline-cli/src/cleanup.ts` (or equivalent for `/ai-sdlc cleanup`) has the same query bug, update there too
-- [ ] #6 Regression test: simulate a worktree on a branch whose `gh pr list --head <branch>` returns empty (deleted source branch) but `--state all` returns a MERGED PR — assert sweep removes it
+- [x] #1 Step 0 sweep in `ai-sdlc-plugin/commands/execute.md` uses `gh pr list --state all` query so squash-merged PRs (with deleted source branches) are correctly identified as merged
+- [x] #2 Sweep correctly removes worktrees whose PR is in MERGED state, regardless of whether the source branch still exists on the remote
+- [x] #3 Sweep does NOT remove worktrees whose PR is CLOSED but not MERGED (e.g., abandoned work) — those need explicit operator cleanup
+- [x] #4 Sweep does NOT remove worktrees that have no associated PR yet (e.g., dispatch in flight before the PR opens) — those are active
+- [x] #5 If `pipeline-cli/src/cleanup.ts` (or equivalent for `/ai-sdlc cleanup`) has the same query bug, update there too (checked: `13-cleanup.ts` removes the sentinel only, no PR query; `00-sweep.ts` was the only location with the bug)
+- [x] #6 Regression test: simulate a worktree on a branch whose `gh pr list --head <branch>` returns empty (deleted source branch) but `--state all` returns a MERGED PR — assert sweep removes it
 <!-- AC:END -->
+
+## Final Summary
+
+Step 0 worktree sweep now uses `--state all` instead of `--state merged` to identify merged PRs, fixing the root cause where squash-merged PRs with deleted source branches were missed.
+
+### Changes
+- `pipeline-cli/src/steps/00-sweep.ts` (modified): Replaced `--state merged` query with `--state all` + client-side `.state === "MERGED"` filter. Extracted `lookupPrState()` as a separately-testable helper. Added detailed JSDoc explaining the AISDLC-204 root cause.
+- `pipeline-cli/src/steps/00-sweep.test.ts` (modified): Expanded from 5 tests to 15 tests covering all required cases: squash-merged with deleted branch (a), still-open PR (b), no PR (c), detached HEAD (d), CLOSED/abandoned PR (e), git failure (f), no .worktrees dir (g), network failure (h), multi-worktree sweep, and regression guard asserting `--state all` is always used.
+- `ai-sdlc-plugin/commands/execute.md` (modified): Updated Step 0 shell snippet to use `--state all` + jq `.state` filter. Added explanatory callout documenting the AISDLC-204 root cause so future maintainers understand why the old pattern was broken.
+
+### Design decisions
+- **`--state all` + client-side filter** over `gh search prs <sha>`: The recommended approach from the task notes. Simpler, works in the same `gh` call, doesn't require reading the HEAD commit SHA from each worktree. No new persistence layer needed.
+- **Extracted `lookupPrState()`**: Makes the PR-state lookup independently unit-testable without going through the full sweep loop.
+- **CLOSED PRs are NOT swept**: Intentionally preserved — abandoned work needs explicit operator cleanup, not silent removal.
+
+### Verification
+- `pnpm --filter @ai-sdlc/pipeline-cli build` — clean
+- `pnpm --filter @ai-sdlc/pipeline-cli test` — 1760 tests passed (107 files)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+
+### Follow-up
+(none)
