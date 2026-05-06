@@ -1020,9 +1020,20 @@ describe('cli-pr-unstick yargs router', () => {
     process.argv = ['node', 'cli-pr-unstick'];
     const fake = makeFakeRunner();
     fake.on('gh', (a) => a[0] === 'repo', { stdout: 'org/repo\n' });
-    await expect(buildPrUnstickCli({ runner: fake.runner }).parseAsync()).rejects.toThrow(
-      /process\.exit/,
-    );
+    // Use try/catch instead of `await expect(...).rejects.toThrow(/process\.exit/)`:
+    // yargs's parseAsync sometimes swallows the exit-throw rejection in CI
+    // (passes locally, fails in CI). The try/catch + message-match is the
+    // proven workaround pattern (see complete-task.test.ts runCli helper).
+    let thrown: unknown;
+    try {
+      await buildPrUnstickCli({ runner: fake.runner }).parseAsync();
+    } catch (e) {
+      thrown = e;
+    }
+    const msg = thrown instanceof Error ? thrown.message : String(thrown);
+    if (!/^process\.exit\(/.test(msg)) {
+      throw thrown;
+    }
     expect(stderrChunks.join('')).toContain('pass a PR number');
   });
 
