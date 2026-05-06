@@ -3,7 +3,7 @@ id: AISDLC-207
 title: >-
   Verifier error message misleading — defaults to "contentHashV3 mismatch" for
   the no-envelope case
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 02:00'
 labels:
@@ -54,9 +54,17 @@ The status URL in the PR check should link to the workflow run, and the workflow
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 When no envelope file exists for any reachable ancestor, the posted description reads `no envelope present at <head>` (or equivalent), not the generic v3-mismatch wording
-- [ ] #2 When envelope present + v4 mismatch, description reads `contentHashV4 mismatch` explicitly
-- [ ] #3 When envelope present without v4 + v3 fallback also mismatches, description reads `contentHashV3 mismatch (v3 fallback)` so the v3-vs-v4 distinction is visible
-- [ ] #4 When signature verification fails (key not in trusted-reviewers, malformed envelope), description reads `signature invalid: <reason>`
-- [ ] #5 Hermetic test in `scripts/verify-attestation.test.mjs` covers each of the 4 failure modes with the expected description string
+- [x] #1 When no envelope file exists for any reachable ancestor, the posted description reads `no envelope present at <head>` (or equivalent), not the generic v3-mismatch wording
+- [x] #2 When envelope present + v4 mismatch, description reads `contentHashV4 mismatch` explicitly
+- [x] #3 When envelope present without v4 + v3 fallback also mismatches, description reads `contentHashV3 mismatch (v3 fallback)` so the v3-vs-v4 distinction is visible
+- [x] #4 When signature verification fails (key not in trusted-reviewers, malformed envelope), description reads `signature invalid: <reason>`
+- [x] #5 Hermetic test in `scripts/verify-attestation.test.mjs` covers each of the 4 failure modes with the expected description string
 <!-- AC:END -->
+
+## Final Summary
+
+<!-- SECTION:FINAL_SUMMARY:BEGIN -->
+Code work shipped via PR #341 (commit `735dc9a` — `fix(orchestrator): distinguish verifier failure modes in description`). The dev opened PR #341 with the source changes + envelope but didn't include the lifecycle close — exactly the AISDLC-203 bug pattern.
+
+This PR is the bookkeeping close: file move tasks/→completed/, status flip, AC checkboxes (all 5 verified met by the merged code: AC #1-4 distinct description strings + AC #5 hermetic tests in `scripts/verify-attestation.test.mjs`).
+<!-- SECTION:FINAL_SUMMARY:END -->
