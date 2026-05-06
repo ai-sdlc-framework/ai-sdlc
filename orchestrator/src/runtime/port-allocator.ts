@@ -1,3 +1,22 @@
+/**
+ * Deterministic port allocator for git worktrees.
+ *
+ * `deterministicPort` maps an absolute worktree path to a port number in a fixed
+ * 900-port range (DEFAULT_BASE_PORT + PORT_RANGE_OFFSET_MIN … PORT_RANGE_OFFSET_MAX)
+ * by hashing the path with MD5 and taking the first two bytes modulo the range span.
+ *
+ * **Hash-collision caveat**: the 900-port range is finite. When multiple worktree paths
+ * are fed through `deterministicPort` in a single test, birthday-paradox collisions are
+ * possible. For n=3 paths the probability is roughly (n*(n-1)/2) / span ≈ 0.33%. Over
+ * thousands of CI runs this causes spurious "distinct ports" assertion failures.
+ *
+ * **Integration-test guidance**: do NOT assert `new Set(ports).size === n` unless the
+ * test controls the exact path strings and has pre-verified they hash to distinct values.
+ * Instead assert:
+ *   - each port is in [DEFAULT_BASE_PORT + PORT_RANGE_OFFSET_MIN, DEFAULT_BASE_PORT + PORT_RANGE_OFFSET_MAX]
+ *   - calling allocatePort twice for the same path returns the same value (idempotency)
+ *   - ports[i] === deterministicPort(h.path) (the core deterministic-port property)
+ */
 import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { createServer } from 'node:net';
@@ -29,6 +48,17 @@ export class PortAllocationError extends Error {
   }
 }
 
+/**
+ * Derive a deterministic port for `worktreePath` by hashing its absolute form with MD5
+ * and mapping the first two bytes into [basePort + PORT_RANGE_OFFSET_MIN,
+ * basePort + PORT_RANGE_OFFSET_MAX].
+ *
+ * **Collision risk**: the output space is only 900 ports wide. When called with multiple
+ * independent (e.g. mkdtemp-generated) paths, two or more paths may map to the same port.
+ * For n=3 paths the birthday probability is ~0.33%. Integration tests that need to assert
+ * port distinctness MUST use pre-chosen, manually-verified paths rather than random
+ * temporaries — see the module-level JSDoc for the recommended assertion pattern.
+ */
 export function deterministicPort(
   worktreePath: string,
   basePort: number = DEFAULT_BASE_PORT,

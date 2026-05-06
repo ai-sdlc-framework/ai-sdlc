@@ -13,7 +13,13 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorktreePoolManager } from './worktree-pool.js';
-import { allocatePort, deterministicPort } from './port-allocator.js';
+import {
+  allocatePort,
+  deterministicPort,
+  DEFAULT_BASE_PORT,
+  PORT_RANGE_OFFSET_MIN,
+  PORT_RANGE_OFFSET_MAX,
+} from './port-allocator.js';
 import { cleanGitEnv } from './git-env.js';
 
 const execFileAsync = promisify(execFile);
@@ -88,13 +94,31 @@ describe('WorktreePoolManager integration (real git)', () => {
       expect(stdout).toMatch(/^gitdir:\s/);
     }
 
-    // Ports are deterministic per worktree path AND distinct across the three.
+    // Ports are deterministic per worktree path: calling allocatePort twice for the same
+    // path must return the same value, and it must equal deterministicPort(path).
+    //
+    // We do NOT assert `new Set(ports).size === 3` here. The deterministic allocator hashes
+    // each path into a 900-port range (DEFAULT_BASE_PORT + PORT_RANGE_OFFSET_MIN/MAX). With
+    // only 3 paths the birthday-paradox collision probability is ~0.3%, causing intermittent
+    // false-positive failures when mkdtemp-generated roots happen to produce colliding hashes
+    // (observed once in PR #349 CI). Use deterministic paths in tests that need distinctness —
+    // see the port-allocator JSDoc for details.
     const ports = await Promise.all(
       handles.map((h) => allocatePort(h.path, { isPortFree: async () => true })),
     );
-    expect(new Set(ports).size).toBe(3);
+    // Each port must be within the valid allocation range.
+    const minPort = DEFAULT_BASE_PORT + PORT_RANGE_OFFSET_MIN;
+    const maxPort = DEFAULT_BASE_PORT + PORT_RANGE_OFFSET_MAX;
+    for (const port of ports) {
+      expect(port).toBeGreaterThanOrEqual(minPort);
+      expect(port).toBeLessThanOrEqual(maxPort);
+    }
+    // Each port is deterministic: re-calling allocatePort returns the same value, and it
+    // matches deterministicPort() directly. This is the core property being verified.
     for (const [i, h] of handles.entries()) {
       expect(ports[i]).toBe(deterministicPort(h.path));
+      const portAgain = await allocatePort(h.path, { isPortFree: async () => true });
+      expect(portAgain).toBe(ports[i]);
     }
 
     // Pool list returns all three slugs.
