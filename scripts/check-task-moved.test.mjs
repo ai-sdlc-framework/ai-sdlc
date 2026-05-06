@@ -304,11 +304,39 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
 
     // Single chore commit (not two separate ones).
     const newSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
-    assert.match(
-      newSubject,
-      /chore: auto-close.*AISDLC-90/i,
-      'chore subject must reference task IDs',
+    assert.match(newSubject, /AISDLC-901/i, 'chore subject must reference AISDLC-901');
+    assert.match(newSubject, /AISDLC-902/i, 'chore subject must reference AISDLC-902');
+    assert.match(newSubject, /^chore: auto-close /, 'must start with chore: auto-close');
+  });
+
+  // ── (h) cli-task-complete failure path (AISDLC-220 robustness) ───────
+
+  it('(h) exits 2 with clear ERROR message when cli-task-complete fails', () => {
+    writeTaskFile(root, 'AISDLC-700');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: failing case (AISDLC-700)'], root);
+
+    const { cmd } = installFakeCli(root, { fail: true });
+    const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+    assert.equal(r.status, 2, `expected 2 (cli failure), got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /ERROR: cli-task-complete .*failed/i);
+  });
+
+  it('(i) exits 2 when cli-task-complete returns success but does not move the file', () => {
+    writeTaskFile(root, 'AISDLC-701');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: silent-noop case (AISDLC-701)'], root);
+
+    const { cmd } = installFakeCli(root, { silent: true });
+    const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+    assert.equal(
+      r.status,
+      2,
+      `expected 2 (post-move integrity check), got ${r.status}: ${r.stderr}`,
     );
+    assert.match(r.stderr, /did not produce backlog\/completed/i);
   });
 
   // ── (f) Task already in completed/ ───────────────────────────────────

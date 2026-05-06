@@ -131,7 +131,6 @@ while IFS= read -r TASK_ID; do
   TASK_ID_LOWER=$(printf '%s' "$TASK_ID" | tr '[:upper:]' '[:lower:]')
 
   # Check if already in completed/ (idempotent).
-  COMPLETED_GLOB=("$WT_ROOT"/backlog/completed/"$TASK_ID_LOWER" - *.md)
   if compgen -G "$WT_ROOT/backlog/completed/$TASK_ID_LOWER - "*.md > /dev/null 2>&1; then
     echo "[task-move] $TASK_ID already in backlog/completed/ — skipping" >&2
     continue
@@ -170,15 +169,19 @@ for TASK_ID in "${TASKS_TO_MOVE[@]}"; do
 
   (
     cd "$WT_ROOT"
+    # `--allow-already-done` collapses cli-task-complete's exit-2 ("already in completed/")
+    # to exit-0. Without it, a benign filesystem race between Step 5's compgen pre-check and
+    # the cli invocation surfaces as a hard push abort. With it, the post-move integrity
+    # guard at line ~190 still catches genuine failures.
     if [ -n "$CLI_TASK_COMPLETE" ]; then
       # Test override: split on whitespace via word splitting (intentional).
       # shellcheck disable=SC2086
-      if ! $CLI_TASK_COMPLETE "$TASK_ID"; then
+      if ! $CLI_TASK_COMPLETE "$TASK_ID" --allow-already-done; then
         echo "[task-move] ERROR: cli-task-complete (override) failed for $TASK_ID; aborting push" >&2
         exit 2
       fi
     else
-      if ! node "$WT_ROOT/pipeline-cli/bin/cli-task-complete.mjs" "$TASK_ID"; then
+      if ! node "$WT_ROOT/pipeline-cli/bin/cli-task-complete.mjs" "$TASK_ID" --allow-already-done; then
         echo "[task-move] ERROR: cli-task-complete.mjs failed for $TASK_ID; aborting push" >&2
         echo "[task-move]        (run \`pnpm --filter @ai-sdlc/pipeline-cli build\` if dist is missing)" >&2
         exit 2
