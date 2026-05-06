@@ -44,13 +44,14 @@
  *                    Burns API credits per dispatch — same billing model as
  *                    `pnpm dogfood watch`. Documented for AI-assistant /
  *                    unattended use until the `claude-cli` spawner ships.
- *   - `claude-cli` — DEFERRED in v1. The cross-session subagent routing
- *                    problem (how does a CLI invoked from a parent Claude
- *                    Code session dispatch subagents back INTO that parent
- *                    session) is unsolved. Selecting `claude-cli` errors
- *                    with a clear path-forward message. Until that ships,
- *                    operators wanting subscription billing should run
- *                    `/ai-sdlc execute <task-id>` (slash command) directly.
+ *   - `claude-cli` — `ClaudeCliInlineSpawner` (Option 3, AISDLC-198).
+ *                    Implements the "co-located process / inline orchestrator"
+ *                    pattern: instead of invoking a subprocess, the spawner
+ *                    writes a dispatch manifest to
+ *                    `$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json`.
+ *                    The calling slash command body reads the manifest and
+ *                    invokes the Agent tool for subscription billing.
+ *                    Design rationale: `docs/operations/claude-cli-spawner.md`.
  *
  * # Hard rules honored
  *
@@ -78,6 +79,7 @@ import { computeBranchName } from '../steps/02-compute-branch.js';
 import { validateTask } from '../steps/01-validate.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
+import { ClaudeCliInlineSpawner } from '../runtime/spawners/claude-cli-inline.js';
 import { ROLLBACK_OUTCOMES } from '../orchestrator/loop.js';
 import { rollbackDispatch, type RollbackResult } from '../orchestrator/rollback.js';
 import {
@@ -95,18 +97,28 @@ export type SpawnerKind = 'mock' | 'api-key' | 'claude-cli';
 export const SPAWNER_KINDS: readonly SpawnerKind[] = ['mock', 'api-key', 'claude-cli'] as const;
 
 /**
- * Error message surfaced when the operator picks `--spawner claude-cli`.
- * Exported so tests can assert the wording (and so the README + future
- * implementer can grep the constant when wiring the real adapter).
+ * Message describing the `--spawner claude-cli` mode for operator documentation.
+ *
+ * Note: this is no longer an error message — `claude-cli` is now implemented
+ * as the `ClaudeCliInlineSpawner` (Option 3, AISDLC-198). It emits a dispatch
+ * manifest to `$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json` rather
+ * than calling a subprocess. The calling slash command body reads the manifest
+ * and invokes the Agent tool.
+ *
+ * Design rationale: `docs/operations/claude-cli-spawner.md`
+ *
+ * Exported so tests can assert the wording.
  */
 export const CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE =
-  'The `claude-cli` spawner is not implemented yet — cross-session subagent ' +
-  'routing (how does a CLI invocation dispatch subagents back into the ' +
-  'parent Claude Code session) is unsolved. Until it ships, choose one of:\n' +
-  "  • Run `/ai-sdlc execute <task-id>` directly from the operator's slash command (subscription billing).\n" +
-  '  • Pass `--spawner api-key` to use API-key billing via the @anthropic-ai/claude-code SDK.\n' +
-  '  • Pass `--spawner mock` for dry-run / plumbing tests.\n' +
-  'Tracked in AISDLC-182 follow-up.';
+  'The `claude-cli` spawner uses Option 3 (inline orchestrator, AISDLC-198): ' +
+  'it emits a dispatch manifest to $ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json ' +
+  'instead of invoking a subprocess. The calling slash command body must invoke ' +
+  'the Agent tool using the manifest parameters.\n' +
+  'To use subscription billing without a slash command body, run:\n' +
+  "  /ai-sdlc execute <task-id>    (operator's Claude Code session, subscription billing)\n" +
+  'To use API-key billing from a CLI:\n' +
+  '  --spawner api-key             (ANTHROPIC_API_KEY required)\n' +
+  'Design doc: docs/operations/claude-cli-spawner.md';
 
 /**
  * Build a `MockSpawner` whose fixtures unconditionally APPROVE. Used by
@@ -183,7 +195,14 @@ export async function resolveSpawner(kind: SpawnerKind): Promise<SubagentSpawner
       });
     }
     case 'claude-cli':
-      throw new Error(CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE);
+      // Option 3 (AISDLC-198): inline mode — the spawner emits a dispatch
+      // manifest to $ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json.
+      // The calling slash command body reads the manifest and invokes the
+      // Agent tool. The `taskId` is left empty here because `resolveSpawner`
+      // is task-agnostic; callers that need the taskId in the manifest
+      // (e.g. the orchestrator loop) should construct `ClaudeCliInlineSpawner`
+      // directly with `{ taskId }` rather than going through this factory.
+      return new ClaudeCliInlineSpawner();
     default: {
       // Exhaustiveness — yargs `choices: SPAWNER_KINDS` already gates this,
       // but TypeScript doesn't know about yargs's runtime narrowing.
@@ -527,7 +546,7 @@ export function executeCommand(): CommandModule {
         })
         .option('spawner', {
           describe:
-            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude-cli (deferred — see README).',
+            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude-cli (inline manifest mode, AISDLC-198; see docs/operations/claude-cli-spawner.md).',
           type: 'string',
           choices: SPAWNER_KINDS as unknown as string[],
           default: 'mock' as SpawnerKind,

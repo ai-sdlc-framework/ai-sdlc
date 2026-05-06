@@ -10,6 +10,128 @@ at [`spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md`](../../spec/rfcs/RF
 
 ---
 
+## Inline orchestrator mode (`--spawner claude-cli`) (AISDLC-198)
+
+The inline orchestrator is the recommended way to run the autonomous
+orchestrator on **subscription billing** (Claude Code Max). It avoids
+per-token API costs by running the orchestrator's tick loop INSIDE the
+operator's Claude Code session instead of as a separate process.
+
+### Why inline mode
+
+The autonomous orchestrator (`cli-orchestrator`) needs to dispatch subagents
+(developer, reviewers). Subagent dispatch via the `Agent` tool is only
+available inside an active Claude Code session. Inline mode solves this
+by making the slash command body the orchestrator process — see
+[`docs/operations/claude-cli-spawner.md`](./claude-cli-spawner.md) for the
+full option evaluation.
+
+### Prerequisites
+
+1. Claude Code Max subscription (any tier).
+2. `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental` set in your shell
+   (enables the `cli-orchestrator` feature gate — required by RFC-0015 §3.1).
+3. Backlog with at least one task in `To Do` status.
+4. Working directory is the project root (where `backlog/`, `.worktrees/`,
+   and `artifacts/` live).
+
+### Starting the inline orchestrator
+
+In your Claude Code session, run the `/ai-sdlc execute` slash command in loop
+mode:
+
+```
+/loop /ai-sdlc execute <task-id>
+```
+
+For autonomous multi-task orchestration (the full loop), the slash command body
+reads the dispatch manifest written by `ClaudeCliInlineSpawner` and invokes the
+Agent tool for each admitted task. The manifest is at:
+
+```
+artifacts/_orchestrator/dispatch-manifest.json
+```
+
+Between ticks the slash command uses `ScheduleWakeup` to yield without blocking.
+
+### Monitoring inline orchestrator progress
+
+Progress lines emitted by the orchestrator are in the format:
+
+```
+[ai-sdlc-progress] <stage>: <message>
+```
+
+The dispatch manifest written before each Agent call is at:
+
+```bash
+cat artifacts/_orchestrator/dispatch-manifest.json
+```
+
+Events are also written to `artifacts/_orchestrator/events-YYYY-MM-DD.jsonl`:
+
+```bash
+tail -f artifacts/_orchestrator/events-$(date +%Y-%m-%d).jsonl | jq .
+```
+
+### How the dispatch manifest works
+
+When the orchestrator runs with `--spawner claude-cli`, each dispatch slot
+calls `ClaudeCliInlineSpawner.spawn()`, which writes a JSON manifest and
+returns `status: 'manifest-emitted'`. The manifest shape:
+
+```json
+{
+  "version": 1,
+  "taskId": "AISDLC-123",
+  "subagentType": "developer",
+  "model": "claude-sonnet-4-6",
+  "prompt": "...",
+  "cwd": "/path/to/worktree",
+  "runInBackground": false,
+  "emittedAt": "2026-05-05T00:00:00.000Z"
+}
+```
+
+The calling slash command body reads the manifest and invokes the `Agent` tool
+with the described parameters. This keeps all Agent-tool invocations inside the
+Claude Code session (subscription billing) while letting the TypeScript
+orchestrator handle scheduling, admission filters, and event emission.
+
+### Stopping the inline orchestrator
+
+The orchestrator tick loop stops when:
+- `maxTicks` is reached (set via `--max-ticks N`).
+- The operator sends `Ctrl+C` (SIGINT) — the loop drains in-flight dispatches
+  and exits cleanly.
+- The slash command session ends (ScheduleWakeup will not fire again).
+
+### Transitioning from manual dispatch to inline orchestrator
+
+If you have been manually running `/ai-sdlc execute <task-id>` for each task:
+
+1. Verify the inline orchestrator prerequisites above are met.
+2. Start the loop (replace manual per-task invocations).
+3. The orchestrator reads the backlog frontier and picks the next `To Do`
+   task automatically — no manual task-id selection needed.
+
+### Troubleshooting inline mode
+
+**`manifest-emitted` status in pipeline logs**: This is expected in inline mode.
+It means the spawner wrote the manifest; the slash command body must invoke
+the Agent tool. If you see this in a non-inline context, the wrong spawner kind
+was selected.
+
+**Manifest file not found**: The manifest path defaults to
+`$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json`. If `ARTIFACTS_DIR` is
+unset it falls back to `<workDir>/artifacts/_orchestrator/`. Check that the
+`artifacts/` directory is writable.
+
+**Orchestrator not starting**: Verify `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`
+is set. The loop refuses to start when the flag is unset.
+
+---
+
 ## Recovering quarantined work after a failed dispatch (AISDLC-177)
 
 When the orchestrator dispatches a task and the dispatcher (Step 6

@@ -2,8 +2,8 @@
  * Tests for the AISDLC-182 umbrella `execute` subcommand.
  *
  * Coverage:
- *   1. Spawner resolution — `mock` succeeds, `claude-cli` errors with the
- *      documented deferred message, `api-key` errors when ANTHROPIC_API_KEY
+ *   1. Spawner resolution — `mock` succeeds, `claude-cli` returns a
+ *      ClaudeCliInlineSpawner (AISDLC-198), `api-key` errors when ANTHROPIC_API_KEY
  *      is unset.
  *   2. Verdict-file write — `writeVerdictFile()` lands the JSON at
  *      `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` and the payload
@@ -110,9 +110,17 @@ describe('resolveSpawner', () => {
     expect(spawner).toBeInstanceOf(MockSpawner);
   });
 
-  it('throws the documented deferred message when kind=claude-cli', async () => {
-    await expect(resolveSpawner('claude-cli')).rejects.toThrow(/not implemented yet/);
-    await expect(resolveSpawner('claude-cli')).rejects.toThrow(CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE);
+  it('returns a ClaudeCliInlineSpawner when kind=claude-cli (AISDLC-198)', async () => {
+    // Option 3 (inline orchestrator) is now implemented — resolveSpawner no longer
+    // throws for claude-cli. It returns a ClaudeCliInlineSpawner that emits a
+    // dispatch manifest to $ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json.
+    const spawner = await resolveSpawner('claude-cli');
+    // Verify it's a SubagentSpawner with the expected methods
+    expect(typeof spawner.spawn).toBe('function');
+    expect(typeof spawner.spawnParallel).toBe('function');
+    // The CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE now documents the inline mode
+    // (no longer an error message, but still exported for grep-ability).
+    expect(CLAUDE_CLI_SPAWNER_DEFERRED_MESSAGE).toContain('AISDLC-198');
   });
 
   it('errors when kind=api-key and ANTHROPIC_API_KEY is unset', async () => {
@@ -400,19 +408,27 @@ describe('runExecuteCommand — real-run mode', () => {
     expect(existsSync(result.verdictFilePath as string)).toBe(true);
   });
 
-  it('returns ok=false when the spawner factory throws', async () => {
+  it('returns ok=false when the spawner factory throws (api-key missing ANTHROPIC_API_KEY)', async () => {
+    // Previously tested with claude-cli which threw; now claude-cli is implemented.
+    // Use api-key without ANTHROPIC_API_KEY set to exercise the "spawner throws" path.
     writeTaskFile(tmp, { id: 'AISDLC-202', title: 'spawner gate', status: 'To Do' });
-    const result = await runExecuteCommand({
-      taskId: 'AISDLC-202',
-      workDir: tmp,
-      spawnerKind: 'claude-cli', // deferred — should fail fast
-      maxIterations: 2,
-      dryRun: false,
-      run: true,
-      logger: silentLogger(),
-    });
-    expect(result.ok).toBe(false);
-    expect(result.reason).toContain('not implemented yet');
+    const saved = process.env.ANTHROPIC_API_KEY;
+    delete process.env.ANTHROPIC_API_KEY;
+    try {
+      const result = await runExecuteCommand({
+        taskId: 'AISDLC-202',
+        workDir: tmp,
+        spawnerKind: 'api-key', // fails when ANTHROPIC_API_KEY is unset
+        maxIterations: 2,
+        dryRun: false,
+        run: true,
+        logger: silentLogger(),
+      });
+      expect(result.ok).toBe(false);
+      expect(result.reason).toContain('ANTHROPIC_API_KEY');
+    } finally {
+      if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
+    }
   });
 
   it('returns ok=false when the executor throws (does not crash)', async () => {

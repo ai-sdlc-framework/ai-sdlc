@@ -422,7 +422,17 @@ export interface SubagentResult {
   output: string;
   /** Parsed structured payload if the subagent returned JSON. */
   parsed?: unknown;
-  status: 'success' | 'timeout' | 'error';
+  /**
+   * Outcome of the spawn call:
+   *   - `'success'` — the subagent ran and returned output.
+   *   - `'timeout'` — the subagent exceeded its timeout.
+   *   - `'error'` — the subagent failed (subprocess error, non-zero exit, etc.).
+   *   - `'manifest-emitted'` — inline-mode only (ClaudeCliInlineSpawner,
+   *     AISDLC-198). The spawner wrote a dispatch manifest to disk instead of
+   *     invoking a subprocess. The calling slash command body must invoke the
+   *     Agent tool using the manifest parameters before continuing the pipeline.
+   */
+  status: 'success' | 'timeout' | 'error' | 'manifest-emitted';
   error?: string;
   durationMs: number;
 }
