@@ -182,8 +182,13 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
   const sha = await shortSha(workDir, runner);
   const syncBranch = `chore/sync-tasks-${sha}`;
 
-  // Create a temporary worktree for the sync commit.
+  // Reserve a unique temp path. mkdtempSync creates the directory atomically
+  // (race-safe), but `git worktree add` requires the destination to NOT exist
+  // — it creates the directory itself. Remove the empty dir immediately so the
+  // path is reserved (no other process will collide on it within the same
+  // tmpdir tick) but absent on disk when worktree add runs.
   const syncWorktreePath = mkdtempSync(join(tmpdir(), 'ai-sdlc-sync-parent-'));
+  rmSync(syncWorktreePath, { recursive: true, force: true });
   try {
     // Create the worktree on origin/main
     const addResult = await runner(

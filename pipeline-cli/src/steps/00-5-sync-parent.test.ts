@@ -16,7 +16,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -296,6 +296,45 @@ describe('Step 0.5 — syncParentUntrackedFiles', () => {
     await syncParentUntrackedFiles({ workDir, runner: capturingFake.toRunner() });
     // The branch passed to worktree add should contain our sha
     expect(worktreeCalls.join(' ')).toContain('chore/sync-tasks-deadbeef');
+  });
+
+  it('reserves the sync worktree path WITHOUT pre-creating the directory (regression)', async () => {
+    // Regression: an earlier version called mkdtempSync but never removed the
+    // empty dir it created. `git worktree add` requires the destination to NOT
+    // exist (it creates the dir itself), so every live invocation failed with
+    // "destination path already exists". FakeRunner can't catch this because
+    // it never execs git — instead, capture the path argument inside the
+    // `worktree add` matcher and assert existsSync(path) === false at the
+    // exact moment git would run.
+    writeFileSync(join(workDir, 'backlog/tasks/aisdlc-700 - new.md'), '# content', 'utf8');
+
+    let capturedPath: string | undefined;
+    let pathExistedAtAddTime: boolean | undefined;
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-700 - new.md\n'))
+      .on(/^git ls-tree origin\/main/, ok(''))
+      .on(/^git rev-parse --short/, ok('eee44444\n'))
+      .on(/^git worktree add/, (args) => {
+        // worktree add args: ['worktree', 'add', <path>, '-b', <branch>, 'origin/main']
+        capturedPath = args[2];
+        pathExistedAtAddTime = existsSync(capturedPath);
+        // After git would have created it, simulate by mkdir so the subsequent
+        // copyFileSync calls have a real directory to write into.
+        mkdirSync(capturedPath, { recursive: true });
+        return { stdout: '', stderr: '', code: 0 };
+      })
+      .on(/^git add/, ok())
+      .on(/^git commit/, ok())
+      .on(/^git push/, ok())
+      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/700\n'))
+      .on(/^git worktree remove/, ok());
+
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+    expect(result.ok).toBe(true);
+    expect(capturedPath).toBeDefined();
+    expect(capturedPath).toMatch(/ai-sdlc-sync-parent-/);
+    expect(pathExistedAtAddTime).toBe(false);
   });
 
   it('does NOT block on non-ok results from git ls-files (clean + non-backlog)', async () => {
