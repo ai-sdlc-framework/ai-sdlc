@@ -14,11 +14,23 @@ labels:
 dependencies:
   - AISDLC-205
 references:
-  - .github/workflows/verify-attestation-docs-only.yml
-  - .github/workflows/ai-sdlc-review-docs-only.yml
   - .github/workflows/verify-attestation.yml
   - .github/workflows/ai-sdlc-review.yml
 priority: medium
+drift_log:
+  - date: '2026-05-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/verify-attestation-docs-only.yml
+    resolution: flagged
+  - date: '2026-05-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/ai-sdlc-review-docs-only.yml
+    resolution: flagged
+drift_checked: '2026-05-06'
 ---
 
 ## Description

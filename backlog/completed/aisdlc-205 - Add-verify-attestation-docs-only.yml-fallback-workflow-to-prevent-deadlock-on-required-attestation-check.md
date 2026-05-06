@@ -15,9 +15,18 @@ labels:
 dependencies: []
 references:
   - .github/workflows/verify-attestation.yml
-  - .github/workflows/ai-sdlc-review-docs-only.yml
-  - backlog/completed/aisdlc-193 - Re-enable-attestation-as-required-merge-gate-design-rebase-stable-HEAD-content-binding.md
+  - >-
+    backlog/completed/aisdlc-193 -
+    Re-enable-attestation-as-required-merge-gate-design-rebase-stable-HEAD-content-binding.md
 priority: high
+drift_log:
+  - date: '2026-05-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/ai-sdlc-review-docs-only.yml
+    resolution: flagged
+drift_checked: '2026-05-06'
 ---
 
 ## Description

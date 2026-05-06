@@ -12,10 +12,21 @@ labels:
   - ci
   - attestation
   - aisdlc-205-followup
-references:
-  - .github/workflows/verify-attestation-docs-only.yml
-  - .github/workflows/ai-sdlc-review-docs-only.yml
 priority: high
+drift_log:
+  - date: '2026-05-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/verify-attestation-docs-only.yml
+    resolution: flagged
+  - date: '2026-05-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      .github/workflows/ai-sdlc-review-docs-only.yml
+    resolution: flagged
+drift_checked: '2026-05-06'
 ---
 
 ## Description
