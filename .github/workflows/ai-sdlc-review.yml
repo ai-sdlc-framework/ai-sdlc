@@ -77,12 +77,15 @@ jobs:
             echo "is_merge_group=false" >> "${GITHUB_OUTPUT}"
           fi
 
-      # Only checkout for merge_group runs (PR runs use the GH API for file
-      # enumeration which doesn't need a working tree).
-      - name: Checkout (merge_group only)
-        if: steps.resolve.outputs.is_merge_group == 'true'
+      # Always checkout — both event types invoke `node scripts/is-docs-only-changeset.mjs`
+      # which requires the script on disk. (Was previously merge_group-only because
+      # the file enumeration was via gh api for PR events, but the script invocation
+      # always needs the working tree.)
+      - name: Checkout
         uses: actions/checkout@v4
         with:
+          # merge_group needs full history for `git diff base...head`; pull_request
+          # only needs the script file but full fetch is harmless.
           fetch-depth: 0
           ref: ${{ steps.resolve.outputs.head_sha }}
 
