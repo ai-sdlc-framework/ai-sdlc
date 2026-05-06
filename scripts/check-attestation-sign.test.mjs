@@ -54,6 +54,11 @@ function setupRepo() {
   writeFileSync(join(root, 'README.md'), 'baseline\n');
   git(['add', '.'], root);
   git(['commit', '-q', '-m', 'baseline'], root);
+  // Synthesize an `origin/main` ref pointing at the baseline so the docs-only
+  // predicate can compute `git diff origin/main...HEAD`. The hook fail-CLOSEs
+  // when origin/main is unreachable (AISDLC-215 review fix), so tests that
+  // simulate dev branches MUST configure this baseline ref.
+  git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], root);
   return root;
 }
 

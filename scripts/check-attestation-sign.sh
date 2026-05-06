@@ -121,10 +121,21 @@ if [ -z "$VERDICT_FILE" ]; then
   # (AISDLC-206) so the definition stays in one place and stays in sync
   # with the `paths-ignore` lists in verify-attestation.yml and
   # ai-sdlc-review.yml.
-  CHANGED_FILES=$(git diff --name-only "origin/main...HEAD" 2>/dev/null || git diff --name-only "HEAD~1...HEAD" 2>/dev/null || echo '')
+  # CRITICAL: only use origin/main as the diff base. The HEAD~1 fallback would
+  # misclassify multi-commit branches where a tip docs commit follows code commits
+  # (only the tip would be inspected → false-positive docs-only → false-positive
+  # auto-sign of unverified code). If origin/main is unreachable (offline session,
+  # shallow clone, network partition), fail-CLOSED — skip auto-sign and require
+  # manual sign. Aligns the predicate's diff range with sign-attestation.mjs's
+  # own origin/main dependency.
+  CHANGED_FILES=$(git diff --name-only "origin/main...HEAD" 2>/dev/null || echo '__UNAVAILABLE__')
+  if [ "$CHANGED_FILES" = "__UNAVAILABLE__" ]; then
+    echo "[attestation-sign] no verdicts file and origin/main unreachable — skipping (manual sign required)" >&2
+    exit 0
+  fi
   if [ -z "$CHANGED_FILES" ]; then
-    # Cannot determine changeset — fall through to original no-op behavior.
-    echo "[attestation-sign] no verdicts file at $VERDICT_DIR/$TASK_ID_LOWER.json and cannot determine changeset — skipping" >&2
+    # Empty diff (no changes vs origin/main) — nothing to attest, nothing to sign.
+    echo "[attestation-sign] no verdicts file and changeset is empty — skipping" >&2
     exit 0
   fi
 
