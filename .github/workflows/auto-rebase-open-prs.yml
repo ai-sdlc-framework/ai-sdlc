@@ -90,12 +90,40 @@ jobs:
           REBASED=0
           SKIPPED=0
           FAILED=0
+          REARMED=0
           while IFS=$'\t' read -r PR TITLE; do
             [ -z "$PR" ] && continue
             echo ""
             echo "=== PR #$PR — $TITLE ==="
+
+            # AISDLC-213 / AISDLC-211 root cause #4:
+            # GitHub clears autoMergeRequest when any force-push occurs — including
+            # the force-push this workflow makes to advance the PR branch onto main.
+            # Strategy: capture auto-merge state BEFORE the rebase, then re-arm AFTER.
+            #
+            # Queue method vs. workflow flag quirk (feedback_gh_auto_merge_method_quirk.md):
+            # The merge queue's mergeMethod is SQUASH; the gh flag used here MUST be the
+            # opposite — --rebase — or GitHub leaves the PR perpetually UNSTABLE in the
+            # queue. auto-enable-auto-merge.yml (AISDLC-138) also uses --auto --rebase
+            # for the same reason. If the queue method ever flips, flip this flag too.
+            WAS_ARMED=$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest --jq '.autoMergeRequest != null')
+            echo "  auto-merge was armed: $WAS_ARMED"
+
             if gh pr update-branch --repo "$REPO" --rebase "$PR" 2>&1; then
               REBASED=$((REBASED + 1))
+
+              # Re-arm auto-merge only for PRs that had it armed before the
+              # force-push. Skips PRs that never had auto-merge, so we don't
+              # accidentally enable it. Closes AISDLC-211 root cause #4.
+              if [ "$WAS_ARMED" = "true" ]; then
+                echo "  Re-arming auto-merge (cleared by force-push) with --auto --rebase"
+                if gh pr merge "$PR" --repo "$REPO" --auto --rebase 2>&1; then
+                  REARMED=$((REARMED + 1))
+                  echo "  auto-merge re-armed successfully"
+                else
+                  echo "  ::warning::Failed to re-arm auto-merge for PR #$PR — operator may need to re-arm manually"
+                fi
+              fi
             else
               # Could be: already up-to-date (treated as success by gh in some
               # versions), conflicts, branch-protection, etc. Log and continue.
@@ -110,4 +138,4 @@ jobs:
           done <<< "$PRS"
 
           echo ""
-          echo "Summary: rebased=$REBASED skipped=$SKIPPED failed=$FAILED"
+          echo "Summary: rebased=$REBASED skipped=$SKIPPED failed=$FAILED rearmed=$REARMED"
