@@ -2597,6 +2597,12 @@ export const orchestratorEventsV1Schema = {
       description:
         "Advisory ISO date after which the operator should re-evaluate the block. Present on `TaskBlocked` (AISDLC-223) when the task's `blocked.until` frontmatter field is set.",
     },
+    unblockedBy: {
+      type: 'array',
+      items: { type: 'string' },
+      description:
+        "Optional list of task IDs that, when all reach Done, advise the operator to clear the block. Present on `TaskBlocked` (AISDLC-223) when the task's `blocked.unblockedBy` frontmatter field is set. Phase 2 (AC #8 of AISDLC-223) will emit an additional `TaskUnblockExpired` advisory event when all listed task IDs are Done; until then this field is informational only.",
+    },
   },
   additionalProperties: false,
   $defs: {
