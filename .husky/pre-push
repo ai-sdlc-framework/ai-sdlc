@@ -3,18 +3,30 @@
 #
 #   1. Coverage gate (existing) — fails fast on under-tested code so we don't
 #      sign an attestation for a build we'd reject anyway.
-#   2. Auto-sign attestation (AISDLC-133) — when the worktree has an active
+#   2. Auto-close backlog task (AISDLC-220) — when any commit in the push range
+#      has `(AISDLC-N)` in its subject and the task file is still in
+#      `backlog/tasks/`, moves the file to `backlog/completed/` via the
+#      AISDLC-203 atomic helper and commits the move as a chore commit, then
+#      exits 1 with "re-push required". ORDER IS LOAD-BEARING — MUST run
+#      BEFORE attestation-sign (item 3 below). The attestation envelope's
+#      `contentHashV4` field binds `{path, headBlobSha}` per changed file;
+#      if the task move happens AFTER attestation sign, the envelope hashes the
+#      OLD path (`backlog/tasks/…`) while the PR diff contains the NEW path
+#      (`backlog/completed/…`) — verify-attestation would reject the envelope.
+#   3. Auto-sign attestation (AISDLC-133) — when the worktree has an active
 #      task + reviewer verdict file but no attestation at current HEAD, signs
 #      a chore commit on top + exits 1 with "re-push required". This removes
 #      the sign-attestation step from /ai-sdlc execute's LLM responsibility
 #      (per the 2026-05-01 "mechanical → hook, never LLM" design discussion).
 #
 # Skip individual gates with their respective env vars
-# (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1) or skip all
-# pre-push hooks via `git push --no-verify` (use sparingly — these gates
-# exist because the things they guard have failed silently in the past).
+# (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_TASK_MOVE=1,
+# AI_SDLC_SKIP_ATTESTATION_SIGN=1) or skip all pre-push hooks via
+# `git push --no-verify` (use sparingly — these gates exist because the things
+# they guard have failed silently in the past).
 
 set -euo pipefail
 
 ./scripts/check-coverage.sh
+./scripts/check-task-moved.sh
 ./scripts/check-attestation-sign.sh

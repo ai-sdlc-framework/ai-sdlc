@@ -884,31 +884,42 @@ The chaos test is intended to be run by the operator before the feature-flag pro
 5. Update `CHANGELOG.md` with the user-visible behavior change ("parallelism is now on by default").
 6. Announce in Slack with a link to the rollback procedure (set `AI_SDLC_PARALLELISM=off` to disable).
 
-## Backlog-task auto-close on PR merge
+## Backlog-task auto-close on push (AISDLC-220)
 
-The `.github/workflows/backlog-task-complete.yml` workflow watches every PR-merged
-event. When a PR title contains `(AISDLC-N)` or `(AISDLC-N.M)`, the workflow:
+The `scripts/check-task-moved.sh` pre-push hook (wired into `.husky/pre-push`
+after the coverage gate and before the attestation-sign gate) handles task-file
+lifecycle closes in the originating PR's own diff.
 
-1. Runs `scripts/close-backlog-task.sh AISDLC-N`, which flips the frontmatter
-   `status` to `Done` and `git mv`s `backlog/tasks/<file>` →
-   `backlog/completed/<file>`.
-2. Pushes the move on a new branch `chore/close-aisdlc-N`.
-3. Opens a follow-up PR titled `chore: close AISDLC-N (auto)` referencing the
-   merged source PR.
+**How it works:**
 
-The workflow opens a PR rather than committing to `main` directly so the move is
-auditable and respects branch protection. The follow-up PR is intended to merge
-without review (it's just file relocation), but the human approves it.
+When any commit in the push range has `(AISDLC-N)` or `(AISDLC-N.M)` in its
+subject and `backlog/tasks/aisdlc-N - *.md` exists locally but
+`backlog/completed/aisdlc-N - *.md` does not:
+
+1. Invokes `node pipeline-cli/bin/cli-task-complete.mjs AISDLC-N` (the
+   AISDLC-203 atomic helper) which flips the frontmatter `status` to `Done`
+   and `git mv`s `backlog/tasks/<file>` → `backlog/completed/<file>`.
+2. Stages the moved files (`git add -- backlog/tasks/ backlog/completed/`).
+3. Commits all moves as a single `chore: auto-close AISDLC-N (AISDLC-220)`
+   commit and exits 1 with a "re-run git push" message.
+4. The next `git push` detects the file is already in `backlog/completed/` (or
+   that HEAD is the auto-close chore) and exits 0 — the push proceeds normally.
+
+**Why this shape:** the lifecycle close lands in the originating PR's own diff,
+not a separate follow-up PR. No orphan chore PRs, no CI bypass, no operator
+babysitting.
 
 **Operator action when this misfires:**
 
-- Title doesn't match the regex → workflow skips silently. If you intended a
-  backlog task to close, edit the PR title to include `(AISDLC-N)` and re-trigger
-  by adding/removing a label, or run the script locally and push.
-- Script exits 2 (`already in completed/`) → no-op, expected after a previous
-  partial run. The workflow still skips opening the follow-up PR.
-- Follow-up PR conflicts with concurrent branch updates → rebase the
-  `chore/close-aisdlc-N` branch onto current `main` and push again.
+- Commit subject doesn't match `(AISDLC-N)` → hook exits 0 silently. If you
+  intended a backlog task to close, manually run
+  `node pipeline-cli/bin/cli-task-complete.mjs AISDLC-N` and commit the result.
+- `cli-task-complete.mjs` fails → hook exits 2 (push aborted). Check that
+  `pnpm --filter @ai-sdlc/pipeline-cli build` has been run and the dist is
+  up to date.
+- Task file is already in `completed/` → hook detects it and skips (idempotent).
+- Defer the auto-move for a specific push: `AI_SDLC_SKIP_TASK_MOVE=1 git push`.
+  You are then responsible for moving the file manually before or after push.
 
 ## Related Documents
 

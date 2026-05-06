@@ -80,8 +80,9 @@ spec:
       - closes
     includeProvenance: true
     # `References` (not `Closes`) — backlog tasks aren't auto-closed by GitHub PR
-    # merges; the .github/workflows/backlog-task-complete workflow runs after merge
-    # and moves the task file to backlog/completed/ via the backlog CLI.
+    # merges; the originating PR carries the task-file move (tasks/ → completed/)
+    # in its own diff via the `scripts/check-task-moved.sh` pre-push hook
+    # (AISDLC-220), so the task lifecycle close lands atomically with the work.
     closeKeyword: References
   notifications:
     templates:

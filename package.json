@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:attestation-sign-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:docs-only-classifier",
+    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:docs-only-classifier",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -26,6 +26,7 @@
     "docs:test": "node --test scripts/docs-sync.test.mjs",
     "test:publishable": "node --test scripts/check-publishable-package-configs.test.mjs",
     "test:drift-gate": "node --test scripts/check-backlog-drift.test.mjs",
+    "test:task-move-gate": "node --test scripts/check-task-moved.test.mjs",
     "test:attestation-sign-gate": "node --test scripts/check-attestation-sign.test.mjs",
     "test:orchestrator-state-gate": "node --test scripts/check-orchestrator-state.test.mjs",
     "test:gate-workflow": "node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs",

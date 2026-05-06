@@ -866,7 +866,7 @@ Compose the PR body from:
 - A list of changed files (`git diff --name-only origin/main...HEAD`)
 - A `<details>` block with the code-reviewer verdict
 - **AISDLC-141 — classifier decision line**: `Classifier decision: [<reviewers>] (confidence: <N.NN>)` (or `Classifier decision: [testing critic security] (fellOpen: <reason>)` when the classifier fell open). This gives the operator per-PR visibility into how often we successfully scope review fan-out down vs. fall open. Use the `$SELECTED`/`$CONFIDENCE`/`$FELL_OPEN` shell vars captured in Step 7a.
-- A footer: `References $TASK_ID` (NOT `Closes` — backlog tasks aren't auto-closed by GitHub PR merges; the `.github/workflows/backlog-task-complete.yml` workflow handles it)
+- A footer: `References $TASK_ID` (NOT `Closes` — backlog tasks aren't auto-closed by GitHub PR merges; the `scripts/check-task-moved.sh` pre-push hook moves the task file atomically in the originating PR's own diff — AISDLC-220)
 
 ```bash
 gh pr create \

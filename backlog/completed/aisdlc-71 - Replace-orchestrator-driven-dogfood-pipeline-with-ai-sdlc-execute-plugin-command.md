@@ -24,7 +24,7 @@ references:
   - ai-sdlc-plugin/commands/review.md
   - ai-sdlc-plugin/hooks/enforce-blocked-actions.sh
   - ai-sdlc-plugin/plugin.json
-  - .github/workflows/backlog-task-complete.yml
+  - scripts/check-task-moved.sh
   - CLAUDE.md
 priority: high
 ---
