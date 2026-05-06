@@ -3,7 +3,7 @@ id: AISDLC-209
 title: >-
   PR #346 follow-up — atomicity hardening + CLI input validation in
   completeTaskAtomically
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 04:19'
 labels:
@@ -54,3 +54,7 @@ PR #346 (AISDLC-203) shipped the atomic Codex completion helper. All three revie
 - [ ] #7 complete-task.test.ts adds: (a) malformed YAML frontmatter test, (b) duplicate-prefix collision test.
 - [ ] #8 (Optional) Mocked renameSync-throws test asserting source remains intact when rename fails — only if time permits.
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Implementation shipped via PR #363. The lifecycle close was lost when the now-retired `.github/workflows/backlog-task-complete.yml` workflow's chore-close PR (#360/#362/#367/#368) failed to auto-merge (one of the orphan-PR cases that motivated AISDLC-220). Moving to `backlog/completed/` retroactively as part of the post-AISDLC-220 sync sweep.

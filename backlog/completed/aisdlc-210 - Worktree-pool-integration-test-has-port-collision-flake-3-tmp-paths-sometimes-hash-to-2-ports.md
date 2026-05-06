@@ -3,7 +3,7 @@ id: AISDLC-210
 title: >-
   Worktree-pool integration test has port-collision flake (3 tmp paths sometimes
   hash to 2 ports)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 04:46'
 labels:
@@ -42,3 +42,7 @@ Option 2 is the cheapest. Option 3 is the most principled (the test exercises th
 - [ ] #3 Test does not introduce hardcoded paths that could collide with concurrent test runs
 - [ ] #4 Document the port-collision possibility in the port-allocator's JSDoc + a note that integration tests must use deterministic paths
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Implementation shipped via PR #364. The lifecycle close was lost when the now-retired `.github/workflows/backlog-task-complete.yml` workflow's chore-close PR (#360/#362/#367/#368) failed to auto-merge (one of the orphan-PR cases that motivated AISDLC-220). Moving to `backlog/completed/` retroactively as part of the post-AISDLC-220 sync sweep.
