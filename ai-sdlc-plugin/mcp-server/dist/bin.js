@@ -102,7 +102,7 @@ var require_code = __commonJS({
     }
     exports._ = _;
     var plus = new _Code("+");
-    function str(strs, ...args) {
+    function str2(strs, ...args) {
       const expr = [safeStringify(strs[0])];
       let i = 0;
       while (i < args.length) {
@@ -113,7 +113,7 @@ var require_code = __commonJS({
       optimize(expr);
       return new _Code(expr);
     }
-    exports.str = str;
+    exports.str = str2;
     function addCodeArg(code, arg) {
       if (arg instanceof _Code)
         code.push(...arg._items);
@@ -156,7 +156,7 @@ var require_code = __commonJS({
       return;
     }
     function strConcat(c1, c2) {
-      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str`${c1}${c2}`;
+      return c2.emptyStr() ? c1 : c1.emptyStr() ? c2 : str2`${c1}${c2}`;
     }
     exports.strConcat = strConcat;
     function interpolate(x) {
@@ -1068,72 +1068,72 @@ var require_util = __commonJS({
       return hash;
     }
     exports.toHash = toHash;
-    function alwaysValidSchema(it, schema) {
-      if (typeof schema == "boolean")
-        return schema;
-      if (Object.keys(schema).length === 0)
+    function alwaysValidSchema(it, schema2) {
+      if (typeof schema2 == "boolean")
+        return schema2;
+      if (Object.keys(schema2).length === 0)
         return true;
-      checkUnknownRules(it, schema);
-      return !schemaHasRules(schema, it.self.RULES.all);
+      checkUnknownRules(it, schema2);
+      return !schemaHasRules(schema2, it.self.RULES.all);
     }
     exports.alwaysValidSchema = alwaysValidSchema;
-    function checkUnknownRules(it, schema = it.schema) {
+    function checkUnknownRules(it, schema2 = it.schema) {
       const { opts, self } = it;
       if (!opts.strictSchema)
         return;
-      if (typeof schema === "boolean")
+      if (typeof schema2 === "boolean")
         return;
       const rules = self.RULES.keywords;
-      for (const key in schema) {
+      for (const key in schema2) {
         if (!rules[key])
           checkStrictMode(it, `unknown keyword: "${key}"`);
       }
     }
     exports.checkUnknownRules = checkUnknownRules;
-    function schemaHasRules(schema, rules) {
-      if (typeof schema == "boolean")
-        return !schema;
-      for (const key in schema)
+    function schemaHasRules(schema2, rules) {
+      if (typeof schema2 == "boolean")
+        return !schema2;
+      for (const key in schema2)
         if (rules[key])
           return true;
       return false;
     }
     exports.schemaHasRules = schemaHasRules;
-    function schemaHasRulesButRef(schema, RULES) {
-      if (typeof schema == "boolean")
-        return !schema;
-      for (const key in schema)
+    function schemaHasRulesButRef(schema2, RULES) {
+      if (typeof schema2 == "boolean")
+        return !schema2;
+      for (const key in schema2)
         if (key !== "$ref" && RULES.all[key])
           return true;
       return false;
     }
     exports.schemaHasRulesButRef = schemaHasRulesButRef;
-    function schemaRefOrVal({ topSchemaRef, schemaPath }, schema, keyword, $data) {
+    function schemaRefOrVal({ topSchemaRef, schemaPath }, schema2, keyword, $data) {
       if (!$data) {
-        if (typeof schema == "number" || typeof schema == "boolean")
-          return schema;
-        if (typeof schema == "string")
-          return (0, codegen_1._)`${schema}`;
+        if (typeof schema2 == "number" || typeof schema2 == "boolean")
+          return schema2;
+        if (typeof schema2 == "string")
+          return (0, codegen_1._)`${schema2}`;
       }
       return (0, codegen_1._)`${topSchemaRef}${schemaPath}${(0, codegen_1.getProperty)(keyword)}`;
     }
     exports.schemaRefOrVal = schemaRefOrVal;
-    function unescapeFragment(str) {
-      return unescapeJsonPointer(decodeURIComponent(str));
+    function unescapeFragment(str2) {
+      return unescapeJsonPointer(decodeURIComponent(str2));
     }
     exports.unescapeFragment = unescapeFragment;
-    function escapeFragment(str) {
-      return encodeURIComponent(escapeJsonPointer(str));
+    function escapeFragment(str2) {
+      return encodeURIComponent(escapeJsonPointer(str2));
     }
     exports.escapeFragment = escapeFragment;
-    function escapeJsonPointer(str) {
-      if (typeof str == "number")
-        return `${str}`;
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPointer(str2) {
+      if (typeof str2 == "number")
+        return `${str2}`;
+      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
     }
     exports.escapeJsonPointer = escapeJsonPointer;
-    function unescapeJsonPointer(str) {
-      return str.replace(/~1/g, "/").replace(/~0/g, "~");
+    function unescapeJsonPointer(str2) {
+      return str2.replace(/~1/g, "/").replace(/~0/g, "~");
     }
     exports.unescapeJsonPointer = unescapeJsonPointer;
     function eachItem(xs, f) {
@@ -1394,10 +1394,10 @@ var require_boolSchema = __commonJS({
       message: "boolean schema is false"
     };
     function topBoolOrEmptySchema(it) {
-      const { gen, schema, validateName } = it;
-      if (schema === false) {
+      const { gen, schema: schema2, validateName } = it;
+      if (schema2 === false) {
         falseSchemaError(it, false);
-      } else if (typeof schema == "object" && schema.$async === true) {
+      } else if (typeof schema2 == "object" && schema2.$async === true) {
         gen.return(names_1.default.data);
       } else {
         gen.assign((0, codegen_1._)`${validateName}.errors`, null);
@@ -1406,8 +1406,8 @@ var require_boolSchema = __commonJS({
     }
     exports.topBoolOrEmptySchema = topBoolOrEmptySchema;
     function boolOrEmptySchema(it, valid) {
-      const { gen, schema } = it;
-      if (schema === false) {
+      const { gen, schema: schema2 } = it;
+      if (schema2 === false) {
         gen.var(valid, false);
         falseSchemaError(it);
       } else {
@@ -1469,18 +1469,18 @@ var require_applicability = __commonJS({
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.shouldUseRule = exports.shouldUseGroup = exports.schemaHasRulesForType = void 0;
-    function schemaHasRulesForType({ schema, self }, type) {
-      const group = self.RULES.types[type];
-      return group && group !== true && shouldUseGroup(schema, group);
+    function schemaHasRulesForType({ schema: schema2, self }, type2) {
+      const group = self.RULES.types[type2];
+      return group && group !== true && shouldUseGroup(schema2, group);
     }
     exports.schemaHasRulesForType = schemaHasRulesForType;
-    function shouldUseGroup(schema, group) {
-      return group.rules.some((rule) => shouldUseRule(schema, rule));
+    function shouldUseGroup(schema2, group) {
+      return group.rules.some((rule) => shouldUseRule(schema2, rule));
     }
     exports.shouldUseGroup = shouldUseGroup;
-    function shouldUseRule(schema, rule) {
+    function shouldUseRule(schema2, rule) {
       var _a;
-      return schema[rule.keyword] !== void 0 || ((_a = rule.definition.implements) === null || _a === void 0 ? void 0 : _a.some((kwd) => schema[kwd] !== void 0));
+      return schema2[rule.keyword] !== void 0 || ((_a = rule.definition.implements) === null || _a === void 0 ? void 0 : _a.some((kwd) => schema2[kwd] !== void 0));
     }
     exports.shouldUseRule = shouldUseRule;
   }
@@ -1502,17 +1502,17 @@ var require_dataType = __commonJS({
       DataType2[DataType2["Correct"] = 0] = "Correct";
       DataType2[DataType2["Wrong"] = 1] = "Wrong";
     })(DataType || (exports.DataType = DataType = {}));
-    function getSchemaTypes(schema) {
-      const types = getJSONTypes(schema.type);
+    function getSchemaTypes(schema2) {
+      const types = getJSONTypes(schema2.type);
       const hasNull = types.includes("null");
       if (hasNull) {
-        if (schema.nullable === false)
+        if (schema2.nullable === false)
           throw new Error("type: null contradicts nullable: false");
       } else {
-        if (!types.length && schema.nullable !== void 0) {
+        if (!types.length && schema2.nullable !== void 0) {
           throw new Error('"nullable" cannot be used without "type"');
         }
-        if (schema.nullable === true)
+        if (schema2.nullable === true)
           types.push("null");
       }
       return types;
@@ -1644,8 +1644,8 @@ var require_dataType = __commonJS({
     }
     exports.checkDataTypes = checkDataTypes;
     var typeError = {
-      message: ({ schema }) => `must be ${schema}`,
-      params: ({ schema, schemaValue }) => typeof schema == "string" ? (0, codegen_1._)`{type: ${schema}}` : (0, codegen_1._)`{type: ${schemaValue}}`
+      message: ({ schema: schema2 }) => `must be ${schema2}`,
+      params: ({ schema: schema2, schemaValue }) => typeof schema2 == "string" ? (0, codegen_1._)`{type: ${schema2}}` : (0, codegen_1._)`{type: ${schemaValue}}`
     };
     function reportTypeError(it) {
       const cxt = getTypeErrorContext(it);
@@ -1653,16 +1653,16 @@ var require_dataType = __commonJS({
     }
     exports.reportTypeError = reportTypeError;
     function getTypeErrorContext(it) {
-      const { gen, data, schema } = it;
-      const schemaCode = (0, util_1.schemaRefOrVal)(it, schema, "type");
+      const { gen, data, schema: schema2 } = it;
+      const schemaCode = (0, util_1.schemaRefOrVal)(it, schema2, "type");
       return {
         gen,
         keyword: "type",
         data,
-        schema: schema.type,
+        schema: schema2.type,
         schemaCode,
         schemaValue: schemaCode,
-        parentSchema: schema,
+        parentSchema: schema2,
         params: {},
         it
       };
@@ -1815,15 +1815,15 @@ var require_code2 = __commonJS({
     }
     exports.validateArray = validateArray;
     function validateUnion(cxt) {
-      const { gen, schema, keyword, it } = cxt;
-      if (!Array.isArray(schema))
+      const { gen, schema: schema2, keyword, it } = cxt;
+      if (!Array.isArray(schema2))
         throw new Error("ajv implementation error");
-      const alwaysValid = schema.some((sch) => (0, util_1.alwaysValidSchema)(it, sch));
+      const alwaysValid = schema2.some((sch) => (0, util_1.alwaysValidSchema)(it, sch));
       if (alwaysValid && !it.opts.unevaluated)
         return;
       const valid = gen.let("valid", false);
       const schValid = gen.name("_valid");
-      gen.block(() => schema.forEach((_sch, i) => {
+      gen.block(() => schema2.forEach((_sch, i) => {
         const schCxt = cxt.subschema({
           keyword,
           schemaProp: i,
@@ -1851,8 +1851,8 @@ var require_keyword = __commonJS({
     var code_1 = require_code2();
     var errors_1 = require_errors();
     function macroKeywordCode(cxt, def) {
-      const { gen, keyword, schema, parentSchema, it } = cxt;
-      const macroSchema = def.macro.call(it.self, schema, parentSchema, it);
+      const { gen, keyword, schema: schema2, parentSchema, it } = cxt;
+      const macroSchema = def.macro.call(it.self, schema2, parentSchema, it);
       const schemaRef = useKeyword(gen, keyword, macroSchema);
       if (it.opts.validateSchema !== false)
         it.self.validateSchema(macroSchema, true);
@@ -1869,9 +1869,9 @@ var require_keyword = __commonJS({
     exports.macroKeywordCode = macroKeywordCode;
     function funcKeywordCode(cxt, def) {
       var _a;
-      const { gen, keyword, schema, parentSchema, $data, it } = cxt;
+      const { gen, keyword, schema: schema2, parentSchema, $data, it } = cxt;
       checkAsyncKeyword(it, def);
-      const validate = !$data && def.compile ? def.compile.call(it.self, schema, parentSchema, it) : def.validate;
+      const validate = !$data && def.compile ? def.compile.call(it.self, schema2, parentSchema, it) : def.validate;
       const validateRef = useKeyword(gen, keyword, validate);
       const valid = gen.let("valid");
       cxt.block$data(valid, validateKeyword);
@@ -1931,20 +1931,20 @@ var require_keyword = __commonJS({
         throw new Error(`keyword "${keyword}" failed to compile`);
       return gen.scopeValue("keyword", typeof result == "function" ? { ref: result } : { ref: result, code: (0, codegen_1.stringify)(result) });
     }
-    function validSchemaType(schema, schemaType, allowUndefined = false) {
-      return !schemaType.length || schemaType.some((st) => st === "array" ? Array.isArray(schema) : st === "object" ? schema && typeof schema == "object" && !Array.isArray(schema) : typeof schema == st || allowUndefined && typeof schema == "undefined");
+    function validSchemaType(schema2, schemaType, allowUndefined = false) {
+      return !schemaType.length || schemaType.some((st) => st === "array" ? Array.isArray(schema2) : st === "object" ? schema2 && typeof schema2 == "object" && !Array.isArray(schema2) : typeof schema2 == st || allowUndefined && typeof schema2 == "undefined");
     }
     exports.validSchemaType = validSchemaType;
-    function validateKeywordUsage({ schema, opts, self, errSchemaPath }, def, keyword) {
+    function validateKeywordUsage({ schema: schema2, opts, self, errSchemaPath }, def, keyword) {
       if (Array.isArray(def.keyword) ? !def.keyword.includes(keyword) : def.keyword !== keyword) {
         throw new Error("ajv implementation error");
       }
       const deps = def.dependencies;
-      if (deps === null || deps === void 0 ? void 0 : deps.some((kwd) => !Object.prototype.hasOwnProperty.call(schema, kwd))) {
+      if (deps === null || deps === void 0 ? void 0 : deps.some((kwd) => !Object.prototype.hasOwnProperty.call(schema2, kwd))) {
         throw new Error(`parent schema must have dependencies of ${keyword}: ${deps.join(",")}`);
       }
       if (def.validateSchema) {
-        const valid = def.validateSchema(schema[keyword]);
+        const valid = def.validateSchema(schema2[keyword]);
         if (!valid) {
           const msg = `keyword "${keyword}" value is invalid at path "${errSchemaPath}": ` + self.errorsText(def.validateSchema.errors);
           if (opts.validateSchema === "log")
@@ -1966,8 +1966,8 @@ var require_subschema = __commonJS({
     exports.extendSubschemaMode = exports.extendSubschemaData = exports.getSubschema = void 0;
     var codegen_1 = require_codegen();
     var util_1 = require_util();
-    function getSubschema(it, { keyword, schemaProp, schema, schemaPath, errSchemaPath, topSchemaRef }) {
-      if (keyword !== void 0 && schema !== void 0) {
+    function getSubschema(it, { keyword, schemaProp, schema: schema2, schemaPath, errSchemaPath, topSchemaRef }) {
+      if (keyword !== void 0 && schema2 !== void 0) {
         throw new Error('both "keyword" and "schema" passed, only one allowed');
       }
       if (keyword !== void 0) {
@@ -1982,12 +1982,12 @@ var require_subschema = __commonJS({
           errSchemaPath: `${it.errSchemaPath}/${keyword}/${(0, util_1.escapeFragment)(schemaProp)}`
         };
       }
-      if (schema !== void 0) {
+      if (schema2 !== void 0) {
         if (schemaPath === void 0 || errSchemaPath === void 0 || topSchemaRef === void 0) {
           throw new Error('"schemaPath", "errSchemaPath" and "topSchemaRef" are required with "schema"');
         }
         return {
-          schema,
+          schema: schema2,
           schemaPath,
           topSchemaRef,
           errSchemaPath
@@ -2080,7 +2080,7 @@ var require_fast_deep_equal = __commonJS({
 var require_json_schema_traverse = __commonJS({
   "../../node_modules/.pnpm/json-schema-traverse@1.0.0/node_modules/json-schema-traverse/index.js"(exports, module) {
     "use strict";
-    var traverse = module.exports = function(schema, opts, cb) {
+    var traverse = module.exports = function(schema2, opts, cb) {
       if (typeof opts == "function") {
         cb = opts;
         opts = {};
@@ -2090,7 +2090,7 @@ var require_json_schema_traverse = __commonJS({
       };
       var post = cb.post || function() {
       };
-      _traverse(opts, pre, post, schema, "", schema);
+      _traverse(opts, pre, post, schema2, "", schema2);
     };
     traverse.keywords = {
       additionalItems: true,
@@ -2136,30 +2136,30 @@ var require_json_schema_traverse = __commonJS({
       maxProperties: true,
       minProperties: true
     };
-    function _traverse(opts, pre, post, schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex) {
-      if (schema && typeof schema == "object" && !Array.isArray(schema)) {
-        pre(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
-        for (var key in schema) {
-          var sch = schema[key];
+    function _traverse(opts, pre, post, schema2, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex) {
+      if (schema2 && typeof schema2 == "object" && !Array.isArray(schema2)) {
+        pre(schema2, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
+        for (var key in schema2) {
+          var sch = schema2[key];
           if (Array.isArray(sch)) {
             if (key in traverse.arrayKeywords) {
               for (var i = 0; i < sch.length; i++)
-                _traverse(opts, pre, post, sch[i], jsonPtr + "/" + key + "/" + i, rootSchema, jsonPtr, key, schema, i);
+                _traverse(opts, pre, post, sch[i], jsonPtr + "/" + key + "/" + i, rootSchema, jsonPtr, key, schema2, i);
             }
           } else if (key in traverse.propsKeywords) {
             if (sch && typeof sch == "object") {
               for (var prop in sch)
-                _traverse(opts, pre, post, sch[prop], jsonPtr + "/" + key + "/" + escapeJsonPtr(prop), rootSchema, jsonPtr, key, schema, prop);
+                _traverse(opts, pre, post, sch[prop], jsonPtr + "/" + key + "/" + escapeJsonPtr(prop), rootSchema, jsonPtr, key, schema2, prop);
             }
           } else if (key in traverse.keywords || opts.allKeys && !(key in traverse.skipKeywords)) {
-            _traverse(opts, pre, post, sch, jsonPtr + "/" + key, rootSchema, jsonPtr, key, schema);
+            _traverse(opts, pre, post, sch, jsonPtr + "/" + key, rootSchema, jsonPtr, key, schema2);
           }
         }
-        post(schema, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
+        post(schema2, jsonPtr, rootSchema, parentJsonPtr, parentKeyword, parentSchema, keyIndex);
       }
     }
-    function escapeJsonPtr(str) {
-      return str.replace(/~/g, "~0").replace(/\//g, "~1");
+    function escapeJsonPtr(str2) {
+      return str2.replace(/~/g, "~0").replace(/\//g, "~1");
     }
   }
 });
@@ -2191,14 +2191,14 @@ var require_resolve = __commonJS({
       "enum",
       "const"
     ]);
-    function inlineRef(schema, limit = true) {
-      if (typeof schema == "boolean")
+    function inlineRef(schema2, limit = true) {
+      if (typeof schema2 == "boolean")
         return true;
       if (limit === true)
-        return !hasRef(schema);
+        return !hasRef(schema2);
       if (!limit)
         return false;
-      return countKeys(schema) <= limit;
+      return countKeys(schema2) <= limit;
     }
     exports.inlineRef = inlineRef;
     var REF_KEYWORDS = /* @__PURE__ */ new Set([
@@ -2208,11 +2208,11 @@ var require_resolve = __commonJS({
       "$dynamicRef",
       "$dynamicAnchor"
     ]);
-    function hasRef(schema) {
-      for (const key in schema) {
+    function hasRef(schema2) {
+      for (const key in schema2) {
         if (REF_KEYWORDS.has(key))
           return true;
-        const sch = schema[key];
+        const sch = schema2[key];
         if (Array.isArray(sch) && sch.some(hasRef))
           return true;
         if (typeof sch == "object" && hasRef(sch))
@@ -2220,16 +2220,16 @@ var require_resolve = __commonJS({
       }
       return false;
     }
-    function countKeys(schema) {
+    function countKeys(schema2) {
       let count = 0;
-      for (const key in schema) {
+      for (const key in schema2) {
         if (key === "$ref")
           return Infinity;
         count++;
         if (SIMPLE_INLINED.has(key))
           continue;
-        if (typeof schema[key] == "object") {
-          (0, util_1.eachItem)(schema[key], (sch) => count += countKeys(sch));
+        if (typeof schema2[key] == "object") {
+          (0, util_1.eachItem)(schema2[key], (sch) => count += countKeys(sch));
         }
         if (count === Infinity)
           return Infinity;
@@ -2259,16 +2259,16 @@ var require_resolve = __commonJS({
     }
     exports.resolveUrl = resolveUrl;
     var ANCHOR = /^[a-z_][-a-z0-9._]*$/i;
-    function getSchemaRefs(schema, baseId) {
-      if (typeof schema == "boolean")
+    function getSchemaRefs(schema2, baseId) {
+      if (typeof schema2 == "boolean")
         return {};
       const { schemaId, uriResolver } = this.opts;
-      const schId = normalizeId(schema[schemaId] || baseId);
+      const schId = normalizeId(schema2[schemaId] || baseId);
       const baseIds = { "": schId };
       const pathPrefix = getFullPath(uriResolver, schId, false);
       const localRefs = {};
       const schemaRefs = /* @__PURE__ */ new Set();
-      traverse(schema, { allKeys: true }, (sch, jsonPtr, _, parentJsonPtr) => {
+      traverse(schema2, { allKeys: true }, (sch, jsonPtr, _, parentJsonPtr) => {
         if (parentJsonPtr === void 0)
           return;
         const fullPath = pathPrefix + jsonPtr;
@@ -2349,15 +2349,15 @@ var require_validate = __commonJS({
       validateFunction(it, () => (0, boolSchema_1.topBoolOrEmptySchema)(it));
     }
     exports.validateFunctionCode = validateFunctionCode;
-    function validateFunction({ gen, validateName, schema, schemaEnv, opts }, body) {
+    function validateFunction({ gen, validateName, schema: schema2, schemaEnv, opts }, body) {
       if (opts.code.es5) {
         gen.func(validateName, (0, codegen_1._)`${names_1.default.data}, ${names_1.default.valCxt}`, schemaEnv.$async, () => {
-          gen.code((0, codegen_1._)`"use strict"; ${funcSourceUrl(schema, opts)}`);
+          gen.code((0, codegen_1._)`"use strict"; ${funcSourceUrl(schema2, opts)}`);
           destructureValCxtES5(gen, opts);
           gen.code(body);
         });
       } else {
-        gen.func(validateName, (0, codegen_1._)`${names_1.default.data}, ${destructureValCxt(opts)}`, schemaEnv.$async, () => gen.code(funcSourceUrl(schema, opts)).code(body));
+        gen.func(validateName, (0, codegen_1._)`${names_1.default.data}, ${destructureValCxt(opts)}`, schemaEnv.$async, () => gen.code(funcSourceUrl(schema2, opts)).code(body));
       }
     }
     function destructureValCxt(opts) {
@@ -2381,9 +2381,9 @@ var require_validate = __commonJS({
       });
     }
     function topSchemaObjCode(it) {
-      const { schema, opts, gen } = it;
+      const { schema: schema2, opts, gen } = it;
       validateFunction(it, () => {
-        if (opts.$comment && schema.$comment)
+        if (opts.$comment && schema2.$comment)
           commentKeyword(it);
         checkNoDefault(it);
         gen.let(names_1.default.vErrors, null);
@@ -2401,8 +2401,8 @@ var require_validate = __commonJS({
       gen.if((0, codegen_1._)`${it.evaluated}.dynamicProps`, () => gen.assign((0, codegen_1._)`${it.evaluated}.props`, (0, codegen_1._)`undefined`));
       gen.if((0, codegen_1._)`${it.evaluated}.dynamicItems`, () => gen.assign((0, codegen_1._)`${it.evaluated}.items`, (0, codegen_1._)`undefined`));
     }
-    function funcSourceUrl(schema, opts) {
-      const schId = typeof schema == "object" && schema[opts.schemaId];
+    function funcSourceUrl(schema2, opts) {
+      const schId = typeof schema2 == "object" && schema2[opts.schemaId];
       return schId && (opts.code.source || opts.code.process) ? (0, codegen_1._)`/*# sourceURL=${schId} */` : codegen_1.nil;
     }
     function subschemaCode(it, valid) {
@@ -2415,10 +2415,10 @@ var require_validate = __commonJS({
       }
       (0, boolSchema_1.boolOrEmptySchema)(it, valid);
     }
-    function schemaCxtHasRules({ schema, self }) {
-      if (typeof schema == "boolean")
-        return !schema;
-      for (const key in schema)
+    function schemaCxtHasRules({ schema: schema2, self }) {
+      if (typeof schema2 == "boolean")
+        return !schema2;
+      for (const key in schema2)
         if (self.RULES.all[key])
           return true;
       return false;
@@ -2427,8 +2427,8 @@ var require_validate = __commonJS({
       return typeof it.schema != "boolean";
     }
     function subSchemaObjCode(it, valid) {
-      const { schema, gen, opts } = it;
-      if (opts.$comment && schema.$comment)
+      const { schema: schema2, gen, opts } = it;
+      if (opts.$comment && schema2.$comment)
         commentKeyword(it);
       updateContext(it);
       checkAsyncSchema(it);
@@ -2448,14 +2448,14 @@ var require_validate = __commonJS({
       schemaKeywords(it, types, !checkedTypes, errsCount);
     }
     function checkRefsAndKeywords(it) {
-      const { schema, errSchemaPath, opts, self } = it;
-      if (schema.$ref && opts.ignoreKeywordsWithRef && (0, util_1.schemaHasRulesButRef)(schema, self.RULES)) {
+      const { schema: schema2, errSchemaPath, opts, self } = it;
+      if (schema2.$ref && opts.ignoreKeywordsWithRef && (0, util_1.schemaHasRulesButRef)(schema2, self.RULES)) {
         self.logger.warn(`$ref: keywords ignored in schema at path "${errSchemaPath}"`);
       }
     }
     function checkNoDefault(it) {
-      const { schema, opts } = it;
-      if (schema.default !== void 0 && opts.useDefaults && opts.strictSchema) {
+      const { schema: schema2, opts } = it;
+      if (schema2.default !== void 0 && opts.useDefaults && opts.strictSchema) {
         (0, util_1.checkStrictMode)(it, "default is ignored in the schema root");
       }
     }
@@ -2468,8 +2468,8 @@ var require_validate = __commonJS({
       if (it.schema.$async && !it.schemaEnv.$async)
         throw new Error("async schema in sync schema");
     }
-    function commentKeyword({ gen, schemaEnv, schema, errSchemaPath, opts }) {
-      const msg = schema.$comment;
+    function commentKeyword({ gen, schemaEnv, schema: schema2, errSchemaPath, opts }) {
+      const msg = schema2.$comment;
       if (opts.$comment === true) {
         gen.code((0, codegen_1._)`${names_1.default.self}.logger.log(${msg})`);
       } else if (typeof opts.$comment == "function") {
@@ -2496,9 +2496,9 @@ var require_validate = __commonJS({
         gen.assign((0, codegen_1._)`${evaluated}.items`, items);
     }
     function schemaKeywords(it, types, typeErrors, errsCount) {
-      const { gen, schema, data, allErrors, opts, self } = it;
+      const { gen, schema: schema2, data, allErrors, opts, self } = it;
       const { RULES } = self;
-      if (schema.$ref && (opts.ignoreKeywordsWithRef || !(0, util_1.schemaHasRulesButRef)(schema, RULES))) {
+      if (schema2.$ref && (opts.ignoreKeywordsWithRef || !(0, util_1.schemaHasRulesButRef)(schema2, RULES))) {
         gen.block(() => keywordCode(it, "$ref", RULES.all.$ref.definition));
         return;
       }
@@ -2510,7 +2510,7 @@ var require_validate = __commonJS({
         groupKeywords(RULES.post);
       });
       function groupKeywords(group) {
-        if (!(0, applicability_1.shouldUseGroup)(schema, group))
+        if (!(0, applicability_1.shouldUseGroup)(schema2, group))
           return;
         if (group.type) {
           gen.if((0, dataType_2.checkDataType)(group.type, data, opts.strictNumbers));
@@ -2528,12 +2528,12 @@ var require_validate = __commonJS({
       }
     }
     function iterateKeywords(it, group) {
-      const { gen, schema, opts: { useDefaults } } = it;
+      const { gen, schema: schema2, opts: { useDefaults } } = it;
       if (useDefaults)
         (0, defaults_1.assignDefaults)(it, group.type);
       gen.block(() => {
         for (const rule of group.rules) {
-          if ((0, applicability_1.shouldUseRule)(schema, rule)) {
+          if ((0, applicability_1.shouldUseRule)(schema2, rule)) {
             keywordCode(it, rule.keyword, rule.definition, group.type);
           }
         }
@@ -2571,9 +2571,9 @@ var require_validate = __commonJS({
       for (const keyword in rules) {
         const rule = rules[keyword];
         if (typeof rule == "object" && (0, applicability_1.shouldUseRule)(it.schema, rule)) {
-          const { type } = rule.definition;
-          if (type.length && !type.some((t) => hasApplicableType(ts, t))) {
-            strictTypesError(it, `missing type "${type.join(",")}" for keyword "${keyword}"`);
+          const { type: type2 } = rule.definition;
+          if (type2.length && !type2.some((t) => hasApplicableType(ts, t))) {
+            strictTypesError(it, `missing type "${type2.join(",")}" for keyword "${keyword}"`);
           }
         }
       }
@@ -2878,17 +2878,17 @@ var require_compile = __commonJS({
         var _a;
         this.refs = {};
         this.dynamicAnchors = {};
-        let schema;
+        let schema2;
         if (typeof env.schema == "object")
-          schema = env.schema;
+          schema2 = env.schema;
         this.schema = env.schema;
         this.schemaId = env.schemaId;
         this.root = env.root || this;
-        this.baseId = (_a = env.baseId) !== null && _a !== void 0 ? _a : (0, resolve_1.normalizeId)(schema === null || schema === void 0 ? void 0 : schema[env.schemaId || "$id"]);
+        this.baseId = (_a = env.baseId) !== null && _a !== void 0 ? _a : (0, resolve_1.normalizeId)(schema2 === null || schema2 === void 0 ? void 0 : schema2[env.schemaId || "$id"]);
         this.schemaPath = env.schemaPath;
         this.localRefs = env.localRefs;
         this.meta = env.meta;
-        this.$async = schema === null || schema === void 0 ? void 0 : schema.$async;
+        this.$async = schema2 === null || schema2 === void 0 ? void 0 : schema2.$async;
         this.refs = {};
       }
     };
@@ -2987,10 +2987,10 @@ var require_compile = __commonJS({
         return schOrFunc;
       let _sch = resolve2.call(this, root, ref);
       if (_sch === void 0) {
-        const schema = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
+        const schema2 = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
-        if (schema)
-          _sch = new SchemaEnv({ schema, schemaId, root, baseId });
+        if (schema2)
+          _sch = new SchemaEnv({ schema: schema2, schemaId, root, baseId });
       }
       if (_sch === void 0)
         return;
@@ -3038,12 +3038,12 @@ var require_compile = __commonJS({
       if (!schOrRef.validate)
         compileSchema.call(this, schOrRef);
       if (id === (0, resolve_1.normalizeId)(ref)) {
-        const { schema } = schOrRef;
+        const { schema: schema2 } = schOrRef;
         const { schemaId } = this.opts;
-        const schId = schema[schemaId];
+        const schId = schema2[schemaId];
         if (schId)
           baseId = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schId);
-        return new SchemaEnv({ schema, schemaId, root, baseId });
+        return new SchemaEnv({ schema: schema2, schemaId, root, baseId });
       }
       return getJsonPointer.call(this, p, schOrRef);
     }
@@ -3055,29 +3055,29 @@ var require_compile = __commonJS({
       "dependencies",
       "definitions"
     ]);
-    function getJsonPointer(parsedRef, { baseId, schema, root }) {
+    function getJsonPointer(parsedRef, { baseId, schema: schema2, root }) {
       var _a;
       if (((_a = parsedRef.fragment) === null || _a === void 0 ? void 0 : _a[0]) !== "/")
         return;
       for (const part of parsedRef.fragment.slice(1).split("/")) {
-        if (typeof schema === "boolean")
+        if (typeof schema2 === "boolean")
           return;
-        const partSchema = schema[(0, util_1.unescapeFragment)(part)];
+        const partSchema = schema2[(0, util_1.unescapeFragment)(part)];
         if (partSchema === void 0)
           return;
-        schema = partSchema;
-        const schId = typeof schema === "object" && schema[this.opts.schemaId];
+        schema2 = partSchema;
+        const schId = typeof schema2 === "object" && schema2[this.opts.schemaId];
         if (!PREVENT_SCOPE_CHANGE.has(part) && schId) {
           baseId = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schId);
         }
       }
       let env;
-      if (typeof schema != "boolean" && schema.$ref && !(0, util_1.schemaHasRulesButRef)(schema, this.RULES)) {
-        const $ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schema.$ref);
+      if (typeof schema2 != "boolean" && schema2.$ref && !(0, util_1.schemaHasRulesButRef)(schema2, this.RULES)) {
+        const $ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schema2.$ref);
         env = resolveSchema.call(this, root, $ref);
       }
       const { schemaId } = this.opts;
-      env = env || new SchemaEnv({ schema, schemaId, root, baseId });
+      env = env || new SchemaEnv({ schema: schema2, schemaId, root, baseId });
       if (env.schema !== env.root.schema)
         return env;
       return void 0;
@@ -3220,10 +3220,10 @@ var require_utils = __commonJS({
         return { host, isIPV6: false };
       }
     }
-    function findToken(str, token) {
+    function findToken(str2, token) {
       let ind = 0;
-      for (let i = 0; i < str.length; i++) {
-        if (str[i] === token) ind++;
+      for (let i = 0; i < str2.length; i++) {
+        if (str2[i] === token) ind++;
       }
       return ind;
     }
@@ -3876,7 +3876,7 @@ var require_core = __commonJS({
     var util_1 = require_util();
     var $dataRefSchema = require_data();
     var uri_1 = require_uri();
-    var defaultRegExp = (str, flags) => new RegExp(str, flags);
+    var defaultRegExp = (str2, flags) => new RegExp(str2, flags);
     defaultRegExp.code = "new RegExp";
     var META_IGNORE_OPTIONS = ["removeAdditional", "useDefaults", "coerceTypes"];
     var EXT_SCOPE_NAMES = /* @__PURE__ */ new Set([
@@ -4006,16 +4006,16 @@ var require_core = __commonJS({
           this.errors = v.errors;
         return valid;
       }
-      compile(schema, _meta) {
-        const sch = this._addSchema(schema, _meta);
+      compile(schema2, _meta) {
+        const sch = this._addSchema(schema2, _meta);
         return sch.validate || this._compileSchemaEnv(sch);
       }
-      compileAsync(schema, meta) {
+      compileAsync(schema2, meta) {
         if (typeof this.opts.loadSchema != "function") {
           throw new Error("options.loadSchema should be a function");
         }
         const { loadSchema } = this.opts;
-        return runCompileAsync.call(this, schema, meta);
+        return runCompileAsync.call(this, schema2, meta);
         async function runCompileAsync(_schema, _meta) {
           await loadMetaSchema.call(this, _schema.$schema);
           const sch = this._addSchema(_schema, _meta);
@@ -4061,37 +4061,37 @@ var require_core = __commonJS({
         }
       }
       // Adds schema to the instance
-      addSchema(schema, key, _meta, _validateSchema = this.opts.validateSchema) {
-        if (Array.isArray(schema)) {
-          for (const sch of schema)
+      addSchema(schema2, key, _meta, _validateSchema = this.opts.validateSchema) {
+        if (Array.isArray(schema2)) {
+          for (const sch of schema2)
             this.addSchema(sch, void 0, _meta, _validateSchema);
           return this;
         }
         let id;
-        if (typeof schema === "object") {
+        if (typeof schema2 === "object") {
           const { schemaId } = this.opts;
-          id = schema[schemaId];
+          id = schema2[schemaId];
           if (id !== void 0 && typeof id != "string") {
             throw new Error(`schema ${schemaId} must be string`);
           }
         }
         key = (0, resolve_1.normalizeId)(key || id);
         this._checkUnique(key);
-        this.schemas[key] = this._addSchema(schema, _meta, key, _validateSchema, true);
+        this.schemas[key] = this._addSchema(schema2, _meta, key, _validateSchema, true);
         return this;
       }
       // Add schema that will be used to validate other schemas
       // options in META_IGNORE_OPTIONS are alway set to false
-      addMetaSchema(schema, key, _validateSchema = this.opts.validateSchema) {
-        this.addSchema(schema, key, true, _validateSchema);
+      addMetaSchema(schema2, key, _validateSchema = this.opts.validateSchema) {
+        this.addSchema(schema2, key, true, _validateSchema);
         return this;
       }
       //  Validate schema against its meta-schema
-      validateSchema(schema, throwOrLogError) {
-        if (typeof schema == "boolean")
+      validateSchema(schema2, throwOrLogError) {
+        if (typeof schema2 == "boolean")
           return true;
         let $schema;
-        $schema = schema.$schema;
+        $schema = schema2.$schema;
         if ($schema !== void 0 && typeof $schema != "string") {
           throw new Error("$schema must be a string");
         }
@@ -4101,7 +4101,7 @@ var require_core = __commonJS({
           this.errors = null;
           return true;
         }
-        const valid = this.validate($schema, schema);
+        const valid = this.validate($schema, schema2);
         if (!valid && throwOrLogError) {
           const message = "schema is invalid: " + this.errorsText();
           if (this.opts.validateSchema === "log")
@@ -4244,9 +4244,9 @@ var require_core = __commonJS({
             if (typeof rule != "object")
               continue;
             const { $data } = rule.definition;
-            const schema = keywords[key];
-            if ($data && schema)
-              keywords[key] = schemaOrData(schema);
+            const schema2 = keywords[key];
+            if ($data && schema2)
+              keywords[key] = schemaOrData(schema2);
           }
         }
         return metaSchema;
@@ -4264,23 +4264,23 @@ var require_core = __commonJS({
           }
         }
       }
-      _addSchema(schema, meta, baseId, validateSchema = this.opts.validateSchema, addSchema = this.opts.addUsedSchema) {
+      _addSchema(schema2, meta, baseId, validateSchema = this.opts.validateSchema, addSchema = this.opts.addUsedSchema) {
         let id;
         const { schemaId } = this.opts;
-        if (typeof schema == "object") {
-          id = schema[schemaId];
+        if (typeof schema2 == "object") {
+          id = schema2[schemaId];
         } else {
           if (this.opts.jtd)
             throw new Error("schema must be object");
-          else if (typeof schema != "boolean")
+          else if (typeof schema2 != "boolean")
             throw new Error("schema must be object or boolean");
         }
-        let sch = this._cache.get(schema);
+        let sch = this._cache.get(schema2);
         if (sch !== void 0)
           return sch;
         baseId = (0, resolve_1.normalizeId)(id || baseId);
-        const localRefs = resolve_1.getSchemaRefs.call(this, schema, baseId);
-        sch = new compile_1.SchemaEnv({ schema, schemaId, meta, baseId, localRefs });
+        const localRefs = resolve_1.getSchemaRefs.call(this, schema2, baseId);
+        sch = new compile_1.SchemaEnv({ schema: schema2, schemaId, meta, baseId, localRefs });
         this._cache.set(sch.schema, sch);
         if (addSchema && !baseId.startsWith("#")) {
           if (baseId)
@@ -4288,7 +4288,7 @@ var require_core = __commonJS({
           this.refs[baseId] = sch;
         }
         if (validateSchema)
-          this.validateSchema(schema, true);
+          this.validateSchema(schema2, true);
         return sch;
       }
       _checkUnique(id) {
@@ -4442,8 +4442,8 @@ var require_core = __commonJS({
     var $dataRef = {
       $ref: "https://raw.githubusercontent.com/ajv-validator/ajv/master/lib/refs/data.json#"
     };
-    function schemaOrData(schema) {
-      return { anyOf: [schema, $dataRef] };
+    function schemaOrData(schema2) {
+      return { anyOf: [schema2, $dataRef] };
     }
   }
 });
@@ -4592,7 +4592,7 @@ var require_core2 = __commonJS({
     Object.defineProperty(exports, "__esModule", { value: true });
     var id_1 = require_id();
     var ref_1 = require_ref();
-    var core = [
+    var core2 = [
       "$schema",
       "$id",
       "$defs",
@@ -4602,7 +4602,7 @@ var require_core2 = __commonJS({
       id_1.default,
       ref_1.default
     ];
-    exports.default = core;
+    exports.default = core2;
   }
 });
 
@@ -4671,16 +4671,16 @@ var require_ucs2length = __commonJS({
   "../../node_modules/.pnpm/ajv@8.17.1/node_modules/ajv/dist/runtime/ucs2length.js"(exports) {
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
-    function ucs2length(str) {
-      const len = str.length;
+    function ucs2length(str2) {
+      const len = str2.length;
       let length = 0;
       let pos = 0;
       let value;
       while (pos < len) {
         length++;
-        value = str.charCodeAt(pos++);
+        value = str2.charCodeAt(pos++);
         if (value >= 55296 && value <= 56319 && pos < len) {
-          value = str.charCodeAt(pos);
+          value = str2.charCodeAt(pos);
           if ((value & 64512) === 56320)
             pos++;
         }
@@ -4742,9 +4742,9 @@ var require_pattern = __commonJS({
       $data: true,
       error: error2,
       code(cxt) {
-        const { data, $data, schema, schemaCode, it } = cxt;
+        const { data, $data, schema: schema2, schemaCode, it } = cxt;
         const u = it.opts.unicodeRegExp ? "u" : "";
-        const regExp = $data ? (0, codegen_1._)`(new RegExp(${schemaCode}, ${u}))` : (0, code_1.usePattern)(cxt, schema);
+        const regExp = $data ? (0, codegen_1._)`(new RegExp(${schemaCode}, ${u}))` : (0, code_1.usePattern)(cxt, schema2);
         cxt.fail$data((0, codegen_1._)`!${regExp}.test(${data})`);
       }
     };
@@ -4800,11 +4800,11 @@ var require_required = __commonJS({
       $data: true,
       error: error2,
       code(cxt) {
-        const { gen, schema, schemaCode, data, $data, it } = cxt;
+        const { gen, schema: schema2, schemaCode, data, $data, it } = cxt;
         const { opts } = it;
-        if (!$data && schema.length === 0)
+        if (!$data && schema2.length === 0)
           return;
-        const useLoop = schema.length >= opts.loopRequired;
+        const useLoop = schema2.length >= opts.loopRequired;
         if (it.allErrors)
           allErrorsMode();
         else
@@ -4812,7 +4812,7 @@ var require_required = __commonJS({
         if (opts.strictRequired) {
           const props = cxt.parentSchema.properties;
           const { definedProperties } = cxt.it;
-          for (const requiredKey of schema) {
+          for (const requiredKey of schema2) {
             if ((props === null || props === void 0 ? void 0 : props[requiredKey]) === void 0 && !definedProperties.has(requiredKey)) {
               const schemaPath = it.schemaEnv.baseId + it.errSchemaPath;
               const msg = `required property "${requiredKey}" is not defined at "${schemaPath}" (strictRequired)`;
@@ -4824,7 +4824,7 @@ var require_required = __commonJS({
           if (useLoop || $data) {
             cxt.block$data(codegen_1.nil, loopAllRequired);
           } else {
-            for (const prop of schema) {
+            for (const prop of schema2) {
               (0, code_1.checkReportMissingProp)(cxt, prop);
             }
           }
@@ -4836,7 +4836,7 @@ var require_required = __commonJS({
             cxt.block$data(valid, () => loopUntilMissing(missing, valid));
             cxt.ok(valid);
           } else {
-            gen.if((0, code_1.checkMissingProp)(cxt, schema, missing));
+            gen.if((0, code_1.checkMissingProp)(cxt, schema2, missing));
             (0, code_1.reportMissingProp)(cxt, missing);
             gen.else();
           }
@@ -4923,8 +4923,8 @@ var require_uniqueItems = __commonJS({
       $data: true,
       error: error2,
       code(cxt) {
-        const { gen, data, $data, schema, parentSchema, schemaCode, it } = cxt;
-        if (!$data && !schema)
+        const { gen, data, $data, schema: schema2, parentSchema, schemaCode, it } = cxt;
+        if (!$data && !schema2)
           return;
         const valid = gen.let("valid");
         const itemTypes = parentSchema.items ? (0, dataType_1.getSchemaTypes)(parentSchema.items) : [];
@@ -4987,11 +4987,11 @@ var require_const = __commonJS({
       $data: true,
       error: error2,
       code(cxt) {
-        const { gen, data, $data, schemaCode, schema } = cxt;
-        if ($data || schema && typeof schema == "object") {
+        const { gen, data, $data, schemaCode, schema: schema2 } = cxt;
+        if ($data || schema2 && typeof schema2 == "object") {
           cxt.fail$data((0, codegen_1._)`!${(0, util_1.useFunc)(gen, equal_1.default)}(${data}, ${schemaCode})`);
         } else {
-          cxt.fail((0, codegen_1._)`${schema} !== ${data}`);
+          cxt.fail((0, codegen_1._)`${schema2} !== ${data}`);
         }
       }
     };
@@ -5017,10 +5017,10 @@ var require_enum = __commonJS({
       $data: true,
       error: error2,
       code(cxt) {
-        const { gen, data, $data, schema, schemaCode, it } = cxt;
-        if (!$data && schema.length === 0)
+        const { gen, data, $data, schema: schema2, schemaCode, it } = cxt;
+        if (!$data && schema2.length === 0)
           throw new Error("enum must have non-empty array");
-        const useLoop = schema.length >= it.opts.loopEnum;
+        const useLoop = schema2.length >= it.opts.loopEnum;
         let eql;
         const getEql = () => eql !== null && eql !== void 0 ? eql : eql = (0, util_1.useFunc)(gen, equal_1.default);
         let valid;
@@ -5028,10 +5028,10 @@ var require_enum = __commonJS({
           valid = gen.let("valid");
           cxt.block$data(valid, loopEnum);
         } else {
-          if (!Array.isArray(schema))
+          if (!Array.isArray(schema2))
             throw new Error("ajv implementation error");
           const vSchema = gen.const("vSchema", schemaCode);
-          valid = (0, codegen_1.or)(...schema.map((_x, i) => equalCode(vSchema, i)));
+          valid = (0, codegen_1.or)(...schema2.map((_x, i) => equalCode(vSchema, i)));
         }
         cxt.pass(valid);
         function loopEnum() {
@@ -5039,7 +5039,7 @@ var require_enum = __commonJS({
           gen.forOf("v", schemaCode, (v) => gen.if((0, codegen_1._)`${getEql()}(${data}, ${v})`, () => gen.assign(valid, true).break()));
         }
         function equalCode(vSchema, i) {
-          const sch = schema[i];
+          const sch = schema2[i];
           return typeof sch === "object" && sch !== null ? (0, codegen_1._)`${getEql()}(${data}, ${vSchema}[${i}])` : (0, codegen_1._)`${data} === ${sch}`;
         }
       }
@@ -5115,13 +5115,13 @@ var require_additionalItems = __commonJS({
       }
     };
     function validateAdditionalItems(cxt, items) {
-      const { gen, schema, data, keyword, it } = cxt;
+      const { gen, schema: schema2, data, keyword, it } = cxt;
       it.items = true;
       const len = gen.const("len", (0, codegen_1._)`${data}.length`);
-      if (schema === false) {
+      if (schema2 === false) {
         cxt.setParams({ len: items.length });
         cxt.pass((0, codegen_1._)`${len} <= ${items.length}`);
-      } else if (typeof schema == "object" && !(0, util_1.alwaysValidSchema)(it, schema)) {
+      } else if (typeof schema2 == "object" && !(0, util_1.alwaysValidSchema)(it, schema2)) {
         const valid = gen.var("valid", (0, codegen_1._)`${len} <= ${items.length}`);
         gen.if((0, codegen_1.not)(valid), () => validateItems(valid));
         cxt.ok(valid);
@@ -5154,11 +5154,11 @@ var require_items = __commonJS({
       schemaType: ["object", "array", "boolean"],
       before: "uniqueItems",
       code(cxt) {
-        const { schema, it } = cxt;
-        if (Array.isArray(schema))
-          return validateTuple(cxt, "additionalItems", schema);
+        const { schema: schema2, it } = cxt;
+        if (Array.isArray(schema2))
+          return validateTuple(cxt, "additionalItems", schema2);
         it.items = true;
-        if ((0, util_1.alwaysValidSchema)(it, schema))
+        if ((0, util_1.alwaysValidSchema)(it, schema2))
           return;
         cxt.ok((0, code_1.validateArray)(cxt));
       }
@@ -5233,10 +5233,10 @@ var require_items2020 = __commonJS({
       before: "uniqueItems",
       error: error2,
       code(cxt) {
-        const { schema, parentSchema, it } = cxt;
+        const { schema: schema2, parentSchema, it } = cxt;
         const { prefixItems } = parentSchema;
         it.items = true;
-        if ((0, util_1.alwaysValidSchema)(it, schema))
+        if ((0, util_1.alwaysValidSchema)(it, schema2))
           return;
         if (prefixItems)
           (0, additionalItems_1.validateAdditionalItems)(cxt, prefixItems);
@@ -5267,7 +5267,7 @@ var require_contains = __commonJS({
       trackErrors: true,
       error: error2,
       code(cxt) {
-        const { gen, schema, parentSchema, data, it } = cxt;
+        const { gen, schema: schema2, parentSchema, data, it } = cxt;
         let min;
         let max;
         const { minContains, maxContains } = parentSchema;
@@ -5288,7 +5288,7 @@ var require_contains = __commonJS({
           cxt.fail();
           return;
         }
-        if ((0, util_1.alwaysValidSchema)(it, schema)) {
+        if ((0, util_1.alwaysValidSchema)(it, schema2)) {
           let cond = (0, codegen_1._)`${len} >= ${min}`;
           if (max !== void 0)
             cond = (0, codegen_1._)`${cond} && ${len} <= ${max}`;
@@ -5373,14 +5373,14 @@ var require_dependencies = __commonJS({
         validateSchemaDeps(cxt, schDeps);
       }
     };
-    function splitDependencies({ schema }) {
+    function splitDependencies({ schema: schema2 }) {
       const propertyDeps = {};
       const schemaDeps = {};
-      for (const key in schema) {
+      for (const key in schema2) {
         if (key === "__proto__")
           continue;
-        const deps = Array.isArray(schema[key]) ? propertyDeps : schemaDeps;
-        deps[key] = schema[key];
+        const deps = Array.isArray(schema2[key]) ? propertyDeps : schemaDeps;
+        deps[key] = schema2[key];
       }
       return [propertyDeps, schemaDeps];
     }
@@ -5453,8 +5453,8 @@ var require_propertyNames = __commonJS({
       schemaType: ["object", "boolean"],
       error: error2,
       code(cxt) {
-        const { gen, schema, data, it } = cxt;
-        if ((0, util_1.alwaysValidSchema)(it, schema))
+        const { gen, schema: schema2, data, it } = cxt;
+        if ((0, util_1.alwaysValidSchema)(it, schema2))
           return;
         const valid = gen.name("valid");
         gen.forIn("key", data, (key) => {
@@ -5500,12 +5500,12 @@ var require_additionalProperties = __commonJS({
       trackErrors: true,
       error: error2,
       code(cxt) {
-        const { gen, schema, parentSchema, data, errsCount, it } = cxt;
+        const { gen, schema: schema2, parentSchema, data, errsCount, it } = cxt;
         if (!errsCount)
           throw new Error("ajv implementation error");
         const { allErrors, opts } = it;
         it.props = true;
-        if (opts.removeAdditional !== "all" && (0, util_1.alwaysValidSchema)(it, schema))
+        if (opts.removeAdditional !== "all" && (0, util_1.alwaysValidSchema)(it, schema2))
           return;
         const props = (0, code_1.allSchemaProperties)(parentSchema.properties);
         const patProps = (0, code_1.allSchemaProperties)(parentSchema.patternProperties);
@@ -5538,18 +5538,18 @@ var require_additionalProperties = __commonJS({
           gen.code((0, codegen_1._)`delete ${data}[${key}]`);
         }
         function additionalPropertyCode(key) {
-          if (opts.removeAdditional === "all" || opts.removeAdditional && schema === false) {
+          if (opts.removeAdditional === "all" || opts.removeAdditional && schema2 === false) {
             deleteAdditional(key);
             return;
           }
-          if (schema === false) {
+          if (schema2 === false) {
             cxt.setParams({ additionalProperty: key });
             cxt.error();
             if (!allErrors)
               gen.break();
             return;
           }
-          if (typeof schema == "object" && !(0, util_1.alwaysValidSchema)(it, schema)) {
+          if (typeof schema2 == "object" && !(0, util_1.alwaysValidSchema)(it, schema2)) {
             const valid = gen.name("valid");
             if (opts.removeAdditional === "failing") {
               applyAdditionalSchema(key, valid, false);
@@ -5599,18 +5599,18 @@ var require_properties = __commonJS({
       type: "object",
       schemaType: "object",
       code(cxt) {
-        const { gen, schema, parentSchema, data, it } = cxt;
+        const { gen, schema: schema2, parentSchema, data, it } = cxt;
         if (it.opts.removeAdditional === "all" && parentSchema.additionalProperties === void 0) {
           additionalProperties_1.default.code(new validate_1.KeywordCxt(it, additionalProperties_1.default, "additionalProperties"));
         }
-        const allProps = (0, code_1.allSchemaProperties)(schema);
+        const allProps = (0, code_1.allSchemaProperties)(schema2);
         for (const prop of allProps) {
           it.definedProperties.add(prop);
         }
         if (it.opts.unevaluated && allProps.length && it.props !== true) {
           it.props = util_1.mergeEvaluated.props(gen, (0, util_1.toHash)(allProps), it.props);
         }
-        const properties = allProps.filter((p) => !(0, util_1.alwaysValidSchema)(it, schema[p]));
+        const properties = allProps.filter((p) => !(0, util_1.alwaysValidSchema)(it, schema2[p]));
         if (properties.length === 0)
           return;
         const valid = gen.name("valid");
@@ -5628,7 +5628,7 @@ var require_properties = __commonJS({
           cxt.ok(valid);
         }
         function hasDefault(prop) {
-          return it.opts.useDefaults && !it.compositeRule && schema[prop].default !== void 0;
+          return it.opts.useDefaults && !it.compositeRule && schema2[prop].default !== void 0;
         }
         function applyPropertySchema(prop) {
           cxt.subschema({
@@ -5657,10 +5657,10 @@ var require_patternProperties = __commonJS({
       type: "object",
       schemaType: "object",
       code(cxt) {
-        const { gen, schema, data, parentSchema, it } = cxt;
+        const { gen, schema: schema2, data, parentSchema, it } = cxt;
         const { opts } = it;
-        const patterns = (0, code_1.allSchemaProperties)(schema);
-        const alwaysValidPatterns = patterns.filter((p) => (0, util_1.alwaysValidSchema)(it, schema[p]));
+        const patterns = (0, code_1.allSchemaProperties)(schema2);
+        const alwaysValidPatterns = patterns.filter((p) => (0, util_1.alwaysValidSchema)(it, schema2[p]));
         if (patterns.length === 0 || alwaysValidPatterns.length === patterns.length && (!it.opts.unevaluated || it.props === true)) {
           return;
         }
@@ -5728,8 +5728,8 @@ var require_not = __commonJS({
       schemaType: ["object", "boolean"],
       trackErrors: true,
       code(cxt) {
-        const { gen, schema, it } = cxt;
-        if ((0, util_1.alwaysValidSchema)(it, schema)) {
+        const { gen, schema: schema2, it } = cxt;
+        if ((0, util_1.alwaysValidSchema)(it, schema2)) {
           cxt.fail();
           return;
         }
@@ -5782,12 +5782,12 @@ var require_oneOf = __commonJS({
       trackErrors: true,
       error: error2,
       code(cxt) {
-        const { gen, schema, parentSchema, it } = cxt;
-        if (!Array.isArray(schema))
+        const { gen, schema: schema2, parentSchema, it } = cxt;
+        if (!Array.isArray(schema2))
           throw new Error("ajv implementation error");
         if (it.opts.discriminator && parentSchema.discriminator)
           return;
-        const schArr = schema;
+        const schArr = schema2;
         const valid = gen.let("valid", false);
         const passing = gen.let("passing", null);
         const schValid = gen.name("_valid");
@@ -5833,11 +5833,11 @@ var require_allOf = __commonJS({
       keyword: "allOf",
       schemaType: "array",
       code(cxt) {
-        const { gen, schema, it } = cxt;
-        if (!Array.isArray(schema))
+        const { gen, schema: schema2, it } = cxt;
+        if (!Array.isArray(schema2))
           throw new Error("ajv implementation error");
         const valid = gen.name("valid");
-        schema.forEach((sch, i) => {
+        schema2.forEach((sch, i) => {
           if ((0, util_1.alwaysValidSchema)(it, sch))
             return;
           const schCxt = cxt.subschema({ keyword: "allOf", schemaProp: i }, valid);
@@ -5912,8 +5912,8 @@ var require_if = __commonJS({
       }
     };
     function hasSchema(it, keyword) {
-      const schema = it.schema[keyword];
-      return schema !== void 0 && !(0, util_1.alwaysValidSchema)(it, schema);
+      const schema2 = it.schema[keyword];
+      return schema2 !== void 0 && !(0, util_1.alwaysValidSchema)(it, schema2);
     }
     exports.default = def;
   }
@@ -6002,7 +6002,7 @@ var require_format = __commonJS({
       $data: true,
       error: error2,
       code(cxt, ruleType) {
-        const { gen, data, $data, schema, schemaCode, it } = cxt;
+        const { gen, data, $data, schema: schema2, schemaCode, it } = cxt;
         const { opts, errSchemaPath, schemaEnv, self } = it;
         if (!opts.validateFormats)
           return;
@@ -6032,7 +6032,7 @@ var require_format = __commonJS({
           }
         }
         function validateFormat() {
-          const formatDef = self.formats[schema];
+          const formatDef = self.formats[schema2];
           if (!formatDef) {
             unknownFormat();
             return;
@@ -6049,12 +6049,12 @@ var require_format = __commonJS({
             }
             throw new Error(unknownMsg());
             function unknownMsg() {
-              return `unknown format "${schema}" ignored in schema at path "${errSchemaPath}"`;
+              return `unknown format "${schema2}" ignored in schema at path "${errSchemaPath}"`;
             }
           }
           function getFormat(fmtDef) {
-            const code = fmtDef instanceof RegExp ? (0, codegen_1.regexpCode)(fmtDef) : opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(schema)}` : void 0;
-            const fmt = gen.scopeValue("formats", { key: schema, ref: fmtDef, code });
+            const code = fmtDef instanceof RegExp ? (0, codegen_1.regexpCode)(fmtDef) : opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(schema2)}` : void 0;
+            const fmt = gen.scopeValue("formats", { key: schema2, ref: fmtDef, code });
             if (typeof fmtDef == "object" && !(fmtDef instanceof RegExp)) {
               return [fmtDef.type || "string", fmtDef.validate, (0, codegen_1._)`${fmt}.validate`];
             }
@@ -6165,15 +6165,15 @@ var require_discriminator = __commonJS({
       schemaType: "object",
       error: error2,
       code(cxt) {
-        const { gen, data, schema, parentSchema, it } = cxt;
+        const { gen, data, schema: schema2, parentSchema, it } = cxt;
         const { oneOf } = parentSchema;
         if (!it.opts.discriminator) {
           throw new Error("discriminator: requires discriminator option");
         }
-        const tagName = schema.propertyName;
+        const tagName = schema2.propertyName;
         if (typeof tagName != "string")
           throw new Error("discriminator: requires propertyName");
-        if (schema.mapping)
+        if (schema2.mapping)
           throw new Error("discriminator: mapping is not supported");
         if (!oneOf)
           throw new Error("discriminator: requires oneOf keyword");
@@ -6554,8 +6554,8 @@ var require_formats = __commonJS({
     }
     var DATE = /^(\d\d\d\d)-(\d\d)-(\d\d)$/;
     var DAYS = [0, 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-    function date3(str) {
-      const matches = DATE.exec(str);
+    function date3(str2) {
+      const matches = DATE.exec(str2);
       if (!matches)
         return false;
       const year = +matches[1];
@@ -6574,8 +6574,8 @@ var require_formats = __commonJS({
     }
     var TIME = /^(\d\d):(\d\d):(\d\d(?:\.\d+)?)(z|([+-])(\d\d)(?::?(\d\d))?)?$/i;
     function getTime(strictTimeZone) {
-      return function time3(str) {
-        const matches = TIME.exec(str);
+      return function time3(str2) {
+        const matches = TIME.exec(str2);
         if (!matches)
           return false;
         const hr = +matches[1];
@@ -6621,8 +6621,8 @@ var require_formats = __commonJS({
     var DATE_TIME_SEPARATOR = /t|\s/i;
     function getDateTime(strictTimeZone) {
       const time3 = getTime(strictTimeZone);
-      return function date_time(str) {
-        const dateTime = str.split(DATE_TIME_SEPARATOR);
+      return function date_time(str2) {
+        const dateTime = str2.split(DATE_TIME_SEPARATOR);
         return dateTime.length === 2 && date3(dateTime[0]) && time3(dateTime[1]);
       };
     }
@@ -6647,13 +6647,13 @@ var require_formats = __commonJS({
     }
     var NOT_URI_FRAGMENT = /\/|:/;
     var URI = /^(?:[a-z][a-z0-9+\-.]*:)(?:\/?\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:]|%[0-9a-f]{2})*@)?(?:\[(?:(?:(?:(?:[0-9a-f]{1,4}:){6}|::(?:[0-9a-f]{1,4}:){5}|(?:[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){4}|(?:(?:[0-9a-f]{1,4}:){0,1}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){3}|(?:(?:[0-9a-f]{1,4}:){0,2}[0-9a-f]{1,4})?::(?:[0-9a-f]{1,4}:){2}|(?:(?:[0-9a-f]{1,4}:){0,3}[0-9a-f]{1,4})?::[0-9a-f]{1,4}:|(?:(?:[0-9a-f]{1,4}:){0,4}[0-9a-f]{1,4})?::)(?:[0-9a-f]{1,4}:[0-9a-f]{1,4}|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?))|(?:(?:[0-9a-f]{1,4}:){0,5}[0-9a-f]{1,4})?::[0-9a-f]{1,4}|(?:(?:[0-9a-f]{1,4}:){0,6}[0-9a-f]{1,4})?::)|[Vv][0-9a-f]+\.[a-z0-9\-._~!$&'()*+,;=:]+)\]|(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)|(?:[a-z0-9\-._~!$&'()*+,;=]|%[0-9a-f]{2})*)(?::\d*)?(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*|\/(?:(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)?|(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})+(?:\/(?:[a-z0-9\-._~!$&'()*+,;=:@]|%[0-9a-f]{2})*)*)(?:\?(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?(?:#(?:[a-z0-9\-._~!$&'()*+,;=:@/?]|%[0-9a-f]{2})*)?$/i;
-    function uri(str) {
-      return NOT_URI_FRAGMENT.test(str) && URI.test(str);
+    function uri(str2) {
+      return NOT_URI_FRAGMENT.test(str2) && URI.test(str2);
     }
     var BYTE = /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/gm;
-    function byte(str) {
+    function byte(str2) {
       BYTE.lastIndex = 0;
-      return BYTE.test(str);
+      return BYTE.test(str2);
     }
     var MIN_INT32 = -(2 ** 31);
     var MAX_INT32 = 2 ** 31 - 1;
@@ -6667,11 +6667,11 @@ var require_formats = __commonJS({
       return true;
     }
     var Z_ANCHOR = /[^\\]\\Z/;
-    function regex(str) {
-      if (Z_ANCHOR.test(str))
+    function regex(str2) {
+      if (Z_ANCHOR.test(str2))
         return false;
       try {
-        new RegExp(str);
+        new RegExp(str2);
         return true;
       } catch (e) {
         return false;
@@ -6795,7 +6795,7 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync25, readdirSync as readdirSync8, statSync as statSync6 } from "node:fs";
+import { existsSync as existsSync27, readdirSync as readdirSync8, statSync as statSync6 } from "node:fs";
 import { join as join26 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
@@ -6945,10 +6945,10 @@ function jsonStringifyReplacer(_, value) {
   return value;
 }
 function cached(getter) {
-  const set = false;
+  const set2 = false;
   return {
     get value() {
-      if (!set) {
+      if (!set2) {
         const value = getter();
         Object.defineProperty(this, "value", { value });
         return value;
@@ -6974,10 +6974,10 @@ function floatSafeRemainder(val, step) {
   return valInt % stepInt / 10 ** decCount;
 }
 function defineLazy(object3, key, getter) {
-  const set = false;
+  const set2 = false;
   Object.defineProperty(object3, key, {
     get() {
-      if (!set) {
+      if (!set2) {
         const value = getter();
         object3[key] = value;
         return value;
@@ -7019,14 +7019,14 @@ function promiseAllObject(promisesObj) {
 }
 function randomString(length = 10) {
   const chars = "abcdefghijklmnopqrstuvwxyz";
-  let str = "";
+  let str2 = "";
   for (let i = 0; i < length; i++) {
-    str += chars[Math.floor(Math.random() * chars.length)];
+    str2 += chars[Math.floor(Math.random() * chars.length)];
   }
-  return str;
+  return str2;
 }
-function esc(str) {
-  return JSON.stringify(str);
+function esc(str2) {
+  return JSON.stringify(str2);
 }
 var captureStackTrace = Error.captureStackTrace ? Error.captureStackTrace : (..._args) => {
 };
@@ -7114,8 +7114,8 @@ var getParsedType = (data) => {
 };
 var propertyKeyTypes = /* @__PURE__ */ new Set(["string", "number", "symbol"]);
 var primitiveTypes = /* @__PURE__ */ new Set(["string", "number", "bigint", "boolean", "symbol", "undefined"]);
-function escapeRegex(str) {
-  return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function escapeRegex(str2) {
+  return str2.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 function clone(inst, def, params) {
   const cl = new inst._zod.constr(def ?? inst._zod.def);
@@ -7195,9 +7195,9 @@ var BIGINT_FORMAT_RANGES = {
   int64: [/* @__PURE__ */ BigInt("-9223372036854775808"), /* @__PURE__ */ BigInt("9223372036854775807")],
   uint64: [/* @__PURE__ */ BigInt(0), /* @__PURE__ */ BigInt("18446744073709551615")]
 };
-function pick(schema, mask) {
+function pick(schema2, mask) {
   const newShape = {};
-  const currDef = schema._zod.def;
+  const currDef = schema2._zod.def;
   for (const key in mask) {
     if (!(key in currDef.shape)) {
       throw new Error(`Unrecognized key: "${key}"`);
@@ -7206,15 +7206,15 @@ function pick(schema, mask) {
       continue;
     newShape[key] = currDef.shape[key];
   }
-  return clone(schema, {
-    ...schema._zod.def,
+  return clone(schema2, {
+    ...schema2._zod.def,
     shape: newShape,
     checks: []
   });
 }
-function omit(schema, mask) {
-  const newShape = { ...schema._zod.def.shape };
-  const currDef = schema._zod.def;
+function omit(schema2, mask) {
+  const newShape = { ...schema2._zod.def.shape };
+  const currDef = schema2._zod.def;
   for (const key in mask) {
     if (!(key in currDef.shape)) {
       throw new Error(`Unrecognized key: "${key}"`);
@@ -7223,27 +7223,27 @@ function omit(schema, mask) {
       continue;
     delete newShape[key];
   }
-  return clone(schema, {
-    ...schema._zod.def,
+  return clone(schema2, {
+    ...schema2._zod.def,
     shape: newShape,
     checks: []
   });
 }
-function extend(schema, shape) {
+function extend(schema2, shape) {
   if (!isPlainObject(shape)) {
     throw new Error("Invalid input to extend: expected a plain object");
   }
   const def = {
-    ...schema._zod.def,
+    ...schema2._zod.def,
     get shape() {
-      const _shape = { ...schema._zod.def.shape, ...shape };
+      const _shape = { ...schema2._zod.def.shape, ...shape };
       assignProp(this, "shape", _shape);
       return _shape;
     },
     checks: []
     // delete existing checks
   };
-  return clone(schema, def);
+  return clone(schema2, def);
 }
 function merge(a, b) {
   return clone(a, {
@@ -7258,8 +7258,8 @@ function merge(a, b) {
     // delete existing checks
   });
 }
-function partial(Class2, schema, mask) {
-  const oldShape = schema._zod.def.shape;
+function partial(Class2, schema2, mask) {
+  const oldShape = schema2._zod.def.shape;
   const shape = { ...oldShape };
   if (mask) {
     for (const key in mask) {
@@ -7281,14 +7281,14 @@ function partial(Class2, schema, mask) {
       }) : oldShape[key];
     }
   }
-  return clone(schema, {
-    ...schema._zod.def,
+  return clone(schema2, {
+    ...schema2._zod.def,
     shape,
     checks: []
   });
 }
-function required(Class2, schema, mask) {
-  const oldShape = schema._zod.def.shape;
+function required(Class2, schema2, mask) {
+  const oldShape = schema2._zod.def.shape;
   const shape = { ...oldShape };
   if (mask) {
     for (const key in mask) {
@@ -7310,8 +7310,8 @@ function required(Class2, schema, mask) {
       });
     }
   }
-  return clone(schema, {
-    ...schema._zod.def,
+  return clone(schema2, {
+    ...schema2._zod.def,
     shape,
     // optional: [],
     checks: []
@@ -7462,9 +7462,9 @@ function formatError(error2, _mapper) {
 }
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/parse.js
-var _parse = (_Err) => (schema, value, _ctx, _params) => {
+var _parse = (_Err) => (schema2, value, _ctx, _params) => {
   const ctx = _ctx ? Object.assign(_ctx, { async: false }) : { async: false };
-  const result = schema._zod.run({ value, issues: [] }, ctx);
+  const result = schema2._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise) {
     throw new $ZodAsyncError();
   }
@@ -7476,9 +7476,9 @@ var _parse = (_Err) => (schema, value, _ctx, _params) => {
   return result.value;
 };
 var parse = /* @__PURE__ */ _parse($ZodRealError);
-var _parseAsync = (_Err) => async (schema, value, _ctx, params) => {
+var _parseAsync = (_Err) => async (schema2, value, _ctx, params) => {
   const ctx = _ctx ? Object.assign(_ctx, { async: true }) : { async: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
+  let result = schema2._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise)
     result = await result;
   if (result.issues.length) {
@@ -7489,9 +7489,9 @@ var _parseAsync = (_Err) => async (schema, value, _ctx, params) => {
   return result.value;
 };
 var parseAsync = /* @__PURE__ */ _parseAsync($ZodRealError);
-var _safeParse = (_Err) => (schema, value, _ctx) => {
+var _safeParse = (_Err) => (schema2, value, _ctx) => {
   const ctx = _ctx ? { ..._ctx, async: false } : { async: false };
-  const result = schema._zod.run({ value, issues: [] }, ctx);
+  const result = schema2._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise) {
     throw new $ZodAsyncError();
   }
@@ -7501,9 +7501,9 @@ var _safeParse = (_Err) => (schema, value, _ctx) => {
   } : { success: true, data: result.value };
 };
 var safeParse = /* @__PURE__ */ _safeParse($ZodRealError);
-var _safeParseAsync = (_Err) => async (schema, value, _ctx) => {
+var _safeParseAsync = (_Err) => async (schema2, value, _ctx) => {
   const ctx = _ctx ? Object.assign(_ctx, { async: true }) : { async: true };
-  let result = schema._zod.run({ value, issues: [] }, ctx);
+  let result = schema2._zod.run({ value, issues: [] }, ctx);
   if (result instanceof Promise)
     result = await result;
   return result.issues.length ? {
@@ -8615,7 +8615,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
     return (payload, ctx) => fn(shape, payload, ctx);
   };
   let fastpass;
-  const isObject2 = isObject;
+  const isObject3 = isObject;
   const jit = !globalConfig.jitless;
   const allowsEval2 = allowsEval;
   const fastEnabled = jit && allowsEval2.value;
@@ -8624,7 +8624,7 @@ var $ZodObject = /* @__PURE__ */ $constructor("$ZodObject", (inst, def) => {
   inst._zod.parse = (payload, ctx) => {
     value ?? (value = _normalized.value);
     const input = payload.value;
-    if (!isObject2(input)) {
+    if (!isObject3(input)) {
       payload.issues.push({
         expected: "object",
         code: "invalid_type",
@@ -8767,19 +8767,19 @@ var $ZodDiscriminatedUnion = /* @__PURE__ */ $constructor("$ZodDiscriminatedUnio
   });
   const disc = cached(() => {
     const opts = def.options;
-    const map = /* @__PURE__ */ new Map();
+    const map2 = /* @__PURE__ */ new Map();
     for (const o of opts) {
       const values = o._zod.propValues[def.discriminator];
       if (!values || values.size === 0)
         throw new Error(`Invalid discriminated union option at index "${def.options.indexOf(o)}"`);
       for (const v of values) {
-        if (map.has(v)) {
+        if (map2.has(v)) {
           throw new Error(`Duplicate discriminator value "${String(v)}"`);
         }
-        map.set(v, o);
+        map2.set(v, o);
       }
     }
-    return map;
+    return map2;
   });
   inst._zod.parse = (payload, ctx) => {
     const input = payload.value;
@@ -9361,14 +9361,14 @@ var $ZodRegistry = class {
     this._map = /* @__PURE__ */ new Map();
     this._idmap = /* @__PURE__ */ new Map();
   }
-  add(schema, ..._meta) {
+  add(schema2, ..._meta) {
     const meta = _meta[0];
-    this._map.set(schema, meta);
+    this._map.set(schema2, meta);
     if (meta && typeof meta === "object" && "id" in meta) {
       if (this._idmap.has(meta.id)) {
         throw new Error(`ID ${meta.id} already exists in the registry`);
       }
-      this._idmap.set(meta.id, schema);
+      this._idmap.set(meta.id, schema2);
     }
     return this;
   }
@@ -9377,25 +9377,25 @@ var $ZodRegistry = class {
     this._idmap = /* @__PURE__ */ new Map();
     return this;
   }
-  remove(schema) {
-    const meta = this._map.get(schema);
+  remove(schema2) {
+    const meta = this._map.get(schema2);
     if (meta && typeof meta === "object" && "id" in meta) {
       this._idmap.delete(meta.id);
     }
-    this._map.delete(schema);
+    this._map.delete(schema2);
     return this;
   }
-  get(schema) {
-    const p = schema._zod.parent;
+  get(schema2) {
+    const p = schema2._zod.parent;
     if (p) {
       const pm = { ...this.get(p) ?? {} };
       delete pm.id;
-      return { ...pm, ...this._map.get(schema) };
+      return { ...pm, ...this._map.get(schema2) };
     }
-    return this._map.get(schema);
+    return this._map.get(schema2);
   }
-  has(schema) {
-    return this._map.has(schema);
+  has(schema2) {
+    return this._map.has(schema2);
   }
 };
 function registry() {
@@ -9824,22 +9824,22 @@ function _array(Class2, element, params) {
 function _custom(Class2, fn, _params) {
   const norm = normalizeParams(_params);
   norm.abort ?? (norm.abort = true);
-  const schema = new Class2({
+  const schema2 = new Class2({
     type: "custom",
     check: "custom",
     fn,
     ...norm
   });
-  return schema;
+  return schema2;
 }
 function _refine(Class2, fn, _params) {
-  const schema = new Class2({
+  const schema2 = new Class2({
     type: "custom",
     check: "custom",
     fn,
     ...normalizeParams(_params)
   });
-  return schema;
+  return schema2;
 }
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/to-json-schema.js
@@ -9854,9 +9854,9 @@ var JSONSchemaGenerator = class {
     this.io = params?.io ?? "output";
     this.seen = /* @__PURE__ */ new Map();
   }
-  process(schema, _params = { path: [], schemaPath: [] }) {
+  process(schema2, _params = { path: [], schemaPath: [] }) {
     var _a;
-    const def = schema._zod.def;
+    const def = schema2._zod.def;
     const formatMap = {
       guid: "uuid",
       url: "uri",
@@ -9865,27 +9865,27 @@ var JSONSchemaGenerator = class {
       regex: ""
       // do not set
     };
-    const seen = this.seen.get(schema);
+    const seen = this.seen.get(schema2);
     if (seen) {
       seen.count++;
-      const isCycle = _params.schemaPath.includes(schema);
+      const isCycle = _params.schemaPath.includes(schema2);
       if (isCycle) {
         seen.cycle = _params.path;
       }
       return seen.schema;
     }
     const result = { schema: {}, count: 1, cycle: void 0, path: _params.path };
-    this.seen.set(schema, result);
-    const overrideSchema = schema._zod.toJSONSchema?.();
+    this.seen.set(schema2, result);
+    const overrideSchema = schema2._zod.toJSONSchema?.();
     if (overrideSchema) {
       result.schema = overrideSchema;
     } else {
       const params = {
         ..._params,
-        schemaPath: [..._params.schemaPath, schema],
+        schemaPath: [..._params.schemaPath, schema2],
         path: _params.path
       };
-      const parent = schema._zod.parent;
+      const parent = schema2._zod.parent;
       if (parent) {
         result.ref = parent;
         this.process(parent, params);
@@ -9894,24 +9894,24 @@ var JSONSchemaGenerator = class {
         const _json = result.schema;
         switch (def.type) {
           case "string": {
-            const json = _json;
-            json.type = "string";
-            const { minimum, maximum, format, patterns, contentEncoding } = schema._zod.bag;
+            const json2 = _json;
+            json2.type = "string";
+            const { minimum, maximum, format, patterns, contentEncoding } = schema2._zod.bag;
             if (typeof minimum === "number")
-              json.minLength = minimum;
+              json2.minLength = minimum;
             if (typeof maximum === "number")
-              json.maxLength = maximum;
+              json2.maxLength = maximum;
             if (format) {
-              json.format = formatMap[format] ?? format;
-              if (json.format === "")
-                delete json.format;
+              json2.format = formatMap[format] ?? format;
+              if (json2.format === "")
+                delete json2.format;
             }
             if (contentEncoding)
-              json.contentEncoding = contentEncoding;
+              json2.contentEncoding = contentEncoding;
             if (patterns && patterns.size > 0) {
               const regexes = [...patterns];
               if (regexes.length === 1)
-                json.pattern = regexes[0].source;
+                json2.pattern = regexes[0].source;
               else if (regexes.length > 1) {
                 result.schema.allOf = [
                   ...regexes.map((regex) => ({
@@ -9924,41 +9924,41 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "number": {
-            const json = _json;
-            const { minimum, maximum, format, multipleOf, exclusiveMaximum, exclusiveMinimum } = schema._zod.bag;
+            const json2 = _json;
+            const { minimum, maximum, format, multipleOf, exclusiveMaximum, exclusiveMinimum } = schema2._zod.bag;
             if (typeof format === "string" && format.includes("int"))
-              json.type = "integer";
+              json2.type = "integer";
             else
-              json.type = "number";
+              json2.type = "number";
             if (typeof exclusiveMinimum === "number")
-              json.exclusiveMinimum = exclusiveMinimum;
+              json2.exclusiveMinimum = exclusiveMinimum;
             if (typeof minimum === "number") {
-              json.minimum = minimum;
+              json2.minimum = minimum;
               if (typeof exclusiveMinimum === "number") {
                 if (exclusiveMinimum >= minimum)
-                  delete json.minimum;
+                  delete json2.minimum;
                 else
-                  delete json.exclusiveMinimum;
+                  delete json2.exclusiveMinimum;
               }
             }
             if (typeof exclusiveMaximum === "number")
-              json.exclusiveMaximum = exclusiveMaximum;
+              json2.exclusiveMaximum = exclusiveMaximum;
             if (typeof maximum === "number") {
-              json.maximum = maximum;
+              json2.maximum = maximum;
               if (typeof exclusiveMaximum === "number") {
                 if (exclusiveMaximum <= maximum)
-                  delete json.maximum;
+                  delete json2.maximum;
                 else
-                  delete json.exclusiveMaximum;
+                  delete json2.exclusiveMaximum;
               }
             }
             if (typeof multipleOf === "number")
-              json.multipleOf = multipleOf;
+              json2.multipleOf = multipleOf;
             break;
           }
           case "boolean": {
-            const json = _json;
-            json.type = "boolean";
+            const json2 = _json;
+            json2.type = "boolean";
             break;
           }
           case "bigint": {
@@ -10006,23 +10006,23 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "array": {
-            const json = _json;
-            const { minimum, maximum } = schema._zod.bag;
+            const json2 = _json;
+            const { minimum, maximum } = schema2._zod.bag;
             if (typeof minimum === "number")
-              json.minItems = minimum;
+              json2.minItems = minimum;
             if (typeof maximum === "number")
-              json.maxItems = maximum;
-            json.type = "array";
-            json.items = this.process(def.element, { ...params, path: [...params.path, "items"] });
+              json2.maxItems = maximum;
+            json2.type = "array";
+            json2.items = this.process(def.element, { ...params, path: [...params.path, "items"] });
             break;
           }
           case "object": {
-            const json = _json;
-            json.type = "object";
-            json.properties = {};
+            const json2 = _json;
+            json2.type = "object";
+            json2.properties = {};
             const shape = def.shape;
             for (const key in shape) {
-              json.properties[key] = this.process(shape[key], {
+              json2.properties[key] = this.process(shape[key], {
                 ...params,
                 path: [...params.path, "properties", key]
               });
@@ -10037,15 +10037,15 @@ var JSONSchemaGenerator = class {
               }
             }));
             if (requiredKeys.size > 0) {
-              json.required = Array.from(requiredKeys);
+              json2.required = Array.from(requiredKeys);
             }
             if (def.catchall?._zod.def.type === "never") {
-              json.additionalProperties = false;
+              json2.additionalProperties = false;
             } else if (!def.catchall) {
               if (this.io === "output")
-                json.additionalProperties = false;
+                json2.additionalProperties = false;
             } else if (def.catchall) {
-              json.additionalProperties = this.process(def.catchall, {
+              json2.additionalProperties = this.process(def.catchall, {
                 ...params,
                 path: [...params.path, "additionalProperties"]
               });
@@ -10053,15 +10053,15 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "union": {
-            const json = _json;
-            json.anyOf = def.options.map((x, i) => this.process(x, {
+            const json2 = _json;
+            json2.anyOf = def.options.map((x, i) => this.process(x, {
               ...params,
               path: [...params.path, "anyOf", i]
             }));
             break;
           }
           case "intersection": {
-            const json = _json;
+            const json2 = _json;
             const a = this.process(def.left, {
               ...params,
               path: [...params.path, "allOf", 0]
@@ -10075,17 +10075,17 @@ var JSONSchemaGenerator = class {
               ...isSimpleIntersection(a) ? a.allOf : [a],
               ...isSimpleIntersection(b) ? b.allOf : [b]
             ];
-            json.allOf = allOf;
+            json2.allOf = allOf;
             break;
           }
           case "tuple": {
-            const json = _json;
-            json.type = "array";
+            const json2 = _json;
+            json2.type = "array";
             const prefixItems = def.items.map((x, i) => this.process(x, { ...params, path: [...params.path, "prefixItems", i] }));
             if (this.target === "draft-2020-12") {
-              json.prefixItems = prefixItems;
+              json2.prefixItems = prefixItems;
             } else {
-              json.items = prefixItems;
+              json2.items = prefixItems;
             }
             if (def.rest) {
               const rest = this.process(def.rest, {
@@ -10093,29 +10093,29 @@ var JSONSchemaGenerator = class {
                 path: [...params.path, "items"]
               });
               if (this.target === "draft-2020-12") {
-                json.items = rest;
+                json2.items = rest;
               } else {
-                json.additionalItems = rest;
+                json2.additionalItems = rest;
               }
             }
             if (def.rest) {
-              json.items = this.process(def.rest, {
+              json2.items = this.process(def.rest, {
                 ...params,
                 path: [...params.path, "items"]
               });
             }
-            const { minimum, maximum } = schema._zod.bag;
+            const { minimum, maximum } = schema2._zod.bag;
             if (typeof minimum === "number")
-              json.minItems = minimum;
+              json2.minItems = minimum;
             if (typeof maximum === "number")
-              json.maxItems = maximum;
+              json2.maxItems = maximum;
             break;
           }
           case "record": {
-            const json = _json;
-            json.type = "object";
-            json.propertyNames = this.process(def.keyType, { ...params, path: [...params.path, "propertyNames"] });
-            json.additionalProperties = this.process(def.valueType, {
+            const json2 = _json;
+            json2.type = "object";
+            json2.propertyNames = this.process(def.keyType, { ...params, path: [...params.path, "propertyNames"] });
+            json2.additionalProperties = this.process(def.valueType, {
               ...params,
               path: [...params.path, "additionalProperties"]
             });
@@ -10134,17 +10134,17 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "enum": {
-            const json = _json;
+            const json2 = _json;
             const values = getEnumValues(def.entries);
             if (values.every((v) => typeof v === "number"))
-              json.type = "number";
+              json2.type = "number";
             if (values.every((v) => typeof v === "string"))
-              json.type = "string";
-            json.enum = values;
+              json2.type = "string";
+            json2.enum = values;
             break;
           }
           case "literal": {
-            const json = _json;
+            const json2 = _json;
             const vals = [];
             for (const val of def.values) {
               if (val === void 0) {
@@ -10165,29 +10165,29 @@ var JSONSchemaGenerator = class {
             if (vals.length === 0) {
             } else if (vals.length === 1) {
               const val = vals[0];
-              json.type = val === null ? "null" : typeof val;
-              json.const = val;
+              json2.type = val === null ? "null" : typeof val;
+              json2.const = val;
             } else {
               if (vals.every((v) => typeof v === "number"))
-                json.type = "number";
+                json2.type = "number";
               if (vals.every((v) => typeof v === "string"))
-                json.type = "string";
+                json2.type = "string";
               if (vals.every((v) => typeof v === "boolean"))
-                json.type = "string";
+                json2.type = "string";
               if (vals.every((v) => v === null))
-                json.type = "null";
-              json.enum = vals;
+                json2.type = "null";
+              json2.enum = vals;
             }
             break;
           }
           case "file": {
-            const json = _json;
+            const json2 = _json;
             const file = {
               type: "string",
               format: "binary",
               contentEncoding: "binary"
             };
-            const { minimum, maximum, mime } = schema._zod.bag;
+            const { minimum, maximum, mime } = schema2._zod.bag;
             if (minimum !== void 0)
               file.minLength = minimum;
             if (maximum !== void 0)
@@ -10195,15 +10195,15 @@ var JSONSchemaGenerator = class {
             if (mime) {
               if (mime.length === 1) {
                 file.contentMediaType = mime[0];
-                Object.assign(json, file);
+                Object.assign(json2, file);
               } else {
-                json.anyOf = mime.map((m) => {
+                json2.anyOf = mime.map((m) => {
                   const mFile = { ...file, contentMediaType: m };
                   return mFile;
                 });
               }
             } else {
-              Object.assign(json, file);
+              Object.assign(json2, file);
             }
             break;
           }
@@ -10224,8 +10224,8 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "success": {
-            const json = _json;
-            json.type = "boolean";
+            const json2 = _json;
+            json2.type = "boolean";
             break;
           }
           case "default": {
@@ -10260,12 +10260,12 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "template_literal": {
-            const json = _json;
-            const pattern = schema._zod.pattern;
+            const json2 = _json;
+            const pattern = schema2._zod.pattern;
             if (!pattern)
               throw new Error("Pattern not found in template literal");
-            json.type = "string";
-            json.pattern = pattern.source;
+            json2.type = "string";
+            json2.pattern = pattern.source;
             break;
           }
           case "pipe": {
@@ -10292,7 +10292,7 @@ var JSONSchemaGenerator = class {
             break;
           }
           case "lazy": {
-            const innerType = schema._zod.innerType;
+            const innerType = schema2._zod.innerType;
             this.process(innerType, params);
             result.ref = innerType;
             break;
@@ -10309,20 +10309,20 @@ var JSONSchemaGenerator = class {
         }
       }
     }
-    const meta = this.metadataRegistry.get(schema);
+    const meta = this.metadataRegistry.get(schema2);
     if (meta)
       Object.assign(result.schema, meta);
-    if (this.io === "input" && isTransforming(schema)) {
+    if (this.io === "input" && isTransforming(schema2)) {
       delete result.schema.examples;
       delete result.schema.default;
     }
     if (this.io === "input" && result.schema._prefault)
       (_a = result.schema).default ?? (_a.default = result.schema._prefault);
     delete result.schema._prefault;
-    const _result = this.seen.get(schema);
+    const _result = this.seen.get(schema2);
     return _result.schema;
   }
-  emit(schema, _params) {
+  emit(schema2, _params) {
     const params = {
       cycles: _params?.cycles ?? "ref",
       reused: _params?.reused ?? "inline",
@@ -10330,7 +10330,7 @@ var JSONSchemaGenerator = class {
       // uri: _params?.uri ?? ((id) => `${id}`),
       external: _params?.external ?? void 0
     };
-    const root = this.seen.get(schema);
+    const root = this.seen.get(schema2);
     if (!root)
       throw new Error("Unprocessed schema. This is a bug in Zod.");
     const makeURI = (entry) => {
@@ -10362,11 +10362,11 @@ var JSONSchemaGenerator = class {
       seen.def = { ...seen.schema };
       if (defId)
         seen.defId = defId;
-      const schema2 = seen.schema;
-      for (const key in schema2) {
-        delete schema2[key];
+      const schema3 = seen.schema;
+      for (const key in schema3) {
+        delete schema3[key];
       }
-      schema2.$ref = ref;
+      schema3.$ref = ref;
     };
     if (params.cycles === "throw") {
       for (const entry of this.seen.entries()) {
@@ -10380,13 +10380,13 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     }
     for (const entry of this.seen.entries()) {
       const seen = entry[1];
-      if (schema === entry[0]) {
+      if (schema2 === entry[0]) {
         extractToDef(entry);
         continue;
       }
       if (params.external) {
         const ext = params.external.registry.get(entry[0])?.id;
-        if (schema !== entry[0] && ext) {
+        if (schema2 !== entry[0] && ext) {
           extractToDef(entry);
           continue;
         }
@@ -10409,8 +10409,8 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     }
     const flattenRef = (zodSchema, params2) => {
       const seen = this.seen.get(zodSchema);
-      const schema2 = seen.def ?? seen.schema;
-      const _cached = { ...schema2 };
+      const schema3 = seen.def ?? seen.schema;
+      const _cached = { ...schema3 };
       if (seen.ref === null) {
         return;
       }
@@ -10420,17 +10420,17 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         flattenRef(ref, params2);
         const refSchema = this.seen.get(ref).schema;
         if (refSchema.$ref && params2.target === "draft-7") {
-          schema2.allOf = schema2.allOf ?? [];
-          schema2.allOf.push(refSchema);
+          schema3.allOf = schema3.allOf ?? [];
+          schema3.allOf.push(refSchema);
         } else {
-          Object.assign(schema2, refSchema);
-          Object.assign(schema2, _cached);
+          Object.assign(schema3, refSchema);
+          Object.assign(schema3, _cached);
         }
       }
       if (!seen.isParent)
         this.override({
           zodSchema,
-          jsonSchema: schema2,
+          jsonSchema: schema3,
           path: seen.path ?? []
         });
     };
@@ -10446,7 +10446,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
       console.warn(`Invalid target: ${this.target}`);
     }
     if (params.external?.uri) {
-      const id = params.external.registry.get(schema)?.id;
+      const id = params.external.registry.get(schema2)?.id;
       if (!id)
         throw new Error("Schema is missing an `id` property");
       result.$id = params.external.uri(id);
@@ -10481,8 +10481,8 @@ function toJSONSchema(input, _params) {
     const gen2 = new JSONSchemaGenerator(_params);
     const defs = {};
     for (const entry of input._idmap.entries()) {
-      const [_, schema] = entry;
-      gen2.process(schema);
+      const [_, schema2] = entry;
+      gen2.process(schema2);
     }
     const schemas = {};
     const external = {
@@ -10491,8 +10491,8 @@ function toJSONSchema(input, _params) {
       defs
     };
     for (const entry of input._idmap.entries()) {
-      const [key, schema] = entry;
-      schemas[key] = gen2.emit(schema, {
+      const [key, schema2] = entry;
+      schemas[key] = gen2.emit(schema2, {
         ..._params,
         external
       });
@@ -10514,8 +10514,8 @@ function isTransforming(_schema, _ctx) {
   if (ctx.seen.has(_schema))
     return false;
   ctx.seen.add(_schema);
-  const schema = _schema;
-  const def = schema._zod.def;
+  const schema2 = _schema;
+  const def = schema2._zod.def;
   switch (def.type) {
     case "string":
     case "number":
@@ -11297,8 +11297,8 @@ function superRefine(fn) {
   });
   return ch;
 }
-function preprocess(fn, schema) {
-  return pipe(transform(fn), schema);
+function preprocess(fn, schema2) {
+  return pipe(transform(fn), schema2);
 }
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/classic/external.js
@@ -12901,8 +12901,8 @@ var StdioServerTransport = class {
   }
   send(message) {
     return new Promise((resolve2) => {
-      const json = serializeMessage(message);
-      if (this._stdout.write(json)) {
+      const json2 = serializeMessage(message);
+      if (this._stdout.write(json2)) {
         resolve2();
       } else {
         this._stdout.once("drain", resolve2);
@@ -13177,8 +13177,8 @@ var ZodIssueCode = util.arrayToEnum([
   "not_finite"
 ]);
 var quotelessJson = (obj) => {
-  const json = JSON.stringify(obj, null, 2);
-  return json.replace(/"([^"]+)":/g, "$1:");
+  const json2 = JSON.stringify(obj, null, 2);
+  return json2.replace(/"([^"]+)":/g, "$1:");
 };
 var ZodError2 = class _ZodError extends Error {
   get errors() {
@@ -13380,8 +13380,8 @@ var en_default2 = errorMap;
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/errors.js
 var overrideErrorMap = en_default2;
-function setErrorMap(map) {
-  overrideErrorMap = map;
+function setErrorMap(map2) {
+  overrideErrorMap = map2;
 }
 function getErrorMap() {
   return overrideErrorMap;
@@ -13404,8 +13404,8 @@ var makeIssue = (params) => {
   }
   let errorMessage = "";
   const maps = errorMaps.filter((m) => !!m).slice().reverse();
-  for (const map of maps) {
-    errorMessage = map(fullIssue, { data, defaultError: errorMessage }).message;
+  for (const map2 of maps) {
+    errorMessage = map2(fullIssue, { data, defaultError: errorMessage }).message;
   }
   return {
     ...issueData,
@@ -13456,9 +13456,9 @@ var ParseStatus = class _ParseStatus {
     }
     return { status: status.value, value: arrayValue };
   }
-  static async mergeObjectAsync(status, pairs) {
+  static async mergeObjectAsync(status, pairs2) {
     const syncPairs = [];
-    for (const pair of pairs) {
+    for (const pair of pairs2) {
       const key = await pair.key;
       const value = await pair.value;
       syncPairs.push({
@@ -13468,9 +13468,9 @@ var ParseStatus = class _ParseStatus {
     }
     return _ParseStatus.mergeObjectSync(status, syncPairs);
   }
-  static mergeObjectSync(status, pairs) {
+  static mergeObjectSync(status, pairs2) {
     const finalObject = {};
-    for (const pair of pairs) {
+    for (const pair of pairs2) {
       const { key, value } = pair;
       if (key.status === "aborted")
         return INVALID;
@@ -15243,9 +15243,9 @@ var ZodArray2 = class _ZodArray extends ZodType2 {
     return this.min(1, message);
   }
 };
-ZodArray2.create = (schema, params) => {
+ZodArray2.create = (schema2, params) => {
   return new ZodArray2({
-    type: schema,
+    type: schema2,
     minLength: null,
     maxLength: null,
     exactLength: null,
@@ -15253,30 +15253,30 @@ ZodArray2.create = (schema, params) => {
     ...processCreateParams(params)
   });
 };
-function deepPartialify(schema) {
-  if (schema instanceof ZodObject2) {
+function deepPartialify(schema2) {
+  if (schema2 instanceof ZodObject2) {
     const newShape = {};
-    for (const key in schema.shape) {
-      const fieldSchema = schema.shape[key];
+    for (const key in schema2.shape) {
+      const fieldSchema = schema2.shape[key];
       newShape[key] = ZodOptional2.create(deepPartialify(fieldSchema));
     }
     return new ZodObject2({
-      ...schema._def,
+      ...schema2._def,
       shape: () => newShape
     });
-  } else if (schema instanceof ZodArray2) {
+  } else if (schema2 instanceof ZodArray2) {
     return new ZodArray2({
-      ...schema._def,
-      type: deepPartialify(schema.element)
+      ...schema2._def,
+      type: deepPartialify(schema2.element)
     });
-  } else if (schema instanceof ZodOptional2) {
-    return ZodOptional2.create(deepPartialify(schema.unwrap()));
-  } else if (schema instanceof ZodNullable2) {
-    return ZodNullable2.create(deepPartialify(schema.unwrap()));
-  } else if (schema instanceof ZodTuple) {
-    return ZodTuple.create(schema.items.map((item) => deepPartialify(item)));
+  } else if (schema2 instanceof ZodOptional2) {
+    return ZodOptional2.create(deepPartialify(schema2.unwrap()));
+  } else if (schema2 instanceof ZodNullable2) {
+    return ZodNullable2.create(deepPartialify(schema2.unwrap()));
+  } else if (schema2 instanceof ZodTuple) {
+    return ZodTuple.create(schema2.items.map((item) => deepPartialify(item)));
   } else {
-    return schema;
+    return schema2;
   }
 }
 var ZodObject2 = class _ZodObject extends ZodType2 {
@@ -15315,11 +15315,11 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
         }
       }
     }
-    const pairs = [];
+    const pairs2 = [];
     for (const key of shapeKeys) {
       const keyValidator = shape[key];
       const value = ctx.data[key];
-      pairs.push({
+      pairs2.push({
         key: { status: "valid", value: key },
         value: keyValidator._parse(new ParseInputLazyPath(ctx, value, ctx.path, key)),
         alwaysSet: key in ctx.data
@@ -15329,7 +15329,7 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
       const unknownKeys = this._def.unknownKeys;
       if (unknownKeys === "passthrough") {
         for (const key of extraKeys) {
-          pairs.push({
+          pairs2.push({
             key: { status: "valid", value: key },
             value: { status: "valid", value: ctx.data[key] }
           });
@@ -15350,7 +15350,7 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
       const catchall = this._def.catchall;
       for (const key of extraKeys) {
         const value = ctx.data[key];
-        pairs.push({
+        pairs2.push({
           key: { status: "valid", value: key },
           value: catchall._parse(
             new ParseInputLazyPath(ctx, value, ctx.path, key)
@@ -15363,7 +15363,7 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
     if (ctx.common.async) {
       return Promise.resolve().then(async () => {
         const syncPairs = [];
-        for (const pair of pairs) {
+        for (const pair of pairs2) {
           const key = await pair.key;
           const value = await pair.value;
           syncPairs.push({
@@ -15377,7 +15377,7 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
         return ParseStatus.mergeObjectSync(status, syncPairs);
       });
     } else {
-      return ParseStatus.mergeObjectSync(status, pairs);
+      return ParseStatus.mergeObjectSync(status, pairs2);
     }
   }
   get shape() {
@@ -15492,8 +15492,8 @@ var ZodObject2 = class _ZodObject extends ZodType2 {
   //   }) as any;
   //   return merged;
   // }
-  setKey(key, schema) {
-    return this.augment({ [key]: schema });
+  setKey(key, schema2) {
+    return this.augment({ [key]: schema2 });
   }
   // merge<Incoming extends AnyZodObject>(
   //   merging: Incoming
@@ -15708,33 +15708,33 @@ ZodUnion2.create = (types, params) => {
     ...processCreateParams(params)
   });
 };
-var getDiscriminator = (type) => {
-  if (type instanceof ZodLazy) {
-    return getDiscriminator(type.schema);
-  } else if (type instanceof ZodEffects) {
-    return getDiscriminator(type.innerType());
-  } else if (type instanceof ZodLiteral2) {
-    return [type.value];
-  } else if (type instanceof ZodEnum2) {
-    return type.options;
-  } else if (type instanceof ZodNativeEnum) {
-    return util.objectValues(type.enum);
-  } else if (type instanceof ZodDefault2) {
-    return getDiscriminator(type._def.innerType);
-  } else if (type instanceof ZodUndefined) {
+var getDiscriminator = (type2) => {
+  if (type2 instanceof ZodLazy) {
+    return getDiscriminator(type2.schema);
+  } else if (type2 instanceof ZodEffects) {
+    return getDiscriminator(type2.innerType());
+  } else if (type2 instanceof ZodLiteral2) {
+    return [type2.value];
+  } else if (type2 instanceof ZodEnum2) {
+    return type2.options;
+  } else if (type2 instanceof ZodNativeEnum) {
+    return util.objectValues(type2.enum);
+  } else if (type2 instanceof ZodDefault2) {
+    return getDiscriminator(type2._def.innerType);
+  } else if (type2 instanceof ZodUndefined) {
     return [void 0];
-  } else if (type instanceof ZodNull2) {
+  } else if (type2 instanceof ZodNull2) {
     return [null];
-  } else if (type instanceof ZodOptional2) {
-    return [void 0, ...getDiscriminator(type.unwrap())];
-  } else if (type instanceof ZodNullable2) {
-    return [null, ...getDiscriminator(type.unwrap())];
-  } else if (type instanceof ZodBranded) {
-    return getDiscriminator(type.unwrap());
-  } else if (type instanceof ZodReadonly2) {
-    return getDiscriminator(type.unwrap());
-  } else if (type instanceof ZodCatch2) {
-    return getDiscriminator(type._def.innerType);
+  } else if (type2 instanceof ZodOptional2) {
+    return [void 0, ...getDiscriminator(type2.unwrap())];
+  } else if (type2 instanceof ZodNullable2) {
+    return [null, ...getDiscriminator(type2.unwrap())];
+  } else if (type2 instanceof ZodBranded) {
+    return getDiscriminator(type2.unwrap());
+  } else if (type2 instanceof ZodReadonly2) {
+    return getDiscriminator(type2.unwrap());
+  } else if (type2 instanceof ZodCatch2) {
+    return getDiscriminator(type2._def.innerType);
   } else {
     return [];
   }
@@ -15794,8 +15794,8 @@ var ZodDiscriminatedUnion2 = class _ZodDiscriminatedUnion extends ZodType2 {
    */
   static create(discriminator, options, params) {
     const optionsMap = /* @__PURE__ */ new Map();
-    for (const type of options) {
-      const discriminatorValues = getDiscriminator(type.shape[discriminator]);
+    for (const type2 of options) {
+      const discriminatorValues = getDiscriminator(type2.shape[discriminator]);
       if (!discriminatorValues.length) {
         throw new Error(`A discriminator value for key \`${discriminator}\` could not be extracted from all schema options`);
       }
@@ -15803,7 +15803,7 @@ var ZodDiscriminatedUnion2 = class _ZodDiscriminatedUnion extends ZodType2 {
         if (optionsMap.has(value)) {
           throw new Error(`Discriminator property ${String(discriminator)} has duplicate value ${String(value)}`);
         }
-        optionsMap.set(value, type);
+        optionsMap.set(value, type2);
       }
     }
     return new _ZodDiscriminatedUnion({
@@ -15939,10 +15939,10 @@ var ZodTuple = class _ZodTuple extends ZodType2 {
       status.dirty();
     }
     const items = [...ctx.data].map((item, itemIndex) => {
-      const schema = this._def.items[itemIndex] || this._def.rest;
-      if (!schema)
+      const schema2 = this._def.items[itemIndex] || this._def.rest;
+      if (!schema2)
         return null;
-      return schema._parse(new ParseInputLazyPath(ctx, item, ctx.path, itemIndex));
+      return schema2._parse(new ParseInputLazyPath(ctx, item, ctx.path, itemIndex));
     }).filter((x) => !!x);
     if (ctx.common.async) {
       return Promise.all(items).then((results) => {
@@ -15990,20 +15990,20 @@ var ZodRecord2 = class _ZodRecord extends ZodType2 {
       });
       return INVALID;
     }
-    const pairs = [];
+    const pairs2 = [];
     const keyType = this._def.keyType;
     const valueType = this._def.valueType;
     for (const key in ctx.data) {
-      pairs.push({
+      pairs2.push({
         key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, key)),
         value: valueType._parse(new ParseInputLazyPath(ctx, ctx.data[key], ctx.path, key)),
         alwaysSet: key in ctx.data
       });
     }
     if (ctx.common.async) {
-      return ParseStatus.mergeObjectAsync(status, pairs);
+      return ParseStatus.mergeObjectAsync(status, pairs2);
     } else {
-      return ParseStatus.mergeObjectSync(status, pairs);
+      return ParseStatus.mergeObjectSync(status, pairs2);
     }
   }
   get element() {
@@ -16045,7 +16045,7 @@ var ZodMap = class extends ZodType2 {
     }
     const keyType = this._def.keyType;
     const valueType = this._def.valueType;
-    const pairs = [...ctx.data.entries()].map(([key, value], index) => {
+    const pairs2 = [...ctx.data.entries()].map(([key, value], index) => {
       return {
         key: keyType._parse(new ParseInputLazyPath(ctx, key, ctx.path, [index, "key"])),
         value: valueType._parse(new ParseInputLazyPath(ctx, value, ctx.path, [index, "value"]))
@@ -16054,7 +16054,7 @@ var ZodMap = class extends ZodType2 {
     if (ctx.common.async) {
       const finalMap = /* @__PURE__ */ new Map();
       return Promise.resolve().then(async () => {
-        for (const pair of pairs) {
+        for (const pair of pairs2) {
           const key = await pair.key;
           const value = await pair.value;
           if (key.status === "aborted" || value.status === "aborted") {
@@ -16069,7 +16069,7 @@ var ZodMap = class extends ZodType2 {
       });
     } else {
       const finalMap = /* @__PURE__ */ new Map();
-      for (const pair of pairs) {
+      for (const pair of pairs2) {
         const key = pair.key;
         const value = pair.value;
         if (key.status === "aborted" || value.status === "aborted") {
@@ -16456,9 +16456,9 @@ var ZodPromise = class extends ZodType2 {
     }));
   }
 };
-ZodPromise.create = (schema, params) => {
+ZodPromise.create = (schema2, params) => {
   return new ZodPromise({
-    type: schema,
+    type: schema2,
     typeName: ZodFirstPartyTypeKind.ZodPromise,
     ...processCreateParams(params)
   });
@@ -16586,17 +16586,17 @@ var ZodEffects = class extends ZodType2 {
     util.assertNever(effect);
   }
 };
-ZodEffects.create = (schema, effect, params) => {
+ZodEffects.create = (schema2, effect, params) => {
   return new ZodEffects({
-    schema,
+    schema: schema2,
     typeName: ZodFirstPartyTypeKind.ZodEffects,
     effect,
     ...processCreateParams(params)
   });
 };
-ZodEffects.createWithPreprocess = (preprocess2, schema, params) => {
+ZodEffects.createWithPreprocess = (preprocess2, schema2, params) => {
   return new ZodEffects({
-    schema,
+    schema: schema2,
     effect: { type: "preprocess", transform: preprocess2 },
     typeName: ZodFirstPartyTypeKind.ZodEffects,
     ...processCreateParams(params)
@@ -16614,9 +16614,9 @@ var ZodOptional2 = class extends ZodType2 {
     return this._def.innerType;
   }
 };
-ZodOptional2.create = (type, params) => {
+ZodOptional2.create = (type2, params) => {
   return new ZodOptional2({
-    innerType: type,
+    innerType: type2,
     typeName: ZodFirstPartyTypeKind.ZodOptional,
     ...processCreateParams(params)
   });
@@ -16633,9 +16633,9 @@ var ZodNullable2 = class extends ZodType2 {
     return this._def.innerType;
   }
 };
-ZodNullable2.create = (type, params) => {
+ZodNullable2.create = (type2, params) => {
   return new ZodNullable2({
-    innerType: type,
+    innerType: type2,
     typeName: ZodFirstPartyTypeKind.ZodNullable,
     ...processCreateParams(params)
   });
@@ -16657,9 +16657,9 @@ var ZodDefault2 = class extends ZodType2 {
     return this._def.innerType;
   }
 };
-ZodDefault2.create = (type, params) => {
+ZodDefault2.create = (type2, params) => {
   return new ZodDefault2({
-    innerType: type,
+    innerType: type2,
     typeName: ZodFirstPartyTypeKind.ZodDefault,
     defaultValue: typeof params.default === "function" ? params.default : () => params.default,
     ...processCreateParams(params)
@@ -16710,9 +16710,9 @@ var ZodCatch2 = class extends ZodType2 {
     return this._def.innerType;
   }
 };
-ZodCatch2.create = (type, params) => {
+ZodCatch2.create = (type2, params) => {
   return new ZodCatch2({
-    innerType: type,
+    innerType: type2,
     typeName: ZodFirstPartyTypeKind.ZodCatch,
     catchValue: typeof params.catch === "function" ? params.catch : () => params.catch,
     ...processCreateParams(params)
@@ -16824,9 +16824,9 @@ var ZodReadonly2 = class extends ZodType2 {
     return this._def.innerType;
   }
 };
-ZodReadonly2.create = (type, params) => {
+ZodReadonly2.create = (type2, params) => {
   return new ZodReadonly2({
-    innerType: type,
+    innerType: type2,
     typeName: ZodFirstPartyTypeKind.ZodReadonly,
     ...processCreateParams(params)
   });
@@ -17000,8 +17000,8 @@ function object2(shape, params) {
 
 // ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1.26.0_zod@3.25.76/node_modules/@modelcontextprotocol/sdk/dist/esm/server/zod-compat.js
 function isZ4Schema(s) {
-  const schema = s;
-  return !!schema._zod;
+  const schema2 = s;
+  return !!schema2._zod;
 }
 function objectFromShape(shape) {
   const values = Object.values(shape);
@@ -17015,33 +17015,33 @@ function objectFromShape(shape) {
     return objectType(shape);
   throw new Error("Mixed Zod versions detected in object shape.");
 }
-function safeParse3(schema, data) {
-  if (isZ4Schema(schema)) {
-    const result2 = safeParse(schema, data);
+function safeParse3(schema2, data) {
+  if (isZ4Schema(schema2)) {
+    const result2 = safeParse(schema2, data);
     return result2;
   }
-  const v3Schema = schema;
+  const v3Schema = schema2;
   const result = v3Schema.safeParse(data);
   return result;
 }
-async function safeParseAsync3(schema, data) {
-  if (isZ4Schema(schema)) {
-    const result2 = await safeParseAsync(schema, data);
+async function safeParseAsync3(schema2, data) {
+  if (isZ4Schema(schema2)) {
+    const result2 = await safeParseAsync(schema2, data);
     return result2;
   }
-  const v3Schema = schema;
+  const v3Schema = schema2;
   const result = await v3Schema.safeParseAsync(data);
   return result;
 }
-function getObjectShape(schema) {
-  if (!schema)
+function getObjectShape(schema2) {
+  if (!schema2)
     return void 0;
   let rawShape;
-  if (isZ4Schema(schema)) {
-    const v4Schema = schema;
+  if (isZ4Schema(schema2)) {
+    const v4Schema = schema2;
     rawShape = v4Schema._zod?.def?.shape;
   } else {
-    const v3Schema = schema;
+    const v3Schema = schema2;
     rawShape = v3Schema.shape;
   }
   if (!rawShape)
@@ -17055,29 +17055,29 @@ function getObjectShape(schema) {
   }
   return rawShape;
 }
-function normalizeObjectSchema(schema) {
-  if (!schema)
+function normalizeObjectSchema(schema2) {
+  if (!schema2)
     return void 0;
-  if (typeof schema === "object") {
-    const asV3 = schema;
-    const asV4 = schema;
+  if (typeof schema2 === "object") {
+    const asV3 = schema2;
+    const asV4 = schema2;
     if (!asV3._def && !asV4._zod) {
-      const values = Object.values(schema);
+      const values = Object.values(schema2);
       if (values.length > 0 && values.every((v) => typeof v === "object" && v !== null && (v._def !== void 0 || v._zod !== void 0 || typeof v.parse === "function"))) {
-        return objectFromShape(schema);
+        return objectFromShape(schema2);
       }
     }
   }
-  if (isZ4Schema(schema)) {
-    const v4Schema = schema;
+  if (isZ4Schema(schema2)) {
+    const v4Schema = schema2;
     const def = v4Schema._zod?.def;
     if (def && (def.type === "object" || def.shape !== void 0)) {
-      return schema;
+      return schema2;
     }
   } else {
-    const v3Schema = schema;
+    const v3Schema = schema2;
     if (v3Schema.shape !== void 0) {
-      return schema;
+      return schema2;
     }
   }
   return void 0;
@@ -17101,23 +17101,23 @@ function getParseErrorMessage(error2) {
   }
   return String(error2);
 }
-function getSchemaDescription(schema) {
-  return schema.description;
+function getSchemaDescription(schema2) {
+  return schema2.description;
 }
-function isSchemaOptional(schema) {
-  if (isZ4Schema(schema)) {
-    const v4Schema = schema;
+function isSchemaOptional(schema2) {
+  if (isZ4Schema(schema2)) {
+    const v4Schema = schema2;
     return v4Schema._zod?.def?.type === "optional";
   }
-  const v3Schema = schema;
-  if (typeof schema.isOptional === "function") {
-    return schema.isOptional();
+  const v3Schema = schema2;
+  if (typeof schema2.isOptional === "function") {
+    return schema2.isOptional();
   }
   return v3Schema._def?.typeName === "ZodOptional";
 }
-function getLiteralValue(schema) {
-  if (isZ4Schema(schema)) {
-    const v4Schema = schema;
+function getLiteralValue(schema2) {
+  if (isZ4Schema(schema2)) {
+    const v4Schema = schema2;
     const def2 = v4Schema._zod?.def;
     if (def2) {
       if (def2.value !== void 0)
@@ -17127,7 +17127,7 @@ function getLiteralValue(schema) {
       }
     }
   }
-  const v3Schema = schema;
+  const v3Schema = schema2;
   const def = v3Schema._def;
   if (def) {
     if (def.value !== void 0)
@@ -17136,7 +17136,7 @@ function getLiteralValue(schema) {
       return def.values[0];
     }
   }
-  const directValue = schema.value;
+  const directValue = schema2.value;
   if (directValue !== void 0)
     return directValue;
   return void 0;
@@ -17412,10 +17412,10 @@ function parseEnumDef(def) {
 }
 
 // ../../node_modules/.pnpm/zod-to-json-schema@3.25.1_zod@3.25.76/node_modules/zod-to-json-schema/dist/esm/parsers/intersection.js
-var isJsonSchema7AllOfType = (type) => {
-  if ("type" in type && type.type === "string")
+var isJsonSchema7AllOfType = (type2) => {
+  if ("type" in type2 && type2.type === "string")
     return false;
-  return "allOf" in type;
+  return "allOf" in type2;
 };
 function parseIntersectionDef(def, refs) {
   const allOf = [
@@ -17430,16 +17430,16 @@ function parseIntersectionDef(def, refs) {
   ].filter((x) => !!x);
   let unevaluatedProperties = refs.target === "jsonSchema2019-09" ? { unevaluatedProperties: false } : void 0;
   const mergedAllOf = [];
-  allOf.forEach((schema) => {
-    if (isJsonSchema7AllOfType(schema)) {
-      mergedAllOf.push(...schema.allOf);
-      if (schema.unevaluatedProperties === void 0) {
+  allOf.forEach((schema2) => {
+    if (isJsonSchema7AllOfType(schema2)) {
+      mergedAllOf.push(...schema2.allOf);
+      if (schema2.unevaluatedProperties === void 0) {
         unevaluatedProperties = void 0;
       }
     } else {
-      let nestedSchema = schema;
-      if ("additionalProperties" in schema && schema.additionalProperties === false) {
-        const { additionalProperties, ...rest } = schema;
+      let nestedSchema = schema2;
+      if ("additionalProperties" in schema2 && schema2.additionalProperties === false) {
+        const { additionalProperties, ...rest } = schema2;
         nestedSchema = rest;
       } else {
         unevaluatedProperties = void 0;
@@ -17666,60 +17666,60 @@ function escapeNonAlphaNumeric(source) {
   }
   return result;
 }
-function addFormat(schema, value, message, refs) {
-  if (schema.format || schema.anyOf?.some((x) => x.format)) {
-    if (!schema.anyOf) {
-      schema.anyOf = [];
+function addFormat(schema2, value, message, refs) {
+  if (schema2.format || schema2.anyOf?.some((x) => x.format)) {
+    if (!schema2.anyOf) {
+      schema2.anyOf = [];
     }
-    if (schema.format) {
-      schema.anyOf.push({
-        format: schema.format,
-        ...schema.errorMessage && refs.errorMessages && {
-          errorMessage: { format: schema.errorMessage.format }
+    if (schema2.format) {
+      schema2.anyOf.push({
+        format: schema2.format,
+        ...schema2.errorMessage && refs.errorMessages && {
+          errorMessage: { format: schema2.errorMessage.format }
         }
       });
-      delete schema.format;
-      if (schema.errorMessage) {
-        delete schema.errorMessage.format;
-        if (Object.keys(schema.errorMessage).length === 0) {
-          delete schema.errorMessage;
+      delete schema2.format;
+      if (schema2.errorMessage) {
+        delete schema2.errorMessage.format;
+        if (Object.keys(schema2.errorMessage).length === 0) {
+          delete schema2.errorMessage;
         }
       }
     }
-    schema.anyOf.push({
+    schema2.anyOf.push({
       format: value,
       ...message && refs.errorMessages && { errorMessage: { format: message } }
     });
   } else {
-    setResponseValueAndErrors(schema, "format", value, message, refs);
+    setResponseValueAndErrors(schema2, "format", value, message, refs);
   }
 }
-function addPattern(schema, regex, message, refs) {
-  if (schema.pattern || schema.allOf?.some((x) => x.pattern)) {
-    if (!schema.allOf) {
-      schema.allOf = [];
+function addPattern(schema2, regex, message, refs) {
+  if (schema2.pattern || schema2.allOf?.some((x) => x.pattern)) {
+    if (!schema2.allOf) {
+      schema2.allOf = [];
     }
-    if (schema.pattern) {
-      schema.allOf.push({
-        pattern: schema.pattern,
-        ...schema.errorMessage && refs.errorMessages && {
-          errorMessage: { pattern: schema.errorMessage.pattern }
+    if (schema2.pattern) {
+      schema2.allOf.push({
+        pattern: schema2.pattern,
+        ...schema2.errorMessage && refs.errorMessages && {
+          errorMessage: { pattern: schema2.errorMessage.pattern }
         }
       });
-      delete schema.pattern;
-      if (schema.errorMessage) {
-        delete schema.errorMessage.pattern;
-        if (Object.keys(schema.errorMessage).length === 0) {
-          delete schema.errorMessage;
+      delete schema2.pattern;
+      if (schema2.errorMessage) {
+        delete schema2.errorMessage.pattern;
+        if (Object.keys(schema2.errorMessage).length === 0) {
+          delete schema2.errorMessage;
         }
       }
     }
-    schema.allOf.push({
+    schema2.allOf.push({
       pattern: stringifyRegExpWithFlags(regex, refs),
       ...message && refs.errorMessages && { errorMessage: { pattern: message } }
     });
   } else {
-    setResponseValueAndErrors(schema, "pattern", stringifyRegExpWithFlags(regex, refs), message, refs);
+    setResponseValueAndErrors(schema2, "pattern", stringifyRegExpWithFlags(regex, refs), message, refs);
   }
 }
 function stringifyRegExpWithFlags(regex, refs) {
@@ -17817,7 +17817,7 @@ function parseRecordDef(def, refs) {
       additionalProperties: refs.rejectedAdditionalProperties
     };
   }
-  const schema = {
+  const schema2 = {
     type: "object",
     additionalProperties: parseDef(def.valueType._def, {
       ...refs,
@@ -17825,29 +17825,29 @@ function parseRecordDef(def, refs) {
     }) ?? refs.allowedAdditionalProperties
   };
   if (refs.target === "openApi3") {
-    return schema;
+    return schema2;
   }
   if (def.keyType?._def.typeName === ZodFirstPartyTypeKind.ZodString && def.keyType._def.checks?.length) {
-    const { type, ...keyType } = parseStringDef(def.keyType._def, refs);
+    const { type: type2, ...keyType } = parseStringDef(def.keyType._def, refs);
     return {
-      ...schema,
+      ...schema2,
       propertyNames: keyType
     };
   } else if (def.keyType?._def.typeName === ZodFirstPartyTypeKind.ZodEnum) {
     return {
-      ...schema,
+      ...schema2,
       propertyNames: {
         enum: def.keyType._def.values
       }
     };
   } else if (def.keyType?._def.typeName === ZodFirstPartyTypeKind.ZodBranded && def.keyType._def.type._def.typeName === ZodFirstPartyTypeKind.ZodString && def.keyType._def.type._def.checks?.length) {
-    const { type, ...keyType } = parseBrandedDef(def.keyType._def, refs);
+    const { type: type2, ...keyType } = parseBrandedDef(def.keyType._def, refs);
     return {
-      ...schema,
+      ...schema2,
       propertyNames: keyType
     };
   }
-  return schema;
+  return schema2;
 }
 
 // ../../node_modules/.pnpm/zod-to-json-schema@3.25.1_zod@3.25.76/node_modules/zod-to-json-schema/dist/esm/parsers/map.js
@@ -17923,20 +17923,20 @@ function parseUnionDef(def, refs) {
   const options = def.options instanceof Map ? Array.from(def.options.values()) : def.options;
   if (options.every((x) => x._def.typeName in primitiveMappings && (!x._def.checks || !x._def.checks.length))) {
     const types = options.reduce((types2, x) => {
-      const type = primitiveMappings[x._def.typeName];
-      return type && !types2.includes(type) ? [...types2, type] : types2;
+      const type2 = primitiveMappings[x._def.typeName];
+      return type2 && !types2.includes(type2) ? [...types2, type2] : types2;
     }, []);
     return {
       type: types.length > 1 ? types : types[0]
     };
   } else if (options.every((x) => x._def.typeName === "ZodLiteral" && !x.description)) {
     const types = options.reduce((acc, x) => {
-      const type = typeof x._def.value;
-      switch (type) {
+      const type2 = typeof x._def.value;
+      switch (type2) {
         case "string":
         case "number":
         case "boolean":
-          return [...acc, type];
+          return [...acc, type2];
         case "bigint":
           return [...acc, "integer"];
         case "object":
@@ -18120,9 +18120,9 @@ function decideAdditionalProperties(def, refs) {
       return refs.removeAdditionalStrategy === "strict" ? refs.allowedAdditionalProperties : refs.rejectedAdditionalProperties;
   }
 }
-function safeIsOptional(schema) {
+function safeIsOptional(schema2) {
   try {
-    return schema.isOptional();
+    return schema2.isOptional();
   } catch {
     return true;
   }
@@ -18178,18 +18178,18 @@ function parseSetDef(def, refs) {
     ...refs,
     currentPath: [...refs.currentPath, "items"]
   });
-  const schema = {
+  const schema2 = {
     type: "array",
     uniqueItems: true,
     items
   };
   if (def.minSize) {
-    setResponseValueAndErrors(schema, "minItems", def.minSize.value, def.minSize.message, refs);
+    setResponseValueAndErrors(schema2, "minItems", def.minSize.value, def.minSize.message, refs);
   }
   if (def.maxSize) {
-    setResponseValueAndErrors(schema, "maxItems", def.maxSize.value, def.maxSize.message, refs);
+    setResponseValueAndErrors(schema2, "maxItems", def.maxSize.value, def.maxSize.message, refs);
   }
-  return schema;
+  return schema2;
 }
 
 // ../../node_modules/.pnpm/zod-to-json-schema@3.25.1_zod@3.25.76/node_modules/zod-to-json-schema/dist/esm/parsers/tuple.js
@@ -18370,17 +18370,17 @@ var addMeta = (def, refs, jsonSchema) => {
 };
 
 // ../../node_modules/.pnpm/zod-to-json-schema@3.25.1_zod@3.25.76/node_modules/zod-to-json-schema/dist/esm/zodToJsonSchema.js
-var zodToJsonSchema = (schema, options) => {
+var zodToJsonSchema = (schema2, options) => {
   const refs = getRefs(options);
-  let definitions = typeof options === "object" && options.definitions ? Object.entries(options.definitions).reduce((acc, [name2, schema2]) => ({
+  let definitions = typeof options === "object" && options.definitions ? Object.entries(options.definitions).reduce((acc, [name2, schema3]) => ({
     ...acc,
-    [name2]: parseDef(schema2._def, {
+    [name2]: parseDef(schema3._def, {
       ...refs,
       currentPath: [...refs.basePath, refs.definitionPath, name2]
     }, true) ?? parseAnyDef(refs)
   }), {}) : void 0;
   const name = typeof options === "string" ? options : options?.nameStrategy === "title" ? void 0 : options?.name;
-  const main = parseDef(schema._def, name === void 0 ? refs : {
+  const main = parseDef(schema2._def, name === void 0 ? refs : {
     ...refs,
     currentPath: [...refs.basePath, refs.definitionPath, name]
   }, false) ?? parseAnyDef(refs);
@@ -18441,20 +18441,20 @@ function mapMiniTarget(t) {
     return "draft-2020-12";
   return "draft-7";
 }
-function toJsonSchemaCompat(schema, opts) {
-  if (isZ4Schema(schema)) {
-    return toJSONSchema(schema, {
+function toJsonSchemaCompat(schema2, opts) {
+  if (isZ4Schema(schema2)) {
+    return toJSONSchema(schema2, {
       target: mapMiniTarget(opts?.target),
       io: opts?.pipeStrategy ?? "input"
     });
   }
-  return zodToJsonSchema(schema, {
+  return zodToJsonSchema(schema2, {
     strictUnions: opts?.strictUnions ?? true,
     pipeStrategy: opts?.pipeStrategy ?? "input"
   });
 }
-function getMethodLiteral(schema) {
-  const shape = getObjectShape(schema);
+function getMethodLiteral(schema2) {
+  const shape = getObjectShape(schema2);
   const methodSchema = shape?.method;
   if (!methodSchema) {
     throw new Error("Schema is missing a method literal");
@@ -18465,8 +18465,8 @@ function getMethodLiteral(schema) {
   }
   return value;
 }
-function parseWithCompat(schema, data) {
-  const result = safeParse3(schema, data);
+function parseWithCompat(schema2, data) {
+  const result = safeParse3(schema2, data);
   if (!result.success) {
     throw result.error;
   }
@@ -19468,8 +19468,8 @@ var AjvJsonSchemaValidator = class {
    * @param schema - Standard JSON Schema object
    * @returns A validator function that validates input data
    */
-  getValidator(schema) {
-    const ajvValidator = "$id" in schema && typeof schema.$id === "string" ? this._ajv.getSchema(schema.$id) ?? this._ajv.compile(schema) : this._ajv.compile(schema);
+  getValidator(schema2) {
+    const ajvValidator = "$id" in schema2 && typeof schema2.$id === "string" ? this._ajv.getSchema(schema2.$id) ?? this._ajv.compile(schema2) : this._ajv.compile(schema2);
     return (input) => {
       const valid = ajvValidator(input);
       if (valid) {
@@ -19978,11 +19978,11 @@ var Server = class extends Protocol {
 
 // ../../node_modules/.pnpm/@modelcontextprotocol+sdk@1.26.0_zod@3.25.76/node_modules/@modelcontextprotocol/sdk/dist/esm/server/completable.js
 var COMPLETABLE_SYMBOL = /* @__PURE__ */ Symbol.for("mcp.completable");
-function isCompletable(schema) {
-  return !!schema && typeof schema === "object" && COMPLETABLE_SYMBOL in schema;
+function isCompletable(schema2) {
+  return !!schema2 && typeof schema2 === "object" && COMPLETABLE_SYMBOL in schema2;
 }
-function getCompleter(schema) {
-  const meta = schema[COMPLETABLE_SYMBOL];
+function getCompleter(schema2) {
+  const meta = schema2[COMPLETABLE_SYMBOL];
   return meta?.complete;
 }
 var McpZodTypeKind;
@@ -20798,17 +20798,17 @@ function isZodRawShapeCompat(obj) {
   }
   return Object.values(obj).some(isZodTypeLike);
 }
-function getZodSchemaObject(schema) {
-  if (!schema) {
+function getZodSchemaObject(schema2) {
+  if (!schema2) {
     return void 0;
   }
-  if (isZodRawShapeCompat(schema)) {
-    return objectFromShape(schema);
+  if (isZodRawShapeCompat(schema2)) {
+    return objectFromShape(schema2);
   }
-  return schema;
+  return schema2;
 }
-function promptArgumentsFromSchema(schema) {
-  const shape = getObjectShape(schema);
+function promptArgumentsFromSchema(schema2) {
+  const shape = getObjectShape(schema2);
   if (!shape)
     return [];
   return Object.entries(shape).map(([name, field]) => {
@@ -20821,8 +20821,8 @@ function promptArgumentsFromSchema(schema) {
     };
   });
 }
-function getMethodValue(schema) {
-  const shape = getObjectShape(schema);
+function getMethodValue(schema2) {
+  const shape = getObjectShape(schema2);
   const methodSchema = shape?.method;
   if (!methodSchema) {
     throw new Error("Schema is missing a method literal");
@@ -21814,9 +21814,9 @@ var ClaudeCodeSDKSpawner = class {
 };
 async function dispatchToSDK(sdk, args, pkg = "@anthropic-ai/claude-code") {
   const root = sdk.default ?? sdk;
-  const { type, prompt, cwd, apiKey, model } = args;
+  const { type: type2, prompt, cwd, apiKey, model } = args;
   if (typeof root.query === "function") {
-    const iter = root.query({ prompt, cwd, agent: type, apiKey, model });
+    const iter = root.query({ prompt, cwd, agent: type2, apiKey, model });
     let output = "";
     let parsed;
     for await (const chunk of iter) {
@@ -21840,7 +21840,7 @@ async function dispatchToSDK(sdk, args, pkg = "@anthropic-ai/claude-code") {
   }
   if (typeof root.ClaudeCode === "function") {
     const client = new root.ClaudeCode({ apiKey, model });
-    const raw = await client.runAgent({ subagentType: type, agent: type, prompt, cwd });
+    const raw = await client.runAgent({ subagentType: type2, agent: type2, prompt, cwd });
     return normaliseRunAgentResponse(raw);
   }
   throw new Error(`Claude Code SDK at \`${pkg}\` does not expose a recognised entry point (neither \`query\` nor \`ClaudeCode\`). The SDK API may have shifted; pass a custom \`invoker\` to ClaudeCodeSDKSpawner to bridge the new shape.`);
@@ -21968,6 +21968,33 @@ var defaultRunner = async (command, args, opts = {}) => {
 // ../../pipeline-cli/dist/steps/00-sweep.js
 import { existsSync as existsSync7, readdirSync as readdirSync2, statSync as statSync2 } from "node:fs";
 import { join as join6 } from "node:path";
+async function lookupPrState(branch, workDir, runner) {
+  try {
+    const r = await runner("gh", [
+      "pr",
+      "list",
+      "--head",
+      branch,
+      "--state",
+      "all",
+      "--json",
+      "number,state,mergedAt",
+      "--jq",
+      ".[0]"
+    ], { allowFailure: true, cwd: workDir });
+    if (r.code !== 0)
+      return { state: null, mergedAt: null };
+    const raw = r.stdout.trim();
+    if (!raw || raw === "null")
+      return { state: null, mergedAt: null };
+    const parsed = JSON.parse(raw);
+    const state = parsed.state ?? null;
+    const mergedAt = parsed.mergedAt ?? null;
+    return { state, mergedAt };
+  } catch {
+    return { state: null, mergedAt: null };
+  }
+}
 async function sweepMergedWorktrees(opts) {
   const runner = opts.runner ?? defaultRunner;
   const worktreesDir = join6(opts.workDir, ".worktrees");
@@ -22004,33 +22031,16 @@ async function sweepMergedWorktrees(opts) {
     }
     if (!branch || branch === "HEAD")
       continue;
-    let mergedAt = "";
-    try {
-      const r = await runner("gh", [
-        "pr",
-        "list",
-        "--head",
-        branch,
-        "--state",
-        "merged",
-        "--json",
-        "mergedAt",
-        "--jq",
-        ".[0].mergedAt"
-      ], { allowFailure: true, cwd: opts.workDir });
-      if (r.code === 0)
-        mergedAt = r.stdout.trim();
-    } catch {
+    const { state, mergedAt } = await lookupPrState(branch, opts.workDir, runner);
+    if (state !== "MERGED")
       continue;
-    }
-    if (!mergedAt || mergedAt === "null")
-      continue;
+    const mergedAtStr = mergedAt ?? "unknown";
     try {
       await runner("git", ["worktree", "remove", "--force", wt], {
         cwd: opts.workDir,
         allowFailure: true
       });
-      swept.push({ worktreePath: wt, branch, mergedAt });
+      swept.push({ worktreePath: wt, branch, mergedAt: mergedAtStr });
     } catch {
     }
   }
@@ -22040,6 +22050,2594 @@ async function sweepMergedWorktrees(opts) {
 // ../../pipeline-cli/dist/steps/01-validate.js
 import { existsSync as existsSync8, readdirSync as readdirSync3, readFileSync as readFileSync6 } from "node:fs";
 import { join as join7 } from "node:path";
+
+// ../../node_modules/.pnpm/js-yaml@4.1.1/node_modules/js-yaml/dist/js-yaml.mjs
+function isNothing(subject) {
+  return typeof subject === "undefined" || subject === null;
+}
+function isObject2(subject) {
+  return typeof subject === "object" && subject !== null;
+}
+function toArray(sequence) {
+  if (Array.isArray(sequence)) return sequence;
+  else if (isNothing(sequence)) return [];
+  return [sequence];
+}
+function extend2(target, source) {
+  var index, length, key, sourceKeys;
+  if (source) {
+    sourceKeys = Object.keys(source);
+    for (index = 0, length = sourceKeys.length; index < length; index += 1) {
+      key = sourceKeys[index];
+      target[key] = source[key];
+    }
+  }
+  return target;
+}
+function repeat(string3, count) {
+  var result = "", cycle;
+  for (cycle = 0; cycle < count; cycle += 1) {
+    result += string3;
+  }
+  return result;
+}
+function isNegativeZero(number3) {
+  return number3 === 0 && Number.NEGATIVE_INFINITY === 1 / number3;
+}
+var isNothing_1 = isNothing;
+var isObject_1 = isObject2;
+var toArray_1 = toArray;
+var repeat_1 = repeat;
+var isNegativeZero_1 = isNegativeZero;
+var extend_1 = extend2;
+var common = {
+  isNothing: isNothing_1,
+  isObject: isObject_1,
+  toArray: toArray_1,
+  repeat: repeat_1,
+  isNegativeZero: isNegativeZero_1,
+  extend: extend_1
+};
+function formatError2(exception2, compact) {
+  var where = "", message = exception2.reason || "(unknown reason)";
+  if (!exception2.mark) return message;
+  if (exception2.mark.name) {
+    where += 'in "' + exception2.mark.name + '" ';
+  }
+  where += "(" + (exception2.mark.line + 1) + ":" + (exception2.mark.column + 1) + ")";
+  if (!compact && exception2.mark.snippet) {
+    where += "\n\n" + exception2.mark.snippet;
+  }
+  return message + " " + where;
+}
+function YAMLException$1(reason, mark) {
+  Error.call(this);
+  this.name = "YAMLException";
+  this.reason = reason;
+  this.mark = mark;
+  this.message = formatError2(this, false);
+  if (Error.captureStackTrace) {
+    Error.captureStackTrace(this, this.constructor);
+  } else {
+    this.stack = new Error().stack || "";
+  }
+}
+YAMLException$1.prototype = Object.create(Error.prototype);
+YAMLException$1.prototype.constructor = YAMLException$1;
+YAMLException$1.prototype.toString = function toString(compact) {
+  return this.name + ": " + formatError2(this, compact);
+};
+var exception = YAMLException$1;
+function getLine(buffer, lineStart, lineEnd, position, maxLineLength) {
+  var head = "";
+  var tail = "";
+  var maxHalfLength = Math.floor(maxLineLength / 2) - 1;
+  if (position - lineStart > maxHalfLength) {
+    head = " ... ";
+    lineStart = position - maxHalfLength + head.length;
+  }
+  if (lineEnd - position > maxHalfLength) {
+    tail = " ...";
+    lineEnd = position + maxHalfLength - tail.length;
+  }
+  return {
+    str: head + buffer.slice(lineStart, lineEnd).replace(/\t/g, "\u2192") + tail,
+    pos: position - lineStart + head.length
+    // relative position
+  };
+}
+function padStart(string3, max) {
+  return common.repeat(" ", max - string3.length) + string3;
+}
+function makeSnippet(mark, options) {
+  options = Object.create(options || null);
+  if (!mark.buffer) return null;
+  if (!options.maxLength) options.maxLength = 79;
+  if (typeof options.indent !== "number") options.indent = 1;
+  if (typeof options.linesBefore !== "number") options.linesBefore = 3;
+  if (typeof options.linesAfter !== "number") options.linesAfter = 2;
+  var re = /\r?\n|\r|\0/g;
+  var lineStarts = [0];
+  var lineEnds = [];
+  var match;
+  var foundLineNo = -1;
+  while (match = re.exec(mark.buffer)) {
+    lineEnds.push(match.index);
+    lineStarts.push(match.index + match[0].length);
+    if (mark.position <= match.index && foundLineNo < 0) {
+      foundLineNo = lineStarts.length - 2;
+    }
+  }
+  if (foundLineNo < 0) foundLineNo = lineStarts.length - 1;
+  var result = "", i, line;
+  var lineNoLength = Math.min(mark.line + options.linesAfter, lineEnds.length).toString().length;
+  var maxLineLength = options.maxLength - (options.indent + lineNoLength + 3);
+  for (i = 1; i <= options.linesBefore; i++) {
+    if (foundLineNo - i < 0) break;
+    line = getLine(
+      mark.buffer,
+      lineStarts[foundLineNo - i],
+      lineEnds[foundLineNo - i],
+      mark.position - (lineStarts[foundLineNo] - lineStarts[foundLineNo - i]),
+      maxLineLength
+    );
+    result = common.repeat(" ", options.indent) + padStart((mark.line - i + 1).toString(), lineNoLength) + " | " + line.str + "\n" + result;
+  }
+  line = getLine(mark.buffer, lineStarts[foundLineNo], lineEnds[foundLineNo], mark.position, maxLineLength);
+  result += common.repeat(" ", options.indent) + padStart((mark.line + 1).toString(), lineNoLength) + " | " + line.str + "\n";
+  result += common.repeat("-", options.indent + lineNoLength + 3 + line.pos) + "^\n";
+  for (i = 1; i <= options.linesAfter; i++) {
+    if (foundLineNo + i >= lineEnds.length) break;
+    line = getLine(
+      mark.buffer,
+      lineStarts[foundLineNo + i],
+      lineEnds[foundLineNo + i],
+      mark.position - (lineStarts[foundLineNo] - lineStarts[foundLineNo + i]),
+      maxLineLength
+    );
+    result += common.repeat(" ", options.indent) + padStart((mark.line + i + 1).toString(), lineNoLength) + " | " + line.str + "\n";
+  }
+  return result.replace(/\n$/, "");
+}
+var snippet = makeSnippet;
+var TYPE_CONSTRUCTOR_OPTIONS = [
+  "kind",
+  "multi",
+  "resolve",
+  "construct",
+  "instanceOf",
+  "predicate",
+  "represent",
+  "representName",
+  "defaultStyle",
+  "styleAliases"
+];
+var YAML_NODE_KINDS = [
+  "scalar",
+  "sequence",
+  "mapping"
+];
+function compileStyleAliases(map2) {
+  var result = {};
+  if (map2 !== null) {
+    Object.keys(map2).forEach(function(style) {
+      map2[style].forEach(function(alias) {
+        result[String(alias)] = style;
+      });
+    });
+  }
+  return result;
+}
+function Type$1(tag, options) {
+  options = options || {};
+  Object.keys(options).forEach(function(name) {
+    if (TYPE_CONSTRUCTOR_OPTIONS.indexOf(name) === -1) {
+      throw new exception('Unknown option "' + name + '" is met in definition of "' + tag + '" YAML type.');
+    }
+  });
+  this.options = options;
+  this.tag = tag;
+  this.kind = options["kind"] || null;
+  this.resolve = options["resolve"] || function() {
+    return true;
+  };
+  this.construct = options["construct"] || function(data) {
+    return data;
+  };
+  this.instanceOf = options["instanceOf"] || null;
+  this.predicate = options["predicate"] || null;
+  this.represent = options["represent"] || null;
+  this.representName = options["representName"] || null;
+  this.defaultStyle = options["defaultStyle"] || null;
+  this.multi = options["multi"] || false;
+  this.styleAliases = compileStyleAliases(options["styleAliases"] || null);
+  if (YAML_NODE_KINDS.indexOf(this.kind) === -1) {
+    throw new exception('Unknown kind "' + this.kind + '" is specified for "' + tag + '" YAML type.');
+  }
+}
+var type = Type$1;
+function compileList(schema2, name) {
+  var result = [];
+  schema2[name].forEach(function(currentType) {
+    var newIndex = result.length;
+    result.forEach(function(previousType, previousIndex) {
+      if (previousType.tag === currentType.tag && previousType.kind === currentType.kind && previousType.multi === currentType.multi) {
+        newIndex = previousIndex;
+      }
+    });
+    result[newIndex] = currentType;
+  });
+  return result;
+}
+function compileMap() {
+  var result = {
+    scalar: {},
+    sequence: {},
+    mapping: {},
+    fallback: {},
+    multi: {
+      scalar: [],
+      sequence: [],
+      mapping: [],
+      fallback: []
+    }
+  }, index, length;
+  function collectType(type2) {
+    if (type2.multi) {
+      result.multi[type2.kind].push(type2);
+      result.multi["fallback"].push(type2);
+    } else {
+      result[type2.kind][type2.tag] = result["fallback"][type2.tag] = type2;
+    }
+  }
+  for (index = 0, length = arguments.length; index < length; index += 1) {
+    arguments[index].forEach(collectType);
+  }
+  return result;
+}
+function Schema$1(definition) {
+  return this.extend(definition);
+}
+Schema$1.prototype.extend = function extend3(definition) {
+  var implicit = [];
+  var explicit = [];
+  if (definition instanceof type) {
+    explicit.push(definition);
+  } else if (Array.isArray(definition)) {
+    explicit = explicit.concat(definition);
+  } else if (definition && (Array.isArray(definition.implicit) || Array.isArray(definition.explicit))) {
+    if (definition.implicit) implicit = implicit.concat(definition.implicit);
+    if (definition.explicit) explicit = explicit.concat(definition.explicit);
+  } else {
+    throw new exception("Schema.extend argument should be a Type, [ Type ], or a schema definition ({ implicit: [...], explicit: [...] })");
+  }
+  implicit.forEach(function(type$1) {
+    if (!(type$1 instanceof type)) {
+      throw new exception("Specified list of YAML types (or a single Type object) contains a non-Type object.");
+    }
+    if (type$1.loadKind && type$1.loadKind !== "scalar") {
+      throw new exception("There is a non-scalar type in the implicit list of a schema. Implicit resolving of such types is not supported.");
+    }
+    if (type$1.multi) {
+      throw new exception("There is a multi type in the implicit list of a schema. Multi tags can only be listed as explicit.");
+    }
+  });
+  explicit.forEach(function(type$1) {
+    if (!(type$1 instanceof type)) {
+      throw new exception("Specified list of YAML types (or a single Type object) contains a non-Type object.");
+    }
+  });
+  var result = Object.create(Schema$1.prototype);
+  result.implicit = (this.implicit || []).concat(implicit);
+  result.explicit = (this.explicit || []).concat(explicit);
+  result.compiledImplicit = compileList(result, "implicit");
+  result.compiledExplicit = compileList(result, "explicit");
+  result.compiledTypeMap = compileMap(result.compiledImplicit, result.compiledExplicit);
+  return result;
+};
+var schema = Schema$1;
+var str = new type("tag:yaml.org,2002:str", {
+  kind: "scalar",
+  construct: function(data) {
+    return data !== null ? data : "";
+  }
+});
+var seq = new type("tag:yaml.org,2002:seq", {
+  kind: "sequence",
+  construct: function(data) {
+    return data !== null ? data : [];
+  }
+});
+var map = new type("tag:yaml.org,2002:map", {
+  kind: "mapping",
+  construct: function(data) {
+    return data !== null ? data : {};
+  }
+});
+var failsafe = new schema({
+  explicit: [
+    str,
+    seq,
+    map
+  ]
+});
+function resolveYamlNull(data) {
+  if (data === null) return true;
+  var max = data.length;
+  return max === 1 && data === "~" || max === 4 && (data === "null" || data === "Null" || data === "NULL");
+}
+function constructYamlNull() {
+  return null;
+}
+function isNull(object3) {
+  return object3 === null;
+}
+var _null4 = new type("tag:yaml.org,2002:null", {
+  kind: "scalar",
+  resolve: resolveYamlNull,
+  construct: constructYamlNull,
+  predicate: isNull,
+  represent: {
+    canonical: function() {
+      return "~";
+    },
+    lowercase: function() {
+      return "null";
+    },
+    uppercase: function() {
+      return "NULL";
+    },
+    camelcase: function() {
+      return "Null";
+    },
+    empty: function() {
+      return "";
+    }
+  },
+  defaultStyle: "lowercase"
+});
+function resolveYamlBoolean(data) {
+  if (data === null) return false;
+  var max = data.length;
+  return max === 4 && (data === "true" || data === "True" || data === "TRUE") || max === 5 && (data === "false" || data === "False" || data === "FALSE");
+}
+function constructYamlBoolean(data) {
+  return data === "true" || data === "True" || data === "TRUE";
+}
+function isBoolean(object3) {
+  return Object.prototype.toString.call(object3) === "[object Boolean]";
+}
+var bool = new type("tag:yaml.org,2002:bool", {
+  kind: "scalar",
+  resolve: resolveYamlBoolean,
+  construct: constructYamlBoolean,
+  predicate: isBoolean,
+  represent: {
+    lowercase: function(object3) {
+      return object3 ? "true" : "false";
+    },
+    uppercase: function(object3) {
+      return object3 ? "TRUE" : "FALSE";
+    },
+    camelcase: function(object3) {
+      return object3 ? "True" : "False";
+    }
+  },
+  defaultStyle: "lowercase"
+});
+function isHexCode(c) {
+  return 48 <= c && c <= 57 || 65 <= c && c <= 70 || 97 <= c && c <= 102;
+}
+function isOctCode(c) {
+  return 48 <= c && c <= 55;
+}
+function isDecCode(c) {
+  return 48 <= c && c <= 57;
+}
+function resolveYamlInteger(data) {
+  if (data === null) return false;
+  var max = data.length, index = 0, hasDigits = false, ch;
+  if (!max) return false;
+  ch = data[index];
+  if (ch === "-" || ch === "+") {
+    ch = data[++index];
+  }
+  if (ch === "0") {
+    if (index + 1 === max) return true;
+    ch = data[++index];
+    if (ch === "b") {
+      index++;
+      for (; index < max; index++) {
+        ch = data[index];
+        if (ch === "_") continue;
+        if (ch !== "0" && ch !== "1") return false;
+        hasDigits = true;
+      }
+      return hasDigits && ch !== "_";
+    }
+    if (ch === "x") {
+      index++;
+      for (; index < max; index++) {
+        ch = data[index];
+        if (ch === "_") continue;
+        if (!isHexCode(data.charCodeAt(index))) return false;
+        hasDigits = true;
+      }
+      return hasDigits && ch !== "_";
+    }
+    if (ch === "o") {
+      index++;
+      for (; index < max; index++) {
+        ch = data[index];
+        if (ch === "_") continue;
+        if (!isOctCode(data.charCodeAt(index))) return false;
+        hasDigits = true;
+      }
+      return hasDigits && ch !== "_";
+    }
+  }
+  if (ch === "_") return false;
+  for (; index < max; index++) {
+    ch = data[index];
+    if (ch === "_") continue;
+    if (!isDecCode(data.charCodeAt(index))) {
+      return false;
+    }
+    hasDigits = true;
+  }
+  if (!hasDigits || ch === "_") return false;
+  return true;
+}
+function constructYamlInteger(data) {
+  var value = data, sign = 1, ch;
+  if (value.indexOf("_") !== -1) {
+    value = value.replace(/_/g, "");
+  }
+  ch = value[0];
+  if (ch === "-" || ch === "+") {
+    if (ch === "-") sign = -1;
+    value = value.slice(1);
+    ch = value[0];
+  }
+  if (value === "0") return 0;
+  if (ch === "0") {
+    if (value[1] === "b") return sign * parseInt(value.slice(2), 2);
+    if (value[1] === "x") return sign * parseInt(value.slice(2), 16);
+    if (value[1] === "o") return sign * parseInt(value.slice(2), 8);
+  }
+  return sign * parseInt(value, 10);
+}
+function isInteger(object3) {
+  return Object.prototype.toString.call(object3) === "[object Number]" && (object3 % 1 === 0 && !common.isNegativeZero(object3));
+}
+var int2 = new type("tag:yaml.org,2002:int", {
+  kind: "scalar",
+  resolve: resolveYamlInteger,
+  construct: constructYamlInteger,
+  predicate: isInteger,
+  represent: {
+    binary: function(obj) {
+      return obj >= 0 ? "0b" + obj.toString(2) : "-0b" + obj.toString(2).slice(1);
+    },
+    octal: function(obj) {
+      return obj >= 0 ? "0o" + obj.toString(8) : "-0o" + obj.toString(8).slice(1);
+    },
+    decimal: function(obj) {
+      return obj.toString(10);
+    },
+    /* eslint-disable max-len */
+    hexadecimal: function(obj) {
+      return obj >= 0 ? "0x" + obj.toString(16).toUpperCase() : "-0x" + obj.toString(16).toUpperCase().slice(1);
+    }
+  },
+  defaultStyle: "decimal",
+  styleAliases: {
+    binary: [2, "bin"],
+    octal: [8, "oct"],
+    decimal: [10, "dec"],
+    hexadecimal: [16, "hex"]
+  }
+});
+var YAML_FLOAT_PATTERN = new RegExp(
+  // 2.5e4, 2.5 and integers
+  "^(?:[-+]?(?:[0-9][0-9_]*)(?:\\.[0-9_]*)?(?:[eE][-+]?[0-9]+)?|\\.[0-9_]+(?:[eE][-+]?[0-9]+)?|[-+]?\\.(?:inf|Inf|INF)|\\.(?:nan|NaN|NAN))$"
+);
+function resolveYamlFloat(data) {
+  if (data === null) return false;
+  if (!YAML_FLOAT_PATTERN.test(data) || // Quick hack to not allow integers end with `_`
+  // Probably should update regexp & check speed
+  data[data.length - 1] === "_") {
+    return false;
+  }
+  return true;
+}
+function constructYamlFloat(data) {
+  var value, sign;
+  value = data.replace(/_/g, "").toLowerCase();
+  sign = value[0] === "-" ? -1 : 1;
+  if ("+-".indexOf(value[0]) >= 0) {
+    value = value.slice(1);
+  }
+  if (value === ".inf") {
+    return sign === 1 ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  } else if (value === ".nan") {
+    return NaN;
+  }
+  return sign * parseFloat(value, 10);
+}
+var SCIENTIFIC_WITHOUT_DOT = /^[-+]?[0-9]+e/;
+function representYamlFloat(object3, style) {
+  var res;
+  if (isNaN(object3)) {
+    switch (style) {
+      case "lowercase":
+        return ".nan";
+      case "uppercase":
+        return ".NAN";
+      case "camelcase":
+        return ".NaN";
+    }
+  } else if (Number.POSITIVE_INFINITY === object3) {
+    switch (style) {
+      case "lowercase":
+        return ".inf";
+      case "uppercase":
+        return ".INF";
+      case "camelcase":
+        return ".Inf";
+    }
+  } else if (Number.NEGATIVE_INFINITY === object3) {
+    switch (style) {
+      case "lowercase":
+        return "-.inf";
+      case "uppercase":
+        return "-.INF";
+      case "camelcase":
+        return "-.Inf";
+    }
+  } else if (common.isNegativeZero(object3)) {
+    return "-0.0";
+  }
+  res = object3.toString(10);
+  return SCIENTIFIC_WITHOUT_DOT.test(res) ? res.replace("e", ".e") : res;
+}
+function isFloat(object3) {
+  return Object.prototype.toString.call(object3) === "[object Number]" && (object3 % 1 !== 0 || common.isNegativeZero(object3));
+}
+var float = new type("tag:yaml.org,2002:float", {
+  kind: "scalar",
+  resolve: resolveYamlFloat,
+  construct: constructYamlFloat,
+  predicate: isFloat,
+  represent: representYamlFloat,
+  defaultStyle: "lowercase"
+});
+var json = failsafe.extend({
+  implicit: [
+    _null4,
+    bool,
+    int2,
+    float
+  ]
+});
+var core = json;
+var YAML_DATE_REGEXP = new RegExp(
+  "^([0-9][0-9][0-9][0-9])-([0-9][0-9])-([0-9][0-9])$"
+);
+var YAML_TIMESTAMP_REGEXP = new RegExp(
+  "^([0-9][0-9][0-9][0-9])-([0-9][0-9]?)-([0-9][0-9]?)(?:[Tt]|[ \\t]+)([0-9][0-9]?):([0-9][0-9]):([0-9][0-9])(?:\\.([0-9]*))?(?:[ \\t]*(Z|([-+])([0-9][0-9]?)(?::([0-9][0-9]))?))?$"
+);
+function resolveYamlTimestamp(data) {
+  if (data === null) return false;
+  if (YAML_DATE_REGEXP.exec(data) !== null) return true;
+  if (YAML_TIMESTAMP_REGEXP.exec(data) !== null) return true;
+  return false;
+}
+function constructYamlTimestamp(data) {
+  var match, year, month, day, hour, minute, second, fraction = 0, delta = null, tz_hour, tz_minute, date3;
+  match = YAML_DATE_REGEXP.exec(data);
+  if (match === null) match = YAML_TIMESTAMP_REGEXP.exec(data);
+  if (match === null) throw new Error("Date resolve error");
+  year = +match[1];
+  month = +match[2] - 1;
+  day = +match[3];
+  if (!match[4]) {
+    return new Date(Date.UTC(year, month, day));
+  }
+  hour = +match[4];
+  minute = +match[5];
+  second = +match[6];
+  if (match[7]) {
+    fraction = match[7].slice(0, 3);
+    while (fraction.length < 3) {
+      fraction += "0";
+    }
+    fraction = +fraction;
+  }
+  if (match[9]) {
+    tz_hour = +match[10];
+    tz_minute = +(match[11] || 0);
+    delta = (tz_hour * 60 + tz_minute) * 6e4;
+    if (match[9] === "-") delta = -delta;
+  }
+  date3 = new Date(Date.UTC(year, month, day, hour, minute, second, fraction));
+  if (delta) date3.setTime(date3.getTime() - delta);
+  return date3;
+}
+function representYamlTimestamp(object3) {
+  return object3.toISOString();
+}
+var timestamp = new type("tag:yaml.org,2002:timestamp", {
+  kind: "scalar",
+  resolve: resolveYamlTimestamp,
+  construct: constructYamlTimestamp,
+  instanceOf: Date,
+  represent: representYamlTimestamp
+});
+function resolveYamlMerge(data) {
+  return data === "<<" || data === null;
+}
+var merge2 = new type("tag:yaml.org,2002:merge", {
+  kind: "scalar",
+  resolve: resolveYamlMerge
+});
+var BASE64_MAP = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=\n\r";
+function resolveYamlBinary(data) {
+  if (data === null) return false;
+  var code, idx, bitlen = 0, max = data.length, map2 = BASE64_MAP;
+  for (idx = 0; idx < max; idx++) {
+    code = map2.indexOf(data.charAt(idx));
+    if (code > 64) continue;
+    if (code < 0) return false;
+    bitlen += 6;
+  }
+  return bitlen % 8 === 0;
+}
+function constructYamlBinary(data) {
+  var idx, tailbits, input = data.replace(/[\r\n=]/g, ""), max = input.length, map2 = BASE64_MAP, bits = 0, result = [];
+  for (idx = 0; idx < max; idx++) {
+    if (idx % 4 === 0 && idx) {
+      result.push(bits >> 16 & 255);
+      result.push(bits >> 8 & 255);
+      result.push(bits & 255);
+    }
+    bits = bits << 6 | map2.indexOf(input.charAt(idx));
+  }
+  tailbits = max % 4 * 6;
+  if (tailbits === 0) {
+    result.push(bits >> 16 & 255);
+    result.push(bits >> 8 & 255);
+    result.push(bits & 255);
+  } else if (tailbits === 18) {
+    result.push(bits >> 10 & 255);
+    result.push(bits >> 2 & 255);
+  } else if (tailbits === 12) {
+    result.push(bits >> 4 & 255);
+  }
+  return new Uint8Array(result);
+}
+function representYamlBinary(object3) {
+  var result = "", bits = 0, idx, tail, max = object3.length, map2 = BASE64_MAP;
+  for (idx = 0; idx < max; idx++) {
+    if (idx % 3 === 0 && idx) {
+      result += map2[bits >> 18 & 63];
+      result += map2[bits >> 12 & 63];
+      result += map2[bits >> 6 & 63];
+      result += map2[bits & 63];
+    }
+    bits = (bits << 8) + object3[idx];
+  }
+  tail = max % 3;
+  if (tail === 0) {
+    result += map2[bits >> 18 & 63];
+    result += map2[bits >> 12 & 63];
+    result += map2[bits >> 6 & 63];
+    result += map2[bits & 63];
+  } else if (tail === 2) {
+    result += map2[bits >> 10 & 63];
+    result += map2[bits >> 4 & 63];
+    result += map2[bits << 2 & 63];
+    result += map2[64];
+  } else if (tail === 1) {
+    result += map2[bits >> 2 & 63];
+    result += map2[bits << 4 & 63];
+    result += map2[64];
+    result += map2[64];
+  }
+  return result;
+}
+function isBinary(obj) {
+  return Object.prototype.toString.call(obj) === "[object Uint8Array]";
+}
+var binary = new type("tag:yaml.org,2002:binary", {
+  kind: "scalar",
+  resolve: resolveYamlBinary,
+  construct: constructYamlBinary,
+  predicate: isBinary,
+  represent: representYamlBinary
+});
+var _hasOwnProperty$3 = Object.prototype.hasOwnProperty;
+var _toString$2 = Object.prototype.toString;
+function resolveYamlOmap(data) {
+  if (data === null) return true;
+  var objectKeys = [], index, length, pair, pairKey, pairHasKey, object3 = data;
+  for (index = 0, length = object3.length; index < length; index += 1) {
+    pair = object3[index];
+    pairHasKey = false;
+    if (_toString$2.call(pair) !== "[object Object]") return false;
+    for (pairKey in pair) {
+      if (_hasOwnProperty$3.call(pair, pairKey)) {
+        if (!pairHasKey) pairHasKey = true;
+        else return false;
+      }
+    }
+    if (!pairHasKey) return false;
+    if (objectKeys.indexOf(pairKey) === -1) objectKeys.push(pairKey);
+    else return false;
+  }
+  return true;
+}
+function constructYamlOmap(data) {
+  return data !== null ? data : [];
+}
+var omap = new type("tag:yaml.org,2002:omap", {
+  kind: "sequence",
+  resolve: resolveYamlOmap,
+  construct: constructYamlOmap
+});
+var _toString$1 = Object.prototype.toString;
+function resolveYamlPairs(data) {
+  if (data === null) return true;
+  var index, length, pair, keys, result, object3 = data;
+  result = new Array(object3.length);
+  for (index = 0, length = object3.length; index < length; index += 1) {
+    pair = object3[index];
+    if (_toString$1.call(pair) !== "[object Object]") return false;
+    keys = Object.keys(pair);
+    if (keys.length !== 1) return false;
+    result[index] = [keys[0], pair[keys[0]]];
+  }
+  return true;
+}
+function constructYamlPairs(data) {
+  if (data === null) return [];
+  var index, length, pair, keys, result, object3 = data;
+  result = new Array(object3.length);
+  for (index = 0, length = object3.length; index < length; index += 1) {
+    pair = object3[index];
+    keys = Object.keys(pair);
+    result[index] = [keys[0], pair[keys[0]]];
+  }
+  return result;
+}
+var pairs = new type("tag:yaml.org,2002:pairs", {
+  kind: "sequence",
+  resolve: resolveYamlPairs,
+  construct: constructYamlPairs
+});
+var _hasOwnProperty$2 = Object.prototype.hasOwnProperty;
+function resolveYamlSet(data) {
+  if (data === null) return true;
+  var key, object3 = data;
+  for (key in object3) {
+    if (_hasOwnProperty$2.call(object3, key)) {
+      if (object3[key] !== null) return false;
+    }
+  }
+  return true;
+}
+function constructYamlSet(data) {
+  return data !== null ? data : {};
+}
+var set = new type("tag:yaml.org,2002:set", {
+  kind: "mapping",
+  resolve: resolveYamlSet,
+  construct: constructYamlSet
+});
+var _default2 = core.extend({
+  implicit: [
+    timestamp,
+    merge2
+  ],
+  explicit: [
+    binary,
+    omap,
+    pairs,
+    set
+  ]
+});
+var _hasOwnProperty$1 = Object.prototype.hasOwnProperty;
+var CONTEXT_FLOW_IN = 1;
+var CONTEXT_FLOW_OUT = 2;
+var CONTEXT_BLOCK_IN = 3;
+var CONTEXT_BLOCK_OUT = 4;
+var CHOMPING_CLIP = 1;
+var CHOMPING_STRIP = 2;
+var CHOMPING_KEEP = 3;
+var PATTERN_NON_PRINTABLE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x84\x86-\x9F\uFFFE\uFFFF]|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?:[^\uD800-\uDBFF]|^)[\uDC00-\uDFFF]/;
+var PATTERN_NON_ASCII_LINE_BREAKS = /[\x85\u2028\u2029]/;
+var PATTERN_FLOW_INDICATORS = /[,\[\]\{\}]/;
+var PATTERN_TAG_HANDLE = /^(?:!|!!|![a-z\-]+!)$/i;
+var PATTERN_TAG_URI = /^(?:!|[^,\[\]\{\}])(?:%[0-9a-f]{2}|[0-9a-z\-#;\/\?:@&=\+\$,_\.!~\*'\(\)\[\]])*$/i;
+function _class(obj) {
+  return Object.prototype.toString.call(obj);
+}
+function is_EOL(c) {
+  return c === 10 || c === 13;
+}
+function is_WHITE_SPACE(c) {
+  return c === 9 || c === 32;
+}
+function is_WS_OR_EOL(c) {
+  return c === 9 || c === 32 || c === 10 || c === 13;
+}
+function is_FLOW_INDICATOR(c) {
+  return c === 44 || c === 91 || c === 93 || c === 123 || c === 125;
+}
+function fromHexCode(c) {
+  var lc;
+  if (48 <= c && c <= 57) {
+    return c - 48;
+  }
+  lc = c | 32;
+  if (97 <= lc && lc <= 102) {
+    return lc - 97 + 10;
+  }
+  return -1;
+}
+function escapedHexLen(c) {
+  if (c === 120) {
+    return 2;
+  }
+  if (c === 117) {
+    return 4;
+  }
+  if (c === 85) {
+    return 8;
+  }
+  return 0;
+}
+function fromDecimalCode(c) {
+  if (48 <= c && c <= 57) {
+    return c - 48;
+  }
+  return -1;
+}
+function simpleEscapeSequence(c) {
+  return c === 48 ? "\0" : c === 97 ? "\x07" : c === 98 ? "\b" : c === 116 ? "	" : c === 9 ? "	" : c === 110 ? "\n" : c === 118 ? "\v" : c === 102 ? "\f" : c === 114 ? "\r" : c === 101 ? "\x1B" : c === 32 ? " " : c === 34 ? '"' : c === 47 ? "/" : c === 92 ? "\\" : c === 78 ? "\x85" : c === 95 ? "\xA0" : c === 76 ? "\u2028" : c === 80 ? "\u2029" : "";
+}
+function charFromCodepoint(c) {
+  if (c <= 65535) {
+    return String.fromCharCode(c);
+  }
+  return String.fromCharCode(
+    (c - 65536 >> 10) + 55296,
+    (c - 65536 & 1023) + 56320
+  );
+}
+function setProperty(object3, key, value) {
+  if (key === "__proto__") {
+    Object.defineProperty(object3, key, {
+      configurable: true,
+      enumerable: true,
+      writable: true,
+      value
+    });
+  } else {
+    object3[key] = value;
+  }
+}
+var simpleEscapeCheck = new Array(256);
+var simpleEscapeMap = new Array(256);
+for (i = 0; i < 256; i++) {
+  simpleEscapeCheck[i] = simpleEscapeSequence(i) ? 1 : 0;
+  simpleEscapeMap[i] = simpleEscapeSequence(i);
+}
+var i;
+function State$1(input, options) {
+  this.input = input;
+  this.filename = options["filename"] || null;
+  this.schema = options["schema"] || _default2;
+  this.onWarning = options["onWarning"] || null;
+  this.legacy = options["legacy"] || false;
+  this.json = options["json"] || false;
+  this.listener = options["listener"] || null;
+  this.implicitTypes = this.schema.compiledImplicit;
+  this.typeMap = this.schema.compiledTypeMap;
+  this.length = input.length;
+  this.position = 0;
+  this.line = 0;
+  this.lineStart = 0;
+  this.lineIndent = 0;
+  this.firstTabInLine = -1;
+  this.documents = [];
+}
+function generateError(state, message) {
+  var mark = {
+    name: state.filename,
+    buffer: state.input.slice(0, -1),
+    // omit trailing \0
+    position: state.position,
+    line: state.line,
+    column: state.position - state.lineStart
+  };
+  mark.snippet = snippet(mark);
+  return new exception(message, mark);
+}
+function throwError(state, message) {
+  throw generateError(state, message);
+}
+function throwWarning(state, message) {
+  if (state.onWarning) {
+    state.onWarning.call(null, generateError(state, message));
+  }
+}
+var directiveHandlers = {
+  YAML: function handleYamlDirective(state, name, args) {
+    var match, major, minor;
+    if (state.version !== null) {
+      throwError(state, "duplication of %YAML directive");
+    }
+    if (args.length !== 1) {
+      throwError(state, "YAML directive accepts exactly one argument");
+    }
+    match = /^([0-9]+)\.([0-9]+)$/.exec(args[0]);
+    if (match === null) {
+      throwError(state, "ill-formed argument of the YAML directive");
+    }
+    major = parseInt(match[1], 10);
+    minor = parseInt(match[2], 10);
+    if (major !== 1) {
+      throwError(state, "unacceptable YAML version of the document");
+    }
+    state.version = args[0];
+    state.checkLineBreaks = minor < 2;
+    if (minor !== 1 && minor !== 2) {
+      throwWarning(state, "unsupported YAML version of the document");
+    }
+  },
+  TAG: function handleTagDirective(state, name, args) {
+    var handle, prefix;
+    if (args.length !== 2) {
+      throwError(state, "TAG directive accepts exactly two arguments");
+    }
+    handle = args[0];
+    prefix = args[1];
+    if (!PATTERN_TAG_HANDLE.test(handle)) {
+      throwError(state, "ill-formed tag handle (first argument) of the TAG directive");
+    }
+    if (_hasOwnProperty$1.call(state.tagMap, handle)) {
+      throwError(state, 'there is a previously declared suffix for "' + handle + '" tag handle');
+    }
+    if (!PATTERN_TAG_URI.test(prefix)) {
+      throwError(state, "ill-formed tag prefix (second argument) of the TAG directive");
+    }
+    try {
+      prefix = decodeURIComponent(prefix);
+    } catch (err) {
+      throwError(state, "tag prefix is malformed: " + prefix);
+    }
+    state.tagMap[handle] = prefix;
+  }
+};
+function captureSegment(state, start, end, checkJson) {
+  var _position, _length2, _character, _result;
+  if (start < end) {
+    _result = state.input.slice(start, end);
+    if (checkJson) {
+      for (_position = 0, _length2 = _result.length; _position < _length2; _position += 1) {
+        _character = _result.charCodeAt(_position);
+        if (!(_character === 9 || 32 <= _character && _character <= 1114111)) {
+          throwError(state, "expected valid JSON character");
+        }
+      }
+    } else if (PATTERN_NON_PRINTABLE.test(_result)) {
+      throwError(state, "the stream contains non-printable characters");
+    }
+    state.result += _result;
+  }
+}
+function mergeMappings(state, destination, source, overridableKeys) {
+  var sourceKeys, key, index, quantity;
+  if (!common.isObject(source)) {
+    throwError(state, "cannot merge mappings; the provided source object is unacceptable");
+  }
+  sourceKeys = Object.keys(source);
+  for (index = 0, quantity = sourceKeys.length; index < quantity; index += 1) {
+    key = sourceKeys[index];
+    if (!_hasOwnProperty$1.call(destination, key)) {
+      setProperty(destination, key, source[key]);
+      overridableKeys[key] = true;
+    }
+  }
+}
+function storeMappingPair(state, _result, overridableKeys, keyTag, keyNode, valueNode, startLine, startLineStart, startPos) {
+  var index, quantity;
+  if (Array.isArray(keyNode)) {
+    keyNode = Array.prototype.slice.call(keyNode);
+    for (index = 0, quantity = keyNode.length; index < quantity; index += 1) {
+      if (Array.isArray(keyNode[index])) {
+        throwError(state, "nested arrays are not supported inside keys");
+      }
+      if (typeof keyNode === "object" && _class(keyNode[index]) === "[object Object]") {
+        keyNode[index] = "[object Object]";
+      }
+    }
+  }
+  if (typeof keyNode === "object" && _class(keyNode) === "[object Object]") {
+    keyNode = "[object Object]";
+  }
+  keyNode = String(keyNode);
+  if (_result === null) {
+    _result = {};
+  }
+  if (keyTag === "tag:yaml.org,2002:merge") {
+    if (Array.isArray(valueNode)) {
+      for (index = 0, quantity = valueNode.length; index < quantity; index += 1) {
+        mergeMappings(state, _result, valueNode[index], overridableKeys);
+      }
+    } else {
+      mergeMappings(state, _result, valueNode, overridableKeys);
+    }
+  } else {
+    if (!state.json && !_hasOwnProperty$1.call(overridableKeys, keyNode) && _hasOwnProperty$1.call(_result, keyNode)) {
+      state.line = startLine || state.line;
+      state.lineStart = startLineStart || state.lineStart;
+      state.position = startPos || state.position;
+      throwError(state, "duplicated mapping key");
+    }
+    setProperty(_result, keyNode, valueNode);
+    delete overridableKeys[keyNode];
+  }
+  return _result;
+}
+function readLineBreak(state) {
+  var ch;
+  ch = state.input.charCodeAt(state.position);
+  if (ch === 10) {
+    state.position++;
+  } else if (ch === 13) {
+    state.position++;
+    if (state.input.charCodeAt(state.position) === 10) {
+      state.position++;
+    }
+  } else {
+    throwError(state, "a line break is expected");
+  }
+  state.line += 1;
+  state.lineStart = state.position;
+  state.firstTabInLine = -1;
+}
+function skipSeparationSpace(state, allowComments, checkIndent) {
+  var lineBreaks = 0, ch = state.input.charCodeAt(state.position);
+  while (ch !== 0) {
+    while (is_WHITE_SPACE(ch)) {
+      if (ch === 9 && state.firstTabInLine === -1) {
+        state.firstTabInLine = state.position;
+      }
+      ch = state.input.charCodeAt(++state.position);
+    }
+    if (allowComments && ch === 35) {
+      do {
+        ch = state.input.charCodeAt(++state.position);
+      } while (ch !== 10 && ch !== 13 && ch !== 0);
+    }
+    if (is_EOL(ch)) {
+      readLineBreak(state);
+      ch = state.input.charCodeAt(state.position);
+      lineBreaks++;
+      state.lineIndent = 0;
+      while (ch === 32) {
+        state.lineIndent++;
+        ch = state.input.charCodeAt(++state.position);
+      }
+    } else {
+      break;
+    }
+  }
+  if (checkIndent !== -1 && lineBreaks !== 0 && state.lineIndent < checkIndent) {
+    throwWarning(state, "deficient indentation");
+  }
+  return lineBreaks;
+}
+function testDocumentSeparator(state) {
+  var _position = state.position, ch;
+  ch = state.input.charCodeAt(_position);
+  if ((ch === 45 || ch === 46) && ch === state.input.charCodeAt(_position + 1) && ch === state.input.charCodeAt(_position + 2)) {
+    _position += 3;
+    ch = state.input.charCodeAt(_position);
+    if (ch === 0 || is_WS_OR_EOL(ch)) {
+      return true;
+    }
+  }
+  return false;
+}
+function writeFoldedLines(state, count) {
+  if (count === 1) {
+    state.result += " ";
+  } else if (count > 1) {
+    state.result += common.repeat("\n", count - 1);
+  }
+}
+function readPlainScalar(state, nodeIndent, withinFlowCollection) {
+  var preceding, following, captureStart, captureEnd, hasPendingContent, _line, _lineStart, _lineIndent, _kind = state.kind, _result = state.result, ch;
+  ch = state.input.charCodeAt(state.position);
+  if (is_WS_OR_EOL(ch) || is_FLOW_INDICATOR(ch) || ch === 35 || ch === 38 || ch === 42 || ch === 33 || ch === 124 || ch === 62 || ch === 39 || ch === 34 || ch === 37 || ch === 64 || ch === 96) {
+    return false;
+  }
+  if (ch === 63 || ch === 45) {
+    following = state.input.charCodeAt(state.position + 1);
+    if (is_WS_OR_EOL(following) || withinFlowCollection && is_FLOW_INDICATOR(following)) {
+      return false;
+    }
+  }
+  state.kind = "scalar";
+  state.result = "";
+  captureStart = captureEnd = state.position;
+  hasPendingContent = false;
+  while (ch !== 0) {
+    if (ch === 58) {
+      following = state.input.charCodeAt(state.position + 1);
+      if (is_WS_OR_EOL(following) || withinFlowCollection && is_FLOW_INDICATOR(following)) {
+        break;
+      }
+    } else if (ch === 35) {
+      preceding = state.input.charCodeAt(state.position - 1);
+      if (is_WS_OR_EOL(preceding)) {
+        break;
+      }
+    } else if (state.position === state.lineStart && testDocumentSeparator(state) || withinFlowCollection && is_FLOW_INDICATOR(ch)) {
+      break;
+    } else if (is_EOL(ch)) {
+      _line = state.line;
+      _lineStart = state.lineStart;
+      _lineIndent = state.lineIndent;
+      skipSeparationSpace(state, false, -1);
+      if (state.lineIndent >= nodeIndent) {
+        hasPendingContent = true;
+        ch = state.input.charCodeAt(state.position);
+        continue;
+      } else {
+        state.position = captureEnd;
+        state.line = _line;
+        state.lineStart = _lineStart;
+        state.lineIndent = _lineIndent;
+        break;
+      }
+    }
+    if (hasPendingContent) {
+      captureSegment(state, captureStart, captureEnd, false);
+      writeFoldedLines(state, state.line - _line);
+      captureStart = captureEnd = state.position;
+      hasPendingContent = false;
+    }
+    if (!is_WHITE_SPACE(ch)) {
+      captureEnd = state.position + 1;
+    }
+    ch = state.input.charCodeAt(++state.position);
+  }
+  captureSegment(state, captureStart, captureEnd, false);
+  if (state.result) {
+    return true;
+  }
+  state.kind = _kind;
+  state.result = _result;
+  return false;
+}
+function readSingleQuotedScalar(state, nodeIndent) {
+  var ch, captureStart, captureEnd;
+  ch = state.input.charCodeAt(state.position);
+  if (ch !== 39) {
+    return false;
+  }
+  state.kind = "scalar";
+  state.result = "";
+  state.position++;
+  captureStart = captureEnd = state.position;
+  while ((ch = state.input.charCodeAt(state.position)) !== 0) {
+    if (ch === 39) {
+      captureSegment(state, captureStart, state.position, true);
+      ch = state.input.charCodeAt(++state.position);
+      if (ch === 39) {
+        captureStart = state.position;
+        state.position++;
+        captureEnd = state.position;
+      } else {
+        return true;
+      }
+    } else if (is_EOL(ch)) {
+      captureSegment(state, captureStart, captureEnd, true);
+      writeFoldedLines(state, skipSeparationSpace(state, false, nodeIndent));
+      captureStart = captureEnd = state.position;
+    } else if (state.position === state.lineStart && testDocumentSeparator(state)) {
+      throwError(state, "unexpected end of the document within a single quoted scalar");
+    } else {
+      state.position++;
+      captureEnd = state.position;
+    }
+  }
+  throwError(state, "unexpected end of the stream within a single quoted scalar");
+}
+function readDoubleQuotedScalar(state, nodeIndent) {
+  var captureStart, captureEnd, hexLength, hexResult, tmp, ch;
+  ch = state.input.charCodeAt(state.position);
+  if (ch !== 34) {
+    return false;
+  }
+  state.kind = "scalar";
+  state.result = "";
+  state.position++;
+  captureStart = captureEnd = state.position;
+  while ((ch = state.input.charCodeAt(state.position)) !== 0) {
+    if (ch === 34) {
+      captureSegment(state, captureStart, state.position, true);
+      state.position++;
+      return true;
+    } else if (ch === 92) {
+      captureSegment(state, captureStart, state.position, true);
+      ch = state.input.charCodeAt(++state.position);
+      if (is_EOL(ch)) {
+        skipSeparationSpace(state, false, nodeIndent);
+      } else if (ch < 256 && simpleEscapeCheck[ch]) {
+        state.result += simpleEscapeMap[ch];
+        state.position++;
+      } else if ((tmp = escapedHexLen(ch)) > 0) {
+        hexLength = tmp;
+        hexResult = 0;
+        for (; hexLength > 0; hexLength--) {
+          ch = state.input.charCodeAt(++state.position);
+          if ((tmp = fromHexCode(ch)) >= 0) {
+            hexResult = (hexResult << 4) + tmp;
+          } else {
+            throwError(state, "expected hexadecimal character");
+          }
+        }
+        state.result += charFromCodepoint(hexResult);
+        state.position++;
+      } else {
+        throwError(state, "unknown escape sequence");
+      }
+      captureStart = captureEnd = state.position;
+    } else if (is_EOL(ch)) {
+      captureSegment(state, captureStart, captureEnd, true);
+      writeFoldedLines(state, skipSeparationSpace(state, false, nodeIndent));
+      captureStart = captureEnd = state.position;
+    } else if (state.position === state.lineStart && testDocumentSeparator(state)) {
+      throwError(state, "unexpected end of the document within a double quoted scalar");
+    } else {
+      state.position++;
+      captureEnd = state.position;
+    }
+  }
+  throwError(state, "unexpected end of the stream within a double quoted scalar");
+}
+function readFlowCollection(state, nodeIndent) {
+  var readNext = true, _line, _lineStart, _pos, _tag = state.tag, _result, _anchor = state.anchor, following, terminator, isPair, isExplicitPair, isMapping, overridableKeys = /* @__PURE__ */ Object.create(null), keyNode, keyTag, valueNode, ch;
+  ch = state.input.charCodeAt(state.position);
+  if (ch === 91) {
+    terminator = 93;
+    isMapping = false;
+    _result = [];
+  } else if (ch === 123) {
+    terminator = 125;
+    isMapping = true;
+    _result = {};
+  } else {
+    return false;
+  }
+  if (state.anchor !== null) {
+    state.anchorMap[state.anchor] = _result;
+  }
+  ch = state.input.charCodeAt(++state.position);
+  while (ch !== 0) {
+    skipSeparationSpace(state, true, nodeIndent);
+    ch = state.input.charCodeAt(state.position);
+    if (ch === terminator) {
+      state.position++;
+      state.tag = _tag;
+      state.anchor = _anchor;
+      state.kind = isMapping ? "mapping" : "sequence";
+      state.result = _result;
+      return true;
+    } else if (!readNext) {
+      throwError(state, "missed comma between flow collection entries");
+    } else if (ch === 44) {
+      throwError(state, "expected the node content, but found ','");
+    }
+    keyTag = keyNode = valueNode = null;
+    isPair = isExplicitPair = false;
+    if (ch === 63) {
+      following = state.input.charCodeAt(state.position + 1);
+      if (is_WS_OR_EOL(following)) {
+        isPair = isExplicitPair = true;
+        state.position++;
+        skipSeparationSpace(state, true, nodeIndent);
+      }
+    }
+    _line = state.line;
+    _lineStart = state.lineStart;
+    _pos = state.position;
+    composeNode(state, nodeIndent, CONTEXT_FLOW_IN, false, true);
+    keyTag = state.tag;
+    keyNode = state.result;
+    skipSeparationSpace(state, true, nodeIndent);
+    ch = state.input.charCodeAt(state.position);
+    if ((isExplicitPair || state.line === _line) && ch === 58) {
+      isPair = true;
+      ch = state.input.charCodeAt(++state.position);
+      skipSeparationSpace(state, true, nodeIndent);
+      composeNode(state, nodeIndent, CONTEXT_FLOW_IN, false, true);
+      valueNode = state.result;
+    }
+    if (isMapping) {
+      storeMappingPair(state, _result, overridableKeys, keyTag, keyNode, valueNode, _line, _lineStart, _pos);
+    } else if (isPair) {
+      _result.push(storeMappingPair(state, null, overridableKeys, keyTag, keyNode, valueNode, _line, _lineStart, _pos));
+    } else {
+      _result.push(keyNode);
+    }
+    skipSeparationSpace(state, true, nodeIndent);
+    ch = state.input.charCodeAt(state.position);
+    if (ch === 44) {
+      readNext = true;
+      ch = state.input.charCodeAt(++state.position);
+    } else {
+      readNext = false;
+    }
+  }
+  throwError(state, "unexpected end of the stream within a flow collection");
+}
+function readBlockScalar(state, nodeIndent) {
+  var captureStart, folding, chomping = CHOMPING_CLIP, didReadContent = false, detectedIndent = false, textIndent = nodeIndent, emptyLines = 0, atMoreIndented = false, tmp, ch;
+  ch = state.input.charCodeAt(state.position);
+  if (ch === 124) {
+    folding = false;
+  } else if (ch === 62) {
+    folding = true;
+  } else {
+    return false;
+  }
+  state.kind = "scalar";
+  state.result = "";
+  while (ch !== 0) {
+    ch = state.input.charCodeAt(++state.position);
+    if (ch === 43 || ch === 45) {
+      if (CHOMPING_CLIP === chomping) {
+        chomping = ch === 43 ? CHOMPING_KEEP : CHOMPING_STRIP;
+      } else {
+        throwError(state, "repeat of a chomping mode identifier");
+      }
+    } else if ((tmp = fromDecimalCode(ch)) >= 0) {
+      if (tmp === 0) {
+        throwError(state, "bad explicit indentation width of a block scalar; it cannot be less than one");
+      } else if (!detectedIndent) {
+        textIndent = nodeIndent + tmp - 1;
+        detectedIndent = true;
+      } else {
+        throwError(state, "repeat of an indentation width identifier");
+      }
+    } else {
+      break;
+    }
+  }
+  if (is_WHITE_SPACE(ch)) {
+    do {
+      ch = state.input.charCodeAt(++state.position);
+    } while (is_WHITE_SPACE(ch));
+    if (ch === 35) {
+      do {
+        ch = state.input.charCodeAt(++state.position);
+      } while (!is_EOL(ch) && ch !== 0);
+    }
+  }
+  while (ch !== 0) {
+    readLineBreak(state);
+    state.lineIndent = 0;
+    ch = state.input.charCodeAt(state.position);
+    while ((!detectedIndent || state.lineIndent < textIndent) && ch === 32) {
+      state.lineIndent++;
+      ch = state.input.charCodeAt(++state.position);
+    }
+    if (!detectedIndent && state.lineIndent > textIndent) {
+      textIndent = state.lineIndent;
+    }
+    if (is_EOL(ch)) {
+      emptyLines++;
+      continue;
+    }
+    if (state.lineIndent < textIndent) {
+      if (chomping === CHOMPING_KEEP) {
+        state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+      } else if (chomping === CHOMPING_CLIP) {
+        if (didReadContent) {
+          state.result += "\n";
+        }
+      }
+      break;
+    }
+    if (folding) {
+      if (is_WHITE_SPACE(ch)) {
+        atMoreIndented = true;
+        state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+      } else if (atMoreIndented) {
+        atMoreIndented = false;
+        state.result += common.repeat("\n", emptyLines + 1);
+      } else if (emptyLines === 0) {
+        if (didReadContent) {
+          state.result += " ";
+        }
+      } else {
+        state.result += common.repeat("\n", emptyLines);
+      }
+    } else {
+      state.result += common.repeat("\n", didReadContent ? 1 + emptyLines : emptyLines);
+    }
+    didReadContent = true;
+    detectedIndent = true;
+    emptyLines = 0;
+    captureStart = state.position;
+    while (!is_EOL(ch) && ch !== 0) {
+      ch = state.input.charCodeAt(++state.position);
+    }
+    captureSegment(state, captureStart, state.position, false);
+  }
+  return true;
+}
+function readBlockSequence(state, nodeIndent) {
+  var _line, _tag = state.tag, _anchor = state.anchor, _result = [], following, detected = false, ch;
+  if (state.firstTabInLine !== -1) return false;
+  if (state.anchor !== null) {
+    state.anchorMap[state.anchor] = _result;
+  }
+  ch = state.input.charCodeAt(state.position);
+  while (ch !== 0) {
+    if (state.firstTabInLine !== -1) {
+      state.position = state.firstTabInLine;
+      throwError(state, "tab characters must not be used in indentation");
+    }
+    if (ch !== 45) {
+      break;
+    }
+    following = state.input.charCodeAt(state.position + 1);
+    if (!is_WS_OR_EOL(following)) {
+      break;
+    }
+    detected = true;
+    state.position++;
+    if (skipSeparationSpace(state, true, -1)) {
+      if (state.lineIndent <= nodeIndent) {
+        _result.push(null);
+        ch = state.input.charCodeAt(state.position);
+        continue;
+      }
+    }
+    _line = state.line;
+    composeNode(state, nodeIndent, CONTEXT_BLOCK_IN, false, true);
+    _result.push(state.result);
+    skipSeparationSpace(state, true, -1);
+    ch = state.input.charCodeAt(state.position);
+    if ((state.line === _line || state.lineIndent > nodeIndent) && ch !== 0) {
+      throwError(state, "bad indentation of a sequence entry");
+    } else if (state.lineIndent < nodeIndent) {
+      break;
+    }
+  }
+  if (detected) {
+    state.tag = _tag;
+    state.anchor = _anchor;
+    state.kind = "sequence";
+    state.result = _result;
+    return true;
+  }
+  return false;
+}
+function readBlockMapping(state, nodeIndent, flowIndent) {
+  var following, allowCompact, _line, _keyLine, _keyLineStart, _keyPos, _tag = state.tag, _anchor = state.anchor, _result = {}, overridableKeys = /* @__PURE__ */ Object.create(null), keyTag = null, keyNode = null, valueNode = null, atExplicitKey = false, detected = false, ch;
+  if (state.firstTabInLine !== -1) return false;
+  if (state.anchor !== null) {
+    state.anchorMap[state.anchor] = _result;
+  }
+  ch = state.input.charCodeAt(state.position);
+  while (ch !== 0) {
+    if (!atExplicitKey && state.firstTabInLine !== -1) {
+      state.position = state.firstTabInLine;
+      throwError(state, "tab characters must not be used in indentation");
+    }
+    following = state.input.charCodeAt(state.position + 1);
+    _line = state.line;
+    if ((ch === 63 || ch === 58) && is_WS_OR_EOL(following)) {
+      if (ch === 63) {
+        if (atExplicitKey) {
+          storeMappingPair(state, _result, overridableKeys, keyTag, keyNode, null, _keyLine, _keyLineStart, _keyPos);
+          keyTag = keyNode = valueNode = null;
+        }
+        detected = true;
+        atExplicitKey = true;
+        allowCompact = true;
+      } else if (atExplicitKey) {
+        atExplicitKey = false;
+        allowCompact = true;
+      } else {
+        throwError(state, "incomplete explicit mapping pair; a key node is missed; or followed by a non-tabulated empty line");
+      }
+      state.position += 1;
+      ch = following;
+    } else {
+      _keyLine = state.line;
+      _keyLineStart = state.lineStart;
+      _keyPos = state.position;
+      if (!composeNode(state, flowIndent, CONTEXT_FLOW_OUT, false, true)) {
+        break;
+      }
+      if (state.line === _line) {
+        ch = state.input.charCodeAt(state.position);
+        while (is_WHITE_SPACE(ch)) {
+          ch = state.input.charCodeAt(++state.position);
+        }
+        if (ch === 58) {
+          ch = state.input.charCodeAt(++state.position);
+          if (!is_WS_OR_EOL(ch)) {
+            throwError(state, "a whitespace character is expected after the key-value separator within a block mapping");
+          }
+          if (atExplicitKey) {
+            storeMappingPair(state, _result, overridableKeys, keyTag, keyNode, null, _keyLine, _keyLineStart, _keyPos);
+            keyTag = keyNode = valueNode = null;
+          }
+          detected = true;
+          atExplicitKey = false;
+          allowCompact = false;
+          keyTag = state.tag;
+          keyNode = state.result;
+        } else if (detected) {
+          throwError(state, "can not read an implicit mapping pair; a colon is missed");
+        } else {
+          state.tag = _tag;
+          state.anchor = _anchor;
+          return true;
+        }
+      } else if (detected) {
+        throwError(state, "can not read a block mapping entry; a multiline key may not be an implicit key");
+      } else {
+        state.tag = _tag;
+        state.anchor = _anchor;
+        return true;
+      }
+    }
+    if (state.line === _line || state.lineIndent > nodeIndent) {
+      if (atExplicitKey) {
+        _keyLine = state.line;
+        _keyLineStart = state.lineStart;
+        _keyPos = state.position;
+      }
+      if (composeNode(state, nodeIndent, CONTEXT_BLOCK_OUT, true, allowCompact)) {
+        if (atExplicitKey) {
+          keyNode = state.result;
+        } else {
+          valueNode = state.result;
+        }
+      }
+      if (!atExplicitKey) {
+        storeMappingPair(state, _result, overridableKeys, keyTag, keyNode, valueNode, _keyLine, _keyLineStart, _keyPos);
+        keyTag = keyNode = valueNode = null;
+      }
+      skipSeparationSpace(state, true, -1);
+      ch = state.input.charCodeAt(state.position);
+    }
+    if ((state.line === _line || state.lineIndent > nodeIndent) && ch !== 0) {
+      throwError(state, "bad indentation of a mapping entry");
+    } else if (state.lineIndent < nodeIndent) {
+      break;
+    }
+  }
+  if (atExplicitKey) {
+    storeMappingPair(state, _result, overridableKeys, keyTag, keyNode, null, _keyLine, _keyLineStart, _keyPos);
+  }
+  if (detected) {
+    state.tag = _tag;
+    state.anchor = _anchor;
+    state.kind = "mapping";
+    state.result = _result;
+  }
+  return detected;
+}
+function readTagProperty(state) {
+  var _position, isVerbatim = false, isNamed = false, tagHandle, tagName, ch;
+  ch = state.input.charCodeAt(state.position);
+  if (ch !== 33) return false;
+  if (state.tag !== null) {
+    throwError(state, "duplication of a tag property");
+  }
+  ch = state.input.charCodeAt(++state.position);
+  if (ch === 60) {
+    isVerbatim = true;
+    ch = state.input.charCodeAt(++state.position);
+  } else if (ch === 33) {
+    isNamed = true;
+    tagHandle = "!!";
+    ch = state.input.charCodeAt(++state.position);
+  } else {
+    tagHandle = "!";
+  }
+  _position = state.position;
+  if (isVerbatim) {
+    do {
+      ch = state.input.charCodeAt(++state.position);
+    } while (ch !== 0 && ch !== 62);
+    if (state.position < state.length) {
+      tagName = state.input.slice(_position, state.position);
+      ch = state.input.charCodeAt(++state.position);
+    } else {
+      throwError(state, "unexpected end of the stream within a verbatim tag");
+    }
+  } else {
+    while (ch !== 0 && !is_WS_OR_EOL(ch)) {
+      if (ch === 33) {
+        if (!isNamed) {
+          tagHandle = state.input.slice(_position - 1, state.position + 1);
+          if (!PATTERN_TAG_HANDLE.test(tagHandle)) {
+            throwError(state, "named tag handle cannot contain such characters");
+          }
+          isNamed = true;
+          _position = state.position + 1;
+        } else {
+          throwError(state, "tag suffix cannot contain exclamation marks");
+        }
+      }
+      ch = state.input.charCodeAt(++state.position);
+    }
+    tagName = state.input.slice(_position, state.position);
+    if (PATTERN_FLOW_INDICATORS.test(tagName)) {
+      throwError(state, "tag suffix cannot contain flow indicator characters");
+    }
+  }
+  if (tagName && !PATTERN_TAG_URI.test(tagName)) {
+    throwError(state, "tag name cannot contain such characters: " + tagName);
+  }
+  try {
+    tagName = decodeURIComponent(tagName);
+  } catch (err) {
+    throwError(state, "tag name is malformed: " + tagName);
+  }
+  if (isVerbatim) {
+    state.tag = tagName;
+  } else if (_hasOwnProperty$1.call(state.tagMap, tagHandle)) {
+    state.tag = state.tagMap[tagHandle] + tagName;
+  } else if (tagHandle === "!") {
+    state.tag = "!" + tagName;
+  } else if (tagHandle === "!!") {
+    state.tag = "tag:yaml.org,2002:" + tagName;
+  } else {
+    throwError(state, 'undeclared tag handle "' + tagHandle + '"');
+  }
+  return true;
+}
+function readAnchorProperty(state) {
+  var _position, ch;
+  ch = state.input.charCodeAt(state.position);
+  if (ch !== 38) return false;
+  if (state.anchor !== null) {
+    throwError(state, "duplication of an anchor property");
+  }
+  ch = state.input.charCodeAt(++state.position);
+  _position = state.position;
+  while (ch !== 0 && !is_WS_OR_EOL(ch) && !is_FLOW_INDICATOR(ch)) {
+    ch = state.input.charCodeAt(++state.position);
+  }
+  if (state.position === _position) {
+    throwError(state, "name of an anchor node must contain at least one character");
+  }
+  state.anchor = state.input.slice(_position, state.position);
+  return true;
+}
+function readAlias(state) {
+  var _position, alias, ch;
+  ch = state.input.charCodeAt(state.position);
+  if (ch !== 42) return false;
+  ch = state.input.charCodeAt(++state.position);
+  _position = state.position;
+  while (ch !== 0 && !is_WS_OR_EOL(ch) && !is_FLOW_INDICATOR(ch)) {
+    ch = state.input.charCodeAt(++state.position);
+  }
+  if (state.position === _position) {
+    throwError(state, "name of an alias node must contain at least one character");
+  }
+  alias = state.input.slice(_position, state.position);
+  if (!_hasOwnProperty$1.call(state.anchorMap, alias)) {
+    throwError(state, 'unidentified alias "' + alias + '"');
+  }
+  state.result = state.anchorMap[alias];
+  skipSeparationSpace(state, true, -1);
+  return true;
+}
+function composeNode(state, parentIndent, nodeContext, allowToSeek, allowCompact) {
+  var allowBlockStyles, allowBlockScalars, allowBlockCollections, indentStatus = 1, atNewLine = false, hasContent = false, typeIndex, typeQuantity, typeList, type2, flowIndent, blockIndent;
+  if (state.listener !== null) {
+    state.listener("open", state);
+  }
+  state.tag = null;
+  state.anchor = null;
+  state.kind = null;
+  state.result = null;
+  allowBlockStyles = allowBlockScalars = allowBlockCollections = CONTEXT_BLOCK_OUT === nodeContext || CONTEXT_BLOCK_IN === nodeContext;
+  if (allowToSeek) {
+    if (skipSeparationSpace(state, true, -1)) {
+      atNewLine = true;
+      if (state.lineIndent > parentIndent) {
+        indentStatus = 1;
+      } else if (state.lineIndent === parentIndent) {
+        indentStatus = 0;
+      } else if (state.lineIndent < parentIndent) {
+        indentStatus = -1;
+      }
+    }
+  }
+  if (indentStatus === 1) {
+    while (readTagProperty(state) || readAnchorProperty(state)) {
+      if (skipSeparationSpace(state, true, -1)) {
+        atNewLine = true;
+        allowBlockCollections = allowBlockStyles;
+        if (state.lineIndent > parentIndent) {
+          indentStatus = 1;
+        } else if (state.lineIndent === parentIndent) {
+          indentStatus = 0;
+        } else if (state.lineIndent < parentIndent) {
+          indentStatus = -1;
+        }
+      } else {
+        allowBlockCollections = false;
+      }
+    }
+  }
+  if (allowBlockCollections) {
+    allowBlockCollections = atNewLine || allowCompact;
+  }
+  if (indentStatus === 1 || CONTEXT_BLOCK_OUT === nodeContext) {
+    if (CONTEXT_FLOW_IN === nodeContext || CONTEXT_FLOW_OUT === nodeContext) {
+      flowIndent = parentIndent;
+    } else {
+      flowIndent = parentIndent + 1;
+    }
+    blockIndent = state.position - state.lineStart;
+    if (indentStatus === 1) {
+      if (allowBlockCollections && (readBlockSequence(state, blockIndent) || readBlockMapping(state, blockIndent, flowIndent)) || readFlowCollection(state, flowIndent)) {
+        hasContent = true;
+      } else {
+        if (allowBlockScalars && readBlockScalar(state, flowIndent) || readSingleQuotedScalar(state, flowIndent) || readDoubleQuotedScalar(state, flowIndent)) {
+          hasContent = true;
+        } else if (readAlias(state)) {
+          hasContent = true;
+          if (state.tag !== null || state.anchor !== null) {
+            throwError(state, "alias node should not have any properties");
+          }
+        } else if (readPlainScalar(state, flowIndent, CONTEXT_FLOW_IN === nodeContext)) {
+          hasContent = true;
+          if (state.tag === null) {
+            state.tag = "?";
+          }
+        }
+        if (state.anchor !== null) {
+          state.anchorMap[state.anchor] = state.result;
+        }
+      }
+    } else if (indentStatus === 0) {
+      hasContent = allowBlockCollections && readBlockSequence(state, blockIndent);
+    }
+  }
+  if (state.tag === null) {
+    if (state.anchor !== null) {
+      state.anchorMap[state.anchor] = state.result;
+    }
+  } else if (state.tag === "?") {
+    if (state.result !== null && state.kind !== "scalar") {
+      throwError(state, 'unacceptable node kind for !<?> tag; it should be "scalar", not "' + state.kind + '"');
+    }
+    for (typeIndex = 0, typeQuantity = state.implicitTypes.length; typeIndex < typeQuantity; typeIndex += 1) {
+      type2 = state.implicitTypes[typeIndex];
+      if (type2.resolve(state.result)) {
+        state.result = type2.construct(state.result);
+        state.tag = type2.tag;
+        if (state.anchor !== null) {
+          state.anchorMap[state.anchor] = state.result;
+        }
+        break;
+      }
+    }
+  } else if (state.tag !== "!") {
+    if (_hasOwnProperty$1.call(state.typeMap[state.kind || "fallback"], state.tag)) {
+      type2 = state.typeMap[state.kind || "fallback"][state.tag];
+    } else {
+      type2 = null;
+      typeList = state.typeMap.multi[state.kind || "fallback"];
+      for (typeIndex = 0, typeQuantity = typeList.length; typeIndex < typeQuantity; typeIndex += 1) {
+        if (state.tag.slice(0, typeList[typeIndex].tag.length) === typeList[typeIndex].tag) {
+          type2 = typeList[typeIndex];
+          break;
+        }
+      }
+    }
+    if (!type2) {
+      throwError(state, "unknown tag !<" + state.tag + ">");
+    }
+    if (state.result !== null && type2.kind !== state.kind) {
+      throwError(state, "unacceptable node kind for !<" + state.tag + '> tag; it should be "' + type2.kind + '", not "' + state.kind + '"');
+    }
+    if (!type2.resolve(state.result, state.tag)) {
+      throwError(state, "cannot resolve a node with !<" + state.tag + "> explicit tag");
+    } else {
+      state.result = type2.construct(state.result, state.tag);
+      if (state.anchor !== null) {
+        state.anchorMap[state.anchor] = state.result;
+      }
+    }
+  }
+  if (state.listener !== null) {
+    state.listener("close", state);
+  }
+  return state.tag !== null || state.anchor !== null || hasContent;
+}
+function readDocument(state) {
+  var documentStart = state.position, _position, directiveName, directiveArgs, hasDirectives = false, ch;
+  state.version = null;
+  state.checkLineBreaks = state.legacy;
+  state.tagMap = /* @__PURE__ */ Object.create(null);
+  state.anchorMap = /* @__PURE__ */ Object.create(null);
+  while ((ch = state.input.charCodeAt(state.position)) !== 0) {
+    skipSeparationSpace(state, true, -1);
+    ch = state.input.charCodeAt(state.position);
+    if (state.lineIndent > 0 || ch !== 37) {
+      break;
+    }
+    hasDirectives = true;
+    ch = state.input.charCodeAt(++state.position);
+    _position = state.position;
+    while (ch !== 0 && !is_WS_OR_EOL(ch)) {
+      ch = state.input.charCodeAt(++state.position);
+    }
+    directiveName = state.input.slice(_position, state.position);
+    directiveArgs = [];
+    if (directiveName.length < 1) {
+      throwError(state, "directive name must not be less than one character in length");
+    }
+    while (ch !== 0) {
+      while (is_WHITE_SPACE(ch)) {
+        ch = state.input.charCodeAt(++state.position);
+      }
+      if (ch === 35) {
+        do {
+          ch = state.input.charCodeAt(++state.position);
+        } while (ch !== 0 && !is_EOL(ch));
+        break;
+      }
+      if (is_EOL(ch)) break;
+      _position = state.position;
+      while (ch !== 0 && !is_WS_OR_EOL(ch)) {
+        ch = state.input.charCodeAt(++state.position);
+      }
+      directiveArgs.push(state.input.slice(_position, state.position));
+    }
+    if (ch !== 0) readLineBreak(state);
+    if (_hasOwnProperty$1.call(directiveHandlers, directiveName)) {
+      directiveHandlers[directiveName](state, directiveName, directiveArgs);
+    } else {
+      throwWarning(state, 'unknown document directive "' + directiveName + '"');
+    }
+  }
+  skipSeparationSpace(state, true, -1);
+  if (state.lineIndent === 0 && state.input.charCodeAt(state.position) === 45 && state.input.charCodeAt(state.position + 1) === 45 && state.input.charCodeAt(state.position + 2) === 45) {
+    state.position += 3;
+    skipSeparationSpace(state, true, -1);
+  } else if (hasDirectives) {
+    throwError(state, "directives end mark is expected");
+  }
+  composeNode(state, state.lineIndent - 1, CONTEXT_BLOCK_OUT, false, true);
+  skipSeparationSpace(state, true, -1);
+  if (state.checkLineBreaks && PATTERN_NON_ASCII_LINE_BREAKS.test(state.input.slice(documentStart, state.position))) {
+    throwWarning(state, "non-ASCII line breaks are interpreted as content");
+  }
+  state.documents.push(state.result);
+  if (state.position === state.lineStart && testDocumentSeparator(state)) {
+    if (state.input.charCodeAt(state.position) === 46) {
+      state.position += 3;
+      skipSeparationSpace(state, true, -1);
+    }
+    return;
+  }
+  if (state.position < state.length - 1) {
+    throwError(state, "end of the stream or a document separator is expected");
+  } else {
+    return;
+  }
+}
+function loadDocuments(input, options) {
+  input = String(input);
+  options = options || {};
+  if (input.length !== 0) {
+    if (input.charCodeAt(input.length - 1) !== 10 && input.charCodeAt(input.length - 1) !== 13) {
+      input += "\n";
+    }
+    if (input.charCodeAt(0) === 65279) {
+      input = input.slice(1);
+    }
+  }
+  var state = new State$1(input, options);
+  var nullpos = input.indexOf("\0");
+  if (nullpos !== -1) {
+    state.position = nullpos;
+    throwError(state, "null byte is not allowed in input");
+  }
+  state.input += "\0";
+  while (state.input.charCodeAt(state.position) === 32) {
+    state.lineIndent += 1;
+    state.position += 1;
+  }
+  while (state.position < state.length - 1) {
+    readDocument(state);
+  }
+  return state.documents;
+}
+function loadAll$1(input, iterator, options) {
+  if (iterator !== null && typeof iterator === "object" && typeof options === "undefined") {
+    options = iterator;
+    iterator = null;
+  }
+  var documents = loadDocuments(input, options);
+  if (typeof iterator !== "function") {
+    return documents;
+  }
+  for (var index = 0, length = documents.length; index < length; index += 1) {
+    iterator(documents[index]);
+  }
+}
+function load$1(input, options) {
+  var documents = loadDocuments(input, options);
+  if (documents.length === 0) {
+    return void 0;
+  } else if (documents.length === 1) {
+    return documents[0];
+  }
+  throw new exception("expected a single document in the stream, but found more");
+}
+var loadAll_1 = loadAll$1;
+var load_1 = load$1;
+var loader = {
+  loadAll: loadAll_1,
+  load: load_1
+};
+var _toString = Object.prototype.toString;
+var _hasOwnProperty = Object.prototype.hasOwnProperty;
+var CHAR_BOM = 65279;
+var CHAR_TAB = 9;
+var CHAR_LINE_FEED = 10;
+var CHAR_CARRIAGE_RETURN = 13;
+var CHAR_SPACE = 32;
+var CHAR_EXCLAMATION = 33;
+var CHAR_DOUBLE_QUOTE = 34;
+var CHAR_SHARP = 35;
+var CHAR_PERCENT = 37;
+var CHAR_AMPERSAND = 38;
+var CHAR_SINGLE_QUOTE = 39;
+var CHAR_ASTERISK = 42;
+var CHAR_COMMA = 44;
+var CHAR_MINUS = 45;
+var CHAR_COLON = 58;
+var CHAR_EQUALS = 61;
+var CHAR_GREATER_THAN = 62;
+var CHAR_QUESTION = 63;
+var CHAR_COMMERCIAL_AT = 64;
+var CHAR_LEFT_SQUARE_BRACKET = 91;
+var CHAR_RIGHT_SQUARE_BRACKET = 93;
+var CHAR_GRAVE_ACCENT = 96;
+var CHAR_LEFT_CURLY_BRACKET = 123;
+var CHAR_VERTICAL_LINE = 124;
+var CHAR_RIGHT_CURLY_BRACKET = 125;
+var ESCAPE_SEQUENCES = {};
+ESCAPE_SEQUENCES[0] = "\\0";
+ESCAPE_SEQUENCES[7] = "\\a";
+ESCAPE_SEQUENCES[8] = "\\b";
+ESCAPE_SEQUENCES[9] = "\\t";
+ESCAPE_SEQUENCES[10] = "\\n";
+ESCAPE_SEQUENCES[11] = "\\v";
+ESCAPE_SEQUENCES[12] = "\\f";
+ESCAPE_SEQUENCES[13] = "\\r";
+ESCAPE_SEQUENCES[27] = "\\e";
+ESCAPE_SEQUENCES[34] = '\\"';
+ESCAPE_SEQUENCES[92] = "\\\\";
+ESCAPE_SEQUENCES[133] = "\\N";
+ESCAPE_SEQUENCES[160] = "\\_";
+ESCAPE_SEQUENCES[8232] = "\\L";
+ESCAPE_SEQUENCES[8233] = "\\P";
+var DEPRECATED_BOOLEANS_SYNTAX = [
+  "y",
+  "Y",
+  "yes",
+  "Yes",
+  "YES",
+  "on",
+  "On",
+  "ON",
+  "n",
+  "N",
+  "no",
+  "No",
+  "NO",
+  "off",
+  "Off",
+  "OFF"
+];
+var DEPRECATED_BASE60_SYNTAX = /^[-+]?[0-9_]+(?::[0-9_]+)+(?:\.[0-9_]*)?$/;
+function compileStyleMap(schema2, map2) {
+  var result, keys, index, length, tag, style, type2;
+  if (map2 === null) return {};
+  result = {};
+  keys = Object.keys(map2);
+  for (index = 0, length = keys.length; index < length; index += 1) {
+    tag = keys[index];
+    style = String(map2[tag]);
+    if (tag.slice(0, 2) === "!!") {
+      tag = "tag:yaml.org,2002:" + tag.slice(2);
+    }
+    type2 = schema2.compiledTypeMap["fallback"][tag];
+    if (type2 && _hasOwnProperty.call(type2.styleAliases, style)) {
+      style = type2.styleAliases[style];
+    }
+    result[tag] = style;
+  }
+  return result;
+}
+function encodeHex(character) {
+  var string3, handle, length;
+  string3 = character.toString(16).toUpperCase();
+  if (character <= 255) {
+    handle = "x";
+    length = 2;
+  } else if (character <= 65535) {
+    handle = "u";
+    length = 4;
+  } else if (character <= 4294967295) {
+    handle = "U";
+    length = 8;
+  } else {
+    throw new exception("code point within a string may not be greater than 0xFFFFFFFF");
+  }
+  return "\\" + handle + common.repeat("0", length - string3.length) + string3;
+}
+var QUOTING_TYPE_SINGLE = 1;
+var QUOTING_TYPE_DOUBLE = 2;
+function State(options) {
+  this.schema = options["schema"] || _default2;
+  this.indent = Math.max(1, options["indent"] || 2);
+  this.noArrayIndent = options["noArrayIndent"] || false;
+  this.skipInvalid = options["skipInvalid"] || false;
+  this.flowLevel = common.isNothing(options["flowLevel"]) ? -1 : options["flowLevel"];
+  this.styleMap = compileStyleMap(this.schema, options["styles"] || null);
+  this.sortKeys = options["sortKeys"] || false;
+  this.lineWidth = options["lineWidth"] || 80;
+  this.noRefs = options["noRefs"] || false;
+  this.noCompatMode = options["noCompatMode"] || false;
+  this.condenseFlow = options["condenseFlow"] || false;
+  this.quotingType = options["quotingType"] === '"' ? QUOTING_TYPE_DOUBLE : QUOTING_TYPE_SINGLE;
+  this.forceQuotes = options["forceQuotes"] || false;
+  this.replacer = typeof options["replacer"] === "function" ? options["replacer"] : null;
+  this.implicitTypes = this.schema.compiledImplicit;
+  this.explicitTypes = this.schema.compiledExplicit;
+  this.tag = null;
+  this.result = "";
+  this.duplicates = [];
+  this.usedDuplicates = null;
+}
+function indentString(string3, spaces) {
+  var ind = common.repeat(" ", spaces), position = 0, next = -1, result = "", line, length = string3.length;
+  while (position < length) {
+    next = string3.indexOf("\n", position);
+    if (next === -1) {
+      line = string3.slice(position);
+      position = length;
+    } else {
+      line = string3.slice(position, next + 1);
+      position = next + 1;
+    }
+    if (line.length && line !== "\n") result += ind;
+    result += line;
+  }
+  return result;
+}
+function generateNextLine(state, level) {
+  return "\n" + common.repeat(" ", state.indent * level);
+}
+function testImplicitResolving(state, str2) {
+  var index, length, type2;
+  for (index = 0, length = state.implicitTypes.length; index < length; index += 1) {
+    type2 = state.implicitTypes[index];
+    if (type2.resolve(str2)) {
+      return true;
+    }
+  }
+  return false;
+}
+function isWhitespace(c) {
+  return c === CHAR_SPACE || c === CHAR_TAB;
+}
+function isPrintable(c) {
+  return 32 <= c && c <= 126 || 161 <= c && c <= 55295 && c !== 8232 && c !== 8233 || 57344 <= c && c <= 65533 && c !== CHAR_BOM || 65536 <= c && c <= 1114111;
+}
+function isNsCharOrWhitespace(c) {
+  return isPrintable(c) && c !== CHAR_BOM && c !== CHAR_CARRIAGE_RETURN && c !== CHAR_LINE_FEED;
+}
+function isPlainSafe(c, prev, inblock) {
+  var cIsNsCharOrWhitespace = isNsCharOrWhitespace(c);
+  var cIsNsChar = cIsNsCharOrWhitespace && !isWhitespace(c);
+  return (
+    // ns-plain-safe
+    (inblock ? (
+      // c = flow-in
+      cIsNsCharOrWhitespace
+    ) : cIsNsCharOrWhitespace && c !== CHAR_COMMA && c !== CHAR_LEFT_SQUARE_BRACKET && c !== CHAR_RIGHT_SQUARE_BRACKET && c !== CHAR_LEFT_CURLY_BRACKET && c !== CHAR_RIGHT_CURLY_BRACKET) && c !== CHAR_SHARP && !(prev === CHAR_COLON && !cIsNsChar) || isNsCharOrWhitespace(prev) && !isWhitespace(prev) && c === CHAR_SHARP || prev === CHAR_COLON && cIsNsChar
+  );
+}
+function isPlainSafeFirst(c) {
+  return isPrintable(c) && c !== CHAR_BOM && !isWhitespace(c) && c !== CHAR_MINUS && c !== CHAR_QUESTION && c !== CHAR_COLON && c !== CHAR_COMMA && c !== CHAR_LEFT_SQUARE_BRACKET && c !== CHAR_RIGHT_SQUARE_BRACKET && c !== CHAR_LEFT_CURLY_BRACKET && c !== CHAR_RIGHT_CURLY_BRACKET && c !== CHAR_SHARP && c !== CHAR_AMPERSAND && c !== CHAR_ASTERISK && c !== CHAR_EXCLAMATION && c !== CHAR_VERTICAL_LINE && c !== CHAR_EQUALS && c !== CHAR_GREATER_THAN && c !== CHAR_SINGLE_QUOTE && c !== CHAR_DOUBLE_QUOTE && c !== CHAR_PERCENT && c !== CHAR_COMMERCIAL_AT && c !== CHAR_GRAVE_ACCENT;
+}
+function isPlainSafeLast(c) {
+  return !isWhitespace(c) && c !== CHAR_COLON;
+}
+function codePointAt(string3, pos) {
+  var first = string3.charCodeAt(pos), second;
+  if (first >= 55296 && first <= 56319 && pos + 1 < string3.length) {
+    second = string3.charCodeAt(pos + 1);
+    if (second >= 56320 && second <= 57343) {
+      return (first - 55296) * 1024 + second - 56320 + 65536;
+    }
+  }
+  return first;
+}
+function needIndentIndicator(string3) {
+  var leadingSpaceRe = /^\n* /;
+  return leadingSpaceRe.test(string3);
+}
+var STYLE_PLAIN = 1;
+var STYLE_SINGLE = 2;
+var STYLE_LITERAL = 3;
+var STYLE_FOLDED = 4;
+var STYLE_DOUBLE = 5;
+function chooseScalarStyle(string3, singleLineOnly, indentPerLevel, lineWidth, testAmbiguousType, quotingType, forceQuotes, inblock) {
+  var i;
+  var char = 0;
+  var prevChar = null;
+  var hasLineBreak = false;
+  var hasFoldableLine = false;
+  var shouldTrackWidth = lineWidth !== -1;
+  var previousLineBreak = -1;
+  var plain = isPlainSafeFirst(codePointAt(string3, 0)) && isPlainSafeLast(codePointAt(string3, string3.length - 1));
+  if (singleLineOnly || forceQuotes) {
+    for (i = 0; i < string3.length; char >= 65536 ? i += 2 : i++) {
+      char = codePointAt(string3, i);
+      if (!isPrintable(char)) {
+        return STYLE_DOUBLE;
+      }
+      plain = plain && isPlainSafe(char, prevChar, inblock);
+      prevChar = char;
+    }
+  } else {
+    for (i = 0; i < string3.length; char >= 65536 ? i += 2 : i++) {
+      char = codePointAt(string3, i);
+      if (char === CHAR_LINE_FEED) {
+        hasLineBreak = true;
+        if (shouldTrackWidth) {
+          hasFoldableLine = hasFoldableLine || // Foldable line = too long, and not more-indented.
+          i - previousLineBreak - 1 > lineWidth && string3[previousLineBreak + 1] !== " ";
+          previousLineBreak = i;
+        }
+      } else if (!isPrintable(char)) {
+        return STYLE_DOUBLE;
+      }
+      plain = plain && isPlainSafe(char, prevChar, inblock);
+      prevChar = char;
+    }
+    hasFoldableLine = hasFoldableLine || shouldTrackWidth && (i - previousLineBreak - 1 > lineWidth && string3[previousLineBreak + 1] !== " ");
+  }
+  if (!hasLineBreak && !hasFoldableLine) {
+    if (plain && !forceQuotes && !testAmbiguousType(string3)) {
+      return STYLE_PLAIN;
+    }
+    return quotingType === QUOTING_TYPE_DOUBLE ? STYLE_DOUBLE : STYLE_SINGLE;
+  }
+  if (indentPerLevel > 9 && needIndentIndicator(string3)) {
+    return STYLE_DOUBLE;
+  }
+  if (!forceQuotes) {
+    return hasFoldableLine ? STYLE_FOLDED : STYLE_LITERAL;
+  }
+  return quotingType === QUOTING_TYPE_DOUBLE ? STYLE_DOUBLE : STYLE_SINGLE;
+}
+function writeScalar(state, string3, level, iskey, inblock) {
+  state.dump = (function() {
+    if (string3.length === 0) {
+      return state.quotingType === QUOTING_TYPE_DOUBLE ? '""' : "''";
+    }
+    if (!state.noCompatMode) {
+      if (DEPRECATED_BOOLEANS_SYNTAX.indexOf(string3) !== -1 || DEPRECATED_BASE60_SYNTAX.test(string3)) {
+        return state.quotingType === QUOTING_TYPE_DOUBLE ? '"' + string3 + '"' : "'" + string3 + "'";
+      }
+    }
+    var indent = state.indent * Math.max(1, level);
+    var lineWidth = state.lineWidth === -1 ? -1 : Math.max(Math.min(state.lineWidth, 40), state.lineWidth - indent);
+    var singleLineOnly = iskey || state.flowLevel > -1 && level >= state.flowLevel;
+    function testAmbiguity(string4) {
+      return testImplicitResolving(state, string4);
+    }
+    switch (chooseScalarStyle(
+      string3,
+      singleLineOnly,
+      state.indent,
+      lineWidth,
+      testAmbiguity,
+      state.quotingType,
+      state.forceQuotes && !iskey,
+      inblock
+    )) {
+      case STYLE_PLAIN:
+        return string3;
+      case STYLE_SINGLE:
+        return "'" + string3.replace(/'/g, "''") + "'";
+      case STYLE_LITERAL:
+        return "|" + blockHeader(string3, state.indent) + dropEndingNewline(indentString(string3, indent));
+      case STYLE_FOLDED:
+        return ">" + blockHeader(string3, state.indent) + dropEndingNewline(indentString(foldString(string3, lineWidth), indent));
+      case STYLE_DOUBLE:
+        return '"' + escapeString(string3) + '"';
+      default:
+        throw new exception("impossible error: invalid scalar style");
+    }
+  })();
+}
+function blockHeader(string3, indentPerLevel) {
+  var indentIndicator = needIndentIndicator(string3) ? String(indentPerLevel) : "";
+  var clip = string3[string3.length - 1] === "\n";
+  var keep = clip && (string3[string3.length - 2] === "\n" || string3 === "\n");
+  var chomp = keep ? "+" : clip ? "" : "-";
+  return indentIndicator + chomp + "\n";
+}
+function dropEndingNewline(string3) {
+  return string3[string3.length - 1] === "\n" ? string3.slice(0, -1) : string3;
+}
+function foldString(string3, width) {
+  var lineRe = /(\n+)([^\n]*)/g;
+  var result = (function() {
+    var nextLF = string3.indexOf("\n");
+    nextLF = nextLF !== -1 ? nextLF : string3.length;
+    lineRe.lastIndex = nextLF;
+    return foldLine(string3.slice(0, nextLF), width);
+  })();
+  var prevMoreIndented = string3[0] === "\n" || string3[0] === " ";
+  var moreIndented;
+  var match;
+  while (match = lineRe.exec(string3)) {
+    var prefix = match[1], line = match[2];
+    moreIndented = line[0] === " ";
+    result += prefix + (!prevMoreIndented && !moreIndented && line !== "" ? "\n" : "") + foldLine(line, width);
+    prevMoreIndented = moreIndented;
+  }
+  return result;
+}
+function foldLine(line, width) {
+  if (line === "" || line[0] === " ") return line;
+  var breakRe = / [^ ]/g;
+  var match;
+  var start = 0, end, curr = 0, next = 0;
+  var result = "";
+  while (match = breakRe.exec(line)) {
+    next = match.index;
+    if (next - start > width) {
+      end = curr > start ? curr : next;
+      result += "\n" + line.slice(start, end);
+      start = end + 1;
+    }
+    curr = next;
+  }
+  result += "\n";
+  if (line.length - start > width && curr > start) {
+    result += line.slice(start, curr) + "\n" + line.slice(curr + 1);
+  } else {
+    result += line.slice(start);
+  }
+  return result.slice(1);
+}
+function escapeString(string3) {
+  var result = "";
+  var char = 0;
+  var escapeSeq;
+  for (var i = 0; i < string3.length; char >= 65536 ? i += 2 : i++) {
+    char = codePointAt(string3, i);
+    escapeSeq = ESCAPE_SEQUENCES[char];
+    if (!escapeSeq && isPrintable(char)) {
+      result += string3[i];
+      if (char >= 65536) result += string3[i + 1];
+    } else {
+      result += escapeSeq || encodeHex(char);
+    }
+  }
+  return result;
+}
+function writeFlowSequence(state, level, object3) {
+  var _result = "", _tag = state.tag, index, length, value;
+  for (index = 0, length = object3.length; index < length; index += 1) {
+    value = object3[index];
+    if (state.replacer) {
+      value = state.replacer.call(object3, String(index), value);
+    }
+    if (writeNode(state, level, value, false, false) || typeof value === "undefined" && writeNode(state, level, null, false, false)) {
+      if (_result !== "") _result += "," + (!state.condenseFlow ? " " : "");
+      _result += state.dump;
+    }
+  }
+  state.tag = _tag;
+  state.dump = "[" + _result + "]";
+}
+function writeBlockSequence(state, level, object3, compact) {
+  var _result = "", _tag = state.tag, index, length, value;
+  for (index = 0, length = object3.length; index < length; index += 1) {
+    value = object3[index];
+    if (state.replacer) {
+      value = state.replacer.call(object3, String(index), value);
+    }
+    if (writeNode(state, level + 1, value, true, true, false, true) || typeof value === "undefined" && writeNode(state, level + 1, null, true, true, false, true)) {
+      if (!compact || _result !== "") {
+        _result += generateNextLine(state, level);
+      }
+      if (state.dump && CHAR_LINE_FEED === state.dump.charCodeAt(0)) {
+        _result += "-";
+      } else {
+        _result += "- ";
+      }
+      _result += state.dump;
+    }
+  }
+  state.tag = _tag;
+  state.dump = _result || "[]";
+}
+function writeFlowMapping(state, level, object3) {
+  var _result = "", _tag = state.tag, objectKeyList = Object.keys(object3), index, length, objectKey, objectValue, pairBuffer;
+  for (index = 0, length = objectKeyList.length; index < length; index += 1) {
+    pairBuffer = "";
+    if (_result !== "") pairBuffer += ", ";
+    if (state.condenseFlow) pairBuffer += '"';
+    objectKey = objectKeyList[index];
+    objectValue = object3[objectKey];
+    if (state.replacer) {
+      objectValue = state.replacer.call(object3, objectKey, objectValue);
+    }
+    if (!writeNode(state, level, objectKey, false, false)) {
+      continue;
+    }
+    if (state.dump.length > 1024) pairBuffer += "? ";
+    pairBuffer += state.dump + (state.condenseFlow ? '"' : "") + ":" + (state.condenseFlow ? "" : " ");
+    if (!writeNode(state, level, objectValue, false, false)) {
+      continue;
+    }
+    pairBuffer += state.dump;
+    _result += pairBuffer;
+  }
+  state.tag = _tag;
+  state.dump = "{" + _result + "}";
+}
+function writeBlockMapping(state, level, object3, compact) {
+  var _result = "", _tag = state.tag, objectKeyList = Object.keys(object3), index, length, objectKey, objectValue, explicitPair, pairBuffer;
+  if (state.sortKeys === true) {
+    objectKeyList.sort();
+  } else if (typeof state.sortKeys === "function") {
+    objectKeyList.sort(state.sortKeys);
+  } else if (state.sortKeys) {
+    throw new exception("sortKeys must be a boolean or a function");
+  }
+  for (index = 0, length = objectKeyList.length; index < length; index += 1) {
+    pairBuffer = "";
+    if (!compact || _result !== "") {
+      pairBuffer += generateNextLine(state, level);
+    }
+    objectKey = objectKeyList[index];
+    objectValue = object3[objectKey];
+    if (state.replacer) {
+      objectValue = state.replacer.call(object3, objectKey, objectValue);
+    }
+    if (!writeNode(state, level + 1, objectKey, true, true, true)) {
+      continue;
+    }
+    explicitPair = state.tag !== null && state.tag !== "?" || state.dump && state.dump.length > 1024;
+    if (explicitPair) {
+      if (state.dump && CHAR_LINE_FEED === state.dump.charCodeAt(0)) {
+        pairBuffer += "?";
+      } else {
+        pairBuffer += "? ";
+      }
+    }
+    pairBuffer += state.dump;
+    if (explicitPair) {
+      pairBuffer += generateNextLine(state, level);
+    }
+    if (!writeNode(state, level + 1, objectValue, true, explicitPair)) {
+      continue;
+    }
+    if (state.dump && CHAR_LINE_FEED === state.dump.charCodeAt(0)) {
+      pairBuffer += ":";
+    } else {
+      pairBuffer += ": ";
+    }
+    pairBuffer += state.dump;
+    _result += pairBuffer;
+  }
+  state.tag = _tag;
+  state.dump = _result || "{}";
+}
+function detectType(state, object3, explicit) {
+  var _result, typeList, index, length, type2, style;
+  typeList = explicit ? state.explicitTypes : state.implicitTypes;
+  for (index = 0, length = typeList.length; index < length; index += 1) {
+    type2 = typeList[index];
+    if ((type2.instanceOf || type2.predicate) && (!type2.instanceOf || typeof object3 === "object" && object3 instanceof type2.instanceOf) && (!type2.predicate || type2.predicate(object3))) {
+      if (explicit) {
+        if (type2.multi && type2.representName) {
+          state.tag = type2.representName(object3);
+        } else {
+          state.tag = type2.tag;
+        }
+      } else {
+        state.tag = "?";
+      }
+      if (type2.represent) {
+        style = state.styleMap[type2.tag] || type2.defaultStyle;
+        if (_toString.call(type2.represent) === "[object Function]") {
+          _result = type2.represent(object3, style);
+        } else if (_hasOwnProperty.call(type2.represent, style)) {
+          _result = type2.represent[style](object3, style);
+        } else {
+          throw new exception("!<" + type2.tag + '> tag resolver accepts not "' + style + '" style');
+        }
+        state.dump = _result;
+      }
+      return true;
+    }
+  }
+  return false;
+}
+function writeNode(state, level, object3, block, compact, iskey, isblockseq) {
+  state.tag = null;
+  state.dump = object3;
+  if (!detectType(state, object3, false)) {
+    detectType(state, object3, true);
+  }
+  var type2 = _toString.call(state.dump);
+  var inblock = block;
+  var tagStr;
+  if (block) {
+    block = state.flowLevel < 0 || state.flowLevel > level;
+  }
+  var objectOrArray = type2 === "[object Object]" || type2 === "[object Array]", duplicateIndex, duplicate;
+  if (objectOrArray) {
+    duplicateIndex = state.duplicates.indexOf(object3);
+    duplicate = duplicateIndex !== -1;
+  }
+  if (state.tag !== null && state.tag !== "?" || duplicate || state.indent !== 2 && level > 0) {
+    compact = false;
+  }
+  if (duplicate && state.usedDuplicates[duplicateIndex]) {
+    state.dump = "*ref_" + duplicateIndex;
+  } else {
+    if (objectOrArray && duplicate && !state.usedDuplicates[duplicateIndex]) {
+      state.usedDuplicates[duplicateIndex] = true;
+    }
+    if (type2 === "[object Object]") {
+      if (block && Object.keys(state.dump).length !== 0) {
+        writeBlockMapping(state, level, state.dump, compact);
+        if (duplicate) {
+          state.dump = "&ref_" + duplicateIndex + state.dump;
+        }
+      } else {
+        writeFlowMapping(state, level, state.dump);
+        if (duplicate) {
+          state.dump = "&ref_" + duplicateIndex + " " + state.dump;
+        }
+      }
+    } else if (type2 === "[object Array]") {
+      if (block && state.dump.length !== 0) {
+        if (state.noArrayIndent && !isblockseq && level > 0) {
+          writeBlockSequence(state, level - 1, state.dump, compact);
+        } else {
+          writeBlockSequence(state, level, state.dump, compact);
+        }
+        if (duplicate) {
+          state.dump = "&ref_" + duplicateIndex + state.dump;
+        }
+      } else {
+        writeFlowSequence(state, level, state.dump);
+        if (duplicate) {
+          state.dump = "&ref_" + duplicateIndex + " " + state.dump;
+        }
+      }
+    } else if (type2 === "[object String]") {
+      if (state.tag !== "?") {
+        writeScalar(state, state.dump, level, iskey, inblock);
+      }
+    } else if (type2 === "[object Undefined]") {
+      return false;
+    } else {
+      if (state.skipInvalid) return false;
+      throw new exception("unacceptable kind of an object to dump " + type2);
+    }
+    if (state.tag !== null && state.tag !== "?") {
+      tagStr = encodeURI(
+        state.tag[0] === "!" ? state.tag.slice(1) : state.tag
+      ).replace(/!/g, "%21");
+      if (state.tag[0] === "!") {
+        tagStr = "!" + tagStr;
+      } else if (tagStr.slice(0, 18) === "tag:yaml.org,2002:") {
+        tagStr = "!!" + tagStr.slice(18);
+      } else {
+        tagStr = "!<" + tagStr + ">";
+      }
+      state.dump = tagStr + " " + state.dump;
+    }
+  }
+  return true;
+}
+function getDuplicateReferences(object3, state) {
+  var objects = [], duplicatesIndexes = [], index, length;
+  inspectNode(object3, objects, duplicatesIndexes);
+  for (index = 0, length = duplicatesIndexes.length; index < length; index += 1) {
+    state.duplicates.push(objects[duplicatesIndexes[index]]);
+  }
+  state.usedDuplicates = new Array(length);
+}
+function inspectNode(object3, objects, duplicatesIndexes) {
+  var objectKeyList, index, length;
+  if (object3 !== null && typeof object3 === "object") {
+    index = objects.indexOf(object3);
+    if (index !== -1) {
+      if (duplicatesIndexes.indexOf(index) === -1) {
+        duplicatesIndexes.push(index);
+      }
+    } else {
+      objects.push(object3);
+      if (Array.isArray(object3)) {
+        for (index = 0, length = object3.length; index < length; index += 1) {
+          inspectNode(object3[index], objects, duplicatesIndexes);
+        }
+      } else {
+        objectKeyList = Object.keys(object3);
+        for (index = 0, length = objectKeyList.length; index < length; index += 1) {
+          inspectNode(object3[objectKeyList[index]], objects, duplicatesIndexes);
+        }
+      }
+    }
+  }
+}
+function dump$1(input, options) {
+  options = options || {};
+  var state = new State(options);
+  if (!state.noRefs) getDuplicateReferences(input, state);
+  var value = input;
+  if (state.replacer) {
+    value = state.replacer.call({ "": value }, "", value);
+  }
+  if (writeNode(state, 0, value, true, true)) return state.dump + "\n";
+  return "";
+}
+var dump_1 = dump$1;
+var dumper = {
+  dump: dump_1
+};
+function renamed(from, to) {
+  return function() {
+    throw new Error("Function yaml." + from + " is removed in js-yaml 4. Use yaml." + to + " instead, which is now safe by default.");
+  };
+}
+var load = loader.load;
+var loadAll = loader.loadAll;
+var dump = dumper.dump;
+var safeLoad = renamed("safeLoad", "load");
+var safeLoadAll = renamed("safeLoadAll", "loadAll");
+var safeDump = renamed("safeDump", "dump");
+
+// ../../pipeline-cli/dist/steps/01-validate.js
 function findTaskFile(taskId, workDir) {
   const tasksDir = join7(workDir, "backlog", "tasks");
   if (!existsSync8(tasksDir))
@@ -22099,45 +24697,19 @@ function parseTaskFile(filePath) {
   };
 }
 function parseSimpleYaml(raw) {
-  const out = {};
-  const lines = raw.split("\n");
-  let currentList = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (!line.trim() || line.trim().startsWith("#")) {
-      currentList = null;
-      continue;
-    }
-    const listItem = line.match(/^\s+- (.*)$/);
-    if (listItem && currentList) {
-      const arr = out[currentList] ?? [];
-      arr.push(stripQuotes(listItem[1]));
-      out[currentList] = arr;
-      continue;
-    }
-    const kv = line.match(/^([A-Za-z_][\w-]*):\s*(.*)$/);
-    if (!kv) {
-      currentList = null;
-      continue;
-    }
-    const key = kv[1];
-    const value = kv[2].trim();
-    if (value === "") {
-      out[key] = [];
-      currentList = key;
-    } else {
-      out[key] = stripQuotes(value);
-      currentList = null;
-    }
+  if (!raw.trim())
+    return {};
+  let parsed;
+  try {
+    parsed = load(raw);
+  } catch (err) {
+    throw new Error(`YAML parse error: ${err.message}`);
   }
-  return out;
-}
-function stripQuotes(s) {
-  const trimmed = s.trim();
-  if (trimmed.startsWith("'") && trimmed.endsWith("'") || trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
+  if (parsed === null || parsed === void 0)
+    return {};
+  if (typeof parsed !== "object" || Array.isArray(parsed))
+    return {};
+  return parsed;
 }
 async function validateTask(opts) {
   const filePath = findTaskFile(opts.taskId, opts.workDir);
@@ -22209,8 +24781,11 @@ function readBranchPattern(workDir, fallback = DEFAULT_PATTERN) {
 }
 async function computeBranchName(opts) {
   const taskIdLower = opts.taskId.toLowerCase();
-  const slug = slugify(opts.task.title);
   const pattern = readBranchPattern(opts.workDir, opts.defaultPattern ?? DEFAULT_PATTERN);
+  const slug = slugify(opts.task.title);
+  if (slug === "" && pattern.includes("{slug}")) {
+    throw new Error(`slug normalisation produced empty string from title ${JSON.stringify(opts.task.title)} (task ${opts.taskId}); branch pattern ${JSON.stringify(pattern)} requires a non-empty {slug}. The title is missing alphanumeric characters after kebab-case normalisation \u2014 if the title field uses YAML block-scalar (>- or |-), confirm the frontmatter parser decodes it to the unwrapped string before slugify().`);
+  }
   const branch = pattern.replace(/\{issueIdLower\}/g, taskIdLower).replace(/\{slug\}/g, slug);
   const worktreePath = join8(opts.workDir, ".worktrees", taskIdLower);
   return { branch, worktreePath, slug, taskIdLower };
@@ -22269,9 +24844,9 @@ ${body}`;
 }
 async function beginTask(opts) {
   const status = opts.status ?? "In Progress";
-  const taskFile = findTaskFile(opts.taskId, opts.workDir);
+  const taskFile = findTaskFile(opts.taskId, opts.worktreePath) ?? findTaskFile(opts.taskId, opts.workDir);
   if (!taskFile) {
-    throw new Error(`Step 4 begin-task: no task file found for ${opts.taskId}`);
+    throw new Error(`Step 4 begin-task: no task file found for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`);
   }
   const raw = readFileSync8(taskFile, "utf8");
   const patched = patchFrontmatterStatus(raw, status);
@@ -22342,11 +24917,21 @@ async function parseDeveloperReturn(opts) {
     try {
       parsed = JSON.parse(parsed);
     } catch (err) {
-      return { ok: false, reason: `failed to parse developer JSON: ${err.message}` };
+      const raw = typeof opts.developerReturn === "string" ? opts.developerReturn : "";
+      const preview = raw.length > 500 ? raw.slice(0, 500) + "\u2026 (truncated)" : raw;
+      return {
+        ok: false,
+        reason: `failed to parse developer JSON: ${err.message} (raw output: ${JSON.stringify(preview)})`,
+        contractViolation: true
+      };
     }
   }
   if (!parsed || typeof parsed !== "object") {
-    return { ok: false, reason: "developer return is not an object" };
+    return {
+      ok: false,
+      reason: "developer return is not an object",
+      contractViolation: true
+    };
   }
   const obj = parsed;
   for (const key of [
@@ -22397,6 +24982,83 @@ async function parseDeveloperReturn(opts) {
     }
   }
   return { ok: true, developer: obj };
+}
+async function parseDeveloperReturnWithRetry(opts) {
+  const initial = await parseDeveloperReturn({
+    developerReturn: opts.initialResult.parsed ?? opts.initialResult.output
+  });
+  if (initial.ok || !initial.contractViolation)
+    return initial;
+  const initialPreview = previewOutput(opts.initialResult.output);
+  const retryPrompt = buildRetryPrompt(initialPreview);
+  const start = Date.now();
+  const retryResult = await opts.spawner.spawn({
+    type: "developer",
+    prompt: retryPrompt,
+    cwd: opts.cwd,
+    ...opts.timeoutMs !== void 0 ? { timeout: opts.timeoutMs } : {}
+  });
+  const durationMs = Date.now() - start;
+  const retryParsed = await parseDeveloperReturn({
+    developerReturn: retryResult.parsed ?? retryResult.output
+  });
+  if (retryParsed.ok) {
+    opts.onRetrySuccess?.({
+      initialOutputPreview: initialPreview,
+      retryOutputPreview: previewOutput(retryResult.output),
+      durationMs
+    });
+    return retryParsed;
+  }
+  return {
+    ok: false,
+    contractViolation: true,
+    reason: `developer subagent violated JSON envelope contract on both turns. initial (${initial.reason ?? "parse failed"}); retry (${retryParsed.reason ?? "parse failed"})`
+  };
+}
+function previewOutput(raw) {
+  if (!raw)
+    return "<empty>";
+  return raw.length > 1e3 ? raw.slice(0, 1e3) + "\u2026 (truncated)" : raw;
+}
+function buildRetryPrompt(initialOutputPreview) {
+  return [
+    "Your previous response was not a valid JSON envelope. The orchestrator",
+    "parses your final assistant message as a JSON object; any prose,",
+    "markdown, or commentary in that turn fails the dispatch.",
+    "",
+    "Your previous output (truncated to 1000 chars):",
+    "---",
+    initialOutputPreview,
+    "---",
+    "",
+    "RE-EMIT the JSON envelope NOW. Your entire response MUST be a single",
+    "JSON object \u2014 no surrounding prose, no markdown fences, no preamble.",
+    "",
+    "Required shape:",
+    "",
+    "{",
+    '  "summary": "<1-3 sentence description>",',
+    '  "filesChanged": ["<paths>"],',
+    '  "commitSha": "<7+ char SHA>",',
+    '  "prUrl": "<https URL or null>",',
+    '  "verifications": {',
+    '    "build": "passed | failed | skipped",',
+    '    "test":  "passed | failed | skipped",',
+    '    "lint":  "passed | failed | skipped",',
+    '    "format":"passed | failed | skipped"',
+    "  },",
+    '  "acceptanceCriteriaMet": [1, 2, 3],',
+    '  "notes": "<optional>"',
+    "}",
+    "",
+    "If you have already committed the work, populate `commitSha` from",
+    "`git rev-parse HEAD` inside this worktree \u2014 do NOT redo the commit.",
+    "If you have already pushed and opened a PR, populate `prUrl` from the",
+    "PR you opened; otherwise set it to null.",
+    "",
+    "Return the JSON object and NOTHING else."
+  ].join("\n");
 }
 
 // ../../pipeline-cli/dist/steps/07-build-review-prompts.js
@@ -22559,8 +25221,27 @@ async function iterateReviewLoop(opts) {
       prompt: devPrompt,
       cwd: opts.worktreePath
     });
-    const parsedDev = await parseDeveloperReturn({
-      developerReturn: devResult.parsed ?? devResult.output
+    const onRetrySuccess = opts.onDeveloperContractRetry;
+    const parsedDev = await parseDeveloperReturnWithRetry({
+      initialResult: devResult,
+      cwd: opts.worktreePath,
+      spawner: opts.spawner,
+      ...onRetrySuccess ? {
+        onRetrySuccess: ({ initialOutputPreview, retryOutputPreview, durationMs }) => {
+          onRetrySuccess({
+            taskId: opts.taskId,
+            initialOutputPreview,
+            retryOutputPreview,
+            durationMs,
+            // AISDLC-196 — iteration-loop path. `iteration` is the
+            // current loop counter (always >=2 by construction:
+            // iteration 1 is the initial dispatch handled in
+            // execute-pipeline, which emits `phase: 'initial'`).
+            phase: "iteration",
+            iteration
+          });
+        }
+      } : {}
     });
     if (!parsedDev.ok || !parsedDev.developer) {
       break;
@@ -22962,40 +25643,46 @@ import { existsSync as existsSync16, readFileSync as readFileSync14 } from "node
 import { appendFileSync, existsSync as existsSync17, mkdirSync as mkdirSync5, readFileSync as readFileSync15 } from "node:fs";
 import { dirname as dirname4, join as join17 } from "node:path";
 
+// ../../pipeline-cli/dist/execute-pipeline.js
+import { existsSync as existsSync18 } from "node:fs";
+
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync24, readFileSync as readFileSync22 } from "node:fs";
+import { existsSync as existsSync26, readFileSync as readFileSync23 } from "node:fs";
 import { join as join24 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/events.js
-import { appendFileSync as appendFileSync2, existsSync as existsSync18, mkdirSync as mkdirSync6, readFileSync as readFileSync16, readdirSync as readdirSync6 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync19, mkdirSync as mkdirSync6, readFileSync as readFileSync16, readdirSync as readdirSync6 } from "node:fs";
 import { dirname as dirname5, join as join18 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/dor-readiness.js
-import { existsSync as existsSync19, readFileSync as readFileSync17 } from "node:fs";
+import { existsSync as existsSync20, readFileSync as readFileSync17 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/calibration-log.js
 import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync7 } from "node:fs";
 import { dirname as dirname6, join as join19 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/external-dependencies.js
-import { existsSync as existsSync20, readFileSync as readFileSync18 } from "node:fs";
+import { existsSync as existsSync21, readFileSync as readFileSync18 } from "node:fs";
 import { join as join20 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/in-flight.js
-import { existsSync as existsSync21, readdirSync as readdirSync7, readFileSync as readFileSync19, statSync as statSync5 } from "node:fs";
+import { existsSync as existsSync22, readdirSync as readdirSync7, readFileSync as readFileSync19, statSync as statSync5 } from "node:fs";
 import { join as join21 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
-import { existsSync as existsSync22, readFileSync as readFileSync20 } from "node:fs";
+import { existsSync as existsSync23, readFileSync as readFileSync20 } from "node:fs";
 import { join as join22 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/handlers/long-running-pr.js
 var LONG_RUNNING_PR_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/playbook/state-machine.js
-import { existsSync as existsSync23, mkdirSync as mkdirSync8, readFileSync as readFileSync21, writeFileSync as writeFileSync6 } from "node:fs";
+import { existsSync as existsSync24, mkdirSync as mkdirSync8, readFileSync as readFileSync21, writeFileSync as writeFileSync6 } from "node:fs";
 import { dirname as dirname7, join as join23 } from "node:path";
+
+// ../../pipeline-cli/dist/orchestrator/rollback.js
+import { existsSync as existsSync25, readFileSync as readFileSync22, writeFileSync as writeFileSync7 } from "node:fs";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 var MAX_IDLE_SLEEP_SEC = 5 * 60;
@@ -23018,7 +25705,7 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync26, readFileSync as readFileSync23, readdirSync as readdirSync9, statSync as statSync7 } from "node:fs";
+import { existsSync as existsSync28, readFileSync as readFileSync24, readdirSync as readdirSync9, statSync as statSync7 } from "node:fs";
 import { basename as basename3, join as join27, relative } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
@@ -23028,21 +25715,21 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync27, readFileSync as readFileSync24 } from "node:fs";
+import { existsSync as existsSync29, readFileSync as readFileSync25 } from "node:fs";
 import { join as join28 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync28, readFileSync as readFileSync25, readdirSync as readdirSync10 } from "node:fs";
+import { existsSync as existsSync30, readFileSync as readFileSync26, readdirSync as readdirSync10 } from "node:fs";
 import { join as join29 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync29, readFileSync as readFileSync26 } from "node:fs";
+import { existsSync as existsSync31, readFileSync as readFileSync27 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync30, readFileSync as readFileSync27 } from "node:fs";
+import { existsSync as existsSync32, readFileSync as readFileSync28 } from "node:fs";
 import { join as join30 } from "node:path";
 
 // src/tools/pipeline-tools.ts
