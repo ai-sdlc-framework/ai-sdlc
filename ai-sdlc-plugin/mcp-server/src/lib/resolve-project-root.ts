@@ -48,8 +48,8 @@ const ERROR_MESSAGE =
 export const PATTERN_C_ERROR_MESSAGE =
   'AI-SDLC: Pattern C detected — parent working tree is read-only. ' +
   'Set AI_SDLC_ACTIVE_TASK_ID env (e.g. export AI_SDLC_ACTIVE_TASK_ID=AISDLC-216) ' +
-  'or ensure a .active-task sentinel exists at the project root ' +
-  'to route writes to the correct worktree.';
+  'or ensure /ai-sdlc execute has written a per-worktree .active-task sentinel ' +
+  '(at .worktrees/<task-id>/.active-task) before launching Claude Code.';
 
 /**
  * Returns true when `dir` is an existing directory that contains a
@@ -110,7 +110,11 @@ export function isPatternCParent(root: string): boolean {
  *
  * Lookup order:
  * 1. `AI_SDLC_ACTIVE_TASK_ID` env var
- * 2. `.active-task` file at `root`
+ * 2. Per-worktree `.active-task` sentinel — scans `<root>/.worktrees/<id>/.active-task`
+ *    (matches `pipeline-cli/src/steps/04-flip-status.ts` write location and the
+ *    `findWorktreeSentinel` pattern used by enforce-blocked-actions.js +
+ *    pipeline-cli/src/orchestrator/in-flight.ts). If multiple sentinels exist
+ *    (multi-task parallel runs), returns the most-recently-modified one.
  *
  * Returns the lower-cased task ID on success, or `undefined` when no signal
  * is present.
@@ -125,18 +129,35 @@ export function resolveActiveTaskId(
     return envTaskId.trim().toLowerCase();
   }
 
-  // 2. .active-task sentinel file.
+  // 2. Per-worktree .active-task sentinels.
+  const worktreesDir = resolve(root, '.worktrees');
+  let entries: import('node:fs').Dirent[];
   try {
-    const sentinel = resolve(root, '.active-task');
-    if (existsSync(sentinel) && statSync(sentinel).isFile()) {
-      const contents = readFileSync(sentinel, 'utf-8').trim();
-      if (contents) return contents.toLowerCase();
-    }
+    entries = readdirSync(worktreesDir, { withFileTypes: true });
   } catch {
-    // I/O errors → no signal
+    return undefined;
   }
 
-  return undefined;
+  let bestTaskId: string | undefined;
+  let bestMtime = -Infinity;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const sentinel = resolve(worktreesDir, entry.name, '.active-task');
+    try {
+      const stat = statSync(sentinel);
+      if (!stat.isFile()) continue;
+      const contents = readFileSync(sentinel, 'utf-8').trim();
+      if (!contents) continue;
+      const mtime = stat.mtimeMs;
+      if (mtime > bestMtime) {
+        bestMtime = mtime;
+        bestTaskId = contents.toLowerCase();
+      }
+    } catch {
+      // skip unreadable / missing sentinel
+    }
+  }
+  return bestTaskId;
 }
 
 /**

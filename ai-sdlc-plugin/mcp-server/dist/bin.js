@@ -21348,7 +21348,7 @@ function readFrontmatterScalar(content, key) {
 import { existsSync as existsSync4, readdirSync, readFileSync as readFileSync4, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 var ERROR_MESSAGE = "AI-SDLC: could not resolve project root. Set AI_SDLC_PROJECT_ROOT or run from a directory inside a project with a backlog/ subdirectory.";
-var PATTERN_C_ERROR_MESSAGE = "AI-SDLC: Pattern C detected \u2014 parent working tree is read-only. Set AI_SDLC_ACTIVE_TASK_ID env (e.g. export AI_SDLC_ACTIVE_TASK_ID=AISDLC-216) or ensure a .active-task sentinel exists at the project root to route writes to the correct worktree.";
+var PATTERN_C_ERROR_MESSAGE = "AI-SDLC: Pattern C detected \u2014 parent working tree is read-only. Set AI_SDLC_ACTIVE_TASK_ID env (e.g. export AI_SDLC_ACTIVE_TASK_ID=AISDLC-216) or ensure /ai-sdlc execute has written a per-worktree .active-task sentinel (at .worktrees/<task-id>/.active-task) before launching Claude Code.";
 function hasBacklogDir(dir) {
   try {
     if (!existsSync4(dir)) return false;
@@ -21385,15 +21385,32 @@ function resolveActiveTaskId(root, env = process.env) {
   if (envTaskId && envTaskId.trim()) {
     return envTaskId.trim().toLowerCase();
   }
+  const worktreesDir = resolve(root, ".worktrees");
+  let entries;
   try {
-    const sentinel = resolve(root, ".active-task");
-    if (existsSync4(sentinel) && statSync(sentinel).isFile()) {
-      const contents = readFileSync4(sentinel, "utf-8").trim();
-      if (contents) return contents.toLowerCase();
-    }
+    entries = readdirSync(worktreesDir, { withFileTypes: true });
   } catch {
+    return void 0;
   }
-  return void 0;
+  let bestTaskId;
+  let bestMtime = -Infinity;
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue;
+    const sentinel = resolve(worktreesDir, entry.name, ".active-task");
+    try {
+      const stat = statSync(sentinel);
+      if (!stat.isFile()) continue;
+      const contents = readFileSync4(sentinel, "utf-8").trim();
+      if (!contents) continue;
+      const mtime = stat.mtimeMs;
+      if (mtime > bestMtime) {
+        bestMtime = mtime;
+        bestTaskId = contents.toLowerCase();
+      }
+    } catch {
+    }
+  }
+  return bestTaskId;
 }
 function resolveProjectRoot(opts = {}) {
   const env = opts.env ?? process.env;

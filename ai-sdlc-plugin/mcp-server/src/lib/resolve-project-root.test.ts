@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import {
@@ -206,21 +206,53 @@ describe('resolveActiveTaskId (AISDLC-216)', () => {
     );
   });
 
-  it('reads .active-task sentinel file when env var is absent (AC #3 signal path)', () => {
-    writeFileSync(join(scratch, '.active-task'), 'AISDLC-216\n', 'utf-8');
+  it('reads per-worktree .active-task sentinel when env var is absent (AC #3 signal path)', () => {
+    // Sentinel lives at <root>/.worktrees/<id>/.active-task per
+    // pipeline-cli/src/steps/04-flip-status.ts (AISDLC-81).
+    mkdirSync(join(scratch, '.worktrees', 'aisdlc-216'), { recursive: true });
+    writeFileSync(
+      join(scratch, '.worktrees', 'aisdlc-216', '.active-task'),
+      'AISDLC-216\n',
+      'utf-8',
+    );
     expect(resolveActiveTaskId(scratch, {})).toBe('aisdlc-216');
   });
 
-  it('prefers env var over .active-task file', () => {
-    writeFileSync(join(scratch, '.active-task'), 'AISDLC-999\n', 'utf-8');
+  it('prefers env var over per-worktree sentinel', () => {
+    mkdirSync(join(scratch, '.worktrees', 'aisdlc-999'), { recursive: true });
+    writeFileSync(
+      join(scratch, '.worktrees', 'aisdlc-999', '.active-task'),
+      'AISDLC-999\n',
+      'utf-8',
+    );
     expect(resolveActiveTaskId(scratch, { AI_SDLC_ACTIVE_TASK_ID: 'AISDLC-216' })).toBe(
       'aisdlc-216',
     );
   });
 
-  it('returns undefined when .active-task file is empty', () => {
-    writeFileSync(join(scratch, '.active-task'), '   \n', 'utf-8');
+  it('returns undefined when sentinel file is empty', () => {
+    mkdirSync(join(scratch, '.worktrees', 'aisdlc-216'), { recursive: true });
+    writeFileSync(join(scratch, '.worktrees', 'aisdlc-216', '.active-task'), '   \n', 'utf-8');
     expect(resolveActiveTaskId(scratch, {})).toBeUndefined();
+  });
+
+  it('returns most-recently-modified sentinel when multiple worktrees have one', () => {
+    mkdirSync(join(scratch, '.worktrees', 'aisdlc-100'), { recursive: true });
+    mkdirSync(join(scratch, '.worktrees', 'aisdlc-216'), { recursive: true });
+    writeFileSync(
+      join(scratch, '.worktrees', 'aisdlc-100', '.active-task'),
+      'AISDLC-100\n',
+      'utf-8',
+    );
+    // Make 216 sentinel definitively newer.
+    writeFileSync(
+      join(scratch, '.worktrees', 'aisdlc-216', '.active-task'),
+      'AISDLC-216\n',
+      'utf-8',
+    );
+    const future = new Date(Date.now() + 60_000);
+    utimesSync(join(scratch, '.worktrees', 'aisdlc-216', '.active-task'), future, future);
+    expect(resolveActiveTaskId(scratch, {})).toBe('aisdlc-216');
   });
 });
 
@@ -259,8 +291,14 @@ describe('applyPatternCIfNeeded (AISDLC-216)', () => {
     expect(result).toBe(resolve(parentRoot, '.worktrees', 'aisdlc-216'));
   });
 
-  it('routes to worktree via .active-task sentinel file (AC #3)', () => {
-    writeFileSync(join(parentRoot, '.active-task'), 'AISDLC-216\n', 'utf-8');
+  it('routes to worktree via per-worktree .active-task sentinel (AC #3)', () => {
+    // Sentinel lives at <root>/.worktrees/<id>/.active-task per
+    // pipeline-cli/src/steps/04-flip-status.ts (AISDLC-81).
+    writeFileSync(
+      join(parentRoot, '.worktrees', 'aisdlc-216', '.active-task'),
+      'AISDLC-216\n',
+      'utf-8',
+    );
     const result = applyPatternCIfNeeded(parentRoot, {});
     expect(result).toBe(resolve(parentRoot, '.worktrees', 'aisdlc-216'));
   });
@@ -326,8 +364,12 @@ describe('resolveProjectRoot — Pattern C end-to-end (AISDLC-216)', () => {
     expect(result).not.toBe(resolve(parentRoot));
   });
 
-  it('AC #6 variant: .active-task sentinel routes to worktree backlog/', () => {
-    writeFileSync(join(parentRoot, '.active-task'), 'AISDLC-216\n', 'utf-8');
+  it('AC #6 variant: per-worktree .active-task sentinel routes to worktree backlog/', () => {
+    writeFileSync(
+      join(parentRoot, '.worktrees', 'aisdlc-216', '.active-task'),
+      'AISDLC-216\n',
+      'utf-8',
+    );
     const result = resolveProjectRoot({
       env: {},
       cwd: parentRoot,
