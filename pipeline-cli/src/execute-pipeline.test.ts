@@ -533,6 +533,237 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     expect(existsSync(join(worktreePath, '.active-task'))).toBe(false);
   });
 
+  // AISDLC-200 — Coverage: best-effort `git worktree remove` returns
+  // non-zero exit code (e.g. permissions issue, lock file present). The
+  // failure MUST be captured as a `cleanupWarnings` entry, surfaced in
+  // `notes`, and logged — it must NOT throw out of the finally and lose
+  // the original abort reason.
+  it('AISDLC-200: best-effort worktree remove non-zero exit surfaces as cleanup warning', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-200-RM-FAIL',
+      title: 'remove returns nonzero',
+      status: 'To Do',
+    });
+
+    const taskFile = join(
+      tmp,
+      'backlog',
+      'tasks',
+      'aisdlc-200-rm-fail - remove-returns-nonzero.md',
+    );
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-200-rm-fail');
+
+    // Same shape as the AC#4 reproduction: Step 3 succeeds + creates the
+    // dir, Step 4 throws (corrupted frontmatter), but this time the
+    // best-effort `git worktree remove --force` returns non-zero — i.e.
+    // the rare "git refused to remove" branch (lines 352-358).
+    const runner = new FakeRunner()
+      .on(/^git fetch/, ok())
+      .on(
+        (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+        () => {
+          mkdirSync(worktreePath, { recursive: true });
+          writeFileSync(taskFile, 'no frontmatter here\n', 'utf8');
+          return ok();
+        },
+      )
+      .on(
+        (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove',
+        fail("fatal: 'aisdlc-200-rm-fail' contains modified or untracked files", 128),
+      )
+      .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'));
+
+    const warnings: string[] = [];
+    const result = await executePipeline({
+      taskId: 'AISDLC-200-RM-FAIL',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: runner.toRunner(),
+      skipFinalizeCommit: true,
+      logger: {
+        info: () => {},
+        warn: (msg) => warnings.push(msg),
+        error: () => {},
+        progress: () => {},
+      },
+    });
+
+    // Original abort reason preserved as the leading segment of `notes`,
+    // with the cleanup warning appended after the `|` separator.
+    expect(result.outcome).toBe('aborted');
+    expect(result.notes).toMatch(/missing YAML frontmatter/i);
+    expect(result.notes).toMatch(/cleanup warnings:/i);
+    expect(result.notes).toMatch(/worktree remove failed:.*modified or untracked files/i);
+
+    // Logger.warn was called with the same message.
+    expect(warnings.some((w) => /best-effort worktree remove failed/.test(w))).toBe(true);
+
+    // The remove call WAS attempted (proving lines 347-351 ran) and
+    // returned non-zero (proving the `removed.code !== 0` branch fired).
+    const removeCalls = runner.calls.filter(
+      (c) => c.command === 'git' && c.args[0] === 'worktree' && c.args[1] === 'remove',
+    );
+    expect(removeCalls).toHaveLength(1);
+  });
+
+  // AISDLC-200 — Coverage: best-effort `git worktree remove` runner
+  // itself THROWS (defensive catch — covers a runner implementation that
+  // doesn't honour `allowFailure: true` or a lower-level system error
+  // like ENOENT on the git binary). The throw MUST be caught, recorded
+  // as a `cleanupWarnings` entry, and surfaced in `notes` rather than
+  // propagating out of the finally.
+  it('AISDLC-200: best-effort worktree remove runner-throw caught as cleanup warning', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-200-RM-THROW',
+      title: 'remove runner throws',
+      status: 'To Do',
+    });
+
+    const taskFile = join(tmp, 'backlog', 'tasks', 'aisdlc-200-rm-throw - remove-runner-throws.md');
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-200-rm-throw');
+
+    const runner = new FakeRunner()
+      .on(/^git fetch/, ok())
+      .on(
+        (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+        () => {
+          mkdirSync(worktreePath, { recursive: true });
+          writeFileSync(taskFile, 'no frontmatter here\n', 'utf8');
+          return ok();
+        },
+      )
+      .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'));
+
+    // Compose the FakeRunner with a wrapper that throws specifically on
+    // `git worktree remove`. The wrapper is what's injected into
+    // executePipeline, so the throw propagates to the catch block at
+    // lines 359-363.
+    const innerRunner = runner.toRunner();
+    const throwingRunner: Parameters<typeof executePipeline>[0]['runner'] = async (
+      cmd,
+      args,
+      opts,
+    ) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        throw new Error('ENOENT: spawn git: no such file or directory');
+      }
+      return innerRunner(cmd, args, opts);
+    };
+
+    const warnings: string[] = [];
+    const result = await executePipeline({
+      taskId: 'AISDLC-200-RM-THROW',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: throwingRunner,
+      skipFinalizeCommit: true,
+      logger: {
+        info: () => {},
+        warn: (msg) => warnings.push(msg),
+        error: () => {},
+        progress: () => {},
+      },
+    });
+
+    expect(result.outcome).toBe('aborted');
+    // Original abort reason still present + cleanup-warning suffix from
+    // the catch block on lines 359-363.
+    expect(result.notes).toMatch(/missing YAML frontmatter/i);
+    expect(result.notes).toMatch(/cleanup warnings:/i);
+    expect(result.notes).toMatch(/worktree remove threw:.*ENOENT/i);
+    expect(warnings.some((w) => /best-effort worktree remove threw/.test(w))).toBe(true);
+  });
+
+  // AISDLC-200 — Coverage: best-effort `git worktree remove` runner-
+  // throw with a non-Error throwable (e.g. `throw 'string'` or a custom
+  // class without a `message`). Hits the `String(err)` fallback inside
+  // the catch block (line 360) — `err instanceof Error` is false, so we
+  // stringify the value verbatim instead of dereferencing `.message`.
+  it('AISDLC-200: best-effort worktree remove non-Error throw stringifies via String(err)', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-200-NONERR',
+      title: 'non error throw',
+      status: 'To Do',
+    });
+
+    const taskFile = join(tmp, 'backlog', 'tasks', 'aisdlc-200-nonerr - non-error-throw.md');
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-200-nonerr');
+
+    const runner = new FakeRunner()
+      .on(/^git fetch/, ok())
+      .on(
+        (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+        () => {
+          mkdirSync(worktreePath, { recursive: true });
+          writeFileSync(taskFile, 'no frontmatter here\n', 'utf8');
+          return ok();
+        },
+      )
+      .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'));
+
+    const innerRunner = runner.toRunner();
+    const stringThrowingRunner: Parameters<typeof executePipeline>[0]['runner'] = async (
+      cmd,
+      args,
+      opts,
+    ) => {
+      if (cmd === 'git' && args[0] === 'worktree' && args[1] === 'remove') {
+        // Intentionally non-Error throwable to exercise the `String(err)`
+        // branch on line 360.
+        throw 'kaboom-as-a-string';
+      }
+      return innerRunner(cmd, args, opts);
+    };
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-200-NONERR',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: stringThrowingRunner,
+      skipFinalizeCommit: true,
+    });
+
+    expect(result.outcome).toBe('aborted');
+    // The non-Error throw reaches `notes` verbatim via `String(err)`.
+    expect(result.notes).toMatch(/worktree remove threw:.*kaboom-as-a-string/);
+  });
+
+  // AISDLC-200 — Coverage: post-Step-2 catch block's `String(err)`
+  // fallback (line 313) for non-Error throwables propagated from
+  // anywhere inside Steps 3-12. Mirrors the worktree-remove non-Error
+  // test above but at the outer catch boundary.
+  it('AISDLC-200: post-Step-2 catch handles non-Error throwables via String(err)', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-200-OUTER-NONERR',
+      title: 'outer non error throw',
+      status: 'To Do',
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-200-outer-nonerr'), { recursive: true });
+
+    // Spawner that throws a non-Error. Step 3 + Step 4 succeed, then
+    // Step 5b throws `'plain-string-error'` — the outer catch on lines
+    // 298-314 must stringify it via `String(err)` (line 313).
+    const stringThrowingSpawner = {
+      async spawn(): Promise<never> {
+        throw 'plain-string-spawner-error';
+      },
+      async spawnParallel(): Promise<never> {
+        throw 'plain-string-spawner-error';
+      },
+    };
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-200-OUTER-NONERR',
+      workDir: tmp,
+      spawner: stringThrowingSpawner,
+      runner: makeHappyRunner().toRunner(),
+      skipFinalizeCommit: true,
+    });
+
+    expect(result.outcome).toBe('aborted');
+    expect(result.notes).toBe('plain-string-spawner-error');
+  });
+
   // AISDLC-200 — Counter-test: post-setup throws (e.g. a buggy step 7
   // implementation) MUST NOT pre-clean the worktree from inside the
   // finally. The wrapper's `rollbackDispatch()` needs the branch ref to
