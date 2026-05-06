@@ -14,11 +14,16 @@ dependencies: []
 references:
   - pipeline-cli/src/steps/
   - .ai-sdlc/pipeline-backlog.yaml
-  - >-
-    backlog/tasks/aisdlc-178.1 -
-    Phase-1-Skeleton-—-cli-tui-binary-Ink-scaffold-Overview-Mode-placeholder-panes.md
   - spec/rfcs/RFC-0025-framework-quality-monitoring.md
 priority: high
+drift_log:
+  - date: '2026-05-06'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists: backlog/tasks/aisdlc-178.1 -
+      Phase-1-Skeleton-—-cli-tui-binary-Ink-scaffold-Overview-Mode-placeholder-panes.md
+    resolution: flagged
+drift_checked: '2026-05-06'
 ---
 
 ## Description
