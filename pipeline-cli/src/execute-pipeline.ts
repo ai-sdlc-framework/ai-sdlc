@@ -117,6 +117,37 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       // stale branches in the orchestrator path (default false → manual path
       // unchanged).
       autonomousMode: opts.autonomousMode,
+      // AISDLC-224 — forward the auto-cleanup event to the orchestrator's
+      // events bus when supplied. setupWorktree synthesizes a `ts` field;
+      // the loop-side handler stamps `runId`/`tick` before writing.
+      // Without this thread, the event is silently dropped on every real
+      // orchestrator run (code-reviewer #377 finding 2).
+      emitEvent: opts.onWorktreeAutoCleaned
+        ? (event) => {
+            if (event.type === 'WorktreeAutoCleaned') {
+              // OrchestratorEvent is a flat interface (not a discriminated
+              // union), so the discriminant check above doesn't narrow
+              // field types. Cast to access the WorktreeAutoCleaned-specific
+              // fields. The runtime check on `event.type` ensures these
+              // fields are actually present.
+              const e = event as unknown as {
+                taskId: string;
+                branch: string;
+                reason: string;
+                hadOpenPR: boolean;
+                hadUncommittedChanges: boolean;
+              };
+              opts.onWorktreeAutoCleaned!({
+                type: 'WorktreeAutoCleaned',
+                taskId: e.taskId,
+                branch: e.branch,
+                reason: e.reason,
+                hadOpenPR: e.hadOpenPR,
+                hadUncommittedChanges: e.hadUncommittedChanges,
+              });
+            }
+          }
+        : undefined,
     });
     worktreeCreated = true;
 

@@ -1580,6 +1580,20 @@ function buildDefaultDispatch(
           ...(iteration !== undefined ? { iteration } : {}),
         });
       },
+      // AISDLC-224 — forward Step 3's `WorktreeAutoCleaned` event onto the
+      // orchestrator's events.jsonl bus. Without this hook, the event was
+      // silently dropped on every real orchestrator run (code-reviewer #377
+      // finding 2 — `setupWorktree`'s `emitEvent` was never threaded).
+      onWorktreeAutoCleaned: (event): void => {
+        emit({
+          type: 'WorktreeAutoCleaned',
+          taskId: event.taskId,
+          branch: event.branch,
+          reason: event.reason,
+          hadOpenPR: event.hadOpenPR,
+          hadUncommittedChanges: event.hadUncommittedChanges,
+        });
+      },
     });
   };
 }

@@ -367,4 +367,181 @@ describe('Step 3 — setupWorktree auto-cleanup (AISDLC-224)', () => {
       }
     }
   });
+
+  /**
+   * Code-reviewer #377 finding 1 — Predicate 1 must FAIL CLOSED on `gh` errors.
+   * If `gh pr list` exits non-zero (token expired, network timeout, gh not
+   * installed), cleanup must NOT proceed. Without this, a transient gh
+   * failure would let `git branch -D` delete a branch backing a live PR.
+   */
+  it('refuses cleanup when gh pr list fails (fail closed, not fail open)', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    try {
+      const emitted: OrchestratorEvent[] = [];
+
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        // Worktree add fails with branch-exists
+        .on(
+          (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+          fail(BRANCH_EXISTS_STDERR, 128),
+        )
+        // gh pr list fails with auth error
+        .on(/^gh pr list/, fail('error: not authenticated. run `gh auth login`', 1));
+
+      await expect(
+        setupWorktree({
+          taskId: TASK_ID,
+          branch: BRANCH,
+          worktreePath: makeWorktreePath(),
+          workDir: tmp,
+          runner: fake.toRunner(),
+          autonomousMode: true,
+          emitEvent: (ev) => {
+            emitted.push({ ts: new Date().toISOString(), ...ev } as OrchestratorEvent);
+          },
+        }),
+      ).rejects.toThrow(/branch already exists|cleanup AISDLC-99/);
+
+      // Cleanup must NOT have run (fail-closed)
+      const branchDeleteCall = fake.calls.find(
+        (c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-D',
+      );
+      expect(branchDeleteCall, 'gh failure must NOT trigger branch delete').toBeUndefined();
+
+      // No event emitted
+      expect(emitted.find((e) => e.type === 'WorktreeAutoCleaned')).toBeUndefined();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
+
+  /**
+   * Code-reviewer #377 finding 6 — retry-also-fails path. If cleanup runs
+   * but the second `git worktree add` ALSO fails, original error must be
+   * thrown, no infinite loop, and no `WorktreeAutoCleaned` event emitted
+   * (because cleanup didn't actually finish — the retry-success post-emit
+   * order ensures this).
+   */
+  it('throws original error and does NOT emit event when retry also fails', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    try {
+      const emitted: OrchestratorEvent[] = [];
+      let worktreeAddCallCount = 0;
+
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        // Both first AND second worktree add fail
+        .on(
+          (cmd, args) =>
+            cmd === 'git' && args[0] === 'worktree' && args[1] === 'add' && args.length > 4,
+          () => {
+            worktreeAddCallCount++;
+            return fail(BRANCH_EXISTS_STDERR, 128);
+          },
+        )
+        .on(/^gh pr list/, ok('[]\n'))
+        .on(/^git -C .+ status --porcelain/, ok(''))
+        .on(/^git worktree list --porcelain/, ok(''))
+        .on(/^git worktree remove --force/, ok())
+        .on(/^git branch -D/, ok());
+
+      await expect(
+        setupWorktree({
+          taskId: TASK_ID,
+          branch: BRANCH,
+          worktreePath: makeWorktreePath(),
+          workDir: tmp,
+          runner: fake.toRunner(),
+          autonomousMode: true,
+          emitEvent: (ev) => {
+            emitted.push({ ts: new Date().toISOString(), ...ev } as OrchestratorEvent);
+          },
+        }),
+      ).rejects.toThrow(/branch already exists|cleanup AISDLC-99/);
+
+      // Exactly 2 worktree-add calls — original + one retry, no infinite loop
+      expect(worktreeAddCallCount).toBe(2);
+
+      // NO event emitted because retry didn't succeed
+      expect(emitted.find((e) => e.type === 'WorktreeAutoCleaned')).toBeUndefined();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
+
+  /**
+   * Code-reviewer #377 finding 3 — Predicate 3 must use EXACT match on the
+   * `branch refs/heads/<name>` line, not `includes()`. Branch `ai-sdlc/aisdlc-9`
+   * must NOT match a worktree-list line `branch refs/heads/ai-sdlc/aisdlc-99`.
+   */
+  it('predicate-3 does NOT false-positive on branch name prefixes', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    try {
+      // Use a branch whose name is a PREFIX of a longer branch name in the
+      // worktree list. With `includes()`, the longer branch's worktree
+      // line would match and falsely block cleanup.
+      const SHORT_BRANCH = 'ai-sdlc/aisdlc-9';
+
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        .on(
+          (cmd, args) =>
+            cmd === 'git' && args[0] === 'worktree' && args[1] === 'add' && args.length > 4,
+          (() => {
+            let call = 0;
+            return () => {
+              call++;
+              if (call === 1) return fail(BRANCH_EXISTS_STDERR, 128);
+              return ok();
+            };
+          })(),
+        )
+        .on(/^gh pr list/, ok('[]\n'))
+        .on(/^git -C .+ status --porcelain/, ok(''))
+        // Worktree list contains AISDLC-99 but NOT the short branch we're
+        // checking. Old `includes()` impl would match because the short
+        // branch is a prefix of the longer one.
+        .on(
+          /^git worktree list --porcelain/,
+          ok('worktree /elsewhere\nbranch refs/heads/ai-sdlc/aisdlc-99\n\n'),
+        )
+        .on(/^git worktree remove --force/, ok())
+        .on(/^git branch -D/, ok())
+        .on(/^git -C .+ rev-parse HEAD/, ok('cafebabe\n'));
+
+      const result = await setupWorktree({
+        taskId: 'AISDLC-9',
+        branch: SHORT_BRANCH,
+        worktreePath: makeWorktreePath(),
+        workDir: tmp,
+        runner: fake.toRunner(),
+        autonomousMode: true,
+      });
+
+      // Cleanup proceeded (the prefix-match false positive is fixed)
+      expect(result.branch).toBe(SHORT_BRANCH);
+      const branchDeleteCall = fake.calls.find(
+        (c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-D',
+      );
+      expect(branchDeleteCall, 'cleanup must run when branch is only a name prefix').toBeDefined();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
 });

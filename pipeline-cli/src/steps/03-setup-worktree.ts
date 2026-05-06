@@ -79,21 +79,29 @@ async function isSafeToAutoClean(
   branch: string,
   worktreePath: string,
 ): Promise<{ safe: boolean; hadOpenPR: boolean; hadUncommittedChanges: boolean }> {
-  // Predicate 1: open-PR check
+  // Predicate 1: open-PR check.
+  // CRITICAL: fail CLOSED on any non-zero gh exit (token expired, network
+  // timeout, gh not installed, rate limit). Without this, a transient gh
+  // failure would let cleanup proceed against a branch with an open PR
+  // and `git branch -D` would delete the local branch backing the live
+  // PR. Mitigation: treat any gh-failure as "unknown PR state → unsafe".
+  // (Code-reviewer + security-reviewer #377 both flagged this fail-open.)
   const prResult = await runner(
     'gh',
     ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number'],
     { cwd: workDir, allowFailure: true },
   );
+  if (prResult.code !== 0) {
+    // gh failed — fail closed, refuse cleanup.
+    return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+  }
   let hadOpenPR = false;
-  if (prResult.code === 0) {
-    try {
-      const parsed = JSON.parse(prResult.stdout.trim() || '[]') as unknown[];
-      hadOpenPR = Array.isArray(parsed) && parsed.length > 0;
-    } catch {
-      // gh returned non-JSON — treat conservatively as having an open PR
-      hadOpenPR = prResult.stdout.trim().length > 0;
-    }
+  try {
+    const parsed = JSON.parse(prResult.stdout.trim() || '[]') as unknown[];
+    hadOpenPR = Array.isArray(parsed) && parsed.length > 0;
+  } catch {
+    // gh returned non-JSON — treat conservatively as having an open PR
+    hadOpenPR = prResult.stdout.trim().length > 0;
   }
   if (hadOpenPR) {
     return { safe: false, hadOpenPR: true, hadUncommittedChanges: false };
@@ -126,10 +134,16 @@ async function isSafeToAutoClean(
   if (worktreeListResult.code === 0) {
     const lines = worktreeListResult.stdout.split('\n');
     let currentPath = '';
+    // EXACT match against `branch refs/heads/<branch>` — substring `includes`
+    // would falsely match prefixes (e.g. branch=`ai-sdlc/aisdlc-9` would
+    // match `branch refs/heads/ai-sdlc/aisdlc-99`). Code-reviewer #377
+    // flagged this. Git's worktree porcelain emits the branch line as
+    // `branch refs/heads/<full-name>` with no trailing whitespace.
+    const expectedBranchLine = `branch refs/heads/${branch}`;
     for (const line of lines) {
       if (line.startsWith('worktree ')) {
         currentPath = line.slice('worktree '.length).trim();
-      } else if (line.startsWith('branch ') && line.includes(branch)) {
+      } else if (line.trim() === expectedBranchLine) {
         // Found the branch — check if it's at a DIFFERENT path
         const normalizedCurrentPath = currentPath.replace(/\/$/, '');
         const normalizedExpectedPath = worktreePath.replace(/\/$/, '');
@@ -163,20 +177,6 @@ async function attemptAutoCleanup(
     return null;
   }
 
-  // Emit WorktreeAutoCleaned event BEFORE running cleanup so it lands
-  // in the events stream even if cleanup subsequently fails.
-  if (opts.emitEvent) {
-    opts.emitEvent({
-      type: 'WorktreeAutoCleaned',
-      ts: new Date().toISOString(),
-      taskId: opts.taskId,
-      branch: opts.branch,
-      reason: 'branch already exists',
-      hadOpenPR,
-      hadUncommittedChanges,
-    });
-  }
-
   // Step 1: remove the stale worktree directory (if registered with git)
   await runner('git', ['worktree', 'remove', '--force', opts.worktreePath], {
     cwd: opts.workDir,
@@ -195,6 +195,24 @@ async function attemptAutoCleanup(
     ['worktree', 'add', opts.worktreePath, '-b', opts.branch, 'origin/main'],
     { cwd: opts.workDir, allowFailure: true },
   );
+
+  // Emit WorktreeAutoCleaned event ONLY after retry succeeds. If we emit
+  // before cleanup runs (or before the retry succeeds), an operator seeing
+  // the event in events.jsonl would incorrectly believe the cleanup landed
+  // even when the retry failed and the original error was thrown. Emit
+  // after retry success means: event present ⇒ cleanup actually finished.
+  // (Code-reviewer #377 minor finding 4.)
+  if (retryResult.code === 0 && opts.emitEvent) {
+    opts.emitEvent({
+      type: 'WorktreeAutoCleaned',
+      ts: new Date().toISOString(),
+      taskId: opts.taskId,
+      branch: opts.branch,
+      reason: 'branch already exists',
+      hadOpenPR,
+      hadUncommittedChanges,
+    });
+  }
 
   return { retried: true, addResult: retryResult };
 }

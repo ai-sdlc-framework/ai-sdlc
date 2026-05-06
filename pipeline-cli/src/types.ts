@@ -63,6 +63,27 @@ export interface PipelineOptions {
    * leaves it false (default OFF — no behavior change for the manual path).
    */
   autonomousMode?: boolean;
+  /**
+   * AISDLC-224 — orchestrator-side hook fired when Step 3's auto-cleanup
+   * actually runs (cleanup-then-retry succeeded). Carries the
+   * `WorktreeAutoCleaned` event payload so the orchestrator loop can
+   * forward it to its events bus (events.jsonl).
+   *
+   * Set by `cli-orchestrator`'s default dispatcher; left undefined by the
+   * manual `/ai-sdlc execute` path (no events bus to forward to).
+   *
+   * Note: emit happens inside `setupWorktree()` AFTER the retry succeeds
+   * (so a partial-failure cleanup doesn't fire a misleading "cleaned"
+   * event — code-reviewer #377 minor finding 4).
+   */
+  onWorktreeAutoCleaned?: (event: {
+    type: 'WorktreeAutoCleaned';
+    taskId: string;
+    branch: string;
+    reason: string;
+    hadOpenPR: boolean;
+    hadUncommittedChanges: boolean;
+  }) => void;
 }
 
 /**
