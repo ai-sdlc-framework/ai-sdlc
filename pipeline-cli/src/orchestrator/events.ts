@@ -92,7 +92,14 @@ export type OrchestratorEventType =
    * `until`. Lets operators grep events.jsonl to see the blocked queue
    * without parsing the full filter trace.
    */
-  | 'TaskBlocked';
+  | 'TaskBlocked'
+  /**
+   * AISDLC-224 — emitted when Step 3's auto-cleanup path fires (stale
+   * branch + all three safety predicates passed + retry succeeded).
+   * Per-event fields: `taskId`, `branch`, `reason`, `hadOpenPR`,
+   * `hadUncommittedChanges`.
+   */
+  | 'WorktreeAutoCleaned';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

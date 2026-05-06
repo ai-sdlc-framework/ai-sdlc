@@ -1557,6 +1557,9 @@ function buildDefaultDispatch(
       spawner,
       runner: adapters.runner ?? defaultRunner,
       logger: adapters.logger ?? DEFAULT_LOGGER,
+      // AISDLC-224 — set autonomousMode so Step 3 can self-heal stale
+      // branches automatically (guarded by AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP).
+      autonomousMode: true,
       // AISDLC-176 — forward the `DeveloperContractRetry` recovery
       // signal from `executePipeline()`'s Step 6 onto the orchestrator
       // events.jsonl bus. High-frequency emission of this event tells

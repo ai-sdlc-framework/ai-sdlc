@@ -248,6 +248,20 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
     });
   });
 
+  it('accepts WorktreeAutoCleaned (AISDLC-224)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'WorktreeAutoCleaned',
+      taskId: 'AISDLC-99',
+      runId,
+      tick: 1,
+      branch: 'ai-sdlc/aisdlc-99',
+      reason: 'branch already exists',
+      hadOpenPR: false,
+      hadUncommittedChanges: false,
+    });
+  });
+
   it('accepts the minimal envelope (only ts + type)', () => {
     expectValid({ ts: baseTs, type: 'OrchestratorTick' });
   });

@@ -24857,6 +24857,82 @@ async function computeBranchName(opts) {
 // ../../pipeline-cli/dist/steps/03-setup-worktree.js
 import { mkdirSync as mkdirSync3 } from "node:fs";
 import { join as join10 } from "node:path";
+function isFlagEnabled(value) {
+  if (!value)
+    return false;
+  return ["1", "true", "yes", "on"].includes(value.trim().toLowerCase());
+}
+function isAutoCleanupEnabled() {
+  return isFlagEnabled(process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP);
+}
+function isBranchExistsError(stderr) {
+  return /branch.+already exists|already exists.+branch/i.test(stderr);
+}
+async function isSafeToAutoClean(runner, workDir, branch, worktreePath) {
+  const prResult = await runner("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number"], { cwd: workDir, allowFailure: true });
+  let hadOpenPR = false;
+  if (prResult.code === 0) {
+    try {
+      const parsed = JSON.parse(prResult.stdout.trim() || "[]");
+      hadOpenPR = Array.isArray(parsed) && parsed.length > 0;
+    } catch {
+      hadOpenPR = prResult.stdout.trim().length > 0;
+    }
+  }
+  if (hadOpenPR) {
+    return { safe: false, hadOpenPR: true, hadUncommittedChanges: false };
+  }
+  let hadUncommittedChanges = false;
+  const statusResult = await runner("git", ["-C", worktreePath, "status", "--porcelain"], { cwd: workDir, allowFailure: true });
+  if (statusResult.code === 0 && statusResult.stdout.trim().length > 0) {
+    hadUncommittedChanges = true;
+  } else if (statusResult.code !== 0) {
+  }
+  if (hadUncommittedChanges) {
+    return { safe: false, hadOpenPR: false, hadUncommittedChanges: true };
+  }
+  const worktreeListResult = await runner("git", ["worktree", "list", "--porcelain"], { cwd: workDir, allowFailure: true });
+  if (worktreeListResult.code === 0) {
+    const lines = worktreeListResult.stdout.split("\n");
+    let currentPath = "";
+    for (const line of lines) {
+      if (line.startsWith("worktree ")) {
+        currentPath = line.slice("worktree ".length).trim();
+      } else if (line.startsWith("branch ") && line.includes(branch)) {
+        const normalizedCurrentPath = currentPath.replace(/\/$/, "");
+        const normalizedExpectedPath = worktreePath.replace(/\/$/, "");
+        if (normalizedCurrentPath !== normalizedExpectedPath) {
+          return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+        }
+      }
+    }
+  }
+  return { safe: true, hadOpenPR: false, hadUncommittedChanges: false };
+}
+async function attemptAutoCleanup(runner, opts) {
+  const { safe, hadOpenPR, hadUncommittedChanges } = await isSafeToAutoClean(runner, opts.workDir, opts.branch, opts.worktreePath);
+  if (!safe) {
+    return null;
+  }
+  if (opts.emitEvent) {
+    opts.emitEvent({
+      type: "WorktreeAutoCleaned",
+      ts: (/* @__PURE__ */ new Date()).toISOString(),
+      taskId: opts.taskId,
+      branch: opts.branch,
+      reason: "branch already exists",
+      hadOpenPR,
+      hadUncommittedChanges
+    });
+  }
+  await runner("git", ["worktree", "remove", "--force", opts.worktreePath], { cwd: opts.workDir, allowFailure: true });
+  await runner("git", ["branch", "-D", opts.branch], {
+    cwd: opts.workDir,
+    allowFailure: true
+  });
+  const retryResult = await runner("git", ["worktree", "add", opts.worktreePath, "-b", opts.branch, "origin/main"], { cwd: opts.workDir, allowFailure: true });
+  return { retried: true, addResult: retryResult };
+}
 async function setupWorktree(opts) {
   const runner = opts.runner ?? defaultRunner;
   if (!opts.skipFetch) {
@@ -24869,6 +24945,15 @@ async function setupWorktree(opts) {
   mkdirSync3(join10(opts.workDir, ".worktrees"), { recursive: true });
   const addResult = await runner("git", ["worktree", "add", opts.worktreePath, "-b", opts.branch, "origin/main"], { cwd: opts.workDir, allowFailure: true });
   if (addResult.code !== 0) {
+    const shouldTryCleanup = opts.autonomousMode === true && isAutoCleanupEnabled() && isBranchExistsError(addResult.stderr);
+    if (shouldTryCleanup) {
+      const cleanupResult = await attemptAutoCleanup(runner, opts);
+      if (cleanupResult && cleanupResult.addResult.code === 0) {
+        const baseShaResult2 = await runner("git", ["-C", opts.worktreePath, "rev-parse", "HEAD"], { allowFailure: true });
+        const baseSha2 = baseShaResult2.code === 0 ? baseShaResult2.stdout.trim() : "";
+        return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha: baseSha2 };
+      }
+    }
     throw new Error(`git worktree add failed for branch '${opts.branch}': ${addResult.stderr.trim() || "unknown error"}
 Likely cause: branch already exists. Run \`/ai-sdlc cleanup ${opts.taskId}\` first or pick a different task.`);
   }

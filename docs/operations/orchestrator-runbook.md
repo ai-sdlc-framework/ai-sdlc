@@ -377,6 +377,105 @@ Common partial-rollback warnings:
 
 ---
 
+## Auto-cleanup of stale worktree branches (AISDLC-224)
+
+When the autonomous orchestrator dispatches a task and Step 3 (`git worktree add`)
+fails because the target branch already exists from a prior aborted session, the
+orchestrator can self-heal by cleaning up the stale branch and retrying — instead
+of returning `{ outcome: 'aborted' }` and re-failing on every subsequent tick.
+
+### Feature flag
+
+Auto-cleanup is **off by default**. Opt in by setting:
+
+```bash
+export AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP=1
+```
+
+Canonical truthy values: `1`, `true`, `yes`, `on` (case-insensitive). Any other
+value (including unset) leaves cleanup disabled and behavior is unchanged from
+before AISDLC-224.
+
+The flag only takes effect when the orchestrator is also running in autonomous
+mode (i.e., invoked via `cli-orchestrator tick` / `cli-orchestrator start`). The
+manual `/ai-sdlc execute` slash command path always leaves `autonomousMode` false
+and is unaffected regardless of the flag.
+
+### How it works
+
+When `git worktree add` exits non-zero with a "branch already exists" stderr
+pattern, AND `autonomousMode === true`, AND `AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP`
+is truthy, Step 3 runs three safety predicates before attempting any cleanup:
+
+1. **Open-PR check** — `gh pr list --head <branch> --state open` must return
+   empty. An open PR means the operator's in-flight work is associated with this
+   branch and clobbering it would destroy review history.
+
+2. **Uncommitted-changes check** — `git -C <worktree-path> status --porcelain`
+   must return empty. Uncommitted changes represent potential data loss if the
+   worktree is forcibly removed.
+
+3. **Branch-checked-out-elsewhere check** — `git worktree list --porcelain` must
+   NOT show the branch mounted at a different path. If it does, another worktree
+   (possibly a parallel dispatch) is actively using the branch.
+
+All three predicates must pass. If ANY predicate fails, cleanup is skipped and
+the original "branch already exists" error propagates (same behavior as before
+AISDLC-224).
+
+When all three pass, the cleanup sequence runs:
+1. `git worktree remove --force <.worktrees/<task-id>/>`
+2. `git branch -D <branch>`
+3. `git worktree add <.worktrees/<task-id>> -b <branch> origin/main` (one retry)
+4. If retry also fails → original error is re-raised (no looping)
+
+### WorktreeAutoCleaned event
+
+When cleanup fires, a `WorktreeAutoCleaned` event is emitted on the
+`events.jsonl` bus:
+
+```jsonc
+{
+  "ts": "2026-05-06T12:34:56.789Z",
+  "type": "WorktreeAutoCleaned",
+  "taskId": "AISDLC-99",
+  "branch": "ai-sdlc/aisdlc-99",
+  "reason": "branch already exists",
+  "hadOpenPR": false,           // always false when cleanup proceeded
+  "hadUncommittedChanges": false // always false when cleanup proceeded
+}
+```
+
+Grep for it:
+
+```bash
+jq -c 'select(.type == "WorktreeAutoCleaned")' \
+  artifacts/_orchestrator/events-*.jsonl
+```
+
+A high frequency of `WorktreeAutoCleaned` events for the same `taskId` across
+multiple days indicates the rollback mechanism (AISDLC-177) may not be
+completing cleanly — investigate the `OrchestratorRollback` events for that
+task to see if worktree removal or branch deletion failed.
+
+### Safety rationale
+
+The three predicates are designed so the orchestrator can only auto-clean
+worktrees that are provably inert:
+
+| Predicate | What it protects |
+|---|---|
+| Open-PR check | In-flight operator review — never silently close a PR's source branch |
+| Uncommitted-changes check | Potential developer work that wasn't committed before the prior session crashed |
+| Branch-checked-out-elsewhere | A parallel dispatch or manual operator session using the same branch |
+
+If the auto-cleanup ever misbehaves (e.g. false-negative on an open-PR check due
+to a `gh` network failure), the conservative fallback is the pre-AISDLC-224
+behavior: the error surfaces, the task gets re-picked on the next tick, and the
+operator sees repeated `aborted` outcomes for the same task — noisy but safe.
+
+---
+
 ## Counting developer-contract retries by code path (AISDLC-196)
 
 When the developer subagent returns non-JSON prose, the Step 6 retry

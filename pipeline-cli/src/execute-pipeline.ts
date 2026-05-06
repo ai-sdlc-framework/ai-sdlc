@@ -113,6 +113,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
       runner: opts.runner,
+      // AISDLC-224 — propagate autonomousMode so Step 3 can self-heal
+      // stale branches in the orchestrator path (default false → manual path
+      // unchanged).
+      autonomousMode: opts.autonomousMode,
     });
     worktreeCreated = true;
 

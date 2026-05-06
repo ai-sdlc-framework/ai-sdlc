@@ -55,6 +55,14 @@ export interface PipelineOptions {
    * dispatch consumers fire the events bus.
    */
   onDeveloperContractRetry?: (info: DeveloperContractRetryInfo) => void;
+  /**
+   * AISDLC-224 — when true, Step 3 (`setupWorktree`) will attempt
+   * auto-cleanup when it detects a stale branch blocking worktree creation
+   * (provided `AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP` is also set). The
+   * orchestrator loop sets this to true; the manual `/ai-sdlc execute` path
+   * leaves it false (default OFF — no behavior change for the manual path).
+   */
+  autonomousMode?: boolean;
 }
 
 /**

@@ -2603,13 +2603,23 @@ export const orchestratorEventsV1Schema = {
       description:
         "Optional list of task IDs that, when all reach Done, advise the operator to clear the block. Present on `TaskBlocked` (AISDLC-223) when the task's `blocked.unblockedBy` frontmatter field is set. Phase 2 (AC #8 of AISDLC-223) will emit an additional `TaskUnblockExpired` advisory event when all listed task IDs are Done; until then this field is informational only.",
     },
+    hadOpenPR: {
+      type: 'boolean',
+      description:
+        'Safety-predicate outcome: whether an open GitHub PR was found for the branch at the time of the auto-cleanup decision. Always `false` when cleanup proceeded (an open PR would have blocked cleanup). Present on `WorktreeAutoCleaned` (AISDLC-224).',
+    },
+    hadUncommittedChanges: {
+      type: 'boolean',
+      description:
+        'Safety-predicate outcome: whether the existing worktree directory had uncommitted changes at the time of the auto-cleanup decision. Always `false` when cleanup proceeded (uncommitted changes would have blocked cleanup). Present on `WorktreeAutoCleaned` (AISDLC-224).',
+    },
   },
   additionalProperties: false,
   $defs: {
     OrchestratorEventType: {
       type: 'string',
       description:
-        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
+        "Discriminator. Phase 4 (AISDLC-169.4) shipped the seven core types covering tick lifecycle + dispatch outcomes + worker-state transitions + the external-deps filter rejection. Phase 3 (AISDLC-169.3) extends the enum with the remaining five filter-rejection / idle / stuck event types so the events.jsonl stream is the single observability path. AISDLC-175 adds `OrchestratorOrphanParent` for parent-task closure detection. AISDLC-176 adds `DeveloperContractRetry` for the recovery path when the developer subagent returns non-JSON prose and the retry-once helper recovers the dispatch. AISDLC-196 extends `DeveloperContractRetry` with `phase` (`'initial' | 'iteration'`) + optional `iteration` (present when `phase === 'iteration'`) so operators can attribute recovery events to the initial-dispatch path versus the iteration-loop path — additive non-breaking change. AISDLC-223 adds `TaskBlocked` emitted on every tick that the Blocked admission filter rejects a candidate (the task has a non-empty `blocked.reason` frontmatter field). AISDLC-224 adds `WorktreeAutoCleaned` for the Step 3 auto-cleanup path (stale branch self-heal in autonomous mode). Future phases / RFCs extend this enum without a schema bump (consumers that don't enforce the enum strictly will tolerate unknown types, those that do will reject + log).",
       enum: [
         'OrchestratorTick',
         'OrchestratorDispatched',
@@ -2629,6 +2639,7 @@ export const orchestratorEventsV1Schema = {
         'OrchestratorRollback',
         'OrchestratorWorkQuarantined',
         'TaskBlocked',
+        'WorktreeAutoCleaned',
       ],
     },
   },
