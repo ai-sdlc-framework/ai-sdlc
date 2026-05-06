@@ -195,7 +195,14 @@ describe('paths-ignore equivalence (AC-4) — DOCS_ONLY_PATTERN mirrors workflow
   // matches. This fails loud if either workflow adds/removes a glob without
   // updating the shared script.
 
-  const WORKFLOW_FILES = ['verify-attestation.yml', 'ai-sdlc-review.yml'];
+  // Note (AISDLC-214): verify-attestation.yml had paths-ignore REMOVED so the
+  // workflow always runs and posts the required `ai-sdlc/attestation` status
+  // even on docs-only PRs (paths-ignore-skipped workflows leave required
+  // checks pending forever per docs/operations/quality-gate.md). Inline
+  // docs-only short-circuit fires inside the workflow instead. ai-sdlc-review.yml
+  // KEEPS paths-ignore as a cost-saver — `Post Review Results` is NOT a required
+  // check so paths-ignore-skipped is safe there.
+  const WORKFLOW_FILES = ['ai-sdlc-review.yml'];
   const EXPECTED_GLOBS = new Set([
     'spec/rfcs/**',
     'docs/**',
