@@ -14,6 +14,15 @@ references:
   - VISION.md
   - docs/operations/operator-runbook.md
 priority: high
+blocked:
+  reason: 'Umbrella parent task — dispatch sub-phases AISDLC-178.2 through 178.7 directly. 178.1 Done; 178.2–178.7 are the actual dispatchable work items. Parent unblocks when AC #1 (all 7 sub-tasks Done) + AC #2 (flag promotion post-soak) are met.'
+  unblockedBy:
+    - AISDLC-178.2
+    - AISDLC-178.3
+    - AISDLC-178.4
+    - AISDLC-178.5
+    - AISDLC-178.6
+    - AISDLC-178.7
 ---
 
 ## Description

@@ -24,6 +24,12 @@ references:
   - ai-sdlc-plugin/agents/test-reviewer.md
   - ai-sdlc-plugin/agents/security-reviewer.md
 priority: high
+blocked:
+  reason: 'Umbrella parent task — dispatch sub-phases AISDLC-202.2 through 202.4 directly. 202.1 (Phase 1 design map) Done; 202.2 (adapter), 202.3 (attestation harness), 202.4 (e2e pilot) are the actual dispatchable work items. Parent unblocks when AC #1 (all 4 sub-tasks Done) is met.'
+  unblockedBy:
+    - AISDLC-202.2
+    - AISDLC-202.3
+    - AISDLC-202.4
 ---
 
 ## Description

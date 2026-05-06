@@ -18,6 +18,12 @@ references:
   - .ai-sdlc/dor-config.yaml
   - spec/schemas/refinement-verdict.v1.schema.json
 priority: high
+blocked:
+  reason: 'Soaking — 8/9 sub-tasks Done (115.1–7 + 115.9); 115.8 partial-shipped; AC #3 soak window opened 2026-05-03 (re-evaluate 2026-05-10); ACs #5 + #6 in flight via AISDLC-162 / 163. AISDLC-223 first user.'
+  unblockedBy:
+    - AISDLC-115.8
+    - AISDLC-162
+    - AISDLC-163
 drift_log:
   - date: '2026-05-03'
     type: ref-deleted

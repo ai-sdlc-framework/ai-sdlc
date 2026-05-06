@@ -15,6 +15,8 @@ references:
   - spec/rfcs/RFC-0014-dependency-graph-composition.md
   - pipeline-cli/src/deps/
 priority: high
+blocked:
+  reason: 'Awaiting AI_SDLC_DEPS_COMPOSITION feature flag promotion (AC #2). All 5 sub-tasks (167.1–167.5) Done. Promotion runbook at docs/operations/deps-composition-promotion.md — operator dispatches the default-on flip once corpus or spot-check evidence supports it. Soak is corpus-driven, NOT calendar-driven.'
 ---
 
 ## Description

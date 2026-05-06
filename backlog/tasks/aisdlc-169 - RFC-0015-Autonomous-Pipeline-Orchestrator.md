@@ -15,6 +15,11 @@ references:
   - spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md
   - pipeline-cli/src/
 priority: high
+blocked:
+  reason: 'Soaking + prerequisites — all 5 sub-tasks (169.1–169.5) Done. AC #2 (AI_SDLC_AUTONOMOUS_ORCHESTRATOR flag promotion from experimental → default-on) gated on (a) AISDLC-223 BlockedFilter so the orchestrator can skip blocked tasks, (b) AISDLC-224 stale-branch auto-cleanup, (c) corpus-driven soak per docs/operations/orchestrator-promotion.md (95%+ tasks complete unattended, no quota-burn surprise).'
+  unblockedBy:
+    - AISDLC-223
+    - AISDLC-224
 ---
 
 ## Description
