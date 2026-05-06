@@ -104,14 +104,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Mirrors paths-ignore from ai-sdlc-review.yml + verify-attestation.yml.
+          # Mirrors paths-ignore from ai-sdlc-review.yml + verify-attestation.yml,
+          # PLUS .ai-sdlc/attestations/<sha>.dsse.json (envelope files are
+          # metadata about review, not code — treated as docs-equivalent for
+          # the fallback purpose; AISDLC-208).
           # Patterns:
           #   - spec/rfcs/**
           #   - docs/**
           #   - backlog/tasks/**
           #   - backlog/completed/**
+          #   - .ai-sdlc/attestations/<sha>.dsse.json (envelope chore-commit files)
           #   - *.md (root-level only — gitignore semantics, single * doesn't match /)
-          PATTERN='^(spec/rfcs/|docs/|backlog/tasks/|backlog/completed/|[^/]+\.md$)'
+          PATTERN='^(spec/rfcs/|docs/|backlog/tasks/|backlog/completed/|\.ai-sdlc/attestations/[^/]+\.dsse\.json$|[^/]+\.md$)'
 
           # Fetch changed file list. PR uses the API; merge_group uses git
           # diff against the queue commit's BASE..HEAD range (the queue tip
