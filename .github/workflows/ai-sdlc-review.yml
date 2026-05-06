@@ -18,12 +18,129 @@ on:
       - 'backlog/tasks/**'
       - 'backlog/completed/**'
       - '*.md'
+  # AISDLC-214: also fire on merge_group so we can post `Post Review Results`
+  # on docs-only queue commits (branch protection requires the check even on
+  # merge_group head SHAs). `paths-ignore` does NOT apply to merge_group events,
+  # so the docs-only-check job below handles the predicate inline and short-circuits
+  # with success. The PR-review jobs (attestation-precheck, analyze, etc.) are
+  # gated on pull_request only and do not run on merge_group.
+  merge_group:
+    types: [checks_requested]
 
 concurrency:
-  group: review-${{ github.event.pull_request.number }}
+  group: review-${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
   cancel-in-progress: true
 
 jobs:
+  # ── Job -1: Docs-only short-circuit (merge_group + pull_request fallback) ──
+  # AISDLC-214: handles two cases with one job:
+  #
+  # Case A — merge_group with docs-only changeset:
+  #   `paths-ignore` does NOT apply to `merge_group` events, so this workflow
+  #   fires for every merge_group commit. We detect docs-only changesets via
+  #   `scripts/is-docs-only-changeset.mjs` (AISDLC-206) and post
+  #   `Post Review Results: success` directly. Code/mixed changesets skip this
+  #   step and the PR-review jobs below run normally (they guard on
+  #   `github.event_name == 'pull_request'` to avoid merge_group context issues).
+  #
+  # Case B — pull_request with docs-only changeset:
+  #   Although `paths-ignore` should skip the workflow for docs-only PRs, branch
+  #   protection still requires `Post Review Results` to be posted. This job handles
+  #   that case — replacing the now-deleted `ai-sdlc-review-docs-only.yml` fallback.
+  #   For mixed PRs (docs + code), this step exits cleanly; the PR-review jobs
+  #   below handle verification normally.
+  #
+  # This job runs on BOTH events so it can be the sole poster of
+  # `Post Review Results: success` for docs-only changes in all contexts.
+  docs-only-check:
+    name: Docs-only check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      statuses: write
+      pull-requests: read
+    steps:
+      - name: Resolve event-driven SHA + range
+        id: resolve
+        run: |
+          if [ "${{ github.event_name }}" = "merge_group" ]; then
+            echo "head_sha=${{ github.event.merge_group.head_sha }}" >> "${GITHUB_OUTPUT}"
+            echo "base_sha=${{ github.event.merge_group.base_sha }}" >> "${GITHUB_OUTPUT}"
+            echo "is_merge_group=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "head_sha=${{ github.event.pull_request.head.sha }}" >> "${GITHUB_OUTPUT}"
+            echo "is_merge_group=false" >> "${GITHUB_OUTPUT}"
+          fi
+
+      # Only checkout for merge_group runs (PR runs use the GH API for file
+      # enumeration which doesn't need a working tree).
+      - name: Checkout (merge_group only)
+        if: steps.resolve.outputs.is_merge_group == 'true'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.resolve.outputs.head_sha }}
+
+      - name: Detect docs-only changeset
+        id: detect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          IS_MERGE_GROUP: ${{ steps.resolve.outputs.is_merge_group }}
+          BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "${IS_MERGE_GROUP}" = "true" ]; then
+            # -c core.quotePath=false emits raw UTF-8 filenames (AISDLC-205 round 3 fix).
+            FILES=$(git -c core.quotePath=false diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          else
+            FILES=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
+          fi
+
+          if [ -z "${FILES}" ]; then
+            echo "No changed files; treating as docs-only (nothing to attest)"
+            echo "all_docs=true" >> "${GITHUB_OUTPUT}"
+            exit 0
+          fi
+
+          ALL_DOCS=$(printf '%s\n' "${FILES}" | node scripts/is-docs-only-changeset.mjs)
+          echo "all_docs=${ALL_DOCS}" >> "${GITHUB_OUTPUT}"
+          echo "---"
+          echo "Files in changeset (event=${{ github.event_name }}):"
+          printf '%s\n' "${FILES}" | sed 's/^/  - /'
+          echo "---"
+          echo "All docs-only: ${ALL_DOCS}"
+
+      - name: Post Review Results status (success, docs-only)
+        if: steps.detect.outputs.all_docs == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          set -euo pipefail
+          if [ -n "${PR_URL:-}" ]; then
+            TARGET_URL_FLAG=(-f "target_url=${PR_URL}")
+          else
+            TARGET_URL_FLAG=()
+          fi
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state=success \
+            -f context='Post Review Results' \
+            -f description='docs-only changeset — review N/A (AISDLC-214)' \
+            "${TARGET_URL_FLAG[@]}"
+          echo "Posted Post Review Results: success (docs-only short-circuit) on ${HEAD_SHA}"
+
+      - name: Skip (mixed/code PR — handled by PR-review jobs below)
+        if: steps.detect.outputs.all_docs != 'true'
+        run: |
+          echo "Changeset contains non-docs files; PR-review jobs will handle verification."
+          echo "This step exits cleanly without posting any status."
+
   # ── Job 0: Attestation precheck (cost-saver SOFT signal) ──────────
   # AISDLC-147 patch 1: when a valid `.ai-sdlc/attestations/<HEAD-sha>.dsse.json`
   # exists at HEAD (the operator already ran the 3 reviewers locally via
@@ -40,7 +157,10 @@ jobs:
   attestation-precheck:
     name: Attestation precheck
     runs-on: ubuntu-latest
-    if: "!startsWith(github.head_ref, 'release-please--')"
+    # AISDLC-214: only run on pull_request events; merge_group events are handled
+    # by the docs-only-check job above (which short-circuits with success for
+    # docs-only queue commits; code/mixed queue commits rely on verify-attestation.yml).
+    if: "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')"
     permissions:
       contents: read
     outputs:
@@ -115,7 +235,7 @@ jobs:
     name: Analyze PR
     needs: [attestation-precheck]
     runs-on: ubuntu-latest
-    if: "!startsWith(github.head_ref, 'release-please--') && needs.attestation-precheck.outputs.skip != 'true'"
+    if: "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--') && needs.attestation-precheck.outputs.skip != 'true'"
     # AISDLC-142: analyze needs `pull-requests: read` to fetch existing PR
     # comments for the incremental-review marker. Read-only — write happens
     # in the `report` job (which already has `pull-requests: write`).
@@ -607,7 +727,8 @@ jobs:
     name: Post Review Results
     runs-on: ubuntu-latest
     needs: [analyze]
-    if: always()
+    # AISDLC-214: only run on pull_request events; merge_group is handled by docs-only-check.
+    if: always() && github.event_name == 'pull_request'
     permissions:
       pull-requests: write
       issues: read
@@ -1189,8 +1310,10 @@ jobs:
     name: Post auto-approved verdicts (attestation valid)
     runs-on: ubuntu-latest
     needs: [attestation-precheck, analyze]
+    # AISDLC-214: only run on pull_request events; merge_group is handled by docs-only-check.
     if: |
       always() &&
+      github.event_name == 'pull_request' &&
       needs.attestation-precheck.result == 'success' &&
       needs.attestation-precheck.outputs.skip == 'true' &&
       needs.analyze.result == 'skipped'

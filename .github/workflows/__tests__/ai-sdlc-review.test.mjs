@@ -59,14 +59,14 @@ before(() => {
 });
 
 describe('ai-sdlc-review.yml — workflow structure (AISDLC-147)', () => {
-  it('parses as valid YAML with all 4 jobs', () => {
+  it('parses as valid YAML with all 5 jobs', () => {
     assert.ok(workflow, 'workflow must parse');
     assert.equal(workflow.name, 'AI-SDLC PR Review');
     const jobs = Object.keys(workflow.jobs).sort();
     assert.deepEqual(
       jobs,
-      ['analyze', 'attestation-precheck', 'post-skip-results', 'report'],
-      'must have exactly 4 jobs after AISDLC-147',
+      ['analyze', 'attestation-precheck', 'docs-only-check', 'post-skip-results', 'report'],
+      'must have exactly 5 jobs after AISDLC-214 adds docs-only-check',
     );
   });
 });
@@ -357,5 +357,241 @@ describe('AISDLC-193: verify-attestation.yml posts ai-sdlc/attestation as requir
       'merge_group' in triggers,
       'verify-attestation.yml must trigger on merge_group for queue-time re-verification',
     );
+  });
+});
+
+// ── AISDLC-214: docs-only short-circuit in regular workflows ─────────────────
+describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race (AC-1 to AC-6)', () => {
+  let reviewWorkflow;
+  let verifyWorkflow;
+
+  before(() => {
+    reviewWorkflow = loadYaml(WORKFLOW_PATH);
+    verifyWorkflow = loadYaml(resolve(__dirname, '..', 'verify-attestation.yml'));
+  });
+
+  // AC-1: verify-attestation.yml short-circuits on docs-only merge_group commits
+  describe('verify-attestation.yml docs-only short-circuit (AC-1)', () => {
+    it('has a docs-only detection step that runs only on merge_group', () => {
+      const verifyJob = verifyWorkflow.jobs.verify;
+      const docsOnlyStep = verifyJob.steps.find((s) => s.id === 'docs_only');
+      assert.ok(docsOnlyStep, 'verify job must have a step with id=docs_only');
+      assert.match(
+        String(docsOnlyStep.if ?? ''),
+        /steps\.resolve\.outputs\.is_merge_group\s*==\s*'true'/,
+        'docs_only step must be gated on is_merge_group == true',
+      );
+    });
+
+    it('has a short-circuit step that posts ai-sdlc/attestation: success for docs-only merge_group', () => {
+      const verifyJob = verifyWorkflow.jobs.verify;
+      const shortCircuitStep = verifyJob.steps.find(
+        (s) => typeof s.name === 'string' && s.name.includes('Short-circuit'),
+      );
+      assert.ok(shortCircuitStep, 'verify job must have a short-circuit step');
+      assert.match(
+        String(shortCircuitStep.if ?? ''),
+        /steps\.docs_only\.outputs\.all_docs\s*==\s*'true'/,
+        'short-circuit step must be gated on all_docs == true',
+      );
+      assert.match(
+        String(shortCircuitStep.if ?? ''),
+        /steps\.resolve\.outputs\.is_merge_group\s*==\s*'true'/,
+        'short-circuit step must also be gated on is_merge_group == true',
+      );
+      // The step must post ai-sdlc/attestation: success via gh api
+      const run = String(shortCircuitStep.run ?? '');
+      assert.match(run, /state=success/, 'short-circuit must post success state');
+      assert.match(
+        run,
+        /ai-sdlc\/attestation/,
+        'short-circuit must use ai-sdlc/attestation context',
+      );
+    });
+
+    it('uses scripts/is-docs-only-changeset.mjs (AISDLC-206 shared predicate)', () => {
+      const verifyJob = verifyWorkflow.jobs.verify;
+      const docsOnlyStep = verifyJob.steps.find((s) => s.id === 'docs_only');
+      const run = String(docsOnlyStep?.run ?? '');
+      assert.match(
+        run,
+        /node scripts\/is-docs-only-changeset\.mjs/,
+        'docs-only detection must use the shared predicate script (AISDLC-206)',
+      );
+    });
+
+    it('uses -c core.quotePath=false for non-ASCII filename safety (AISDLC-205 round 3)', () => {
+      const verifyJob = verifyWorkflow.jobs.verify;
+      const docsOnlyStep = verifyJob.steps.find((s) => s.id === 'docs_only');
+      const run = String(docsOnlyStep?.run ?? '');
+      assert.match(
+        run,
+        /core\.quotePath=false/,
+        'git diff must use -c core.quotePath=false to prevent C-quoted non-ASCII filenames',
+      );
+    });
+
+    it('remaining verify steps are skipped when docs-only short-circuit fires', () => {
+      const verifyJob = verifyWorkflow.jobs.verify;
+      // The pnpm/node/install/build/verify steps must have a guard that
+      // skips them on docs-only merge_group commits.
+      const installStep = verifyJob.steps.find(
+        (s) => typeof s.name === 'string' && s.name.startsWith('Install'),
+      );
+      assert.ok(installStep, 'must have an install step');
+      const ifStr = String(installStep.if ?? '');
+      assert.match(
+        ifStr,
+        /steps\.docs_only\.outputs\.all_docs\s*!=\s*'true'/,
+        'install step must skip when docs-only short-circuit fires',
+      );
+
+      // The always() status-posting step must also exclude the docs-only case
+      const postStep = verifyJob.steps.find(
+        (s) => typeof s.name === 'string' && s.name.startsWith('Post ai-sdlc/attestation status'),
+      );
+      assert.ok(postStep, 'must have a Post ai-sdlc/attestation status step');
+      const postIf = String(postStep.if ?? '');
+      assert.match(
+        postIf,
+        /always\(\)/,
+        'status-posting step must use always() for crash recovery',
+      );
+      assert.match(
+        postIf,
+        /steps\.docs_only\.outputs\.all_docs\s*!=\s*'true'/,
+        'status-posting step must skip when docs-only short-circuit already posted success',
+      );
+    });
+  });
+
+  // AC-2: ai-sdlc-review.yml short-circuits on docs-only merge_group commits
+  describe('ai-sdlc-review.yml docs-only short-circuit (AC-2)', () => {
+    it('ai-sdlc-review.yml now triggers on merge_group', () => {
+      const triggers = reviewWorkflow.on || reviewWorkflow[true] || {};
+      assert.ok(
+        'merge_group' in triggers,
+        'ai-sdlc-review.yml must now trigger on merge_group for docs-only queue commits (AISDLC-214)',
+      );
+    });
+
+    it('has a docs-only-check job that handles both merge_group and pull_request docs-only', () => {
+      const job = reviewWorkflow.jobs['docs-only-check'];
+      assert.ok(job, 'ai-sdlc-review.yml must have a docs-only-check job');
+      assert.ok(job.steps, 'docs-only-check must have steps');
+    });
+
+    it('docs-only-check step posts Post Review Results: success on docs-only changeset', () => {
+      const job = reviewWorkflow.jobs['docs-only-check'];
+      const blob = JSON.stringify(job);
+      assert.match(
+        blob,
+        /context=['"]Post Review Results['"]/,
+        'docs-only-check must post status with context=Post Review Results',
+      );
+      assert.match(blob, /state=success/, 'docs-only-check must post success state');
+    });
+
+    it('docs-only-check uses scripts/is-docs-only-changeset.mjs (AISDLC-206 shared predicate)', () => {
+      const job = reviewWorkflow.jobs['docs-only-check'];
+      const blob = JSON.stringify(job);
+      assert.match(
+        blob,
+        /node scripts\/is-docs-only-changeset\.mjs/,
+        'docs-only-check must use the shared predicate script (AISDLC-206)',
+      );
+    });
+
+    it('docs-only-check uses -c core.quotePath=false for non-ASCII safety', () => {
+      const job = reviewWorkflow.jobs['docs-only-check'];
+      const blob = JSON.stringify(job);
+      assert.match(
+        blob,
+        /core\.quotePath=false/,
+        'docs-only-check must use -c core.quotePath=false for non-ASCII filename safety',
+      );
+    });
+
+    it('PR-review jobs are gated to only run on pull_request events', () => {
+      const precheck = reviewWorkflow.jobs['attestation-precheck'];
+      const analyze = reviewWorkflow.jobs.analyze;
+      const report = reviewWorkflow.jobs.report;
+      const postSkip = reviewWorkflow.jobs['post-skip-results'];
+
+      for (const [name, job] of [
+        ['attestation-precheck', precheck],
+        ['analyze', analyze],
+        ['report', report],
+        ['post-skip-results', postSkip],
+      ]) {
+        const ifStr = String(job?.if ?? '');
+        assert.match(
+          ifStr,
+          /github\.event_name\s*==\s*'pull_request'/,
+          `${name} job must be gated on github.event_name == 'pull_request' so it does not run on merge_group events`,
+        );
+      }
+    });
+
+    it('workflow has 5 jobs total after AISDLC-214 adds docs-only-check', () => {
+      const jobs = Object.keys(reviewWorkflow.jobs).sort();
+      assert.deepEqual(
+        jobs,
+        ['analyze', 'attestation-precheck', 'docs-only-check', 'post-skip-results', 'report'],
+        'must have exactly 5 jobs after AISDLC-214 adds docs-only-check',
+      );
+    });
+  });
+
+  // AC-3: fallback workflows deleted
+  describe('fallback workflows deleted (AC-3)', () => {
+    it('verify-attestation-docs-only.yml no longer exists', async () => {
+      const { existsSync } = await import('node:fs');
+      const fallbackPath = resolve(__dirname, '..', 'verify-attestation-docs-only.yml');
+      assert.ok(
+        !existsSync(fallbackPath),
+        'verify-attestation-docs-only.yml must be deleted (AISDLC-214 retirement)',
+      );
+    });
+
+    it('ai-sdlc-review-docs-only.yml no longer exists', async () => {
+      const { existsSync } = await import('node:fs');
+      const fallbackPath = resolve(__dirname, '..', 'ai-sdlc-review-docs-only.yml');
+      assert.ok(
+        !existsSync(fallbackPath),
+        'ai-sdlc-review-docs-only.yml must be deleted (AISDLC-214 retirement)',
+      );
+    });
+  });
+
+  // AC-5: No regression — code PRs still require valid envelope
+  describe('no regression: code PRs still require valid envelope (AC-5)', () => {
+    it('verify-attestation.yml verify job still runs full envelope check for non-docs-only events', () => {
+      const verifyJob = verifyWorkflow.jobs.verify;
+      const verifyStep = verifyJob.steps.find((s) => s.id === 'verify');
+      assert.ok(verifyStep, 'verify step must still exist for code PRs');
+      // The verify step must be gated on NOT docs-only — it must NOT run when
+      // docs-only short-circuit fires, but MUST run for code/mixed changesets.
+      const ifStr = String(verifyStep.if ?? '');
+      assert.match(
+        ifStr,
+        /steps\.docs_only\.outputs\.all_docs\s*!=\s*'true'/,
+        'verify step must include not-docs-only guard so code PRs still verify the envelope',
+      );
+    });
+
+    it('Post ai-sdlc/attestation status step still posts failure when verifier finds invalid envelope', () => {
+      const verifyJob = verifyWorkflow.jobs.verify;
+      const postStep = verifyJob.steps.find(
+        (s) => typeof s.name === 'string' && s.name.startsWith('Post ai-sdlc/attestation status'),
+      );
+      assert.ok(postStep, 'status-posting step must still exist');
+      const run = String(postStep.run ?? '');
+      assert.match(
+        run,
+        /STATE=failure/,
+        'status-posting step must still have a failure branch for invalid envelopes',
+      );
+    });
   });
 });

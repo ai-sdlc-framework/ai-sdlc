@@ -73,24 +73,80 @@ jobs:
           fetch-depth: 0
           ref: ${{ steps.resolve.outputs.head_sha }}
 
+      # AISDLC-214: short-circuit on docs-only merge_group commits.
+      # `paths-ignore` on `pull_request` skips the workflow entirely for docs-only PRs,
+      # but `paths-ignore` does NOT apply to `merge_group` events. The former fallback
+      # workflow `verify-attestation-docs-only.yml` raced with this workflow on the same
+      # concurrency group → one got CANCELLED → auto-merge blocked. The fix: detect
+      # docs-only changesets inside this workflow and post `ai-sdlc/attestation: success`
+      # directly, then exit. Code PRs and mixed PRs fall through to the full verify.
+      # Only runs on merge_group (pull_request events that would reach here are already
+      # code/mixed — paths-ignore already filtered pure docs events away).
+      - name: Detect docs-only changeset (merge_group only)
+        id: docs_only
+        if: steps.resolve.outputs.is_merge_group == 'true'
+        env:
+          BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          # -c core.quotePath=false emits raw UTF-8 filenames instead of C-quoted
+          # form so non-ASCII paths match the DOCS_ONLY_PATTERN correctly
+          # (AISDLC-205 round 3 fix — see verify-attestation-docs-only.yml).
+          FILES=$(git -c core.quotePath=false diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          if [ -z "${FILES}" ]; then
+            echo "No changed files in merge_group commit; treating as docs-only (nothing to attest)"
+            echo "all_docs=true" >> "${GITHUB_OUTPUT}"
+          else
+            ALL_DOCS=$(printf '%s\n' "${FILES}" | node scripts/is-docs-only-changeset.mjs)
+            echo "all_docs=${ALL_DOCS}" >> "${GITHUB_OUTPUT}"
+            echo "Docs-only detection result: ${ALL_DOCS}"
+            echo "Files: $(printf '%s\n' "${FILES}" | head -20 | sed 's/^/  - /')"
+          fi
+
+      - name: Short-circuit — post ai-sdlc/attestation success (docs-only merge_group)
+        if: steps.resolve.outputs.is_merge_group == 'true' && steps.docs_only.outputs.all_docs == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state=success \
+            -f context='ai-sdlc/attestation' \
+            -f description='docs-only merge_group commit — attestation N/A (AISDLC-214)'
+          echo "Posted ai-sdlc/attestation: success (docs-only short-circuit) on ${HEAD_SHA}"
+
+      # Skip the full verify pipeline when the docs-only short-circuit already
+      # posted the success status above. These steps only run for code PRs or
+      # mixed PRs (pull_request events always reach here because paths-ignore
+      # filtered out pure-docs pull_request events already; merge_group events
+      # with non-docs files also fall through).
       - uses: pnpm/action-setup@v4
+        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
 
       - uses: actions/setup-node@v4
+        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install (orchestrator only — verifier needs the runtime barrel)
+        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build orchestrator + dependencies (verifier imports compiled JS)
         # `...` suffix builds @ai-sdlc/orchestrator AND its workspace deps
         # (notably @ai-sdlc/reference) in topological order. Without it the
         # orchestrator build fails with TS2307: cannot find @ai-sdlc/reference.
+        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
         run: pnpm --filter "@ai-sdlc/orchestrator..." build
 
       - name: Verify attestation
         id: verify
+        if: steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true'
         env:
           PR_HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
           PR_BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
@@ -103,13 +159,14 @@ jobs:
       # state) so a sibling PR merging into the same files between PR-head
       # verification and queue execution surfaces here.
       - name: Post ai-sdlc/attestation status
-        # `if: always()` so the status is posted even when the prior
-        # `Verify attestation` step throws (uncaught exception, OOM, etc.).
+        # `always() && not-docs-only` so the status is posted even when the prior
+        # `Verify attestation` step throws (uncaught exception, OOM, etc.),
+        # but NOT when the docs-only short-circuit already posted success above.
         # Without this, a verifier crash leaves the gate UN-posted forever
         # and the PR sits BLOCKED with no surfaced reason. With this, a
         # crash falls through to STATE=failure with a clear "verifier
         # crashed" reason — operator sees red status, opens workflow log.
-        if: always()
+        if: always() && (steps.resolve.outputs.is_merge_group != 'true' || steps.docs_only.outputs.all_docs != 'true')
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}

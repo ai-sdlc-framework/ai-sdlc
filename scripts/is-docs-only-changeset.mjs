@@ -3,22 +3,25 @@
  * scripts/is-docs-only-changeset.mjs — AISDLC-206
  *
  * Single source of truth for the "docs-only" path predicate used by:
- *   - .github/workflows/verify-attestation-docs-only.yml  (inline regex)
- *   - .github/workflows/ai-sdlc-review-docs-only.yml      (inline regex)
- *   - .github/workflows/verify-attestation.yml            (paths-ignore)
- *   - .github/workflows/ai-sdlc-review.yml                (paths-ignore)
+ *   - .github/workflows/verify-attestation.yml  (paths-ignore + merge_group short-circuit)
+ *   - .github/workflows/ai-sdlc-review.yml      (paths-ignore + merge_group short-circuit)
  *
- * Previously each of those 4 locations carried its own copy of the regex.
- * A single addition to one list (e.g. a new docs prefix or an attestation
- * path) without updating the others would silently drift and could produce
- * queue deadlocks for the uncovered path shape. This module is the canonical
- * definition; the fallback workflows shell out to it (or import its regex
- * via `node -p`) instead of carrying inline copies.
+ * AISDLC-214: the former fallback workflows (verify-attestation-docs-only.yml,
+ * ai-sdlc-review-docs-only.yml) have been retired. The regular workflows now do
+ * their own docs-only detection at job-start using this script for merge_group
+ * events (where `paths-ignore` does not apply). This eliminates the CANCELLED
+ * race that blocked auto-merge when both workflows ran on the same concurrency
+ * group for the same merge_group event.
+ *
+ * Previously 4 locations carried their own copies of the regex. A single
+ * addition to one list without updating the others would silently drift and
+ * could produce queue deadlocks for the uncovered path shape. This module is
+ * the canonical definition; both regular workflows shell out to it for
+ * merge_group detection.
  *
  * Mirrors paths-ignore from ai-sdlc-review.yml + verify-attestation.yml,
  * PLUS .ai-sdlc/attestations/<sha>.dsse.json (envelope files are metadata
- * about review, not code — treated as docs-equivalent for the fallback
- * purpose; AISDLC-208).
+ * about review, not code — treated as docs-equivalent; AISDLC-208).
  *
  * Covered path prefixes (in sync with paths-ignore lists):
  *   - spec/rfcs/**
