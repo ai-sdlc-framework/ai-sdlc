@@ -30,7 +30,9 @@
     "cli-pr-unstick": "bin/cli-pr-unstick.mjs",
     "cli-orchestrator": "bin/cli-orchestrator.mjs",
     "cli-orchestrator-corpus": "bin/cli-orchestrator-corpus.mjs",
-    "cli-tui": "bin/cli-tui.mjs"
+    "cli-tui": "bin/cli-tui.mjs",
+    "cli-task-complete": "bin/cli-task-complete.mjs",
+    "cli-backlog-verify": "bin/cli-backlog-verify.mjs"
   },
   "exports": {
     ".": {
