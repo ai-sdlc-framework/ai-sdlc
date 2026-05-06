@@ -3,7 +3,7 @@ id: AISDLC-198
 title: >-
   Implement claude-cli spawner: cross-session subagent invocation for autonomous
   orchestrator subscription billing
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-05 02:48'
 labels:
@@ -63,3 +63,7 @@ The orchestrator promotion process (Phase 5 of RFC-0015) requires soak evidence 
 - [ ] #5 orchestrator-promotion.md soak-evidence checklist updated
 - [ ] #6 Operator runbook entry for starting the orchestrator
 <!-- AC:END -->
+
+## Final Summary
+
+Implementation shipped via PR #353 — `pipeline-cli/src/runtime/spawners/claude-cli-inline.{ts,test.ts}` + `docs/operations/claude-cli-spawner.md`. The lifecycle close was lost when the now-retired `.github/workflows/backlog-task-complete.yml` workflow's chore-close PR failed to auto-merge. Moving to `backlog/completed/` retroactively as part of the post-AISDLC-220 sync sweep.

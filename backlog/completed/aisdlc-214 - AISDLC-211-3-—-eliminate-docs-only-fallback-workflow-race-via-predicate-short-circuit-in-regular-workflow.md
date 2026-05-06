@@ -3,7 +3,7 @@ id: AISDLC-214
 title: >-
   AISDLC-211 #3 — eliminate docs-only fallback workflow race via predicate
   short-circuit in regular workflow
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 13:54'
 labels:
@@ -74,3 +74,7 @@ This task edits 4 workflow files (regular + fallback for both attestation + revi
 - [ ] #5 No regression: code PRs still require valid envelope; mixed PRs (code + docs) require valid envelope
 - [ ] #6 Documentation in CLAUDE.md updated to reflect the simplified workflow architecture
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Implementation shipped via PR #358. The lifecycle close was lost when the now-retired `.github/workflows/backlog-task-complete.yml` workflow's chore-close PR (#360/#362/#367/#368) failed to auto-merge (one of the orphan-PR cases that motivated AISDLC-220). Moving to `backlog/completed/` retroactively as part of the post-AISDLC-220 sync sweep.

@@ -3,7 +3,7 @@ id: AISDLC-211
 title: >-
   Attestation gate keeps failing on rebased/docs-only PRs — systemic root-cause
   cluster
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 05:17'
 labels:
@@ -71,3 +71,7 @@ Was somewhat fixed by AISDLC-189 (PAT switch makes downstream workflows fire) bu
 - [ ] #5 Hermetic test: simulate "PR rebased + force-pushed without verdicts file" → assert auto-sign still produces a valid envelope (or short-circuits)
 - [ ] #6 Hermetic test: simulate "merge_group event on docs-only diff" → assert verify-attestation passes without needing an envelope
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Implementation shipped via PR (parent task — all sub-issues 213/214/215 + 212 done). The lifecycle close was lost when the now-retired `.github/workflows/backlog-task-complete.yml` workflow's chore-close PR (#360/#362/#367/#368) failed to auto-merge (one of the orphan-PR cases that motivated AISDLC-220). Moving to `backlog/completed/` retroactively as part of the post-AISDLC-220 sync sweep.

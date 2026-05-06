@@ -3,7 +3,7 @@ id: AISDLC-215
 title: >-
   AISDLC-211 #2 — auto-sign hook auto-approves docs-only PRs without requiring
   verdicts file
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 13:54'
 labels:
@@ -60,3 +60,7 @@ Dependencies: AISDLC-206 merged (it is). Ideally also AISDLC-211 #3 first so the
 - [ ] #4 The signed envelope's payload reflects "auto-approved by hook" so audit trail is accurate
 - [ ] #5 Documentation in CLAUDE.md `## Hooks` section updated to mention the docs-only auto-approve path
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Implementation shipped via PR #359. The lifecycle close was lost when the now-retired `.github/workflows/backlog-task-complete.yml` workflow's chore-close PR (#360/#362/#367/#368) failed to auto-merge (one of the orphan-PR cases that motivated AISDLC-220). Moving to `backlog/completed/` retroactively as part of the post-AISDLC-220 sync sweep.
