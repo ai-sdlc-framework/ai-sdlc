@@ -35,7 +35,7 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 `.husky/pre-push` chains in order:
 
 1. **`scripts/check-coverage.sh`** — 80% lines coverage threshold per package. Skip: `AI_SDLC_SKIP_COVERAGE_GATE=1`.
-2. **`scripts/check-attestation-sign.sh`** — auto-signs DSSE attestation when `<worktree>/.active-task` exists, `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` exists, and no envelope at HEAD. Commits the envelope as a separate `chore: auto-sign attestation for <task-id>` and exits 1 with "re-run git push". Idempotent on the second push (envelope-at-HEAD or HEAD-is-auto-sign-chore predicate). Skip: `AI_SDLC_SKIP_ATTESTATION_SIGN=1`.
+2. **`scripts/check-attestation-sign.sh`** — auto-signs DSSE attestation when `<worktree>/.active-task` exists, `<worktree>/.ai-sdlc/verdicts/<task-id-lower>.json` exists, and no envelope at HEAD. Commits the envelope as a separate `chore: auto-sign attestation for <task-id>` and exits 1 with "re-run git push". Idempotent on the second push (envelope-at-HEAD or HEAD-is-auto-sign-chore predicate). **Docs-only auto-approve (AISDLC-215):** when the verdict file is missing AND `scripts/is-docs-only-changeset.mjs` reports the changeset is docs-only, the hook synthesizes a transient auto-approved verdicts file (3 reviewer entries, gitignored) and proceeds to sign — no manual step required. Code PRs with a missing verdict file still exit 0 (no-op) as before. Skip: `AI_SDLC_SKIP_ATTESTATION_SIGN=1`.
 
 `set -euo pipefail` aborts on first failure. `git push --no-verify` bypasses everything. Both gates have hermetic tests at `scripts/<name>.test.mjs` wired via `pnpm test:drift-gate` / `test:attestation-sign-gate`.
 

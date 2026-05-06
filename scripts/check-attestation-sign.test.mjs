@@ -400,6 +400,102 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     assert.notEqual(logAfter, logBefore, 'signer must be re-invoked for the brand-new dev commit');
   });
 
+  // ── AISDLC-215: docs-only auto-approve ────────────────────────────────
+
+  it('AISDLC-215: docs-only PR + missing verdicts → auto-signs (no-op second push)', () => {
+    // A docs-only commit (README.md change) with an active-task sentinel but
+    // no verdict file. The hook must synthesize verdicts and sign, exiting 1
+    // with "re-push required". The second push (HEAD is auto-sign chore)
+    // must be a no-op per AISDLC-135.
+    // NOTE: write .active-task AFTER the docs commit so git diff doesn't
+    // include .active-task (in production .active-task is gitignored; the
+    // test repo has no .gitignore, so we avoid git-adding it by writing
+    // the sentinel after the commit that captures the docs-only files).
+
+    // Add a docs-only commit so HEAD~1...HEAD shows a markdown-only diff.
+    mkdirSync(join(root, 'docs'), { recursive: true });
+    writeFileSync(join(root, 'docs', 'guide.md'), '# Guide\nContent.\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'docs: add guide'], root);
+
+    // Write sentinel AFTER commit so it is not tracked/staged.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-215\n');
+    // No verdict file written — this is the docs-only path.
+
+    const devHead = git(['rev-parse', 'HEAD'], root).trim();
+    const { cmd } = installFakeSigner(root);
+
+    // First push — hook should detect docs-only, synthesize verdicts, sign.
+    const r1 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    assert.equal(
+      r1.status,
+      1,
+      `expected 1 (auto-signed docs-only), got ${r1.status}: ${r1.stderr}`,
+    );
+    assert.match(r1.stderr, /docs-only changeset detected/i);
+    assert.match(r1.stderr, /synthesizing auto-approved verdicts/i);
+
+    // Attestation must exist at dev HEAD.
+    const attPath = join(root, '.ai-sdlc', 'attestations', `${devHead}.dsse.json`);
+    assert.equal(existsSync(attPath), true, 'attestation file must exist after auto-sign');
+
+    // A chore commit must have been added.
+    const choreHead = git(['rev-parse', 'HEAD'], root).trim();
+    assert.notEqual(choreHead, devHead, 'a chore commit must have been added on top of HEAD');
+    const choreSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(choreSubject, /^chore: auto-sign attestation for AISDLC-215/);
+
+    // The synthesized verdict file must mention "auto-approved".
+    const verdictPath = join(root, '.ai-sdlc', 'verdicts', 'aisdlc-215.json');
+    assert.equal(existsSync(verdictPath), true, 'synthesized verdict file must exist');
+    const verdictContent = JSON.parse(execFileSync('cat', [verdictPath], { encoding: 'utf-8' }));
+    assert.ok(
+      Array.isArray(verdictContent) && verdictContent.length === 3,
+      'must have 3 reviewer entries',
+    );
+    assert.ok(
+      verdictContent.every((v) => v.approved === true),
+      'all reviewers must be approved=true',
+    );
+    assert.ok(
+      verdictContent.some((v) => /auto-approved/i.test(v.summary)),
+      'at least one summary must mention auto-approved',
+    );
+  });
+
+  it('AISDLC-215: code PR + missing verdicts → no-op (original behavior preserved)', () => {
+    // A code commit (src/index.ts change) with an active-task sentinel but
+    // no verdict file. The hook must NOT synthesize verdicts — it should exit
+    // 0 with "not docs-only — skipping" so code PRs still require real review.
+    // NOTE: write .active-task AFTER the commit (see docs-only test above).
+
+    // Add a code commit so HEAD~1...HEAD shows a non-docs file.
+    mkdirSync(join(root, 'src'), { recursive: true });
+    writeFileSync(join(root, 'src', 'index.ts'), 'export const x = 1;\n');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: add index'], root);
+
+    // Write sentinel AFTER commit so it is not tracked/staged.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-215\n');
+    // No verdict file written — simulates reviewers not having run yet.
+
+    const { cmd, logPath } = installFakeSigner(root);
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+
+    assert.equal(
+      r.status,
+      0,
+      `expected 0 (no-op for code PR without verdicts), got ${r.status}: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /not docs-only — skipping/i);
+    // Signer must NOT be invoked.
+    assert.equal(
+      existsSync(logPath),
+      false,
+      'signer must NOT run when changeset is not docs-only and verdicts are missing',
+    );
+  });
+
   it('the chore commit body does NOT contain a CI-skip magic token (AISDLC-88 contract)', () => {
     // The auto-sign chore commit body would re-trigger every workflow on the
     // resulting PR if it carried [skip ci]/[ci skip]/etc. The check-skip-ci-marker
