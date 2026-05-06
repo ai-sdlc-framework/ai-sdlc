@@ -3,7 +3,7 @@ id: AISDLC-206
 title: >-
   Hermetic tests and shared classifier for docs-only changeset predicate
   (deferred from AISDLC-205)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-05 22:30'
 labels:
