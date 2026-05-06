@@ -53,7 +53,11 @@ name: Auto-enable auto-merge on PR open
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # AISDLC-218: include `ready_for_review` so this fires when the new
+    # draft-PR flow flips a draft to ready (which is the FIRST time the PR
+    # should arm auto-merge). The existing job-level `draft == false` guard
+    # below correctly skips draft `opened` events.
+    types: [opened, synchronize, reopened, ready_for_review]
 
 permissions:
   pull-requests: write

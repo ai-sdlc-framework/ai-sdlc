@@ -68,6 +68,15 @@ const SENTINELS = [
     description: 'gh pr create must include --draft flag (AISDLC-218)',
   },
   {
+    key: 'marker-upsert-substep',
+    // Step 11c: incremental-review marker upsert MUST come AFTER Step 11b
+    // (PR creation) — code-reviewer flagged the original Step 8.5 placement
+    // as a real runtime bug because gh pr comment requires the PR to exist.
+    sentinel: '### Step 11c — Update the incremental-review marker',
+    description:
+      'Step 11c subheading (marker upsert post-PR-creation) must be present in execute.md (AISDLC-218 ordering fix)',
+  },
+  {
     key: 'flip-to-ready-heading',
     // Step 13 heading: flip draft→ready_for_review
     sentinel: '## Step 13 — Flip DRAFT',

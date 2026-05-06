@@ -17,7 +17,8 @@ on:
   issues:
     types: [opened, edited]
   pull_request:
-    types: [opened, synchronize, reopened]
+    # AISDLC-218: drop `opened` (draft opens) + add `ready_for_review`.
+    types: [synchronize, reopened, ready_for_review]
     paths:
       - 'backlog/tasks/*.md'
 
@@ -217,7 +218,8 @@ jobs:
   evaluate-pr-tasks:
     name: Evaluate backlog tasks changed by PR
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    # AISDLC-218: AND in draft guard.
+    if: github.event_name == 'pull_request' && github.event.pull_request.draft == false
     permissions:
       pull-requests: write
       contents: read

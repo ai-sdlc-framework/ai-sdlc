@@ -498,66 +498,10 @@ Combine the three verdicts:
 - Count findings by severity across all reviewers (`critical`, `major`, `minor`, `suggestion`).
 - If `HARNESS_NOTE` is non-empty, prepend it to the aggregated summary so the operator sees the independence warning every time it applies.
 - Compute the gate decision:
-  - **APPROVED**: all three reviewers approved AND no `critical`/`major` findings → proceed to Step 8.5 marker update, then Step 10.
+  - **APPROVED**: all three reviewers approved AND no `critical`/`major` findings → proceed to Step 10. (The incremental-review marker upsert that USED to live here as Step 8.5 has moved to Step 11c — it now runs AFTER the draft PR is created, since AISDLC-218 made the PR open in Step 11b instead of by the developer subagent.)
   - **CHANGES REQUESTED**: any `critical` or `major` findings → enter the iteration loop (Step 9). Do NOT update the marker on this branch — the marker only ever binds to APPROVED states.
 
 Print the aggregation summary to the user before proceeding.
-
-## Step 8.5 — Update the incremental-review marker (AISDLC-142)
-
-ONLY if the gate decision is APPROVED (skip when `[needs-human-attention]` is being shipped from Step 9). Update the PR-comment marker with the freshly-computed contentHash + the SHA we just reviewed against. Subsequent pushes that don't change content can then short-circuit at Step 7a-bis.
-
-```bash
-HEAD_SHA=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
-MARKER_BODY=$(node pipeline-cli/bin/cli-incremental-decide.mjs format-marker \
-  --content-hash "$INCR_CONTENT_HASH" \
-  --reviewed-sha "$HEAD_SHA")
-
-# Idempotent upsert: search existing PR comments for the marker prefix; update
-# in-place if present, else create new. Mirrors the pattern at
-# .github/workflows/dor-ingress.yml around `<!-- ai-sdlc:dor-comment ... -->`.
-#
-# ── AISDLC-142 round-2 CRITICAL fix ────────────────────────────────────
-# Filter to TRUSTED authors before selecting the prior marker. Without
-# this filter an attacker-planted comment (containing the marker prefix
-# substring) could be selected as `EXISTING_COMMENT_ID` and either (a)
-# overwritten by the PATCH below — silently destroying the attacker's
-# evidence — OR more importantly (b) preserved in place when the
-# attacker's comment is "newer" than the bot's (`tail -1` keeps the
-# latest), which would let the next push's incremental gate read the
-# attacker's marker instead of the legitimate one. Same trust criteria
-# as the analyze-job's gh --jq filter — keep them in lock-step.
-EXISTING_COMMENT_ID=$(gh pr view "$BRANCH" --json comments \
-  --jq '
-    .comments[]
-    | select(
-        .author.login == "github-actions"
-        or .authorAssociation == "OWNER"
-        or .authorAssociation == "MEMBER"
-        or .authorAssociation == "COLLABORATOR"
-      )
-    | select(.body | contains("<!-- ai-sdlc:last-reviewed-contenthash:"))
-    | .id
-  ' \
-  2>/dev/null | tail -1)
-
-COMMENT_BODY=$(printf '%s\n\n%s\n\n%s\n' \
-  '## AI-SDLC: incremental review state' \
-  '_Auto-managed by `/ai-sdlc execute`. Editing this comment will break incremental review for this PR until the next full review re-creates it._' \
-  "$MARKER_BODY")
-
-if [ -n "$EXISTING_COMMENT_ID" ]; then
-  gh api "repos/{owner}/{repo}/issues/comments/${EXISTING_COMMENT_ID}" \
-    -X PATCH \
-    -f body="$COMMENT_BODY" >/dev/null \
-    || echo "[ai-sdlc-progress] Step 8.5: marker update failed (non-fatal — next push will re-create)"
-else
-  gh pr comment "$BRANCH" --body "$COMMENT_BODY" >/dev/null \
-    || echo "[ai-sdlc-progress] Step 8.5: marker create failed (non-fatal — next push will re-try)"
-fi
-```
-
-The marker write is best-effort. A failure here at worst forces the next push back through a FULL review — never a SAFETY regression. The actual review verdicts already landed in the PR via Step 11.
 
 ## Step 9 — Iteration loop (max 2 dev iterations on review failure)
 
@@ -895,7 +839,65 @@ gh pr create \
 
 Print the PR URL. Capture it as `MAIN_PR_URL` and the PR number as `MAIN_PR_NUMBER`.
 
-> **Note on Step 7a-bis incremental-review marker.** The marker lookup (`gh pr view "$BRANCH" --json comments`) works on DRAFT PRs — GitHub's REST API returns draft PR data regardless of draft state. The marker upsert in Step 8.5 (`gh pr comment "$BRANCH"`) similarly works on drafts. No special handling needed here.
+> **Note on Step 7a-bis incremental-review marker.** The marker lookup (`gh pr view "$BRANCH" --json comments`) works on DRAFT PRs — GitHub's REST API returns draft PR data regardless of draft state. The marker upsert in Step 11c below (`gh pr comment "$BRANCH"`) similarly works on drafts. No special handling needed here.
+
+### Step 11c — Update the incremental-review marker (AISDLC-142, formerly Step 8.5)
+
+ONLY if the gate decision in Step 8 was APPROVED (skip when `[needs-human-attention]` is being shipped from Step 9). Update the PR-comment marker with the freshly-computed contentHash + the SHA we just reviewed against. Subsequent pushes that don't change content can then short-circuit at Step 7a-bis.
+
+> **Why this lives here, not earlier:** AISDLC-218 moved PR creation from the developer subagent's Done-of-Definition (where the PR was always open by the time we reached marker upsert) to Step 11b. Running marker upsert before Step 11b would call `gh pr comment "$BRANCH"` against a non-existent PR — `gh` returns "no PR found for branch" and the marker is permanently never written, defeating the AISDLC-142 incremental short-circuit on every PR. AISDLC-220 review of PR #376 caught the bug; this step's relocation is the fix.
+
+```bash
+HEAD_SHA=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
+MARKER_BODY=$(node pipeline-cli/bin/cli-incremental-decide.mjs format-marker \
+  --content-hash "$INCR_CONTENT_HASH" \
+  --reviewed-sha "$HEAD_SHA")
+
+# Idempotent upsert: search existing PR comments for the marker prefix; update
+# in-place if present, else create new. Mirrors the pattern at
+# .github/workflows/dor-ingress.yml around `<!-- ai-sdlc:dor-comment ... -->`.
+#
+# ── AISDLC-142 round-2 CRITICAL fix ────────────────────────────────────
+# Filter to TRUSTED authors before selecting the prior marker. Without
+# this filter an attacker-planted comment (containing the marker prefix
+# substring) could be selected as `EXISTING_COMMENT_ID` and either (a)
+# overwritten by the PATCH below — silently destroying the attacker's
+# evidence — OR more importantly (b) preserved in place when the
+# attacker's comment is "newer" than the bot's (`tail -1` keeps the
+# latest), which would let the next push's incremental gate read the
+# attacker's marker instead of the legitimate one. Same trust criteria
+# as the analyze-job's gh --jq filter — keep them in lock-step.
+EXISTING_COMMENT_ID=$(gh pr view "$BRANCH" --json comments \
+  --jq '
+    .comments[]
+    | select(
+        .author.login == "github-actions"
+        or .authorAssociation == "OWNER"
+        or .authorAssociation == "MEMBER"
+        or .authorAssociation == "COLLABORATOR"
+      )
+    | select(.body | contains("<!-- ai-sdlc:last-reviewed-contenthash:"))
+    | .id
+  ' \
+  2>/dev/null | tail -1)
+
+COMMENT_BODY=$(printf '%s\n\n%s\n\n%s\n' \
+  '## AI-SDLC: incremental review state' \
+  '_Auto-managed by `/ai-sdlc execute`. Editing this comment will break incremental review for this PR until the next full review re-creates it._' \
+  "$MARKER_BODY")
+
+if [ -n "$EXISTING_COMMENT_ID" ]; then
+  gh api "repos/{owner}/{repo}/issues/comments/${EXISTING_COMMENT_ID}" \
+    -X PATCH \
+    -f body="$COMMENT_BODY" >/dev/null \
+    || echo "[ai-sdlc-progress] Step 11c: marker update failed (non-fatal — next push will re-create)"
+else
+  gh pr comment "$BRANCH" --body "$COMMENT_BODY" >/dev/null \
+    || echo "[ai-sdlc-progress] Step 11c: marker create failed (non-fatal — next push will re-try)"
+fi
+```
+
+The marker write is best-effort. A failure here at worst forces the next push back through a FULL review — never a SAFETY regression. The actual review verdicts already landed in the PR via Step 11b.
 
 ## Step 12 — Cross-repo PRs (siblings under permittedExternalPaths)
 

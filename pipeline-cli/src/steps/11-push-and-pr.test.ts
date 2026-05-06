@@ -131,6 +131,33 @@ describe('Step 11 — pushAndPr', () => {
     expect(r.prUrl).toBe('https://github.com/x/y/pull/1');
   });
 
+  // AISDLC-218: regression guard — `gh pr create` must include `--draft`.
+  // Without this assertion, removing the flag wouldn't be caught by any
+  // other test in the suite (the `/^gh pr create/` matcher is permissive).
+  it('opens the PR as DRAFT (AISDLC-218 regression guard)', async () => {
+    const fake = new FakeRunner()
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/1\n'));
+    await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      runner: fake.toRunner(),
+    });
+    const ghPrCreateCall = fake.calls.find(
+      (c) => c.command === 'gh' && c.args[0] === 'pr' && c.args[1] === 'create',
+    );
+    expect(ghPrCreateCall, '`gh pr create` must be invoked').toBeDefined();
+    expect(
+      ghPrCreateCall!.args.includes('--draft'),
+      `gh pr create args must include --draft (AISDLC-218); got: ${ghPrCreateCall!.args.join(' ')}`,
+    ).toBe(true);
+  });
+
   it('returns pushed=false with reason on non-fast-forward', async () => {
     const fake = new FakeRunner().on(
       /^git push -u origin/,

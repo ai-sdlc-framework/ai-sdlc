@@ -2,7 +2,10 @@ name: AI-SDLC PR Review
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened]
+    # AISDLC-218: drop `opened` (would fire on draft opens before reviewers
+    # have run + envelope is signed). Add `ready_for_review` so the workflow
+    # fires exactly once per PR, after `gh pr ready`.
+    types: [synchronize, reopened, ready_for_review]
     branches: [main]
     # AISDLC-131: docs-only PRs (RFC drafts, backlog edits, READMEs) skip the
     # 3-reviewer subagent fan-out — those iterations don't need code review and
@@ -60,6 +63,10 @@ jobs:
   docs-only-check:
     name: Docs-only check
     runs-on: ubuntu-latest
+    # AISDLC-218: draft guard for `synchronize` events (which fire on draft
+    # pushes too). `merge_group` events are unaffected — drafts can't enter
+    # the merge queue.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     permissions:
       contents: read
       statuses: write
@@ -168,7 +175,11 @@ jobs:
     # AISDLC-214: only run on pull_request events; merge_group events are handled
     # by the docs-only-check job above (which short-circuits with success for
     # docs-only queue commits; code/mixed queue commits rely on verify-attestation.yml).
-    if: "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--')"
+    # AISDLC-218: also skip drafts (synchronize fires on draft pushes too).
+    if: >-
+      github.event_name == 'pull_request' &&
+      !startsWith(github.head_ref, 'release-please--') &&
+      github.event.pull_request.draft == false
     permissions:
       contents: read
     outputs:

@@ -25,7 +25,11 @@ on:
   # workflow via the docs-only detect step below — no envelope verify, just
   # post `success` directly.
   pull_request:
-    types: [opened, synchronize, reopened]
+    # AISDLC-218: drop `opened` (would fire on draft opens before envelope
+    # exists at HEAD → spurious `failure` posting). Add `ready_for_review`
+    # so the gate fires exactly once per PR, after the envelope is signed
+    # and the draft is flipped to ready.
+    types: [synchronize, reopened, ready_for_review]
     branches: [main]
   # AISDLC-113: also verify inside the merge-queue's gh-readonly-queue branch
   # so a sibling PR merging into the same files between PR-head verification
@@ -43,7 +47,11 @@ jobs:
     runs-on: ubuntu-latest
     # Skip release-please's own PRs (they don't carry attestations) — also
     # skip merge_group runs whose head_ref is a release-please queue branch.
-    if: "!startsWith(github.head_ref, 'release-please--') && !contains(github.event.merge_group.head_ref || '', 'release-please--')"
+    # AISDLC-218: also skip draft PRs (envelope only signed after `gh pr ready`).
+    if: >-
+      !startsWith(github.head_ref, 'release-please--') &&
+      !contains(github.event.merge_group.head_ref || '', 'release-please--') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     permissions:
       contents: read
       statuses: write

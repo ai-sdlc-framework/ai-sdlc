@@ -5,16 +5,23 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # AISDLC-218: explicit types — drop the implicit `opened` (fires on draft
+    # opens), keep `synchronize` + `reopened` (push + reopen events on
+    # ready PRs), add `ready_for_review` (the canonical fire-once trigger).
+    types: [synchronize, reopened, ready_for_review]
   merge_group:
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# AISDLC-218: skip every PR-event job when the PR is a draft. The guard
+# allows push (no PR context) + merge_group (always non-draft) through.
 jobs:
   changes:
     name: Detect Changes
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     outputs:
       python: ${{ steps.filter.outputs.python }}
       go: ${{ steps.filter.outputs.go }}
@@ -34,6 +41,7 @@ jobs:
   lint:
     name: Lint & Format
     runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -83,6 +91,8 @@ jobs:
     # short-circuit by design).
     name: Backlog Drift
     runs-on: ubuntu-latest
+    # AISDLC-218: skip on draft PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -132,6 +142,8 @@ jobs:
   build-and-test:
     name: Build & Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    # AISDLC-218: skip on draft PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       matrix:
         node-version: [20, 22]
@@ -188,6 +200,8 @@ jobs:
   coverage:
     name: Coverage
     runs-on: ubuntu-latest
+    # AISDLC-218: skip on draft PRs.
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -208,7 +222,11 @@ jobs:
     name: Integration Tests
     runs-on: ubuntu-latest
     # Only run on push to main (not PRs from forks, which lack secrets)
-    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    # AISDLC-218: AND in the draft guard so integration is skipped on draft PRs.
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'merge_group' ||
+       github.event.pull_request.head.repo.full_name == github.repository) &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
     permissions:
       contents: read
       issues: read
