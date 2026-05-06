@@ -14,7 +14,9 @@ allowed-tools:
 model: inherit
 ---
 
-Execute backlog task `$ARGUMENTS` end-to-end. The Step 0-13 pipeline below runs inline in the main Claude Code session — worktree creation, developer subagent fan-out, 3 parallel reviewer subagents, attestation signing, PR open.
+Execute backlog task `$ARGUMENTS` end-to-end. The Step 0-15 pipeline below runs inline in the main Claude Code session — worktree creation, developer subagent fan-out, 3 parallel reviewer subagents, attestation signing, PR open.
+
+> **AISDLC-218 — 1 CI run per PR.** Prior to this change, opening the PR before reviewers completed triggered CI run #1 (failing verify-attestation), then the attestation chore commit triggered CI run #2. The fix: the developer opens the PR as a **draft** (`gh pr create --draft`). Reviewers run + attestation signs while still draft. Step 13 calls `gh pr ready` to flip draft→ready_for_review, which triggers CI exactly once on the fully-signed, reviewer-approved state. ~50% CI-minute reduction per PR.
 
 ## Why this lives in the slash command body (not a subagent)
 
@@ -219,7 +221,7 @@ echo "$TASK_ID" > "$WORKTREE_PATH/.active-task"
 
 The sentinel lives **inside the worktree** (at `.worktrees/<task-id-lower>/.active-task`), not at the project-level `.worktrees/.active-task` path used by older versions. This is the canonical source of truth for "which task is active for this worktree." The hook walks up from the developer subagent's cwd to find this file, so each parallel `/ai-sdlc execute` run (in its own Claude Code session) has its own sentinel without racing the others. Without it, cross-repo writes are denied.
 
-CRITICAL: this file MUST be deleted at end of run (Step 13) regardless of success/failure, otherwise a future invocation reading the worktree (e.g. `/ai-sdlc cleanup` or another execute that re-uses the path) inherits the stale active task. Treat it as a try/finally — if anything fails between here and Step 13, still delete.
+CRITICAL: this file MUST be deleted at end of run (Step 15) regardless of success/failure, otherwise a future invocation reading the worktree (e.g. `/ai-sdlc cleanup` or another execute that re-uses the path) inherits the stale active task. Treat it as a try/finally — if anything fails between here and Step 15, still delete.
 
 > **Parallel runs are safe.** Multiple `/ai-sdlc execute` invocations can run concurrently against the same project root (each in its own Claude Code session), including with cross-repo writes — each invocation reads/writes its own per-worktree sentinel. The legacy project-level sentinel `.worktrees/.active-task` is no longer written by this pipeline, but the hook still falls back to it for one release for compatibility (deprecated, will be removed in v0.9.0+).
 
@@ -804,7 +806,11 @@ If reviews approved cleanly:
 
 When the PR merges, the file is already in `backlog/completed/` on `main` — no race with the post-merge workflow. The attestation file (added by the pre-push hook on a separate commit in Step 11) stays in the repo as audit trail (~1-2KB per PR; not a secret — the private key never left the contributor's machine).
 
-## Step 11 — Push and open PR
+## Step 11 — Push branch + open as DRAFT PR (AISDLC-218: 1 CI run per PR)
+
+> **Why DRAFT? (AISDLC-218)** Opening the PR immediately as a regular PR triggers CI run #1 before reviewers have completed and before the attestation envelope is signed. Then the envelope chore commit (auto-produced by the pre-push hook) triggers CI run #2 — identical work done twice. The fix: open as draft first, run reviewers + sign while still draft, then flip draft→ready_for_review as the LAST step (Step 13). CI fires exactly once on the fully-signed state. Observed in 12+ PRs during the 2026-05-06 autopilot session; ~50% CI-minute savings per PR.
+
+### Step 11a — Push branch
 
 ```bash
 cd "$WORKTREE_PATH"
@@ -824,6 +830,11 @@ cd "$WORKTREE_PATH"
 #
 # So this step is a `git push` LOOP capped at 2 attempts. Anything beyond 2
 # is a real push failure (network, permissions, non-fast-forward) — escalate.
+#
+# AISDLC-218: this push does NOT open a PR — the branch lands on origin but
+# workflows only fire on pull_request: events. We open a DRAFT PR in Step 11b
+# AFTER the push loop completes. This means no CI fires until `gh pr ready`
+# in Step 13 (after reviewers + attestation sign).
 PUSH_ATTEMPTS=0
 LAST_PUSH_RC=0
 while [ "$PUSH_ATTEMPTS" -lt 2 ]; do
@@ -857,7 +868,11 @@ fi
 
 If push fails with non-fast-forward (someone else pushed to the same branch), abort with `outcome: aborted` and populate `notes` for the user (e.g. "non-fast-forward push to `$BRANCH`; cleanup is to delete the remote branch and rerun, but that's destructive — confirm with the operator first"). Do NOT force-push, do NOT delete the remote branch yourself.
 
-> **Husky `pre-push` serialises across parallel runs.** When N concurrent `/ai-sdlc execute` invocations all reach Step 11 at roughly the same moment, the husky `pre-push` hook (a flock-based serialiser in `.husky/pre-push`) ensures only one push is in flight at a time. This keeps the local git index from being clobbered, but does NOT serialise the rest of the pipeline — Steps 5-10 still run fully in parallel across runs. AISDLC-133's auto-sign step in the hook is also serialised by the same boundary — a second concurrent push waiting on the lock will see the first run's attestation chore commit already in HEAD and exit 0 idempotently.
+> **Husky `pre-push` serialises across parallel runs.** When N concurrent `/ai-sdlc execute` invocations all reach Step 11a at roughly the same moment, the husky `pre-push` hook (a flock-based serialiser in `.husky/pre-push`) ensures only one push is in flight at a time. This keeps the local git index from being clobbered, but does NOT serialise the rest of the pipeline — Steps 5-10 still run fully in parallel across runs. AISDLC-133's auto-sign step in the hook is also serialised by the same boundary — a second concurrent push waiting on the lock will see the first run's attestation chore commit already in HEAD and exit 0 idempotently.
+
+### Step 11b — Open as DRAFT PR
+
+Now that the branch is on origin, open the PR **as a draft**. Opening as draft means GitHub does NOT trigger `pull_request: opened` CI workflows on every workflow that skips drafts (see `pipeline-cli/docs/aisdlc-218-workflow-changes.md` for the list of workflows that need the `ready_for_review` trigger + job-level draft guard added). CI fires only when Step 13 calls `gh pr ready`.
 
 Compose the PR title from `.ai-sdlc/pipeline-backlog.yaml` `pullRequest.titleTemplate` (today: `feat: {issueTitle} ({issueId})`).
 
@@ -869,14 +884,18 @@ Compose the PR body from:
 - A footer: `References $TASK_ID` (NOT `Closes` — backlog tasks aren't auto-closed by GitHub PR merges; the `scripts/check-task-moved.sh` pre-push hook moves the task file atomically in the originating PR's own diff — AISDLC-220)
 
 ```bash
+# AISDLC-218: --draft is mandatory. CI does not fire until Step 13 (gh pr ready).
 gh pr create \
+  --draft \
   --title "<composed title>" \
   --body "<composed body>" \
   --base main \
   --head "$BRANCH"
 ```
 
-Print the PR URL. Capture it as `MAIN_PR_URL`.
+Print the PR URL. Capture it as `MAIN_PR_URL` and the PR number as `MAIN_PR_NUMBER`.
+
+> **Note on Step 7a-bis incremental-review marker.** The marker lookup (`gh pr view "$BRANCH" --json comments`) works on DRAFT PRs — GitHub's REST API returns draft PR data regardless of draft state. The marker upsert in Step 8.5 (`gh pr comment "$BRANCH"`) similarly works on drafts. No special handling needed here.
 
 ## Step 12 — Cross-repo PRs (siblings under permittedExternalPaths)
 
@@ -926,7 +945,34 @@ If any sibling PR creation fails partway, do NOT roll back the main PR — print
 After all siblings:
 - Update the main PR body via `gh pr edit $MAIN_PR_URL --body "..."` to add a `## Sibling PRs` section listing each sibling URL.
 
-## Step 13 — Cleanup sentinel + Report
+## Step 13 — Flip DRAFT → ready-for-review (AISDLC-218: triggers CI exactly once)
+
+This is the final step of the pipeline and the ONLY moment CI fires for this PR.
+
+```bash
+# AISDLC-218: flip draft → ready_for_review. This is the pull_request:
+# ready_for_review event that all required-check workflows wait for.
+# At this point:
+#   - Reviewers have approved (Step 7-9)
+#   - Attestation envelope is signed (Step 10 / pre-push hook)
+#   - Branch is on origin at the signed HEAD (Step 11a)
+#   - PR is open as draft (Step 11b)
+#
+# CI fires ONCE on this SHA — verify-attestation passes because the
+# envelope is already at HEAD, ai-sdlc-review passes because the
+# envelope satisfies the required check, and build/test/lint/coverage
+# run against the fully-reviewed state.
+gh pr ready "$MAIN_PR_NUMBER"
+echo "[ai-sdlc-progress] Step 13: PR #$MAIN_PR_NUMBER flipped to ready_for_review — CI will fire once"
+```
+
+If `gh pr ready` fails (network, the PR was already marked ready, etc.), do NOT abort — log the error and continue to cleanup. The PR is still open and reviewable; the operator can flip it manually via `gh pr ready <number>` or via the GitHub UI.
+
+> **Why Step 13 comes LAST.** The `ready_for_review` event triggers ALL required-check workflows simultaneously on the signed HEAD. If we flipped the PR to ready BEFORE reviewers run (or before attestation signs), we'd get the 2-CI-run pattern we're eliminating: CI fires once on the unsigned state, fails verify-attestation, then fires again after the attestation chore push. By keeping the PR draft through Steps 11-12 and flipping LAST, we guarantee: (1) attestation is at HEAD, (2) CI fires exactly once, (3) it fires on the state reviewers actually approved. ~50% CI-minute reduction per PR.
+
+> **Workflows that need updating.** To realize the full CI savings, ALL required-check workflows must add `ready_for_review` to their trigger types AND a `if: github.event.pull_request.draft == false` job-level guard. See `pipeline-cli/docs/aisdlc-218-workflow-changes.md` for the complete audit. Until those workflow edits land, some workflows may still fire on the `opened` event for draft PRs — the savings are partial until the workflow edits merge.
+
+## Step 15 — Cleanup sentinel + Report
 
 Always remove the per-worktree active-task sentinel — without this a future invocation reading the worktree could see a stale active task:
 
@@ -949,7 +995,7 @@ Then print a tight summary:
 
 ## Return value (printed to the user)
 
-After Step 13, print a JSON object summarising the run so the operator (or a wrapping `/loop`) can render or post-process:
+After Step 15, print a JSON object summarising the run so the operator (or a wrapping `/loop`) can render or post-process:
 
 ```json
 {

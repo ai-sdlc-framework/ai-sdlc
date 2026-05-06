@@ -29,11 +29,11 @@ A task is NOT done until you have:
 1. Committed the work
 2. **Rebased onto `origin/main`** (`git fetch origin main && git rebase origin/main`)
 3. **Pushed the branch to `origin`** (`git push --force-with-lease --set-upstream origin HEAD` — the rebase changed the SHA, so `--force-with-lease` is required and is the ONLY force-push variant permitted; never `--force` / `-f`)
-4. **Opened a pull request via `gh pr create` and captured the PR URL**
+4. **Opened a pull request as DRAFT via `gh pr create --draft` and captured the PR URL** (AISDLC-218: draft PRs prevent CI from firing before reviewers + attestation sign complete — `gh pr ready <number>` flips it to ready-for-review as the final step of `/ai-sdlc execute`, triggering CI exactly once on the fully-signed state)
 
 > **Hard rule: you MUST rebase, push, and open the PR. Returning without rebasing, without pushing, or without opening the PR is INCORRECT.** It is not "the orchestrator's job" — it is YOUR job. Rebase + push + PR are not optional cleanup; they are core deliverables on equal footing with the commit itself. A run that ends at the commit step has produced an unreachable artifact and wasted the operator's time. A run that pushes WITHOUT rebasing leaves the PR BEHIND `main` from the moment it opens, costing two CI cycles + manual operator action before merge — see [Why rebase-before-push is mandatory](#why-rebase-before-push-is-mandatory) below.
 
-If you find yourself thinking "my role ends at commit, the orchestrator handles push + PR" — that thought is **wrong** and is the exact failure mode this prompt was rewritten to eliminate. Rebase the branch. Push the branch. Open the PR. Capture the URL.
+If you find yourself thinking "my role ends at commit, the orchestrator handles push + PR" — that thought is **wrong** and is the exact failure mode this prompt was rewritten to eliminate. Rebase the branch. Push the branch. Open the PR **as a draft** (`--draft`). Capture the URL.
 
 ### Why rebase-before-push is mandatory
 
@@ -153,7 +153,7 @@ Stages and the status line each one should produce:
 >
 > - `git fetch origin main` followed by `git rebase origin/main` — this is **mandatory**, not conditional on whether you "think" main has moved. If conflicts surface, resolve mechanical ones in-place per the [Mechanical-conflict scope](#mechanical-conflict-scope--handle-these-yourself-do-not-escalate) section above; on semantic conflicts, run `git rebase --abort` and report rather than guessing.
 > - `git push --force-with-lease --set-upstream origin HEAD` (handle pre-push hook re-runs as expected; never `--no-verify`; `--force-with-lease` is required because the rebase changed the SHA, but `--force` (no lease) is still forbidden)
-> - `gh pr create --title <conventional-commit subject> --body <hand-written body explaining why, the failure mode if applicable, and how the diff addresses the ACs>` — write the PR body yourself; you have the mid-stream context that produces a better narrative than the orchestrator can synthesize from a JSON return
+> - `gh pr create --draft --title <conventional-commit subject> --body <hand-written body explaining why, the failure mode if applicable, and how the diff addresses the ACs>` — always open as **draft** (AISDLC-218); write the PR body yourself; you have the mid-stream context that produces a better narrative than the orchestrator can synthesize from a JSON return. `/ai-sdlc execute` will call `gh pr ready <number>` after reviewers + attestation sign complete, triggering CI exactly once.
 > - Capture the resulting PR URL and put it in the `prUrl` field of your return JSON
 >
 > Emit: `[ai-sdlc-progress] rebase: <status>`, `[ai-sdlc-progress] push: pushed <branch> to origin (--force-with-lease)`, and `[ai-sdlc-progress] pr: opened <url>`. These three lines are mandatory.

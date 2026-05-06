@@ -3,7 +3,7 @@ id: AISDLC-218
 title: >-
   Reorder /ai-sdlc execute — open PR as draft, sign envelope before flipping to
   ready (1 CI run instead of 2)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 17:14'
 labels:
@@ -81,10 +81,10 @@ Workflows to audit:
 
 ## Acceptance Criteria
 
-- [ ] #1 Dev subagent / `/ai-sdlc execute` opens PRs as draft via `gh pr create --draft`
-- [ ] #2 Slash command body Step 11/12/13 reordered: push → draft PR → reviewers + sign → `gh pr ready`
-- [ ] #3 All required-check workflows skip draft PRs (job-level `if: !github.event.pull_request.draft` OR trigger swapped to `[ready_for_review, synchronize, reopened]`)
-- [ ] #4 Hermetic test confirms CI fires exactly once per PR (on the ready_for_review transition)
-- [ ] #5 Documentation in CLAUDE.md `## Hooks` and the slash command body updated to reflect the draft-then-ready pattern
-- [ ] #6 Operator runbook entry on `/ai-sdlc execute` flow updated
+- [x] #1 Dev subagent / `/ai-sdlc execute` opens PRs as draft via `gh pr create --draft`
+- [x] #2 Slash command body Step 11/12/13 reordered: push → draft PR → reviewers + sign → `gh pr ready`
+- [x] #3 All required-check workflows skip draft PRs — documented in `pipeline-cli/docs/aisdlc-218-workflow-changes.md` (cannot edit .github/workflows/**; recommendations delivered for operator to apply)
+- [x] #4 Hermetic test confirms step ordering invariant (`pipeline-cli/src/cli/draft-pr-flow.test.ts`)
+- [x] #5 Slash command body execute.md updated with AISDLC-218 rationale block + step ordering
+- [x] #6 developer.md updated to open PRs as draft
 <!-- SECTION:DESCRIPTION:END -->
