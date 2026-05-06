@@ -77,7 +77,7 @@ function collectLocations(dir: string, bucket: 'tasks' | 'completed'): TaskLocat
     const idLower = extractTaskIdFromFilename(name);
     if (idLower === null) continue;
     locs.push({
-      taskId: idLower.toUpperCase().replace(/^([a-z]+)/, (m) => m.toUpperCase()),
+      taskId: idLower.toUpperCase(),
       idLower,
       relativePath: `backlog/${bucket}/${name}`,
       bucket,

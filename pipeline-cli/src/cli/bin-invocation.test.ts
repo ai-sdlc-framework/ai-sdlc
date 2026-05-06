@@ -52,9 +52,11 @@
  * mocking `child_process` would defeat the purpose.
  */
 
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -362,6 +364,186 @@ describe('AISDLC-203: atomic-completion bin shim existence guard', () => {
   });
 });
 
+// ── AISDLC-209: end-to-end bin shim integration tests (AC#6) ─────────
+//
+// Previous guard (AISDLC-203) only asserted `--help` exits 0.  These tests
+// exercise a real invocation with a real task file in a temp-dir fixture to
+// prove the full read-patch-rename pipeline works end-to-end through the
+// compiled shim.
+
+describe('AISDLC-209: cli-task-complete end-to-end integration (AC#6)', () => {
+  const binPath = join(PKG_ROOT, 'bin', 'cli-task-complete.mjs');
+  // Use a numeric task ID so it passes TASK_ID_RE (/^[a-z]+-[0-9]+.../i).
+  const E2E_TASK_ID = 'AISDLC-209';
+  const TASK_FM =
+    '---\nid: AISDLC-209\ntitle: integration test task\nstatus: In Progress\n---\n\n## Body\n\nTest.\n';
+  const TASK_FILENAME = 'aisdlc-209 - integration-test-task.md';
+
+  let tmpWorkDir: string;
+
+  beforeEach(() => {
+    tmpWorkDir = mkdtempSync(join(tmpdir(), 'bin-invocation-e2e-'));
+    mkdirSync(join(tmpWorkDir, 'backlog', 'tasks'), { recursive: true });
+    mkdirSync(join(tmpWorkDir, 'backlog', 'completed'), { recursive: true });
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tmpWorkDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  it('moves a real task file from tasks/ to completed/ (text output, exit 0)', () => {
+    writeFileSync(join(tmpWorkDir, 'backlog', 'tasks', TASK_FILENAME), TASK_FM, 'utf8');
+
+    const result = spawnSync(process.execPath, [binPath, E2E_TASK_ID, '--work-dir', tmpWorkDir], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+    const detail = `\n--- exit ${result.status} ---\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
+    expect(result.status, `cli-task-complete did not exit 0:${detail}`).toBe(0);
+    expect(result.stdout).toContain(`${E2E_TASK_ID}: moved`);
+    expect(result.stdout).toContain('verified: OK');
+    expect(
+      existsSync(join(tmpWorkDir, 'backlog', 'completed', TASK_FILENAME)),
+      `completed file missing:${detail}`,
+    ).toBe(true);
+    expect(
+      existsSync(join(tmpWorkDir, 'backlog', 'tasks', TASK_FILENAME)),
+      `tasks file still present after move:${detail}`,
+    ).toBe(false);
+  });
+
+  it('patches status to Done in the moved file', () => {
+    writeFileSync(join(tmpWorkDir, 'backlog', 'tasks', TASK_FILENAME), TASK_FM, 'utf8');
+
+    spawnSync(process.execPath, [binPath, E2E_TASK_ID, '--work-dir', tmpWorkDir], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+
+    const content = readFileSync(join(tmpWorkDir, 'backlog', 'completed', TASK_FILENAME), 'utf8');
+    expect(content).toContain('status: Done');
+    expect(content).not.toContain('status: In Progress');
+  });
+
+  it('exits with JSON output when --format json is passed', () => {
+    writeFileSync(join(tmpWorkDir, 'backlog', 'tasks', TASK_FILENAME), TASK_FM, 'utf8');
+
+    const result = spawnSync(
+      process.execPath,
+      [binPath, E2E_TASK_ID, '--work-dir', tmpWorkDir, '--format', 'json'],
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 },
+    );
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout.trim()) as {
+      ok: boolean;
+      alreadyDone: boolean;
+      taskId: string;
+      verified: boolean;
+    };
+    expect(json.ok).toBe(true);
+    expect(json.alreadyDone).toBe(false);
+    expect(json.taskId).toBe(E2E_TASK_ID);
+    expect(json.verified).toBe(true);
+  });
+
+  it('rejects a malformed task ID with exit 1 (AC#3 end-to-end)', () => {
+    const result = spawnSync(process.execPath, [binPath, 'not!!valid', '--work-dir', tmpWorkDir], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Invalid task ID');
+  });
+
+  it('exits 2 when task already in completed/ (idempotent)', () => {
+    writeFileSync(join(tmpWorkDir, 'backlog', 'completed', TASK_FILENAME), TASK_FM, 'utf8');
+
+    const result = spawnSync(process.execPath, [binPath, E2E_TASK_ID, '--work-dir', tmpWorkDir], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+    expect(result.status).toBe(2);
+  });
+});
+
+describe('AISDLC-209: cli-backlog-verify end-to-end integration (AC#6)', () => {
+  const binPath = join(PKG_ROOT, 'bin', 'cli-backlog-verify.mjs');
+  // Use numeric IDs so extractTaskIdFromFilename can parse them.
+  const TASK_FILENAME = 'aisdlc-209 - e2e-verify-task.md';
+  const TASK_CONTENT = '---\nid: AISDLC-209\nstatus: In Progress\n---\n\nBody.\n';
+
+  let tmpWorkDir: string;
+
+  beforeEach(() => {
+    tmpWorkDir = mkdtempSync(join(tmpdir(), 'bin-invocation-verify-e2e-'));
+    mkdirSync(join(tmpWorkDir, 'backlog', 'tasks'), { recursive: true });
+    mkdirSync(join(tmpWorkDir, 'backlog', 'completed'), { recursive: true });
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(tmpWorkDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  it('exits 0 when no duplicates (only in tasks/)', () => {
+    writeFileSync(join(tmpWorkDir, 'backlog', 'tasks', TASK_FILENAME), TASK_CONTENT, 'utf8');
+
+    const result = spawnSync(process.execPath, [binPath, '--work-dir', tmpWorkDir], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+    const detail = `\n--- exit ${result.status} ---\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
+    expect(result.status, `cli-backlog-verify should exit 0 when no duplicates:${detail}`).toBe(0);
+    expect(result.stdout).toContain('OK');
+  });
+
+  it('exits 1 and reports to stderr when duplicate task ID detected', () => {
+    writeFileSync(join(tmpWorkDir, 'backlog', 'tasks', TASK_FILENAME), TASK_CONTENT, 'utf8');
+    writeFileSync(join(tmpWorkDir, 'backlog', 'completed', TASK_FILENAME), TASK_CONTENT, 'utf8');
+
+    const result = spawnSync(process.execPath, [binPath, '--work-dir', tmpWorkDir], {
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+    const detail = `\n--- exit ${result.status} ---\n--- stdout ---\n${result.stdout}\n--- stderr ---\n${result.stderr}`;
+    expect(result.status, `cli-backlog-verify should exit 1 on duplicate:${detail}`).toBe(1);
+    expect(result.stderr).toContain('DUPLICATE');
+    expect(result.stderr).toContain('aisdlc-209');
+  });
+
+  it('exits 0 with JSON output when no duplicates (--format json)', () => {
+    writeFileSync(join(tmpWorkDir, 'backlog', 'tasks', TASK_FILENAME), TASK_CONTENT, 'utf8');
+
+    const result = spawnSync(
+      process.execPath,
+      [binPath, '--work-dir', tmpWorkDir, '--format', 'json'],
+      { encoding: 'utf-8', stdio: 'pipe', timeout: 10_000 },
+    );
+    expect(result.status).toBe(0);
+    const json = JSON.parse(result.stdout.trim()) as {
+      ok: boolean;
+      duplicates: string[];
+      locations: unknown[];
+    };
+    expect(json.ok).toBe(true);
+    expect(json.duplicates).toHaveLength(0);
+    expect(json.locations.length).toBeGreaterThan(0);
+  });
+});
+
 // Coverage hint for callers reading this in isolation: the production
 // invocation patterns live in:
 //   - `.github/workflows/ai-sdlc-review.yml` — per-CLI cost-saver bins
@@ -370,4 +552,6 @@ describe('AISDLC-203: atomic-completion bin shim existence guard', () => {
 //     bin (4 call sites: dor-evaluate ×2, dor-render-comment, dor-render-pr-summary).
 //   - AISDLC-203: cli-task-complete + cli-backlog-verify invoked by operators
 //     locally and in future workflow steps (using the direct-node form).
+//   - AISDLC-209: cli-task-complete + cli-backlog-verify end-to-end integration
+//     tests added to guard the full read-patch-rename pipeline through the shim.
 // Search for `node pipeline-cli/bin/` to enumerate them.

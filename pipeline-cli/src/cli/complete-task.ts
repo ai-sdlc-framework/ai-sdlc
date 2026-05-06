@@ -25,11 +25,28 @@
  * @module cli/complete-task
  */
 
-import { existsSync, mkdirSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  readdirSync,
+  renameSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
+
+// ── Constants ─────────────────────────────────────────────────────────
+
+/**
+ * Regex for valid backlog task IDs (e.g. "AISDLC-203", "aisdlc-203.1").
+ * Validated at CLI entry to fail-fast on typos and future path-construction
+ * refactors that might use taskId directly in path.join().
+ */
+export const TASK_ID_RE = /^[a-z]+-[0-9]+(?:\.[0-9]+)?$/i;
 
 // ── Types ─────────────────────────────────────────────────────────────
 
@@ -48,6 +65,19 @@ export interface AlreadyDoneResult {
 }
 
 export type CompleteTaskOutcome = CompleteTaskResult | AlreadyDoneResult;
+
+export class SymbolicLinkError extends Error {
+  readonly path: string;
+
+  constructor(path: string) {
+    super(
+      `[cli-task-complete] SECURITY: ${path} is a symbolic link.\n` +
+        `Refusing to read/write through a symlink — resolve the target manually.`,
+    );
+    this.name = 'SymbolicLinkError';
+    this.path = path;
+  }
+}
 
 export class DuplicateTaskFileError extends Error {
   readonly taskId: string;
@@ -153,18 +183,33 @@ export function completeTaskAtomically(
     );
   }
 
-  // Patch status to Done.
+  // Symlink guard — refuse to operate through a symlink (security, AC#2).
+  const stat = lstatSync(tasksFile);
+  if (stat.isSymbolicLink()) {
+    throw new SymbolicLinkError(tasksFile);
+  }
+
+  // Read + patch status to Done.
   const raw = readFileSync(tasksFile, 'utf8');
   const patched = patchStatusDone(raw);
-  writeFileSync(tasksFile, patched, 'utf8');
 
   // Ensure destination dir exists.
   mkdirSync(completedDir, { recursive: true });
 
-  // Atomic move.
-  const fileName = tasksFile.split('/').at(-1)!;
+  // Atomic write (AC#1): write patched content to a temp file in completed/,
+  // then rename temp → dest.  This eliminates the intermediate state where
+  // tasks/<id>.md contains a Done-status write but hasn't been moved yet.
+  // A crash after writeFileSync(tmpPath) leaves only the tmp file in
+  // completed/ — the source tasks/ file is still intact in the original
+  // state, so no data loss and no duplicate ID situation.
+  const fileName = basename(tasksFile);
   const destPath = join(completedDir, fileName);
-  renameSync(tasksFile, destPath);
+  const tmpPath = join(completedDir, `.tmp-${process.pid}-${fileName}`);
+  writeFileSync(tmpPath, patched, 'utf8');
+  // Atomic: place the patched file at the final destination.
+  renameSync(tmpPath, destPath);
+  // Content is now safely in completed/; remove the original source.
+  unlinkSync(tasksFile);
 
   // Post-move verification.
   if (!existsSync(destPath)) {
@@ -222,6 +267,21 @@ export function buildCompleteTaskCli(): Argv {
         const workDir = String(argv['work-dir']);
         const format = String(argv.format) as 'text' | 'json';
         const allowAlreadyDone = Boolean(argv['allow-already-done']);
+
+        // Validate taskId at CLI entry (AC#3): fail-fast on operator typos and
+        // document the contract for future callers that use taskId in paths.
+        if (!TASK_ID_RE.test(taskId)) {
+          const msg =
+            `[cli-task-complete] Invalid task ID: "${taskId}"\n` +
+            `  Expected format: <prefix>-<number> (e.g. AISDLC-203, aisdlc-203.1)\n` +
+            `  Regex: ${TASK_ID_RE.toString()}`;
+          if (format === 'json') {
+            process.stdout.write(JSON.stringify({ ok: false, error: msg }, null, 2) + '\n');
+          } else {
+            process.stderr.write(msg + '\n');
+          }
+          process.exit(1);
+        }
 
         let result: CompleteTaskOutcome;
         try {
