@@ -88,7 +88,9 @@ describe('CriticalPathPaneContent — list rendering', () => {
   });
 
   it('renders effPri and CPL for each row', () => {
-    const records = [makeRecord('AISDLC-10', { criticalPathLength: 3 })];
+    // AISDLC-178.4 #384 review fix: effPri now reads the proper
+    // SnapshotRecord.effectivePriority field instead of proxying from CPL.
+    const records = [makeRecord('AISDLC-10', { criticalPathLength: 3, effectivePriority: 3 })];
     const rows = buildCriticalPathRows(records);
     const { lastFrame } = render(
       <CriticalPathPaneContent rows={rows} allRecords={records} error={null} />,

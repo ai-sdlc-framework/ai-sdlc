@@ -19,18 +19,18 @@ import { useEffect, useRef } from 'react';
 // ── Priority mapping ──────────────────────────────────────────────────────────
 
 /**
- * Snapshot records don't carry explicit effectivePriority yet (the dep
- * snapshot writer stores it for RFC-0014 Phase 2 callers). We derive it
- * from `criticalPathLength` as a proxy: a longer chain → higher effective
- * urgency as a first approximation. This is AC #7's "effectivePriority
- * DESC" ordering with the available data.
- *
- * When the snapshot record gains an explicit `effectivePriority` field in a
- * future phase, the comparator can be updated to use it directly.
+ * Read `effectivePriority` from the snapshot record. AISDLC-178.4 #384 review
+ * fix: previously this proxied via `criticalPathLength` which produced
+ * dramatically wrong orderings (a leaf with `priority: critical` sorted
+ * BELOW a chain-of-3 with `priority: low` because CPL=0 vs 3). The snapshot
+ * now carries `effectivePriority` directly (computed by
+ * `computeEffectivePriorities` per RFC-0014 §5.3 — `max(basePriority,
+ * downstream max)` weight 1-4). Older snapshots without the field fall back
+ * to `DEFAULT_PRIORITY_WEIGHT` (medium=2) so the TUI never crashes on a
+ * stale on-disk artifact.
  */
-function effectivePriorityProxy(record: SnapshotRecord): number {
-  // criticalPathLength as a stand-in — higher CPL = more dependents = more urgent
-  return record.criticalPathLength;
+function readEffectivePriority(record: SnapshotRecord): number {
+  return record.effectivePriority ?? 2;
 }
 
 // ── Sort ──────────────────────────────────────────────────────────────────────
@@ -41,8 +41,8 @@ function effectivePriorityProxy(record: SnapshotRecord): number {
  */
 export function sortCriticalPath(records: SnapshotRecord[]): SnapshotRecord[] {
   return [...records].sort((a, b) => {
-    const effA = effectivePriorityProxy(a);
-    const effB = effectivePriorityProxy(b);
+    const effA = readEffectivePriority(a);
+    const effB = readEffectivePriority(b);
     if (effB !== effA) return effB - effA; // effectivePriority DESC
 
     const cplDiff = b.criticalPathLength - a.criticalPathLength;
@@ -90,7 +90,7 @@ export function buildAsciiDepTree(focused: SnapshotRecord, all: SnapshotRecord[]
 
   // Focused task
   lines.push(
-    `  * ${focused.id}  [effPri≈${effectivePriorityProxy(focused)} CPL=${focused.criticalPathLength} downstream=${focused.dependents.length}]`,
+    `  * ${focused.id}  [effPri=${readEffectivePriority(focused)} CPL=${focused.criticalPathLength} downstream=${focused.dependents.length}]`,
   );
 
   // Children (dependents)
@@ -121,7 +121,7 @@ export interface CriticalPathRow {
 export function buildCriticalPathRows(records: SnapshotRecord[]): CriticalPathRow[] {
   return sortCriticalPath(records).map((record) => ({
     record,
-    effPri: effectivePriorityProxy(record),
+    effPri: readEffectivePriority(record),
     blastRadius: record.dependents.length,
   }));
 }

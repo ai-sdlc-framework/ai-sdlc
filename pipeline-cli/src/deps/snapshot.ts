@@ -41,6 +41,7 @@ import {
   type DependencyGraph,
   type ExternalDependency,
 } from './dependency-graph.js';
+import { computeEffectivePriorities } from './effective-priority.js';
 
 /**
  * Tag identifying the event that prompted a snapshot. Per RFC-0014 §12 Q2:
@@ -78,6 +79,18 @@ export interface SnapshotRecord {
    * `effectivePriority`.
    */
   criticalPathLength: number;
+  /**
+   * `max(basePriority, max basePriority across transitive downstream)` per
+   * RFC-0014 §5.3. The PRIMARY dispatcher sort key — a high-priority
+   * downstream lifts a low-priority upstream blocker so the critical path
+   * surfaces. Numeric weight 1-4 (low=1, medium=2, high=3, critical=4).
+   * AISDLC-178.4 #384 review fix: was missing from the snapshot, forcing
+   * the TUI Critical Path pane to use criticalPathLength as a wrong proxy
+   * (a leaf with priority:critical would sort below a chain-of-3 with
+   * priority:low). Computed by `computeEffectivePriorities` at snapshot
+   * time and stamped onto each record.
+   */
+  effectivePriority: number;
   /** RFC-0014 §8 + Q3 — declared external blockers (pure signal in v1). */
   externalDependencies: ExternalDependency[];
   /** ISO-8601 mtime of the on-disk task file (best-effort; '' on stat failure). */
@@ -238,6 +251,13 @@ export function computeSnapshotRecords(graph: DependencyGraph): SnapshotRecord[]
     return best;
   }
 
+  // AISDLC-178.4 #384 review fix: compute effectivePriority once per snapshot
+  // and stamp each record. The TUI Critical Path pane needs this as the
+  // primary sort key per RFC-0014 §5.3 + AC #7 of AISDLC-178.4. Reads each
+  // node's `priority` frontmatter (already on DependencyNode); falls back to
+  // DEFAULT_PRIORITY_WEIGHT (medium=2) when absent.
+  const effPri = computeEffectivePriorities(graph);
+
   const records: SnapshotRecord[] = [];
   const sortedKeys = Array.from(graph.nodes.keys()).sort((a, b) =>
     a.localeCompare(b, 'en', { numeric: true }),
@@ -254,6 +274,7 @@ export function computeSnapshotRecords(graph: DependencyGraph): SnapshotRecord[]
       dependents,
       depth: depthOf(key, new Set()),
       criticalPathLength: cplOf(key, new Set()),
+      effectivePriority: effPri.get(key)?.effectivePriority ?? 2,
       externalDependencies: node.externalDependencies,
       lastModified: node.lastModified,
     });

@@ -1005,6 +1005,7 @@ export const depsSnapshotV1Schema = {
     'dependents',
     'depth',
     'criticalPathLength',
+    'effectivePriority',
     'externalDependencies',
     'lastModified',
   ],
@@ -1044,6 +1045,13 @@ export const depsSnapshotV1Schema = {
       minimum: 0,
       description:
         'Longest chain length FORWARD from this task via the reverse edge set (impact closure). Leaf tasks (nothing depends on them) have CPL 0. Per RFC-0014 §12 Q1 this is the secondary dispatcher tiebreak after `effectivePriority` and before recency.',
+    },
+    effectivePriority: {
+      type: 'integer',
+      minimum: 1,
+      maximum: 4,
+      description:
+        '`max(basePriority, max basePriority across transitive downstream(T))` per RFC-0014 §5.3. The PRIMARY dispatcher sort key — a high-priority downstream lifts a low-priority upstream so the critical path surfaces. Numeric weight: low=1, medium=2 (default), high=3, critical=4. AISDLC-178.4 #384 review fix: was missing from earlier snapshots; readers tolerate absence by falling back to medium (2) for backward compat.',
     },
     externalDependencies: {
       type: 'array',

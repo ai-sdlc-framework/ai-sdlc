@@ -38,7 +38,7 @@ export function ciGlyph(pr: GhPrSummary): CiGlyph {
 export type ReviewStateLabel = 'approved' | 'changes-requested' | 'pending' | 'no-reviews-yet';
 
 export function reviewStateLabel(pr: GhPrSummary): ReviewStateLabel {
-  const decision = (pr as unknown as { reviewDecision?: string }).reviewDecision;
+  const decision = pr.reviewDecision;
   if (!decision) return 'no-reviews-yet';
   const upper = decision.toUpperCase();
   if (upper === 'APPROVED') return 'approved';

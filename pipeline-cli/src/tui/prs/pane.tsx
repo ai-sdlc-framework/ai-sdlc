@@ -49,7 +49,7 @@ interface PrDetailProps {
 
 export function PrDetail({ row, onClose }: PrDetailProps): React.ReactElement {
   const pr = row.pr;
-  const body = (pr as unknown as { body?: string }).body ?? '';
+  const body = pr.body ?? '';
 
   useInput((input, key) => {
     if (key.escape || input === 'q') {

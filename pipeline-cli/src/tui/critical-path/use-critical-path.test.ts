@@ -169,10 +169,20 @@ describe('buildCriticalPathRows', () => {
     expect(buildCriticalPathRows([])).toEqual([]);
   });
 
-  it('derives effPri as criticalPathLength proxy', () => {
+  it('reads effPri from snapshot.effectivePriority field (per RFC-0014 §5.3)', () => {
+    // AISDLC-178.4 #384 review fix: effPri now reads the proper field
+    // from the snapshot record instead of proxying via criticalPathLength.
+    const records = [makeRecord('A', { effectivePriority: 4, criticalPathLength: 7 })];
+    const [row] = buildCriticalPathRows(records);
+    expect(row.effPri).toBe(4);
+  });
+
+  it('falls back to default priority weight (2 = medium) when effectivePriority absent', () => {
+    // Backward-compat: stale on-disk snapshots written before AISDLC-178.4
+    // don't have the field; fallback to medium (2) so the TUI never crashes.
     const records = [makeRecord('A', { criticalPathLength: 7 })];
     const [row] = buildCriticalPathRows(records);
-    expect(row.effPri).toBe(7);
+    expect(row.effPri).toBe(2);
   });
 
   it('derives blastRadius as dependents count', () => {
