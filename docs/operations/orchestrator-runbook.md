@@ -10,6 +10,126 @@ at [`spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md`](../../spec/rfcs/RF
 
 ---
 
+## Full-pipeline umbrella dispatch (AISDLC-229)
+
+As of AISDLC-229, `cli-orchestrator tick` dispatches tasks through the
+`ai-sdlc-pipeline execute` umbrella (AISDLC-182) rather than shelling out
+to `claude --print --agent developer` directly. This means each admitted
+task now runs the full Step 0-13 pipeline:
+
+- Step 7: spawn three reviewer subagents (code / test / security)
+- Step 8: aggregate verdicts → write `.ai-sdlc/verdicts/<task-id-lower>.json`
+- Step 10: sign DSSE attestation envelope
+- Step 11: push branch + open PR
+- Step 12: open sibling-repo PRs (when `permittedExternalPaths` declared)
+- Step 13: cleanup `.active-task` sentinel
+
+### Spawner choice: `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK`
+
+The default spawner for the umbrella is `claude-cli` (inline manifest mode,
+AISDLC-198). This requires the AISDLC-225 consumer bridge to be deployed so
+that the dispatch manifest is actually consumed and subagents are invoked.
+
+While AISDLC-225 is in flight (consumer bridge not yet shipped), you can
+fall back to `api-key` billing by setting:
+
+```bash
+export AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key
+```
+
+With this set, if the `claude-cli` spawner reports the consumer bridge is
+missing, the orchestrator automatically retries the same task with `api-key`
+(requires `ANTHROPIC_API_KEY` in the environment). This incurs Anthropic API
+costs (same billing model as `pnpm dogfood watch`), but lets unattended
+orchestrator runs produce complete PRs today.
+
+If `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK` is unset (the default) AND the
+`claude-cli` spawner is unavailable, the dispatch records a failure in
+`outcomes[i].failure` with `type: 'spawner-unavailable'` and continues to
+the next admitted task — it never blocks the entire tick.
+
+### `pipeline.*` outcome fields (AISDLC-229)
+
+Each `outcomes[i]` entry in the tick result now carries optional `pipeline`
+and `failure` fields populated from the umbrella's return envelope:
+
+```json
+{
+  "taskId": "AISDLC-99",
+  "outcome": "approved",
+  "prUrl": "https://github.com/org/repo/pull/42",
+  "pipeline": {
+    "attestationSha": null,
+    "prNumber": 42,
+    "reviewerVerdicts": {
+      "code": "approved",
+      "test": "approved",
+      "security": "approved"
+    },
+    "iterations": 2
+  }
+}
+```
+
+| Field | Type | Notes |
+|---|---|---|
+| `pipeline.attestationSha` | `string \| null` | HEAD SHA after the DSSE attestation chore commit. `null` when reviewers didn't run. |
+| `pipeline.prNumber` | `number \| null` | GitHub PR number parsed from `prUrl`. `null` on failure paths. |
+| `pipeline.reviewerVerdicts` | `{ code, test, security } \| null` | Per-reviewer `"approved"` or `"changes-requested"`. `null` when reviewers didn't run. |
+| `pipeline.iterations` | `number \| null` | Number of review iterations the umbrella ran. `null` on pre-review failures. |
+
+The `pipeline` field is `undefined` when:
+- The legacy `dispatch` adapter was injected (backwards-compatible test paths).
+- The umbrella failed before the review phase.
+
+The `failure` field (when present):
+
+```json
+{
+  "failure": {
+    "type": "developer-failed",
+    "message": "developer returned commitSha: null"
+  }
+}
+```
+
+| `failure.type` | Cause |
+|---|---|
+| `developer-failed` | Dev subagent returned `commitSha: null` (no work produced). |
+| `developer-json-contract-violated` | Dev returned prose twice; umbrella gave up. |
+| `aborted` | Push or `gh pr create` failed mid-flight. |
+| `spawner-unavailable` | `claude-cli` spawner manifest not consumed; no fallback configured. |
+| `unknown` | Catch-all for other umbrella failures. |
+
+### What to do if the umbrella fails mid-tick
+
+**If `failure.type === 'developer-failed'` or `aborted`:**
+The orchestrator's AISDLC-177 rollback fires automatically: it reverts the
+task status to its pre-dispatch value, removes the worktree, and
+(if the dev produced commits) quarantines the branch under
+`quarantine/<task-id-lower>-<ts>`. The next tick will re-pick the task.
+See the "Recovering quarantined work" section below for forensic inspection.
+
+**If `failure.type === 'spawner-unavailable'`:**
+Set `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` (see above) and
+re-dispatch the task. Alternatively, wait for AISDLC-225 (consumer bridge)
+to ship and then re-run.
+
+**If `failure.type === 'unknown'`:**
+Inspect the `message` field. Common causes:
+- `ANTHROPIC_API_KEY` missing when `--spawner api-key` fallback was attempted.
+- Validation failure in Step 1 (malformed task frontmatter).
+- Network errors during `gh pr create`.
+
+To re-dispatch manually, reset the task status to `To Do` (the rollback
+does this automatically, but you can also do it via the plugin MCP tool):
+
+```bash
+mcp__plugin_ai-sdlc_ai-sdlc__task_edit AISDLC-99 --status "To Do"
+```
+
+---
+
 ## Inline orchestrator mode (`--spawner claude-cli`) (AISDLC-198)
 
 The inline orchestrator is the recommended way to run the autonomous

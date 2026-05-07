@@ -302,6 +302,59 @@ export type OrchestratorIdleEvent =
   | { type: 'OrchestratorIdleNoWork'; ts: string; idleStreak: number }
   | { type: 'OrchestratorIdleAllFiltered'; ts: string; idleStreak: number; rejectedCount: number };
 
+/**
+ * AISDLC-229 — reviewer verdicts extracted from the umbrella's
+ * `ExecuteCommandResult` and surfaced on the tick outcome so Slack
+ * consumers + the operator status view can see the full pipeline result
+ * without grepping events.jsonl.
+ */
+export interface PipelineOutcomeDetail {
+  /**
+   * Git SHA of the HEAD commit at the time the DSSE attestation was
+   * signed. `null` when the attestation chore commit didn't land
+   * (e.g. the developer failed before reviewers ran).
+   */
+  attestationSha: string | null;
+  /**
+   * GitHub PR number parsed from the PR URL. `null` when no PR was
+   * opened (failure paths).
+   */
+  prNumber: number | null;
+  /**
+   * Per-reviewer approval decision (`'approved'` or
+   * `'changes-requested'`). All three keys are present when reviewers
+   * ran; the map is `null` when the pipeline failed before the review
+   * phase.
+   */
+  reviewerVerdicts: {
+    code: 'approved' | 'changes-requested';
+    test: 'approved' | 'changes-requested';
+    security: 'approved' | 'changes-requested';
+  } | null;
+  /**
+   * Number of review iterations the umbrella ran (mirrors
+   * `PipelineResult.iterations`). `null` on pre-review failures.
+   */
+  iterations: number | null;
+}
+
+/**
+ * AISDLC-229 — failure detail recorded when the `ai-sdlc-pipeline execute`
+ * umbrella exits non-zero. Lets Slack consumers and the runbook surface
+ * the failure type without re-parsing stderr.
+ */
+export interface PipelineFailureDetail {
+  /** Short machine-readable failure type tag. */
+  type:
+    | 'developer-failed'
+    | 'developer-json-contract-violated'
+    | 'aborted'
+    | 'spawner-unavailable'
+    | 'unknown';
+  /** Human-readable failure reason (the umbrella's `reason` field or the thrown message). */
+  message: string;
+}
+
 export interface TaskDispatchOutcome {
   taskId: string;
   outcome: PipelineOutcome | 'unknown-failure';
@@ -310,6 +363,18 @@ export interface TaskDispatchOutcome {
   error?: string;
   /** Set when the result already had a `notes` field. */
   notes?: string;
+  /**
+   * AISDLC-229 — populated when the `ai-sdlc-pipeline execute` umbrella ran to
+   * completion (success or failure). `undefined` when the orchestrator short-
+   * circuited before calling the umbrella (e.g. spawner-resolution error, in-flight
+   * filter rejection).
+   */
+  pipeline?: PipelineOutcomeDetail;
+  /**
+   * AISDLC-229 — populated when the umbrella exited non-zero OR the dispatch
+   * threw. `undefined` on successful outcomes.
+   */
+  failure?: PipelineFailureDetail;
 }
 
 /**
@@ -375,6 +440,43 @@ export interface OrchestratorStatus {
  * stub it without instantiating a real spawner / runner / worktree.
  */
 export type DispatchFn = (taskId: string) => Promise<PipelineResult>;
+
+/**
+ * AISDLC-229 — richer dispatch result that includes the `pipeline` detail
+ * (attestationSha, prNumber, reviewerVerdicts, iterations) and optional
+ * `failure` when the umbrella exited non-zero. Returned by the new
+ * `umbrellaDispatch` adapter that the orchestrator uses in place of the
+ * legacy `DispatchFn` when no test override is injected.
+ *
+ * This type extends the existing `PipelineResult` contract rather than
+ * replacing it so existing tests that inject plain `DispatchFn` adapters
+ * continue to work unchanged — the tick loop only populates the extra
+ * fields when the umbrella path was taken.
+ */
+export interface RichDispatchResult {
+  /** Core pipeline result (maps to the existing `PipelineResult` shape). */
+  result: PipelineResult;
+  /**
+   * Populated whenever the umbrella ran far enough to produce reviewer
+   * verdicts + an attestation commit. `undefined` on pre-review failures.
+   */
+  pipeline?: PipelineOutcomeDetail;
+  /**
+   * Populated when the umbrella exited non-zero or the dispatch threw.
+   * `undefined` on successful outcomes.
+   */
+  failure?: PipelineFailureDetail;
+}
+
+/**
+ * AISDLC-229 — umbrella dispatch adapter. When set on `OrchestratorAdapters`,
+ * the tick loop calls this instead of the legacy `DispatchFn`. Returns a
+ * `RichDispatchResult` that carries the `pipeline` + `failure` extra fields
+ * so the tick result can populate `outcomes[i].pipeline` and
+ * `outcomes[i].failure`. Tests that only care about the basic `PipelineResult`
+ * shape continue to inject the legacy `dispatch` adapter unchanged.
+ */
+export type UmbrellaDispatchFn = (taskId: string) => Promise<RichDispatchResult>;
 
 /** Adapter that fetches the dispatch frontier (defaults to cli-deps frontier()). */
 export type FrontierFn = () => Array<{ id: string; title: string }>;

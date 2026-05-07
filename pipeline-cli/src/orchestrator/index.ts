@@ -80,7 +80,11 @@ export type {
   OrchestratorTaskBlockedEvent,
   OrchestratorTickResult,
   OrchestratorWorkQuarantinedEvent,
+  PipelineFailureDetail,
+  PipelineOutcomeDetail,
+  RichDispatchResult,
   TaskDispatchOutcome,
+  UmbrellaDispatchFn,
 } from './types.js';
 
 // RFC-0015 Phase 2 — failure playbook (AISDLC-169.2).

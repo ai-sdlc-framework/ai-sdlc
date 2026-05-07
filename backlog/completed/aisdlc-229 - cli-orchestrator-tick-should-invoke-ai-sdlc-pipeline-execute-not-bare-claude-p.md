@@ -3,7 +3,7 @@ id: AISDLC-229
 title: >-
   cli-orchestrator tick should invoke ai-sdlc-pipeline execute (AISDLC-182), not
   bare `claude -p --agent developer`
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 03:11'
 labels:
@@ -16,6 +16,52 @@ labels:
 dependencies:
   - AISDLC-225
 priority: high
+finalSummary: |
+  ## Summary
+  Wired `cli-orchestrator tick`'s dispatch step to invoke the `ai-sdlc-pipeline execute`
+  umbrella (AISDLC-182) via a new `UmbrellaDispatchFn` adapter in `buildDefaultUmbrellaDispatch`.
+  Each admitted task now runs the full Step 0-13 pipeline including Steps 7-13
+  (reviewers, attestation, push, PR) rather than stopping after Step 5.
+
+  ## Changes
+  - `pipeline-cli/src/orchestrator/types.ts` (modified): Added `PipelineOutcomeDetail`,
+    `PipelineFailureDetail`, `RichDispatchResult`, and `UmbrellaDispatchFn` types.
+    Extended `TaskDispatchOutcome` with optional `pipeline?` and `failure?` fields.
+  - `pipeline-cli/src/orchestrator/loop.ts` (modified): Added `buildDefaultUmbrellaDispatch`
+    that calls `runExecuteCommand` with `claude-cli` spawner (default), plus
+    `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` fallback logic. Added
+    `umbrellaDispatch`, `umbrellaSpawnerKind`, and `umbrellaExecutor` to
+    `OrchestratorAdapters`. Tick loop now uses `richDispatchFn` (umbrella path
+    when no legacy `dispatch` adapter is injected).
+  - `pipeline-cli/src/orchestrator/index.ts` (modified): Exported new types.
+  - `pipeline-cli/src/orchestrator/loop.umbrella.test.ts` (new): 9 hermetic tests
+    covering success/failure paths, spawner fallback, backward-compat with legacy
+    `dispatch` adapter, and tick output schema stability (AC #6).
+  - `docs/operations/orchestrator-runbook.md` (modified): Added spawner-fallback env
+    docs, `pipeline.*` outcome fields table, and "what to do if umbrella fails" guide.
+  - `pipeline-cli/docs/orchestrator.md` (modified): Added "How tick connects to
+    AISDLC-182's umbrella" section with spawner decision tree and phase plan row.
+
+  ## Design decisions
+  - **`UmbrellaDispatchFn` adapter**: Rather than replacing `DispatchFn`, added a
+    sibling adapter. Tests that inject `dispatch` (legacy `DispatchFn`) are wrapped
+    to return `RichDispatchResult` with `pipeline: undefined`. This preserves 279
+    existing test cases without modification.
+  - **`claude-cli` default**: Matches AC #1 (default `claude-cli` spawner). The
+    `api-key` fallback is opt-in via `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key`.
+  - **`umbrellaExecutor` adapter**: Allows tests to stub the `runExecuteCommand` call
+    without setting up a real task directory, enabling hermetic coverage.
+
+  ## Verification
+  - `pnpm --filter @ai-sdlc/pipeline-cli test` — 288 tests pass (279 existing + 9 new)
+  - All orchestrator tests: 25 test files, 288 tests passed
+  - Pre-existing `@ai-sdlc/reference` tsc error confirmed pre-existing (not introduced by this PR)
+
+  ## Follow-up
+  - AISDLC-225: Consumer bridge for `claude-cli` spawner (manifest → Agent tool invocation).
+    Until this ships, use `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` for real runs.
+  - Integration test with real binary + mock spawner (AC #7): deferred to AISDLC-225
+    because `--spawner mock --run` is blocked by the umbrella's safety guard.
 ---
 
 ## Description

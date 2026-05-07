@@ -769,6 +769,76 @@ RFC-driven flag promotions can copy it verbatim.
 [Single-line revert command]
 ```
 
+## How tick connects to AISDLC-182's umbrella (AISDLC-229)
+
+As of AISDLC-229, each tick dispatches admitted tasks through the
+`ai-sdlc-pipeline execute` umbrella subcommand (AISDLC-182) rather than
+calling `executePipeline()` directly with `defaultSpawner()`. This ensures
+the full Step 0-13 pipeline runs per dispatch, including Steps 7-13 that
+were previously only reachable via the operator's manual slash command session.
+
+### Spawner decision tree
+
+```
+Was adapters.umbrellaDispatch injected?
+  YES → use it directly (test path)
+  NO  →
+    Was adapters.dispatch injected?
+      YES → wrap it as a legacy DispatchFn (test backward-compat path)
+      NO  → buildDefaultUmbrellaDispatch(config, adapters, emit)
+              │
+              ▼
+              resolveUmbrellaSpawnerKind()
+                ├─ adapters.umbrellaSpawnerKind set? → use it
+                └─ else → 'claude-cli' (default)
+              │
+              ▼
+              runExecuteCommand({
+                taskId, workDir,
+                spawnerKind: 'claude-cli',  // default
+                maxIterations: 2,
+                run: true,
+              })
+              │
+              ├─ ok: true  → map ExecuteCommandResult → RichDispatchResult
+              │                (pipeline.reviewerVerdicts, prNumber, iterations)
+              │
+              └─ ok: false →
+                  Is AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key set?
+                  AND does the failure reason match a spawner pattern?
+                    YES → retry with spawnerKind='api-key'
+                    NO  → return { failure: { type, message } }
+```
+
+### Outcome shape extension (AISDLC-229)
+
+Each `TaskDispatchOutcome` returned by `runOrchestratorTick()` now carries
+optional extra fields:
+
+| Field | Type | When present |
+|---|---|---|
+| `pipeline` | `PipelineOutcomeDetail` | When the umbrella ran far enough to produce reviewer verdicts. |
+| `pipeline.attestationSha` | `string \| null` | HEAD SHA after the DSSE attestation chore commit. |
+| `pipeline.prNumber` | `number \| null` | GitHub PR number. |
+| `pipeline.reviewerVerdicts` | `{ code, test, security }` | Per-reviewer decisions. |
+| `pipeline.iterations` | `number \| null` | Review loop iteration count. |
+| `failure` | `PipelineFailureDetail` | When the umbrella exited non-zero. |
+| `failure.type` | `'developer-failed' \| 'aborted' \| 'spawner-unavailable' \| ...` | Machine-readable failure tag. |
+| `failure.message` | `string` | Human-readable failure reason. |
+
+The legacy `dispatch` adapter (injected by existing tests) bypasses the
+umbrella path entirely — `pipeline` and `failure` remain `undefined` on
+such outcomes. No existing test code changes are required.
+
+### Environment variables
+
+| Variable | Effect |
+|---|---|
+| `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` | Fall back to `--spawner api-key` (ANTHROPIC_API_KEY required) when the `claude-cli` spawner is unavailable (AISDLC-225 not yet deployed). |
+
+See `docs/operations/orchestrator-runbook.md` for runbook coverage of
+spawner-unavailable failures and what to do when the umbrella fails mid-tick.
+
 ## Phase plan
 
 | Phase | Task | Status | Scope |
@@ -778,6 +848,7 @@ RFC-driven flag promotions can copy it verbatim.
 | 3 | AISDLC-169.3 | Shipped | DoR + dependency + external-deps pre-dispatch admission filters; in-memory stuck-candidate counter; exponential-backoff cadence (Q3 + Q5). Filter rejection + idle + stuck events emit through Phase 4's `writeEvent()` so the events.jsonl stream is the single observability path. |
 | 4 | AISDLC-169.4 | Shipped | `events.jsonl` writer + `cli-status --orchestrator` view + canonical schema for downstream consumers. |
 | 5 | AISDLC-169.5 | Shipped | Soak corpus aggregator (`cli-orchestrator-corpus`), chaos test harness, hybrid promotion runbook. |
+| 6 | AISDLC-229 | Shipped | Tick invokes `ai-sdlc-pipeline execute` umbrella (AISDLC-182) instead of bare `executePipeline()`. Full Step 0-13 per dispatch. Spawner fallback env. Rich `pipeline` + `failure` outcome fields. |
 
 ## Cross-references
 

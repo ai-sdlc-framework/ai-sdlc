@@ -60,6 +60,7 @@ import { sortFrontierByEffectivePriority } from '../deps/dispatch.js';
 import { executePipeline } from '../execute-pipeline.js';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
+import { runExecuteCommand, type ExecuteCommandResult, type SpawnerKind } from '../cli/execute.js';
 import { findTaskFile, parseSimpleYaml } from '../steps/01-validate.js';
 import {
   DEFAULT_LOGGER,
@@ -98,6 +99,9 @@ import type {
   OrchestratorBlockedEvent,
   OrchestratorConfig,
   OrchestratorFilterEvent,
+  PipelineFailureDetail,
+  PipelineOutcomeDetail,
+  UmbrellaDispatchFn,
   OrchestratorIdleEvent,
   OrchestratorStatus,
   OrchestratorStuckCandidateEvent,
@@ -149,6 +153,14 @@ export interface OrchestratorAdapters {
   frontier?: FrontierFn;
   /** Dispatcher — defaults to a real `executePipeline()` call. */
   dispatch?: DispatchFn;
+  /**
+   * AISDLC-229 — umbrella dispatcher. When set, overrides `dispatch`. The
+   * tick loop calls this and populates `outcomes[i].pipeline` and
+   * `outcomes[i].failure` from the richer return type. Tests that inject a
+   * plain `dispatch` adapter use the legacy path and leave `pipeline` /
+   * `failure` undefined. Production uses `buildDefaultUmbrellaDispatch()`.
+   */
+  umbrellaDispatch?: UmbrellaDispatchFn;
   /** Escalation hook — defaults to a `gh pr edit --add-label needs-human-attention` shell-out. */
   escalate?: EscalateFn;
   /** Sleeper — defaults to `setTimeout`. Tests inject a synchronous resolve. */
@@ -160,6 +172,24 @@ export interface OrchestratorAdapters {
    * usually override `dispatch` directly instead of going through this.
    */
   spawner?: SubagentSpawner;
+  /**
+   * AISDLC-229 — spawner kind for the umbrella dispatcher. Defaults to
+   * `'claude-cli'` (inline manifest mode, AISDLC-198). Override via the
+   * `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK` env var or by injecting this
+   * field directly (tests).
+   *
+   * When `claude-cli` is selected but `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key`
+   * is set AND the umbrella reports the consumer bridge is missing (AISDLC-225
+   * not yet shipped), the orchestrator automatically falls back to `api-key`.
+   */
+  umbrellaSpawnerKind?: SpawnerKind;
+  /**
+   * AISDLC-229 — umbrella executor. When provided, overrides the default
+   * `runExecuteCommand` call. Tests inject a stub to avoid spawning a real
+   * process. The function receives the task ID and spawner kind and returns
+   * an `ExecuteCommandResult`.
+   */
+  umbrellaExecutor?: (taskId: string, spawnerKind: SpawnerKind) => Promise<ExecuteCommandResult>;
   /** Optional injected `Runner` for the default frontier + escalate paths. */
   runner?: Runner;
   /**
@@ -327,7 +357,28 @@ export async function runOrchestratorTick(
   // can forward `DeveloperContractRetry` payloads from
   // `executePipeline()` to the events.jsonl bus. Tests injecting their
   // own dispatch adapter bypass this entirely.
-  const dispatchFn = adapters.dispatch ?? buildDefaultDispatch(config, adapters, emit);
+  //
+  // AISDLC-229 — build a unified rich dispatcher that always returns a
+  // `RichDispatchResult`. Priority order:
+  //   1. `adapters.umbrellaDispatch` — injected by tests that exercise the
+  //      new umbrella path directly.
+  //   2. `adapters.dispatch` (legacy `DispatchFn`) — used by existing tests
+  //      that haven't migrated to the umbrella shape yet. Wrapped to fill
+  //      the `RichDispatchResult` envelope with `pipeline: undefined` and
+  //      `failure: undefined` so the tick loop has a single code path.
+  //   3. Default umbrella: `buildDefaultUmbrellaDispatch()` — calls
+  //      `runExecuteCommand` with the configured spawner kind.
+  const richDispatchFn: UmbrellaDispatchFn = (() => {
+    if (adapters.umbrellaDispatch) return adapters.umbrellaDispatch;
+    if (adapters.dispatch) {
+      const legacyFn = adapters.dispatch;
+      return async (taskId: string) => ({ result: await legacyFn(taskId) });
+    }
+    return buildDefaultUmbrellaDispatch(config, adapters, emit);
+  })();
+  // NOTE: `tryPlaybookOnError` builds its own dispatchFn from
+  // `args.adapters.dispatch ?? buildDefaultDispatch(...)` at call time.
+  // No need to construct a separate alias here.
   // RFC-0015 Phase 3 — wall-clock + per-task stuck counter + cadence
   // state are shared across ticks via the adapters bag (see
   // `adaptersWithSharedState` in `runOrchestratorLoop`).
@@ -556,8 +607,17 @@ export async function runOrchestratorTick(
       // started" on the events bus.
       emit({ type: 'OrchestratorDispatched', taskId });
       try {
-        const result = await dispatchFn(taskId);
-        return { taskId, result, preDispatchStatus };
+        const richResult = await richDispatchFn(taskId);
+        // Normalise: the rich result carries the PipelineResult + optional
+        // pipeline/failure extras. Pass all three so the settled-value
+        // aggregator can populate the full TaskDispatchOutcome.
+        return {
+          taskId,
+          result: richResult.result,
+          pipeline: richResult.pipeline,
+          failure: richResult.failure,
+          preDispatchStatus,
+        };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return { taskId, error: message, preDispatchStatus };
@@ -763,12 +823,19 @@ export async function runOrchestratorTick(
       continue;
     }
     const result = value.result;
-    outcomes.push({
+    // AISDLC-229 — build the outcome entry. When the rich umbrella path
+    // was taken, `value.pipeline` and `value.failure` carry the extra fields.
+    // When the legacy `dispatch` adapter was injected (tests), both are
+    // `undefined` — the outcome shape is unchanged for existing consumers.
+    const outcomeEntry: TaskDispatchOutcome = {
       taskId: result.taskId,
       outcome: result.outcome,
       prUrl: result.prUrl,
       notes: result.notes,
-    });
+    };
+    if (value.pipeline !== undefined) outcomeEntry.pipeline = value.pipeline;
+    if (value.failure !== undefined) outcomeEntry.failure = value.failure;
+    outcomes.push(outcomeEntry);
     emit({
       type: 'OrchestratorCompleted',
       taskId: result.taskId,
@@ -847,7 +914,13 @@ export async function runOrchestratorTick(
  * of whether the dispatcher succeeded, failed cleanly, or threw.
  */
 type DispatchSettledValue =
-  | { taskId: string; preDispatchStatus: string; result: PipelineResult }
+  | {
+      taskId: string;
+      preDispatchStatus: string;
+      result: PipelineResult;
+      pipeline?: PipelineOutcomeDetail;
+      failure?: PipelineFailureDetail;
+    }
   | { taskId: string; preDispatchStatus: string; error: string; result?: undefined };
 
 interface MaybeRollbackArgs {
@@ -1541,6 +1614,213 @@ function buildDefaultBlockedLoader(
     } catch {
       return undefined;
     }
+  };
+}
+
+/**
+ * AISDLC-229 — resolve which spawner kind to use for the umbrella dispatch.
+ *
+ * Decision tree:
+ *   1. If `adapters.umbrellaSpawnerKind` is explicitly set, use it.
+ *   2. If `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set AND the
+ *      umbrella will need the fallback (checked post-hoc after the umbrella
+ *      runs — see `buildDefaultUmbrellaDispatch`), fall back to `api-key`.
+ *   3. Otherwise default to `claude-cli` (AISDLC-198 inline manifest mode).
+ */
+function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): SpawnerKind {
+  if (adapters.umbrellaSpawnerKind) return adapters.umbrellaSpawnerKind;
+  return 'claude-cli';
+}
+
+/**
+ * AISDLC-229 — extract `prNumber` from a GitHub PR URL.
+ * Returns `null` on parse failure.
+ */
+function parsePrNumber(prUrl: string | null): number | null {
+  if (!prUrl) return null;
+  const m = prUrl.match(/\/pull\/(\d+)/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isNaN(n) ? null : n;
+}
+
+/**
+ * AISDLC-229 — build a `PipelineOutcomeDetail` from an `ExecuteCommandResult`.
+ * Returns `undefined` when the result carries no pipeline data (pre-review
+ * failure paths where `result.pipeline` is absent).
+ */
+function extractPipelineDetail(
+  execResult: ExecuteCommandResult,
+): PipelineOutcomeDetail | undefined {
+  const pr = execResult.pipeline;
+  if (!pr) return undefined;
+
+  // reviewer verdicts — extract from finalVerdict if available
+  let reviewerVerdicts: PipelineOutcomeDetail['reviewerVerdicts'] = null;
+  if (pr.finalVerdict?.verdicts && pr.finalVerdict.verdicts.length > 0) {
+    const verdictMap: Record<string, 'approved' | 'changes-requested'> = {};
+    for (const v of pr.finalVerdict.verdicts) {
+      if (
+        v.agentId === 'code-reviewer' ||
+        v.agentId === 'test-reviewer' ||
+        v.agentId === 'security-reviewer'
+      ) {
+        const role = v.agentId.replace('-reviewer', '') as 'code' | 'test' | 'security';
+        verdictMap[role] = v.approved ? 'approved' : 'changes-requested';
+      }
+    }
+    if (verdictMap.code && verdictMap.test && verdictMap.security) {
+      reviewerVerdicts = {
+        code: verdictMap.code,
+        test: verdictMap.test,
+        security: verdictMap.security,
+      };
+    }
+  }
+
+  return {
+    attestationSha: null, // no direct attestation SHA on PipelineResult; enriched post-hoc
+    prNumber: parsePrNumber(pr.prUrl),
+    reviewerVerdicts,
+    iterations: pr.iterations ?? null,
+  };
+}
+
+/**
+ * AISDLC-229 — default umbrella dispatcher that calls `runExecuteCommand`
+ * (the AISDLC-182 umbrella CLI entry point) instead of `executePipeline`
+ * directly. This ensures the full Step 0-13 pipeline runs, including:
+ * Step 7 (reviewer spawning), Step 8 (verdict aggregation), Step 10
+ * (DSSE attestation sign), Step 11 (push + PR), Step 12 (sibling PRs).
+ *
+ * Spawner selection:
+ *   1. Default: `claude-cli` (AISDLC-198 inline manifest mode).
+ *   2. Fallback: if `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set
+ *      AND the umbrella returns `ok: false` with a spawner-unavailable reason
+ *      (AISDLC-225 consumer bridge not yet shipped), retry with `api-key`.
+ *   3. Otherwise: record `failure: { type: 'spawner-unavailable', ... }` and
+ *      set outcome to `aborted` so the tick continues without blocking.
+ *
+ * NOTE: The `api-key` fallback path uses ANTHROPIC_API_KEY. If the key is
+ * missing, the umbrella will return `ok: false` with an appropriate reason,
+ * which surfaces as `failure: { type: 'unknown', ... }`.
+ */
+function buildDefaultUmbrellaDispatch(
+  config: OrchestratorConfig,
+  adapters: OrchestratorAdapters,
+  emit: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void,
+): UmbrellaDispatchFn {
+  const logger = adapters.logger ?? DEFAULT_LOGGER;
+  const spawnerKind = resolveUmbrellaSpawnerKind(adapters);
+  const executor = adapters.umbrellaExecutor;
+
+  return async (taskId): Promise<import('./types.js').RichDispatchResult> => {
+    const runUmbrella = async (kind: SpawnerKind): Promise<ExecuteCommandResult> => {
+      if (executor) return executor(taskId, kind);
+      return runExecuteCommand({
+        taskId,
+        workDir: config.workDir,
+        spawnerKind: kind,
+        maxIterations: 2,
+        dryRun: false,
+        run: true,
+        logger,
+      });
+    };
+
+    // First attempt with configured spawner (usually `claude-cli`).
+    let execResult = await runUmbrella(spawnerKind);
+
+    // AISDLC-229 AC #2 — spawner-unavailable fallback. When:
+    //   1. the first attempt failed (ok: false)
+    //   2. AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key is set
+    //   3. the failure reason looks like a spawner-resolution error
+    // …retry once with `api-key`.
+    const fallbackEnv = process.env.AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK;
+    const wantFallback = fallbackEnv === 'api-key';
+    if (!execResult.ok && wantFallback && spawnerKind !== 'api-key') {
+      const reason = execResult.reason ?? '';
+      // Spawner-unavailable signatures: missing API key, manifest errors,
+      // or explicit ANTHROPIC_API_KEY requirement message.
+      const looksLikeSpawnerIssue =
+        reason.includes('ANTHROPIC_API_KEY') ||
+        reason.includes('spawner') ||
+        reason.includes('manifest') ||
+        reason.includes('ClaudeCliInlineSpawner') ||
+        reason.includes('claude-cli');
+      if (looksLikeSpawnerIssue) {
+        logger.warn(
+          `[orchestrator] claude-cli spawner unavailable for ${taskId}; ` +
+            `falling back to api-key (AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key)`,
+        );
+        emit({ type: 'OrchestratorDispatched', taskId }); // re-emit to log the retry
+        execResult = await runUmbrella('api-key');
+      }
+    }
+
+    // Map ExecuteCommandResult → RichDispatchResult
+    if (!execResult.ok) {
+      // Umbrella reported failure — synthesise a PipelineResult so the tick
+      // loop can reason about the outcome + run rollback if needed.
+      const reason = execResult.reason ?? 'unknown umbrella failure';
+      logger.warn(`[orchestrator] umbrella failed for ${taskId}: ${reason}`);
+      const failureType: PipelineFailureDetail['type'] = (() => {
+        if (reason.includes('developer-failed')) return 'developer-failed';
+        if (reason.includes('developer-json-contract-violated'))
+          return 'developer-json-contract-violated';
+        if (reason.includes('aborted')) return 'aborted';
+        if (reason.includes('spawner') || reason.includes('ANTHROPIC_API_KEY'))
+          return 'spawner-unavailable';
+        return 'unknown';
+      })();
+      const syntheticResult: PipelineResult = {
+        taskId,
+        branch: `ai-sdlc/${taskId.toLowerCase()}`,
+        worktreePath: `${config.workDir}/.worktrees/${taskId.toLowerCase()}`,
+        outcome:
+          failureType === 'developer-failed'
+            ? 'developer-failed'
+            : failureType === 'developer-json-contract-violated'
+              ? 'developer-json-contract-violated'
+              : 'aborted',
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+        notes: reason,
+      };
+      return {
+        result: syntheticResult,
+        failure: { type: failureType, message: reason },
+      };
+    }
+
+    // Umbrella succeeded — extract the PipelineResult + pipeline extras.
+    const pr = execResult.pipeline;
+    if (!pr) {
+      // Dry-run plan — shouldn't happen in `run: true` mode but be defensive.
+      const syntheticResult: PipelineResult = {
+        taskId,
+        branch: `ai-sdlc/${taskId.toLowerCase()}`,
+        worktreePath: `${config.workDir}/.worktrees/${taskId.toLowerCase()}`,
+        outcome: 'aborted',
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+        notes: 'umbrella returned ok without pipeline result (dry-run plan?)',
+      };
+      return {
+        result: syntheticResult,
+        failure: { type: 'unknown', message: 'umbrella ok but no pipeline result' },
+      };
+    }
+
+    const pipelineDetail = extractPipelineDetail(execResult);
+    return {
+      result: pr,
+      pipeline: pipelineDetail,
+    };
   };
 }
 
