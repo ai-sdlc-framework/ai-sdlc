@@ -20,6 +20,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "clean": "pnpm -r clean",
+    "tui": "AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs",
     "validate-schemas": "pnpm -C reference validate-schemas",
     "docs:sync": "node scripts/docs-sync.mjs",
     "docs:check": "node scripts/check-docs-sync.mjs",
