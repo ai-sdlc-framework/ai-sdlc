@@ -3,7 +3,7 @@ id: AISDLC-240
 title: >-
   cli-orchestrator tick broken — umbrella default spawner claude-cli needs
   AISDLC-225 bridge (not yet shipped)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 22:55'
 labels:
