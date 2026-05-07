@@ -1,5 +1,5 @@
 /**
- * Tests for the PRs pane component — RFC-0023 §7.2 / AISDLC-178.4.
+ * Tests for the PRs pane component — RFC-0023 §7.2 / AISDLC-178.4 + 178.4.1.
  *
  * Covers:
  *   - Empty state (no PRs)
@@ -8,6 +8,8 @@
  *   - Color mapping: green/yellow/red/gray rows
  *   - Keyboard: ↑↓ navigation, Enter opens detail, Escape closes detail
  *   - Detail view: renders PR number, CI, review, merge, next-step
+ *   - AISDLC-178.4.1: chain indicator + unblocks count + sort cycling (s key)
+ *   - AISDLC-178.4.1: detail view renders chain tree
  */
 
 import React from 'react';
@@ -16,6 +18,7 @@ import { render, cleanup } from 'ink-testing-library';
 
 import { PrsPaneContent } from './pane.js';
 import { buildPrRows, type PrRow } from './use-prs.js';
+import { derivePrChainGraph } from './critical-path.js';
 import type { GhPrSummary } from '../sources/gh-pr-cache.js';
 
 afterEach(() => {
@@ -56,6 +59,11 @@ describe('PrsPaneContent — empty state', () => {
   it('shows no-open-prs message', () => {
     const { lastFrame } = render(<PrsPaneContent rows={[]} error={null} />);
     expect(lastFrame()).toContain('No open PRs');
+  });
+
+  it('shows the active sort mode in the header', () => {
+    const { lastFrame } = render(<PrsPaneContent rows={[]} error={null} />);
+    expect(lastFrame()).toContain('sort: critical-path');
   });
 });
 
@@ -108,6 +116,7 @@ describe('PrsPaneContent — list rendering', () => {
     const rows = makeRows([makePr()]);
     const { lastFrame } = render(<PrsPaneContent rows={rows} error={null} />);
     expect(lastFrame()).toContain('navigate');
+    expect(lastFrame()).toContain('[s] sort');
   });
 
   it('truncates long branch names and titles', () => {
@@ -118,8 +127,35 @@ describe('PrsPaneContent — list rendering', () => {
       }),
     ]);
     const { lastFrame } = render(<PrsPaneContent rows={rows} error={null} />);
-    // Should render without crashing and contain the truncation indicator
     expect(lastFrame()).toContain('…');
+  });
+
+  it('renders chain indicator (🔗 N/M) for chained PRs (AC #3)', () => {
+    const rows = makeRows([
+      makePr({ number: 1 }),
+      makePr({ number: 2, labels: [{ name: 'depends-on:#1' }] }),
+    ]);
+    const { lastFrame } = render(<PrsPaneContent rows={rows} error={null} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('🔗 1/2');
+    expect(frame).toContain('🔗 2/2');
+  });
+
+  it('renders unblocks N count for PRs with downstream (AC #3)', () => {
+    const rows = makeRows([
+      makePr({ number: 1 }),
+      makePr({ number: 2, labels: [{ name: 'depends-on:#1' }] }),
+      makePr({ number: 3, labels: [{ name: 'depends-on:#1' }] }),
+    ]);
+    const { lastFrame } = render(<PrsPaneContent rows={rows} error={null} />);
+    expect(lastFrame()).toContain('unblocks 2');
+  });
+
+  it('omits chain indicator on singleton PRs', () => {
+    const rows = makeRows([makePr({ number: 99 })]);
+    const { lastFrame } = render(<PrsPaneContent rows={rows} error={null} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).not.toContain('🔗');
   });
 });
 
@@ -133,7 +169,6 @@ describe('PrsPaneContent — keyboard navigation', () => {
     await flush();
 
     const frame = lastFrame() ?? '';
-    // Detail view should be visible
     expect(frame).toContain('#99');
   });
 
@@ -142,10 +177,9 @@ describe('PrsPaneContent — keyboard navigation', () => {
     const { lastFrame, stdin } = render(<PrsPaneContent rows={rows} error={null} />);
 
     await flush();
-    stdin.write('\r'); // open detail
+    stdin.write('\r');
     await flush();
 
-    // Press Escape to close
     stdin.write('\x1b'); // ESC
     await flush();
 
@@ -164,7 +198,6 @@ describe('PrsPaneContent — keyboard navigation', () => {
     stdin.write('\x1b[B'); // down arrow
     await flush();
 
-    // Just verify it didn't crash
     expect(lastFrame()).toContain('PRs IN FLIGHT');
   });
 
@@ -185,5 +218,52 @@ describe('PrsPaneContent — keyboard navigation', () => {
     expect(frame).toContain('#77');
     expect(frame).toContain('approved');
     expect(frame).toContain('ready-to-merge');
+  });
+
+  it('cycles sort modes on `s` keystroke (AC #5)', async () => {
+    const rows = makeRows([
+      makePr({ number: 1, statusCheckRollup: 'SUCCESS' }),
+      makePr({ number: 2, statusCheckRollup: 'FAILURE' }),
+    ]);
+    const { lastFrame, stdin } = render(<PrsPaneContent rows={rows} error={null} />);
+    await flush();
+    expect(lastFrame()).toContain('sort: critical-path');
+
+    stdin.write('s');
+    await flush();
+    expect(lastFrame()).toContain('sort: recency');
+
+    stdin.write('s');
+    await flush();
+    expect(lastFrame()).toContain('sort: ci-status');
+
+    stdin.write('s');
+    await flush();
+    expect(lastFrame()).toContain('sort: critical-path');
+  });
+
+  it('detail view renders chain tree when chain present (AC #4)', async () => {
+    const prs = [
+      makePr({ number: 100, headRefName: 'feat/parent', title: 'parent' }),
+      makePr({
+        number: 101,
+        headRefName: 'feat/child',
+        title: 'child',
+        labels: [{ name: 'depends-on:#100' }],
+      }),
+    ];
+    const rows = makeRows(prs);
+    const graph = derivePrChainGraph({ prs });
+    const { lastFrame, stdin } = render(
+      <PrsPaneContent rows={rows} prs={prs} graph={graph} error={null} />,
+    );
+    await flush();
+    stdin.write('\r'); // open detail on focused (head of chain)
+    await flush();
+
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Chain:');
+    // Head-of-chain has a downstream entry pointing at #101
+    expect(frame).toContain('#101');
   });
 });

@@ -210,8 +210,32 @@ Compact summary of every open PR:
 - Review state (approved / changes-requested / pending / no-reviews-yet)
 - Merge state (clean / behind / dirty / blocked-by-required-check)
 - "Next step" annotation: `awaiting-ci`, `ready-to-merge`, `awaiting-human`, `awaiting-rebase`
+- **Chain indicator** (AISDLC-178.4.1): `🔗 N/M` when the PR is part of a serial merge chain (PR `N` of `M`); empty for singletons.
+- **Unblocks count** (AISDLC-178.4.1): `unblocks N` — transitive count of downstream PRs blocked on this one.
 
-Color-coded by urgency. Sorted by "operator-attention required" descending.
+Color-coded by urgency.
+
+**Sort order** — default is **critical-path** (AISDLC-178.4.1):
+
+```
+prCriticalPathLength DESC → unblockCount DESC → effPri DESC → age (createdAt) ASC
+```
+
+Head-of-chain PRs surface first so the operator merges in dependency-respecting order and avoids rebase storms. The `s` keystroke cycles between three modes:
+
+- `critical-path` (default) — merge sequence per the formula above.
+- `recency` — `updatedAt` DESC; useful when the operator wants to see "what just changed."
+- `ci-status` — legacy "operator-attention" bucket sort (blocked-on-human → changes-requested → awaiting-rebase → in-progress → ready-to-merge), preserved for back-compat.
+
+PR dependencies powering critical-path are derived from three sources, in this order (deduped, weakest signal does not override stronger):
+
+1. **Task dependencies via 1:1 task↔PR mapping** — branch-name task token (`AISDLC-NNN[.M[.K]]`) is looked up in the latest RFC-0014 dep snapshot; every dep ID that maps to another open PR contributes an upstream edge.
+2. **Operator-declared `depends-on:#N` markers** — labels (`depends-on:#247`, also `depends-on-#N` and `depends-on: N` variants) and inline body markers (`Depends-on: #247`).
+3. **Git branch ancestry** (optional, off by default in the render path) — pluggable hook so a future revision can wire `git merge-base --is-ancestor` once the perf budget is understood.
+
+The longer-term home for auto-rebase trigger semantics, depends-on label conventions, and multi-repo PR ordering is **RFC-0034 (PR Merge Critical-Path Ordering)** — reserved (no file yet) per the registry. The minimum derivation needed for sort + chain indicator + chain-tree detail view ships under AISDLC-178.4.1.
+
+Pressing Enter on a row opens a detail view with full title/body, review history, **and an ASCII chain tree** (upstream PRs above, downstream below — mirrors the §7.3 task dep-tree rendering).
 
 ### 7.3 Critical path pane (bottom-left)
 
