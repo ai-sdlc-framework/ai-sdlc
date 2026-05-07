@@ -318,11 +318,36 @@ Sequential phases, each behind feature flag `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=exp
 | **Phase 2: Failure playbook** | 1.5 wk | All 8 modes from §5.1; per-mode tests with synthetic triggers | 90%+ of injected failures recover automatically; remaining 10% escalate cleanly |
 | **Phase 3: Pre-dispatch filters** | 0.5 wk | DoR readiness (RFC-0011), dependency check (cli-deps), external-deps gating (RFC-0014 Q3) | Filter trace logged; `OrchestratorAwaitingExternal` event fires correctly |
 | **Phase 4: Observability hooks** | 1 wk | events.jsonl writer, `cli-status --orchestrator` view, schema definition for downstream consumers | Dashboard mock can render real-time view from the event stream |
-| **Phase 5: Hardening + soak** | corpus-driven, NOT calendar-gated | Real-issue queue (≥20 tasks across 3 RFCs); chaos test (kill orchestrator mid-tick, verify resume); subscription-quota burn validation. **Shipped via AISDLC-169.5**: `cli-orchestrator-corpus aggregate` aggregator (`pipeline-cli/src/cli/orchestrator-corpus.ts`); chaos-test harness (`pipeline-cli/src/orchestrator/chaos.test.ts`); hybrid promotion runbook ([`docs/operations/orchestrator-promotion.md`](../../docs/operations/orchestrator-promotion.md)) | Promotion to default-on when 95%+ tasks complete without human intervention AND no quota-burn surprise. Operator dispatches the flag flip from the runbook (corpus path or operator-override path); rollback is a single-line revert. |
+| **Phase 5: Hardening + soak** | corpus-driven, NOT calendar-gated | Real-issue queue (≥20 tasks across 3 RFCs); chaos test (kill orchestrator mid-tick, verify resume); subscription-quota burn validation. **Shipped via AISDLC-169.5**: `cli-orchestrator-corpus aggregate` aggregator (`pipeline-cli/src/cli/orchestrator-corpus.ts`); chaos-test harness (`pipeline-cli/src/orchestrator/chaos.test.ts`); hybrid promotion runbook ([`docs/operations/orchestrator-promotion.md`](../../docs/operations/orchestrator-promotion.md)). **Inline spawner path (AISDLC-225) marked production-ready**: `/ai-sdlc orchestrator-tick` slash command (consumer bridge) ships the missing half of AISDLC-198 Option 3 — reads `dispatch-manifest.json`, invokes `Agent` tool inline, writes `dispatch-result.json`. Subscription-billing path is now end-to-end. See [`docs/operations/orchestrator-inline-loop.md`](../../docs/operations/orchestrator-inline-loop.md) for the consumer protocol. | Promotion to default-on when 95%+ tasks complete without human intervention AND no quota-burn surprise. Operator dispatches the flag flip from the runbook (corpus path or operator-override path); rollback is a single-line revert. |
 
 Total wall-clock: ~4 weeks for Phase 1-4; Phase 5 is corpus-driven per maintainer directive 2026-05-01.
 
 Critical path: Phase 1 → Phase 2 → Phase 3 → Phase 4 → Phase 5.
+
+### Phase 5 — Inline spawner promotion status (AISDLC-225)
+
+The subscription-billing inline spawner path (AISDLC-198 Option 3) is now
+**production-ready** as of AISDLC-225. The two-part protocol is fully
+implemented:
+
+1. **Producer** (`ClaudeCliInlineSpawner`) — writes `dispatch-manifest.json`,
+   returns `{ status: 'manifest-emitted' }`. Shipped in AISDLC-198.
+
+2. **Consumer** (`/ai-sdlc orchestrator-tick`) — reads the manifest, invokes
+   the `Agent` tool, writes `dispatch-result.json`, returns control to the
+   tick loop. Shipped in AISDLC-225.
+
+The `dispatch-result.ts` module provides `writeDispatchResult()`,
+`readDispatchResult()`, and `dispatchResultToSubagentResult()` so the
+orchestrator tick loop can recover the `SubagentResult` from the result file
+and continue `executePipeline()` from Step 6.
+
+**Promotion gate**: The inline path is production-ready for inclusion in the
+corpus-driven soak. Operators running the dogfood pipeline should prefer
+`--spawner claude-cli` (subscription billing) over the API-key path. Once the
+soak corpus shows 95%+ task completion without human intervention and no
+quota-burn surprises, the orchestrator is promoted to default-on per the
+[orchestrator-promotion runbook](../../docs/operations/orchestrator-promotion.md).
 
 ## 12. Resource Sizing & Cost Model
 

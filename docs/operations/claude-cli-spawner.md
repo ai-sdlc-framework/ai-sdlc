@@ -241,9 +241,48 @@ This round-trip keeps the pipeline-cli orchestrator code pure (no Agent tool
 calls in TypeScript land — those live in the slash command body only) while
 letting the inline mode drive the dispatch.
 
+### Consumer bridge — production-ready (AISDLC-225)
+
+Step 6 above (converting the Agent result back into a `SubagentResult`) is
+implemented by the `/ai-sdlc orchestrator-tick` slash command (AISDLC-225).
+The bridge protocol uses a second well-known file:
+
+```
+$ARTIFACTS_DIR/_orchestrator/dispatch-result.json
+```
+
+After the Agent call, the slash command body writes the result to this file
+using `writeDispatchResult()` from `pipeline-cli/src/runtime/spawners/dispatch-result.ts`.
+The orchestrator tick loop reads it via `readDispatchResult()` and converts it
+back to a `SubagentResult` via `dispatchResultToSubagentResult()`.
+
+**Full round-trip:**
+
+```
+ClaudeCliInlineSpawner.spawn()
+  → writes dispatch-manifest.json
+  → returns { status: 'manifest-emitted' }
+
+/ai-sdlc orchestrator-tick (slash command body)
+  → reads dispatch-manifest.json
+  → invokes Agent tool
+  → writes dispatch-result.json
+
+cli-orchestrator tick --continue-from-result
+  → reads dispatch-result.json
+  → dispatchResultToSubagentResult()
+  → continues executePipeline() Steps 6+
+```
+
+See [`docs/operations/orchestrator-inline-loop.md`](./orchestrator-inline-loop.md)
+for the complete consumer protocol documentation.
+
 ---
 
 ## Running the inline orchestrator
 
-See the [Operator runbook](./orchestrator-runbook.md#inline-orchestrator-mode-claude-cli-spawner)
-for the step-by-step start procedure.
+See the [Consumer Bridge Protocol](./orchestrator-inline-loop.md) for the
+step-by-step start procedure and loop control options.
+
+For background on the operator runbook, see
+[orchestrator-runbook.md](./orchestrator-runbook.md#inline-orchestrator-mode-claude-cli-spawner).
