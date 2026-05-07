@@ -3,7 +3,7 @@ id: AISDLC-178.2
 title: >-
   Phase 2: Data sources — events.jsonl tail, gh PR cache, dep-snapshot reader,
   cli-status poller, backlog file walker
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 02:02'
 labels:
@@ -42,13 +42,13 @@ Manual refresh via `r` keystroke is the escape hatch for "I want to see X now."
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 pipeline-cli/src/tui/sources/events-tail.ts implements rolling tail of events-YYYY-MM-DD.jsonl (5s cadence)
-- [ ] #2 pipeline-cli/src/tui/sources/gh-pr-cache.ts wraps `gh pr list --json` with 60s TTL cache + invalidation on `r` keystroke
-- [ ] #3 pipeline-cli/src/tui/sources/dep-snapshot-reader.ts reads $ARTIFACTS_DIR/_deps/snapshot.<iso>.<tag>.jsonl on-demand
-- [ ] #4 pipeline-cli/src/tui/sources/orchestrator-status.ts polls `cli-orchestrator status` every 10s
-- [ ] #5 pipeline-cli/src/tui/sources/backlog-walker.ts walks backlog/tasks/ + backlog/completed/ every 30s
-- [ ] #6 Each source exposes a React hook (useEvents, useGhPrs, useDepSnapshot, useOrchestratorStatus, useBacklogTasks) for downstream pane consumption
-- [ ] #7 Graceful degradation per RFC §12: missing data source surfaces banner instead of crashing pane
-- [ ] #8 Unit tests cover: cache TTL behavior, polling lifecycle, error-handling for missing/corrupt files
-- [ ] #9 New code reaches 80%+ patch coverage
+- [x] #1 pipeline-cli/src/tui/sources/events-tail.ts implements rolling tail of events-YYYY-MM-DD.jsonl (5s cadence)
+- [x] #2 pipeline-cli/src/tui/sources/gh-pr-cache.ts wraps `gh pr list --json` with 60s TTL cache + invalidation on `r` keystroke
+- [x] #3 pipeline-cli/src/tui/sources/dep-snapshot-reader.ts reads $ARTIFACTS_DIR/_deps/snapshot.<iso>.<tag>.jsonl on-demand
+- [x] #4 pipeline-cli/src/tui/sources/orchestrator-status.ts polls `cli-orchestrator status` every 10s
+- [x] #5 pipeline-cli/src/tui/sources/backlog-walker.ts walks backlog/tasks/ + backlog/completed/ every 30s
+- [x] #6 Each source exposes a React hook (useEvents, useGhPrs, useDepSnapshot, useOrchestratorStatus, useBacklogTasks) for downstream pane consumption
+- [x] #7 Graceful degradation per RFC §12: missing data source surfaces banner instead of crashing pane
+- [x] #8 Unit tests cover: cache TTL behavior, polling lifecycle, error-handling for missing/corrupt files
+- [x] #9 New code reaches 80%+ patch coverage
 <!-- AC:END -->
