@@ -1,7 +1,7 @@
 ---
 id: AISDLC-217
 title: Auto-sync untracked parent task files before dispatch (Step 0.5)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 14:11'
 labels:
@@ -56,3 +56,7 @@ Optional: if the parent has untracked files that AREN'T in `backlog/tasks/` (e.g
 - [ ] #8 Hermetic test: parent with 1 untracked file matching an already-on-origin path → skipped (already there)
 - [ ] #9 Documentation in `ai-sdlc-plugin/commands/execute.md` updated to describe Step 0.5
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Implementation shipped via PR for AISDLC-217; lifecycle close was lost when the now-retired `backlog-task-complete.yml` workflow's chore-close PR (#369/#371) failed to auto-merge. Moving to `backlog/completed/` retroactively as part of the post-AISDLC-220 sync sweep.

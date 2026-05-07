@@ -3,7 +3,7 @@ id: AISDLC-216
 title: >-
   MCP backlog tools must respect Pattern C — route writes to active worktree,
   not parent
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 14:10'
 labels:
@@ -57,3 +57,7 @@ The MCP server's project-root resolver needs a Pattern-C-aware mode:
 - [ ] #6 Hermetic test: simulate cwd-from-worktree + task_create → asserts file lands in worktree's backlog/, not parent's
 - [ ] #7 Documentation in CLAUDE.md `## Plugin MCP server — project root resolution` section updated with Pattern C resolver behavior
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+Implementation shipped via PR for AISDLC-216; lifecycle close was lost when the now-retired `backlog-task-complete.yml` workflow's chore-close PR (#369/#371) failed to auto-merge. Moving to `backlog/completed/` retroactively as part of the post-AISDLC-220 sync sweep.
