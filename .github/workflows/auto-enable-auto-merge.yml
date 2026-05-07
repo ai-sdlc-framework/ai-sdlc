@@ -83,7 +83,6 @@ on:
 permissions:
   pull-requests: write
   contents: write
-  checks: read
 
 jobs:
   enable-auto-merge:
@@ -99,7 +98,7 @@ jobs:
           # check_suite + status events expose the head SHA differently.
           # Either field is empty when the OTHER event fires; cat with || true
           # to keep the assignment non-fatal.
-          HEAD_SHA: ${{ github.event.check_suite.head_sha || github.event.commit.sha || github.sha }}
+          HEAD_SHA: ${{ github.event.check_suite.head_sha || github.event.sha || github.sha }}
         run: |
           set -euo pipefail
           if [ "$EVENT_NAME" = "pull_request" ]; then
@@ -127,18 +126,23 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          PR_INFO=$(gh pr view "$PR" --json isDraft,headRepository -q '{isDraft: .isDraft, headRepoName: (.headRepository.name // "")}')
+          # Use the full `owner/repo` of the PR head (NOT the bare repo name).
+          # Forks always preserve the bare name, so a bare-name comparison would
+          # accept fork PRs and contradict the same-repo intent below.
+          PR_INFO=$(gh pr view "$PR" --json isDraft,headRepositoryOwner,headRepository \
+            -q '{isDraft: .isDraft, headFull: (((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")) // "")}')
           IS_DRAFT=$(echo "$PR_INFO" | jq -r '.isDraft')
-          # GitHub's `headRepository.name` is just the repo name (e.g. "ai-sdlc"),
-          # not "owner/repo". We compare against the bare name from the org/repo
-          # github.repository value.
-          HEAD_REPO_NAME=$(echo "$PR_INFO" | jq -r '.headRepoName')
-          REPO_NAME="${REPO##*/}"
+          HEAD_FULL=$(echo "$PR_INFO" | jq -r '.headFull')
           if [ "$IS_DRAFT" = "true" ]; then
             echo "[auto-enable] PR #$PR is draft — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
-          elif [ -n "$HEAD_REPO_NAME" ] && [ "$HEAD_REPO_NAME" != "$REPO_NAME" ]; then
-            echo "[auto-enable] PR #$PR is from a fork ($HEAD_REPO_NAME) — skipping."
+          elif [ "$HEAD_FULL" = "/" ] || [ -z "$HEAD_FULL" ]; then
+            # Defensive: head repository was deleted or API returned an empty
+            # shape. Refuse to arm — operator can re-arm manually if intended.
+            echo "[auto-enable] PR #$PR has no resolvable head repository — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$HEAD_FULL" != "$REPO" ]; then
+            echo "[auto-enable] PR #$PR is from a fork ($HEAD_FULL) — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
