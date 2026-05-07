@@ -1005,7 +1005,6 @@ export const depsSnapshotV1Schema = {
     'dependents',
     'depth',
     'criticalPathLength',
-    'effectivePriority',
     'externalDependencies',
     'lastModified',
   ],

@@ -38,6 +38,7 @@ function makeRecord(
     dependents: [],
     depth: 0,
     criticalPathLength: 0,
+    effectivePriority: 2, // medium default per RFC-0014
     externalDependencies: [],
     lastModified: '',
     ...overrides,

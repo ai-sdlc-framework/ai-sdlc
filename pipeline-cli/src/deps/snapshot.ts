@@ -89,8 +89,13 @@ export interface SnapshotRecord {
    * (a leaf with priority:critical would sort below a chain-of-3 with
    * priority:low). Computed by `computeEffectivePriorities` at snapshot
    * time and stamped onto each record.
+   *
+   * Optional in the type for backward-compat with stale on-disk snapshots
+   * written before this field shipped. Readers use the
+   * `?? DEFAULT_PRIORITY_WEIGHT` (medium=2) fallback so the TUI never
+   * crashes on a stale artifact. New snapshots ALWAYS populate this field.
    */
-  effectivePriority: number;
+  effectivePriority?: number;
   /** RFC-0014 §8 + Q3 — declared external blockers (pure signal in v1). */
   externalDependencies: ExternalDependency[];
   /** ISO-8601 mtime of the on-disk task file (best-effort; '' on stat failure). */
