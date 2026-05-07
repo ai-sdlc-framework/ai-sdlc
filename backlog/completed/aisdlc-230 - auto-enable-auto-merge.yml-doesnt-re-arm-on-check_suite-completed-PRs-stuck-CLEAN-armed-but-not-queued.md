@@ -3,7 +3,7 @@ id: AISDLC-230
 title: >-
   auto-enable-auto-merge.yml doesn't re-arm on check_suite.completed — PRs stuck
   CLEAN+armed but not queued
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 21:30'
 labels:
