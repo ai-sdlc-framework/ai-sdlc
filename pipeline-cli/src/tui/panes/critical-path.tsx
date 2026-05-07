@@ -1,29 +1,20 @@
 /**
- * Critical Path pane (bottom-left) — RFC-0023 §7.3.
+ * Critical Path pane (bottom-left) — RFC-0023 §7.3 / AISDLC-178.4.
  *
- * Phase 1: placeholder. Phase 4 (AISDLC-178.4) wires the RFC-0014 dep
- * snapshot reader.
+ * Phase 4 (AISDLC-178.4): wires the RFC-0014 dep snapshot reader from Phase 2
+ * via useCriticalPath(). Renders the dispatch frontier sorted by
+ * effectivePriority + criticalPathLength, showing the next ~5–10 tasks the
+ * orchestrator would dispatch.
  *
- * Will render the dispatch frontier sorted by effectivePriority +
- * criticalPathLength, showing the next ~5–10 tasks the orchestrator would
- * pick up. Per-row: ID, title, effPri, CPL, blast-radius (RFC-0014 Phase 3).
+ * Per row: task ID, effPri, CPL, blast-radius (downstream count).
+ * Enter opens detail with ASCII dep tree (parents above, children below).
  */
 
 import React from 'react';
-import { Box, Text } from 'ink';
+import { CriticalPathPaneContent } from '../critical-path/pane.js';
+import { useCriticalPath } from '../critical-path/use-critical-path.js';
 
 export function CriticalPathPane(): React.ReactElement {
-  return (
-    <Box flexDirection="column" borderStyle="single" paddingX={1} flexGrow={1}>
-      <Text bold color="yellow">
-        🛤️ CRITICAL PATH (frontier)
-      </Text>
-      <Text color="gray">─────────────────────────</Text>
-      <Box marginTop={1}>
-        <Text color="gray" dimColor>
-          (Phase 4: RFC-0014 dep frontier — effPri, CPL, blast-radius)
-        </Text>
-      </Box>
-    </Box>
-  );
+  const { rows, allRecords, error } = useCriticalPath();
+  return <CriticalPathPaneContent rows={rows} allRecords={allRecords} error={error} />;
 }

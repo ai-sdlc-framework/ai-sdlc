@@ -3,7 +3,7 @@ id: AISDLC-178.4
 title: >-
   Phase 4: PRs pane + Critical Path pane — replace placeholders with real
   implementations
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 02:03'
 labels:
@@ -37,15 +37,15 @@ Parallelizable with Phases 3 + 5.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 pipeline-cli/src/tui/prs/pane.tsx renders PRs pane per RFC §7.2 layout
-- [ ] #2 PR row shows: number, branch (truncated), title (truncated), CI glyph, review state, merge state, next-step annotation
-- [ ] #3 Color coding: green (ready-to-merge), yellow (in-progress), red (blocked), grey (no-attention-needed)
-- [ ] #4 Sort order: blocked-on-human > changes-requested > awaiting-rebase > in-progress > ready-to-merge
-- [ ] #5 Enter opens PR detail (full-screen): full title/body, review history, file change summary; `o` opens in browser via gh browse
-- [ ] #6 pipeline-cli/src/tui/critical-path/pane.tsx renders Critical Path pane per RFC §7.3 layout
-- [ ] #7 Critical Path consumes useDepSnapshot hook from Phase 2; sorts by effectivePriority DESC → criticalPathLength DESC → recency DESC → id ASC (matches cli-deps frontier)
-- [ ] #8 Critical Path row shows: task ID, title (truncated), effPri, CPL, blast-radius count
-- [ ] #9 Enter on Critical Path row opens detail with full dep tree rendered as ASCII (parents above, children below the focused task)
-- [ ] #10 Unit tests cover: PR sort order, CI glyph mapping, dep tree ASCII rendering, color/state encoding
-- [ ] #11 New code reaches 80%+ patch coverage
+- [x] #1 pipeline-cli/src/tui/prs/pane.tsx renders PRs pane per RFC §7.2 layout
+- [x] #2 PR row shows: number, branch (truncated), title (truncated), CI glyph, review state, merge state, next-step annotation
+- [x] #3 Color coding: green (ready-to-merge), yellow (in-progress), red (blocked), grey (no-attention-needed)
+- [x] #4 Sort order: blocked-on-human > changes-requested > awaiting-rebase > in-progress > ready-to-merge
+- [x] #5 Enter opens PR detail (full-screen): full title/body, review history, file change summary; `o` opens in browser via gh browse
+- [x] #6 pipeline-cli/src/tui/critical-path/pane.tsx renders Critical Path pane per RFC §7.3 layout
+- [x] #7 Critical Path consumes useDepSnapshot hook from Phase 2; sorts by effectivePriority DESC → criticalPathLength DESC → recency DESC → id ASC (matches cli-deps frontier)
+- [x] #8 Critical Path row shows: task ID, title (truncated), effPri, CPL, blast-radius count
+- [x] #9 Enter on Critical Path row opens detail with full dep tree rendered as ASCII (parents above, children below the focused task)
+- [x] #10 Unit tests cover: PR sort order, CI glyph mapping, dep tree ASCII rendering, color/state encoding
+- [x] #11 New code reaches 80%+ patch coverage (94.81% lines, 87.17% functions overall)
 <!-- AC:END -->
