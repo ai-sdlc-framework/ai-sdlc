@@ -366,15 +366,37 @@ export async function runOrchestratorTick(
   //      that haven't migrated to the umbrella shape yet. Wrapped to fill
   //      the `RichDispatchResult` envelope with `pipeline: undefined` and
   //      `failure: undefined` so the tick loop has a single code path.
-  //   3. Default umbrella: `buildDefaultUmbrellaDispatch()` — calls
-  //      `runExecuteCommand` with the configured spawner kind.
+  //   3. Default — production behaviour:
+  //      - Default to the LEGACY direct-spawner path (`buildDefaultDispatch`)
+  //        wrapped in the rich envelope. This uses `ShellClaudePSpawner`
+  //        directly, the same path that successfully drove AISDLC-178.5,
+  //        178.6, and 229 itself through the queue.
+  //      - Opt INTO the umbrella path with `AI_SDLC_ORCHESTRATOR_USE_UMBRELLA=1`.
+  //        AISDLC-240 — the umbrella's default `claude-cli` spawner depends
+  //        on AISDLC-225's manifest-consumer bridge, which is not yet shipped.
+  //        Without it the spawner emits a manifest no one consumes, the
+  //        subprocess "completes" with empty stdout, and every dispatch
+  //        fails as `developer-json-contract-violated`. Reverting the
+  //        default to the legacy path unblocks orchestrator dispatch
+  //        until AISDLC-225 closes the consumer loop.
+  const useUmbrella = (process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA ?? '').trim() === '1';
+  // AISDLC-240 — `adapters.umbrellaExecutor` is the test-injection hook for
+  // stubbing the umbrella's internal `runExecuteCommand` call. Its presence
+  // means the test is exercising the umbrella path, so opt INTO the umbrella
+  // even when the env flag is absent. Without this special-case the umbrella
+  // tests fail because `buildDefaultUmbrellaDispatch` is no longer the default.
+  const testWantsUmbrella = adapters.umbrellaExecutor !== undefined;
   const richDispatchFn: UmbrellaDispatchFn = (() => {
     if (adapters.umbrellaDispatch) return adapters.umbrellaDispatch;
     if (adapters.dispatch) {
       const legacyFn = adapters.dispatch;
       return async (taskId: string) => ({ result: await legacyFn(taskId) });
     }
-    return buildDefaultUmbrellaDispatch(config, adapters, emit);
+    if (useUmbrella || testWantsUmbrella) {
+      return buildDefaultUmbrellaDispatch(config, adapters, emit);
+    }
+    const legacyFn = buildDefaultDispatch(config, adapters, emit);
+    return async (taskId: string) => ({ result: await legacyFn(taskId) });
   })();
   // NOTE: `tryPlaybookOnError` builds its own dispatchFn from
   // `args.adapters.dispatch ?? buildDefaultDispatch(...)` at call time.
