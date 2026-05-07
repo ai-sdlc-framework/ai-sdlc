@@ -15,7 +15,7 @@ dependencies: []
 priority: high
 references:
   - pipeline-cli/src/steps/11-push-and-pr.ts
-  - ai-sdlc-plugin/skills/execute/SKILL.md
+  - ai-sdlc-plugin/commands/execute.md
 ---
 
 ## Description
@@ -104,8 +104,8 @@ On `hard-conflict`:
 ## References
 
 - `pipeline-cli/src/steps/11-push-and-pr.ts` (the step this modifies)
-- `ai-sdlc-plugin/skills/execute/SKILL.md` (skill body's Step 11 description)
-- `ai-sdlc-plugin/skills/rebase/SKILL.md` (auto-resolve patterns to reuse)
+- `ai-sdlc-plugin/commands/execute.md` (slash command body's Step 11 description)
+- `ai-sdlc-plugin/commands/rebase.md` (auto-resolve patterns to reuse)
 - `pipeline-cli/src/cli/rebase.ts` (the existing PR-level rebase implementation — code-reuse target)
 - Operator's "ai-sdlc plugin feedback for Dom.md" 2026-05-07 — Alex's report
 - AISDLC-231 (sister task — hot-file serializer, same parallel-safety batch)

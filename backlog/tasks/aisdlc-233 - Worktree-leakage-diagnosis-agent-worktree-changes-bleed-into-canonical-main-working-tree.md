@@ -15,7 +15,8 @@ labels:
 dependencies: []
 priority: high
 references:
-  - .worktrees/
+  - CLAUDE.md
+  - pnpm-workspace.yaml
 ---
 
 ## Description
