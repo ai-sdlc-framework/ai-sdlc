@@ -3,7 +3,7 @@ id: AISDLC-178.5
 title: >-
   Phase 5: Mode switching + Configuration browser — b/p/d/c/a mode keys +
   external $EDITOR handoff
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 02:03'
 labels:
@@ -48,16 +48,16 @@ Parallelizable with Phases 3 + 4.
 
 ## Acceptance Criteria
 <!-- AC:BEGIN -->
-- [ ] #1 pipeline-cli/src/tui/modes/router.tsx handles all 9 mode keys (b/p/d/c/a/slash/r/?/q)
-- [ ] #2 Mode keys swap the active pane to full-screen; Esc returns to Overview Mode
-- [ ] #3 Help screen (?) lists every keystroke with description, sourced from a single keymap config (no drift between footer + help)
-- [ ] #4 Configuration browser lists every YAML file under .ai-sdlc/ with status icon (valid/invalid)
-- [ ] #5 Selecting a config file shows it syntax-highlighted (yaml-parser based); validation errors annotated inline with line numbers
-- [ ] #6 `e` keystroke launches $EDITOR on the selected file; on editor exit, re-validates and surfaces errors before saving
-- [ ] #7 Operator can override empty-state copy via .ai-sdlc/tui-config.yaml per OQ-9 resolution
-- [ ] #8 `b` keystroke on a task row launches backlog.md kanban URL via gh browse / open / xdg-open / pbcopy fallback per OQ-5 resolution
-- [ ] #9 Search (/) filters the current pane's items by substring match
-- [ ] #10 Refresh (r) invalidates all source caches and re-polls
-- [ ] #11 Unit tests cover: keymap routing, editor handoff lifecycle, validation re-run on save, fallback chain for browser launch
-- [ ] #12 New code reaches 80%+ patch coverage
+- [x] #1 pipeline-cli/src/tui/modes/router.tsx handles all 9 mode keys (b/p/d/c/a/slash/r/?/q)
+- [x] #2 Mode keys swap the active pane to full-screen; Esc returns to Overview Mode
+- [x] #3 Help screen (?) lists every keystroke with description, sourced from a single keymap config (no drift between footer + help)
+- [x] #4 Configuration browser lists every YAML file under .ai-sdlc/ with status icon (valid/invalid)
+- [x] #5 Selecting a config file shows it syntax-highlighted (yaml-parser based); validation errors annotated inline with line numbers
+- [x] #6 `e` keystroke launches $EDITOR on the selected file; on editor exit, re-validates and surfaces errors before saving
+- [x] #7 Operator can override empty-state copy via .ai-sdlc/tui-config.yaml per OQ-9 resolution
+- [x] #8 `b` keystroke on a task row launches backlog.md kanban URL via gh browse / open / xdg-open / pbcopy fallback per OQ-5 resolution
+- [x] #9 Search (/) filters the current pane's items by substring match
+- [x] #10 Refresh (r) invalidates all source caches and re-polls
+- [x] #11 Unit tests cover: keymap routing, editor handoff lifecycle, validation re-run on save, fallback chain for browser launch
+- [x] #12 New code reaches 80%+ patch coverage
 <!-- AC:END -->

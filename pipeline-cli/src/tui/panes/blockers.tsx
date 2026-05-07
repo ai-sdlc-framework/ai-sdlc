@@ -22,8 +22,17 @@ import { Box, Text, useInput } from 'ink';
 
 import { useBlockers } from '../blockers/use-blockers.js';
 import type { BlockerItem, BlockerKind } from '../blockers/detector.js';
+import { launchKanban, type KanbanLaunchResult } from '../kanban.js';
+import { loadTuiConfig } from '../tui-config.js';
+import { useIsFullScreen, useSearch } from '../modes/router.js';
 
 export const BLOCKERS_EMPTY_STATE = '✓ No decisions pending — pipeline self-driving';
+
+/** Resolve the empty-state copy, honoring `.ai-sdlc/tui-config.yaml` (OQ-9). */
+function resolveEmptyState(workDir?: string): string {
+  const config = loadTuiConfig({ workDir });
+  return config.blockersEmptyState ?? BLOCKERS_EMPTY_STATE;
+}
 
 // ── Kind icons ───────────────────────────────────────────────────────────────
 
@@ -73,6 +82,37 @@ function formatAge(updatedAt: string): string {
 function truncate(str: string, maxLen: number): string {
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 1) + '…';
+}
+
+/**
+ * Extract a task ID (e.g. `AISDLC-178.5`) from a BlockerItem. Tasks
+ * surface as `ref: AISDLC-NNN`; PR blockers (ref: `#42`) return null and
+ * the kanban link-out is skipped.
+ */
+export function extractTaskId(item: BlockerItem): string | null {
+  if (!item.ref) return null;
+  const match = /^([A-Z][A-Z0-9]*-[\d.]+)$/.exec(item.ref);
+  return match ? match[1] : null;
+}
+
+/**
+ * Filter blockers by search query (substring match against ref + summary).
+ * No-op when not in full-screen mode or when query is null/empty (Overview
+ * Mode keeps every blocker visible per AC#9).
+ */
+export function filterBlockers(
+  items: BlockerItem[],
+  isFullScreen: boolean,
+  query: string | null,
+): BlockerItem[] {
+  if (!isFullScreen || !query) return items;
+  const q = query.toLowerCase();
+  return items.filter(
+    (b) =>
+      b.ref.toLowerCase().includes(q) ||
+      b.summary.toLowerCase().includes(q) ||
+      b.detail.toLowerCase().includes(q),
+  );
 }
 
 // ── Detail view ──────────────────────────────────────────────────────────────
@@ -228,16 +268,49 @@ function BlockerRow({ item, isSelected }: BlockerRowProps): React.ReactElement {
 export interface BlockersPaneProps {
   /** Inject hook opts (tests). */
   hookOpts?: Parameters<typeof useBlockers>[0];
+  /**
+   * Inject the kanban launcher (tests). Defaults to the production
+   * `launchKanban` (open / xdg-open / pbcopy fallback chain).
+   */
+  kanbanLauncher?: typeof launchKanban;
+  /**
+   * Force the pane to behave as if it were full-screen for the `b`
+   * kanban-link keystroke (tests). When omitted, falls back to the
+   * router's FullScreenContext.
+   */
+  forceFullScreen?: boolean;
+  /** Override the resolved empty-state copy (tests). */
+  emptyStateOverride?: string;
+  /** Project root for OQ-9 tui-config.yaml lookup. Defaults `process.cwd()`. */
+  workDir?: string;
 }
 
-export function BlockersPane({ hookOpts }: BlockersPaneProps = {}): React.ReactElement {
-  const { items, error } = useBlockers(hookOpts);
+export function BlockersPane({
+  hookOpts,
+  kanbanLauncher = launchKanban,
+  forceFullScreen,
+  emptyStateOverride,
+  workDir,
+}: BlockersPaneProps = {}): React.ReactElement {
+  const { items: rawItems, error } = useBlockers(hookOpts);
 
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [detailItem, setDetailItem] = useState<BlockerItem | null>(null);
+  const [kanbanStatus, setKanbanStatus] = useState<KanbanLaunchResult | null>(null);
+
+  const { query: searchQuery } = useSearch();
+  const ctxFullScreen = useIsFullScreen();
+  const isFullScreen = forceFullScreen ?? ctxFullScreen;
+
+  // AC#9: search (/) filters the active pane by substring match. Only
+  // applied while the pane is full-screen — Overview Mode keeps showing
+  // every blocker so the operator's at-a-glance read isn't pruned.
+  const items = filterBlockers(rawItems, isFullScreen, searchQuery);
 
   // Clamp selection when list shrinks.
   const clampedIndex = Math.min(selectedIndex, Math.max(0, items.length - 1));
+
+  const emptyState = emptyStateOverride ?? resolveEmptyState(workDir);
 
   useInput((input, key) => {
     if (detailItem) return; // Detail view has its own input handler.
@@ -248,6 +321,18 @@ export function BlockersPane({ hookOpts }: BlockersPaneProps = {}): React.ReactE
       setSelectedIndex((prev) => Math.min(items.length - 1, prev + 1));
     } else if (key.return && items.length > 0) {
       setDetailItem(items[clampedIndex] ?? null);
+    } else if (input === 'b' && isFullScreen && items.length > 0) {
+      // RFC §11 / OQ-5: from any task row, `b` opens the backlog.md
+      // kanban filtered to that task. Only fires in full-screen mode so
+      // the same `b` keystroke in Overview Mode remains a mode-switch.
+      const focused = items[clampedIndex];
+      const taskId = extractTaskId(focused);
+      if (taskId) {
+        const config = loadTuiConfig({ workDir });
+        const url = `${(config.kanbanBaseUrl ?? 'http://localhost:6420').replace(/\/+$/, '')}/?task=${encodeURIComponent(taskId)}`;
+        const result = kanbanLauncher({ url });
+        setKanbanStatus(result);
+      }
     }
   });
 
@@ -284,10 +369,29 @@ export function BlockersPane({ hookOpts }: BlockersPaneProps = {}): React.ReactE
         </Box>
       )}
 
-      {/* Empty state */}
+      {/* Empty state — OQ-9 affirming copy, overridable via .ai-sdlc/tui-config.yaml */}
       {items.length === 0 && !error && (
         <Box marginTop={1}>
-          <Text color="green">{BLOCKERS_EMPTY_STATE}</Text>
+          <Text color="green">{emptyState}</Text>
+        </Box>
+      )}
+
+      {/* Kanban link-out status (AC#8) */}
+      {kanbanStatus && (
+        <Box marginTop={1}>
+          {kanbanStatus.outcome === 'browser' && (
+            <Text color="green">↗ opened {kanbanStatus.url} in browser</Text>
+          )}
+          {kanbanStatus.outcome === 'clipboard' && (
+            <Text color="yellow">
+              📋 copied {kanbanStatus.url} to clipboard ({kanbanStatus.tool})
+            </Text>
+          )}
+          {kanbanStatus.outcome === 'none' && (
+            <Text color="red">
+              ✗ couldn't launch browser/clipboard. Open this URL: {kanbanStatus.url}
+            </Text>
+          )}
         </Box>
       )}
 

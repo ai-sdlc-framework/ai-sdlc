@@ -1,16 +1,9 @@
 /**
  * Top-level App component for the operator TUI (RFC-0023 Phase 1 / AISDLC-178.1).
  *
- * Renders Overview Mode — five panes per RFC-0023 §7:
- *   ┌─ Blockers (top-left)  │ PRs (top-right)            ─┐
- *   ├─ CriticalPath (mid-L) │ Analytics (mid-R)          ─┤
- *   ├─ Events (full-width bottom strip)                    │
- *   └─ Footer keystroke legend                             ┘
- *
- * Phase 1 surface is read-only placeholders. The `q` keystroke exits;
- * Ctrl+C is automatic in Ink (raw-mode SIGINT handler).
- *
- * Mode-switch keys (`b`/`p`/`d`/`c`/`a`) ship in Phase 5 (AISDLC-178.5).
+ * Renders Overview Mode — five panes per RFC-0023 §7 — and wraps it in the
+ * `ModeRouter` (Phase 5 / AISDLC-178.5) which handles mode-switch keystrokes
+ * (b/p/d/c/a/?), `/` search, `r` refresh, and Esc-to-overview.
  */
 
 import React from 'react';
@@ -21,6 +14,7 @@ import { CriticalPathPane } from './panes/critical-path.js';
 import { AnalyticsPane } from './panes/analytics.js';
 import { EventsPane } from './panes/events.js';
 import { Footer } from './footer.js';
+import { ModeRouter } from './modes/router.js';
 
 /**
  * Pure keystroke dispatcher — extracted so tests can exercise the routing
@@ -28,8 +22,10 @@ import { Footer } from './footer.js';
  * test stdin shim in `ink-testing-library` does not actually wire through
  * to `useInput` callbacks). Returns true if the keystroke was consumed.
  *
- * Phase 1 surface: `q` exits. Mode-switch keys (`b`/`p`/`d`/`c`/`a`) ship
- * in Phase 5 (AISDLC-178.5).
+ * The router (`modes/router.tsx`) handles every other key. `q` ALSO routes
+ * through here for the Phase 1 baseline behaviour: tests written against
+ * Phase 1 still rely on `handleAppKey('q', ...)` invoking exit. The router
+ * also handles `q` while in Overview Mode to keep the old behaviour intact.
  */
 export function handleAppKey(input: string, actions: { exit: () => void }): boolean {
   if (input === 'q') {
@@ -39,13 +35,7 @@ export function handleAppKey(input: string, actions: { exit: () => void }): bool
   return false;
 }
 
-export function App(): React.ReactElement {
-  const { exit } = useApp();
-
-  useInput((input) => {
-    handleAppKey(input, { exit });
-  });
-
+function OverviewLayout(): React.ReactElement {
   return (
     <Box flexDirection="column" width="100%" height="100%">
       {/* Top half: Blockers + PRs side-by-side */}
@@ -77,4 +67,14 @@ export function App(): React.ReactElement {
       <Footer />
     </Box>
   );
+}
+
+export function App(): React.ReactElement {
+  const { exit } = useApp();
+
+  useInput((input) => {
+    handleAppKey(input, { exit });
+  });
+
+  return <ModeRouter overviewSlot={<OverviewLayout />} />;
 }

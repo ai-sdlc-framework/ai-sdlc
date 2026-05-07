@@ -230,6 +230,9 @@ importers:
 
   pipeline-cli:
     dependencies:
+      '@ai-sdlc/reference':
+        specifier: workspace:*
+        version: link:../reference
       ink:
         specifier: ^5.2.1
         version: 5.2.1(@types/react@18.3.28)(react@18.3.1)

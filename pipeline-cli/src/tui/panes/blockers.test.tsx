@@ -260,6 +260,109 @@ describe('BlockersPane', () => {
       expect(lastFrame() ?? '').toContain('[↑↓/jk] navigate');
     });
   });
+
+  describe('kanban link-out (AISDLC-178.5 / OQ-5 / AC#8)', () => {
+    it('b on a focused task row launches the kanban URL when full-screen', async () => {
+      const launcher = vi.fn().mockReturnValue({
+        url: 'http://localhost:6420/?task=AISDLC-100',
+        outcome: 'browser',
+        tool: 'open',
+      });
+      const { stdin, lastFrame } = render(
+        <BlockersPane
+          hookOpts={makeHookOpts([TASK_BLOCKER])}
+          kanbanLauncher={launcher}
+          forceFullScreen={true}
+        />,
+      );
+      await flush();
+      stdin.write('b');
+      await flush();
+      expect(launcher).toHaveBeenCalledWith(
+        expect.objectContaining({ url: expect.stringContaining('AISDLC-100') }),
+      );
+      expect(lastFrame() ?? '').toContain('opened');
+    });
+
+    it('b is a no-op when not full-screen (router will switch modes instead)', async () => {
+      const launcher = vi.fn();
+      const { stdin } = render(
+        <BlockersPane
+          hookOpts={makeHookOpts([TASK_BLOCKER])}
+          kanbanLauncher={launcher}
+          forceFullScreen={false}
+        />,
+      );
+      await flush();
+      stdin.write('b');
+      await flush();
+      expect(launcher).not.toHaveBeenCalled();
+    });
+
+    it('b is a no-op on PR blocker rows (no taskId to link to)', async () => {
+      const launcher = vi.fn();
+      const { stdin } = render(
+        <BlockersPane
+          hookOpts={makeHookOpts([PR_BLOCKER])}
+          kanbanLauncher={launcher}
+          forceFullScreen={true}
+        />,
+      );
+      await flush();
+      stdin.write('b');
+      await flush();
+      expect(launcher).not.toHaveBeenCalled();
+    });
+
+    it('shows clipboard-fallback banner when kanban returns outcome=clipboard', async () => {
+      const launcher = vi.fn().mockReturnValue({
+        url: 'http://localhost:6420/?task=AISDLC-100',
+        outcome: 'clipboard',
+        tool: 'pbcopy',
+      });
+      const { stdin, lastFrame } = render(
+        <BlockersPane
+          hookOpts={makeHookOpts([TASK_BLOCKER])}
+          kanbanLauncher={launcher}
+          forceFullScreen={true}
+        />,
+      );
+      await flush();
+      stdin.write('b');
+      await flush();
+      expect(lastFrame() ?? '').toContain('copied');
+      expect(lastFrame() ?? '').toContain('pbcopy');
+    });
+
+    it('shows none-fallback banner when kanban returns outcome=none', async () => {
+      const launcher = vi.fn().mockReturnValue({
+        url: 'http://x.test',
+        outcome: 'none',
+        tool: null,
+      });
+      const { stdin, lastFrame } = render(
+        <BlockersPane
+          hookOpts={makeHookOpts([TASK_BLOCKER])}
+          kanbanLauncher={launcher}
+          forceFullScreen={true}
+        />,
+      );
+      await flush();
+      stdin.write('b');
+      await flush();
+      expect(lastFrame() ?? '').toContain("couldn't launch browser");
+    });
+  });
+
+  describe('OQ-9 empty-state copy', () => {
+    it('uses the override when provided via emptyStateOverride prop', () => {
+      const { lastFrame } = render(
+        <BlockersPane hookOpts={makeHookOpts([])} emptyStateOverride="✨ All clear, captain" />,
+      );
+      expect(lastFrame() ?? '').toContain('✨ All clear, captain');
+      expect(lastFrame() ?? '').not.toContain(BLOCKERS_EMPTY_STATE);
+    });
+  });
 });
 
 /** Flush microtasks + Ink render queue. */
