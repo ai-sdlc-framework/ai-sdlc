@@ -50,6 +50,18 @@ name: Auto-enable auto-merge on PR open
 # auto-merge from re-fires this workflow which re-enables it. `gh pr merge
 # --auto` is idempotent (verified empirically: exit 0 + no error when
 # auto-merge is already enabled), so no extra guard is needed (AISDLC-130).
+#
+# AISDLC-230 (2026-05-07): also re-fire on `check_suite.completed` and
+# `status` events. Without these, when CI completes AFTER auto-merge was
+# armed, GitHub's queue-admission logic can leave the PR sitting CLEAN +
+# armed but never actually queued — operators report needing to manually
+# `gh pr merge --disable-auto && gh pr merge --auto` to force a fresh
+# evaluation. By re-running the disable-then-arm cycle on every CI
+# completion, the workflow self-heals that staleness without operator
+# intervention. The disable-then-arm cycle (vs bare `--auto`) is required
+# because bare `--auto` is idempotent — calling it on an already-armed
+# stale state is a no-op. `--disable-auto` followed by `--auto` is what
+# clears GitHub's cached state and triggers immediate queue admission.
 
 on:
   pull_request:
@@ -58,20 +70,90 @@ on:
     # should arm auto-merge). The existing job-level `draft == false` guard
     # below correctly skips draft `opened` events.
     types: [opened, synchronize, reopened, ready_for_review]
+  # AISDLC-230: re-fire when a check_suite completes so auto-merge is
+  # re-evaluated after CI finishes. Same `--disable-auto` / `--auto`
+  # cycle is what unsticks PRs that go CLEAN+armed-but-not-queued.
+  check_suite:
+    types: [completed]
+  # AISDLC-230: status events (used by some external CI providers like
+  # Codecov) carry the same staleness risk. Inexpensive to handle: the
+  # discover-PR step is gated to a single PR per head SHA.
+  status: {}
 
 permissions:
   pull-requests: write
   contents: write
+  checks: read
 
 jobs:
   enable-auto-merge:
     runs-on: ubuntu-latest
-    if: >-
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository
     steps:
-      - name: Enable auto-merge (queue dictates strategy)
-        run: gh pr merge --auto "${{ github.event.pull_request.number }}"
+      - name: Discover PR for this event
+        id: discover
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER_FROM_PR_EVENT: ${{ github.event.pull_request.number }}
+          # check_suite + status events expose the head SHA differently.
+          # Either field is empty when the OTHER event fires; cat with || true
+          # to keep the assignment non-fatal.
+          HEAD_SHA: ${{ github.event.check_suite.head_sha || github.event.commit.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "pr=$PR_NUMBER_FROM_PR_EVENT" >> "$GITHUB_OUTPUT"
+          else
+            # Look up the open PR for this head SHA. Pick the first one
+            # (multiple PRs sharing a head SHA is exotic — same-branch
+            # forks are excluded later by the same-repo guard).
+            PR=$(gh api "/repos/$GH_REPO/commits/$HEAD_SHA/pulls" --jq '.[] | select(.state == "open") | .number' | head -1)
+            echo "pr=${PR:-}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip when no PR matches the event
+        if: steps.discover.outputs.pr == ''
+        run: |
+          echo "[auto-enable] no open PR for this event — nothing to arm."
+
+      - name: Skip drafts and fork PRs
+        id: guard
+        if: steps.discover.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.discover.outputs.pr }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR_INFO=$(gh pr view "$PR" --json isDraft,headRepository -q '{isDraft: .isDraft, headRepoName: (.headRepository.name // "")}')
+          IS_DRAFT=$(echo "$PR_INFO" | jq -r '.isDraft')
+          # GitHub's `headRepository.name` is just the repo name (e.g. "ai-sdlc"),
+          # not "owner/repo". We compare against the bare name from the org/repo
+          # github.repository value.
+          HEAD_REPO_NAME=$(echo "$PR_INFO" | jq -r '.headRepoName')
+          REPO_NAME="${REPO##*/}"
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "[auto-enable] PR #$PR is draft — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ -n "$HEAD_REPO_NAME" ] && [ "$HEAD_REPO_NAME" != "$REPO_NAME" ]; then
+            echo "[auto-enable] PR #$PR is from a fork ($HEAD_REPO_NAME) — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refresh auto-merge (disable-then-arm to force re-evaluation)
+        if: steps.discover.outputs.pr != '' && steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ steps.discover.outputs.pr }}
+        run: |
+          # AISDLC-230: bare `gh pr merge --auto` is idempotent on
+          # already-armed PRs and won't clear stale GitHub state, so
+          # disable-then-arm is required to refresh queue admission.
+          # `|| true` on disable handles the "wasn't armed yet" case.
+          gh pr merge --disable-auto "$PR" 2>/dev/null || true
+          gh pr merge --auto "$PR"
