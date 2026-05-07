@@ -92,7 +92,7 @@ function BlockerDetail({
     if (key.escape || input === 'q') onClose();
     if (input === 'o') {
       if (item.prUrl) {
-        // Open in browser (best-effort; no crash on platforms without xdg-open).
+        // Open PR in browser (best-effort; no crash on platforms without xdg-open).
         const opener =
           process.platform === 'darwin'
             ? 'open'
@@ -103,6 +103,24 @@ function BlockerDetail({
           execFileSync(opener, [item.prUrl], { stdio: 'ignore' });
         } catch {
           // Silently ignore if opener isn't available.
+        }
+      } else if (item.taskFilePath) {
+        // Open task file in $EDITOR per RFC §8 ("one-keystroke action: open
+        // task in editor"). The hint text on the row already says "[o] open
+        // task file in $EDITOR" — without this branch the keystroke was a
+        // no-op (#383 review fix). Fall back to nothing if EDITOR is unset
+        // (don't pick a guess like vim — the operator's choice).
+        const editor = process.env.EDITOR ?? process.env.VISUAL;
+        if (editor) {
+          try {
+            // Use shell so $EDITOR can be `code -w` etc; the path is
+            // controlled (originates from local backlog file walker).
+            execFileSync('sh', ['-c', `${editor} "$1"`, '-', item.taskFilePath], {
+              stdio: 'inherit',
+            });
+          } catch {
+            // Silently ignore if editor exits non-zero or isn't on PATH.
+          }
         }
       }
     }

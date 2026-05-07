@@ -63,6 +63,10 @@ export interface GhPrSummary {
   statusCheckRollup?: unknown;
   /** Labels — array of `{name}` objects. */
   labels?: Array<{ name: string }>;
+  /** PR body (markdown). Used by the Blockers pane Rule 5 to detect "?" in the description. */
+  body?: string;
+  /** Aggregate review decision ("APPROVED"|"CHANGES_REQUESTED"|"REVIEW_REQUIRED"|null). */
+  reviewDecision?: string;
 }
 
 /** The JSON fields requested from `gh pr list`. */
@@ -78,6 +82,8 @@ export const GH_PR_JSON_FIELDS = [
   'mergeable',
   'statusCheckRollup',
   'labels',
+  'body',
+  'reviewDecision',
 ].join(',');
 
 export type GhRunner = (args: readonly string[]) => string;

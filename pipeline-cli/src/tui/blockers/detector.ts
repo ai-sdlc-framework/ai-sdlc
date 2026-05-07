@@ -227,19 +227,28 @@ export function detectChangesRequested(pr: GhPrSummary): BlockerItem | null {
     reviewDecision?: string;
   };
 
+  // `reviewDecision` is the single authoritative signal — GitHub computes it
+  // from the FRESH review state per reviewer (a dismissed CHANGES_REQUESTED
+  // doesn't count, an APPROVED after CHANGES_REQUESTED supersedes). When
+  // present, trust it exclusively. When absent (older API responses or
+  // certain edge cases), fall back to the reviews-array / labels heuristic.
+  // (AISDLC-178.3 #383 review fix — code-reviewer flagged false-positive
+  // when a dismissed CHANGES_REQUESTED review left a stale entry in the
+  // array even after the reviewer flipped to APPROVED.)
   let hasChangesRequested = false;
-
-  // Check reviewDecision (the most reliable single-field signal).
   if (ext.reviewDecision === 'CHANGES_REQUESTED') {
     hasChangesRequested = true;
-  }
-
-  // Check the reviews array for any non-dismissed CHANGES_REQUESTED entry.
-  if (!hasChangesRequested && Array.isArray(ext.reviews)) {
+  } else if (ext.reviewDecision === 'APPROVED' || ext.reviewDecision === 'REVIEW_REQUIRED') {
+    // reviewDecision is authoritative — array path would be misleading
+    return null;
+  } else if (Array.isArray(ext.reviews)) {
+    // Fall back to array only when reviewDecision is null/undefined.
+    // Filter out dismissed entries (state='DISMISSED') even if the original
+    // state was CHANGES_REQUESTED.
     hasChangesRequested = ext.reviews.some((r) => r.state === 'CHANGES_REQUESTED');
   }
 
-  // Fallback: label-based detection (CI workflow may add these).
+  // Final fallback: label-based detection (CI workflow may add these).
   if (
     !hasChangesRequested &&
     pr.labels?.some((l) => l.name.toLowerCase() === 'changes-requested')
@@ -263,18 +272,23 @@ export function detectChangesRequested(pr: GhPrSummary): BlockerItem | null {
 
 /**
  * Rule 5: Open PR with body/title containing "?" — heuristic for an
- * unresolved question addressed to the operator.
+ * unresolved question addressed to the operator. Conventional commit
+ * titles rarely contain "?", so the body scan is load-bearing for the
+ * common case where the dev describes a question in the PR description
+ * rather than the title. (AISDLC-178.3 #383 review fix.)
  */
 export function detectOpenPrQuestion(pr: GhPrSummary): BlockerItem | null {
-  const hasQuestion = pr.title.includes('?');
-  if (!hasQuestion) return null;
+  const titleQuestion = pr.title.includes('?');
+  const bodyQuestion = typeof pr.body === 'string' && pr.body.includes('?');
+  if (!titleQuestion && !bodyQuestion) return null;
 
+  const where = titleQuestion ? 'title' : 'description';
   return {
     key: `pr:${pr.number}:open-question`,
     kind: 'open-pr-question',
     ref: `#${pr.number}`,
     summary: `PR #${pr.number} has open question: ${pr.title}`,
-    detail: `PR #${pr.number} — ${pr.title}\n\nThe PR title contains a "?" suggesting an unresolved question.\n\nURL: ${pr.url}\nBranch: ${pr.headRefName ?? 'unknown'}\nUpdated: ${pr.updatedAt}`,
+    detail: `PR #${pr.number} — ${pr.title}\n\nThe PR ${where} contains a "?" suggesting an unresolved question.\n\nURL: ${pr.url}\nBranch: ${pr.headRefName ?? 'unknown'}\nUpdated: ${pr.updatedAt}`,
     updatedAt: pr.updatedAt,
     prUrl: pr.url,
     isUrgent: false,
