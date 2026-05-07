@@ -8,11 +8,25 @@
  */
 
 import React from 'react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { render, cleanup } from 'ink-testing-library';
 import { Box, Text } from 'ink';
 
 import { ModeRouter } from './router.js';
+import { TUI_TELEMETRY_FLAG } from '../analytics/feature-flag.js';
+
+// AISDLC-178.6 — the router now logs every mode transition to
+// `_operator/interactions.jsonl`. Suppress those writes here so the
+// integration test stays hermetic.
+let savedTelemetry: string | undefined;
+beforeAll(() => {
+  savedTelemetry = process.env[TUI_TELEMETRY_FLAG];
+  process.env[TUI_TELEMETRY_FLAG] = 'off';
+});
+afterAll(() => {
+  if (savedTelemetry !== undefined) process.env[TUI_TELEMETRY_FLAG] = savedTelemetry;
+  else delete process.env[TUI_TELEMETRY_FLAG];
+});
 
 afterEach(() => {
   cleanup();

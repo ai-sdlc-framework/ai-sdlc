@@ -16,12 +16,17 @@
 
 import React from 'react';
 import { isTuiEnabled, tuiDisabledMessage } from './feature-flag.js';
+import { printBanner } from './banner.js';
 
 export async function runTui(): Promise<void> {
   if (!isTuiEnabled()) {
     process.stderr.write(`${tuiDisabledMessage()}\n`);
     process.exit(1);
   }
+
+  // RFC-0023 §10 / OQ-8 disclosure — surface the telemetry path + opt-out
+  // env var BEFORE the Ink render loop captures the terminal.
+  printBanner();
 
   const { render } = await import('ink');
   const { App } = await import('./app.js');

@@ -17,7 +17,7 @@
  *     wrapper.
  */
 
-import React, { createContext, useCallback, useContext, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 
 import { isModeKey, modeForKey, type ModeId } from '../keymap.js';
@@ -27,6 +27,7 @@ import { AnalyticsPane } from '../panes/analytics.js';
 import { HelpScreen } from './help.js';
 import { DepsFullScreen } from './deps-full.js';
 import { ConfigBrowserPane } from '../config-browser/pane.js';
+import { writeInteraction, type WriteInteractionOpts } from '../analytics/interactions-writer.js';
 
 // ── Refresh context (AC#10) ──────────────────────────────────────────────────
 
@@ -182,6 +183,14 @@ export function routeKey(
 export interface ModeRouterProps {
   /** What to render when mode === 'overview'. The App passes the 5-pane layout. */
   overviewSlot: React.ReactNode;
+  /**
+   * Inject the interactions writer (tests). Defaults `writeInteraction` —
+   * the production path that respects `AI_SDLC_TUI_TELEMETRY=off`.
+   */
+  interactionsWriter?: (
+    record: Parameters<typeof writeInteraction>[0],
+    opts?: WriteInteractionOpts,
+  ) => boolean;
 }
 
 /**
@@ -190,7 +199,10 @@ export interface ModeRouterProps {
  * Wrapping the Overview Mode allows the App to keep its existing 5-pane
  * layout intact while the mode keys hand off to full-screen views.
  */
-export function ModeRouter({ overviewSlot }: ModeRouterProps): React.ReactElement {
+export function ModeRouter({
+  overviewSlot,
+  interactionsWriter = writeInteraction,
+}: ModeRouterProps): React.ReactElement {
   const { exit } = useApp();
   const [mode, setMode] = useState<ModeId>('overview');
   const [searchQuery, setSearchQuery] = useState<string | null>(null);
@@ -200,6 +212,38 @@ export function ModeRouter({ overviewSlot }: ModeRouterProps): React.ReactElemen
   const bumpRefresh = useCallback((): void => {
     setRefreshNonce((n) => n + 1);
   }, []);
+
+  // RFC-0023 §10 AC#3 — log every mode transition + refresh / search edge
+  // to `_operator/interactions.jsonl`. Default ON; the writer self-gates
+  // on `AI_SDLC_TUI_TELEMETRY=off`. The first mount records the initial
+  // overview pane so the corpus has the entry-point event.
+  const writerRef = useRef(interactionsWriter);
+  writerRef.current = interactionsWriter;
+
+  const lastModeRef = useRef<ModeId | null>(null);
+  useEffect(() => {
+    if (lastModeRef.current === mode) return;
+    lastModeRef.current = mode;
+    writerRef.current({ kind: 'pane-opened', pane: mode });
+  }, [mode]);
+
+  const lastRefreshRef = useRef(refreshNonce);
+  useEffect(() => {
+    if (lastRefreshRef.current === refreshNonce) return;
+    lastRefreshRef.current = refreshNonce;
+    if (refreshNonce > 0) writerRef.current({ kind: 'refresh', pane: mode });
+  }, [refreshNonce, mode]);
+
+  const lastSearchActiveRef = useRef(false);
+  useEffect(() => {
+    if (lastSearchActiveRef.current === searchActive) return;
+    lastSearchActiveRef.current = searchActive;
+    writerRef.current({
+      kind: searchActive ? 'search-opened' : 'search-committed',
+      pane: mode,
+      detail: searchQuery ?? undefined,
+    });
+  }, [searchActive, mode, searchQuery]);
 
   useInput((input, key) => {
     routeKey(

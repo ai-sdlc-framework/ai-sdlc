@@ -9,11 +9,25 @@
  */
 
 import React from 'react';
-import { describe, expect, it, afterEach, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { render, cleanup } from 'ink-testing-library';
 import { App, handleAppKey } from './app.js';
 import { BLOCKERS_EMPTY_STATE } from './panes/blockers.js';
 import { FOOTER_KEYS } from './footer.js';
+import { TUI_TELEMETRY_FLAG } from './analytics/feature-flag.js';
+
+// AISDLC-178.6 — the App's ModeRouter now logs interactions on mount.
+// Suppress those writes here so app.test.tsx stays hermetic (no writes
+// to <cwd>/artifacts/_operator/interactions.jsonl).
+let savedTelemetry: string | undefined;
+beforeAll(() => {
+  savedTelemetry = process.env[TUI_TELEMETRY_FLAG];
+  process.env[TUI_TELEMETRY_FLAG] = 'off';
+});
+afterAll(() => {
+  if (savedTelemetry !== undefined) process.env[TUI_TELEMETRY_FLAG] = savedTelemetry;
+  else delete process.env[TUI_TELEMETRY_FLAG];
+});
 
 afterEach(() => {
   cleanup();
