@@ -16,7 +16,7 @@ labels:
 dependencies: []
 priority: high
 references:
-  - spec/rfcs/RFC-0011-definition-of-ready-gate-for-pipeline-admission.md
+  - spec/rfcs/RFC-0011-definition-of-ready-gate.md
 ---
 
 ## Description
@@ -99,7 +99,7 @@ Recommendation: ship `dispatchable: boolean` first (simple boolean opt-out). Mig
 
 ## References
 
-- `spec/rfcs/RFC-0011-definition-of-ready-gate-for-pipeline-admission.md` (RFC for the DoR gate)
+- `spec/rfcs/RFC-0011-definition-of-ready-gate.md` (RFC for the DoR gate)
 - `pipeline-cli/src/orchestrator/filters/blocked.ts` (sister filter as code reference)
 - `backlog/tasks/aisdlc-178.7 - ...md` (witness task, recently tagged blocked)
 - AISDLC-223 (BlockedFilter — the workaround we're replacing for the permanent case)
