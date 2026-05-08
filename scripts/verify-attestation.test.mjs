@@ -2165,3 +2165,191 @@ describe('runVerifier (AISDLC-207 — distinguish failure modes in reason)', () 
     );
   });
 });
+
+// ─── AISDLC-237 — contentHashV4 merge-queue rebase stability ──────────────
+//
+// Root-cause analysis (AC#3): contentHashV4 IS base-independent for
+// non-overlapping PRs. The design intent — "survives merge-queue rebases" —
+// holds exactly when the PR's files don't overlap with sibling PRs that land
+// between signing and queue admission. When a sibling PR DID modify the same
+// files, v4 correctly rejects because the file content at the merge_group
+// commit genuinely includes both PRs' changes — this is not a bug.
+//
+// The CLAUDE.md description "survives merge-queue rebases" was imprecise.
+// It has been amended to "survives merge-queue rebases when the PR's files
+// don't overlap with sibling PRs; fails (correctly) when a sibling PR
+// modified the same files — the reviewed content genuinely changed."
+//
+// These regression tests pin the correct behavior for both scenarios so a
+// future change that breaks v4 stability or incorrectly accepts stale
+// same-file envelopes is caught before merge.
+
+describe('runVerifier (AISDLC-237 — contentHashV4 merge-queue rebase stability)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('AC#5 non-overlapping 2-PR fixture: contentHashV4 stable after merge-queue rebase', () => {
+    // Reproduces the merge-queue scenario end-to-end in a hermetic git
+    // fixture. This is the "no overlap" case — the happy path where
+    // contentHashV4 survives a merge-queue rebase.
+    //
+    // Timeline:
+    //   M1 = original main tip (the base the operator signed against)
+    //   PR-A branch: adds pr-a-only.txt  (the candidate PR)
+    //   PR-B merges to M2: adds pr-b-only.txt (different file — no overlap)
+    //   merge_group for PR-A: PR-A rebased onto M2
+    //   → runVerifier({headSha: mergeGroupHead, baseSha: M2}) must return valid
+    //
+    // If v4 is truly base-independent, the blob SHA of pr-a-only.txt at
+    // the merge_group head equals the blob SHA at PR-A's original head.
+    // The verifier's diff (M2...mergeGroupHead) enumerates {pr-a-only.txt},
+    // reads its blob SHA, computes v4 → matches the signed envelope → valid.
+
+    const M1 = fixture.baseSha; // original main
+
+    // PR-A: branch from M1, add pr-a-only.txt.
+    git(['checkout', '-q', '-b', 'pr-a', M1], fixture.root);
+    writeFileSync(join(fixture.root, 'pr-a-only.txt'), 'PR-A exclusive content\n');
+    git(['add', 'pr-a-only.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-A adds pr-a-only.txt'], fixture.root);
+    const prAHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign the attestation for PR-A against M1 (what the operator does).
+    writeAttestation(fixture.root, prAHead, M1, prAHead, keys.privateKeyPem);
+
+    // PR-B merges to main with a DIFFERENT file (no overlap with PR-A).
+    git(['checkout', '-q', 'main'], fixture.root);
+    writeFileSync(join(fixture.root, 'pr-b-only.txt'), 'PR-B exclusive content\n');
+    git(['add', 'pr-b-only.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-B adds pr-b-only.txt'], fixture.root);
+    const M2 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Simulate merge-queue rebase: GitHub rebases PR-A's commits onto M2.
+    // The resulting merge_group commit has:
+    //   - baseSha  = M2  (current main tip = merge_group.base_sha)
+    //   - headSha  = mergeGroupHead  (PR-A rebased onto M2 = merge_group.head_sha)
+    git(['checkout', '-q', 'pr-a'], fixture.root);
+    git(['rebase', '-q', M2], fixture.root);
+    const mergeGroupHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Confirm pr-a-only.txt blob is identical pre- and post-rebase
+    // (sanity — the test is only meaningful if the rebase was clean).
+    const blobAtPrAHead = git(['rev-parse', `${prAHead}:pr-a-only.txt`], fixture.root).trim();
+    const blobAtMergeGroup = git(
+      ['rev-parse', `${mergeGroupHead}:pr-a-only.txt`],
+      fixture.root,
+    ).trim();
+    assert.equal(
+      blobAtPrAHead,
+      blobAtMergeGroup,
+      'sanity: pr-a-only.txt blob must be identical pre- and post-rebase',
+    );
+
+    // The verifier runs at: headSha=mergeGroupHead, baseSha=M2 (= merge_group event).
+    // contentHashV4 MUST match the signed envelope → valid.
+    const out = runVerifier({
+      headSha: mergeGroupHead,
+      baseSha: M2,
+      repoRoot: fixture.root,
+    });
+    assert.equal(
+      out.status,
+      'valid',
+      `AC#5: contentHashV4 should survive non-overlapping merge-queue rebase, got: ${out.reason}`,
+    );
+  });
+
+  it('AC#5 overlapping 2-PR fixture: contentHashV4 correctly rejects when sibling modified same file', () => {
+    // This is the "same file overlap" case. When a sibling PR (PR-B) modifies
+    // the same file as the candidate PR (PR-A), the merge_group commit's blob
+    // SHA for that file contains BOTH PRs' changes — the reviewed content
+    // genuinely changed. contentHashV4 should (and does) reject.
+    //
+    // This is correct behavior: the operator must rebase + re-sign to attest
+    // that the new combined content was reviewed. The test pins this so any
+    // future change that accidentally accepts stale same-file envelopes is
+    // caught before merge.
+
+    const M1 = fixture.baseSha;
+
+    // Shared file exists at M1 baseline.
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-content\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'add shared.txt baseline'], fixture.root);
+    const M1b = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // PR-A: branch from M1b, modify shared.txt.
+    git(['checkout', '-q', '-b', 'pr-a', M1b], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-content\nPR-A-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-A adds line to shared.txt'], fixture.root);
+    const prAHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign PR-A against M1b (what the operator does).
+    writeAttestation(fixture.root, prAHead, M1b, prAHead, keys.privateKeyPem);
+
+    // PR-B merges to M2 with a DIFFERENT line in shared.txt (same file!).
+    git(['checkout', '-q', 'main'], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-content\nPR-B-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-B adds its own line to shared.txt'], fixture.root);
+    const M2 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Simulate merge-queue rebase: PR-A rebased onto M2 with merge resolution.
+    // After rebase, shared.txt contains baseline + PR-A-line + PR-B-line (merge result).
+    //
+    // Instead of a rebase with conflict resolution (which requires interactive
+    // git rebase --continue and a commit message editor), we directly construct
+    // the merge_group commit state: a commit on top of M2 that applies PR-A's
+    // changes on top of M2's shared.txt content. This mirrors what GitHub does
+    // when the merge queue rebases a conflicting PR — the resulting tree has
+    // both PRs' changes in the file.
+    git(['checkout', '-q', '-b', 'merge-group-sim', M2], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'baseline-content\nPR-B-line\nPR-A-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'merge_group: PR-A rebased onto M2 (simulated)'], fixture.root);
+    const mergeGroupHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // shared.txt blob at mergeGroupHead must DIFFER from the signed prAHead blob.
+    const blobAtPrAHead = git(['rev-parse', `${prAHead}:shared.txt`], fixture.root).trim();
+    const blobAtMergeGroup = git(
+      ['rev-parse', `${mergeGroupHead}:shared.txt`],
+      fixture.root,
+    ).trim();
+    assert.notEqual(
+      blobAtPrAHead,
+      blobAtMergeGroup,
+      'sanity: shared.txt blob must differ after merging sibling PR changes',
+    );
+
+    // The verifier runs at: headSha=mergeGroupHead, baseSha=M2.
+    // contentHashV4 MUST reject — the blob content changed (sibling PR
+    // merged its own changes into shared.txt, and the combined file was
+    // not part of what was reviewed). This is correct behavior.
+    const out = runVerifier({
+      headSha: mergeGroupHead,
+      baseSha: M2,
+      repoRoot: fixture.root,
+    });
+    assert.equal(
+      out.status,
+      'invalid',
+      `AC#5: contentHashV4 should reject when sibling PR modified the same file, got: ${out.status}`,
+    );
+    assert.match(
+      out.reason,
+      /contentHash(V3|V4) mismatch/,
+      `AC#5: reject reason must mention content hash mismatch, got: ${out.reason}`,
+    );
+  });
+});

@@ -3,7 +3,7 @@ id: AISDLC-237
 title: >-
   contentHashV4 not actually base-independent — PRs ejected from merge queue
   after main moves
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-07 22:25'
 labels:

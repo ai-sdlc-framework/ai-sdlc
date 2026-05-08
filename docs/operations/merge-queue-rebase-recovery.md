@@ -1,0 +1,87 @@
+# Merge Queue Rebase Recovery
+
+## Overview
+
+When a PR enters the merge queue, GitHub rebases the PR's commits onto the current tip of `main`. If a sibling PR that merged before yours modified **the same files** as your PR, the rebase produces a merge_group commit whose blob SHAs for those shared files differ from what was signed in the attestation envelope — because the file content now includes both PRs' changes.
+
+The `verify-attestation.yml` workflow correctly detects this: `contentHashV4 mismatch`. The PR is ejected from the merge queue.
+
+**This is correct behavior, not a bug.** The reviewed content genuinely changed — a sibling PR contributed additional lines to the same files. The attestation must be re-signed to bind the new combined content.
+
+## When does this happen?
+
+- Your PR and a sibling PR both modified the same file(s).
+- The sibling PR landed on `main` BEFORE your PR's merge-queue turn.
+- The merge queue rebased your PR, producing a `merge_group` commit where the shared file(s) carry both PRs' changes.
+- `verify-attestation.yml` ran on the `merge_group` commit with `headSha = merge_group.head_sha` and `baseSha = merge_group.base_sha`.
+- The verifier computed `contentHashV4` for the rebased state and it didn't match the signed envelope.
+
+**When does this NOT happen?**
+
+If your PR's files don't overlap with any sibling PRs that land ahead of you in the queue, `contentHashV4` is fully stable across the rebase. No manual action needed.
+
+## Recovery Steps
+
+1. **Fetch and rebase your branch onto the latest main:**
+
+   ```bash
+   git fetch origin main
+   git rebase origin/main
+   ```
+
+   Resolve any merge conflicts as usual. The result should contain both the sibling PR's changes and your PR's changes in the shared files.
+
+2. **Verify the build and tests still pass:**
+
+   ```bash
+   pnpm build && pnpm test && pnpm lint && pnpm format:check
+   ```
+
+3. **Re-run the reviewer subagents** (the file content changed, so the review must cover the new state):
+
+   ```bash
+   /ai-sdlc execute <task-id>
+   ```
+
+   Or manually spawn reviewers and sign:
+
+   ```bash
+   node ai-sdlc-plugin/scripts/sign-attestation.mjs \
+     --review-verdicts /tmp/review-verdicts-<task-id>.json \
+     --iteration-count 1 \
+     --harness-note ""
+   ```
+
+4. **Force-push with lease** (the rebase changed the SHA):
+
+   ```bash
+   git push --force-with-lease
+   ```
+
+5. **Re-arm auto-merge** (the force-push cancels auto-merge):
+
+   ```bash
+   gh pr merge --auto --rebase <pr-number>
+   ```
+
+   Or via the GitHub UI: click "Enable auto-merge."
+
+6. **The PR re-enters the merge queue.** If no further sibling PRs land ahead of it and modify the same files, it will merge cleanly.
+
+## Why contentHashV4 is not fully "rebase-proof"
+
+`contentHashV4` was designed to be base-independent — it only hashes `{path, headBlobSha}` for files in the PR's diff, not the base blob SHAs. This means it survives a rebase that does NOT change the PR's file blobs.
+
+A clean rebase (no overlapping files) leaves the blobs identical:
+- Blob of `pr-a-only.txt` at PR-A HEAD = Blob of `pr-a-only.txt` at merge_group HEAD
+- `contentHashV4` matches → verifier accepts
+
+But when a sibling PR modifies the same file, the merge_group commit has a DIFFERENT blob for that file (it contains both PRs' changes). The blob mismatch is intentional — the content changed, and the operator must re-attest that the new combined content was reviewed.
+
+## Related
+
+- `CLAUDE.md` — "Review attestations" section, contentHashV4 contract
+- `scripts/verify-attestation.mjs` — verifier implementation
+- `scripts/verify-attestation.test.mjs` — AISDLC-237 regression tests (non-overlapping stable + overlapping correctly rejects)
+- AISDLC-237 — root-cause analysis and fix tracking
+- AISDLC-193.1 — introducing contentHashV4
