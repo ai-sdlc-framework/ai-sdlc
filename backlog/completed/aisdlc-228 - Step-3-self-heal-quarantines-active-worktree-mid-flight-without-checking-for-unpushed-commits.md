@@ -3,7 +3,7 @@ id: AISDLC-228
 title: >-
   Step 3 self-heal quarantines active worktree mid-flight without checking for
   unpushed commits or open PR
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 02:50'
 labels:
