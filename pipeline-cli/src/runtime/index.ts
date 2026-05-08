@@ -13,3 +13,5 @@ export * from './shell-claude-p-spawner.js';
 export * from './claude-code-sdk-spawner.js';
 export * from './default-spawner.js';
 export * from './exec.js';
+// AISDLC-202.2 — Codex harness adapter (Phase 2 of the Codex execution path).
+export * from './spawners/codex-harness.js';

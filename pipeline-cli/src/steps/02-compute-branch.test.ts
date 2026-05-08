@@ -1,11 +1,28 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeBranchName, readBranchPattern, slugify } from './02-compute-branch.js';
+import {
+  FALLBACK_SLUG,
+  computeBranchName,
+  readBranchPattern,
+  slugify,
+} from './02-compute-branch.js';
 import { parseTaskFile } from './01-validate.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
-import type { TaskSpec } from '../types.js';
+import type { PipelineLogger, TaskSpec } from '../types.js';
+
+function makeRecordingLogger(): PipelineLogger & { warnings: string[] } {
+  const warnings: string[] = [];
+  const logger = {
+    info: () => undefined,
+    warn: (m: string) => warnings.push(m),
+    error: () => undefined,
+    progress: () => undefined,
+    warnings,
+  } as PipelineLogger & { warnings: string[] };
+  return logger;
+}
 
 let tmp: string;
 beforeEach(() => {
@@ -110,44 +127,115 @@ describe('Step 2 — slugify (AISDLC-180 fixtures)', () => {
   });
 });
 
-describe('Step 2 — computeBranchName fail-loud (AISDLC-180)', () => {
-  it('throws when slug normalisation produces empty string', async () => {
-    const evilTask: TaskSpec = {
-      id: 'AISDLC-EMPTY',
-      // The exact pre-fix bug: legacy parser captured `>-` as the title.
-      title: '>-',
-      status: 'To Do',
-      acceptanceCriteria: ['a'],
-      acceptanceCriteriaChecked: [false],
-      description: '',
-      rawBody: '',
-      filePath: '',
-    };
-    await expect(
-      computeBranchName({ taskId: 'AISDLC-EMPTY', task: evilTask, workDir: tmp }),
-    ).rejects.toThrow(/slug normalisation produced empty string/);
+// AISDLC-202.2 — degraded-input fallback. AISDLC-180 originally threw here so
+// the upstream parser bug (block-scalar markers leaking through) would fail
+// loud; AISDLC-202.2 replaces the throw with a stable fallback slug + warning
+// so Codex/unattended runs that hit a degraded title still produce a valid
+// branch name without operator hand-patching.
+describe('Step 2 — computeBranchName degraded-slug fallback (AISDLC-202.2)', () => {
+  const evilTask = (title: string): TaskSpec => ({
+    id: 'AISDLC-EMPTY',
+    title,
+    status: 'To Do',
+    acceptanceCriteria: ['a'],
+    acceptanceCriteriaChecked: [false],
+    description: '',
+    rawBody: '',
+    filePath: '',
   });
 
-  it('does NOT throw when the branch pattern omits {slug}', async () => {
-    const evilTask: TaskSpec = {
-      id: 'AISDLC-EMPTY',
-      title: '!!!',
-      status: 'To Do',
-      acceptanceCriteria: ['a'],
-      acceptanceCriteriaChecked: [false],
-      description: '',
-      rawBody: '',
-      filePath: '',
-    };
-    // Slug-less pattern is fine even when the title produces empty slug.
+  it('substitutes the fallback slug when the title is a block-scalar marker (>-)', async () => {
+    const logger = makeRecordingLogger();
     const r = await computeBranchName({
       taskId: 'AISDLC-EMPTY',
-      task: evilTask,
+      task: evilTask('>-'),
+      workDir: tmp,
+      logger,
+    });
+    expect(r.slug).toBe(FALLBACK_SLUG);
+    expect(r.branch).toBe(`ai-sdlc/aisdlc-empty-${FALLBACK_SLUG}`);
+    // Warning surfaces the upstream parser bug — same diagnostic as the
+    // legacy throw so operators can grep their logs for degraded titles.
+    expect(logger.warnings).toHaveLength(1);
+    expect(logger.warnings[0]).toMatch(/empty string/);
+    expect(logger.warnings[0]).toMatch(/fallback slug "task"/);
+  });
+
+  it('substitutes the fallback slug when the title is pure punctuation', async () => {
+    const logger = makeRecordingLogger();
+    const r = await computeBranchName({
+      taskId: 'AISDLC-EMPTY',
+      task: evilTask('!!!'),
+      workDir: tmp,
+      logger,
+    });
+    expect(r.slug).toBe(FALLBACK_SLUG);
+    expect(r.branch).toBe(`ai-sdlc/aisdlc-empty-${FALLBACK_SLUG}`);
+    expect(logger.warnings).toHaveLength(1);
+  });
+
+  it('substitutes the fallback slug for the AISDLC-201 reproducer (em-dashes only)', async () => {
+    const logger = makeRecordingLogger();
+    const r = await computeBranchName({
+      taskId: 'AISDLC-201',
+      task: evilTask('— — —'),
+      workDir: tmp,
+      logger,
+    });
+    // Branch is valid (no trailing dash) and worktree path is taskId-derived.
+    expect(r.branch).toMatch(/^ai-sdlc\/aisdlc-201-task$/);
+    expect(r.worktreePath).toBe(join(tmp, '.worktrees', 'aisdlc-201'));
+    // Branch must be a valid git ref shape — no doubled dashes, no trailing
+    // dash, no leading slash, no empty segments.
+    expect(r.branch).not.toMatch(/--/);
+    expect(r.branch).not.toMatch(/-$/);
+    expect(r.branch.split('/').every((seg) => seg.length > 0)).toBe(true);
+  });
+
+  it('falls back to console.warn when no logger is injected', async () => {
+    const spy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const r = await computeBranchName({
+        taskId: 'AISDLC-EMPTY',
+        task: evilTask('>-'),
+        workDir: tmp,
+      });
+      expect(r.slug).toBe(FALLBACK_SLUG);
+      expect(spy).toHaveBeenCalledTimes(1);
+      expect(spy.mock.calls[0]?.[0]).toMatch(/fallback slug "task"/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('does NOT warn or fall back when slug is non-empty', async () => {
+    const logger = makeRecordingLogger();
+    const r = await computeBranchName({
+      taskId: 'AISDLC-100',
+      task: evilTask('Real Title'),
+      workDir: tmp,
+      logger,
+    });
+    expect(r.slug).toBe('real-title');
+    expect(r.branch).toBe('ai-sdlc/aisdlc-100-real-title');
+    expect(logger.warnings).toHaveLength(0);
+  });
+
+  it('does NOT warn or fall back when the branch pattern omits {slug}', async () => {
+    const logger = makeRecordingLogger();
+    // Slug-less pattern is fine even when the title produces empty slug —
+    // the empty slug never reaches the rendered branch, so the fallback
+    // path is skipped entirely. No warning is emitted.
+    const r = await computeBranchName({
+      taskId: 'AISDLC-EMPTY',
+      task: evilTask('!!!'),
       workDir: tmp,
       defaultPattern: 'manual/{issueIdLower}',
+      logger,
     });
     expect(r.branch).toBe('manual/aisdlc-empty');
     expect(r.slug).toBe('');
+    expect(logger.warnings).toHaveLength(0);
   });
 });
 

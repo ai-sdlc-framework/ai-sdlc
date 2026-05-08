@@ -194,29 +194,59 @@ node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --run --spawner 
 |---|---|---|
 | `mock` | shipped (default) | Dry-run/plumbing only. A no-`--run` invocation validates and prints the plan without resolving the spawner or mutating files. `--run --spawner mock` refuses before filesystem mutation. |
 | `api-key` | shipped | Constructs the `ClaudeCodeSDKSpawner` (lazy SDK import). Requires `ANTHROPIC_API_KEY` in env and explicit `--run`. Same billing model as `pnpm dogfood watch`. |
-| `claude-cli` | DEFERRED — see below | Errors with a documented path-forward message. Cross-session subagent routing is the unsolved problem; until it lands, operators wanting subscription billing should run `/ai-sdlc execute` (slash command) directly. |
+| `claude-cli` | shipped (AISDLC-198) | Constructs the `ClaudeCliInlineSpawner` (Option 3 inline-orchestrator pattern). Writes a dispatch manifest to `$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json`; the calling slash command body reads the manifest and invokes the `Agent` tool. Subscription-billed via the operator's session. Design: `docs/operations/claude-cli-spawner.md`. |
+| `codex` | shipped (AISDLC-202.2) | Constructs the `CodexHarnessAdapter` (callback-driven Codex `spawn_agent` bridge). The CLI resolver wires a subprocess bridge whose path is read from `CODEX_SPAWN_AGENT_BIN`; when that env var is unset the resolver fails with a configuration message before any pipeline mutation. Programmatic callers can construct `CodexHarnessAdapter` directly with their own `CodexSpawnAgentFn`. Design map: `docs/operations/codex-execution-path.md`. |
 
-The `claude-cli` spawner — whose intent is "use the operator's existing
-Claude Code session for subagent dispatch so billing stays on the
-subscription" — requires solving how a CLI invoked from a parent session
-can dispatch subagents back INTO that parent session. The
-`ShellClaudePSpawner` already exists for the case where the CLI starts
-its own short-lived `claude --print` invocation (which DOES use the
-subscription, but each spawn pays the cold-start tax and produces a
-disconnected session). True same-session dispatch is the harder problem
-that was deferred from the AISDLC-182 v1 scope. Tracked in the AISDLC-182
-follow-up notes.
+##### `--spawner codex` — Codex CLI host-bridge dispatch (AISDLC-202.2)
 
-### Until the `claude-cli` spawner lands — manual composition rule
+Phase 2 of the Codex execution path ships the `CodexHarnessAdapter`, a
+host-agnostic `SubagentSpawner` over Codex's `spawn_agent` host tool.
+Codex CLI does not expose Claude Code's plugin `Agent` system, so the
+adapter centralises the developer + reviewer dispatch contract that the
+AISDLC-201 run had to reconstruct by hand:
 
-AI assistants helping the operator MUST manually compose Steps 5 + 7 + 8
-+ 10 + 11 (dispatch dev → dispatch 3 reviewers → aggregate → write
-verdict file → push for hook auto-sign) on every dispatch. Skipping
-any of those steps reproduces the 2026-05-04 failure mode (PRs shipped
-without reviewer verdicts). The umbrella `execute` subcommand exists
-precisely so you don't have to compose by hand — once `--spawner
-claude-cli` is wired, the explicit real-run path will be
-`ai-sdlc-pipeline execute <task-id> --run --spawner claude-cli`.
+- Per-`SubagentType` system prompts derived from
+  `ai-sdlc-plugin/agents/<type>.md` (overridable via constructor option).
+- A single injected `spawnAgent` callback that wraps the operator's host
+  bridge — no Codex CLI version coupling lives in `pipeline-cli`.
+- Reviewer envelopes returned by the adapter pass through Step 8
+  aggregation **without manual reshaping** (`coerceReviewerVerdict`
+  consumes them directly; verdicts are tagged `harness: 'codex'`).
+
+Two ways to use it:
+
+```bash
+# CLI form — requires CODEX_SPAWN_AGENT_BIN to point at a script that
+# implements the JSON-line bridge protocol over Codex's spawn_agent tool.
+export CODEX_SPAWN_AGENT_BIN=/usr/local/bin/codex-spawn-agent-bridge
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-202 --run --spawner codex
+```
+
+```typescript
+// Programmatic form — inject any CodexSpawnAgentFn (host-tool wrapper,
+// in-process bridge, etc.). Tests use a deterministic mock.
+import { CodexHarnessAdapter } from '@ai-sdlc/pipeline-cli';
+
+const adapter = new CodexHarnessAdapter({
+  spawnAgent: async ({ agentType, systemPrompt, userPrompt, cwd, timeoutMs }) => {
+    // Wrap Codex's spawn_agent host tool here.
+    return { output: '<agent JSON return>', parsed: { /* optional pre-parse */ } };
+  },
+});
+```
+
+Bridge JSON-line protocol (the wire format `subprocessCodexSpawnAgent`
+produces / consumes):
+
+| Direction | Stream | Shape |
+|---|---|---|
+| Adapter → bridge | `stdin` (single JSON line) | `{ agentType, systemPrompt, userPrompt, cwd, timeoutMs }` |
+| Bridge → adapter | `stdout` (single JSON envelope) | `{ output: string, parsed?: unknown }` |
+| Bridge → adapter | exit code | `0` for success; non-zero surfaces `stderr` as the error |
+
+The adapter normalises reviewer responses into the canonical
+`ReviewerVerdict` envelope (`{ approved, findings, summary, harness:
+'codex' }`) before returning, so Step 8 aggregation runs unchanged.
 
 ## Quickstart — Tier 1 (slash command body)
 

@@ -132,6 +132,32 @@ describe('resolveSpawner', () => {
       if (saved !== undefined) process.env.ANTHROPIC_API_KEY = saved;
     }
   });
+
+  it('errors with a clear configuration message when kind=codex and CODEX_SPAWN_AGENT_BIN is unset (AISDLC-202.2)', async () => {
+    const saved = process.env.CODEX_SPAWN_AGENT_BIN;
+    delete process.env.CODEX_SPAWN_AGENT_BIN;
+    try {
+      await expect(resolveSpawner('codex')).rejects.toThrow(/CODEX_SPAWN_AGENT_BIN/);
+    } finally {
+      if (saved !== undefined) process.env.CODEX_SPAWN_AGENT_BIN = saved;
+    }
+  });
+
+  it('returns a CodexHarnessAdapter when kind=codex and CODEX_SPAWN_AGENT_BIN is set (AISDLC-202.2)', async () => {
+    const saved = process.env.CODEX_SPAWN_AGENT_BIN;
+    process.env.CODEX_SPAWN_AGENT_BIN = '/tmp/fake-codex-bridge';
+    try {
+      const spawner = await resolveSpawner('codex');
+      expect(typeof spawner.spawn).toBe('function');
+      expect(typeof spawner.spawnParallel).toBe('function');
+    } finally {
+      if (saved === undefined) {
+        delete process.env.CODEX_SPAWN_AGENT_BIN;
+      } else {
+        process.env.CODEX_SPAWN_AGENT_BIN = saved;
+      }
+    }
+  });
 });
 
 describe('buildApprovingMockSpawner', () => {

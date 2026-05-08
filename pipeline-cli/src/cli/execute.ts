@@ -52,6 +52,17 @@
  *                    The calling slash command body reads the manifest and
  *                    invokes the Agent tool for subscription billing.
  *                    Design rationale: `docs/operations/claude-cli-spawner.md`.
+ *   - `codex`      — `CodexHarnessAdapter` over the Codex `spawn_agent` host
+ *                    tool (AISDLC-202.2, Phase 2). The CLI resolver constructs
+ *                    the adapter with a subprocess bridge whose path is read
+ *                    from `CODEX_SPAWN_AGENT_BIN` (the operator's wrapper
+ *                    around Codex's `spawn_agent`). When that env var is
+ *                    absent the resolver fails with a clear configuration
+ *                    message rather than silently dispatching to nothing.
+ *                    Programmatic callers can bypass the env var by
+ *                    constructing `CodexHarnessAdapter` directly with a
+ *                    custom `CodexSpawnAgentFn` injection.
+ *                    Design map: `docs/operations/codex-execution-path.md`.
  *
  * # Hard rules honored
  *
@@ -80,6 +91,10 @@ import { validateTask } from '../steps/01-validate.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
 import { ClaudeCliInlineSpawner } from '../runtime/spawners/claude-cli-inline.js';
+import {
+  CodexHarnessAdapter,
+  subprocessCodexSpawnAgent,
+} from '../runtime/spawners/codex-harness.js';
 import { ROLLBACK_OUTCOMES } from '../orchestrator/loop.js';
 import { rollbackDispatch, type RollbackResult } from '../orchestrator/rollback.js';
 import {
@@ -92,9 +107,14 @@ import {
 } from '../types.js';
 
 /** Spawner identifiers accepted by `--spawner`. */
-export type SpawnerKind = 'mock' | 'api-key' | 'claude-cli';
+export type SpawnerKind = 'mock' | 'api-key' | 'claude-cli' | 'codex';
 
-export const SPAWNER_KINDS: readonly SpawnerKind[] = ['mock', 'api-key', 'claude-cli'] as const;
+export const SPAWNER_KINDS: readonly SpawnerKind[] = [
+  'mock',
+  'api-key',
+  'claude-cli',
+  'codex',
+] as const;
 
 /**
  * Message describing the `--spawner claude-cli` mode for operator documentation.
@@ -203,6 +223,19 @@ export async function resolveSpawner(kind: SpawnerKind): Promise<SubagentSpawner
       // (e.g. the orchestrator loop) should construct `ClaudeCliInlineSpawner`
       // directly with `{ taskId }` rather than going through this factory.
       return new ClaudeCliInlineSpawner();
+    case 'codex': {
+      // AISDLC-202.2 — Phase 2 of the Codex execution path. The
+      // `CodexHarnessAdapter` is callback-driven (host-agnostic); the CLI
+      // resolver wires the default subprocess bridge that shells out to
+      // `$CODEX_SPAWN_AGENT_BIN`. `subprocessCodexSpawnAgent()` throws
+      // synchronously when that env var is unset so the operator sees a
+      // clear "configure CODEX_SPAWN_AGENT_BIN" message before any
+      // pipeline mutation. Programmatic callers can construct
+      // `CodexHarnessAdapter` directly with their own `CodexSpawnAgentFn`
+      // injection (e.g. an in-process bridge to Codex's host tools).
+      const spawnAgent = subprocessCodexSpawnAgent();
+      return new CodexHarnessAdapter({ spawnAgent });
+    }
     default: {
       // Exhaustiveness — yargs `choices: SPAWNER_KINDS` already gates this,
       // but TypeScript doesn't know about yargs's runtime narrowing.
@@ -546,7 +579,7 @@ export function executeCommand(): CommandModule {
         })
         .option('spawner', {
           describe:
-            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude-cli (inline manifest mode, AISDLC-198; see docs/operations/claude-cli-spawner.md).',
+            'SubagentSpawner: mock (default; dry-run plumbing only) | api-key (paid Anthropic API) | claude-cli (inline manifest mode, AISDLC-198) | codex (Codex CLI host-bridge dispatch via CodexHarnessAdapter, AISDLC-202.2; requires CODEX_SPAWN_AGENT_BIN). See pipeline-cli/README.md.',
           type: 'string',
           choices: SPAWNER_KINDS as unknown as string[],
           default: 'mock' as SpawnerKind,
