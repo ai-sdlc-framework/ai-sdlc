@@ -1031,3 +1031,98 @@ The diagnosis without instrumentation was impossible. With `stderrTail`,
 envelope. AC #7 (fix-after-diagnosis) is deferred until a live repro surfaces
 the actual `failureType` — speculative fixes without evidence are explicitly
 out of scope per the task brief.
+
+---
+
+## Worktree mutex — preventing `.git/config.lock` races (AISDLC-241)
+
+When the orchestrator dispatches more than one task in parallel, concurrent
+`git worktree add` invocations race on `.git/config.lock`. The symptom is a
+hard failure during Step 3:
+
+```
+fatal: Unable to create '.git/config.lock': File exists
+```
+
+This is fixed in AISDLC-241 by serializing all `git worktree add` (and the
+cleanup siblings `git worktree remove` + `git branch -D`) through an
+in-process promise-queue backed by an advisory file lock at
+`.git/.ai-sdlc-worktree-mutex`.
+
+### How the lock works
+
+Two layers of protection:
+
+1. **In-process promise queue** — all callers within the same Node.js process
+   share a singleton chain. When `withWorktreeMutex()` is called concurrently,
+   callers queue behind the current holder and run one at a time.
+
+2. **Cross-process file lock** — a directory at `.git/.ai-sdlc-worktree-mutex`
+   is created atomically (`mkdir`) by the holder and removed on release. This
+   protects against two independently started `cli-orchestrator tick` processes.
+
+The lock has a 60-second timeout. If the mutex cannot be acquired within 60s,
+the caller receives:
+
+```
+Error: worktree mutex held > 60s — likely a stuck previous tick;
+investigate `.git/.ai-sdlc-worktree-mutex` mtime
+```
+
+### Clearing a stuck mutex
+
+A stuck mutex can occur if the orchestrator process was killed with `SIGKILL`
+(not `SIGTERM` or `SIGINT`) while inside the critical section, or if the
+process crashed before the `finally` block ran.
+
+**Check if the file lock is held:**
+
+```bash
+ls -la .git/.ai-sdlc-worktree-mutex
+```
+
+If the directory exists and the owning process is no longer running, remove it
+manually:
+
+```bash
+rmdir .git/.ai-sdlc-worktree-mutex
+```
+
+**Verify no stale `.git/config.lock` remains:**
+
+```bash
+ls -la .git/config.lock
+# If present, inspect its age:
+stat .git/config.lock
+# Remove if the owning process is gone:
+rm .git/config.lock
+```
+
+**Check that no `git worktree` operation is currently running:**
+
+```bash
+ps aux | grep 'git worktree'
+```
+
+Once the stale lock is removed, the next orchestrator tick will proceed
+normally.
+
+### Observability
+
+The worktree mutex does not emit events to `events.jsonl` (it is a
+low-level runtime primitive). If you suspect mutex contention is causing
+slow ticks, check:
+
+1. The mtime of `.git/.ai-sdlc-worktree-mutex` to estimate how long the
+   current holder has been running.
+2. The orchestrator log for `OrchestratorDispatched` events — a cluster of
+   events with similar timestamps indicates parallel dispatches that queued
+   behind the mutex.
+
+### Signal safety
+
+`setupWorktreeSignalHandler(workDir)` is called once per orchestrator
+process start. It installs a `SIGINT` / `SIGTERM` listener that releases
+the file lock before re-raising the signal, so a clean `Ctrl-C` leaves no
+stale `.git/.ai-sdlc-worktree-mutex` on disk. A `SIGKILL` bypasses the
+handler — manual cleanup (above) is required in that case.

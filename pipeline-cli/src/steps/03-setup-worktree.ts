@@ -20,6 +20,7 @@ import { execSync } from 'node:child_process';
 import { mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
+import { withWorktreeMutex, type WithWorktreeMutexOptions } from '../runtime/worktree-mutex.js';
 import type { SetupWorktreeResult } from '../types.js';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
 
@@ -64,6 +65,20 @@ export interface SetupWorktreeOptions {
    * AISDLC-228 — override `Date.now()` for hermetic tests of sentinel age.
    */
   nowMs?: () => number;
+  /**
+   * AISDLC-241 — options forwarded to `withWorktreeMutex()`. When provided,
+   * `git worktree add`, `git worktree remove`, and `git branch -D` are
+   * serialized via the in-process mutex (and optionally the file-based lock).
+   *
+   * The orchestrator loop injects `{ workDir }` so all concurrent ticks in
+   * the same process share the singleton queue. Tests inject `{ _mutex }`
+   * to drive a private mutex without touching the global one.
+   *
+   * When undefined (the default), no locking is applied — backwards
+   * compatible with the manual `/ai-sdlc execute` path, which never runs
+   * concurrent worktree ops.
+   */
+  mutexOpts?: WithWorktreeMutexOptions;
 }
 
 /**
@@ -377,6 +392,7 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
   const runner = opts.runner ?? defaultRunner;
 
   if (!opts.skipFetch) {
+    // git fetch does NOT touch .git/config — no mutex needed here.
     await runner('git', ['fetch', 'origin', 'main'], {
       cwd: opts.workDir,
       timeout: 30_000,
@@ -387,45 +403,51 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
   // Idempotent mkdir of `.worktrees/`
   mkdirSync(join(opts.workDir, '.worktrees'), { recursive: true });
 
-  const addResult = await runner(
-    'git',
-    ['worktree', 'add', opts.worktreePath, '-b', opts.branch, 'origin/main'],
-    { cwd: opts.workDir, allowFailure: true },
-  );
+  // AISDLC-241 — wrap git worktree add (and any sibling cleanup ops) in the
+  // mutex so concurrent ticks cannot race on .git/config.lock.
+  return withWorktreeMutex(async () => {
+    const addResult = await runner(
+      'git',
+      ['worktree', 'add', opts.worktreePath, '-b', opts.branch, 'origin/main'],
+      { cwd: opts.workDir, allowFailure: true },
+    );
 
-  if (addResult.code !== 0) {
-    // AISDLC-224 — auto-cleanup path: only attempt when:
-    //   a) autonomousMode is true
-    //   b) AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP feature flag is on
-    //   c) the error is specifically "branch already exists"
-    const shouldTryCleanup =
-      opts.autonomousMode === true &&
-      isAutoCleanupEnabled() &&
-      isBranchExistsError(addResult.stderr);
+    if (addResult.code !== 0) {
+      // AISDLC-224 — auto-cleanup path: only attempt when:
+      //   a) autonomousMode is true
+      //   b) AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP feature flag is on
+      //   c) the error is specifically "branch already exists"
+      const shouldTryCleanup =
+        opts.autonomousMode === true &&
+        isAutoCleanupEnabled() &&
+        isBranchExistsError(addResult.stderr);
 
-    if (shouldTryCleanup) {
-      const cleanupResult = await attemptAutoCleanup(runner, opts);
-      if (cleanupResult && cleanupResult.addResult.code === 0) {
-        // Retry succeeded — continue with the cleaned-up worktree
-        const baseShaResult = await runner('git', ['-C', opts.worktreePath, 'rev-parse', 'HEAD'], {
-          allowFailure: true,
-        });
-        const baseSha = baseShaResult.code === 0 ? baseShaResult.stdout.trim() : '';
-        return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
+      if (shouldTryCleanup) {
+        const cleanupResult = await attemptAutoCleanup(runner, opts);
+        if (cleanupResult && cleanupResult.addResult.code === 0) {
+          // Retry succeeded — continue with the cleaned-up worktree
+          const baseShaResult = await runner(
+            'git',
+            ['-C', opts.worktreePath, 'rev-parse', 'HEAD'],
+            { allowFailure: true },
+          );
+          const baseSha = baseShaResult.code === 0 ? baseShaResult.stdout.trim() : '';
+          return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
+        }
       }
+
+      // Either auto-cleanup was not attempted, predicates failed, or retry also failed
+      throw new Error(
+        `git worktree add failed for branch '${opts.branch}': ${addResult.stderr.trim() || 'unknown error'}\n` +
+          `Likely cause: branch already exists. Run \`/ai-sdlc cleanup ${opts.taskId}\` first or pick a different task.`,
+      );
     }
 
-    // Either auto-cleanup was not attempted, predicates failed, or retry also failed
-    throw new Error(
-      `git worktree add failed for branch '${opts.branch}': ${addResult.stderr.trim() || 'unknown error'}\n` +
-        `Likely cause: branch already exists. Run \`/ai-sdlc cleanup ${opts.taskId}\` first or pick a different task.`,
-    );
-  }
+    const baseShaResult = await runner('git', ['-C', opts.worktreePath, 'rev-parse', 'HEAD'], {
+      allowFailure: true,
+    });
+    const baseSha = baseShaResult.code === 0 ? baseShaResult.stdout.trim() : '';
 
-  const baseShaResult = await runner('git', ['-C', opts.worktreePath, 'rev-parse', 'HEAD'], {
-    allowFailure: true,
-  });
-  const baseSha = baseShaResult.code === 0 ? baseShaResult.stdout.trim() : '';
-
-  return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
+    return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
+  }, opts.mutexOpts);
 }
