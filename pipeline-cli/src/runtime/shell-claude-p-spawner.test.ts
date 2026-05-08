@@ -6,6 +6,10 @@
  * fake builds a `ChildProcess`-shaped EventEmitter, scripts stdout / stderr /
  * exit-code, and lets each test assert the exact argv shape the spawner
  * emitted before scripting the response.
+ *
+ * AISDLC-239: tests extended to cover the new `subprocessDiagnostics` field
+ * and failure-type taxonomy (claude-cli-api-error, claude-cli-empty-output-fast,
+ * claude-cli-killed, etc.).
  */
 
 import { describe, expect, it, vi } from 'vitest';
@@ -18,6 +22,8 @@ interface ScriptedRun {
   stdout?: string;
   stderr?: string;
   code?: number | null;
+  /** Signal to pass as the second argument to the 'close' event. Default: null. */
+  signal?: NodeJS.Signals | null;
   /** Delay (ms) before emitting `close`. Default: 0. */
   delayMs?: number;
   /** When set, the fake emits an `error` event instead of `close`. */
@@ -46,7 +52,8 @@ function makeFakeSpawn(scripted: ScriptedRun) {
         child.emit('error', scripted.emitError);
         return;
       }
-      child.emit('close', scripted.code ?? 0);
+      // Pass (code, signal) matching Node.js ChildProcess 'close' event signature.
+      child.emit('close', scripted.code ?? 0, scripted.signal ?? null);
     }, scripted.delayMs ?? 0);
     return child;
   };
@@ -274,6 +281,155 @@ describe('ShellClaudePSpawner', () => {
         return c.args[i + 1];
       });
       expect(agentValues).toEqual(['code-reviewer', 'test-reviewer', 'security-reviewer']);
+    });
+  });
+});
+
+// ── AISDLC-239: subprocessDiagnostics hermetic tests ─────────────────────────
+
+describe('ShellClaudePSpawner — subprocessDiagnostics (AISDLC-239)', () => {
+  describe('(a) exit-0-with-output (happy path)', () => {
+    it('populates subprocessDiagnostics with exitCode=0, signal=null, stderrTail="", argv', async () => {
+      const inner = JSON.stringify({ summary: 'done', commitSha: 'abc123' });
+      const envelope = JSON.stringify({ type: 'result', result: inner });
+      const { fake } = makeFakeSpawn({ stdout: envelope, code: 0, signal: null });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const r = await spawner.spawn(opts());
+      expect(r.status).toBe('success');
+      expect(r.subprocessDiagnostics).toBeDefined();
+      const d = r.subprocessDiagnostics!;
+      expect(d.exitCode).toBe(0);
+      expect(d.signal).toBeNull();
+      expect(d.stderrTail).toBe('');
+      expect(d.wallClockMs).toBeGreaterThanOrEqual(0);
+      expect(d.argv).toContain('--agent');
+      expect(d.argv).toContain('developer');
+      expect(d.failureType).toBeUndefined();
+    });
+
+    it('sets failureType=claude-cli-empty-output-fast when exit=0, stdout empty, wallClock<5s', async () => {
+      // Use timeout=50ms so the spawn completes well under 5 seconds
+      const { fake } = makeFakeSpawn({ stdout: '', code: 0, signal: null });
+      const spawner = new ShellClaudePSpawner({ spawn: fake, defaultTimeoutMs: 50 });
+      const r = await spawner.spawn(opts());
+      // Even though status is 'success', the fast-empty anomaly is flagged
+      expect(r.subprocessDiagnostics).toBeDefined();
+      expect(r.subprocessDiagnostics!.failureType).toBe('claude-cli-empty-output-fast');
+    });
+  });
+
+  describe('(b) exit-1-with-stderr (API error)', () => {
+    it('sets failureType=claude-cli-api-error when stderr contains Anthropic error pattern', async () => {
+      const apiErrStderr =
+        '{"type":"error","error":{"type":"authentication_error","message":"invalid api key"}}\n';
+      const { fake } = makeFakeSpawn({ stdout: '', stderr: apiErrStderr, code: 1 });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const r = await spawner.spawn(opts());
+      expect(r.status).toBe('error');
+      expect(r.subprocessDiagnostics).toBeDefined();
+      const d = r.subprocessDiagnostics!;
+      expect(d.exitCode).toBe(1);
+      expect(d.signal).toBeNull();
+      expect(d.stderrTail).toContain('authentication_error');
+      expect(d.failureType).toBe('claude-cli-api-error');
+      expect(d.argv).toContain('developer');
+    });
+
+    it('sets failureType=claude-cli-api-error for rate_limit pattern', async () => {
+      const { fake } = makeFakeSpawn({
+        stdout: '',
+        stderr: 'Error: rate_limit exceeded — please retry after 60s',
+        code: 1,
+      });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const r = await spawner.spawn(opts());
+      expect(r.subprocessDiagnostics!.failureType).toBe('claude-cli-api-error');
+    });
+
+    it('sets failureType=claude-cli-nonzero-exit for unrecognised non-zero exit', async () => {
+      const { fake } = makeFakeSpawn({ stdout: '', stderr: 'segfault (core dumped)', code: 139 });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const r = await spawner.spawn(opts());
+      expect(r.status).toBe('error');
+      expect(r.subprocessDiagnostics!.failureType).toBe('claude-cli-nonzero-exit');
+      expect(r.subprocessDiagnostics!.exitCode).toBe(139);
+    });
+
+    it('truncates stderrTail to last 2 KB when stderr is large', async () => {
+      const bigStderr = 'x'.repeat(4096) + 'SENTINEL_END';
+      const { fake } = makeFakeSpawn({ stdout: '', stderr: bigStderr, code: 1 });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const r = await spawner.spawn(opts());
+      // stderrTail is at most 2048 chars and contains the end of the string
+      expect(r.subprocessDiagnostics!.stderrTail.length).toBeLessThanOrEqual(2048);
+      expect(r.subprocessDiagnostics!.stderrTail).toContain('SENTINEL_END');
+    });
+  });
+
+  describe('(c) signal-killed (external SIGTERM)', () => {
+    it('sets failureType=claude-cli-killed and watchdogFired=false for external signal', async () => {
+      // Emit close with SIGTERM and no code (killed by signal)
+      const { fake } = makeFakeSpawn({ code: null, signal: 'SIGTERM' });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const r = await spawner.spawn(opts());
+      expect(r.status).toBe('error');
+      expect(r.error).toMatch(/SIGTERM/);
+      const d = r.subprocessDiagnostics!;
+      expect(d.failureType).toBe('claude-cli-killed');
+      expect(d.signal).toBe('SIGTERM');
+      expect(d.watchdogFired).toBe(false);
+    });
+
+    it('sets failureType=claude-cli-killed and watchdogFired=false for SIGKILL (external)', async () => {
+      const { fake } = makeFakeSpawn({ code: null, signal: 'SIGKILL' });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const r = await spawner.spawn(opts());
+      const d = r.subprocessDiagnostics!;
+      expect(d.failureType).toBe('claude-cli-killed');
+      expect(d.signal).toBe('SIGKILL');
+      expect(d.watchdogFired).toBe(false);
+    });
+  });
+
+  describe('(d) timeout-watchdog-killed', () => {
+    it('sets status=timeout, failureType=claude-cli-killed, watchdogFired=true', async () => {
+      // Process delays 200ms but timeout is 1ms — watchdog kills it
+      const { fake } = makeFakeSpawn({ stdout: '{}', code: 0, delayMs: 200 });
+      const spawner = new ShellClaudePSpawner({ spawn: fake, defaultTimeoutMs: 1 });
+      const r = await spawner.spawn(opts());
+      expect(r.status).toBe('timeout');
+      expect(r.subprocessDiagnostics).toBeDefined();
+      const d = r.subprocessDiagnostics!;
+      expect(d.failureType).toBe('claude-cli-killed');
+      expect(d.signal).toBe('SIGTERM');
+      expect(d.watchdogFired).toBe(true);
+    });
+  });
+
+  describe('spawn-error path', () => {
+    it('sets failureType=claude-cli-spawn-error when spawn() itself throws', async () => {
+      const enoent = new Error('spawn ENOENT') as Error & { code?: string };
+      enoent.code = 'ENOENT';
+      const { fake } = makeFakeSpawn({ throwOnSpawn: enoent });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const r = await spawner.spawn(opts());
+      expect(r.status).toBe('error');
+      expect(r.subprocessDiagnostics).toBeDefined();
+      const d = r.subprocessDiagnostics!;
+      expect(d.failureType).toBe('claude-cli-spawn-error');
+      expect(d.exitCode).toBeNull();
+      expect(d.argv).toContain('developer');
+    });
+  });
+
+  describe('diagnostics argv includes full argv (not binary)', () => {
+    it('argv array matches buildArgv output', async () => {
+      const { fake } = makeFakeSpawn({ stdout: '{}', code: 0 });
+      const spawner = new ShellClaudePSpawner({ spawn: fake });
+      const spawnOpts = opts({ type: 'security-reviewer', prompt: 'check this' });
+      const r = await spawner.spawn(spawnOpts);
+      const expectedArgv = spawner.buildArgv(spawnOpts);
+      expect(r.subprocessDiagnostics!.argv).toEqual(expectedArgv);
     });
   });
 });

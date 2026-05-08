@@ -445,6 +445,68 @@ export interface SpawnOpts {
   timeout?: number;
 }
 
+/**
+ * AISDLC-239 — structured subprocess diagnostics captured by ShellClaudePSpawner.
+ *
+ * Populated on every `ShellClaudePSpawner` invocation (success or failure).
+ * Other spawner implementations (ClaudeCodeSDKSpawner, MockSpawner) leave
+ * this field undefined — callers must treat it as optional.
+ *
+ * Fields:
+ *  - `exitCode`    — process exit code (null when killed by signal before exit).
+ *  - `signal`      — signal that killed the subprocess (null when normal exit).
+ *  - `stderrTail`  — last 2 KB of stderr output (empty string when stderr was clean).
+ *  - `wallClockMs` — wall-clock duration from spawn() to close event (mirrors `durationMs`
+ *                    for shell-based spawners; separate field so other spawner types can
+ *                    leave it undefined without changing `durationMs` semantics).
+ *  - `argv`        — full argv array passed to the subprocess (binary NOT included; these
+ *                    are the arguments after the binary name, matching `child_process.spawn`
+ *                    argv shape).
+ *  - `failureType` — machine-readable tag classifying why the spawn failed:
+ *                    - `'claude-cli-api-error'`: exit != 0 AND stderr matches Anthropic API error patterns.
+ *                    - `'claude-cli-empty-output-fast'`: exit 0, stdout empty, wall-clock < 5 s
+ *                      (auth/config issue — subagent never ran).
+ *                    - `'claude-cli-killed'`: process was killed by a signal (SIGTERM/SIGKILL).
+ *                    - `'claude-cli-nonzero-exit'`: non-zero exit without a recognised API error pattern.
+ *                    - `'claude-cli-spawn-error'`: the spawn() call itself threw (e.g. ENOENT).
+ *                    - `'claude-cli-watch-error'`: the child emitted an 'error' event.
+ *                    - Absent (`undefined`) on success paths.
+ *  - `watchdogFired` — true when the spawner's own timeout watchdog sent the kill signal;
+ *                      false when the process was killed externally (only set when `failureType`
+ *                      is `'claude-cli-killed'`).
+ */
+export interface SubprocessDiagnostics {
+  exitCode: number | null;
+  signal: string | null;
+  stderrTail: string;
+  wallClockMs: number;
+  argv: readonly string[];
+  failureType?:
+    | 'claude-cli-api-error'
+    | 'claude-cli-empty-output-fast'
+    | 'claude-cli-killed'
+    | 'claude-cli-nonzero-exit'
+    | 'claude-cli-spawn-error'
+    | 'claude-cli-watch-error';
+  /** Only set when `failureType === 'claude-cli-killed'`. */
+  watchdogFired?: boolean;
+}
+
+/** Anthropic API error patterns used to classify non-zero exit failures. */
+export const ANTHROPIC_API_ERROR_PATTERNS: readonly RegExp[] = [
+  /api_error_status/i,
+  /invalid_request_error/i,
+  /rate_limit/i,
+  /authentication_error/i,
+  /overloaded_error/i,
+];
+
+/** Tail the last `maxBytes` bytes of `text` (preserves whole UTF-8 chars). */
+export function tailBytes(text: string, maxBytes: number): string {
+  if (text.length <= maxBytes) return text;
+  return text.slice(-maxBytes);
+}
+
 export interface SubagentResult {
   type: SubagentType;
   /** Raw stdout/output from the subagent (may be empty on error). */
@@ -464,6 +526,13 @@ export interface SubagentResult {
   status: 'success' | 'timeout' | 'error' | 'manifest-emitted';
   error?: string;
   durationMs: number;
+  /**
+   * AISDLC-239 — structured subprocess diagnostics. Only populated by
+   * `ShellClaudePSpawner`; other spawner implementations leave this undefined.
+   * Contains exitCode, signal, stderrTail (last 2 KB), wallClockMs, argv,
+   * and a `failureType` tag when the invocation failed.
+   */
+  subprocessDiagnostics?: SubprocessDiagnostics;
 }
 
 /**

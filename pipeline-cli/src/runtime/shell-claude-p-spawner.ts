@@ -66,7 +66,15 @@
 
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import type { SpawnOpts, SubagentResult, SubagentSpawner, SubagentType } from '../types.js';
+import {
+  ANTHROPIC_API_ERROR_PATTERNS,
+  tailBytes,
+  type SpawnOpts,
+  type SubagentResult,
+  type SubagentSpawner,
+  type SubagentType,
+  type SubprocessDiagnostics,
+} from '../types.js';
 
 /**
  * Subset of `child_process.spawn` we depend on. Tests inject a fake to assert
@@ -155,12 +163,22 @@ export class ShellClaudePSpawner implements SubagentSpawner {
       try {
         child = this.processSpawner(this.binary, argv, { cwd: opts.cwd });
       } catch (err) {
+        const wallClockMs = Date.now() - start;
+        const diag: SubprocessDiagnostics = {
+          exitCode: null,
+          signal: null,
+          stderrTail: '',
+          wallClockMs,
+          argv,
+          failureType: 'claude-cli-spawn-error',
+        };
         resolve({
           type: opts.type,
           output: '',
           status: 'error',
           error: `failed to spawn ${this.binary}: ${stringifyError(err)}`,
-          durationMs: Date.now() - start,
+          durationMs: wallClockMs,
+          subprocessDiagnostics: diag,
         });
         return;
       }
@@ -168,6 +186,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
       let stdout = '';
       let stderr = '';
       let settled = false;
+      let watchdogFired = false;
 
       const settle = (result: SubagentResult): void => {
         if (settled) return;
@@ -177,17 +196,29 @@ export class ShellClaudePSpawner implements SubagentSpawner {
       };
 
       const timer = setTimeout(() => {
+        watchdogFired = true;
         try {
           child.kill('SIGTERM');
         } catch {
           /* ignore */
         }
+        const wallClockMs = Date.now() - start;
+        const diag: SubprocessDiagnostics = {
+          exitCode: null,
+          signal: 'SIGTERM',
+          stderrTail: tailBytes(stderr, 2048),
+          wallClockMs,
+          argv,
+          failureType: 'claude-cli-killed',
+          watchdogFired: true,
+        };
         settle({
           type: opts.type,
           output: stdout,
           status: 'timeout',
           error: `claude -p timed out after ${timeoutMs}ms`,
-          durationMs: Date.now() - start,
+          durationMs: wallClockMs,
+          subprocessDiagnostics: diag,
         });
       }, timeoutMs);
 
@@ -199,33 +230,97 @@ export class ShellClaudePSpawner implements SubagentSpawner {
       });
 
       child.on('error', (err) => {
+        const wallClockMs = Date.now() - start;
+        const diag: SubprocessDiagnostics = {
+          exitCode: null,
+          signal: null,
+          stderrTail: tailBytes(stderr, 2048),
+          wallClockMs,
+          argv,
+          failureType: 'claude-cli-watch-error',
+        };
         settle({
           type: opts.type,
           output: stdout,
           status: 'error',
           error: stringifyError(err),
-          durationMs: Date.now() - start,
+          durationMs: wallClockMs,
+          subprocessDiagnostics: diag,
         });
       });
 
-      child.on('close', (code: number | null) => {
-        if (code !== 0) {
+      child.on('close', (code: number | null, signal: NodeJS.Signals | null) => {
+        const wallClockMs = Date.now() - start;
+        const stderrTail = tailBytes(stderr, 2048);
+
+        // Killed by signal
+        if (signal !== null) {
+          const isWatchableSignal = signal === 'SIGKILL' || signal === 'SIGTERM';
+          const diag: SubprocessDiagnostics = {
+            exitCode: code,
+            signal,
+            stderrTail,
+            wallClockMs,
+            argv,
+            ...(isWatchableSignal
+              ? { failureType: 'claude-cli-killed', watchdogFired }
+              : { failureType: 'claude-cli-killed', watchdogFired }),
+          };
           settle({
             type: opts.type,
             output: stdout,
             status: 'error',
-            error: stderr.trim() || `claude -p exited with code ${code ?? 'null'}`,
-            durationMs: Date.now() - start,
+            error: `claude -p killed by signal ${signal}`,
+            durationMs: wallClockMs,
+            subprocessDiagnostics: diag,
           });
           return;
         }
+
+        if (code !== 0) {
+          // Classify failure type based on stderr content
+          const isApiError = ANTHROPIC_API_ERROR_PATTERNS.some((re) => re.test(stderrTail));
+          const failureType = isApiError ? 'claude-cli-api-error' : 'claude-cli-nonzero-exit';
+          const diag: SubprocessDiagnostics = {
+            exitCode: code,
+            signal: null,
+            stderrTail,
+            wallClockMs,
+            argv,
+            failureType,
+          };
+          settle({
+            type: opts.type,
+            output: stdout,
+            status: 'error',
+            error: stderrTail.trim() || `claude -p exited with code ${code ?? 'null'}`,
+            durationMs: wallClockMs,
+            subprocessDiagnostics: diag,
+          });
+          return;
+        }
+
+        // Exit code 0 — check for empty-stdout-fast anomaly
+        const EMPTY_OUTPUT_FAST_THRESHOLD_MS = 5000;
+        const isEmptyFast =
+          stdout.trim().length === 0 && wallClockMs < EMPTY_OUTPUT_FAST_THRESHOLD_MS;
+        const diag: SubprocessDiagnostics = {
+          exitCode: 0,
+          signal: null,
+          stderrTail,
+          wallClockMs,
+          argv,
+          ...(isEmptyFast ? { failureType: 'claude-cli-empty-output-fast' } : {}),
+        };
+
         const parsed = parseClaudeOutput(stdout);
         settle({
           type: opts.type,
           output: stdout,
           parsed,
           status: 'success',
-          durationMs: Date.now() - start,
+          durationMs: wallClockMs,
+          subprocessDiagnostics: diag,
         });
       });
     });
