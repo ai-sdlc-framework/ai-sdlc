@@ -362,7 +362,7 @@ Total: ~6–8 weeks wall-clock, parallelizable phases 3 + 4 + 5.
 
 ## 14. Feature flag
 
-`AI_SDLC_TUI=experimental` (mirroring the RFC-0015 pattern). When unset, `cli-tui` exits with a "not enabled" message + pointer to the promotion runbook. Promoted to default-on after Phase 7.
+`AI_SDLC_TUI=experimental` (mirroring the RFC-0015 pattern). When unset, `cli-tui` exits with a "not enabled" message + pointer to the promotion runbook. Promotion to default-on follows the corpus-driven hybrid runbook at [`docs/operations/operator-tui-promotion.md`](../../docs/operations/operator-tui-promotion.md): the operator runs `cli-tui-corpus aggregate` against the workspace `$ARTIFACTS_DIR` and dispatches the flag flip when the recommendation envelope is `safe-to-promote` (≥7 sessions across ≥7 calendar days, ≥2 distinct panes opened, zero `TuiCrashed` events). The override path covers the sparse-corpus case via operator spot-check (still subject to the zero-crash hard gate).
 
 ## 15. Resolved questions
 
@@ -451,3 +451,4 @@ Position grounded in RFC-0029 Principle 5 (governance by composition; TUI consum
 |---|---|---|---|
 | v0.1 | 2026-05-03 | dominique@reliablegenius.io | Initial draft seed; 10 open questions |
 | v0.2 | 2026-05-03 | dominique@reliablegenius.io | All 10 OQs resolved via operator walkthrough. Lifecycle: Draft → Ready for Review. Engineering + Operator signed; awaiting Product Lead. |
+| v0.3 | 2026-05-07 | dominique@reliablegenius.io | Phase 7 (AISDLC-178.7) shipped: `_tui/events.jsonl` self-observability writer (`TuiStarted`/`TuiCrashed`), corpus aggregator (`cli-tui-corpus aggregate`), hybrid promotion runbook at [`docs/operations/operator-tui-promotion.md`](../../docs/operations/operator-tui-promotion.md), and operator-runbook TUI usage section. The `AI_SDLC_TUI` default-on flip is dispatched from the runbook once a soak corpus satisfies the recommendation envelope (≥7 sessions across ≥7 calendar days, ≥2 distinct panes opened, zero `TuiCrashed` events) — calendar-driven gating retired in favour of the corpus-driven gate. |

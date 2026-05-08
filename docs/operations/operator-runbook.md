@@ -884,6 +884,108 @@ The chaos test is intended to be run by the operator before the feature-flag pro
 5. Update `CHANGELOG.md` with the user-visible behavior change ("parallelism is now on by default").
 6. Announce in Slack with a link to the rollback procedure (set `AI_SDLC_PARALLELISM=off` to disable).
 
+## Operator TUI usage (RFC-0023)
+
+The operator TUI (`cli-tui` / `pnpm tui`) is the canonical surface for
+"what's the pipeline doing right now and what needs my attention?" It
+shows live pipeline state, PR readiness, dependency frontier, blockers
+(especially decisions-pending), pipeline configuration, and operator-
+throughput analytics — composed from artifacts the framework already
+produces (events.jsonl, dep snapshots, gh PR cache, backlog files,
+`.ai-sdlc/*.yaml`).
+
+The TUI is **read-mostly** — config edits hand off to `$EDITOR`, status
+changes go through the existing CLIs. Restart loses no operator state
+(every data source is external).
+
+### Opt-in (during the experimental window)
+
+```bash
+AI_SDLC_TUI=experimental pnpm tui
+# or, equivalently:
+AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs
+```
+
+The `pnpm tui` shortcut is wired in the workspace root `package.json`
+(AISDLC-235); it does not set the env automatically while the flag is
+opt-in. After RFC-0023 §13 Phase 7 promotion the env requirement
+disappears (see `docs/operations/operator-tui-promotion.md`).
+
+The TUI prints a startup banner disclosing the path it writes
+self-observability events to and the opt-out env var
+(`AI_SDLC_TUI_TELEMETRY=off`). The banner is normative per RFC §10
+OQ-8 and stays even after the default-on flip — the disclosure
+contract is independent of the opt-in default.
+
+### Keystroke reference
+
+The Overview Mode shows five panes: Blockers, PRs, Critical Path,
+Analytics, and a full-width Events tail. From the overview, mode keys
+zoom into a focused full-screen view:
+
+| Key | Action |
+|---|---|
+| `b` | Open Blockers full-screen — every actionable decision-pending item, sortable by urgency, drill-down with detail panes |
+| `p` | Open PRs full-screen — every open PR with diff preview, review history; default sort is critical-path (head-of-chain first) |
+| `d` | Open Dependency graph full-screen — ASCII tree of the full dep graph |
+| `c` | Open Configuration browser — `.ai-sdlc/*.yaml` syntax-highlighted, validation errors annotated; press `e` to launch `$EDITOR` |
+| `a` | Open Analytics full-screen — operator throughput + pipeline metrics drill-down |
+| `?` | Open this help screen (also rendered from the keymap, so footer + help cannot drift) |
+| `/` | Filter the active pane by substring match — Enter commits, Esc clears |
+| `r` | Refresh all data sources (invalidates caches and re-polls) |
+| `Esc` | Return to Overview Mode from any full-screen view |
+| `q` | Quit the TUI (Ctrl+C also works) |
+
+When a pane is in full-screen mode, the same key that mode-switched
+into it (`b` on Blockers, `p` on PRs, etc.) is repurposed for a
+row-scoped action — e.g. `b` on a focused task row in the Blockers
+full-screen opens the backlog kanban filtered to that task in the
+operator's browser via `gh browse` (`open` on macOS, `xdg-open` on
+Linux). Esc returns to overview without taking the row action.
+
+### Self-observability events
+
+The TUI writes two append-only JSONL streams under
+`$ARTIFACTS_DIR/_tui/` and `$ARTIFACTS_DIR/_operator/`:
+
+- `_tui/events.jsonl` — `TuiStarted`, `TuiCrashed` events (process
+  lifecycle + crash forensics). RFC §13 Phase 7 promotion gates on
+  zero `TuiCrashed` events across the soak window.
+- `_operator/interactions.jsonl` — pane-opened, drill-down, refresh,
+  search-opened/committed events (operator-throughput
+  instrumentation).
+- `_operator/decisions.jsonl` — `Needs Clarification → resolved`
+  transitions captured by the in-TUI tracker (and `task_edit` MCP
+  callers when those wire through).
+
+All three streams are local-only by design (RFC §10 OQ-8); operators
+own the files and can `rm` them at will. To opt out:
+
+```bash
+AI_SDLC_TUI_TELEMETRY=off AI_SDLC_TUI=experimental pnpm tui
+```
+
+The opt-OUT is the kill switch for ALL three local streams. If TUI
+events ever ship offsite (future SaaS dashboard), that becomes a
+separate explicit-opt-IN mechanism — `AI_SDLC_TUI_TELEMETRY=off` MUST
+keep working as the local kill switch regardless.
+
+### Soak corpus aggregator
+
+The Phase 7 corpus aggregator computes the soak-completion signal
+that drives the `AI_SDLC_TUI` default-on promotion decision:
+
+```bash
+node pipeline-cli/bin/cli-tui-corpus.mjs aggregate ./artifacts --format table
+```
+
+Returns a `safe-to-promote | continue-soak | insufficient-data`
+recommendation envelope plus the supporting metrics: sessions,
+days-with-usage, pane-open distribution, time-to-decision trend,
+TuiCrashed count (must be 0), captures-filed-during-soak count. See
+[`docs/operations/operator-tui-promotion.md`](operator-tui-promotion.md)
+for the full hybrid corpus / override runbook.
+
 ## Backlog-task auto-close on push (AISDLC-220)
 
 The `scripts/check-task-moved.sh` pre-push hook (wired into `.husky/pre-push`
