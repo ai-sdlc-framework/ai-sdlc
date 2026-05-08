@@ -437,6 +437,12 @@ export async function rollbackDispatch(opts: RollbackOptions): Promise<RollbackR
     const reason = err instanceof Error ? err.message : String(err);
     warnings.push(`quarantine probe failed: ${reason}`);
     logger.warn(`[orchestrator-rollback] quarantine probe failed for ${opts.taskId}: ${reason}`);
+    // AISDLC-228 — when isReallyStale or the quarantine probe itself throws,
+    // we cannot prove the branch is safe to destroy. Default to PRESERVE:
+    // setting quarantineSkippedReason here makes steps 3 (worktree remove)
+    // and 4 (git branch -D) below skip, so the active branch survives. The
+    // operator can always quarantine manually after diagnosing the failure.
+    quarantineSkippedReason = `quarantine probe threw: ${reason} (preserving branch as safety fallback)`;
   }
 
   // ── 3. Remove the worktree (sentinel goes with it) ────────────────
