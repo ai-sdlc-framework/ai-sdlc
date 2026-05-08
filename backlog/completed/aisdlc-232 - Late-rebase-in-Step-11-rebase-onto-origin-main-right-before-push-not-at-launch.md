@@ -3,7 +3,7 @@ id: AISDLC-232
 title: >-
   Late-rebase in Step 11 — rebase onto origin/main right before push, not at
   launch
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 21:35'
 labels:
