@@ -370,9 +370,20 @@ export interface PipelineFailureDetail {
     | 'claude-cli-api-error'
     | 'claude-cli-empty-output-fast'
     | 'claude-cli-killed'
-    | 'unknown';
+    | 'unknown'
+    /**
+     * AISDLC-232 — Step 11 late-rebase hit semantic conflicts that could not
+     * be auto-resolved. The rebase was aborted; the dev's commits are intact
+     * on the branch. Operator resolves via `/ai-sdlc rebase <pr>` or manually.
+     */
+    | 'rebase-conflict';
   /** Human-readable failure reason (the umbrella's `reason` field or the thrown message). */
   message: string;
+  /**
+   * AISDLC-232 — set when `type === 'rebase-conflict'`. The list of files
+   * that had unresolvable semantic conflicts during the late-rebase step.
+   */
+  files?: string[];
 }
 
 export interface TaskDispatchOutcome {

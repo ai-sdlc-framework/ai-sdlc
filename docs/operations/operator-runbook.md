@@ -578,6 +578,30 @@ The composition layer (`AI_SDLC_DEPS_COMPOSITION`) ships behind a flag — these
 3. If aborting: re-trigger the pipeline run; the orchestrator will re-fetch and try again. If the rebase fails the same way, the issue likely needs a different implementation approach — re-triage manually.
 4. After resolving + `git rebase --continue`: `git push --force-with-lease origin <branch>`. The orchestrator will detect the up-to-date base on next merge-gate acquisition.
 
+### `rebase-conflict` outcome (AISDLC-232 late-rebase)
+
+**What it is.** Step 11 (`push-and-pr`) now runs a late-rebase (`git fetch origin main && git rebase origin/main`) right before pushing, catching conflicts that accumulated while the dev ran Steps 5-10 (20-40 min). Mechanical conflicts — CHANGELOG `Unreleased` bullet overlaps, test additions to the same `describe`, and prettier formatting drift — are auto-resolved in-place. Semantic conflicts (overlapping logic in the same function, shared variable declarations, non-changelog/non-test files with conflicting edits) cannot be auto-resolved.
+
+**Symptom.** The orchestrator tick records `outcome: 'rebase-conflict'` for the task. The tick log shows:
+
+```
+outcomes[N].outcome = 'rebase-conflict'
+outcomes[N].failure.type = 'rebase-conflict'
+outcomes[N].failure.message = 'rebase-conflict: semantic conflicts in: <file-list>'
+```
+
+The dev's commits are **NOT rolled back** — they are intact on the branch and the rebase was cleanly aborted before push. The orchestrator tick continues to the next task without blocking.
+
+**Where to look.** The `notes` field of the `PipelineResult` or the `outcomes[N].failure.message` contains the conflicting file paths. You can also inspect the worktree directly: `cd .worktrees/<task-id-lower>; git status`.
+
+**Recovery.**
+1. Run `/ai-sdlc rebase <pr-number>` — this invokes the `rebase-resolver` subagent which handles the mechanical 80% of conflicts and escalates the architectural 20%. If the PR isn't open yet (push was blocked), inspect the branch directly.
+2. If no open PR yet: `cd .worktrees/<task-id-lower>` and resolve the conflict manually, then `git rebase --continue && git push -u origin <branch>`.
+3. After the branch is pushed: `gh pr create --draft --title "..." --body "..."` (or re-trigger via `/ai-sdlc execute <task-id>`).
+4. To prevent recurrence: check AISDLC-231 (hot-file serializer). The late-rebase is a secondary safety net; AISDLC-231 is the primary defense that prevents parallel tasks from touching the same hot files simultaneously.
+
+**Design intent.** The `rebase-conflict` outcome is intentionally NOT in `ROLLBACK_OUTCOMES` — the dev's commits are valuable and should not be discarded. The worktree stays on disk so the operator can resolve the conflict and push without re-running the entire pipeline. This is the "secondary safety net" pattern: AISDLC-231 (hot-file serializer) serializes tasks that touch the same files; AISDLC-232 (late-rebase) catches any conflicts that slip through.
+
 ### Stuck heartbeats (agent hung mid-stage)
 
 **Symptom.** `cli-status` shows an issue with `(STALE)` next to its heartbeat age. No progress for >5 minutes.

@@ -884,7 +884,18 @@ export async function runOrchestratorTick(
       notes: result.notes,
     };
     if (value.pipeline !== undefined) outcomeEntry.pipeline = value.pipeline;
-    if (value.failure !== undefined) outcomeEntry.failure = value.failure;
+    if (value.failure !== undefined) {
+      outcomeEntry.failure = value.failure;
+    } else if (result.outcome === 'rebase-conflict') {
+      // AISDLC-232 — when the legacy `dispatch` adapter is used (tests or
+      // older callers), the `failure` field isn't populated by the umbrella.
+      // Surface a synthetic `rebase-conflict` failure detail so
+      // `outcomes[i].failure` is always set when the outcome is `rebase-conflict`.
+      outcomeEntry.failure = {
+        type: 'rebase-conflict',
+        message: result.notes ?? 'late-rebase hit semantic conflicts before push',
+      };
+    }
     outcomes.push(outcomeEntry);
     emit({
       type: 'OrchestratorCompleted',

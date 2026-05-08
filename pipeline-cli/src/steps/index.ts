@@ -16,6 +16,7 @@ export * from './07-build-review-prompts.js';
 export * from './08-aggregate-verdicts.js';
 export * from './09-iterate.js';
 export * from './10-finalize.js';
+export * from './11-late-rebase.js';
 export * from './11-push-and-pr.js';
 export * from './12-sibling-prs.js';
 export * from './13-cleanup.js';
