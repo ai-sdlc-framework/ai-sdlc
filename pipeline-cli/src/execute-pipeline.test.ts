@@ -764,6 +764,61 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     expect(result.notes).toBe('plain-string-spawner-error');
   });
 
+  // ── AISDLC-241 — mutexOpts threading ────────────────────────────────
+  //
+  // Regression guard: `mutexOpts` must flow from `PipelineOptions` → Step 3
+  // (`setupWorktree`). Previously `PipelineOptions` had no `mutexOpts` field
+  // and `executePipeline` never passed it — the mutex was dead code in
+  // production. This test injects a private `_mutex` and confirms Step 3
+  // uses it (non-zero `depth` while the worktree-add runner is running).
+  it('AISDLC-241: mutexOpts is threaded from PipelineOptions to setupWorktree', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-241-WIRE',
+      title: 'mutex opts threading',
+      status: 'To Do',
+      acceptanceCriteria: ['mutex is active during worktree add'],
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-241-wire'), { recursive: true });
+
+    // Private mutex so we can observe its depth without touching the global one.
+    const privateMutex = { queue: Promise.resolve(), depth: 0 };
+    const depthDuringWorktreeAdd: number[] = [];
+
+    const runner = new FakeRunner()
+      .on(/^git fetch/, ok())
+      .on(
+        (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+        () => {
+          // Capture depth at the moment worktree add runs.
+          depthDuringWorktreeAdd.push(privateMutex.depth);
+          return ok();
+        },
+      )
+      .on(/^git -C .+ rev-parse HEAD$/, ok('basecommit\n'))
+      .on(/^git diff origin\/main\.\.\.HEAD$/, ok('--- diff content ---\n'))
+      .on(/^git diff --name-only origin\/main\.\.\.HEAD$/, ok('a.ts\n'))
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/owner/repo/pull/42\n'));
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-241-WIRE',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: runner.toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 2,
+      // AISDLC-241 — inject the private mutex to verify the threading path.
+      mutexOpts: { _mutex: privateMutex },
+    });
+
+    expect(result.outcome).toBe('approved');
+    // The mutex must have been held (depth > 0) during the worktree add.
+    expect(depthDuringWorktreeAdd).toHaveLength(1);
+    expect(depthDuringWorktreeAdd[0]).toBeGreaterThanOrEqual(1);
+    // Depth must be back to 0 after the pipeline completes.
+    expect(privateMutex.depth).toBe(0);
+  });
+
   // AISDLC-200 — Counter-test: post-setup throws (e.g. a buggy step 7
   // implementation) MUST NOT pre-clean the worktree from inside the
   // finally. The wrapper's `rollbackDispatch()` needs the branch ref to

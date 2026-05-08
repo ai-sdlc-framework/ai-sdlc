@@ -117,6 +117,12 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       // stale branches in the orchestrator path (default false → manual path
       // unchanged).
       autonomousMode: opts.autonomousMode,
+      // AISDLC-241 — thread the mutex options through so the orchestrator's
+      // `buildDefaultDispatch` can activate the in-process (and optionally
+      // cross-process file-based) lock across concurrent ticks. When undefined
+      // (manual `/ai-sdlc execute` path), `setupWorktree` falls through to
+      // `withWorktreeMutex`'s no-op default (no lock applied — backward-compatible).
+      mutexOpts: opts.mutexOpts,
       // AISDLC-224 — forward the auto-cleanup event to the orchestrator's
       // events bus when supplied. setupWorktree synthesizes a `ts` field;
       // the loop-side handler stamps `runId`/`tick` before writing.

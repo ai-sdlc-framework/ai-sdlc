@@ -200,9 +200,19 @@ export async function withWorktreeMutex<T>(
     // Race: either the previous holder releases, or we time out.
     await Promise.race([prevTail, timeoutPromise]);
   } catch (timeoutErr) {
-    // We timed out — clean up our slot in the queue and propagate.
-    // Release our lock slot immediately so subsequent waiters don't deadlock.
-    releaseLock();
+    // We timed out waiting for our turn. We must NOT resolve `newTail`
+    // eagerly here: `mutex.queue` currently points to `newTail`, so
+    // resolving it now would let a C3 caller that enqueues after our
+    // timeout use `newTail` as its `prevTail` — and because `newTail`
+    // is already resolved, C3 would enter the critical section
+    // concurrently with C1 (the real holder that hasn't finished yet).
+    //
+    // Instead, chain the release onto `prevTail` so C2's slot in the
+    // queue stays "occupied" until the real prior holder (C1) finishes.
+    // This preserves the queue invariant: C3 sees `newTail` as its
+    // `prevTail`; `newTail` resolves only after C1's `prevTail` resolves,
+    // which is exactly when C1 has released its own lock.
+    void prevTail.finally(() => releaseLock());
     mutex.depth -= 1;
     // Clear the timeout timer so the process doesn't hang.
     if (timeoutId !== undefined) clearTimeout(timeoutId);

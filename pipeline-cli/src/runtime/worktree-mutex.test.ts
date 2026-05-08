@@ -207,6 +207,63 @@ describe('withWorktreeMutex — timeout (AC #5)', () => {
     expect(log).toContain('c3-ran');
     expect(mutex.depth).toBe(0);
   });
+
+  // AISDLC-241 — Bug 2 regression test: queue-chain break on timeout.
+  //
+  // Failure scenario prior to fix:
+  //   C1 holds the mutex → C2 enqueues with a short timeout → C2 times out
+  //   and EAGERLY resolves its own `newTail` → C3 enqueues; its `prevTail`
+  //   is already-resolved C2.newTail → C3 enters the critical section
+  //   CONCURRENTLY with C1. This breaks the mutual-exclusion guarantee.
+  //
+  // After the fix: on timeout, C2 chains `prevTail.finally(() => releaseLock())`
+  // so C2.newTail only resolves after C1 releases, preserving the queue order.
+  it('AISDLC-241: C3 enqueued after C2 timeout does NOT start before C1 finishes', async () => {
+    const mutex = makeMutex();
+
+    let c1ReleaseFn!: () => void;
+    let c1EndTime = 0;
+    let c3StartTime = 0;
+
+    const c1Done = new Promise<void>((res) => {
+      c1ReleaseFn = res;
+    });
+
+    // C1: acquires + holds for ~100ms.
+    const c1 = withWorktreeMutex(
+      async () => {
+        await c1Done;
+        c1EndTime = Date.now();
+      },
+      { _mutex: mutex },
+    );
+
+    // C2: enqueues with a short timeout (25ms) — will time out while C1 holds.
+    const c2Timeout = withWorktreeMutex(async () => {}, { _mutex: mutex, timeoutMs: 25 });
+
+    // Let C2 time out.
+    await expect(c2Timeout).rejects.toThrow(/worktree mutex held > 60s/);
+
+    // t=30ms: C3 enqueues AFTER C2 has already timed out.
+    await delay(5); // brief pause to ensure C2's timeout settled
+    const c3 = withWorktreeMutex(
+      async () => {
+        c3StartTime = Date.now();
+      },
+      { _mutex: mutex },
+    );
+
+    // Now release C1 (simulate the real holder finishing after ~100ms total).
+    await delay(50); // simulate remaining hold time
+    c1ReleaseFn();
+    await Promise.all([c1, c3]);
+
+    // CRITICAL assertion: C3 must NOT have started before C1 ended.
+    // If the bug is present, c3StartTime < c1EndTime because C3 entered
+    // the critical section while C1 was still running.
+    expect(c3StartTime).toBeGreaterThanOrEqual(c1EndTime);
+    expect(mutex.depth).toBe(0);
+  });
 });
 
 // ── File lock tests ───────────────────────────────────────────────────────
