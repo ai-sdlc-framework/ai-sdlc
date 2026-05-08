@@ -55,6 +55,12 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import {
+  dispatchResultToSubagentResult,
+  readDispatchResult,
+  type DispatchResult,
+} from '../runtime/spawners/dispatch-result.js';
+
 import { buildDependencyGraph, frontier, type DependencyGraph } from '../deps/dependency-graph.js';
 import { sortFrontierByEffectivePriority } from '../deps/dispatch.js';
 import { executePipeline } from '../execute-pipeline.js';
@@ -101,6 +107,7 @@ import type {
   OrchestratorFilterEvent,
   PipelineFailureDetail,
   PipelineOutcomeDetail,
+  RichDispatchResult,
   UmbrellaDispatchFn,
   OrchestratorIdleEvent,
   OrchestratorStatus,
@@ -274,6 +281,18 @@ export interface OrchestratorAdapters {
    */
   calibrationLogPath?: string;
   /**
+   * AISDLC-225 — consumer-bridge continuation path. When set, the tick loop
+   * reads the dispatch-result.json at this path and uses it as the dispatch
+   * result for the admitted task instead of re-dispatching. This is the
+   * second half of the inline-spawner protocol: the slash command body writes
+   * the Agent result, then re-invokes `cli-orchestrator tick
+   * --continue-from-result <path>` to advance the pipeline to Steps 6+.
+   *
+   * The path is passed by the CLI's `--continue-from-result` flag. When
+   * undefined (the common case), the tick dispatches normally.
+   */
+  continueFromResultPath?: string;
+  /**
    * RFC-0015 Phase 3 — per-task stuck-candidate counter shared across ticks.
    * The loop increments per skip + emits `OrchestratorStuckCandidate` once
    * the count crosses `STUCK_CANDIDATE_THRESHOLD`. Reset on the candidate's
@@ -388,6 +407,15 @@ export async function runOrchestratorTick(
   const testWantsUmbrella = adapters.umbrellaExecutor !== undefined;
   const richDispatchFn: UmbrellaDispatchFn = (() => {
     if (adapters.umbrellaDispatch) return adapters.umbrellaDispatch;
+    // AISDLC-225 — consumer-bridge continuation. When `continueFromResultPath`
+    // is set, the slash command body has already run the Agent and written the
+    // dispatch-result.json. The tick reads that file and forwards the result to
+    // `executePipeline()` Steps 6+ without re-dispatching. This is the second
+    // half of the inline-spawner handshake.
+    if (adapters.continueFromResultPath !== undefined) {
+      const resultPath = adapters.continueFromResultPath;
+      return buildContinuationDispatch(resultPath, config, adapters, emit);
+    }
     if (adapters.dispatch) {
       const legacyFn = adapters.dispatch;
       return async (taskId: string) => ({ result: await legacyFn(taskId) });
@@ -1731,6 +1759,105 @@ function extractPipelineDetail(
  * missing, the umbrella will return `ok: false` with an appropriate reason,
  * which surfaces as `failure: { type: 'unknown', ... }`.
  */
+/**
+ * AISDLC-225 — build a `UmbrellaDispatchFn` that reads a pre-written
+ * `dispatch-result.json` and calls `executePipeline()` with a prefill
+ * spawner that returns the on-disk `SubagentResult` for the `developer`
+ * spawn call. All subsequent spawner calls (reviewers) go through the
+ * normal `defaultSpawner()` path.
+ *
+ * This is the consumer-bridge continuation: the slash command body
+ * already ran the Agent and wrote the result; this tick just needs to
+ * advance the pipeline from Step 6 (parse developer return) onwards.
+ *
+ * When the file is missing or invalid, the function falls back to a
+ * normal dispatch (same as if `continueFromResultPath` were not set),
+ * so a stale `--continue-from-result` flag never silently breaks the
+ * loop.
+ */
+function buildContinuationDispatch(
+  resultPath: string,
+  config: OrchestratorConfig,
+  adapters: OrchestratorAdapters,
+  emit: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void,
+): UmbrellaDispatchFn {
+  const logger = adapters.logger ?? DEFAULT_LOGGER;
+
+  return async (taskId): Promise<RichDispatchResult> => {
+    // Read the dispatch-result.json written by the slash command body.
+    const dispatchResult: DispatchResult | null = readDispatchResult({ resultPath });
+
+    if (!dispatchResult) {
+      logger.warn(
+        `[orchestrator] --continue-from-result: no valid dispatch-result.json at ${resultPath}; ` +
+          `falling back to normal dispatch for ${taskId}`,
+      );
+      // Fall back to the legacy direct-spawner path (same as default production behaviour).
+      const legacyFn = buildDefaultDispatch(config, adapters, emit);
+      return { result: await legacyFn(taskId) };
+    }
+
+    logger.info(
+      `[orchestrator] --continue-from-result: restoring ${dispatchResult.status} result ` +
+        `for ${dispatchResult.taskId} from ${resultPath}`,
+    );
+
+    // Build a "prefill spawner" that returns the pre-loaded SubagentResult when
+    // asked for the developer type. Reviewer spawns go through the real spawner.
+    const preloadedSubagentResult = dispatchResultToSubagentResult(dispatchResult);
+    let developerSpawnConsumed = false;
+    const baseSpawner = adapters.spawner ?? (await defaultSpawner());
+
+    const prefillSpawner: SubagentSpawner = {
+      spawn: async (opts) => {
+        if (opts.type === 'developer' && !developerSpawnConsumed) {
+          developerSpawnConsumed = true;
+          logger.info(
+            `[orchestrator] prefill-spawner: returning pre-loaded developer result ` +
+              `(status=${preloadedSubagentResult.status}, durationMs=${preloadedSubagentResult.durationMs})`,
+          );
+          return preloadedSubagentResult;
+        }
+        return baseSpawner.spawn(opts);
+      },
+      spawnParallel: async (opts) => {
+        return Promise.all(opts.map((o) => prefillSpawner.spawn(o)));
+      },
+    };
+
+    const result = await executePipeline({
+      taskId,
+      workDir: config.workDir,
+      spawner: prefillSpawner,
+      runner: adapters.runner ?? defaultRunner,
+      logger,
+      autonomousMode: true,
+      onDeveloperContractRetry: ({ initialOutputPreview, durationMs, phase, iteration }): void => {
+        emit({
+          type: 'DeveloperContractRetry',
+          taskId,
+          initialOutputPreview,
+          retryDurationMs: durationMs,
+          phase,
+          ...(iteration !== undefined ? { iteration } : {}),
+        });
+      },
+      onWorktreeAutoCleaned: (event): void => {
+        emit({
+          type: 'WorktreeAutoCleaned',
+          taskId: event.taskId,
+          branch: event.branch,
+          reason: event.reason,
+          hadOpenPR: event.hadOpenPR,
+          hadUncommittedChanges: event.hadUncommittedChanges,
+        });
+      },
+    });
+
+    return { result };
+  };
+}
+
 function buildDefaultUmbrellaDispatch(
   config: OrchestratorConfig,
   adapters: OrchestratorAdapters,

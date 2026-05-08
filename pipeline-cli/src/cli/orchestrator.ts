@@ -8,6 +8,11 @@
  *                 SIGINT/SIGTERM for clean drain.
  *   - `tick`    — runs a single tick + exits. Useful for cron-driven
  *                 invocations or "kick the loop one step" testing.
+ *                 `--continue-from-result <path>` reads a pre-completed
+ *                 dispatch-result.json (AISDLC-225 consumer bridge).
+ *   - `write-dispatch-result` — write a dispatch-result.json to disk.
+ *                 Called by the /ai-sdlc orchestrator-tick slash command body
+ *                 after the Agent tool call completes (AISDLC-225).
  *   - `status`  — read-only snapshot: feature-flag state + frontier head +
  *                 queue depth + configured concurrency + tick interval.
  *
@@ -35,6 +40,11 @@ import {
   type OrchestratorAdapters,
   type OrchestratorConfig,
 } from '../orchestrator/index.js';
+import {
+  resolveResultPath,
+  writeDispatchResult,
+  type DispatchResult,
+} from '../runtime/spawners/dispatch-result.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -123,18 +133,149 @@ export function buildOrchestratorCli(adapters?: OrchestratorAdapters): Argv {
       'tick',
       'Run a single tick and exit. Useful for cron-driven invocations or one-shot testing.',
       (y) =>
-        y.option('dry-run', {
-          describe: 'Resolve the frontier but skip dispatch.',
-          type: 'boolean',
-          default: false,
-        }),
+        y
+          .option('dry-run', {
+            describe: 'Resolve the frontier but skip dispatch.',
+            type: 'boolean',
+            default: false,
+          })
+          .option('continue-from-result', {
+            describe:
+              'Path to a dispatch-result.json written by the slash command body. ' +
+              'When set, the tick reads the pre-completed Agent result and forwards it to the ' +
+              'pipeline (Steps 6+) instead of re-dispatching the task. ' +
+              'Defaults to $ARTIFACTS_DIR/_orchestrator/dispatch-result.json when the flag is ' +
+              'present but no path is given.',
+            type: 'string',
+            // Allow `--continue-from-result` without a value (boolean-style).
+            // Yargs treats a `string` option without a value as an empty string;
+            // we normalize that below.
+          }),
       async (argv) => {
         if (!isOrchestratorEnabled()) {
           fail(orchestratorDisabledMessage(), 2);
         }
         const config = buildConfig({ ...argv, 'max-ticks': 1 } as Record<string, unknown>);
-        const result = await runOrchestratorTick(config, adapters ?? {}, 1);
+
+        // AISDLC-225 — resolve the continueFromResultPath when the flag is
+        // present. A bare `--continue-from-result` (no value) resolves to the
+        // default artifact path; an explicit path is used as-is.
+        const rawContinue = argv['continue-from-result'];
+        const continueFromResultPath: string | undefined =
+          rawContinue !== undefined && rawContinue !== null
+            ? rawContinue.length > 0
+              ? rawContinue
+              : resolveResultPath() // bare flag → default path
+            : undefined;
+
+        const tickAdapters: OrchestratorAdapters = {
+          ...(adapters ?? {}),
+          ...(continueFromResultPath !== undefined ? { continueFromResultPath } : {}),
+        };
+
+        const result = await runOrchestratorTick(config, tickAdapters, 1);
         emit({ ok: true, mode: 'tick', tick: result });
+      },
+    )
+    .command(
+      'write-dispatch-result',
+      'Write a dispatch-result.json to disk. Called by the /ai-sdlc orchestrator-tick slash ' +
+        'command body after the Agent tool call completes (AISDLC-225 consumer bridge).',
+      (y) =>
+        y
+          .option('task-id', {
+            describe: 'Task ID that was dispatched (e.g. AISDLC-123).',
+            type: 'string',
+            demandOption: true,
+          })
+          .option('subagent-type', {
+            describe:
+              'Subagent type that was invoked (developer | code-reviewer | test-reviewer | security-reviewer).',
+            type: 'string',
+            demandOption: true,
+          })
+          .option('status', {
+            describe: 'Outcome of the Agent call: success | error.',
+            type: 'string',
+            choices: ['success', 'error'],
+            demandOption: true,
+          })
+          .option('output', {
+            describe: 'Raw output from the Agent call.',
+            type: 'string',
+            default: '',
+          })
+          .option('result-path', {
+            describe:
+              'Absolute path where the result JSON is written. ' +
+              'Defaults to $ARTIFACTS_DIR/_orchestrator/dispatch-result.json.',
+            type: 'string',
+          })
+          .option('parsed', {
+            describe:
+              'Parsed structured payload from the Agent output (JSON string). ' +
+              'For developer subagents this is the JSON return envelope.',
+            type: 'string',
+          })
+          .option('error', {
+            describe: 'Error message when status is "error".',
+            type: 'string',
+          })
+          .option('start-ms', {
+            describe:
+              'Unix epoch timestamp in milliseconds when the dispatch started. ' +
+              'Used to compute durationMs = Date.now() - startMs.',
+            type: 'number',
+          })
+          .option('duration-ms', {
+            describe:
+              'Duration of the Agent call in milliseconds. ' +
+              'Mutually exclusive with --start-ms (start-ms wins when both are set).',
+            type: 'number',
+            default: 0,
+          }),
+      (argv) => {
+        const taskId = String(argv['task-id']);
+        const subagentType = String(argv['subagent-type']);
+        const status = argv['status'] as 'success' | 'error';
+        const output = String(argv['output'] ?? '');
+        const resultPath = argv['result-path'] ? String(argv['result-path']) : undefined;
+        const errorMsg = argv['error'] ? String(argv['error']) : undefined;
+
+        // Parse the optional --parsed JSON string.
+        let parsedPayload: unknown | undefined;
+        const rawParsed = argv['parsed'];
+        if (rawParsed) {
+          try {
+            parsedPayload = JSON.parse(rawParsed);
+          } catch {
+            fail(`--parsed is not valid JSON: ${rawParsed}`, 1);
+          }
+        }
+
+        // Compute durationMs: prefer (now - startMs) when --start-ms is given.
+        const startMs = argv['start-ms'];
+        const durationMs =
+          typeof startMs === 'number' && startMs > 0
+            ? Math.max(0, Date.now() - startMs)
+            : ((argv['duration-ms'] as number | undefined) ?? 0);
+
+        const resultFields: Omit<DispatchResult, 'version' | 'writtenAt'> = {
+          taskId,
+          // Cast to SubagentType — CLI validates the string is one of the known values
+          // via the allowed `choices` on `subagent-type` (no .choices() here since
+          // SubagentType is a TS union; runtime validation is intentionally permissive
+          // to allow future types without a deploy).
+          subagentType: subagentType as DispatchResult['subagentType'],
+          status,
+          output,
+          durationMs,
+          ...(parsedPayload !== undefined ? { parsed: parsedPayload } : {}),
+          ...(errorMsg !== undefined ? { error: errorMsg } : {}),
+        };
+
+        const envelope = writeDispatchResult(resultFields, { resultPath });
+        emit({ ok: true, mode: 'write-dispatch-result', result: envelope });
       },
     )
     .command(
