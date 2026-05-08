@@ -383,11 +383,14 @@ describe('withWorktreeMutex — real git worktree add (AC #7)', () => {
     execSync('git init -b main', { cwd: repoDir, stdio: 'pipe' });
     execSync('git config user.email "test@test.com"', { cwd: repoDir, stdio: 'pipe' });
     execSync('git config user.name "Test"', { cwd: repoDir, stdio: 'pipe' });
-    execSync('echo "init" > README.md && git add . && git commit -m "init"', {
-      cwd: repoDir,
-      shell: '/bin/bash',
-      stdio: 'pipe',
-    });
+    execSync(
+      'echo "init" > README.md && git add . && git -c commit.gpgsign=false commit --no-verify -m "init"',
+      {
+        cwd: repoDir,
+        shell: '/bin/bash',
+        stdio: 'pipe',
+      },
+    );
   });
 
   afterEach(() => {
