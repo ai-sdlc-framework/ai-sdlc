@@ -25,7 +25,12 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { buildQuarantineRef, rollbackDispatch, type RollbackOptions } from './rollback.js';
+import {
+  buildQuarantineRef,
+  isReallyStale,
+  rollbackDispatch,
+  type RollbackOptions,
+} from './rollback.js';
 import type { ExecOptions, ExecResult, Runner } from '../runtime/exec.js';
 import type { PipelineLogger } from '../types.js';
 
@@ -479,5 +484,603 @@ describe('rollbackDispatch — AISDLC-186 collision avoidance', () => {
     expect(r1.quarantineRef).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44-123');
     expect(r2.quarantineRef).toBe('quarantine/aisdlc-70-2026-05-04T14-23-44-456');
     expect(r1.quarantineRef).not.toBe(r2.quarantineRef);
+  });
+});
+
+// ── AISDLC-228 — isReallyStale predicate tests ───────────────────────────────
+
+describe('isReallyStale — Signal 1: unpushed commits (no upstream)', () => {
+  /**
+   * When the branch has no remote upstream AND has commits ahead of origin/main,
+   * the branch is local-only with unrecoverable work → not stale.
+   */
+  it('returns not-stale when branch has no upstream and commits ahead of origin/main', async () => {
+    const { runner } = makeRunner({
+      responses: {
+        // No upstream → non-zero exit
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: '',
+          stderr: 'fatal: no upstream',
+          code: 128,
+        },
+        // Has commits ahead of origin/main
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/main': {
+          stdout: '2\n',
+          stderr: '',
+          code: 0,
+        },
+      },
+    });
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => null,
+        readProcessTable: () => '',
+      },
+    );
+
+    expect(result.stale).toBe(false);
+    expect(result.reason).toMatch(/unpushed commit/i);
+  });
+
+  /**
+   * When the branch has an upstream AND is ahead of it, commits are in-flight.
+   */
+  it('returns not-stale when branch is ahead of its upstream', async () => {
+    const { runner } = makeRunner({
+      responses: {
+        // Has upstream
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        // 3 commits ahead of upstream
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '3\n',
+          stderr: '',
+          code: 0,
+        },
+      },
+    });
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => null,
+        readProcessTable: () => '',
+      },
+    );
+
+    expect(result.stale).toBe(false);
+    expect(result.reason).toMatch(/ahead of origin\/ai-sdlc\/aisdlc-70/);
+  });
+});
+
+describe('isReallyStale — Signal 2: active sentinel (<6h old)', () => {
+  /**
+   * A sentinel modified 12 minutes ago means the session is actively running.
+   */
+  it('returns not-stale when sentinel is younger than 6 hours', async () => {
+    const nowMs = 1_700_000_000_000;
+    const twelveMinutesAgo = nowMs - 12 * 60 * 1000;
+
+    const { runner } = makeRunner({
+      responses: {
+        // Branch has upstream and is NOT ahead of it (signals 1 is quiet)
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+      },
+    });
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => twelveMinutesAgo,
+        readProcessTable: () => '',
+        nowMs: () => nowMs,
+      },
+    );
+
+    expect(result.stale).toBe(false);
+    expect(result.reason).toMatch(/active sentinel modified 12min ago/);
+  });
+
+  /**
+   * A sentinel modified 7 hours ago is past the threshold → does NOT block
+   * quarantine on its own (other signals may still be active).
+   */
+  it('does NOT block quarantine based on sentinel alone when sentinel is >6h old', async () => {
+    const nowMs = 1_700_000_000_000;
+    const sevenHoursAgo = nowMs - 7 * 60 * 60 * 1000;
+
+    const { runner } = makeRunner({
+      responses: {
+        // Signal 1: upstream present, not ahead
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+        // Signal 4: no open PR
+        'gh pr list': { stdout: '[]\n', stderr: '', code: 0 },
+      },
+    });
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => sevenHoursAgo,
+        readProcessTable: () => '', // no subprocess (signal 3 quiet)
+        nowMs: () => nowMs,
+      },
+    );
+
+    // All signals quiet → stale
+    expect(result.stale).toBe(true);
+  });
+});
+
+describe('isReallyStale — Signal 3: live claude --print subprocess', () => {
+  /**
+   * A live `claude --print` process whose argv contains the task ID means
+   * the dev subagent is still running.
+   */
+  it('returns not-stale when a live claude --print subprocess references the task ID', async () => {
+    const { runner } = makeRunner({
+      responses: {
+        // Signal 1: upstream present, not ahead
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+      },
+    });
+
+    // Signal 2: no sentinel
+    // Signal 3: live subprocess in process table
+    const fakePs = [
+      '    1 /sbin/launchd',
+      '12345 /usr/local/bin/claude --print AISDLC-70 some-prompt',
+      '99999 /usr/bin/vim',
+    ].join('\n');
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => null,
+        readProcessTable: () => fakePs,
+      },
+    );
+
+    expect(result.stale).toBe(false);
+    expect(result.reason).toMatch(/live claude.*subprocess.*AISDLC-70.*PID 12345/i);
+  });
+
+  /**
+   * When the process table scan throws (ps unavailable), the signal is skipped
+   * and the predicate continues to signal 4 (open PR).
+   */
+  it('skips signal 3 when readProcessTable throws and continues to signal 4', async () => {
+    const { runner } = makeRunner({
+      responses: {
+        // Signal 1: upstream present, not ahead
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+        // Signal 4: open PR found
+        'gh pr list': { stdout: '[{"number":42}]\n', stderr: '', code: 0 },
+      },
+    });
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => null,
+        readProcessTable: () => {
+          throw new Error('ps not available');
+        },
+      },
+    );
+
+    // Signal 3 was skipped; signal 4 (open PR) fires
+    expect(result.stale).toBe(false);
+    expect(result.reason).toMatch(/PR #42/);
+  });
+});
+
+describe('isReallyStale — Signal 4: open GitHub PR', () => {
+  /**
+   * An open PR means commits are in review — quarantining would break the
+   * PR's source ref.
+   */
+  it('returns not-stale when an open PR exists for the branch', async () => {
+    const { runner } = makeRunner({
+      responses: {
+        // Signal 1: upstream present, not ahead
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+        // Signal 4: open PR
+        'gh pr list': { stdout: '[{"number":99}]\n', stderr: '', code: 0 },
+      },
+    });
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => null,
+        readProcessTable: () => '',
+      },
+    );
+
+    expect(result.stale).toBe(false);
+    expect(result.reason).toMatch(/PR #99/);
+  });
+
+  /**
+   * When gh exits non-zero (token expired, network), fail CLOSED — treat as in-flight.
+   */
+  it('returns not-stale (fail-closed) when gh pr list fails', async () => {
+    const { runner } = makeRunner({
+      responses: {
+        // Signal 1: upstream present, not ahead
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+        // Signal 4: gh fails
+        'gh pr list': {
+          stdout: '',
+          stderr: 'error: not authenticated',
+          code: 1,
+        },
+      },
+    });
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => null,
+        readProcessTable: () => '',
+      },
+    );
+
+    expect(result.stale).toBe(false);
+    expect(result.reason).toMatch(/fail-closed/);
+  });
+
+  /**
+   * AC #7 — "all stale" path: when all 4 signals say quiet, isReallyStale
+   * returns stale: true and quarantine can proceed.
+   */
+  it('returns stale: true when ALL signals are quiet (truly stale branch)', async () => {
+    const { runner } = makeRunner({
+      responses: {
+        // Signal 1: upstream present, not ahead
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+        // Signal 4: no open PR
+        'gh pr list': { stdout: '[]\n', stderr: '', code: 0 },
+      },
+    });
+
+    const result = await isReallyStale(
+      'AISDLC-70',
+      'ai-sdlc/aisdlc-70',
+      '/tmp/workdir',
+      '/tmp/workdir/.worktrees/aisdlc-70',
+      {
+        runner,
+        readSentinelMtime: () => null, // no sentinel (signal 2 quiet)
+        readProcessTable: () => '', // no subprocess (signal 3 quiet)
+      },
+    );
+
+    expect(result.stale).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+});
+
+describe('rollbackDispatch — AISDLC-228: quarantine skipped for in-flight branches', () => {
+  /**
+   * The key regression from AISDLC-228: rollbackDispatch must NOT quarantine
+   * a branch when isReallyStale() returns false. Instead it must:
+   *   - skip the `git branch -m` rename
+   *   - skip the worktree removal
+   *   - skip the branch delete
+   *   - set quarantineSkippedReason in the result
+   *   - emit a [step-3] trace line
+   */
+  it('skips quarantine and worktree removal when branch has active sentinel', async () => {
+    const fixture = makeFakeWorkDir('AISDLC-70', 'In Progress');
+    const wt = mkdtempSync(join(tmpdir(), 'rollback-228-wt-'));
+
+    // Write a fresh .active-task sentinel (5 minutes old)
+    const nowMs = 1_700_000_000_000;
+    const fiveMinutesAgo = nowMs - 5 * 60 * 1000;
+
+    const { runner, calls } = makeRunner({
+      responses: {
+        // countCommitsAhead: branch exists with commits
+        'git rev-parse --verify ai-sdlc/aisdlc-70': { stdout: 'abc1234\n', stderr: '', code: 0 },
+        'git rev-parse --verify origin/main': { stdout: 'def5678\n', stderr: '', code: 0 },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/main': {
+          stdout: '2\n',
+          stderr: '',
+          code: 0,
+        },
+        // isReallyStale signal 1: upstream present, not ahead of it
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+      },
+      defaultResponse: { stdout: '', stderr: '', code: 0 },
+    });
+
+    const loggedLines: string[] = [];
+    const logger: PipelineLogger = {
+      info: (msg: string) => loggedLines.push(msg),
+      warn: () => {},
+      error: () => {},
+      progress: () => {},
+    };
+
+    const result = await rollbackDispatch(
+      makeOptions({
+        workDir: fixture.workDir,
+        worktreePath: wt,
+        runner,
+        logger,
+        fromStatus: 'To Do',
+        now: () => new Date('2026-05-07T02:37:40.838Z'),
+        readSentinelMtime: () => fiveMinutesAgo, // fresh sentinel
+        nowMs: () => nowMs,
+        readProcessTable: () => '', // no subprocess
+      }),
+    );
+
+    rmSync(fixture.workDir, { recursive: true, force: true });
+    rmSync(wt, { recursive: true, force: true });
+
+    // Branch must NOT have been quarantined
+    expect(result.branchQuarantined).toBe(false);
+    expect(result.quarantineRef).toBeUndefined();
+
+    // quarantineSkippedReason must be set
+    expect(result.quarantineSkippedReason).toBeDefined();
+    expect(result.quarantineSkippedReason).toMatch(/active sentinel modified/);
+
+    // NO git branch -m (quarantine rename) call
+    expect(
+      calls.some((c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-m'),
+    ).toBe(false);
+
+    // NO git branch -D call
+    expect(
+      calls.some((c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-D'),
+    ).toBe(false);
+
+    // [step-3] trace line was emitted
+    expect(loggedLines.some((l) => l.includes('[step-3]') && l.includes('keeping branch'))).toBe(
+      true,
+    );
+  });
+
+  /**
+   * When an open PR exists for the branch, rollbackDispatch must skip quarantine.
+   * This is the witnessed AISDLC-228 incident: the PR hadn't been opened yet
+   * (push failed), but other signals (sentinel, subprocess) would have caught it.
+   * Here we test the PR signal explicitly.
+   */
+  it('skips quarantine when an open PR exists for the branch', async () => {
+    const fixture = makeFakeWorkDir('AISDLC-70', 'In Progress');
+
+    const { runner, calls } = makeRunner({
+      responses: {
+        // countCommitsAhead: branch has commits
+        'git rev-parse --verify ai-sdlc/aisdlc-70': { stdout: 'abc1234\n', stderr: '', code: 0 },
+        'git rev-parse --verify origin/main': { stdout: 'def5678\n', stderr: '', code: 0 },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/main': {
+          stdout: '1\n',
+          stderr: '',
+          code: 0,
+        },
+        // isReallyStale signal 1: upstream present, not ahead of it
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+        // isReallyStale signal 4: open PR
+        'gh pr list': { stdout: '[{"number":386}]\n', stderr: '', code: 0 },
+      },
+    });
+
+    const result = await rollbackDispatch(
+      makeOptions({
+        workDir: fixture.workDir,
+        worktreePath: '/tmp/nonexistent-wt-228',
+        runner,
+        logger: silentLogger(),
+        fromStatus: 'To Do',
+        now: () => new Date('2026-05-07T02:37:40.838Z'),
+        readSentinelMtime: () => null, // no sentinel
+        readProcessTable: () => '', // no subprocess
+      }),
+    );
+
+    rmSync(fixture.workDir, { recursive: true, force: true });
+
+    expect(result.branchQuarantined).toBe(false);
+    expect(result.quarantineSkippedReason).toMatch(/PR #386/);
+
+    // No branch -m call
+    expect(calls.some((c) => c.args[0] === 'branch' && c.args[1] === '-m')).toBe(false);
+    // No branch -D call
+    expect(calls.some((c) => c.args[0] === 'branch' && c.args[1] === '-D')).toBe(false);
+  });
+
+  /**
+   * AC #7 — no regression: when all signals say stale, quarantine still fires.
+   * Ensures AISDLC-228 didn't break the existing AISDLC-224 path.
+   */
+  it('still quarantines when all signals say stale (AISDLC-224 no-regression)', async () => {
+    const fixture = makeFakeWorkDir('AISDLC-70', 'In Progress');
+    const tipSha = 'abc1234deadbeef';
+    const fixedNow = new Date('2026-05-04T14:23:44.000Z');
+    const expectedRef = 'quarantine/aisdlc-70-2026-05-04T14-23-44-000';
+
+    const { runner } = makeRunner({
+      responses: {
+        // countCommitsAhead: 2 commits
+        'git rev-parse --verify ai-sdlc/aisdlc-70': {
+          stdout: `${tipSha}\n`,
+          stderr: '',
+          code: 0,
+        },
+        'git rev-parse --verify origin/main': { stdout: 'def5678\n', stderr: '', code: 0 },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/main': {
+          stdout: '2\n',
+          stderr: '',
+          code: 0,
+        },
+        // isReallyStale signal 1: upstream present, NOT ahead
+        'git rev-parse --abbrev-ref ai-sdlc/aisdlc-70@{upstream}': {
+          stdout: 'origin/ai-sdlc/aisdlc-70\n',
+          stderr: '',
+          code: 0,
+        },
+        'git rev-list --count ai-sdlc/aisdlc-70 ^origin/ai-sdlc/aisdlc-70': {
+          stdout: '0\n',
+          stderr: '',
+          code: 0,
+        },
+        // isReallyStale signal 4: no open PR
+        'gh pr list': { stdout: '[]\n', stderr: '', code: 0 },
+        // quarantine rename succeeds
+        [`git branch -m ai-sdlc/aisdlc-70 ${expectedRef}`]: {
+          stdout: '',
+          stderr: '',
+          code: 0,
+        },
+      },
+    });
+
+    const result = await rollbackDispatch(
+      makeOptions({
+        workDir: fixture.workDir,
+        worktreePath: '/tmp/nonexistent-wt-228-no-regression',
+        runner,
+        logger: silentLogger(),
+        fromStatus: 'To Do',
+        now: () => fixedNow,
+        readSentinelMtime: () => null, // no sentinel (signal 2 quiet)
+        readProcessTable: () => '', // no subprocess (signal 3 quiet)
+      }),
+    );
+
+    rmSync(fixture.workDir, { recursive: true, force: true });
+
+    // Quarantine MUST have fired
+    expect(result.branchQuarantined).toBe(true);
+    expect(result.quarantineRef).toBe(expectedRef);
+    expect(result.quarantineSha).toBe(tipSha);
+    expect(result.quarantineCommitCount).toBe(2);
+
+    // No quarantineSkippedReason
+    expect(result.quarantineSkippedReason).toBeUndefined();
   });
 });

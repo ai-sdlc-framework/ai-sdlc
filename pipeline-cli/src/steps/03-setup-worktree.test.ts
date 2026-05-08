@@ -4,6 +4,7 @@ import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.j
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
 import { join } from 'node:path';
 import type { OrchestratorEvent } from '../orchestrator/events.js';
+import type { ExecResult } from '../runtime/exec.js';
 
 let tmp: string;
 beforeEach(() => {
@@ -536,6 +537,282 @@ describe('Step 3 — setupWorktree auto-cleanup (AISDLC-224)', () => {
         (c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-D',
       );
       expect(branchDeleteCall, 'cleanup must run when branch is only a name prefix').toBeDefined();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
+});
+
+// ── AISDLC-228 — new safety predicates (signals 4-6) ─────────────────────────
+
+describe('Step 3 — isSafeToAutoClean AISDLC-228 signals', () => {
+  const BRANCH_EXISTS_STDERR = "fatal: a branch named 'ai-sdlc/aisdlc-99' already exists";
+  const BRANCH = 'ai-sdlc/aisdlc-99';
+  const TASK_ID = 'AISDLC-99';
+
+  function makeWorktreePath(): string {
+    return join(tmp, '.worktrees', 'aisdlc-99');
+  }
+
+  /**
+   * Signal 4 — unpushed commits (no upstream): cleanup must refuse when the
+   * branch has commits ahead of origin/main and no remote upstream.
+   */
+  it('refuses cleanup when branch has unpushed commits and no remote upstream', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    try {
+      const emitted: OrchestratorEvent[] = [];
+
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        // Initial worktree add fails with branch-exists
+        .on(
+          (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+          fail(BRANCH_EXISTS_STDERR, 128),
+        )
+        // No open PRs (signal 1 quiet)
+        .on(/^gh pr list/, ok('[]\n'))
+        // git status: clean (signal 2 quiet)
+        .on(/^git -C .+ status --porcelain/, ok(''))
+        // git worktree list: not checked out elsewhere (signal 3 quiet)
+        .on(/^git worktree list --porcelain/, ok('worktree /some/path\nbranch refs/heads/other\n'))
+        // Signal 4: no upstream → non-zero
+        .on(/^git rev-parse --abbrev-ref ai-sdlc\/aisdlc-99@{upstream}/, fail('no upstream', 128))
+        // Signal 4: commits ahead of origin/main
+        .on(/^git rev-list --count ai-sdlc\/aisdlc-99 \^origin\/main/, ok('2\n'));
+
+      await expect(
+        setupWorktree({
+          taskId: TASK_ID,
+          branch: BRANCH,
+          worktreePath: makeWorktreePath(),
+          workDir: tmp,
+          runner: fake.toRunner(),
+          autonomousMode: true,
+          emitEvent: (ev) => {
+            emitted.push({ ts: new Date().toISOString(), ...ev } as OrchestratorEvent);
+          },
+          readSentinelMtime: () => null, // no sentinel (signal 5 quiet)
+          readProcessTable: () => '', // no subprocess (signal 6 quiet)
+        }),
+      ).rejects.toThrow(/branch already exists|cleanup AISDLC-99/);
+
+      // No cleanup event emitted
+      expect(emitted.find((e) => e.type === 'WorktreeAutoCleaned')).toBeUndefined();
+
+      // No branch -D call
+      const branchDeleteCall = fake.calls.find(
+        (c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-D',
+      );
+      expect(branchDeleteCall, 'must not delete branch with unpushed commits').toBeUndefined();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
+
+  /**
+   * Signal 5 — active sentinel (<6h): cleanup must refuse when the .active-task
+   * sentinel was modified within the last 6 hours.
+   */
+  it('refuses cleanup when the .active-task sentinel is younger than 6 hours', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    const nowMs = 1_700_000_000_000;
+    const tenMinutesAgo = nowMs - 10 * 60 * 1000;
+    try {
+      const emitted: OrchestratorEvent[] = [];
+
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        .on(
+          (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+          fail(BRANCH_EXISTS_STDERR, 128),
+        )
+        // Signals 1-3 quiet
+        .on(/^gh pr list/, ok('[]\n'))
+        .on(/^git -C .+ status --porcelain/, ok(''))
+        .on(/^git worktree list --porcelain/, ok('worktree /some/path\nbranch refs/heads/other\n'))
+        // Signal 4: has upstream, not ahead of it
+        .on(
+          /^git rev-parse --abbrev-ref ai-sdlc\/aisdlc-99@{upstream}/,
+          ok('origin/ai-sdlc/aisdlc-99\n'),
+        )
+        .on(/^git rev-list --count ai-sdlc\/aisdlc-99 \^origin\/ai-sdlc\/aisdlc-99/, ok('0\n'));
+
+      await expect(
+        setupWorktree({
+          taskId: TASK_ID,
+          branch: BRANCH,
+          worktreePath: makeWorktreePath(),
+          workDir: tmp,
+          runner: fake.toRunner(),
+          autonomousMode: true,
+          emitEvent: (ev) => {
+            emitted.push({ ts: new Date().toISOString(), ...ev } as OrchestratorEvent);
+          },
+          readSentinelMtime: () => tenMinutesAgo, // fresh sentinel → signal 5 fires
+          readProcessTable: () => '', // signal 6 quiet
+          nowMs: () => nowMs,
+        }),
+      ).rejects.toThrow(/branch already exists|cleanup AISDLC-99/);
+
+      expect(emitted.find((e) => e.type === 'WorktreeAutoCleaned')).toBeUndefined();
+
+      const branchDeleteCall = fake.calls.find(
+        (c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-D',
+      );
+      expect(branchDeleteCall, 'must not delete branch with active sentinel').toBeUndefined();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
+
+  /**
+   * Signal 6 — live claude --print subprocess: cleanup must refuse when the
+   * process table shows a claude subprocess for this task.
+   */
+  it('refuses cleanup when a live claude --print subprocess is running for this task', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    try {
+      const emitted: OrchestratorEvent[] = [];
+
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        .on(
+          (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+          fail(BRANCH_EXISTS_STDERR, 128),
+        )
+        // Signals 1-3 quiet
+        .on(/^gh pr list/, ok('[]\n'))
+        .on(/^git -C .+ status --porcelain/, ok(''))
+        .on(/^git worktree list --porcelain/, ok('worktree /some/path\nbranch refs/heads/other\n'))
+        // Signal 4: has upstream, not ahead
+        .on(
+          /^git rev-parse --abbrev-ref ai-sdlc\/aisdlc-99@{upstream}/,
+          ok('origin/ai-sdlc/aisdlc-99\n'),
+        )
+        .on(/^git rev-list --count ai-sdlc\/aisdlc-99 \^origin\/ai-sdlc\/aisdlc-99/, ok('0\n'));
+
+      const fakePs = [
+        '    1 /sbin/launchd',
+        '55555 /usr/local/bin/claude --print AISDLC-99 some-developer-prompt',
+      ].join('\n');
+
+      await expect(
+        setupWorktree({
+          taskId: TASK_ID,
+          branch: BRANCH,
+          worktreePath: makeWorktreePath(),
+          workDir: tmp,
+          runner: fake.toRunner(),
+          autonomousMode: true,
+          emitEvent: (ev) => {
+            emitted.push({ ts: new Date().toISOString(), ...ev } as OrchestratorEvent);
+          },
+          readSentinelMtime: () => null, // signal 5 quiet
+          readProcessTable: () => fakePs, // signal 6 fires
+        }),
+      ).rejects.toThrow(/branch already exists|cleanup AISDLC-99/);
+
+      expect(emitted.find((e) => e.type === 'WorktreeAutoCleaned')).toBeUndefined();
+
+      const branchDeleteCall = fake.calls.find(
+        (c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-D',
+      );
+      expect(branchDeleteCall, 'must not delete branch with live subprocess').toBeUndefined();
+    } finally {
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
+
+  /**
+   * AC #7 — no regression: all 6 signals quiet → cleanup proceeds normally.
+   * Signals 1-3 are from AISDLC-224, signals 4-6 from AISDLC-228.
+   */
+  it('AC#7 — cleans up when ALL 6 signals say stale (truly stale branch)', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    const nowMs = 1_700_000_000_000;
+    const eightHoursAgo = nowMs - 8 * 60 * 60 * 1000;
+    try {
+      const emitted: OrchestratorEvent[] = [];
+
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        .on(
+          (cmd, args) =>
+            cmd === 'git' && args[0] === 'worktree' && args[1] === 'add' && args.length > 4,
+          (() => {
+            let call = 0;
+            return (): ExecResult => {
+              call++;
+              if (call === 1) return fail(BRANCH_EXISTS_STDERR, 128);
+              return ok();
+            };
+          })(),
+        )
+        // Signal 1: no open PR
+        .on(/^gh pr list/, ok('[]\n'))
+        // Signal 2: clean worktree
+        .on(/^git -C .+ status --porcelain/, ok(''))
+        // Signal 3: not checked out elsewhere
+        .on(/^git worktree list --porcelain/, ok('worktree /somewhere\nbranch refs/heads/other\n'))
+        // Signal 4: has upstream, NOT ahead of it
+        .on(
+          /^git rev-parse --abbrev-ref ai-sdlc\/aisdlc-99@{upstream}/,
+          ok('origin/ai-sdlc/aisdlc-99\n'),
+        )
+        .on(/^git rev-list --count ai-sdlc\/aisdlc-99 \^origin\/ai-sdlc\/aisdlc-99/, ok('0\n'))
+        // Cleanup commands
+        .on(/^git worktree remove --force/, ok())
+        .on(/^git branch -D/, ok())
+        // Final rev-parse after retry
+        .on(/^git -C .+ rev-parse HEAD/, ok('deadbeef\n'));
+
+      const result = await setupWorktree({
+        taskId: TASK_ID,
+        branch: BRANCH,
+        worktreePath: makeWorktreePath(),
+        workDir: tmp,
+        runner: fake.toRunner(),
+        autonomousMode: true,
+        emitEvent: (ev) => {
+          emitted.push({ ts: new Date().toISOString(), ...ev } as OrchestratorEvent);
+        },
+        readSentinelMtime: () => eightHoursAgo, // signal 5: old sentinel (>6h) → quiet
+        readProcessTable: () => '', // signal 6: no subprocess → quiet
+        nowMs: () => nowMs,
+      });
+
+      // Cleanup must have proceeded
+      expect(result.branch).toBe(BRANCH);
+      expect(result.baseSha).toBe('deadbeef');
+
+      const cleanedEvent = emitted.find((e) => e.type === 'WorktreeAutoCleaned');
+      expect(cleanedEvent).toBeDefined();
+
+      const branchDeleteCall = fake.calls.find(
+        (c) => c.command === 'git' && c.args[0] === 'branch' && c.args[1] === '-D',
+      );
+      expect(branchDeleteCall, 'cleanup must run when all signals are quiet').toBeDefined();
     } finally {
       if (originalEnv === undefined) {
         delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;

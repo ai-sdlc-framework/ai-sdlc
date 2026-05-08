@@ -607,11 +607,14 @@ and is unaffected regardless of the flag.
 
 When `git worktree add` exits non-zero with a "branch already exists" stderr
 pattern, AND `autonomousMode === true`, AND `AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP`
-is truthy, Step 3 runs three safety predicates before attempting any cleanup:
+is truthy, Step 3 runs **six** safety predicates before attempting any cleanup
+(AISDLC-224 introduced predicates 1-3; AISDLC-228 added predicates 4-6 to close
+the incident where an active worktree was quarantined mid-attestation-sign):
 
 1. **Open-PR check** — `gh pr list --head <branch> --state open` must return
    empty. An open PR means the operator's in-flight work is associated with this
-   branch and clobbering it would destroy review history.
+   branch and clobbering it would destroy review history. Fails **closed** on any
+   `gh` error (token expired, network timeout, `gh` not installed).
 
 2. **Uncommitted-changes check** — `git -C <worktree-path> status --porcelain`
    must return empty. Uncommitted changes represent potential data loss if the
@@ -621,11 +624,26 @@ is truthy, Step 3 runs three safety predicates before attempting any cleanup:
    NOT show the branch mounted at a different path. If it does, another worktree
    (possibly a parallel dispatch) is actively using the branch.
 
-All three predicates must pass. If ANY predicate fails, cleanup is skipped and
-the original "branch already exists" error propagates (same behavior as before
-AISDLC-224).
+4. **Unpushed-commits check** (AISDLC-228) — if the branch has commits ahead of
+   `origin/main` AND no remote tracking upstream (i.e. not yet pushed at all),
+   cleanup is refused. If a tracking upstream is present, `git rev-list --count
+   <branch> ^<upstream>` must be 0. This catches the witnessed incident where the
+   dev had committed locally but `git push` was still in progress.
 
-When all three pass, the cleanup sequence runs:
+5. **Active-sentinel check** (AISDLC-228) — `.worktrees/<task-id-lower>/.active-task`
+   must either be absent OR have an mtime older than **6 hours**. A sentinel
+   younger than 6 hours means a live pipeline session is using this worktree.
+
+6. **Live-subprocess check** (AISDLC-228) — a portable `ps -ax -o pid,command`
+   scan must find no `claude --print` (or `claude -p`) process whose argv
+   references the task ID. A live subprocess means the dev subagent is still
+   running.
+
+ALL six predicates must pass. If ANY predicate fires, cleanup is skipped and a
+`[step-3] <taskId>: keeping branch (<reason>)` trace line is emitted so the
+operator can see why (e.g. `active sentinel modified 10min ago`).
+
+When all six pass, the cleanup sequence runs:
 1. `git worktree remove --force <.worktrees/<task-id>/>`
 2. `git branch -D <branch>`
 3. `git worktree add <.worktrees/<task-id>> -b <branch> origin/main` (one retry)
@@ -662,19 +680,132 @@ task to see if worktree removal or branch deletion failed.
 
 ### Safety rationale
 
-The three predicates are designed so the orchestrator can only auto-clean
-worktrees that are provably inert:
-
-| Predicate | What it protects |
-|---|---|
-| Open-PR check | In-flight operator review — never silently close a PR's source branch |
-| Uncommitted-changes check | Potential developer work that wasn't committed before the prior session crashed |
-| Branch-checked-out-elsewhere | A parallel dispatch or manual operator session using the same branch |
+| Predicate | Signal | What it protects |
+|---|---|---|
+| Open-PR check | Fail-closed | In-flight operator review — never silently close a PR's source branch |
+| Uncommitted-changes check | git status | Potential developer work that wasn't committed before the prior session crashed |
+| Branch-checked-out-elsewhere | git worktree list | A parallel dispatch or manual operator session using the same branch |
+| Unpushed-commits check | git rev-list | Dev commits that landed but weren't pushed before the orchestrator interrupted |
+| Active-sentinel check | `.active-task` mtime | A live pipeline session is mid-flight in the worktree |
+| Live-subprocess check | ps -ax | The dev subagent subprocess is still running |
 
 If the auto-cleanup ever misbehaves (e.g. false-negative on an open-PR check due
 to a `gh` network failure), the conservative fallback is the pre-AISDLC-224
 behavior: the error surfaces, the task gets re-picked on the next tick, and the
 operator sees repeated `aborted` outcomes for the same task — noisy but safe.
+
+---
+
+## Worktree quarantine rules (AISDLC-228) {#quarantine-rules}
+
+> **Incident witness (2026-05-07):** The orchestrator's rollback path quarantined
+> an active branch mid-attestation-sign. The dev commit (`8f20a42`) and the
+> attestation chore (`003496f`) survived only via `git reflog`. This section
+> documents the tightened predicate that prevents recurrence.
+
+### When quarantine fires
+
+The AISDLC-177 rollback helper renames a failed-dispatch branch under
+`quarantine/<task-id-lower>-<iso-timestamp>` when:
+
+1. The branch has commits beyond `origin/main` (the dev produced work before
+   the dispatch failed), AND
+2. **ALL four** `isReallyStale()` signals say "stale" (AISDLC-228 tightened
+   predicate — previously only signal 1 was checked).
+
+### The `isReallyStale()` predicate
+
+Before renaming, `rollbackDispatch` calls `isReallyStale(taskId, branch)` which
+checks four signals in order. The first signal that says "in-flight" short-circuits
+the check and quarantine is **skipped**:
+
+| Signal | Check | Stale verdict |
+|---|---|---|
+| (1) Upstream tracking | `git rev-parse --abbrev-ref <branch>@{upstream}` — if no upstream exists, commits are local-only → NOT stale. If upstream present, `git rev-list --count <branch> ^<upstream>` must be 0. | Not stale if > 0 commits ahead of upstream |
+| (2) Active sentinel | `.worktrees/<id-lower>/.active-task` mtime < 6 hours | Not stale if sentinel is fresh |
+| (3) Live subprocess | `ps -ax -o pid,command` scan for `claude --print` with task ID in argv | Not stale if subprocess found |
+| (4) Open PR | `gh pr list --head <branch> --state open` (fail-closed on gh errors) | Not stale if PR exists |
+
+When quarantine is **skipped**, `rollbackDispatch` also skips the worktree removal
+and branch delete steps — the session is actively using them.
+
+### Observability: [step-3] trace lines
+
+Both the auto-cleanup path (Step 3) and the rollback path emit a trace line when
+preserving a branch:
+
+```
+[step-3] aisdlc-178.4.1: keeping branch (active sentinel modified 12min ago)
+[step-3] aisdlc-70: keeping branch (3 commits ahead of origin/ai-sdlc/aisdlc-70 (unpushed))
+[step-3] aisdlc-99: keeping branch (open PR #386 for branch ai-sdlc/aisdlc-99)
+[step-3] aisdlc-99: keeping branch (live claude --print subprocess for AISDLC-99 (PID 55555))
+```
+
+The `quarantineSkippedReason` field is also set in the `OrchestratorRollback`
+event payload for forensic use:
+
+```bash
+jq -c 'select(.type == "OrchestratorRollback" and .quarantineSkippedReason != null)' \
+  artifacts/_orchestrator/events-*.jsonl
+```
+
+### Recovery playbook: quarantine fired on active work
+
+If quarantine fired on a branch that was actively in-flight (e.g. before
+AISDLC-228 shipped, or if all 4 signals somehow passed), recover with:
+
+**Step 1:** Find the quarantine ref:
+
+```bash
+git branch --list 'quarantine/<task-id-lower>-*'
+# or from events.jsonl:
+jq -c 'select(.type == "OrchestratorWorkQuarantined" and .taskId == "AISDLC-NNN")' \
+  artifacts/_orchestrator/events-*.jsonl
+```
+
+**Step 2:** Restore the worktree from the quarantine ref:
+
+```bash
+# Replace <task-id-lower>, <branch-name>, and <quarantine-ref> with your values.
+git worktree add .worktrees/<task-id-lower> -b <branch-name> <quarantine-ref>
+```
+
+**Step 3:** Verify the commits are there:
+
+```bash
+git -C .worktrees/<task-id-lower> log --oneline --not origin/main
+```
+
+**Step 4:** Push the recovered branch and open/re-open the PR:
+
+```bash
+git push -u origin <branch-name>
+gh pr create --draft --title "recovered: ..." --body "..."
+```
+
+**Step 5:** Re-run any review / attestation steps that were interrupted
+(the worktree's `.ai-sdlc/verdicts/` and `.ai-sdlc/attestations/` directories
+may be intact from before the quarantine fired — check before re-running).
+
+### When quarantine fires correctly (truly stale branch)
+
+When all 4 signals say stale, quarantine is the right action. The
+`OrchestratorWorkQuarantined` event documents what was preserved:
+
+```jsonc
+{
+  "type": "OrchestratorWorkQuarantined",
+  "taskId": "AISDLC-70",
+  "branch": "ai-sdlc/aisdlc-70",
+  "quarantineRef": "quarantine/aisdlc-70-2026-05-04T14-23-44-000",
+  "commitSha": "abc1234deadbeef",
+  "commitCount": 2
+}
+```
+
+The task's status is reverted to `To Do` automatically; the next tick re-dispatches
+the task. Use the "Recovery playbook" above only if the dev's commits should be
+carried forward rather than restarted from scratch.
 
 ---
 

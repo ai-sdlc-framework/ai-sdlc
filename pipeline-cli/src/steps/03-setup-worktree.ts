@@ -7,15 +7,17 @@
  *
  * AISDLC-224 — when `opts.autonomousMode === true` AND
  * `AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP` is truthy, a "branch already exists"
- * failure triggers an automatic cleanup-then-retry path. Three safety
- * predicates must all pass before any cleanup proceeds: no open PR, no
- * uncommitted changes, and the branch not checked out elsewhere. A
- * `WorktreeAutoCleaned` event is emitted when cleanup fires.
+ * failure triggers an automatic cleanup-then-retry path. Six safety
+ * predicates must all pass before any cleanup proceeds (AISDLC-228 added
+ * signals 4-6): no open PR, no uncommitted changes, branch not checked out
+ * elsewhere, no unpushed commits, no active sentinel (<6h), no live subprocess.
+ * A `WorktreeAutoCleaned` event is emitted when cleanup fires.
  *
  * @module steps/03-setup-worktree
  */
 
-import { mkdirSync } from 'node:fs';
+import { execSync } from 'node:child_process';
+import { mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { SetupWorktreeResult } from '../types.js';
@@ -48,6 +50,20 @@ export interface SetupWorktreeOptions {
    * When undefined, cleanup still proceeds but no event is emitted.
    */
   emitEvent?: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void;
+  /**
+   * AISDLC-228 — override the sentinel mtime reader for hermetic tests.
+   * Returns the mtime in milliseconds since epoch, or null if missing/error.
+   */
+  readSentinelMtime?: (sentinelPath: string) => number | null;
+  /**
+   * AISDLC-228 — override the process-table scanner for hermetic tests.
+   * Returns the raw stdout of `ps -ax -o pid,command`, or throws.
+   */
+  readProcessTable?: () => string;
+  /**
+   * AISDLC-228 — override `Date.now()` for hermetic tests of sentinel age.
+   */
+  nowMs?: () => number;
 }
 
 /**
@@ -64,21 +80,63 @@ function isBranchExistsError(stderr: string): boolean {
   return /branch.+already exists|already exists.+branch/i.test(stderr);
 }
 
+/** Six-hour sentinel age threshold (in ms). Sentinels younger than this mean "active". */
+const SENTINEL_ACTIVE_THRESHOLD_MS = 6 * 60 * 60 * 1000;
+
 /**
- * AISDLC-224 — run all three safety predicates before any cleanup. Returns
- * `true` only when ALL three pass (safe to proceed with cleanup).
+ * Scan ps output for a claude --print/-p subprocess referencing the task ID.
+ * Returns the PID if found, null otherwise. Mirrors the logic in already-in-flight.ts.
+ */
+function findClaudeSubprocess(psOutput: string, taskId: string): number | null {
+  const taskIdLower = taskId.toLowerCase();
+  const taskIdUpper = taskId.toUpperCase();
+  for (const line of psOutput.split('\n')) {
+    const trimmed = line.trim();
+    if (trimmed === '') continue;
+    const spaceIdx = trimmed.indexOf(' ');
+    if (spaceIdx === -1) continue;
+    const pidStr = trimmed.slice(0, spaceIdx).trim();
+    const command = trimmed.slice(spaceIdx + 1).trim();
+    const pid = parseInt(pidStr, 10);
+    if (isNaN(pid)) continue;
+    if (!command.includes('claude')) continue;
+    if (!command.includes('--print') && !/ -p(\s|$)/.test(command)) continue;
+    if (command.includes(taskIdLower) || command.includes(taskIdUpper)) {
+      return pid;
+    }
+  }
+  return null;
+}
+
+/**
+ * AISDLC-224 + AISDLC-228 — run all safety predicates before any cleanup.
+ * Returns `{ safe: true }` only when ALL predicates pass (safe to proceed).
  *
- * Safety predicates:
+ * Safety predicates (AISDLC-228 added signals 4-6):
  * 1. No open PR for the branch.
  * 2. No uncommitted changes in the existing worktree.
  * 3. Branch not checked out in any other registered worktree.
+ * 4. No unpushed commits (commits ahead of origin/main that have no upstream).
+ * 5. No active `.active-task` sentinel younger than 6 hours.
+ * 6. No live `claude --print` subprocess for this task.
+ *
+ * When NOT safe, emits a `[step-3] <taskId>: keeping branch (<reason>)` trace
+ * line for observability (AC #3 of AISDLC-228).
  */
 async function isSafeToAutoClean(
   runner: Runner,
   workDir: string,
+  taskId: string,
   branch: string,
   worktreePath: string,
+  opts?: {
+    readSentinelMtime?: (path: string) => number | null;
+    readProcessTable?: () => string;
+    nowMs?: () => number;
+  },
 ): Promise<{ safe: boolean; hadOpenPR: boolean; hadUncommittedChanges: boolean }> {
+  const taskIdLower = taskId.toLowerCase();
+
   // Predicate 1: open-PR check.
   // CRITICAL: fail CLOSED on any non-zero gh exit (token expired, network
   // timeout, gh not installed, rate limit). Without this, a transient gh
@@ -93,6 +151,7 @@ async function isSafeToAutoClean(
   );
   if (prResult.code !== 0) {
     // gh failed — fail closed, refuse cleanup.
+    console.info(`[step-3] ${taskIdLower}: keeping branch (gh pr list failed; fail-closed)`);
     return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
   }
   let hadOpenPR = false;
@@ -104,6 +163,7 @@ async function isSafeToAutoClean(
     hadOpenPR = prResult.stdout.trim().length > 0;
   }
   if (hadOpenPR) {
+    console.info(`[step-3] ${taskIdLower}: keeping branch (open PR found for ${branch})`);
     return { safe: false, hadOpenPR: true, hadUncommittedChanges: false };
   }
 
@@ -123,6 +183,7 @@ async function isSafeToAutoClean(
     // safe because the worktree-remove step below will catch real issues.
   }
   if (hadUncommittedChanges) {
+    console.info(`[step-3] ${taskIdLower}: keeping branch (uncommitted changes in worktree)`);
     return { safe: false, hadOpenPR: false, hadUncommittedChanges: true };
   }
 
@@ -149,10 +210,99 @@ async function isSafeToAutoClean(
         const normalizedExpectedPath = worktreePath.replace(/\/$/, '');
         if (normalizedCurrentPath !== normalizedExpectedPath) {
           // Branch is checked out at a different location — unsafe
+          console.info(`[step-3] ${taskIdLower}: keeping branch (checked out at ${currentPath})`);
           return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
         }
       }
     }
+  }
+
+  // Predicate 4 (AISDLC-228): unpushed-commits check.
+  // When the branch has commits ahead of origin/main AND no remote upstream
+  // (i.e. not yet pushed), cleanup would silently destroy unrecoverable work.
+  // We check: does the branch have a remote tracking ref? If not → not safe.
+  // If yes, is it ahead of that upstream? If yes → not safe.
+  const upstreamResult = await runner(
+    'git',
+    ['rev-parse', '--abbrev-ref', `${branch}@{upstream}`],
+    { cwd: workDir, allowFailure: true },
+  );
+  if (upstreamResult.code !== 0) {
+    // No upstream — check if branch has ANY commits ahead of origin/main.
+    const aheadOriginResult = await runner('git', ['rev-list', '--count', branch, '^origin/main'], {
+      cwd: workDir,
+      allowFailure: true,
+    });
+    if (aheadOriginResult.code === 0) {
+      const ahead = Number.parseInt(aheadOriginResult.stdout.trim(), 10);
+      if (Number.isFinite(ahead) && ahead > 0) {
+        console.info(
+          `[step-3] ${taskIdLower}: keeping branch (${ahead} unpushed commit(s), no upstream)`,
+        );
+        return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+      }
+    }
+  } else {
+    // Has an upstream — check if ahead of it.
+    const upstream = upstreamResult.stdout.trim();
+    if (upstream) {
+      const aheadUpstreamResult = await runner(
+        'git',
+        ['rev-list', '--count', branch, `^${upstream}`],
+        { cwd: workDir, allowFailure: true },
+      );
+      if (aheadUpstreamResult.code === 0) {
+        const ahead = Number.parseInt(aheadUpstreamResult.stdout.trim(), 10);
+        if (Number.isFinite(ahead) && ahead > 0) {
+          console.info(
+            `[step-3] ${taskIdLower}: keeping branch (${ahead} commit(s) ahead of ${upstream})`,
+          );
+          return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+        }
+      }
+    }
+  }
+
+  // Predicate 5 (AISDLC-228): active sentinel age check.
+  const sentinelPath = join(worktreePath, '.active-task');
+  const readSentinelMtime =
+    opts?.readSentinelMtime ??
+    ((p: string): number | null => {
+      try {
+        return statSync(p).mtimeMs;
+      } catch {
+        return null;
+      }
+    });
+  const nowMs = opts?.nowMs ?? ((): number => Date.now());
+  const mtime = readSentinelMtime(sentinelPath);
+  if (mtime !== null) {
+    const ageMs = nowMs() - mtime;
+    if (ageMs < SENTINEL_ACTIVE_THRESHOLD_MS) {
+      const ageMins = Math.round(ageMs / 60_000);
+      console.info(
+        `[step-3] ${taskIdLower}: keeping branch (active sentinel modified ${ageMins}min ago)`,
+      );
+      return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+    }
+  }
+
+  // Predicate 6 (AISDLC-228): live subprocess check.
+  const readProcessTable =
+    opts?.readProcessTable ??
+    ((): string =>
+      execSync('ps -ax -o pid,command', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }));
+  try {
+    const psOutput = readProcessTable();
+    const pid = findClaudeSubprocess(psOutput, taskId);
+    if (pid !== null) {
+      console.info(
+        `[step-3] ${taskIdLower}: keeping branch (live claude --print subprocess PID ${pid})`,
+      );
+      return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+    }
+  } catch {
+    // ps not available or parse error — skip this signal (conservative: allow cleanup).
   }
 
   return { safe: true, hadOpenPR: false, hadUncommittedChanges: false };
@@ -169,8 +319,14 @@ async function attemptAutoCleanup(
   const { safe, hadOpenPR, hadUncommittedChanges } = await isSafeToAutoClean(
     runner,
     opts.workDir,
+    opts.taskId,
     opts.branch,
     opts.worktreePath,
+    {
+      readSentinelMtime: opts.readSentinelMtime,
+      readProcessTable: opts.readProcessTable,
+      nowMs: opts.nowMs,
+    },
   );
 
   if (!safe) {
