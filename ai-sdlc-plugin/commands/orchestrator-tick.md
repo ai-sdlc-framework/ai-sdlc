@@ -145,20 +145,40 @@ Use the Agent tool to spawn a `$SUBAGENT_TYPE` subagent in `$CWD` with
 the full developer/reviewer flow and returns a structured JSON result.
 
 After the Agent call completes, write its result to the result file so the
-orchestrator tick loop can continue:
+orchestrator tick loop can continue. The orchestrator session is expected to
+extract three values from the Agent's structured return:
+
+- `$AGENT_RESULT_JSON` — the raw stdout/text the Agent returned (full envelope,
+  for diagnostics).
+- `$DEV_JSON_ENVELOPE` — the developer's JSON return envelope, parsed out of
+  `$AGENT_RESULT_JSON`. This MUST be passed as `--parsed` so the continuation
+  tick can hand a populated `SubagentResult.parsed` to `executePipeline` Steps
+  6+. Without it, `parseDeveloperReturn()` treats `parsed: undefined` as a
+  contract violation and the continuation tick aborts with
+  `developer-json-contract-violated`.
+- `$STATUS` — `"success"` when the Agent returned a well-formed envelope,
+  `"error"` when it failed (Agent tool errored, the developer JSON didn't
+  parse, etc.). REQUIRED — `--status` is `demandOption: true` on the CLI; if
+  omitted, yargs exits 1 and the `2>/dev/null || true` swallows the error,
+  silently making the bridge a no-op.
 
 ```bash
   # Write the Agent result to disk for the orchestrator to consume
-  # (The result will contain the developer's JSON return or reviewer verdict)
   DISPATCH_START_MS=$(date +%s%3N)
 
   # ... (Agent tool invocation happens here — this is the live dispatch) ...
+  # The operator session captures the Agent's structured return into
+  # $AGENT_RESULT_JSON, extracts the developer JSON envelope into
+  # $DEV_JSON_ENVELOPE, and decides $STATUS based on whether the dispatch
+  # succeeded.
 
   # After Agent completes, write dispatch-result.json
   node pipeline-cli/bin/cli-orchestrator.mjs write-dispatch-result \
     --task-id "$TASK_ID" \
     --subagent-type "$SUBAGENT_TYPE" \
+    --status "$STATUS" \
     --output "$AGENT_RESULT_JSON" \
+    --parsed "$DEV_JSON_ENVELOPE" \
     --result-path "$RESULT_PATH" \
     --start-ms "$DISPATCH_START_MS" \
     2>/dev/null || true
