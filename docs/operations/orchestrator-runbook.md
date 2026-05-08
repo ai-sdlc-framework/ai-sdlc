@@ -724,3 +724,120 @@ so the queries above implicitly bucket pre-discriminator events into
 neither group. Any persistent imbalance between the two paths is the
 signal — pick the one with the higher count and address its drift
 source first.
+
+---
+
+## Diagnosing `claude --print` subprocess failures (AISDLC-239)
+
+When a developer dispatch returns `developer-json-contract-violated` with
+`raw output: ""`, the problem is at the subprocess level — the `claude --print`
+process itself exited without producing output. As of AISDLC-239,
+`ShellClaudePSpawner` captures full subprocess diagnostics and surfaces them
+on the `SubagentResult.subprocessDiagnostics` field.
+
+### New `subprocessDiagnostics` field
+
+Every `ShellClaudePSpawner` invocation now populates:
+
+```ts
+interface SubprocessDiagnostics {
+  exitCode: number | null;      // process exit code; null when killed by signal
+  signal: string | null;        // OS signal that killed the process; null on normal exit
+  stderrTail: string;           // last 2 KB of stderr (empty when stderr was clean)
+  wallClockMs: number;          // wall-clock spawn → close duration in ms
+  argv: readonly string[];      // full argv passed to claude (excludes the binary name)
+  failureType?: string;         // machine-readable failure classification (see below)
+  watchdogFired?: boolean;      // true when the spawner's own timeout killed the process
+}
+```
+
+The field is on `SubagentResult` and propagates through the pipeline to the
+`PipelineFailureDetail.type` and outcome `notes` fields when a dispatch fails.
+
+### Failure-type taxonomy
+
+| `failureType` | `PipelineFailureDetail.type` | Meaning | Next action |
+|---|---|---|---|
+| `claude-cli-api-error` | `claude-cli-api-error` | Exit != 0 AND stderr matches an Anthropic API error pattern (`authentication_error`, `rate_limit`, `overloaded_error`, `api_error_status`, `invalid_request_error`). | Check `stderrTail`. If `authentication_error` → re-login (`claude auth`). If `rate_limit` → backoff and retry. If `overloaded_error` → retry later. |
+| `claude-cli-empty-output-fast` | `claude-cli-empty-output-fast` | Exit 0, stdout empty, wall-clock < 5 s. The CLI quit before the session started. | Run `claude auth status` to check login state. Re-login if needed (`claude auth`). |
+| `claude-cli-killed` | `claude-cli-killed` | Process was killed by a signal. `signal` carries the signal name; `watchdogFired=true` means the orchestrator's 30-min timeout fired; `watchdogFired=false` means an external kill (OOM, operator). | If `watchdogFired=true` and the task is consistently slow, increase the spawner's `defaultTimeoutMs`. If an OOM kill, investigate memory pressure. |
+| `claude-cli-nonzero-exit` | `developer-json-contract-violated` (fallback) | Non-zero exit without a recognised API error pattern. | Read `stderrTail` for the raw error. Common causes: plugin not loaded, misconfigured agent name. |
+| `claude-cli-spawn-error` | `developer-json-contract-violated` (fallback) | `spawn()` itself threw (e.g. `ENOENT` — `claude` binary not on PATH). | Install the Claude Code CLI: `npm i -g @anthropic-ai/claude-code`. |
+| `claude-cli-watch-error` | `developer-json-contract-violated` (fallback) | Child process emitted an `error` event (network error, process crash). | Check `stderrTail` and system logs. |
+| _(absent)_ | (as-is) | Exit 0, non-empty stdout — happy path OR `claude-cli-empty-output-fast` not triggered because `wallClockMs >= 5000`. | No action needed on success; on `wallClockMs >= 5000` + empty stdout — inspect `stderrTail`. |
+
+### Reading diagnostics in log output
+
+The spawner emits a human-readable summary when a dispatch fails. Look for
+lines like:
+
+```
+[ai-sdlc-progress] execute: outcome=developer-json-contract-violated pr=none iterations=1
+```
+
+To see the full `subprocessDiagnostics` payload, inspect the `TaskDispatchOutcome`
+in the tick result (printed as JSON to `cli-orchestrator tick` stdout):
+
+```json
+{
+  "taskId": "AISDLC-99",
+  "outcome": "developer-json-contract-violated",
+  "prUrl": null,
+  "failure": {
+    "type": "claude-cli-api-error",
+    "message": "claude -p exited with code 1"
+  },
+  "notes": "developer subagent violated JSON envelope contract..."
+}
+```
+
+Or from events.jsonl (Phase 4):
+
+```bash
+jq -c 'select(.type == "OrchestratorFailed")' \
+  artifacts/_orchestrator/events-*.jsonl
+```
+
+### Reproducing a controlled failure for diagnostics verification
+
+To verify the new diagnostic fields are working without a live dispatch, trigger
+a controlled failure by using an invalid model name:
+
+```bash
+AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental \
+  node pipeline-cli/bin/cli-orchestrator.mjs tick \
+  --max-concurrent 1 --max-ticks 1
+```
+
+Or drive the spawner directly in a test context (using the injected fake spawn):
+
+```ts
+// Simulate an auth error
+const { fake } = makeFakeSpawn({
+  stderr: '{"error":{"type":"authentication_error","message":"invalid key"}}',
+  code: 1,
+});
+const spawner = new ShellClaudePSpawner({ spawn: fake });
+const result = await spawner.spawn({ type: 'developer', prompt: '...', cwd: '.' });
+console.log(result.subprocessDiagnostics);
+// => { exitCode: 1, signal: null, stderrTail: '...authentication_error...', failureType: 'claude-cli-api-error', ... }
+```
+
+### AC #6 — controlled repro observation (AISDLC-239)
+
+The original dogfood incident (2026-05-07) showed both parallel `claude --print`
+dispatches returning empty stdout. With the new diagnostics instrumented, the
+same failure would now surface one of:
+
+- `claude-cli-empty-output-fast` — if the subprocess exited in < 5 s with code 0.
+  Most likely culprit for the parallel-empty-output incident: the CLI quit
+  immediately (auth/config check), stdout was never written.
+- `claude-cli-api-error` — if `stderrTail` shows an Anthropic API error
+  (e.g. `overloaded_error` under heavy load when two parallel sessions both
+  hit the subscription's concurrent-session limit).
+
+The diagnosis without instrumentation was impossible. With `stderrTail`,
+`exitCode`, and `wallClockMs`, the root cause is machine-readable in the outcome
+envelope. AC #7 (fix-after-diagnosis) is deferred until a live repro surfaces
+the actual `failureType` — speculative fixes without evidence are explicitly
+out of scope per the task brief.
