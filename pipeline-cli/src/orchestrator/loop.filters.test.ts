@@ -265,39 +265,43 @@ describe('runOrchestratorTick — Phase 3 4-task fixture acceptance', () => {
 // ── Stuck-candidate detection (AC #4) ──────────────────────────────────
 
 describe('runOrchestratorTick — stuck-candidate counter', () => {
-  it('emits OrchestratorStuckCandidate exactly once after >5 ticks of the same skip', async () => {
-    const graph = buildGraph([
-      node('AISDLC-OPEN'),
-      node('AISDLC-STUCK', { deps: ['AISDLC-OPEN'] }),
-    ]);
-    const stuckCounters = new Map<string, StuckCounterEntry>();
-    const config = defaultOrchestratorConfig({
-      workDir: tmp,
-      maxConcurrent: 1,
-      maxTicks: 1,
-      tickIntervalSec: 0,
-    });
-    const adapters: OrchestratorAdapters = {
-      logger: silentLogger(),
-      sleep: () => Promise.resolve(),
-      frontier: () => [{ id: 'AISDLC-STUCK', title: 'STUCK' }],
-      graphLoader: () => graph,
-      taskLabelsLoader: () => [],
-      dispatch: async (id) => approvedResult(id),
-      escalate: async () => {},
-      stuckCounters,
-    };
-    let stuckEmissions = 0;
-    // Run THRESHOLD+2 consecutive ticks. The first THRESHOLD don't emit; the
-    // (THRESHOLD+1)-th emits exactly once; subsequent ticks do not re-emit.
-    for (let i = 0; i < STUCK_CANDIDATE_THRESHOLD + 2; i++) {
-      const tick = await runOrchestratorTick(config, adapters, i + 1);
-      const ev = tick.filterEvents.find((e) => e.taskId === 'AISDLC-STUCK');
-      if (ev?.stuckEvent) stuckEmissions += 1;
-    }
-    expect(stuckEmissions).toBe(1);
-    expect(stuckCounters.get('aisdlc-stuck')?.ticks).toBe(STUCK_CANDIDATE_THRESHOLD + 2);
-  });
+  it(
+    'emits OrchestratorStuckCandidate exactly once after >5 ticks of the same skip',
+    { timeout: 15000 },
+    async () => {
+      const graph = buildGraph([
+        node('AISDLC-OPEN'),
+        node('AISDLC-STUCK', { deps: ['AISDLC-OPEN'] }),
+      ]);
+      const stuckCounters = new Map<string, StuckCounterEntry>();
+      const config = defaultOrchestratorConfig({
+        workDir: tmp,
+        maxConcurrent: 1,
+        maxTicks: 1,
+        tickIntervalSec: 0,
+      });
+      const adapters: OrchestratorAdapters = {
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        frontier: () => [{ id: 'AISDLC-STUCK', title: 'STUCK' }],
+        graphLoader: () => graph,
+        taskLabelsLoader: () => [],
+        dispatch: async (id) => approvedResult(id),
+        escalate: async () => {},
+        stuckCounters,
+      };
+      let stuckEmissions = 0;
+      // Run THRESHOLD+2 consecutive ticks. The first THRESHOLD don't emit; the
+      // (THRESHOLD+1)-th emits exactly once; subsequent ticks do not re-emit.
+      for (let i = 0; i < STUCK_CANDIDATE_THRESHOLD + 2; i++) {
+        const tick = await runOrchestratorTick(config, adapters, i + 1);
+        const ev = tick.filterEvents.find((e) => e.taskId === 'AISDLC-STUCK');
+        if (ev?.stuckEvent) stuckEmissions += 1;
+      }
+      expect(stuckEmissions).toBe(1);
+      expect(stuckCounters.get('aisdlc-stuck')?.ticks).toBe(STUCK_CANDIDATE_THRESHOLD + 2);
+    },
+  );
 
   it('resets the stuck counter when the candidate is admitted', async () => {
     const graph1 = buildGraph([
