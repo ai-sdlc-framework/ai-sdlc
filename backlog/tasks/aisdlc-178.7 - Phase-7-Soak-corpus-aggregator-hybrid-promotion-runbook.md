@@ -18,6 +18,12 @@ references:
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md
 parent_task_id: AISDLC-178
 priority: medium
+blocked:
+  reason: >-
+    Operator soak phase — implementation deferred until soak telemetry is in
+    place (operator monitors stability for ~1 week with the 178.x TUI in real
+    use, then promotes). NOT a dispatchable code task. Orchestrator's
+    BlockedFilter should skip this.
 ---
 
 ## Description
