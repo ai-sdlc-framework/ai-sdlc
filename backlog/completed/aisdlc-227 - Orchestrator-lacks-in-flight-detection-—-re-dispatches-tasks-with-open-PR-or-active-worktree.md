@@ -3,7 +3,7 @@ id: AISDLC-227
 title: >-
   Orchestrator lacks in-flight detection — re-dispatches tasks with open PR or
   active worktree
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 02:26'
 labels:
@@ -15,6 +15,41 @@ labels:
 dependencies: []
 priority: high
 ---
+
+## Final Summary
+
+## Summary
+
+Shipped `AlreadyInFlightFilter` (`pipeline-cli/src/orchestrator/filters/already-in-flight.ts`), a new pre-dispatch filter that prevents `cli-orchestrator tick` from re-dispatching tasks that are already being processed. The filter checks three signals — open PR, active worktree sentinel, and live `claude --print` subprocess — before the dependency readiness walk and short-circuits on the first hit. The witness was AISDLC-202.2 (PR #402 already open) wasting ~30s of tick overhead per attempt.
+
+## Changes
+
+- `pipeline-cli/src/orchestrator/filters/already-in-flight.ts` (new): Three-signal in-flight detector with injectable `listOpenPRs` and `readProcessTable` for hermetic testing; subprocess detection behind `AI_SDLC_ORCHESTRATOR_DETECT_SUBPROCESS` env var (default ON)
+- `pipeline-cli/src/orchestrator/filters/already-in-flight.test.ts` (new): 18 hermetic tests covering all 3 detection paths, negative path, signal priority, env var gating, and error-swallowing
+- `pipeline-cli/src/orchestrator/filters/types.ts` (modified): Added `AlreadyInFlight` to `FilterName` union; added `AlreadyInFlightDetail` to `FilterDetail` union
+- `pipeline-cli/src/orchestrator/filters/chain.ts` (modified): Inserted `AlreadyInFlight` filter BEFORE `DependencyReadiness`; added `alreadyInFlightOpts` to `RunFilterChainOpts`; added human name + terminal note for the new filter
+- `pipeline-cli/src/orchestrator/filters/chain.test.ts` (modified): Updated all chain tests for 6-filter trace, added `noInFlight()` stub helper, added already-in-flight short-circuit test
+- `pipeline-cli/src/orchestrator/filters/index.ts` (modified): Exported `checkAlreadyInFlight` and `CheckAlreadyInFlightOpts`
+- `pipeline-cli/src/orchestrator/loop.ts` (modified): Added `already-in-flight` case to `toBlockedEvent` switch (returns null; events handled separately via `alreadyInFlightEvents`)
+- `docs/operations/orchestrator-runbook.md` (modified): New "In-flight detection" section documenting the 3 signals, trace output, and recovery steps
+
+## Design decisions
+
+- **Filter position AFTER OrphanParent, BEFORE DependencyReadiness**: gh call + existsSync are O(1) local checks; the worktree clash cost (~30s setup) far outweighs them. OrphanParent stays first because it's pure in-memory.
+- **Subprocess detection behind env var**: `ps -ax` is more invasive than a gh call; operators can opt out via `AI_SDLC_ORCHESTRATOR_DETECT_SUBPROCESS=0`. Default is ON for tick/start — most users want the protection.
+- **Injectable callbacks for testability**: `listOpenPRs` and `readProcessTable` replace real subprocess calls in tests; all 18 tests are fully hermetic (no network, no real `gh`/`ps`).
+- **gh failure is silent skip**: A transient gh network error should NOT block dispatch — we degrade gracefully to signals (b) and (c).
+
+## Verification
+
+- `pnpm --filter @ai-sdlc/pipeline-cli build` — clean
+- `pnpm --filter @ai-sdlc/pipeline-cli test` — 2352 tests passed (149 suites)
+- `pnpm lint` — clean
+- `pnpm format:check` — clean
+
+## Follow-up
+
+- AISDLC-225: once the inline spawner consumer bridge lands, signal (c) can be extended to detect manifests written by `ClaudeCliInlineSpawner` as a fourth signal
 
 ## Description
 

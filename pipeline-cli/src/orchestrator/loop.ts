@@ -1333,6 +1333,10 @@ function toBlockedEvent(
       if (detail.until !== undefined) ev.until = detail.until;
       return ev;
     }
+    case 'already-in-flight':
+      // AlreadyInFlight rejections are handled as `OrchestratorTaskAlreadyInFlight`
+      // events separately in the loop — they don't map to a `BlockedEvent` arm.
+      return null;
   }
 }
 
