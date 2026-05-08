@@ -18,6 +18,7 @@
  */
 
 import type { ExternalDependency } from '../../deps/dependency-graph.js';
+import type { AlreadyInFlightDetail } from './already-in-flight.js';
 import type { BlockedDetail } from './blocked.js';
 
 /**
@@ -28,12 +29,16 @@ import type { BlockedDetail } from './blocked.js';
  * `OrphanParent` (AISDLC-175) is the cheapest filter — a constant-time graph
  * lookup against the candidate's own node + the already-loaded parent map —
  * so it runs FIRST and short-circuits before the costlier dependency walk.
- * The other four filters preserve the RFC §4.3 ordering among themselves.
- * `Blocked` (AISDLC-223) runs last — it catches tasks the operator has
- * explicitly marked as blocked via `blocked.reason` in frontmatter.
+ * `AlreadyInFlight` (AISDLC-227) runs second — it checks for open PRs,
+ * active worktree sentinels, and live subprocesses before the costlier
+ * dependency walk. The other four filters preserve the RFC §4.3 ordering
+ * among themselves. `Blocked` (AISDLC-223) runs last — it catches tasks the
+ * operator has explicitly marked as blocked via `blocked.reason` in
+ * frontmatter.
  */
 export type FilterName =
   | 'OrphanParent'
+  | 'AlreadyInFlight'
   | 'DependencyReadiness'
   | 'DorReadiness'
   | 'ExternalDependencies'
@@ -69,10 +74,11 @@ export type FilterDetail =
   | DorBlockedDetail
   | AwaitingExternalDetail
   | OrphanParentDetail
+  | AlreadyInFlightDetail
   | BlockedDetail;
 
-// Re-export BlockedDetail so callers can narrow the union without a
-// separate import from blocked.ts.
+// Re-export detail types so callers can narrow the union without extra imports.
+export type { AlreadyInFlightDetail } from './already-in-flight.js';
 export type { BlockedDetail } from './blocked.js';
 
 /**

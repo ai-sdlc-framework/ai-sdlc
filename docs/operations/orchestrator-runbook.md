@@ -252,6 +252,88 @@ is set. The loop refuses to start when the flag is unset.
 
 ---
 
+## In-flight detection — preventing duplicate dispatches (AISDLC-227)
+
+The orchestrator's `AlreadyInFlight` admission filter prevents `cli-orchestrator tick`
+from re-dispatching a task that is already being processed by a concurrent pipeline run.
+Without this filter, a slow-merging PR or a still-running dev subprocess in another session
+causes a duplicate dispatch on every tick — the witness was AISDLC-202.2 (PR #402 already
+open, worktree already existed, `git worktree add` failed with "branch already exists" and
+wasted ~30s of tick + setup overhead per attempt).
+
+### How the filter works
+
+The filter runs BEFORE `DependencyReadiness` and checks three signals in order,
+short-circuiting on the first hit:
+
+| Signal | Check | Always active? |
+|---|---|---|
+| (a) **Open PR** | `gh pr list --head ai-sdlc/<task-id-lower>-* --state open` returns ≥1 entry | Yes |
+| (b) **Active worktree sentinel** | `.worktrees/<task-id-lower>/.active-task` exists on disk | Yes |
+| (c) **Live subprocess** | A `claude --print` or `claude -p` process with the task ID in its argv | Behind `AI_SDLC_ORCHESTRATOR_DETECT_SUBPROCESS` (default ON) |
+
+Signal (a) is the definitive signal — a PR exists means a full pipeline run completed or is
+in review. Signal (b) detects an active session mid-flight. Signal (c) is a best-effort
+process-table scan using portable `ps -ax -o pid,command` (Darwin + Linux); it silently
+no-ops on errors.
+
+### Trace output
+
+When the filter fires, the tick trace includes a rejection line:
+
+```
+[orchestrator] filter trace for AISDLC-202.2:
+  - Orphan-parent check: passed
+  - Already-in-flight check: failed (PR #402 open)
+  → skipped, already in flight (PR #402 already open)
+```
+
+Other rejection patterns:
+
+```
+  - Already-in-flight check: failed (active worktree)
+  → skipped, already in flight (active worktree sentinel at /repo/.worktrees/aisdlc-202.2/.active-task)
+```
+
+```
+  - Already-in-flight check: failed (live subprocess PID 12345)
+  → skipped, already in flight (live claude --print subprocess for AISDLC-202.2 (PID 12345))
+```
+
+### Enabling / disabling subprocess detection
+
+Subprocess detection (signal c) is **enabled by default** for tick and start modes.
+Disable it by setting:
+
+```bash
+export AI_SDLC_ORCHESTRATOR_DETECT_SUBPROCESS=0
+```
+
+Canonical truthy values that keep it enabled: `1`, `true`, `yes`, `on` (case-insensitive).
+Tests should pass `detectSubprocess: false` in `alreadyInFlightOpts` to stay hermetic.
+
+### When the filter fires but shouldn't (false positives)
+
+**Open-PR signal (a)**: Fires correctly when the PR is still in review or in the merge queue.
+If you need to re-dispatch the task anyway (e.g. the PR was abandoned), close the PR first or
+rename the branch so it no longer matches the `ai-sdlc/<task-id-lower>-*` pattern, then run
+the next tick.
+
+**Worktree sentinel (b)**: The `.active-task` sentinel is removed by Step 13 (cleanup) after
+a successful pipeline run. If it persists due to a crashed session, remove it manually:
+
+```bash
+rm .worktrees/<task-id-lower>/.active-task
+# or remove the whole worktree if no in-progress work is present:
+git worktree remove --force .worktrees/<task-id-lower>
+```
+
+**Subprocess signal (c)**: If the subprocess detection is mis-firing (rare — requires a
+`claude --print` process whose argv happens to contain the task ID), disable it via the env
+var above and investigate.
+
+---
+
 ## Blocking a task from orchestrator dispatch (AISDLC-223)
 
 The orchestrator's `Blocked` admission filter lets operators put a task on

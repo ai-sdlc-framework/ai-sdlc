@@ -19,6 +19,7 @@
  */
 
 import type { DependencyGraph } from '../../deps/dependency-graph.js';
+import { checkAlreadyInFlight, type CheckAlreadyInFlightOpts } from './already-in-flight.js';
 import { checkBlocked, type BlockedFrontmatter, type CheckBlockedOpts } from './blocked.js';
 import {
   checkDependencyReadiness,
@@ -58,19 +59,30 @@ export interface RunFilterChainOpts {
    * this alongside `taskLabels` so the chain stays I/O-free.
    */
   taskBlocked?: BlockedFrontmatter;
+  /**
+   * AISDLC-227 — options forwarded to `checkAlreadyInFlight`. When undefined
+   * the filter uses defaults (reads `AI_SDLC_ORCHESTRATOR_DETECT_SUBPROCESS`
+   * from the environment; repoRoot defaults to `process.cwd()`).
+   */
+  alreadyInFlightOpts?: Pick<
+    CheckAlreadyInFlightOpts,
+    'repoRoot' | 'detectSubprocess' | 'listOpenPRs' | 'readProcessTable'
+  >;
 }
 
 /**
- * Run the five filters in chain order against a single candidate.
+ * Run the six filters in chain order against a single candidate.
  * Short-circuits on the first failure but ALWAYS returns the partial trace
  * so the loop's event emission carries the prefix of cleared filters.
  *
- * Order: OrphanParent (AISDLC-175) → DependencyReadiness → DorReadiness →
- * ExternalDependencies → Blocked (AISDLC-223).
+ * Order: OrphanParent (AISDLC-175) → AlreadyInFlight (AISDLC-227) →
+ * DependencyReadiness → DorReadiness → ExternalDependencies → Blocked (AISDLC-223).
  * OrphanParent runs first because it's the cheapest check (constant-time
  * graph lookup) AND the most decisive — an orphan parent isn't real work
- * at all. The others preserve the RFC §4.3 ordering; Blocked runs last
- * because it's a pure struct lookup and its position is specified by AC #3.
+ * at all. AlreadyInFlight runs second — it catches in-progress tasks before
+ * the costlier dep walk. The others preserve the RFC §4.3 ordering; Blocked
+ * runs last because it's a pure struct lookup and its position is specified by
+ * AC #3 of AISDLC-223.
  */
 export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const trace: FilterResult[] = [];
@@ -82,6 +94,19 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const orphan = checkOrphanParent(orphanOpts);
   trace.push(orphan);
   if (!orphan.passed) return { passed: false, trace, failure: orphan };
+
+  // Filter 0.5 — already-in-flight detection (AISDLC-227). Runs BEFORE the
+  // dependency walk because the cost of a duplicate dispatch (worktree clash,
+  // ~30s wasted setup) far outweighs the cost of a `gh pr list` + existsSync
+  // + optional `ps -ax` call. Three signals: (a) open PR, (b) active worktree
+  // sentinel, (c) live claude --print subprocess (behind env flag).
+  const inflightOpts: CheckAlreadyInFlightOpts = {
+    taskId: opts.taskId,
+    ...opts.alreadyInFlightOpts,
+  };
+  const inflight = checkAlreadyInFlight(inflightOpts);
+  trace.push(inflight);
+  if (!inflight.passed) return { passed: false, trace, failure: inflight };
 
   // Filter 1 — dependency readiness.
   const depOpts: CheckDependencyReadinessOpts = { graph: opts.graph, taskId: opts.taskId };
@@ -150,6 +175,8 @@ function humanFilterName(filter: FilterResult['filter']): string {
   switch (filter) {
     case 'OrphanParent':
       return 'Orphan-parent check';
+    case 'AlreadyInFlight':
+      return 'Already-in-flight check';
     case 'DependencyReadiness':
       return 'Dependency check';
     case 'DorReadiness':
@@ -163,6 +190,8 @@ function humanFilterName(filter: FilterResult['filter']): string {
 
 function terminalNote(failure: FilterResult): string {
   switch (failure.detail?.kind) {
+    case 'already-in-flight':
+      return `already in flight (${failure.detail.description})`;
     case 'dependency-blocked':
       return 'awaiting dependency';
     case 'dor-blocked':

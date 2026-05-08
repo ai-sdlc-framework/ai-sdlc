@@ -7,6 +7,7 @@
  * that want to evaluate filters in isolation.
  */
 
+export { checkAlreadyInFlight, type CheckAlreadyInFlightOpts } from './already-in-flight.js';
 export { checkBlocked, type BlockedFrontmatter, type CheckBlockedOpts } from './blocked.js';
 export {
   checkDependencyReadiness,
@@ -24,6 +25,7 @@ export {
 export { checkOrphanParent, type CheckOrphanParentOpts } from './orphan-parent.js';
 export { formatFilterTrace, runFilterChain, type RunFilterChainOpts } from './chain.js';
 export type {
+  AlreadyInFlightDetail,
   AwaitingExternalDetail,
   BlockedDetail,
   DependencyBlockedDetail,
