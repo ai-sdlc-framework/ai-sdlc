@@ -91,7 +91,7 @@ jobs:
       - name: Discover PR for this event
         id: discover
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GH_REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER_FROM_PR_EVENT: ${{ github.event.pull_request.number }}
@@ -120,7 +120,7 @@ jobs:
         id: guard
         if: steps.discover.outputs.pr != ''
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ steps.discover.outputs.pr }}
           REPO: ${{ github.repository }}
@@ -151,7 +151,7 @@ jobs:
       - name: Refresh auto-merge (disable-then-arm to force re-evaluation)
         if: steps.discover.outputs.pr != '' && steps.guard.outputs.skip != 'true'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ steps.discover.outputs.pr }}
         run: |
