@@ -309,8 +309,23 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       runner: opts.runner,
     });
     if (!push.pushed) {
-      // outcome already defaults to 'aborted'; just record the reason.
-      aborted = push.reason ?? 'push failed';
+      if (push.rebaseConflict) {
+        // AISDLC-232 — late-rebase hit semantic conflicts. Surface as a
+        // dedicated outcome so the orchestrator tick can continue to the next
+        // task without rolling back the dev's commits (the branch is intact
+        // and the rebase was cleanly aborted). Operator resolves via
+        // `/ai-sdlc rebase <pr>` or manual rebase.
+        outcome = 'rebase-conflict';
+        aborted =
+          `rebase-conflict: ${push.rebaseConflict.reason}` +
+          (push.rebaseConflict.files.length > 0
+            ? `; conflicting files: ${push.rebaseConflict.files.join(', ')}`
+            : '');
+      } else {
+        // Regular push failure (non-fast-forward, network, etc.)
+        // outcome already defaults to 'aborted'; just record the reason.
+        aborted = push.reason ?? 'push failed';
+      }
     } else if (!push.prUrl) {
       aborted = push.reason ?? 'PR creation failed';
     } else {

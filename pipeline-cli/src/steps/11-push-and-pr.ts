@@ -7,6 +7,15 @@
  * code reviewer summary, then runs `git push -u origin <branch>` followed
  * by `gh pr create`.
  *
+ * AISDLC-232 — Late-rebase before push:
+ *   Before the first `git push`, this step runs `git fetch origin main &&
+ *   git rebase origin/main` to catch conflicts that emerged while the dev
+ *   ran (Step 3's initial rebase may be 20-40 min stale by now). Mechanical
+ *   conflicts (CHANGELOG `Unreleased`, test additions, prettier drift) are
+ *   auto-resolved in-place. Semantic conflicts abort the rebase and return
+ *   `{ pushed: false, rebaseConflict: { files, reason } }` so the
+ *   orchestrator can record the `rebase-conflict` outcome and continue.
+ *
  * Hard rules (NEVER violated, see RFC §11.5):
  *   - No `git push --force` / `-f`
  *   - No `gh pr merge`
@@ -20,6 +29,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import type { PushAndPrOptions, PushAndPrResult } from '../types.js';
+import { lateRebase } from './11-late-rebase.js';
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
   runner?: Runner;
@@ -93,6 +103,24 @@ export function composeBody(opts: PushAndPrOptions): string {
 
 export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrResult> {
   const runner = opts.runner ?? defaultRunner;
+
+  // 0. AISDLC-232 — Late-rebase: fetch + rebase origin/main before pushing.
+  //    This catches conflicts that accumulated while the dev ran (Steps 5-10
+  //    take 20-40 min; origin/main may have moved). Mechanical conflicts are
+  //    auto-resolved in-place; semantic conflicts abort + return the conflict
+  //    files so the orchestrator can record `rebase-conflict` and continue.
+  const rebase = await lateRebase({ worktreePath: opts.worktreePath, runner });
+  if (!rebase.ok) {
+    return {
+      pushed: false,
+      prUrl: null,
+      reason: rebase.reason,
+      rebaseConflict: {
+        files: rebase.conflictingFiles,
+        reason: rebase.reason ?? 'late-rebase failed',
+      },
+    };
+  }
 
   // 1. Push -u origin <branch>. NEVER force.
   const pushResult = await runner('git', ['push', '-u', 'origin', opts.branch], {

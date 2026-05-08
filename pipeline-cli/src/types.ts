@@ -141,7 +141,18 @@ export type PipelineOutcome =
   | 'needs-human-attention'
   | 'developer-failed'
   | 'developer-json-contract-violated'
-  | 'aborted';
+  | 'aborted'
+  /**
+   * AISDLC-232 — Step 11 late-rebase hit semantic conflicts it could not
+   * auto-resolve (CHANGELOG / test / prettier rules exhausted). The rebase
+   * was aborted; the worktree is left clean (pre-rebase state). The
+   * orchestrator tick records this outcome and continues to the next task —
+   * it does NOT rollback (the dev's commits are safe on the branch) and does
+   * NOT escalate via `EscalateFn`. The operator sees the conflict files in
+   * `outcomes[i].failure.message` and resolves manually via
+   * `/ai-sdlc rebase <pr>` or by rebasing the branch themselves.
+   */
+  | 'rebase-conflict';
 
 // ── Step contracts ───────────────────────────────────────────────────
 
@@ -401,6 +412,18 @@ export interface PushAndPrResult {
   prUrl: string | null;
   /** When push fails non-fast-forward we abort cleanly with a reason. */
   reason?: string;
+  /**
+   * AISDLC-232 — set when the late-rebase before push hit semantic conflicts
+   * that could not be auto-resolved. The push was NOT attempted. The worktree
+   * is left in its pre-rebase state (clean, rebased to the last clean commit).
+   * Orchestrator tick maps this to `outcome: 'rebase-conflict'` and continues.
+   */
+  rebaseConflict?: {
+    /** Files that had unresolvable conflicts. */
+    files: string[];
+    /** Human-readable reason (includes file list + cap-exceeded note). */
+    reason: string;
+  };
 }
 
 // ── Step 12 — Sibling PRs ────────────────────────────────────────────
