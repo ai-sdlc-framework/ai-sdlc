@@ -60,6 +60,17 @@ export interface LateRebaseResult {
    * Number of rebase attempts made (0 when origin/main was already ancestor).
    */
   rebaseAttempts: number;
+  /**
+   * Paths of files that were auto-resolved during the rebase (relative to
+   * worktreePath). Populated only when `ok === true` AND at least one file
+   * was mechanically resolved. Empty when the rebase was a noop fast-forward
+   * or when no conflicts occurred.
+   *
+   * Non-empty means HEAD's blob SHAs shifted → contentHashV4 in the
+   * Step-10 attestation envelope is stale. Step 11 (pushAndPr) MUST
+   * re-sign before pushing.
+   */
+  resolvedFiles: string[];
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
@@ -254,6 +265,7 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
       conflictingFiles: [],
       reason: `git fetch origin main failed: ${fetchResult.stderr.trim() || fetchResult.stdout.trim()}`,
       rebaseAttempts: 0,
+      resolvedFiles: [],
     };
   }
 
@@ -265,10 +277,13 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
   );
   if (ancestorCheck.code === 0) {
     // origin/main is already an ancestor of HEAD — no rebase needed
-    return { ok: true, conflictingFiles: [], rebaseAttempts: 0 };
+    return { ok: true, conflictingFiles: [], rebaseAttempts: 0, resolvedFiles: [] };
   }
 
   let attempts = 0;
+  // Accumulate all auto-resolved files across rebase attempts (multi-round
+  // rebases can resolve different files in each round).
+  const allResolvedFiles: string[] = [];
 
   for (attempts = 1; attempts <= maxAttempts; attempts++) {
     // Step 3 — attempt the rebase
@@ -278,8 +293,13 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
     });
 
     if (rebaseResult.code === 0) {
-      // Clean rebase — done
-      return { ok: true, conflictingFiles: [], rebaseAttempts: attempts };
+      // Clean rebase — done. Include any files resolved in earlier rounds.
+      return {
+        ok: true,
+        conflictingFiles: [],
+        rebaseAttempts: attempts,
+        resolvedFiles: allResolvedFiles,
+      };
     }
 
     // Rebase hit conflicts — get the list of conflicting files
@@ -297,17 +317,18 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
         conflictingFiles: [],
         reason: `git rebase failed with code ${rebaseResult.code}: ${rebaseResult.stderr.trim() || rebaseResult.stdout.trim()}`,
         rebaseAttempts: attempts,
+        resolvedFiles: [],
       };
     }
 
     // Step 4 — attempt mechanical resolution
     const hardConflicts: string[] = [];
-    const resolvedFiles: string[] = [];
+    const resolvedThisRound: string[] = [];
 
     for (const file of conflictingFiles) {
       const resolved = tryResolveFile(file, cwd);
       if (resolved) {
-        resolvedFiles.push(file);
+        resolvedThisRound.push(file);
       } else {
         hardConflicts.push(file);
       }
@@ -321,11 +342,15 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
         conflictingFiles: hardConflicts,
         reason: `semantic conflicts in: ${hardConflicts.join(', ')}`,
         rebaseAttempts: attempts,
+        resolvedFiles: [],
       };
     }
 
+    // Accumulate resolved files from this round
+    allResolvedFiles.push(...resolvedThisRound);
+
     // Step 5 — run prettier on resolved files, stage them, continue
-    for (const file of resolvedFiles) {
+    for (const file of resolvedThisRound) {
       // Best-effort prettier; ignore failures (prettier may not be installed)
       await runner('pnpm', ['exec', 'prettier', '--write', file], {
         cwd,
@@ -342,8 +367,13 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
     });
 
     if (continueResult.code === 0) {
-      // Done after this round of resolution
-      return { ok: true, conflictingFiles: [], rebaseAttempts: attempts };
+      // Done after this round of resolution — include all resolved files
+      return {
+        ok: true,
+        conflictingFiles: [],
+        rebaseAttempts: attempts,
+        resolvedFiles: allResolvedFiles,
+      };
     }
 
     // Another round of conflicts — loop will retry up to maxAttempts
@@ -356,5 +386,6 @@ export async function lateRebase(opts: LateRebaseOptions): Promise<LateRebaseRes
     conflictingFiles: [],
     reason: `rebase iteration cap (${maxAttempts}) exceeded — main is moving faster than auto-resolve can converge`,
     rebaseAttempts: maxAttempts,
+    resolvedFiles: [],
   };
 }

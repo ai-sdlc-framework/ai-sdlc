@@ -149,6 +149,8 @@ describe('lateRebase', () => {
     expect(result.ok).toBe(true);
     expect(result.conflictingFiles).toEqual([]);
     expect(result.rebaseAttempts).toBe(0);
+    // noop fast-forward: no files were auto-resolved
+    expect(result.resolvedFiles).toEqual([]);
 
     // Verify it did NOT call git rebase (noop path)
     const rebaseCalls = fake.calls.filter(
@@ -187,6 +189,23 @@ describe('lateRebase', () => {
 
     expect(result.ok).toBe(true);
     expect(result.conflictingFiles).toEqual([]);
+    expect(result.rebaseAttempts).toBe(1);
+    // CHANGELOG was auto-resolved → resolvedFiles must contain it
+    expect(result.resolvedFiles).toContain('CHANGELOG.md');
+  });
+
+  // resolvedFiles is empty when clean rebase (no conflict, just fast-forward)
+  it('returns resolvedFiles=[] when rebase is clean with no conflicts', async () => {
+    const fake = new FakeRunner()
+      .on(/^git fetch origin main/, ok())
+      .on(/^git merge-base --is-ancestor/, fail('', 1))
+      // Rebase succeeds cleanly (no conflicts at all)
+      .on(/^git rebase origin\/main$/, ok());
+
+    const result = await lateRebase({ worktreePath: tmp, runner: fake.toRunner() });
+
+    expect(result.ok).toBe(true);
+    expect(result.resolvedFiles).toEqual([]);
     expect(result.rebaseAttempts).toBe(1);
   });
 
@@ -368,5 +387,127 @@ describe('Step 11 — pushAndPr with late-rebase (AISDLC-232)', () => {
       (c) => c.command === 'git' && c.args.some((a) => a === 'push'),
     );
     expect(pushCalls.length).toBe(0);
+  });
+
+  // AISDLC-232: re-sign attestation when lateRebase resolvedFiles is non-empty
+  it('invokes sign-attestation + chore-commit before push when CHANGELOG was auto-resolved', async () => {
+    const { pushAndPr } = await import('./11-push-and-pr.js');
+
+    // Write resolvable CHANGELOG conflict
+    writeFileSync(
+      join(tmp, 'CHANGELOG.md'),
+      `## [Unreleased]\n### Added\n<<<<<<< HEAD\n- branch feat\n=======\n- main feat\n>>>>>>> origin/main\n`,
+    );
+
+    // Create a fake sign-attestation.mjs script path that "exists" on disk
+    const fakeSignScript = join(tmp, 'sign-attestation.mjs');
+    writeFileSync(fakeSignScript, '// fake signer\n');
+
+    const callOrder: string[] = [];
+
+    const fake = new FakeRunner()
+      // late-rebase: NOT ancestor → rebase needed
+      .on(/^git fetch origin main/, ok())
+      .on(/^git merge-base --is-ancestor/, fail('', 1))
+      .on(/^git rebase origin\/main$/, fail('CONFLICT in CHANGELOG.md', 1))
+      .on(/^git status --porcelain/, ok('UU CHANGELOG.md\n'))
+      .on(/^pnpm exec prettier/, ok())
+      .on(/^git add CHANGELOG/, ok())
+      .on(/^git rebase --continue/, ok())
+      // re-sign: node sign-attestation.mjs
+      .on(/^node .+sign-attestation/, (_args) => {
+        callOrder.push('sign');
+        return ok('.ai-sdlc/attestations/abc123.dsse.json');
+      })
+      // git add .ai-sdlc/attestations
+      .on(/^git add .ai-sdlc\/attestations/, (_args) => {
+        callOrder.push('add-envelope');
+        return ok();
+      })
+      // chore commit for re-sign
+      .on(/^git commit/, (_args) => {
+        callOrder.push('commit-re-sign');
+        return ok();
+      })
+      // push + PR
+      .on(/^git push -u origin/, (_args) => {
+        callOrder.push('push');
+        return ok();
+      })
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/99\n'));
+
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task: integrationTask,
+      developerReturn: integrationDev,
+      verdict: integrationApproved,
+      runner: fake.toRunner(),
+      signAttestationScript: fakeSignScript,
+    });
+
+    expect(r.pushed).toBe(true);
+    expect(r.prUrl).toBe('https://github.com/x/y/pull/99');
+
+    // sign → add-envelope → commit-re-sign must ALL happen before push
+    expect(callOrder).toContain('sign');
+    expect(callOrder).toContain('add-envelope');
+    expect(callOrder).toContain('commit-re-sign');
+    expect(callOrder).toContain('push');
+    const signIdx = callOrder.indexOf('sign');
+    const pushIdx = callOrder.indexOf('push');
+    expect(signIdx).toBeLessThan(pushIdx);
+    const commitIdx = callOrder.indexOf('commit-re-sign');
+    expect(commitIdx).toBeLessThan(pushIdx);
+  });
+
+  it('skips re-sign and still pushes when signAttestationScript is absent', async () => {
+    const { pushAndPr } = await import('./11-push-and-pr.js');
+
+    // Write resolvable CHANGELOG conflict
+    writeFileSync(
+      join(tmp, 'CHANGELOG.md'),
+      `## [Unreleased]\n### Added\n<<<<<<< HEAD\n- branch feat\n=======\n- main feat\n>>>>>>> origin/main\n`,
+    );
+
+    // No signAttestationScript provided, CLAUDE_PLUGIN_ROOT unset → no signer
+    const savedEnv = process.env.CLAUDE_PLUGIN_ROOT;
+    delete process.env.CLAUDE_PLUGIN_ROOT;
+
+    const fake = new FakeRunner()
+      .on(/^git fetch origin main/, ok())
+      .on(/^git merge-base --is-ancestor/, fail('', 1))
+      .on(/^git rebase origin\/main$/, fail('CONFLICT in CHANGELOG.md', 1))
+      .on(/^git status --porcelain/, ok('UU CHANGELOG.md\n'))
+      .on(/^pnpm exec prettier/, ok())
+      .on(/^git add CHANGELOG/, ok())
+      .on(/^git rebase --continue/, ok())
+      .on(/^git push -u origin/, ok())
+      .on(/^gh pr create/, ok('https://github.com/x/y/pull/77\n'));
+
+    const r = await pushAndPr({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task: integrationTask,
+      developerReturn: integrationDev,
+      verdict: integrationApproved,
+      runner: fake.toRunner(),
+      // No signAttestationScript → signer absent
+    });
+
+    // Restore env
+    if (savedEnv !== undefined) process.env.CLAUDE_PLUGIN_ROOT = savedEnv;
+
+    // Push should still succeed (signer absence is non-fatal — pre-push hook fallback handles it)
+    expect(r.pushed).toBe(true);
+    expect(r.prUrl).toBe('https://github.com/x/y/pull/77');
+
+    // No node sign-attestation call should have been made
+    const signCalls = fake.calls.filter((c) => c.command === 'node');
+    expect(signCalls.length).toBe(0);
   });
 });

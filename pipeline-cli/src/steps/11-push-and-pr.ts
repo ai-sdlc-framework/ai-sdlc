@@ -33,6 +33,14 @@ import { lateRebase } from './11-late-rebase.js';
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
   runner?: Runner;
+  /**
+   * Path to sign-attestation.mjs helper (defaults to env-var detection).
+   * Passed through from Step 10 (finalizeTask) pattern — the signer reads
+   * `.ai-sdlc/verdicts/<task-id>.json` and writes
+   * `.ai-sdlc/attestations/<sha>.dsse.json` at the NEW HEAD so
+   * verify-attestation.yml sees a valid envelope after the rebase.
+   */
+  signAttestationScript?: string;
 }
 
 const DEFAULT_TITLE_TEMPLATE = 'feat: {issueTitle} ({issueId})';
@@ -120,6 +128,53 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
         reason: rebase.reason ?? 'late-rebase failed',
       },
     };
+  }
+
+  // 0b. AISDLC-232 — Re-sign attestation after auto-resolve.
+  //     When lateRebase resolved one or more files, HEAD's blob SHAs have
+  //     shifted. The contentHashV4 in the Step-10 attestation envelope
+  //     (signed at the pre-rebase SHA) no longer matches the new HEAD →
+  //     verify-attestation.yml would post `ai-sdlc/attestation: failure`.
+  //
+  //     Fix: invoke sign-attestation.mjs at the NEW HEAD, then commit the
+  //     refreshed envelope as a chore commit BEFORE the push so the
+  //     pre-push hook (check-attestation-sign.sh) sees an envelope at HEAD
+  //     and skips its own sign-and-exit-1 dance.
+  if (rebase.resolvedFiles.length > 0) {
+    const helperScript =
+      opts.signAttestationScript ??
+      (process.env.CLAUDE_PLUGIN_ROOT
+        ? join(process.env.CLAUDE_PLUGIN_ROOT, 'scripts', 'sign-attestation.mjs')
+        : null);
+
+    if (helperScript && existsSync(helperScript)) {
+      const signResult = await runner('node', [helperScript], {
+        cwd: opts.worktreePath,
+        allowFailure: true,
+      });
+      if (signResult.code === 0) {
+        // Stage the refreshed envelope + commit as chore before push.
+        // Mirrors the AISDLC-220 chore-commit pattern used in Step 10.
+        await runner('git', ['add', '.ai-sdlc/attestations'], {
+          cwd: opts.worktreePath,
+          allowFailure: true,
+        });
+        const reSignMessage =
+          `chore(spec): re-sign attestation after late-rebase auto-resolve (AISDLC-232)\n\n` +
+          `Late-rebase resolved ${rebase.resolvedFiles.join(', ')} — HEAD blob SHAs shifted.\n` +
+          `Refreshed DSSE envelope so verify-attestation.yml sees a valid contentHashV4.\n\n` +
+          `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n`;
+        await runner('git', ['commit', '-m', reSignMessage], {
+          cwd: opts.worktreePath,
+          allowFailure: true,
+          env: { GIT_EDITOR: 'true' },
+        });
+      }
+      // If sign fails (script unavailable or signer error): continue with push.
+      // The pre-push hook's check-attestation-sign.sh will handle sign + exit-1
+      // → re-run dance as the fallback (AISDLC-232 failure mode A is still
+      // better than silently pushing an invalid envelope).
+    }
   }
 
   // 1. Push -u origin <branch>. NEVER force.
