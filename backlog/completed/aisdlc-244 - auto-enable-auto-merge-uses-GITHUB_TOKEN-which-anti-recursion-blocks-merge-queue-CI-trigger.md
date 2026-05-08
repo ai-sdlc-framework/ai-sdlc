@@ -3,7 +3,7 @@ id: AISDLC-244
 title: >-
   auto-enable-auto-merge uses GITHUB_TOKEN which anti-recursion blocks
   merge_group CI from firing — root cause of every queue stall today
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 02:55'
 labels:
