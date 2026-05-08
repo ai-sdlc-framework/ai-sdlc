@@ -3,7 +3,7 @@ id: AISDLC-238
 title: >-
   ai-sdlc-review.yml fires API-billed reviewers on initial push before
   attestation chore lands — burns budget unnecessarily
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 22:35'
 labels:
