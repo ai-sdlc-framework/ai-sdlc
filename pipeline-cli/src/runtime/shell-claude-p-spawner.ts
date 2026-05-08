@@ -255,16 +255,14 @@ export class ShellClaudePSpawner implements SubagentSpawner {
 
         // Killed by signal
         if (signal !== null) {
-          const isWatchableSignal = signal === 'SIGKILL' || signal === 'SIGTERM';
           const diag: SubprocessDiagnostics = {
             exitCode: code,
             signal,
             stderrTail,
             wallClockMs,
             argv,
-            ...(isWatchableSignal
-              ? { failureType: 'claude-cli-killed', watchdogFired }
-              : { failureType: 'claude-cli-killed', watchdogFired }),
+            failureType: 'claude-cli-killed',
+            watchdogFired,
           };
           settle({
             type: opts.type,
