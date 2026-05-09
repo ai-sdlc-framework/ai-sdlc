@@ -6801,8 +6801,8 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync31, readdirSync as readdirSync12, statSync as statSync11 } from "node:fs";
-import { join as join34 } from "node:path";
+import { existsSync as existsSync32, readdirSync as readdirSync12, statSync as statSync11 } from "node:fs";
+import { join as join35 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
     "use strict";
@@ -25169,8 +25169,8 @@ async function computeBranchName(opts) {
     logger.warn(`[ai-sdlc] computeBranchName: slug normalisation of title ${JSON.stringify(opts.task.title)} (task ${opts.taskId}) produced an empty string; using fallback slug ${JSON.stringify(FALLBACK_SLUG)}. If the title field uses YAML block-scalar (>- or |-), confirm the frontmatter parser decodes it to the unwrapped string before slugify().`);
   }
   const branch = pattern.replace(/\{issueIdLower\}/g, taskIdLower).replace(/\{slug\}/g, slug);
-  const worktreePath = join10(opts.workDir, ".worktrees", taskIdLower);
-  return { branch, worktreePath, slug, taskIdLower };
+  const worktreePath2 = join10(opts.workDir, ".worktrees", taskIdLower);
+  return { branch, worktreePath: worktreePath2, slug, taskIdLower };
 }
 
 // ../../pipeline-cli/dist/steps/03-setup-worktree.js
@@ -25295,7 +25295,7 @@ function findClaudeSubprocess(psOutput, taskId) {
   }
   return null;
 }
-async function isSafeToAutoClean(runner, workDir, taskId, branch, worktreePath, opts) {
+async function isSafeToAutoClean(runner, workDir, taskId, branch, worktreePath2, opts) {
   const taskIdLower = taskId.toLowerCase();
   const prResult = await runner("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number"], { cwd: workDir, allowFailure: true });
   if (prResult.code !== 0) {
@@ -25314,7 +25314,7 @@ async function isSafeToAutoClean(runner, workDir, taskId, branch, worktreePath, 
     return { safe: false, hadOpenPR: true, hadUncommittedChanges: false };
   }
   let hadUncommittedChanges = false;
-  const statusResult = await runner("git", ["-C", worktreePath, "status", "--porcelain"], {
+  const statusResult = await runner("git", ["-C", worktreePath2, "status", "--porcelain"], {
     cwd: workDir,
     allowFailure: true
   });
@@ -25339,7 +25339,7 @@ async function isSafeToAutoClean(runner, workDir, taskId, branch, worktreePath, 
         currentPath = line.slice("worktree ".length).trim();
       } else if (line.trim() === expectedBranchLine) {
         const normalizedCurrentPath = currentPath.replace(/\/$/, "");
-        const normalizedExpectedPath = worktreePath.replace(/\/$/, "");
+        const normalizedExpectedPath = worktreePath2.replace(/\/$/, "");
         if (normalizedCurrentPath !== normalizedExpectedPath) {
           console.info(`[step-3] ${taskIdLower}: keeping branch (checked out at ${currentPath})`);
           return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
@@ -25373,7 +25373,7 @@ async function isSafeToAutoClean(runner, workDir, taskId, branch, worktreePath, 
       }
     }
   }
-  const sentinelPath = join12(worktreePath, ".active-task");
+  const sentinelPath = join12(worktreePath2, ".active-task");
   const readSentinelMtime = opts?.readSentinelMtime ?? ((p) => {
     try {
       return statSync4(p).mtimeMs;
@@ -31081,8 +31081,8 @@ function resolveTestConflict(content) {
   }
   return result;
 }
-function tryResolveFile(filePath, worktreePath) {
-  const absPath = join17(worktreePath, filePath);
+function tryResolveFile(filePath, worktreePath2) {
+  const absPath = join17(worktreePath2, filePath);
   let content;
   try {
     content = readFileSync16(absPath, "utf8");
@@ -31497,8 +31497,8 @@ import { existsSync as existsSync21 } from "node:fs";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync30, readFileSync as readFileSync30 } from "node:fs";
-import { join as join32 } from "node:path";
+import { existsSync as existsSync31, readFileSync as readFileSync31 } from "node:fs";
+import { join as join33 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/dispatch-result.js
 import { mkdirSync as mkdirSync10, readFileSync as readFileSync22, writeFileSync as writeFileSync9 } from "node:fs";
@@ -31553,6 +31553,11 @@ var LONG_RUNNING_PR_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
 import { existsSync as existsSync29, mkdirSync as mkdirSync15, readFileSync as readFileSync29, writeFileSync as writeFileSync13 } from "node:fs";
 import { dirname as dirname12, join as join31 } from "node:path";
 
+// ../../pipeline-cli/dist/orchestrator/checkpoint.js
+import { execSync as execSync6 } from "node:child_process";
+import { existsSync as existsSync30, readFileSync as readFileSync30 } from "node:fs";
+import { join as join32 } from "node:path";
+
 // ../../pipeline-cli/dist/orchestrator/loop.js
 var MAX_IDLE_SLEEP_SEC = 5 * 60;
 
@@ -31561,7 +31566,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 // ../../pipeline-cli/dist/classifier/classifier.js
 import { appendFile, mkdir } from "node:fs/promises";
-import { dirname as dirname13, join as join33 } from "node:path";
+import { dirname as dirname13, join as join34 } from "node:path";
 
 // ../../pipeline-cli/dist/classifier/budget-classifier.js
 var BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
@@ -31574,8 +31579,8 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync32, readFileSync as readFileSync31, readdirSync as readdirSync13, statSync as statSync12 } from "node:fs";
-import { basename as basename5, join as join35, relative as relative2 } from "node:path";
+import { existsSync as existsSync33, readFileSync as readFileSync32, readdirSync as readdirSync13, statSync as statSync12 } from "node:fs";
+import { basename as basename5, join as join36, relative as relative2 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
 var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
@@ -31584,22 +31589,22 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync33, readFileSync as readFileSync32 } from "node:fs";
-import { join as join36 } from "node:path";
-
-// ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync34, readFileSync as readFileSync33, readdirSync as readdirSync14 } from "node:fs";
+import { existsSync as existsSync34, readFileSync as readFileSync33 } from "node:fs";
 import { join as join37 } from "node:path";
 
+// ../../pipeline-cli/dist/dor/ingress-claude.js
+import { existsSync as existsSync35, readFileSync as readFileSync34, readdirSync as readdirSync14 } from "node:fs";
+import { join as join38 } from "node:path";
+
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync35, readFileSync as readFileSync34 } from "node:fs";
+import { existsSync as existsSync36, readFileSync as readFileSync35 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync36, readFileSync as readFileSync35 } from "node:fs";
-import { join as join38 } from "node:path";
+import { existsSync as existsSync37, readFileSync as readFileSync36 } from "node:fs";
+import { join as join39 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {
@@ -31746,12 +31751,12 @@ function registerPipelineTools(server2, deps = {}) {
       workDir: external_exports.string(),
       skipFetch: external_exports.boolean().optional().describe("Skip the `git fetch origin main` step (useful in tests / offline runs).")
     },
-    async ({ taskId, branch, worktreePath, workDir, skipFetch }) => {
+    async ({ taskId, branch, worktreePath: worktreePath2, workDir, skipFetch }) => {
       try {
         const result = await runners.setupWorktree({
           taskId,
           branch,
-          worktreePath,
+          worktreePath: worktreePath2,
           workDir,
           skipFetch
         });
@@ -31770,9 +31775,9 @@ function registerPipelineTools(server2, deps = {}) {
       workDir: external_exports.string(),
       status: external_exports.string().optional().describe("Override status (defaults to 'In Progress').")
     },
-    async ({ taskId, worktreePath, workDir, status }) => {
+    async ({ taskId, worktreePath: worktreePath2, workDir, status }) => {
       try {
-        const result = await runners.beginTask({ taskId, worktreePath, workDir, status });
+        const result = await runners.beginTask({ taskId, worktreePath: worktreePath2, workDir, status });
         return jsonResult(result);
       } catch (err) {
         return errorResult("pipeline_step_4_begin_task", err);
@@ -31790,13 +31795,13 @@ function registerPipelineTools(server2, deps = {}) {
       reviewerFeedback: external_exports.string().optional().describe("Optional reviewer feedback bundle for iteration N>1 (Step 9)."),
       iteration: external_exports.number().optional().describe("Iteration number \u2014 set to >1 to inject the feedback section (default 1).")
     },
-    async ({ taskId, task, branch, worktreePath, reviewerFeedback, iteration }) => {
+    async ({ taskId, task, branch, worktreePath: worktreePath2, reviewerFeedback, iteration }) => {
       try {
         const result = await runners.buildDeveloperPrompt({
           taskId,
           task,
           branch,
-          worktreePath,
+          worktreePath: worktreePath2,
           reviewerFeedback,
           iteration
         });
@@ -31834,13 +31839,13 @@ function registerPipelineTools(server2, deps = {}) {
       workDir: external_exports.string(),
       codexAvailable: external_exports.boolean().optional().describe("Override the codex-availability detection (test injection).")
     },
-    async ({ taskId, task, branch, worktreePath, workDir, codexAvailable }) => {
+    async ({ taskId, task, branch, worktreePath: worktreePath2, workDir, codexAvailable }) => {
       try {
         const result = await runners.buildReviewPrompts({
           taskId,
           task,
           branch,
-          worktreePath,
+          worktreePath: worktreePath2,
           workDir,
           codexAvailable
         });
@@ -31882,7 +31887,7 @@ function registerPipelineTools(server2, deps = {}) {
     },
     async ({
       taskId,
-      worktreePath,
+      worktreePath: worktreePath2,
       task,
       branch,
       initialDeveloperReturn,
@@ -31893,7 +31898,7 @@ function registerPipelineTools(server2, deps = {}) {
         const spawner = await spawnerFactory();
         const result = await runners.iterateReviewLoop({
           taskId,
-          worktreePath,
+          worktreePath: worktreePath2,
           task,
           branch,
           initialDeveloperReturn,
@@ -31924,7 +31929,7 @@ function registerPipelineTools(server2, deps = {}) {
     async ({
       taskId,
       workDir,
-      worktreePath,
+      worktreePath: worktreePath2,
       task,
       developerReturn,
       verdict,
@@ -31936,7 +31941,7 @@ function registerPipelineTools(server2, deps = {}) {
         const result = await runners.finalizeTask({
           taskId,
           workDir,
-          worktreePath,
+          worktreePath: worktreePath2,
           task,
           developerReturn,
           verdict,
@@ -31966,7 +31971,7 @@ function registerPipelineTools(server2, deps = {}) {
     async ({
       taskId,
       workDir,
-      worktreePath,
+      worktreePath: worktreePath2,
       branch,
       task,
       developerReturn,
@@ -31977,7 +31982,7 @@ function registerPipelineTools(server2, deps = {}) {
         const result = await runners.pushAndPr({
           taskId,
           workDir,
-          worktreePath,
+          worktreePath: worktreePath2,
           branch,
           task,
           developerReturn,
@@ -32022,9 +32027,9 @@ function registerPipelineTools(server2, deps = {}) {
       taskId: external_exports.string(),
       worktreePath: external_exports.string()
     },
-    async ({ taskId, worktreePath }) => {
+    async ({ taskId, worktreePath: worktreePath2 }) => {
       try {
-        const result = await runners.cleanupTask({ taskId, worktreePath });
+        const result = await runners.cleanupTask({ taskId, worktreePath: worktreePath2 });
         return jsonResult(result);
       } catch (err) {
         return errorResult("pipeline_step_13_cleanup", err);
