@@ -7,10 +7,16 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
+var __require = /* @__PURE__ */ ((x) => typeof require !== "undefined" ? require : typeof Proxy !== "undefined" ? new Proxy(x, {
+  get: (a, b) => (typeof require !== "undefined" ? require : a)[b]
+}) : x)(function(x) {
+  if (typeof require !== "undefined") return require.apply(this, arguments);
+  throw Error('Dynamic require of "' + x + '" is not supported');
+});
 var __esm = (fn, res) => function __init() {
   return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
 };
-var __commonJS = (cb, mod) => function __require() {
+var __commonJS = (cb, mod) => function __require2() {
   return mod || (0, cb[__getOwnPropNames(cb)[0]])((mod = { exports: {} }).exports, mod), mod.exports;
 };
 var __export = (target, all) => {
@@ -77,12 +83,12 @@ var require_code = __commonJS({
         return item === "" || item === '""';
       }
       get str() {
-        var _a;
-        return (_a = this._str) !== null && _a !== void 0 ? _a : this._str = this._items.reduce((s, c) => `${s}${c}`, "");
+        var _a2;
+        return (_a2 = this._str) !== null && _a2 !== void 0 ? _a2 : this._str = this._items.reduce((s, c) => `${s}${c}`, "");
       }
       get names() {
-        var _a;
-        return (_a = this._names) !== null && _a !== void 0 ? _a : this._names = this._items.reduce((names, c) => {
+        var _a2;
+        return (_a2 = this._names) !== null && _a2 !== void 0 ? _a2 : this._names = this._items.reduce((names, c) => {
           if (c instanceof Name)
             names[c.str] = (names[c.str] || 0) + 1;
           return names;
@@ -228,8 +234,8 @@ var require_scope = __commonJS({
         return `${prefix}${ng.index++}`;
       }
       _nameGroup(prefix) {
-        var _a, _b;
-        if (((_b = (_a = this._parent) === null || _a === void 0 ? void 0 : _a._prefixes) === null || _b === void 0 ? void 0 : _b.has(prefix)) || this._prefixes && !this._prefixes.has(prefix)) {
+        var _a2, _b2;
+        if (((_b2 = (_a2 = this._parent) === null || _a2 === void 0 ? void 0 : _a2._prefixes) === null || _b2 === void 0 ? void 0 : _b2.has(prefix)) || this._prefixes && !this._prefixes.has(prefix)) {
           throw new Error(`CodeGen: prefix "${prefix}" is not allowed in this scope`);
         }
         return this._names[prefix] = { prefix, index: 0 };
@@ -262,12 +268,12 @@ var require_scope = __commonJS({
         return new ValueScopeName(prefix, this._newName(prefix));
       }
       value(nameOrPrefix, value) {
-        var _a;
+        var _a2;
         if (value.ref === void 0)
           throw new Error("CodeGen: ref must be passed in value");
         const name = this.toName(nameOrPrefix);
         const { prefix } = name;
-        const valueKey = (_a = value.key) !== null && _a !== void 0 ? _a : value.ref;
+        const valueKey = (_a2 = value.key) !== null && _a2 !== void 0 ? _a2 : value.ref;
         let vs = this._values[prefix];
         if (vs) {
           const _name = vs.get(valueKey);
@@ -585,8 +591,8 @@ var require_codegen = __commonJS({
         return this;
       }
       optimizeNames(names, constants) {
-        var _a;
-        this.else = (_a = this.else) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
+        var _a2;
+        this.else = (_a2 = this.else) === null || _a2 === void 0 ? void 0 : _a2.optimizeNames(names, constants);
         if (!(super.optimizeNames(names, constants) || this.else))
           return;
         this.condition = optimizeExpr(this.condition, names, constants);
@@ -690,17 +696,17 @@ var require_codegen = __commonJS({
         return code;
       }
       optimizeNodes() {
-        var _a, _b;
+        var _a2, _b2;
         super.optimizeNodes();
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNodes();
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNodes();
+        (_a2 = this.catch) === null || _a2 === void 0 ? void 0 : _a2.optimizeNodes();
+        (_b2 = this.finally) === null || _b2 === void 0 ? void 0 : _b2.optimizeNodes();
         return this;
       }
       optimizeNames(names, constants) {
-        var _a, _b;
+        var _a2, _b2;
         super.optimizeNames(names, constants);
-        (_a = this.catch) === null || _a === void 0 ? void 0 : _a.optimizeNames(names, constants);
-        (_b = this.finally) === null || _b === void 0 ? void 0 : _b.optimizeNames(names, constants);
+        (_a2 = this.catch) === null || _a2 === void 0 ? void 0 : _a2.optimizeNames(names, constants);
+        (_b2 = this.finally) === null || _b2 === void 0 ? void 0 : _b2.optimizeNames(names, constants);
         return this;
       }
       get names() {
@@ -1479,8 +1485,8 @@ var require_applicability = __commonJS({
     }
     exports.shouldUseGroup = shouldUseGroup;
     function shouldUseRule(schema2, rule) {
-      var _a;
-      return schema2[rule.keyword] !== void 0 || ((_a = rule.definition.implements) === null || _a === void 0 ? void 0 : _a.some((kwd) => schema2[kwd] !== void 0));
+      var _a2;
+      return schema2[rule.keyword] !== void 0 || ((_a2 = rule.definition.implements) === null || _a2 === void 0 ? void 0 : _a2.some((kwd) => schema2[kwd] !== void 0));
     }
     exports.shouldUseRule = shouldUseRule;
   }
@@ -1868,14 +1874,14 @@ var require_keyword = __commonJS({
     }
     exports.macroKeywordCode = macroKeywordCode;
     function funcKeywordCode(cxt, def) {
-      var _a;
+      var _a2;
       const { gen, keyword, schema: schema2, parentSchema, $data, it } = cxt;
       checkAsyncKeyword(it, def);
       const validate = !$data && def.compile ? def.compile.call(it.self, schema2, parentSchema, it) : def.validate;
       const validateRef = useKeyword(gen, keyword, validate);
       const valid = gen.let("valid");
       cxt.block$data(valid, validateKeyword);
-      cxt.ok((_a = def.valid) !== null && _a !== void 0 ? _a : valid);
+      cxt.ok((_a2 = def.valid) !== null && _a2 !== void 0 ? _a2 : valid);
       function validateKeyword() {
         if (def.errors === false) {
           assignValid();
@@ -1906,8 +1912,8 @@ var require_keyword = __commonJS({
         gen.assign(valid, (0, codegen_1._)`${_await}${(0, code_1.callValidateCode)(cxt, validateRef, passCxt, passSchema)}`, def.modifying);
       }
       function reportErrs(errors) {
-        var _a2;
-        gen.if((0, codegen_1.not)((_a2 = def.valid) !== null && _a2 !== void 0 ? _a2 : valid), errors);
+        var _a3;
+        gen.if((0, codegen_1.not)((_a3 = def.valid) !== null && _a3 !== void 0 ? _a3 : valid), errors);
       }
     }
     exports.funcKeywordCode = funcKeywordCode;
@@ -2236,8 +2242,8 @@ var require_resolve = __commonJS({
       }
       return count;
     }
-    function getFullPath(resolver, id = "", normalize) {
-      if (normalize !== false)
+    function getFullPath(resolver, id = "", normalize2) {
+      if (normalize2 !== false)
         id = normalizeId(id);
       const p = resolver.parse(id);
       return _getFullPath(resolver, p);
@@ -2874,20 +2880,20 @@ var require_compile = __commonJS({
     var util_1 = require_util();
     var validate_1 = require_validate();
     var SchemaEnv = class {
-      constructor(env) {
-        var _a;
+      constructor(env2) {
+        var _a2;
         this.refs = {};
         this.dynamicAnchors = {};
         let schema2;
-        if (typeof env.schema == "object")
-          schema2 = env.schema;
-        this.schema = env.schema;
-        this.schemaId = env.schemaId;
-        this.root = env.root || this;
-        this.baseId = (_a = env.baseId) !== null && _a !== void 0 ? _a : (0, resolve_1.normalizeId)(schema2 === null || schema2 === void 0 ? void 0 : schema2[env.schemaId || "$id"]);
-        this.schemaPath = env.schemaPath;
-        this.localRefs = env.localRefs;
-        this.meta = env.meta;
+        if (typeof env2.schema == "object")
+          schema2 = env2.schema;
+        this.schema = env2.schema;
+        this.schemaId = env2.schemaId;
+        this.root = env2.root || this;
+        this.baseId = (_a2 = env2.baseId) !== null && _a2 !== void 0 ? _a2 : (0, resolve_1.normalizeId)(schema2 === null || schema2 === void 0 ? void 0 : schema2[env2.schemaId || "$id"]);
+        this.schemaPath = env2.schemaPath;
+        this.localRefs = env2.localRefs;
+        this.meta = env2.meta;
         this.$async = schema2 === null || schema2 === void 0 ? void 0 : schema2.$async;
         this.refs = {};
       }
@@ -2980,14 +2986,14 @@ var require_compile = __commonJS({
     }
     exports.compileSchema = compileSchema;
     function resolveRef(root, baseId, ref) {
-      var _a;
+      var _a2;
       ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, ref);
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve3.call(this, root, ref);
+      let _sch = resolve7.call(this, root, ref);
       if (_sch === void 0) {
-        const schema2 = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
+        const schema2 = (_a2 = root.localRefs) === null || _a2 === void 0 ? void 0 : _a2[ref];
         const { schemaId } = this.opts;
         if (schema2)
           _sch = new SchemaEnv({ schema: schema2, schemaId, root, baseId });
@@ -3012,7 +3018,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve3(root, ref) {
+    function resolve7(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3056,8 +3062,8 @@ var require_compile = __commonJS({
       "definitions"
     ]);
     function getJsonPointer(parsedRef, { baseId, schema: schema2, root }) {
-      var _a;
-      if (((_a = parsedRef.fragment) === null || _a === void 0 ? void 0 : _a[0]) !== "/")
+      var _a2;
+      if (((_a2 = parsedRef.fragment) === null || _a2 === void 0 ? void 0 : _a2[0]) !== "/")
         return;
       for (const part of parsedRef.fragment.slice(1).split("/")) {
         if (typeof schema2 === "boolean")
@@ -3071,15 +3077,15 @@ var require_compile = __commonJS({
           baseId = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schId);
         }
       }
-      let env;
+      let env2;
       if (typeof schema2 != "boolean" && schema2.$ref && !(0, util_1.schemaHasRulesButRef)(schema2, this.RULES)) {
         const $ref = (0, resolve_1.resolveUrl)(this.opts.uriResolver, baseId, schema2.$ref);
-        env = resolveSchema.call(this, root, $ref);
+        env2 = resolveSchema.call(this, root, $ref);
       }
       const { schemaId } = this.opts;
-      env = env || new SchemaEnv({ schema: schema2, schemaId, root, baseId });
-      if (env.schema !== env.root.schema)
-        return env;
+      env2 = env2 || new SchemaEnv({ schema: schema2, schemaId, root, baseId });
+      if (env2.schema !== env2.root.schema)
+        return env2;
       return void 0;
     }
   }
@@ -3577,7 +3583,7 @@ var require_fast_uri = __commonJS({
     "use strict";
     var { normalizeIPv6, removeDotSegments, recomposeAuthority, normalizeComponentEncoding, isIPv4, nonSimpleDomain } = require_utils();
     var { SCHEMES, getSchemeHandler } = require_schemes();
-    function normalize(uri, options) {
+    function normalize2(uri, options) {
       if (typeof uri === "string") {
         uri = /** @type {T} */
         serialize(parse3(uri, options), options);
@@ -3587,55 +3593,55 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve3(baseURI, relativeURI, options) {
+    function resolve7(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
       return serialize(resolved, schemelessOptions);
     }
-    function resolveComponent(base, relative2, options, skipNormalization) {
+    function resolveComponent(base, relative3, options, skipNormalization) {
       const target = {};
       if (!skipNormalization) {
         base = parse3(serialize(base, options), options);
-        relative2 = parse3(serialize(relative2, options), options);
+        relative3 = parse3(serialize(relative3, options), options);
       }
       options = options || {};
-      if (!options.tolerant && relative2.scheme) {
-        target.scheme = relative2.scheme;
-        target.userinfo = relative2.userinfo;
-        target.host = relative2.host;
-        target.port = relative2.port;
-        target.path = removeDotSegments(relative2.path || "");
-        target.query = relative2.query;
+      if (!options.tolerant && relative3.scheme) {
+        target.scheme = relative3.scheme;
+        target.userinfo = relative3.userinfo;
+        target.host = relative3.host;
+        target.port = relative3.port;
+        target.path = removeDotSegments(relative3.path || "");
+        target.query = relative3.query;
       } else {
-        if (relative2.userinfo !== void 0 || relative2.host !== void 0 || relative2.port !== void 0) {
-          target.userinfo = relative2.userinfo;
-          target.host = relative2.host;
-          target.port = relative2.port;
-          target.path = removeDotSegments(relative2.path || "");
-          target.query = relative2.query;
+        if (relative3.userinfo !== void 0 || relative3.host !== void 0 || relative3.port !== void 0) {
+          target.userinfo = relative3.userinfo;
+          target.host = relative3.host;
+          target.port = relative3.port;
+          target.path = removeDotSegments(relative3.path || "");
+          target.query = relative3.query;
         } else {
-          if (!relative2.path) {
+          if (!relative3.path) {
             target.path = base.path;
-            if (relative2.query !== void 0) {
-              target.query = relative2.query;
+            if (relative3.query !== void 0) {
+              target.query = relative3.query;
             } else {
               target.query = base.query;
             }
           } else {
-            if (relative2.path[0] === "/") {
-              target.path = removeDotSegments(relative2.path);
+            if (relative3.path[0] === "/") {
+              target.path = removeDotSegments(relative3.path);
             } else {
               if ((base.userinfo !== void 0 || base.host !== void 0 || base.port !== void 0) && !base.path) {
-                target.path = "/" + relative2.path;
+                target.path = "/" + relative3.path;
               } else if (!base.path) {
-                target.path = relative2.path;
+                target.path = relative3.path;
               } else {
-                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative2.path;
+                target.path = base.path.slice(0, base.path.lastIndexOf("/") + 1) + relative3.path;
               }
               target.path = removeDotSegments(target.path);
             }
-            target.query = relative2.query;
+            target.query = relative3.query;
           }
           target.userinfo = base.userinfo;
           target.host = base.host;
@@ -3643,7 +3649,7 @@ var require_fast_uri = __commonJS({
         }
         target.scheme = base.scheme;
       }
-      target.fragment = relative2.fragment;
+      target.fragment = relative3.fragment;
       return target;
     }
     function equal(uriA, uriB, options) {
@@ -3813,8 +3819,8 @@ var require_fast_uri = __commonJS({
     }
     var fastUri = {
       SCHEMES,
-      normalize,
-      resolve: resolve3,
+      normalize: normalize2,
+      resolve: resolve7,
       resolveComponent,
       equal,
       serialize,
@@ -3918,11 +3924,11 @@ var require_core = __commonJS({
     };
     var MAX_EXPRESSION = 200;
     function requiredOptions(o) {
-      var _a, _b, _c, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
+      var _a2, _b2, _c2, _d, _e, _f, _g, _h, _j, _k, _l, _m, _o, _p, _q, _r, _s, _t, _u, _v, _w, _x, _y, _z, _0;
       const s = o.strict;
-      const _optz = (_a = o.code) === null || _a === void 0 ? void 0 : _a.optimize;
+      const _optz = (_a2 = o.code) === null || _a2 === void 0 ? void 0 : _a2.optimize;
       const optimize = _optz === true || _optz === void 0 ? 1 : _optz || 0;
-      const regExp = (_c = (_b = o.code) === null || _b === void 0 ? void 0 : _b.regExp) !== null && _c !== void 0 ? _c : defaultRegExp;
+      const regExp = (_c2 = (_b2 = o.code) === null || _b2 === void 0 ? void 0 : _b2.regExp) !== null && _c2 !== void 0 ? _c2 : defaultRegExp;
       const uriResolver = (_d = o.uriResolver) !== null && _d !== void 0 ? _d : uri_1.default;
       return {
         strictSchema: (_f = (_e = o.strictSchema) !== null && _e !== void 0 ? _e : s) !== null && _f !== void 0 ? _f : true,
@@ -4220,10 +4226,10 @@ var require_core = __commonJS({
         return this;
       }
       // Add format
-      addFormat(name, format) {
-        if (typeof format == "string")
-          format = new RegExp(format);
-        this.formats[name] = format;
+      addFormat(name, format3) {
+        if (typeof format3 == "string")
+          format3 = new RegExp(format3);
+        this.formats[name] = format3;
         return this;
       }
       errorsText(errors = this.errors, { separator = ", ", dataVar = "data" } = {}) {
@@ -4341,9 +4347,9 @@ var require_core = __commonJS({
     }
     function addInitialFormats() {
       for (const name in this.opts.formats) {
-        const format = this.opts.formats[name];
-        if (format)
-          this.addFormat(name, format);
+        const format3 = this.opts.formats[name];
+        if (format3)
+          this.addFormat(name, format3);
       }
     }
     function addInitialKeywords(defs) {
@@ -4394,7 +4400,7 @@ var require_core = __commonJS({
       }
     }
     function addRule(keyword, definition, dataType) {
-      var _a;
+      var _a2;
       const post = definition === null || definition === void 0 ? void 0 : definition.post;
       if (dataType && post)
         throw new Error('keyword with "post" flag cannot have "type"');
@@ -4420,7 +4426,7 @@ var require_core = __commonJS({
       else
         ruleGroup.rules.push(rule);
       RULES.all[keyword] = rule;
-      (_a = definition.implements) === null || _a === void 0 ? void 0 : _a.forEach((kwd) => this.addKeyword(kwd));
+      (_a2 = definition.implements) === null || _a2 === void 0 ? void 0 : _a2.forEach((kwd) => this.addKeyword(kwd));
     }
     function addBeforeRule(ruleGroup, rule, before) {
       const i = ruleGroup.rules.findIndex((_rule) => _rule.keyword === before);
@@ -4480,8 +4486,8 @@ var require_ref = __commonJS({
       schemaType: "string",
       code(cxt) {
         const { gen, schema: $ref, it } = cxt;
-        const { baseId, schemaEnv: env, validateName, opts, self } = it;
-        const { root } = env;
+        const { baseId, schemaEnv: env2, validateName, opts, self } = it;
+        const { root } = env2;
         if (($ref === "#" || $ref === "#/") && baseId === root.baseId)
           return callRootRef();
         const schOrEnv = compile_1.resolveRef.call(self, root, baseId, $ref);
@@ -4491,8 +4497,8 @@ var require_ref = __commonJS({
           return callValidate(schOrEnv);
         return inlineRefSchema(schOrEnv);
         function callRootRef() {
-          if (env === root)
-            return callRef(cxt, validateName, env, env.$async);
+          if (env2 === root)
+            return callRef(cxt, validateName, env2, env2.$async);
           const rootName = gen.scopeValue("root", { ref: root });
           return callRef(cxt, (0, codegen_1._)`${rootName}.validate`, root, root.$async);
         }
@@ -4522,14 +4528,14 @@ var require_ref = __commonJS({
     exports.getValidate = getValidate;
     function callRef(cxt, v, sch, $async) {
       const { gen, it } = cxt;
-      const { allErrors, schemaEnv: env, opts } = it;
+      const { allErrors, schemaEnv: env2, opts } = it;
       const passCxt = opts.passContext ? names_1.default.this : codegen_1.nil;
       if ($async)
         callAsyncRef();
       else
         callSyncRef();
       function callAsyncRef() {
-        if (!env.$async)
+        if (!env2.$async)
           throw new Error("async schema referenced by sync schema");
         const valid = gen.let("valid");
         gen.try(() => {
@@ -4554,10 +4560,10 @@ var require_ref = __commonJS({
         gen.assign(names_1.default.errors, (0, codegen_1._)`${names_1.default.vErrors}.length`);
       }
       function addEvaluatedFrom(source) {
-        var _a;
+        var _a2;
         if (!it.opts.unevaluated)
           return;
-        const schEvaluated = (_a = sch === null || sch === void 0 ? void 0 : sch.validate) === null || _a === void 0 ? void 0 : _a.evaluated;
+        const schEvaluated = (_a2 = sch === null || sch === void 0 ? void 0 : sch.validate) === null || _a2 === void 0 ? void 0 : _a2.evaluated;
         if (it.props !== true) {
           if (schEvaluated && !schEvaluated.dynamicProps) {
             if (schEvaluated.props !== void 0) {
@@ -5063,7 +5069,7 @@ var require_validation = __commonJS({
     var uniqueItems_1 = require_uniqueItems();
     var const_1 = require_const();
     var enum_1 = require_enum();
-    var validation = [
+    var validation2 = [
       // number
       limitNumber_1.default,
       multipleOf_1.default,
@@ -5082,7 +5088,7 @@ var require_validation = __commonJS({
       const_1.default,
       enum_1.default
     ];
-    exports.default = validation;
+    exports.default = validation2;
   }
 });
 
@@ -6017,18 +6023,18 @@ var require_format = __commonJS({
           });
           const fDef = gen.const("fDef", (0, codegen_1._)`${fmts}[${schemaCode}]`);
           const fType = gen.let("fType");
-          const format = gen.let("format");
-          gen.if((0, codegen_1._)`typeof ${fDef} == "object" && !(${fDef} instanceof RegExp)`, () => gen.assign(fType, (0, codegen_1._)`${fDef}.type || "string"`).assign(format, (0, codegen_1._)`${fDef}.validate`), () => gen.assign(fType, (0, codegen_1._)`"string"`).assign(format, fDef));
+          const format3 = gen.let("format");
+          gen.if((0, codegen_1._)`typeof ${fDef} == "object" && !(${fDef} instanceof RegExp)`, () => gen.assign(fType, (0, codegen_1._)`${fDef}.type || "string"`).assign(format3, (0, codegen_1._)`${fDef}.validate`), () => gen.assign(fType, (0, codegen_1._)`"string"`).assign(format3, fDef));
           cxt.fail$data((0, codegen_1.or)(unknownFmt(), invalidFmt()));
           function unknownFmt() {
             if (opts.strictSchema === false)
               return codegen_1.nil;
-            return (0, codegen_1._)`${schemaCode} && !${format}`;
+            return (0, codegen_1._)`${schemaCode} && !${format3}`;
           }
           function invalidFmt() {
-            const callFormat = schemaEnv.$async ? (0, codegen_1._)`(${fDef}.async ? await ${format}(${data}) : ${format}(${data}))` : (0, codegen_1._)`${format}(${data})`;
-            const validData = (0, codegen_1._)`(typeof ${format} == "function" ? ${callFormat} : ${format}.test(${data}))`;
-            return (0, codegen_1._)`${format} && ${format} !== true && ${fType} === ${ruleType} && !${validData}`;
+            const callFormat = schemaEnv.$async ? (0, codegen_1._)`(${fDef}.async ? await ${format3}(${data}) : ${format3}(${data}))` : (0, codegen_1._)`${format3}(${data})`;
+            const validData = (0, codegen_1._)`(typeof ${format3} == "function" ? ${callFormat} : ${format3}.test(${data}))`;
+            return (0, codegen_1._)`${format3} && ${format3} !== true && ${fType} === ${ruleType} && !${validData}`;
           }
         }
         function validateFormat() {
@@ -6039,7 +6045,7 @@ var require_format = __commonJS({
           }
           if (formatDef === true)
             return;
-          const [fmtType, format, fmtRef] = getFormat(formatDef);
+          const [fmtType, format3, fmtRef] = getFormat(formatDef);
           if (fmtType === ruleType)
             cxt.pass(validCondition());
           function unknownFormat() {
@@ -6066,7 +6072,7 @@ var require_format = __commonJS({
                 throw new Error("async format in sync schema");
               return (0, codegen_1._)`await ${fmtRef}(${data})`;
             }
-            return typeof format == "function" ? (0, codegen_1._)`${fmtRef}(${data})` : (0, codegen_1._)`${fmtRef}.test(${data})`;
+            return typeof format3 == "function" ? (0, codegen_1._)`${fmtRef}(${data})` : (0, codegen_1._)`${fmtRef}.test(${data})`;
           }
         }
       }
@@ -6081,8 +6087,8 @@ var require_format2 = __commonJS({
     "use strict";
     Object.defineProperty(exports, "__esModule", { value: true });
     var format_1 = require_format();
-    var format = [format_1.default];
-    exports.default = format;
+    var format3 = [format_1.default];
+    exports.default = format3;
   }
 });
 
@@ -6199,7 +6205,7 @@ var require_discriminator = __commonJS({
           return _valid;
         }
         function getMapping() {
-          var _a;
+          var _a2;
           const oneOfMapping = {};
           const topRequired = hasRequired(parentSchema);
           let tagRequired = true;
@@ -6213,7 +6219,7 @@ var require_discriminator = __commonJS({
               if (sch === void 0)
                 throw new ref_error_1.default(it.opts.uriResolver, it.baseId, ref);
             }
-            const propSch = (_a = sch === null || sch === void 0 ? void 0 : sch.properties) === null || _a === void 0 ? void 0 : _a[tagName];
+            const propSch = (_a2 = sch === null || sch === void 0 ? void 0 : sch.properties) === null || _a2 === void 0 ? void 0 : _a2[tagName];
             if (typeof propSch != "object") {
               throw new Error(`discriminator: oneOf subschemas (or referenced schemas) must have "properties/${tagName}"`);
             }
@@ -6724,17 +6730,17 @@ var require_limit = __commonJS({
           cxt.fail$data((0, codegen_1.or)((0, codegen_1._)`typeof ${fmt} != "object"`, (0, codegen_1._)`${fmt} instanceof RegExp`, (0, codegen_1._)`typeof ${fmt}.compare != "function"`, compareCode(fmt)));
         }
         function validateFormat() {
-          const format = fCxt.schema;
-          const fmtDef = self.formats[format];
+          const format3 = fCxt.schema;
+          const fmtDef = self.formats[format3];
           if (!fmtDef || fmtDef === true)
             return;
           if (typeof fmtDef != "object" || fmtDef instanceof RegExp || typeof fmtDef.compare != "function") {
-            throw new Error(`"${keyword}": format "${format}" does not define "compare" function`);
+            throw new Error(`"${keyword}": format "${format3}" does not define "compare" function`);
           }
           const fmt = gen.scopeValue("formats", {
-            key: format,
+            key: format3,
             ref: fmtDef,
-            code: opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(format)}` : void 0
+            code: opts.code.formats ? (0, codegen_1._)`${opts.code.formats}${(0, codegen_1.getProperty)(format3)}` : void 0
           });
           cxt.fail$data(compareCode(fmt));
         }
@@ -6782,9 +6788,9 @@ var require_dist = __commonJS({
       return f;
     };
     function addFormats(ajv, list, fs, exportName) {
-      var _a;
-      var _b;
-      (_a = (_b = ajv.opts.code).formats) !== null && _a !== void 0 ? _a : _b.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
+      var _a2;
+      var _b2;
+      (_a2 = (_b2 = ajv.opts.code).formats) !== null && _a2 !== void 0 ? _a2 : _b2.formats = (0, codegen_1._)`require("ajv-formats/dist/formats").${exportName}`;
       for (const f of list)
         ajv.addFormat(f, fs[f]);
     }
@@ -6795,8 +6801,8 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync30, readdirSync as readdirSync10, statSync as statSync9 } from "node:fs";
-import { join as join33 } from "node:path";
+import { existsSync as existsSync31, readdirSync as readdirSync12, statSync as statSync11 } from "node:fs";
+import { join as join34 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
     "use strict";
@@ -6813,12 +6819,12 @@ var NEVER = Object.freeze({
 // @__NO_SIDE_EFFECTS__
 function $constructor(name, initializer3, params) {
   function init(inst, def) {
-    var _a;
+    var _a2;
     Object.defineProperty(inst, "_zod", {
       value: inst._zod ?? {},
       enumerable: false
     });
-    (_a = inst._zod).traits ?? (_a.traits = /* @__PURE__ */ new Set());
+    (_a2 = inst._zod).traits ?? (_a2.traits = /* @__PURE__ */ new Set());
     inst._zod.traits.add(name);
     initializer3(inst, def);
     for (const k in _.prototype) {
@@ -6833,10 +6839,10 @@ function $constructor(name, initializer3, params) {
   }
   Object.defineProperty(Definition, "name", { value: name });
   function _(def) {
-    var _a;
+    var _a2;
     const inst = params?.Parent ? new Definition() : this;
     init(inst, def);
-    (_a = inst._zod).deferred ?? (_a.deferred = []);
+    (_a2 = inst._zod).deferred ?? (_a2.deferred = []);
     for (const fn of inst._zod.deferred) {
       fn();
     }
@@ -7326,8 +7332,8 @@ function aborted(x, startIndex = 0) {
 }
 function prefixIssues(path, issues) {
   return issues.map((iss) => {
-    var _a;
-    (_a = iss).path ?? (_a.path = []);
+    var _a2;
+    (_a2 = iss).path ?? (_a2.path = []);
     iss.path.unshift(path);
     return iss;
   });
@@ -7573,10 +7579,10 @@ var uppercase = /^[^a-z]*$/;
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/checks.js
 var $ZodCheck = /* @__PURE__ */ $constructor("$ZodCheck", (inst, def) => {
-  var _a;
+  var _a2;
   inst._zod ?? (inst._zod = {});
   inst._zod.def = def;
-  (_a = inst._zod).onattach ?? (_a.onattach = []);
+  (_a2 = inst._zod).onattach ?? (_a2.onattach = []);
 });
 var numericOriginMap = {
   number: "number",
@@ -7642,8 +7648,8 @@ var $ZodCheckGreaterThan = /* @__PURE__ */ $constructor("$ZodCheckGreaterThan", 
 var $ZodCheckMultipleOf = /* @__PURE__ */ $constructor("$ZodCheckMultipleOf", (inst, def) => {
   $ZodCheck.init(inst, def);
   inst._zod.onattach.push((inst2) => {
-    var _a;
-    (_a = inst2._zod.bag).multipleOf ?? (_a.multipleOf = def.value);
+    var _a2;
+    (_a2 = inst2._zod.bag).multipleOf ?? (_a2.multipleOf = def.value);
   });
   inst._zod.check = (payload) => {
     if (typeof payload.value !== typeof def.value)
@@ -7736,9 +7742,9 @@ var $ZodCheckNumberFormat = /* @__PURE__ */ $constructor("$ZodCheckNumberFormat"
   };
 });
 var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (inst, def) => {
-  var _a;
+  var _a2;
   $ZodCheck.init(inst, def);
-  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.length !== void 0;
   });
@@ -7765,9 +7771,9 @@ var $ZodCheckMaxLength = /* @__PURE__ */ $constructor("$ZodCheckMaxLength", (ins
   };
 });
 var $ZodCheckMinLength = /* @__PURE__ */ $constructor("$ZodCheckMinLength", (inst, def) => {
-  var _a;
+  var _a2;
   $ZodCheck.init(inst, def);
-  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.length !== void 0;
   });
@@ -7794,9 +7800,9 @@ var $ZodCheckMinLength = /* @__PURE__ */ $constructor("$ZodCheckMinLength", (ins
   };
 });
 var $ZodCheckLengthEquals = /* @__PURE__ */ $constructor("$ZodCheckLengthEquals", (inst, def) => {
-  var _a;
+  var _a2;
   $ZodCheck.init(inst, def);
-  (_a = inst._zod.def).when ?? (_a.when = (payload) => {
+  (_a2 = inst._zod.def).when ?? (_a2.when = (payload) => {
     const val = payload.value;
     return !nullish(val) && val.length !== void 0;
   });
@@ -7825,7 +7831,7 @@ var $ZodCheckLengthEquals = /* @__PURE__ */ $constructor("$ZodCheckLengthEquals"
   };
 });
 var $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat", (inst, def) => {
-  var _a, _b;
+  var _a2, _b2;
   $ZodCheck.init(inst, def);
   inst._zod.onattach.push((inst2) => {
     const bag = inst2._zod.bag;
@@ -7836,7 +7842,7 @@ var $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat"
     }
   });
   if (def.pattern)
-    (_a = inst._zod).check ?? (_a.check = (payload) => {
+    (_a2 = inst._zod).check ?? (_a2.check = (payload) => {
       def.pattern.lastIndex = 0;
       if (def.pattern.test(payload.value))
         return;
@@ -7851,7 +7857,7 @@ var $ZodCheckStringFormat = /* @__PURE__ */ $constructor("$ZodCheckStringFormat"
       });
     });
   else
-    (_b = inst._zod).check ?? (_b.check = () => {
+    (_b2 = inst._zod).check ?? (_b2.check = () => {
     });
 });
 var $ZodCheckRegex = /* @__PURE__ */ $constructor("$ZodCheckRegex", (inst, def) => {
@@ -8001,7 +8007,7 @@ var version = {
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v4/core/schemas.js
 var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
-  var _a;
+  var _a2;
   inst ?? (inst = {});
   inst._zod.def = def;
   inst._zod.bag = inst._zod.bag || {};
@@ -8016,7 +8022,7 @@ var $ZodType = /* @__PURE__ */ $constructor("$ZodType", (inst, def) => {
     }
   }
   if (checks.length === 0) {
-    (_a = inst._zod).deferred ?? (_a.deferred = []);
+    (_a2 = inst._zod).deferred ?? (_a2.deferred = []);
     inst._zod.deferred?.push(() => {
       inst._zod.run = inst._zod.parse;
     });
@@ -8814,15 +8820,15 @@ var $ZodIntersection = /* @__PURE__ */ $constructor("$ZodIntersection", (inst, d
   $ZodType.init(inst, def);
   inst._zod.parse = (payload, ctx) => {
     const input = payload.value;
-    const left = def.left._zod.run({ value: input, issues: [] }, ctx);
-    const right = def.right._zod.run({ value: input, issues: [] }, ctx);
-    const async = left instanceof Promise || right instanceof Promise;
+    const left2 = def.left._zod.run({ value: input, issues: [] }, ctx);
+    const right2 = def.right._zod.run({ value: input, issues: [] }, ctx);
+    const async = left2 instanceof Promise || right2 instanceof Promise;
     if (async) {
-      return Promise.all([left, right]).then(([left2, right2]) => {
-        return handleIntersectionResults(payload, left2, right2);
+      return Promise.all([left2, right2]).then(([left3, right3]) => {
+        return handleIntersectionResults(payload, left3, right3);
       });
     }
-    return handleIntersectionResults(payload, left, right);
+    return handleIntersectionResults(payload, left2, right2);
   };
 });
 function mergeValues(a, b) {
@@ -8869,16 +8875,16 @@ function mergeValues(a, b) {
   }
   return { valid: false, mergeErrorPath: [] };
 }
-function handleIntersectionResults(result, left, right) {
-  if (left.issues.length) {
-    result.issues.push(...left.issues);
+function handleIntersectionResults(result, left2, right2) {
+  if (left2.issues.length) {
+    result.issues.push(...left2.issues);
   }
-  if (right.issues.length) {
-    result.issues.push(...right.issues);
+  if (right2.issues.length) {
+    result.issues.push(...right2.issues);
   }
   if (aborted(result))
     return result;
-  const merged = mergeValues(left.value, right.value);
+  const merged = mergeValues(left2.value, right2.value);
   if (!merged.valid) {
     throw new Error(`Unmergable intersection. Error path: ${JSON.stringify(merged.mergeErrorPath)}`);
   }
@@ -9172,18 +9178,18 @@ var $ZodPipe = /* @__PURE__ */ $constructor("$ZodPipe", (inst, def) => {
   defineLazy(inst._zod, "optin", () => def.in._zod.optin);
   defineLazy(inst._zod, "optout", () => def.out._zod.optout);
   inst._zod.parse = (payload, ctx) => {
-    const left = def.in._zod.run(payload, ctx);
-    if (left instanceof Promise) {
-      return left.then((left2) => handlePipeResult(left2, def, ctx));
+    const left2 = def.in._zod.run(payload, ctx);
+    if (left2 instanceof Promise) {
+      return left2.then((left3) => handlePipeResult(left3, def, ctx));
     }
-    return handlePipeResult(left, def, ctx);
+    return handlePipeResult(left2, def, ctx);
   };
 });
-function handlePipeResult(left, def, ctx) {
-  if (aborted(left)) {
-    return left;
+function handlePipeResult(left2, def, ctx) {
+  if (aborted(left2)) {
+    return left2;
   }
-  return def.out._zod.run({ value: left.value, issues: left.issues }, ctx);
+  return def.out._zod.run({ value: left2.value, issues: left2.issues }, ctx);
 }
 var $ZodReadonly = /* @__PURE__ */ $constructor("$ZodReadonly", (inst, def) => {
   $ZodType.init(inst, def);
@@ -9855,7 +9861,7 @@ var JSONSchemaGenerator = class {
     this.seen = /* @__PURE__ */ new Map();
   }
   process(schema2, _params = { path: [], schemaPath: [] }) {
-    var _a;
+    var _a2;
     const def = schema2._zod.def;
     const formatMap = {
       guid: "uuid",
@@ -9896,13 +9902,13 @@ var JSONSchemaGenerator = class {
           case "string": {
             const json2 = _json;
             json2.type = "string";
-            const { minimum, maximum, format, patterns, contentEncoding } = schema2._zod.bag;
+            const { minimum, maximum, format: format3, patterns, contentEncoding } = schema2._zod.bag;
             if (typeof minimum === "number")
               json2.minLength = minimum;
             if (typeof maximum === "number")
               json2.maxLength = maximum;
-            if (format) {
-              json2.format = formatMap[format] ?? format;
+            if (format3) {
+              json2.format = formatMap[format3] ?? format3;
               if (json2.format === "")
                 delete json2.format;
             }
@@ -9925,8 +9931,8 @@ var JSONSchemaGenerator = class {
           }
           case "number": {
             const json2 = _json;
-            const { minimum, maximum, format, multipleOf, exclusiveMaximum, exclusiveMinimum } = schema2._zod.bag;
-            if (typeof format === "string" && format.includes("int"))
+            const { minimum, maximum, format: format3, multipleOf, exclusiveMaximum, exclusiveMinimum } = schema2._zod.bag;
+            if (typeof format3 === "string" && format3.includes("int"))
               json2.type = "integer";
             else
               json2.type = "number";
@@ -10317,7 +10323,7 @@ var JSONSchemaGenerator = class {
       delete result.schema.default;
     }
     if (this.io === "input" && result.schema._prefault)
-      (_a = result.schema).default ?? (_a.default = result.schema._prefault);
+      (_a2 = result.schema).default ?? (_a2.default = result.schema._prefault);
     delete result.schema._prefault;
     const _result = this.seen.get(schema2);
     return _result.schema;
@@ -11038,11 +11044,11 @@ var ZodIntersection = /* @__PURE__ */ $constructor("ZodIntersection", (inst, def
   $ZodIntersection.init(inst, def);
   ZodType.init(inst, def);
 });
-function intersection(left, right) {
+function intersection(left2, right2) {
   return new ZodIntersection({
     type: "intersection",
-    left,
-    right
+    left: left2,
+    right: right2
   });
 }
 var ZodRecord = /* @__PURE__ */ $constructor("ZodRecord", (inst, def) => {
@@ -12900,12 +12906,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve3) => {
+    return new Promise((resolve7) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve3();
+        resolve7();
       } else {
-        this._stdout.once("drain", resolve3);
+        this._stdout.once("drain", resolve7);
       }
     });
   }
@@ -13684,8 +13690,8 @@ var ZodType2 = class {
       data,
       parsedType: getParsedType2(data)
     };
-    const maybeAsyncResult = this._parse({ data, path: ctx.path, parent: ctx });
-    const result = await (isAsync(maybeAsyncResult) ? maybeAsyncResult : Promise.resolve(maybeAsyncResult));
+    const maybeAsyncResult2 = this._parse({ data, path: ctx.path, parent: ctx });
+    const result = await (isAsync(maybeAsyncResult2) ? maybeAsyncResult2 : Promise.resolve(maybeAsyncResult2));
     return handleResult(ctx, result);
   }
   refine(check2, message) {
@@ -14231,9 +14237,9 @@ var ZodString2 = class _ZodString2 extends ZodType2 {
     }
     return { status: status.value, value: input.data };
   }
-  _regex(regex, validation, message) {
+  _regex(regex, validation2, message) {
     return this.refinement((data) => regex.test(data), {
-      validation,
+      validation: validation2,
       code: ZodIssueCode.invalid_string,
       ...errorUtil.errToObj(message)
     });
@@ -15884,7 +15890,7 @@ var ZodIntersection2 = class extends ZodType2 {
           path: ctx.path,
           parent: ctx
         })
-      ]).then(([left, right]) => handleParsed(left, right));
+      ]).then(([left2, right2]) => handleParsed(left2, right2));
     } else {
       return handleParsed(this._def.left._parseSync({
         data: ctx.data,
@@ -15898,10 +15904,10 @@ var ZodIntersection2 = class extends ZodType2 {
     }
   }
 };
-ZodIntersection2.create = (left, right, params) => {
+ZodIntersection2.create = (left2, right2, params) => {
   return new ZodIntersection2({
-    left,
-    right,
+    left: left2,
+    right: right2,
     typeName: ZodFirstPartyTypeKind.ZodIntersection,
     ...processCreateParams(params)
   });
@@ -18967,7 +18973,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
+        await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -18984,7 +18990,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve7, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -19062,7 +19068,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve3(parseResult.data);
+            resolve7(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -19323,12 +19329,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve3, reject) => {
+    return new Promise((resolve7, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve3, interval);
+      const timeoutId = setTimeout(resolve7, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -20287,7 +20293,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
+      await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -21384,8 +21390,8 @@ function isPatternCParent(root) {
     return false;
   }
 }
-function resolveActiveTaskId(root, env = process.env) {
-  const envTaskId = env.AI_SDLC_ACTIVE_TASK_ID;
+function resolveActiveTaskId(root, env2 = process.env) {
+  const envTaskId = env2.AI_SDLC_ACTIVE_TASK_ID;
   if (envTaskId && envTaskId.trim()) {
     return envTaskId.trim().toLowerCase();
   }
@@ -21417,23 +21423,23 @@ function resolveActiveTaskId(root, env = process.env) {
   return bestTaskId;
 }
 function resolveProjectRoot(opts = {}) {
-  const env = opts.env ?? process.env;
+  const env2 = opts.env ?? process.env;
   const cwd = opts.cwd ?? process.cwd();
-  const envProjectRoot = env.AI_SDLC_PROJECT_ROOT;
+  const envProjectRoot = env2.AI_SDLC_PROJECT_ROOT;
   if (envProjectRoot && hasBacklogDir(envProjectRoot)) {
-    return applyPatternCIfNeeded(resolve(envProjectRoot), env);
+    return applyPatternCIfNeeded(resolve(envProjectRoot), env2);
   }
-  const claudeProjectDir = env.CLAUDE_PROJECT_DIR;
+  const claudeProjectDir = env2.CLAUDE_PROJECT_DIR;
   if (claudeProjectDir && hasBacklogDir(claudeProjectDir)) {
-    return applyPatternCIfNeeded(resolve(claudeProjectDir), env);
+    return applyPatternCIfNeeded(resolve(claudeProjectDir), env2);
   }
   const fromCwd = walkUpForBacklog(cwd);
-  if (fromCwd) return applyPatternCIfNeeded(fromCwd, env);
+  if (fromCwd) return applyPatternCIfNeeded(fromCwd, env2);
   throw new Error(ERROR_MESSAGE);
 }
-function applyPatternCIfNeeded(root, env = process.env) {
+function applyPatternCIfNeeded(root, env2 = process.env) {
   if (!isPatternCParent(root)) return root;
-  const taskId = resolveActiveTaskId(root, env);
+  const taskId = resolveActiveTaskId(root, env2);
   if (!taskId) {
     throw new Error(PATTERN_C_ERROR_MESSAGE);
   }
@@ -21921,7 +21927,7 @@ var ShellClaudePSpawner = class {
     const start = Date.now();
     const argv = this.buildArgv(opts);
     const timeoutMs = opts.timeout ?? this.defaultTimeoutMs;
-    return new Promise((resolve3) => {
+    return new Promise((resolve7) => {
       let child;
       try {
         child = this.processSpawner(this.binary, argv, { cwd: opts.cwd });
@@ -21935,7 +21941,7 @@ var ShellClaudePSpawner = class {
           argv,
           failureType: "claude-cli-spawn-error"
         };
-        resolve3({
+        resolve7({
           type: opts.type,
           output: "",
           status: "error",
@@ -21954,7 +21960,7 @@ var ShellClaudePSpawner = class {
           return;
         settled = true;
         clearTimeout(timer);
-        resolve3(result);
+        resolve7(result);
       };
       const timer = setTimeout(() => {
         watchdogFired = true;
@@ -22240,11 +22246,11 @@ var TimeoutError = class extends Error {
   }
 };
 function withTimeout(p, timeoutMs) {
-  return new Promise((resolve3, reject) => {
+  return new Promise((resolve7, reject) => {
     const timer = setTimeout(() => reject(new TimeoutError(timeoutMs)), timeoutMs);
     p.then((v) => {
       clearTimeout(timer);
-      resolve3(v);
+      resolve7(v);
     }, (e) => {
       clearTimeout(timer);
       reject(e);
@@ -22268,9 +22274,9 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 var execFileP = promisify(execFile);
 var defaultWhich = async (bin) => {
-  const command = process.platform === "win32" ? "where" : "which";
+  const command2 = process.platform === "win32" ? "where" : "which";
   try {
-    const { stdout } = await execFileP(command, [bin], { timeout: 5e3 });
+    const { stdout } = await execFileP(command2, [bin], { timeout: 5e3 });
     return stdout.trim().length > 0;
   } catch {
     return false;
@@ -22296,9 +22302,9 @@ async function defaultSpawner(options = {}) {
 import { execFile as execFile2 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
 var execFileP2 = promisify2(execFile2);
-var defaultRunner = async (command, args, opts = {}) => {
+var defaultRunner = async (command2, args, opts = {}) => {
   try {
-    const result = await execFileP2(command, args, {
+    const result = await execFileP2(command2, args, {
       cwd: opts.cwd,
       timeout: opts.timeout ?? 6e4,
       env: { ...process.env, ...opts.env },
@@ -22322,7 +22328,7 @@ var defaultRunner = async (command, args, opts = {}) => {
       return result;
     }
     const reason = result.stderr || result.stdout || e.message || "command failed";
-    const exposed = new Error(`${command} ${args.join(" ")} failed: ${reason.trim()}`);
+    const exposed = new Error(`${command2} ${args.join(" ")} failed: ${reason.trim()}`);
     exposed.result = result;
     throw exposed;
   }
@@ -23132,7 +23138,7 @@ var _hasOwnProperty$3 = Object.prototype.hasOwnProperty;
 var _toString$2 = Object.prototype.toString;
 function resolveYamlOmap(data) {
   if (data === null) return true;
-  var objectKeys = [], index, length, pair, pairKey, pairHasKey, object3 = data;
+  var objectKeys2 = [], index, length, pair, pairKey, pairHasKey, object3 = data;
   for (index = 0, length = object3.length; index < length; index += 1) {
     pair = object3[index];
     pairHasKey = false;
@@ -23144,7 +23150,7 @@ function resolveYamlOmap(data) {
       }
     }
     if (!pairHasKey) return false;
-    if (objectKeys.indexOf(pairKey) === -1) objectKeys.push(pairKey);
+    if (objectKeys2.indexOf(pairKey) === -1) objectKeys2.push(pairKey);
     else return false;
   }
   return true;
@@ -25201,8 +25207,8 @@ async function withWorktreeMutex(fn, opts = {}) {
   const mutex = opts._mutex ?? _globalMutex;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_MUTEX_TIMEOUT_MS;
   let releaseLock;
-  const newTail = new Promise((resolve3) => {
-    releaseLock = resolve3;
+  const newTail = new Promise((resolve7) => {
+    releaseLock = resolve7;
   });
   const prevTail = mutex.queue;
   mutex.queue = newTail;
@@ -25231,7 +25237,7 @@ async function withWorktreeMutex(fn, opts = {}) {
       if (tryAcquireFileLock(opts.workDir)) {
         fileLockAcquired = true;
       } else {
-        await new Promise((resolve3) => setTimeout(resolve3, 200));
+        await new Promise((resolve7) => setTimeout(resolve7, 200));
       }
     }
     if (!fileLockAcquired) {
@@ -25275,15 +25281,15 @@ function findClaudeSubprocess(psOutput, taskId) {
     if (spaceIdx === -1)
       continue;
     const pidStr = trimmed.slice(0, spaceIdx).trim();
-    const command = trimmed.slice(spaceIdx + 1).trim();
+    const command2 = trimmed.slice(spaceIdx + 1).trim();
     const pid = parseInt(pidStr, 10);
     if (isNaN(pid))
       continue;
-    if (!command.includes("claude"))
+    if (!command2.includes("claude"))
       continue;
-    if (!command.includes("--print") && !/ -p(\s|$)/.test(command))
+    if (!command2.includes("--print") && !/ -p(\s|$)/.test(command2))
       continue;
-    if (command.includes(taskIdLower) || command.includes(taskIdUpper)) {
+    if (command2.includes(taskIdLower) || command2.includes(taskIdUpper)) {
       return pid;
     }
   }
@@ -25950,8 +25956,4954 @@ function coerceReviewerVerdict(agentId, r) {
 }
 
 // ../../pipeline-cli/dist/steps/10-finalize.js
-import { existsSync as existsSync13, mkdirSync as mkdirSync6, readFileSync as readFileSync11, renameSync as renameSync2, writeFileSync as writeFileSync5 } from "node:fs";
-import { basename as basename2, dirname as dirname4, join as join15 } from "node:path";
+import { existsSync as existsSync14, mkdirSync as mkdirSync7, readFileSync as readFileSync15, renameSync as renameSync3, writeFileSync as writeFileSync6 } from "node:fs";
+import { basename as basename4, dirname as dirname6, join as join16 } from "node:path";
+
+// ../../pipeline-cli/dist/cli/complete-task.js
+import { existsSync as existsSync13, lstatSync, mkdirSync as mkdirSync6, readdirSync as readdirSync7, renameSync as renameSync2, unlinkSync, writeFileSync as writeFileSync5 } from "node:fs";
+import { readFileSync as readFileSync14 } from "node:fs";
+import { basename as basename3, join as join15 } from "node:path";
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/lib/platform-shims/esm.mjs
+import { notStrictEqual, strictEqual } from "assert";
+
+// ../../node_modules/.pnpm/cliui@8.0.1/node_modules/cliui/build/lib/index.js
+var align = {
+  right: alignRight,
+  center: alignCenter
+};
+var top = 0;
+var right = 1;
+var bottom = 2;
+var left = 3;
+var UI = class {
+  constructor(opts) {
+    var _a2;
+    this.width = opts.width;
+    this.wrap = (_a2 = opts.wrap) !== null && _a2 !== void 0 ? _a2 : true;
+    this.rows = [];
+  }
+  span(...args) {
+    const cols = this.div(...args);
+    cols.span = true;
+  }
+  resetOutput() {
+    this.rows = [];
+  }
+  div(...args) {
+    if (args.length === 0) {
+      this.div("");
+    }
+    if (this.wrap && this.shouldApplyLayoutDSL(...args) && typeof args[0] === "string") {
+      return this.applyLayoutDSL(args[0]);
+    }
+    const cols = args.map((arg) => {
+      if (typeof arg === "string") {
+        return this.colFromString(arg);
+      }
+      return arg;
+    });
+    this.rows.push(cols);
+    return cols;
+  }
+  shouldApplyLayoutDSL(...args) {
+    return args.length === 1 && typeof args[0] === "string" && /[\t\n]/.test(args[0]);
+  }
+  applyLayoutDSL(str2) {
+    const rows = str2.split("\n").map((row) => row.split("	"));
+    let leftColumnWidth = 0;
+    rows.forEach((columns) => {
+      if (columns.length > 1 && mixin.stringWidth(columns[0]) > leftColumnWidth) {
+        leftColumnWidth = Math.min(Math.floor(this.width * 0.5), mixin.stringWidth(columns[0]));
+      }
+    });
+    rows.forEach((columns) => {
+      this.div(...columns.map((r, i) => {
+        return {
+          text: r.trim(),
+          padding: this.measurePadding(r),
+          width: i === 0 && columns.length > 1 ? leftColumnWidth : void 0
+        };
+      }));
+    });
+    return this.rows[this.rows.length - 1];
+  }
+  colFromString(text) {
+    return {
+      text,
+      padding: this.measurePadding(text)
+    };
+  }
+  measurePadding(str2) {
+    const noAnsi = mixin.stripAnsi(str2);
+    return [0, noAnsi.match(/\s*$/)[0].length, 0, noAnsi.match(/^\s*/)[0].length];
+  }
+  toString() {
+    const lines = [];
+    this.rows.forEach((row) => {
+      this.rowToString(row, lines);
+    });
+    return lines.filter((line) => !line.hidden).map((line) => line.text).join("\n");
+  }
+  rowToString(row, lines) {
+    this.rasterize(row).forEach((rrow, r) => {
+      let str2 = "";
+      rrow.forEach((col, c) => {
+        const { width } = row[c];
+        const wrapWidth = this.negatePadding(row[c]);
+        let ts = col;
+        if (wrapWidth > mixin.stringWidth(col)) {
+          ts += " ".repeat(wrapWidth - mixin.stringWidth(col));
+        }
+        if (row[c].align && row[c].align !== "left" && this.wrap) {
+          const fn = align[row[c].align];
+          ts = fn(ts, wrapWidth);
+          if (mixin.stringWidth(ts) < wrapWidth) {
+            ts += " ".repeat((width || 0) - mixin.stringWidth(ts) - 1);
+          }
+        }
+        const padding = row[c].padding || [0, 0, 0, 0];
+        if (padding[left]) {
+          str2 += " ".repeat(padding[left]);
+        }
+        str2 += addBorder(row[c], ts, "| ");
+        str2 += ts;
+        str2 += addBorder(row[c], ts, " |");
+        if (padding[right]) {
+          str2 += " ".repeat(padding[right]);
+        }
+        if (r === 0 && lines.length > 0) {
+          str2 = this.renderInline(str2, lines[lines.length - 1]);
+        }
+      });
+      lines.push({
+        text: str2.replace(/ +$/, ""),
+        span: row.span
+      });
+    });
+    return lines;
+  }
+  // if the full 'source' can render in
+  // the target line, do so.
+  renderInline(source, previousLine) {
+    const match = source.match(/^ */);
+    const leadingWhitespace = match ? match[0].length : 0;
+    const target = previousLine.text;
+    const targetTextWidth = mixin.stringWidth(target.trimRight());
+    if (!previousLine.span) {
+      return source;
+    }
+    if (!this.wrap) {
+      previousLine.hidden = true;
+      return target + source;
+    }
+    if (leadingWhitespace < targetTextWidth) {
+      return source;
+    }
+    previousLine.hidden = true;
+    return target.trimRight() + " ".repeat(leadingWhitespace - targetTextWidth) + source.trimLeft();
+  }
+  rasterize(row) {
+    const rrows = [];
+    const widths = this.columnWidths(row);
+    let wrapped;
+    row.forEach((col, c) => {
+      col.width = widths[c];
+      if (this.wrap) {
+        wrapped = mixin.wrap(col.text, this.negatePadding(col), { hard: true }).split("\n");
+      } else {
+        wrapped = col.text.split("\n");
+      }
+      if (col.border) {
+        wrapped.unshift("." + "-".repeat(this.negatePadding(col) + 2) + ".");
+        wrapped.push("'" + "-".repeat(this.negatePadding(col) + 2) + "'");
+      }
+      if (col.padding) {
+        wrapped.unshift(...new Array(col.padding[top] || 0).fill(""));
+        wrapped.push(...new Array(col.padding[bottom] || 0).fill(""));
+      }
+      wrapped.forEach((str2, r) => {
+        if (!rrows[r]) {
+          rrows.push([]);
+        }
+        const rrow = rrows[r];
+        for (let i = 0; i < c; i++) {
+          if (rrow[i] === void 0) {
+            rrow.push("");
+          }
+        }
+        rrow.push(str2);
+      });
+    });
+    return rrows;
+  }
+  negatePadding(col) {
+    let wrapWidth = col.width || 0;
+    if (col.padding) {
+      wrapWidth -= (col.padding[left] || 0) + (col.padding[right] || 0);
+    }
+    if (col.border) {
+      wrapWidth -= 4;
+    }
+    return wrapWidth;
+  }
+  columnWidths(row) {
+    if (!this.wrap) {
+      return row.map((col) => {
+        return col.width || mixin.stringWidth(col.text);
+      });
+    }
+    let unset = row.length;
+    let remainingWidth = this.width;
+    const widths = row.map((col) => {
+      if (col.width) {
+        unset--;
+        remainingWidth -= col.width;
+        return col.width;
+      }
+      return void 0;
+    });
+    const unsetWidth = unset ? Math.floor(remainingWidth / unset) : 0;
+    return widths.map((w, i) => {
+      if (w === void 0) {
+        return Math.max(unsetWidth, _minWidth(row[i]));
+      }
+      return w;
+    });
+  }
+};
+function addBorder(col, ts, style) {
+  if (col.border) {
+    if (/[.']-+[.']/.test(ts)) {
+      return "";
+    }
+    if (ts.trim().length !== 0) {
+      return style;
+    }
+    return "  ";
+  }
+  return "";
+}
+function _minWidth(col) {
+  const padding = col.padding || [];
+  const minWidth = 1 + (padding[left] || 0) + (padding[right] || 0);
+  if (col.border) {
+    return minWidth + 4;
+  }
+  return minWidth;
+}
+function getWindowWidth() {
+  if (typeof process === "object" && process.stdout && process.stdout.columns) {
+    return process.stdout.columns;
+  }
+  return 80;
+}
+function alignRight(str2, width) {
+  str2 = str2.trim();
+  const strWidth = mixin.stringWidth(str2);
+  if (strWidth < width) {
+    return " ".repeat(width - strWidth) + str2;
+  }
+  return str2;
+}
+function alignCenter(str2, width) {
+  str2 = str2.trim();
+  const strWidth = mixin.stringWidth(str2);
+  if (strWidth >= width) {
+    return str2;
+  }
+  return " ".repeat(width - strWidth >> 1) + str2;
+}
+var mixin;
+function cliui(opts, _mixin) {
+  mixin = _mixin;
+  return new UI({
+    width: (opts === null || opts === void 0 ? void 0 : opts.width) || getWindowWidth(),
+    wrap: opts === null || opts === void 0 ? void 0 : opts.wrap
+  });
+}
+
+// ../../node_modules/.pnpm/cliui@8.0.1/node_modules/cliui/build/lib/string-utils.js
+var ansi = new RegExp("\x1B(?:\\[(?:\\d+[ABCDEFGJKSTm]|\\d+;\\d+[Hfm]|\\d+;\\d+;\\d+m|6n|s|u|\\?25[lh])|\\w)", "g");
+function stripAnsi(str2) {
+  return str2.replace(ansi, "");
+}
+function wrap(str2, width) {
+  const [start, end] = str2.match(ansi) || ["", ""];
+  str2 = stripAnsi(str2);
+  let wrapped = "";
+  for (let i = 0; i < str2.length; i++) {
+    if (i !== 0 && i % width === 0) {
+      wrapped += "\n";
+    }
+    wrapped += str2.charAt(i);
+  }
+  if (start && end) {
+    wrapped = `${start}${wrapped}${end}`;
+  }
+  return wrapped;
+}
+
+// ../../node_modules/.pnpm/cliui@8.0.1/node_modules/cliui/index.mjs
+function ui(opts) {
+  return cliui(opts, {
+    stringWidth: (str2) => {
+      return [...str2].length;
+    },
+    stripAnsi,
+    wrap
+  });
+}
+
+// ../../node_modules/.pnpm/escalade@3.2.0/node_modules/escalade/sync/index.mjs
+import { dirname as dirname4, resolve as resolve3 } from "path";
+import { readdirSync as readdirSync6, statSync as statSync5 } from "fs";
+function sync_default(start, callback) {
+  let dir = resolve3(".", start);
+  let tmp, stats = statSync5(dir);
+  if (!stats.isDirectory()) {
+    dir = dirname4(dir);
+  }
+  while (true) {
+    tmp = callback(dir, readdirSync6(dir));
+    if (tmp) return resolve3(dir, tmp);
+    dir = dirname4(tmp = dir);
+    if (tmp === dir) break;
+  }
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/lib/platform-shims/esm.mjs
+import { inspect } from "util";
+import { readFileSync as readFileSync13 } from "fs";
+import { fileURLToPath } from "url";
+
+// ../../node_modules/.pnpm/yargs-parser@21.1.1/node_modules/yargs-parser/build/lib/index.js
+import { format } from "util";
+import { normalize, resolve as resolve4 } from "path";
+
+// ../../node_modules/.pnpm/yargs-parser@21.1.1/node_modules/yargs-parser/build/lib/string-utils.js
+function camelCase(str2) {
+  const isCamelCase = str2 !== str2.toLowerCase() && str2 !== str2.toUpperCase();
+  if (!isCamelCase) {
+    str2 = str2.toLowerCase();
+  }
+  if (str2.indexOf("-") === -1 && str2.indexOf("_") === -1) {
+    return str2;
+  } else {
+    let camelcase = "";
+    let nextChrUpper = false;
+    const leadingHyphens = str2.match(/^-+/);
+    for (let i = leadingHyphens ? leadingHyphens[0].length : 0; i < str2.length; i++) {
+      let chr = str2.charAt(i);
+      if (nextChrUpper) {
+        nextChrUpper = false;
+        chr = chr.toUpperCase();
+      }
+      if (i !== 0 && (chr === "-" || chr === "_")) {
+        nextChrUpper = true;
+      } else if (chr !== "-" && chr !== "_") {
+        camelcase += chr;
+      }
+    }
+    return camelcase;
+  }
+}
+function decamelize(str2, joinString) {
+  const lowercase2 = str2.toLowerCase();
+  joinString = joinString || "-";
+  let notCamelcase = "";
+  for (let i = 0; i < str2.length; i++) {
+    const chrLower = lowercase2.charAt(i);
+    const chrString = str2.charAt(i);
+    if (chrLower !== chrString && i > 0) {
+      notCamelcase += `${joinString}${lowercase2.charAt(i)}`;
+    } else {
+      notCamelcase += chrString;
+    }
+  }
+  return notCamelcase;
+}
+function looksLikeNumber(x) {
+  if (x === null || x === void 0)
+    return false;
+  if (typeof x === "number")
+    return true;
+  if (/^0x[0-9a-f]+$/i.test(x))
+    return true;
+  if (/^0[^.]/.test(x))
+    return false;
+  return /^[-]?(?:\d+(?:\.\d*)?|\.\d+)(e[-+]?\d+)?$/.test(x);
+}
+
+// ../../node_modules/.pnpm/yargs-parser@21.1.1/node_modules/yargs-parser/build/lib/tokenize-arg-string.js
+function tokenizeArgString(argString) {
+  if (Array.isArray(argString)) {
+    return argString.map((e) => typeof e !== "string" ? e + "" : e);
+  }
+  argString = argString.trim();
+  let i = 0;
+  let prevC = null;
+  let c = null;
+  let opening = null;
+  const args = [];
+  for (let ii = 0; ii < argString.length; ii++) {
+    prevC = c;
+    c = argString.charAt(ii);
+    if (c === " " && !opening) {
+      if (!(prevC === " ")) {
+        i++;
+      }
+      continue;
+    }
+    if (c === opening) {
+      opening = null;
+    } else if ((c === "'" || c === '"') && !opening) {
+      opening = c;
+    }
+    if (!args[i])
+      args[i] = "";
+    args[i] += c;
+  }
+  return args;
+}
+
+// ../../node_modules/.pnpm/yargs-parser@21.1.1/node_modules/yargs-parser/build/lib/yargs-parser-types.js
+var DefaultValuesForTypeKey;
+(function(DefaultValuesForTypeKey2) {
+  DefaultValuesForTypeKey2["BOOLEAN"] = "boolean";
+  DefaultValuesForTypeKey2["STRING"] = "string";
+  DefaultValuesForTypeKey2["NUMBER"] = "number";
+  DefaultValuesForTypeKey2["ARRAY"] = "array";
+})(DefaultValuesForTypeKey || (DefaultValuesForTypeKey = {}));
+
+// ../../node_modules/.pnpm/yargs-parser@21.1.1/node_modules/yargs-parser/build/lib/yargs-parser.js
+var mixin2;
+var YargsParser = class {
+  constructor(_mixin) {
+    mixin2 = _mixin;
+  }
+  parse(argsInput, options) {
+    const opts = Object.assign({
+      alias: void 0,
+      array: void 0,
+      boolean: void 0,
+      config: void 0,
+      configObjects: void 0,
+      configuration: void 0,
+      coerce: void 0,
+      count: void 0,
+      default: void 0,
+      envPrefix: void 0,
+      narg: void 0,
+      normalize: void 0,
+      string: void 0,
+      number: void 0,
+      __: void 0,
+      key: void 0
+    }, options);
+    const args = tokenizeArgString(argsInput);
+    const inputIsString = typeof argsInput === "string";
+    const aliases = combineAliases(Object.assign(/* @__PURE__ */ Object.create(null), opts.alias));
+    const configuration = Object.assign({
+      "boolean-negation": true,
+      "camel-case-expansion": true,
+      "combine-arrays": false,
+      "dot-notation": true,
+      "duplicate-arguments-array": true,
+      "flatten-duplicate-arrays": true,
+      "greedy-arrays": true,
+      "halt-at-non-option": false,
+      "nargs-eats-options": false,
+      "negation-prefix": "no-",
+      "parse-numbers": true,
+      "parse-positional-numbers": true,
+      "populate--": false,
+      "set-placeholder-key": false,
+      "short-option-groups": true,
+      "strip-aliased": false,
+      "strip-dashed": false,
+      "unknown-options-as-args": false
+    }, opts.configuration);
+    const defaults = Object.assign(/* @__PURE__ */ Object.create(null), opts.default);
+    const configObjects = opts.configObjects || [];
+    const envPrefix = opts.envPrefix;
+    const notFlagsOption = configuration["populate--"];
+    const notFlagsArgv = notFlagsOption ? "--" : "_";
+    const newAliases = /* @__PURE__ */ Object.create(null);
+    const defaulted = /* @__PURE__ */ Object.create(null);
+    const __ = opts.__ || mixin2.format;
+    const flags = {
+      aliases: /* @__PURE__ */ Object.create(null),
+      arrays: /* @__PURE__ */ Object.create(null),
+      bools: /* @__PURE__ */ Object.create(null),
+      strings: /* @__PURE__ */ Object.create(null),
+      numbers: /* @__PURE__ */ Object.create(null),
+      counts: /* @__PURE__ */ Object.create(null),
+      normalize: /* @__PURE__ */ Object.create(null),
+      configs: /* @__PURE__ */ Object.create(null),
+      nargs: /* @__PURE__ */ Object.create(null),
+      coercions: /* @__PURE__ */ Object.create(null),
+      keys: []
+    };
+    const negative = /^-([0-9]+(\.[0-9]+)?|\.[0-9]+)$/;
+    const negatedBoolean = new RegExp("^--" + configuration["negation-prefix"] + "(.+)");
+    [].concat(opts.array || []).filter(Boolean).forEach(function(opt) {
+      const key = typeof opt === "object" ? opt.key : opt;
+      const assignment = Object.keys(opt).map(function(key2) {
+        const arrayFlagKeys = {
+          boolean: "bools",
+          string: "strings",
+          number: "numbers"
+        };
+        return arrayFlagKeys[key2];
+      }).filter(Boolean).pop();
+      if (assignment) {
+        flags[assignment][key] = true;
+      }
+      flags.arrays[key] = true;
+      flags.keys.push(key);
+    });
+    [].concat(opts.boolean || []).filter(Boolean).forEach(function(key) {
+      flags.bools[key] = true;
+      flags.keys.push(key);
+    });
+    [].concat(opts.string || []).filter(Boolean).forEach(function(key) {
+      flags.strings[key] = true;
+      flags.keys.push(key);
+    });
+    [].concat(opts.number || []).filter(Boolean).forEach(function(key) {
+      flags.numbers[key] = true;
+      flags.keys.push(key);
+    });
+    [].concat(opts.count || []).filter(Boolean).forEach(function(key) {
+      flags.counts[key] = true;
+      flags.keys.push(key);
+    });
+    [].concat(opts.normalize || []).filter(Boolean).forEach(function(key) {
+      flags.normalize[key] = true;
+      flags.keys.push(key);
+    });
+    if (typeof opts.narg === "object") {
+      Object.entries(opts.narg).forEach(([key, value]) => {
+        if (typeof value === "number") {
+          flags.nargs[key] = value;
+          flags.keys.push(key);
+        }
+      });
+    }
+    if (typeof opts.coerce === "object") {
+      Object.entries(opts.coerce).forEach(([key, value]) => {
+        if (typeof value === "function") {
+          flags.coercions[key] = value;
+          flags.keys.push(key);
+        }
+      });
+    }
+    if (typeof opts.config !== "undefined") {
+      if (Array.isArray(opts.config) || typeof opts.config === "string") {
+        ;
+        [].concat(opts.config).filter(Boolean).forEach(function(key) {
+          flags.configs[key] = true;
+        });
+      } else if (typeof opts.config === "object") {
+        Object.entries(opts.config).forEach(([key, value]) => {
+          if (typeof value === "boolean" || typeof value === "function") {
+            flags.configs[key] = value;
+          }
+        });
+      }
+    }
+    extendAliases(opts.key, aliases, opts.default, flags.arrays);
+    Object.keys(defaults).forEach(function(key) {
+      (flags.aliases[key] || []).forEach(function(alias) {
+        defaults[alias] = defaults[key];
+      });
+    });
+    let error2 = null;
+    checkConfiguration();
+    let notFlags = [];
+    const argv = Object.assign(/* @__PURE__ */ Object.create(null), { _: [] });
+    const argvReturn = {};
+    for (let i = 0; i < args.length; i++) {
+      const arg = args[i];
+      const truncatedArg = arg.replace(/^-{3,}/, "---");
+      let broken;
+      let key;
+      let letters;
+      let m;
+      let next;
+      let value;
+      if (arg !== "--" && /^-/.test(arg) && isUnknownOptionAsArg(arg)) {
+        pushPositional(arg);
+      } else if (truncatedArg.match(/^---+(=|$)/)) {
+        pushPositional(arg);
+        continue;
+      } else if (arg.match(/^--.+=/) || !configuration["short-option-groups"] && arg.match(/^-.+=/)) {
+        m = arg.match(/^--?([^=]+)=([\s\S]*)$/);
+        if (m !== null && Array.isArray(m) && m.length >= 3) {
+          if (checkAllAliases(m[1], flags.arrays)) {
+            i = eatArray(i, m[1], args, m[2]);
+          } else if (checkAllAliases(m[1], flags.nargs) !== false) {
+            i = eatNargs(i, m[1], args, m[2]);
+          } else {
+            setArg(m[1], m[2], true);
+          }
+        }
+      } else if (arg.match(negatedBoolean) && configuration["boolean-negation"]) {
+        m = arg.match(negatedBoolean);
+        if (m !== null && Array.isArray(m) && m.length >= 2) {
+          key = m[1];
+          setArg(key, checkAllAliases(key, flags.arrays) ? [false] : false);
+        }
+      } else if (arg.match(/^--.+/) || !configuration["short-option-groups"] && arg.match(/^-[^-]+/)) {
+        m = arg.match(/^--?(.+)/);
+        if (m !== null && Array.isArray(m) && m.length >= 2) {
+          key = m[1];
+          if (checkAllAliases(key, flags.arrays)) {
+            i = eatArray(i, key, args);
+          } else if (checkAllAliases(key, flags.nargs) !== false) {
+            i = eatNargs(i, key, args);
+          } else {
+            next = args[i + 1];
+            if (next !== void 0 && (!next.match(/^-/) || next.match(negative)) && !checkAllAliases(key, flags.bools) && !checkAllAliases(key, flags.counts)) {
+              setArg(key, next);
+              i++;
+            } else if (/^(true|false)$/.test(next)) {
+              setArg(key, next);
+              i++;
+            } else {
+              setArg(key, defaultValue(key));
+            }
+          }
+        }
+      } else if (arg.match(/^-.\..+=/)) {
+        m = arg.match(/^-([^=]+)=([\s\S]*)$/);
+        if (m !== null && Array.isArray(m) && m.length >= 3) {
+          setArg(m[1], m[2]);
+        }
+      } else if (arg.match(/^-.\..+/) && !arg.match(negative)) {
+        next = args[i + 1];
+        m = arg.match(/^-(.\..+)/);
+        if (m !== null && Array.isArray(m) && m.length >= 2) {
+          key = m[1];
+          if (next !== void 0 && !next.match(/^-/) && !checkAllAliases(key, flags.bools) && !checkAllAliases(key, flags.counts)) {
+            setArg(key, next);
+            i++;
+          } else {
+            setArg(key, defaultValue(key));
+          }
+        }
+      } else if (arg.match(/^-[^-]+/) && !arg.match(negative)) {
+        letters = arg.slice(1, -1).split("");
+        broken = false;
+        for (let j = 0; j < letters.length; j++) {
+          next = arg.slice(j + 2);
+          if (letters[j + 1] && letters[j + 1] === "=") {
+            value = arg.slice(j + 3);
+            key = letters[j];
+            if (checkAllAliases(key, flags.arrays)) {
+              i = eatArray(i, key, args, value);
+            } else if (checkAllAliases(key, flags.nargs) !== false) {
+              i = eatNargs(i, key, args, value);
+            } else {
+              setArg(key, value);
+            }
+            broken = true;
+            break;
+          }
+          if (next === "-") {
+            setArg(letters[j], next);
+            continue;
+          }
+          if (/[A-Za-z]/.test(letters[j]) && /^-?\d+(\.\d*)?(e-?\d+)?$/.test(next) && checkAllAliases(next, flags.bools) === false) {
+            setArg(letters[j], next);
+            broken = true;
+            break;
+          }
+          if (letters[j + 1] && letters[j + 1].match(/\W/)) {
+            setArg(letters[j], next);
+            broken = true;
+            break;
+          } else {
+            setArg(letters[j], defaultValue(letters[j]));
+          }
+        }
+        key = arg.slice(-1)[0];
+        if (!broken && key !== "-") {
+          if (checkAllAliases(key, flags.arrays)) {
+            i = eatArray(i, key, args);
+          } else if (checkAllAliases(key, flags.nargs) !== false) {
+            i = eatNargs(i, key, args);
+          } else {
+            next = args[i + 1];
+            if (next !== void 0 && (!/^(-|--)[^-]/.test(next) || next.match(negative)) && !checkAllAliases(key, flags.bools) && !checkAllAliases(key, flags.counts)) {
+              setArg(key, next);
+              i++;
+            } else if (/^(true|false)$/.test(next)) {
+              setArg(key, next);
+              i++;
+            } else {
+              setArg(key, defaultValue(key));
+            }
+          }
+        }
+      } else if (arg.match(/^-[0-9]$/) && arg.match(negative) && checkAllAliases(arg.slice(1), flags.bools)) {
+        key = arg.slice(1);
+        setArg(key, defaultValue(key));
+      } else if (arg === "--") {
+        notFlags = args.slice(i + 1);
+        break;
+      } else if (configuration["halt-at-non-option"]) {
+        notFlags = args.slice(i);
+        break;
+      } else {
+        pushPositional(arg);
+      }
+    }
+    applyEnvVars(argv, true);
+    applyEnvVars(argv, false);
+    setConfig(argv);
+    setConfigObjects();
+    applyDefaultsAndAliases(argv, flags.aliases, defaults, true);
+    applyCoercions(argv);
+    if (configuration["set-placeholder-key"])
+      setPlaceholderKeys(argv);
+    Object.keys(flags.counts).forEach(function(key) {
+      if (!hasKey(argv, key.split(".")))
+        setArg(key, 0);
+    });
+    if (notFlagsOption && notFlags.length)
+      argv[notFlagsArgv] = [];
+    notFlags.forEach(function(key) {
+      argv[notFlagsArgv].push(key);
+    });
+    if (configuration["camel-case-expansion"] && configuration["strip-dashed"]) {
+      Object.keys(argv).filter((key) => key !== "--" && key.includes("-")).forEach((key) => {
+        delete argv[key];
+      });
+    }
+    if (configuration["strip-aliased"]) {
+      ;
+      [].concat(...Object.keys(aliases).map((k) => aliases[k])).forEach((alias) => {
+        if (configuration["camel-case-expansion"] && alias.includes("-")) {
+          delete argv[alias.split(".").map((prop) => camelCase(prop)).join(".")];
+        }
+        delete argv[alias];
+      });
+    }
+    function pushPositional(arg) {
+      const maybeCoercedNumber = maybeCoerceNumber("_", arg);
+      if (typeof maybeCoercedNumber === "string" || typeof maybeCoercedNumber === "number") {
+        argv._.push(maybeCoercedNumber);
+      }
+    }
+    function eatNargs(i, key, args2, argAfterEqualSign) {
+      let ii;
+      let toEat = checkAllAliases(key, flags.nargs);
+      toEat = typeof toEat !== "number" || isNaN(toEat) ? 1 : toEat;
+      if (toEat === 0) {
+        if (!isUndefined(argAfterEqualSign)) {
+          error2 = Error(__("Argument unexpected for: %s", key));
+        }
+        setArg(key, defaultValue(key));
+        return i;
+      }
+      let available = isUndefined(argAfterEqualSign) ? 0 : 1;
+      if (configuration["nargs-eats-options"]) {
+        if (args2.length - (i + 1) + available < toEat) {
+          error2 = Error(__("Not enough arguments following: %s", key));
+        }
+        available = toEat;
+      } else {
+        for (ii = i + 1; ii < args2.length; ii++) {
+          if (!args2[ii].match(/^-[^0-9]/) || args2[ii].match(negative) || isUnknownOptionAsArg(args2[ii]))
+            available++;
+          else
+            break;
+        }
+        if (available < toEat)
+          error2 = Error(__("Not enough arguments following: %s", key));
+      }
+      let consumed = Math.min(available, toEat);
+      if (!isUndefined(argAfterEqualSign) && consumed > 0) {
+        setArg(key, argAfterEqualSign);
+        consumed--;
+      }
+      for (ii = i + 1; ii < consumed + i + 1; ii++) {
+        setArg(key, args2[ii]);
+      }
+      return i + consumed;
+    }
+    function eatArray(i, key, args2, argAfterEqualSign) {
+      let argsToSet = [];
+      let next = argAfterEqualSign || args2[i + 1];
+      const nargsCount = checkAllAliases(key, flags.nargs);
+      if (checkAllAliases(key, flags.bools) && !/^(true|false)$/.test(next)) {
+        argsToSet.push(true);
+      } else if (isUndefined(next) || isUndefined(argAfterEqualSign) && /^-/.test(next) && !negative.test(next) && !isUnknownOptionAsArg(next)) {
+        if (defaults[key] !== void 0) {
+          const defVal = defaults[key];
+          argsToSet = Array.isArray(defVal) ? defVal : [defVal];
+        }
+      } else {
+        if (!isUndefined(argAfterEqualSign)) {
+          argsToSet.push(processValue(key, argAfterEqualSign, true));
+        }
+        for (let ii = i + 1; ii < args2.length; ii++) {
+          if (!configuration["greedy-arrays"] && argsToSet.length > 0 || nargsCount && typeof nargsCount === "number" && argsToSet.length >= nargsCount)
+            break;
+          next = args2[ii];
+          if (/^-/.test(next) && !negative.test(next) && !isUnknownOptionAsArg(next))
+            break;
+          i = ii;
+          argsToSet.push(processValue(key, next, inputIsString));
+        }
+      }
+      if (typeof nargsCount === "number" && (nargsCount && argsToSet.length < nargsCount || isNaN(nargsCount) && argsToSet.length === 0)) {
+        error2 = Error(__("Not enough arguments following: %s", key));
+      }
+      setArg(key, argsToSet);
+      return i;
+    }
+    function setArg(key, val, shouldStripQuotes = inputIsString) {
+      if (/-/.test(key) && configuration["camel-case-expansion"]) {
+        const alias = key.split(".").map(function(prop) {
+          return camelCase(prop);
+        }).join(".");
+        addNewAlias(key, alias);
+      }
+      const value = processValue(key, val, shouldStripQuotes);
+      const splitKey = key.split(".");
+      setKey(argv, splitKey, value);
+      if (flags.aliases[key]) {
+        flags.aliases[key].forEach(function(x) {
+          const keyProperties = x.split(".");
+          setKey(argv, keyProperties, value);
+        });
+      }
+      if (splitKey.length > 1 && configuration["dot-notation"]) {
+        ;
+        (flags.aliases[splitKey[0]] || []).forEach(function(x) {
+          let keyProperties = x.split(".");
+          const a = [].concat(splitKey);
+          a.shift();
+          keyProperties = keyProperties.concat(a);
+          if (!(flags.aliases[key] || []).includes(keyProperties.join("."))) {
+            setKey(argv, keyProperties, value);
+          }
+        });
+      }
+      if (checkAllAliases(key, flags.normalize) && !checkAllAliases(key, flags.arrays)) {
+        const keys = [key].concat(flags.aliases[key] || []);
+        keys.forEach(function(key2) {
+          Object.defineProperty(argvReturn, key2, {
+            enumerable: true,
+            get() {
+              return val;
+            },
+            set(value2) {
+              val = typeof value2 === "string" ? mixin2.normalize(value2) : value2;
+            }
+          });
+        });
+      }
+    }
+    function addNewAlias(key, alias) {
+      if (!(flags.aliases[key] && flags.aliases[key].length)) {
+        flags.aliases[key] = [alias];
+        newAliases[alias] = true;
+      }
+      if (!(flags.aliases[alias] && flags.aliases[alias].length)) {
+        addNewAlias(alias, key);
+      }
+    }
+    function processValue(key, val, shouldStripQuotes) {
+      if (shouldStripQuotes) {
+        val = stripQuotes(val);
+      }
+      if (checkAllAliases(key, flags.bools) || checkAllAliases(key, flags.counts)) {
+        if (typeof val === "string")
+          val = val === "true";
+      }
+      let value = Array.isArray(val) ? val.map(function(v) {
+        return maybeCoerceNumber(key, v);
+      }) : maybeCoerceNumber(key, val);
+      if (checkAllAliases(key, flags.counts) && (isUndefined(value) || typeof value === "boolean")) {
+        value = increment();
+      }
+      if (checkAllAliases(key, flags.normalize) && checkAllAliases(key, flags.arrays)) {
+        if (Array.isArray(val))
+          value = val.map((val2) => {
+            return mixin2.normalize(val2);
+          });
+        else
+          value = mixin2.normalize(val);
+      }
+      return value;
+    }
+    function maybeCoerceNumber(key, value) {
+      if (!configuration["parse-positional-numbers"] && key === "_")
+        return value;
+      if (!checkAllAliases(key, flags.strings) && !checkAllAliases(key, flags.bools) && !Array.isArray(value)) {
+        const shouldCoerceNumber = looksLikeNumber(value) && configuration["parse-numbers"] && Number.isSafeInteger(Math.floor(parseFloat(`${value}`)));
+        if (shouldCoerceNumber || !isUndefined(value) && checkAllAliases(key, flags.numbers)) {
+          value = Number(value);
+        }
+      }
+      return value;
+    }
+    function setConfig(argv2) {
+      const configLookup = /* @__PURE__ */ Object.create(null);
+      applyDefaultsAndAliases(configLookup, flags.aliases, defaults);
+      Object.keys(flags.configs).forEach(function(configKey) {
+        const configPath = argv2[configKey] || configLookup[configKey];
+        if (configPath) {
+          try {
+            let config2 = null;
+            const resolvedConfigPath = mixin2.resolve(mixin2.cwd(), configPath);
+            const resolveConfig = flags.configs[configKey];
+            if (typeof resolveConfig === "function") {
+              try {
+                config2 = resolveConfig(resolvedConfigPath);
+              } catch (e) {
+                config2 = e;
+              }
+              if (config2 instanceof Error) {
+                error2 = config2;
+                return;
+              }
+            } else {
+              config2 = mixin2.require(resolvedConfigPath);
+            }
+            setConfigObject(config2);
+          } catch (ex) {
+            if (ex.name === "PermissionDenied")
+              error2 = ex;
+            else if (argv2[configKey])
+              error2 = Error(__("Invalid JSON config file: %s", configPath));
+          }
+        }
+      });
+    }
+    function setConfigObject(config2, prev) {
+      Object.keys(config2).forEach(function(key) {
+        const value = config2[key];
+        const fullKey = prev ? prev + "." + key : key;
+        if (typeof value === "object" && value !== null && !Array.isArray(value) && configuration["dot-notation"]) {
+          setConfigObject(value, fullKey);
+        } else {
+          if (!hasKey(argv, fullKey.split(".")) || checkAllAliases(fullKey, flags.arrays) && configuration["combine-arrays"]) {
+            setArg(fullKey, value);
+          }
+        }
+      });
+    }
+    function setConfigObjects() {
+      if (typeof configObjects !== "undefined") {
+        configObjects.forEach(function(configObject) {
+          setConfigObject(configObject);
+        });
+      }
+    }
+    function applyEnvVars(argv2, configOnly) {
+      if (typeof envPrefix === "undefined")
+        return;
+      const prefix = typeof envPrefix === "string" ? envPrefix : "";
+      const env2 = mixin2.env();
+      Object.keys(env2).forEach(function(envVar) {
+        if (prefix === "" || envVar.lastIndexOf(prefix, 0) === 0) {
+          const keys = envVar.split("__").map(function(key, i) {
+            if (i === 0) {
+              key = key.substring(prefix.length);
+            }
+            return camelCase(key);
+          });
+          if ((configOnly && flags.configs[keys.join(".")] || !configOnly) && !hasKey(argv2, keys)) {
+            setArg(keys.join("."), env2[envVar]);
+          }
+        }
+      });
+    }
+    function applyCoercions(argv2) {
+      let coerce2;
+      const applied = /* @__PURE__ */ new Set();
+      Object.keys(argv2).forEach(function(key) {
+        if (!applied.has(key)) {
+          coerce2 = checkAllAliases(key, flags.coercions);
+          if (typeof coerce2 === "function") {
+            try {
+              const value = maybeCoerceNumber(key, coerce2(argv2[key]));
+              [].concat(flags.aliases[key] || [], key).forEach((ali) => {
+                applied.add(ali);
+                argv2[ali] = value;
+              });
+            } catch (err) {
+              error2 = err;
+            }
+          }
+        }
+      });
+    }
+    function setPlaceholderKeys(argv2) {
+      flags.keys.forEach((key) => {
+        if (~key.indexOf("."))
+          return;
+        if (typeof argv2[key] === "undefined")
+          argv2[key] = void 0;
+      });
+      return argv2;
+    }
+    function applyDefaultsAndAliases(obj, aliases2, defaults2, canLog = false) {
+      Object.keys(defaults2).forEach(function(key) {
+        if (!hasKey(obj, key.split("."))) {
+          setKey(obj, key.split("."), defaults2[key]);
+          if (canLog)
+            defaulted[key] = true;
+          (aliases2[key] || []).forEach(function(x) {
+            if (hasKey(obj, x.split(".")))
+              return;
+            setKey(obj, x.split("."), defaults2[key]);
+          });
+        }
+      });
+    }
+    function hasKey(obj, keys) {
+      let o = obj;
+      if (!configuration["dot-notation"])
+        keys = [keys.join(".")];
+      keys.slice(0, -1).forEach(function(key2) {
+        o = o[key2] || {};
+      });
+      const key = keys[keys.length - 1];
+      if (typeof o !== "object")
+        return false;
+      else
+        return key in o;
+    }
+    function setKey(obj, keys, value) {
+      let o = obj;
+      if (!configuration["dot-notation"])
+        keys = [keys.join(".")];
+      keys.slice(0, -1).forEach(function(key2) {
+        key2 = sanitizeKey(key2);
+        if (typeof o === "object" && o[key2] === void 0) {
+          o[key2] = {};
+        }
+        if (typeof o[key2] !== "object" || Array.isArray(o[key2])) {
+          if (Array.isArray(o[key2])) {
+            o[key2].push({});
+          } else {
+            o[key2] = [o[key2], {}];
+          }
+          o = o[key2][o[key2].length - 1];
+        } else {
+          o = o[key2];
+        }
+      });
+      const key = sanitizeKey(keys[keys.length - 1]);
+      const isTypeArray = checkAllAliases(keys.join("."), flags.arrays);
+      const isValueArray = Array.isArray(value);
+      let duplicate = configuration["duplicate-arguments-array"];
+      if (!duplicate && checkAllAliases(key, flags.nargs)) {
+        duplicate = true;
+        if (!isUndefined(o[key]) && flags.nargs[key] === 1 || Array.isArray(o[key]) && o[key].length === flags.nargs[key]) {
+          o[key] = void 0;
+        }
+      }
+      if (value === increment()) {
+        o[key] = increment(o[key]);
+      } else if (Array.isArray(o[key])) {
+        if (duplicate && isTypeArray && isValueArray) {
+          o[key] = configuration["flatten-duplicate-arrays"] ? o[key].concat(value) : (Array.isArray(o[key][0]) ? o[key] : [o[key]]).concat([value]);
+        } else if (!duplicate && Boolean(isTypeArray) === Boolean(isValueArray)) {
+          o[key] = value;
+        } else {
+          o[key] = o[key].concat([value]);
+        }
+      } else if (o[key] === void 0 && isTypeArray) {
+        o[key] = isValueArray ? value : [value];
+      } else if (duplicate && !(o[key] === void 0 || checkAllAliases(key, flags.counts) || checkAllAliases(key, flags.bools))) {
+        o[key] = [o[key], value];
+      } else {
+        o[key] = value;
+      }
+    }
+    function extendAliases(...args2) {
+      args2.forEach(function(obj) {
+        Object.keys(obj || {}).forEach(function(key) {
+          if (flags.aliases[key])
+            return;
+          flags.aliases[key] = [].concat(aliases[key] || []);
+          flags.aliases[key].concat(key).forEach(function(x) {
+            if (/-/.test(x) && configuration["camel-case-expansion"]) {
+              const c = camelCase(x);
+              if (c !== key && flags.aliases[key].indexOf(c) === -1) {
+                flags.aliases[key].push(c);
+                newAliases[c] = true;
+              }
+            }
+          });
+          flags.aliases[key].concat(key).forEach(function(x) {
+            if (x.length > 1 && /[A-Z]/.test(x) && configuration["camel-case-expansion"]) {
+              const c = decamelize(x, "-");
+              if (c !== key && flags.aliases[key].indexOf(c) === -1) {
+                flags.aliases[key].push(c);
+                newAliases[c] = true;
+              }
+            }
+          });
+          flags.aliases[key].forEach(function(x) {
+            flags.aliases[x] = [key].concat(flags.aliases[key].filter(function(y) {
+              return x !== y;
+            }));
+          });
+        });
+      });
+    }
+    function checkAllAliases(key, flag) {
+      const toCheck = [].concat(flags.aliases[key] || [], key);
+      const keys = Object.keys(flag);
+      const setAlias = toCheck.find((key2) => keys.includes(key2));
+      return setAlias ? flag[setAlias] : false;
+    }
+    function hasAnyFlag(key) {
+      const flagsKeys = Object.keys(flags);
+      const toCheck = [].concat(flagsKeys.map((k) => flags[k]));
+      return toCheck.some(function(flag) {
+        return Array.isArray(flag) ? flag.includes(key) : flag[key];
+      });
+    }
+    function hasFlagsMatching(arg, ...patterns) {
+      const toCheck = [].concat(...patterns);
+      return toCheck.some(function(pattern) {
+        const match = arg.match(pattern);
+        return match && hasAnyFlag(match[1]);
+      });
+    }
+    function hasAllShortFlags(arg) {
+      if (arg.match(negative) || !arg.match(/^-[^-]+/)) {
+        return false;
+      }
+      let hasAllFlags = true;
+      let next;
+      const letters = arg.slice(1).split("");
+      for (let j = 0; j < letters.length; j++) {
+        next = arg.slice(j + 2);
+        if (!hasAnyFlag(letters[j])) {
+          hasAllFlags = false;
+          break;
+        }
+        if (letters[j + 1] && letters[j + 1] === "=" || next === "-" || /[A-Za-z]/.test(letters[j]) && /^-?\d+(\.\d*)?(e-?\d+)?$/.test(next) || letters[j + 1] && letters[j + 1].match(/\W/)) {
+          break;
+        }
+      }
+      return hasAllFlags;
+    }
+    function isUnknownOptionAsArg(arg) {
+      return configuration["unknown-options-as-args"] && isUnknownOption(arg);
+    }
+    function isUnknownOption(arg) {
+      arg = arg.replace(/^-{3,}/, "--");
+      if (arg.match(negative)) {
+        return false;
+      }
+      if (hasAllShortFlags(arg)) {
+        return false;
+      }
+      const flagWithEquals = /^-+([^=]+?)=[\s\S]*$/;
+      const normalFlag = /^-+([^=]+?)$/;
+      const flagEndingInHyphen = /^-+([^=]+?)-$/;
+      const flagEndingInDigits = /^-+([^=]+?\d+)$/;
+      const flagEndingInNonWordCharacters = /^-+([^=]+?)\W+.*$/;
+      return !hasFlagsMatching(arg, flagWithEquals, negatedBoolean, normalFlag, flagEndingInHyphen, flagEndingInDigits, flagEndingInNonWordCharacters);
+    }
+    function defaultValue(key) {
+      if (!checkAllAliases(key, flags.bools) && !checkAllAliases(key, flags.counts) && `${key}` in defaults) {
+        return defaults[key];
+      } else {
+        return defaultForType(guessType2(key));
+      }
+    }
+    function defaultForType(type2) {
+      const def = {
+        [DefaultValuesForTypeKey.BOOLEAN]: true,
+        [DefaultValuesForTypeKey.STRING]: "",
+        [DefaultValuesForTypeKey.NUMBER]: void 0,
+        [DefaultValuesForTypeKey.ARRAY]: []
+      };
+      return def[type2];
+    }
+    function guessType2(key) {
+      let type2 = DefaultValuesForTypeKey.BOOLEAN;
+      if (checkAllAliases(key, flags.strings))
+        type2 = DefaultValuesForTypeKey.STRING;
+      else if (checkAllAliases(key, flags.numbers))
+        type2 = DefaultValuesForTypeKey.NUMBER;
+      else if (checkAllAliases(key, flags.bools))
+        type2 = DefaultValuesForTypeKey.BOOLEAN;
+      else if (checkAllAliases(key, flags.arrays))
+        type2 = DefaultValuesForTypeKey.ARRAY;
+      return type2;
+    }
+    function isUndefined(num) {
+      return num === void 0;
+    }
+    function checkConfiguration() {
+      Object.keys(flags.counts).find((key) => {
+        if (checkAllAliases(key, flags.arrays)) {
+          error2 = Error(__("Invalid configuration: %s, opts.count excludes opts.array.", key));
+          return true;
+        } else if (checkAllAliases(key, flags.nargs)) {
+          error2 = Error(__("Invalid configuration: %s, opts.count excludes opts.narg.", key));
+          return true;
+        }
+        return false;
+      });
+    }
+    return {
+      aliases: Object.assign({}, flags.aliases),
+      argv: Object.assign(argvReturn, argv),
+      configuration,
+      defaulted: Object.assign({}, defaulted),
+      error: error2,
+      newAliases: Object.assign({}, newAliases)
+    };
+  }
+};
+function combineAliases(aliases) {
+  const aliasArrays = [];
+  const combined = /* @__PURE__ */ Object.create(null);
+  let change = true;
+  Object.keys(aliases).forEach(function(key) {
+    aliasArrays.push([].concat(aliases[key], key));
+  });
+  while (change) {
+    change = false;
+    for (let i = 0; i < aliasArrays.length; i++) {
+      for (let ii = i + 1; ii < aliasArrays.length; ii++) {
+        const intersect = aliasArrays[i].filter(function(v) {
+          return aliasArrays[ii].indexOf(v) !== -1;
+        });
+        if (intersect.length) {
+          aliasArrays[i] = aliasArrays[i].concat(aliasArrays[ii]);
+          aliasArrays.splice(ii, 1);
+          change = true;
+          break;
+        }
+      }
+    }
+  }
+  aliasArrays.forEach(function(aliasArray) {
+    aliasArray = aliasArray.filter(function(v, i, self) {
+      return self.indexOf(v) === i;
+    });
+    const lastAlias = aliasArray.pop();
+    if (lastAlias !== void 0 && typeof lastAlias === "string") {
+      combined[lastAlias] = aliasArray;
+    }
+  });
+  return combined;
+}
+function increment(orig) {
+  return orig !== void 0 ? orig + 1 : 1;
+}
+function sanitizeKey(key) {
+  if (key === "__proto__")
+    return "___proto___";
+  return key;
+}
+function stripQuotes(val) {
+  return typeof val === "string" && (val[0] === "'" || val[0] === '"') && val[val.length - 1] === val[0] ? val.substring(1, val.length - 1) : val;
+}
+
+// ../../node_modules/.pnpm/yargs-parser@21.1.1/node_modules/yargs-parser/build/lib/index.js
+import { readFileSync as readFileSync11 } from "fs";
+var _a;
+var _b;
+var _c;
+var minNodeVersion = process && process.env && process.env.YARGS_MIN_NODE_VERSION ? Number(process.env.YARGS_MIN_NODE_VERSION) : 12;
+var nodeVersion = (_b = (_a = process === null || process === void 0 ? void 0 : process.versions) === null || _a === void 0 ? void 0 : _a.node) !== null && _b !== void 0 ? _b : (_c = process === null || process === void 0 ? void 0 : process.version) === null || _c === void 0 ? void 0 : _c.slice(1);
+if (nodeVersion) {
+  const major = Number(nodeVersion.match(/^([^.]+)/)[1]);
+  if (major < minNodeVersion) {
+    throw Error(`yargs parser supports a minimum Node.js version of ${minNodeVersion}. Read our version support policy: https://github.com/yargs/yargs-parser#supported-nodejs-versions`);
+  }
+}
+var env = process ? process.env : {};
+var parser = new YargsParser({
+  cwd: process.cwd,
+  env: () => {
+    return env;
+  },
+  format,
+  normalize,
+  resolve: resolve4,
+  // TODO: figure  out a  way to combine ESM and CJS coverage, such  that
+  // we can exercise all the lines below:
+  require: (path) => {
+    if (typeof __require !== "undefined") {
+      return __require(path);
+    } else if (path.match(/\.json$/)) {
+      return JSON.parse(readFileSync11(path, "utf8"));
+    } else {
+      throw Error("only .json config files are supported in ESM");
+    }
+  }
+});
+var yargsParser = function Parser(args, opts) {
+  const result = parser.parse(args.slice(), opts);
+  return result.argv;
+};
+yargsParser.detailed = function(args, opts) {
+  return parser.parse(args.slice(), opts);
+};
+yargsParser.camelCase = camelCase;
+yargsParser.decamelize = decamelize;
+yargsParser.looksLikeNumber = looksLikeNumber;
+var lib_default = yargsParser;
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/lib/platform-shims/esm.mjs
+import { basename as basename2, dirname as dirname5, extname, relative, resolve as resolve6 } from "path";
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/utils/process-argv.js
+function getProcessArgvBinIndex() {
+  if (isBundledElectronApp())
+    return 0;
+  return 1;
+}
+function isBundledElectronApp() {
+  return isElectronApp() && !process.defaultApp;
+}
+function isElectronApp() {
+  return !!process.versions.electron;
+}
+function getProcessArgvBin() {
+  return process.argv[getProcessArgvBinIndex()];
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/yerror.js
+var YError = class _YError extends Error {
+  constructor(msg) {
+    super(msg || "yargs error");
+    this.name = "YError";
+    if (Error.captureStackTrace) {
+      Error.captureStackTrace(this, _YError);
+    }
+  }
+};
+
+// ../../node_modules/.pnpm/y18n@5.0.8/node_modules/y18n/build/lib/platform-shims/node.js
+import { readFileSync as readFileSync12, statSync as statSync6, writeFile } from "fs";
+import { format as format2 } from "util";
+import { resolve as resolve5 } from "path";
+var node_default = {
+  fs: {
+    readFileSync: readFileSync12,
+    writeFile
+  },
+  format: format2,
+  resolve: resolve5,
+  exists: (file) => {
+    try {
+      return statSync6(file).isFile();
+    } catch (err) {
+      return false;
+    }
+  }
+};
+
+// ../../node_modules/.pnpm/y18n@5.0.8/node_modules/y18n/build/lib/index.js
+var shim;
+var Y18N = class {
+  constructor(opts) {
+    opts = opts || {};
+    this.directory = opts.directory || "./locales";
+    this.updateFiles = typeof opts.updateFiles === "boolean" ? opts.updateFiles : true;
+    this.locale = opts.locale || "en";
+    this.fallbackToLanguage = typeof opts.fallbackToLanguage === "boolean" ? opts.fallbackToLanguage : true;
+    this.cache = /* @__PURE__ */ Object.create(null);
+    this.writeQueue = [];
+  }
+  __(...args) {
+    if (typeof arguments[0] !== "string") {
+      return this._taggedLiteral(arguments[0], ...arguments);
+    }
+    const str2 = args.shift();
+    let cb = function() {
+    };
+    if (typeof args[args.length - 1] === "function")
+      cb = args.pop();
+    cb = cb || function() {
+    };
+    if (!this.cache[this.locale])
+      this._readLocaleFile();
+    if (!this.cache[this.locale][str2] && this.updateFiles) {
+      this.cache[this.locale][str2] = str2;
+      this._enqueueWrite({
+        directory: this.directory,
+        locale: this.locale,
+        cb
+      });
+    } else {
+      cb();
+    }
+    return shim.format.apply(shim.format, [this.cache[this.locale][str2] || str2].concat(args));
+  }
+  __n() {
+    const args = Array.prototype.slice.call(arguments);
+    const singular = args.shift();
+    const plural = args.shift();
+    const quantity = args.shift();
+    let cb = function() {
+    };
+    if (typeof args[args.length - 1] === "function")
+      cb = args.pop();
+    if (!this.cache[this.locale])
+      this._readLocaleFile();
+    let str2 = quantity === 1 ? singular : plural;
+    if (this.cache[this.locale][singular]) {
+      const entry = this.cache[this.locale][singular];
+      str2 = entry[quantity === 1 ? "one" : "other"];
+    }
+    if (!this.cache[this.locale][singular] && this.updateFiles) {
+      this.cache[this.locale][singular] = {
+        one: singular,
+        other: plural
+      };
+      this._enqueueWrite({
+        directory: this.directory,
+        locale: this.locale,
+        cb
+      });
+    } else {
+      cb();
+    }
+    const values = [str2];
+    if (~str2.indexOf("%d"))
+      values.push(quantity);
+    return shim.format.apply(shim.format, values.concat(args));
+  }
+  setLocale(locale) {
+    this.locale = locale;
+  }
+  getLocale() {
+    return this.locale;
+  }
+  updateLocale(obj) {
+    if (!this.cache[this.locale])
+      this._readLocaleFile();
+    for (const key in obj) {
+      if (Object.prototype.hasOwnProperty.call(obj, key)) {
+        this.cache[this.locale][key] = obj[key];
+      }
+    }
+  }
+  _taggedLiteral(parts, ...args) {
+    let str2 = "";
+    parts.forEach(function(part, i) {
+      const arg = args[i + 1];
+      str2 += part;
+      if (typeof arg !== "undefined") {
+        str2 += "%s";
+      }
+    });
+    return this.__.apply(this, [str2].concat([].slice.call(args, 1)));
+  }
+  _enqueueWrite(work) {
+    this.writeQueue.push(work);
+    if (this.writeQueue.length === 1)
+      this._processWriteQueue();
+  }
+  _processWriteQueue() {
+    const _this = this;
+    const work = this.writeQueue[0];
+    const directory = work.directory;
+    const locale = work.locale;
+    const cb = work.cb;
+    const languageFile = this._resolveLocaleFile(directory, locale);
+    const serializedLocale = JSON.stringify(this.cache[locale], null, 2);
+    shim.fs.writeFile(languageFile, serializedLocale, "utf-8", function(err) {
+      _this.writeQueue.shift();
+      if (_this.writeQueue.length > 0)
+        _this._processWriteQueue();
+      cb(err);
+    });
+  }
+  _readLocaleFile() {
+    let localeLookup = {};
+    const languageFile = this._resolveLocaleFile(this.directory, this.locale);
+    try {
+      if (shim.fs.readFileSync) {
+        localeLookup = JSON.parse(shim.fs.readFileSync(languageFile, "utf-8"));
+      }
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        err.message = "syntax error in " + languageFile;
+      }
+      if (err.code === "ENOENT")
+        localeLookup = {};
+      else
+        throw err;
+    }
+    this.cache[this.locale] = localeLookup;
+  }
+  _resolveLocaleFile(directory, locale) {
+    let file = shim.resolve(directory, "./", locale + ".json");
+    if (this.fallbackToLanguage && !this._fileExistsSync(file) && ~locale.lastIndexOf("_")) {
+      const languageFile = shim.resolve(directory, "./", locale.split("_")[0] + ".json");
+      if (this._fileExistsSync(languageFile))
+        file = languageFile;
+    }
+    return file;
+  }
+  _fileExistsSync(file) {
+    return shim.exists(file);
+  }
+};
+function y18n(opts, _shim) {
+  shim = _shim;
+  const y18n3 = new Y18N(opts);
+  return {
+    __: y18n3.__.bind(y18n3),
+    __n: y18n3.__n.bind(y18n3),
+    setLocale: y18n3.setLocale.bind(y18n3),
+    getLocale: y18n3.getLocale.bind(y18n3),
+    updateLocale: y18n3.updateLocale.bind(y18n3),
+    locale: y18n3.locale
+  };
+}
+
+// ../../node_modules/.pnpm/y18n@5.0.8/node_modules/y18n/index.mjs
+var y18n2 = (opts) => {
+  return y18n(opts, node_default);
+};
+var y18n_default = y18n2;
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/lib/platform-shims/esm.mjs
+var REQUIRE_ERROR = "require is not supported by ESM";
+var REQUIRE_DIRECTORY_ERROR = "loading a directory of commands is not supported yet for ESM";
+var __dirname;
+try {
+  __dirname = fileURLToPath(import.meta.url);
+} catch (e) {
+  __dirname = process.cwd();
+}
+var mainFilename = __dirname.substring(0, __dirname.lastIndexOf("node_modules"));
+var esm_default = {
+  assert: {
+    notStrictEqual,
+    strictEqual
+  },
+  cliui: ui,
+  findUp: sync_default,
+  getEnv: (key) => {
+    return process.env[key];
+  },
+  inspect,
+  getCallerFile: () => {
+    throw new YError(REQUIRE_DIRECTORY_ERROR);
+  },
+  getProcessArgvBin,
+  mainFilename: mainFilename || process.cwd(),
+  Parser: lib_default,
+  path: {
+    basename: basename2,
+    dirname: dirname5,
+    extname,
+    relative,
+    resolve: resolve6
+  },
+  process: {
+    argv: () => process.argv,
+    cwd: process.cwd,
+    emitWarning: (warning, type2) => process.emitWarning(warning, type2),
+    execPath: () => process.execPath,
+    exit: process.exit,
+    nextTick: process.nextTick,
+    stdColumns: typeof process.stdout.columns !== "undefined" ? process.stdout.columns : null
+  },
+  readFileSync: readFileSync13,
+  require: () => {
+    throw new YError(REQUIRE_ERROR);
+  },
+  requireDirectory: () => {
+    throw new YError(REQUIRE_DIRECTORY_ERROR);
+  },
+  stringWidth: (str2) => {
+    return [...str2].length;
+  },
+  y18n: y18n_default({
+    directory: resolve6(__dirname, "../../../locales"),
+    updateFiles: false
+  })
+};
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/typings/common-types.js
+function assertNotStrictEqual(actual, expected, shim3, message) {
+  shim3.assert.notStrictEqual(actual, expected, message);
+}
+function assertSingleKey(actual, shim3) {
+  shim3.assert.strictEqual(typeof actual, "string");
+}
+function objectKeys(object3) {
+  return Object.keys(object3);
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/utils/is-promise.js
+function isPromise(maybePromise) {
+  return !!maybePromise && !!maybePromise.then && typeof maybePromise.then === "function";
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/parse-command.js
+function parseCommand(cmd) {
+  const extraSpacesStrippedCommand = cmd.replace(/\s{2,}/g, " ");
+  const splitCommand = extraSpacesStrippedCommand.split(/\s+(?![^[]*]|[^<]*>)/);
+  const bregex = /\.*[\][<>]/g;
+  const firstCommand = splitCommand.shift();
+  if (!firstCommand)
+    throw new Error(`No command found in: ${cmd}`);
+  const parsedCommand = {
+    cmd: firstCommand.replace(bregex, ""),
+    demanded: [],
+    optional: []
+  };
+  splitCommand.forEach((cmd2, i) => {
+    let variadic = false;
+    cmd2 = cmd2.replace(/\s/g, "");
+    if (/\.+[\]>]/.test(cmd2) && i === splitCommand.length - 1)
+      variadic = true;
+    if (/^\[/.test(cmd2)) {
+      parsedCommand.optional.push({
+        cmd: cmd2.replace(bregex, "").split("|"),
+        variadic
+      });
+    } else {
+      parsedCommand.demanded.push({
+        cmd: cmd2.replace(bregex, "").split("|"),
+        variadic
+      });
+    }
+  });
+  return parsedCommand;
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/argsert.js
+var positionName = ["first", "second", "third", "fourth", "fifth", "sixth"];
+function argsert(arg1, arg2, arg3) {
+  function parseArgs() {
+    return typeof arg1 === "object" ? [{ demanded: [], optional: [] }, arg1, arg2] : [
+      parseCommand(`cmd ${arg1}`),
+      arg2,
+      arg3
+    ];
+  }
+  try {
+    let position = 0;
+    const [parsed, callerArguments, _length2] = parseArgs();
+    const args = [].slice.call(callerArguments);
+    while (args.length && args[args.length - 1] === void 0)
+      args.pop();
+    const length = _length2 || args.length;
+    if (length < parsed.demanded.length) {
+      throw new YError(`Not enough arguments provided. Expected ${parsed.demanded.length} but received ${args.length}.`);
+    }
+    const totalCommands = parsed.demanded.length + parsed.optional.length;
+    if (length > totalCommands) {
+      throw new YError(`Too many arguments provided. Expected max ${totalCommands} but received ${length}.`);
+    }
+    parsed.demanded.forEach((demanded) => {
+      const arg = args.shift();
+      const observedType = guessType(arg);
+      const matchingTypes = demanded.cmd.filter((type2) => type2 === observedType || type2 === "*");
+      if (matchingTypes.length === 0)
+        argumentTypeError(observedType, demanded.cmd, position);
+      position += 1;
+    });
+    parsed.optional.forEach((optional2) => {
+      if (args.length === 0)
+        return;
+      const arg = args.shift();
+      const observedType = guessType(arg);
+      const matchingTypes = optional2.cmd.filter((type2) => type2 === observedType || type2 === "*");
+      if (matchingTypes.length === 0)
+        argumentTypeError(observedType, optional2.cmd, position);
+      position += 1;
+    });
+  } catch (err) {
+    console.warn(err.stack);
+  }
+}
+function guessType(arg) {
+  if (Array.isArray(arg)) {
+    return "array";
+  } else if (arg === null) {
+    return "null";
+  }
+  return typeof arg;
+}
+function argumentTypeError(observedType, allowedTypes, position) {
+  throw new YError(`Invalid ${positionName[position] || "manyith"} argument. Expected ${allowedTypes.join(" or ")} but received ${observedType}.`);
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/middleware.js
+var GlobalMiddleware = class {
+  constructor(yargs) {
+    this.globalMiddleware = [];
+    this.frozens = [];
+    this.yargs = yargs;
+  }
+  addMiddleware(callback, applyBeforeValidation, global = true, mutates = false) {
+    argsert("<array|function> [boolean] [boolean] [boolean]", [callback, applyBeforeValidation, global], arguments.length);
+    if (Array.isArray(callback)) {
+      for (let i = 0; i < callback.length; i++) {
+        if (typeof callback[i] !== "function") {
+          throw Error("middleware must be a function");
+        }
+        const m = callback[i];
+        m.applyBeforeValidation = applyBeforeValidation;
+        m.global = global;
+      }
+      Array.prototype.push.apply(this.globalMiddleware, callback);
+    } else if (typeof callback === "function") {
+      const m = callback;
+      m.applyBeforeValidation = applyBeforeValidation;
+      m.global = global;
+      m.mutates = mutates;
+      this.globalMiddleware.push(callback);
+    }
+    return this.yargs;
+  }
+  addCoerceMiddleware(callback, option) {
+    const aliases = this.yargs.getAliases();
+    this.globalMiddleware = this.globalMiddleware.filter((m) => {
+      const toCheck = [...aliases[option] || [], option];
+      if (!m.option)
+        return true;
+      else
+        return !toCheck.includes(m.option);
+    });
+    callback.option = option;
+    return this.addMiddleware(callback, true, true, true);
+  }
+  getMiddleware() {
+    return this.globalMiddleware;
+  }
+  freeze() {
+    this.frozens.push([...this.globalMiddleware]);
+  }
+  unfreeze() {
+    const frozen = this.frozens.pop();
+    if (frozen !== void 0)
+      this.globalMiddleware = frozen;
+  }
+  reset() {
+    this.globalMiddleware = this.globalMiddleware.filter((m) => m.global);
+  }
+};
+function commandMiddlewareFactory(commandMiddleware) {
+  if (!commandMiddleware)
+    return [];
+  return commandMiddleware.map((middleware) => {
+    middleware.applyBeforeValidation = false;
+    return middleware;
+  });
+}
+function applyMiddleware(argv, yargs, middlewares, beforeValidation) {
+  return middlewares.reduce((acc, middleware) => {
+    if (middleware.applyBeforeValidation !== beforeValidation) {
+      return acc;
+    }
+    if (middleware.mutates) {
+      if (middleware.applied)
+        return acc;
+      middleware.applied = true;
+    }
+    if (isPromise(acc)) {
+      return acc.then((initialObj) => Promise.all([initialObj, middleware(initialObj, yargs)])).then(([initialObj, middlewareObj]) => Object.assign(initialObj, middlewareObj));
+    } else {
+      const result = middleware(acc, yargs);
+      return isPromise(result) ? result.then((middlewareObj) => Object.assign(acc, middlewareObj)) : Object.assign(acc, result);
+    }
+  }, argv);
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/utils/maybe-async-result.js
+function maybeAsyncResult(getResult, resultHandler, errorHandler = (err) => {
+  throw err;
+}) {
+  try {
+    const result = isFunction(getResult) ? getResult() : getResult;
+    return isPromise(result) ? result.then((result2) => resultHandler(result2)) : resultHandler(result);
+  } catch (err) {
+    return errorHandler(err);
+  }
+}
+function isFunction(arg) {
+  return typeof arg === "function";
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/utils/which-module.js
+function whichModule(exported) {
+  if (typeof __require === "undefined")
+    return null;
+  for (let i = 0, files = Object.keys(__require.cache), mod; i < files.length; i++) {
+    mod = __require.cache[files[i]];
+    if (mod.exports === exported)
+      return mod;
+  }
+  return null;
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/command.js
+var DEFAULT_MARKER = /(^\*)|(^\$0)/;
+var CommandInstance = class {
+  constructor(usage2, validation2, globalMiddleware, shim3) {
+    this.requireCache = /* @__PURE__ */ new Set();
+    this.handlers = {};
+    this.aliasMap = {};
+    this.frozens = [];
+    this.shim = shim3;
+    this.usage = usage2;
+    this.globalMiddleware = globalMiddleware;
+    this.validation = validation2;
+  }
+  addDirectory(dir, req, callerFile, opts) {
+    opts = opts || {};
+    if (typeof opts.recurse !== "boolean")
+      opts.recurse = false;
+    if (!Array.isArray(opts.extensions))
+      opts.extensions = ["js"];
+    const parentVisit = typeof opts.visit === "function" ? opts.visit : (o) => o;
+    opts.visit = (obj, joined, filename) => {
+      const visited = parentVisit(obj, joined, filename);
+      if (visited) {
+        if (this.requireCache.has(joined))
+          return visited;
+        else
+          this.requireCache.add(joined);
+        this.addHandler(visited);
+      }
+      return visited;
+    };
+    this.shim.requireDirectory({ require: req, filename: callerFile }, dir, opts);
+  }
+  addHandler(cmd, description, builder, handler, commandMiddleware, deprecated) {
+    let aliases = [];
+    const middlewares = commandMiddlewareFactory(commandMiddleware);
+    handler = handler || (() => {
+    });
+    if (Array.isArray(cmd)) {
+      if (isCommandAndAliases(cmd)) {
+        [cmd, ...aliases] = cmd;
+      } else {
+        for (const command2 of cmd) {
+          this.addHandler(command2);
+        }
+      }
+    } else if (isCommandHandlerDefinition(cmd)) {
+      let command2 = Array.isArray(cmd.command) || typeof cmd.command === "string" ? cmd.command : this.moduleName(cmd);
+      if (cmd.aliases)
+        command2 = [].concat(command2).concat(cmd.aliases);
+      this.addHandler(command2, this.extractDesc(cmd), cmd.builder, cmd.handler, cmd.middlewares, cmd.deprecated);
+      return;
+    } else if (isCommandBuilderDefinition(builder)) {
+      this.addHandler([cmd].concat(aliases), description, builder.builder, builder.handler, builder.middlewares, builder.deprecated);
+      return;
+    }
+    if (typeof cmd === "string") {
+      const parsedCommand = parseCommand(cmd);
+      aliases = aliases.map((alias) => parseCommand(alias).cmd);
+      let isDefault = false;
+      const parsedAliases = [parsedCommand.cmd].concat(aliases).filter((c) => {
+        if (DEFAULT_MARKER.test(c)) {
+          isDefault = true;
+          return false;
+        }
+        return true;
+      });
+      if (parsedAliases.length === 0 && isDefault)
+        parsedAliases.push("$0");
+      if (isDefault) {
+        parsedCommand.cmd = parsedAliases[0];
+        aliases = parsedAliases.slice(1);
+        cmd = cmd.replace(DEFAULT_MARKER, parsedCommand.cmd);
+      }
+      aliases.forEach((alias) => {
+        this.aliasMap[alias] = parsedCommand.cmd;
+      });
+      if (description !== false) {
+        this.usage.command(cmd, description, isDefault, aliases, deprecated);
+      }
+      this.handlers[parsedCommand.cmd] = {
+        original: cmd,
+        description,
+        handler,
+        builder: builder || {},
+        middlewares,
+        deprecated,
+        demanded: parsedCommand.demanded,
+        optional: parsedCommand.optional
+      };
+      if (isDefault)
+        this.defaultCommand = this.handlers[parsedCommand.cmd];
+    }
+  }
+  getCommandHandlers() {
+    return this.handlers;
+  }
+  getCommands() {
+    return Object.keys(this.handlers).concat(Object.keys(this.aliasMap));
+  }
+  hasDefaultCommand() {
+    return !!this.defaultCommand;
+  }
+  runCommand(command2, yargs, parsed, commandIndex, helpOnly, helpOrVersionSet) {
+    const commandHandler = this.handlers[command2] || this.handlers[this.aliasMap[command2]] || this.defaultCommand;
+    const currentContext = yargs.getInternalMethods().getContext();
+    const parentCommands = currentContext.commands.slice();
+    const isDefaultCommand = !command2;
+    if (command2) {
+      currentContext.commands.push(command2);
+      currentContext.fullCommands.push(commandHandler.original);
+    }
+    const builderResult = this.applyBuilderUpdateUsageAndParse(isDefaultCommand, commandHandler, yargs, parsed.aliases, parentCommands, commandIndex, helpOnly, helpOrVersionSet);
+    return isPromise(builderResult) ? builderResult.then((result) => this.applyMiddlewareAndGetResult(isDefaultCommand, commandHandler, result.innerArgv, currentContext, helpOnly, result.aliases, yargs)) : this.applyMiddlewareAndGetResult(isDefaultCommand, commandHandler, builderResult.innerArgv, currentContext, helpOnly, builderResult.aliases, yargs);
+  }
+  applyBuilderUpdateUsageAndParse(isDefaultCommand, commandHandler, yargs, aliases, parentCommands, commandIndex, helpOnly, helpOrVersionSet) {
+    const builder = commandHandler.builder;
+    let innerYargs = yargs;
+    if (isCommandBuilderCallback(builder)) {
+      yargs.getInternalMethods().getUsageInstance().freeze();
+      const builderOutput = builder(yargs.getInternalMethods().reset(aliases), helpOrVersionSet);
+      if (isPromise(builderOutput)) {
+        return builderOutput.then((output) => {
+          innerYargs = isYargsInstance(output) ? output : yargs;
+          return this.parseAndUpdateUsage(isDefaultCommand, commandHandler, innerYargs, parentCommands, commandIndex, helpOnly);
+        });
+      }
+    } else if (isCommandBuilderOptionDefinitions(builder)) {
+      yargs.getInternalMethods().getUsageInstance().freeze();
+      innerYargs = yargs.getInternalMethods().reset(aliases);
+      Object.keys(commandHandler.builder).forEach((key) => {
+        innerYargs.option(key, builder[key]);
+      });
+    }
+    return this.parseAndUpdateUsage(isDefaultCommand, commandHandler, innerYargs, parentCommands, commandIndex, helpOnly);
+  }
+  parseAndUpdateUsage(isDefaultCommand, commandHandler, innerYargs, parentCommands, commandIndex, helpOnly) {
+    if (isDefaultCommand)
+      innerYargs.getInternalMethods().getUsageInstance().unfreeze(true);
+    if (this.shouldUpdateUsage(innerYargs)) {
+      innerYargs.getInternalMethods().getUsageInstance().usage(this.usageFromParentCommandsCommandHandler(parentCommands, commandHandler), commandHandler.description);
+    }
+    const innerArgv = innerYargs.getInternalMethods().runYargsParserAndExecuteCommands(null, void 0, true, commandIndex, helpOnly);
+    return isPromise(innerArgv) ? innerArgv.then((argv) => ({
+      aliases: innerYargs.parsed.aliases,
+      innerArgv: argv
+    })) : {
+      aliases: innerYargs.parsed.aliases,
+      innerArgv
+    };
+  }
+  shouldUpdateUsage(yargs) {
+    return !yargs.getInternalMethods().getUsageInstance().getUsageDisabled() && yargs.getInternalMethods().getUsageInstance().getUsage().length === 0;
+  }
+  usageFromParentCommandsCommandHandler(parentCommands, commandHandler) {
+    const c = DEFAULT_MARKER.test(commandHandler.original) ? commandHandler.original.replace(DEFAULT_MARKER, "").trim() : commandHandler.original;
+    const pc = parentCommands.filter((c2) => {
+      return !DEFAULT_MARKER.test(c2);
+    });
+    pc.push(c);
+    return `$0 ${pc.join(" ")}`;
+  }
+  handleValidationAndGetResult(isDefaultCommand, commandHandler, innerArgv, currentContext, aliases, yargs, middlewares, positionalMap) {
+    if (!yargs.getInternalMethods().getHasOutput()) {
+      const validation2 = yargs.getInternalMethods().runValidation(aliases, positionalMap, yargs.parsed.error, isDefaultCommand);
+      innerArgv = maybeAsyncResult(innerArgv, (result) => {
+        validation2(result);
+        return result;
+      });
+    }
+    if (commandHandler.handler && !yargs.getInternalMethods().getHasOutput()) {
+      yargs.getInternalMethods().setHasOutput();
+      const populateDoubleDash = !!yargs.getOptions().configuration["populate--"];
+      yargs.getInternalMethods().postProcess(innerArgv, populateDoubleDash, false, false);
+      innerArgv = applyMiddleware(innerArgv, yargs, middlewares, false);
+      innerArgv = maybeAsyncResult(innerArgv, (result) => {
+        const handlerResult = commandHandler.handler(result);
+        return isPromise(handlerResult) ? handlerResult.then(() => result) : result;
+      });
+      if (!isDefaultCommand) {
+        yargs.getInternalMethods().getUsageInstance().cacheHelpMessage();
+      }
+      if (isPromise(innerArgv) && !yargs.getInternalMethods().hasParseCallback()) {
+        innerArgv.catch((error2) => {
+          try {
+            yargs.getInternalMethods().getUsageInstance().fail(null, error2);
+          } catch (_err) {
+          }
+        });
+      }
+    }
+    if (!isDefaultCommand) {
+      currentContext.commands.pop();
+      currentContext.fullCommands.pop();
+    }
+    return innerArgv;
+  }
+  applyMiddlewareAndGetResult(isDefaultCommand, commandHandler, innerArgv, currentContext, helpOnly, aliases, yargs) {
+    let positionalMap = {};
+    if (helpOnly)
+      return innerArgv;
+    if (!yargs.getInternalMethods().getHasOutput()) {
+      positionalMap = this.populatePositionals(commandHandler, innerArgv, currentContext, yargs);
+    }
+    const middlewares = this.globalMiddleware.getMiddleware().slice(0).concat(commandHandler.middlewares);
+    const maybePromiseArgv = applyMiddleware(innerArgv, yargs, middlewares, true);
+    return isPromise(maybePromiseArgv) ? maybePromiseArgv.then((resolvedInnerArgv) => this.handleValidationAndGetResult(isDefaultCommand, commandHandler, resolvedInnerArgv, currentContext, aliases, yargs, middlewares, positionalMap)) : this.handleValidationAndGetResult(isDefaultCommand, commandHandler, maybePromiseArgv, currentContext, aliases, yargs, middlewares, positionalMap);
+  }
+  populatePositionals(commandHandler, argv, context, yargs) {
+    argv._ = argv._.slice(context.commands.length);
+    const demanded = commandHandler.demanded.slice(0);
+    const optional2 = commandHandler.optional.slice(0);
+    const positionalMap = {};
+    this.validation.positionalCount(demanded.length, argv._.length);
+    while (demanded.length) {
+      const demand = demanded.shift();
+      this.populatePositional(demand, argv, positionalMap);
+    }
+    while (optional2.length) {
+      const maybe = optional2.shift();
+      this.populatePositional(maybe, argv, positionalMap);
+    }
+    argv._ = context.commands.concat(argv._.map((a) => "" + a));
+    this.postProcessPositionals(argv, positionalMap, this.cmdToParseOptions(commandHandler.original), yargs);
+    return positionalMap;
+  }
+  populatePositional(positional, argv, positionalMap) {
+    const cmd = positional.cmd[0];
+    if (positional.variadic) {
+      positionalMap[cmd] = argv._.splice(0).map(String);
+    } else {
+      if (argv._.length)
+        positionalMap[cmd] = [String(argv._.shift())];
+    }
+  }
+  cmdToParseOptions(cmdString) {
+    const parseOptions = {
+      array: [],
+      default: {},
+      alias: {},
+      demand: {}
+    };
+    const parsed = parseCommand(cmdString);
+    parsed.demanded.forEach((d) => {
+      const [cmd, ...aliases] = d.cmd;
+      if (d.variadic) {
+        parseOptions.array.push(cmd);
+        parseOptions.default[cmd] = [];
+      }
+      parseOptions.alias[cmd] = aliases;
+      parseOptions.demand[cmd] = true;
+    });
+    parsed.optional.forEach((o) => {
+      const [cmd, ...aliases] = o.cmd;
+      if (o.variadic) {
+        parseOptions.array.push(cmd);
+        parseOptions.default[cmd] = [];
+      }
+      parseOptions.alias[cmd] = aliases;
+    });
+    return parseOptions;
+  }
+  postProcessPositionals(argv, positionalMap, parseOptions, yargs) {
+    const options = Object.assign({}, yargs.getOptions());
+    options.default = Object.assign(parseOptions.default, options.default);
+    for (const key of Object.keys(parseOptions.alias)) {
+      options.alias[key] = (options.alias[key] || []).concat(parseOptions.alias[key]);
+    }
+    options.array = options.array.concat(parseOptions.array);
+    options.config = {};
+    const unparsed = [];
+    Object.keys(positionalMap).forEach((key) => {
+      positionalMap[key].map((value) => {
+        if (options.configuration["unknown-options-as-args"])
+          options.key[key] = true;
+        unparsed.push(`--${key}`);
+        unparsed.push(value);
+      });
+    });
+    if (!unparsed.length)
+      return;
+    const config2 = Object.assign({}, options.configuration, {
+      "populate--": false
+    });
+    const parsed = this.shim.Parser.detailed(unparsed, Object.assign({}, options, {
+      configuration: config2
+    }));
+    if (parsed.error) {
+      yargs.getInternalMethods().getUsageInstance().fail(parsed.error.message, parsed.error);
+    } else {
+      const positionalKeys = Object.keys(positionalMap);
+      Object.keys(positionalMap).forEach((key) => {
+        positionalKeys.push(...parsed.aliases[key]);
+      });
+      Object.keys(parsed.argv).forEach((key) => {
+        if (positionalKeys.includes(key)) {
+          if (!positionalMap[key])
+            positionalMap[key] = parsed.argv[key];
+          if (!this.isInConfigs(yargs, key) && !this.isDefaulted(yargs, key) && Object.prototype.hasOwnProperty.call(argv, key) && Object.prototype.hasOwnProperty.call(parsed.argv, key) && (Array.isArray(argv[key]) || Array.isArray(parsed.argv[key]))) {
+            argv[key] = [].concat(argv[key], parsed.argv[key]);
+          } else {
+            argv[key] = parsed.argv[key];
+          }
+        }
+      });
+    }
+  }
+  isDefaulted(yargs, key) {
+    const { default: defaults } = yargs.getOptions();
+    return Object.prototype.hasOwnProperty.call(defaults, key) || Object.prototype.hasOwnProperty.call(defaults, this.shim.Parser.camelCase(key));
+  }
+  isInConfigs(yargs, key) {
+    const { configObjects } = yargs.getOptions();
+    return configObjects.some((c) => Object.prototype.hasOwnProperty.call(c, key)) || configObjects.some((c) => Object.prototype.hasOwnProperty.call(c, this.shim.Parser.camelCase(key)));
+  }
+  runDefaultBuilderOn(yargs) {
+    if (!this.defaultCommand)
+      return;
+    if (this.shouldUpdateUsage(yargs)) {
+      const commandString = DEFAULT_MARKER.test(this.defaultCommand.original) ? this.defaultCommand.original : this.defaultCommand.original.replace(/^[^[\]<>]*/, "$0 ");
+      yargs.getInternalMethods().getUsageInstance().usage(commandString, this.defaultCommand.description);
+    }
+    const builder = this.defaultCommand.builder;
+    if (isCommandBuilderCallback(builder)) {
+      return builder(yargs, true);
+    } else if (!isCommandBuilderDefinition(builder)) {
+      Object.keys(builder).forEach((key) => {
+        yargs.option(key, builder[key]);
+      });
+    }
+    return void 0;
+  }
+  moduleName(obj) {
+    const mod = whichModule(obj);
+    if (!mod)
+      throw new Error(`No command name given for module: ${this.shim.inspect(obj)}`);
+    return this.commandFromFilename(mod.filename);
+  }
+  commandFromFilename(filename) {
+    return this.shim.path.basename(filename, this.shim.path.extname(filename));
+  }
+  extractDesc({ describe, description, desc }) {
+    for (const test of [describe, description, desc]) {
+      if (typeof test === "string" || test === false)
+        return test;
+      assertNotStrictEqual(test, true, this.shim);
+    }
+    return false;
+  }
+  freeze() {
+    this.frozens.push({
+      handlers: this.handlers,
+      aliasMap: this.aliasMap,
+      defaultCommand: this.defaultCommand
+    });
+  }
+  unfreeze() {
+    const frozen = this.frozens.pop();
+    assertNotStrictEqual(frozen, void 0, this.shim);
+    ({
+      handlers: this.handlers,
+      aliasMap: this.aliasMap,
+      defaultCommand: this.defaultCommand
+    } = frozen);
+  }
+  reset() {
+    this.handlers = {};
+    this.aliasMap = {};
+    this.defaultCommand = void 0;
+    this.requireCache = /* @__PURE__ */ new Set();
+    return this;
+  }
+};
+function command(usage2, validation2, globalMiddleware, shim3) {
+  return new CommandInstance(usage2, validation2, globalMiddleware, shim3);
+}
+function isCommandBuilderDefinition(builder) {
+  return typeof builder === "object" && !!builder.builder && typeof builder.handler === "function";
+}
+function isCommandAndAliases(cmd) {
+  return cmd.every((c) => typeof c === "string");
+}
+function isCommandBuilderCallback(builder) {
+  return typeof builder === "function";
+}
+function isCommandBuilderOptionDefinitions(builder) {
+  return typeof builder === "object";
+}
+function isCommandHandlerDefinition(cmd) {
+  return typeof cmd === "object" && !Array.isArray(cmd);
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/utils/obj-filter.js
+function objFilter(original = {}, filter = () => true) {
+  const obj = {};
+  objectKeys(original).forEach((key) => {
+    if (filter(key, original[key])) {
+      obj[key] = original[key];
+    }
+  });
+  return obj;
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/utils/set-blocking.js
+function setBlocking(blocking) {
+  if (typeof process === "undefined")
+    return;
+  [process.stdout, process.stderr].forEach((_stream) => {
+    const stream = _stream;
+    if (stream._handle && stream.isTTY && typeof stream._handle.setBlocking === "function") {
+      stream._handle.setBlocking(blocking);
+    }
+  });
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/usage.js
+function isBoolean2(fail) {
+  return typeof fail === "boolean";
+}
+function usage(yargs, shim3) {
+  const __ = shim3.y18n.__;
+  const self = {};
+  const fails = [];
+  self.failFn = function failFn(f) {
+    fails.push(f);
+  };
+  let failMessage = null;
+  let globalFailMessage = null;
+  let showHelpOnFail = true;
+  self.showHelpOnFail = function showHelpOnFailFn(arg1 = true, arg2) {
+    const [enabled, message] = typeof arg1 === "string" ? [true, arg1] : [arg1, arg2];
+    if (yargs.getInternalMethods().isGlobalContext()) {
+      globalFailMessage = message;
+    }
+    failMessage = message;
+    showHelpOnFail = enabled;
+    return self;
+  };
+  let failureOutput = false;
+  self.fail = function fail(msg, err) {
+    const logger = yargs.getInternalMethods().getLoggerInstance();
+    if (fails.length) {
+      for (let i = fails.length - 1; i >= 0; --i) {
+        const fail2 = fails[i];
+        if (isBoolean2(fail2)) {
+          if (err)
+            throw err;
+          else if (msg)
+            throw Error(msg);
+        } else {
+          fail2(msg, err, self);
+        }
+      }
+    } else {
+      if (yargs.getExitProcess())
+        setBlocking(true);
+      if (!failureOutput) {
+        failureOutput = true;
+        if (showHelpOnFail) {
+          yargs.showHelp("error");
+          logger.error();
+        }
+        if (msg || err)
+          logger.error(msg || err);
+        const globalOrCommandFailMessage = failMessage || globalFailMessage;
+        if (globalOrCommandFailMessage) {
+          if (msg || err)
+            logger.error("");
+          logger.error(globalOrCommandFailMessage);
+        }
+      }
+      err = err || new YError(msg);
+      if (yargs.getExitProcess()) {
+        return yargs.exit(1);
+      } else if (yargs.getInternalMethods().hasParseCallback()) {
+        return yargs.exit(1, err);
+      } else {
+        throw err;
+      }
+    }
+  };
+  let usages = [];
+  let usageDisabled = false;
+  self.usage = (msg, description) => {
+    if (msg === null) {
+      usageDisabled = true;
+      usages = [];
+      return self;
+    }
+    usageDisabled = false;
+    usages.push([msg, description || ""]);
+    return self;
+  };
+  self.getUsage = () => {
+    return usages;
+  };
+  self.getUsageDisabled = () => {
+    return usageDisabled;
+  };
+  self.getPositionalGroupName = () => {
+    return __("Positionals:");
+  };
+  let examples = [];
+  self.example = (cmd, description) => {
+    examples.push([cmd, description || ""]);
+  };
+  let commands = [];
+  self.command = function command2(cmd, description, isDefault, aliases, deprecated = false) {
+    if (isDefault) {
+      commands = commands.map((cmdArray) => {
+        cmdArray[2] = false;
+        return cmdArray;
+      });
+    }
+    commands.push([cmd, description || "", isDefault, aliases, deprecated]);
+  };
+  self.getCommands = () => commands;
+  let descriptions = {};
+  self.describe = function describe(keyOrKeys, desc) {
+    if (Array.isArray(keyOrKeys)) {
+      keyOrKeys.forEach((k) => {
+        self.describe(k, desc);
+      });
+    } else if (typeof keyOrKeys === "object") {
+      Object.keys(keyOrKeys).forEach((k) => {
+        self.describe(k, keyOrKeys[k]);
+      });
+    } else {
+      descriptions[keyOrKeys] = desc;
+    }
+  };
+  self.getDescriptions = () => descriptions;
+  let epilogs = [];
+  self.epilog = (msg) => {
+    epilogs.push(msg);
+  };
+  let wrapSet = false;
+  let wrap2;
+  self.wrap = (cols) => {
+    wrapSet = true;
+    wrap2 = cols;
+  };
+  self.getWrap = () => {
+    if (shim3.getEnv("YARGS_DISABLE_WRAP")) {
+      return null;
+    }
+    if (!wrapSet) {
+      wrap2 = windowWidth();
+      wrapSet = true;
+    }
+    return wrap2;
+  };
+  const deferY18nLookupPrefix = "__yargsString__:";
+  self.deferY18nLookup = (str2) => deferY18nLookupPrefix + str2;
+  self.help = function help() {
+    if (cachedHelpMessage)
+      return cachedHelpMessage;
+    normalizeAliases();
+    const base$0 = yargs.customScriptName ? yargs.$0 : shim3.path.basename(yargs.$0);
+    const demandedOptions = yargs.getDemandedOptions();
+    const demandedCommands = yargs.getDemandedCommands();
+    const deprecatedOptions = yargs.getDeprecatedOptions();
+    const groups = yargs.getGroups();
+    const options = yargs.getOptions();
+    let keys = [];
+    keys = keys.concat(Object.keys(descriptions));
+    keys = keys.concat(Object.keys(demandedOptions));
+    keys = keys.concat(Object.keys(demandedCommands));
+    keys = keys.concat(Object.keys(options.default));
+    keys = keys.filter(filterHiddenOptions);
+    keys = Object.keys(keys.reduce((acc, key) => {
+      if (key !== "_")
+        acc[key] = true;
+      return acc;
+    }, {}));
+    const theWrap = self.getWrap();
+    const ui2 = shim3.cliui({
+      width: theWrap,
+      wrap: !!theWrap
+    });
+    if (!usageDisabled) {
+      if (usages.length) {
+        usages.forEach((usage2) => {
+          ui2.div({ text: `${usage2[0].replace(/\$0/g, base$0)}` });
+          if (usage2[1]) {
+            ui2.div({ text: `${usage2[1]}`, padding: [1, 0, 0, 0] });
+          }
+        });
+        ui2.div();
+      } else if (commands.length) {
+        let u = null;
+        if (demandedCommands._) {
+          u = `${base$0} <${__("command")}>
+`;
+        } else {
+          u = `${base$0} [${__("command")}]
+`;
+        }
+        ui2.div(`${u}`);
+      }
+    }
+    if (commands.length > 1 || commands.length === 1 && !commands[0][2]) {
+      ui2.div(__("Commands:"));
+      const context = yargs.getInternalMethods().getContext();
+      const parentCommands = context.commands.length ? `${context.commands.join(" ")} ` : "";
+      if (yargs.getInternalMethods().getParserConfiguration()["sort-commands"] === true) {
+        commands = commands.sort((a, b) => a[0].localeCompare(b[0]));
+      }
+      const prefix = base$0 ? `${base$0} ` : "";
+      commands.forEach((command2) => {
+        const commandString = `${prefix}${parentCommands}${command2[0].replace(/^\$0 ?/, "")}`;
+        ui2.span({
+          text: commandString,
+          padding: [0, 2, 0, 2],
+          width: maxWidth(commands, theWrap, `${base$0}${parentCommands}`) + 4
+        }, { text: command2[1] });
+        const hints = [];
+        if (command2[2])
+          hints.push(`[${__("default")}]`);
+        if (command2[3] && command2[3].length) {
+          hints.push(`[${__("aliases:")} ${command2[3].join(", ")}]`);
+        }
+        if (command2[4]) {
+          if (typeof command2[4] === "string") {
+            hints.push(`[${__("deprecated: %s", command2[4])}]`);
+          } else {
+            hints.push(`[${__("deprecated")}]`);
+          }
+        }
+        if (hints.length) {
+          ui2.div({
+            text: hints.join(" "),
+            padding: [0, 0, 0, 2],
+            align: "right"
+          });
+        } else {
+          ui2.div();
+        }
+      });
+      ui2.div();
+    }
+    const aliasKeys = (Object.keys(options.alias) || []).concat(Object.keys(yargs.parsed.newAliases) || []);
+    keys = keys.filter((key) => !yargs.parsed.newAliases[key] && aliasKeys.every((alias) => (options.alias[alias] || []).indexOf(key) === -1));
+    const defaultGroup = __("Options:");
+    if (!groups[defaultGroup])
+      groups[defaultGroup] = [];
+    addUngroupedKeys(keys, options.alias, groups, defaultGroup);
+    const isLongSwitch = (sw) => /^--/.test(getText(sw));
+    const displayedGroups = Object.keys(groups).filter((groupName) => groups[groupName].length > 0).map((groupName) => {
+      const normalizedKeys = groups[groupName].filter(filterHiddenOptions).map((key) => {
+        if (aliasKeys.includes(key))
+          return key;
+        for (let i = 0, aliasKey; (aliasKey = aliasKeys[i]) !== void 0; i++) {
+          if ((options.alias[aliasKey] || []).includes(key))
+            return aliasKey;
+        }
+        return key;
+      });
+      return { groupName, normalizedKeys };
+    }).filter(({ normalizedKeys }) => normalizedKeys.length > 0).map(({ groupName, normalizedKeys }) => {
+      const switches = normalizedKeys.reduce((acc, key) => {
+        acc[key] = [key].concat(options.alias[key] || []).map((sw) => {
+          if (groupName === self.getPositionalGroupName())
+            return sw;
+          else {
+            return (/^[0-9]$/.test(sw) ? options.boolean.includes(key) ? "-" : "--" : sw.length > 1 ? "--" : "-") + sw;
+          }
+        }).sort((sw1, sw2) => isLongSwitch(sw1) === isLongSwitch(sw2) ? 0 : isLongSwitch(sw1) ? 1 : -1).join(", ");
+        return acc;
+      }, {});
+      return { groupName, normalizedKeys, switches };
+    });
+    const shortSwitchesUsed = displayedGroups.filter(({ groupName }) => groupName !== self.getPositionalGroupName()).some(({ normalizedKeys, switches }) => !normalizedKeys.every((key) => isLongSwitch(switches[key])));
+    if (shortSwitchesUsed) {
+      displayedGroups.filter(({ groupName }) => groupName !== self.getPositionalGroupName()).forEach(({ normalizedKeys, switches }) => {
+        normalizedKeys.forEach((key) => {
+          if (isLongSwitch(switches[key])) {
+            switches[key] = addIndentation(switches[key], "-x, ".length);
+          }
+        });
+      });
+    }
+    displayedGroups.forEach(({ groupName, normalizedKeys, switches }) => {
+      ui2.div(groupName);
+      normalizedKeys.forEach((key) => {
+        const kswitch = switches[key];
+        let desc = descriptions[key] || "";
+        let type2 = null;
+        if (desc.includes(deferY18nLookupPrefix))
+          desc = __(desc.substring(deferY18nLookupPrefix.length));
+        if (options.boolean.includes(key))
+          type2 = `[${__("boolean")}]`;
+        if (options.count.includes(key))
+          type2 = `[${__("count")}]`;
+        if (options.string.includes(key))
+          type2 = `[${__("string")}]`;
+        if (options.normalize.includes(key))
+          type2 = `[${__("string")}]`;
+        if (options.array.includes(key))
+          type2 = `[${__("array")}]`;
+        if (options.number.includes(key))
+          type2 = `[${__("number")}]`;
+        const deprecatedExtra = (deprecated) => typeof deprecated === "string" ? `[${__("deprecated: %s", deprecated)}]` : `[${__("deprecated")}]`;
+        const extra = [
+          key in deprecatedOptions ? deprecatedExtra(deprecatedOptions[key]) : null,
+          type2,
+          key in demandedOptions ? `[${__("required")}]` : null,
+          options.choices && options.choices[key] ? `[${__("choices:")} ${self.stringifiedValues(options.choices[key])}]` : null,
+          defaultString(options.default[key], options.defaultDescription[key])
+        ].filter(Boolean).join(" ");
+        ui2.span({
+          text: getText(kswitch),
+          padding: [0, 2, 0, 2 + getIndentation(kswitch)],
+          width: maxWidth(switches, theWrap) + 4
+        }, desc);
+        const shouldHideOptionExtras = yargs.getInternalMethods().getUsageConfiguration()["hide-types"] === true;
+        if (extra && !shouldHideOptionExtras)
+          ui2.div({ text: extra, padding: [0, 0, 0, 2], align: "right" });
+        else
+          ui2.div();
+      });
+      ui2.div();
+    });
+    if (examples.length) {
+      ui2.div(__("Examples:"));
+      examples.forEach((example) => {
+        example[0] = example[0].replace(/\$0/g, base$0);
+      });
+      examples.forEach((example) => {
+        if (example[1] === "") {
+          ui2.div({
+            text: example[0],
+            padding: [0, 2, 0, 2]
+          });
+        } else {
+          ui2.div({
+            text: example[0],
+            padding: [0, 2, 0, 2],
+            width: maxWidth(examples, theWrap) + 4
+          }, {
+            text: example[1]
+          });
+        }
+      });
+      ui2.div();
+    }
+    if (epilogs.length > 0) {
+      const e = epilogs.map((epilog) => epilog.replace(/\$0/g, base$0)).join("\n");
+      ui2.div(`${e}
+`);
+    }
+    return ui2.toString().replace(/\s*$/, "");
+  };
+  function maxWidth(table, theWrap, modifier) {
+    let width = 0;
+    if (!Array.isArray(table)) {
+      table = Object.values(table).map((v) => [v]);
+    }
+    table.forEach((v) => {
+      width = Math.max(shim3.stringWidth(modifier ? `${modifier} ${getText(v[0])}` : getText(v[0])) + getIndentation(v[0]), width);
+    });
+    if (theWrap)
+      width = Math.min(width, parseInt((theWrap * 0.5).toString(), 10));
+    return width;
+  }
+  function normalizeAliases() {
+    const demandedOptions = yargs.getDemandedOptions();
+    const options = yargs.getOptions();
+    (Object.keys(options.alias) || []).forEach((key) => {
+      options.alias[key].forEach((alias) => {
+        if (descriptions[alias])
+          self.describe(key, descriptions[alias]);
+        if (alias in demandedOptions)
+          yargs.demandOption(key, demandedOptions[alias]);
+        if (options.boolean.includes(alias))
+          yargs.boolean(key);
+        if (options.count.includes(alias))
+          yargs.count(key);
+        if (options.string.includes(alias))
+          yargs.string(key);
+        if (options.normalize.includes(alias))
+          yargs.normalize(key);
+        if (options.array.includes(alias))
+          yargs.array(key);
+        if (options.number.includes(alias))
+          yargs.number(key);
+      });
+    });
+  }
+  let cachedHelpMessage;
+  self.cacheHelpMessage = function() {
+    cachedHelpMessage = this.help();
+  };
+  self.clearCachedHelpMessage = function() {
+    cachedHelpMessage = void 0;
+  };
+  self.hasCachedHelpMessage = function() {
+    return !!cachedHelpMessage;
+  };
+  function addUngroupedKeys(keys, aliases, groups, defaultGroup) {
+    let groupedKeys = [];
+    let toCheck = null;
+    Object.keys(groups).forEach((group) => {
+      groupedKeys = groupedKeys.concat(groups[group]);
+    });
+    keys.forEach((key) => {
+      toCheck = [key].concat(aliases[key]);
+      if (!toCheck.some((k) => groupedKeys.indexOf(k) !== -1)) {
+        groups[defaultGroup].push(key);
+      }
+    });
+    return groupedKeys;
+  }
+  function filterHiddenOptions(key) {
+    return yargs.getOptions().hiddenOptions.indexOf(key) < 0 || yargs.parsed.argv[yargs.getOptions().showHiddenOpt];
+  }
+  self.showHelp = (level) => {
+    const logger = yargs.getInternalMethods().getLoggerInstance();
+    if (!level)
+      level = "error";
+    const emit = typeof level === "function" ? level : logger[level];
+    emit(self.help());
+  };
+  self.functionDescription = (fn) => {
+    const description = fn.name ? shim3.Parser.decamelize(fn.name, "-") : __("generated-value");
+    return ["(", description, ")"].join("");
+  };
+  self.stringifiedValues = function stringifiedValues(values, separator) {
+    let string3 = "";
+    const sep2 = separator || ", ";
+    const array2 = [].concat(values);
+    if (!values || !array2.length)
+      return string3;
+    array2.forEach((value) => {
+      if (string3.length)
+        string3 += sep2;
+      string3 += JSON.stringify(value);
+    });
+    return string3;
+  };
+  function defaultString(value, defaultDescription) {
+    let string3 = `[${__("default:")} `;
+    if (value === void 0 && !defaultDescription)
+      return null;
+    if (defaultDescription) {
+      string3 += defaultDescription;
+    } else {
+      switch (typeof value) {
+        case "string":
+          string3 += `"${value}"`;
+          break;
+        case "object":
+          string3 += JSON.stringify(value);
+          break;
+        default:
+          string3 += value;
+      }
+    }
+    return `${string3}]`;
+  }
+  function windowWidth() {
+    const maxWidth2 = 80;
+    if (shim3.process.stdColumns) {
+      return Math.min(maxWidth2, shim3.process.stdColumns);
+    } else {
+      return maxWidth2;
+    }
+  }
+  let version2 = null;
+  self.version = (ver) => {
+    version2 = ver;
+  };
+  self.showVersion = (level) => {
+    const logger = yargs.getInternalMethods().getLoggerInstance();
+    if (!level)
+      level = "error";
+    const emit = typeof level === "function" ? level : logger[level];
+    emit(version2);
+  };
+  self.reset = function reset(localLookup) {
+    failMessage = null;
+    failureOutput = false;
+    usages = [];
+    usageDisabled = false;
+    epilogs = [];
+    examples = [];
+    commands = [];
+    descriptions = objFilter(descriptions, (k) => !localLookup[k]);
+    return self;
+  };
+  const frozens = [];
+  self.freeze = function freeze() {
+    frozens.push({
+      failMessage,
+      failureOutput,
+      usages,
+      usageDisabled,
+      epilogs,
+      examples,
+      commands,
+      descriptions
+    });
+  };
+  self.unfreeze = function unfreeze(defaultCommand = false) {
+    const frozen = frozens.pop();
+    if (!frozen)
+      return;
+    if (defaultCommand) {
+      descriptions = { ...frozen.descriptions, ...descriptions };
+      commands = [...frozen.commands, ...commands];
+      usages = [...frozen.usages, ...usages];
+      examples = [...frozen.examples, ...examples];
+      epilogs = [...frozen.epilogs, ...epilogs];
+    } else {
+      ({
+        failMessage,
+        failureOutput,
+        usages,
+        usageDisabled,
+        epilogs,
+        examples,
+        commands,
+        descriptions
+      } = frozen);
+    }
+  };
+  return self;
+}
+function isIndentedText(text) {
+  return typeof text === "object";
+}
+function addIndentation(text, indent) {
+  return isIndentedText(text) ? { text: text.text, indentation: text.indentation + indent } : { text, indentation: indent };
+}
+function getIndentation(text) {
+  return isIndentedText(text) ? text.indentation : 0;
+}
+function getText(text) {
+  return isIndentedText(text) ? text.text : text;
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/completion-templates.js
+var completionShTemplate = `###-begin-{{app_name}}-completions-###
+#
+# yargs command completion script
+#
+# Installation: {{app_path}} {{completion_command}} >> ~/.bashrc
+#    or {{app_path}} {{completion_command}} >> ~/.bash_profile on OSX.
+#
+_{{app_name}}_yargs_completions()
+{
+    local cur_word args type_list
+
+    cur_word="\${COMP_WORDS[COMP_CWORD]}"
+    args=("\${COMP_WORDS[@]}")
+
+    # ask yargs to generate completions.
+    type_list=$({{app_path}} --get-yargs-completions "\${args[@]}")
+
+    COMPREPLY=( $(compgen -W "\${type_list}" -- \${cur_word}) )
+
+    # if no match was found, fall back to filename completion
+    if [ \${#COMPREPLY[@]} -eq 0 ]; then
+      COMPREPLY=()
+    fi
+
+    return 0
+}
+complete -o bashdefault -o default -F _{{app_name}}_yargs_completions {{app_name}}
+###-end-{{app_name}}-completions-###
+`;
+var completionZshTemplate = `#compdef {{app_name}}
+###-begin-{{app_name}}-completions-###
+#
+# yargs command completion script
+#
+# Installation: {{app_path}} {{completion_command}} >> ~/.zshrc
+#    or {{app_path}} {{completion_command}} >> ~/.zprofile on OSX.
+#
+_{{app_name}}_yargs_completions()
+{
+  local reply
+  local si=$IFS
+  IFS=$'
+' reply=($(COMP_CWORD="$((CURRENT-1))" COMP_LINE="$BUFFER" COMP_POINT="$CURSOR" {{app_path}} --get-yargs-completions "\${words[@]}"))
+  IFS=$si
+  _describe 'values' reply
+}
+compdef _{{app_name}}_yargs_completions {{app_name}}
+###-end-{{app_name}}-completions-###
+`;
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/completion.js
+var Completion = class {
+  constructor(yargs, usage2, command2, shim3) {
+    var _a2, _b2, _c2;
+    this.yargs = yargs;
+    this.usage = usage2;
+    this.command = command2;
+    this.shim = shim3;
+    this.completionKey = "get-yargs-completions";
+    this.aliases = null;
+    this.customCompletionFunction = null;
+    this.indexAfterLastReset = 0;
+    this.zshShell = (_c2 = ((_a2 = this.shim.getEnv("SHELL")) === null || _a2 === void 0 ? void 0 : _a2.includes("zsh")) || ((_b2 = this.shim.getEnv("ZSH_NAME")) === null || _b2 === void 0 ? void 0 : _b2.includes("zsh"))) !== null && _c2 !== void 0 ? _c2 : false;
+  }
+  defaultCompletion(args, argv, current, done) {
+    const handlers = this.command.getCommandHandlers();
+    for (let i = 0, ii = args.length; i < ii; ++i) {
+      if (handlers[args[i]] && handlers[args[i]].builder) {
+        const builder = handlers[args[i]].builder;
+        if (isCommandBuilderCallback(builder)) {
+          this.indexAfterLastReset = i + 1;
+          const y = this.yargs.getInternalMethods().reset();
+          builder(y, true);
+          return y.argv;
+        }
+      }
+    }
+    const completions = [];
+    this.commandCompletions(completions, args, current);
+    this.optionCompletions(completions, args, argv, current);
+    this.choicesFromOptionsCompletions(completions, args, argv, current);
+    this.choicesFromPositionalsCompletions(completions, args, argv, current);
+    done(null, completions);
+  }
+  commandCompletions(completions, args, current) {
+    const parentCommands = this.yargs.getInternalMethods().getContext().commands;
+    if (!current.match(/^-/) && parentCommands[parentCommands.length - 1] !== current && !this.previousArgHasChoices(args)) {
+      this.usage.getCommands().forEach((usageCommand) => {
+        const commandName = parseCommand(usageCommand[0]).cmd;
+        if (args.indexOf(commandName) === -1) {
+          if (!this.zshShell) {
+            completions.push(commandName);
+          } else {
+            const desc = usageCommand[1] || "";
+            completions.push(commandName.replace(/:/g, "\\:") + ":" + desc);
+          }
+        }
+      });
+    }
+  }
+  optionCompletions(completions, args, argv, current) {
+    if ((current.match(/^-/) || current === "" && completions.length === 0) && !this.previousArgHasChoices(args)) {
+      const options = this.yargs.getOptions();
+      const positionalKeys = this.yargs.getGroups()[this.usage.getPositionalGroupName()] || [];
+      Object.keys(options.key).forEach((key) => {
+        const negable = !!options.configuration["boolean-negation"] && options.boolean.includes(key);
+        const isPositionalKey = positionalKeys.includes(key);
+        if (!isPositionalKey && !options.hiddenOptions.includes(key) && !this.argsContainKey(args, key, negable)) {
+          this.completeOptionKey(key, completions, current, negable && !!options.default[key]);
+        }
+      });
+    }
+  }
+  choicesFromOptionsCompletions(completions, args, argv, current) {
+    if (this.previousArgHasChoices(args)) {
+      const choices = this.getPreviousArgChoices(args);
+      if (choices && choices.length > 0) {
+        completions.push(...choices.map((c) => c.replace(/:/g, "\\:")));
+      }
+    }
+  }
+  choicesFromPositionalsCompletions(completions, args, argv, current) {
+    if (current === "" && completions.length > 0 && this.previousArgHasChoices(args)) {
+      return;
+    }
+    const positionalKeys = this.yargs.getGroups()[this.usage.getPositionalGroupName()] || [];
+    const offset = Math.max(this.indexAfterLastReset, this.yargs.getInternalMethods().getContext().commands.length + 1);
+    const positionalKey = positionalKeys[argv._.length - offset - 1];
+    if (!positionalKey) {
+      return;
+    }
+    const choices = this.yargs.getOptions().choices[positionalKey] || [];
+    for (const choice of choices) {
+      if (choice.startsWith(current)) {
+        completions.push(choice.replace(/:/g, "\\:"));
+      }
+    }
+  }
+  getPreviousArgChoices(args) {
+    if (args.length < 1)
+      return;
+    let previousArg = args[args.length - 1];
+    let filter = "";
+    if (!previousArg.startsWith("-") && args.length > 1) {
+      filter = previousArg;
+      previousArg = args[args.length - 2];
+    }
+    if (!previousArg.startsWith("-"))
+      return;
+    const previousArgKey = previousArg.replace(/^-+/, "");
+    const options = this.yargs.getOptions();
+    const possibleAliases = [
+      previousArgKey,
+      ...this.yargs.getAliases()[previousArgKey] || []
+    ];
+    let choices;
+    for (const possibleAlias of possibleAliases) {
+      if (Object.prototype.hasOwnProperty.call(options.key, possibleAlias) && Array.isArray(options.choices[possibleAlias])) {
+        choices = options.choices[possibleAlias];
+        break;
+      }
+    }
+    if (choices) {
+      return choices.filter((choice) => !filter || choice.startsWith(filter));
+    }
+  }
+  previousArgHasChoices(args) {
+    const choices = this.getPreviousArgChoices(args);
+    return choices !== void 0 && choices.length > 0;
+  }
+  argsContainKey(args, key, negable) {
+    const argsContains = (s) => args.indexOf((/^[^0-9]$/.test(s) ? "-" : "--") + s) !== -1;
+    if (argsContains(key))
+      return true;
+    if (negable && argsContains(`no-${key}`))
+      return true;
+    if (this.aliases) {
+      for (const alias of this.aliases[key]) {
+        if (argsContains(alias))
+          return true;
+      }
+    }
+    return false;
+  }
+  completeOptionKey(key, completions, current, negable) {
+    var _a2, _b2, _c2, _d;
+    let keyWithDesc = key;
+    if (this.zshShell) {
+      const descs = this.usage.getDescriptions();
+      const aliasKey = (_b2 = (_a2 = this === null || this === void 0 ? void 0 : this.aliases) === null || _a2 === void 0 ? void 0 : _a2[key]) === null || _b2 === void 0 ? void 0 : _b2.find((alias) => {
+        const desc2 = descs[alias];
+        return typeof desc2 === "string" && desc2.length > 0;
+      });
+      const descFromAlias = aliasKey ? descs[aliasKey] : void 0;
+      const desc = (_d = (_c2 = descs[key]) !== null && _c2 !== void 0 ? _c2 : descFromAlias) !== null && _d !== void 0 ? _d : "";
+      keyWithDesc = `${key.replace(/:/g, "\\:")}:${desc.replace("__yargsString__:", "").replace(/(\r\n|\n|\r)/gm, " ")}`;
+    }
+    const startsByTwoDashes = (s) => /^--/.test(s);
+    const isShortOption = (s) => /^[^0-9]$/.test(s);
+    const dashes = !startsByTwoDashes(current) && isShortOption(key) ? "-" : "--";
+    completions.push(dashes + keyWithDesc);
+    if (negable) {
+      completions.push(dashes + "no-" + keyWithDesc);
+    }
+  }
+  customCompletion(args, argv, current, done) {
+    assertNotStrictEqual(this.customCompletionFunction, null, this.shim);
+    if (isSyncCompletionFunction(this.customCompletionFunction)) {
+      const result = this.customCompletionFunction(current, argv);
+      if (isPromise(result)) {
+        return result.then((list) => {
+          this.shim.process.nextTick(() => {
+            done(null, list);
+          });
+        }).catch((err) => {
+          this.shim.process.nextTick(() => {
+            done(err, void 0);
+          });
+        });
+      }
+      return done(null, result);
+    } else if (isFallbackCompletionFunction(this.customCompletionFunction)) {
+      return this.customCompletionFunction(current, argv, (onCompleted = done) => this.defaultCompletion(args, argv, current, onCompleted), (completions) => {
+        done(null, completions);
+      });
+    } else {
+      return this.customCompletionFunction(current, argv, (completions) => {
+        done(null, completions);
+      });
+    }
+  }
+  getCompletion(args, done) {
+    const current = args.length ? args[args.length - 1] : "";
+    const argv = this.yargs.parse(args, true);
+    const completionFunction = this.customCompletionFunction ? (argv2) => this.customCompletion(args, argv2, current, done) : (argv2) => this.defaultCompletion(args, argv2, current, done);
+    return isPromise(argv) ? argv.then(completionFunction) : completionFunction(argv);
+  }
+  generateCompletionScript($0, cmd) {
+    let script = this.zshShell ? completionZshTemplate : completionShTemplate;
+    const name = this.shim.path.basename($0);
+    if ($0.match(/\.js$/))
+      $0 = `./${$0}`;
+    script = script.replace(/{{app_name}}/g, name);
+    script = script.replace(/{{completion_command}}/g, cmd);
+    return script.replace(/{{app_path}}/g, $0);
+  }
+  registerFunction(fn) {
+    this.customCompletionFunction = fn;
+  }
+  setParsed(parsed) {
+    this.aliases = parsed.aliases;
+  }
+};
+function completion(yargs, usage2, command2, shim3) {
+  return new Completion(yargs, usage2, command2, shim3);
+}
+function isSyncCompletionFunction(completionFunction) {
+  return completionFunction.length < 3;
+}
+function isFallbackCompletionFunction(completionFunction) {
+  return completionFunction.length > 3;
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/utils/levenshtein.js
+function levenshtein(a, b) {
+  if (a.length === 0)
+    return b.length;
+  if (b.length === 0)
+    return a.length;
+  const matrix = [];
+  let i;
+  for (i = 0; i <= b.length; i++) {
+    matrix[i] = [i];
+  }
+  let j;
+  for (j = 0; j <= a.length; j++) {
+    matrix[0][j] = j;
+  }
+  for (i = 1; i <= b.length; i++) {
+    for (j = 1; j <= a.length; j++) {
+      if (b.charAt(i - 1) === a.charAt(j - 1)) {
+        matrix[i][j] = matrix[i - 1][j - 1];
+      } else {
+        if (i > 1 && j > 1 && b.charAt(i - 2) === a.charAt(j - 1) && b.charAt(i - 1) === a.charAt(j - 2)) {
+          matrix[i][j] = matrix[i - 2][j - 2] + 1;
+        } else {
+          matrix[i][j] = Math.min(matrix[i - 1][j - 1] + 1, Math.min(matrix[i][j - 1] + 1, matrix[i - 1][j] + 1));
+        }
+      }
+    }
+  }
+  return matrix[b.length][a.length];
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/validation.js
+var specialKeys = ["$0", "--", "_"];
+function validation(yargs, usage2, shim3) {
+  const __ = shim3.y18n.__;
+  const __n = shim3.y18n.__n;
+  const self = {};
+  self.nonOptionCount = function nonOptionCount(argv) {
+    const demandedCommands = yargs.getDemandedCommands();
+    const positionalCount = argv._.length + (argv["--"] ? argv["--"].length : 0);
+    const _s = positionalCount - yargs.getInternalMethods().getContext().commands.length;
+    if (demandedCommands._ && (_s < demandedCommands._.min || _s > demandedCommands._.max)) {
+      if (_s < demandedCommands._.min) {
+        if (demandedCommands._.minMsg !== void 0) {
+          usage2.fail(demandedCommands._.minMsg ? demandedCommands._.minMsg.replace(/\$0/g, _s.toString()).replace(/\$1/, demandedCommands._.min.toString()) : null);
+        } else {
+          usage2.fail(__n("Not enough non-option arguments: got %s, need at least %s", "Not enough non-option arguments: got %s, need at least %s", _s, _s.toString(), demandedCommands._.min.toString()));
+        }
+      } else if (_s > demandedCommands._.max) {
+        if (demandedCommands._.maxMsg !== void 0) {
+          usage2.fail(demandedCommands._.maxMsg ? demandedCommands._.maxMsg.replace(/\$0/g, _s.toString()).replace(/\$1/, demandedCommands._.max.toString()) : null);
+        } else {
+          usage2.fail(__n("Too many non-option arguments: got %s, maximum of %s", "Too many non-option arguments: got %s, maximum of %s", _s, _s.toString(), demandedCommands._.max.toString()));
+        }
+      }
+    }
+  };
+  self.positionalCount = function positionalCount(required2, observed) {
+    if (observed < required2) {
+      usage2.fail(__n("Not enough non-option arguments: got %s, need at least %s", "Not enough non-option arguments: got %s, need at least %s", observed, observed + "", required2 + ""));
+    }
+  };
+  self.requiredArguments = function requiredArguments(argv, demandedOptions) {
+    let missing = null;
+    for (const key of Object.keys(demandedOptions)) {
+      if (!Object.prototype.hasOwnProperty.call(argv, key) || typeof argv[key] === "undefined") {
+        missing = missing || {};
+        missing[key] = demandedOptions[key];
+      }
+    }
+    if (missing) {
+      const customMsgs = [];
+      for (const key of Object.keys(missing)) {
+        const msg = missing[key];
+        if (msg && customMsgs.indexOf(msg) < 0) {
+          customMsgs.push(msg);
+        }
+      }
+      const customMsg = customMsgs.length ? `
+${customMsgs.join("\n")}` : "";
+      usage2.fail(__n("Missing required argument: %s", "Missing required arguments: %s", Object.keys(missing).length, Object.keys(missing).join(", ") + customMsg));
+    }
+  };
+  self.unknownArguments = function unknownArguments(argv, aliases, positionalMap, isDefaultCommand, checkPositionals = true) {
+    var _a2;
+    const commandKeys = yargs.getInternalMethods().getCommandInstance().getCommands();
+    const unknown2 = [];
+    const currentContext = yargs.getInternalMethods().getContext();
+    Object.keys(argv).forEach((key) => {
+      if (!specialKeys.includes(key) && !Object.prototype.hasOwnProperty.call(positionalMap, key) && !Object.prototype.hasOwnProperty.call(yargs.getInternalMethods().getParseContext(), key) && !self.isValidAndSomeAliasIsNotNew(key, aliases)) {
+        unknown2.push(key);
+      }
+    });
+    if (checkPositionals && (currentContext.commands.length > 0 || commandKeys.length > 0 || isDefaultCommand)) {
+      argv._.slice(currentContext.commands.length).forEach((key) => {
+        if (!commandKeys.includes("" + key)) {
+          unknown2.push("" + key);
+        }
+      });
+    }
+    if (checkPositionals) {
+      const demandedCommands = yargs.getDemandedCommands();
+      const maxNonOptDemanded = ((_a2 = demandedCommands._) === null || _a2 === void 0 ? void 0 : _a2.max) || 0;
+      const expected = currentContext.commands.length + maxNonOptDemanded;
+      if (expected < argv._.length) {
+        argv._.slice(expected).forEach((key) => {
+          key = String(key);
+          if (!currentContext.commands.includes(key) && !unknown2.includes(key)) {
+            unknown2.push(key);
+          }
+        });
+      }
+    }
+    if (unknown2.length) {
+      usage2.fail(__n("Unknown argument: %s", "Unknown arguments: %s", unknown2.length, unknown2.map((s) => s.trim() ? s : `"${s}"`).join(", ")));
+    }
+  };
+  self.unknownCommands = function unknownCommands(argv) {
+    const commandKeys = yargs.getInternalMethods().getCommandInstance().getCommands();
+    const unknown2 = [];
+    const currentContext = yargs.getInternalMethods().getContext();
+    if (currentContext.commands.length > 0 || commandKeys.length > 0) {
+      argv._.slice(currentContext.commands.length).forEach((key) => {
+        if (!commandKeys.includes("" + key)) {
+          unknown2.push("" + key);
+        }
+      });
+    }
+    if (unknown2.length > 0) {
+      usage2.fail(__n("Unknown command: %s", "Unknown commands: %s", unknown2.length, unknown2.join(", ")));
+      return true;
+    } else {
+      return false;
+    }
+  };
+  self.isValidAndSomeAliasIsNotNew = function isValidAndSomeAliasIsNotNew(key, aliases) {
+    if (!Object.prototype.hasOwnProperty.call(aliases, key)) {
+      return false;
+    }
+    const newAliases = yargs.parsed.newAliases;
+    return [key, ...aliases[key]].some((a) => !Object.prototype.hasOwnProperty.call(newAliases, a) || !newAliases[key]);
+  };
+  self.limitedChoices = function limitedChoices(argv) {
+    const options = yargs.getOptions();
+    const invalid = {};
+    if (!Object.keys(options.choices).length)
+      return;
+    Object.keys(argv).forEach((key) => {
+      if (specialKeys.indexOf(key) === -1 && Object.prototype.hasOwnProperty.call(options.choices, key)) {
+        [].concat(argv[key]).forEach((value) => {
+          if (options.choices[key].indexOf(value) === -1 && value !== void 0) {
+            invalid[key] = (invalid[key] || []).concat(value);
+          }
+        });
+      }
+    });
+    const invalidKeys = Object.keys(invalid);
+    if (!invalidKeys.length)
+      return;
+    let msg = __("Invalid values:");
+    invalidKeys.forEach((key) => {
+      msg += `
+  ${__("Argument: %s, Given: %s, Choices: %s", key, usage2.stringifiedValues(invalid[key]), usage2.stringifiedValues(options.choices[key]))}`;
+    });
+    usage2.fail(msg);
+  };
+  let implied = {};
+  self.implies = function implies(key, value) {
+    argsert("<string|object> [array|number|string]", [key, value], arguments.length);
+    if (typeof key === "object") {
+      Object.keys(key).forEach((k) => {
+        self.implies(k, key[k]);
+      });
+    } else {
+      yargs.global(key);
+      if (!implied[key]) {
+        implied[key] = [];
+      }
+      if (Array.isArray(value)) {
+        value.forEach((i) => self.implies(key, i));
+      } else {
+        assertNotStrictEqual(value, void 0, shim3);
+        implied[key].push(value);
+      }
+    }
+  };
+  self.getImplied = function getImplied() {
+    return implied;
+  };
+  function keyExists(argv, val) {
+    const num = Number(val);
+    val = isNaN(num) ? val : num;
+    if (typeof val === "number") {
+      val = argv._.length >= val;
+    } else if (val.match(/^--no-.+/)) {
+      val = val.match(/^--no-(.+)/)[1];
+      val = !Object.prototype.hasOwnProperty.call(argv, val);
+    } else {
+      val = Object.prototype.hasOwnProperty.call(argv, val);
+    }
+    return val;
+  }
+  self.implications = function implications(argv) {
+    const implyFail = [];
+    Object.keys(implied).forEach((key) => {
+      const origKey = key;
+      (implied[key] || []).forEach((value) => {
+        let key2 = origKey;
+        const origValue = value;
+        key2 = keyExists(argv, key2);
+        value = keyExists(argv, value);
+        if (key2 && !value) {
+          implyFail.push(` ${origKey} -> ${origValue}`);
+        }
+      });
+    });
+    if (implyFail.length) {
+      let msg = `${__("Implications failed:")}
+`;
+      implyFail.forEach((value) => {
+        msg += value;
+      });
+      usage2.fail(msg);
+    }
+  };
+  let conflicting = {};
+  self.conflicts = function conflicts(key, value) {
+    argsert("<string|object> [array|string]", [key, value], arguments.length);
+    if (typeof key === "object") {
+      Object.keys(key).forEach((k) => {
+        self.conflicts(k, key[k]);
+      });
+    } else {
+      yargs.global(key);
+      if (!conflicting[key]) {
+        conflicting[key] = [];
+      }
+      if (Array.isArray(value)) {
+        value.forEach((i) => self.conflicts(key, i));
+      } else {
+        conflicting[key].push(value);
+      }
+    }
+  };
+  self.getConflicting = () => conflicting;
+  self.conflicting = function conflictingFn(argv) {
+    Object.keys(argv).forEach((key) => {
+      if (conflicting[key]) {
+        conflicting[key].forEach((value) => {
+          if (value && argv[key] !== void 0 && argv[value] !== void 0) {
+            usage2.fail(__("Arguments %s and %s are mutually exclusive", key, value));
+          }
+        });
+      }
+    });
+    if (yargs.getInternalMethods().getParserConfiguration()["strip-dashed"]) {
+      Object.keys(conflicting).forEach((key) => {
+        conflicting[key].forEach((value) => {
+          if (value && argv[shim3.Parser.camelCase(key)] !== void 0 && argv[shim3.Parser.camelCase(value)] !== void 0) {
+            usage2.fail(__("Arguments %s and %s are mutually exclusive", key, value));
+          }
+        });
+      });
+    }
+  };
+  self.recommendCommands = function recommendCommands(cmd, potentialCommands) {
+    const threshold = 3;
+    potentialCommands = potentialCommands.sort((a, b) => b.length - a.length);
+    let recommended = null;
+    let bestDistance = Infinity;
+    for (let i = 0, candidate; (candidate = potentialCommands[i]) !== void 0; i++) {
+      const d = levenshtein(cmd, candidate);
+      if (d <= threshold && d < bestDistance) {
+        bestDistance = d;
+        recommended = candidate;
+      }
+    }
+    if (recommended)
+      usage2.fail(__("Did you mean %s?", recommended));
+  };
+  self.reset = function reset(localLookup) {
+    implied = objFilter(implied, (k) => !localLookup[k]);
+    conflicting = objFilter(conflicting, (k) => !localLookup[k]);
+    return self;
+  };
+  const frozens = [];
+  self.freeze = function freeze() {
+    frozens.push({
+      implied,
+      conflicting
+    });
+  };
+  self.unfreeze = function unfreeze() {
+    const frozen = frozens.pop();
+    assertNotStrictEqual(frozen, void 0, shim3);
+    ({ implied, conflicting } = frozen);
+  };
+  return self;
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/utils/apply-extends.js
+var previouslyVisitedConfigs = [];
+var shim2;
+function applyExtends(config2, cwd, mergeExtends, _shim) {
+  shim2 = _shim;
+  let defaultConfig = {};
+  if (Object.prototype.hasOwnProperty.call(config2, "extends")) {
+    if (typeof config2.extends !== "string")
+      return defaultConfig;
+    const isPath = /\.json|\..*rc$/.test(config2.extends);
+    let pathToDefault = null;
+    if (!isPath) {
+      try {
+        pathToDefault = __require.resolve(config2.extends);
+      } catch (_err) {
+        return config2;
+      }
+    } else {
+      pathToDefault = getPathToDefaultConfig(cwd, config2.extends);
+    }
+    checkForCircularExtends(pathToDefault);
+    previouslyVisitedConfigs.push(pathToDefault);
+    defaultConfig = isPath ? JSON.parse(shim2.readFileSync(pathToDefault, "utf8")) : __require(config2.extends);
+    delete config2.extends;
+    defaultConfig = applyExtends(defaultConfig, shim2.path.dirname(pathToDefault), mergeExtends, shim2);
+  }
+  previouslyVisitedConfigs = [];
+  return mergeExtends ? mergeDeep(defaultConfig, config2) : Object.assign({}, defaultConfig, config2);
+}
+function checkForCircularExtends(cfgPath) {
+  if (previouslyVisitedConfigs.indexOf(cfgPath) > -1) {
+    throw new YError(`Circular extended configurations: '${cfgPath}'.`);
+  }
+}
+function getPathToDefaultConfig(cwd, pathToExtend) {
+  return shim2.path.resolve(cwd, pathToExtend);
+}
+function mergeDeep(config1, config2) {
+  const target = {};
+  function isObject3(obj) {
+    return obj && typeof obj === "object" && !Array.isArray(obj);
+  }
+  Object.assign(target, config1);
+  for (const key of Object.keys(config2)) {
+    if (isObject3(config2[key]) && isObject3(target[key])) {
+      target[key] = mergeDeep(config1[key], config2[key]);
+    } else {
+      target[key] = config2[key];
+    }
+  }
+  return target;
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/build/lib/yargs-factory.js
+var __classPrivateFieldSet = function(receiver, state, value, kind, f) {
+  if (kind === "m") throw new TypeError("Private method is not writable");
+  if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a setter");
+  if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot write private member to an object whose class did not declare it");
+  return kind === "a" ? f.call(receiver, value) : f ? f.value = value : state.set(receiver, value), value;
+};
+var __classPrivateFieldGet = function(receiver, state, kind, f) {
+  if (kind === "a" && !f) throw new TypeError("Private accessor was defined without a getter");
+  if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
+  return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
+};
+var _YargsInstance_command;
+var _YargsInstance_cwd;
+var _YargsInstance_context;
+var _YargsInstance_completion;
+var _YargsInstance_completionCommand;
+var _YargsInstance_defaultShowHiddenOpt;
+var _YargsInstance_exitError;
+var _YargsInstance_detectLocale;
+var _YargsInstance_emittedWarnings;
+var _YargsInstance_exitProcess;
+var _YargsInstance_frozens;
+var _YargsInstance_globalMiddleware;
+var _YargsInstance_groups;
+var _YargsInstance_hasOutput;
+var _YargsInstance_helpOpt;
+var _YargsInstance_isGlobalContext;
+var _YargsInstance_logger;
+var _YargsInstance_output;
+var _YargsInstance_options;
+var _YargsInstance_parentRequire;
+var _YargsInstance_parserConfig;
+var _YargsInstance_parseFn;
+var _YargsInstance_parseContext;
+var _YargsInstance_pkgs;
+var _YargsInstance_preservedGroups;
+var _YargsInstance_processArgs;
+var _YargsInstance_recommendCommands;
+var _YargsInstance_shim;
+var _YargsInstance_strict;
+var _YargsInstance_strictCommands;
+var _YargsInstance_strictOptions;
+var _YargsInstance_usage;
+var _YargsInstance_usageConfig;
+var _YargsInstance_versionOpt;
+var _YargsInstance_validation;
+function YargsFactory(_shim) {
+  return (processArgs = [], cwd = _shim.process.cwd(), parentRequire) => {
+    const yargs = new YargsInstance(processArgs, cwd, parentRequire, _shim);
+    Object.defineProperty(yargs, "argv", {
+      get: () => {
+        return yargs.parse();
+      },
+      enumerable: true
+    });
+    yargs.help();
+    yargs.version();
+    return yargs;
+  };
+}
+var kCopyDoubleDash = /* @__PURE__ */ Symbol("copyDoubleDash");
+var kCreateLogger = /* @__PURE__ */ Symbol("copyDoubleDash");
+var kDeleteFromParserHintObject = /* @__PURE__ */ Symbol("deleteFromParserHintObject");
+var kEmitWarning = /* @__PURE__ */ Symbol("emitWarning");
+var kFreeze = /* @__PURE__ */ Symbol("freeze");
+var kGetDollarZero = /* @__PURE__ */ Symbol("getDollarZero");
+var kGetParserConfiguration = /* @__PURE__ */ Symbol("getParserConfiguration");
+var kGetUsageConfiguration = /* @__PURE__ */ Symbol("getUsageConfiguration");
+var kGuessLocale = /* @__PURE__ */ Symbol("guessLocale");
+var kGuessVersion = /* @__PURE__ */ Symbol("guessVersion");
+var kParsePositionalNumbers = /* @__PURE__ */ Symbol("parsePositionalNumbers");
+var kPkgUp = /* @__PURE__ */ Symbol("pkgUp");
+var kPopulateParserHintArray = /* @__PURE__ */ Symbol("populateParserHintArray");
+var kPopulateParserHintSingleValueDictionary = /* @__PURE__ */ Symbol("populateParserHintSingleValueDictionary");
+var kPopulateParserHintArrayDictionary = /* @__PURE__ */ Symbol("populateParserHintArrayDictionary");
+var kPopulateParserHintDictionary = /* @__PURE__ */ Symbol("populateParserHintDictionary");
+var kSanitizeKey = /* @__PURE__ */ Symbol("sanitizeKey");
+var kSetKey = /* @__PURE__ */ Symbol("setKey");
+var kUnfreeze = /* @__PURE__ */ Symbol("unfreeze");
+var kValidateAsync = /* @__PURE__ */ Symbol("validateAsync");
+var kGetCommandInstance = /* @__PURE__ */ Symbol("getCommandInstance");
+var kGetContext = /* @__PURE__ */ Symbol("getContext");
+var kGetHasOutput = /* @__PURE__ */ Symbol("getHasOutput");
+var kGetLoggerInstance = /* @__PURE__ */ Symbol("getLoggerInstance");
+var kGetParseContext = /* @__PURE__ */ Symbol("getParseContext");
+var kGetUsageInstance = /* @__PURE__ */ Symbol("getUsageInstance");
+var kGetValidationInstance = /* @__PURE__ */ Symbol("getValidationInstance");
+var kHasParseCallback = /* @__PURE__ */ Symbol("hasParseCallback");
+var kIsGlobalContext = /* @__PURE__ */ Symbol("isGlobalContext");
+var kPostProcess = /* @__PURE__ */ Symbol("postProcess");
+var kRebase = /* @__PURE__ */ Symbol("rebase");
+var kReset = /* @__PURE__ */ Symbol("reset");
+var kRunYargsParserAndExecuteCommands = /* @__PURE__ */ Symbol("runYargsParserAndExecuteCommands");
+var kRunValidation = /* @__PURE__ */ Symbol("runValidation");
+var kSetHasOutput = /* @__PURE__ */ Symbol("setHasOutput");
+var kTrackManuallySetKeys = /* @__PURE__ */ Symbol("kTrackManuallySetKeys");
+var YargsInstance = class {
+  constructor(processArgs = [], cwd, parentRequire, shim3) {
+    this.customScriptName = false;
+    this.parsed = false;
+    _YargsInstance_command.set(this, void 0);
+    _YargsInstance_cwd.set(this, void 0);
+    _YargsInstance_context.set(this, { commands: [], fullCommands: [] });
+    _YargsInstance_completion.set(this, null);
+    _YargsInstance_completionCommand.set(this, null);
+    _YargsInstance_defaultShowHiddenOpt.set(this, "show-hidden");
+    _YargsInstance_exitError.set(this, null);
+    _YargsInstance_detectLocale.set(this, true);
+    _YargsInstance_emittedWarnings.set(this, {});
+    _YargsInstance_exitProcess.set(this, true);
+    _YargsInstance_frozens.set(this, []);
+    _YargsInstance_globalMiddleware.set(this, void 0);
+    _YargsInstance_groups.set(this, {});
+    _YargsInstance_hasOutput.set(this, false);
+    _YargsInstance_helpOpt.set(this, null);
+    _YargsInstance_isGlobalContext.set(this, true);
+    _YargsInstance_logger.set(this, void 0);
+    _YargsInstance_output.set(this, "");
+    _YargsInstance_options.set(this, void 0);
+    _YargsInstance_parentRequire.set(this, void 0);
+    _YargsInstance_parserConfig.set(this, {});
+    _YargsInstance_parseFn.set(this, null);
+    _YargsInstance_parseContext.set(this, null);
+    _YargsInstance_pkgs.set(this, {});
+    _YargsInstance_preservedGroups.set(this, {});
+    _YargsInstance_processArgs.set(this, void 0);
+    _YargsInstance_recommendCommands.set(this, false);
+    _YargsInstance_shim.set(this, void 0);
+    _YargsInstance_strict.set(this, false);
+    _YargsInstance_strictCommands.set(this, false);
+    _YargsInstance_strictOptions.set(this, false);
+    _YargsInstance_usage.set(this, void 0);
+    _YargsInstance_usageConfig.set(this, {});
+    _YargsInstance_versionOpt.set(this, null);
+    _YargsInstance_validation.set(this, void 0);
+    __classPrivateFieldSet(this, _YargsInstance_shim, shim3, "f");
+    __classPrivateFieldSet(this, _YargsInstance_processArgs, processArgs, "f");
+    __classPrivateFieldSet(this, _YargsInstance_cwd, cwd, "f");
+    __classPrivateFieldSet(this, _YargsInstance_parentRequire, parentRequire, "f");
+    __classPrivateFieldSet(this, _YargsInstance_globalMiddleware, new GlobalMiddleware(this), "f");
+    this.$0 = this[kGetDollarZero]();
+    this[kReset]();
+    __classPrivateFieldSet(this, _YargsInstance_command, __classPrivateFieldGet(this, _YargsInstance_command, "f"), "f");
+    __classPrivateFieldSet(this, _YargsInstance_usage, __classPrivateFieldGet(this, _YargsInstance_usage, "f"), "f");
+    __classPrivateFieldSet(this, _YargsInstance_validation, __classPrivateFieldGet(this, _YargsInstance_validation, "f"), "f");
+    __classPrivateFieldSet(this, _YargsInstance_options, __classPrivateFieldGet(this, _YargsInstance_options, "f"), "f");
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").showHiddenOpt = __classPrivateFieldGet(this, _YargsInstance_defaultShowHiddenOpt, "f");
+    __classPrivateFieldSet(this, _YargsInstance_logger, this[kCreateLogger](), "f");
+  }
+  addHelpOpt(opt, msg) {
+    const defaultHelpOpt = "help";
+    argsert("[string|boolean] [string]", [opt, msg], arguments.length);
+    if (__classPrivateFieldGet(this, _YargsInstance_helpOpt, "f")) {
+      this[kDeleteFromParserHintObject](__classPrivateFieldGet(this, _YargsInstance_helpOpt, "f"));
+      __classPrivateFieldSet(this, _YargsInstance_helpOpt, null, "f");
+    }
+    if (opt === false && msg === void 0)
+      return this;
+    __classPrivateFieldSet(this, _YargsInstance_helpOpt, typeof opt === "string" ? opt : defaultHelpOpt, "f");
+    this.boolean(__classPrivateFieldGet(this, _YargsInstance_helpOpt, "f"));
+    this.describe(__classPrivateFieldGet(this, _YargsInstance_helpOpt, "f"), msg || __classPrivateFieldGet(this, _YargsInstance_usage, "f").deferY18nLookup("Show help"));
+    return this;
+  }
+  help(opt, msg) {
+    return this.addHelpOpt(opt, msg);
+  }
+  addShowHiddenOpt(opt, msg) {
+    argsert("[string|boolean] [string]", [opt, msg], arguments.length);
+    if (opt === false && msg === void 0)
+      return this;
+    const showHiddenOpt = typeof opt === "string" ? opt : __classPrivateFieldGet(this, _YargsInstance_defaultShowHiddenOpt, "f");
+    this.boolean(showHiddenOpt);
+    this.describe(showHiddenOpt, msg || __classPrivateFieldGet(this, _YargsInstance_usage, "f").deferY18nLookup("Show hidden options"));
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").showHiddenOpt = showHiddenOpt;
+    return this;
+  }
+  showHidden(opt, msg) {
+    return this.addShowHiddenOpt(opt, msg);
+  }
+  alias(key, value) {
+    argsert("<object|string|array> [string|array]", [key, value], arguments.length);
+    this[kPopulateParserHintArrayDictionary](this.alias.bind(this), "alias", key, value);
+    return this;
+  }
+  array(keys) {
+    argsert("<array|string>", [keys], arguments.length);
+    this[kPopulateParserHintArray]("array", keys);
+    this[kTrackManuallySetKeys](keys);
+    return this;
+  }
+  boolean(keys) {
+    argsert("<array|string>", [keys], arguments.length);
+    this[kPopulateParserHintArray]("boolean", keys);
+    this[kTrackManuallySetKeys](keys);
+    return this;
+  }
+  check(f, global) {
+    argsert("<function> [boolean]", [f, global], arguments.length);
+    this.middleware((argv, _yargs) => {
+      return maybeAsyncResult(() => {
+        return f(argv, _yargs.getOptions());
+      }, (result) => {
+        if (!result) {
+          __classPrivateFieldGet(this, _YargsInstance_usage, "f").fail(__classPrivateFieldGet(this, _YargsInstance_shim, "f").y18n.__("Argument check failed: %s", f.toString()));
+        } else if (typeof result === "string" || result instanceof Error) {
+          __classPrivateFieldGet(this, _YargsInstance_usage, "f").fail(result.toString(), result);
+        }
+        return argv;
+      }, (err) => {
+        __classPrivateFieldGet(this, _YargsInstance_usage, "f").fail(err.message ? err.message : err.toString(), err);
+        return argv;
+      });
+    }, false, global);
+    return this;
+  }
+  choices(key, value) {
+    argsert("<object|string|array> [string|array]", [key, value], arguments.length);
+    this[kPopulateParserHintArrayDictionary](this.choices.bind(this), "choices", key, value);
+    return this;
+  }
+  coerce(keys, value) {
+    argsert("<object|string|array> [function]", [keys, value], arguments.length);
+    if (Array.isArray(keys)) {
+      if (!value) {
+        throw new YError("coerce callback must be provided");
+      }
+      for (const key of keys) {
+        this.coerce(key, value);
+      }
+      return this;
+    } else if (typeof keys === "object") {
+      for (const key of Object.keys(keys)) {
+        this.coerce(key, keys[key]);
+      }
+      return this;
+    }
+    if (!value) {
+      throw new YError("coerce callback must be provided");
+    }
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").key[keys] = true;
+    __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f").addCoerceMiddleware((argv, yargs) => {
+      let aliases;
+      const shouldCoerce = Object.prototype.hasOwnProperty.call(argv, keys);
+      if (!shouldCoerce) {
+        return argv;
+      }
+      return maybeAsyncResult(() => {
+        aliases = yargs.getAliases();
+        return value(argv[keys]);
+      }, (result) => {
+        argv[keys] = result;
+        const stripAliased = yargs.getInternalMethods().getParserConfiguration()["strip-aliased"];
+        if (aliases[keys] && stripAliased !== true) {
+          for (const alias of aliases[keys]) {
+            argv[alias] = result;
+          }
+        }
+        return argv;
+      }, (err) => {
+        throw new YError(err.message);
+      });
+    }, keys);
+    return this;
+  }
+  conflicts(key1, key2) {
+    argsert("<string|object> [string|array]", [key1, key2], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_validation, "f").conflicts(key1, key2);
+    return this;
+  }
+  config(key = "config", msg, parseFn) {
+    argsert("[object|string] [string|function] [function]", [key, msg, parseFn], arguments.length);
+    if (typeof key === "object" && !Array.isArray(key)) {
+      key = applyExtends(key, __classPrivateFieldGet(this, _YargsInstance_cwd, "f"), this[kGetParserConfiguration]()["deep-merge-config"] || false, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+      __classPrivateFieldGet(this, _YargsInstance_options, "f").configObjects = (__classPrivateFieldGet(this, _YargsInstance_options, "f").configObjects || []).concat(key);
+      return this;
+    }
+    if (typeof msg === "function") {
+      parseFn = msg;
+      msg = void 0;
+    }
+    this.describe(key, msg || __classPrivateFieldGet(this, _YargsInstance_usage, "f").deferY18nLookup("Path to JSON config file"));
+    (Array.isArray(key) ? key : [key]).forEach((k) => {
+      __classPrivateFieldGet(this, _YargsInstance_options, "f").config[k] = parseFn || true;
+    });
+    return this;
+  }
+  completion(cmd, desc, fn) {
+    argsert("[string] [string|boolean|function] [function]", [cmd, desc, fn], arguments.length);
+    if (typeof desc === "function") {
+      fn = desc;
+      desc = void 0;
+    }
+    __classPrivateFieldSet(this, _YargsInstance_completionCommand, cmd || __classPrivateFieldGet(this, _YargsInstance_completionCommand, "f") || "completion", "f");
+    if (!desc && desc !== false) {
+      desc = "generate completion script";
+    }
+    this.command(__classPrivateFieldGet(this, _YargsInstance_completionCommand, "f"), desc);
+    if (fn)
+      __classPrivateFieldGet(this, _YargsInstance_completion, "f").registerFunction(fn);
+    return this;
+  }
+  command(cmd, description, builder, handler, middlewares, deprecated) {
+    argsert("<string|array|object> [string|boolean] [function|object] [function] [array] [boolean|string]", [cmd, description, builder, handler, middlewares, deprecated], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_command, "f").addHandler(cmd, description, builder, handler, middlewares, deprecated);
+    return this;
+  }
+  commands(cmd, description, builder, handler, middlewares, deprecated) {
+    return this.command(cmd, description, builder, handler, middlewares, deprecated);
+  }
+  commandDir(dir, opts) {
+    argsert("<string> [object]", [dir, opts], arguments.length);
+    const req = __classPrivateFieldGet(this, _YargsInstance_parentRequire, "f") || __classPrivateFieldGet(this, _YargsInstance_shim, "f").require;
+    __classPrivateFieldGet(this, _YargsInstance_command, "f").addDirectory(dir, req, __classPrivateFieldGet(this, _YargsInstance_shim, "f").getCallerFile(), opts);
+    return this;
+  }
+  count(keys) {
+    argsert("<array|string>", [keys], arguments.length);
+    this[kPopulateParserHintArray]("count", keys);
+    this[kTrackManuallySetKeys](keys);
+    return this;
+  }
+  default(key, value, defaultDescription) {
+    argsert("<object|string|array> [*] [string]", [key, value, defaultDescription], arguments.length);
+    if (defaultDescription) {
+      assertSingleKey(key, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+      __classPrivateFieldGet(this, _YargsInstance_options, "f").defaultDescription[key] = defaultDescription;
+    }
+    if (typeof value === "function") {
+      assertSingleKey(key, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+      if (!__classPrivateFieldGet(this, _YargsInstance_options, "f").defaultDescription[key])
+        __classPrivateFieldGet(this, _YargsInstance_options, "f").defaultDescription[key] = __classPrivateFieldGet(this, _YargsInstance_usage, "f").functionDescription(value);
+      value = value.call();
+    }
+    this[kPopulateParserHintSingleValueDictionary](this.default.bind(this), "default", key, value);
+    return this;
+  }
+  defaults(key, value, defaultDescription) {
+    return this.default(key, value, defaultDescription);
+  }
+  demandCommand(min = 1, max, minMsg, maxMsg) {
+    argsert("[number] [number|string] [string|null|undefined] [string|null|undefined]", [min, max, minMsg, maxMsg], arguments.length);
+    if (typeof max !== "number") {
+      minMsg = max;
+      max = Infinity;
+    }
+    this.global("_", false);
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").demandedCommands._ = {
+      min,
+      max,
+      minMsg,
+      maxMsg
+    };
+    return this;
+  }
+  demand(keys, max, msg) {
+    if (Array.isArray(max)) {
+      max.forEach((key) => {
+        assertNotStrictEqual(msg, true, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+        this.demandOption(key, msg);
+      });
+      max = Infinity;
+    } else if (typeof max !== "number") {
+      msg = max;
+      max = Infinity;
+    }
+    if (typeof keys === "number") {
+      assertNotStrictEqual(msg, true, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+      this.demandCommand(keys, max, msg, msg);
+    } else if (Array.isArray(keys)) {
+      keys.forEach((key) => {
+        assertNotStrictEqual(msg, true, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+        this.demandOption(key, msg);
+      });
+    } else {
+      if (typeof msg === "string") {
+        this.demandOption(keys, msg);
+      } else if (msg === true || typeof msg === "undefined") {
+        this.demandOption(keys);
+      }
+    }
+    return this;
+  }
+  demandOption(keys, msg) {
+    argsert("<object|string|array> [string]", [keys, msg], arguments.length);
+    this[kPopulateParserHintSingleValueDictionary](this.demandOption.bind(this), "demandedOptions", keys, msg);
+    return this;
+  }
+  deprecateOption(option, message) {
+    argsert("<string> [string|boolean]", [option, message], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").deprecatedOptions[option] = message;
+    return this;
+  }
+  describe(keys, description) {
+    argsert("<object|string|array> [string]", [keys, description], arguments.length);
+    this[kSetKey](keys, true);
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").describe(keys, description);
+    return this;
+  }
+  detectLocale(detect) {
+    argsert("<boolean>", [detect], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_detectLocale, detect, "f");
+    return this;
+  }
+  env(prefix) {
+    argsert("[string|boolean]", [prefix], arguments.length);
+    if (prefix === false)
+      delete __classPrivateFieldGet(this, _YargsInstance_options, "f").envPrefix;
+    else
+      __classPrivateFieldGet(this, _YargsInstance_options, "f").envPrefix = prefix || "";
+    return this;
+  }
+  epilogue(msg) {
+    argsert("<string>", [msg], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").epilog(msg);
+    return this;
+  }
+  epilog(msg) {
+    return this.epilogue(msg);
+  }
+  example(cmd, description) {
+    argsert("<string|array> [string]", [cmd, description], arguments.length);
+    if (Array.isArray(cmd)) {
+      cmd.forEach((exampleParams) => this.example(...exampleParams));
+    } else {
+      __classPrivateFieldGet(this, _YargsInstance_usage, "f").example(cmd, description);
+    }
+    return this;
+  }
+  exit(code, err) {
+    __classPrivateFieldSet(this, _YargsInstance_hasOutput, true, "f");
+    __classPrivateFieldSet(this, _YargsInstance_exitError, err, "f");
+    if (__classPrivateFieldGet(this, _YargsInstance_exitProcess, "f"))
+      __classPrivateFieldGet(this, _YargsInstance_shim, "f").process.exit(code);
+  }
+  exitProcess(enabled = true) {
+    argsert("[boolean]", [enabled], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_exitProcess, enabled, "f");
+    return this;
+  }
+  fail(f) {
+    argsert("<function|boolean>", [f], arguments.length);
+    if (typeof f === "boolean" && f !== false) {
+      throw new YError("Invalid first argument. Expected function or boolean 'false'");
+    }
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").failFn(f);
+    return this;
+  }
+  getAliases() {
+    return this.parsed ? this.parsed.aliases : {};
+  }
+  async getCompletion(args, done) {
+    argsert("<array> [function]", [args, done], arguments.length);
+    if (!done) {
+      return new Promise((resolve7, reject) => {
+        __classPrivateFieldGet(this, _YargsInstance_completion, "f").getCompletion(args, (err, completions) => {
+          if (err)
+            reject(err);
+          else
+            resolve7(completions);
+        });
+      });
+    } else {
+      return __classPrivateFieldGet(this, _YargsInstance_completion, "f").getCompletion(args, done);
+    }
+  }
+  getDemandedOptions() {
+    argsert([], 0);
+    return __classPrivateFieldGet(this, _YargsInstance_options, "f").demandedOptions;
+  }
+  getDemandedCommands() {
+    argsert([], 0);
+    return __classPrivateFieldGet(this, _YargsInstance_options, "f").demandedCommands;
+  }
+  getDeprecatedOptions() {
+    argsert([], 0);
+    return __classPrivateFieldGet(this, _YargsInstance_options, "f").deprecatedOptions;
+  }
+  getDetectLocale() {
+    return __classPrivateFieldGet(this, _YargsInstance_detectLocale, "f");
+  }
+  getExitProcess() {
+    return __classPrivateFieldGet(this, _YargsInstance_exitProcess, "f");
+  }
+  getGroups() {
+    return Object.assign({}, __classPrivateFieldGet(this, _YargsInstance_groups, "f"), __classPrivateFieldGet(this, _YargsInstance_preservedGroups, "f"));
+  }
+  getHelp() {
+    __classPrivateFieldSet(this, _YargsInstance_hasOutput, true, "f");
+    if (!__classPrivateFieldGet(this, _YargsInstance_usage, "f").hasCachedHelpMessage()) {
+      if (!this.parsed) {
+        const parse3 = this[kRunYargsParserAndExecuteCommands](__classPrivateFieldGet(this, _YargsInstance_processArgs, "f"), void 0, void 0, 0, true);
+        if (isPromise(parse3)) {
+          return parse3.then(() => {
+            return __classPrivateFieldGet(this, _YargsInstance_usage, "f").help();
+          });
+        }
+      }
+      const builderResponse = __classPrivateFieldGet(this, _YargsInstance_command, "f").runDefaultBuilderOn(this);
+      if (isPromise(builderResponse)) {
+        return builderResponse.then(() => {
+          return __classPrivateFieldGet(this, _YargsInstance_usage, "f").help();
+        });
+      }
+    }
+    return Promise.resolve(__classPrivateFieldGet(this, _YargsInstance_usage, "f").help());
+  }
+  getOptions() {
+    return __classPrivateFieldGet(this, _YargsInstance_options, "f");
+  }
+  getStrict() {
+    return __classPrivateFieldGet(this, _YargsInstance_strict, "f");
+  }
+  getStrictCommands() {
+    return __classPrivateFieldGet(this, _YargsInstance_strictCommands, "f");
+  }
+  getStrictOptions() {
+    return __classPrivateFieldGet(this, _YargsInstance_strictOptions, "f");
+  }
+  global(globals, global) {
+    argsert("<string|array> [boolean]", [globals, global], arguments.length);
+    globals = [].concat(globals);
+    if (global !== false) {
+      __classPrivateFieldGet(this, _YargsInstance_options, "f").local = __classPrivateFieldGet(this, _YargsInstance_options, "f").local.filter((l) => globals.indexOf(l) === -1);
+    } else {
+      globals.forEach((g) => {
+        if (!__classPrivateFieldGet(this, _YargsInstance_options, "f").local.includes(g))
+          __classPrivateFieldGet(this, _YargsInstance_options, "f").local.push(g);
+      });
+    }
+    return this;
+  }
+  group(opts, groupName) {
+    argsert("<string|array> <string>", [opts, groupName], arguments.length);
+    const existing = __classPrivateFieldGet(this, _YargsInstance_preservedGroups, "f")[groupName] || __classPrivateFieldGet(this, _YargsInstance_groups, "f")[groupName];
+    if (__classPrivateFieldGet(this, _YargsInstance_preservedGroups, "f")[groupName]) {
+      delete __classPrivateFieldGet(this, _YargsInstance_preservedGroups, "f")[groupName];
+    }
+    const seen = {};
+    __classPrivateFieldGet(this, _YargsInstance_groups, "f")[groupName] = (existing || []).concat(opts).filter((key) => {
+      if (seen[key])
+        return false;
+      return seen[key] = true;
+    });
+    return this;
+  }
+  hide(key) {
+    argsert("<string>", [key], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").hiddenOptions.push(key);
+    return this;
+  }
+  implies(key, value) {
+    argsert("<string|object> [number|string|array]", [key, value], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_validation, "f").implies(key, value);
+    return this;
+  }
+  locale(locale) {
+    argsert("[string]", [locale], arguments.length);
+    if (locale === void 0) {
+      this[kGuessLocale]();
+      return __classPrivateFieldGet(this, _YargsInstance_shim, "f").y18n.getLocale();
+    }
+    __classPrivateFieldSet(this, _YargsInstance_detectLocale, false, "f");
+    __classPrivateFieldGet(this, _YargsInstance_shim, "f").y18n.setLocale(locale);
+    return this;
+  }
+  middleware(callback, applyBeforeValidation, global) {
+    return __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f").addMiddleware(callback, !!applyBeforeValidation, global);
+  }
+  nargs(key, value) {
+    argsert("<string|object|array> [number]", [key, value], arguments.length);
+    this[kPopulateParserHintSingleValueDictionary](this.nargs.bind(this), "narg", key, value);
+    return this;
+  }
+  normalize(keys) {
+    argsert("<array|string>", [keys], arguments.length);
+    this[kPopulateParserHintArray]("normalize", keys);
+    return this;
+  }
+  number(keys) {
+    argsert("<array|string>", [keys], arguments.length);
+    this[kPopulateParserHintArray]("number", keys);
+    this[kTrackManuallySetKeys](keys);
+    return this;
+  }
+  option(key, opt) {
+    argsert("<string|object> [object]", [key, opt], arguments.length);
+    if (typeof key === "object") {
+      Object.keys(key).forEach((k) => {
+        this.options(k, key[k]);
+      });
+    } else {
+      if (typeof opt !== "object") {
+        opt = {};
+      }
+      this[kTrackManuallySetKeys](key);
+      if (__classPrivateFieldGet(this, _YargsInstance_versionOpt, "f") && (key === "version" || (opt === null || opt === void 0 ? void 0 : opt.alias) === "version")) {
+        this[kEmitWarning]([
+          '"version" is a reserved word.',
+          "Please do one of the following:",
+          '- Disable version with `yargs.version(false)` if using "version" as an option',
+          "- Use the built-in `yargs.version` method instead (if applicable)",
+          "- Use a different option key",
+          "https://yargs.js.org/docs/#api-reference-version"
+        ].join("\n"), void 0, "versionWarning");
+      }
+      __classPrivateFieldGet(this, _YargsInstance_options, "f").key[key] = true;
+      if (opt.alias)
+        this.alias(key, opt.alias);
+      const deprecate = opt.deprecate || opt.deprecated;
+      if (deprecate) {
+        this.deprecateOption(key, deprecate);
+      }
+      const demand = opt.demand || opt.required || opt.require;
+      if (demand) {
+        this.demand(key, demand);
+      }
+      if (opt.demandOption) {
+        this.demandOption(key, typeof opt.demandOption === "string" ? opt.demandOption : void 0);
+      }
+      if (opt.conflicts) {
+        this.conflicts(key, opt.conflicts);
+      }
+      if ("default" in opt) {
+        this.default(key, opt.default);
+      }
+      if (opt.implies !== void 0) {
+        this.implies(key, opt.implies);
+      }
+      if (opt.nargs !== void 0) {
+        this.nargs(key, opt.nargs);
+      }
+      if (opt.config) {
+        this.config(key, opt.configParser);
+      }
+      if (opt.normalize) {
+        this.normalize(key);
+      }
+      if (opt.choices) {
+        this.choices(key, opt.choices);
+      }
+      if (opt.coerce) {
+        this.coerce(key, opt.coerce);
+      }
+      if (opt.group) {
+        this.group(key, opt.group);
+      }
+      if (opt.boolean || opt.type === "boolean") {
+        this.boolean(key);
+        if (opt.alias)
+          this.boolean(opt.alias);
+      }
+      if (opt.array || opt.type === "array") {
+        this.array(key);
+        if (opt.alias)
+          this.array(opt.alias);
+      }
+      if (opt.number || opt.type === "number") {
+        this.number(key);
+        if (opt.alias)
+          this.number(opt.alias);
+      }
+      if (opt.string || opt.type === "string") {
+        this.string(key);
+        if (opt.alias)
+          this.string(opt.alias);
+      }
+      if (opt.count || opt.type === "count") {
+        this.count(key);
+      }
+      if (typeof opt.global === "boolean") {
+        this.global(key, opt.global);
+      }
+      if (opt.defaultDescription) {
+        __classPrivateFieldGet(this, _YargsInstance_options, "f").defaultDescription[key] = opt.defaultDescription;
+      }
+      if (opt.skipValidation) {
+        this.skipValidation(key);
+      }
+      const desc = opt.describe || opt.description || opt.desc;
+      const descriptions = __classPrivateFieldGet(this, _YargsInstance_usage, "f").getDescriptions();
+      if (!Object.prototype.hasOwnProperty.call(descriptions, key) || typeof desc === "string") {
+        this.describe(key, desc);
+      }
+      if (opt.hidden) {
+        this.hide(key);
+      }
+      if (opt.requiresArg) {
+        this.requiresArg(key);
+      }
+    }
+    return this;
+  }
+  options(key, opt) {
+    return this.option(key, opt);
+  }
+  parse(args, shortCircuit, _parseFn) {
+    argsert("[string|array] [function|boolean|object] [function]", [args, shortCircuit, _parseFn], arguments.length);
+    this[kFreeze]();
+    if (typeof args === "undefined") {
+      args = __classPrivateFieldGet(this, _YargsInstance_processArgs, "f");
+    }
+    if (typeof shortCircuit === "object") {
+      __classPrivateFieldSet(this, _YargsInstance_parseContext, shortCircuit, "f");
+      shortCircuit = _parseFn;
+    }
+    if (typeof shortCircuit === "function") {
+      __classPrivateFieldSet(this, _YargsInstance_parseFn, shortCircuit, "f");
+      shortCircuit = false;
+    }
+    if (!shortCircuit)
+      __classPrivateFieldSet(this, _YargsInstance_processArgs, args, "f");
+    if (__classPrivateFieldGet(this, _YargsInstance_parseFn, "f"))
+      __classPrivateFieldSet(this, _YargsInstance_exitProcess, false, "f");
+    const parsed = this[kRunYargsParserAndExecuteCommands](args, !!shortCircuit);
+    const tmpParsed = this.parsed;
+    __classPrivateFieldGet(this, _YargsInstance_completion, "f").setParsed(this.parsed);
+    if (isPromise(parsed)) {
+      return parsed.then((argv) => {
+        if (__classPrivateFieldGet(this, _YargsInstance_parseFn, "f"))
+          __classPrivateFieldGet(this, _YargsInstance_parseFn, "f").call(this, __classPrivateFieldGet(this, _YargsInstance_exitError, "f"), argv, __classPrivateFieldGet(this, _YargsInstance_output, "f"));
+        return argv;
+      }).catch((err) => {
+        if (__classPrivateFieldGet(this, _YargsInstance_parseFn, "f")) {
+          __classPrivateFieldGet(this, _YargsInstance_parseFn, "f")(err, this.parsed.argv, __classPrivateFieldGet(this, _YargsInstance_output, "f"));
+        }
+        throw err;
+      }).finally(() => {
+        this[kUnfreeze]();
+        this.parsed = tmpParsed;
+      });
+    } else {
+      if (__classPrivateFieldGet(this, _YargsInstance_parseFn, "f"))
+        __classPrivateFieldGet(this, _YargsInstance_parseFn, "f").call(this, __classPrivateFieldGet(this, _YargsInstance_exitError, "f"), parsed, __classPrivateFieldGet(this, _YargsInstance_output, "f"));
+      this[kUnfreeze]();
+      this.parsed = tmpParsed;
+    }
+    return parsed;
+  }
+  parseAsync(args, shortCircuit, _parseFn) {
+    const maybePromise = this.parse(args, shortCircuit, _parseFn);
+    return !isPromise(maybePromise) ? Promise.resolve(maybePromise) : maybePromise;
+  }
+  parseSync(args, shortCircuit, _parseFn) {
+    const maybePromise = this.parse(args, shortCircuit, _parseFn);
+    if (isPromise(maybePromise)) {
+      throw new YError(".parseSync() must not be used with asynchronous builders, handlers, or middleware");
+    }
+    return maybePromise;
+  }
+  parserConfiguration(config2) {
+    argsert("<object>", [config2], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_parserConfig, config2, "f");
+    return this;
+  }
+  pkgConf(key, rootPath) {
+    argsert("<string> [string]", [key, rootPath], arguments.length);
+    let conf = null;
+    const obj = this[kPkgUp](rootPath || __classPrivateFieldGet(this, _YargsInstance_cwd, "f"));
+    if (obj[key] && typeof obj[key] === "object") {
+      conf = applyExtends(obj[key], rootPath || __classPrivateFieldGet(this, _YargsInstance_cwd, "f"), this[kGetParserConfiguration]()["deep-merge-config"] || false, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+      __classPrivateFieldGet(this, _YargsInstance_options, "f").configObjects = (__classPrivateFieldGet(this, _YargsInstance_options, "f").configObjects || []).concat(conf);
+    }
+    return this;
+  }
+  positional(key, opts) {
+    argsert("<string> <object>", [key, opts], arguments.length);
+    const supportedOpts = [
+      "default",
+      "defaultDescription",
+      "implies",
+      "normalize",
+      "choices",
+      "conflicts",
+      "coerce",
+      "type",
+      "describe",
+      "desc",
+      "description",
+      "alias"
+    ];
+    opts = objFilter(opts, (k, v) => {
+      if (k === "type" && !["string", "number", "boolean"].includes(v))
+        return false;
+      return supportedOpts.includes(k);
+    });
+    const fullCommand = __classPrivateFieldGet(this, _YargsInstance_context, "f").fullCommands[__classPrivateFieldGet(this, _YargsInstance_context, "f").fullCommands.length - 1];
+    const parseOptions = fullCommand ? __classPrivateFieldGet(this, _YargsInstance_command, "f").cmdToParseOptions(fullCommand) : {
+      array: [],
+      alias: {},
+      default: {},
+      demand: {}
+    };
+    objectKeys(parseOptions).forEach((pk) => {
+      const parseOption = parseOptions[pk];
+      if (Array.isArray(parseOption)) {
+        if (parseOption.indexOf(key) !== -1)
+          opts[pk] = true;
+      } else {
+        if (parseOption[key] && !(pk in opts))
+          opts[pk] = parseOption[key];
+      }
+    });
+    this.group(key, __classPrivateFieldGet(this, _YargsInstance_usage, "f").getPositionalGroupName());
+    return this.option(key, opts);
+  }
+  recommendCommands(recommend = true) {
+    argsert("[boolean]", [recommend], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_recommendCommands, recommend, "f");
+    return this;
+  }
+  required(keys, max, msg) {
+    return this.demand(keys, max, msg);
+  }
+  require(keys, max, msg) {
+    return this.demand(keys, max, msg);
+  }
+  requiresArg(keys) {
+    argsert("<array|string|object> [number]", [keys], arguments.length);
+    if (typeof keys === "string" && __classPrivateFieldGet(this, _YargsInstance_options, "f").narg[keys]) {
+      return this;
+    } else {
+      this[kPopulateParserHintSingleValueDictionary](this.requiresArg.bind(this), "narg", keys, NaN);
+    }
+    return this;
+  }
+  showCompletionScript($0, cmd) {
+    argsert("[string] [string]", [$0, cmd], arguments.length);
+    $0 = $0 || this.$0;
+    __classPrivateFieldGet(this, _YargsInstance_logger, "f").log(__classPrivateFieldGet(this, _YargsInstance_completion, "f").generateCompletionScript($0, cmd || __classPrivateFieldGet(this, _YargsInstance_completionCommand, "f") || "completion"));
+    return this;
+  }
+  showHelp(level) {
+    argsert("[string|function]", [level], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_hasOutput, true, "f");
+    if (!__classPrivateFieldGet(this, _YargsInstance_usage, "f").hasCachedHelpMessage()) {
+      if (!this.parsed) {
+        const parse3 = this[kRunYargsParserAndExecuteCommands](__classPrivateFieldGet(this, _YargsInstance_processArgs, "f"), void 0, void 0, 0, true);
+        if (isPromise(parse3)) {
+          parse3.then(() => {
+            __classPrivateFieldGet(this, _YargsInstance_usage, "f").showHelp(level);
+          });
+          return this;
+        }
+      }
+      const builderResponse = __classPrivateFieldGet(this, _YargsInstance_command, "f").runDefaultBuilderOn(this);
+      if (isPromise(builderResponse)) {
+        builderResponse.then(() => {
+          __classPrivateFieldGet(this, _YargsInstance_usage, "f").showHelp(level);
+        });
+        return this;
+      }
+    }
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").showHelp(level);
+    return this;
+  }
+  scriptName(scriptName) {
+    this.customScriptName = true;
+    this.$0 = scriptName;
+    return this;
+  }
+  showHelpOnFail(enabled, message) {
+    argsert("[boolean|string] [string]", [enabled, message], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").showHelpOnFail(enabled, message);
+    return this;
+  }
+  showVersion(level) {
+    argsert("[string|function]", [level], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").showVersion(level);
+    return this;
+  }
+  skipValidation(keys) {
+    argsert("<array|string>", [keys], arguments.length);
+    this[kPopulateParserHintArray]("skipValidation", keys);
+    return this;
+  }
+  strict(enabled) {
+    argsert("[boolean]", [enabled], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_strict, enabled !== false, "f");
+    return this;
+  }
+  strictCommands(enabled) {
+    argsert("[boolean]", [enabled], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_strictCommands, enabled !== false, "f");
+    return this;
+  }
+  strictOptions(enabled) {
+    argsert("[boolean]", [enabled], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_strictOptions, enabled !== false, "f");
+    return this;
+  }
+  string(keys) {
+    argsert("<array|string>", [keys], arguments.length);
+    this[kPopulateParserHintArray]("string", keys);
+    this[kTrackManuallySetKeys](keys);
+    return this;
+  }
+  terminalWidth() {
+    argsert([], 0);
+    return __classPrivateFieldGet(this, _YargsInstance_shim, "f").process.stdColumns;
+  }
+  updateLocale(obj) {
+    return this.updateStrings(obj);
+  }
+  updateStrings(obj) {
+    argsert("<object>", [obj], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_detectLocale, false, "f");
+    __classPrivateFieldGet(this, _YargsInstance_shim, "f").y18n.updateLocale(obj);
+    return this;
+  }
+  usage(msg, description, builder, handler) {
+    argsert("<string|null|undefined> [string|boolean] [function|object] [function]", [msg, description, builder, handler], arguments.length);
+    if (description !== void 0) {
+      assertNotStrictEqual(msg, null, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+      if ((msg || "").match(/^\$0( |$)/)) {
+        return this.command(msg, description, builder, handler);
+      } else {
+        throw new YError(".usage() description must start with $0 if being used as alias for .command()");
+      }
+    } else {
+      __classPrivateFieldGet(this, _YargsInstance_usage, "f").usage(msg);
+      return this;
+    }
+  }
+  usageConfiguration(config2) {
+    argsert("<object>", [config2], arguments.length);
+    __classPrivateFieldSet(this, _YargsInstance_usageConfig, config2, "f");
+    return this;
+  }
+  version(opt, msg, ver) {
+    const defaultVersionOpt = "version";
+    argsert("[boolean|string] [string] [string]", [opt, msg, ver], arguments.length);
+    if (__classPrivateFieldGet(this, _YargsInstance_versionOpt, "f")) {
+      this[kDeleteFromParserHintObject](__classPrivateFieldGet(this, _YargsInstance_versionOpt, "f"));
+      __classPrivateFieldGet(this, _YargsInstance_usage, "f").version(void 0);
+      __classPrivateFieldSet(this, _YargsInstance_versionOpt, null, "f");
+    }
+    if (arguments.length === 0) {
+      ver = this[kGuessVersion]();
+      opt = defaultVersionOpt;
+    } else if (arguments.length === 1) {
+      if (opt === false) {
+        return this;
+      }
+      ver = opt;
+      opt = defaultVersionOpt;
+    } else if (arguments.length === 2) {
+      ver = msg;
+      msg = void 0;
+    }
+    __classPrivateFieldSet(this, _YargsInstance_versionOpt, typeof opt === "string" ? opt : defaultVersionOpt, "f");
+    msg = msg || __classPrivateFieldGet(this, _YargsInstance_usage, "f").deferY18nLookup("Show version number");
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").version(ver || void 0);
+    this.boolean(__classPrivateFieldGet(this, _YargsInstance_versionOpt, "f"));
+    this.describe(__classPrivateFieldGet(this, _YargsInstance_versionOpt, "f"), msg);
+    return this;
+  }
+  wrap(cols) {
+    argsert("<number|null|undefined>", [cols], arguments.length);
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").wrap(cols);
+    return this;
+  }
+  [(_YargsInstance_command = /* @__PURE__ */ new WeakMap(), _YargsInstance_cwd = /* @__PURE__ */ new WeakMap(), _YargsInstance_context = /* @__PURE__ */ new WeakMap(), _YargsInstance_completion = /* @__PURE__ */ new WeakMap(), _YargsInstance_completionCommand = /* @__PURE__ */ new WeakMap(), _YargsInstance_defaultShowHiddenOpt = /* @__PURE__ */ new WeakMap(), _YargsInstance_exitError = /* @__PURE__ */ new WeakMap(), _YargsInstance_detectLocale = /* @__PURE__ */ new WeakMap(), _YargsInstance_emittedWarnings = /* @__PURE__ */ new WeakMap(), _YargsInstance_exitProcess = /* @__PURE__ */ new WeakMap(), _YargsInstance_frozens = /* @__PURE__ */ new WeakMap(), _YargsInstance_globalMiddleware = /* @__PURE__ */ new WeakMap(), _YargsInstance_groups = /* @__PURE__ */ new WeakMap(), _YargsInstance_hasOutput = /* @__PURE__ */ new WeakMap(), _YargsInstance_helpOpt = /* @__PURE__ */ new WeakMap(), _YargsInstance_isGlobalContext = /* @__PURE__ */ new WeakMap(), _YargsInstance_logger = /* @__PURE__ */ new WeakMap(), _YargsInstance_output = /* @__PURE__ */ new WeakMap(), _YargsInstance_options = /* @__PURE__ */ new WeakMap(), _YargsInstance_parentRequire = /* @__PURE__ */ new WeakMap(), _YargsInstance_parserConfig = /* @__PURE__ */ new WeakMap(), _YargsInstance_parseFn = /* @__PURE__ */ new WeakMap(), _YargsInstance_parseContext = /* @__PURE__ */ new WeakMap(), _YargsInstance_pkgs = /* @__PURE__ */ new WeakMap(), _YargsInstance_preservedGroups = /* @__PURE__ */ new WeakMap(), _YargsInstance_processArgs = /* @__PURE__ */ new WeakMap(), _YargsInstance_recommendCommands = /* @__PURE__ */ new WeakMap(), _YargsInstance_shim = /* @__PURE__ */ new WeakMap(), _YargsInstance_strict = /* @__PURE__ */ new WeakMap(), _YargsInstance_strictCommands = /* @__PURE__ */ new WeakMap(), _YargsInstance_strictOptions = /* @__PURE__ */ new WeakMap(), _YargsInstance_usage = /* @__PURE__ */ new WeakMap(), _YargsInstance_usageConfig = /* @__PURE__ */ new WeakMap(), _YargsInstance_versionOpt = /* @__PURE__ */ new WeakMap(), _YargsInstance_validation = /* @__PURE__ */ new WeakMap(), kCopyDoubleDash)](argv) {
+    if (!argv._ || !argv["--"])
+      return argv;
+    argv._.push.apply(argv._, argv["--"]);
+    try {
+      delete argv["--"];
+    } catch (_err) {
+    }
+    return argv;
+  }
+  [kCreateLogger]() {
+    return {
+      log: (...args) => {
+        if (!this[kHasParseCallback]())
+          console.log(...args);
+        __classPrivateFieldSet(this, _YargsInstance_hasOutput, true, "f");
+        if (__classPrivateFieldGet(this, _YargsInstance_output, "f").length)
+          __classPrivateFieldSet(this, _YargsInstance_output, __classPrivateFieldGet(this, _YargsInstance_output, "f") + "\n", "f");
+        __classPrivateFieldSet(this, _YargsInstance_output, __classPrivateFieldGet(this, _YargsInstance_output, "f") + args.join(" "), "f");
+      },
+      error: (...args) => {
+        if (!this[kHasParseCallback]())
+          console.error(...args);
+        __classPrivateFieldSet(this, _YargsInstance_hasOutput, true, "f");
+        if (__classPrivateFieldGet(this, _YargsInstance_output, "f").length)
+          __classPrivateFieldSet(this, _YargsInstance_output, __classPrivateFieldGet(this, _YargsInstance_output, "f") + "\n", "f");
+        __classPrivateFieldSet(this, _YargsInstance_output, __classPrivateFieldGet(this, _YargsInstance_output, "f") + args.join(" "), "f");
+      }
+    };
+  }
+  [kDeleteFromParserHintObject](optionKey) {
+    objectKeys(__classPrivateFieldGet(this, _YargsInstance_options, "f")).forEach((hintKey) => {
+      if (/* @__PURE__ */ ((key) => key === "configObjects")(hintKey))
+        return;
+      const hint = __classPrivateFieldGet(this, _YargsInstance_options, "f")[hintKey];
+      if (Array.isArray(hint)) {
+        if (hint.includes(optionKey))
+          hint.splice(hint.indexOf(optionKey), 1);
+      } else if (typeof hint === "object") {
+        delete hint[optionKey];
+      }
+    });
+    delete __classPrivateFieldGet(this, _YargsInstance_usage, "f").getDescriptions()[optionKey];
+  }
+  [kEmitWarning](warning, type2, deduplicationId) {
+    if (!__classPrivateFieldGet(this, _YargsInstance_emittedWarnings, "f")[deduplicationId]) {
+      __classPrivateFieldGet(this, _YargsInstance_shim, "f").process.emitWarning(warning, type2);
+      __classPrivateFieldGet(this, _YargsInstance_emittedWarnings, "f")[deduplicationId] = true;
+    }
+  }
+  [kFreeze]() {
+    __classPrivateFieldGet(this, _YargsInstance_frozens, "f").push({
+      options: __classPrivateFieldGet(this, _YargsInstance_options, "f"),
+      configObjects: __classPrivateFieldGet(this, _YargsInstance_options, "f").configObjects.slice(0),
+      exitProcess: __classPrivateFieldGet(this, _YargsInstance_exitProcess, "f"),
+      groups: __classPrivateFieldGet(this, _YargsInstance_groups, "f"),
+      strict: __classPrivateFieldGet(this, _YargsInstance_strict, "f"),
+      strictCommands: __classPrivateFieldGet(this, _YargsInstance_strictCommands, "f"),
+      strictOptions: __classPrivateFieldGet(this, _YargsInstance_strictOptions, "f"),
+      completionCommand: __classPrivateFieldGet(this, _YargsInstance_completionCommand, "f"),
+      output: __classPrivateFieldGet(this, _YargsInstance_output, "f"),
+      exitError: __classPrivateFieldGet(this, _YargsInstance_exitError, "f"),
+      hasOutput: __classPrivateFieldGet(this, _YargsInstance_hasOutput, "f"),
+      parsed: this.parsed,
+      parseFn: __classPrivateFieldGet(this, _YargsInstance_parseFn, "f"),
+      parseContext: __classPrivateFieldGet(this, _YargsInstance_parseContext, "f")
+    });
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").freeze();
+    __classPrivateFieldGet(this, _YargsInstance_validation, "f").freeze();
+    __classPrivateFieldGet(this, _YargsInstance_command, "f").freeze();
+    __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f").freeze();
+  }
+  [kGetDollarZero]() {
+    let $0 = "";
+    let default$0;
+    if (/\b(node|iojs|electron)(\.exe)?$/.test(__classPrivateFieldGet(this, _YargsInstance_shim, "f").process.argv()[0])) {
+      default$0 = __classPrivateFieldGet(this, _YargsInstance_shim, "f").process.argv().slice(1, 2);
+    } else {
+      default$0 = __classPrivateFieldGet(this, _YargsInstance_shim, "f").process.argv().slice(0, 1);
+    }
+    $0 = default$0.map((x) => {
+      const b = this[kRebase](__classPrivateFieldGet(this, _YargsInstance_cwd, "f"), x);
+      return x.match(/^(\/|([a-zA-Z]:)?\\)/) && b.length < x.length ? b : x;
+    }).join(" ").trim();
+    if (__classPrivateFieldGet(this, _YargsInstance_shim, "f").getEnv("_") && __classPrivateFieldGet(this, _YargsInstance_shim, "f").getProcessArgvBin() === __classPrivateFieldGet(this, _YargsInstance_shim, "f").getEnv("_")) {
+      $0 = __classPrivateFieldGet(this, _YargsInstance_shim, "f").getEnv("_").replace(`${__classPrivateFieldGet(this, _YargsInstance_shim, "f").path.dirname(__classPrivateFieldGet(this, _YargsInstance_shim, "f").process.execPath())}/`, "");
+    }
+    return $0;
+  }
+  [kGetParserConfiguration]() {
+    return __classPrivateFieldGet(this, _YargsInstance_parserConfig, "f");
+  }
+  [kGetUsageConfiguration]() {
+    return __classPrivateFieldGet(this, _YargsInstance_usageConfig, "f");
+  }
+  [kGuessLocale]() {
+    if (!__classPrivateFieldGet(this, _YargsInstance_detectLocale, "f"))
+      return;
+    const locale = __classPrivateFieldGet(this, _YargsInstance_shim, "f").getEnv("LC_ALL") || __classPrivateFieldGet(this, _YargsInstance_shim, "f").getEnv("LC_MESSAGES") || __classPrivateFieldGet(this, _YargsInstance_shim, "f").getEnv("LANG") || __classPrivateFieldGet(this, _YargsInstance_shim, "f").getEnv("LANGUAGE") || "en_US";
+    this.locale(locale.replace(/[.:].*/, ""));
+  }
+  [kGuessVersion]() {
+    const obj = this[kPkgUp]();
+    return obj.version || "unknown";
+  }
+  [kParsePositionalNumbers](argv) {
+    const args = argv["--"] ? argv["--"] : argv._;
+    for (let i = 0, arg; (arg = args[i]) !== void 0; i++) {
+      if (__classPrivateFieldGet(this, _YargsInstance_shim, "f").Parser.looksLikeNumber(arg) && Number.isSafeInteger(Math.floor(parseFloat(`${arg}`)))) {
+        args[i] = Number(arg);
+      }
+    }
+    return argv;
+  }
+  [kPkgUp](rootPath) {
+    const npath = rootPath || "*";
+    if (__classPrivateFieldGet(this, _YargsInstance_pkgs, "f")[npath])
+      return __classPrivateFieldGet(this, _YargsInstance_pkgs, "f")[npath];
+    let obj = {};
+    try {
+      let startDir = rootPath || __classPrivateFieldGet(this, _YargsInstance_shim, "f").mainFilename;
+      if (!rootPath && __classPrivateFieldGet(this, _YargsInstance_shim, "f").path.extname(startDir)) {
+        startDir = __classPrivateFieldGet(this, _YargsInstance_shim, "f").path.dirname(startDir);
+      }
+      const pkgJsonPath = __classPrivateFieldGet(this, _YargsInstance_shim, "f").findUp(startDir, (dir, names) => {
+        if (names.includes("package.json")) {
+          return "package.json";
+        } else {
+          return void 0;
+        }
+      });
+      assertNotStrictEqual(pkgJsonPath, void 0, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+      obj = JSON.parse(__classPrivateFieldGet(this, _YargsInstance_shim, "f").readFileSync(pkgJsonPath, "utf8"));
+    } catch (_noop) {
+    }
+    __classPrivateFieldGet(this, _YargsInstance_pkgs, "f")[npath] = obj || {};
+    return __classPrivateFieldGet(this, _YargsInstance_pkgs, "f")[npath];
+  }
+  [kPopulateParserHintArray](type2, keys) {
+    keys = [].concat(keys);
+    keys.forEach((key) => {
+      key = this[kSanitizeKey](key);
+      __classPrivateFieldGet(this, _YargsInstance_options, "f")[type2].push(key);
+    });
+  }
+  [kPopulateParserHintSingleValueDictionary](builder, type2, key, value) {
+    this[kPopulateParserHintDictionary](builder, type2, key, value, (type3, key2, value2) => {
+      __classPrivateFieldGet(this, _YargsInstance_options, "f")[type3][key2] = value2;
+    });
+  }
+  [kPopulateParserHintArrayDictionary](builder, type2, key, value) {
+    this[kPopulateParserHintDictionary](builder, type2, key, value, (type3, key2, value2) => {
+      __classPrivateFieldGet(this, _YargsInstance_options, "f")[type3][key2] = (__classPrivateFieldGet(this, _YargsInstance_options, "f")[type3][key2] || []).concat(value2);
+    });
+  }
+  [kPopulateParserHintDictionary](builder, type2, key, value, singleKeyHandler) {
+    if (Array.isArray(key)) {
+      key.forEach((k) => {
+        builder(k, value);
+      });
+    } else if (/* @__PURE__ */ ((key2) => typeof key2 === "object")(key)) {
+      for (const k of objectKeys(key)) {
+        builder(k, key[k]);
+      }
+    } else {
+      singleKeyHandler(type2, this[kSanitizeKey](key), value);
+    }
+  }
+  [kSanitizeKey](key) {
+    if (key === "__proto__")
+      return "___proto___";
+    return key;
+  }
+  [kSetKey](key, set2) {
+    this[kPopulateParserHintSingleValueDictionary](this[kSetKey].bind(this), "key", key, set2);
+    return this;
+  }
+  [kUnfreeze]() {
+    var _a2, _b2, _c2, _d, _e, _f, _g, _h, _j, _k, _l, _m;
+    const frozen = __classPrivateFieldGet(this, _YargsInstance_frozens, "f").pop();
+    assertNotStrictEqual(frozen, void 0, __classPrivateFieldGet(this, _YargsInstance_shim, "f"));
+    let configObjects;
+    _a2 = this, _b2 = this, _c2 = this, _d = this, _e = this, _f = this, _g = this, _h = this, _j = this, _k = this, _l = this, _m = this, {
+      options: { set value(_o) {
+        __classPrivateFieldSet(_a2, _YargsInstance_options, _o, "f");
+      } }.value,
+      configObjects,
+      exitProcess: { set value(_o) {
+        __classPrivateFieldSet(_b2, _YargsInstance_exitProcess, _o, "f");
+      } }.value,
+      groups: { set value(_o) {
+        __classPrivateFieldSet(_c2, _YargsInstance_groups, _o, "f");
+      } }.value,
+      output: { set value(_o) {
+        __classPrivateFieldSet(_d, _YargsInstance_output, _o, "f");
+      } }.value,
+      exitError: { set value(_o) {
+        __classPrivateFieldSet(_e, _YargsInstance_exitError, _o, "f");
+      } }.value,
+      hasOutput: { set value(_o) {
+        __classPrivateFieldSet(_f, _YargsInstance_hasOutput, _o, "f");
+      } }.value,
+      parsed: this.parsed,
+      strict: { set value(_o) {
+        __classPrivateFieldSet(_g, _YargsInstance_strict, _o, "f");
+      } }.value,
+      strictCommands: { set value(_o) {
+        __classPrivateFieldSet(_h, _YargsInstance_strictCommands, _o, "f");
+      } }.value,
+      strictOptions: { set value(_o) {
+        __classPrivateFieldSet(_j, _YargsInstance_strictOptions, _o, "f");
+      } }.value,
+      completionCommand: { set value(_o) {
+        __classPrivateFieldSet(_k, _YargsInstance_completionCommand, _o, "f");
+      } }.value,
+      parseFn: { set value(_o) {
+        __classPrivateFieldSet(_l, _YargsInstance_parseFn, _o, "f");
+      } }.value,
+      parseContext: { set value(_o) {
+        __classPrivateFieldSet(_m, _YargsInstance_parseContext, _o, "f");
+      } }.value
+    } = frozen;
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").configObjects = configObjects;
+    __classPrivateFieldGet(this, _YargsInstance_usage, "f").unfreeze();
+    __classPrivateFieldGet(this, _YargsInstance_validation, "f").unfreeze();
+    __classPrivateFieldGet(this, _YargsInstance_command, "f").unfreeze();
+    __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f").unfreeze();
+  }
+  [kValidateAsync](validation2, argv) {
+    return maybeAsyncResult(argv, (result) => {
+      validation2(result);
+      return result;
+    });
+  }
+  getInternalMethods() {
+    return {
+      getCommandInstance: this[kGetCommandInstance].bind(this),
+      getContext: this[kGetContext].bind(this),
+      getHasOutput: this[kGetHasOutput].bind(this),
+      getLoggerInstance: this[kGetLoggerInstance].bind(this),
+      getParseContext: this[kGetParseContext].bind(this),
+      getParserConfiguration: this[kGetParserConfiguration].bind(this),
+      getUsageConfiguration: this[kGetUsageConfiguration].bind(this),
+      getUsageInstance: this[kGetUsageInstance].bind(this),
+      getValidationInstance: this[kGetValidationInstance].bind(this),
+      hasParseCallback: this[kHasParseCallback].bind(this),
+      isGlobalContext: this[kIsGlobalContext].bind(this),
+      postProcess: this[kPostProcess].bind(this),
+      reset: this[kReset].bind(this),
+      runValidation: this[kRunValidation].bind(this),
+      runYargsParserAndExecuteCommands: this[kRunYargsParserAndExecuteCommands].bind(this),
+      setHasOutput: this[kSetHasOutput].bind(this)
+    };
+  }
+  [kGetCommandInstance]() {
+    return __classPrivateFieldGet(this, _YargsInstance_command, "f");
+  }
+  [kGetContext]() {
+    return __classPrivateFieldGet(this, _YargsInstance_context, "f");
+  }
+  [kGetHasOutput]() {
+    return __classPrivateFieldGet(this, _YargsInstance_hasOutput, "f");
+  }
+  [kGetLoggerInstance]() {
+    return __classPrivateFieldGet(this, _YargsInstance_logger, "f");
+  }
+  [kGetParseContext]() {
+    return __classPrivateFieldGet(this, _YargsInstance_parseContext, "f") || {};
+  }
+  [kGetUsageInstance]() {
+    return __classPrivateFieldGet(this, _YargsInstance_usage, "f");
+  }
+  [kGetValidationInstance]() {
+    return __classPrivateFieldGet(this, _YargsInstance_validation, "f");
+  }
+  [kHasParseCallback]() {
+    return !!__classPrivateFieldGet(this, _YargsInstance_parseFn, "f");
+  }
+  [kIsGlobalContext]() {
+    return __classPrivateFieldGet(this, _YargsInstance_isGlobalContext, "f");
+  }
+  [kPostProcess](argv, populateDoubleDash, calledFromCommand, runGlobalMiddleware) {
+    if (calledFromCommand)
+      return argv;
+    if (isPromise(argv))
+      return argv;
+    if (!populateDoubleDash) {
+      argv = this[kCopyDoubleDash](argv);
+    }
+    const parsePositionalNumbers = this[kGetParserConfiguration]()["parse-positional-numbers"] || this[kGetParserConfiguration]()["parse-positional-numbers"] === void 0;
+    if (parsePositionalNumbers) {
+      argv = this[kParsePositionalNumbers](argv);
+    }
+    if (runGlobalMiddleware) {
+      argv = applyMiddleware(argv, this, __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f").getMiddleware(), false);
+    }
+    return argv;
+  }
+  [kReset](aliases = {}) {
+    __classPrivateFieldSet(this, _YargsInstance_options, __classPrivateFieldGet(this, _YargsInstance_options, "f") || {}, "f");
+    const tmpOptions = {};
+    tmpOptions.local = __classPrivateFieldGet(this, _YargsInstance_options, "f").local || [];
+    tmpOptions.configObjects = __classPrivateFieldGet(this, _YargsInstance_options, "f").configObjects || [];
+    const localLookup = {};
+    tmpOptions.local.forEach((l) => {
+      localLookup[l] = true;
+      (aliases[l] || []).forEach((a) => {
+        localLookup[a] = true;
+      });
+    });
+    Object.assign(__classPrivateFieldGet(this, _YargsInstance_preservedGroups, "f"), Object.keys(__classPrivateFieldGet(this, _YargsInstance_groups, "f")).reduce((acc, groupName) => {
+      const keys = __classPrivateFieldGet(this, _YargsInstance_groups, "f")[groupName].filter((key) => !(key in localLookup));
+      if (keys.length > 0) {
+        acc[groupName] = keys;
+      }
+      return acc;
+    }, {}));
+    __classPrivateFieldSet(this, _YargsInstance_groups, {}, "f");
+    const arrayOptions = [
+      "array",
+      "boolean",
+      "string",
+      "skipValidation",
+      "count",
+      "normalize",
+      "number",
+      "hiddenOptions"
+    ];
+    const objectOptions = [
+      "narg",
+      "key",
+      "alias",
+      "default",
+      "defaultDescription",
+      "config",
+      "choices",
+      "demandedOptions",
+      "demandedCommands",
+      "deprecatedOptions"
+    ];
+    arrayOptions.forEach((k) => {
+      tmpOptions[k] = (__classPrivateFieldGet(this, _YargsInstance_options, "f")[k] || []).filter((k2) => !localLookup[k2]);
+    });
+    objectOptions.forEach((k) => {
+      tmpOptions[k] = objFilter(__classPrivateFieldGet(this, _YargsInstance_options, "f")[k], (k2) => !localLookup[k2]);
+    });
+    tmpOptions.envPrefix = __classPrivateFieldGet(this, _YargsInstance_options, "f").envPrefix;
+    __classPrivateFieldSet(this, _YargsInstance_options, tmpOptions, "f");
+    __classPrivateFieldSet(this, _YargsInstance_usage, __classPrivateFieldGet(this, _YargsInstance_usage, "f") ? __classPrivateFieldGet(this, _YargsInstance_usage, "f").reset(localLookup) : usage(this, __classPrivateFieldGet(this, _YargsInstance_shim, "f")), "f");
+    __classPrivateFieldSet(this, _YargsInstance_validation, __classPrivateFieldGet(this, _YargsInstance_validation, "f") ? __classPrivateFieldGet(this, _YargsInstance_validation, "f").reset(localLookup) : validation(this, __classPrivateFieldGet(this, _YargsInstance_usage, "f"), __classPrivateFieldGet(this, _YargsInstance_shim, "f")), "f");
+    __classPrivateFieldSet(this, _YargsInstance_command, __classPrivateFieldGet(this, _YargsInstance_command, "f") ? __classPrivateFieldGet(this, _YargsInstance_command, "f").reset() : command(__classPrivateFieldGet(this, _YargsInstance_usage, "f"), __classPrivateFieldGet(this, _YargsInstance_validation, "f"), __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f"), __classPrivateFieldGet(this, _YargsInstance_shim, "f")), "f");
+    if (!__classPrivateFieldGet(this, _YargsInstance_completion, "f"))
+      __classPrivateFieldSet(this, _YargsInstance_completion, completion(this, __classPrivateFieldGet(this, _YargsInstance_usage, "f"), __classPrivateFieldGet(this, _YargsInstance_command, "f"), __classPrivateFieldGet(this, _YargsInstance_shim, "f")), "f");
+    __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f").reset();
+    __classPrivateFieldSet(this, _YargsInstance_completionCommand, null, "f");
+    __classPrivateFieldSet(this, _YargsInstance_output, "", "f");
+    __classPrivateFieldSet(this, _YargsInstance_exitError, null, "f");
+    __classPrivateFieldSet(this, _YargsInstance_hasOutput, false, "f");
+    this.parsed = false;
+    return this;
+  }
+  [kRebase](base, dir) {
+    return __classPrivateFieldGet(this, _YargsInstance_shim, "f").path.relative(base, dir);
+  }
+  [kRunYargsParserAndExecuteCommands](args, shortCircuit, calledFromCommand, commandIndex = 0, helpOnly = false) {
+    let skipValidation = !!calledFromCommand || helpOnly;
+    args = args || __classPrivateFieldGet(this, _YargsInstance_processArgs, "f");
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").__ = __classPrivateFieldGet(this, _YargsInstance_shim, "f").y18n.__;
+    __classPrivateFieldGet(this, _YargsInstance_options, "f").configuration = this[kGetParserConfiguration]();
+    const populateDoubleDash = !!__classPrivateFieldGet(this, _YargsInstance_options, "f").configuration["populate--"];
+    const config2 = Object.assign({}, __classPrivateFieldGet(this, _YargsInstance_options, "f").configuration, {
+      "populate--": true
+    });
+    const parsed = __classPrivateFieldGet(this, _YargsInstance_shim, "f").Parser.detailed(args, Object.assign({}, __classPrivateFieldGet(this, _YargsInstance_options, "f"), {
+      configuration: { "parse-positional-numbers": false, ...config2 }
+    }));
+    const argv = Object.assign(parsed.argv, __classPrivateFieldGet(this, _YargsInstance_parseContext, "f"));
+    let argvPromise = void 0;
+    const aliases = parsed.aliases;
+    let helpOptSet = false;
+    let versionOptSet = false;
+    Object.keys(argv).forEach((key) => {
+      if (key === __classPrivateFieldGet(this, _YargsInstance_helpOpt, "f") && argv[key]) {
+        helpOptSet = true;
+      } else if (key === __classPrivateFieldGet(this, _YargsInstance_versionOpt, "f") && argv[key]) {
+        versionOptSet = true;
+      }
+    });
+    argv.$0 = this.$0;
+    this.parsed = parsed;
+    if (commandIndex === 0) {
+      __classPrivateFieldGet(this, _YargsInstance_usage, "f").clearCachedHelpMessage();
+    }
+    try {
+      this[kGuessLocale]();
+      if (shortCircuit) {
+        return this[kPostProcess](argv, populateDoubleDash, !!calledFromCommand, false);
+      }
+      if (__classPrivateFieldGet(this, _YargsInstance_helpOpt, "f")) {
+        const helpCmds = [__classPrivateFieldGet(this, _YargsInstance_helpOpt, "f")].concat(aliases[__classPrivateFieldGet(this, _YargsInstance_helpOpt, "f")] || []).filter((k) => k.length > 1);
+        if (helpCmds.includes("" + argv._[argv._.length - 1])) {
+          argv._.pop();
+          helpOptSet = true;
+        }
+      }
+      __classPrivateFieldSet(this, _YargsInstance_isGlobalContext, false, "f");
+      const handlerKeys = __classPrivateFieldGet(this, _YargsInstance_command, "f").getCommands();
+      const requestCompletions = __classPrivateFieldGet(this, _YargsInstance_completion, "f").completionKey in argv;
+      const skipRecommendation = helpOptSet || requestCompletions || helpOnly;
+      if (argv._.length) {
+        if (handlerKeys.length) {
+          let firstUnknownCommand;
+          for (let i = commandIndex || 0, cmd; argv._[i] !== void 0; i++) {
+            cmd = String(argv._[i]);
+            if (handlerKeys.includes(cmd) && cmd !== __classPrivateFieldGet(this, _YargsInstance_completionCommand, "f")) {
+              const innerArgv = __classPrivateFieldGet(this, _YargsInstance_command, "f").runCommand(cmd, this, parsed, i + 1, helpOnly, helpOptSet || versionOptSet || helpOnly);
+              return this[kPostProcess](innerArgv, populateDoubleDash, !!calledFromCommand, false);
+            } else if (!firstUnknownCommand && cmd !== __classPrivateFieldGet(this, _YargsInstance_completionCommand, "f")) {
+              firstUnknownCommand = cmd;
+              break;
+            }
+          }
+          if (!__classPrivateFieldGet(this, _YargsInstance_command, "f").hasDefaultCommand() && __classPrivateFieldGet(this, _YargsInstance_recommendCommands, "f") && firstUnknownCommand && !skipRecommendation) {
+            __classPrivateFieldGet(this, _YargsInstance_validation, "f").recommendCommands(firstUnknownCommand, handlerKeys);
+          }
+        }
+        if (__classPrivateFieldGet(this, _YargsInstance_completionCommand, "f") && argv._.includes(__classPrivateFieldGet(this, _YargsInstance_completionCommand, "f")) && !requestCompletions) {
+          if (__classPrivateFieldGet(this, _YargsInstance_exitProcess, "f"))
+            setBlocking(true);
+          this.showCompletionScript();
+          this.exit(0);
+        }
+      }
+      if (__classPrivateFieldGet(this, _YargsInstance_command, "f").hasDefaultCommand() && !skipRecommendation) {
+        const innerArgv = __classPrivateFieldGet(this, _YargsInstance_command, "f").runCommand(null, this, parsed, 0, helpOnly, helpOptSet || versionOptSet || helpOnly);
+        return this[kPostProcess](innerArgv, populateDoubleDash, !!calledFromCommand, false);
+      }
+      if (requestCompletions) {
+        if (__classPrivateFieldGet(this, _YargsInstance_exitProcess, "f"))
+          setBlocking(true);
+        args = [].concat(args);
+        const completionArgs = args.slice(args.indexOf(`--${__classPrivateFieldGet(this, _YargsInstance_completion, "f").completionKey}`) + 1);
+        __classPrivateFieldGet(this, _YargsInstance_completion, "f").getCompletion(completionArgs, (err, completions) => {
+          if (err)
+            throw new YError(err.message);
+          (completions || []).forEach((completion2) => {
+            __classPrivateFieldGet(this, _YargsInstance_logger, "f").log(completion2);
+          });
+          this.exit(0);
+        });
+        return this[kPostProcess](argv, !populateDoubleDash, !!calledFromCommand, false);
+      }
+      if (!__classPrivateFieldGet(this, _YargsInstance_hasOutput, "f")) {
+        if (helpOptSet) {
+          if (__classPrivateFieldGet(this, _YargsInstance_exitProcess, "f"))
+            setBlocking(true);
+          skipValidation = true;
+          this.showHelp("log");
+          this.exit(0);
+        } else if (versionOptSet) {
+          if (__classPrivateFieldGet(this, _YargsInstance_exitProcess, "f"))
+            setBlocking(true);
+          skipValidation = true;
+          __classPrivateFieldGet(this, _YargsInstance_usage, "f").showVersion("log");
+          this.exit(0);
+        }
+      }
+      if (!skipValidation && __classPrivateFieldGet(this, _YargsInstance_options, "f").skipValidation.length > 0) {
+        skipValidation = Object.keys(argv).some((key) => __classPrivateFieldGet(this, _YargsInstance_options, "f").skipValidation.indexOf(key) >= 0 && argv[key] === true);
+      }
+      if (!skipValidation) {
+        if (parsed.error)
+          throw new YError(parsed.error.message);
+        if (!requestCompletions) {
+          const validation2 = this[kRunValidation](aliases, {}, parsed.error);
+          if (!calledFromCommand) {
+            argvPromise = applyMiddleware(argv, this, __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f").getMiddleware(), true);
+          }
+          argvPromise = this[kValidateAsync](validation2, argvPromise !== null && argvPromise !== void 0 ? argvPromise : argv);
+          if (isPromise(argvPromise) && !calledFromCommand) {
+            argvPromise = argvPromise.then(() => {
+              return applyMiddleware(argv, this, __classPrivateFieldGet(this, _YargsInstance_globalMiddleware, "f").getMiddleware(), false);
+            });
+          }
+        }
+      }
+    } catch (err) {
+      if (err instanceof YError)
+        __classPrivateFieldGet(this, _YargsInstance_usage, "f").fail(err.message, err);
+      else
+        throw err;
+    }
+    return this[kPostProcess](argvPromise !== null && argvPromise !== void 0 ? argvPromise : argv, populateDoubleDash, !!calledFromCommand, true);
+  }
+  [kRunValidation](aliases, positionalMap, parseErrors, isDefaultCommand) {
+    const demandedOptions = { ...this.getDemandedOptions() };
+    return (argv) => {
+      if (parseErrors)
+        throw new YError(parseErrors.message);
+      __classPrivateFieldGet(this, _YargsInstance_validation, "f").nonOptionCount(argv);
+      __classPrivateFieldGet(this, _YargsInstance_validation, "f").requiredArguments(argv, demandedOptions);
+      let failedStrictCommands = false;
+      if (__classPrivateFieldGet(this, _YargsInstance_strictCommands, "f")) {
+        failedStrictCommands = __classPrivateFieldGet(this, _YargsInstance_validation, "f").unknownCommands(argv);
+      }
+      if (__classPrivateFieldGet(this, _YargsInstance_strict, "f") && !failedStrictCommands) {
+        __classPrivateFieldGet(this, _YargsInstance_validation, "f").unknownArguments(argv, aliases, positionalMap, !!isDefaultCommand);
+      } else if (__classPrivateFieldGet(this, _YargsInstance_strictOptions, "f")) {
+        __classPrivateFieldGet(this, _YargsInstance_validation, "f").unknownArguments(argv, aliases, {}, false, false);
+      }
+      __classPrivateFieldGet(this, _YargsInstance_validation, "f").limitedChoices(argv);
+      __classPrivateFieldGet(this, _YargsInstance_validation, "f").implications(argv);
+      __classPrivateFieldGet(this, _YargsInstance_validation, "f").conflicting(argv);
+    };
+  }
+  [kSetHasOutput]() {
+    __classPrivateFieldSet(this, _YargsInstance_hasOutput, true, "f");
+  }
+  [kTrackManuallySetKeys](keys) {
+    if (typeof keys === "string") {
+      __classPrivateFieldGet(this, _YargsInstance_options, "f").key[keys] = true;
+    } else {
+      for (const k of keys) {
+        __classPrivateFieldGet(this, _YargsInstance_options, "f").key[k] = true;
+      }
+    }
+  }
+};
+function isYargsInstance(y) {
+  return !!y && typeof y.getInternalMethods === "function";
+}
+
+// ../../node_modules/.pnpm/yargs@17.7.2/node_modules/yargs/index.mjs
+var Yargs = YargsFactory(esm_default);
+
+// ../../pipeline-cli/dist/cli/complete-task.js
+var SymbolicLinkError = class extends Error {
+  path;
+  constructor(path) {
+    super(`[cli-task-complete] SECURITY: ${path} is a symbolic link.
+Refusing to read/write through a symlink \u2014 resolve the target manually.`);
+    this.name = "SymbolicLinkError";
+    this.path = path;
+  }
+};
+var DuplicateTaskFileError = class extends Error {
+  taskId;
+  tasksPath;
+  completedPath;
+  constructor(taskId, tasksPath, completedPath) {
+    super(`[cli-task-complete] DUPLICATE DETECTED: ${taskId} exists in BOTH backlog locations.
+  tasks/:     ${tasksPath}
+  completed/: ${completedPath}
+Remove the tasks/ copy manually (or via a lifecycle-close PR) before proceeding.`);
+    this.name = "DuplicateTaskFileError";
+    this.taskId = taskId;
+    this.tasksPath = tasksPath;
+    this.completedPath = completedPath;
+  }
+};
+function findFileInDir(dir, idLower) {
+  if (!existsSync13(dir))
+    return null;
+  let entries;
+  try {
+    entries = readdirSync7(dir);
+  } catch {
+    return null;
+  }
+  const prefix = `${idLower} -`;
+  const match = entries.find((name) => name.toLowerCase().startsWith(prefix));
+  return match ? join15(dir, match) : null;
+}
+function patchStatusDone(raw) {
+  let inFm = false;
+  let fmCount = 0;
+  return raw.split("\n").map((line) => {
+    if (line === "---") {
+      fmCount++;
+      if (fmCount === 1)
+        inFm = true;
+      else if (fmCount === 2)
+        inFm = false;
+      return line;
+    }
+    if (inFm && /^status:/.test(line)) {
+      return "status: Done";
+    }
+    return line;
+  }).join("\n");
+}
+function completeTaskAtomically(taskId, workDir = process.cwd()) {
+  const idLower = taskId.toLowerCase();
+  const tasksDir = join15(workDir, "backlog", "tasks");
+  const completedDir = join15(workDir, "backlog", "completed");
+  const tasksFile = findFileInDir(tasksDir, idLower);
+  const completedFile = findFileInDir(completedDir, idLower);
+  if (tasksFile !== null && completedFile !== null) {
+    throw new DuplicateTaskFileError(taskId, tasksFile, completedFile);
+  }
+  if (completedFile !== null) {
+    return { taskId, location: completedFile, alreadyDone: true };
+  }
+  if (tasksFile === null) {
+    throw new Error(`[cli-task-complete] Task file not found for ${taskId} under ${tasksDir}
+Ensure the file exists with a name matching "${idLower} - *.md".`);
+  }
+  const stat = lstatSync(tasksFile);
+  if (stat.isSymbolicLink()) {
+    throw new SymbolicLinkError(tasksFile);
+  }
+  const raw = readFileSync14(tasksFile, "utf8");
+  const patched = patchStatusDone(raw);
+  mkdirSync6(completedDir, { recursive: true });
+  const fileName = basename3(tasksFile);
+  const destPath = join15(completedDir, fileName);
+  const tmpPath = join15(completedDir, `.tmp-${process.pid}-${fileName}`);
+  writeFileSync5(tmpPath, patched, "utf8");
+  renameSync2(tmpPath, destPath);
+  unlinkSync(tasksFile);
+  if (!existsSync13(destPath)) {
+    throw new Error(`[cli-task-complete] Move appeared to succeed but ${destPath} does not exist post-move.`);
+  }
+  if (existsSync13(tasksFile)) {
+    throw new DuplicateTaskFileError(taskId, tasksFile, destPath);
+  }
+  return { taskId, from: tasksFile, to: destPath, verified: true, alreadyDone: false };
+}
+
+// ../../pipeline-cli/dist/steps/10-finalize.js
 function buildFinalSummary(opts) {
   const allAcs = opts.task.acceptanceCriteria.map((_, i) => i + 1);
   const acceptanceCriteriaCheck = opts.developerReturn.acceptanceCriteriaMet.length > 0 ? opts.developerReturn.acceptanceCriteriaMet : allAcs;
@@ -25979,12 +30931,12 @@ ${opts.developerReturn.notes ?? "(none)"}
   return { finalSummary, acceptanceCriteriaCheck };
 }
 function moveTaskToCompleted(taskFilePath) {
-  const fileName = basename2(taskFilePath);
-  const tasksDir = dirname4(taskFilePath);
-  const completedDir = join15(dirname4(tasksDir), "completed");
-  mkdirSync6(completedDir, { recursive: true });
-  const destPath = join15(completedDir, fileName);
-  renameSync2(taskFilePath, destPath);
+  const fileName = basename4(taskFilePath);
+  const tasksDir = dirname6(taskFilePath);
+  const completedDir = join16(dirname6(tasksDir), "completed");
+  mkdirSync7(completedDir, { recursive: true });
+  const destPath = join16(completedDir, fileName);
+  renameSync3(taskFilePath, destPath);
   return destPath;
 }
 async function finalizeTask(opts) {
@@ -26003,14 +30955,20 @@ async function finalizeTask(opts) {
   if (!taskFile) {
     throw new Error(`finalize: cannot locate task file for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`);
   }
-  const raw = readFileSync11(taskFile, "utf8");
-  const patched = patchFrontmatterStatus(raw, "Done");
-  writeFileSync5(taskFile, patched, "utf8");
-  const completedPath = moveTaskToCompleted(taskFile);
+  let completedPath;
+  if (opts.useAtomicCompletion) {
+    const result = completeTaskAtomically(opts.taskId, opts.worktreePath);
+    completedPath = result.alreadyDone ? result.location : result.to;
+  } else {
+    const raw = readFileSync15(taskFile, "utf8");
+    const patched = patchFrontmatterStatus(raw, "Done");
+    writeFileSync6(taskFile, patched, "utf8");
+    completedPath = moveTaskToCompleted(taskFile);
+  }
   parseTaskFile(completedPath);
   let attestationPath = null;
-  const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join15(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
-  if (helperScript && existsSync13(helperScript)) {
+  const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join16(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
+  if (helperScript && existsSync14(helperScript)) {
     const signResult = await runner("node", [helperScript], {
       cwd: opts.worktreePath,
       allowFailure: true
@@ -26057,8 +31015,8 @@ Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in t
 }
 
 // ../../pipeline-cli/dist/steps/11-late-rebase.js
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync6 } from "node:fs";
-import { join as join16 } from "node:path";
+import { readFileSync as readFileSync16, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join17 } from "node:path";
 function parseConflictingFiles(porcelain) {
   const files = [];
   for (const line of porcelain.split("\n")) {
@@ -26124,10 +31082,10 @@ function resolveTestConflict(content) {
   return result;
 }
 function tryResolveFile(filePath, worktreePath) {
-  const absPath = join16(worktreePath, filePath);
+  const absPath = join17(worktreePath, filePath);
   let content;
   try {
-    content = readFileSync12(absPath, "utf8");
+    content = readFileSync16(absPath, "utf8");
   } catch {
     return false;
   }
@@ -26143,7 +31101,7 @@ function tryResolveFile(filePath, worktreePath) {
   if (resolved === null || resolved.includes("<<<<<<<")) {
     return false;
   }
-  writeFileSync6(absPath, resolved, "utf8");
+  writeFileSync7(absPath, resolved, "utf8");
   return true;
 }
 async function lateRebase(opts) {
@@ -26252,16 +31210,16 @@ async function lateRebase(opts) {
 }
 
 // ../../pipeline-cli/dist/steps/11-push-and-pr.js
-import { existsSync as existsSync14, readFileSync as readFileSync13 } from "node:fs";
-import { join as join17 } from "node:path";
+import { existsSync as existsSync15, readFileSync as readFileSync17 } from "node:fs";
+import { join as join18 } from "node:path";
 var DEFAULT_TITLE_TEMPLATE = "feat: {issueTitle} ({issueId})";
 function readTitleTemplate(workDir) {
-  const path = join17(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
-  if (!existsSync14(path))
+  const path = join18(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
+  if (!existsSync15(path))
     return DEFAULT_TITLE_TEMPLATE;
   let raw;
   try {
-    raw = readFileSync13(path, "utf8");
+    raw = readFileSync17(path, "utf8");
   } catch {
     return DEFAULT_TITLE_TEMPLATE;
   }
@@ -26309,8 +31267,8 @@ async function pushAndPr(opts) {
     };
   }
   if (rebase.resolvedFiles.length > 0) {
-    const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join17(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
-    if (helperScript && existsSync14(helperScript)) {
+    const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join18(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
+    if (helperScript && existsSync15(helperScript)) {
       const signResult = await runner("node", [helperScript], {
         cwd: opts.worktreePath,
         allowFailure: true
@@ -26495,15 +31453,15 @@ ${filesList || "- (none)"}
 }
 
 // ../../pipeline-cli/dist/steps/13-cleanup.js
-import { existsSync as existsSync15, unlinkSync } from "node:fs";
-import { join as join18 } from "node:path";
+import { existsSync as existsSync16, unlinkSync as unlinkSync2 } from "node:fs";
+import { join as join19 } from "node:path";
 async function cleanupTask(opts) {
-  const sentinelPath = join18(opts.worktreePath, ".active-task");
-  if (!existsSync15(sentinelPath)) {
+  const sentinelPath = join19(opts.worktreePath, ".active-task");
+  if (!existsSync16(sentinelPath)) {
     return { sentinelRemoved: false };
   }
   try {
-    unlinkSync(sentinelPath);
+    unlinkSync2(sentinelPath);
     return { sentinelRemoved: true };
   } catch {
     return { sentinelRemoved: false };
@@ -26511,12 +31469,12 @@ async function cleanupTask(opts) {
 }
 
 // ../../pipeline-cli/dist/deps/dependency-graph.js
-import { existsSync as existsSync16, readdirSync as readdirSync6, readFileSync as readFileSync14, statSync as statSync5 } from "node:fs";
-import { join as join19 } from "node:path";
+import { existsSync as existsSync17, readdirSync as readdirSync8, readFileSync as readFileSync18, statSync as statSync7 } from "node:fs";
+import { join as join20 } from "node:path";
 
 // ../../pipeline-cli/dist/deps/snapshot.js
-import { existsSync as existsSync17, mkdirSync as mkdirSync7, readdirSync as readdirSync7, readFileSync as readFileSync15, statSync as statSync6, unlinkSync as unlinkSync2, writeFileSync as writeFileSync7 } from "node:fs";
-import { join as join20 } from "node:path";
+import { existsSync as existsSync18, mkdirSync as mkdirSync8, readdirSync as readdirSync9, readFileSync as readFileSync19, statSync as statSync8, unlinkSync as unlinkSync3, writeFileSync as writeFileSync8 } from "node:fs";
+import { join as join21 } from "node:path";
 
 // ../../pipeline-cli/dist/deps/effective-priority.js
 var PRIORITY_WEIGHT = {
@@ -26528,72 +31486,72 @@ var PRIORITY_WEIGHT = {
 var DEFAULT_PRIORITY_WEIGHT = PRIORITY_WEIGHT.medium;
 
 // ../../pipeline-cli/dist/deps/critical-path.js
-import { existsSync as existsSync18, readFileSync as readFileSync16 } from "node:fs";
+import { existsSync as existsSync19, readFileSync as readFileSync20 } from "node:fs";
 
 // ../../pipeline-cli/dist/deps/override-log.js
-import { appendFileSync, existsSync as existsSync19, mkdirSync as mkdirSync8, readFileSync as readFileSync17 } from "node:fs";
-import { dirname as dirname5, join as join21 } from "node:path";
+import { appendFileSync, existsSync as existsSync20, mkdirSync as mkdirSync9, readFileSync as readFileSync21 } from "node:fs";
+import { dirname as dirname7, join as join22 } from "node:path";
 
 // ../../pipeline-cli/dist/execute-pipeline.js
-import { existsSync as existsSync20 } from "node:fs";
+import { existsSync as existsSync21 } from "node:fs";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync29, readFileSync as readFileSync26 } from "node:fs";
-import { join as join31 } from "node:path";
+import { existsSync as existsSync30, readFileSync as readFileSync30 } from "node:fs";
+import { join as join32 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/dispatch-result.js
-import { mkdirSync as mkdirSync9, readFileSync as readFileSync18, writeFileSync as writeFileSync8 } from "node:fs";
-import { dirname as dirname6 } from "node:path";
+import { mkdirSync as mkdirSync10, readFileSync as readFileSync22, writeFileSync as writeFileSync9 } from "node:fs";
+import { dirname as dirname8 } from "node:path";
 
 // ../../pipeline-cli/dist/cli/execute.js
-import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync11 } from "node:fs";
-import { join as join23 } from "node:path";
+import { mkdirSync as mkdirSync12, writeFileSync as writeFileSync12 } from "node:fs";
+import { join as join24 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/claude-cli-inline.js
-import { mkdirSync as mkdirSync10, writeFileSync as writeFileSync9 } from "node:fs";
-import { dirname as dirname7 } from "node:path";
+import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync10 } from "node:fs";
+import { dirname as dirname9 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/rollback.js
 import { execSync as execSync4 } from "node:child_process";
-import { existsSync as existsSync21, readFileSync as readFileSync19, statSync as statSync7, writeFileSync as writeFileSync10 } from "node:fs";
-import { join as join22 } from "node:path";
+import { existsSync as existsSync22, readFileSync as readFileSync23, statSync as statSync9, writeFileSync as writeFileSync11 } from "node:fs";
+import { join as join23 } from "node:path";
 var SENTINEL_ACTIVE_THRESHOLD_MS2 = 6 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/events.js
-import { appendFileSync as appendFileSync2, existsSync as existsSync22, mkdirSync as mkdirSync12, readFileSync as readFileSync20, readdirSync as readdirSync8 } from "node:fs";
-import { dirname as dirname8, join as join24 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync23, mkdirSync as mkdirSync13, readFileSync as readFileSync24, readdirSync as readdirSync10 } from "node:fs";
+import { dirname as dirname10, join as join25 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/already-in-flight.js
 import { execSync as execSync5 } from "node:child_process";
-import { existsSync as existsSync23 } from "node:fs";
-import { join as join25 } from "node:path";
+import { existsSync as existsSync24 } from "node:fs";
+import { join as join26 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/dor-readiness.js
-import { existsSync as existsSync24, readFileSync as readFileSync21 } from "node:fs";
+import { existsSync as existsSync25, readFileSync as readFileSync25 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/calibration-log.js
-import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync13 } from "node:fs";
-import { dirname as dirname9, join as join26 } from "node:path";
+import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync14 } from "node:fs";
+import { dirname as dirname11, join as join27 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/external-dependencies.js
-import { existsSync as existsSync25, readFileSync as readFileSync22 } from "node:fs";
-import { join as join27 } from "node:path";
-
-// ../../pipeline-cli/dist/orchestrator/in-flight.js
-import { existsSync as existsSync26, readdirSync as readdirSync9, readFileSync as readFileSync23, statSync as statSync8 } from "node:fs";
+import { existsSync as existsSync26, readFileSync as readFileSync26 } from "node:fs";
 import { join as join28 } from "node:path";
 
-// ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
-import { existsSync as existsSync27, readFileSync as readFileSync24 } from "node:fs";
+// ../../pipeline-cli/dist/orchestrator/in-flight.js
+import { existsSync as existsSync27, readdirSync as readdirSync11, readFileSync as readFileSync27, statSync as statSync10 } from "node:fs";
 import { join as join29 } from "node:path";
+
+// ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
+import { existsSync as existsSync28, readFileSync as readFileSync28 } from "node:fs";
+import { join as join30 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/handlers/long-running-pr.js
 var LONG_RUNNING_PR_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/playbook/state-machine.js
-import { existsSync as existsSync28, mkdirSync as mkdirSync14, readFileSync as readFileSync25, writeFileSync as writeFileSync12 } from "node:fs";
-import { dirname as dirname10, join as join30 } from "node:path";
+import { existsSync as existsSync29, mkdirSync as mkdirSync15, readFileSync as readFileSync29, writeFileSync as writeFileSync13 } from "node:fs";
+import { dirname as dirname12, join as join31 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 var MAX_IDLE_SLEEP_SEC = 5 * 60;
@@ -26603,7 +31561,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 // ../../pipeline-cli/dist/classifier/classifier.js
 import { appendFile, mkdir } from "node:fs/promises";
-import { dirname as dirname11, join as join32 } from "node:path";
+import { dirname as dirname13, join as join33 } from "node:path";
 
 // ../../pipeline-cli/dist/classifier/budget-classifier.js
 var BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
@@ -26616,8 +31574,8 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync31, readFileSync as readFileSync27, readdirSync as readdirSync11, statSync as statSync10 } from "node:fs";
-import { basename as basename3, join as join34, relative } from "node:path";
+import { existsSync as existsSync32, readFileSync as readFileSync31, readdirSync as readdirSync13, statSync as statSync12 } from "node:fs";
+import { basename as basename5, join as join35, relative as relative2 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
 var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
@@ -26626,22 +31584,22 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync32, readFileSync as readFileSync28 } from "node:fs";
-import { join as join35 } from "node:path";
-
-// ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync33, readFileSync as readFileSync29, readdirSync as readdirSync12 } from "node:fs";
+import { existsSync as existsSync33, readFileSync as readFileSync32 } from "node:fs";
 import { join as join36 } from "node:path";
 
+// ../../pipeline-cli/dist/dor/ingress-claude.js
+import { existsSync as existsSync34, readFileSync as readFileSync33, readdirSync as readdirSync14 } from "node:fs";
+import { join as join37 } from "node:path";
+
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync34, readFileSync as readFileSync30 } from "node:fs";
+import { existsSync as existsSync35, readFileSync as readFileSync34 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync35, readFileSync as readFileSync31 } from "node:fs";
-import { join as join37 } from "node:path";
+import { existsSync as existsSync36, readFileSync as readFileSync35 } from "node:fs";
+import { join as join38 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {
