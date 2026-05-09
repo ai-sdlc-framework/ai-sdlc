@@ -44,6 +44,13 @@ export interface MakeTaskOptions {
    * pointing at a parent (e.g. AISDLC-70.1 → AISDLC-70).
    */
   parentTaskId?: string;
+  /**
+   * AISDLC-243 — `dispatchable:` frontmatter field. When `false`, the
+   * Dispatchability filter rejects the task and the frontier table annotates
+   * it with `[non-dispatchable]`. Omitting the field is equivalent to `true`
+   * (backward-compatible default).
+   */
+  dispatchable?: boolean;
 }
 
 /**
@@ -97,6 +104,9 @@ export function writeTaskFile(workDir: string, opts: MakeTaskOptions): string {
   }
   if (opts.parentTaskId) {
     fmLines.push(`parent_task_id: ${opts.parentTaskId}`);
+  }
+  if (opts.dispatchable === false) {
+    fmLines.push(`dispatchable: false`);
   }
 
   const acLines = acs.map((ac, i) => `- [${checked[i] ? 'x' : ' '}] #${i + 1} ${ac}`).join('\n');

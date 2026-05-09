@@ -95,6 +95,23 @@ describe('cli-deps router', () => {
     expect(text).toContain('alpha');
   });
 
+  // AISDLC-243: non-dispatchable tasks must show [non-dispatchable] annotation
+  // in the frontier table; normal tasks must NOT show it.
+  it('frontier --format table annotates non-dispatchable tasks and leaves normal tasks unmarked', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-ND', title: 'soak task', dispatchable: false });
+    writeTaskFile(tmp, { id: 'AISDLC-OK', title: 'normal task' });
+    setArgv('frontier', '--format', 'table', '--work-dir', tmp);
+    await buildDepsCli().parseAsync();
+    const text = stdoutText();
+    // Non-dispatchable task row must contain the annotation.
+    expect(text).toContain('AISDLC-ND');
+    expect(text).toContain('[non-dispatchable]');
+    // Normal task row must NOT contain the annotation.
+    const okLine = text.split('\n').find((l) => l.includes('AISDLC-OK'));
+    expect(okLine).toBeDefined();
+    expect(okLine).not.toContain('[non-dispatchable]');
+  });
+
   it('blockers lists the transitive open deps for a task', async () => {
     writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
     writeTaskFile(tmp, { id: 'AISDLC-B', title: 'b', dependencies: ['AISDLC-A'] });

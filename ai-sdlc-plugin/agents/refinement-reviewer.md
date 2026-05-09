@@ -150,6 +150,67 @@ Stage A already caught the structural cases. You catch:
 - **Gate 7:** unstated structural assumptions a fresh developer would
   trip over ("after the auth rewrite ships" without any link/issue).
 
+## Dispatchability heuristic — suggest `dispatchable: false` (RFC-0011 §7.4 / AISDLC-243)
+
+After scoring the DoR gates above, scan the task **title** and **body** for
+patterns that signal the task is permanently not LLM-dispatchable — i.e. it
+requires human judgment, operator presence, or monitoring, not code production.
+
+### Trigger patterns (case-insensitive substring match)
+
+- **Soak / stability monitoring**: "Soak", "soak phase", "stability soak", "monitor stability"
+- **Investigation / diagnosis**: "Investigation", "Investigate", "Diagnose", "Diagnosis", "Look into"
+- **Operator-only action**: "Operator-only", "Operator monitors", "Operator decides", "operator action"
+- **Manual step**: "Manual", "manually"
+
+### What to output when matched
+
+When the title **or** any line of the body contains one of these patterns AND
+you have **medium or high confidence** that the task is genuinely not
+LLM-dispatchable (not merely that a word appeared in passing), append the
+following to your `summary` field and include a new `dispatchabilityHint`
+object in your JSON output:
+
+```json
+{
+  "dispatchabilityHint": {
+    "suggest": false,
+    "reason": "<one-sentence explaining which pattern matched and why this task is not LLM-dispatchable>",
+    "confidence": "high | medium"
+  }
+}
+```
+
+**Recommendation text** — also include the following line in your `summary`
+so the orchestrator / reviewer can see it at a glance:
+
+> Recommendation: add `dispatchable: false` and `dispatchableReason: <one-sentence>` to frontmatter
+
+### Confidence-gated: stay silent on low-confidence matches
+
+- If the pattern word appears once in a passing clause ("this soak phase will
+  end when…") but the overall task clearly describes a code deliverable, do
+  NOT emit `dispatchabilityHint`. Omit the field entirely.
+- Only emit when you have **medium or high confidence** that a reviewer looking
+  at the same task would agree "this is not code work, it's human monitoring or
+  investigation."
+- Reserve the hint for clear cases — the safe default is `dispatchable: true`
+  (no hint). A missed hint is a recoverable manual fix; a false positive that
+  blocks a real code task is a worse failure mode.
+
+### This heuristic does NOT override the DoR gates
+
+The `dispatchabilityHint` is a **separate advisory output**, not a DoR gate
+verdict. It does not affect `verdict` or `confidence` on gates 1–7. The
+orchestrator reads it as an operator suggestion, not a hard block.
+
+The `checkDispatchability` filter in
+`pipeline-cli/src/orchestrator/filters/dispatchability.ts` is the runtime
+enforcement layer — it only reads the already-written frontmatter field.
+Your job is to surface the suggestion so the operator can copy it to the
+task file; you do not write the file yourself (hard rule #1: you are
+read-only).
+
 ## Confidence tiering — RFC §5.5 / Q4
 
 The `confidence` field on each gate verdict drives downstream
@@ -198,7 +259,12 @@ Return a JSON object exactly matching this shape:
       "clarificationQuestion": "Optional — required when verdict='fail'"
     }
   ],
-  "summary": "Optional one-sentence aggregate."
+  "summary": "Optional one-sentence aggregate.",
+  "dispatchabilityHint": {
+    "suggest": false,
+    "reason": "Title contains 'Soak' — task is a monitoring phase, not a code deliverable.",
+    "confidence": "high"
+  }
 }
 ```
 
@@ -212,6 +278,10 @@ Rules:
 - `clarificationQuestion`: required when `verdict="fail"`, omitted
   otherwise. One question the orchestrator can post back to the issue
   author.
+- `dispatchabilityHint`: optional — include ONLY when you have medium
+  or high confidence the task is permanently not LLM-dispatchable (see
+  the "Dispatchability heuristic" section above). Omit the field
+  entirely when there is no match or confidence is low.
 - Output JSON ONLY. No prose before or after. No markdown fence is
   required — the parser tolerates a single ```json fence but plain
   JSON is preferred.
