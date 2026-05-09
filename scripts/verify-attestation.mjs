@@ -985,6 +985,28 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     console.log(`[ai-sdlc/attestation] pipelineVersion: <missing> (legacy envelope)`);
   }
 
+  // --- Forensic logging: harness (AISDLC-202.3) -------------------------
+  // Surface which harness (e.g. codex, claude-code) produced the verdicts.
+  // Optional field — legacy envelopes (before AISDLC-202.3) carry no
+  // `harness` field; log `<unknown>` so operators can distinguish "unknown
+  // harness" from "field present but empty".
+  const matchedHarness = chosen.entry.predicate?.harness;
+  if (
+    matchedHarness &&
+    typeof matchedHarness === 'object' &&
+    typeof matchedHarness.name === 'string'
+  ) {
+    // SHORT_ID-validated by validatePredicateShape — safe to surface.
+    const harnessLine = matchedHarness.version
+      ? `${matchedHarness.name}@${matchedHarness.version}`
+      : matchedHarness.name;
+    console.log(`[ai-sdlc/attestation] harness: ${harnessLine}`);
+  } else {
+    console.log(
+      `[ai-sdlc/attestation] harness: <unknown> (legacy envelope or claude-code default)`,
+    );
+  }
+
   // --- Verify signature + schema (delegates to runtime) -----------------
   // The orchestrator's verifyAttestation does its own (regex-bound) schema
   // validation, schemaVersion allowlist re-check, signature check, and the

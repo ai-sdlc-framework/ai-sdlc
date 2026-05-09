@@ -145,6 +145,13 @@ async function main() {
   const verdictsPath = args['review-verdicts'];
   const iterationCount = Number(args['iteration-count'] ?? '1');
   const harnessNote = args['harness-note'] ?? '';
+  // AISDLC-202.3: optional harness identification. The Codex execution path
+  // passes --harness-name codex (and optionally --harness-version) so the
+  // envelope predicate carries a machine-readable { name, version } field.
+  // Claude Code paths omit these flags and the field is absent (back-compat).
+  const harnessName = typeof args['harness-name'] === 'string' ? args['harness-name'].trim() : '';
+  const harnessVersion =
+    typeof args['harness-version'] === 'string' ? args['harness-version'].trim() : '';
 
   if (!verdictsPath) fail('--review-verdicts <path> required');
   if (!Number.isFinite(iterationCount) || iterationCount < 1) {
@@ -233,12 +240,21 @@ async function main() {
     // field rather than embedding a bad value.
   }
 
+  // Build harness object when --harness-name was provided. The Codex path
+  // passes --harness-name codex (+ optional --harness-version) so the
+  // envelope predicate carries a machine-readable harness identification.
+  // Claude Code paths omit the flag and the predicate field stays absent.
+  const harnessPayload = harnessName
+    ? { name: harnessName, ...(harnessVersion ? { version: harnessVersion } : {}) }
+    : undefined;
+
   const predicate = buildPredicate({
     commitSha: headSha,
     policy,
     reviewers,
     pluginVersion,
     pipelineVersion: pipelineVersion ?? undefined,
+    harness: harnessPayload,
     iterationCount,
     harnessNote,
     changedFileDeltas,

@@ -178,6 +178,23 @@ export interface AttestationPredicate {
    * `<missing> (legacy envelope)` instead.
    */
   pipelineVersion?: string;
+  /**
+   * Harness that produced the developer + reviewer verdicts (AISDLC-202.3).
+   * Populated by the calling adapter (e.g. `CodexHarnessAdapter` sets
+   * `{ name: 'codex', version: '0.128.0' }` when signing a Codex-run task).
+   * Claude Code paths omit this field or set `{ name: 'claude-code' }`.
+   *
+   * Optional for backward compatibility: envelopes produced before
+   * AISDLC-202.3 carry no `harness` field; the verifier accepts them and
+   * logs `<unknown>` when the field is absent. Downstream trust decisions
+   * (e.g. "require Codex review for Claude-developed PRs") can filter on
+   * `harness.name` without failing envelopes that predate this field.
+   *
+   * `name` is constrained to `SHORT_ID` (letters, digits, dot, dash,
+   * underscore) to prevent CR/LF injection into GITHUB_OUTPUT. `version`
+   * is constrained to `SEMVER` when present.
+   */
+  harness?: { name: string; version?: string };
   /** Iteration count — how many dev rounds the work went through. */
   iterationCount: number;
   /**
@@ -397,6 +414,28 @@ export function validatePredicateShape(parsed: unknown): string | null {
     return 'schema validation failed: harnessNote contains forbidden characters';
   }
 
+  // harness (AISDLC-202.3) — optional envelope-level harness field.
+  // Absent on pre-202.3 envelopes — accepted for backward compatibility.
+  // When present, must be an object with a SHORT_ID `name` and an optional
+  // SEMVER `version`. Validated before interpolation to prevent injection.
+  const harness = p['harness'];
+  if (harness !== undefined) {
+    if (harness === null || typeof harness !== 'object') {
+      return 'schema validation failed: harness must be an object when present';
+    }
+    const h = harness as Record<string, unknown>;
+    const hName = h['name'];
+    if (typeof hName !== 'string' || hName.length === 0 || !SHORT_ID.test(hName)) {
+      return 'schema validation failed: harness.name does not match SHORT_ID pattern';
+    }
+    const hVersion = h['version'];
+    if (hVersion !== undefined) {
+      if (typeof hVersion !== 'string' || !SEMVER.test(hVersion)) {
+        return 'schema validation failed: harness.version does not match SEMVER pattern';
+      }
+    }
+  }
+
   // signedAt — ISO 8601.
   const signedAt = p['signedAt'];
   if (typeof signedAt !== 'string' || !ISO_8601.test(signedAt)) {
@@ -582,6 +621,17 @@ export interface BuildPredicateInputs {
    * this but does not enforce.
    */
   pipelineVersion?: string;
+  /**
+   * Harness that produced the developer + reviewer verdicts (AISDLC-202.3).
+   * Optional — when omitted, the predicate carries no `harness` field
+   * (back-compat with pre-202.3 envelopes). When provided, the adapter
+   * populates both `name` (required, SHORT_ID) and optionally `version`
+   * (SEMVER). Example: `{ name: 'codex', version: '0.128.0' }`.
+   *
+   * The signing script (`sign-attestation.mjs`) passes this via
+   * `--harness-name` + `--harness-version` CLI flags.
+   */
+  harness?: { name: string; version?: string };
   iterationCount: number;
   harnessNote: string;
   /** Override `signedAt` for deterministic tests. */
@@ -1126,6 +1176,15 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
   // validatePredicateShape.
   if (typeof inputs.pipelineVersion === 'string' && inputs.pipelineVersion.length > 0) {
     predicate.pipelineVersion = inputs.pipelineVersion;
+  }
+  // AISDLC-202.3: include `harness` only when the caller provided it.
+  // Omitted on legacy / Claude Code paths so pre-202.3 envelopes round-trip
+  // cleanly through validatePredicateShape (which treats absence as back-compat).
+  if (inputs.harness && typeof inputs.harness.name === 'string' && inputs.harness.name.length > 0) {
+    predicate.harness = { name: inputs.harness.name };
+    if (typeof inputs.harness.version === 'string' && inputs.harness.version.length > 0) {
+      predicate.harness.version = inputs.harness.version;
+    }
   }
   return predicate;
 }

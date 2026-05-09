@@ -262,6 +262,94 @@ Step 8's `coerceReviewerVerdict` and `normalizeReviewerVerdict` stamp `harness: 
 
 ---
 
+---
+
+## Interpreting the Harness Field in Verification Logs (AISDLC-202.3)
+
+Starting with AISDLC-202.3, attestation envelopes carry an optional top-level
+`harness` field that identifies which execution harness produced the developer
+commit and reviewer verdicts. This field is surfaced in CI verification logs
+so operators can audit which harness was responsible for a given PR's verdicts.
+
+### What the log line looks like
+
+After the `pipelineVersion` log line, `verify-attestation` emits:
+
+```
+[ai-sdlc/attestation] harness: codex@0.128.0
+```
+
+or, when no version is available:
+
+```
+[ai-sdlc/attestation] harness: codex
+```
+
+For legacy envelopes (produced before AISDLC-202.3) or Claude Code paths that
+do not explicitly set the field:
+
+```
+[ai-sdlc/attestation] harness: <unknown> (legacy envelope or claude-code default)
+```
+
+### How to interpret the values
+
+| Log line | Meaning |
+|----------|---------|
+| `harness: codex@X.Y.Z` | Codex CLI vX.Y.Z was the execution harness. Developer ran via `--spawner codex`; reviewers are Claude variants (default cross-harness). |
+| `harness: codex` | Codex was the harness but version was not recorded (pre-202.3 Codex path or version detection failed). |
+| `harness: claude-code` | Claude Code was explicitly declared as the harness (future; current Claude Code path omits the field). |
+| `harness: <unknown>` | Envelope predates AISDLC-202.3 OR was produced by a Claude Code path that does not set the field. Treat as `claude-code` for trust purposes. |
+
+### How the harness field is populated
+
+**Claude Code path (`/ai-sdlc execute`):** The `sign-attestation.mjs` script
+is invoked by the pre-push hook without `--harness-name`. The `harness` field
+is absent in the envelope — the `<unknown>` log line appears.
+
+**Codex path (`ai-sdlc-pipeline execute --spawner codex`):** Pass
+`--harness-name codex --harness-version <version>` to `sign-attestation.mjs`
+when invoking it manually after a Codex-driven task:
+
+```bash
+node ai-sdlc-plugin/scripts/sign-attestation.mjs \
+  --review-verdicts /tmp/review-verdicts-AISDLC-N.json \
+  --iteration-count 1 \
+  --harness-note "" \
+  --harness-name codex \
+  --harness-version 0.128.0
+```
+
+The pre-push hook's `check-attestation-sign.sh` already reads the
+`CODEX_VERSION` env var (when set) to populate `--harness-name` and
+`--harness-version` automatically in the Codex execution path.
+
+### Trust decisions based on harness field
+
+The harness field is **forensic/audit only** — the verifier does NOT enforce
+a specific harness or reject envelopes based on harness value. Its purpose is
+to help operators answer the question: "Did this PR go through the expected
+harness for cross-harness independence?"
+
+Operator cross-check pattern:
+
+```bash
+# Extract harness from the envelope predicate
+ENVELOPE=.ai-sdlc/attestations/<sha>.dsse.json
+jq -r '.payload' "$ENVELOPE" | base64 -d | jq '.harness // {"name":"unknown"}'
+```
+
+Expected output for a Codex-run task:
+```json
+{ "name": "codex", "version": "0.128.0" }
+```
+
+If the field is absent or `name` is `unknown` for a task that should have run
+on Codex, the Codex path may not have passed `--harness-name` to the signing
+script. Re-sign the envelope manually with the correct flags.
+
+---
+
 ## Related Documentation
 
 - `ai-sdlc-plugin/README.md` — plugin agent listing

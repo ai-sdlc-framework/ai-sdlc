@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { buildFinalSummary, finalizeTask, moveTaskToCompleted } from './10-finalize.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
@@ -180,5 +180,66 @@ describe('Step 10 — finalizeTask', () => {
         skipCommit: true,
       }),
     ).rejects.toThrow(/cannot locate task file/);
+  });
+
+  // ── AISDLC-202.3 AC #3 + #4: Codex path uses atomic completion ──────
+
+  it('AC #3: useAtomicCompletion uses completeTaskAtomically (task in exactly one backlog location)', async () => {
+    // Regression guard for the AISDLC-201 / AISDLC-203 duplicate-record bug:
+    // before AISDLC-203, the Codex workflow copied the completed file without
+    // deleting the original, leaving the task in BOTH tasks/ and completed/.
+    // This test asserts that useAtomicCompletion guarantees single-location.
+    writeTaskFile(tmp, { id: 'AISDLC-5', title: 'five', status: 'In Progress' });
+    const fake = new FakeRunner();
+    const r = await finalizeTask({
+      taskId: 'AISDLC-5',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+      runner: fake.toRunner(),
+      skipCommit: true,
+      useAtomicCompletion: true,
+    });
+    expect(r.skipped).toBe(false);
+    const completedPath = join(tmp, 'backlog', 'completed', 'aisdlc-5 - five.md');
+    const tasksPath = join(tmp, 'backlog', 'tasks', 'aisdlc-5 - five.md');
+    // AC #4: task exists in EXACTLY ONE backlog location — completed/.
+    expect(existsSync(completedPath)).toBe(true);
+    expect(existsSync(tasksPath)).toBe(false);
+    expect(readFileSync(completedPath, 'utf8')).toContain('status: Done');
+  });
+
+  it('AC #4: regression — Codex workflow does not create duplicate backlog entries', async () => {
+    // AISDLC-201 root cause: the Codex workflow copied the file to
+    // backlog/completed/ WITHOUT removing it from backlog/tasks/. This left
+    // the task visible in both locations. completeTaskAtomically throws a
+    // DuplicateTaskFileError when a duplicate already exists, ensuring the
+    // invariant is detectable before push.
+    writeTaskFile(tmp, { id: 'AISDLC-6', title: 'six', status: 'In Progress' });
+    // Manually create a stale completed/ copy (simulating the AISDLC-201 bug).
+    const completedDir = join(tmp, 'backlog', 'completed');
+    mkdirSync(completedDir, { recursive: true });
+    writeFileSync(
+      join(completedDir, 'aisdlc-6 - six.md'),
+      '---\nid: AISDLC-6\ntitle: six\nstatus: Done\n---\n',
+    );
+    // When both copies exist, completeTaskAtomically should throw — finalizeTask
+    // surfaces this as a rejected promise so the pipeline can abort cleanly.
+    await expect(
+      finalizeTask({
+        taskId: 'AISDLC-6',
+        workDir: tmp,
+        worktreePath: tmp,
+        task,
+        developerReturn: dev,
+        verdict: approved(),
+        iterations: 1,
+        skipCommit: true,
+        useAtomicCompletion: true,
+      }),
+    ).rejects.toThrow(/DUPLICATE DETECTED|cli-task-complete/);
   });
 });

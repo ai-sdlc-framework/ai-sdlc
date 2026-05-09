@@ -2188,3 +2188,121 @@ describe('verifyAttestation v4-prefer / v3-fallback (AISDLC-193.1)', () => {
     expect(result.valid).toBe(true);
   });
 });
+
+// ── AISDLC-202.3: harness envelope field ──────────────────────────────
+
+describe('buildPredicate — harness field (AISDLC-202.3 AC #1)', () => {
+  it('omits harness field when inputs.harness is not provided (back-compat)', () => {
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    expect(predicate.harness).toBeUndefined();
+  });
+
+  it('includes harness.name only when version is absent', () => {
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      harness: { name: 'codex' },
+    });
+    expect(predicate.harness).toEqual({ name: 'codex' });
+  });
+
+  it('includes both harness.name and harness.version when provided', () => {
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      harness: { name: 'codex', version: '0.128.0' },
+    });
+    expect(predicate.harness).toEqual({ name: 'codex', version: '0.128.0' });
+  });
+
+  it('omits harness field when name is empty string', () => {
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      harness: { name: '' },
+    });
+    expect(predicate.harness).toBeUndefined();
+  });
+});
+
+describe('validatePredicateShape — harness field back-compat (AISDLC-202.3 AC #2)', () => {
+  function makeRawPredicate(overrides: Record<string, unknown> = {}): unknown {
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    const json = JSON.parse(JSON.stringify(predicate)) as Record<string, unknown>;
+    return { ...json, ...overrides };
+  }
+
+  it('accepts a predicate without harness field (legacy back-compat)', () => {
+    const raw = makeRawPredicate();
+    const err = validatePredicateShape(raw);
+    expect(err).toBeNull();
+  });
+
+  it('accepts a predicate with harness.name only', () => {
+    const raw = makeRawPredicate({ harness: { name: 'codex' } });
+    const err = validatePredicateShape(raw);
+    expect(err).toBeNull();
+  });
+
+  it('accepts a predicate with harness.name and harness.version', () => {
+    const raw = makeRawPredicate({ harness: { name: 'codex', version: '0.128.0' } });
+    const err = validatePredicateShape(raw);
+    expect(err).toBeNull();
+  });
+
+  it('rejects harness as a non-object', () => {
+    const raw = makeRawPredicate({ harness: 'codex' });
+    const err = validatePredicateShape(raw);
+    expect(err).toMatch(/harness must be an object/);
+  });
+
+  it('rejects harness.name that does not match SHORT_ID', () => {
+    const raw = makeRawPredicate({ harness: { name: 'codex cli' } }); // space not allowed
+    const err = validatePredicateShape(raw);
+    expect(err).toMatch(/harness\.name does not match SHORT_ID/);
+  });
+
+  it('rejects harness.version that does not match SEMVER', () => {
+    const raw = makeRawPredicate({ harness: { name: 'codex', version: 'not-semver' } });
+    const err = validatePredicateShape(raw);
+    expect(err).toMatch(/harness\.version does not match SEMVER/);
+  });
+});
+
+describe('verifyAttestation — harness field round-trip (AISDLC-202.3 AC #2)', () => {
+  it('verifies a Codex-run envelope with harness field and exposes it in the predicate', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      harness: { name: 'codex', version: '0.128.0' },
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        contentHashV3: predicate.contentHashV3,
+      },
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.predicate.harness).toEqual({ name: 'codex', version: '0.128.0' });
+    }
+  });
+
+  it('verifies a legacy envelope without harness field (back-compat)', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate(DEFAULT_INPUTS); // no harness field
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        contentHashV3: predicate.contentHashV3,
+      },
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) {
+      expect(result.predicate.harness).toBeUndefined();
+    }
+  });
+});

@@ -26,6 +26,7 @@ import { basename, dirname, join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { findTaskFile, parseTaskFile } from './01-validate.js';
 import { patchFrontmatterStatus } from './04-flip-status.js';
+import { completeTaskAtomically } from '../cli/complete-task.js';
 import type { FinalizeTaskOptions, FinalizeTaskResult } from '../types.js';
 
 export interface FinalizeStepOptions extends FinalizeTaskOptions {
@@ -34,6 +35,21 @@ export interface FinalizeStepOptions extends FinalizeTaskOptions {
   signAttestationScript?: string;
   /** When true, skip the chore commit (useful in tests without a real git repo). */
   skipCommit?: boolean;
+  /**
+   * When true, use `completeTaskAtomically` (AISDLC-203) for the task move
+   * instead of the raw `renameSync`-based `moveTaskToCompleted`.
+   *
+   * The atomic helper performs duplicate detection, atomic write+rename, and
+   * post-move verification so the task ID ends up in exactly ONE backlog
+   * location. This is the correct path for the Codex execution path (and any
+   * other harness where multiple processes may operate on the same backlog
+   * concurrently). The Claude Code `/ai-sdlc execute` path defaults to false
+   * (backward-compatible) because it runs in a worktree isolation that already
+   * ensures a single writer; switching it on is safe but not required there.
+   *
+   * AISDLC-202.3 — AC #3: Codex execution path Step 10 must use this flag.
+   */
+  useAtomicCompletion?: boolean;
 }
 
 /**
@@ -117,12 +133,28 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
       `finalize: cannot locate task file for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`,
     );
   }
-  const raw = readFileSync(taskFile, 'utf8');
-  const patched = patchFrontmatterStatus(raw, 'Done');
-  writeFileSync(taskFile, patched, 'utf8');
 
-  // 2. Move tasks/ → completed/ (mirrors task_complete tool)
-  const completedPath = moveTaskToCompleted(taskFile);
+  // 2. Move tasks/ → completed/ using the appropriate strategy.
+  //
+  // `useAtomicCompletion` (AISDLC-202.3 AC #3): use `completeTaskAtomically`
+  // (the AISDLC-203 shared helper) which performs an atomic write+rename with
+  // duplicate detection and single-location verification. This is the required
+  // path for the Codex execution path where multiple processes may operate on
+  // the same backlog. `completeTaskAtomically` also patches the status to Done
+  // internally, so we skip the manual patch below.
+  //
+  // Default (backward-compat): plain `renameSync`-based `moveTaskToCompleted`
+  // followed by a manual status patch — this is the pre-202.3 Claude Code path.
+  let completedPath: string;
+  if (opts.useAtomicCompletion) {
+    const result = completeTaskAtomically(opts.taskId, opts.worktreePath);
+    completedPath = result.alreadyDone ? result.location : result.to;
+  } else {
+    const raw = readFileSync(taskFile, 'utf8');
+    const patched = patchFrontmatterStatus(raw, 'Done');
+    writeFileSync(taskFile, patched, 'utf8');
+    completedPath = moveTaskToCompleted(taskFile);
+  }
   // Re-parse to make sure the on-disk shape stayed valid (defensive).
   parseTaskFile(completedPath);
 
