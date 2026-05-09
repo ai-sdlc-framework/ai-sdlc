@@ -122,7 +122,7 @@ Plugin subagents cannot use the `Agent` tool (Claude Code filters it one level d
 
 ### Lifecycle rules
 
-- **Create-before-execution**: when a plan spans multiple tasks, create them ALL via `mcp__backlog__task_create` first.
+- **Create-before-execution**: when a plan spans multiple tasks, create them ALL before dispatching. In Pattern C projects (non-bare parent repo + `.worktrees/` isolates), use `mcp__plugin_ai-sdlc_ai-sdlc__task_create` — it routes writes to the active worktree so files survive the next `git reset --hard` on the parent. In plain (non-Pattern-C) projects `mcp__backlog__task_create` is fine.
 - **Claim on start**: status → `In Progress` (auto by `/ai-sdlc execute`).
 - **Complete = TWO steps**: `mcp__backlog__task_edit` (status, ACs, finalSummary) + `mcp__backlog__task_complete` (moves file). File location is source of truth. Run the workspace test suite + lint before flipping.
 - **Never leave `To Do` after implementation.** A task isn't closed until it's in `backlog/completed/`.

@@ -2985,7 +2985,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve2.call(this, root, ref);
+      let _sch = resolve3.call(this, root, ref);
       if (_sch === void 0) {
         const schema2 = (_a = root.localRefs) === null || _a === void 0 ? void 0 : _a[ref];
         const { schemaId } = this.opts;
@@ -3012,7 +3012,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve2(root, ref) {
+    function resolve3(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3587,7 +3587,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve2(baseURI, relativeURI, options) {
+    function resolve3(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3814,7 +3814,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize,
-      resolve: resolve2,
+      resolve: resolve3,
       resolveComponent,
       equal,
       serialize,
@@ -6795,8 +6795,8 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync29, readdirSync as readdirSync9, statSync as statSync9 } from "node:fs";
-import { join as join32 } from "node:path";
+import { existsSync as existsSync30, readdirSync as readdirSync10, statSync as statSync9 } from "node:fs";
+import { join as join33 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
     "use strict";
@@ -12900,12 +12900,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve2) => {
+    return new Promise((resolve3) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve2();
+        resolve3();
       } else {
-        this._stdout.once("drain", resolve2);
+        this._stdout.once("drain", resolve3);
       }
     });
   }
@@ -18967,7 +18967,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+        await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -18984,7 +18984,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -19062,7 +19062,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve2(parseResult.data);
+            resolve3(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -19323,12 +19323,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve2, interval);
+      const timeoutId = setTimeout(resolve3, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -20287,7 +20287,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve2) => setTimeout(resolve2, pollInterval));
+      await new Promise((resolve3) => setTimeout(resolve3, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -21139,6 +21139,10 @@ function registerGetReviewPolicy(server2, deps) {
   );
 }
 
+// src/tools/task-create.ts
+import { existsSync as existsSync6, mkdirSync, readdirSync as readdirSync3, writeFileSync as writeFileSync2 } from "node:fs";
+import { join as join5, resolve as resolve2, sep } from "node:path";
+
 // src/tools/task-edit.ts
 import { existsSync as existsSync5, readdirSync as readdirSync2, readFileSync as readFileSync5, writeFileSync } from "node:fs";
 import { join as join4 } from "node:path";
@@ -21550,9 +21554,213 @@ function locateTaskFile(projectDir, id) {
   return void 0;
 }
 
+// src/tools/task-create.ts
+function registerTaskCreate(server2, deps) {
+  server2.tool(
+    "task_create",
+    "Create a new Backlog.md task file in the correct location \u2014 Pattern C-aware (writes to the active worktree, not the parent read-only tree). Mirrors mcp__backlog__task_create schema. AISDLC-234.",
+    {
+      id: external_exports.string().describe('Task ID, e.g. "AISDLC-234" (must be unique in backlog/)'),
+      title: external_exports.string().describe("Human-readable task title"),
+      description: external_exports.string().optional().describe("Markdown body content for the task (placed after frontmatter)"),
+      status: external_exports.string().optional().describe('Initial status. Defaults to "To Do".'),
+      priority: external_exports.enum(["critical", "high", "medium", "low"]).optional().describe("Task priority level."),
+      labels: external_exports.array(external_exports.string()).optional().describe("List of label strings to attach."),
+      dependencies: external_exports.array(external_exports.string()).optional().describe('List of task IDs this task depends on (e.g. ["AISDLC-100"]).'),
+      references: external_exports.array(external_exports.string()).optional().describe("List of file paths or URLs relevant to this task.")
+    },
+    async ({ id, title, description, status, priority, labels, dependencies, references }) => {
+      try {
+        const ID_PATTERN = /^[A-Z][A-Z0-9]*-\d+(\.\d+)*$/;
+        if (!ID_PATTERN.test(id)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Invalid task ID format: "${id}". Expected format: PROJECT-N or PROJECT-N.M (e.g. AISDLC-234, AISDLC-234.1). Only ASCII uppercase letters, digits, and hyphens are permitted.`
+              }
+            ],
+            isError: true
+          };
+        }
+        const projectDir = pickProjectRoot(deps.projectDir);
+        if (typeof projectDir !== "string") return projectDir;
+        const tasksDir = join5(projectDir, "backlog", "tasks");
+        if (!existsSync6(tasksDir)) {
+          mkdirSync(tasksDir, { recursive: true });
+        }
+        const existing = findExistingTaskFile(projectDir, id);
+        if (existing) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Task ${id} already exists at ${existing}. Use task_edit to modify it or choose a different ID.`
+              }
+            ],
+            isError: true
+          };
+        }
+        const badRefs = validateReferences(references ?? [], projectDir);
+        if (badRefs.length > 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `References validation failed for ${id}:
+` + badRefs.map((r) => `  - ${r}`).join("\n") + "\n\nFix the references or omit them, then retry."
+              }
+            ],
+            isError: true
+          };
+        }
+        const resolvedStatus = status ?? "To Do";
+        const slug = slugify(title);
+        const filename = `${id.toLowerCase()} - ${slug}.md`;
+        const filePath = join5(tasksDir, filename);
+        if (!resolve2(filePath).startsWith(resolve2(tasksDir) + sep)) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Security: computed file path "${filePath}" escapes the tasks directory. Operation refused.`
+              }
+            ],
+            isError: true
+          };
+        }
+        const content = buildTaskContent({
+          id,
+          title,
+          description,
+          status: resolvedStatus,
+          priority,
+          labels,
+          dependencies,
+          references
+        });
+        writeFileSync2(filePath, content, "utf-8");
+        const summaryParts = [
+          `# task_create: ${id}`,
+          `Path: ${filePath}`,
+          `Title: ${title}`,
+          `Status: ${resolvedStatus}`
+        ];
+        if (priority) summaryParts.push(`Priority: ${priority}`);
+        if (labels && labels.length > 0) summaryParts.push(`Labels: ${labels.join(", ")}`);
+        if (dependencies && dependencies.length > 0)
+          summaryParts.push(`Dependencies: ${dependencies.join(", ")}`);
+        if (references && references.length > 0)
+          summaryParts.push(`References: ${references.join(", ")}`);
+        return { content: [{ type: "text", text: summaryParts.join("\n") }] };
+      } catch (err) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error creating task ${id}: ${err.message}`
+            }
+          ],
+          isError: true
+        };
+      }
+    }
+  );
+}
+function slugify(title) {
+  return title.trim().replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+}
+function findExistingTaskFile(projectDir, id) {
+  const idLower = id.toLowerCase();
+  const bucketDirs = [
+    join5(projectDir, "backlog", "tasks"),
+    join5(projectDir, "backlog", "completed")
+  ];
+  for (const dir of bucketDirs) {
+    if (!existsSync6(dir)) continue;
+    for (const entry of readdirSync3(dir)) {
+      const lower = entry.toLowerCase();
+      if (lower.startsWith(`${idLower} `) || lower.startsWith(`${idLower}.`)) {
+        return join5(dir, entry);
+      }
+    }
+  }
+  return void 0;
+}
+function validateReferences(references, projectDir) {
+  const errors = [];
+  for (const ref of references) {
+    if (/^https?:\/\//i.test(ref)) continue;
+    const absPath = join5(projectDir, ref);
+    if (!existsSync6(absPath)) {
+      errors.push(`${ref} \u2014 file not found at ${absPath}`);
+    }
+  }
+  return errors;
+}
+function buildTaskContent(opts) {
+  const now = nowStamp2();
+  const lines = ["---", `id: ${opts.id}`, `title: ${formatYamlString(opts.title)}`];
+  lines.push(`status: ${formatYamlString(opts.status)}`);
+  if (opts.priority) {
+    lines.push(`priority: ${opts.priority}`);
+  }
+  lines.push(`created_date: '${now}'`);
+  lines.push(`updated_date: '${now}'`);
+  lines.push("assignee: []");
+  if (opts.labels && opts.labels.length > 0) {
+    lines.push("labels:");
+    for (const label of opts.labels) {
+      lines.push(`  - ${formatYamlString(label)}`);
+    }
+  } else {
+    lines.push("labels: []");
+  }
+  if (opts.dependencies && opts.dependencies.length > 0) {
+    lines.push("dependencies:");
+    for (const dep of opts.dependencies) {
+      lines.push(`  - ${formatYamlString(dep)}`);
+    }
+  } else {
+    lines.push("dependencies: []");
+  }
+  if (opts.references && opts.references.length > 0) {
+    lines.push("references:");
+    for (const ref of opts.references) {
+      lines.push(`  - ${formatYamlString(ref)}`);
+    }
+  } else {
+    lines.push("references: []");
+  }
+  lines.push("---", "");
+  if (opts.description) {
+    lines.push(opts.description, "");
+  }
+  return lines.join("\n");
+}
+function formatYamlString(value) {
+  if (needsQuoting2(value)) {
+    const escaped = value.replace(/'/g, "''");
+    return `'${escaped}'`;
+  }
+  return value;
+}
+function needsQuoting2(value) {
+  if (value === "") return true;
+  if (/^[\s!&*?|>%@`#,[\]{}'"-]/.test(value)) return true;
+  if (/[:#]/.test(value)) return true;
+  if (/^(true|false|null|yes|no|on|off|~)$/i.test(value)) return true;
+  if (/^-?\d+(\.\d+)?$/.test(value)) return true;
+  return false;
+}
+function nowStamp2(date3 = /* @__PURE__ */ new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${date3.getUTCFullYear()}-${pad(date3.getUTCMonth() + 1)}-${pad(date3.getUTCDate())} ${pad(date3.getUTCHours())}:${pad(date3.getUTCMinutes())}`;
+}
+
 // src/tools/task-complete.ts
-import { existsSync as existsSync6, mkdirSync, readFileSync as readFileSync6, renameSync, writeFileSync as writeFileSync2 } from "node:fs";
-import { basename, dirname as dirname2, join as join5 } from "node:path";
+import { existsSync as existsSync7, mkdirSync as mkdirSync2, readFileSync as readFileSync6, renameSync, writeFileSync as writeFileSync3 } from "node:fs";
+import { basename, dirname as dirname2, join as join6 } from "node:path";
 function registerTaskComplete(server2, deps) {
   server2.tool(
     "task_complete",
@@ -21572,7 +21780,7 @@ function registerTaskComplete(server2, deps) {
             content: [
               {
                 type: "text",
-                text: `Task ${id} not found under ${join5(projectDir, "backlog")}/{tasks,completed}/`
+                text: `Task ${id} not found under ${join6(projectDir, "backlog")}/{tasks,completed}/`
               }
             ],
             isError: true
@@ -21585,7 +21793,7 @@ function registerTaskComplete(server2, deps) {
             finalSummary,
             updatedDate
           });
-          if (after2 !== before2) writeFileSync2(located.path, after2, "utf-8");
+          if (after2 !== before2) writeFileSync3(located.path, after2, "utf-8");
           return {
             content: [
               {
@@ -21605,12 +21813,12 @@ function registerTaskComplete(server2, deps) {
           finalSummary,
           updatedDate
         });
-        if (after !== before) writeFileSync2(located.path, after, "utf-8");
-        const completedDir = join5(projectDir, "backlog", "completed");
-        if (!existsSync6(completedDir)) mkdirSync(completedDir, { recursive: true });
+        if (after !== before) writeFileSync3(located.path, after, "utf-8");
+        const completedDir = join6(projectDir, "backlog", "completed");
+        if (!existsSync7(completedDir)) mkdirSync2(completedDir, { recursive: true });
         const filename = basename(located.path);
-        const destPath = join5(completedDir, filename);
-        if (existsSync6(destPath)) {
+        const destPath = join6(completedDir, filename);
+        if (existsSync7(destPath)) {
           return {
             content: [
               {
@@ -21621,7 +21829,7 @@ function registerTaskComplete(server2, deps) {
             isError: true
           };
         }
-        mkdirSync(dirname2(destPath), { recursive: true });
+        mkdirSync2(dirname2(destPath), { recursive: true });
         renameSync(located.path, destPath);
         return {
           content: [
@@ -21713,7 +21921,7 @@ var ShellClaudePSpawner = class {
     const start = Date.now();
     const argv = this.buildArgv(opts);
     const timeoutMs = opts.timeout ?? this.defaultTimeoutMs;
-    return new Promise((resolve2) => {
+    return new Promise((resolve3) => {
       let child;
       try {
         child = this.processSpawner(this.binary, argv, { cwd: opts.cwd });
@@ -21727,7 +21935,7 @@ var ShellClaudePSpawner = class {
           argv,
           failureType: "claude-cli-spawn-error"
         };
-        resolve2({
+        resolve3({
           type: opts.type,
           output: "",
           status: "error",
@@ -21746,7 +21954,7 @@ var ShellClaudePSpawner = class {
           return;
         settled = true;
         clearTimeout(timer);
-        resolve2(result);
+        resolve3(result);
       };
       const timer = setTimeout(() => {
         watchdogFired = true;
@@ -22032,11 +22240,11 @@ var TimeoutError = class extends Error {
   }
 };
 function withTimeout(p, timeoutMs) {
-  return new Promise((resolve2, reject) => {
+  return new Promise((resolve3, reject) => {
     const timer = setTimeout(() => reject(new TimeoutError(timeoutMs)), timeoutMs);
     p.then((v) => {
       clearTimeout(timer);
-      resolve2(v);
+      resolve3(v);
     }, (e) => {
       clearTimeout(timer);
       reject(e);
@@ -22125,8 +22333,8 @@ import { spawn as nodeSpawn2 } from "node:child_process";
 var DEFAULT_TIMEOUT_MS3 = 30 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/steps/00-sweep.js
-import { existsSync as existsSync7, readdirSync as readdirSync3, statSync as statSync2 } from "node:fs";
-import { join as join6 } from "node:path";
+import { existsSync as existsSync8, readdirSync as readdirSync4, statSync as statSync2 } from "node:fs";
+import { join as join7 } from "node:path";
 async function lookupPrState(branch, workDir, runner) {
   try {
     const r = await runner("gh", [
@@ -22156,19 +22364,19 @@ async function lookupPrState(branch, workDir, runner) {
 }
 async function sweepMergedWorktrees(opts) {
   const runner = opts.runner ?? defaultRunner;
-  const worktreesDir = join6(opts.workDir, ".worktrees");
-  if (!existsSync7(worktreesDir)) {
+  const worktreesDir = join7(opts.workDir, ".worktrees");
+  if (!existsSync8(worktreesDir)) {
     return { swept: [] };
   }
   const swept = [];
   let entries;
   try {
-    entries = readdirSync3(worktreesDir);
+    entries = readdirSync4(worktreesDir);
   } catch {
     return { swept: [] };
   }
   for (const entry of entries) {
-    const wt = join6(worktreesDir, entry);
+    const wt = join7(worktreesDir, entry);
     let isDir = false;
     try {
       isDir = statSync2(wt).isDirectory();
@@ -22207,13 +22415,13 @@ async function sweepMergedWorktrees(opts) {
 }
 
 // ../../pipeline-cli/dist/steps/00-5-sync-parent.js
-import { copyFileSync, mkdirSync as mkdirSync2, mkdtempSync, rmSync } from "node:fs";
-import { join as join7, dirname as dirname3 } from "node:path";
+import { copyFileSync, mkdirSync as mkdirSync3, mkdtempSync, rmSync } from "node:fs";
+import { join as join8, dirname as dirname3 } from "node:path";
 import { tmpdir } from "node:os";
 
 // ../../pipeline-cli/dist/steps/01-validate.js
-import { existsSync as existsSync8, readdirSync as readdirSync4, readFileSync as readFileSync7 } from "node:fs";
-import { join as join8 } from "node:path";
+import { existsSync as existsSync9, readdirSync as readdirSync5, readFileSync as readFileSync7 } from "node:fs";
+import { join as join9 } from "node:path";
 
 // ../../node_modules/.pnpm/js-yaml@4.1.1/node_modules/js-yaml/dist/js-yaml.mjs
 function isNothing(subject) {
@@ -24803,19 +25011,19 @@ var safeDump = renamed("safeDump", "dump");
 
 // ../../pipeline-cli/dist/steps/01-validate.js
 function findTaskFile(taskId, workDir) {
-  const tasksDir = join8(workDir, "backlog", "tasks");
-  if (!existsSync8(tasksDir))
+  const tasksDir = join9(workDir, "backlog", "tasks");
+  if (!existsSync9(tasksDir))
     return null;
   const lower = taskId.toLowerCase();
   let entries;
   try {
-    entries = readdirSync4(tasksDir);
+    entries = readdirSync5(tasksDir);
   } catch {
     return null;
   }
   const prefix = `${lower} -`;
   const match = entries.find((name) => name.toLowerCase().startsWith(prefix));
-  return match ? join8(tasksDir, match) : null;
+  return match ? join9(tasksDir, match) : null;
 }
 function parseTaskFile(filePath) {
   const raw = readFileSync7(filePath, "utf8");
@@ -24924,16 +25132,16 @@ async function validateTask(opts) {
 }
 
 // ../../pipeline-cli/dist/steps/02-compute-branch.js
-import { existsSync as existsSync9, readFileSync as readFileSync8 } from "node:fs";
-import { join as join9 } from "node:path";
+import { existsSync as existsSync10, readFileSync as readFileSync8 } from "node:fs";
+import { join as join10 } from "node:path";
 var DEFAULT_PATTERN = "ai-sdlc/{issueIdLower}-{slug}";
 var FALLBACK_SLUG = "task";
-function slugify(title) {
+function slugify2(title) {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
 }
 function readBranchPattern(workDir, fallback = DEFAULT_PATTERN) {
-  const yamlPath = join9(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
-  if (!existsSync9(yamlPath))
+  const yamlPath = join10(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
+  if (!existsSync10(yamlPath))
     return fallback;
   let raw;
   try {
@@ -24947,7 +25155,7 @@ function readBranchPattern(workDir, fallback = DEFAULT_PATTERN) {
 async function computeBranchName(opts) {
   const taskIdLower = opts.taskId.toLowerCase();
   const pattern = readBranchPattern(opts.workDir, opts.defaultPattern ?? DEFAULT_PATTERN);
-  const rawSlug = slugify(opts.task.title);
+  const rawSlug = slugify2(opts.task.title);
   let slug = rawSlug;
   if (slug === "" && pattern.includes("{slug}")) {
     slug = FALLBACK_SLUG;
@@ -24955,18 +25163,18 @@ async function computeBranchName(opts) {
     logger.warn(`[ai-sdlc] computeBranchName: slug normalisation of title ${JSON.stringify(opts.task.title)} (task ${opts.taskId}) produced an empty string; using fallback slug ${JSON.stringify(FALLBACK_SLUG)}. If the title field uses YAML block-scalar (>- or |-), confirm the frontmatter parser decodes it to the unwrapped string before slugify().`);
   }
   const branch = pattern.replace(/\{issueIdLower\}/g, taskIdLower).replace(/\{slug\}/g, slug);
-  const worktreePath = join9(opts.workDir, ".worktrees", taskIdLower);
+  const worktreePath = join10(opts.workDir, ".worktrees", taskIdLower);
   return { branch, worktreePath, slug, taskIdLower };
 }
 
 // ../../pipeline-cli/dist/steps/03-setup-worktree.js
 import { execSync as execSync3 } from "node:child_process";
-import { mkdirSync as mkdirSync4, statSync as statSync4 } from "node:fs";
-import { join as join11 } from "node:path";
+import { mkdirSync as mkdirSync5, statSync as statSync4 } from "node:fs";
+import { join as join12 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/worktree-mutex.js
-import { existsSync as existsSync10, mkdirSync as mkdirSync3, rmdirSync, statSync as statSync3 } from "node:fs";
-import { join as join10 } from "node:path";
+import { existsSync as existsSync11, mkdirSync as mkdirSync4, rmdirSync, statSync as statSync3 } from "node:fs";
+import { join as join11 } from "node:path";
 var DEFAULT_MUTEX_TIMEOUT_MS = 6e4;
 var MUTEX_TIMEOUT_MESSAGE = "worktree mutex held > 60s \u2014 likely a stuck previous tick; investigate `.git/.ai-sdlc-worktree-mutex` mtime";
 var _globalMutex = {
@@ -24974,16 +25182,16 @@ var _globalMutex = {
   depth: 0
 };
 function tryAcquireFileLock(workDir) {
-  const lockDir = join10(workDir, ".git", ".ai-sdlc-worktree-mutex");
+  const lockDir = join11(workDir, ".git", ".ai-sdlc-worktree-mutex");
   try {
-    mkdirSync3(lockDir, { recursive: false });
+    mkdirSync4(lockDir, { recursive: false });
     return true;
   } catch {
     return false;
   }
 }
 function releaseFileLock(workDir) {
-  const lockDir = join10(workDir, ".git", ".ai-sdlc-worktree-mutex");
+  const lockDir = join11(workDir, ".git", ".ai-sdlc-worktree-mutex");
   try {
     rmdirSync(lockDir);
   } catch {
@@ -24993,8 +25201,8 @@ async function withWorktreeMutex(fn, opts = {}) {
   const mutex = opts._mutex ?? _globalMutex;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_MUTEX_TIMEOUT_MS;
   let releaseLock;
-  const newTail = new Promise((resolve2) => {
-    releaseLock = resolve2;
+  const newTail = new Promise((resolve3) => {
+    releaseLock = resolve3;
   });
   const prevTail = mutex.queue;
   mutex.queue = newTail;
@@ -25023,7 +25231,7 @@ async function withWorktreeMutex(fn, opts = {}) {
       if (tryAcquireFileLock(opts.workDir)) {
         fileLockAcquired = true;
       } else {
-        await new Promise((resolve2) => setTimeout(resolve2, 200));
+        await new Promise((resolve3) => setTimeout(resolve3, 200));
       }
     }
     if (!fileLockAcquired) {
@@ -25159,7 +25367,7 @@ async function isSafeToAutoClean(runner, workDir, taskId, branch, worktreePath, 
       }
     }
   }
-  const sentinelPath = join11(worktreePath, ".active-task");
+  const sentinelPath = join12(worktreePath, ".active-task");
   const readSentinelMtime = opts?.readSentinelMtime ?? ((p) => {
     try {
       return statSync4(p).mtimeMs;
@@ -25229,7 +25437,7 @@ async function setupWorktree(opts) {
       allowFailure: true
     });
   }
-  mkdirSync4(join11(opts.workDir, ".worktrees"), { recursive: true });
+  mkdirSync5(join12(opts.workDir, ".worktrees"), { recursive: true });
   return withWorktreeMutex(async () => {
     const addResult = await runner("git", ["worktree", "add", opts.worktreePath, "-b", opts.branch, "origin/main"], { cwd: opts.workDir, allowFailure: true });
     if (addResult.code !== 0) {
@@ -25254,8 +25462,8 @@ Likely cause: branch already exists. Run \`/ai-sdlc cleanup ${opts.taskId}\` fir
 }
 
 // ../../pipeline-cli/dist/steps/04-flip-status.js
-import { readFileSync as readFileSync9, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join12 } from "node:path";
+import { readFileSync as readFileSync9, writeFileSync as writeFileSync4 } from "node:fs";
+import { join as join13 } from "node:path";
 function patchFrontmatterStatus(raw, newStatus) {
   const fm = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!fm) {
@@ -25287,9 +25495,9 @@ async function beginTask(opts) {
   }
   const raw = readFileSync9(taskFile, "utf8");
   const patched = patchFrontmatterStatus(raw, status);
-  writeFileSync3(taskFile, patched, "utf8");
-  const sentinelPath = join12(opts.worktreePath, ".active-task");
-  writeFileSync3(sentinelPath, `${opts.taskId}
+  writeFileSync4(taskFile, patched, "utf8");
+  const sentinelPath = join13(opts.worktreePath, ".active-task");
+  writeFileSync4(sentinelPath, `${opts.taskId}
 `, "utf8");
   return { taskId: opts.taskId, worktreePath: opts.worktreePath, sentinelPath };
 }
@@ -25499,8 +25707,8 @@ function buildRetryPrompt(initialOutputPreview) {
 }
 
 // ../../pipeline-cli/dist/steps/07-build-review-prompts.js
-import { existsSync as existsSync11, readFileSync as readFileSync10 } from "node:fs";
-import { join as join13 } from "node:path";
+import { existsSync as existsSync12, readFileSync as readFileSync10 } from "node:fs";
+import { join as join14 } from "node:path";
 var REVIEWERS = ["code-reviewer", "test-reviewer", "security-reviewer"];
 async function buildReviewPrompts(opts) {
   const runner = opts.runner ?? defaultRunner;
@@ -25524,8 +25732,8 @@ async function buildReviewPrompts(opts) {
     }
   }
   const harnessNote = codexAvailable ? "" : "\u26A0 INDEPENDENCE NOT ENFORCED (codex unavailable, fell back to claude-code)";
-  const policyPath = join13(opts.workDir, ".ai-sdlc", "review-policy.md");
-  const policy = existsSync11(policyPath) ? readFileSync10(policyPath, "utf8") : "";
+  const policyPath = join14(opts.workDir, ".ai-sdlc", "review-policy.md");
+  const policy = existsSync12(policyPath) ? readFileSync10(policyPath, "utf8") : "";
   const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join("\n");
   const prompts = REVIEWERS.map((reviewer) => ({
     reviewer,
@@ -25742,8 +25950,8 @@ function coerceReviewerVerdict(agentId, r) {
 }
 
 // ../../pipeline-cli/dist/steps/10-finalize.js
-import { existsSync as existsSync12, mkdirSync as mkdirSync5, readFileSync as readFileSync11, renameSync as renameSync2, writeFileSync as writeFileSync4 } from "node:fs";
-import { basename as basename2, dirname as dirname4, join as join14 } from "node:path";
+import { existsSync as existsSync13, mkdirSync as mkdirSync6, readFileSync as readFileSync11, renameSync as renameSync2, writeFileSync as writeFileSync5 } from "node:fs";
+import { basename as basename2, dirname as dirname4, join as join15 } from "node:path";
 function buildFinalSummary(opts) {
   const allAcs = opts.task.acceptanceCriteria.map((_, i) => i + 1);
   const acceptanceCriteriaCheck = opts.developerReturn.acceptanceCriteriaMet.length > 0 ? opts.developerReturn.acceptanceCriteriaMet : allAcs;
@@ -25773,9 +25981,9 @@ ${opts.developerReturn.notes ?? "(none)"}
 function moveTaskToCompleted(taskFilePath) {
   const fileName = basename2(taskFilePath);
   const tasksDir = dirname4(taskFilePath);
-  const completedDir = join14(dirname4(tasksDir), "completed");
-  mkdirSync5(completedDir, { recursive: true });
-  const destPath = join14(completedDir, fileName);
+  const completedDir = join15(dirname4(tasksDir), "completed");
+  mkdirSync6(completedDir, { recursive: true });
+  const destPath = join15(completedDir, fileName);
   renameSync2(taskFilePath, destPath);
   return destPath;
 }
@@ -25797,12 +26005,12 @@ async function finalizeTask(opts) {
   }
   const raw = readFileSync11(taskFile, "utf8");
   const patched = patchFrontmatterStatus(raw, "Done");
-  writeFileSync4(taskFile, patched, "utf8");
+  writeFileSync5(taskFile, patched, "utf8");
   const completedPath = moveTaskToCompleted(taskFile);
   parseTaskFile(completedPath);
   let attestationPath = null;
-  const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join14(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
-  if (helperScript && existsSync12(helperScript)) {
+  const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join15(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
+  if (helperScript && existsSync13(helperScript)) {
     const signResult = await runner("node", [helperScript], {
       cwd: opts.worktreePath,
       allowFailure: true
@@ -25849,8 +26057,8 @@ Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in t
 }
 
 // ../../pipeline-cli/dist/steps/11-late-rebase.js
-import { readFileSync as readFileSync12, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join15 } from "node:path";
+import { readFileSync as readFileSync12, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join16 } from "node:path";
 function parseConflictingFiles(porcelain) {
   const files = [];
   for (const line of porcelain.split("\n")) {
@@ -25916,7 +26124,7 @@ function resolveTestConflict(content) {
   return result;
 }
 function tryResolveFile(filePath, worktreePath) {
-  const absPath = join15(worktreePath, filePath);
+  const absPath = join16(worktreePath, filePath);
   let content;
   try {
     content = readFileSync12(absPath, "utf8");
@@ -25935,7 +26143,7 @@ function tryResolveFile(filePath, worktreePath) {
   if (resolved === null || resolved.includes("<<<<<<<")) {
     return false;
   }
-  writeFileSync5(absPath, resolved, "utf8");
+  writeFileSync6(absPath, resolved, "utf8");
   return true;
 }
 async function lateRebase(opts) {
@@ -26044,12 +26252,12 @@ async function lateRebase(opts) {
 }
 
 // ../../pipeline-cli/dist/steps/11-push-and-pr.js
-import { existsSync as existsSync13, readFileSync as readFileSync13 } from "node:fs";
-import { join as join16 } from "node:path";
+import { existsSync as existsSync14, readFileSync as readFileSync13 } from "node:fs";
+import { join as join17 } from "node:path";
 var DEFAULT_TITLE_TEMPLATE = "feat: {issueTitle} ({issueId})";
 function readTitleTemplate(workDir) {
-  const path = join16(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
-  if (!existsSync13(path))
+  const path = join17(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
+  if (!existsSync14(path))
     return DEFAULT_TITLE_TEMPLATE;
   let raw;
   try {
@@ -26101,8 +26309,8 @@ async function pushAndPr(opts) {
     };
   }
   if (rebase.resolvedFiles.length > 0) {
-    const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join16(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
-    if (helperScript && existsSync13(helperScript)) {
+    const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join17(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
+    if (helperScript && existsSync14(helperScript)) {
       const signResult = await runner("node", [helperScript], {
         cwd: opts.worktreePath,
         allowFailure: true
@@ -26287,11 +26495,11 @@ ${filesList || "- (none)"}
 }
 
 // ../../pipeline-cli/dist/steps/13-cleanup.js
-import { existsSync as existsSync14, unlinkSync } from "node:fs";
-import { join as join17 } from "node:path";
+import { existsSync as existsSync15, unlinkSync } from "node:fs";
+import { join as join18 } from "node:path";
 async function cleanupTask(opts) {
-  const sentinelPath = join17(opts.worktreePath, ".active-task");
-  if (!existsSync14(sentinelPath)) {
+  const sentinelPath = join18(opts.worktreePath, ".active-task");
+  if (!existsSync15(sentinelPath)) {
     return { sentinelRemoved: false };
   }
   try {
@@ -26303,12 +26511,12 @@ async function cleanupTask(opts) {
 }
 
 // ../../pipeline-cli/dist/deps/dependency-graph.js
-import { existsSync as existsSync15, readdirSync as readdirSync5, readFileSync as readFileSync14, statSync as statSync5 } from "node:fs";
-import { join as join18 } from "node:path";
+import { existsSync as existsSync16, readdirSync as readdirSync6, readFileSync as readFileSync14, statSync as statSync5 } from "node:fs";
+import { join as join19 } from "node:path";
 
 // ../../pipeline-cli/dist/deps/snapshot.js
-import { existsSync as existsSync16, mkdirSync as mkdirSync6, readdirSync as readdirSync6, readFileSync as readFileSync15, statSync as statSync6, unlinkSync as unlinkSync2, writeFileSync as writeFileSync6 } from "node:fs";
-import { join as join19 } from "node:path";
+import { existsSync as existsSync17, mkdirSync as mkdirSync7, readdirSync as readdirSync7, readFileSync as readFileSync15, statSync as statSync6, unlinkSync as unlinkSync2, writeFileSync as writeFileSync7 } from "node:fs";
+import { join as join20 } from "node:path";
 
 // ../../pipeline-cli/dist/deps/effective-priority.js
 var PRIORITY_WEIGHT = {
@@ -26320,72 +26528,72 @@ var PRIORITY_WEIGHT = {
 var DEFAULT_PRIORITY_WEIGHT = PRIORITY_WEIGHT.medium;
 
 // ../../pipeline-cli/dist/deps/critical-path.js
-import { existsSync as existsSync17, readFileSync as readFileSync16 } from "node:fs";
+import { existsSync as existsSync18, readFileSync as readFileSync16 } from "node:fs";
 
 // ../../pipeline-cli/dist/deps/override-log.js
-import { appendFileSync, existsSync as existsSync18, mkdirSync as mkdirSync7, readFileSync as readFileSync17 } from "node:fs";
-import { dirname as dirname5, join as join20 } from "node:path";
+import { appendFileSync, existsSync as existsSync19, mkdirSync as mkdirSync8, readFileSync as readFileSync17 } from "node:fs";
+import { dirname as dirname5, join as join21 } from "node:path";
 
 // ../../pipeline-cli/dist/execute-pipeline.js
-import { existsSync as existsSync19 } from "node:fs";
+import { existsSync as existsSync20 } from "node:fs";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync28, readFileSync as readFileSync26 } from "node:fs";
-import { join as join30 } from "node:path";
+import { existsSync as existsSync29, readFileSync as readFileSync26 } from "node:fs";
+import { join as join31 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/dispatch-result.js
-import { mkdirSync as mkdirSync8, readFileSync as readFileSync18, writeFileSync as writeFileSync7 } from "node:fs";
+import { mkdirSync as mkdirSync9, readFileSync as readFileSync18, writeFileSync as writeFileSync8 } from "node:fs";
 import { dirname as dirname6 } from "node:path";
 
 // ../../pipeline-cli/dist/cli/execute.js
-import { mkdirSync as mkdirSync10, writeFileSync as writeFileSync10 } from "node:fs";
-import { join as join22 } from "node:path";
+import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync11 } from "node:fs";
+import { join as join23 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/claude-cli-inline.js
-import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync8 } from "node:fs";
+import { mkdirSync as mkdirSync10, writeFileSync as writeFileSync9 } from "node:fs";
 import { dirname as dirname7 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/rollback.js
 import { execSync as execSync4 } from "node:child_process";
-import { existsSync as existsSync20, readFileSync as readFileSync19, statSync as statSync7, writeFileSync as writeFileSync9 } from "node:fs";
-import { join as join21 } from "node:path";
+import { existsSync as existsSync21, readFileSync as readFileSync19, statSync as statSync7, writeFileSync as writeFileSync10 } from "node:fs";
+import { join as join22 } from "node:path";
 var SENTINEL_ACTIVE_THRESHOLD_MS2 = 6 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/events.js
-import { appendFileSync as appendFileSync2, existsSync as existsSync21, mkdirSync as mkdirSync11, readFileSync as readFileSync20, readdirSync as readdirSync7 } from "node:fs";
-import { dirname as dirname8, join as join23 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync22, mkdirSync as mkdirSync12, readFileSync as readFileSync20, readdirSync as readdirSync8 } from "node:fs";
+import { dirname as dirname8, join as join24 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/already-in-flight.js
 import { execSync as execSync5 } from "node:child_process";
-import { existsSync as existsSync22 } from "node:fs";
-import { join as join24 } from "node:path";
+import { existsSync as existsSync23 } from "node:fs";
+import { join as join25 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/dor-readiness.js
-import { existsSync as existsSync23, readFileSync as readFileSync21 } from "node:fs";
+import { existsSync as existsSync24, readFileSync as readFileSync21 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/calibration-log.js
-import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync12 } from "node:fs";
-import { dirname as dirname9, join as join25 } from "node:path";
+import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync13 } from "node:fs";
+import { dirname as dirname9, join as join26 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/external-dependencies.js
-import { existsSync as existsSync24, readFileSync as readFileSync22 } from "node:fs";
-import { join as join26 } from "node:path";
-
-// ../../pipeline-cli/dist/orchestrator/in-flight.js
-import { existsSync as existsSync25, readdirSync as readdirSync8, readFileSync as readFileSync23, statSync as statSync8 } from "node:fs";
+import { existsSync as existsSync25, readFileSync as readFileSync22 } from "node:fs";
 import { join as join27 } from "node:path";
 
-// ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
-import { existsSync as existsSync26, readFileSync as readFileSync24 } from "node:fs";
+// ../../pipeline-cli/dist/orchestrator/in-flight.js
+import { existsSync as existsSync26, readdirSync as readdirSync9, readFileSync as readFileSync23, statSync as statSync8 } from "node:fs";
 import { join as join28 } from "node:path";
+
+// ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
+import { existsSync as existsSync27, readFileSync as readFileSync24 } from "node:fs";
+import { join as join29 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/handlers/long-running-pr.js
 var LONG_RUNNING_PR_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/playbook/state-machine.js
-import { existsSync as existsSync27, mkdirSync as mkdirSync13, readFileSync as readFileSync25, writeFileSync as writeFileSync11 } from "node:fs";
-import { dirname as dirname10, join as join29 } from "node:path";
+import { existsSync as existsSync28, mkdirSync as mkdirSync14, readFileSync as readFileSync25, writeFileSync as writeFileSync12 } from "node:fs";
+import { dirname as dirname10, join as join30 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 var MAX_IDLE_SLEEP_SEC = 5 * 60;
@@ -26395,7 +26603,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 // ../../pipeline-cli/dist/classifier/classifier.js
 import { appendFile, mkdir } from "node:fs/promises";
-import { dirname as dirname11, join as join31 } from "node:path";
+import { dirname as dirname11, join as join32 } from "node:path";
 
 // ../../pipeline-cli/dist/classifier/budget-classifier.js
 var BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
@@ -26408,8 +26616,8 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync30, readFileSync as readFileSync27, readdirSync as readdirSync10, statSync as statSync10 } from "node:fs";
-import { basename as basename3, join as join33, relative } from "node:path";
+import { existsSync as existsSync31, readFileSync as readFileSync27, readdirSync as readdirSync11, statSync as statSync10 } from "node:fs";
+import { basename as basename3, join as join34, relative } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
 var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
@@ -26418,22 +26626,22 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync31, readFileSync as readFileSync28 } from "node:fs";
-import { join as join34 } from "node:path";
-
-// ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync32, readFileSync as readFileSync29, readdirSync as readdirSync11 } from "node:fs";
+import { existsSync as existsSync32, readFileSync as readFileSync28 } from "node:fs";
 import { join as join35 } from "node:path";
 
+// ../../pipeline-cli/dist/dor/ingress-claude.js
+import { existsSync as existsSync33, readFileSync as readFileSync29, readdirSync as readdirSync12 } from "node:fs";
+import { join as join36 } from "node:path";
+
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync33, readFileSync as readFileSync30 } from "node:fs";
+import { existsSync as existsSync34, readFileSync as readFileSync30 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync34, readFileSync as readFileSync31 } from "node:fs";
-import { join as join36 } from "node:path";
+import { existsSync as existsSync35, readFileSync as readFileSync31 } from "node:fs";
+import { join as join37 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {
@@ -26874,6 +27082,7 @@ function registerAllTools(server2, deps) {
   registerGetGovernanceContext(server2, deps);
   registerListDetectedPatterns(server2, deps);
   registerGetReviewPolicy(server2, deps);
+  registerTaskCreate(server2, deps);
   registerTaskEdit(server2, deps);
   registerTaskComplete(server2, deps);
   registerPipelineTools(server2);
