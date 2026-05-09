@@ -5,6 +5,7 @@ import { registerCheckIssue } from './check-issue.js';
 import { registerGetGovernanceContext } from './get-governance-context.js';
 import { registerListDetectedPatterns } from './list-detected-patterns.js';
 import { registerGetReviewPolicy } from './get-review-policy.js';
+import { registerTaskCreate } from './task-create.js';
 import { registerTaskEdit } from './task-edit.js';
 import { registerTaskComplete } from './task-complete.js';
 import { registerPipelineTools } from './pipeline-tools.js';
@@ -15,6 +16,7 @@ export function registerAllTools(server: McpServer, deps: ToolDeps): void {
   registerGetGovernanceContext(server, deps);
   registerListDetectedPatterns(server, deps);
   registerGetReviewPolicy(server, deps);
+  registerTaskCreate(server, deps);
   registerTaskEdit(server, deps);
   registerTaskComplete(server, deps);
   // RFC-0012 Phase 3 (AISDLC-100.3): wrap each pipeline-cli step function

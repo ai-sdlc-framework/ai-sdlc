@@ -17,6 +17,9 @@ vi.mock('./list-detected-patterns.js', () => ({
 vi.mock('./get-review-policy.js', () => ({
   registerGetReviewPolicy: vi.fn(),
 }));
+vi.mock('./task-create.js', () => ({
+  registerTaskCreate: vi.fn(),
+}));
 vi.mock('./task-edit.js', () => ({
   registerTaskEdit: vi.fn(),
 }));
@@ -28,7 +31,7 @@ vi.mock('./pipeline-tools.js', () => ({
 }));
 
 describe('registerAllTools', () => {
-  it('calls server.tool() once per tool registration helper (8 total)', async () => {
+  it('calls server.tool() once per tool registration helper (9 total)', async () => {
     const server = {
       tool: vi.fn(),
     } as unknown as McpServer;
@@ -42,6 +45,7 @@ describe('registerAllTools', () => {
     const { registerGetGovernanceContext } = vi.mocked(await import('./get-governance-context.js'));
     const { registerListDetectedPatterns } = vi.mocked(await import('./list-detected-patterns.js'));
     const { registerGetReviewPolicy } = vi.mocked(await import('./get-review-policy.js'));
+    const { registerTaskCreate } = vi.mocked(await import('./task-create.js'));
     const { registerTaskEdit } = vi.mocked(await import('./task-edit.js'));
     const { registerTaskComplete } = vi.mocked(await import('./task-complete.js'));
     const { registerPipelineTools } = vi.mocked(await import('./pipeline-tools.js'));
@@ -51,6 +55,7 @@ describe('registerAllTools', () => {
     expect(registerGetGovernanceContext).toHaveBeenCalledOnce();
     expect(registerListDetectedPatterns).toHaveBeenCalledOnce();
     expect(registerGetReviewPolicy).toHaveBeenCalledOnce();
+    expect(registerTaskCreate).toHaveBeenCalledOnce();
     expect(registerTaskEdit).toHaveBeenCalledOnce();
     expect(registerTaskComplete).toHaveBeenCalledOnce();
     expect(registerPipelineTools).toHaveBeenCalledOnce();
