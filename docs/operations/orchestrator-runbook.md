@@ -10,6 +10,65 @@ at [`spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md`](../../spec/rfcs/RF
 
 ---
 
+## Auto-rebuild of stale `pipeline-cli/dist/` (AISDLC-226)
+
+`pipeline-cli/dist/` is gitignored. After `git pull`, the compiled output
+stays at your last manual `pnpm build`. Running `cli-orchestrator tick` or
+`cli-orchestrator start` with a stale `dist/` silently runs OLD code —
+filters and features that shipped in `src/` are not active.
+
+### How it works
+
+At the start of every `tick` and `start` invocation the orchestrator compares
+the mtime of two sentinel files:
+
+- **`src/index.ts`** — newest-touched source file proxy
+- **`dist/index.js`** — compiled output proxy
+
+If `src/index.ts` is newer than `dist/index.js`, the orchestrator:
+
+1. Logs a single line to stderr:
+   ```
+   [orchestrator] dist/ stale, rebuilding pipeline-cli
+   ```
+2. Runs `pnpm --filter @ai-sdlc/pipeline-cli build` with inherited stdio so
+   you see the TypeScript compiler output in real time.
+3. Proceeds normally once the build succeeds.
+
+If the build exits non-zero the orchestrator **aborts** with a clear error
+message — it does NOT silently proceed with stale dist.
+
+### Skip the auto-rebuild
+
+Set `AI_SDLC_ORCHESTRATOR_SKIP_REBUILD=1` to disable the staleness check.
+Use this in:
+
+- **CI environments** — dist is built by the CI step that precedes the orchestrator.
+- **Packaged / containerised deployments** — dist is baked into the image.
+- **Development loops** where you know dist is fresh and want to skip the stat.
+
+```bash
+export AI_SDLC_ORCHESTRATOR_SKIP_REBUILD=1
+node pipeline-cli/bin/cli-orchestrator.mjs tick
+```
+
+### Manually rebuild if needed
+
+```bash
+pnpm --filter @ai-sdlc/pipeline-cli build
+```
+
+Or from the workspace root:
+
+```bash
+pnpm build
+```
+
+After a successful build, run `cli-orchestrator tick` normally — the staleness
+check will see that `dist/index.js` is now newer and skip the rebuild.
+
+---
+
 ## Full-pipeline umbrella dispatch (AISDLC-229)
 
 As of AISDLC-229, `cli-orchestrator tick` dispatches tasks through the

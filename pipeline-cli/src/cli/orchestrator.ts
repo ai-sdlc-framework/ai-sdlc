@@ -45,6 +45,7 @@ import {
   writeDispatchResult,
   type DispatchResult,
 } from '../runtime/spawners/dispatch-result.js';
+import { checkAndRebuildIfStale, type DistStalenessOptions } from './dist-staleness.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -77,8 +78,15 @@ function buildConfig(argv: Record<string, unknown>): OrchestratorConfig {
  * frontier / escalator. Production invocations leave it undefined and pick
  * up the real-world defaults (cli-deps frontier query, executePipeline,
  * `gh pr edit --add-label`).
+ *
+ * The optional `distStaleness` argument lets tests inject staleness-check
+ * overrides (packageRoot, pnpmBin, spawnFn, stderrWrite). Production
+ * invocations leave it undefined and pick up real env/fs defaults.
  */
-export function buildOrchestratorCli(adapters?: OrchestratorAdapters): Argv {
+export function buildOrchestratorCli(
+  adapters?: OrchestratorAdapters,
+  distStaleness?: DistStalenessOptions,
+): Argv {
   const cwdDefault = (): string => process.cwd();
 
   return yargs(hideBin(process.argv))
@@ -112,6 +120,7 @@ export function buildOrchestratorCli(adapters?: OrchestratorAdapters): Argv {
         if (!isOrchestratorEnabled()) {
           fail(orchestratorDisabledMessage(), 2);
         }
+        checkAndRebuildIfStale(distStaleness);
         const config = buildConfig(argv as Record<string, unknown>);
         try {
           const ticks = await runOrchestratorLoop(config, adapters ?? {});
@@ -155,6 +164,7 @@ export function buildOrchestratorCli(adapters?: OrchestratorAdapters): Argv {
         if (!isOrchestratorEnabled()) {
           fail(orchestratorDisabledMessage(), 2);
         }
+        checkAndRebuildIfStale(distStaleness);
         const config = buildConfig({ ...argv, 'max-ticks': 1 } as Record<string, unknown>);
 
         // AISDLC-225 — resolve the continueFromResultPath when the flag is
