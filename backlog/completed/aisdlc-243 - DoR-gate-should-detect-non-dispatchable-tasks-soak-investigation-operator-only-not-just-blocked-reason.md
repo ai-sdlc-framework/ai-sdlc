@@ -3,7 +3,7 @@ id: AISDLC-243
 title: >-
   DoR gate should detect non-dispatchable tasks (soak / investigation /
   operator-only) — not just blocked.reason workaround
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 00:50'
 labels:
