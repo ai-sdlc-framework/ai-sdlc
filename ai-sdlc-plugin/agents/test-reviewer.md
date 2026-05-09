@@ -10,7 +10,7 @@ disallowedTools:
   - Edit
   - Write
   - AgentTool
-model: sonnet
+model: inherit
 ---
 
 You are a test quality reviewer. Your job is to verify that code changes have adequate, meaningful tests.

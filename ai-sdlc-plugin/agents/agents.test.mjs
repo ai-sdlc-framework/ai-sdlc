@@ -10,7 +10,7 @@
 
 import { describe, it, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -72,6 +72,11 @@ function parseFrontmatter(filePath) {
 // agent inherits the model) MUST gate every plugin subagent uniformly,
 // so this list is the source of truth for "all plugin subagents". When
 // a new agent ships, append it here.
+//
+// AISDLC-247: code-reviewer-codex.md + test-reviewer-codex.md added as
+// cross-harness Codex reviewer variants. They share the same invariants
+// (Read, AgentTool disallowed, model: inherit) but differ from the Claude
+// variants in harness (codex) and tools (Bash instead of Grep/Glob).
 const agentFiles = [
   'code-reviewer.md',
   'security-reviewer.md',
@@ -79,8 +84,11 @@ const agentFiles = [
   'developer.md',
   'rebase-resolver.md',
   'refinement-reviewer.md',
+  'code-reviewer-codex.md',
+  'test-reviewer-codex.md',
 ];
 const reviewerFiles = ['code-reviewer.md', 'security-reviewer.md', 'test-reviewer.md'];
+const codexReviewerFiles = ['code-reviewer-codex.md', 'test-reviewer-codex.md'];
 const agents = {};
 
 before(() => {
@@ -214,3 +222,89 @@ describe('agent definition tool restrictions', () => {
 // body itself, which is where the recipe was moved). See that file for
 // the contract that used to live in the `describe('execute-orchestrator
 // agent ...')` block here.
+
+describe('AISDLC-247: Codex reviewer variants', () => {
+  it('code-reviewer-codex.md exists', () => {
+    assert.ok(
+      existsSync(join(__dirname, 'code-reviewer-codex.md')),
+      'code-reviewer-codex.md must exist',
+    );
+  });
+
+  it('test-reviewer-codex.md exists', () => {
+    assert.ok(
+      existsSync(join(__dirname, 'test-reviewer-codex.md')),
+      'test-reviewer-codex.md must exist',
+    );
+  });
+
+  it('codex reviewer variants declare harness: codex', () => {
+    for (const file of codexReviewerFiles) {
+      assert.equal(
+        agents[file].harness,
+        'codex',
+        `${file} must declare harness: codex for cross-harness routing`,
+      );
+    }
+  });
+
+  it('codex reviewer variants have Bash in tools (needed to shell out to codex CLI)', () => {
+    for (const file of codexReviewerFiles) {
+      assert.ok(
+        agents[file].tools.includes('Bash'),
+        `${file} must include Bash (to shell out to codex exec)`,
+      );
+    }
+  });
+
+  it('codex reviewer variants disallow Edit and Write (read-only bridge)', () => {
+    for (const file of codexReviewerFiles) {
+      assert.ok(
+        agents[file].disallowedTools.includes('Edit'),
+        `${file} must disallow Edit (read-only reviewer)`,
+      );
+      assert.ok(
+        agents[file].disallowedTools.includes('Write'),
+        `${file} must disallow Write (read-only reviewer)`,
+      );
+    }
+  });
+
+  it('codex reviewer bodies document the JSON envelope shape', () => {
+    for (const file of codexReviewerFiles) {
+      const body = readFileSync(join(__dirname, file), 'utf-8');
+      assert.ok(
+        body.includes('"approved"'),
+        `${file} body must document the approved field in the JSON envelope`,
+      );
+      assert.ok(
+        body.includes('"findings"'),
+        `${file} body must document the findings field in the JSON envelope`,
+      );
+      assert.ok(
+        body.includes('"summary"'),
+        `${file} body must document the summary field in the JSON envelope`,
+      );
+    }
+  });
+
+  it('codex reviewer bodies instruct shelling out to codex exec', () => {
+    for (const file of codexReviewerFiles) {
+      const body = readFileSync(join(__dirname, file), 'utf-8');
+      assert.ok(
+        body.includes('codex exec'),
+        `${file} body must instruct the agent to invoke codex exec`,
+      );
+    }
+  });
+
+  it('codex reviewer variants have requiresIndependentHarnessFrom: implement', () => {
+    for (const file of codexReviewerFiles) {
+      assert.ok(
+        Array.isArray(agents[file].requiresIndependentHarnessFrom) &&
+          agents[file].requiresIndependentHarnessFrom.includes('implement'),
+        `${file} must declare requiresIndependentHarnessFrom: [implement] for harness independence`,
+      );
+    }
+  });
+});
