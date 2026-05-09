@@ -3,7 +3,7 @@ id: AISDLC-234
 title: >-
   Plugin MCP server — add Pattern-C-aware task_create tool (currently only
   task_edit + task_complete route to worktrees)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 21:35'
 labels:
