@@ -3,7 +3,7 @@ id: AISDLC-226
 title: >-
   Orchestrator's local pipeline-cli/dist staleness — operator must rebuild
   manually after main moves
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 02:23'
 labels:
