@@ -10,7 +10,7 @@ tools:
   - Write
 disallowedTools:
   - AgentTool
-model: sonnet
+model: inherit
 harness: claude-code
 ---
 

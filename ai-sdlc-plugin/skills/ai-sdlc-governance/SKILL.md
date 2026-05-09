@@ -88,6 +88,23 @@ When review agents post findings:
 - `.github/workflows/` — GitHub Actions — agents cannot modify these files
 - `spec/schemas/` — JSON schemas for YAML validation
 
+## Cross-harness review (AISDLC-247)
+
+Two Codex reviewer variants ship alongside the Claude variants:
+
+| Agent | Harness | When to use |
+|-------|---------|-------------|
+| `code-reviewer` | claude-code | Default code review |
+| `test-reviewer` | claude-code | Default test review |
+| `code-reviewer-codex` | codex | Claude-developed PRs reviewed by Codex; or when o4-mini latency/cost is preferred |
+| `test-reviewer-codex` | codex | Same as above for test coverage |
+
+All four return the same `{ approved, findings, summary }` envelope — Step 8 aggregation is harness-agnostic.
+
+**`security-reviewer` stays on Claude** (per `feedback_subagent_model_selection.md`) for reasoning-heavy OWASP analysis.
+
+See `docs/operations/cross-harness-review.md` for the full operator runbook.
+
 ## Testing
 
 - Use Vitest for all orchestrator and reference tests
