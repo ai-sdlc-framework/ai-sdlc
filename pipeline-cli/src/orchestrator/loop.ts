@@ -2038,6 +2038,15 @@ function buildDefaultDispatch(
           hadUncommittedChanges: event.hadUncommittedChanges,
         });
       },
+      // AISDLC-241 — activate the in-process mutex (and cross-process file
+      // lock) for Step 3's `git worktree add`. The singleton `_globalMutex`
+      // inside `withWorktreeMutex` serializes all concurrent ticks running
+      // in the same Node.js process; `workDir` activates the advisory
+      // `mkdir`-based file lock for the rare case of two independently
+      // started `cli-orchestrator tick` processes racing the same repo.
+      // The manual `/ai-sdlc execute` path leaves `mutexOpts` undefined,
+      // preserving the no-lock backward-compatible default.
+      mutexOpts: { workDir: config.workDir },
     });
   };
 }

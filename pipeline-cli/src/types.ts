@@ -84,6 +84,18 @@ export interface PipelineOptions {
     hadOpenPR: boolean;
     hadUncommittedChanges: boolean;
   }) => void;
+  /**
+   * AISDLC-241 — options forwarded to `withWorktreeMutex()` inside Step 3
+   * (`setupWorktree`). When provided, `git worktree add` (and any sibling
+   * cleanup ops) are serialized via the in-process mutex so concurrent
+   * orchestrator ticks in the same process cannot race on `.git/config.lock`.
+   *
+   * The orchestrator's `buildDefaultDispatch` injects `{ workDir }` so all
+   * concurrent ticks share the singleton in-process queue AND the cross-process
+   * file lock. Manual `/ai-sdlc execute` leaves this undefined (default OFF —
+   * no behaviour change for the single-dispatch path).
+   */
+  mutexOpts?: import('./runtime/worktree-mutex.js').WithWorktreeMutexOptions;
 }
 
 /**
