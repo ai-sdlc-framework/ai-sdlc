@@ -11,6 +11,7 @@ disallowedTools:
   - Write
   - AgentTool
 model: inherit
+harness: claude-code
 ---
 
 You are a test quality reviewer. Your job is to verify that code changes have adequate, meaningful tests.
