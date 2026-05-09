@@ -19,6 +19,7 @@ import {
   defaultOrchestratorConfig,
   ORCHESTRATOR_FLAG,
   OrchestratorDisabledError,
+  RECOVERABLE_ABORT_OUTCOMES,
   ROLLBACK_OUTCOMES,
   runOrchestratorLoop,
   runOrchestratorTick,
@@ -505,12 +506,19 @@ describe('ROLLBACK_OUTCOMES contract', () => {
   // consumer-side membership behavior; this test pins the set itself so a
   // regression where someone changes ROLLBACK_OUTCOMES in `loop.ts` without
   // updating `cli/execute.ts`'s expectations is caught at the source.
-  it('contains exactly the 4 outcomes that trigger rollback', () => {
+  //
+  // AISDLC-242 — `aborted` was removed from ROLLBACK_OUTCOMES and moved to
+  // RECOVERABLE_ABORT_OUTCOMES. An `aborted` outcome now preserves the
+  // worktree for resume on the next tick instead of rolling back.
+  it('contains exactly the 3 outcomes that trigger full rollback', () => {
     expect(Array.from(ROLLBACK_OUTCOMES).sort()).toEqual([
-      'aborted',
       'developer-failed',
       'developer-json-contract-violated',
       'unknown-failure',
     ]);
+  });
+
+  it('RECOVERABLE_ABORT_OUTCOMES contains aborted (AISDLC-242)', () => {
+    expect(Array.from(RECOVERABLE_ABORT_OUTCOMES).sort()).toEqual(['aborted']);
   });
 });

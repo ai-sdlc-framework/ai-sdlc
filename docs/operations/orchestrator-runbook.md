@@ -1126,3 +1126,149 @@ process start. It installs a `SIGINT` / `SIGTERM` listener that releases
 the file lock before re-raising the signal, so a clean `Ctrl-C` leaves no
 stale `.git/.ai-sdlc-worktree-mutex` on disk. A `SIGKILL` bypasses the
 handler — manual cleanup (above) is required in that case.
+
+---
+
+## Resume from interrupted orchestrator runs (AISDLC-242)
+
+Long Tier-2 tasks (12+ ACs, 30+ files) take 20-30 minutes of dev subagent
+time. Losing that work to a kill signal, watchdog timeout, network blip, or
+operator Ctrl-C is expensive. The resume protocol preserves partial dev work
+so the next tick picks up where the previous session left off.
+
+### How it works
+
+When the `cli-orchestrator tick` dispatcher returns `outcome: 'aborted'`
+(the outcome set when a dev subagent is killed by SIGTERM/SIGKILL or the
+30-min watchdog fires), the orchestrator classifies the abort as
+**RECOVERABLE** instead of rolling back:
+
+1. **Worktree preserved**: `.worktrees/<task-id-lower>/` is left on disk
+   with the dev's partial changes intact.
+2. **Branch preserved**: the dev's branch (`ai-sdlc/<task-id-lower>-...`)
+   is not quarantined or deleted.
+3. **Sentinel preserved**: `.active-task` sentinel stays in place so the
+   in-flight filter recognises the worktree on restart.
+4. **Event emitted**: `OrchestratorTaskAbortedRecoverable` is written to
+   `events.jsonl` with the abort reason, branch name, and commit counts
+   (including any `wip(checkpoint):` commits).
+
+On the **next tick**, the orchestrator detects the existing worktree and
+emits `OrchestratorTaskResumed` before re-dispatching the task. The dev
+subagent dispatched by that tick finds the worktree already populated and
+continues from the current HEAD instead of starting from scratch.
+
+### Checkpoint commits (Mechanism 1)
+
+The dev agent can emit periodic `wip(checkpoint):` commits to preserve
+partial work in git history:
+
+```bash
+# Inside the worktree — the orchestrator checkpoint helper does this:
+git add -A
+git -c commit.gpgsign=false commit --no-verify -m "wip(checkpoint): after editing step-7 files (AISDLC-242)"
+```
+
+These commits are intentionally exempt from pre-commit hooks (`--no-verify`)
+because:
+- The working diff may be incomplete (tests don't pass yet).
+- Coverage, drift, and attestation hooks are not meaningful mid-edit.
+
+Before the final push, checkpoint commits are squashed into the real commit
+via `git rebase --autosquash`, so they never appear in PR history.
+
+To inspect checkpoint commits in a preserved worktree:
+
+```bash
+git -C .worktrees/<task-id-lower> log --oneline --grep="^wip(checkpoint):" origin/main..HEAD
+```
+
+### Stale worktree sweep policy
+
+A recoverable worktree older than **24 hours** is considered stale and
+is eligible for automatic discard. The sweep policy is:
+
+- Age is measured from the sentinel's mtime (last write = last dev activity).
+- Worktrees with an open PR are never swept automatically — they follow the
+  PR lifecycle instead.
+- Worktrees with a live `claude --print` subprocess are never swept.
+
+To list all preserved worktrees and their ages:
+
+```bash
+find .worktrees -name '.active-task' -maxdepth 2 | while read p; do
+  dir=$(dirname "$p")
+  age=$(( ( $(date +%s) - $(stat -f %m "$p" 2>/dev/null || stat -c %Y "$p") ) / 3600 ))
+  echo "${age}h old: $dir ($(cat $p))"
+done
+```
+
+### Manually resuming a task
+
+If you want to force a resume immediately (rather than waiting for the next
+scheduled tick):
+
+```bash
+# Option 1: run a single tick now (picks up the preserved worktree automatically)
+AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental \
+  node pipeline-cli/bin/cli-orchestrator.mjs tick
+
+# Option 2: open the worktree interactively and continue development yourself
+cd .worktrees/<task-id-lower>
+git log --oneline origin/main..HEAD  # inspect checkpoint commits
+# make additional edits, then push normally
+```
+
+### Manually discarding a recoverable worktree
+
+If the partial work is no longer needed (e.g. the task spec changed
+significantly and a clean dispatch is preferable):
+
+```bash
+# 1. Remove the worktree
+git worktree remove --force .worktrees/<task-id-lower>
+
+# 2. Delete the stale branch
+git branch -D ai-sdlc/<task-id-lower>-<branch-suffix>
+
+# 3. Revert the task status to "To Do"
+#    (edit the frontmatter in backlog/tasks/<task-file>.md)
+#    status: To Do
+
+# 4. The next tick will dispatch the task fresh.
+```
+
+### Observability
+
+Recoverable aborts and resumes both write to `events.jsonl`:
+
+```bash
+# See all recoverable aborts
+grep '"OrchestratorTaskAbortedRecoverable"' artifacts/_orchestrator/events-*.jsonl | \
+  jq -r '. | "\(.ts) \(.taskId) reason=\(.reason) commits=\(.commitCount)"'
+
+# See all resumed dispatches
+grep '"OrchestratorTaskResumed"' artifacts/_orchestrator/events-*.jsonl | \
+  jq -r '. | "\(.ts) \(.taskId) checkpoints=\(.checkpointCommits) total=\(.commitCount)"'
+```
+
+### Session-id resume (Mechanism 2 — future work)
+
+`claude --print --session-id <id>` was investigated (AISDLC-242) to determine
+whether a killed Claude Code session could be resumed by re-attaching to the
+previous conversation ID. Empirical testing against the installed CLI shows:
+
+- `claude --print --session-id` exists as a flag but restarting a session
+  by ID starts a **new conversation** pre-seeded with the previous session's
+  context window. This is not a true resume — the model re-derives intent from
+  context rather than continuing a live session state.
+- The flag does not resume from a mid-tool-call state (the killed session's
+  in-progress `Edit` or `Write` call is not retried).
+- Claude Code's remote sandbox model (CCR) does not expose session-id
+  semantics at all for `--print` mode.
+
+**Conclusion**: session-id resume is NOT the right primitive for this use
+case. Mechanism 1 (checkpoint commits) + Mechanism 4 (preserve worktree) is
+the correct combination: the dev subagent on resume reads the preserved
+worktree's git history to understand what was accomplished, then continues
+from the current HEAD without needing to restart from scratch.

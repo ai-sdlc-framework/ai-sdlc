@@ -97,6 +97,11 @@ import {
   type WorkerContext,
 } from './playbook/index.js';
 import { rollbackDispatch, type RollbackResult } from './rollback.js';
+import {
+  countCheckpointCommits,
+  countCommitsBeyondMain,
+  detectRecoverableWorktree,
+} from './checkpoint.js';
 import type {
   DispatchFn,
   EscalateFn,
@@ -106,6 +111,7 @@ import type {
   OrchestratorBlockedEvent,
   OrchestratorConfig,
   OrchestratorFilterEvent,
+  OrchestratorTaskResumedEvent,
   PipelineFailureDetail,
   PipelineOutcomeDetail,
   RichDispatchResult,
@@ -134,13 +140,30 @@ export const STUCK_CANDIDATE_THRESHOLD = 5;
  * successfully (`approved`, `needs-human-attention` — the latter parks
  * the PR for a human and INTENTIONALLY leaves the worktree in place so
  * the operator can iterate from where the dev stopped).
+ *
+ * AISDLC-242 — `aborted` is intentionally EXCLUDED from this set.
+ * An `aborted` outcome (killed by SIGTERM/SIGKILL/watchdog or network
+ * blip) is classified as a RECOVERABLE abort: the worktree is preserved
+ * so the next tick can resume from the dev's partial work. The matching
+ * `OrchestratorTaskAbortedRecoverable` event is emitted in its place.
+ * Use `UNRECOVERABLE_OUTCOMES` for the set that DOES include `aborted`
+ * only when you explicitly want to roll back killed sessions.
  */
 export const ROLLBACK_OUTCOMES: ReadonlySet<PipelineOutcome | 'unknown-failure'> = new Set([
   'developer-failed',
   'developer-json-contract-violated',
-  'aborted',
   'unknown-failure',
 ]);
+
+/**
+ * AISDLC-242 — the `aborted` outcome is classified as RECOVERABLE by
+ * default (the worktree is preserved for resume). This set is exported for
+ * callers that need to check whether a given outcome should trigger the
+ * recoverable-abort path rather than a full rollback.
+ */
+export const RECOVERABLE_ABORT_OUTCOMES: ReadonlySet<PipelineOutcome | 'unknown-failure'> = new Set(
+  ['aborted'],
+);
 
 /** Build the default config — callers can override individual fields. */
 export function defaultOrchestratorConfig(
@@ -646,6 +669,14 @@ export async function runOrchestratorTick(
   const outcomes: TaskDispatchOutcome[] = [];
   const escalations: EscalationRecord[] = [];
 
+  // AISDLC-242 — detect recoverable worktrees for the picked tasks BEFORE
+  // dispatching. When a picked task has a preserved worktree from a prior
+  // aborted session, emit `OrchestratorTaskResumed` so operators know the
+  // dispatch is continuing from partial work rather than starting fresh.
+  // The actual resumption is transparent to the dispatcher — it finds the
+  // existing worktree + branch and continues where the dev left off.
+  detectAndEmitResumes(picks, config, emit, logger, now);
+
   // Phase 1 default `maxConcurrent: 1`. We still use Promise.all so Phase 2
   // can bump the cap without touching this code path. Each dispatch is
   // wrapped in its own try/catch so one task's escape never crashes the loop.
@@ -930,9 +961,15 @@ export async function runOrchestratorTick(
     });
     // AISDLC-177 — failure outcomes from `executePipeline()` (the
     // witness case: `developer-failed` from a dev subagent that returned
-    // commitSha:null, plus the AISDLC-176 `developer-json-contract-violated`
-    // and the catch-all `aborted`) all left Step 4's side-effects on
-    // disk. Roll them back so the task is re-dispatchable cleanly.
+    // commitSha:null, plus the AISDLC-176 `developer-json-contract-violated`)
+    // all left Step 4's side-effects on disk. Roll them back so the task is
+    // re-dispatchable cleanly.
+    //
+    // AISDLC-242 — `aborted` is now RECOVERABLE (excluded from
+    // ROLLBACK_OUTCOMES): instead of tearing down the worktree, we preserve
+    // it and emit `OrchestratorTaskAbortedRecoverable` so the next tick can
+    // resume from the dev's partial work. Full rollback still fires for
+    // `developer-failed` and `developer-json-contract-violated`.
     if (ROLLBACK_OUTCOMES.has(result.outcome)) {
       await maybeRollback({
         taskId: result.taskId,
@@ -940,6 +977,19 @@ export async function runOrchestratorTick(
         preDispatchStatus: value.preDispatchStatus,
         config,
         adapters,
+        emit,
+        logger,
+        now,
+        branch: result.branch,
+        worktreePath: result.worktreePath,
+      });
+    } else if (RECOVERABLE_ABORT_OUTCOMES.has(result.outcome)) {
+      // Recoverable abort — preserve the worktree and emit the matching event.
+      emitRecoverableAbort({
+        taskId: result.taskId,
+        outcome: result.outcome,
+        reason: result.notes ?? `aborted (${result.outcome})`,
+        config,
         emit,
         logger,
         now,
@@ -1106,6 +1156,120 @@ async function maybeRollback(args: MaybeRollbackArgs): Promise<void> {
       `[orchestrator-rollback] partial rollback for ${args.taskId}: ${result.warnings.join('; ')}`,
     );
   }
+}
+
+// ── AISDLC-242 recoverable-abort bridge ─────────────────────────────
+
+interface EmitRecoverableAbortArgs {
+  taskId: string;
+  outcome: PipelineOutcome | 'unknown-failure';
+  reason: string;
+  config: OrchestratorConfig;
+  emit: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void;
+  logger: PipelineLogger;
+  now: () => Date;
+  /** Branch name from the dispatcher's result (when available). */
+  branch?: string;
+  /** Worktree path from the dispatcher's result (when available). */
+  worktreePath?: string;
+}
+
+/**
+ * AISDLC-242 — handle an `aborted` dispatch outcome as RECOVERABLE:
+ * preserve the worktree + branch (do NOT roll back) and emit the
+ * `OrchestratorTaskAbortedRecoverable` event so operators + future ticks
+ * can detect and resume the session.
+ *
+ * The worktree is left on disk with the `.active-task` sentinel intact so
+ * `reconstructInFlightFromWorktrees()` picks it up on the next cold start
+ * and the in-flight filter keeps it from being re-dispatched as a fresh
+ * session. The resume path in `runOrchestratorTick` checks for recoverable
+ * worktrees at the start of each tick and emits `OrchestratorTaskResumed`
+ * when it detects partial work to continue.
+ */
+function emitRecoverableAbort(args: EmitRecoverableAbortArgs): void {
+  const idLower = args.taskId.toLowerCase();
+  const branch = args.branch ?? `ai-sdlc/${idLower}`;
+  const wPath = args.worktreePath ?? join(args.config.workDir, '.worktrees', idLower);
+
+  const commitCount = countCommitsBeyondMain(wPath);
+  const checkpointCount = countCheckpointCommits(wPath);
+
+  // Trim the reason to keep events.jsonl scannable.
+  const reason = args.reason.slice(0, 120);
+
+  args.logger.info(
+    `[orchestrator] recoverable abort for ${args.taskId}: worktree preserved at ${wPath} ` +
+      `(${commitCount} commits ahead, ${checkpointCount} checkpoints). ` +
+      `Next tick will resume. Reason: ${reason}`,
+  );
+
+  // Spread into a plain object to satisfy the index-signature requirement
+  // of the `emit` function (which accepts `Omit<OrchestratorEvent, 'ts'> & { ts?: string }`).
+  args.emit({
+    type: 'OrchestratorTaskAbortedRecoverable' as const,
+    ts: args.now().toISOString(),
+    taskId: args.taskId,
+    branch,
+    worktreePath: wPath,
+    reason,
+    hasCheckpointCommits: checkpointCount > 0,
+    commitCount,
+  });
+}
+
+/**
+ * AISDLC-242 — on each tick, check whether any in-flight task has a
+ * recoverable worktree from a previous aborted session. When found, emit
+ * `OrchestratorTaskResumed` and log the details so operators see that the
+ * next dispatch will continue from where the dev left off.
+ *
+ * This is informational-only — the actual resume happens implicitly because
+ * the worktree + branch are still on disk and the dev agent is re-dispatched
+ * with the same worktree path context.
+ */
+function detectAndEmitResumes(
+  taskIds: string[],
+  config: OrchestratorConfig,
+  emit: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void,
+  logger: PipelineLogger,
+  now: () => Date,
+): OrchestratorTaskResumedEvent[] {
+  const resumed: OrchestratorTaskResumedEvent[] = [];
+  for (const taskId of taskIds) {
+    const recoverable = detectRecoverableWorktree(config.workDir, taskId);
+    if (!recoverable) continue;
+
+    const ts = now().toISOString();
+    const branch = `ai-sdlc/${taskId.toLowerCase()}`;
+    const ev: OrchestratorTaskResumedEvent = {
+      type: 'OrchestratorTaskResumed',
+      ts,
+      taskId,
+      branch,
+      worktreePath: recoverable.worktreePath,
+      checkpointCommits: recoverable.checkpointCount,
+      commitCount: recoverable.commitCount,
+      resumedAt: ts,
+    };
+    logger.info(
+      `[orchestrator] resuming ${taskId} from recoverable worktree: ` +
+        `${recoverable.commitCount} commits ahead (${recoverable.checkpointCount} checkpoints)`,
+    );
+    // Spread to satisfy the index-signature requirement of the `emit` function.
+    emit({
+      type: 'OrchestratorTaskResumed' as const,
+      ts,
+      taskId: ev.taskId,
+      branch: ev.branch,
+      worktreePath: ev.worktreePath,
+      checkpointCommits: ev.checkpointCommits,
+      commitCount: ev.commitCount,
+      resumedAt: ev.resumedAt,
+    });
+    resumed.push(ev);
+  }
+  return resumed;
 }
 
 /**

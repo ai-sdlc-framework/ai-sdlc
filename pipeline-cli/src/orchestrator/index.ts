@@ -32,6 +32,7 @@ export {
   makeInitialCadenceState,
   MAX_IDLE_SLEEP_SEC,
   OrchestratorDisabledError,
+  RECOVERABLE_ABORT_OUTCOMES,
   ROLLBACK_OUTCOMES,
   runOrchestratorLoop,
   runOrchestratorTick,
@@ -40,6 +41,15 @@ export {
   type OrchestratorAdapters,
   type StuckCounterEntry,
 } from './loop.js';
+export {
+  countCheckpointCommits,
+  countCommitsBeyondMain,
+  detectRecoverableWorktree,
+  emitCheckpointCommit,
+  worktreePath as resolveWorktreePath,
+  type CheckpointOptions,
+  type CheckpointResult,
+} from './checkpoint.js';
 export {
   buildQuarantineRef,
   rollbackDispatch,
@@ -77,7 +87,9 @@ export type {
   OrchestratorRollbackEvent,
   OrchestratorStatus,
   OrchestratorStuckCandidateEvent,
+  OrchestratorTaskAbortedRecoverableEvent,
   OrchestratorTaskBlockedEvent,
+  OrchestratorTaskResumedEvent,
   OrchestratorTickResult,
   OrchestratorWorkQuarantinedEvent,
   PipelineFailureDetail,
