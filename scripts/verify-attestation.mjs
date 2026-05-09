@@ -996,10 +996,20 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     typeof matchedHarness === 'object' &&
     typeof matchedHarness.name === 'string'
   ) {
-    // SHORT_ID-validated by validatePredicateShape — safe to surface.
-    const harnessLine = matchedHarness.version
-      ? `${matchedHarness.name}@${matchedHarness.version}`
-      : matchedHarness.name;
+    // Apply paranoia regex BEFORE schema validation runs (validatePredicateShape
+    // executes inside verifyAttestation() below). Mirrors the pipelineVersion
+    // guard above (lines ~980-983); operator-local trust model bounds the threat
+    // but a CR/LF/ANSI in harness.name/version would otherwise reach CI logs.
+    const SAFE_NAME = /^[A-Za-z0-9._-]+$/;
+    const SAFE_VERSION = /^[A-Za-z0-9.\-+]+$/;
+    const safeName = SAFE_NAME.test(matchedHarness.name)
+      ? matchedHarness.name
+      : '<unsafe value redacted>';
+    const safeVersion =
+      typeof matchedHarness.version === 'string' && SAFE_VERSION.test(matchedHarness.version)
+        ? matchedHarness.version
+        : null;
+    const harnessLine = safeVersion ? `${safeName}@${safeVersion}` : safeName;
     console.log(`[ai-sdlc/attestation] harness: ${harnessLine}`);
   } else {
     console.log(
