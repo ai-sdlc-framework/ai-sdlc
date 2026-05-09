@@ -20,6 +20,7 @@
 import type { ExternalDependency } from '../../deps/dependency-graph.js';
 import type { AlreadyInFlightDetail } from './already-in-flight.js';
 import type { BlockedDetail } from './blocked.js';
+import type { DispatchabilityBlockedDetail } from './dispatchability.js';
 
 /**
  * Names of the filters in the order the chain runs them. Used in trace
@@ -40,6 +41,7 @@ export type FilterName =
   | 'OrphanParent'
   | 'AlreadyInFlight'
   | 'DependencyReadiness'
+  | 'Dispatchability'
   | 'DorReadiness'
   | 'ExternalDependencies'
   | 'Blocked';
@@ -75,11 +77,13 @@ export type FilterDetail =
   | AwaitingExternalDetail
   | OrphanParentDetail
   | AlreadyInFlightDetail
-  | BlockedDetail;
+  | BlockedDetail
+  | DispatchabilityBlockedDetail;
 
 // Re-export detail types so callers can narrow the union without extra imports.
 export type { AlreadyInFlightDetail } from './already-in-flight.js';
 export type { BlockedDetail } from './blocked.js';
+export type { DispatchabilityBlockedDetail } from './dispatchability.js';
 
 /**
  * AISDLC-175 — the candidate is a parent task whose every declared child is

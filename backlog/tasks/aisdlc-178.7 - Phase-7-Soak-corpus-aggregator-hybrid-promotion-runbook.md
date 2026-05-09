@@ -18,6 +18,11 @@ references:
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md
 parent_task_id: AISDLC-178
 priority: medium
+dispatchable: false
+dispatchableReason: >-
+  Operator soak phase — operator monitors TUI stability for ~1 week before
+  promoting. No code work; this phase is driven by telemetry + human judgment,
+  not a developer subagent.
 blocked:
   reason: >-
     Operator soak phase — implementation deferred until soak telemetry is in

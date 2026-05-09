@@ -19,11 +19,13 @@
  * @module cli/deps
  */
 
+import { existsSync, readFileSync } from 'node:fs';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import {
   blockers,
   buildDependencyGraph,
+  type DependencyGraph,
   type DependencyNode,
   frontier,
   impact,
@@ -41,6 +43,7 @@ import {
   type SnapshotTag,
   writeSnapshot,
 } from '../deps/snapshot.js';
+import { parseSimpleYaml } from '../steps/01-validate.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -84,6 +87,32 @@ function renderTable(headers: string[], rows: string[][]): string {
 }
 
 /**
+ * AISDLC-243 — check whether a task in the dependency graph has
+ * `dispatchable: false` in its frontmatter. Used by the frontier table
+ * to annotate non-dispatchable tasks with `[non-dispatchable]` so
+ * operators can see at a glance which frontier entries the orchestrator
+ * will never pick up.
+ *
+ * Returns `false` when the field is absent (backward-compatible default:
+ * all pre-243 tasks are dispatchable unless explicitly opted out).
+ * Returns `false` if the file can't be read (conservative: don't annotate
+ * on read errors).
+ */
+function isNonDispatchable(graph: DependencyGraph, taskId: string): boolean {
+  const node = graph.nodes.get(taskId.toLowerCase());
+  if (!node?.filePath || !existsSync(node.filePath)) return false;
+  try {
+    const raw = readFileSync(node.filePath, 'utf8');
+    const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+    if (!fmMatch) return false;
+    const fm = parseSimpleYaml(fmMatch[1]);
+    return fm.dispatchable === false;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Build the cli-deps yargs program. Exported so tests can drive the parser
  * without going through process.argv.
  */
@@ -117,13 +146,19 @@ export function buildDepsCli(): Argv {
         const ranked = sortFrontierByEffectivePriority(g, baseline);
         const compositionOn = isCompositionEnabled();
         if ((argv.format as string) === 'table') {
-          const rows = ranked.map((e: RankedFrontierEntry) => [
-            e.id,
-            e.title || '(no title)',
-            String(e.effectivePriority),
-            String(e.criticalPathLength),
-            e.dependencies.length === 0 ? '(none)' : e.dependencies.join(', '),
-          ]);
+          const rows = ranked.map((e: RankedFrontierEntry) => {
+            // AISDLC-243 — annotate non-dispatchable tasks so operators can
+            // see at a glance which frontier entries the orchestrator will skip.
+            const nonDispatchable = isNonDispatchable(g, e.id);
+            const idCell = nonDispatchable ? `${e.id} [non-dispatchable]` : e.id;
+            return [
+              idCell,
+              e.title || '(no title)',
+              String(e.effectivePriority),
+              String(e.criticalPathLength),
+              e.dependencies.length === 0 ? '(none)' : e.dependencies.join(', '),
+            ];
+          });
           emitText(
             renderTable(['ID', 'Title', 'EffPri', 'CPL', 'Dependencies (all completed)'], rows),
           );
@@ -133,6 +168,8 @@ export function buildDepsCli(): Argv {
           // composition metadata. `frontier` order matches `ranked` order
           // so consumers that still index into `frontier[0]` get the
           // dispatcher's first pick automatically.
+          // AISDLC-243 — include `dispatchable` on each entry so JSON consumers
+          // can filter non-dispatchable tasks without re-reading task files.
           emit({
             ok: true,
             compositionEnabled: compositionOn,
@@ -140,6 +177,7 @@ export function buildDepsCli(): Argv {
               id: r.id,
               title: r.title,
               dependencies: r.dependencies,
+              dispatchable: !isNonDispatchable(g, r.id),
             })),
             ranked,
           });

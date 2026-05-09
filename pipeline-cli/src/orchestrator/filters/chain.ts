@@ -25,6 +25,7 @@ import {
   checkDependencyReadiness,
   type CheckDependencyReadinessOpts,
 } from './dependency-readiness.js';
+import { checkDispatchability, type CheckDispatchabilityOpts } from './dispatchability.js';
 import { checkDorReadiness, type CheckDorReadinessOpts } from './dor-readiness.js';
 import {
   checkExternalDependencies,
@@ -53,6 +54,20 @@ export interface RunFilterChainOpts {
    */
   clearedExternalKeys?: ReadonlySet<string>;
   /**
+   * AISDLC-243 — pre-parsed `dispatchable:` frontmatter field for the candidate.
+   * When undefined the Dispatchability filter treats the task as dispatchable
+   * (backward-compatible with tasks that predate this field). `false` causes
+   * the filter to reject the candidate immediately after DependencyReadiness.
+   */
+  taskDispatchable?: boolean;
+  /**
+   * AISDLC-243 — pre-parsed `dispatchableReason:` frontmatter field. Advisory
+   * string carried in the filter trace + event payload so operators can see WHY
+   * a task is non-dispatchable without opening the task file. Only meaningful
+   * when `taskDispatchable === false`.
+   */
+  taskDispatchableReason?: string;
+  /**
    * AISDLC-223 — pre-parsed `blocked:` frontmatter field for the candidate.
    * When undefined the Blocked filter treats the task as not blocked
    * (backward-compatible with tasks that predate this field). The loop loads
@@ -71,18 +86,21 @@ export interface RunFilterChainOpts {
 }
 
 /**
- * Run the six filters in chain order against a single candidate.
+ * Run the seven filters in chain order against a single candidate.
  * Short-circuits on the first failure but ALWAYS returns the partial trace
  * so the loop's event emission carries the prefix of cleared filters.
  *
  * Order: OrphanParent (AISDLC-175) → AlreadyInFlight (AISDLC-227) →
- * DependencyReadiness → DorReadiness → ExternalDependencies → Blocked (AISDLC-223).
+ * DependencyReadiness → Dispatchability (AISDLC-243) → DorReadiness →
+ * ExternalDependencies → Blocked (AISDLC-223).
  * OrphanParent runs first because it's the cheapest check (constant-time
  * graph lookup) AND the most decisive — an orphan parent isn't real work
  * at all. AlreadyInFlight runs second — it catches in-progress tasks before
- * the costlier dep walk. The others preserve the RFC §4.3 ordering; Blocked
- * runs last because it's a pure struct lookup and its position is specified by
- * AC #3 of AISDLC-223.
+ * the costlier dep walk. Dispatchability runs AFTER DependencyReadiness and
+ * BEFORE DoR: we want to confirm the task's deps are met before spending time
+ * on the DoR log scan, but we want to skip the DoR scan entirely for tasks
+ * that are permanently marked non-dispatchable (soak phases, operator-only
+ * steps, investigations). Blocked runs last per AC #3 of AISDLC-223.
  */
 export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const trace: FilterResult[] = [];
@@ -113,6 +131,20 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const dep = checkDependencyReadiness(depOpts);
   trace.push(dep);
   if (!dep.passed) return { passed: false, trace, failure: dep };
+
+  // Filter 1.5 — dispatchability gate (AISDLC-243). Runs AFTER dependency
+  // readiness and BEFORE DoR so we don't spend time scanning the calibration
+  // log for tasks permanently marked non-dispatchable (soak phases,
+  // operator-only steps, investigation tasks). The filter reads a single
+  // boolean from the pre-loaded frontmatter — no I/O.
+  const dispatchabilityOpts: CheckDispatchabilityOpts = {
+    taskId: opts.taskId,
+    dispatchable: opts.taskDispatchable,
+    dispatchableReason: opts.taskDispatchableReason,
+  };
+  const dispatchability = checkDispatchability(dispatchabilityOpts);
+  trace.push(dispatchability);
+  if (!dispatchability.passed) return { passed: false, trace, failure: dispatchability };
 
   // Filter 2 — DoR readiness.
   const dorOpts: CheckDorReadinessOpts = { taskId: opts.taskId };
@@ -179,6 +211,8 @@ function humanFilterName(filter: FilterResult['filter']): string {
       return 'Already-in-flight check';
     case 'DependencyReadiness':
       return 'Dependency check';
+    case 'Dispatchability':
+      return 'Dispatchability check';
     case 'DorReadiness':
       return 'DoR readiness';
     case 'ExternalDependencies':
@@ -194,6 +228,8 @@ function terminalNote(failure: FilterResult): string {
       return `already in flight (${failure.detail.description})`;
     case 'dependency-blocked':
       return 'awaiting dependency';
+    case 'not-dispatchable':
+      return `non-dispatchable: ${failure.detail.dispatchableReason}`;
     case 'dor-blocked':
       return 'awaiting DoR clarification';
     case 'awaiting-external':

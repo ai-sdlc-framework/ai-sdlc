@@ -116,13 +116,16 @@ export interface OrchestratorFilterEvent {
  * in the tick result + via the logger. AISDLC-175 added the
  * `OrchestratorOrphanParent` arm for parent-task closure detection.
  * AISDLC-223 adds `OrchestratorTaskBlocked` for operator-blocked tasks.
+ * AISDLC-243 adds `OrchestratorBlockedByDispatchability` for tasks
+ * permanently marked non-dispatchable via `dispatchable: false` frontmatter.
  */
 export type OrchestratorBlockedEvent =
   | OrchestratorBlockedByDependencyEvent
   | OrchestratorBlockedByDorEvent
   | OrchestratorAwaitingExternalEvent
   | OrchestratorOrphanParentEvent
-  | OrchestratorTaskBlockedEvent;
+  | OrchestratorTaskBlockedEvent
+  | OrchestratorBlockedByDispatchabilityEvent;
 
 export interface OrchestratorBlockedByDependencyEvent {
   type: 'OrchestratorBlockedByDependency';
@@ -175,6 +178,26 @@ export interface OrchestratorTaskBlockedEvent {
    * block. Mirrors `blocked.until` when present.
    */
   until?: string;
+}
+
+/**
+ * AISDLC-243 — emitted on every tick that the `Dispatchability` admission
+ * filter rejects a candidate. The task has `dispatchable: false` in its
+ * frontmatter — it is permanently not meant to be dispatched to a developer
+ * subagent (soak phases, operator-only steps, investigation tasks). This
+ * replaces the overloaded `blocked.reason` workaround for the permanent
+ * non-dispatchable case.
+ */
+export interface OrchestratorBlockedByDispatchabilityEvent {
+  type: 'OrchestratorBlockedByDispatchability';
+  ts: string;
+  taskId: string;
+  /**
+   * The value of `dispatchableReason` frontmatter — the operator-supplied
+   * advisory reason. Mirrors the filter's `reason` field. Generated default
+   * when the frontmatter field is absent.
+   */
+  dispatchableReason: string;
 }
 
 /**

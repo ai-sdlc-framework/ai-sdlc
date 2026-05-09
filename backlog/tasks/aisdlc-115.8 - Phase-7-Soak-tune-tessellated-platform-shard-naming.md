@@ -18,6 +18,11 @@ references:
   - spec/rfcs/RFC-0011-definition-of-ready-gate.md
 parent_task_id: AISDLC-115
 priority: medium
+dispatchable: false
+dispatchableReason: >-
+  Soak phase — operator-driven exit criterion (FP rate < 10% per gate AND
+  override-rate plateau in calibration.jsonl). No code work for a developer
+  subagent; progress is driven by real usage accumulating corpus data.
 blocked:
   reason: 'Soaking — code slice (ACs #3, #4, #6) shipped; ACs #1, #2, #5 are operator-driven soak data accumulating in $ARTIFACTS_DIR/_dor/calibration.jsonl. Phase 7 exit criterion is corpus-driven (FP rate < 10% per gate AND override-rate plateau), NOT calendar-driven.'
 drift_status: flagged

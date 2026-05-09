@@ -14,6 +14,11 @@ export {
   type CheckDependencyReadinessOpts,
 } from './dependency-readiness.js';
 export {
+  checkDispatchability,
+  type CheckDispatchabilityOpts,
+  type DispatchabilityBlockedDetail,
+} from './dispatchability.js';
+export {
   checkDorReadiness,
   DOR_BYPASS_LABEL,
   type CheckDorReadinessOpts,
@@ -29,6 +34,7 @@ export type {
   AwaitingExternalDetail,
   BlockedDetail,
   DependencyBlockedDetail,
+  DispatchabilityBlockedDetail as DispatchabilityDetail,
   DorBlockedDetail,
   FilterChainResult,
   FilterDetail,

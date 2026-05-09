@@ -94,6 +94,14 @@ export type OrchestratorEventType =
    */
   | 'TaskBlocked'
   /**
+   * AISDLC-243 — emitted on every tick that the `Dispatchability` admission
+   * filter rejects a candidate (i.e. the task has `dispatchable: false` in
+   * its frontmatter). Per-event fields: `taskId`, `dispatchableReason`.
+   * Permanently non-dispatchable tasks (soak phases, operator-only steps,
+   * investigation tasks) are excluded before wasting dev subagent time.
+   */
+  | 'OrchestratorBlockedByDispatchability'
+  /**
    * AISDLC-224 — emitted when Step 3's auto-cleanup path fires (stale
    * branch + all three safety predicates passed + retry succeeded).
    * Per-event fields: `taskId`, `branch`, `reason`, `hadOpenPR`,

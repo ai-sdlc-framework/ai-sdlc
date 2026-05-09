@@ -86,13 +86,15 @@ describe('runFilterChain — all-pass', () => {
     });
     expect(result.passed).toBe(true);
     expect(result.failure).toBeNull();
-    expect(result.trace).toHaveLength(6);
+    expect(result.trace).toHaveLength(7);
     // AISDLC-175 prepended `OrphanParent`. AISDLC-227 inserted `AlreadyInFlight`
-    // second. AISDLC-223 appended `Blocked` last.
+    // second. AISDLC-243 inserted `Dispatchability` after DependencyReadiness.
+    // AISDLC-223 appended `Blocked` last.
     expect(result.trace.map((r) => r.filter)).toEqual([
       'OrphanParent',
       'AlreadyInFlight',
       'DependencyReadiness',
+      'Dispatchability',
       'DorReadiness',
       'ExternalDependencies',
       'Blocked',
@@ -196,14 +198,19 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('DorReadiness');
-    expect(result.trace).toHaveLength(4);
+    // OrphanParent + AlreadyInFlight + DependencyReadiness + Dispatchability (passed) +
+    // DorReadiness (failed). ExternalDependencies is NOT in the trace.
+    expect(result.trace).toHaveLength(5);
     expect(result.trace[0].filter).toBe('OrphanParent');
     expect(result.trace[0].passed).toBe(true);
     expect(result.trace[1].filter).toBe('AlreadyInFlight');
     expect(result.trace[1].passed).toBe(true);
     expect(result.trace[2].filter).toBe('DependencyReadiness');
     expect(result.trace[2].passed).toBe(true);
-    expect(result.trace[3].passed).toBe(false);
+    expect(result.trace[3].filter).toBe('Dispatchability');
+    expect(result.trace[3].passed).toBe(true);
+    expect(result.trace[4].filter).toBe('DorReadiness');
+    expect(result.trace[4].passed).toBe(false);
   });
 
   it('rejects at ExternalDependencies when an external manual dep is unresolved (short-circuits before Blocked)', () => {
@@ -220,14 +227,15 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('ExternalDependencies');
-    // OrphanParent + AlreadyInFlight + DependencyReadiness + DorReadiness +
-    // ExternalDependencies (fails). Blocked is NOT in the trace.
-    expect(result.trace).toHaveLength(5);
+    // OrphanParent + AlreadyInFlight + DependencyReadiness + Dispatchability +
+    // DorReadiness + ExternalDependencies (fails). Blocked is NOT in the trace.
+    expect(result.trace).toHaveLength(6);
     expect(result.trace[0].passed).toBe(true);
     expect(result.trace[1].passed).toBe(true);
     expect(result.trace[2].passed).toBe(true);
     expect(result.trace[3].passed).toBe(true);
-    expect(result.trace[4].passed).toBe(false);
+    expect(result.trace[4].passed).toBe(true);
+    expect(result.trace[5].passed).toBe(false);
   });
 
   it('rejects at Blocked when taskBlocked.reason is set (full trace of 6 entries)', () => {
@@ -241,15 +249,16 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('Blocked');
-    // All 6 filters in trace, only last one fails.
-    expect(result.trace).toHaveLength(6);
+    // All 7 filters in trace (AISDLC-243 added Dispatchability at index 3),
+    // only the last one (Blocked at index 6) fails.
+    expect(result.trace).toHaveLength(7);
     expect(result.trace[0].filter).toBe('OrphanParent');
     expect(result.trace[0].passed).toBe(true);
     expect(result.trace[1].filter).toBe('AlreadyInFlight');
     expect(result.trace[1].passed).toBe(true);
-    expect(result.trace[5].filter).toBe('Blocked');
-    expect(result.trace[5].passed).toBe(false);
-    expect(result.trace[5].reason).toBe('Soaking — promotion gated on evidence');
+    expect(result.trace[6].filter).toBe('Blocked');
+    expect(result.trace[6].passed).toBe(false);
+    expect(result.trace[6].reason).toBe('Soaking — promotion gated on evidence');
   });
 });
 
@@ -267,6 +276,7 @@ describe('formatFilterTrace', () => {
     expect(text).toContain('Orphan-parent check: passed');
     expect(text).toContain('Already-in-flight check: passed');
     expect(text).toContain('Dependency check: passed');
+    expect(text).toContain('Dispatchability check: passed');
     expect(text).toContain('DoR readiness: passed');
     expect(text).toContain('External deps: passed');
     expect(text).toContain('Operator-blocked check: passed');

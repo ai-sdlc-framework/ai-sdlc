@@ -14,6 +14,11 @@ labels:
   - investigation
 dependencies: []
 priority: high
+dispatchable: false
+dispatchableReason: >-
+  Investigation/diagnosis task — requires operator to reproduce and observe
+  the leakage pattern interactively. No standalone code fix can be developed
+  without first understanding the root cause through operator observation.
 references:
   - CLAUDE.md
   - pnpm-workspace.yaml

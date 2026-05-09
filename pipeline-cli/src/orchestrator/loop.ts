@@ -102,6 +102,7 @@ import type {
   EscalateFn,
   EscalationRecord,
   FrontierFn,
+  OrchestratorBlockedByDispatchabilityEvent,
   OrchestratorBlockedEvent,
   OrchestratorConfig,
   OrchestratorFilterEvent,
@@ -256,6 +257,19 @@ export interface OrchestratorAdapters {
    * inject a pure map so they don't have to materialise backlog files.
    */
   taskLabelsLoader?: (taskId: string) => readonly string[];
+  /**
+   * AISDLC-243 — frontmatter `dispatchable:` loader for the Dispatchability
+   * filter. Defaults to reading the on-disk task file. Tests inject a pure
+   * map so they don't have to materialise backlog files. Returns undefined
+   * when the field is absent (backward-compatible with tasks predating this
+   * field — absent means dispatchable:true). Returns a pair of
+   * `[dispatchable, dispatchableReason]` so both values can be loaded in one
+   * file read.
+   */
+  taskDispatchableLoader?: (taskId: string) => {
+    dispatchable: boolean | undefined;
+    dispatchableReason: string | undefined;
+  };
   /**
    * AISDLC-223 — frontmatter `blocked:` loader for the Blocked filter.
    * Defaults to reading the on-disk task file. Tests inject a pure map
@@ -506,6 +520,8 @@ export async function runOrchestratorTick(
   const graphLoader = adapters.graphLoader ?? buildDefaultGraphLoader(config);
   const labelsLoader = adapters.taskLabelsLoader ?? buildDefaultLabelsLoader(config.workDir);
   const blockedLoader = adapters.taskBlockedLoader ?? buildDefaultBlockedLoader(config.workDir);
+  const dispatchableLoader =
+    adapters.taskDispatchableLoader ?? buildDefaultDispatchableLoader(config.workDir);
   const graph = graphLoader();
   const filterEvents: OrchestratorFilterEvent[] = [];
   const alreadyInFlightEvents: OrchestratorTaskAlreadyInFlightEvent[] = [];
@@ -545,10 +561,19 @@ export async function runOrchestratorTick(
     if (picks.length >= budget) break;
     const labels = labelsLoader(candidate.id);
     const blockedFm = blockedLoader(candidate.id);
+    const dispatchableFm = dispatchableLoader(candidate.id);
     const chainResult = runFilterChain({
       graph,
       taskId: candidate.id,
       taskLabels: labels,
+      // AISDLC-243 — pass the pre-loaded dispatchable flag + reason so the
+      // Dispatchability filter doesn't need to re-read the task file.
+      ...(dispatchableFm.dispatchable !== undefined
+        ? { taskDispatchable: dispatchableFm.dispatchable }
+        : {}),
+      ...(dispatchableFm.dispatchableReason !== undefined
+        ? { taskDispatchableReason: dispatchableFm.dispatchableReason }
+        : {}),
       ...(blockedFm !== undefined ? { taskBlocked: blockedFm } : {}),
       ...(adapters.clearedExternalKeys !== undefined
         ? { clearedExternalKeys: adapters.clearedExternalKeys }
@@ -1372,6 +1397,15 @@ function toBlockedEvent(
       if (detail.until !== undefined) ev.until = detail.until;
       return ev;
     }
+    case 'not-dispatchable': {
+      const ev: OrchestratorBlockedByDispatchabilityEvent = {
+        type: 'OrchestratorBlockedByDispatchability',
+        ts,
+        taskId,
+        dispatchableReason: detail.dispatchableReason,
+      };
+      return ev;
+    }
     case 'already-in-flight':
       // AlreadyInFlight rejections are handled as `OrchestratorTaskAlreadyInFlight`
       // events separately in the loop — they don't map to a `BlockedEvent` arm.
@@ -1423,6 +1457,12 @@ function toEmittableBlockedEvent(blocked: OrchestratorBlockedEvent): Omit<Orches
       if (blocked.until !== undefined) payload.until = blocked.until;
       return payload;
     }
+    case 'OrchestratorBlockedByDispatchability':
+      return {
+        type: 'OrchestratorBlockedByDispatchability',
+        taskId: blocked.taskId,
+        dispatchableReason: blocked.dispatchableReason,
+      };
   }
 }
 
@@ -1678,6 +1718,38 @@ function buildDefaultBlockedLoader(
       return { reason, until, unblockedBy };
     } catch {
       return undefined;
+    }
+  };
+}
+
+/**
+ * AISDLC-243 — default `dispatchable:` + `dispatchableReason:` frontmatter
+ * loader for the Dispatchability filter. Reads the on-disk task file and
+ * returns the parsed values when present. Returns `{ dispatchable: undefined,
+ * dispatchableReason: undefined }` on any read / parse error or when the field
+ * is absent — an absent `dispatchable` field means `true` (backward-compatible
+ * default: all pre-243 tasks are dispatchable unless explicitly opted out).
+ */
+function buildDefaultDispatchableLoader(workDir: string): (taskId: string) => {
+  dispatchable: boolean | undefined;
+  dispatchableReason: string | undefined;
+} {
+  return (taskId) => {
+    try {
+      const path = findTaskFile(taskId, workDir);
+      if (!path || !existsSync(path))
+        return { dispatchable: undefined, dispatchableReason: undefined };
+      const raw = readFileSync(path, 'utf8');
+      const fmMatch = raw.match(/^---\n([\s\S]*?)\n---/);
+      if (!fmMatch) return { dispatchable: undefined, dispatchableReason: undefined };
+      const fm = parseSimpleYaml(fmMatch[1]);
+      const d = fm.dispatchable;
+      const dispatchable = typeof d === 'boolean' ? d : undefined;
+      const r = fm.dispatchableReason;
+      const dispatchableReason = typeof r === 'string' ? r : undefined;
+      return { dispatchable, dispatchableReason };
+    } catch {
+      return { dispatchable: undefined, dispatchableReason: undefined };
     }
   };
 }
