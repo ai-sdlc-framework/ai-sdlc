@@ -6795,8 +6795,8 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync28, readdirSync as readdirSync9, statSync as statSync6 } from "node:fs";
-import { join as join29 } from "node:path";
+import { existsSync as existsSync29, readdirSync as readdirSync9, statSync as statSync9 } from "node:fs";
+import { join as join32 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
     "use strict";
@@ -21653,6 +21653,18 @@ function registerTaskComplete(server2, deps) {
 }
 
 // ../../pipeline-cli/dist/types.js
+var ANTHROPIC_API_ERROR_PATTERNS = [
+  /api_error_status/i,
+  /invalid_request_error/i,
+  /rate_limit/i,
+  /authentication_error/i,
+  /overloaded_error/i
+];
+function tailBytes(text, maxBytes) {
+  if (text.length <= maxBytes)
+    return text;
+  return text.slice(-maxBytes);
+}
 var DEFAULT_LOGGER = {
   info: (m) => console.log(m),
   warn: (m) => console.warn(m),
@@ -21706,18 +21718,29 @@ var ShellClaudePSpawner = class {
       try {
         child = this.processSpawner(this.binary, argv, { cwd: opts.cwd });
       } catch (err) {
+        const wallClockMs = Date.now() - start;
+        const diag = {
+          exitCode: null,
+          signal: null,
+          stderrTail: "",
+          wallClockMs,
+          argv,
+          failureType: "claude-cli-spawn-error"
+        };
         resolve2({
           type: opts.type,
           output: "",
           status: "error",
           error: `failed to spawn ${this.binary}: ${stringifyError(err)}`,
-          durationMs: Date.now() - start
+          durationMs: wallClockMs,
+          subprocessDiagnostics: diag
         });
         return;
       }
       let stdout = "";
       let stderr = "";
       let settled = false;
+      let watchdogFired = false;
       const settle = (result) => {
         if (settled)
           return;
@@ -21726,16 +21749,28 @@ var ShellClaudePSpawner = class {
         resolve2(result);
       };
       const timer = setTimeout(() => {
+        watchdogFired = true;
         try {
           child.kill("SIGTERM");
         } catch {
         }
+        const wallClockMs = Date.now() - start;
+        const diag = {
+          exitCode: null,
+          signal: "SIGTERM",
+          stderrTail: tailBytes(stderr, 2048),
+          wallClockMs,
+          argv,
+          failureType: "claude-cli-killed",
+          watchdogFired: true
+        };
         settle({
           type: opts.type,
           output: stdout,
           status: "timeout",
           error: `claude -p timed out after ${timeoutMs}ms`,
-          durationMs: Date.now() - start
+          durationMs: wallClockMs,
+          subprocessDiagnostics: diag
         });
       }, timeoutMs);
       child.stdout?.on("data", (chunk) => {
@@ -21745,32 +21780,86 @@ var ShellClaudePSpawner = class {
         stderr += chunk.toString();
       });
       child.on("error", (err) => {
+        const wallClockMs = Date.now() - start;
+        const diag = {
+          exitCode: null,
+          signal: null,
+          stderrTail: tailBytes(stderr, 2048),
+          wallClockMs,
+          argv,
+          failureType: "claude-cli-watch-error"
+        };
         settle({
           type: opts.type,
           output: stdout,
           status: "error",
           error: stringifyError(err),
-          durationMs: Date.now() - start
+          durationMs: wallClockMs,
+          subprocessDiagnostics: diag
         });
       });
-      child.on("close", (code) => {
-        if (code !== 0) {
+      child.on("close", (code, signal) => {
+        const wallClockMs = Date.now() - start;
+        const stderrTail = tailBytes(stderr, 2048);
+        if (signal !== null) {
+          const diag2 = {
+            exitCode: code,
+            signal,
+            stderrTail,
+            wallClockMs,
+            argv,
+            failureType: "claude-cli-killed",
+            watchdogFired
+          };
           settle({
             type: opts.type,
             output: stdout,
             status: "error",
-            error: stderr.trim() || `claude -p exited with code ${code ?? "null"}`,
-            durationMs: Date.now() - start
+            error: `claude -p killed by signal ${signal}`,
+            durationMs: wallClockMs,
+            subprocessDiagnostics: diag2
           });
           return;
         }
+        if (code !== 0) {
+          const isApiError = ANTHROPIC_API_ERROR_PATTERNS.some((re) => re.test(stderrTail));
+          const failureType = isApiError ? "claude-cli-api-error" : "claude-cli-nonzero-exit";
+          const diag2 = {
+            exitCode: code,
+            signal: null,
+            stderrTail,
+            wallClockMs,
+            argv,
+            failureType
+          };
+          settle({
+            type: opts.type,
+            output: stdout,
+            status: "error",
+            error: stderrTail.trim() || `claude -p exited with code ${code ?? "null"}`,
+            durationMs: wallClockMs,
+            subprocessDiagnostics: diag2
+          });
+          return;
+        }
+        const EMPTY_OUTPUT_FAST_THRESHOLD_MS = 5e3;
+        const isEmptyFast = stdout.trim().length === 0 && wallClockMs < EMPTY_OUTPUT_FAST_THRESHOLD_MS;
+        const diag = {
+          exitCode: 0,
+          signal: null,
+          stderrTail,
+          wallClockMs,
+          argv,
+          ...isEmptyFast ? { failureType: "claude-cli-empty-output-fast" } : {}
+        };
         const parsed = parseClaudeOutput(stdout);
         settle({
           type: opts.type,
           output: stdout,
           parsed,
           status: "success",
-          durationMs: Date.now() - start
+          durationMs: wallClockMs,
+          subprocessDiagnostics: diag
         });
       });
     });
@@ -24871,8 +24960,90 @@ async function computeBranchName(opts) {
 }
 
 // ../../pipeline-cli/dist/steps/03-setup-worktree.js
-import { mkdirSync as mkdirSync3 } from "node:fs";
+import { execSync as execSync3 } from "node:child_process";
+import { mkdirSync as mkdirSync4, statSync as statSync4 } from "node:fs";
+import { join as join11 } from "node:path";
+
+// ../../pipeline-cli/dist/runtime/worktree-mutex.js
+import { existsSync as existsSync10, mkdirSync as mkdirSync3, rmdirSync, statSync as statSync3 } from "node:fs";
 import { join as join10 } from "node:path";
+var DEFAULT_MUTEX_TIMEOUT_MS = 6e4;
+var MUTEX_TIMEOUT_MESSAGE = "worktree mutex held > 60s \u2014 likely a stuck previous tick; investigate `.git/.ai-sdlc-worktree-mutex` mtime";
+var _globalMutex = {
+  queue: Promise.resolve(),
+  depth: 0
+};
+function tryAcquireFileLock(workDir) {
+  const lockDir = join10(workDir, ".git", ".ai-sdlc-worktree-mutex");
+  try {
+    mkdirSync3(lockDir, { recursive: false });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function releaseFileLock(workDir) {
+  const lockDir = join10(workDir, ".git", ".ai-sdlc-worktree-mutex");
+  try {
+    rmdirSync(lockDir);
+  } catch {
+  }
+}
+async function withWorktreeMutex(fn, opts = {}) {
+  const mutex = opts._mutex ?? _globalMutex;
+  const timeoutMs = opts.timeoutMs ?? DEFAULT_MUTEX_TIMEOUT_MS;
+  let releaseLock;
+  const newTail = new Promise((resolve2) => {
+    releaseLock = resolve2;
+  });
+  const prevTail = mutex.queue;
+  mutex.queue = newTail;
+  mutex.depth += 1;
+  let timeoutId;
+  const timeoutPromise = new Promise((_, reject) => {
+    timeoutId = setTimeout(() => {
+      reject(new Error(MUTEX_TIMEOUT_MESSAGE));
+    }, timeoutMs);
+  });
+  try {
+    await Promise.race([prevTail, timeoutPromise]);
+  } catch (timeoutErr) {
+    void prevTail.finally(() => releaseLock());
+    mutex.depth -= 1;
+    if (timeoutId !== void 0)
+      clearTimeout(timeoutId);
+    throw timeoutErr;
+  }
+  if (timeoutId !== void 0)
+    clearTimeout(timeoutId);
+  let fileLockAcquired = false;
+  if (opts.workDir) {
+    const deadline = Date.now() + timeoutMs;
+    while (!fileLockAcquired && Date.now() < deadline) {
+      if (tryAcquireFileLock(opts.workDir)) {
+        fileLockAcquired = true;
+      } else {
+        await new Promise((resolve2) => setTimeout(resolve2, 200));
+      }
+    }
+    if (!fileLockAcquired) {
+      releaseLock();
+      mutex.depth -= 1;
+      throw new Error(MUTEX_TIMEOUT_MESSAGE);
+    }
+  }
+  try {
+    return await fn();
+  } finally {
+    if (opts.workDir && fileLockAcquired) {
+      releaseFileLock(opts.workDir);
+    }
+    releaseLock();
+    mutex.depth -= 1;
+  }
+}
+
+// ../../pipeline-cli/dist/steps/03-setup-worktree.js
 function isFlagEnabled(value) {
   if (!value)
     return false;
@@ -24884,9 +25055,37 @@ function isAutoCleanupEnabled() {
 function isBranchExistsError(stderr) {
   return /branch.+already exists|already exists.+branch/i.test(stderr);
 }
-async function isSafeToAutoClean(runner, workDir, branch, worktreePath) {
+var SENTINEL_ACTIVE_THRESHOLD_MS = 6 * 60 * 60 * 1e3;
+function findClaudeSubprocess(psOutput, taskId) {
+  const taskIdLower = taskId.toLowerCase();
+  const taskIdUpper = taskId.toUpperCase();
+  for (const line of psOutput.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "")
+      continue;
+    const spaceIdx = trimmed.indexOf(" ");
+    if (spaceIdx === -1)
+      continue;
+    const pidStr = trimmed.slice(0, spaceIdx).trim();
+    const command = trimmed.slice(spaceIdx + 1).trim();
+    const pid = parseInt(pidStr, 10);
+    if (isNaN(pid))
+      continue;
+    if (!command.includes("claude"))
+      continue;
+    if (!command.includes("--print") && !/ -p(\s|$)/.test(command))
+      continue;
+    if (command.includes(taskIdLower) || command.includes(taskIdUpper)) {
+      return pid;
+    }
+  }
+  return null;
+}
+async function isSafeToAutoClean(runner, workDir, taskId, branch, worktreePath, opts) {
+  const taskIdLower = taskId.toLowerCase();
   const prResult = await runner("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number"], { cwd: workDir, allowFailure: true });
   if (prResult.code !== 0) {
+    console.info(`[step-3] ${taskIdLower}: keeping branch (gh pr list failed; fail-closed)`);
     return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
   }
   let hadOpenPR = false;
@@ -24897,6 +25096,7 @@ async function isSafeToAutoClean(runner, workDir, branch, worktreePath) {
     hadOpenPR = prResult.stdout.trim().length > 0;
   }
   if (hadOpenPR) {
+    console.info(`[step-3] ${taskIdLower}: keeping branch (open PR found for ${branch})`);
     return { safe: false, hadOpenPR: true, hadUncommittedChanges: false };
   }
   let hadUncommittedChanges = false;
@@ -24909,6 +25109,7 @@ async function isSafeToAutoClean(runner, workDir, branch, worktreePath) {
   } else if (statusResult.code !== 0) {
   }
   if (hadUncommittedChanges) {
+    console.info(`[step-3] ${taskIdLower}: keeping branch (uncommitted changes in worktree)`);
     return { safe: false, hadOpenPR: false, hadUncommittedChanges: true };
   }
   const worktreeListResult = await runner("git", ["worktree", "list", "--porcelain"], {
@@ -24926,15 +25127,74 @@ async function isSafeToAutoClean(runner, workDir, branch, worktreePath) {
         const normalizedCurrentPath = currentPath.replace(/\/$/, "");
         const normalizedExpectedPath = worktreePath.replace(/\/$/, "");
         if (normalizedCurrentPath !== normalizedExpectedPath) {
+          console.info(`[step-3] ${taskIdLower}: keeping branch (checked out at ${currentPath})`);
           return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
         }
       }
     }
   }
+  const upstreamResult = await runner("git", ["rev-parse", "--abbrev-ref", `${branch}@{upstream}`], { cwd: workDir, allowFailure: true });
+  if (upstreamResult.code !== 0) {
+    const aheadOriginResult = await runner("git", ["rev-list", "--count", branch, "^origin/main"], {
+      cwd: workDir,
+      allowFailure: true
+    });
+    if (aheadOriginResult.code === 0) {
+      const ahead = Number.parseInt(aheadOriginResult.stdout.trim(), 10);
+      if (Number.isFinite(ahead) && ahead > 0) {
+        console.info(`[step-3] ${taskIdLower}: keeping branch (${ahead} unpushed commit(s), no upstream)`);
+        return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+      }
+    }
+  } else {
+    const upstream = upstreamResult.stdout.trim();
+    if (upstream) {
+      const aheadUpstreamResult = await runner("git", ["rev-list", "--count", branch, `^${upstream}`], { cwd: workDir, allowFailure: true });
+      if (aheadUpstreamResult.code === 0) {
+        const ahead = Number.parseInt(aheadUpstreamResult.stdout.trim(), 10);
+        if (Number.isFinite(ahead) && ahead > 0) {
+          console.info(`[step-3] ${taskIdLower}: keeping branch (${ahead} commit(s) ahead of ${upstream})`);
+          return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+        }
+      }
+    }
+  }
+  const sentinelPath = join11(worktreePath, ".active-task");
+  const readSentinelMtime = opts?.readSentinelMtime ?? ((p) => {
+    try {
+      return statSync4(p).mtimeMs;
+    } catch {
+      return null;
+    }
+  });
+  const nowMs = opts?.nowMs ?? (() => Date.now());
+  const mtime = readSentinelMtime(sentinelPath);
+  if (mtime !== null) {
+    const ageMs = nowMs() - mtime;
+    if (ageMs < SENTINEL_ACTIVE_THRESHOLD_MS) {
+      const ageMins = Math.round(ageMs / 6e4);
+      console.info(`[step-3] ${taskIdLower}: keeping branch (active sentinel modified ${ageMins}min ago)`);
+      return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+    }
+  }
+  const readProcessTable = opts?.readProcessTable ?? (() => execSync3("ps -ax -o pid,command", { encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] }));
+  try {
+    const psOutput = readProcessTable();
+    const pid = findClaudeSubprocess(psOutput, taskId);
+    if (pid !== null) {
+      console.info(`[step-3] ${taskIdLower}: keeping branch (live claude --print subprocess PID ${pid})`);
+      return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
+    }
+  } catch {
+  }
   return { safe: true, hadOpenPR: false, hadUncommittedChanges: false };
 }
 async function attemptAutoCleanup(runner, opts) {
-  const { safe, hadOpenPR, hadUncommittedChanges } = await isSafeToAutoClean(runner, opts.workDir, opts.branch, opts.worktreePath);
+  const { safe, hadOpenPR, hadUncommittedChanges } = await isSafeToAutoClean(runner, opts.workDir, opts.taskId, opts.branch, opts.worktreePath, {
+    readSentinelMtime: opts.readSentinelMtime,
+    readProcessTable: opts.readProcessTable,
+    nowMs: opts.nowMs
+  });
   if (!safe) {
     return null;
   }
@@ -24969,33 +25229,33 @@ async function setupWorktree(opts) {
       allowFailure: true
     });
   }
-  mkdirSync3(join10(opts.workDir, ".worktrees"), { recursive: true });
-  const addResult = await runner("git", ["worktree", "add", opts.worktreePath, "-b", opts.branch, "origin/main"], { cwd: opts.workDir, allowFailure: true });
-  if (addResult.code !== 0) {
-    const shouldTryCleanup = opts.autonomousMode === true && isAutoCleanupEnabled() && isBranchExistsError(addResult.stderr);
-    if (shouldTryCleanup) {
-      const cleanupResult = await attemptAutoCleanup(runner, opts);
-      if (cleanupResult && cleanupResult.addResult.code === 0) {
-        const baseShaResult2 = await runner("git", ["-C", opts.worktreePath, "rev-parse", "HEAD"], {
-          allowFailure: true
-        });
-        const baseSha2 = baseShaResult2.code === 0 ? baseShaResult2.stdout.trim() : "";
-        return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha: baseSha2 };
+  mkdirSync4(join11(opts.workDir, ".worktrees"), { recursive: true });
+  return withWorktreeMutex(async () => {
+    const addResult = await runner("git", ["worktree", "add", opts.worktreePath, "-b", opts.branch, "origin/main"], { cwd: opts.workDir, allowFailure: true });
+    if (addResult.code !== 0) {
+      const shouldTryCleanup = opts.autonomousMode === true && isAutoCleanupEnabled() && isBranchExistsError(addResult.stderr);
+      if (shouldTryCleanup) {
+        const cleanupResult = await attemptAutoCleanup(runner, opts);
+        if (cleanupResult && cleanupResult.addResult.code === 0) {
+          const baseShaResult2 = await runner("git", ["-C", opts.worktreePath, "rev-parse", "HEAD"], { allowFailure: true });
+          const baseSha2 = baseShaResult2.code === 0 ? baseShaResult2.stdout.trim() : "";
+          return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha: baseSha2 };
+        }
       }
-    }
-    throw new Error(`git worktree add failed for branch '${opts.branch}': ${addResult.stderr.trim() || "unknown error"}
+      throw new Error(`git worktree add failed for branch '${opts.branch}': ${addResult.stderr.trim() || "unknown error"}
 Likely cause: branch already exists. Run \`/ai-sdlc cleanup ${opts.taskId}\` first or pick a different task.`);
-  }
-  const baseShaResult = await runner("git", ["-C", opts.worktreePath, "rev-parse", "HEAD"], {
-    allowFailure: true
-  });
-  const baseSha = baseShaResult.code === 0 ? baseShaResult.stdout.trim() : "";
-  return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
+    }
+    const baseShaResult = await runner("git", ["-C", opts.worktreePath, "rev-parse", "HEAD"], {
+      allowFailure: true
+    });
+    const baseSha = baseShaResult.code === 0 ? baseShaResult.stdout.trim() : "";
+    return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
+  }, opts.mutexOpts);
 }
 
 // ../../pipeline-cli/dist/steps/04-flip-status.js
 import { readFileSync as readFileSync9, writeFileSync as writeFileSync3 } from "node:fs";
-import { join as join11 } from "node:path";
+import { join as join12 } from "node:path";
 function patchFrontmatterStatus(raw, newStatus) {
   const fm = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
   if (!fm) {
@@ -25028,7 +25288,7 @@ async function beginTask(opts) {
   const raw = readFileSync9(taskFile, "utf8");
   const patched = patchFrontmatterStatus(raw, status);
   writeFileSync3(taskFile, patched, "utf8");
-  const sentinelPath = join11(opts.worktreePath, ".active-task");
+  const sentinelPath = join12(opts.worktreePath, ".active-task");
   writeFileSync3(sentinelPath, `${opts.taskId}
 `, "utf8");
   return { taskId: opts.taskId, worktreePath: opts.worktreePath, sentinelPath };
@@ -25239,8 +25499,8 @@ function buildRetryPrompt(initialOutputPreview) {
 }
 
 // ../../pipeline-cli/dist/steps/07-build-review-prompts.js
-import { existsSync as existsSync10, readFileSync as readFileSync10 } from "node:fs";
-import { join as join12 } from "node:path";
+import { existsSync as existsSync11, readFileSync as readFileSync10 } from "node:fs";
+import { join as join13 } from "node:path";
 var REVIEWERS = ["code-reviewer", "test-reviewer", "security-reviewer"];
 async function buildReviewPrompts(opts) {
   const runner = opts.runner ?? defaultRunner;
@@ -25264,8 +25524,8 @@ async function buildReviewPrompts(opts) {
     }
   }
   const harnessNote = codexAvailable ? "" : "\u26A0 INDEPENDENCE NOT ENFORCED (codex unavailable, fell back to claude-code)";
-  const policyPath = join12(opts.workDir, ".ai-sdlc", "review-policy.md");
-  const policy = existsSync10(policyPath) ? readFileSync10(policyPath, "utf8") : "";
+  const policyPath = join13(opts.workDir, ".ai-sdlc", "review-policy.md");
+  const policy = existsSync11(policyPath) ? readFileSync10(policyPath, "utf8") : "";
   const acList = opts.task.acceptanceCriteria.map((ac, i) => `${i + 1}. ${ac}`).join("\n");
   const prompts = REVIEWERS.map((reviewer) => ({
     reviewer,
@@ -25482,8 +25742,8 @@ function coerceReviewerVerdict(agentId, r) {
 }
 
 // ../../pipeline-cli/dist/steps/10-finalize.js
-import { existsSync as existsSync11, mkdirSync as mkdirSync4, readFileSync as readFileSync11, renameSync as renameSync2, writeFileSync as writeFileSync4 } from "node:fs";
-import { basename as basename2, dirname as dirname4, join as join13 } from "node:path";
+import { existsSync as existsSync12, mkdirSync as mkdirSync5, readFileSync as readFileSync11, renameSync as renameSync2, writeFileSync as writeFileSync4 } from "node:fs";
+import { basename as basename2, dirname as dirname4, join as join14 } from "node:path";
 function buildFinalSummary(opts) {
   const allAcs = opts.task.acceptanceCriteria.map((_, i) => i + 1);
   const acceptanceCriteriaCheck = opts.developerReturn.acceptanceCriteriaMet.length > 0 ? opts.developerReturn.acceptanceCriteriaMet : allAcs;
@@ -25513,9 +25773,9 @@ ${opts.developerReturn.notes ?? "(none)"}
 function moveTaskToCompleted(taskFilePath) {
   const fileName = basename2(taskFilePath);
   const tasksDir = dirname4(taskFilePath);
-  const completedDir = join13(dirname4(tasksDir), "completed");
-  mkdirSync4(completedDir, { recursive: true });
-  const destPath = join13(completedDir, fileName);
+  const completedDir = join14(dirname4(tasksDir), "completed");
+  mkdirSync5(completedDir, { recursive: true });
+  const destPath = join14(completedDir, fileName);
   renameSync2(taskFilePath, destPath);
   return destPath;
 }
@@ -25541,8 +25801,8 @@ async function finalizeTask(opts) {
   const completedPath = moveTaskToCompleted(taskFile);
   parseTaskFile(completedPath);
   let attestationPath = null;
-  const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join13(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
-  if (helperScript && existsSync11(helperScript)) {
+  const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join14(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
+  if (helperScript && existsSync12(helperScript)) {
     const signResult = await runner("node", [helperScript], {
       cwd: opts.worktreePath,
       allowFailure: true
@@ -25588,17 +25848,212 @@ Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in t
   };
 }
 
+// ../../pipeline-cli/dist/steps/11-late-rebase.js
+import { readFileSync as readFileSync12, writeFileSync as writeFileSync5 } from "node:fs";
+import { join as join15 } from "node:path";
+function parseConflictingFiles(porcelain) {
+  const files = [];
+  for (const line of porcelain.split("\n")) {
+    if (/^(UU|AA|DD|AU|UA|DU|UD)\s/.test(line)) {
+      files.push(line.slice(3).trim());
+    }
+  }
+  return files;
+}
+function resolveChangelogConflict(content) {
+  if (!content.includes("<<<<<<<"))
+    return content;
+  const conflictPattern = /<<<<<<< [^\n]+\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>> [^\n]*/g;
+  let result = content;
+  let match;
+  while ((match = conflictPattern.exec(content)) !== null) {
+    const headSide = match[1];
+    const incomingSide = match[2];
+    const isBulletOnly = (text) => text.split("\n").every((l) => /^\s*$/.test(l) || /^\s*-\s/.test(l));
+    if (!isBulletOnly(headSide) || !isBulletOnly(incomingSide)) {
+      return null;
+    }
+    const resolved = incomingSide.trimEnd() + "\n" + headSide.trimEnd() + "\n";
+    result = result.slice(0, match.index) + resolved + result.slice(match.index + match[0].length);
+    conflictPattern.lastIndex = 0;
+    content = result;
+  }
+  return result;
+}
+function resolveTestConflict(content) {
+  if (!content.includes("<<<<<<<"))
+    return content;
+  const conflictPattern = /<<<<<<< [^\n]+\n([\s\S]*?)=======\n([\s\S]*?)>>>>>>> [^\n]*/g;
+  let result = content;
+  let match;
+  while ((match = conflictPattern.exec(content)) !== null) {
+    const headSide = match[1];
+    const incomingSide = match[2];
+    const hasTestCalls = (text) => /\b(it|test|describe)\s*\(/.test(text);
+    if (!hasTestCalls(headSide) || !hasTestCalls(incomingSide)) {
+      return null;
+    }
+    const extractDeclaredIdentifiers = (text) => {
+      const ids = /* @__PURE__ */ new Set();
+      for (const line of text.split("\n")) {
+        const m = line.match(/^\s*(?:const|let|var)\s+(\w+)/);
+        if (m)
+          ids.add(m[1]);
+      }
+      return ids;
+    };
+    const headIds = extractDeclaredIdentifiers(headSide);
+    const incomingIds = extractDeclaredIdentifiers(incomingSide);
+    for (const id of headIds) {
+      if (incomingIds.has(id))
+        return null;
+    }
+    const resolved = headSide.trimEnd() + "\n" + incomingSide.trimEnd() + "\n";
+    result = result.slice(0, match.index) + resolved + result.slice(match.index + match[0].length);
+    conflictPattern.lastIndex = 0;
+    content = result;
+  }
+  return result;
+}
+function tryResolveFile(filePath, worktreePath) {
+  const absPath = join15(worktreePath, filePath);
+  let content;
+  try {
+    content = readFileSync12(absPath, "utf8");
+  } catch {
+    return false;
+  }
+  if (!content.includes("<<<<<<<"))
+    return true;
+  const lowerPath = filePath.toLowerCase();
+  let resolved = null;
+  if (lowerPath.includes("changelog")) {
+    resolved = resolveChangelogConflict(content);
+  } else if (lowerPath.endsWith(".test.ts") || lowerPath.endsWith(".test.js") || lowerPath.endsWith(".spec.ts") || lowerPath.endsWith(".spec.js") || lowerPath.includes("__test")) {
+    resolved = resolveTestConflict(content);
+  }
+  if (resolved === null || resolved.includes("<<<<<<<")) {
+    return false;
+  }
+  writeFileSync5(absPath, resolved, "utf8");
+  return true;
+}
+async function lateRebase(opts) {
+  const runner = opts.runner ?? defaultRunner;
+  const maxAttempts = opts.maxAttempts ?? 3;
+  const cwd = opts.worktreePath;
+  const fetchResult = await runner("git", ["fetch", "origin", "main"], {
+    cwd,
+    allowFailure: true,
+    timeout: 3e4
+  });
+  if (fetchResult.code !== 0) {
+    return {
+      ok: false,
+      conflictingFiles: [],
+      reason: `git fetch origin main failed: ${fetchResult.stderr.trim() || fetchResult.stdout.trim()}`,
+      rebaseAttempts: 0,
+      resolvedFiles: []
+    };
+  }
+  const ancestorCheck = await runner("git", ["merge-base", "--is-ancestor", "origin/main", "HEAD"], { cwd, allowFailure: true });
+  if (ancestorCheck.code === 0) {
+    return { ok: true, conflictingFiles: [], rebaseAttempts: 0, resolvedFiles: [] };
+  }
+  let attempts = 0;
+  const allResolvedFiles = [];
+  for (attempts = 1; attempts <= maxAttempts; attempts++) {
+    const rebaseResult = await runner("git", ["rebase", "origin/main"], {
+      cwd,
+      allowFailure: true
+    });
+    if (rebaseResult.code === 0) {
+      return {
+        ok: true,
+        conflictingFiles: [],
+        rebaseAttempts: attempts,
+        resolvedFiles: allResolvedFiles
+      };
+    }
+    const statusResult = await runner("git", ["status", "--porcelain"], {
+      cwd,
+      allowFailure: true
+    });
+    const conflictingFiles = parseConflictingFiles(statusResult.stdout);
+    if (conflictingFiles.length === 0) {
+      await runner("git", ["rebase", "--abort"], { cwd, allowFailure: true });
+      return {
+        ok: false,
+        conflictingFiles: [],
+        reason: `git rebase failed with code ${rebaseResult.code}: ${rebaseResult.stderr.trim() || rebaseResult.stdout.trim()}`,
+        rebaseAttempts: attempts,
+        resolvedFiles: []
+      };
+    }
+    const hardConflicts = [];
+    const resolvedThisRound = [];
+    for (const file of conflictingFiles) {
+      const resolved = tryResolveFile(file, cwd);
+      if (resolved) {
+        resolvedThisRound.push(file);
+      } else {
+        hardConflicts.push(file);
+      }
+    }
+    if (hardConflicts.length > 0) {
+      await runner("git", ["rebase", "--abort"], { cwd, allowFailure: true });
+      return {
+        ok: false,
+        conflictingFiles: hardConflicts,
+        reason: `semantic conflicts in: ${hardConflicts.join(", ")}`,
+        rebaseAttempts: attempts,
+        resolvedFiles: []
+      };
+    }
+    allResolvedFiles.push(...resolvedThisRound);
+    for (const file of resolvedThisRound) {
+      await runner("pnpm", ["exec", "prettier", "--write", file], {
+        cwd,
+        allowFailure: true
+      });
+      await runner("git", ["add", file], { cwd, allowFailure: true });
+    }
+    const continueResult = await runner("git", ["rebase", "--continue"], {
+      cwd,
+      allowFailure: true,
+      env: { GIT_EDITOR: "true" }
+      // suppress editor prompt for commit message
+    });
+    if (continueResult.code === 0) {
+      return {
+        ok: true,
+        conflictingFiles: [],
+        rebaseAttempts: attempts,
+        resolvedFiles: allResolvedFiles
+      };
+    }
+  }
+  await runner("git", ["rebase", "--abort"], { cwd, allowFailure: true });
+  return {
+    ok: false,
+    conflictingFiles: [],
+    reason: `rebase iteration cap (${maxAttempts}) exceeded \u2014 main is moving faster than auto-resolve can converge`,
+    rebaseAttempts: maxAttempts,
+    resolvedFiles: []
+  };
+}
+
 // ../../pipeline-cli/dist/steps/11-push-and-pr.js
-import { existsSync as existsSync12, readFileSync as readFileSync12 } from "node:fs";
-import { join as join14 } from "node:path";
+import { existsSync as existsSync13, readFileSync as readFileSync13 } from "node:fs";
+import { join as join16 } from "node:path";
 var DEFAULT_TITLE_TEMPLATE = "feat: {issueTitle} ({issueId})";
 function readTitleTemplate(workDir) {
-  const path = join14(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
-  if (!existsSync12(path))
+  const path = join16(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
+  if (!existsSync13(path))
     return DEFAULT_TITLE_TEMPLATE;
   let raw;
   try {
-    raw = readFileSync12(path, "utf8");
+    raw = readFileSync13(path, "utf8");
   } catch {
     return DEFAULT_TITLE_TEMPLATE;
   }
@@ -25633,6 +26088,45 @@ References ${opts.taskId}
 }
 async function pushAndPr(opts) {
   const runner = opts.runner ?? defaultRunner;
+  const rebase = await lateRebase({ worktreePath: opts.worktreePath, runner });
+  if (!rebase.ok) {
+    return {
+      pushed: false,
+      prUrl: null,
+      reason: rebase.reason,
+      rebaseConflict: {
+        files: rebase.conflictingFiles,
+        reason: rebase.reason ?? "late-rebase failed"
+      }
+    };
+  }
+  if (rebase.resolvedFiles.length > 0) {
+    const helperScript = opts.signAttestationScript ?? (process.env.CLAUDE_PLUGIN_ROOT ? join16(process.env.CLAUDE_PLUGIN_ROOT, "scripts", "sign-attestation.mjs") : null);
+    if (helperScript && existsSync13(helperScript)) {
+      const signResult = await runner("node", [helperScript], {
+        cwd: opts.worktreePath,
+        allowFailure: true
+      });
+      if (signResult.code === 0) {
+        await runner("git", ["add", ".ai-sdlc/attestations"], {
+          cwd: opts.worktreePath,
+          allowFailure: true
+        });
+        const reSignMessage = `chore(spec): re-sign attestation after late-rebase auto-resolve (AISDLC-232)
+
+Late-rebase resolved ${rebase.resolvedFiles.join(", ")} \u2014 HEAD blob SHAs shifted.
+Refreshed DSSE envelope so verify-attestation.yml sees a valid contentHashV4.
+
+Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
+`;
+        await runner("git", ["commit", "-m", reSignMessage], {
+          cwd: opts.worktreePath,
+          allowFailure: true,
+          env: { GIT_EDITOR: "true" }
+        });
+      }
+    }
+  }
   const pushResult = await runner("git", ["push", "-u", "origin", opts.branch], {
     cwd: opts.worktreePath,
     allowFailure: true
@@ -25793,11 +26287,11 @@ ${filesList || "- (none)"}
 }
 
 // ../../pipeline-cli/dist/steps/13-cleanup.js
-import { existsSync as existsSync13, unlinkSync } from "node:fs";
-import { join as join15 } from "node:path";
+import { existsSync as existsSync14, unlinkSync } from "node:fs";
+import { join as join17 } from "node:path";
 async function cleanupTask(opts) {
-  const sentinelPath = join15(opts.worktreePath, ".active-task");
-  if (!existsSync13(sentinelPath)) {
+  const sentinelPath = join17(opts.worktreePath, ".active-task");
+  if (!existsSync14(sentinelPath)) {
     return { sentinelRemoved: false };
   }
   try {
@@ -25809,12 +26303,12 @@ async function cleanupTask(opts) {
 }
 
 // ../../pipeline-cli/dist/deps/dependency-graph.js
-import { existsSync as existsSync14, readdirSync as readdirSync5, readFileSync as readFileSync13, statSync as statSync3 } from "node:fs";
-import { join as join16 } from "node:path";
+import { existsSync as existsSync15, readdirSync as readdirSync5, readFileSync as readFileSync14, statSync as statSync5 } from "node:fs";
+import { join as join18 } from "node:path";
 
 // ../../pipeline-cli/dist/deps/snapshot.js
-import { existsSync as existsSync15, mkdirSync as mkdirSync5, readdirSync as readdirSync6, readFileSync as readFileSync14, statSync as statSync4, unlinkSync as unlinkSync2, writeFileSync as writeFileSync5 } from "node:fs";
-import { join as join17 } from "node:path";
+import { existsSync as existsSync16, mkdirSync as mkdirSync6, readdirSync as readdirSync6, readFileSync as readFileSync15, statSync as statSync6, unlinkSync as unlinkSync2, writeFileSync as writeFileSync6 } from "node:fs";
+import { join as join19 } from "node:path";
 
 // ../../pipeline-cli/dist/deps/effective-priority.js
 var PRIORITY_WEIGHT = {
@@ -25826,69 +26320,72 @@ var PRIORITY_WEIGHT = {
 var DEFAULT_PRIORITY_WEIGHT = PRIORITY_WEIGHT.medium;
 
 // ../../pipeline-cli/dist/deps/critical-path.js
-import { existsSync as existsSync16, readFileSync as readFileSync15 } from "node:fs";
+import { existsSync as existsSync17, readFileSync as readFileSync16 } from "node:fs";
 
 // ../../pipeline-cli/dist/deps/override-log.js
-import { appendFileSync, existsSync as existsSync17, mkdirSync as mkdirSync6, readFileSync as readFileSync16 } from "node:fs";
-import { dirname as dirname5, join as join18 } from "node:path";
+import { appendFileSync, existsSync as existsSync18, mkdirSync as mkdirSync7, readFileSync as readFileSync17 } from "node:fs";
+import { dirname as dirname5, join as join20 } from "node:path";
 
 // ../../pipeline-cli/dist/execute-pipeline.js
-import { existsSync as existsSync18 } from "node:fs";
+import { existsSync as existsSync19 } from "node:fs";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync27, readFileSync as readFileSync25 } from "node:fs";
-import { join as join27 } from "node:path";
+import { existsSync as existsSync28, readFileSync as readFileSync26 } from "node:fs";
+import { join as join30 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/dispatch-result.js
-import { mkdirSync as mkdirSync7, readFileSync as readFileSync17, writeFileSync as writeFileSync6 } from "node:fs";
+import { mkdirSync as mkdirSync8, readFileSync as readFileSync18, writeFileSync as writeFileSync7 } from "node:fs";
 import { dirname as dirname6 } from "node:path";
 
 // ../../pipeline-cli/dist/cli/execute.js
-import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync9 } from "node:fs";
-import { join as join19 } from "node:path";
+import { mkdirSync as mkdirSync10, writeFileSync as writeFileSync10 } from "node:fs";
+import { join as join22 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/claude-cli-inline.js
-import { mkdirSync as mkdirSync8, writeFileSync as writeFileSync7 } from "node:fs";
+import { mkdirSync as mkdirSync9, writeFileSync as writeFileSync8 } from "node:fs";
 import { dirname as dirname7 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/rollback.js
-import { existsSync as existsSync19, readFileSync as readFileSync18, writeFileSync as writeFileSync8 } from "node:fs";
+import { execSync as execSync4 } from "node:child_process";
+import { existsSync as existsSync20, readFileSync as readFileSync19, statSync as statSync7, writeFileSync as writeFileSync9 } from "node:fs";
+import { join as join21 } from "node:path";
+var SENTINEL_ACTIVE_THRESHOLD_MS2 = 6 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/events.js
-import { appendFileSync as appendFileSync2, existsSync as existsSync20, mkdirSync as mkdirSync10, readFileSync as readFileSync19, readdirSync as readdirSync7 } from "node:fs";
-import { dirname as dirname8, join as join20 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync21, mkdirSync as mkdirSync11, readFileSync as readFileSync20, readdirSync as readdirSync7 } from "node:fs";
+import { dirname as dirname8, join as join23 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/already-in-flight.js
-import { execSync as execSync3 } from "node:child_process";
-import { existsSync as existsSync21 } from "node:fs";
-import { join as join21 } from "node:path";
-
-// ../../pipeline-cli/dist/orchestrator/filters/dor-readiness.js
-import { existsSync as existsSync22, readFileSync as readFileSync20 } from "node:fs";
-
-// ../../pipeline-cli/dist/dor/calibration-log.js
-import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync11 } from "node:fs";
-import { dirname as dirname9, join as join22 } from "node:path";
-
-// ../../pipeline-cli/dist/orchestrator/filters/external-dependencies.js
-import { existsSync as existsSync23, readFileSync as readFileSync21 } from "node:fs";
-import { join as join23 } from "node:path";
-
-// ../../pipeline-cli/dist/orchestrator/in-flight.js
-import { existsSync as existsSync24, readdirSync as readdirSync8, readFileSync as readFileSync22, statSync as statSync5 } from "node:fs";
+import { execSync as execSync5 } from "node:child_process";
+import { existsSync as existsSync22 } from "node:fs";
 import { join as join24 } from "node:path";
 
+// ../../pipeline-cli/dist/orchestrator/filters/dor-readiness.js
+import { existsSync as existsSync23, readFileSync as readFileSync21 } from "node:fs";
+
+// ../../pipeline-cli/dist/dor/calibration-log.js
+import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync12 } from "node:fs";
+import { dirname as dirname9, join as join25 } from "node:path";
+
+// ../../pipeline-cli/dist/orchestrator/filters/external-dependencies.js
+import { existsSync as existsSync24, readFileSync as readFileSync22 } from "node:fs";
+import { join as join26 } from "node:path";
+
+// ../../pipeline-cli/dist/orchestrator/in-flight.js
+import { existsSync as existsSync25, readdirSync as readdirSync8, readFileSync as readFileSync23, statSync as statSync8 } from "node:fs";
+import { join as join27 } from "node:path";
+
 // ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
-import { existsSync as existsSync25, readFileSync as readFileSync23 } from "node:fs";
-import { join as join25 } from "node:path";
+import { existsSync as existsSync26, readFileSync as readFileSync24 } from "node:fs";
+import { join as join28 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/handlers/long-running-pr.js
 var LONG_RUNNING_PR_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/playbook/state-machine.js
-import { existsSync as existsSync26, mkdirSync as mkdirSync12, readFileSync as readFileSync24, writeFileSync as writeFileSync10 } from "node:fs";
-import { dirname as dirname10, join as join26 } from "node:path";
+import { existsSync as existsSync27, mkdirSync as mkdirSync13, readFileSync as readFileSync25, writeFileSync as writeFileSync11 } from "node:fs";
+import { dirname as dirname10, join as join29 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 var MAX_IDLE_SLEEP_SEC = 5 * 60;
@@ -25898,7 +26395,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 // ../../pipeline-cli/dist/classifier/classifier.js
 import { appendFile, mkdir } from "node:fs/promises";
-import { dirname as dirname11, join as join28 } from "node:path";
+import { dirname as dirname11, join as join31 } from "node:path";
 
 // ../../pipeline-cli/dist/classifier/budget-classifier.js
 var BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
@@ -25911,8 +26408,8 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync29, readFileSync as readFileSync26, readdirSync as readdirSync10, statSync as statSync7 } from "node:fs";
-import { basename as basename3, join as join30, relative } from "node:path";
+import { existsSync as existsSync30, readFileSync as readFileSync27, readdirSync as readdirSync10, statSync as statSync10 } from "node:fs";
+import { basename as basename3, join as join33, relative } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
 var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
@@ -25921,22 +26418,22 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync30, readFileSync as readFileSync27 } from "node:fs";
-import { join as join31 } from "node:path";
+import { existsSync as existsSync31, readFileSync as readFileSync28 } from "node:fs";
+import { join as join34 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync31, readFileSync as readFileSync28, readdirSync as readdirSync11 } from "node:fs";
-import { join as join32 } from "node:path";
+import { existsSync as existsSync32, readFileSync as readFileSync29, readdirSync as readdirSync11 } from "node:fs";
+import { join as join35 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync32, readFileSync as readFileSync29 } from "node:fs";
+import { existsSync as existsSync33, readFileSync as readFileSync30 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync33, readFileSync as readFileSync30 } from "node:fs";
-import { join as join33 } from "node:path";
+import { existsSync as existsSync34, readFileSync as readFileSync31 } from "node:fs";
+import { join as join36 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {
