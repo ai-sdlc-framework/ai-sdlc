@@ -209,6 +209,30 @@ describe('task_create MCP tool (AISDLC-234)', () => {
     expect(result.isError).toBeUndefined();
     expect(existsSync(join(projectDir, 'backlog', 'tasks'))).toBe(true);
   });
+
+  // Major 1 (security): ID shape validation — path traversal prevention
+  it('rejects id with path traversal attempt (Major 1 security)', async () => {
+    const result = await handler({ id: '../../tmp/pwn', title: 'Traversal' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid task ID format');
+  });
+
+  it('rejects id with non-ASCII characters (Major 1 security)', async () => {
+    const result = await handler({ id: 'AISDLC-Á', title: 'Unicode' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid task ID format');
+  });
+
+  it('rejects id with leading slash (Major 1 security)', async () => {
+    const result = await handler({ id: '/etc/passwd', title: 'Traversal' });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Invalid task ID format');
+  });
+
+  it('accepts valid id with sub-task suffix (Major 1 security)', async () => {
+    const result = await handler({ id: 'AISDLC-234.1', title: 'Sub-task' });
+    expect(result.isError).toBeUndefined();
+  });
 });
 
 /**
@@ -250,73 +274,86 @@ describe('task_create — Pattern C routing (AC #6)', () => {
     expect(result.content[0].text).toContain(join(plainProject, 'backlog', 'tasks'));
   });
 
-  // AC #6(a): Pattern C — routes to worktree when sentinel exists.
-  // We simulate this by injecting the worktree projectDir directly (the same
-  // way resolveProjectRoot routes in a real Pattern C setup when the sentinel
-  // is found). The actual env-based routing is covered by resolve-project-root.test.ts.
-  it('(a) routes to worktree when worktree projectDir is injected (AC #6)', async () => {
+  // AC #6(a): Pattern C — routes to worktree when sentinel (.active-task) exists.
+  // This test exercises the REAL Pattern C routing path through pickProjectRoot →
+  // resolveProjectRoot → applyPatternCIfNeeded → sentinel scan. We inject the
+  // PARENT (which has .worktrees/<id>/ subdir + .active-task sentinel inside) as
+  // projectDir. pickProjectRoot sees the parent has backlog/ → passes directly to
+  // the tool, but the tool routes through pickProjectRoot which uses injected
+  // projectDir. The actual Pattern C sentinel scanning is tested via env var path.
+  // We use vi.stubEnv to inject AI_SDLC_ACTIVE_TASK_ID so resolveProjectRoot
+  // routes correctly without relying on cwd-walk (hermetic).
+  it('(a) routes to worktree when Pattern C parent has a .active-task sentinel (AC #6)', async () => {
     const parentRoot = join(scratch, 'parent-repo');
-    const worktreeRoot = join(parentRoot, '.worktrees', 'aisdlc-234');
+    const worktreeId = 'aisdlc-777';
+    const worktreeRoot = join(parentRoot, '.worktrees', worktreeId);
+    // Set up the parent with backlog/ AND the worktree subdir with backlog/tasks/
     mkdirSync(join(parentRoot, 'backlog', 'tasks'), { recursive: true });
     mkdirSync(join(worktreeRoot, 'backlog', 'tasks'), { recursive: true });
+    // Write the .active-task sentinel inside the worktree
+    writeFileSync(join(worktreeRoot, '.active-task'), 'AISDLC-777', 'utf-8');
 
-    // Simulate what resolveProjectRoot returns when the sentinel routes to the worktree:
-    // inject the worktree as projectDir.
+    // Stub AI_SDLC_ACTIVE_TASK_ID so resolveProjectRoot routes via env var (hermetic)
+    vi.stubEnv('AI_SDLC_ACTIVE_TASK_ID', 'AISDLC-777');
+    // Point AI_SDLC_PROJECT_ROOT at the parent so resolveProjectRoot finds it
+    vi.stubEnv('AI_SDLC_PROJECT_ROOT', parentRoot);
+
     let handler!: Handler;
     const server = {
       tool: vi.fn((_name, _desc, _schema, registered) => {
         handler = registered as Handler;
       }),
     } as unknown as McpServer;
-    registerTaskCreate(server, { projectDir: worktreeRoot });
+    // Inject a deps.projectDir that has NO backlog/ so pickProjectRoot falls through
+    // to resolveProjectRoot, which picks up AI_SDLC_PROJECT_ROOT → Pattern C routing.
+    const noBacklogDir = join(scratch, 'no-backlog-for-6a');
+    mkdirSync(noBacklogDir, { recursive: true });
+    registerTaskCreate(server, { projectDir: noBacklogDir });
 
-    const result = await handler({ id: 'AISDLC-234', title: 'Worktree task' });
+    const result = await handler({ id: 'AISDLC-777', title: 'Worktree routed task' });
     expect(result.isError).toBeUndefined();
-    // File lands in the WORKTREE's tasks dir, NOT the parent's
+    // File must land inside the WORKTREE's tasks dir, not the parent's
     expect(result.content[0].text).toContain(join(worktreeRoot, 'backlog', 'tasks'));
-    expect(result.content[0].text).not.toContain(join(parentRoot, 'backlog', 'tasks') + '/aisdlc');
+    expect(result.content[0].text).not.toContain(join(parentRoot, 'backlog', 'tasks'));
+
+    vi.unstubAllEnvs();
   });
 
-  // AC #6(c): Pattern C parent with no sentinel — resolveProjectRoot throws.
-  // We simulate this by injecting a path that has no backlog/ dir, which causes
-  // pickProjectRoot to fall through to resolveProjectRoot, which then detects
-  // Pattern C and refuses (since no AI_SDLC_ACTIVE_TASK_ID is set and no
-  // sentinel exists).
+  // AC #6(c): Pattern C parent with no sentinel — resolveProjectRoot throws the
+  // canonical PATTERN_C_ERROR_MESSAGE and the tool returns isError: true.
+  // We set up a Pattern C parent (with .worktrees/<id>/ subdir but NO .active-task
+  // inside it), point AI_SDLC_PROJECT_ROOT at it via vi.stubEnv, clear
+  // AI_SDLC_ACTIVE_TASK_ID, inject a deps.projectDir with no backlog/ so
+  // pickProjectRoot falls through to resolveProjectRoot, and assert the error.
   it('(c) refuses with clear error when Pattern C parent has no sentinel (AC #6)', async () => {
-    const parentRoot = join(scratch, 'pattern-c-parent');
+    const parentRoot = join(scratch, 'pattern-c-no-sentinel');
     mkdirSync(join(parentRoot, 'backlog', 'tasks'), { recursive: true });
-    // Create a worktree directory to trigger Pattern C detection
+    // Create a worktree subdir — enough to trigger Pattern C detection — but NO sentinel
     mkdirSync(join(parentRoot, '.worktrees', 'aisdlc-999'), { recursive: true });
-    // But NO .active-task sentinel and NO AI_SDLC_ACTIVE_TASK_ID in env
+    // Explicitly do NOT write a .active-task sentinel
 
-    // Inject a bogus projectDir so pickProjectRoot falls through to resolveProjectRoot.
-    // resolveProjectRoot will walk up from process.cwd() — we need to ensure it finds
-    // the Pattern C parent. Since we can't reliably control cwd in tests, we use the
-    // AI_SDLC_PROJECT_ROOT env var pointing at the Pattern C parent WITHOUT a
-    // .worktrees/<id>/backlog/ to trigger the Pattern C refuse path.
-    // Actually — the simplest hermetic approach: inject `projectDir` as the worktree
-    // path that has NO backlog/ dir, so pickProjectRoot tries resolveProjectRoot,
-    // which finds parentRoot via env var, which IS Pattern C, and refuses.
-    // The easiest test of this behaviour is to verify that when projectDir injection
-    // has no backlog/ AND the env override points at a Pattern C root with no signal,
-    // the tool returns an error.
-    // We use process.env injection indirectly via pickProjectRoot: if deps.projectDir
-    // has no backlog/ dir, pickProjectRoot calls resolveProjectRoot() which uses
-    // process.env. We can't safely mutate process.env in Vitest without vi.stubEnv.
-    // Instead, verify the behavior via validateReferences and findExistingTaskFile
-    // internal path — this AC is primarily about the resolver.
-    // This scenario is fully covered by resolve-project-root.test.ts AC #5/#6 hermetic.
-    // Here we add a smoke test that confirms an invalid projectDir injection results in error.
-    const bogusDir = join(scratch, 'no-backlog-here');
-    mkdirSync(bogusDir, { recursive: true });
-    // bogusDir has no backlog/ — pickProjectRoot will try resolveProjectRoot()
-    // In the test runner cwd, there IS a backlog/ higher up (the repo root), so
-    // resolveProjectRoot might succeed. To prevent that, we rely on the fact that
-    // the repo root in CI has no .worktrees/ (not Pattern C), so resolveProjectRoot
-    // returns the repo root and the tool works fine — which means this test would
-    // pass through. We skip the env-stubbing approach to avoid test pollution.
-    // The canonical Pattern C refusal is tested in resolve-project-root.test.ts.
-    expect(true).toBe(true); // AC #6(c) fully covered by resolve-project-root.test.ts
+    // Hermetically control env: point resolver at the Pattern C parent, ensure no task ID
+    vi.stubEnv('AI_SDLC_PROJECT_ROOT', parentRoot);
+    vi.stubEnv('AI_SDLC_ACTIVE_TASK_ID', '');
+
+    const noBacklogDir = join(scratch, 'no-backlog-for-6c');
+    mkdirSync(noBacklogDir, { recursive: true });
+
+    let handler!: Handler;
+    const server = {
+      tool: vi.fn((_name, _desc, _schema, registered) => {
+        handler = registered as Handler;
+      }),
+    } as unknown as McpServer;
+    // Inject a projectDir with no backlog/ so pickProjectRoot falls through to resolveProjectRoot
+    registerTaskCreate(server, { projectDir: noBacklogDir });
+
+    const result = await handler({ id: 'AISDLC-999', title: 'Should be refused' });
+    expect(result.isError).toBe(true);
+    // The error message must contain the canonical Pattern C error string
+    expect(result.content[0].text).toContain('Pattern C');
+
+    vi.unstubAllEnvs();
   });
 });
 
@@ -427,8 +464,10 @@ describe('buildTaskContent (AISDLC-234)', () => {
     expect(content).toContain('status: To Do');
     expect(content).toContain('created_date:');
     expect(content).toContain('updated_date:');
+    expect(content).toContain('assignee: []');
     expect(content).toContain('labels: []');
     expect(content).toContain('dependencies: []');
+    expect(content).toContain('references: []');
   });
 
   it('includes priority when provided', () => {

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { ToolDeps } from '../types.js';
 import { pickProjectRoot } from './task-edit.js';
@@ -48,6 +48,26 @@ export function registerTaskCreate(server: McpServer, deps: ToolDeps): void {
     },
     async ({ id, title, description, status, priority, labels, dependencies, references }) => {
       try {
+        // Major 1 (security): validate `id` shape before interpolating into filesystem paths.
+        // Reject any ID that doesn't match the project convention (AISDLC-N, AISDLC-N.M, etc.)
+        // to prevent path traversal via `id: "../../tmp/pwn"` and non-ASCII injection.
+        // The regex also enforces ASCII-only (matches check-backlog-ascii.sh gate).
+        const ID_PATTERN = /^[A-Z][A-Z0-9]*-\d+(\.\d+)*$/;
+        if (!ID_PATTERN.test(id)) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text:
+                  `Invalid task ID format: "${id}". ` +
+                  `Expected format: PROJECT-N or PROJECT-N.M (e.g. AISDLC-234, AISDLC-234.1). ` +
+                  `Only ASCII uppercase letters, digits, and hyphens are permitted.`,
+              },
+            ],
+            isError: true,
+          };
+        }
+
         // Resolve the project root (Pattern C-aware). Prefer injected deps.projectDir
         // when it has a backlog/ dir (test-friendly), otherwise use the env+cwd
         // resolver which handles Pattern C routing (AISDLC-216).
@@ -100,6 +120,21 @@ export function registerTaskCreate(server: McpServer, deps: ToolDeps): void {
         const slug = slugify(title);
         const filename = `${id.toLowerCase()} - ${slug}.md`;
         const filePath = join(tasksDir, filename);
+
+        // Defense-in-depth: assert the resolved path stays inside tasksDir.
+        // The ID_PATTERN check above is the primary guard; this is a belt-and-suspenders
+        // assertion that catches any future code path that bypasses the regex.
+        if (!resolve(filePath).startsWith(resolve(tasksDir) + sep)) {
+          return {
+            content: [
+              {
+                type: 'text' as const,
+                text: `Security: computed file path "${filePath}" escapes the tasks directory. Operation refused.`,
+              },
+            ],
+            isError: true,
+          };
+        }
 
         const content = buildTaskContent({
           id,
@@ -232,6 +267,9 @@ export function buildTaskContent(opts: TaskCreateOptions): string {
   lines.push(`created_date: '${now}'`);
   lines.push(`updated_date: '${now}'`);
 
+  // assignee: [] — present on every task file in the repo; keep consistent
+  lines.push('assignee: []');
+
   if (opts.labels && opts.labels.length > 0) {
     lines.push('labels:');
     for (const label of opts.labels) {
@@ -244,7 +282,7 @@ export function buildTaskContent(opts: TaskCreateOptions): string {
   if (opts.dependencies && opts.dependencies.length > 0) {
     lines.push('dependencies:');
     for (const dep of opts.dependencies) {
-      lines.push(`  - ${dep}`);
+      lines.push(`  - ${formatYamlString(dep)}`);
     }
   } else {
     lines.push('dependencies: []');
@@ -255,6 +293,8 @@ export function buildTaskContent(opts: TaskCreateOptions): string {
     for (const ref of opts.references) {
       lines.push(`  - ${formatYamlString(ref)}`);
     }
+  } else {
+    lines.push('references: []');
   }
 
   lines.push('---', '');
