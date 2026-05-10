@@ -427,24 +427,39 @@ export async function runOrchestratorTick(
   // worktrees don't accumulate across autonomous-loop ticks. Try/catch ensures
   // sweep failure NEVER aborts the tick — the orchestrator continues even if
   // the gh network is unreachable.
-  try {
-    const swept = await sweepMergedWorktrees({
-      workDir: config.workDir,
-      runner: adapters.runner,
-    });
-    for (const entry of swept.swept) {
-      logger.info(
-        `[orchestrator] swept merged worktree: ${entry.worktreePath} (branch=${entry.branch}, mergedAt=${entry.mergedAt})`,
-      );
-      emit({
-        type: 'OrchestratorWorktreeSwept',
-        worktreePath: entry.worktreePath,
-        branch: entry.branch,
-        mergedAt: entry.mergedAt,
+  //
+  // Kill switch (security review minor): set `AI_SDLC_SWEEP_DISABLED=1` to
+  // disable the auto-sweep entirely for the tick. Use when investigating a
+  // suspected spurious-MERGED incident or while running with a known-stale
+  // gh API. The dirty-worktree guard inside sweepMergedWorktrees() is the
+  // first line of defense; this env var is the operator escape hatch.
+  const sweepDisabled = ['1', 'true', 'yes', 'on'].includes(
+    (process.env['AI_SDLC_SWEEP_DISABLED'] ?? '').toLowerCase(),
+  );
+  if (sweepDisabled) {
+    logger.info(
+      `[orchestrator] sweep disabled via AI_SDLC_SWEEP_DISABLED — skipping per-tick worktree cleanup`,
+    );
+  } else {
+    try {
+      const swept = await sweepMergedWorktrees({
+        workDir: config.workDir,
+        runner: adapters.runner,
       });
+      for (const entry of swept.swept) {
+        logger.info(
+          `[orchestrator] swept merged worktree: ${entry.worktreePath} (branch=${entry.branch}, mergedAt=${entry.mergedAt})`,
+        );
+        emit({
+          type: 'OrchestratorWorktreeSwept',
+          worktreePath: entry.worktreePath,
+          branch: entry.branch,
+          mergedAt: entry.mergedAt,
+        });
+      }
+    } catch (err) {
+      logger.warn(`[orchestrator] sweep failed: ${err}; continuing tick`);
     }
-  } catch (err) {
-    logger.warn(`[orchestrator] sweep failed: ${err}; continuing tick`);
   }
 
   const frontierFn = adapters.frontier ?? buildDefaultFrontier(config);
