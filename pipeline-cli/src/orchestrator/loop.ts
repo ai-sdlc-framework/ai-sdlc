@@ -558,10 +558,34 @@ export async function runOrchestratorTick(
   // "branch already exists" at Step 3. Forwarding `OrchestratorTaskAlreadyInFlight`
   // to both the in-process accumulator + events bus gives operators a
   // forensic trace of the rejection.
+  //
+  // AISDLC-242 fix (Major 2) — recoverable-abort bypass: when a cold-start
+  // reconstruction added the task to the in-flight map (dispatchPromise ===
+  // null, meaning the originating process is dead) AND the worktree has a
+  // recoverable abort sentinel + partial commits, we allow the candidate
+  // through so it reaches `picks` and `detectAndEmitResumes` can emit
+  // `OrchestratorTaskResumed`. Without this bypass, the in-flight entry from
+  // `reconstructInFlightFromWorktrees` permanently blocks the task, leaving
+  // the preserved worktree stuck and `OrchestratorTaskResumed` never emitting.
+  // Note: entries with a live dispatchPromise (from the CURRENT process) are
+  // still blocked — only dead-process sentinel entries are eligible for bypass.
   const dispatchableCandidates: typeof candidates = [];
   for (const candidate of candidates) {
     const existing = isInFlight(inFlight, candidate.id);
     if (existing) {
+      // Recoverable-abort bypass: if the entry comes from a prior dead process
+      // (dispatchPromise === null) and the worktree has partial commits, allow
+      // this candidate through for resumption rather than blocking it forever.
+      if (
+        existing.dispatchPromise === null &&
+        detectRecoverableWorktree(config.workDir, candidate.id) !== null
+      ) {
+        // Remove the stale sentinel entry so claimInFlight below can create a
+        // fresh live entry for the new dispatch.
+        inFlight.delete(candidate.id.toLowerCase());
+        dispatchableCandidates.push(candidate);
+        continue;
+      }
       const ts = now().toISOString();
       const event: OrchestratorTaskAlreadyInFlightEvent = {
         type: 'OrchestratorTaskAlreadyInFlight',

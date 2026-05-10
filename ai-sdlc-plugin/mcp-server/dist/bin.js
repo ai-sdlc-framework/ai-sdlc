@@ -31554,7 +31554,7 @@ import { existsSync as existsSync29, mkdirSync as mkdirSync15, readFileSync as r
 import { dirname as dirname12, join as join31 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/checkpoint.js
-import { execSync as execSync6 } from "node:child_process";
+import { execFileSync, execSync as execSync6 } from "node:child_process";
 import { existsSync as existsSync30, readFileSync as readFileSync30 } from "node:fs";
 import { join as join32 } from "node:path";
 

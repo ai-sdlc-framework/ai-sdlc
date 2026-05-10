@@ -42,6 +42,7 @@ import {
   type OrchestratorAdapters,
 } from './index.js';
 import { detectRecoverableWorktree } from './checkpoint.js';
+import { makeInFlightMap } from './in-flight.js';
 import type { OrchestratorEvent } from './events.js';
 import type { ExecOptions, ExecResult, Runner } from '../runtime/exec.js';
 import type { PipelineLogger, PipelineOutcome, PipelineResult } from '../types.js';
@@ -416,5 +417,184 @@ describe('runOrchestratorTick — resume path (AISDLC-242 AC #7)', () => {
     // And should NOT roll back (aborted is still recoverable)
     const rollback = events.find((e) => e.type === 'OrchestratorRollback');
     expect(rollback).toBeUndefined();
+  });
+});
+
+// ── AISDLC-242 Major-2 fix: in-flight bypass for recoverable worktrees ──
+//
+// Regression fixture for the bug identified in the Codex code review:
+// `reconstructInFlightFromWorktrees()` adds any worktree with an `.active-task`
+// sentinel to the in-flight map (dispatchPromise: null). When the next tick
+// runs, the AlreadyInFlight pre-filter blocks the candidate before `picks` is
+// built, so `detectAndEmitResumes` never sees it and `OrchestratorTaskResumed`
+// never fires — leaving the preserved worktree stuck forever.
+//
+// The fix: if the in-flight entry has `dispatchPromise === null` AND the
+// worktree has partial commits (detectRecoverableWorktree returns non-null),
+// the pre-filter bypasses the AlreadyInFlight block, removes the stale map
+// entry, and allows the candidate through for resumption.
+
+describe('runOrchestratorTick — in-flight bypass for recoverable worktrees (AISDLC-242)', () => {
+  it('emits OrchestratorTaskResumed even when task is in in-flight map with dispatchPromise=null', async () => {
+    // Set up a real git repo so detectRecoverableWorktree can verify commits.
+    const baseDir = mkdtempSync(join(tmpdir(), 'resume-inflight-bypass-'));
+    workDirs.push(baseDir);
+
+    const originDir = join(baseDir, 'origin.git');
+    mkdirSync(originDir);
+    execSync('git init --bare', { cwd: originDir, stdio: 'pipe' });
+
+    const repoDir = join(baseDir, 'repo');
+    mkdirSync(repoDir);
+    execSync('git init', { cwd: repoDir, stdio: 'pipe' });
+    execSync(`git remote add origin ${originDir}`, { cwd: repoDir, stdio: 'pipe' });
+    execSync('git config user.email "test@example.com"', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: repoDir, stdio: 'pipe' });
+    writeFileSync(join(repoDir, 'README.md'), '# test\n', 'utf8');
+    execSync('git add README.md', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git commit -m "chore: initial"', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git push origin HEAD:main', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git fetch origin', { cwd: repoDir, stdio: 'pipe' });
+
+    const taskId = 'AISDLC-242';
+    const wtDir = join(repoDir, '.worktrees', taskId.toLowerCase());
+    mkdirSync(join(repoDir, '.worktrees'), { recursive: true });
+
+    execSync(`git checkout -b ai-sdlc/${taskId.toLowerCase()}-bypass-test`, {
+      cwd: repoDir,
+      stdio: 'pipe',
+    });
+    execSync('git checkout main', { cwd: repoDir, stdio: 'pipe' });
+    execSync(`git worktree add ${wtDir} ai-sdlc/${taskId.toLowerCase()}-bypass-test`, {
+      cwd: repoDir,
+      stdio: 'pipe',
+    });
+
+    // Commit partial work so detectRecoverableWorktree returns non-null
+    execSync('git config user.email "test@example.com"', { cwd: wtDir, stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: wtDir, stdio: 'pipe' });
+    writeFileSync(join(wtDir, 'wip.ts'), 'const y = 2;\n', 'utf8');
+    execSync('git add wip.ts', { cwd: wtDir, stdio: 'pipe' });
+    execSync(
+      `git -c commit.gpgsign=false commit --no-verify -m "wip(checkpoint): bypass test (${taskId})"`,
+      { cwd: wtDir, stdio: 'pipe' },
+    );
+    writeFileSync(join(wtDir, '.active-task'), `${taskId}\n`, 'utf8');
+
+    // Confirm the worktree is detected as recoverable
+    expect(detectRecoverableWorktree(repoDir, taskId)).not.toBeNull();
+
+    mkdirSync(join(repoDir, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(
+      join(repoDir, 'backlog', 'tasks', `${taskId.toLowerCase()} - test-task.md`),
+      `---\nid: ${taskId}\ntitle: test task\nstatus: In Progress\n---\n\n## Description\nbody\n`,
+      'utf8',
+    );
+
+    const { events, sink } = captureSink();
+    const config = defaultOrchestratorConfig({ workDir: repoDir, maxConcurrent: 1, maxTicks: 1 });
+
+    // KEY: pre-populate the in-flight map with a sentinel-reconstructed entry
+    // (dispatchPromise: null) — simulating what reconstructInFlightFromWorktrees
+    // produces on a cold start when the previous process left a sentinel behind.
+    const preloadedInFlight = makeInFlightMap();
+    preloadedInFlight.set(taskId.toLowerCase(), {
+      startedAt: new Date().toISOString(),
+      worktreePath: wtDir,
+      dispatchPromise: null, // sentinel-reconstructed entry, previous process dead
+    });
+
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      frontier: fakeFrontier([taskId]),
+      dispatch: async () => ({
+        taskId,
+        branch: `ai-sdlc/${taskId.toLowerCase()}-bypass-test`,
+        worktreePath: wtDir,
+        outcome: 'aborted' as const,
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+        notes: 'killed again',
+      }),
+      escalate: async () => {},
+      emitEvent: sink,
+      runId: 'aisdlc-242-inflight-bypass',
+      graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
+      taskLabelsLoader: () => [],
+      calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // Inject the pre-populated in-flight map to simulate a cold-start
+      // reconstruction that erroneously blocks a recoverable worktree.
+      inFlight: preloadedInFlight,
+    };
+
+    await runOrchestratorTick(config, adapters, 1);
+
+    // The fix: even with the task in the in-flight map, the recoverable worktree
+    // bypass allows it through → OrchestratorTaskResumed fires.
+    const resumed = events.find((e) => e.type === 'OrchestratorTaskResumed');
+    expect(resumed).toBeDefined();
+    expect(resumed).toMatchObject({
+      type: 'OrchestratorTaskResumed',
+      taskId,
+    });
+
+    // AlreadyInFlight must NOT be emitted (the bypass skipped it)
+    const alreadyInFlight = events.find((e) => e.type === 'OrchestratorTaskAlreadyInFlight');
+    expect(alreadyInFlight).toBeUndefined();
+  });
+
+  it('still blocks tasks with a live dispatchPromise (same-process in-flight)', async () => {
+    // A task with a non-null dispatchPromise is genuinely mid-flight in this
+    // process — it must NOT be bypassed, even if a worktree exists.
+    const taskId = 'AISDLC-242';
+    const workDir = makeWorkDirWithTask(taskId, 'To Do');
+    workDirs.push(workDir);
+
+    const { events, sink } = captureSink();
+    const config = defaultOrchestratorConfig({ workDir, maxConcurrent: 1, maxTicks: 1 });
+
+    const livePromise = new Promise<void>(() => {}); // never resolves — simulates live dispatch
+    const preloadedInFlight = makeInFlightMap();
+    preloadedInFlight.set(taskId.toLowerCase(), {
+      startedAt: new Date().toISOString(),
+      worktreePath: join(workDir, '.worktrees', taskId.toLowerCase()),
+      dispatchPromise: livePromise as unknown as Promise<unknown>,
+    });
+
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      frontier: fakeFrontier([taskId]),
+      dispatch: async () => ({
+        taskId,
+        branch: `ai-sdlc/${taskId.toLowerCase()}`,
+        worktreePath: join(workDir, '.worktrees', taskId.toLowerCase()),
+        outcome: 'aborted' as const,
+        prUrl: null,
+        siblingPrUrls: [],
+        iterations: 0,
+        finalVerdict: null,
+        notes: 'should not reach dispatch — blocked by live in-flight',
+      }),
+      escalate: async () => {},
+      emitEvent: sink,
+      runId: 'aisdlc-242-live-dispatch-block',
+      graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
+      taskLabelsLoader: () => [],
+      calibrationLogPath: '/nonexistent-bypass.jsonl',
+      inFlight: preloadedInFlight,
+    };
+
+    await runOrchestratorTick(config, adapters, 1);
+
+    // Live-promise entry must still block the task (not bypassed)
+    const alreadyInFlight = events.find((e) => e.type === 'OrchestratorTaskAlreadyInFlight');
+    expect(alreadyInFlight).toBeDefined();
+    expect(alreadyInFlight).toMatchObject({ type: 'OrchestratorTaskAlreadyInFlight', taskId });
+
+    // Dispatch must NOT have fired
+    const dispatched = events.find((e) => e.type === 'OrchestratorDispatched');
+    expect(dispatched).toBeUndefined();
   });
 });

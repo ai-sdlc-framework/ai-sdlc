@@ -37,7 +37,7 @@
  * @module orchestrator/checkpoint
  */
 
-import { execSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -144,10 +144,18 @@ export function emitCheckpointCommit(opts: CheckpointOptions): CheckpointResult 
   // Commit with --no-verify (skip hooks) and -c commit.gpgsign=false
   // (no GPG in unattended Tier 2). GIT_AUTHOR_NAME / GIT_COMMITTER_NAME
   // inherit from the environment (same as every other orchestrator git call).
+  //
+  // SECURITY (AISDLC-242 fix): use execFileSync (argv array) instead of
+  // execSync (shell string) so that shell metacharacters in `subject` —
+  // e.g. an annotation derived from an agent-controlled task title like
+  // "$(touch /tmp/pwned)" — cannot trigger command substitution or word
+  // splitting. git -c key=value is passed as discrete argv elements; the
+  // commit message is a single element. No shell involvement.
   let rawSha: string;
   try {
-    rawSha = execSync(
-      `git -c commit.gpgsign=false commit --no-verify -m ${JSON.stringify(subject)}`,
+    rawSha = execFileSync(
+      'git',
+      ['-c', 'commit.gpgsign=false', 'commit', '--no-verify', '-m', subject],
       {
         cwd,
         encoding: 'utf8',

@@ -122,11 +122,11 @@ Use the Bash tool to run:
 OUTPUT_FILE=/tmp/codex-test-review-output-$(date +%s%N).json
 
 codex exec \
-  --model o4-mini \
+  --skip-git-repo-check \
+  --color never \
   -s read-only \
   -o "$OUTPUT_FILE" \
-  --quiet \
-  - < /tmp/codex-test-review-prompt-<timestamp>.txt
+  - < /tmp/codex-test-review-prompt-<timestamp>.txt > /dev/null
 
 echo "EXIT:$?"
 ```
@@ -134,11 +134,13 @@ echo "EXIT:$?"
 Use the exact prompt file path from Step 3. Capture the exit code from the `EXIT:$?` line.
 
 Flags used:
-- `--model o4-mini` — fast, cost-effective reasoning model suitable for test review
+- `--skip-git-repo-check` — required when invoked from `.worktrees/<id>/` subdirectories; codex 0.128.0 confuses the Pattern C parent layout with a non-git dir and errors without this flag
+- `--color never` — clean log capture; color escape codes corrupt the output file
 - `-s read-only` — read-only sandbox; Codex can read files but cannot write, execute, or make network calls that modify state
 - `-o "$OUTPUT_FILE"` — captures the last assistant message to a file (avoids parsing JSONL stream)
-- `--quiet` — suppresses progress spinners in non-interactive mode
+- `> /dev/null` — suppress stdout; codex exec dumps the full prompt back even with `-o` set, flooding logs. The output file (`-o`) is the source of truth
 - `-` — reads the prompt from stdin via file redirect (avoids ARG_MAX limits on large diffs; avoids shell meta-character injection)
+- **`--model` intentionally omitted** — `--model o4-mini` is rejected (HTTP 400) on ChatGPT-account auth (the default for personal Codex installs); the default model selected by the server for your auth tier works correctly. API-key accounts can optionally pass `--model o4-mini` if needed.
 
 **IMPORTANT:** Never use `--dangerously-bypass-approvals-and-sandbox`. If the `-s read-only` flag is rejected by the installed Codex version, return the error envelope:
 
