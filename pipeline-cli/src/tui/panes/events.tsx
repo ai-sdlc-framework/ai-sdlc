@@ -19,9 +19,6 @@ export function EventsPane(): React.ReactElement {
       <Text bold color="blue">
         📡 EVENTS (live tail)
       </Text>
-      <Text color="gray">
-        ─────────────────────────────────────────────────────────────────────
-      </Text>
       <Box marginTop={1}>
         <Text color="gray" dimColor>
           (Phase 2: events.jsonl tail — filtered to operator-relevant types)
