@@ -49,6 +49,13 @@ function makeTmpDir(): string {
 function makeGitRepo(): string {
   const d = makeTmpDir();
   execSync('git init', { cwd: d, env: GIT_ENV, stdio: 'pipe' });
+  // Write per-repo identity to .git/config. Production emitCheckpointCommit
+  // doesn't pass env (it inherits the operator's git env), so the test repo
+  // needs identity in its config for emitCheckpointCommit's commits to
+  // succeed. With env: GIT_ENV above, GIT_DIR is NOT inherited, so this
+  // config write lands in d/.git/config (not the host worktree's config).
+  execSync('git config user.email "test@test.invalid"', { cwd: d, env: GIT_ENV, stdio: 'pipe' });
+  execSync('git config user.name "Test"', { cwd: d, env: GIT_ENV, stdio: 'pipe' });
   writeFileSync(join(d, 'README.md'), '# test\n', 'utf8');
   execSync('git add README.md', { cwd: d, env: GIT_ENV, stdio: 'pipe' });
   execSync('git -c commit.gpgsign=false commit --no-verify -m "chore: initial"', {
@@ -75,6 +82,10 @@ function makeGitRepoWithOrigin(): { repoDir: string; originDir: string } {
   mkdirSync(repoDir);
   execSync('git init', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
   execSync(`git remote add origin ${originDir}`, { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+  // Per-repo identity for emitCheckpointCommit (which doesn't pass env). Safe
+  // because env: GIT_ENV blocks GIT_DIR pollution; this lands in repoDir/.git/config.
+  execSync('git config user.email "test@test.invalid"', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+  execSync('git config user.name "Test"', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
   writeFileSync(join(repoDir, 'README.md'), '# test\n', 'utf8');
   execSync('git add README.md', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
   execSync('git -c commit.gpgsign=false commit --no-verify -m "chore: initial"', {
