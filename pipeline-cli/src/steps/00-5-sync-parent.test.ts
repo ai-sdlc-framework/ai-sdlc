@@ -13,9 +13,12 @@
  *   (f) git worktree add fails → ok: false with reason
  *   (g) git push fails → ok: false with reason
  *   (h) gh pr create fails → ok: false (but syncedFiles populated)
+ *   (i) AISDLC-222: local tasks/ + origin completed/ → path-mismatch, skip with log
+ *   (j) AISDLC-222: local completed/ + origin tasks/ → symmetric path-mismatch, skip with log
+ *   (k) AISDLC-222: auto-reconcile opt-in deletes stale local copy
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -23,6 +26,8 @@ import {
   syncParentUntrackedFiles,
   listUntrackedFiles,
   isFileOnOriginMain,
+  findPathMismatchOnOrigin,
+  isFileOnOriginMainInAnyDir,
 } from './00-5-sync-parent.js';
 import { FakeRunner, ok, fail as fakeRunnerFail } from '../__test-helpers/fake-runner.js';
 
@@ -344,5 +349,308 @@ describe('Step 0.5 — syncParentUntrackedFiles', () => {
     // git error → treated as no untracked files → clean no-op
     expect(result.ok).toBe(true);
     expect(result.syncedFiles).toEqual([]);
+  });
+});
+
+// ── AISDLC-222: Path-mismatch helper unit tests ──────────────────────
+
+describe('findPathMismatchOnOrigin', () => {
+  it('returns found: true with canonicalPath when basename exists in completed/ on origin', async () => {
+    // Local file is in tasks/, but on origin/main it's in completed/
+    const fake = new FakeRunner().on(
+      /^git ls-tree origin\/main .+completed\/aisdlc-10/,
+      ok('backlog/completed/aisdlc-10 - done.md\n'),
+    );
+    const result = await findPathMismatchOnOrigin(
+      'backlog/tasks/aisdlc-10 - done.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result.found).toBe(true);
+    if (result.found) {
+      expect(result.canonicalPath).toBe('backlog/completed/aisdlc-10 - done.md');
+    }
+  });
+
+  it('returns found: true with canonicalPath when basename exists in tasks/ on origin (symmetric)', async () => {
+    // Local file is in completed/, but on origin/main it's still in tasks/
+    const fake = new FakeRunner().on(
+      /^git ls-tree origin\/main .+tasks\/aisdlc-11/,
+      ok('backlog/tasks/aisdlc-11 - in-progress.md\n'),
+    );
+    const result = await findPathMismatchOnOrigin(
+      'backlog/completed/aisdlc-11 - in-progress.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result.found).toBe(true);
+    if (result.found) {
+      expect(result.canonicalPath).toBe('backlog/tasks/aisdlc-11 - in-progress.md');
+    }
+  });
+
+  it('returns found: false when alternate directory check finds nothing', async () => {
+    const fake = new FakeRunner().on(/^git ls-tree origin\/main/, ok(''));
+    const result = await findPathMismatchOnOrigin(
+      'backlog/tasks/aisdlc-99 - new.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result.found).toBe(false);
+  });
+
+  it('returns found: false for a non-backlog path', async () => {
+    const fake = new FakeRunner(); // no expectations needed
+    const result = await findPathMismatchOnOrigin('src/some-file.ts', workDir, fake.toRunner());
+    expect(result.found).toBe(false);
+  });
+
+  it('returns found: false when git ls-tree exits non-zero', async () => {
+    const fake = new FakeRunner().on(/^git ls-tree/, fakeRunnerFail('error', 128));
+    const result = await findPathMismatchOnOrigin(
+      'backlog/tasks/aisdlc-12 - foo.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result.found).toBe(false);
+  });
+});
+
+describe('isFileOnOriginMainInAnyDir', () => {
+  it('returns exactMatch:true when file is on origin at the exact same path', async () => {
+    const fake = new FakeRunner().on(
+      /^git ls-tree origin\/main .+tasks\/aisdlc-20/,
+      ok('backlog/tasks/aisdlc-20 - foo.md\n'),
+    );
+    const result = await isFileOnOriginMainInAnyDir(
+      'backlog/tasks/aisdlc-20 - foo.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result.onOrigin).toBe(true);
+    expect(result.exactMatch).toBe(true);
+    expect(result.canonicalPath).toBe('backlog/tasks/aisdlc-20 - foo.md');
+  });
+
+  it('returns exactMatch:false + onOrigin:true when file is on origin at alternate path', async () => {
+    const fake = new FakeRunner()
+      // Exact path check: tasks/ → not found
+      .on(/^git ls-tree origin\/main .+tasks\/aisdlc-21/, ok(''))
+      // Alternate path check: completed/ → found
+      .on(
+        /^git ls-tree origin\/main .+completed\/aisdlc-21/,
+        ok('backlog/completed/aisdlc-21 - done.md\n'),
+      );
+    const result = await isFileOnOriginMainInAnyDir(
+      'backlog/tasks/aisdlc-21 - done.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result.onOrigin).toBe(true);
+    expect(result.exactMatch).toBe(false);
+    expect(result.canonicalPath).toBe('backlog/completed/aisdlc-21 - done.md');
+  });
+
+  it('returns onOrigin:false when file is not on origin in any directory', async () => {
+    const fake = new FakeRunner().on(/^git ls-tree origin\/main/, ok(''));
+    const result = await isFileOnOriginMainInAnyDir(
+      'backlog/tasks/aisdlc-99 - brand-new.md',
+      workDir,
+      fake.toRunner(),
+    );
+    expect(result.onOrigin).toBe(false);
+    expect(result.exactMatch).toBe(false);
+    expect(result.canonicalPath).toBeNull();
+  });
+});
+
+// ── AISDLC-222: Path-mismatch integration tests ──────────────────────
+
+describe('Step 0.5 — path-mismatch reconciliation (AISDLC-222)', () => {
+  it('(i) local tasks/aisdlc-N + origin completed/aisdlc-N → skip with log (no sync PR)', async () => {
+    // Local: backlog/tasks/aisdlc-10 - done.md
+    // Origin: only backlog/completed/aisdlc-10 - done.md
+    writeFileSync(
+      join(workDir, 'backlog/tasks/aisdlc-10 - done.md'),
+      '# aisdlc-10\ncontent',
+      'utf8',
+    );
+
+    const logLines: string[] = [];
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logLines.push(msg);
+    });
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-10 - done.md\n'))
+      // Exact path check: tasks/ → NOT on origin
+      .on(/^git ls-tree origin\/main .+tasks\/aisdlc-10/, ok(''))
+      // Alternate path check: completed/ → FOUND (path-mismatch)
+      .on(
+        /^git ls-tree origin\/main .+completed\/aisdlc-10/,
+        ok('backlog/completed/aisdlc-10 - done.md\n'),
+      );
+
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+    consoleSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(result.syncedFiles).toEqual([]);
+    expect(result.pathMismatchedFiles).toEqual(['backlog/tasks/aisdlc-10 - done.md']);
+    expect(result.skippedReason).toBeDefined();
+    expect(result.skippedReason).toMatch(/path-mismatched/);
+    // Verify log line was emitted
+    const mismatchLog = logLines.find(
+      (l) => l.includes('[step-0.5]') && l.includes('stale local copy'),
+    );
+    expect(mismatchLog).toBeDefined();
+    expect(mismatchLog).toContain('backlog/tasks/aisdlc-10 - done.md');
+    expect(mismatchLog).toContain('backlog/completed/aisdlc-10 - done.md');
+  });
+
+  it('(j) local completed/aisdlc-N + origin tasks/aisdlc-N → symmetric path-mismatch, skip with log', async () => {
+    // Symmetric case: operator promoted locally but main hasn't caught up
+    writeFileSync(
+      join(workDir, 'backlog/completed/aisdlc-11 - in-progress.md'),
+      '# aisdlc-11\ncontent',
+      'utf8',
+    );
+
+    const logLines: string[] = [];
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation((msg: string) => {
+      logLines.push(msg);
+    });
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/completed/aisdlc-11 - in-progress.md\n'))
+      // Exact path check: completed/ → NOT on origin
+      .on(/^git ls-tree origin\/main .+completed\/aisdlc-11/, ok(''))
+      // Alternate path check: tasks/ → FOUND (symmetric path-mismatch)
+      .on(
+        /^git ls-tree origin\/main .+tasks\/aisdlc-11/,
+        ok('backlog/tasks/aisdlc-11 - in-progress.md\n'),
+      );
+
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+    consoleSpy.mockRestore();
+
+    expect(result.ok).toBe(true);
+    expect(result.syncedFiles).toEqual([]);
+    expect(result.pathMismatchedFiles).toEqual(['backlog/completed/aisdlc-11 - in-progress.md']);
+    expect(result.skippedReason).toBeDefined();
+    expect(result.skippedReason).toMatch(/path-mismatched/);
+    // Verify log line was emitted
+    const mismatchLog = logLines.find(
+      (l) => l.includes('[step-0.5]') && l.includes('stale local copy'),
+    );
+    expect(mismatchLog).toBeDefined();
+    expect(mismatchLog).toContain('backlog/completed/aisdlc-11 - in-progress.md');
+    expect(mismatchLog).toContain('backlog/tasks/aisdlc-11 - in-progress.md');
+  });
+
+  it('genuinely new file (not on origin anywhere) is NOT treated as path-mismatch', async () => {
+    writeFileSync(
+      join(workDir, 'backlog/tasks/aisdlc-999 - brand-new.md'),
+      '# aisdlc-999\ncontent',
+      'utf8',
+    );
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-999 - brand-new.md\n'))
+      // Neither exact nor alternate path found on origin
+      .on(/^git ls-tree origin\/main/, ok(''))
+      .on(/^git rev-parse --short/, ok('abc12345\n'))
+      .on(/^git worktree add/, ok())
+      .on(/^git add --/, ok())
+      .on(/^git commit/, ok())
+      .on(/^git push/, ok())
+      .on(/^gh pr create/, ok('https://github.com/org/repo/pull/1001\n'))
+      .on(/^git worktree remove/, ok());
+
+    const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+    expect(result.ok).toBe(true);
+    expect(result.syncedFiles).toHaveLength(1);
+    expect(result.syncedFiles[0]).toContain('aisdlc-999');
+    expect(result.pathMismatchedFiles).toBeUndefined();
+    expect(result.prUrl).toBe('https://github.com/org/repo/pull/1001');
+  });
+
+  it('(k) AI_SDLC_STEP_0_5_AUTO_RECONCILE=1: deletes stale local copy when set', async () => {
+    const staleFile = join(workDir, 'backlog/tasks/aisdlc-50 - done.md');
+    writeFileSync(staleFile, '# aisdlc-50\ncontent', 'utf8');
+    expect(existsSync(staleFile)).toBe(true);
+
+    // Set the auto-reconcile env var
+    const originalEnv = process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'];
+    process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'] = '1';
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-50 - done.md\n'))
+      // Exact path: NOT found
+      .on(/^git ls-tree origin\/main .+tasks\/aisdlc-50/, ok(''))
+      // Alternate path: FOUND
+      .on(
+        /^git ls-tree origin\/main .+completed\/aisdlc-50/,
+        ok('backlog/completed/aisdlc-50 - done.md\n'),
+      )
+      // git rm fails (file is untracked, not staged) → fallback to direct delete
+      .on(/^git rm/, fakeRunnerFail('not tracked', 128));
+
+    try {
+      const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+      expect(result.ok).toBe(true);
+      expect(result.syncedFiles).toEqual([]);
+      expect(result.pathMismatchedFiles).toEqual(['backlog/tasks/aisdlc-50 - done.md']);
+      // The file should have been deleted by the auto-reconcile fallback
+      expect(existsSync(staleFile)).toBe(false);
+    } finally {
+      consoleSpy.mockRestore();
+      if (originalEnv === undefined) {
+        delete process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'];
+      } else {
+        process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'] = originalEnv;
+      }
+    }
+  });
+
+  it('(k) auto-reconcile NOT triggered when env var is unset', async () => {
+    const staleFile = join(workDir, 'backlog/tasks/aisdlc-51 - done.md');
+    writeFileSync(staleFile, '# aisdlc-51\ncontent', 'utf8');
+    expect(existsSync(staleFile)).toBe(true);
+
+    const originalEnv = process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'];
+    delete process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'];
+
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+
+    const fake = new FakeRunner()
+      .on(/^git ls-files/, ok('backlog/tasks/aisdlc-51 - done.md\n'))
+      .on(/^git ls-tree origin\/main .+tasks\/aisdlc-51/, ok(''))
+      .on(
+        /^git ls-tree origin\/main .+completed\/aisdlc-51/,
+        ok('backlog/completed/aisdlc-51 - done.md\n'),
+      );
+
+    try {
+      const result = await syncParentUntrackedFiles({ workDir, runner: fake.toRunner() });
+
+      expect(result.ok).toBe(true);
+      expect(result.pathMismatchedFiles).toEqual(['backlog/tasks/aisdlc-51 - done.md']);
+      // File should NOT have been deleted (auto-reconcile not enabled)
+      expect(existsSync(staleFile)).toBe(true);
+    } finally {
+      consoleSpy.mockRestore();
+      if (originalEnv === undefined) {
+        delete process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'];
+      } else {
+        process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'] = originalEnv;
+      }
+    }
   });
 });

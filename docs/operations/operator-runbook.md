@@ -960,6 +960,65 @@ babysitting.
 - Defer the auto-move for a specific push: `AI_SDLC_SKIP_TASK_MOVE=1 git push`.
   You are then responsible for moving the file manually before or after push.
 
+## Step 0.5 — path-mismatch reconciliation (AISDLC-222)
+
+Step 0.5 (`pipeline-cli/src/steps/00-5-sync-parent.ts`) detects untracked
+task files in the parent working tree and opens a sync PR for genuinely-new
+ones. Before AISDLC-222, a stale local copy at `backlog/tasks/aisdlc-N -
+X.md` whose canonical version had already been completed and moved to
+`backlog/completed/aisdlc-N - X.md` on `origin/main` would be treated as
+"genuinely new" (because the exact path was not found on origin), and a
+duplicate sync PR would open for it.
+
+**The fix (AISDLC-222):** Step 0.5 now probes BOTH `backlog/tasks/` AND
+`backlog/completed/` for the same basename on `origin/main`. When a file is
+found in the _alternate_ directory (path-mismatch), it is treated as a stale
+local copy and is skipped — no sync PR is opened for it.
+
+### Log line you will see
+
+When a path-mismatch is detected, Step 0.5 logs:
+
+```
+[step-0.5] aisdlc-N - X.md: stale local copy at backlog/tasks/aisdlc-N - X.md; canonical version on origin at backlog/completed/aisdlc-N - X.md — skipping sync
+```
+
+This is informational — the file will NOT be included in the sync PR.
+
+### Operator action
+
+The log line is the only output for the conservative (default) mode. The stale
+local copy remains on disk. To actually remove it:
+
+1. **Manual remove** (safest): `rm backlog/tasks/aisdlc-N\ -\ X.md` followed
+   by `git clean -fd` if the parent working tree is otherwise clean.
+2. **Auto-reconcile opt-in**: set `AI_SDLC_STEP_0_5_AUTO_RECONCILE=1` before
+   running the pipeline. Step 0.5 will attempt `git rm --force` on the stale
+   copy (falling back to `rm` for untracked files). An additional log line
+   confirms the deletion:
+   ```
+   [step-0.5] aisdlc-N - X.md: auto-reconcile: deleted stale local copy at backlog/tasks/aisdlc-N - X.md
+   ```
+   **Auto-reconcile is destructive.** Only enable it when you are confident the
+   local copy is genuinely stale (i.e. the canonical version on origin is the
+   truth). Do NOT enable it if you are actively editing task files locally.
+
+### Symmetric case
+
+The same detection applies in reverse: if your local copy is at
+`backlog/completed/aisdlc-N - X.md` but origin still has it at
+`backlog/tasks/aisdlc-N - X.md` (e.g. you promoted the file locally before
+the completing PR merged), Step 0.5 also skips it with a `[step-0.5]` log
+line so the file is not re-synced into `tasks/` on origin.
+
+### Return value surface
+
+When path-mismatch files are detected, `syncParentUntrackedFiles` populates
+`result.pathMismatchedFiles: string[]` in the returned `SyncParentResult`.
+`result.ok` is still `true` (path-mismatch is not an error condition).
+`result.skippedReason` mentions `path-mismatched file(s)` alongside exact-match
+skips.
+
 ## Codex Pilot Results
 
 This section captures Codex CLI execution path pilot results as they accumulate.
