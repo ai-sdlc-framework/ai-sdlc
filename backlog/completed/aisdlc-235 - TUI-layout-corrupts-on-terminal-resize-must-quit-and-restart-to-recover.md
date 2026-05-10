@@ -2,7 +2,7 @@
 id: AISDLC-235
 title: >-
   TUI layout corrupts on terminal resize — must quit and restart to recover
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 22:00'
 labels:
