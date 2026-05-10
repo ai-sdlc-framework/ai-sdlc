@@ -1,6 +1,6 @@
 # Cross-Harness Review Runbook
 
-**Status:** Operational (AISDLC-247)
+**Status:** Operational (AISDLC-252)
 
 **Audience:** AI-SDLC pipeline operators configuring the bidirectional Claude <-> Codex review convention.
 
@@ -24,6 +24,8 @@ Two reviewer variants exist for `code-reviewer` and `test-reviewer`:
 **Why cross-harness?** Reviewer independence from the developer harness means the reviewer cannot be biased by the same model's idiosyncratic blind spots. A Claude-developed PR reviewed by Codex gets a genuinely different perspective at no additional orchestration cost.
 
 **Security stays on Claude.** `security-reviewer` uses Claude Opus per `feedback_subagent_model_selection.md`. Codex's `o4-mini` is fast but its security-reasoning depth is not yet validated for OWASP-class findings. Do not create a `security-reviewer-codex` until this validation is done.
+
+**Verifier supports cross-harness end-to-end (AISDLC-252).** As of AISDLC-252, the `verify-attestation` workflow accepts `code-reviewer-codex` and `test-reviewer-codex` as satisfying the required reviewer set. No redundant Claude review is needed on Codex-reviewed PRs — the codex variant satisfies the role. The verifier also enforces independence: if the implementer ran in Codex (`predicate.harness.name === 'codex'`), the code-reviewer and test-reviewer must use a different harness (RFC-0010 §13.10). This ensures the cross-harness independence goal is verified cryptographically, not just by convention.
 
 ---
 

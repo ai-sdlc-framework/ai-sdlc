@@ -746,7 +746,18 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
   );
   const agentDir = join(repoRoot, 'ai-sdlc-plugin', 'agents');
-  const agentIds = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
+  // AISDLC-252: include codex variants so the agentFileHash check extends
+  // to cross-harness reviewers. Envelopes that only have the non-codex
+  // variants are not affected (expectedAgentFileHashes is a lookup map;
+  // missing agentIds are simply not checked — the completeness enforcement
+  // is handled inside verifyAttestation via REVIEWER_ROLE_EQUIVALENCES).
+  const agentIds = [
+    'code-reviewer',
+    'code-reviewer-codex',
+    'test-reviewer',
+    'test-reviewer-codex',
+    'security-reviewer',
+  ];
   const expectedAgentFileHashes = Object.fromEntries(
     agentIds.map((a) => [a, sha256Hex(readFileSync(join(agentDir, `${a}.md`), 'utf-8'))]),
   );

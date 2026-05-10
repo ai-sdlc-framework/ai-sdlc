@@ -497,6 +497,47 @@ export const REQUIRED_REVIEWER_AGENT_IDS: readonly string[] = Object.freeze([
 ]);
 
 /**
+ * Name-equivalence map for the reviewer-set completeness check (AISDLC-252).
+ *
+ * A "role" is satisfied when any of the listed agentIds is present in the
+ * envelope's reviewer set. This lets codex-harness variants (`code-reviewer-codex`,
+ * `test-reviewer-codex`) satisfy the same role as their Claude counterparts,
+ * enabling the bidirectional cross-harness review goal without requiring a
+ * redundant Claude review on Codex-reviewed PRs.
+ *
+ * Security stays Claude-only: `security-reviewer` has no codex variant per
+ * `feedback_subagent_model_selection.md` (Claude Opus for security reasoning
+ * depth is not yet validated for Codex o4-mini).
+ *
+ * The map is keyed by role name (= the canonical agentId), each value is the
+ * set of ALL agentIds that satisfy the role (including the canonical one).
+ *
+ * Frozen to discourage callers from mutating it.
+ */
+export const REVIEWER_ROLE_EQUIVALENCES: Readonly<Record<string, readonly string[]>> =
+  Object.freeze({
+    'code-reviewer': Object.freeze(['code-reviewer', 'code-reviewer-codex']),
+    'test-reviewer': Object.freeze(['test-reviewer', 'test-reviewer-codex']),
+    'security-reviewer': Object.freeze(['security-reviewer']),
+  });
+
+/**
+ * When the implementer ran in Codex (`predicate.harness.name === 'codex'`),
+ * these reviewer roles MUST be satisfied by a reviewer whose `harness` field
+ * differs from `codex`. Per RFC-0010 §13.10 `requiresIndependentHarnessFrom`:
+ * code and test reviewers must come from a different harness than the
+ * implementer to preserve cross-harness independence.
+ *
+ * Security is excluded — it is always Claude-only regardless.
+ *
+ * Frozen to discourage callers from mutating it.
+ */
+export const INDEPENDENCE_REQUIRED_ROLES: readonly string[] = Object.freeze([
+  'code-reviewer',
+  'test-reviewer',
+]);
+
+/**
  * One entry in the changed-file set used to compute `contentHash`
  * (AISDLC-94). `path` is the repo-relative forward-slash path; `blobSha`
  * is the git blob SHA-1 (40 lowercase hex chars) of the file's CURRENT
@@ -1454,18 +1495,43 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
     }
   }
 
-  // ── Reviewer-set completeness ────────────────────────────────
-  // Every attestation MUST cover all three required reviewers (code,
-  // test, security). Without this, a contributor could ship an
-  // attestation containing only `code-reviewer` and bypass the test
-  // and security review entirely.
-  const present = new Set(predicate.reviewers.map((r) => r.agentId));
-  for (const required of REQUIRED_REVIEWER_AGENT_IDS) {
-    if (!present.has(required)) {
+  // ── Reviewer-set completeness (AISDLC-252) ──────────────────────
+  // Every attestation MUST cover all three required reviewer ROLES (code,
+  // test, security). Each role is satisfied by ANY agentId in its
+  // equivalence group — so `code-reviewer-codex` satisfies the `code-reviewer`
+  // role, enabling cross-harness reviews without a redundant Claude review.
+  // Security stays Claude-only (no codex variant, per policy).
+  const presentIds = new Set(predicate.reviewers.map((r) => r.agentId));
+  for (const [role, variants] of Object.entries(REVIEWER_ROLE_EQUIVALENCES)) {
+    const satisfied = variants.some((v) => presentIds.has(v));
+    if (!satisfied) {
       return {
         valid: false,
-        reason: `reviewer set incomplete: missing required reviewer '${required}'`,
+        reason: `reviewer set incomplete: missing required reviewer '${role}' (or any variant: ${variants.join(', ')})`,
       };
+    }
+  }
+
+  // ── Independence enforcement (AISDLC-252, RFC-0010 §13.10) ──────
+  // When the implementer ran in codex (`predicate.harness.name === 'codex'`),
+  // the code-reviewer and test-reviewer MUST NOT also be codex — that would
+  // defeat the cross-harness independence goal. Security is exempt because it
+  // is always Claude-only.
+  const implementerHarness = predicate.harness?.name?.toLowerCase();
+  if (implementerHarness === 'codex') {
+    for (const role of INDEPENDENCE_REQUIRED_ROLES) {
+      // Find the reviewer entry that satisfied this role.
+      const satisfyingVariants = REVIEWER_ROLE_EQUIVALENCES[role] ?? [];
+      const reviewerEntry = predicate.reviewers.find((r) => satisfyingVariants.includes(r.agentId));
+      if (reviewerEntry) {
+        const reviewerHarness = reviewerEntry.harness?.toLowerCase();
+        if (reviewerHarness === 'codex') {
+          return {
+            valid: false,
+            reason: `independence violation: implementer harness is 'codex' but reviewer '${reviewerEntry.agentId}' also uses codex (requiresIndependentHarnessFrom per RFC-0010 §13.10)`,
+          };
+        }
+      }
     }
   }
 
