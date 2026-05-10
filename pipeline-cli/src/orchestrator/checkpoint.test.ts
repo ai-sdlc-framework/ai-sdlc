@@ -192,6 +192,7 @@ describe('emitCheckpointCommit() — real git repo', () => {
 
     const log = execSync('git log -1 --format=%s', {
       cwd: repoDir,
+      env: GIT_ENV,
       encoding: 'utf8',
     }).trim();
     expect(log).toBe('wip(checkpoint): after editing 3 files (AISDLC-242)');
@@ -224,6 +225,7 @@ describe('emitCheckpointCommit() — real git repo', () => {
     // Verify the annotation was stored verbatim (no shell evaluation occurred)
     const log = execSync('git log -1 --format=%s', {
       cwd: repoDir,
+      env: GIT_ENV,
       encoding: 'utf8',
     }).trim();
     expect(log).toContain('$(echo pwned)');
