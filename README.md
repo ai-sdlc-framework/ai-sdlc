@@ -79,6 +79,8 @@ AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs
 ai-sdlc dashboard
 ```
 
+**Terminal requirement:** `cli-tui` uses the xterm alternate-screen buffer (`\e[?1049h` / `\e[?1049l`) to render in-place without content drift. Every modern terminal emulator supports these sequences (iTerm2, Terminal.app, GNOME Terminal, Alacritty, tmux, screen, etc.). Plain `xterm-color` or `dumb` terminals without alternate-screen support will fall back to scroll-mode output.
+
 ### Pattern-C Worktree Isolation
 
 The parent repository's working tree is read-only. Each dispatched task runs in its own isolated worktree at `.worktrees/<task-id>/`. MCP routing ensures writes land in the correct worktree, never as untracked debris in the parent. The plugin's MCP server resolves the active worktree from `AI_SDLC_ACTIVE_TASK_ID` or the per-worktree `.active-task` sentinel.

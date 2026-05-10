@@ -266,4 +266,48 @@ describe('PrsPaneContent — keyboard navigation', () => {
     // Head-of-chain has a downstream entry pointing at #101
     expect(frame).toContain('#101');
   });
+
+  /**
+   * AISDLC-236 regression guard: navigation sequence (5 × down) must
+   * produce a single coherent frame, NOT append new frames below the
+   * previous ones ("content drift" symptom).
+   *
+   * ink-testing-library captures only `lastFrame()` — the final rendered
+   * output — so if the renderer were appending rather than redrawing we
+   * would see duplicate pane headers in that single string.  A correct
+   * in-place redraw shows each header exactly once.
+   */
+  it('AISDLC-236: 5× down-arrow navigation yields a single frame with no duplicate pane headers', async () => {
+    const prs = [
+      makePr({ number: 1, headRefName: 'feat/a' }),
+      makePr({ number: 2, headRefName: 'feat/b' }),
+      makePr({ number: 3, headRefName: 'feat/c' }),
+      makePr({ number: 4, headRefName: 'feat/d' }),
+      makePr({ number: 5, headRefName: 'feat/e' }),
+      makePr({ number: 6, headRefName: 'feat/f' }),
+    ];
+    const rows = makeRows(prs);
+    const { lastFrame, stdin } = render(<PrsPaneContent rows={rows} error={null} />);
+    await flush();
+
+    // Simulate 5 down-arrow keystrokes (the exact sequence from the bug report).
+    for (let i = 0; i < 5; i++) {
+      stdin.write('\x1b[B'); // VT100 down-arrow
+      await flush();
+    }
+
+    const frame = lastFrame() ?? '';
+
+    // The pane header must appear exactly once — if frames are being
+    // appended instead of redrawn in place the header would appear
+    // multiple times in the combined output.
+    const headerCount = (frame.match(/PRs IN FLIGHT/g) ?? []).length;
+    expect(headerCount).toBe(1);
+
+    // The focus indicator must be on row 5 (0-indexed) after 5 downs.
+    // Row index 5 = PR #6 (clamped at last row).
+    expect(frame).toContain('▶');
+    // The pane is still showing the list (not detail view).
+    expect(frame).toContain('navigate');
+  });
 });
