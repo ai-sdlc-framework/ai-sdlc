@@ -1,7 +1,7 @@
 ---
 id: AISDLC-250
 title: check-attestation-sign.sh should pass --harness-name and --harness-version from CODEX_VERSION env
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09'
 labels:
