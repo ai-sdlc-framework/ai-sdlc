@@ -405,11 +405,7 @@ describe('AISDLC-256 — AI_SDLC_SWEEP_DISABLED kill switch', () => {
       const workDir = makeWorkDirWithTask('AISDLC-256');
       workDirs.push(workDir);
       const branch = `ai-sdlc/aisdlc-disabled-${val.toLowerCase()}`;
-      const wtPath = makeWorktreeFixture(
-        workDir,
-        `aisdlc-disabled-${val.toLowerCase()}`,
-        branch,
-      );
+      const wtPath = makeWorktreeFixture(workDir, `aisdlc-disabled-${val.toLowerCase()}`, branch);
 
       const { runner } = makeRunner({ [branch]: 'MERGED' });
       const { sink } = captureSink();
