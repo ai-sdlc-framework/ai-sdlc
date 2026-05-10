@@ -5,11 +5,12 @@
  *   - All-pass chain: trace has 8 entries, `passed: true`, `failure: null`.
  *   - Short-circuits at filter 0 (orphan-parent → single entry in trace).
  *   - Short-circuits at filter 0.5 (already-in-flight → 2 entries in trace).
- *   - Short-circuits at filter 0.6 (blast-radius-overlap → 3 entries in trace).
- *   - Short-circuits at filter 1 (dependency failure → no DoR/external/blocked read).
- *   - Short-circuits at filter 2 (DoR failure → no external/blocked read).
- *   - Short-circuits at filter 3 (external failure → no blocked in trace).
- *   - Short-circuits at filter 4 (blocked failure → all 8 in trace).
+ *   - Short-circuits at filter 1 (dependency failure → 3 entries; blast-radius
+ *     overlap never runs because dep is the prior gate in the new order).
+ *   - Short-circuits at filter 1.5 (blast-radius-overlap → 4 entries in trace).
+ *   - Short-circuits at filter 3 (DoR failure → no external/blocked read).
+ *   - Short-circuits at filter 4 (external failure → no blocked in trace).
+ *   - Short-circuits at filter 5 (blocked failure → all 8 in trace).
  *   - `formatFilterTrace` renders both the admit and the skip cases per the
  *     RFC §11 Phase 3 task spec's exact format.
  */
@@ -94,13 +95,15 @@ describe('runFilterChain — all-pass', () => {
     expect(result.failure).toBeNull();
     expect(result.trace).toHaveLength(8);
     // AISDLC-175 prepended `OrphanParent`. AISDLC-227 inserted `AlreadyInFlight`
-    // second. AISDLC-231 inserted `BlastRadiusOverlap` third. AISDLC-243 inserted
-    // `Dispatchability` after DependencyReadiness. AISDLC-223 appended `Blocked` last.
+    // second. DependencyReadiness runs third (before BlastRadiusOverlap so that
+    // dep-blocked tasks report the dep failure, not the overlap). AISDLC-231
+    // inserted `BlastRadiusOverlap` fourth. AISDLC-243 inserted `Dispatchability`
+    // after BlastRadiusOverlap. AISDLC-223 appended `Blocked` last.
     expect(result.trace.map((r) => r.filter)).toEqual([
       'OrphanParent',
       'AlreadyInFlight',
-      'BlastRadiusOverlap',
       'DependencyReadiness',
+      'BlastRadiusOverlap',
       'Dispatchability',
       'DorReadiness',
       'ExternalDependencies',
@@ -164,7 +167,50 @@ describe('runFilterChain — short-circuit ordering', () => {
     expect(result.trace[1].passed).toBe(false);
   });
 
-  it('rejects + stops at DependencyReadiness when a dependency is open (no DoR/external in trace)', () => {
+  it('rejects + stops at BlastRadiusOverlap (4 entries) — after Dep passes, before Dispatchability', () => {
+    // Candidate has no open deps (dep check passes), but its blast-radius
+    // overlaps an in-flight task.
+    const g = graph([node('AISDLC-231')]);
+    const result = runFilterChain({
+      graph: g,
+      taskId: 'AISDLC-231',
+      calibrationLogPath: logPath,
+      alreadyInFlightOpts: noInFlight(),
+      blastRadiusOverlapOpts: {
+        // Simulate: AISDLC-100 is in-flight and shares shared/types.ts.
+        listOpenPRs: () =>
+          [{ number: 400, headRefName: 'ai-sdlc/aisdlc-100-shared-types' }] as {
+            number: number;
+            headRefName: string;
+          }[],
+        computeBlastRadiusFiles: (taskId: string) => {
+          if (taskId.toUpperCase() === 'AISDLC-231') return ['shared/types.ts'];
+          if (taskId.toUpperCase() === 'AISDLC-100') return ['shared/types.ts'];
+          return [];
+        },
+      },
+    });
+    expect(result.passed).toBe(false);
+    expect(result.failure?.filter).toBe('BlastRadiusOverlap');
+    // OrphanParent (0) + AlreadyInFlight (0.5) + DependencyReadiness (1) passed;
+    // BlastRadiusOverlap (1.5) failed → 4 entries total, Dispatchability never runs.
+    expect(result.trace).toHaveLength(4);
+    expect(result.trace[0].filter).toBe('OrphanParent');
+    expect(result.trace[0].passed).toBe(true);
+    expect(result.trace[1].filter).toBe('AlreadyInFlight');
+    expect(result.trace[1].passed).toBe(true);
+    expect(result.trace[2].filter).toBe('DependencyReadiness');
+    expect(result.trace[2].passed).toBe(true);
+    expect(result.trace[3].filter).toBe('BlastRadiusOverlap');
+    expect(result.trace[3].passed).toBe(false);
+    expect(result.failure?.detail).toMatchObject({
+      kind: 'blast-radius-overlap',
+      inFlightTaskId: 'AISDLC-100',
+      overlap: ['shared/types.ts'],
+    });
+  });
+
+  it('rejects + stops at DependencyReadiness when a dependency is open (no BlastRadius/DoR/external in trace)', () => {
     const g = graph([node('AISDLC-OPEN'), node('AISDLC-DEP', { deps: ['AISDLC-OPEN'] })]);
     const result = runFilterChain({
       graph: g,
@@ -176,16 +222,15 @@ describe('runFilterChain — short-circuit ordering', () => {
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('DependencyReadiness');
     // OrphanParent passed (filter 0), AlreadyInFlight passed (filter 0.5),
-    // BlastRadiusOverlap passed (filter 0.6), DependencyReadiness failed (filter 1).
-    expect(result.trace).toHaveLength(4);
+    // DependencyReadiness failed (filter 1) — BlastRadiusOverlap never runs
+    // because the chain short-circuits at DependencyReadiness first.
+    expect(result.trace).toHaveLength(3);
     expect(result.trace[0].filter).toBe('OrphanParent');
     expect(result.trace[0].passed).toBe(true);
     expect(result.trace[1].filter).toBe('AlreadyInFlight');
     expect(result.trace[1].passed).toBe(true);
-    expect(result.trace[2].filter).toBe('BlastRadiusOverlap');
-    expect(result.trace[2].passed).toBe(true);
-    expect(result.trace[3].filter).toBe('DependencyReadiness');
-    expect(result.trace[3].passed).toBe(false);
+    expect(result.trace[2].filter).toBe('DependencyReadiness');
+    expect(result.trace[2].passed).toBe(false);
   });
 
   it('rejects + stops at DorReadiness when the verdict blocks (no external in trace)', () => {
@@ -219,16 +264,16 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('DorReadiness');
-    // OrphanParent + AlreadyInFlight + BlastRadiusOverlap + DependencyReadiness +
+    // OrphanParent + AlreadyInFlight + DependencyReadiness + BlastRadiusOverlap +
     // Dispatchability (passed) + DorReadiness (failed). ExternalDependencies is NOT in the trace.
     expect(result.trace).toHaveLength(6);
     expect(result.trace[0].filter).toBe('OrphanParent');
     expect(result.trace[0].passed).toBe(true);
     expect(result.trace[1].filter).toBe('AlreadyInFlight');
     expect(result.trace[1].passed).toBe(true);
-    expect(result.trace[2].filter).toBe('BlastRadiusOverlap');
+    expect(result.trace[2].filter).toBe('DependencyReadiness');
     expect(result.trace[2].passed).toBe(true);
-    expect(result.trace[3].filter).toBe('DependencyReadiness');
+    expect(result.trace[3].filter).toBe('BlastRadiusOverlap');
     expect(result.trace[3].passed).toBe(true);
     expect(result.trace[4].filter).toBe('Dispatchability');
     expect(result.trace[4].passed).toBe(true);
@@ -251,7 +296,7 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('ExternalDependencies');
-    // OrphanParent + AlreadyInFlight + BlastRadiusOverlap + DependencyReadiness +
+    // OrphanParent + AlreadyInFlight + DependencyReadiness + BlastRadiusOverlap +
     // Dispatchability + DorReadiness + ExternalDependencies (fails). Blocked is NOT in the trace.
     expect(result.trace).toHaveLength(7);
     expect(result.trace[0].passed).toBe(true);
@@ -275,16 +320,18 @@ describe('runFilterChain — short-circuit ordering', () => {
     });
     expect(result.passed).toBe(false);
     expect(result.failure?.filter).toBe('Blocked');
-    // All 8 filters in trace (AISDLC-231 added BlastRadiusOverlap at index 2,
-    // AISDLC-243 added Dispatchability at index 4), only the last one (Blocked
-    // at index 7) fails.
+    // All 8 filters in trace (DependencyReadiness is at index 2, AISDLC-231
+    // added BlastRadiusOverlap at index 3, AISDLC-243 added Dispatchability at
+    // index 4), only the last one (Blocked at index 7) fails.
     expect(result.trace).toHaveLength(8);
     expect(result.trace[0].filter).toBe('OrphanParent');
     expect(result.trace[0].passed).toBe(true);
     expect(result.trace[1].filter).toBe('AlreadyInFlight');
     expect(result.trace[1].passed).toBe(true);
-    expect(result.trace[2].filter).toBe('BlastRadiusOverlap');
+    expect(result.trace[2].filter).toBe('DependencyReadiness');
     expect(result.trace[2].passed).toBe(true);
+    expect(result.trace[3].filter).toBe('BlastRadiusOverlap');
+    expect(result.trace[3].passed).toBe(true);
     expect(result.trace[7].filter).toBe('Blocked');
     expect(result.trace[7].passed).toBe(false);
     expect(result.trace[7].reason).toBe('Soaking — promotion gated on evidence');

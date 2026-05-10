@@ -6,14 +6,25 @@
  * verdict; the loop is responsible for emitting the matching event +
  * requeueing the candidate for the next tick.
  *
- * Order is significant: dependency readiness is the cheapest check (in-memory
- * graph walk, ~µs) and the most common failure mode in practice, so it runs
- * first. DoR readiness is a single log file scan (~ms). External dependencies
- * is a single JSON file read + a frontmatter inspection (~µs). The `Blocked`
- * filter (AISDLC-223) runs last — it catches tasks the operator has
- * explicitly marked as blocked via `blocked.reason` in frontmatter. Reordering
- * would shift cost without changing semantics — the §4.3 order matches both
- * the cost ranking and the human reading order in the RFC, so we keep it.
+ * Order is significant:
+ *   - OrphanParent runs first — constant-time graph lookup, most decisive
+ *     (an orphan parent isn't real dispatch work at all).
+ *   - AlreadyInFlight runs second — catches mid-dispatch duplicates before
+ *     the costlier dep/blast-radius checks.
+ *   - DependencyReadiness runs third — in-memory graph walk (~µs), the
+ *     most common blocking condition in practice. A dep-blocked task also
+ *     overlapping a blast-radius should report the dep block (more
+ *     actionable for the operator), so dep runs BEFORE blast-radius.
+ *   - BlastRadiusOverlap (AISDLC-231) runs AFTER DependencyReadiness and
+ *     BEFORE Dispatchability — it serialises tasks that overlap with
+ *     in-flight file sets. The ordering ensures a dep-blocked task emits
+ *     `OrchestratorBlockedByDependency` (root cause) rather than the less
+ *     informative `OrchestratorBlockedByBlastRadiusOverlap`.
+ *   - Dispatchability runs after BlastRadiusOverlap and before DorReadiness
+ *     so permanently non-dispatchable tasks skip the DoR log scan.
+ *   - DoR readiness is a single log file scan (~ms).
+ *   - ExternalDependencies is a single JSON file read + frontmatter scan.
+ *   - Blocked (AISDLC-223) runs last per AC #3.
  *
  * @module orchestrator/filters/chain
  */
@@ -105,20 +116,18 @@ export interface RunFilterChainOpts {
  * so the loop's event emission carries the prefix of cleared filters.
  *
  * Order: OrphanParent (AISDLC-175) → AlreadyInFlight (AISDLC-227) →
- * BlastRadiusOverlap (AISDLC-231) → DependencyReadiness →
+ * DependencyReadiness → BlastRadiusOverlap (AISDLC-231) →
  * Dispatchability (AISDLC-243) → DorReadiness → ExternalDependencies →
  * Blocked (AISDLC-223).
- * OrphanParent runs first because it's the cheapest check (constant-time
- * graph lookup) AND the most decisive — an orphan parent isn't real work
- * at all. AlreadyInFlight runs second — it catches in-progress tasks before
- * the costlier dep walk. BlastRadiusOverlap (AISDLC-231) runs third — it
- * serializes tasks that touch the same files as an in-flight task, preventing
- * stale-rebase fan-out collisions (AISDLC-231 rationale). Dispatchability
- * runs AFTER DependencyReadiness and BEFORE DoR: we want to confirm the task's
- * deps are met before spending time on the DoR log scan, but we want to skip
- * the DoR scan entirely for tasks that are permanently marked non-dispatchable
- * (soak phases, operator-only steps, investigations). Blocked runs last per
- * AC #3 of AISDLC-223.
+ *
+ * Rationale for DependencyReadiness BEFORE BlastRadiusOverlap: a task
+ * that is both dep-blocked AND overlapping an in-flight blast-radius
+ * should emit `OrchestratorBlockedByDependency` — the root cause visible
+ * to the operator. `OrchestratorBlockedByBlastRadiusOverlap` is deferred
+ * until deps are clear so it only fires when the overlap is the actual
+ * blocker. Dispatchability runs AFTER BlastRadiusOverlap and BEFORE DoR
+ * so permanently non-dispatchable tasks skip the DoR log scan entirely.
+ * Blocked runs last per AC #3 of AISDLC-223.
  */
 export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const trace: FilterResult[] = [];
@@ -144,34 +153,39 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   trace.push(inflight);
   if (!inflight.passed) return { passed: false, trace, failure: inflight };
 
-  // Filter 0.6 — blast-radius overlap detection (AISDLC-231). Runs AFTER
-  // AlreadyInFlight (so we skip the file-set computation when the task is
-  // already in flight for other reasons) and BEFORE DependencyReadiness (so
-  // a blast-radius deferral surfaces before a dependency-readiness failure;
-  // both the description block and AC #1 specify this relative ordering).
-  //
-  // Degrade-open: candidates with an empty or uncomputable blast-radius are
-  // admitted unconditionally. Env overrides (AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS
-  // and AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS_TASK) are checked inside the filter.
-  const blastRadiusOpts: CheckBlastRadiusOverlapOpts = {
-    taskId: opts.taskId,
-    ...opts.blastRadiusOverlapOpts,
-  };
-  const blastRadius = checkBlastRadiusOverlap(blastRadiusOpts);
-  trace.push(blastRadius);
-  if (!blastRadius.passed) return { passed: false, trace, failure: blastRadius };
-
-  // Filter 1 — dependency readiness.
+  // Filter 1 — dependency readiness. Runs BEFORE blast-radius overlap so
+  // that a task blocked by both an open dependency AND an overlapping
+  // blast-radius emits `OrchestratorBlockedByDependency` (root cause) rather
+  // than the less actionable `OrchestratorBlockedByBlastRadiusOverlap`.
   const depOpts: CheckDependencyReadinessOpts = { graph: opts.graph, taskId: opts.taskId };
   const dep = checkDependencyReadiness(depOpts);
   trace.push(dep);
   if (!dep.passed) return { passed: false, trace, failure: dep };
 
-  // Filter 1.5 — dispatchability gate (AISDLC-243). Runs AFTER dependency
-  // readiness and BEFORE DoR so we don't spend time scanning the calibration
-  // log for tasks permanently marked non-dispatchable (soak phases,
-  // operator-only steps, investigation tasks). The filter reads a single
-  // boolean from the pre-loaded frontmatter — no I/O.
+  // Filter 1.5 — blast-radius overlap detection (AISDLC-231). Runs AFTER
+  // DependencyReadiness (so dep-blocked tasks report the dep failure, not
+  // the overlap) and BEFORE Dispatchability so permanently non-dispatchable
+  // tasks skip the blast-radius file-set computation entirely.
+  //
+  // Degrade-open: candidates with an empty or uncomputable blast-radius are
+  // admitted unconditionally. Env overrides (AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS
+  // and AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS_TASK) are checked inside the filter.
+  const blastRadiusOpts: CheckBlastRadiusOverlapOpts = {
+    ...opts.blastRadiusOverlapOpts,
+    // taskId MUST come last — the adapter type is Omit<..., 'taskId'> but
+    // the underlying CheckBlastRadiusOverlapOpts requires it; ensure the
+    // candidate's own id always wins over any stray injected value.
+    taskId: opts.taskId,
+  };
+  const blastRadius = checkBlastRadiusOverlap(blastRadiusOpts);
+  trace.push(blastRadius);
+  if (!blastRadius.passed) return { passed: false, trace, failure: blastRadius };
+
+  // Filter 2 — dispatchability gate (AISDLC-243). Runs AFTER BlastRadiusOverlap
+  // and BEFORE DoR so we don't spend time scanning the calibration log for
+  // tasks permanently marked non-dispatchable (soak phases, operator-only
+  // steps, investigation tasks). The filter reads a single boolean from the
+  // pre-loaded frontmatter — no I/O.
   const dispatchabilityOpts: CheckDispatchabilityOpts = {
     taskId: opts.taskId,
     dispatchable: opts.taskDispatchable,
@@ -181,7 +195,7 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   trace.push(dispatchability);
   if (!dispatchability.passed) return { passed: false, trace, failure: dispatchability };
 
-  // Filter 2 — DoR readiness.
+  // Filter 3 — DoR readiness.
   const dorOpts: CheckDorReadinessOpts = { taskId: opts.taskId };
   if (opts.taskLabels !== undefined) dorOpts.taskLabels = opts.taskLabels;
   if (opts.calibrationLogPath !== undefined) dorOpts.calibrationLogPath = opts.calibrationLogPath;
@@ -190,7 +204,7 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   trace.push(dor);
   if (!dor.passed) return { passed: false, trace, failure: dor };
 
-  // Filter 3 — external dependencies.
+  // Filter 4 — external dependencies.
   const extOpts: CheckExternalDependenciesOpts = { graph: opts.graph, taskId: opts.taskId };
   if (opts.artifactsDir !== undefined) extOpts.artifactsDir = opts.artifactsDir;
   if (opts.clearedExternalKeys !== undefined) extOpts.clearedKeys = opts.clearedExternalKeys;
@@ -198,7 +212,7 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   trace.push(ext);
   if (!ext.passed) return { passed: false, trace, failure: ext };
 
-  // Filter 4 — operator-blocked gate (AISDLC-223). Runs last per AC #3.
+  // Filter 5 — operator-blocked gate (AISDLC-223). Runs last per AC #3.
   const blockedOpts: CheckBlockedOpts = {
     taskId: opts.taskId,
     blocked: opts.taskBlocked,

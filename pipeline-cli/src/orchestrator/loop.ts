@@ -309,8 +309,16 @@ export interface OrchestratorAdapters {
    * `repoRoot`) to drive the filter without filesystem or network access.
    * When undefined the filter uses defaults (reads `references:` frontmatter
    * from `<workDir>/backlog/`, scans `.worktrees/` sentinels, calls `gh`).
+   *
+   * Typed as `Omit<..., 'taskId'>` so the adapter cannot supply a stray
+   * `taskId` that would override the per-candidate id injected by the loop.
+   * The chain spreads these opts BEFORE setting `taskId` so the candidate's
+   * own id always wins (enforced in chain.ts).
    */
-  blastRadiusOverlapOpts?: import('./filters/blast-radius-overlap.js').CheckBlastRadiusOverlapOpts;
+  blastRadiusOverlapOpts?: Omit<
+    import('./filters/blast-radius-overlap.js').CheckBlastRadiusOverlapOpts,
+    'taskId'
+  >;
   /** RFC-0015 Phase 3 — wall-clock for event timestamps. Defaults to `Date.now()`. */
   now?: () => Date;
   /**
