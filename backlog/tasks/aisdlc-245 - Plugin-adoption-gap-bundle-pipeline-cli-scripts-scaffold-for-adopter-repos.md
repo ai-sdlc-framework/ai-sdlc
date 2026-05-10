@@ -6,6 +6,7 @@ title: >-
 status: To Do
 assignee: []
 created_date: '2026-05-08 12:10'
+updated_date: '2026-05-10 14:57'
 labels:
   - bug
   - adoption
@@ -13,12 +14,11 @@ labels:
   - p0
   - dogfood
 dependencies: []
-priority: high
 references:
   - ai-sdlc-plugin/commands/execute.md
-  - ai-sdlc-plugin/package.json
+  - ai-sdlc-plugin/plugin.json
   - ai-sdlc-plugin/scripts/
-  - ai-sdlc-adoption-gap.md
+priority: high
 ---
 
 ## Description
@@ -91,20 +91,21 @@ the work along orthogonal axes:
 - **245.5** — Schema reconciliation: `.ai-sdlc/pipeline-backlog.yaml` vs adopter's `.ai-sdlc/pipeline.yaml` — pick canonical, document migration, update all readers
 
 ## Acceptance Criteria
-
-- [ ] #1 All 5 sub-tasks (AISDLC-245.1 through 245.5) reach Done
-- [ ] #2 Fresh adopter repo install: `ai-sdlc-plugin install` + `/ai-sdlc init` + `/ai-sdlc execute <task-id>` runs end-to-end without ANY of the 8 missing-surface errors above
-- [ ] #3 Adopter validation runbook at `docs/operations/adopter-onboarding.md` documents the install + first-task flow
-- [ ] #4 Plugin's `package.json` declares the runtime dependency on the published `@ai-sdlc/pipeline-cli` version (pin to a specific version, not `*`)
-- [ ] #5 The framework dev-repo continues to work (no regressions for self-dogfood — this PR's CI proves it)
+<!-- AC:BEGIN -->
+- [ ] #1 #1 All 5 sub-tasks (AISDLC-245.1 through 245.5) reach Done
+- [ ] #2 #2 Fresh adopter repo install: `ai-sdlc-plugin install` + `/ai-sdlc init` + `/ai-sdlc execute <task-id>` runs end-to-end without ANY of the 8 missing-surface errors above
+- [ ] #3 #3 Adopter validation runbook at `docs/operations/adopter-onboarding.md` documents the install + first-task flow
+- [ ] #4 #4 Plugin's `package.json` declares the runtime dependency on the published `@ai-sdlc/pipeline-cli` version (pin to a specific version, not `*`)
+- [ ] #5 #5 The framework dev-repo continues to work (no regressions for self-dogfood — this PR's CI proves it)
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] #1 All 5 sub-tasks (AISDLC-245.1 through 245.5) reach Done
-- [ ] #2 Fresh adopter repo: install + init + execute end-to-end works without missing-surface errors
-- [ ] #3 Adopter onboarding runbook at docs/operations/adopter-onboarding.md
-- [ ] #4 Plugin package.json declares pinned @ai-sdlc/pipeline-cli runtime dep
-- [ ] #5 Framework dev-repo self-dogfood continues working — no regressions
+- [ ] #6 #1 All 5 sub-tasks (AISDLC-245.1 through 245.5) reach Done
+- [ ] #7 #2 Fresh adopter repo: install + init + execute end-to-end works without missing-surface errors
+- [ ] #8 #3 Adopter onboarding runbook at docs/operations/adopter-onboarding.md
+- [ ] #9 #4 Plugin package.json declares pinned @ai-sdlc/pipeline-cli runtime dep
+- [ ] #10 #5 Framework dev-repo self-dogfood continues working — no regressions
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->

@@ -16,7 +16,7 @@ references:
   - .ai-sdlc/pipeline-backlog.yaml
   - >-
     backlog/tasks/aisdlc-178.1 -
-    Phase-1-Skeleton-—-cli-tui-binary-Ink-scaffold-Overview-Mode-placeholder-panes.md
+    Phase-1-Skeleton-cli-tui-binary-Ink-scaffold-Overview-Mode-placeholder-panes.md
   - spec/rfcs/RFC-0025-framework-quality-monitoring.md
 priority: high
 ---

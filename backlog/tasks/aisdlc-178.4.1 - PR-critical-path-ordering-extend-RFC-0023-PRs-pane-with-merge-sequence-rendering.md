@@ -19,7 +19,7 @@ references:
   - pipeline-cli/src/deps/effective-priority.ts
   - >-
     backlog/tasks/aisdlc-178.4 -
-    Phase-4-PRs-pane-Critical-Path-pane-—-replace-placeholders-with-real-implementations.md
+    Phase-4-PRs-pane-Critical-Path-pane-replace-placeholders-with-real-implementations.md
 parent_task_id: AISDLC-178.4
 priority: medium
 ---

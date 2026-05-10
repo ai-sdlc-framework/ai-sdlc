@@ -14,9 +14,18 @@ dependencies:
   - AISDLC-248.2
 priority: high
 permittedExternalPaths:
-  - '../ai-sdlc-io/'
-references:
   - ../ai-sdlc-io/
+drift_status: flagged
+drift_checked: '2026-05-10'
+drift_log:
+  - date: '2026-05-10'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: ../ai-sdlc-io/'
+    resolution: flagged
+  - date: '2026-05-10'
+    type: refs-orphaned
+    detail: All referenced files have been deleted
+    resolution: flagged
 ---
 
 ## Description

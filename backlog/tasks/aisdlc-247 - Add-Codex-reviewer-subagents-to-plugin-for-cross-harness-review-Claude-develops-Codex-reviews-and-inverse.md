@@ -6,6 +6,7 @@ title: >-
 status: In Progress
 assignee: []
 created_date: '2026-05-09 17:30'
+updated_date: '2026-05-10 14:57'
 labels:
   - enhancement
   - plugin
@@ -14,12 +15,11 @@ labels:
   - harness
   - dogfood
 dependencies: []
-priority: high
 references:
   - ai-sdlc-plugin/agents/code-reviewer.md
   - ai-sdlc-plugin/agents/test-reviewer.md
   - spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md
-  - backlog/completed/aisdlc-202.2 - Codex-harness-adapter-and-Step-2-slug-fallback.md
+priority: high
 ---
 
 ## Description
@@ -64,15 +64,15 @@ The convention for the slash command body / orchestrator caller (initially manua
 
 This satisfies the RFC-0010 §13.10 "no harness reviews its own output" property without needing the full HarnessAdapter independence-enforcement framework to ship first.
 
-## Acceptance criteria
-
-- [ ] #1 `ai-sdlc-plugin/agents/code-reviewer-codex.md` agent exists, frontmatter declares `harness: codex`, body invokes Codex CLI with the diff + review prompt and parses the JSON envelope
-- [ ] #2 `ai-sdlc-plugin/agents/test-reviewer-codex.md` ditto for test review
-- [ ] #3 Both agents return the SAME JSON envelope shape as their Claude counterparts (so callers can swap harnesses without changing parsing logic)
-- [ ] #4 Agents are listed in plugin documentation (`ai-sdlc-plugin/README.md` or governance skill)
-- [ ] #5 Manual smoke test: spawn `code-reviewer-codex` against a recent merged PR's diff; verify the envelope shape and at least basic finding plausibility
-- [ ] #6 Operator runbook entry at `docs/operations/cross-harness-review.md` documenting when to use which variant, the bidirectional convention, and the cost/latency tradeoffs vs Claude reviewers
-- [ ] #7 `feedback_subagent_model_selection.md` memory file updated to note codex variants as alternatives for code/test review (security stays on Opus pending separate evaluation)
+## Acceptance Criteria
+<!-- AC:BEGIN -->
+- [ ] #1 #1 `ai-sdlc-plugin/agents/code-reviewer-codex.md` agent exists, frontmatter declares `harness: codex`, body invokes Codex CLI with the diff + review prompt and parses the JSON envelope
+- [ ] #2 #2 `ai-sdlc-plugin/agents/test-reviewer-codex.md` ditto for test review
+- [ ] #3 #3 Both agents return the SAME JSON envelope shape as their Claude counterparts (so callers can swap harnesses without changing parsing logic)
+- [ ] #4 #4 Agents are listed in plugin documentation (`ai-sdlc-plugin/README.md` or governance skill)
+- [ ] #5 #5 Manual smoke test: spawn `code-reviewer-codex` against a recent merged PR's diff; verify the envelope shape and at least basic finding plausibility
+- [ ] #6 #6 Operator runbook entry at `docs/operations/cross-harness-review.md` documenting when to use which variant, the bidirectional convention, and the cost/latency tradeoffs vs Claude reviewers
+- [ ] #7 #7 `feedback_subagent_model_selection.md` memory file updated to note codex variants as alternatives for code/test review (security stays on Opus pending separate evaluation)
 
 ## Composes with / unblocks
 
@@ -99,11 +99,12 @@ This satisfies the RFC-0010 §13.10 "no harness reviews its own output" property
 ## Acceptance Criteria
 
 <!-- SECTION:ACCEPTANCE:BEGIN -->
-- [ ] #1 ai-sdlc-plugin/agents/code-reviewer-codex.md exists, declares harness: codex, invokes Codex CLI
-- [ ] #2 ai-sdlc-plugin/agents/test-reviewer-codex.md ditto for test review
-- [ ] #3 Same JSON envelope shape as Claude counterparts
-- [ ] #4 Plugin docs list the new agents
-- [ ] #5 Manual smoke test against a recent PR diff verifies envelope + plausibility
-- [ ] #6 Operator runbook documents bidirectional convention + cost/latency tradeoffs
-- [ ] #7 Memory file updated to note codex variants as alternatives
+- [ ] #8 #1 ai-sdlc-plugin/agents/code-reviewer-codex.md exists, declares harness: codex, invokes Codex CLI
+- [ ] #9 #2 ai-sdlc-plugin/agents/test-reviewer-codex.md ditto for test review
+- [ ] #10 #3 Same JSON envelope shape as Claude counterparts
+- [ ] #11 #4 Plugin docs list the new agents
+- [ ] #12 #5 Manual smoke test against a recent PR diff verifies envelope + plausibility
+- [ ] #13 #6 Operator runbook documents bidirectional convention + cost/latency tradeoffs
+- [ ] #14 #7 Memory file updated to note codex variants as alternatives
 <!-- SECTION:ACCEPTANCE:END -->
+<!-- AC:END -->
