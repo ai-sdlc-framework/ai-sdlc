@@ -1,7 +1,7 @@
 ---
 id: AISDLC-246
 title: Harden worktree-mutex AC #7 integration test (currently `describe.skip`)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 14:42'
 labels:
