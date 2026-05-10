@@ -142,7 +142,12 @@ export async function findPathMismatchOnOrigin(
   const match = relativePath.match(/^backlog\/(tasks|completed)\/(.+)$/i);
   if (!match) return { found: false };
 
-  const [, localDir, filename] = match;
+  const [, localDirRaw, filename] = match;
+  // The regex above is case-insensitive, so localDirRaw could be "Tasks" /
+  // "Completed" on case-insensitive filesystems. Normalize before the equality
+  // check (was a code-reviewer minor: the regex was /i but the comparison was
+  // case-sensitive, so a `backlog/Tasks/...` path would route to the wrong altDir).
+  const localDir = localDirRaw.toLowerCase();
   const altDir = localDir === 'tasks' ? 'completed' : 'tasks';
   const altPath = `backlog/${altDir}/${filename}`;
 
@@ -244,6 +249,16 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
   const alreadyOnOrigin: string[] = [];
   const pathMismatchedFiles: string[] = [];
 
+  // Security minor (AISDLC-222 review): filenames come from `git ls-files` and
+  // a contributor could in principle commit a file whose name contains ANSI
+  // escape sequences (`\x1b[...`) or other control characters. Interpolating
+  // those raw into `console.log` lets them manipulate the operator's terminal.
+  // `safeForLog` strips C0/C1 control chars before interpolation. Used for any
+  // filename echoed from this step's logs.
+  const safeForLog = (s: string): string =>
+    // eslint-disable-next-line no-control-regex
+    s.replace(/[\x00-\x1f\x7f-\x9f]/g, '?');
+
   for (const file of backlogFiles) {
     const check = await isFileOnOriginMainInAnyDir(file, workDir, runner);
     if (check.onOrigin && check.exactMatch) {
@@ -252,8 +267,11 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
       // Path-mismatch: local file exists at a different path than origin's canonical location.
       // Skip syncing — would duplicate the file. Log for operator visibility.
       const canonicalPath = check.canonicalPath!;
+      const safeFile = safeForLog(file);
+      const safeBase = safeForLog(basename(file));
+      const safeCanonical = safeForLog(canonicalPath);
       console.log(
-        `[step-0.5] ${basename(file)}: stale local copy at ${file}; canonical version on origin at ${canonicalPath} — skipping sync`,
+        `[step-0.5] ${safeBase}: stale local copy at ${safeFile}; canonical version on origin at ${safeCanonical} — skipping sync`,
       );
       pathMismatchedFiles.push(file);
 
@@ -273,12 +291,12 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
             }
           }
           console.log(
-            `[step-0.5] ${basename(file)}: auto-reconcile: deleted stale local copy at ${file}`,
+            `[step-0.5] ${safeBase}: auto-reconcile: deleted stale local copy at ${safeFile}`,
           );
         } catch (err) {
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(
-            `[step-0.5] ${basename(file)}: auto-reconcile: failed to delete ${file}: ${msg}`,
+            `[step-0.5] ${safeBase}: auto-reconcile: failed to delete ${safeFile}: ${safeForLog(msg)}`,
           );
         }
       }
