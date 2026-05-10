@@ -197,7 +197,7 @@ node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-182 --run --spawner 
 | `claude-cli` | shipped (AISDLC-198) | Constructs the `ClaudeCliInlineSpawner` (Option 3 inline-orchestrator pattern). Writes a dispatch manifest to `$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json`; the calling slash command body reads the manifest and invokes the `Agent` tool. Subscription-billed via the operator's session. Design: `docs/operations/claude-cli-spawner.md`. |
 | `codex` | shipped (AISDLC-202.2) | Constructs the `CodexHarnessAdapter` (callback-driven Codex `spawn_agent` bridge). The CLI resolver wires a subprocess bridge whose path is read from `CODEX_SPAWN_AGENT_BIN`; when that env var is unset the resolver fails with a configuration message before any pipeline mutation. Programmatic callers can construct `CodexHarnessAdapter` directly with their own `CodexSpawnAgentFn`. Design map: `docs/operations/codex-execution-path.md`. |
 
-##### `--spawner codex` — Codex CLI host-bridge dispatch (AISDLC-202.2)
+##### `--spawner codex` — Codex CLI host-bridge dispatch (AISDLC-202.2 + AISDLC-251)
 
 Phase 2 of the Codex execution path ships the `CodexHarnessAdapter`, a
 host-agnostic `SubagentSpawner` over Codex's `spawn_agent` host tool.
@@ -213,12 +213,27 @@ AISDLC-201 run had to reconstruct by hand:
   aggregation **without manual reshaping** (`coerceReviewerVerdict`
   consumes them directly; verdicts are tagged `harness: 'codex'`).
 
+**Canonical bridge script (AISDLC-251):** The repo ships a ready-to-use bridge
+at `scripts/codex-spawn-agent-bridge.mjs`. Set `CODEX_SPAWN_AGENT_BIN` to this
+script — no hand-written bridge needed:
+
+```bash
+# Canonical setup — set CODEX_SPAWN_AGENT_BIN to the canonical bridge script,
+# then run ai-sdlc-pipeline execute with --spawner codex.
+export CODEX_SPAWN_AGENT_BIN="$(pwd)/scripts/codex-spawn-agent-bridge.mjs"
+node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-NNN --run --spawner codex
+```
+
+The canonical bridge uses the verified flag set for codex-cli 0.128.0:
+`codex exec -s read-only --skip-git-repo-check --color never`.
+DO NOT use `--quiet` (errors with "unexpected argument") or `--model o4-mini`
+(HTTP 400 on ChatGPT-account auth) — see AISDLC-249/247 smoke test notes.
+
 Two ways to use it:
 
 ```bash
-# CLI form — requires CODEX_SPAWN_AGENT_BIN to point at a script that
-# implements the JSON-line bridge protocol over Codex's spawn_agent tool.
-export CODEX_SPAWN_AGENT_BIN=/usr/local/bin/codex-spawn-agent-bridge
+# CLI form — requires CODEX_SPAWN_AGENT_BIN (use canonical bridge above or your own).
+export CODEX_SPAWN_AGENT_BIN="$(pwd)/scripts/codex-spawn-agent-bridge.mjs"
 node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-202 --run --spawner codex
 ```
 

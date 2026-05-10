@@ -143,8 +143,9 @@ the shape the signer consumes.
 
 ## Current Operator Guidance
 
-AISDLC-202.2 through AISDLC-202.4 + AISDLC-247 have shipped. The Codex
-execution path is operational for cross-harness review.
+AISDLC-202.2 through AISDLC-202.4 + AISDLC-247 + AISDLC-251 have shipped.
+The Codex execution path is operational for cross-harness review and for
+programmatic `--spawner codex` dispatch.
 
 1. **Default path:** Use `/ai-sdlc execute <task-id>` in Claude Code for the
    supported subscription-billed Tier 1 path. This remains the primary
@@ -154,10 +155,35 @@ execution path is operational for cross-harness review.
    `security-reviewer`. See
    [`docs/operations/cross-harness-review.md`](./cross-harness-review.md)
    for the full procedure.
-3. **Programmatic Codex dispatch (`--spawner codex`):** Set
-   `CODEX_SPAWN_AGENT_BIN` to your bridge script and pass `--spawner codex`
-   to `ai-sdlc-pipeline execute`. The bridge must implement the JSON-line
-   protocol documented in `pipeline-cli/src/runtime/spawners/codex-harness.ts`.
+3. **Programmatic Codex dispatch (`--spawner codex`):** Use the canonical
+   bridge script shipped at `scripts/codex-spawn-agent-bridge.mjs` (AISDLC-251).
+   You no longer need to write your own bridge. Set `CODEX_SPAWN_AGENT_BIN`
+   to the canonical script and pass `--spawner codex` to
+   `ai-sdlc-pipeline execute`:
+
+   ```bash
+   export CODEX_SPAWN_AGENT_BIN="$(pwd)/scripts/codex-spawn-agent-bridge.mjs"
+   node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-NNN --run --spawner codex
+   ```
+
+   **Pilot procedure:**
+
+   a. Ensure `codex` CLI 0.128.0+ is on your PATH and authenticated.
+   b. Set the env var as shown above — point it at the canonical bridge.
+   c. Run `ai-sdlc-pipeline execute <task-id> --run --spawner codex`.
+   d. The bridge invokes `codex exec -s read-only --skip-git-repo-check
+      --color never` for each agent dispatch. DO NOT add `--quiet` or
+      `--model o4-mini` — those flags fail on codex 0.128.0 with
+      ChatGPT-account auth (verified empirically in AISDLC-249/247 smoke
+      testing: `--quiet` → "unexpected argument", `--model o4-mini` → HTTP 400).
+   e. Per-field overrides: add `"extraArgs": ["--some-flag"]` in the request
+      envelope if your Codex auth supports additional flags.
+
+   The bridge implements the JSON-line wire protocol from
+   `pipeline-cli/src/runtime/spawners/codex-harness.ts`:
+   reads `{ agentType, systemPrompt, userPrompt, cwd, timeoutMs }` from stdin,
+   invokes `codex exec`, writes `{ output, parsed? }` to stdout.
+
 4. **Developer dispatch via Codex (Codex develops, Claude reviews):** The
    attended path works today via the Codex host's `spawn_agent` tool. Use the
    Claude Code reviewer variants (no `-codex` suffix) as reviewers — they
