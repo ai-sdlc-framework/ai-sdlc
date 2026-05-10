@@ -46,8 +46,15 @@ import { makeInFlightMap } from './in-flight.js';
 import type { OrchestratorEvent } from './events.js';
 import type { ExecOptions, ExecResult, Runner } from '../runtime/exec.js';
 import type { PipelineLogger, PipelineOutcome, PipelineResult } from '../types.js';
+import { makeGitEnv } from '../__test-helpers/git-env.js';
 
 // ── Test helpers ──────────────────────────────────────────────────────
+//
+// AISDLC-253: every `execSync('git ...')` MUST use `env: GIT_ENV` so the
+// fixture's git ops can never bleed into the host worktree via a polluted
+// GIT_DIR / GIT_WORK_TREE inherited from the parent shell.
+
+const GIT_ENV: NodeJS.ProcessEnv = makeGitEnv();
 
 function silentLogger(): PipelineLogger {
   return { info: () => {}, warn: () => {}, error: () => {}, progress: () => {} };
@@ -319,22 +326,20 @@ describe('runOrchestratorTick — resume path (AISDLC-242 AC #7)', () => {
     // Init bare "origin" repo
     const originDir = join(baseDir, 'origin.git');
     mkdirSync(originDir);
-    execSync('git init --bare', { cwd: originDir, stdio: 'pipe' });
+    execSync('git init --bare', { cwd: originDir, env: GIT_ENV, stdio: 'pipe' });
 
     // Create a local repo that treats originDir as "origin"
     const repoDir = join(baseDir, 'repo');
     mkdirSync(repoDir);
-    execSync('git init', { cwd: repoDir, stdio: 'pipe' });
-    execSync(`git remote add origin ${originDir}`, { cwd: repoDir, stdio: 'pipe' });
+    execSync('git init', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+    execSync(`git remote add origin ${originDir}`, { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
     // Commit a base file so main has a valid commit
-    execSync('git config user.email "test@example.com"', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git config user.name "Test"', { cwd: repoDir, stdio: 'pipe' });
     writeFileSync(join(repoDir, 'README.md'), '# test\n', 'utf8');
-    execSync('git add README.md', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git commit -m "chore: initial"', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git push origin HEAD:main', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git add README.md', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+    execSync('git commit -m "chore: initial"', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+    execSync('git push origin HEAD:main', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
     // Fetch so origin/main is visible
-    execSync('git fetch origin', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git fetch origin', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
 
     // Create a worktree (simulating the dev's partial work)
     const taskId = 'AISDLC-242';
@@ -343,22 +348,22 @@ describe('runOrchestratorTick — resume path (AISDLC-242 AC #7)', () => {
     // Create a branch for the task
     execSync(`git checkout -b ai-sdlc/${taskId.toLowerCase()}-test`, {
       cwd: repoDir,
+      env: GIT_ENV,
       stdio: 'pipe',
     });
     // Go back to main and create the worktree on the feature branch
-    execSync('git checkout main', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git checkout main', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
     execSync(`git worktree add ${wtDir} ai-sdlc/${taskId.toLowerCase()}-test`, {
       cwd: repoDir,
+      env: GIT_ENV,
       stdio: 'pipe',
     });
     // Add a checkpoint commit in the worktree
-    execSync('git config user.email "test@example.com"', { cwd: wtDir, stdio: 'pipe' });
-    execSync('git config user.name "Test"', { cwd: wtDir, stdio: 'pipe' });
     writeFileSync(join(wtDir, 'partial-work.ts'), 'const x = 1;\n', 'utf8');
-    execSync('git add partial-work.ts', { cwd: wtDir, stdio: 'pipe' });
+    execSync('git add partial-work.ts', { cwd: wtDir, env: GIT_ENV, stdio: 'pipe' });
     execSync(
       `git -c commit.gpgsign=false commit --no-verify -m "wip(checkpoint): partial edit (${taskId})"`,
-      { cwd: wtDir, stdio: 'pipe' },
+      { cwd: wtDir, env: GIT_ENV, stdio: 'pipe' },
     );
     // Write the sentinel
     writeFileSync(join(wtDir, '.active-task'), `${taskId}\n`, 'utf8');
@@ -442,19 +447,17 @@ describe('runOrchestratorTick — in-flight bypass for recoverable worktrees (AI
 
     const originDir = join(baseDir, 'origin.git');
     mkdirSync(originDir);
-    execSync('git init --bare', { cwd: originDir, stdio: 'pipe' });
+    execSync('git init --bare', { cwd: originDir, env: GIT_ENV, stdio: 'pipe' });
 
     const repoDir = join(baseDir, 'repo');
     mkdirSync(repoDir);
-    execSync('git init', { cwd: repoDir, stdio: 'pipe' });
-    execSync(`git remote add origin ${originDir}`, { cwd: repoDir, stdio: 'pipe' });
-    execSync('git config user.email "test@example.com"', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git config user.name "Test"', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git init', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+    execSync(`git remote add origin ${originDir}`, { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
     writeFileSync(join(repoDir, 'README.md'), '# test\n', 'utf8');
-    execSync('git add README.md', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git commit -m "chore: initial"', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git push origin HEAD:main', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git fetch origin', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git add README.md', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+    execSync('git commit -m "chore: initial"', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+    execSync('git push origin HEAD:main', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+    execSync('git fetch origin', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
 
     const taskId = 'AISDLC-242';
     const wtDir = join(repoDir, '.worktrees', taskId.toLowerCase());
@@ -462,22 +465,22 @@ describe('runOrchestratorTick — in-flight bypass for recoverable worktrees (AI
 
     execSync(`git checkout -b ai-sdlc/${taskId.toLowerCase()}-bypass-test`, {
       cwd: repoDir,
+      env: GIT_ENV,
       stdio: 'pipe',
     });
-    execSync('git checkout main', { cwd: repoDir, stdio: 'pipe' });
+    execSync('git checkout main', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
     execSync(`git worktree add ${wtDir} ai-sdlc/${taskId.toLowerCase()}-bypass-test`, {
       cwd: repoDir,
+      env: GIT_ENV,
       stdio: 'pipe',
     });
 
     // Commit partial work so detectRecoverableWorktree returns non-null
-    execSync('git config user.email "test@example.com"', { cwd: wtDir, stdio: 'pipe' });
-    execSync('git config user.name "Test"', { cwd: wtDir, stdio: 'pipe' });
     writeFileSync(join(wtDir, 'wip.ts'), 'const y = 2;\n', 'utf8');
-    execSync('git add wip.ts', { cwd: wtDir, stdio: 'pipe' });
+    execSync('git add wip.ts', { cwd: wtDir, env: GIT_ENV, stdio: 'pipe' });
     execSync(
       `git -c commit.gpgsign=false commit --no-verify -m "wip(checkpoint): bypass test (${taskId})"`,
-      { cwd: wtDir, stdio: 'pipe' },
+      { cwd: wtDir, env: GIT_ENV, stdio: 'pipe' },
     );
     writeFileSync(join(wtDir, '.active-task'), `${taskId}\n`, 'utf8');
 
