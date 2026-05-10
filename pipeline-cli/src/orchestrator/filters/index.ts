@@ -8,6 +8,15 @@
  */
 
 export { checkAlreadyInFlight, type CheckAlreadyInFlightOpts } from './already-in-flight.js';
+export {
+  checkBlastRadiusOverlap,
+  defaultComputeBlastRadiusFiles,
+  intersectFileSets,
+  isGlobalBypassEnabled,
+  isPerTaskBypassEnabled,
+  type BlastRadiusOverlapDetail,
+  type CheckBlastRadiusOverlapOpts,
+} from './blast-radius-overlap.js';
 export { checkBlocked, type BlockedFrontmatter, type CheckBlockedOpts } from './blocked.js';
 export {
   checkDependencyReadiness,

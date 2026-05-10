@@ -118,6 +118,8 @@ export interface OrchestratorFilterEvent {
  * AISDLC-223 adds `OrchestratorTaskBlocked` for operator-blocked tasks.
  * AISDLC-243 adds `OrchestratorBlockedByDispatchability` for tasks
  * permanently marked non-dispatchable via `dispatchable: false` frontmatter.
+ * AISDLC-231 adds `OrchestratorBlockedByBlastRadiusOverlap` for tasks
+ * whose file-level blast-radius overlaps with an in-flight task.
  */
 export type OrchestratorBlockedEvent =
   | OrchestratorBlockedByDependencyEvent
@@ -125,7 +127,8 @@ export type OrchestratorBlockedEvent =
   | OrchestratorAwaitingExternalEvent
   | OrchestratorOrphanParentEvent
   | OrchestratorTaskBlockedEvent
-  | OrchestratorBlockedByDispatchabilityEvent;
+  | OrchestratorBlockedByDispatchabilityEvent
+  | OrchestratorBlockedByBlastRadiusOverlapEvent;
 
 export interface OrchestratorBlockedByDependencyEvent {
   type: 'OrchestratorBlockedByDependency';
@@ -198,6 +201,33 @@ export interface OrchestratorBlockedByDispatchabilityEvent {
    * when the frontmatter field is absent.
    */
   dispatchableReason: string;
+}
+
+/**
+ * AISDLC-231 — emitted on every tick that the `BlastRadiusOverlap` admission
+ * filter rejects a candidate. The candidate task's file-level blast-radius
+ * (derived from its `references:` frontmatter) overlaps with that of an
+ * in-flight task. The orchestrator defers the candidate until the in-flight
+ * task's PR is merged or its worktree sentinel is removed.
+ *
+ * Operators can grep events.jsonl for this event type to identify serialized
+ * task pairs. To override (when the operator KNOWS the file touches won't
+ * conflict), set `AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS=1` (global) or
+ * `AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS_TASK=<task-id>` (per-task).
+ */
+export interface OrchestratorBlockedByBlastRadiusOverlapEvent {
+  type: 'OrchestratorBlockedByBlastRadiusOverlap';
+  ts: string;
+  taskId: string;
+  /** The in-flight task whose blast-radius overlaps with the candidate. */
+  inFlightTaskId: string;
+  /**
+   * Up to 3 overlapping file paths (the full intersection may be larger;
+   * `overlapCount` carries the total).
+   */
+  overlap: string[];
+  /** Total number of overlapping files. */
+  overlapCount: number;
 }
 
 /**

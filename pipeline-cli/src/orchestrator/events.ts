@@ -102,6 +102,20 @@ export type OrchestratorEventType =
    */
   | 'OrchestratorBlockedByDispatchability'
   /**
+   * AISDLC-231 — emitted on every tick that the `BlastRadiusOverlap`
+   * admission filter rejects a candidate because its file-level blast-radius
+   * overlaps with an in-flight task's blast-radius. Per-event fields:
+   * `taskId`, `inFlightTaskId`, `overlap` (up to 3 file paths), `overlapCount`.
+   * The orchestrator defers the candidate until the in-flight task's PR is
+   * merged or its worktree sentinel is removed.
+   *
+   * Operator override: `AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS=1` (global) or
+   * `AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS_TASK=<task-id>` (per-task) skips
+   * the filter for cases where the operator knows the file touches won't
+   * conflict.
+   */
+  | 'OrchestratorBlockedByBlastRadiusOverlap'
+  /**
    * AISDLC-224 — emitted when Step 3's auto-cleanup path fires (stale
    * branch + all three safety predicates passed + retry succeeded).
    * Per-event fields: `taskId`, `branch`, `reason`, `hadOpenPR`,

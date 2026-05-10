@@ -20,6 +20,10 @@
 
 import type { DependencyGraph } from '../../deps/dependency-graph.js';
 import { checkAlreadyInFlight, type CheckAlreadyInFlightOpts } from './already-in-flight.js';
+import {
+  checkBlastRadiusOverlap,
+  type CheckBlastRadiusOverlapOpts,
+} from './blast-radius-overlap.js';
 import { checkBlocked, type BlockedFrontmatter, type CheckBlockedOpts } from './blocked.js';
 import {
   checkDependencyReadiness,
@@ -83,24 +87,38 @@ export interface RunFilterChainOpts {
     CheckAlreadyInFlightOpts,
     'repoRoot' | 'detectSubprocess' | 'listOpenPRs' | 'readProcessTable'
   >;
+  /**
+   * AISDLC-231 — options forwarded to `checkBlastRadiusOverlap`. When
+   * undefined the filter uses defaults (repoRoot defaults to `process.cwd()`,
+   * blast-radius computed from task frontmatter `references:`). Tests inject
+   * stubs so they can drive the filter without filesystem access.
+   */
+  blastRadiusOverlapOpts?: Pick<
+    CheckBlastRadiusOverlapOpts,
+    'repoRoot' | 'backlogDir' | 'listOpenPRs' | 'computeBlastRadiusFiles'
+  >;
 }
 
 /**
- * Run the seven filters in chain order against a single candidate.
+ * Run the eight filters in chain order against a single candidate.
  * Short-circuits on the first failure but ALWAYS returns the partial trace
  * so the loop's event emission carries the prefix of cleared filters.
  *
  * Order: OrphanParent (AISDLC-175) → AlreadyInFlight (AISDLC-227) →
- * DependencyReadiness → Dispatchability (AISDLC-243) → DorReadiness →
- * ExternalDependencies → Blocked (AISDLC-223).
+ * BlastRadiusOverlap (AISDLC-231) → DependencyReadiness →
+ * Dispatchability (AISDLC-243) → DorReadiness → ExternalDependencies →
+ * Blocked (AISDLC-223).
  * OrphanParent runs first because it's the cheapest check (constant-time
  * graph lookup) AND the most decisive — an orphan parent isn't real work
  * at all. AlreadyInFlight runs second — it catches in-progress tasks before
- * the costlier dep walk. Dispatchability runs AFTER DependencyReadiness and
- * BEFORE DoR: we want to confirm the task's deps are met before spending time
- * on the DoR log scan, but we want to skip the DoR scan entirely for tasks
- * that are permanently marked non-dispatchable (soak phases, operator-only
- * steps, investigations). Blocked runs last per AC #3 of AISDLC-223.
+ * the costlier dep walk. BlastRadiusOverlap (AISDLC-231) runs third — it
+ * serializes tasks that touch the same files as an in-flight task, preventing
+ * stale-rebase fan-out collisions (AISDLC-231 rationale). Dispatchability
+ * runs AFTER DependencyReadiness and BEFORE DoR: we want to confirm the task's
+ * deps are met before spending time on the DoR log scan, but we want to skip
+ * the DoR scan entirely for tasks that are permanently marked non-dispatchable
+ * (soak phases, operator-only steps, investigations). Blocked runs last per
+ * AC #3 of AISDLC-223.
  */
 export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const trace: FilterResult[] = [];
@@ -125,6 +143,23 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const inflight = checkAlreadyInFlight(inflightOpts);
   trace.push(inflight);
   if (!inflight.passed) return { passed: false, trace, failure: inflight };
+
+  // Filter 0.6 — blast-radius overlap detection (AISDLC-231). Runs AFTER
+  // AlreadyInFlight (so we skip the file-set computation when the task is
+  // already in flight for other reasons) and BEFORE DependencyReadiness (so
+  // a blast-radius deferral surfaces before a dependency-readiness failure;
+  // both the description block and AC #1 specify this relative ordering).
+  //
+  // Degrade-open: candidates with an empty or uncomputable blast-radius are
+  // admitted unconditionally. Env overrides (AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS
+  // and AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS_TASK) are checked inside the filter.
+  const blastRadiusOpts: CheckBlastRadiusOverlapOpts = {
+    taskId: opts.taskId,
+    ...opts.blastRadiusOverlapOpts,
+  };
+  const blastRadius = checkBlastRadiusOverlap(blastRadiusOpts);
+  trace.push(blastRadius);
+  if (!blastRadius.passed) return { passed: false, trace, failure: blastRadius };
 
   // Filter 1 — dependency readiness.
   const depOpts: CheckDependencyReadinessOpts = { graph: opts.graph, taskId: opts.taskId };
@@ -209,6 +244,8 @@ function humanFilterName(filter: FilterResult['filter']): string {
       return 'Orphan-parent check';
     case 'AlreadyInFlight':
       return 'Already-in-flight check';
+    case 'BlastRadiusOverlap':
+      return 'Blast-radius overlap check';
     case 'DependencyReadiness':
       return 'Dependency check';
     case 'Dispatchability':
@@ -226,6 +263,8 @@ function terminalNote(failure: FilterResult): string {
   switch (failure.detail?.kind) {
     case 'already-in-flight':
       return `already in flight (${failure.detail.description})`;
+    case 'blast-radius-overlap':
+      return `blast-radius overlap with in-flight ${failure.detail.inFlightTaskId} (${failure.detail.overlap.slice(0, 3).join(', ')})`;
     case 'dependency-blocked':
       return 'awaiting dependency';
     case 'not-dispatchable':

@@ -107,6 +107,7 @@ import type {
   EscalateFn,
   EscalationRecord,
   FrontierFn,
+  OrchestratorBlockedByBlastRadiusOverlapEvent,
   OrchestratorBlockedByDispatchabilityEvent,
   OrchestratorBlockedEvent,
   OrchestratorConfig,
@@ -302,6 +303,14 @@ export interface OrchestratorAdapters {
   taskBlockedLoader?: (
     taskId: string,
   ) => import('./filters/blocked.js').BlockedFrontmatter | undefined;
+  /**
+   * AISDLC-231 — options forwarded to the `BlastRadiusOverlap` filter.
+   * Tests inject stubs (`computeBlastRadiusFiles`, `listOpenPRs`,
+   * `repoRoot`) to drive the filter without filesystem or network access.
+   * When undefined the filter uses defaults (reads `references:` frontmatter
+   * from `<workDir>/backlog/`, scans `.worktrees/` sentinels, calls `gh`).
+   */
+  blastRadiusOverlapOpts?: import('./filters/blast-radius-overlap.js').CheckBlastRadiusOverlapOpts;
   /** RFC-0015 Phase 3 — wall-clock for event timestamps. Defaults to `Date.now()`. */
   now?: () => Date;
   /**
@@ -628,6 +637,13 @@ export async function runOrchestratorTick(
       ...(adapters.artifactsDir !== undefined ? { artifactsDir: adapters.artifactsDir } : {}),
       ...(adapters.calibrationLogPath !== undefined
         ? { calibrationLogPath: adapters.calibrationLogPath }
+        : {}),
+      // AISDLC-231 — pass blast-radius overlap options when provided.
+      // Tests inject stubs via `adapters.blastRadiusOverlapOpts`; production
+      // leaves this undefined and the filter uses defaults (reads frontmatter
+      // `references:`, scans `.worktrees/` sentinels, calls `gh`).
+      ...(adapters.blastRadiusOverlapOpts !== undefined
+        ? { blastRadiusOverlapOpts: adapters.blastRadiusOverlapOpts }
         : {}),
     });
     logger.info(formatFilterTrace(candidate.id, chainResult));
@@ -1594,6 +1610,17 @@ function toBlockedEvent(
       };
       return ev;
     }
+    case 'blast-radius-overlap': {
+      const ev: OrchestratorBlockedByBlastRadiusOverlapEvent = {
+        type: 'OrchestratorBlockedByBlastRadiusOverlap',
+        ts,
+        taskId,
+        inFlightTaskId: detail.inFlightTaskId,
+        overlap: detail.overlap,
+        overlapCount: detail.overlapCount,
+      };
+      return ev;
+    }
     case 'already-in-flight':
       // AlreadyInFlight rejections are handled as `OrchestratorTaskAlreadyInFlight`
       // events separately in the loop — they don't map to a `BlockedEvent` arm.
@@ -1650,6 +1677,14 @@ function toEmittableBlockedEvent(blocked: OrchestratorBlockedEvent): Omit<Orches
         type: 'OrchestratorBlockedByDispatchability',
         taskId: blocked.taskId,
         dispatchableReason: blocked.dispatchableReason,
+      };
+    case 'OrchestratorBlockedByBlastRadiusOverlap':
+      return {
+        type: 'OrchestratorBlockedByBlastRadiusOverlap',
+        taskId: blocked.taskId,
+        inFlightTaskId: blocked.inFlightTaskId,
+        overlap: [...blocked.overlap],
+        overlapCount: blocked.overlapCount,
       };
   }
 }

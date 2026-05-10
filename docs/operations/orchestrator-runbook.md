@@ -393,6 +393,93 @@ var above and investigate.
 
 ---
 
+## Blast-radius overlap — preventing parallel dispatch of conflicting tasks (AISDLC-231)
+
+The orchestrator's `BlastRadiusOverlap` admission filter prevents two tasks whose
+file-level blast-radius overlaps from running in parallel. Without this filter, two
+concurrent subagents can race to edit the same files, producing conflicting diffs that
+either fail to rebase cleanly or produce silent merge-order bugs that slip past CI.
+
+### How the filter works
+
+The filter runs AFTER `AlreadyInFlight` and BEFORE `DependencyReadiness`. For each
+candidate task it:
+
+1. Computes the candidate's blast-radius file set from the task's `references:` frontmatter
+   (v1). If the field is absent or empty the candidate is **admitted unconditionally** (degrade-open
+   policy — the filter cannot block what it cannot measure).
+2. Collects all in-flight task IDs from two sources:
+   - Open PRs with a branch matching `ai-sdlc/*` (via `gh pr list`).
+   - `.worktrees/<dir>/.active-task` sentinel files on disk.
+3. For each in-flight task, computes its blast-radius file set and intersects it with the
+   candidate's set. Intersection is exact-path OR directory-prefix (a candidate file of
+   `src/foo/bar.ts` overlaps an in-flight entry of `src/foo/` and vice-versa).
+4. If any in-flight task's set intersects the candidate's set, the filter **blocks** the
+   candidate for this tick, emitting an `OrchestratorBlockedByBlastRadiusOverlap` event.
+   The first overlapping task is cited in the event payload.
+
+### Trace output
+
+When the filter blocks a candidate:
+
+```
+[orchestrator] filter trace for AISDLC-300:
+  - Orphan-parent check: passed
+  - Already-in-flight check: passed
+  - Blast-radius overlap check: failed (overlaps AISDLC-299 on 2 file(s): pipeline-cli/src/orchestrator/filters/chain.ts, ...)
+  → skipped, blast-radius overlap with in-flight task AISDLC-299 (2 file(s) in common)
+```
+
+When the candidate has no computable blast-radius (degrade-open):
+
+```
+  - Blast-radius overlap check: passed (degrade-open — empty blast-radius)
+```
+
+### events.jsonl payload
+
+Each blocked candidate emits one `OrchestratorBlockedByBlastRadiusOverlap` event per tick:
+
+```json
+{
+  "type": "OrchestratorBlockedByBlastRadiusOverlap",
+  "ts": "2026-05-09T12:34:56.789Z",
+  "taskId": "AISDLC-300",
+  "inFlightTaskId": "AISDLC-299",
+  "overlap": ["pipeline-cli/src/orchestrator/filters/chain.ts"],
+  "overlapCount": 1
+}
+```
+
+### Bypass overrides
+
+Two environment variables override the filter in exceptional circumstances:
+
+| Variable | Effect |
+|---|---|
+| `AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS=1` | Global bypass — all candidates are admitted regardless of overlap |
+| `AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS_TASK=AISDLC-300` | Per-task bypass — only the named task is admitted; others are still filtered |
+
+Both are opt-in and not set by default. Tests should **not** set these; use the
+`computeBlastRadiusFiles` / `listOpenPRs` injection points in `blastRadiusOverlapOpts`
+instead to stay hermetic.
+
+### When the filter fires but shouldn't (false positives)
+
+The `references:` field is currently the only source of blast-radius truth (v1). If two
+tasks legitimately share a reference file but edit different functions within it, the filter
+is overly conservative. Options:
+
+1. **Wait** — once the in-flight task's PR merges, the overlap disappears and the held task
+   is admitted on the next tick automatically.
+2. **Per-task bypass** — `AI_SDLC_BLAST_RADIUS_OVERLAP_BYPASS_TASK=<candidate-id>` if the
+   operator is confident the actual edits won't conflict.
+3. **Update `references:`** — remove the shared file from the candidate's frontmatter if it
+   is not genuinely a target of that task's edits (requires updating the task file and
+   re-pushing to backlog main).
+
+---
+
 ## Blocking a task from orchestrator dispatch (AISDLC-223)
 
 The orchestrator's `Blocked` admission filter lets operators put a task on
@@ -596,8 +683,8 @@ mcp__plugin_ai-sdlc_ai-sdlc__task_edit AISDLC-70 --status "In Progress"
   silently with an `OrchestratorTaskAlreadyInFlight` event.
 - **Filter-chain rejections** (`OrchestratorBlockedByDependency`,
   `OrchestratorBlockedByDor`, `OrchestratorAwaitingExternal`,
-  `OrchestratorOrphanParent`) — the orchestrator never invoked
-  Step 4, so there's nothing to roll back.
+  `OrchestratorOrphanParent`, `OrchestratorBlockedByBlastRadiusOverlap`) —
+  the orchestrator never invoked Step 4, so there's nothing to roll back.
 
 ### Failure modes inside rollback itself
 
