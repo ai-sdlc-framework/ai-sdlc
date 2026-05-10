@@ -257,15 +257,14 @@ describe('AISDLC-247: Codex reviewer variants', () => {
     }
   });
 
-  it('codex reviewer variants disallow Edit and Write (read-only bridge)', () => {
+  it('codex reviewer variants disallow Edit (no direct codebase writes)', () => {
+    // Codex reviewer agents need Write to create temp prompt files at /tmp/
+    // but must not Edit project files directly. Disallow Edit only.
+    // Write is intentionally allowed — see Step 3 in each agent body.
     for (const file of codexReviewerFiles) {
       assert.ok(
         agents[file].disallowedTools.includes('Edit'),
-        `${file} must disallow Edit (read-only reviewer)`,
-      );
-      assert.ok(
-        agents[file].disallowedTools.includes('Write'),
-        `${file} must disallow Write (read-only reviewer)`,
+        `${file} must disallow Edit (no direct project file edits)`,
       );
     }
   });
@@ -304,6 +303,20 @@ describe('AISDLC-247: Codex reviewer variants', () => {
         Array.isArray(agents[file].requiresIndependentHarnessFrom) &&
           agents[file].requiresIndependentHarnessFrom.includes('implement'),
         `${file} must declare requiresIndependentHarnessFrom: [implement] for harness independence`,
+      );
+    }
+  });
+
+  it('AISDLC-249: codex reviewer bodies include --skip-git-repo-check (Pattern C worktree regression guard)', () => {
+    // Without this flag, codex CLI exits when invoked from .worktrees/<id>/
+    // because codex 0.128.0 confuses the Pattern C parent layout (non-bare
+    // parent repo + .worktrees/ isolates) with a non-git directory and errors
+    // before running any review. AISDLC-202.4 pilot data captured this gap.
+    for (const file of codexReviewerFiles) {
+      const body = readFileSync(join(__dirname, file), 'utf-8');
+      assert.ok(
+        body.includes('--skip-git-repo-check'),
+        `${file} body must include --skip-git-repo-check so codex exec works from .worktrees/<id>/ (Pattern C parent layout)`,
       );
     }
   });
