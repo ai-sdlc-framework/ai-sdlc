@@ -1,7 +1,7 @@
 ---
 id: AISDLC-115
 title: 'RFC-0011: Definition-of-Ready Gate for Pipeline Admission'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-01 16:22'
 updated_date: '2026-05-03 17:00'
@@ -18,12 +18,19 @@ references:
   - .ai-sdlc/dor-config.yaml
   - spec/schemas/refinement-verdict.v1.schema.json
 priority: high
-blocked:
-  reason: 'Soaking — 8/9 sub-tasks Done (115.1–7 + 115.9); 115.8 partial-shipped; AC #3 soak window opened 2026-05-03 (re-evaluate 2026-05-10); ACs #5 + #6 in flight via AISDLC-162 / 163. AISDLC-223 first user.'
-  unblockedBy:
-    - AISDLC-115.8
-    - AISDLC-162
-    - AISDLC-163
+finalSummary: |
+  ## Summary
+  All 9 phase sub-tasks (AISDLC-115.1 through 115.9) shipped; AISDLC-115.8 partial-shipped (tessellated-platform shard naming for Gate 5; data-driven ACs operator-tracked). DoR gate is at `evaluationMode: enforce` in this project's `.ai-sdlc/dor-config.yaml` (already promoted via AISDLC-115.9 operator-override path). Operator decision 2026-05-10: feature stays opt-in for adopters — the framework's shipped DoR config defaults to `warn-only`; each adopter project promotes to `enforce` per the runbook (`docs/operations/dor-promotion.md`) once their corpus or spot-check evidence supports it.
+
+  ## Decision
+  - **AC #1** sub-tasks all Done (8/9 fully + 115.8 partial).
+  - **AC #2** ✅ done in dogfood (`evaluationMode: enforce`); framework default stays `warn-only` for adopters per operator decision.
+  - **AC #3** rejected — soak verification is a per-adopter exercise, not a framework-level gate.
+  - **AC #4** ✅ both Alex's additions delivered (signal-pipeline auto-pass + tessellated-platform shard naming).
+  - **AC #5, #6** continue as separate trackers (AISDLC-161 calibration log + 162 dashboard + 163 runbook); not a blocker for parent close given the opt-in-only stance.
+
+  ## Follow-up
+  None at framework level. Adopters opt in by editing their project's `.ai-sdlc/dor-config.yaml` per `docs/operations/dor-promotion.md`.
 drift_log:
   - date: '2026-05-03'
     type: ref-deleted

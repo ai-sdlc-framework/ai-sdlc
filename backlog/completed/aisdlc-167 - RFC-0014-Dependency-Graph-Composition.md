@@ -1,7 +1,7 @@
 ---
 id: AISDLC-167
 title: 'RFC-0014: Dependency Graph Composition'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-03'
 labels:
@@ -15,8 +15,18 @@ references:
   - spec/rfcs/RFC-0014-dependency-graph-composition.md
   - pipeline-cli/src/deps/
 priority: high
-blocked:
-  reason: 'Awaiting AI_SDLC_DEPS_COMPOSITION feature flag promotion (AC #2). All 5 sub-tasks (167.1–167.5) Done. Promotion runbook at docs/operations/deps-composition-promotion.md — operator dispatches the default-on flip once corpus or spot-check evidence supports it. Soak is corpus-driven, NOT calendar-driven.'
+finalSummary: |
+  ## Summary
+  All 5 sub-tasks (AISDLC-167.1 through 167.5) shipped. Operator decision 2026-05-10: feature stays opt-in via `AI_SDLC_DEPS_COMPOSITION=1`; default-on promotion (AC #2) is intentionally deferred — composition is a nice-to-have ranking enhancement, not a regression risk if left off, and the promotion runbook (`docs/operations/deps-composition-promotion.md`) remains the path for any future flip.
+
+  ## Decision
+  - **AC #1** ✅ all 5 sub-tasks Done.
+  - **AC #2** rejected by operator — flag stays opt-in; runbook preserved for adopter teams that want to flip per-project.
+  - **AC #3, #5, #6** rejected as a consequence of AC #2 (soak/runbook extension/docs only matter once we're driving toward default-on).
+  - **AC #4** ✅ all 6 RFC §12 v3 Q-resolutions cross-referenced in shipped phases.
+
+  ## Follow-up
+  None. Adopters opt in via `AI_SDLC_DEPS_COMPOSITION=1` per `docs/operations/deps-composition.md`.
 ---
 
 ## Description

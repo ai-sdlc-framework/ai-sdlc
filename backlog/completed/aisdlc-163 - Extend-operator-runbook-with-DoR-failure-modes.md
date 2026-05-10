@@ -16,7 +16,7 @@ references:
   - spec/rfcs/RFC-0011-definition-of-ready-gate.md
   - docs/operations/operator-runbook.md
   - docs/operations/dor-promotion.md
-  - backlog/tasks/aisdlc-115 - RFC-0011-Definition-of-Ready-Gate-for-Pipeline-Admission.md
+  - backlog/completed/aisdlc-115 - RFC-0011-Definition-of-Ready-Gate-for-Pipeline-Admission.md
 parent_task_id: AISDLC-115
 priority: medium
 ---

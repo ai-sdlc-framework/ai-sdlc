@@ -16,10 +16,9 @@ references:
   - pipeline-cli/src/
 priority: high
 blocked:
-  reason: 'Soaking + prerequisites — all 5 sub-tasks (169.1–169.5) Done. AC #2 (AI_SDLC_AUTONOMOUS_ORCHESTRATOR flag promotion from experimental → default-on) gated on (a) AISDLC-223 BlockedFilter so the orchestrator can skip blocked tasks, (b) AISDLC-224 stale-branch auto-cleanup, (c) corpus-driven soak per docs/operations/orchestrator-promotion.md (95%+ tasks complete unattended, no quota-burn surprise).'
+  reason: 'BLOCKED on AISDLC-253 (checkpoint test fixture leak). All 5 sub-tasks (169.1–169.5) shipped, but the corpus measured 2026-05-10 from `artifacts/_orchestrator/events-*.jsonl` shows 0% unattended completion across 23 dispatched tasks (11 aborted, 6 developer-contract-violated, 2 developer-failed) — far below the 95% AC #2 promotion threshold. The aborted-class failures trace to the AISDLC-253 fixture leak (AISDLC-242 checkpoint tests contaminating sibling worktrees). Hold flag promotion until 253 lands and a fresh corpus passes the threshold.'
   unblockedBy:
-    - AISDLC-223
-    - AISDLC-224
+    - AISDLC-253
 ---
 
 ## Description

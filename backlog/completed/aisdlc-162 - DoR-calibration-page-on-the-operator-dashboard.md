@@ -14,7 +14,7 @@ dependencies:
   - AISDLC-161
 references:
   - backlog/completed/aisdlc-161 - Wire-up-DoR-calibration-data-collection-in-CI-and-enable-hybrid-Phase-8-promotion-path.md
-  - backlog/tasks/aisdlc-115 - RFC-0011-Definition-of-Ready-Gate-for-Pipeline-Admission.md
+  - backlog/completed/aisdlc-115 - RFC-0011-Definition-of-Ready-Gate-for-Pipeline-Admission.md
   - pipeline-cli/src/cli/dor-corpus.ts
   - docs/operations/dor-promotion.md
 priority: high
