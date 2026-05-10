@@ -55,31 +55,71 @@ function walk(dir: string): string[] {
   return out;
 }
 
-describe('TUI lint — no fixed-width `─` dividers (AISDLC-254)', () => {
-  it('rejects every <Text>─────...</Text> with a hardcoded character count', () => {
-    const offenders: Array<{ file: string; line: number; snippet: string }> = [];
-    // Match a Text element whose content is purely 5+ box-drawing horizontal
-    // characters. This catches the AISDLC-254 incident pattern without
-    // false-positiving on TS comment headers (// ── Section ──) or on
-    // dynamic dividers built from `'─'.repeat(width)`.
-    const PATTERN = /<Text[^>]*>─{5,}<\/Text>/;
+describe('TUI lint — no fixed-width char-art dividers (AISDLC-254)', () => {
+  // Reviewer feedback: extend coverage beyond `<Text>───</Text>` literal form.
+  //
+  // Patterns rejected (whitespace-tolerant, multi-line via dotAll):
+  //   - <Text ...>─────...</Text>                    [original literal form]
+  //   - <Text ...>{'─────...'}</Text>                [JSX expr with string literal]
+  //   - <Text ...>{"─────..."}</Text>                [double-quoted variant]
+  //   - <Text ...>{`─────...`}</Text>                [template literal]
+  //   - <Text ...>{'─'.repeat(60)}</Text>            [hardcoded count via repeat]
+  //   - same for `=`, `*`, `_`, `━`, `═` char-art (other overflow-prone divider chars)
+  //
+  // Patterns allowed (intentional dynamic / width-aware):
+  //   - <Text>{'─'.repeat(width)}</Text>             [width is computed]
+  //   - <Text>{'─'.repeat(termCols - 4)}</Text>      [responsive]
+  //   - // ── Section ──                              [TS comment header, NOT inside <Text>]
+  //
+  // The walk is full-file with the `s` (dotAll) flag, so newlines between
+  // <Text ...> and the divider content don't defeat detection.
+
+  const DIVIDER_CHARS = '─━═*=_';
+  const FIXED_LIT = `[${DIVIDER_CHARS}]{5,}`;
+  const REPEAT_FIXED = `['"\`][${DIVIDER_CHARS}]['"\`]\\.repeat\\(\\s*\\d+\\s*\\)`;
+  const PATTERNS: Array<{ name: string; re: RegExp }> = [
+    {
+      name: 'literal-text-content',
+      re: new RegExp(`<Text[^>]*>\\s*${FIXED_LIT}\\s*</Text>`, 's'),
+    },
+    {
+      name: 'jsx-string-expression',
+      re: new RegExp(`<Text[^>]*>\\s*\\{\\s*['"\`]${FIXED_LIT}['"\`]\\s*\\}\\s*</Text>`, 's'),
+    },
+    {
+      name: 'jsx-repeat-fixed-count',
+      re: new RegExp(`<Text[^>]*>\\s*\\{\\s*${REPEAT_FIXED}\\s*\\}\\s*</Text>`, 's'),
+    },
+  ];
+
+  it('rejects every fixed-width char-art divider variant', () => {
+    const offenders: Array<{ file: string; pattern: string; snippet: string }> = [];
     for (const file of walk(TUI_DIR)) {
       const base = file.split('/').pop()!;
       if (ALLOWLIST.has(base)) continue;
       const content = readFileSync(file, 'utf8');
-      content.split('\n').forEach((line, i) => {
-        if (PATTERN.test(line)) {
-          offenders.push({ file, line: i + 1, snippet: line.trim().slice(0, 100) });
+      for (const { name, re } of PATTERNS) {
+        // Use a global form of the regex to find every occurrence + capture
+        // a snippet for the failure message.
+        const globalRe = new RegExp(re.source, re.flags.includes('g') ? re.flags : `g${re.flags}`);
+        let match: RegExpExecArray | null;
+        while ((match = globalRe.exec(content)) !== null) {
+          offenders.push({
+            file,
+            pattern: name,
+            snippet: match[0].replace(/\s+/g, ' ').slice(0, 120),
+          });
         }
-      });
+      }
     }
     if (offenders.length > 0) {
       const detail = offenders
-        .map((o) => `  ${o.file}:${o.line}\n    ${o.snippet}`)
+        .map((o) => `  [${o.pattern}] ${o.file}\n    ${o.snippet}`)
         .join('\n');
       throw new Error(
-        `AISDLC-254: ${offenders.length} hardcoded fixed-width <Text>─...</Text> divider(s) ` +
+        `AISDLC-254: ${offenders.length} hardcoded fixed-width char-art divider(s) ` +
           `found. Replace with marginBottom whitespace or Ink-native borderTop. ` +
+          `Width-aware forms (e.g. \`'─'.repeat(width)\` where width is computed) are fine. ` +
           `See no-fixed-dividers.test.ts docstring for guidance.\n${detail}`,
       );
     }
