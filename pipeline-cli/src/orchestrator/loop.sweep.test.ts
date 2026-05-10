@@ -357,3 +357,99 @@ describe('AISDLC-256 — OrchestratorWorktreeSwept event envelope', () => {
     expect(sweptEvents[0]?.ts).toBeTruthy();
   });
 });
+
+// ── AISDLC-256 kill switch (security review minor) ───────────────────────
+//
+// `AI_SDLC_SWEEP_DISABLED=1` (or true/yes/on) skips the sweep call entirely
+// for the tick. Operator escape hatch when investigating a suspected
+// spurious-MERGED incident or running with a known-stale gh API.
+
+describe('AISDLC-256 — AI_SDLC_SWEEP_DISABLED kill switch', () => {
+  const originalEnv = process.env['AI_SDLC_SWEEP_DISABLED'];
+  afterEach(() => {
+    if (originalEnv === undefined) delete process.env['AI_SDLC_SWEEP_DISABLED'];
+    else process.env['AI_SDLC_SWEEP_DISABLED'] = originalEnv;
+  });
+
+  it('skips sweep entirely when AI_SDLC_SWEEP_DISABLED=1 (worktree NOT removed)', async () => {
+    process.env['AI_SDLC_SWEEP_DISABLED'] = '1';
+    const workDir = makeWorkDirWithTask('AISDLC-256');
+    workDirs.push(workDir);
+    const branch = 'ai-sdlc/aisdlc-disabled-merged';
+    const wtPath = makeWorktreeFixture(workDir, 'aisdlc-disabled-merged', branch);
+
+    const { runner } = makeRunner({ [branch]: 'MERGED' });
+    const { events, sink } = captureSink();
+
+    const config = defaultOrchestratorConfig({ workDir, maxTicks: 1 });
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      runner,
+      emitEvent: sink,
+      frontier: () => [],
+      sleep: () => Promise.resolve(),
+    };
+
+    await runOrchestratorTick(config, adapters, 0);
+
+    // Worktree NOT removed because sweep was skipped.
+    expect(existsSync(wtPath)).toBe(true);
+    // No OrchestratorWorktreeSwept event emitted.
+    expect(events.filter((e) => e.type === 'OrchestratorWorktreeSwept')).toHaveLength(0);
+  });
+
+  it.each(['true', 'yes', 'on', 'TRUE', 'YES', 'On'])(
+    'accepts truthy value %s as kill switch',
+    async (val) => {
+      process.env['AI_SDLC_SWEEP_DISABLED'] = val;
+      const workDir = makeWorkDirWithTask('AISDLC-256');
+      workDirs.push(workDir);
+      const branch = `ai-sdlc/aisdlc-disabled-${val.toLowerCase()}`;
+      const wtPath = makeWorktreeFixture(
+        workDir,
+        `aisdlc-disabled-${val.toLowerCase()}`,
+        branch,
+      );
+
+      const { runner } = makeRunner({ [branch]: 'MERGED' });
+      const { sink } = captureSink();
+
+      const config = defaultOrchestratorConfig({ workDir, maxTicks: 1 });
+      const adapters: OrchestratorAdapters = {
+        logger: silentLogger(),
+        runner,
+        emitEvent: sink,
+        frontier: () => [],
+        sleep: () => Promise.resolve(),
+      };
+
+      await runOrchestratorTick(config, adapters, 0);
+      expect(existsSync(wtPath)).toBe(true);
+    },
+  );
+
+  it('does NOT skip sweep for falsy / unset / arbitrary values', async () => {
+    // Unset
+    delete process.env['AI_SDLC_SWEEP_DISABLED'];
+    const workDir = makeWorkDirWithTask('AISDLC-256');
+    workDirs.push(workDir);
+    const branch = 'ai-sdlc/aisdlc-default-sweep';
+    const wtPath = makeWorktreeFixture(workDir, 'aisdlc-default-sweep', branch);
+
+    const { runner } = makeRunner({ [branch]: 'MERGED' });
+    const { sink } = captureSink();
+
+    const config = defaultOrchestratorConfig({ workDir, maxTicks: 1 });
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      runner,
+      emitEvent: sink,
+      frontier: () => [],
+      sleep: () => Promise.resolve(),
+    };
+
+    await runOrchestratorTick(config, adapters, 0);
+    // Default behavior: sweep removes the merged worktree.
+    expect(existsSync(wtPath)).toBe(false);
+  });
+});

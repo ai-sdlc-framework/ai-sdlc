@@ -243,4 +243,67 @@ describe('Step 0 — sweepMergedWorktrees', () => {
     const branches = result.swept.map((s) => s.branch).sort();
     expect(branches).toEqual(['ai-sdlc/aisdlc-10-feat', 'ai-sdlc/aisdlc-11-feat']);
   });
+
+  // ── AISDLC-256 dirty-worktree guard (security review minor) ────────────
+  //
+  // The sweep MUST refuse `git worktree remove --force` when the worktree
+  // has uncommitted changes. Mirrors the AISDLC-224 hadUncommittedChanges
+  // guard. Defends against spurious MERGED states (gh API race, cached
+  // stale response, accidental early merge of in-progress work).
+
+  it('AISDLC-256 dirty-worktree guard: skips removal when status --porcelain has changes', async () => {
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-dirty'), { recursive: true });
+    let removeCalled = false;
+    const fake = new FakeRunner()
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-dirty-feat\n'))
+      .on(
+        /^gh pr list/,
+        ok(JSON.stringify({ number: 999, state: 'MERGED', mergedAt: '2026-05-10T00:00:00Z' })),
+      )
+      .on(/^git -C .+ status --porcelain/, ok(' M src/file.ts\n?? src/new.ts\n'))
+      .on(/^git worktree remove/, () => {
+        removeCalled = true;
+        return ok();
+      });
+
+    const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
+    expect(result.swept).toEqual([]); // NOT removed
+    expect(removeCalled).toBe(false); // remove never invoked
+  });
+
+  it('AISDLC-256 dirty-worktree guard: removes when status --porcelain is clean', async () => {
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-clean'), { recursive: true });
+    const fake = new FakeRunner()
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-clean-feat\n'))
+      .on(
+        /^gh pr list/,
+        ok(JSON.stringify({ number: 1000, state: 'MERGED', mergedAt: '2026-05-10T00:00:00Z' })),
+      )
+      .on(/^git -C .+ status --porcelain/, ok('')) // clean
+      .on(/^git worktree remove/, ok());
+
+    const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
+    expect(result.swept).toHaveLength(1);
+    expect(result.swept[0]?.branch).toBe('ai-sdlc/aisdlc-clean-feat');
+  });
+
+  it('AISDLC-256 dirty-worktree guard: skips removal when status check itself fails', async () => {
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-status-err'), { recursive: true });
+    let removeCalled = false;
+    const fake = new FakeRunner()
+      .on(/^git -C .+ rev-parse --abbrev-ref HEAD/, ok('ai-sdlc/aisdlc-status-err-feat\n'))
+      .on(
+        /^gh pr list/,
+        ok(JSON.stringify({ number: 1001, state: 'MERGED', mergedAt: '2026-05-10T00:00:00Z' })),
+      )
+      .on(/^git -C .+ status --porcelain/, fakeRunnerFail('fatal: not a repo', 128))
+      .on(/^git worktree remove/, () => {
+        removeCalled = true;
+        return ok();
+      });
+
+    const result = await sweepMergedWorktrees({ workDir: tmp, runner: fake.toRunner() });
+    expect(result.swept).toEqual([]); // conservative: skip on status failure
+    expect(removeCalled).toBe(false);
+  });
 });
