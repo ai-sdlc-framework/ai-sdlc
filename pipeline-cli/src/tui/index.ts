@@ -59,22 +59,41 @@ export const ALT_SCREEN_EXIT = '\x1b[?1049l';
 export function enterAltScreen(stdout: NodeJS.WriteStream = process.stdout): () => void {
   stdout.write(ALT_SCREEN_ENTER);
 
+  // Idempotent: restore writes the exit sequence at most once even if
+  // multiple exit paths fire (normal `q`, signal handler, process exit).
+  let restored = false;
   const restore = (): void => {
+    if (restored) return;
+    restored = true;
     stdout.write(ALT_SCREEN_EXIT);
   };
 
-  // Ensure we restore on every exit path.
-  process.once('exit', restore);
-  process.once('SIGINT', () => {
+  const onSigInt = (): void => {
     restore();
     process.exit(130); // conventional SIGINT exit code
-  });
-  process.once('SIGTERM', () => {
+  };
+  const onSigTerm = (): void => {
     restore();
     process.exit(143); // conventional SIGTERM exit code
-  });
+  };
 
-  return restore;
+  // Ensure we restore on every exit path. AISDLC-236 codex code-reviewer:
+  // include `exit` for normal Ink shutdown via `q`/`waitUntilExit()`, and
+  // SIGINT/SIGTERM for keyboard interrupt + container kill. Caller-driven
+  // teardown can also invoke the returned restore() explicitly.
+  process.once('exit', restore);
+  process.once('SIGINT', onSigInt);
+  process.once('SIGTERM', onSigTerm);
+
+  // Return a caller-controlled cleanup that ALSO removes the listeners we
+  // installed, so a second runTui() invocation in the same process (tests,
+  // re-entry) doesn't leak handlers or emit duplicate exit sequences.
+  return (): void => {
+    restore();
+    process.off('exit', restore);
+    process.off('SIGINT', onSigInt);
+    process.off('SIGTERM', onSigTerm);
+  };
 }
 
 export async function runTui(): Promise<void> {
@@ -90,15 +109,29 @@ export async function runTui(): Promise<void> {
   // AC#7: capture uncaught errors before Ink mounts so they can be
   // surfaced to stderr after Ink unmounts (when the alt-screen is gone
   // and the operator can actually read the output).
+  //
+  // AISDLC-236 codex code-reviewer: the previous `captureError` impl just
+  // pushed errors to a buffer with no termination, which suppressed Node's
+  // default crash semantics — `waitUntilExit()` could hang indefinitely
+  // after a real failure. We now buffer for AC#7 reporting AND tear down
+  // the Ink instance so the process can exit cleanly.
   const pendingErrors: unknown[] = [];
+  let inkInstance: { unmount: () => void } | null = null;
   const captureError = (err: unknown): void => {
     pendingErrors.push(err);
+    if (inkInstance) {
+      try {
+        inkInstance.unmount();
+      } catch {
+        // best-effort — we'll still exit below
+      }
+    }
   };
   process.on('uncaughtException', captureError);
   process.on('unhandledRejection', captureError);
 
   // Enter the alt-screen buffer (AISDLC-236).
-  enterAltScreen(process.stdout);
+  const restoreAltScreen = enterAltScreen(process.stdout);
 
   const { render } = await import('ink');
   const { App } = await import('./app.js');
@@ -109,9 +142,15 @@ export async function runTui(): Promise<void> {
   // component tree through Ink's output buffer rather than stomping the
   // rendered frame on stdout.
   const instance = render(React.createElement(App), { patchConsole: true });
+  inkInstance = instance;
 
   // Wait for the Ink render loop to finish (user pressed `q` or Ctrl+C).
   await instance.waitUntilExit();
+  inkInstance = null;
+
+  // AISDLC-236: restore the alt-screen on normal exit too. The signal
+  // handlers cover Ctrl+C / SIGTERM, but `q`-driven exit reaches here.
+  restoreAltScreen();
 
   // Deregister error listeners now that Ink has unmounted.
   process.off('uncaughtException', captureError);
