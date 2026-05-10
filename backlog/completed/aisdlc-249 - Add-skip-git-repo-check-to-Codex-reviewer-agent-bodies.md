@@ -1,7 +1,7 @@
 ---
 id: AISDLC-249
 title: Add --skip-git-repo-check to Codex reviewer agent bodies
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09'
 labels:
