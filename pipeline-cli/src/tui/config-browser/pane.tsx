@@ -136,7 +136,6 @@ function DetailView({
       <Text bold color="magenta">
         ⚙ CONFIG — {file.relPath}
       </Text>
-      <Text color="gray">─────────────────────────────────────────────────────────</Text>
       {readError && (
         <Box marginTop={1}>
           <Text color="red">⚠ unable to read file: {readError}</Text>
@@ -416,7 +415,6 @@ export function ConfigBrowserPane(props: ConfigBrowserPaneProps): React.ReactEle
       <Text bold color="magenta">
         ⚙ CONFIGURATION ({walkResult.files.length} files)
       </Text>
-      <Text color="gray">─────────────────────────────────────────</Text>
       {walkResult.error && (
         <Box marginTop={1}>
           <Text color="red">⚠ unable to list .ai-sdlc/: {walkResult.error}</Text>
