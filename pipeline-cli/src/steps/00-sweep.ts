@@ -137,7 +137,19 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
       const status = await runner('git', ['-C', wt, 'status', '--porcelain'], {
         allowFailure: true,
       });
-      if (status.code === 0 && status.stdout.trim().length > 0) {
+      // Conservative: skip removal in BOTH cases — dirty worktree OR
+      // status check itself failed (the runner uses allowFailure so a
+      // non-zero exit returns code != 0 instead of throwing). Either way,
+      // we don't have a reliable signal that the tree is clean.
+      if (status.code !== 0) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          `[step-0-sweep] ${branch}: SKIPPED removal — git status check failed ` +
+            `(exit ${status.code}) at ${wt}. Conservative skip; inspect manually.`,
+        );
+        continue;
+      }
+      if (status.stdout.trim().length > 0) {
         // Dirty worktree — skip removal, log + leave for operator to inspect.
         // Not pushing this to `swept` so the consumer (orchestrator loop)
         // doesn't emit a misleading OrchestratorWorktreeSwept event.
@@ -149,7 +161,8 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
         continue;
       }
     } catch {
-      // status check failed — be conservative + skip removal
+      // Defense-in-depth: even with allowFailure: true, a thrown error
+      // (e.g. runner mock that throws) falls here. Same conservative skip.
       continue;
     }
 
