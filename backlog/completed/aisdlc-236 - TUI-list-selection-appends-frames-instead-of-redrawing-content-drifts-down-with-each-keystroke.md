@@ -3,7 +3,7 @@ id: AISDLC-236
 title: >-
   TUI down-arrow keystroke appends frames instead of redrawing in place —
   content drifts down with each press
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 22:05'
 labels:
