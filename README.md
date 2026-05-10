@@ -2,7 +2,7 @@
 
 # AI-SDLC Framework
 
-**Declarative governance for AI-augmented software development lifecycles**
+**The autonomous AI software development lifecycle — orchestrator, cross-harness review, decision engine, operator TUI, and governance in one framework**
 
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 [![CI](https://github.com/ai-sdlc-framework/ai-sdlc/actions/workflows/ci.yml/badge.svg)](https://github.com/ai-sdlc-framework/ai-sdlc/actions/workflows/ci.yml)
@@ -22,9 +22,70 @@
 
 ---
 
-An open-source orchestrator that drives AI coding agents through the full software development lifecycle — with quality gates, progressive autonomy, and codebase-aware context at every step.
+AI-SDLC is an open-source framework for running AI coding agents autonomously through the full software development lifecycle. It goes beyond individual agent calls: it orchestrates agent dispatch, enforces cross-harness review independence, guides operators through definition-of-ready decisions, and provides a live TUI for monitoring the entire pipeline — all with quality gates and provenance at every step.
 
-The AI-SDLC Framework takes issues as input and routes them through a declared pipeline of stages, assigning AI agents and/or human reviewers at each stage, enforcing quality gates, and continuously learning which agents can be trusted with what.
+The framework takes issues as input and routes them through a declared pipeline: tasks are prioritized, agents are dispatched into isolated worktrees, three independent reviewers (optionally across different AI harnesses) validate the work, DSSE attestation envelopes are signed, and pull requests are opened — with the operator monitoring progress from a dashboard rather than managing individual steps.
+
+Governance is a first-class pillar, not an afterthought. Declarative policies define which actions agents can take, which paths they can write, and what quality gates must pass before a PR is mergeable. The orchestrator enforces these policies at every stage, recording outcomes in an autonomy ledger that determines how much trust each agent has earned.
+
+---
+
+## What is this?
+
+AI-SDLC is a **full autonomous SDLC framework** shipped in the May 2026 sprint. The framework comprises six shipped pillars:
+
+### Autonomous Orchestrator ([RFC-0015](spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md))
+
+`cli-orchestrator tick` / `cli-orchestrator start` runs a continuous reconciliation loop over your backlog. Each tick:
+
+- Reads the dependency graph and admission filters (blocked, already-in-flight, DoR, dispatchability)
+- Dispatches admitted tasks into isolated git worktrees (Pattern C layout)
+- Runs the full Step 0-13 pipeline: dev agent → 3 reviewers → attestation sign → PR open
+- Applies a worktree mutex to prevent `.git/config.lock` races on parallel dispatches
+- Quarantines failed branches and reverts task status for clean retry
+- Resumes interrupted tasks from checkpoint commits rather than restarting from scratch
+
+Feature flag: `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental`
+
+Operator runbooks: [`docs/operations/orchestrator-runbook.md`](docs/operations/orchestrator-runbook.md) | [`docs/operations/orchestrator-promotion.md`](docs/operations/orchestrator-promotion.md)
+
+### Cross-Harness Review ([RFC-0010](spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) §13)
+
+Claude and Codex review each other's work. A Claude-developed PR is reviewed by Codex (`code-reviewer-codex`, `test-reviewer-codex`); a Codex-developed PR is reviewed by Claude's standard reviewers. Security always runs on Claude Opus.
+
+- DSSE envelopes carry a `harness` field that identifies which execution harness produced each review
+- `verify-attestation` enforces independence: if the implementer was Codex, the code and test reviewers must use a different harness
+- Verifier accepts `code-reviewer-codex` and `test-reviewer-codex` as satisfying the required reviewer set — no redundant Claude review needed
+
+Runbook: [`docs/operations/cross-harness-review.md`](docs/operations/cross-harness-review.md)
+
+### Decision Engine ([RFC-0011](spec/rfcs/RFC-0011-definition-of-ready-gate.md) DoR)
+
+Tasks are not dispatched until they satisfy a Definition of Ready gate. The DoR check:
+
+- Validates that acceptance criteria are present and unambiguous
+- Scores complexity and checks that task scope is bounded
+- Blocks dispatch on tasks that lack operator-answered questions (frontload decisions before the agent runs)
+
+Feature flag: `AI_SDLC_DOR_GATE` | Runbook: [`docs/operations/dor-promotion.md`](docs/operations/dor-promotion.md)
+
+### Operator TUI ([RFC-0023](spec/rfcs/RFC-0023-operator-tui-pipeline-monitoring.md))
+
+A live terminal dashboard with five panes: pipeline status, open PRs, dependency graph, configuration, and analytics. Launch with:
+
+```bash
+AI_SDLC_TUI=experimental node pipeline-cli/bin/cli-tui.mjs
+# or:
+ai-sdlc dashboard
+```
+
+### Pattern-C Worktree Isolation
+
+The parent repository's working tree is read-only. Each dispatched task runs in its own isolated worktree at `.worktrees/<task-id>/`. MCP routing ensures writes land in the correct worktree, never as untracked debris in the parent. The plugin's MCP server resolves the active worktree from `AI_SDLC_ACTIVE_TASK_ID` or the per-worktree `.active-task` sentinel.
+
+### Governance (original pillar)
+
+Declarative agent-role policies, pre-push quality gates, DSSE attestation envelopes, branch protection enforcement, and an autonomy ledger that tracks each agent's trust level. Governance is now embedded in the orchestrator's admission and dispatch pipeline rather than being a standalone plugin concern.
 
 ---
 
@@ -84,23 +145,73 @@ The orchestrator implements a continuous reconciliation loop:
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-## Quick Start
+## Getting Started (Adopter Flow)
+
+### 1. Install the plugin
 
 ```bash
-# Install the orchestrator
-npm install -g @ai-sdlc/orchestrator
+# Add the AI-SDLC marketplace
+/plugin marketplace add ai-sdlc-framework/ai-sdlc
 
-# Initialize in your repository
-ai-sdlc init
+# Install the plugin
+/plugin install ai-sdlc@ai-sdlc
 
-# Run a pipeline for a single issue
-ai-sdlc run --issue 42
-
-# Or start the long-running orchestrator
-ai-sdlc start
+# Reload to activate
+/reload-plugins
 ```
 
-The `init` command detects your project's language, framework, and CI setup, then generates starter configuration in `.ai-sdlc/`.
+Or install the orchestrator CLI globally:
+
+```bash
+npm install -g @ai-sdlc/orchestrator
+```
+
+### 2. Initialize your repository
+
+```bash
+# Interactive bootstrap (recommended for first-time users)
+ai-sdlc init
+
+# Non-interactive (CI / scripted setup)
+ai-sdlc init --yes
+```
+
+The `init` command scaffolds `.ai-sdlc/pipeline.yaml`, `agent-role.yaml`, `quality-gate.yaml`, `autonomy-policy.yaml`, the `ai-sdlc/pr-ready` rollup gate workflow, and a `CLAUDE.md` pointer block. Full flag reference: [`docs/operations/init.md`](docs/operations/init.md).
+
+### 3. Dispatch your first task
+
+```bash
+# Single task via the slash command (subscription billing)
+/ai-sdlc execute AISDLC-42
+
+# Or run a pipeline for a single issue directly
+ai-sdlc run --issue 42
+
+# Or start the autonomous orchestrator (processes the full backlog)
+AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental ai-sdlc start
+```
+
+The pipeline runs Steps 0-13: sweep stale worktrees → triage → DoR check → worktree setup → developer agent → parallel reviewers → verdict aggregation → attestation sign → push + PR open → sibling-repo PRs → cleanup.
+
+### 4. Enable cross-harness review (optional)
+
+When Codex CLI is available (`which codex`), the orchestrator can route code and test reviews to Codex for independent harness coverage:
+
+```bash
+# Verify Codex availability
+codex --version
+codex login --check
+
+# Spawn Codex reviewer subagents explicitly
+Agent(subagent_type='ai-sdlc:code-reviewer-codex')
+Agent(subagent_type='ai-sdlc:test-reviewer-codex')
+```
+
+Full setup and pilot procedure: [`docs/operations/cross-harness-review.md`](docs/operations/cross-harness-review.md).
+
+> **Note:** The `/ai-sdlc init` adopter scaffold (`AISDLC-245` family) is currently in-flight. The manual flow above is the supported path today. The scaffold will automate steps 1-2 when it ships.
+
+---
 
 ## Agent Runners
 
@@ -140,7 +251,7 @@ All runners follow the same pattern: build prompt with codebase context, spawn t
 | `ai-sdlc routing --last 7d` | Task routing distribution |
 | `ai-sdlc complexity` | Codebase complexity profile |
 | `ai-sdlc cost --last 7d` | Cost summary by agent and pipeline |
-| `ai-sdlc dashboard` | Live TUI dashboard |
+| `ai-sdlc dashboard` | Live TUI dashboard (RFC-0023) |
 | `ai-sdlc detect-patterns` | Detect workflow patterns from telemetry data |
 | `ai-sdlc list-patterns` | View detected patterns and proposals |
 | `ai-sdlc approve-pattern ID` | Generate automation artifact from approved pattern |
@@ -191,6 +302,7 @@ The plugin provides:
 | **7 Hooks** | PreToolUse enforcement, PostToolUse telemetry, SessionStart governance context + plugin-version staleness nag, Stop quality gates (command + agent + asyncRewake coverage), PermissionRequest deny |
 | **6 Commands** | `/review`, `/triage`, `/fix-pr`, `/detect-patterns`, `/status`, `/version` |
 | **3 Agents** | `code-reviewer`, `security-reviewer`, `test-reviewer` — each with restricted tool pools (reviewers can't Edit/Write) |
+| **2 Cross-harness agents** | `code-reviewer-codex`, `test-reviewer-codex` — Codex-based reviewers for Claude-developed PRs |
 | **1 Skill** | Governance rules auto-loaded at session start |
 | **MCP Server** | 5 tools: `check_pr_status`, `check_issue`, `get_governance_context`, `list_detected_patterns`, `get_review_policy` |
 

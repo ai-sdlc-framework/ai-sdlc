@@ -15,7 +15,7 @@ User-facing documentation for the AI-SDLC Framework.
 | [API Reference](api-reference/) | Complete SDK and orchestrator reference |
 | [Examples](examples/) | Runnable TypeScript and YAML examples |
 | [Architecture](architecture.md) | Package structure, data flow, design decisions |
-| [Operations](operations/) | Operator runbooks, execution paths, and production triage |
+| [Operations](operations/) | Operator runbooks, execution paths, and production triage — see [Operations index](operations/README.md) for the full navigation map |
 | [Troubleshooting](troubleshooting.md) | FAQ, common errors, environment variables |
 
 ## Quick Links
