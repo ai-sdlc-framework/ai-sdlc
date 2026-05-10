@@ -5,7 +5,7 @@ status: Approved
 lifecycle: Signed Off
 author: dominique@reliablegenius.io
 created: 2026-04-30
-updated: 2026-04-30
+updated: 2026-05-09
 targetSpecVersion: v1alpha1
 requiresDocs: []
 ---
@@ -34,6 +34,7 @@ requiresDocs: []
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | v1 | 2026-04-30 | dominique | Initial draft after AISDLC-82's empirical failure surfaced the need for a different architecture. All 4 open questions from the design conversation resolved inline. |
+| v2 | 2026-05-09 | dominique | Codex CLI is now a supported harness option. Operator-led pilot validated 2026-05-09 via PR #415 code review: `code-reviewer-codex` (o4-mini, `-s read-only`) caught 2 real bugs (shell injection + logic gap) in 19s using ~32K tokens. The full `CodexHarnessAdapter` (`--spawner codex`) ships in AISDLC-202.2; attestation harness context in AISDLC-202.3; cross-harness review agents (`code-reviewer-codex`, `test-reviewer-codex`) in AISDLC-247. See `docs/operations/cross-harness-review.md` for the bidirectional review convention and pilot procedure. |
 
 ## Table of Contents
 

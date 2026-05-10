@@ -350,6 +350,131 @@ script. Re-sign the envelope manually with the correct flags.
 
 ---
 
+---
+
+## End-to-End Pilot Procedure
+
+This section documents how an operator runs a safe pilot task through the full
+Codex CLI workflow, what to observe, and how to capture metrics for the soak
+corpus.
+
+### Prerequisites
+
+1. Codex CLI v0.128.0+ installed and authenticated (see "Prerequisites" above).
+2. A backlog task with `dispatchable: true` and limited blast radius (docs change
+   or localized bug fix). Do NOT pilot on critical-path work.
+3. The `CODEX_SPAWN_AGENT_BIN` env var set to your bridge script if using the
+   `--spawner codex` programmatic path (see
+   `docs/operations/codex-execution-path.md` for the wire protocol). For the
+   attended path (operator in Codex session), this env var is not required.
+
+### Pilot procedure — attended Codex session
+
+```bash
+# 1. Select a safe pilot task
+TASK_ID="AISDLC-NNN"  # fill in
+
+# 2. Open a Codex interactive session in the project root
+codex
+
+# Inside the Codex session:
+# 3. Sweep merged worktrees (Step 0)
+#    Run MCP pipeline_step_0_sweep or: node pipeline-cli/bin/ai-sdlc-pipeline.mjs step-sweep
+
+# 4. Dispatch the developer subagent (Step 5b) — Codex host spawn_agent
+#    Load the full developer agent body from:
+#      cat ai-sdlc-plugin/agents/developer.md
+#    Spawn with task spec from Step 5 prompt builder
+#    Expected: developer returns a JSON envelope { commitSha, prUrl, ... }
+
+# 5. Dispatch the three reviewer subagents concurrently (Step 7b)
+#    code-reviewer-codex   → ai-sdlc-plugin/agents/code-reviewer-codex.md
+#    test-reviewer-codex   → ai-sdlc-plugin/agents/test-reviewer-codex.md
+#    security-reviewer     → ai-sdlc-plugin/agents/security-reviewer.md (Claude)
+#    Note: security-reviewer stays on Claude (Opus) per the cross-harness policy
+
+# 6. Sign the attestation (Step 10)
+#    node ai-sdlc-plugin/scripts/sign-attestation.mjs \
+#      --review-verdicts /tmp/review-verdicts-$TASK_ID.json \
+#      --iteration-count 1 \
+#      --harness-note "" \
+#      --harness-name codex \
+#      --harness-version 0.128.0
+```
+
+### Metrics to capture
+
+Record the following in the "Codex pilot results" section of the operator
+runbook after the pilot completes:
+
+| Metric | Where to find it | Record |
+|--------|------------------|--------|
+| Wall-clock (dispatch → PR open) | Time delta between Step 5b dispatch and `gh pr view` URL available | ___s |
+| Developer token usage | Codex session token counter or `codex usage` | ___ tokens |
+| Reviewer token usage (each) | Per-reviewer session counter | ___ tokens each |
+| Reviewer count | 3 (code + test + security) | 3 |
+| Sandbox mode used | Must be `-s read-only` | read-only |
+| `--skip-git-repo-check` needed | Boolean; note if required for your environment | Y/N |
+| DSSE verification result | `verify-attestation.yml` CI status or manual: `node pipeline-cli/bin/cli-verify-attestation.mjs` | passed/failed |
+| Anomalies | Any manual-intervention points, parse failures, CLI version issues | ___ |
+
+### What to observe
+
+**During developer dispatch:**
+- Does Codex complete Steps 5-11 without manual intervention?
+- Does the developer return a valid JSON envelope (not prose)?
+- Is the PR opened as a draft?
+
+**During reviewer dispatch:**
+- Do all three reviewers return `{ approved, findings, summary, harness }` shapes?
+- Are `code-reviewer-codex` and `test-reviewer-codex` faster than the Claude
+  variants (expected 10-40s vs 30-90s)?
+- Does the `harness: "codex"` field appear in the verdict file?
+
+**During attestation sign:**
+- Does `sign-attestation.mjs` accept the verdict file without reshaping?
+- Does the DSSE envelope's predicate carry `harness: { name: "codex", version: "0.128.0" }`?
+- Does `verify-attestation.yml` post `ai-sdlc/attestation: success`?
+
+### Known flags required (as of v0.128.0)
+
+| Flag | Why required |
+|------|-------------|
+| `-s read-only` | Sandbox mode — prevents shell injection via diff content |
+| `--skip-git-repo-check` | Some Codex installations reject non-GitHub-authenticated repos or bare clones. Pass this flag if Codex errors on the repo check. |
+
+---
+
+## Pilot Results Log
+
+Pre-populated with the smoke-test data captured 2026-05-09.
+
+### Entry 1 — Smoke test: code-reviewer-codex on PR #415 (AISDLC-242)
+
+**Date:** 2026-05-09
+**Task:** AISDLC-242 (Resume from interrupted orchestrator runs)
+**PR:** [#415](https://github.com/ai-sdlc/ai-sdlc/pull/415)
+**Pilot type:** Cross-harness review only (not a full developer dispatch)
+
+| Metric | Value |
+|--------|-------|
+| Wall-clock (review only) | 19 seconds |
+| Token usage | ~32,000 tokens |
+| Reviewer variant | `code-reviewer-codex` (o4-mini) |
+| Sandbox mode | `-s read-only` |
+| `--skip-git-repo-check` needed | Yes |
+| Findings | 2 majors: (1) shell injection via unquoted `$PR_BODY` in a `gh pr create` call; (2) logic gap in state-machine transition guard |
+| DSSE verification | Attended review path — verdict written manually to `.ai-sdlc/verdicts/`; envelope verified via pre-push hook |
+| Anomalies | None. Parse succeeded on first attempt. Codex returned raw JSON (no markdown fences). |
+
+**Conclusion:** Cross-harness review path WORKS. The reviewer caught 2 real bugs (shell injection + logic gap) that the Claude Code developer did not flag. Wall-clock was 19s, well within the 10-40s estimate for Codex o4-mini. The `-s read-only` sandbox functioned correctly — no network writes occurred during the review.
+
+**Operational notes:**
+- `--skip-git-repo-check` was required in this environment. Add to all review invocations until this becomes the default.
+- The reviewer returned raw JSON on the first attempt. No fenced-output cleanup was needed — the parse path handles both cases.
+
+---
+
 ## Related Documentation
 
 - `ai-sdlc-plugin/README.md` — plugin agent listing

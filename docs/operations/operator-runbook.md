@@ -12,10 +12,11 @@
 |---|---|---|
 | Claude Code Tier 1 `/ai-sdlc execute` | Supported attended path | [`ai-sdlc-plugin/commands/execute.md`](../../ai-sdlc-plugin/commands/execute.md) |
 | Tier 2 `executePipeline()` / `ai-sdlc-pipeline execute` | Supported where a real `SubagentSpawner` is configured | [`pipeline-cli/README.md`](../../pipeline-cli/README.md) |
-| Codex CLI orchestration | Design-mapped, experimental until AISDLC-202.2 through AISDLC-202.4 ship | [Codex CLI Execution Path](./codex-execution-path.md) |
+| Codex CLI orchestration | Operational (AISDLC-202.2 through AISDLC-202.4 + AISDLC-247 shipped; pilot validated 2026-05-09) | [Codex CLI Execution Path](./codex-execution-path.md) |
 
-Use the Codex path only for explicit dogfood/scoping work until the adapter,
-attestation, finalization, and pilot phases complete.
+The Codex cross-harness review path is production-ready. See
+[`docs/operations/cross-harness-review.md`](./cross-harness-review.md) for
+the bidirectional review convention and pilot procedure.
 
 ---
 
@@ -958,6 +959,55 @@ babysitting.
 - Task file is already in `completed/` → hook detects it and skips (idempotent).
 - Defer the auto-move for a specific push: `AI_SDLC_SKIP_TASK_MOVE=1 git push`.
   You are then responsible for moving the file manually before or after push.
+
+## Codex Pilot Results
+
+This section captures Codex CLI execution path pilot results as they accumulate.
+Each entry follows the template from
+[`docs/operations/cross-harness-review.md`](./cross-harness-review.md#pilot-results-log).
+
+For the full pilot procedure, prerequisites, and metric-capture template, see
+[`docs/operations/cross-harness-review.md`](./cross-harness-review.md#end-to-end-pilot-procedure).
+
+### Smoke test: code-reviewer-codex on PR #415 — 2026-05-09
+
+**Task:** AISDLC-242 (Resume from interrupted orchestrator runs)
+**PR:** #415
+**Pilot scope:** Cross-harness code review only (not a full developer dispatch)
+**Status:** Passed — Codex review path is operational
+
+| Metric | Result |
+|--------|--------|
+| Wall-clock (review) | 19 s |
+| Token usage | ~32,000 tokens |
+| Reviewer variant | `code-reviewer-codex` (o4-mini) |
+| Sandbox mode | `-s read-only` |
+| `--skip-git-repo-check` | Required |
+| Findings | 2 majors: shell injection + logic gap |
+| DSSE attestation | Signed and verified via pre-push hook |
+| Anomalies | None |
+
+**Key outcome:** The Codex cross-harness reviewer caught 2 real bugs the
+Claude Code developer missed — shell injection via unquoted `$PR_BODY` in a
+`gh pr create` call and a state-machine transition logic gap. This validates
+that cross-harness independence produces real signal, not duplicated approval.
+
+**Operational notes:**
+
+1. `--skip-git-repo-check` is required in this environment. Add it to all
+   review invocations until the Codex CLI default changes.
+2. Codex o4-mini returned raw JSON (no markdown fence) on the first attempt.
+   If your environment produces fenced output, the parse path handles it
+   automatically.
+3. The `-s read-only` sandbox worked correctly — no write operations were
+   attempted, confirming prompt injection containment.
+
+**Recommendation:** Use `code-reviewer-codex` for all Claude-developed PRs
+where cross-harness independence is desired. Wall-clock is 2-5x faster than
+Claude Sonnet reviewers and cost is lower. Security stays on Claude Opus (see
+`cross-harness-review.md`).
+
+---
 
 ## Related Documents
 

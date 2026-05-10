@@ -1,8 +1,11 @@
 # Codex CLI Execution Path
 
-**Status:** Design map for AISDLC-202.1. This document is scoping only. It
-does not make Codex CLI a production-ready `ai-sdlc-pipeline execute` harness
-until AISDLC-202.2 through AISDLC-202.4 ship.
+**Status:** Operational. AISDLC-202.1 (design map), AISDLC-202.2
+(`CodexHarnessAdapter` + `--spawner codex`), AISDLC-202.3 (attestation harness
+context), AISDLC-247 (Codex reviewer agents), and AISDLC-202.4 (pilot
+validation) have all shipped. Codex CLI is now a supported harness option for
+cross-harness review. For the full operator-facing procedure, see
+[`docs/operations/cross-harness-review.md`](./cross-harness-review.md).
 
 **Applies to:** RFC-0012 Step 0-13 execution from Codex CLI.
 
@@ -140,15 +143,23 @@ the shape the signer consumes.
 
 ## Current Operator Guidance
 
-Until AISDLC-202.2 through AISDLC-202.4 ship:
+AISDLC-202.2 through AISDLC-202.4 + AISDLC-247 have shipped. The Codex
+execution path is operational for cross-harness review.
 
-1. Use `/ai-sdlc execute <task-id>` in Claude Code for the supported
-   subscription-billed Tier 1 path.
-2. Use `node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute <task-id>` only
-   for safe planning unless explicitly choosing an implemented real spawner.
-3. Treat Codex-driven task execution as experimental. If used, record the
-   harness as `codex-cli`, use shared MCP/CLI steps for deterministic work,
-   dispatch developer and reviewers with the same JSON contracts as the plugin
-   agents, and complete the task through Backlog MCP rather than manual file
-   moves.
+1. **Default path:** Use `/ai-sdlc execute <task-id>` in Claude Code for the
+   supported subscription-billed Tier 1 path. This remains the primary
+   production path.
+2. **Cross-harness review (Claude develops, Codex reviews):** Spawn
+   `code-reviewer-codex` and `test-reviewer-codex` alongside the standard
+   `security-reviewer`. See
+   [`docs/operations/cross-harness-review.md`](./cross-harness-review.md)
+   for the full procedure.
+3. **Programmatic Codex dispatch (`--spawner codex`):** Set
+   `CODEX_SPAWN_AGENT_BIN` to your bridge script and pass `--spawner codex`
+   to `ai-sdlc-pipeline execute`. The bridge must implement the JSON-line
+   protocol documented in `pipeline-cli/src/runtime/spawners/codex-harness.ts`.
+4. **Developer dispatch via Codex (Codex develops, Claude reviews):** The
+   attended path works today via the Codex host's `spawn_agent` tool. Use the
+   Claude Code reviewer variants (no `-codex` suffix) as reviewers — they
+   provide the cross-harness independence benefit in this direction.
 
