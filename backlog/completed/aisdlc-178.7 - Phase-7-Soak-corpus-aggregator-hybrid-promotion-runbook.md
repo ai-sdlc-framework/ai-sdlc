@@ -1,7 +1,7 @@
 ---
 id: AISDLC-178.7
 title: 'Phase 7: Soak + corpus aggregator + hybrid promotion runbook'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 02:04'
 labels:

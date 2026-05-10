@@ -31,6 +31,7 @@
     "cli-orchestrator": "bin/cli-orchestrator.mjs",
     "cli-orchestrator-corpus": "bin/cli-orchestrator-corpus.mjs",
     "cli-tui": "bin/cli-tui.mjs",
+    "cli-tui-corpus": "bin/cli-tui-corpus.mjs",
     "cli-task-complete": "bin/cli-task-complete.mjs",
     "cli-backlog-verify": "bin/cli-backlog-verify.mjs"
   },

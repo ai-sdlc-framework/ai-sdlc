@@ -1068,6 +1068,80 @@ Claude Sonnet reviewers and cost is lower. Security stays on Claude Opus (see
 
 ---
 
+## TUI Usage (RFC-0023 / AISDLC-178)
+
+The Operator TUI (`cli-tui`) is the recommended monitoring interface
+when `AI_SDLC_TUI=experimental` (or default-on after Phase 7 promotion).
+It provides the five RFC-0023 §7 panes in a single full-screen terminal
+UI.
+
+### Enabling the TUI
+
+```bash
+# Opt in (pre-promotion — Phase 7 runbook flips this to default-on):
+export AI_SDLC_TUI=experimental
+
+# Launch:
+node pipeline-cli/bin/cli-tui.mjs
+```
+
+### Keystroke reference
+
+| Key | Action |
+|---|---|
+| `b` | Open Blockers pane — every actionable decision-pending item |
+| `p` | Open PRs pane — every open PR with diff preview and review history |
+| `d` | Open Dependency graph pane — ASCII tree of full dep graph |
+| `c` | Open Configuration browser — `.ai-sdlc/*.yaml` syntax-highlighted, `e` launches `$EDITOR` |
+| `a` | Open Analytics pane — operator throughput + pipeline metrics drill-down |
+| `?` | Open this help screen |
+| `/` | Filter the active pane by substring match |
+| `r` | Refresh all data sources (invalidates caches and re-polls) |
+| `Esc` | Return to overview |
+| `q` | Quit (Ctrl+C also works) |
+
+### Pane summary
+
+| Pane | Key | What it shows |
+|---|---|---|
+| Overview | (default) | Five-pane split: Blockers + PRs (top), CriticalPath + Analytics (middle), Events tail (bottom) |
+| Blockers | `b` | Full-screen Blockers — every task in `Needs Clarification` across open backlog, sorted by age |
+| PRs | `p` | Full-screen PRs — open PRs with status, review decision, diff preview on select |
+| Deps | `d` | Full-screen Dependency graph — ASCII tree of the current dep graph from `cli-deps frontier` |
+| Config | `c` | Configuration browser — `.ai-sdlc/*.yaml` with syntax highlighting + validation error annotations |
+| Analytics | `a` | Full-screen Analytics — operator throughput (decisions resolved, time-to-decision, WIP-blocked) + pipeline throughput (dispatched/merged/failed in 24h) |
+| Help | `?` | Keystroke reference (same as this table) |
+
+### Telemetry opt-out
+
+The TUI writes local-only navigation events to
+`$ARTIFACTS_DIR/_operator/interactions.jsonl` by default (RFC-0023 §10
+OQ-8 disclosure). To opt out:
+
+```bash
+export AI_SDLC_TUI_TELEMETRY=off
+```
+
+The events file is local-only (never shipped offsite) and can be deleted
+at any time without operational impact.
+
+### Soak corpus + promotion
+
+During the Phase 7 soak window, the TUI writes session-level events to
+`$ARTIFACTS_DIR/_tui/events.jsonl`. The corpus aggregator reads this
+file to produce the promotion recommendation:
+
+```bash
+node pipeline-cli/bin/cli-tui-corpus.mjs aggregate \
+  $ARTIFACTS_DIR/_tui/events.jsonl --format table
+```
+
+See [`docs/operations/operator-tui-promotion.md`](operator-tui-promotion.md)
+for the full promotion runbook (corpus path + operator-override path +
+flag-flip procedure).
+
+---
+
 ## Related Documents
 
 - [RFC-0010 — Parallel Execution and Worktree Pooling](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) — full normative spec for everything this runbook references
