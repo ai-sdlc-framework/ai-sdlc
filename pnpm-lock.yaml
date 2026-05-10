@@ -267,6 +267,9 @@ importers:
       ink-testing-library:
         specifier: ^4.0.0
         version: 4.0.0(@types/react@18.3.28)
+      string-width:
+        specifier: ^7.2.0
+        version: 7.2.0
       typescript:
         specifier: ^5.7.0
         version: 5.9.3
