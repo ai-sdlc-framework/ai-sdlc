@@ -1,7 +1,7 @@
 ---
 id: AISDLC-251
 title: Provide canonical CODEX_SPAWN_AGENT_BIN bridge script for --spawner codex path
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09'
 labels:
