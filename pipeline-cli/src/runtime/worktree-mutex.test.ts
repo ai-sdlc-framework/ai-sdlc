@@ -371,38 +371,119 @@ describe('setupWorktreeSignalHandler', () => {
 
 // ── AC #7 — integration test with real git repo ───────────────────────────
 
-// Skipped until AISDLC-246 hardens the test fixture: the real-git
-// integration test is environment-sensitive (inherits parent shell's git
-// config / hooks), causing flaky failures under V8 coverage instrumentation.
-// AC #6 (hermetic 5-concurrent serialization) above already proves the
-// in-process mutex correctness; this AC #7 was supposed to verify the
-// behavior against real `git worktree add` to catch end-to-end regressions.
-describe.skip('withWorktreeMutex — real git worktree add (AC #7)', () => {
+/**
+ * Hermetic env for AC #7 real-git execSync calls.
+ *
+ * Env-hygiene pattern (AISDLC-246): all execSync calls that shell out to git
+ * inside a tmpdir fixture MUST use an explicit, sanitised env rather than
+ * inheriting `process.env`. The parent shell can export vars that silently
+ * redirect or corrupt git operations in the child process:
+ *
+ *   GIT_DIR / GIT_WORK_TREE   — redirect git's repo/worktree pointers away
+ *                                from the tmpdir, causing operations to land
+ *                                in the calling project's .git instead.
+ *   GIT_INDEX_FILE             — similarly hijacks the index.
+ *   GIT_CONFIG_GLOBAL /
+ *   GIT_CONFIG_SYSTEM          — can inject gpgsign=true or custom hooks
+ *                                that break `git commit` in the fixture.
+ *   CLAUDE_PROJECT_DIR /
+ *   GIT_ASKPASS / GIT_EDITOR   — set by the IDE / Claude Code; harmless for
+ *                                normal git ops but can cause unexpected
+ *                                subprocess spawning or auth-prompt hangs.
+ *   HUSKY                      — controls husky hook execution; without this
+ *                                git commit will run the calling project's
+ *                                .husky/pre-commit lint-staged + typecheck,
+ *                                which fails inside an isolated tmpdir.
+ *
+ * The safe subset passed below is:
+ *   PATH   — required to find git, bash, etc.
+ *   HOME   — required for git fallback identity lookup (mitigated by
+ *             GIT_AUTHOR_{NAME,EMAIL} overrides below, but some git versions
+ *             still read HOME for SSH config even when identity is overridden).
+ *   TMPDIR / TEMP / TMP — OS temp directory (macOS/Linux/Windows).
+ *   LANG / LC_ALL       — prevent git from emitting locale-specific
+ *                         error strings that break stderr parsing.
+ *
+ * Identity is provided via GIT_AUTHOR_{NAME,EMAIL} / GIT_COMMITTER_{NAME,EMAIL}
+ * env vars so that we never have to run `git config user.email` — which would
+ * write into the fixture's .git/config and could be redirected by GIT_DIR bleed.
+ *
+ * System and global git config is disabled via GIT_CONFIG_NOSYSTEM=1 and
+ * GIT_CONFIG_GLOBAL=/dev/null so that operator-level gpgsign or hook
+ * settings cannot bleed into the fixture.
+ *
+ * Husky is explicitly disabled via HUSKY=0 so that git commit in the
+ * fixture does not attempt to run the calling project's pre-commit hooks.
+ *
+ * core.hooksPath is additionally set to /dev/null via `-c` in the commit
+ * invocation as a belt-and-suspenders guard against any hookPath config
+ * that survived the env sanitisation above.
+ */
+function makeGitEnv(): NodeJS.ProcessEnv {
+  return {
+    // Minimal OS plumbing.
+    PATH: process.env['PATH'] ?? '/usr/bin:/bin',
+    HOME: process.env['HOME'] ?? '/tmp',
+    ...(process.env['TMPDIR'] ? { TMPDIR: process.env['TMPDIR'] } : {}),
+    ...(process.env['TEMP'] ? { TEMP: process.env['TEMP'] } : {}),
+    ...(process.env['TMP'] ? { TMP: process.env['TMP'] } : {}),
+    // Locale — prevent non-ASCII error strings in git output.
+    LANG: process.env['LANG'] ?? 'en_US.UTF-8',
+    LC_ALL: 'C',
+    // Git identity — supplied via env so git config writes are unnecessary.
+    GIT_AUTHOR_NAME: 'Test',
+    GIT_AUTHOR_EMAIL: 'test@test.invalid',
+    GIT_COMMITTER_NAME: 'Test',
+    GIT_COMMITTER_EMAIL: 'test@test.invalid',
+    // Disable system + global git config to prevent gpgsign/hook bleed.
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: '/dev/null',
+    // Disable husky so the calling project's pre-commit hooks don't fire.
+    HUSKY: '0',
+    // Suppress credential helpers / interactive prompts.
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_SSH_COMMAND: 'ssh -o BatchMode=yes',
+  };
+}
+
+describe('withWorktreeMutex — real git worktree add (AC #7)', () => {
   let repoDir: string;
   let worktreeDirs: string[];
+  let gitEnv: NodeJS.ProcessEnv;
 
   beforeEach(() => {
     repoDir = mkdtempSync(join(tmpdir(), 'worktree-mutex-integration-'));
     worktreeDirs = [];
+    gitEnv = makeGitEnv();
 
-    // Initialise a real bare-ish git repo with a commit on main.
-    execSync('git init -b main', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git config user.email "test@test.com"', { cwd: repoDir, stdio: 'pipe' });
-    execSync('git config user.name "Test"', { cwd: repoDir, stdio: 'pipe' });
-    execSync(
-      'echo "init" > README.md && git add . && git -c commit.gpgsign=false commit --no-verify -m "init"',
-      {
-        cwd: repoDir,
-        shell: '/bin/bash',
-        stdio: 'pipe',
-      },
-    );
+    // Initialise a real git repo with a commit on main.
+    //
+    // Env-hygiene: all execSync calls use an explicit hermetic env (gitEnv)
+    // to prevent parent-shell GIT_DIR / GIT_WORK_TREE / CLAUDE_PROJECT_DIR /
+    // HUSKY bleed. Identity is passed via GIT_AUTHOR_* env vars so we never
+    // need `git config user.email`, which would write into .git/config and
+    // could be redirected if GIT_DIR is set in the parent env.
+    //
+    // Additionally, `-c core.hooksPath=/dev/null` prevents any hookPath that
+    // survived env sanitisation from running on `git commit`.
+    execSync('git init -b main', { cwd: repoDir, env: gitEnv, stdio: 'pipe' });
+    execSync('touch README.md && git add .', {
+      cwd: repoDir,
+      env: gitEnv,
+      shell: '/bin/bash',
+      stdio: 'pipe',
+    });
+    execSync('git -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -m "init"', {
+      cwd: repoDir,
+      env: gitEnv,
+      stdio: 'pipe',
+    });
   });
 
   afterEach(() => {
     // Prune all registered worktrees before removing directories.
     try {
-      execSync('git worktree prune', { cwd: repoDir, stdio: 'pipe' });
+      execSync('git worktree prune', { cwd: repoDir, env: gitEnv, stdio: 'pipe' });
     } catch {
       // best-effort
     }
@@ -430,9 +511,10 @@ describe.skip('withWorktreeMutex — real git worktree add (AC #7)', () => {
       worktreeDirs.push(wtPath);
       return withWorktreeMutex(
         async () => {
-          // Run the real git worktree add.
+          // Run the real git worktree add with the hermetic env.
           execSync(`git worktree add "${wtPath}" -b "${branch}" HEAD`, {
             cwd: repoDir,
+            env: gitEnv,
             stdio: 'pipe',
           });
         },
