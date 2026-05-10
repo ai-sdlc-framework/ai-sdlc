@@ -87,6 +87,34 @@ function runCodexExec(promptText, cwd, timeoutMs, extraArgs = []) {
 
     // Verified flag set from AISDLC-249/247 smoke testing (codex-cli 0.128.0,
     // ChatGPT-account auth). DO NOT add --quiet or --model o4-mini here.
+    //
+    // SECURITY (AISDLC-251 codex code-reviewer finding): filter extraArgs to
+    // reject any flag that would override the read-only sandbox guarantee.
+    // The bridge MUST run codex in read-only mode regardless of caller input.
+    const SANDBOX_OVERRIDE_FLAGS = new Set([
+      '-s',
+      '--sandbox',
+      '--sandbox-mode',
+      '--dangerously-bypass-approvals-and-sandbox',
+    ]);
+    const safeExtraArgs = [];
+    for (let i = 0; i < extraArgs.length; i++) {
+      const arg = extraArgs[i];
+      const flagPart = typeof arg === 'string' ? arg.split('=')[0] : '';
+      if (SANDBOX_OVERRIDE_FLAGS.has(flagPart)) {
+        // Skip the flag AND its value (if separated by space). Bare-flag forms
+        // like --dangerously-bypass-approvals-and-sandbox have no value.
+        if (
+          (flagPart === '-s' || flagPart === '--sandbox' || flagPart === '--sandbox-mode') &&
+          arg === flagPart
+        ) {
+          i += 1; // skip the next argv (the sandbox value)
+        }
+        continue;
+      }
+      safeExtraArgs.push(arg);
+    }
+
     const baseArgs = [
       'exec',
       '-s',
@@ -94,7 +122,7 @@ function runCodexExec(promptText, cwd, timeoutMs, extraArgs = []) {
       '--skip-git-repo-check',
       '--color',
       'never',
-      ...extraArgs,
+      ...safeExtraArgs,
       '--file',
       promptFile,
     ];
