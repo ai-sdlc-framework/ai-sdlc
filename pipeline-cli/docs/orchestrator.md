@@ -70,6 +70,13 @@ node pipeline-cli/bin/cli-orchestrator.mjs start \
 
 Each tick:
 
+0. **Self-cleans merged worktrees** (AISDLC-256) — before the frontier
+   scan, calls `sweepMergedWorktrees()` to remove any `.worktrees/<id>/`
+   directory whose corresponding GitHub PR has merged. This runs first so
+   blast-radius + in-flight trackers see a clean slate. A sweep failure
+   (e.g. `gh` network timeout) is swallowed — the tick continues. Each
+   removed worktree emits an `OrchestratorWorktreeSwept` event to
+   `events.jsonl`.
 1. Reads the frontier in-process via the same query `cli-deps frontier` runs.
    When `AI_SDLC_DEPS_COMPOSITION` is on, the result is already sorted by
    `effectivePriority DESC → criticalPathLength DESC → recency DESC`

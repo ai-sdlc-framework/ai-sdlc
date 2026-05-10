@@ -288,6 +288,18 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       until: '2026-05-13',
     });
   });
+
+  it('accepts OrchestratorWorktreeSwept (AISDLC-256)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'OrchestratorWorktreeSwept',
+      runId,
+      tick: 1,
+      worktreePath: '/home/op/.worktrees/aisdlc-256',
+      branch: 'ai-sdlc/aisdlc-256',
+      mergedAt: '2026-05-09T12:00:00Z',
+    });
+  });
 });
 
 describe('orchestrator-events.v1.schema.json — rejects malformed events', () => {

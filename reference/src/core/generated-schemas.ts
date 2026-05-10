@@ -2620,6 +2620,17 @@ export const orchestratorEventsV1Schema = {
       description:
         'Safety-predicate outcome: whether the existing worktree directory had uncommitted changes at the time of the auto-cleanup decision. Always `false` when cleanup proceeded (uncommitted changes would have blocked cleanup). Present on `WorktreeAutoCleaned` (AISDLC-224).',
     },
+    worktreePath: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Absolute path of the worktree directory that was removed. Present on `OrchestratorWorktreeSwept` (AISDLC-256).',
+    },
+    mergedAt: {
+      type: 'string',
+      description:
+        "ISO-8601 timestamp (or 'unknown') when the PR was merged. Present on `OrchestratorWorktreeSwept` (AISDLC-256).",
+    },
   },
   additionalProperties: false,
   $defs: {
@@ -2647,6 +2658,7 @@ export const orchestratorEventsV1Schema = {
         'OrchestratorWorkQuarantined',
         'TaskBlocked',
         'WorktreeAutoCleaned',
+        'OrchestratorWorktreeSwept',
       ],
     },
   },

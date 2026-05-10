@@ -140,7 +140,14 @@ export type OrchestratorEventType =
    * `worktreePath`, `checkpointCommits` (count of wip(checkpoint): commits
    * preserved), `resumedAt`.
    */
-  | 'OrchestratorTaskResumed';
+  | 'OrchestratorTaskResumed'
+  /**
+   * AISDLC-256 — emitted per merged worktree that the autonomous loop
+   * sweeps at the start of each tick. Per-event fields: `worktreePath`,
+   * `branch`, `mergedAt`. Lets operators grep events.jsonl to audit the
+   * automatic cleanup history without reading the filesystem.
+   */
+  | 'OrchestratorWorktreeSwept';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

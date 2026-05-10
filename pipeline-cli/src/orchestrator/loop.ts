@@ -68,6 +68,7 @@ import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { defaultSpawner } from '../runtime/default-spawner.js';
 import { runExecuteCommand, type ExecuteCommandResult, type SpawnerKind } from '../cli/execute.js';
 import { findTaskFile, parseSimpleYaml } from '../steps/01-validate.js';
+import { sweepMergedWorktrees } from '../steps/00-sweep.js';
 import {
   DEFAULT_LOGGER,
   type PipelineLogger,
@@ -416,16 +417,42 @@ export async function runOrchestratorTick(
   tickNumber: number,
 ): Promise<OrchestratorTickResult> {
   const logger = adapters.logger ?? DEFAULT_LOGGER;
+  // RFC-0015 Phase 4 — events sink. The default writer is feature-flag
+  // gated + best-effort (swallows write errors); the helper wraps it in
+  // a try/catch so a thrown injected sink never crashes the tick.
+  // Built early so the sweep block below can emit events with runId + tick.
+  const emit = buildEmitter(config, adapters, tickNumber);
+
+  // AISDLC-256 — self-clean merged worktrees before frontier scan so stale
+  // worktrees don't accumulate across autonomous-loop ticks. Try/catch ensures
+  // sweep failure NEVER aborts the tick — the orchestrator continues even if
+  // the gh network is unreachable.
+  try {
+    const swept = await sweepMergedWorktrees({
+      workDir: config.workDir,
+      runner: adapters.runner,
+    });
+    for (const entry of swept.swept) {
+      logger.info(
+        `[orchestrator] swept merged worktree: ${entry.worktreePath} (branch=${entry.branch}, mergedAt=${entry.mergedAt})`,
+      );
+      emit({
+        type: 'OrchestratorWorktreeSwept',
+        worktreePath: entry.worktreePath,
+        branch: entry.branch,
+        mergedAt: entry.mergedAt,
+      });
+    }
+  } catch (err) {
+    logger.warn(`[orchestrator] sweep failed: ${err}; continuing tick`);
+  }
+
   const frontierFn = adapters.frontier ?? buildDefaultFrontier(config);
   const escalateFn = adapters.escalate ?? buildDefaultEscalate(config, adapters);
   // RFC-0015 Phase 2 — load the catalogue once per tick. The loader is a
   // small file read + in-process validation; doing it per tick keeps
   // operator edits to the YAML hot-reloadable without a daemon restart.
   const catalogue = adapters.catalogue ?? loadFailurePatternCatalogue({ workDir: config.workDir });
-  // RFC-0015 Phase 4 — events sink. The default writer is feature-flag
-  // gated + best-effort (swallows write errors); the helper wraps it in
-  // a try/catch so a thrown injected sink never crashes the tick.
-  const emit = buildEmitter(config, adapters, tickNumber);
   // AISDLC-176 — the default dispatcher needs the per-tick emit so it
   // can forward `DeveloperContractRetry` payloads from
   // `executePipeline()` to the events.jsonl bus. Tests injecting their
