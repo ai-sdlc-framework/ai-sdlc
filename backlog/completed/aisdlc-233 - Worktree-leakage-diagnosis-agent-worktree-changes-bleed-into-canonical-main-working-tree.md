@@ -3,7 +3,7 @@ id: AISDLC-233
 title: >-
   Worktree leakage diagnosis — agent worktree changes bleed into canonical
   main working tree
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-07 21:35'
 labels:
@@ -22,7 +22,34 @@ dispatchableReason: >-
 references:
   - CLAUDE.md
   - pnpm-workspace.yaml
----
+  - pipeline-cli/src/__test-helpers/git-env.ts
+finalSummary: |
+  ## Summary
+  Root-caused as a duplicate of AISDLC-253 incident class: `git config` /
+  `git add` / `git commit` calls in test fixtures inherited polluted
+  `GIT_DIR` / `GIT_WORK_TREE` env vars from the parent shell (typically a
+  husky pre-push hook or operator git workflow). When the worktree's git
+  ops fired with a polluted GIT_DIR, writes landed in the host worktree's
+  `.git/` directory rather than the intended target — surfacing as
+  "modified files in the canonical main working tree" exactly as Alex
+  reported on the forge repo 2026-05-07.
+
+  ## Resolution
+  Fix landed in AISDLC-253 (PR #429): hermetic `makeGitEnv()` helper at
+  `pipeline-cli/src/__test-helpers/git-env.ts` that REPLACES the inherited
+  env (omits GIT_DIR/GIT_WORK_TREE), applied to checkpoint.test.ts and
+  loop.resume.test.ts. End-to-end leak-reproduction test pollutes
+  process.env.GIT_DIR and asserts no leak.
+
+  ## Why this closes 233 specifically
+  AISDLC-233 was filed as the diagnosis-only investigation task. With 253
+  fixed, the diagnosis is complete + the fix is shipped. No additional
+  code work needed under 233 — its acceptance was always "operator
+  observes the pattern enough to root-cause it"; that's now done.
+
+  ## Follow-up
+  None — file the next incident under 253 if the leak recurs (regression
+  test would fail at CI-time before the operator hits it).
 
 ## Description
 
