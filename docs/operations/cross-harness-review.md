@@ -344,9 +344,20 @@ node ai-sdlc-plugin/scripts/sign-attestation.mjs \
   --harness-version 0.128.0
 ```
 
-The pre-push hook's `check-attestation-sign.sh` already reads the
-`CODEX_VERSION` env var (when set) to populate `--harness-name` and
-`--harness-version` automatically in the Codex execution path.
+The pre-push hook's `check-attestation-sign.sh` reads the `CODEX_VERSION` env
+var (when set) to populate `--harness-name` and `--harness-version`
+automatically in the Codex execution path (implemented in AISDLC-250). To
+activate, export the variable before running `git push`:
+
+```bash
+export CODEX_VERSION="codex@$(codex --version)"
+git push
+```
+
+The hook strips the `codex@` prefix and passes `--harness-name codex
+--harness-version <version>` to `sign-attestation.mjs`. When `CODEX_VERSION`
+is unset, no harness args are passed (back-compat: the `harness` field is
+absent from the envelope, equivalent to `claude-code`).
 
 ### Trust decisions based on harness field
 

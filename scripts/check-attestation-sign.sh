@@ -221,6 +221,21 @@ fi
 ITERATION_COUNT="${AI_SDLC_ITERATION_COUNT:-1}"
 HARNESS_NOTE="${AI_SDLC_HARNESS_NOTE:-}"
 
+# ── AISDLC-250: Codex harness identification ──────────────────────────
+# When `CODEX_VERSION` is set (operator pre-exports
+# `export CODEX_VERSION="codex@$(codex --version)"`), pass
+# `--harness-name codex --harness-version <version>` to the signer so
+# the attestation envelope carries the harness field automatically.
+# Format: "codex@X.Y.Z" → harness-name=codex, harness-version=X.Y.Z.
+# When unset, no extra args are passed (back-compat: harness field absent).
+HARNESS_ARGS=""
+if [ -n "${CODEX_VERSION:-}" ]; then
+  # Strip the "codex@" prefix to extract the version number.
+  CODEX_VERSION_NUM="${CODEX_VERSION#codex@}"
+  HARNESS_ARGS="--harness-name codex --harness-version $CODEX_VERSION_NUM"
+  echo "[attestation-sign] Codex harness detected: name=codex version=$CODEX_VERSION_NUM" >&2
+fi
+
 echo "[attestation-sign] Auto-signing attestation for $TASK_ID against HEAD $HEAD_SHA" >&2
 
 if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
@@ -230,15 +245,18 @@ if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
   if ! $AI_SDLC_SIGN_ATTESTATION_CMD \
       --review-verdicts "$VERDICT_FILE" \
       --iteration-count "$ITERATION_COUNT" \
-      --harness-note "$HARNESS_NOTE"; then
+      --harness-note "$HARNESS_NOTE" \
+      $HARNESS_ARGS; then
     echo "[attestation-sign] ERROR: signer invocation (override) failed; aborting push" >&2
     exit 2
   fi
 else
+  # shellcheck disable=SC2086
   if ! node "$WT_ROOT/ai-sdlc-plugin/scripts/sign-attestation.mjs" \
       --review-verdicts "$VERDICT_FILE" \
       --iteration-count "$ITERATION_COUNT" \
-      --harness-note "$HARNESS_NOTE"; then
+      --harness-note "$HARNESS_NOTE" \
+      $HARNESS_ARGS; then
     echo "[attestation-sign] ERROR: sign-attestation.mjs failed; aborting push" >&2
     echo "[attestation-sign]        (run \`pnpm --filter @ai-sdlc/orchestrator build\` if dist is missing)" >&2
     exit 2

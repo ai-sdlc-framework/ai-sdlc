@@ -36,6 +36,9 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
   delete env.AI_SDLC_ITERATION_COUNT;
   delete env.AI_SDLC_HARNESS_NOTE;
+  // AISDLC-250: don't inherit CODEX_VERSION from the host env so tests that
+  // assert the "absent" path are hermetic even when the operator has exported it.
+  delete env.CODEX_VERSION;
   for (const [k, v] of Object.entries(extra)) env[k] = v;
   return env;
 }
@@ -498,6 +501,53 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       existsSync(logPath),
       false,
       'signer must NOT run when changeset is not docs-only and verdicts are missing',
+    );
+  });
+
+  // ── AISDLC-250: CODEX_VERSION env var harness passthrough ────────────────
+
+  it('AISDLC-250: passes --harness-name codex --harness-version when CODEX_VERSION is set', () => {
+    // When the operator pre-exports CODEX_VERSION="codex@0.128.0", the hook
+    // must parse the version and forward --harness-name codex --harness-version 0.128.0
+    // to the signer so the attestation envelope carries harness identification.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-250\n');
+    writeVerdictFile(root, 'AISDLC-250');
+    const { cmd, logPath } = installFakeSigner(root);
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      CODEX_VERSION: 'codex@0.128.0',
+    });
+    assert.equal(r.status, 1, `expected 1 (signed), got ${r.status}: ${r.stderr}`);
+    const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
+    assert.match(
+      log,
+      /--harness-name codex/,
+      `signer must be invoked with --harness-name codex: ${log}`,
+    );
+    assert.match(
+      log,
+      /--harness-version 0\.128\.0/,
+      `signer must be invoked with --harness-version 0.128.0: ${log}`,
+    );
+  });
+
+  it('AISDLC-250: does NOT pass --harness-name when CODEX_VERSION is absent', () => {
+    // When CODEX_VERSION is not set (claude-code path), the hook must NOT pass
+    // --harness-name or --harness-version — the back-compat path leaves harness
+    // absent from the envelope (defaults to claude-code per AISDLC-202.3).
+    writeFileSync(join(root, '.active-task'), 'AISDLC-250\n');
+    writeVerdictFile(root, 'AISDLC-250');
+    const { cmd, logPath } = installFakeSigner(root);
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      // CODEX_VERSION intentionally absent (cleanEnv already deletes it if present)
+    });
+    assert.equal(r.status, 1, `expected 1 (signed), got ${r.status}: ${r.stderr}`);
+    const log = execFileSync('cat', [logPath], { encoding: 'utf-8' });
+    assert.equal(
+      log.includes('--harness-name'),
+      false,
+      `signer must NOT receive --harness-name when CODEX_VERSION is unset: ${log}`,
     );
   });
 
