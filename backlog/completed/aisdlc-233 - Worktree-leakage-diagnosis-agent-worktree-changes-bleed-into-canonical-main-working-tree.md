@@ -50,6 +50,7 @@ finalSummary: |
   ## Follow-up
   None — file the next incident under 253 if the leak recurs (regression
   test would fail at CI-time before the operator hits it).
+---
 
 ## Description
 
