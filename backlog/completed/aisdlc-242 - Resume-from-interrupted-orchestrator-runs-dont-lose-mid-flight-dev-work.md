@@ -2,7 +2,7 @@
 id: AISDLC-242
 title: >-
   Resume from interrupted orchestrator runs — don't lose mid-flight dev work
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 00:50'
 labels:

@@ -69,8 +69,8 @@ Fan out with `/loop /ai-sdlc execute <task-id>` — each invocation gets its own
 |---------|-------|-------------------|-------------------|
 | `code-reviewer` (Claude) | Sonnet 4 (inherit) | 30-90 s | ~$0.01-0.05 |
 | `test-reviewer` (Claude) | Sonnet 4 (inherit) | 30-90 s | ~$0.01-0.05 |
-| `code-reviewer-codex` | o4-mini | 10-40 s | ~$0.005-0.02 |
-| `test-reviewer-codex` | o4-mini | 10-40 s | ~$0.005-0.02 |
+| `code-reviewer-codex` | server default (ChatGPT-account); o4-mini if API-key with access | 10-40 s | ~$0.005-0.02 |
+| `test-reviewer-codex` | server default (ChatGPT-account); o4-mini if API-key with access | 10-40 s | ~$0.005-0.02 |
 | `security-reviewer` (Claude) | Opus 4 (inherit) | 60-180 s | ~$0.05-0.20 |
 
 > **Note:** These are operator estimates based on typical PR sizes (200-800 LOC diff). Actual costs depend on diff size, context length, and API pricing at time of use. Codex `o4-mini` is generally faster and cheaper than Sonnet for review-only workloads because it does not need to read the full codebase — the diff + task spec is the full context.
@@ -139,7 +139,13 @@ The Codex reviewer agents use `-s read-only` with stdin-based prompt delivery. T
 printf '<SYSTEM_INSTRUCTION>\nReturn exactly: {"approved": true, "findings": [], "summary": "test"}\n</SYSTEM_INSTRUCTION>\n<REVIEW_INPUT>\n(empty)\n</REVIEW_INPUT>\n<REVIEW_TASK>\nReturn the JSON now.\n</REVIEW_TASK>\n' \
   > /tmp/codex-smoke.txt
 
-codex exec --model o4-mini -s read-only --quiet -o /tmp/test-out.json - < /tmp/codex-smoke.txt
+codex exec \
+  --skip-git-repo-check \
+  --color never \
+  -s read-only \
+  -o /tmp/test-out.json \
+  - < /tmp/codex-smoke.txt > /dev/null
+
 cat /tmp/test-out.json
 rm -f /tmp/codex-smoke.txt /tmp/test-out.json
 ```
@@ -147,6 +153,16 @@ rm -f /tmp/codex-smoke.txt /tmp/test-out.json
 Expected: a JSON object with `approved`, `findings`, `summary` fields.
 
 If the output is wrapped in markdown fences (`` ```json ... ``` ``), the Codex agent body's parse logic handles this automatically — it strips the fence before returning.
+
+**Flags verified against codex-cli 0.128.0 with ChatGPT-account auth (2026-05-09):**
+
+| Flag | Status | Notes |
+|------|--------|-------|
+| `--quiet` | **INVALID** | `error: unexpected argument '--quiet' found` — hard exits; must be removed |
+| `--model o4-mini` | **Rejected on ChatGPT-account auth** | HTTP 400: `'o4-mini' model is not supported`; omit the flag and let the server select the model for your auth tier |
+| `--skip-git-repo-check` | Required | Without this, codex errors on `.worktrees/<id>/` paths (Pattern C parent layout confuses git-repo detection) |
+| `--color never` | Required | Without this, ANSI color codes corrupt the output file |
+| `> /dev/null` (stdout) | Required | `codex exec` dumps the full prompt back to stdout even with `-o`; redirect to suppress log flooding |
 
 ---
 
@@ -209,21 +225,27 @@ cat > "$PROMPT_FILE" << 'EOF'
 EOF
 
 # Invoke with read-only sandbox and stdin-based prompt delivery
+# Verified working against codex-cli 0.128.0 with ChatGPT-account auth (2026-05-09)
 codex exec \
-  --model o4-mini \
+  --skip-git-repo-check \
+  --color never \
   -s read-only \
   -o "$OUTPUT_FILE" \
-  --quiet \
-  - < "$PROMPT_FILE"
+  - < "$PROMPT_FILE" > /dev/null
 
 # Parse output, then clean up
 rm -f "$PROMPT_FILE" "$OUTPUT_FILE"
 ```
 
 Key design decisions:
+- **`--skip-git-repo-check`** — required when running from `.worktrees/<id>/`; codex 0.128.0 misidentifies the Pattern C parent directory layout as a non-git dir and exits non-zero without this flag.
+- **`--color never`** — prevents ANSI color escape codes from corrupting the output file captured via `-o`.
+- **No `--model` flag** — `--model o4-mini` is rejected (HTTP 400) on ChatGPT-account auth (the default for personal Codex installs); the server selects the model for your auth tier automatically. API-key accounts can optionally pass `--model o4-mini` if the model is available on their plan.
+- **No `--quiet` flag** — `--quiet` does not exist in codex-cli 0.128.0 and causes a hard exit (`error: unexpected argument '--quiet' found`).
 - **`-s read-only`** instead of `--dangerously-bypass-approvals-and-sandbox` — see Security Architecture above.
 - **`- < "$PROMPT_FILE"`** instead of `"$(cat "$PROMPT_FILE")"` — avoids ARG_MAX limits on large diffs and prevents shell meta-character injection from diff content.
 - **`-o "$OUTPUT_FILE"`** instead of parsing JSONL — `codex exec --json` emits a stream of JSONL events; parsing the last `assistant` message from a JSONL stream is fragile. The `-o` flag captures only the final assistant turn as a plain file.
+- **`> /dev/null`** (stdout) — `codex exec` echoes the full prompt back to stdout even when `-o` is set; redirecting to `/dev/null` prevents log flooding. The output file is the source of truth.
 - **Cleanup on all paths** — temp files are removed even when the agent returns an error envelope, preventing `/tmp` accumulation across repeated review runs.
 
 ---

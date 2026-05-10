@@ -95,7 +95,7 @@ import {
   CodexHarnessAdapter,
   subprocessCodexSpawnAgent,
 } from '../runtime/spawners/codex-harness.js';
-import { ROLLBACK_OUTCOMES } from '../orchestrator/loop.js';
+import { ROLLBACK_OUTCOMES, RECOVERABLE_ABORT_OUTCOMES } from '../orchestrator/loop.js';
 import { rollbackDispatch, type RollbackResult } from '../orchestrator/rollback.js';
 import {
   DEFAULT_LOGGER,
@@ -502,20 +502,32 @@ export async function runExecuteCommand(
   // On any outcome that left Step 3 (worktree creation) + Step 4 (status
   // flip + sentinel) side-effects on disk WITHOUT successfully opening a
   // PR, those side-effects must be reversed so the operator (or a
-  // re-dispatch) finds a clean slate. The full set is sourced from
-  // `ROLLBACK_OUTCOMES` in `orchestrator/loop.ts` (AISDLC-191) so the
-  // umbrella CLI and the autonomous orchestrator stay in lockstep:
+  // re-dispatch) finds a clean slate.
+  //
+  // The umbrella rolls back on ROLLBACK_OUTCOMES PLUS `aborted`:
   //   - `developer-failed` — dev subagent returned commitSha:null (AISDLC-177)
   //   - `developer-json-contract-violated` — dev returned prose twice (AISDLC-176)
-  //   - `aborted` — Step 11 push or `gh pr create` failed mid-flight
+  //   - `aborted` — Step 11 push or `gh pr create` failed mid-flight; the
+  //     worktree exists + status is "In Progress" but no PR was opened.
   //   - `unknown-failure` — synthetic; orchestrator-only (executePipeline
   //     never returns this directly, but the membership check is harmless)
+  //
+  // NOTE (AISDLC-242): The autonomous orchestrator loop handles `aborted`
+  // DIFFERENTLY — it classifies it as a recoverable abort (worktree preserved
+  // for resume on the next tick). The umbrella CLI context is different: here
+  // `aborted` is returned by `executePipeline()` only when Step 11 failed
+  // (push rejected or `gh pr create` transient error). In that case the dev's
+  // commit IS intact on the branch, but the operator ran the umbrella
+  // manually and expects a clean slate so they can re-run. Rollback IS correct
+  // for the umbrella path; preserve IS correct for the orchestrator loop path.
+  //
   // The orchestrator's loop.ts wires rollback for the autonomous path;
   // the umbrella subcommand wires the same helper for the manual path.
   // (This is the umbrella's CONSISTENCY OVER PARITY value-add over the
   // raw slash command body, which does NOT yet wire rollback.)
+  const umbrellaRollbackOutcomes = new Set([...ROLLBACK_OUTCOMES, ...RECOVERABLE_ABORT_OUTCOMES]);
   let rollbackResult: RollbackResult | undefined;
-  if (ROLLBACK_OUTCOMES.has(result.outcome)) {
+  if (umbrellaRollbackOutcomes.has(result.outcome)) {
     logger.progress('execute', `rollback start outcome=${result.outcome} branch=${result.branch}`);
     try {
       rollbackResult = await rollback({

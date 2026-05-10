@@ -227,7 +227,10 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
     rmSync(workDir, { recursive: true, force: true });
   });
 
-  it('aborted (catch-all): also triggers rollback', async () => {
+  // AISDLC-242 — `aborted` is now classified as RECOVERABLE. The worktree
+  // is preserved and `OrchestratorTaskAbortedRecoverable` is emitted instead
+  // of `OrchestratorRollback`. This test verifies the NEW expected behaviour.
+  it('aborted (recoverable): does NOT trigger rollback, emits OrchestratorTaskAbortedRecoverable', async () => {
     const workDir = makeWorkDirWithTask('AISDLC-72', 'To Do');
     const { runner } = makeRunner();
     const { events, sink } = captureSink();
@@ -245,7 +248,12 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
     };
 
     await runOrchestratorTick(config, adapters, 1);
-    expect(events.some((e) => e.type === 'OrchestratorRollback')).toBe(true);
+    // Must NOT roll back — worktree is preserved for resume.
+    expect(events.some((e) => e.type === 'OrchestratorRollback')).toBe(false);
+    // Must emit recoverable event.
+    expect(events.some((e) => e.type === 'OrchestratorTaskAbortedRecoverable')).toBe(true);
+    const recoverable = events.find((e) => e.type === 'OrchestratorTaskAbortedRecoverable');
+    expect(recoverable?.taskId).toBe('AISDLC-72');
     rmSync(workDir, { recursive: true, force: true });
   });
 

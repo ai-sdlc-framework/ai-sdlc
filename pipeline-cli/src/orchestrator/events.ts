@@ -107,7 +107,26 @@ export type OrchestratorEventType =
    * Per-event fields: `taskId`, `branch`, `reason`, `hadOpenPR`,
    * `hadUncommittedChanges`.
    */
-  | 'WorktreeAutoCleaned';
+  | 'WorktreeAutoCleaned'
+  /**
+   * AISDLC-242 — emitted when an `aborted` pipeline outcome is classified
+   * as RECOVERABLE (killed by signal / network blip / orchestrator watchdog)
+   * and the worktree is intentionally preserved for resume on the next tick.
+   * Per-event fields: `taskId`, `branch`, `worktreePath`, `reason`,
+   * `hasCheckpointCommits` (true when the dev emitted at least one
+   * `wip(checkpoint):` commit before the kill).
+   *
+   * Distinct from `OrchestratorRollback` (unrecoverable) — operators can
+   * grep this type to find sessions eligible for resume.
+   */
+  | 'OrchestratorTaskAbortedRecoverable'
+  /**
+   * AISDLC-242 — emitted on the tick that resumes a previously-aborted
+   * recoverable dispatch. Per-event fields: `taskId`, `branch`,
+   * `worktreePath`, `checkpointCommits` (count of wip(checkpoint): commits
+   * preserved), `resumedAt`.
+   */
+  | 'OrchestratorTaskResumed';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

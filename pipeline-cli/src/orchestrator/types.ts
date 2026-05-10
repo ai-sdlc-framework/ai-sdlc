@@ -317,6 +317,68 @@ export interface OrchestratorWorkQuarantinedEvent {
 }
 
 /**
+ * AISDLC-242 — emitted when an `aborted` pipeline outcome is classified as
+ * RECOVERABLE (e.g. killed by SIGTERM / SIGKILL / orchestrator watchdog /
+ * network blip) and the worktree is intentionally preserved for resume on the
+ * next tick. The operator can inspect the worktree to see the dev's partial
+ * work (including any `wip(checkpoint):` commits) before the next tick picks
+ * it up and resumes.
+ *
+ * Contrast with `OrchestratorRollback` (unrecoverable failures like
+ * `developer-failed` or `developer-json-contract-violated`) — those always
+ * tear down the worktree and revert task status so the next tick dispatches
+ * fresh. Recoverable aborts PRESERVE the worktree + branch.
+ */
+export interface OrchestratorTaskAbortedRecoverableEvent {
+  type: 'OrchestratorTaskAbortedRecoverable';
+  ts: string;
+  taskId: string;
+  /** Branch name preserved (e.g. `ai-sdlc/aisdlc-242-resume-...`). */
+  branch: string;
+  /** Absolute path to the preserved worktree. */
+  worktreePath: string;
+  /**
+   * Short human-readable abort reason (typically the dispatch error message
+   * trimmed to the first 120 chars so events.jsonl stays scannable).
+   */
+  reason: string;
+  /**
+   * True when the branch has at least one `wip(checkpoint):` commit beyond
+   * `origin/main`. Operators can inspect these commits to see how far the dev
+   * progressed before the kill.
+   */
+  hasCheckpointCommits: boolean;
+  /**
+   * Number of all commits beyond `origin/main` on the preserved branch
+   * (checkpoint commits + any final commit the dev managed before the kill).
+   */
+  commitCount: number;
+}
+
+/**
+ * AISDLC-242 — emitted when `cli-orchestrator tick` detects a previously-
+ * aborted recoverable worktree and resumes the dispatch from that state
+ * instead of dispatching fresh. The dev subagent receives the prompt with
+ * the worktree's current HEAD content so it can continue from where it left
+ * off.
+ */
+export interface OrchestratorTaskResumedEvent {
+  type: 'OrchestratorTaskResumed';
+  ts: string;
+  taskId: string;
+  /** Branch name being resumed. */
+  branch: string;
+  /** Absolute path to the worktree being resumed. */
+  worktreePath: string;
+  /** Count of `wip(checkpoint):` commits on the branch (may be 0). */
+  checkpointCommits: number;
+  /** Total commits beyond `origin/main` (checkpoint + partial final). */
+  commitCount: number;
+  /** ISO timestamp of the tick that is resuming the dispatch. */
+  resumedAt: string;
+}
+
+/**
  * RFC-0015 Phase 3 (Q3 + Q5) — emitted on a tick that dispatched nothing.
  * The reason distinguishes "no candidates ready" from "candidates rejected
  * by filters" so operators can grep events.jsonl for the actual cause.
