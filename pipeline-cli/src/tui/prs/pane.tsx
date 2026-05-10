@@ -98,7 +98,6 @@ export function PrDetail({ row, prs, graph, onClose }: PrDetailProps): React.Rea
       <Text bold color={colorFor(row.color)}>
         PR #{pr.number} — {pr.headRefName ?? 'unknown-branch'}
       </Text>
-      <Text color="gray">─────────────────────────────────────────────────</Text>
       <Box marginTop={1}>
         <Text bold>{pr.title}</Text>
       </Box>
@@ -227,7 +226,6 @@ export function PrsPaneContent({ rows, prs, graph, error }: PrsPaneProps): React
       <Text bold color="cyan">
         📦 PRs IN FLIGHT ({visibleRows.length}) — sort: {SORT_LABEL[sortMode]}
       </Text>
-      <Text color="gray">─────────────────────────────────────────────────────────────</Text>
       {error && (
         <Box marginTop={1}>
           <Text color="red">⚠ source-unavailable: gh pr list failed ({error})</Text>

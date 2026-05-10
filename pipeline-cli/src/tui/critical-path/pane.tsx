@@ -53,7 +53,6 @@ export function CriticalPathDetail({
       <Text bold color="yellow">
         🛤️ Critical Path — {row.record.id}
       </Text>
-      <Text color="gray">─────────────────────────────────────────────────────────</Text>
       <Box marginTop={1} flexDirection="column">
         <Text>
           effPri: {row.effPri} CPL: {row.record.criticalPathLength} blast-radius: {row.blastRadius}
@@ -147,7 +146,6 @@ export function CriticalPathPaneContent({
       <Text bold color="yellow">
         🛤️ CRITICAL PATH ({rows.length} tasks)
       </Text>
-      <Text color="gray">─────────────────────────────────────────</Text>
       {error && (
         <Box marginTop={1}>
           <Text color="red">⚠ dep snapshot unavailable ({error})</Text>

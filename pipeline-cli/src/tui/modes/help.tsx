@@ -16,7 +16,6 @@ export function HelpScreen(): React.ReactElement {
       <Text bold color="cyan">
         ? HELP — operator-tui keystrokes
       </Text>
-      <Text color="gray">─────────────────────────────────────────────────────────</Text>
       <Box marginTop={1} flexDirection="column">
         {KEYMAP.map((b) => (
           <Box key={b.key}>
@@ -27,7 +26,6 @@ export function HelpScreen(): React.ReactElement {
         ))}
       </Box>
       <Box marginTop={1} flexDirection="column">
-        <Text color="gray">─────────────────────────────────────────────────────────</Text>
         <Text color="gray" dimColor>
           [Esc] return to overview
         </Text>

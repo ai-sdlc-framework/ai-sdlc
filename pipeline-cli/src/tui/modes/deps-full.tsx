@@ -65,7 +65,6 @@ export function DepsFullScreen(props: DepsFullProps): React.ReactElement {
       <Text bold color="yellow">
         🛤️ DEPENDENCY GRAPH ({filtered.length} tasks)
       </Text>
-      <Text color="gray">─────────────────────────────────────────────────────────</Text>
       {error && (
         <Box marginTop={1}>
           <Text color="red">⚠ dep snapshot unavailable ({error})</Text>

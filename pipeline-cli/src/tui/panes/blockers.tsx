@@ -194,7 +194,6 @@ function BlockerDetail({
 
       {/* Detail text */}
       <Box marginBottom={1} flexDirection="column">
-        <Text color="gray">─────────────────────────────────────────</Text>
         {item.detail.split('\n').map((line, i) => (
           <Text key={i}>{line}</Text>
         ))}
@@ -214,7 +213,6 @@ function BlockerDetail({
 
       {/* Action shortcuts */}
       <Box marginTop={1} flexDirection="column">
-        <Text color="gray">─────────────────────────────────────────</Text>
         <Text color="gray">Actions:</Text>
         {item.prUrl && <Text color="green"> [o] open PR in browser</Text>}
         {item.taskFilePath && <Text color="green"> [o] open task file in $EDITOR</Text>}
@@ -358,7 +356,6 @@ export function BlockersPane({
       <Text bold color={items.length > 0 ? 'red' : 'green'}>
         {items.length > 0 ? '🛑' : '✓'} BLOCKERS ({items.length})
       </Text>
-      <Text color="gray">─────────────────────────</Text>
 
       {/* Error banner */}
       {error && (
