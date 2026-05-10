@@ -84,7 +84,11 @@ function makeGitRepoWithOrigin(): { repoDir: string; originDir: string } {
   execSync(`git remote add origin ${originDir}`, { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
   // Per-repo identity for emitCheckpointCommit (which doesn't pass env). Safe
   // because env: GIT_ENV blocks GIT_DIR pollution; this lands in repoDir/.git/config.
-  execSync('git config user.email "test@test.invalid"', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
+  execSync('git config user.email "test@test.invalid"', {
+    cwd: repoDir,
+    env: GIT_ENV,
+    stdio: 'pipe',
+  });
   execSync('git config user.name "Test"', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
   writeFileSync(join(repoDir, 'README.md'), '# test\n', 'utf8');
   execSync('git add README.md', { cwd: repoDir, env: GIT_ENV, stdio: 'pipe' });
@@ -571,7 +575,6 @@ describe('detectRecoverableWorktree() — recoverable detection with real git', 
       env: GIT_ENV,
       stdio: 'pipe',
     });
-
 
     for (let i = 1; i <= 3; i++) {
       writeFileSync(join(wtDir, `wip${i}.ts`), `const w${i} = ${i};\n`, 'utf8');

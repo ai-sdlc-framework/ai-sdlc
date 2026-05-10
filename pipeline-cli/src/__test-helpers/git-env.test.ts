@@ -99,7 +99,11 @@ describe('makeGitEnv() — AISDLC-253 fixture-leak prevention', () => {
     const fixtureDirs: string[] = [];
     afterEach(() => {
       for (const d of fixtureDirs) {
-        try { rmSync(d, { recursive: true, force: true }); } catch { /* ignore */ }
+        try {
+          rmSync(d, { recursive: true, force: true });
+        } catch {
+          /* ignore */
+        }
       }
       fixtureDirs.length = 0;
     });
@@ -196,10 +200,13 @@ describe('makeGitEnv() — AISDLC-253 fixture-leak prevention', () => {
       // commit into hostDir's repo, not fixtureDir.
       try {
         execSync('git add -A', { cwd: fixtureDir, stdio: 'pipe' });
-        execSync('git -c commit.gpgsign=false commit --no-verify -m "leak: this should NOT land here"', {
-          cwd: fixtureDir,
-          stdio: 'pipe',
-        });
+        execSync(
+          'git -c commit.gpgsign=false commit --no-verify -m "leak: this should NOT land here"',
+          {
+            cwd: fixtureDir,
+            stdio: 'pipe',
+          },
+        );
       } catch {
         // The commit may fail in some envs (e.g. if leak-file.txt isn't tracked
         // because GIT_WORK_TREE wasn't also set). Either way, we're checking
