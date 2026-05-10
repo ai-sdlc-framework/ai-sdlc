@@ -15,6 +15,7 @@ import { AnalyticsPane } from './panes/analytics.js';
 import { EventsPane } from './panes/events.js';
 import { Footer } from './footer.js';
 import { ModeRouter } from './modes/router.js';
+import { useTerminalDimensions } from './use-terminal-dimensions.js';
 
 /**
  * Pure keystroke dispatcher — extracted so tests can exercise the routing
@@ -71,6 +72,16 @@ function OverviewLayout(): React.ReactElement {
 
 export function App(): React.ReactElement {
   const { exit } = useApp();
+
+  // Subscribe to terminal resize events so the whole component tree
+  // re-renders when the terminal is resized (AISDLC-235). Ink recalculates
+  // yoga layout on its own, but React components need a state change to
+  // pick up the new dimensions. Consuming the hook here at the root
+  // propagates re-renders down the full tree.
+  // The `_dimensions` value is intentionally unused in the JSX — its only
+  // purpose is to trigger re-renders via state updates in the hook.
+  const _dimensions = useTerminalDimensions();
+  void _dimensions;
 
   useInput((input) => {
     handleAppKey(input, { exit });
