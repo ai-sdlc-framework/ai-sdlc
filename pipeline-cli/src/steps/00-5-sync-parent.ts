@@ -14,21 +14,34 @@
  * appear. Step 0.5 catches the residual cases (external tooling, operator-
  * pasted files, etc.).
  *
+ * ## Path-mismatch reconciliation (AISDLC-222)
+ *
+ * A stale local copy at `backlog/tasks/aisdlc-N - X.md` whose canonical
+ * version has been completed and now lives at `backlog/completed/aisdlc-N -
+ * X.md` on origin/main returns `false` from a naive exact-path `isFileOnOriginMain`
+ * check — so Step 0.5 would open a sync PR for it, duplicating the file.
+ *
+ * The fix: for every untracked backlog task file, probe the ALTERNATE directory
+ * on origin/main (tasks → completed, completed → tasks). When the basename is
+ * found under the alternate path, the local file is a stale duplicate and is
+ * skipped with a `[step-0.5]` log line. Opt-in auto-delete via
+ * `AI_SDLC_STEP_0_5_AUTO_RECONCILE=1`.
+ *
  * ## Contract
  *
  * - `ok: true` + `syncedFiles: []` → parent is clean, no action taken.
  * - `ok: true` + `syncedFiles: [...]` + `prUrl` → sync PR opened; files
  *    now on origin; Step 0 self-heal on the next run will clean them up.
  * - `ok: true` + `skippedReason` → all untracked task files were already
- *    on `origin/main`; nothing to sync.
+ *    on `origin/main` (exact or path-mismatched); nothing to sync.
  * - `ok: false` + `reason` → non-backlog untracked files detected; operator
  *    must resolve before dispatch can proceed.
  *
  * @module steps/00-5-sync-parent
  */
 
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, unlinkSync, existsSync } from 'node:fs';
+import { join, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 
@@ -63,6 +76,12 @@ export interface SyncParentResult {
    * Does not indicate an error.
    */
   skippedReason?: string;
+  /**
+   * AISDLC-222 — path-mismatched files skipped (stale local copies whose
+   * canonical version is in the alternate backlog directory on origin/main).
+   * Populated only when path-mismatch files were detected.
+   */
+  pathMismatchedFiles?: string[];
 }
 
 /**
@@ -102,6 +121,65 @@ export async function isFileOnOriginMain(
 }
 
 /**
+ * AISDLC-222 — Path-mismatch detection.
+ *
+ * Given a local `relativePath` such as `backlog/tasks/aisdlc-N - X.md`,
+ * probes the ALTERNATE backlog directory on origin/main (e.g.
+ * `backlog/completed/aisdlc-N - X.md`).
+ *
+ * Returns `{ found: true, canonicalPath }` when the basename exists under
+ * the alternate directory on origin/main — indicating the local file is a
+ * stale copy of a file that has already been moved on origin.
+ *
+ * Returns `{ found: false }` when no alternate-directory match is found.
+ */
+export async function findPathMismatchOnOrigin(
+  relativePath: string,
+  workDir: string,
+  runner: Runner,
+): Promise<{ found: true; canonicalPath: string } | { found: false }> {
+  // Extract the directory segment (tasks or completed) and filename
+  const match = relativePath.match(/^backlog\/(tasks|completed)\/(.+)$/i);
+  if (!match) return { found: false };
+
+  const [, localDir, filename] = match;
+  const altDir = localDir === 'tasks' ? 'completed' : 'tasks';
+  const altPath = `backlog/${altDir}/${filename}`;
+
+  const r = await runner('git', ['ls-tree', 'origin/main', '--name-only', altPath], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+  if (r.code !== 0) return { found: false };
+  if (r.stdout.trim().length === 0) return { found: false };
+  return { found: true, canonicalPath: altPath };
+}
+
+/**
+ * AISDLC-222 — Probes ALL backlog directories (tasks + completed) on
+ * origin/main for the given file's basename. Returns `true` if the file
+ * is present under ANY backlog directory on origin/main (exact path OR
+ * alternate path), along with the found canonical path.
+ */
+export async function isFileOnOriginMainInAnyDir(
+  relativePath: string,
+  workDir: string,
+  runner: Runner,
+): Promise<{ onOrigin: boolean; exactMatch: boolean; canonicalPath: string | null }> {
+  // 1. Exact path check
+  const exact = await isFileOnOriginMain(relativePath, workDir, runner);
+  if (exact) return { onOrigin: true, exactMatch: true, canonicalPath: relativePath };
+
+  // 2. Alternate directory check (path-mismatch)
+  const mismatch = await findPathMismatchOnOrigin(relativePath, workDir, runner);
+  if (mismatch.found) {
+    return { onOrigin: true, exactMatch: false, canonicalPath: mismatch.canonicalPath };
+  }
+
+  return { onOrigin: false, exactMatch: false, canonicalPath: null };
+}
+
+/**
  * Returns a short sha-like suffix for branch names: the first 8 chars of
  * the git hash of HEAD. Falls back to a timestamp if git call fails.
  */
@@ -121,7 +199,10 @@ async function shortSha(workDir: string, runner: Runner): Promise<string> {
  * 2. Partitions them into backlog task files vs. everything else.
  * 3. If non-backlog untracked files exist → returns `ok: false` with an
  *    operator-attention message.
- * 4. For each backlog file, checks if it's already on `origin/main`.
+ * 4. For each backlog file, checks if it's already on `origin/main` (exact
+ *    path OR alternate backlog directory — AISDLC-222 path-mismatch detection).
+ *    Path-mismatched files are skipped with a log line and optionally deleted
+ *    when `AI_SDLC_STEP_0_5_AUTO_RECONCILE=1` is set.
  * 5. Genuinely-new files → creates a temp sync worktree, copies files,
  *    commits, pushes, opens a docs-only PR, returns `ok: true` + prUrl.
  * 6. All files already on origin → returns `ok: true` + `skippedReason`.
@@ -130,6 +211,7 @@ async function shortSha(workDir: string, runner: Runner): Promise<string> {
 export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise<SyncParentResult> {
   const runner = opts.runner ?? defaultRunner;
   const workDir = opts.workDir;
+  const autoReconcile = process.env['AI_SDLC_STEP_0_5_AUTO_RECONCILE'] === '1';
 
   // 1. List untracked files
   const untracked = await listUntrackedFiles(workDir, runner);
@@ -156,25 +238,76 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
   }
 
   // 4. All untracked files are backlog task files. Check which are genuinely new.
+  // AISDLC-222: also probe the alternate backlog directory to catch path-mismatched
+  // stale local copies.
   const newFiles: string[] = [];
   const alreadyOnOrigin: string[] = [];
+  const pathMismatchedFiles: string[] = [];
 
   for (const file of backlogFiles) {
-    const onOrigin = await isFileOnOriginMain(file, workDir, runner);
-    if (onOrigin) {
+    const check = await isFileOnOriginMainInAnyDir(file, workDir, runner);
+    if (check.onOrigin && check.exactMatch) {
       alreadyOnOrigin.push(file);
+    } else if (check.onOrigin && !check.exactMatch) {
+      // Path-mismatch: local file exists at a different path than origin's canonical location.
+      // Skip syncing — would duplicate the file. Log for operator visibility.
+      const canonicalPath = check.canonicalPath!;
+      console.log(
+        `[step-0.5] ${basename(file)}: stale local copy at ${file}; canonical version on origin at ${canonicalPath} — skipping sync`,
+      );
+      pathMismatchedFiles.push(file);
+
+      // AISDLC-222 opt-in: auto-delete stale local copy when env var is set
+      if (autoReconcile) {
+        const absPath = join(workDir, file);
+        try {
+          // Prefer git rm for tracked files; fall back to unlinkSync for untracked
+          const gitRmResult = await runner('git', ['rm', '--force', '--', file], {
+            cwd: workDir,
+            allowFailure: true,
+          });
+          if (gitRmResult.code !== 0) {
+            // File is untracked — remove directly
+            if (existsSync(absPath)) {
+              unlinkSync(absPath);
+            }
+          }
+          console.log(
+            `[step-0.5] ${basename(file)}: auto-reconcile: deleted stale local copy at ${file}`,
+          );
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `[step-0.5] ${basename(file)}: auto-reconcile: failed to delete ${file}: ${msg}`,
+          );
+        }
+      }
     } else {
       newFiles.push(file);
     }
   }
 
+  const totalSkipped = alreadyOnOrigin.length + pathMismatchedFiles.length;
+
   if (newFiles.length === 0) {
+    const skipParts: string[] = [];
+    if (alreadyOnOrigin.length > 0) {
+      skipParts.push(
+        `${alreadyOnOrigin.length} file(s) already on origin/main at exact path (${alreadyOnOrigin.join(', ')})`,
+      );
+    }
+    if (pathMismatchedFiles.length > 0) {
+      skipParts.push(
+        `${pathMismatchedFiles.length} path-mismatched file(s) skipped (stale local copies — see [step-0.5] log lines above)`,
+      );
+    }
     return {
       ok: true,
       syncedFiles: [],
       skippedReason:
-        `All ${backlogFiles.length} untracked backlog task file(s) are already on origin/main ` +
-        `(${alreadyOnOrigin.join(', ')}) — skipping sync.`,
+        `All ${totalSkipped} untracked backlog task file(s) skipped — nothing to sync. ` +
+        skipParts.join('; '),
+      ...(pathMismatchedFiles.length > 0 ? { pathMismatchedFiles } : {}),
     };
   }
 
@@ -297,6 +430,7 @@ export async function syncParentUntrackedFiles(opts: SyncParentOptions): Promise
       ok: true,
       syncedFiles: newFiles,
       prUrl,
+      ...(pathMismatchedFiles.length > 0 ? { pathMismatchedFiles } : {}),
     };
   } finally {
     // Always clean up the temp sync worktree. Best-effort — don't throw on failure.

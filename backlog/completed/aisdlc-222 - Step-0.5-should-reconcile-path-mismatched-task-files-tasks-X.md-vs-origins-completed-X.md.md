@@ -3,7 +3,7 @@ id: AISDLC-222
 title: >-
   Step 0.5 should reconcile path-mismatched task files (tasks/X.md vs origin's
   completed/X.md)
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-06 19:09'
 labels:
