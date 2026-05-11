@@ -76,6 +76,9 @@
       }
     ]
   },
+  "runtimeDependencies": {
+    "@ai-sdlc/pipeline-cli": "^0.10.0"
+  },
   "mcpServers": {
     "ai-sdlc": {
       "command": "node",
