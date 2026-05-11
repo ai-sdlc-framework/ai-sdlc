@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.9.0...ai-sdlc-plugin-v0.9.1) (2026-05-11)
+
+
+### Bug Fixes
+
+* **plugin:** re-add pipeline-cli runtime dep + ship check-orchestrator-state.sh ([#453](https://github.com/ai-sdlc-framework/ai-sdlc/issues/453)) ([be4ef47](https://github.com/ai-sdlc-framework/ai-sdlc/commit/be4ef477002c069c3aa72ce29d1436be10b43183))
+
 ## [0.9.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.8.1...ai-sdlc-plugin-v0.9.0) (2026-05-11)
 
 
