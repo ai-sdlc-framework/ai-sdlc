@@ -91,7 +91,7 @@ PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-$(pwd)/ai-sdlc-plugin}/scripts"
 First, ensure the parent (orchestrator) repo is in the right state for worktree creation. The parent's working tree on `main` is **read-only** by Pattern C contract (project memory `project_orchestrator_repo_layout.md`) — all edits happen in `.worktrees/<task-id>/`. This makes it safe to auto-sync the parent to current `origin/main` at the start of every dispatch.
 
 ```bash
-./scripts/check-orchestrator-state.sh
+bash "$PLUGIN_SCRIPTS_DIR/check-orchestrator-state.sh"
 ```
 
 The script (AISDLC-137):
