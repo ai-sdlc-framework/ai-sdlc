@@ -317,7 +317,11 @@ describe('Step 2 — backlog regression (AISDLC-180)', () => {
     const repoRoot = resolve(fileURLToPath(import.meta.url), '..', '..', '..', '..');
     const tasksDir = join(repoRoot, 'backlog', 'tasks');
     const files = readdirSync(tasksDir).filter((n) => n.endsWith('.md'));
-    expect(files.length).toBeGreaterThan(0);
+    // No `> 0` assertion: when the dispatchable backlog is fully drained
+    // (all tasks moved to backlog/completed/), files.length is legitimately 0.
+    // The regression this test guards (AISDLC-180 block-scalar title leaking
+    // through slugify as `>-`) only matters when there ARE open tasks; an
+    // empty backlog is a degenerate-but-valid pass.
 
     const failures: { file: string; title: string; slug: string }[] = [];
     for (const name of files) {
