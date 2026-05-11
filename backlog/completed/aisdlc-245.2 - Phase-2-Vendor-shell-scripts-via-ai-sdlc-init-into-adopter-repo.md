@@ -1,7 +1,7 @@
 ---
 id: AISDLC-245.2
 title: 'Phase 2: Vendor shell scripts via /ai-sdlc init into adopter repo'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 12:10'
 updated_date: '2026-05-10 14:57'
@@ -54,3 +54,13 @@ them via stable relative paths.
 - [ ] #12 #6 Adopter onboarding runbook documents upgrade flow
 <!-- SECTION:ACCEPTANCE:END -->
 <!-- AC:END -->
+
+## Final Summary
+
+**Closed: superseded by operator decision (B), 2026-05-10.**
+
+Operator chose **plugin-resolved (no vendoring)**: pre-push hook scripts run from `node_modules/@ai-sdlc/plugin/scripts/` and updates ship via npm. The vendoring approach this task was scoped to is no longer the chosen path.
+
+The plugin-resolved path was implemented by AISDLC-245.4 (slash commands resolve via `$CLAUDE_PLUGIN_DIR`). Adopters get the canonical scripts via `@ai-sdlc/pipeline-cli` npm package + the plugin's bundled scripts directory — no per-repo vendoring needed.
+
+If the operator ever reverses and wants vendored scripts, this task should be reopened with a fresh design (or a new task filed).

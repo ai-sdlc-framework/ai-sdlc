@@ -3,7 +3,7 @@ id: AISDLC-245.3
 title: >-
   Phase 3: Husky bootstrap in /ai-sdlc init — install + write pre-push hook
   chain
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 12:10'
 updated_date: '2026-05-10 14:57'
@@ -59,3 +59,11 @@ exist. `/ai-sdlc init` should bootstrap this.
 - [ ] #14 #7 Adopter runbook documents bootstrap + extension
 <!-- SECTION:ACCEPTANCE:END -->
 <!-- AC:END -->
+
+## Final Summary
+
+**Closed: deferred per operator decision, 2026-05-10 ("stays opt-in").**
+
+The husky-bootstrap path was deferred indefinitely. Adopters who want pre-push gates configure husky themselves; the plugin-resolved scripts (AISDLC-245.4) make the gate scripts available, but the install-side wiring is the adopter's call.
+
+If a future cohort of adopters needs zero-config pre-push, reopen this task or file a new one.

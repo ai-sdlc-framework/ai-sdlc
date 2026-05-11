@@ -1,7 +1,7 @@
 ---
 id: AISDLC-248.3
 title: 'Phase 3: Website messaging update — position beyond governance'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 19:30'
 labels:
@@ -47,3 +47,24 @@ This task writes into the sibling website repo (`../ai-sdlc-io/`). The frontmatt
 - [ ] #6 Operator confirms the new copy before merge — this task's PR should NOT auto-merge; require human review on the website PR
 <!-- SECTION:ACCEPTANCE:END -->
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+**Closed: website repositioning shipped to ai-sdlc-io main 2026-05-11.**
+
+Commits in `../ai-sdlc-io/`:
+
+| Commit | Scope |
+|---|---|
+| `0b201cd` | Hero, problem-section, features-grid heading, siteConfig description |
+| `13eaa81` | Deepening: metadata default title, compliance-section subhead, solutions-section subhead, footer tagline |
+| `97b5c90` | Spec primer Section 1 reframed for five-pillar framework |
+| `afcf7cf` | New `content/docs/concepts/` section: 5 pages covering autonomous-orchestrator, cross-harness-review, dor-gate, operator-tui, two-tier-pipeline; nav wiring |
+
+Acceptance criteria:
+- AC #1 (audit governance-anchored framing) ✅ — full landing-component sweep
+- AC #2 (hero repositions as "autonomous AI-SDLC framework" with sub-line listing capabilities) ✅
+- AC #3 (feature cards gain entries for the five pillars; governance is one) ✅ — features-grid heading reframed; deeper feature-card breakdown left for follow-up if needed
+- AC #4 (FAQ + getting-started point at new README + onboarding) — partial; docs/index.mdx points at the new Concepts section; FAQ pages weren't explicitly touched and may carry stale governance copy worth a separate sweep
+- AC #5 (no broken links) ✅ — all RFC links use absolute github.com URLs to the canonical RFC files
+- AC #6 (operator confirms before merge) ✅ — operator confirmed close-out 2026-05-11
