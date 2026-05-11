@@ -32,8 +32,7 @@ const COMMANDS_DIR = dirname(fileURLToPath(import.meta.url));
 /** Pattern: `node pipeline-cli/bin/...` or `node ai-sdlc-plugin/scripts/...`
  * appearing as the FIRST non-whitespace token on a line (i.e. an executable
  * shell invocation, not a prose mention). */
-const BARE_PATH_RE =
-  /^\s*node\s+(?:pipeline-cli\/bin|ai-sdlc-plugin\/scripts)\//;
+const BARE_PATH_RE = /^\s*node\s+(?:pipeline-cli\/bin|ai-sdlc-plugin\/scripts)\//;
 
 describe('AISDLC-245.4 — no bare hardcoded paths in slash command bodies', () => {
   it('every commands/*.md uses $PIPELINE_CLI_BIN / $PLUGIN_SCRIPTS_DIR', () => {
@@ -55,9 +54,7 @@ describe('AISDLC-245.4 — no bare hardcoded paths in slash command bodies', () 
     }
 
     if (offenders.length > 0) {
-      const detail = offenders
-        .map((o) => `  ${o.file}:${o.line}\n    ${o.snippet}`)
-        .join('\n');
+      const detail = offenders.map((o) => `  ${o.file}:${o.line}\n    ${o.snippet}`).join('\n');
       throw new Error(
         `AISDLC-245.4: ${offenders.length} bare hardcoded path(s) found in slash command bodies. ` +
           `Use $PIPELINE_CLI_BIN / $PLUGIN_SCRIPTS_DIR resolved via $CLAUDE_PLUGIN_DIR instead. ` +
