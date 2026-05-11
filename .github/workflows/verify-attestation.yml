@@ -46,16 +46,25 @@ jobs:
   verify:
     name: Verify attestation
     runs-on: ubuntu-latest
-    # Skip release-please's own PRs (they don't carry attestations) — also
-    # skip merge_group runs whose head_ref is a release-please queue branch.
-    # AISDLC-218: also skip draft PRs (envelope only signed after `gh pr ready`).
+    # AISDLC-218: skip draft PRs (envelope only signed after `gh pr ready`).
+    # release-please PRs are NOT skipped at job level — they need a posted
+    # `ai-sdlc/attestation` status (branch-protection required check) so the
+    # release PR can merge. Posting is handled by the inline release-please
+    # short-circuit step below (symmetric with the docs-only short-circuit).
     if: >-
-      !startsWith(github.head_ref, 'release-please--') &&
-      !contains(github.event.merge_group.head_ref || '', 'release-please--') &&
-      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+      github.event_name != 'pull_request' || github.event.pull_request.draft == false
     permissions:
       contents: read
       statuses: write
+      # AISDLC-PR (release-please merge_group fix): the `Detect release-please
+      # PR` step calls `gh pr view <N> --json headRefName` to look up the
+      # source PR's branch name on merge_group events (the queue head_ref
+      # `gh-readonly-queue/main/pr-<N>-<sha>` does not contain the source
+      # branch name itself). That call needs `pull-requests: read` — without
+      # it `github.token` returns 403 and the detection silently classifies
+      # release-please PRs as non-release-please, recreating the loop the
+      # short-circuit was added to prevent.
+      pull-requests: read
     steps:
       # AISDLC-113: derive head/base SHAs from whichever event triggered us.
       # pull_request → github.event.pull_request.{head,base}.sha
@@ -124,32 +133,155 @@ jobs:
             -f description='docs-only changeset — attestation N/A (AISDLC-214)'
           echo "Posted ai-sdlc/attestation: success (docs-only short-circuit) on ${HEAD_SHA}"
 
-      # Skip the full verify pipeline when the docs-only short-circuit already
-      # posted the success status above. These steps only run for code PRs or
-      # mixed PRs.
-      - uses: pnpm/action-setup@v4
+      # release-please PRs change package.json versions + workspace
+      # CHANGELOG.md files (NOT root *.md, so docs-only doesn't catch them).
+      # The bot is a trusted internal source — version bumps don't carry
+      # reviewable code, so attestation is N/A. Post `success` to satisfy
+      # branch-protection without running the envelope verifier.
+      #
+      # Detection covers BOTH paths and is gated on TWO criteria
+      # (defense-in-depth):
+      #   1. The PR head branch starts with `release-please--` (the bot's
+      #      canonical branch naming).
+      #   2. The PR author identity matches a trusted release bot
+      #      (`github-actions[bot]` or `release-please[bot]`).
+      #
+      # Why both: a same-repo user with push access could create a branch
+      # named `release-please--bypass` and skip attestation if we relied on
+      # branch name alone. Requiring the bot identity in addition closes
+      # that hole. Fork PRs cannot exploit either check (the `gh api
+      # .../statuses` POST would fail with the read-only token forks get
+      # on `pull_request` events).
+      #
+      # Implementation:
+      #   - pull_request: github.head_ref + github.event.pull_request.user.login
+      #   - merge_group: github.event.merge_group.head_ref is
+      #     `gh-readonly-queue/<base>/pr-<N>-<sha>`. Parse PR number, look up
+      #     the source PR's head_ref + author.login via `gh pr view`, then
+      #     check both. Requires `pull-requests: read` permission (declared
+      #     above) — without it `gh pr view` returns 403 and detection fails.
+      #
+      # Failure handling: if `gh pr view` fails, exit the step with a clear
+      # `::error::` log message. Fail-loud rather than silently classifying
+      # as non-release-please (which would loop the merge queue with
+      # reason `failed_checks` indefinitely). Operator can re-trigger after
+      # diagnosing.
+      #
+      # The merge_group case is critical — without it, the queue commit's
+      # required `ai-sdlc/attestation` status defaults to FAILURE
+      # (no envelope on the rebased commit) and the queue removes the PR
+      # with reason `failed_checks` in an infinite loop.
+      - name: Detect release-please PR
+        id: release_please
         if: steps.docs_only.outputs.all_docs != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_HEAD_REF: ${{ github.head_ref }}
+          PR_USER_LOGIN: ${{ github.event.pull_request.user.login }}
+          MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+        run: |
+          set -euo pipefail
+          IS_RP='false'
+          TRUSTED_BOT_RE='^(github-actions\[bot\]|release-please\[bot\])$'
+
+          is_trusted_bot() {
+            printf '%s' "$1" | grep -qE "$TRUSTED_BOT_RE"
+          }
+
+          # pull_request: branch prefix AND trusted bot identity
+          case "${PR_HEAD_REF:-}" in
+            release-please--*)
+              if is_trusted_bot "${PR_USER_LOGIN:-}"; then
+                IS_RP='true'
+                echo "pull_request release-please match: head_ref='${PR_HEAD_REF}', user='${PR_USER_LOGIN}'"
+              else
+                echo "::warning::PR head_ref '${PR_HEAD_REF}' looks like release-please but author '${PR_USER_LOGIN:-<empty>}' is NOT a trusted release bot — falling through to full verification"
+              fi
+              ;;
+          esac
+
+          # merge_group: parse PR number from queue branch, look up source
+          # PR's head_ref + author. Allow multi-segment protected branch
+          # names (e.g. `release/1.0`) — the queue branch is
+          # `gh-readonly-queue/<base>/pr-<N>-<sha>` where <base> may itself
+          # contain slashes, but pr-<N> always precedes the trailing -<sha>.
+          if [ "$IS_RP" = 'false' ] && [ -n "${MERGE_GROUP_HEAD_REF:-}" ]; then
+            PR_NUM=$(printf '%s' "$MERGE_GROUP_HEAD_REF" | sed -nE 's|^gh-readonly-queue/.*/pr-([0-9]+)-[^/]*$|\1|p')
+            if [ -n "$PR_NUM" ]; then
+              # No `|| echo ''` — we want gh failure to fail the step loud.
+              # `set -e` is on; non-zero exit surfaces as a step failure with
+              # an `::error::` line below for operator diagnostics.
+              if SOURCE_INFO=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefName,author --jq '{head: .headRefName, login: .author.login}'); then
+                SOURCE_HEAD_REF=$(printf '%s' "$SOURCE_INFO" | jq -r '.head // ""')
+                SOURCE_LOGIN=$(printf '%s' "$SOURCE_INFO" | jq -r '.login // ""')
+                # GitHub returns author.login WITHOUT the [bot] suffix that
+                # the pull_request payload carries (e.g. "github-actions"
+                # vs "github-actions[bot]"). Match both forms via a second
+                # regex that allows either suffix shape.
+                MERGE_GROUP_BOT_RE='^(github-actions(\[bot\])?|release-please(\[bot\])?)$'
+                if printf '%s' "$SOURCE_LOGIN" | grep -qE "$MERGE_GROUP_BOT_RE"; then
+                  case "$SOURCE_HEAD_REF" in
+                    release-please--*)
+                      IS_RP='true'
+                      echo "merge_group release-please match: PR=#${PR_NUM}, headRefName='${SOURCE_HEAD_REF}', author='${SOURCE_LOGIN}'"
+                      ;;
+                    *)
+                      echo "merge_group: PR=#${PR_NUM} author '${SOURCE_LOGIN}' is a trusted bot but headRefName '${SOURCE_HEAD_REF}' is NOT release-please — falling through to full verification"
+                      ;;
+                  esac
+                else
+                  echo "merge_group: PR=#${PR_NUM} author '${SOURCE_LOGIN}' is NOT a trusted release bot — falling through to full verification"
+                fi
+              else
+                echo "::error::Failed to resolve source PR #${PR_NUM} for merge_group head_ref '${MERGE_GROUP_HEAD_REF}'. Verify the workflow's permissions block grants 'pull-requests: read'. Manual unblock: post 'ai-sdlc/attestation: success' on the queue commit and re-run."
+                exit 1
+              fi
+            fi
+          fi
+          echo "is_release_please=${IS_RP}" >> "${GITHUB_OUTPUT}"
+          echo "Release-please detection: head_ref='${PR_HEAD_REF:-}', user='${PR_USER_LOGIN:-}', merge_group_head_ref='${MERGE_GROUP_HEAD_REF:-}', is_release_please=${IS_RP}"
+
+      - name: Short-circuit — post ai-sdlc/attestation success (release-please)
+        if: steps.release_please.outputs.is_release_please == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/statuses/${HEAD_SHA}" \
+            -X POST \
+            -f state=success \
+            -f context='ai-sdlc/attestation' \
+            -f description='release-please version bump — attestation N/A'
+          echo "Posted ai-sdlc/attestation: success (release-please short-circuit) on ${HEAD_SHA}"
+
+      # Skip the full verify pipeline when EITHER short-circuit already posted
+      # the success status above. These steps only run for code PRs or mixed PRs.
+      - uses: pnpm/action-setup@v4
+        if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
 
       - uses: actions/setup-node@v4
-        if: steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
         with:
           node-version: 22
           cache: pnpm
 
       - name: Install (orchestrator only — verifier needs the runtime barrel)
-        if: steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
         run: pnpm install --frozen-lockfile
 
       - name: Build orchestrator + dependencies (verifier imports compiled JS)
         # `...` suffix builds @ai-sdlc/orchestrator AND its workspace deps
         # (notably @ai-sdlc/reference) in topological order. Without it the
         # orchestrator build fails with TS2307: cannot find @ai-sdlc/reference.
-        if: steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
         run: pnpm --filter "@ai-sdlc/orchestrator..." build
 
       - name: Verify attestation
         id: verify
-        if: steps.docs_only.outputs.all_docs != 'true'
+        if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
         env:
           PR_HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
           PR_BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
@@ -162,14 +294,15 @@ jobs:
       # state) so a sibling PR merging into the same files between PR-head
       # verification and queue execution surfaces here.
       - name: Post ai-sdlc/attestation status
-        # `always() && not-docs-only` so the status is posted even when the prior
-        # `Verify attestation` step throws (uncaught exception, OOM, etc.),
-        # but NOT when the docs-only short-circuit already posted success above.
-        # Without this, a verifier crash leaves the gate UN-posted forever
-        # and the PR sits BLOCKED with no surfaced reason. With this, a
-        # crash falls through to STATE=failure with a clear "verifier
-        # crashed" reason — operator sees red status, opens workflow log.
-        if: always() && steps.docs_only.outputs.all_docs != 'true'
+        # `always() && not-short-circuited` so the status is posted even when
+        # the prior `Verify attestation` step throws (uncaught exception, OOM,
+        # etc.), but NOT when one of the short-circuits (docs-only,
+        # release-please) already posted success above. Without this, a
+        # verifier crash leaves the gate UN-posted forever and the PR sits
+        # BLOCKED with no surfaced reason. With this, a crash falls through
+        # to STATE=failure with a clear "verifier crashed" reason — operator
+        # sees red status, opens workflow log.
+        if: always() && steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
