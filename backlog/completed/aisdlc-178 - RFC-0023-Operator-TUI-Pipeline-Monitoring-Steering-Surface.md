@@ -1,7 +1,7 @@
 ---
 id: AISDLC-178
 title: 'RFC-0023: Operator TUI — Pipeline Monitoring + Steering Surface'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-04 02:01'
 labels:

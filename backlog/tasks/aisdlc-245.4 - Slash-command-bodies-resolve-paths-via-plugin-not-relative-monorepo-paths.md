@@ -23,6 +23,10 @@ references:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+## Operator decision (2026-05-10)
+
+**(A) CLAUDE_PLUGIN_DIR-relative resolution — operator decision 2026-05-10.** Slash command bodies use `node "\$CLAUDE_PLUGIN_DIR/pipeline-cli/bin/cli-XXX.mjs"`. Standard Claude Code plugin pattern; works in every install layout.
+
 ## Problem
 Slash command bodies invoke `node pipeline-cli/bin/cli-*.mjs` (relative path
 that only resolves in framework monorepo) and `node ai-sdlc-plugin/scripts/compute-slug.mjs`

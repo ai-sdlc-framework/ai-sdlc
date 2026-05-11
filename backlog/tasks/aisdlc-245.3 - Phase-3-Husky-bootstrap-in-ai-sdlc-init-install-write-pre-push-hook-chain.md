@@ -26,6 +26,10 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+## Operator decision (2026-05-10)
+
+**(B) Detect husky + offer to install if missing — operator decision 2026-05-10.** Init checks for `.husky/`; if present, appends to `pre-push`. If missing, prompts `Install husky? [Y/n]`. `--yes` flag for non-interactive (CI scaffolding).
+
 ## Problem
 Adopter repos don't have husky installed. The pre-push hook chain
 (coverage → task-move → attestation-sign) is the canonical safety gate per

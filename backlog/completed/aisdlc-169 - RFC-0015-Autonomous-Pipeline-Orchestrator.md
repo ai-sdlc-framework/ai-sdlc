@@ -1,7 +1,7 @@
 ---
 id: AISDLC-169
 title: 'RFC-0015: Autonomous Pipeline Orchestrator'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-03'
 labels:

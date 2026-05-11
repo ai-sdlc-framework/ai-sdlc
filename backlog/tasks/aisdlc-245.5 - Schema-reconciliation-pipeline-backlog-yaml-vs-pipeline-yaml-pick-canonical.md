@@ -23,6 +23,10 @@ references:
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+## Operator decision (2026-05-10)
+
+**(A) pipeline.yaml is canonical — operator decision 2026-05-10.** Migrate slash command bodies to read `.ai-sdlc/pipeline.yaml`. Define backlog-specific section (e.g. `pipeline.yaml: { backlog: { branching, milestones } }`). Keep `pipeline-backlog.yaml` as legacy shim (warn-on-load) for one release, then delete.
+
 ## Problem
 Framework dev-repo uses `.ai-sdlc/pipeline-backlog.yaml`. Adopter (arc-1) was
 shipped `.ai-sdlc/pipeline.yaml` with a different schema. The slash command

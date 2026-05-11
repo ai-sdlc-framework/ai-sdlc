@@ -23,6 +23,10 @@ priority: high
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+## Operator decision (2026-05-10)
+
+**(B) Plugin-resolved (no vendoring) — operator decision 2026-05-10.** Pre-push hook calls scripts from `node_modules/@ai-sdlc/plugin/scripts/`, no vendoring into adopter repo. Updates ship via npm.
+
 ## Problem
 Shell scripts (orchestrator state-check, hook gates) live in the framework
 repo's `scripts/` directory. Adopters need their own copies under
