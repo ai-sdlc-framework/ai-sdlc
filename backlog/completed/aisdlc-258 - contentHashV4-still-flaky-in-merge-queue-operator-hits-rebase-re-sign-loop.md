@@ -1,7 +1,7 @@
 ---
 id: AISDLC-258
 title: contentHashV4 still flaky in merge queue — operator hits rebase+re-sign loop on every multi-PR queue
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-10 16:35'
 labels:
