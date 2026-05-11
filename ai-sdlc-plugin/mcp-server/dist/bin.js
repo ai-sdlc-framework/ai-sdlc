@@ -25160,22 +25160,74 @@ var FALLBACK_SLUG = "task";
 function slugify2(title) {
   return title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 50);
 }
-function readBranchPattern(workDir, fallback = DEFAULT_PATTERN) {
-  const yamlPath = join10(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
-  if (!existsSync11(yamlPath))
-    return fallback;
+function readBranchPattern(workDir, fallback = DEFAULT_PATTERN, logger) {
+  const pipelineYamlPath = join10(workDir, ".ai-sdlc", "pipeline.yaml");
+  if (existsSync11(pipelineYamlPath)) {
+    const pattern = parsePipelineBacklogKey(pipelineYamlPath, ["branching", "pattern"]);
+    if (typeof pattern === "string" && pattern.length > 0)
+      return pattern;
+  }
+  const legacyPath = join10(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
+  if (existsSync11(legacyPath)) {
+    const pattern = parseLegacyKey(legacyPath, ["branching", "pattern"]);
+    if (typeof pattern === "string" && pattern.length > 0) {
+      const log = logger ?? DEFAULT_LOGGER;
+      log.warn("[ai-sdlc] DEPRECATION: reading branching.pattern from .ai-sdlc/pipeline-backlog.yaml. Migrate this setting to .ai-sdlc/pipeline.yaml under spec.backlog.branching.pattern. pipeline-backlog.yaml will be removed in the next major release (AISDLC-245.5).");
+      return pattern;
+    }
+  }
+  return fallback;
+}
+function parsePipelineBacklogKey(pipelineYamlPath, keyPath) {
   let raw;
   try {
-    raw = readFileSync8(yamlPath, "utf8");
+    raw = readFileSync8(pipelineYamlPath, "utf8");
   } catch {
-    return fallback;
+    return void 0;
   }
-  const m = raw.match(/branching:\s*[\r\n]+\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/);
-  return m ? m[1].trim() : fallback;
+  let parsed;
+  try {
+    parsed = load(raw);
+  } catch {
+    return void 0;
+  }
+  if (parsed === null || typeof parsed !== "object")
+    return void 0;
+  const root = parsed;
+  const backlog = root.backlog ?? root.spec?.backlog;
+  if (!backlog || typeof backlog !== "object")
+    return void 0;
+  return walkKeyPath(backlog, keyPath);
+}
+function parseLegacyKey(legacyPath, keyPath) {
+  let raw;
+  try {
+    raw = readFileSync8(legacyPath, "utf8");
+  } catch {
+    return void 0;
+  }
+  let parsed;
+  try {
+    parsed = load(raw);
+  } catch {
+    return void 0;
+  }
+  if (parsed === null || typeof parsed !== "object")
+    return void 0;
+  return walkKeyPath(parsed, keyPath);
+}
+function walkKeyPath(root, keyPath) {
+  let cur = root;
+  for (const segment of keyPath) {
+    if (!cur || typeof cur !== "object")
+      return void 0;
+    cur = cur[segment];
+  }
+  return cur;
 }
 async function computeBranchName(opts) {
   const taskIdLower = opts.taskId.toLowerCase();
-  const pattern = readBranchPattern(opts.workDir, opts.defaultPattern ?? DEFAULT_PATTERN);
+  const pattern = readBranchPattern(opts.workDir, opts.defaultPattern ?? DEFAULT_PATTERN, opts.logger);
   const rawSlug = slugify2(opts.task.title);
   let slug = rawSlug;
   if (slug === "" && pattern.includes("{slug}")) {
@@ -31225,21 +31277,26 @@ async function lateRebase(opts) {
 }
 
 // ../../pipeline-cli/dist/steps/11-push-and-pr.js
-import { existsSync as existsSync16, readFileSync as readFileSync17 } from "node:fs";
+import { existsSync as existsSync16 } from "node:fs";
 import { join as join18 } from "node:path";
 var DEFAULT_TITLE_TEMPLATE = "feat: {issueTitle} ({issueId})";
-function readTitleTemplate(workDir) {
-  const path = join18(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
-  if (!existsSync16(path))
-    return DEFAULT_TITLE_TEMPLATE;
-  let raw;
-  try {
-    raw = readFileSync17(path, "utf8");
-  } catch {
-    return DEFAULT_TITLE_TEMPLATE;
+function readTitleTemplate(workDir, logger) {
+  const pipelineYamlPath = join18(workDir, ".ai-sdlc", "pipeline.yaml");
+  if (existsSync16(pipelineYamlPath)) {
+    const tpl2 = parsePipelineBacklogKey(pipelineYamlPath, ["pullRequest", "titleTemplate"]);
+    if (typeof tpl2 === "string" && tpl2.length > 0)
+      return tpl2;
   }
-  const m = raw.match(/pullRequest:\s*[\r\n]+\s*titleTemplate:\s*['"]?([^'"\r\n]+)['"]?/);
-  return m ? m[1].trim() : DEFAULT_TITLE_TEMPLATE;
+  const legacyPath = join18(workDir, ".ai-sdlc", "pipeline-backlog.yaml");
+  if (!existsSync16(legacyPath))
+    return DEFAULT_TITLE_TEMPLATE;
+  const tpl = parseLegacyKey(legacyPath, ["pullRequest", "titleTemplate"]);
+  if (typeof tpl === "string" && tpl.length > 0) {
+    const log = logger ?? DEFAULT_LOGGER;
+    log.warn("[ai-sdlc] DEPRECATION: reading pullRequest.titleTemplate from .ai-sdlc/pipeline-backlog.yaml. Migrate this setting to .ai-sdlc/pipeline.yaml under spec.backlog.pullRequest.titleTemplate. pipeline-backlog.yaml will be removed in the next major release (AISDLC-245.5).");
+    return tpl;
+  }
+  return DEFAULT_TITLE_TEMPLATE;
 }
 function composeTitle(template, taskId, taskTitle, needsHumanAttention) {
   const tagged = needsHumanAttention ? `${taskTitle} [needs-human-attention]` : taskTitle;
@@ -31317,7 +31374,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>
     const reason = /non-fast-forward|rejected/i.test(stderr) ? `non-fast-forward push to '${opts.branch}'; cleanup is to delete the remote branch and rerun, but that's destructive \u2014 confirm with the operator first` : `git push failed: ${stderr || pushResult.stdout.trim() || "unknown error"}`;
     return { pushed: false, prUrl: null, reason };
   }
-  const titleTemplate = readTitleTemplate(opts.workDir);
+  const titleTemplate = readTitleTemplate(opts.workDir, opts.logger);
   const title = composeTitle(titleTemplate, opts.taskId, opts.task.title, !!opts.needsHumanAttention);
   const body = composeBody(opts);
   const prResult = await runner("gh", [
@@ -31484,11 +31541,11 @@ async function cleanupTask(opts) {
 }
 
 // ../../pipeline-cli/dist/deps/dependency-graph.js
-import { existsSync as existsSync18, readdirSync as readdirSync8, readFileSync as readFileSync18, statSync as statSync7 } from "node:fs";
+import { existsSync as existsSync18, readdirSync as readdirSync8, readFileSync as readFileSync17, statSync as statSync7 } from "node:fs";
 import { join as join20 } from "node:path";
 
 // ../../pipeline-cli/dist/deps/snapshot.js
-import { existsSync as existsSync19, mkdirSync as mkdirSync8, readdirSync as readdirSync9, readFileSync as readFileSync19, statSync as statSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync8 } from "node:fs";
+import { existsSync as existsSync19, mkdirSync as mkdirSync8, readdirSync as readdirSync9, readFileSync as readFileSync18, statSync as statSync8, unlinkSync as unlinkSync4, writeFileSync as writeFileSync8 } from "node:fs";
 import { join as join21 } from "node:path";
 
 // ../../pipeline-cli/dist/deps/effective-priority.js
@@ -31501,10 +31558,10 @@ var PRIORITY_WEIGHT = {
 var DEFAULT_PRIORITY_WEIGHT = PRIORITY_WEIGHT.medium;
 
 // ../../pipeline-cli/dist/deps/critical-path.js
-import { existsSync as existsSync20, readFileSync as readFileSync20 } from "node:fs";
+import { existsSync as existsSync20, readFileSync as readFileSync19 } from "node:fs";
 
 // ../../pipeline-cli/dist/deps/override-log.js
-import { appendFileSync, existsSync as existsSync21, mkdirSync as mkdirSync9, readFileSync as readFileSync21 } from "node:fs";
+import { appendFileSync, existsSync as existsSync21, mkdirSync as mkdirSync9, readFileSync as readFileSync20 } from "node:fs";
 import { dirname as dirname7, join as join22 } from "node:path";
 
 // ../../pipeline-cli/dist/execute-pipeline.js
@@ -31512,11 +31569,11 @@ import { existsSync as existsSync22 } from "node:fs";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync33, readFileSync as readFileSync32 } from "node:fs";
+import { existsSync as existsSync33, readFileSync as readFileSync31 } from "node:fs";
 import { join as join34 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/dispatch-result.js
-import { mkdirSync as mkdirSync10, readFileSync as readFileSync22, writeFileSync as writeFileSync9 } from "node:fs";
+import { mkdirSync as mkdirSync10, readFileSync as readFileSync21, writeFileSync as writeFileSync9 } from "node:fs";
 import { dirname as dirname8 } from "node:path";
 
 // ../../pipeline-cli/dist/cli/execute.js
@@ -31529,12 +31586,12 @@ import { dirname as dirname9 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/rollback.js
 import { execSync as execSync4 } from "node:child_process";
-import { existsSync as existsSync23, readFileSync as readFileSync23, statSync as statSync9, writeFileSync as writeFileSync11 } from "node:fs";
+import { existsSync as existsSync23, readFileSync as readFileSync22, statSync as statSync9, writeFileSync as writeFileSync11 } from "node:fs";
 import { join as join23 } from "node:path";
 var SENTINEL_ACTIVE_THRESHOLD_MS2 = 6 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/events.js
-import { appendFileSync as appendFileSync2, existsSync as existsSync24, mkdirSync as mkdirSync13, readFileSync as readFileSync24, readdirSync as readdirSync10 } from "node:fs";
+import { appendFileSync as appendFileSync2, existsSync as existsSync24, mkdirSync as mkdirSync13, readFileSync as readFileSync23, readdirSync as readdirSync10 } from "node:fs";
 import { dirname as dirname10, join as join25 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/already-in-flight.js
@@ -31544,38 +31601,38 @@ import { join as join26 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/blast-radius-overlap.js
 import { execSync as execSync6 } from "node:child_process";
-import { existsSync as existsSync26, readdirSync as readdirSync11, readFileSync as readFileSync25 } from "node:fs";
+import { existsSync as existsSync26, readdirSync as readdirSync11, readFileSync as readFileSync24 } from "node:fs";
 import { join as join27 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/dor-readiness.js
-import { existsSync as existsSync27, readFileSync as readFileSync26 } from "node:fs";
+import { existsSync as existsSync27, readFileSync as readFileSync25 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/calibration-log.js
 import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync14 } from "node:fs";
 import { dirname as dirname11, join as join28 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/external-dependencies.js
-import { existsSync as existsSync28, readFileSync as readFileSync27 } from "node:fs";
+import { existsSync as existsSync28, readFileSync as readFileSync26 } from "node:fs";
 import { join as join29 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/in-flight.js
-import { existsSync as existsSync29, readdirSync as readdirSync12, readFileSync as readFileSync28, statSync as statSync10 } from "node:fs";
+import { existsSync as existsSync29, readdirSync as readdirSync12, readFileSync as readFileSync27, statSync as statSync10 } from "node:fs";
 import { join as join30 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
-import { existsSync as existsSync30, readFileSync as readFileSync29 } from "node:fs";
+import { existsSync as existsSync30, readFileSync as readFileSync28 } from "node:fs";
 import { join as join31 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/handlers/long-running-pr.js
 var LONG_RUNNING_PR_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/playbook/state-machine.js
-import { existsSync as existsSync31, mkdirSync as mkdirSync15, readFileSync as readFileSync30, writeFileSync as writeFileSync13 } from "node:fs";
+import { existsSync as existsSync31, mkdirSync as mkdirSync15, readFileSync as readFileSync29, writeFileSync as writeFileSync13 } from "node:fs";
 import { dirname as dirname12, join as join32 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/checkpoint.js
 import { execFileSync, execSync as execSync7 } from "node:child_process";
-import { existsSync as existsSync32, readFileSync as readFileSync31 } from "node:fs";
+import { existsSync as existsSync32, readFileSync as readFileSync30 } from "node:fs";
 import { join as join33 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
@@ -31599,7 +31656,7 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync35, readFileSync as readFileSync33, readdirSync as readdirSync14, statSync as statSync12 } from "node:fs";
+import { existsSync as existsSync35, readFileSync as readFileSync32, readdirSync as readdirSync14, statSync as statSync12 } from "node:fs";
 import { basename as basename6, join as join37, relative as relative2 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
@@ -31609,21 +31666,21 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync36, readFileSync as readFileSync34 } from "node:fs";
+import { existsSync as existsSync36, readFileSync as readFileSync33 } from "node:fs";
 import { join as join38 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync37, readFileSync as readFileSync35, readdirSync as readdirSync15 } from "node:fs";
+import { existsSync as existsSync37, readFileSync as readFileSync34, readdirSync as readdirSync15 } from "node:fs";
 import { join as join39 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync38, readFileSync as readFileSync36 } from "node:fs";
+import { existsSync as existsSync38, readFileSync as readFileSync35 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync39, readFileSync as readFileSync37 } from "node:fs";
+import { existsSync as existsSync39, readFileSync as readFileSync36 } from "node:fs";
 import { join as join40 } from "node:path";
 
 // src/tools/pipeline-tools.ts
