@@ -387,3 +387,107 @@ describe('Step 2 — readBranchPattern', () => {
     expect(readBranchPattern(tmp, undefined, logger)).toBe('test/{slug}');
   });
 });
+
+// AISDLC-245.5 — migration equivalence: an adopter who edits pipeline-backlog.yaml
+// today must get the IDENTICAL branch pattern after migrating that same value
+// to pipeline.yaml's spec.backlog.branching.pattern. This is the contract the
+// migration runbook (docs/operations/pipeline-backlog-migration.md) promises
+// — if it ever drifted we'd silently break adopter branches on next run.
+describe('Step 2 — migration equivalence (AISDLC-245.5)', () => {
+  const PATTERNS = [
+    'ai-sdlc/{issueIdLower}-{slug}',
+    'feat/{issueIdLower}/{slug}',
+    'custom/{issueIdLower}',
+  ];
+
+  for (const pattern of PATTERNS) {
+    it(`legacy pipeline-backlog.yaml and canonical pipeline.yaml produce same pattern: ${pattern}`, () => {
+      // Legacy shape: pipeline-backlog.yaml
+      const legacyDir = makeTmpProject();
+      try {
+        mkdirSync(join(legacyDir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(legacyDir, '.ai-sdlc', 'pipeline-backlog.yaml'),
+          `branching:\n  pattern: '${pattern}'\n`,
+        );
+        const legacyLogger = makeRecordingLogger();
+        const legacyResult = readBranchPattern(legacyDir, 'default', legacyLogger);
+
+        // Canonical shape: pipeline.yaml spec.backlog.branching.pattern
+        const canonicalDir = makeTmpProject();
+        try {
+          mkdirSync(join(canonicalDir, '.ai-sdlc'), { recursive: true });
+          writeFileSync(
+            join(canonicalDir, '.ai-sdlc', 'pipeline.yaml'),
+            [
+              'apiVersion: ai-sdlc.io/v1alpha1',
+              'kind: Pipeline',
+              'metadata:',
+              '  name: migration-test',
+              'spec:',
+              '  triggers: []',
+              '  providers: {}',
+              '  stages: []',
+              '  backlog:',
+              '    branching:',
+              `      pattern: '${pattern}'`,
+            ].join('\n') + '\n',
+          );
+          const canonicalLogger = makeRecordingLogger();
+          const canonicalResult = readBranchPattern(canonicalDir, 'default', canonicalLogger);
+
+          // Equivalence: same pattern value
+          expect(canonicalResult).toBe(legacyResult);
+          expect(canonicalResult).toBe(pattern);
+          // Canonical shape MUST NOT emit deprecation warning
+          expect(canonicalLogger.warnings).toHaveLength(0);
+          // Legacy shape MUST emit deprecation warning
+          expect(legacyLogger.warnings).toHaveLength(1);
+          expect(legacyLogger.warnings[0]).toMatch(/DEPRECATION/);
+        } finally {
+          cleanupTmpProject(canonicalDir);
+        }
+      } finally {
+        cleanupTmpProject(legacyDir);
+      }
+    });
+  }
+
+  it('end-to-end: same task + same pattern produces same branch via legacy or canonical', async () => {
+    const pattern = 'feat/{issueIdLower}/{slug}';
+
+    const legacyDir = makeTmpProject();
+    const canonicalDir = makeTmpProject();
+    try {
+      mkdirSync(join(legacyDir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(legacyDir, '.ai-sdlc', 'pipeline-backlog.yaml'),
+        `branching:\n  pattern: '${pattern}'\n`,
+      );
+      mkdirSync(join(canonicalDir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(canonicalDir, '.ai-sdlc', 'pipeline.yaml'),
+        ['spec:', '  backlog:', '    branching:', `      pattern: '${pattern}'`].join('\n') + '\n',
+      );
+
+      const legacy = await computeBranchName({
+        taskId: 'AISDLC-100',
+        task: baseTask,
+        workDir: legacyDir,
+        logger: makeRecordingLogger(),
+      });
+      const canonical = await computeBranchName({
+        taskId: 'AISDLC-100',
+        task: baseTask,
+        workDir: canonicalDir,
+        logger: makeRecordingLogger(),
+      });
+
+      expect(canonical.branch).toBe(legacy.branch);
+      expect(canonical.slug).toBe(legacy.slug);
+    } finally {
+      cleanupTmpProject(legacyDir);
+      cleanupTmpProject(canonicalDir);
+    }
+  });
+});

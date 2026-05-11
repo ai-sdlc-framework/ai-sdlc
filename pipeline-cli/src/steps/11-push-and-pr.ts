@@ -30,7 +30,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
-import type { PushAndPrOptions, PushAndPrResult } from '../types.js';
+import {
+  DEFAULT_LOGGER,
+  type PipelineLogger,
+  type PushAndPrOptions,
+  type PushAndPrResult,
+} from '../types.js';
 import { lateRebase } from './11-late-rebase.js';
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
@@ -50,13 +55,14 @@ const DEFAULT_TITLE_TEMPLATE = 'feat: {issueTitle} ({issueId})';
 /**
  * Read `pullRequest.titleTemplate` from the canonical location:
  *   1. `.ai-sdlc/pipeline.yaml` → `spec.backlog.pullRequest.titleTemplate` (AISDLC-245.5)
- *   2. `.ai-sdlc/pipeline-backlog.yaml` → `pullRequest.titleTemplate` (deprecated shim)
+ *   2. `.ai-sdlc/pipeline-backlog.yaml` → `pullRequest.titleTemplate` (deprecated shim,
+ *      logs a warning on first use; will be removed in the next major release)
  *
  * Returns the default when neither file has the key.
  *
  * Exported for unit tests.
  */
-export function readTitleTemplate(workDir: string): string {
+export function readTitleTemplate(workDir: string, logger?: PipelineLogger): string {
   // --- 1. Canonical path: pipeline.yaml spec.backlog.pullRequest.titleTemplate ---
   const pipelineYamlPath = join(workDir, '.ai-sdlc', 'pipeline.yaml');
   if (existsSync(pipelineYamlPath)) {
@@ -91,7 +97,16 @@ export function readTitleTemplate(workDir: string): string {
     return DEFAULT_TITLE_TEMPLATE;
   }
   const m = raw.match(/pullRequest:\s*[\r\n]+\s*titleTemplate:\s*['"]?([^'"\r\n]+)['"]?/);
-  return m ? m[1].trim() : DEFAULT_TITLE_TEMPLATE;
+  if (m) {
+    const log = logger ?? DEFAULT_LOGGER;
+    log.warn(
+      '[ai-sdlc] DEPRECATION: reading pullRequest.titleTemplate from .ai-sdlc/pipeline-backlog.yaml. ' +
+        'Migrate this setting to .ai-sdlc/pipeline.yaml under spec.backlog.pullRequest.titleTemplate. ' +
+        'pipeline-backlog.yaml will be removed in the next major release (AISDLC-245.5).',
+    );
+    return m[1].trim();
+  }
+  return DEFAULT_TITLE_TEMPLATE;
 }
 
 /**
@@ -222,7 +237,7 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
   }
 
   // 2. gh pr create
-  const titleTemplate = readTitleTemplate(opts.workDir);
+  const titleTemplate = readTitleTemplate(opts.workDir, opts.logger);
   const title = composeTitle(
     titleTemplate,
     opts.taskId,

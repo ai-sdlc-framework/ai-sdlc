@@ -417,6 +417,8 @@ export interface PushAndPrOptions {
   developerReturn: DeveloperReturn;
   verdict: AggregatedVerdict;
   needsHumanAttention?: boolean;
+  /** Optional logger; defaults to console. AISDLC-245.5 — used to surface deprecation warnings. */
+  logger?: PipelineLogger;
 }
 
 export interface PushAndPrResult {

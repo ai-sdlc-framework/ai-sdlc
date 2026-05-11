@@ -224,11 +224,21 @@ the guide at `docs/operations/pipeline-backlog-migration.md`.
 
 ```bash
 # AISDLC-245.5: read from pipeline.yaml spec.backlog.branching.pattern (canonical).
-# Falls back to pipeline-backlog.yaml with a deprecation warning when the
-# pipeline.yaml backlog section is absent (one-release grace period).
-BRANCH_PATTERN=$(node pipeline-cli/bin/cli-compute-branch.mjs --print-pattern 2>/dev/null) \
-  || BRANCH_PATTERN=$(grep -A4 'backlog:' .ai-sdlc/pipeline.yaml | grep -A2 'branching:' | grep 'pattern:' | sed -E "s/.*pattern: *'?([^'\"]+)'?.*/\1/") \
-  || BRANCH_PATTERN='ai-sdlc/{issueIdLower}-{slug}'
+# Falls back to pipeline-backlog.yaml when pipeline.yaml lacks the backlog
+# section (one-release grace period). pipeline-cli/src/steps/02-compute-branch.ts
+# is the source-of-truth reader and emits the deprecation warning when the
+# legacy file is used; the shell pipeline below mirrors the priority order so
+# `/ai-sdlc execute` reads the same value the in-process pipeline would.
+BRANCH_PATTERN=$(grep -A4 'backlog:' .ai-sdlc/pipeline.yaml 2>/dev/null \
+    | grep -A2 'branching:' | grep 'pattern:' \
+    | sed -E "s/.*pattern: *'?([^'\"]+)'?.*/\1/" | head -1)
+if [ -z "$BRANCH_PATTERN" ] && [ -f .ai-sdlc/pipeline-backlog.yaml ]; then
+  BRANCH_PATTERN=$(grep -A2 'branching:' .ai-sdlc/pipeline-backlog.yaml \
+    | grep 'pattern:' | sed -E "s/.*pattern: *'([^']+)'.*/\1/")
+  [ -n "$BRANCH_PATTERN" ] && echo \
+    "[ai-sdlc] DEPRECATION: read branching.pattern from .ai-sdlc/pipeline-backlog.yaml. Migrate to .ai-sdlc/pipeline.yaml under spec.backlog.branching.pattern (AISDLC-245.5)." >&2
+fi
+[ -z "$BRANCH_PATTERN" ] && BRANCH_PATTERN='ai-sdlc/{issueIdLower}-{slug}'
 # AISDLC-180: use ai-sdlc-plugin/scripts/compute-slug.mjs to parse the YAML
 # frontmatter title properly. The previous shell pipeline (`grep ^title: |
 # sed`) returned `>-` literally for any block-scalar title produced by

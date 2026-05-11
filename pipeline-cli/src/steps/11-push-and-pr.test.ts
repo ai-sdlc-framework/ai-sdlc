@@ -50,18 +50,34 @@ const approved: AggregatedVerdict = {
   summary: 'APPROVED',
 };
 
+function makeRecordingLogger() {
+  const warnings: string[] = [];
+  const logger = {
+    info: () => undefined,
+    warn: (m: string) => warnings.push(m),
+    error: () => undefined,
+    progress: () => undefined,
+    warnings,
+  };
+  return logger;
+}
+
 describe('Step 11 — readTitleTemplate', () => {
   it('returns default when yaml missing', () => {
     expect(readTitleTemplate('/no/such')).toMatch(/feat: \{issueTitle\}/);
   });
 
-  it('reads pullRequest.titleTemplate from legacy pipeline-backlog.yaml (deprecated shim)', () => {
+  it('reads pullRequest.titleTemplate from legacy pipeline-backlog.yaml (deprecated shim, warns)', () => {
     mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
     writeFileSync(
       join(tmp, '.ai-sdlc', 'pipeline-backlog.yaml'),
       `pullRequest:\n  titleTemplate: 'fix: {issueTitle} ({issueId})'\n`,
     );
-    expect(readTitleTemplate(tmp)).toBe('fix: {issueTitle} ({issueId})');
+    const logger = makeRecordingLogger();
+    expect(readTitleTemplate(tmp, logger)).toBe('fix: {issueTitle} ({issueId})');
+    expect(logger.warnings).toHaveLength(1);
+    expect(logger.warnings[0]).toMatch(/DEPRECATION/);
+    expect(logger.warnings[0]).toMatch(/pipeline-backlog\.yaml/);
   });
 
   it('reads pullRequest.titleTemplate from pipeline.yaml spec.backlog section (canonical, AISDLC-245.5)', () => {
@@ -75,10 +91,13 @@ describe('Step 11 — readTitleTemplate', () => {
         "      titleTemplate: 'chore: {issueTitle} ({issueId})'",
       ].join('\n') + '\n',
     );
-    expect(readTitleTemplate(tmp)).toBe('chore: {issueTitle} ({issueId})');
+    const logger = makeRecordingLogger();
+    expect(readTitleTemplate(tmp, logger)).toBe('chore: {issueTitle} ({issueId})');
+    // Canonical path MUST NOT emit deprecation warning
+    expect(logger.warnings).toHaveLength(0);
   });
 
-  it('prefers pipeline.yaml over pipeline-backlog.yaml for title template (canonical wins)', () => {
+  it('prefers pipeline.yaml over pipeline-backlog.yaml for title template (canonical wins, no warning)', () => {
     mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
     writeFileSync(
       join(tmp, '.ai-sdlc', 'pipeline.yaml'),
@@ -93,8 +112,64 @@ describe('Step 11 — readTitleTemplate', () => {
       join(tmp, '.ai-sdlc', 'pipeline-backlog.yaml'),
       `pullRequest:\n  titleTemplate: 'legacy: {issueTitle}'\n`,
     );
-    expect(readTitleTemplate(tmp)).toBe('canonical: {issueTitle}');
+    const logger = makeRecordingLogger();
+    expect(readTitleTemplate(tmp, logger)).toBe('canonical: {issueTitle}');
+    expect(logger.warnings).toHaveLength(0);
   });
+
+  it('does not warn when legacy file exists but lacks titleTemplate (returns default)', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(join(tmp, '.ai-sdlc', 'pipeline-backlog.yaml'), 'branching:\n  pattern: x\n');
+    const logger = makeRecordingLogger();
+    expect(readTitleTemplate(tmp, logger)).toMatch(/feat: \{issueTitle\}/);
+    expect(logger.warnings).toHaveLength(0);
+  });
+});
+
+// AISDLC-245.5 — migration equivalence: an adopter who edits pipeline-backlog.yaml
+// today must get the IDENTICAL title template after migrating to pipeline.yaml's
+// spec.backlog.pullRequest.titleTemplate. Mirror of the step-02 migration test.
+describe('Step 11 — readTitleTemplate migration equivalence (AISDLC-245.5)', () => {
+  const TEMPLATES = [
+    'feat: {issueTitle} ({issueId})',
+    'fix: {issueTitle} ({issueId})',
+    'chore: {issueTitle}',
+  ];
+
+  for (const template of TEMPLATES) {
+    it(`legacy and canonical produce same template: ${template}`, () => {
+      // Legacy
+      mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'pipeline-backlog.yaml'),
+        `pullRequest:\n  titleTemplate: '${template}'\n`,
+      );
+      const legacyLogger = makeRecordingLogger();
+      const legacyResult = readTitleTemplate(tmp, legacyLogger);
+
+      // Canonical (in a fresh project, otherwise pipeline.yaml would win in tmp)
+      const canonicalDir = makeTmpProject();
+      try {
+        mkdirSync(join(canonicalDir, '.ai-sdlc'), { recursive: true });
+        writeFileSync(
+          join(canonicalDir, '.ai-sdlc', 'pipeline.yaml'),
+          ['spec:', '  backlog:', '    pullRequest:', `      titleTemplate: '${template}'`].join(
+            '\n',
+          ) + '\n',
+        );
+        const canonicalLogger = makeRecordingLogger();
+        const canonicalResult = readTitleTemplate(canonicalDir, canonicalLogger);
+
+        expect(canonicalResult).toBe(legacyResult);
+        expect(canonicalResult).toBe(template);
+        expect(canonicalLogger.warnings).toHaveLength(0);
+        expect(legacyLogger.warnings).toHaveLength(1);
+        expect(legacyLogger.warnings[0]).toMatch(/DEPRECATION/);
+      } finally {
+        cleanupTmpProject(canonicalDir);
+      }
+    });
+  }
 });
 
 describe('Step 11 — composeTitle', () => {

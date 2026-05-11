@@ -46,7 +46,7 @@ import {
   type WizardFlags,
 } from './init-features.js';
 
-const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
+export const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
 metadata:
   name: default
