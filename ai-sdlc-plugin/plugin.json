@@ -1,7 +1,7 @@
 {
   "name": "ai-sdlc",
-  "version": "0.8.1",
-  "description": "AI-SDLC governance framework for Claude Code \u2014 action enforcement, telemetry, quality gates, and review agents",
+  "version": "0.9.0",
+  "description": "AI-SDLC governance framework for Claude Code — action enforcement, telemetry, quality gates, and review agents",
   "author": {
     "name": "AI-SDLC Framework",
     "url": "https://ai-sdlc.io"
@@ -9,7 +9,13 @@
   "homepage": "https://ai-sdlc.io",
   "repository": "https://github.com/ai-sdlc-framework/ai-sdlc",
   "license": "Apache-2.0",
-  "keywords": ["governance", "sdlc", "security", "quality-gates", "code-review"],
+  "keywords": [
+    "governance",
+    "sdlc",
+    "security",
+    "quality-gates",
+    "code-review"
+  ],
   "hooks": {
     "SessionStart": [
       {
@@ -100,7 +106,9 @@
   "mcpServers": {
     "ai-sdlc": {
       "command": "node",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/bin.js"],
+      "args": [
+        "${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/bin.js"
+      ],
       "env": {
         "AI_SDLC_PROJECT_ROOT": "${CLAUDE_PLUGIN_DATA}"
       }
@@ -110,7 +118,7 @@
     "github_token": {
       "type": "string",
       "title": "GitHub Token",
-      "description": "Personal access token for GitHub API (label management, PR operations). Optional \u2014 falls back to gh CLI auth.",
+      "description": "Personal access token for GitHub API (label management, PR operations). Optional — falls back to gh CLI auth.",
       "required": false,
       "sensitive": true
     },

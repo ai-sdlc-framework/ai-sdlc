@@ -28,6 +28,51 @@
 
 The `AI_SDLC_PARALLELISM` flag defaults to `on` as of AISDLC-116 (this Unreleased cycle). The original promotion criteria — chaos-test plan in `docs/operations/operator-runbook.md` plus a 1-week dogfood soak window — were dropped by maintainer directive 2026-05-01 in favor of substantive readiness (no parallelism-related incidents in the trailing observation window). Operators who want to pin the pre-promotion mode can still set `AI_SDLC_PARALLELISM=experimental`; operators who want to disable parallelism entirely can set `AI_SDLC_PARALLELISM=off` (or `disabled`/`false`/`0`).
 
+## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.9.0...orchestrator-v0.10.0) (2026-05-11)
+
+
+### Features
+
+* add per-file-delta contentHashV3 to attestation predicate (AISDLC-101) ([563d9fc](https://github.com/ai-sdlc-framework/ai-sdlc/commit/563d9fc612193adbed4c0f4bfaa56ad58b5d184a))
+* add pipelineVersion to attestation predicate (AISDLC-100.6) ([6ac0ac9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6ac0ac9dc1d4416276a7ae0e5f1a8e32b00c4aae))
+* **deps:** dor gate enforce mode + RFC-0011 v4 + parent task progress (AISDLC-115.9) ([270a497](https://github.com/ai-sdlc-framework/ai-sdlc/commit/270a4978283ba9f9e5c981ee9fe65d1795d29e8f))
+* **orchestrator:** interactive init wizard + scaffold gate workflow (AISDLC-143) ([450cbaa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/450cbaac668091761efb73028c75ee7dbd1877ba))
+* **orchestrator:** rfc-0011 phase 4 — definition-of-ready composition (AISDLC-115.5) ([6c0e997](https://github.com/ai-sdlc-framework/ai-sdlc/commit/6c0e9977f52405bb5d333b8e4e65d79f2f720715))
+* **orchestrator:** tier-based agent-role tool defaults — coding/research/meta (AISDLC-79) ([adeb70d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/adeb70dff0ef45e4c57677df973f02607e343ce7))
+* promote AI_SDLC_PARALLELISM to default-on (AISDLC-116) ([4d7c06d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4d7c06d9c67deda9dcdd95e5b25706f526645bea))
+* rfc-0011 phase 1 schema + needs-clarification status (AISDLC-115.1) ([300682b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/300682bca895ee9a61da67840c567a36e06a87da))
+* **spec:** attestation harness context + Codex finalization via MCP task_complete (AISDLC-202.3) ([#414](https://github.com/ai-sdlc-framework/ai-sdlc/issues/414)) ([c994a1b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c994a1bb476ddb9cee35de6c20b6d3bb01250f91))
+* **spec:** make pipeline.yaml canonical; deprecate pipeline-backlog.yaml (AISDLC-245.5) ([#444](https://github.com/ai-sdlc-framework/ai-sdlc/issues/444)) ([281d139](https://github.com/ai-sdlc-framework/ai-sdlc/commit/281d1397400778f7dd90ff78ad24197303b6643f))
+* verifier Phase 3 — require contentHashV3, bump schema to v3 (AISDLC-103) ([4602edf](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4602edf92cc24d12fa90167b52ff31a95247eaf8))
+
+
+### Bug Fixes
+
+* add rebase-tolerant contentHash to attestation predicate (AISDLC-94) ([feb5259](https://github.com/ai-sdlc-framework/ai-sdlc/commit/feb52591f66de353193c9d7c9111ce4b3f9e7137))
+* address reviewer feedback for AISDLC-94 dual-hash ([957e1f3](https://github.com/ai-sdlc-framework/ai-sdlc/commit/957e1f344d9d2b5691fd3ca98d39bc82bd581376))
+* **attestation:** exclude shared churn files from contentHashV4 (AISDLC-258) ([#441](https://github.com/ai-sdlc-framework/ai-sdlc/issues/441)) ([4290056](https://github.com/ai-sdlc-framework/ai-sdlc/commit/42900565251afda282ce1cda36700d89a5796d79))
+* **deps:** harden classifier — docs extension safelist + auth regex (AISDLC-145) ([fcc287f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/fcc287fa534daeb03cf43d8e691d51922cf8c9cb))
+* **orchestrator:** add contentHashV4 base-independent hash + envelope self-exclusion (AISDLC-193.1) ([#335](https://github.com/ai-sdlc-framework/ai-sdlc/issues/335)) ([39c4301](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39c43010d537f15bb5c3421ccbd7b4e0fb13a7b1))
+* **orchestrator:** admit confidence honors enrichment-success above 0.5 default (AISDLC-172) ([907662c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/907662ce6dc604d90a8b9290ca4b339bfe175c73))
+* **orchestrator:** convention detector — React naming, multi-test-dir, path aliases (AISDLC-80) ([554dbb8](https://github.com/ai-sdlc-framework/ai-sdlc/commit/554dbb8b29847cadde0f92cb9e77775692d5deaa))
+* **orchestrator:** harden orchestrator/-side test fixtures against GIT_DIR env bleed (AISDLC-257) ([#438](https://github.com/ai-sdlc-framework/ai-sdlc/issues/438)) ([b6db688](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b6db6884ab39e140c35979955fab4aa22e826b4e))
+* **orchestrator:** init UX papercuts (AISDLC-78) ([7085274](https://github.com/ai-sdlc-framework/ai-sdlc/commit/70852740800a0565be90c815af876ad94afaefec))
+* **orchestrator:** isolate init-workspace test from host git origin (AISDLC-134) ([0563124](https://github.com/ai-sdlc-framework/ai-sdlc/commit/0563124af37e8f5bb773d6720b1bf8590696a5d8))
+* **orchestrator:** re-apply / harden AISDLC-189 init-workspace test fix (AISDLC-159) ([ea89d5b](https://github.com/ai-sdlc-framework/ai-sdlc/commit/ea89d5bfd08fa8129a327f95e3d7a85c255cce19))
+* **orchestrator:** unset GIT_* env in init-workspace test + direct .git/ writes ([f4f1e28](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f4f1e289a147d8dad6455c15bb69c81bf3e283f4))
+* **orchestrator:** unshadow CLI --version listener and cover with integration tests (AISDLC-78) ([07b5680](https://github.com/ai-sdlc-framework/ai-sdlc/commit/07b56803eb5baa2db3f9182f019f391c6f3a6996))
+* **orchestrator:** verifier accepts codex reviewer variants + enforces cross-harness independence (AISDLC-252) ([#418](https://github.com/ai-sdlc-framework/ai-sdlc/issues/418)) ([2c3b109](https://github.com/ai-sdlc-framework/ai-sdlc/commit/2c3b109729f15e7f2ceebbd796ebbe62ff3f00f9))
+* **orchestrator:** wire designAuthority diagnostic into HC_design (AISDLC-171) ([3efab87](https://github.com/ai-sdlc-framework/ai-sdlc/commit/3efab871dccd3250b5c1a3c7f7f3906eb94e1def))
+* pin detectGitRemote cwd via git -C to avoid host git origin bleed (AISDLC-104) ([937a5fa](https://github.com/ai-sdlc-framework/ai-sdlc/commit/937a5fa6130766557b130b9016becbd86ed13c42))
+* validate changedFileDeltas element shape (review feedback) ([9556af5](https://github.com/ai-sdlc-framework/ai-sdlc/commit/9556af5eaf1611f510b2c6780aabc4b155b86e52))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.10.0
+
 ## [0.9.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.8.0...orchestrator-v0.9.0) (2026-04-30)
 
 
