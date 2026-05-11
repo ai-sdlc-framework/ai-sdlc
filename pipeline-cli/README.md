@@ -10,8 +10,11 @@ AISDLC-98) and `orchestrator/src/` into pure step functions exposed three ways:
 3. **MCP tools** — Phase 3 (AISDLC-100.3) wraps each step as an MCP tool from
    the plugin's MCP server
 
-The package is **`private: true`** in Phase 1. Phase 8 (AISDLC-100.8) flips
-that, adds the `publishConfig` block, and publishes to npm.
+The package is published publicly as **`@ai-sdlc/pipeline-cli`** on npm
+(AISDLC-245.1 makes it publishable; the actual `runtimeDependencies`
+declaration in `ai-sdlc-plugin/plugin.json` lands in AISDLC-248.1's release
+PR once the first version is published, so adopters don't fail install on
+an unpublished version reference).
 
 ## Why two tiers?
 
@@ -39,11 +42,40 @@ is identical — only the LLM dispatch boundary differs. See
 
 ## Install
 
-### As part of the plugin (recommended, today)
+### As part of the plugin (recommended)
 
 If you've installed `ai-sdlc-plugin` in Claude Code, `@ai-sdlc/pipeline-cli` is
-already available — the plugin's MCP server depends on it (Phase 3) and the
-slash command body shells out to its CLI. No separate install needed.
+pulled in automatically via the plugin's `runtimeDependencies` declaration. The
+Claude Code plugin runtime installs it under the plugin's own `node_modules/`:
+
+```
+<CLAUDE_PLUGIN_ROOT>/node_modules/@ai-sdlc/pipeline-cli/
+```
+
+All 16 `bin/` entries are then resolvable as
+`${CLAUDE_PLUGIN_ROOT}/node_modules/@ai-sdlc/pipeline-cli/bin/<bin>.mjs`:
+
+```bash
+ai-sdlc-pipeline.mjs            # Step 0-13 umbrella (RFC-0012)
+cli-backlog-verify.mjs          # Backlog drift gate (CI)
+cli-classify-budget.mjs         # AISDLC-141 classifier-budget filter
+cli-classify-pr.mjs             # AISDLC-141 reviewer subset classifier
+cli-deps.mjs                    # AISDLC-117 dependency-graph CLI
+cli-deps-corpus.mjs             # AISDLC-167.5 deps-composition aggregator
+cli-dor-corpus.mjs              # AISDLC-161 DoR calibration aggregator
+cli-dor-digest.mjs              # AISDLC-162 DoR Slack digest
+cli-dor-stats.mjs               # AISDLC-162 DoR analytics
+cli-incremental-decide.mjs      # AISDLC-142 incremental review gate
+cli-orchestrator.mjs            # RFC-0015 autonomous orchestrator
+cli-orchestrator-corpus.mjs     # AISDLC-178.7 orchestrator soak aggregator
+cli-pr-unstick.mjs              # PR queue rescue helper
+cli-task-complete.mjs           # AISDLC-203 atomic task lifecycle
+cli-tui.mjs                     # RFC-0023 operator TUI
+cli-tui-corpus.mjs              # AISDLC-178.7 TUI soak aggregator
+```
+
+AISDLC-245.4 will update the slash command bodies to use this resolution path
+so adopters don't need the full monorepo checked out.
 
 ### As a workspace dependency (monorepo / dogfood)
 
@@ -107,10 +139,9 @@ eventually fixes own-bin resolution — or we move to a different package
 manager — that test will fail and force a deliberate re-evaluation of
 whether the simpler form can be reintroduced.
 
-### From npm (Phase 8)
+### From npm (standalone / non-plugin usage)
 
-Once Phase 8 (AISDLC-100.8) ships, `@ai-sdlc/pipeline-cli` will publish
-publicly:
+`@ai-sdlc/pipeline-cli` is published publicly on npmjs.org (AISDLC-245.1):
 
 ```bash
 pnpm add @ai-sdlc/pipeline-cli
@@ -530,7 +561,7 @@ pnpm test:watch            # iteration mode
 | 5 | AISDLC-100.5 | Migrate `dogfood/src/watch.ts` to call `executePipeline()` | in flight |
 | 6 | AISDLC-100.6 | Add `pipelineVersion` to attestation envelope | shipped |
 | 7 | AISDLC-100.7 | Documentation pass — README + spawner doc + per-step docs | shipped |
-| 8 | AISDLC-100.8 | Flip `private: false`, add `publishConfig`, ship to npm | future |
+| 8 | AISDLC-100.8 / AISDLC-245.1 | Publish as `@ai-sdlc/pipeline-cli` to npm; `ai-sdlc-plugin` declares it as `runtimeDependencies` | shipped |
 
 See [`spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md`](../spec/rfcs/RFC-0012-two-tier-pipeline-architecture.md)
 for the full design.
