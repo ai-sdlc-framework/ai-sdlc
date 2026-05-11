@@ -44,6 +44,12 @@ async function setup(): Promise<Setup> {
 
   // Seed clone with main + feature branch
   await execFileAsync('git', ['clone', '-q', origin, seed], { env: makeGitEnv() });
+  // Per-repo identity in .git/config so production code's `git rebase`
+  // (which inherits process.env without GIT_AUTHOR_*) can find an identity.
+  // Safe alongside env: makeGitEnv() — GIT_DIR is not polluted, so this
+  // write lands in seed/.git/config (not the host worktree's config).
+  await git(seed, 'config', 'user.email', 'test@test.invalid');
+  await git(seed, 'config', 'user.name', 'Test');
   await writeFile(join(seed, 'README.md'), 'init\n');
   await git(seed, 'add', 'README.md');
   await git(seed, 'commit', '-q', '-m', 'init');
@@ -59,8 +65,10 @@ async function setup(): Promise<Setup> {
   await git(seed, 'commit', '-q', '-m', 'feat-init');
   await git(seed, 'push', '-q', '-u', 'origin', feature);
 
-  // Work clone (simulates pipeline's worktree)
+  // Work clone (simulates pipeline's worktree). Same per-repo identity as seed.
   await execFileAsync('git', ['clone', '-q', origin, workClone], { env: makeGitEnv() });
+  await git(workClone, 'config', 'user.email', 'test@test.invalid');
+  await git(workClone, 'config', 'user.name', 'Test');
   await git(workClone, 'fetch', 'origin', feature);
   await git(workClone, 'checkout', '-q', feature);
 
@@ -82,6 +90,9 @@ async function setupNoDrift(): Promise<Setup> {
 
   await execFileAsync('git', ['init', '-q', '--bare', origin], { env: makeGitEnv() });
   await execFileAsync('git', ['clone', '-q', origin, workClone], { env: makeGitEnv() });
+  // Per-repo identity for production-code rebase + commit (see setup() comment).
+  await git(workClone, 'config', 'user.email', 'test@test.invalid');
+  await git(workClone, 'config', 'user.name', 'Test');
   await writeFile(join(workClone, 'README.md'), 'init\n');
   await git(workClone, 'add', 'README.md');
   await git(workClone, 'commit', '-q', '-m', 'init');
