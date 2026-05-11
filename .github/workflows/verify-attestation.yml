@@ -206,8 +206,14 @@ jobs:
           # names (e.g. `release/1.0`) — the queue branch is
           # `gh-readonly-queue/<base>/pr-<N>-<sha>` where <base> may itself
           # contain slashes, but pr-<N> always precedes the trailing -<sha>.
+          # GitHub passes the merge_group head_ref WITH a `refs/heads/`
+          # prefix (witnessed in workflow logs as
+          # `refs/heads/gh-readonly-queue/...`), so the regex makes the
+          # prefix optional. Without that, every release-please merge_group
+          # event fell through to full envelope verification and posted
+          # `contentHashV4 mismatch`, looping the queue.
           if [ "$IS_RP" = 'false' ] && [ -n "${MERGE_GROUP_HEAD_REF:-}" ]; then
-            PR_NUM=$(printf '%s' "$MERGE_GROUP_HEAD_REF" | sed -nE 's|^gh-readonly-queue/.*/pr-([0-9]+)-[^/]*$|\1|p')
+            PR_NUM=$(printf '%s' "$MERGE_GROUP_HEAD_REF" | sed -nE 's|^(refs/heads/)?gh-readonly-queue/.*/pr-([0-9]+)-[^/]*$|\2|p')
             if [ -n "$PR_NUM" ]; then
               # No `|| echo ''` — we want gh failure to fail the step loud.
               # `set -e` is on; non-zero exit surfaces as a step failure with
