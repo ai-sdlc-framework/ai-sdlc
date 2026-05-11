@@ -386,6 +386,29 @@ describe('Step 2 — readBranchPattern', () => {
     const logger = makeRecordingLogger();
     expect(readBranchPattern(tmp, undefined, logger)).toBe('test/{slug}');
   });
+
+  // AISDLC-245.5 round-2 code-reviewer MINOR regression: when spec.backlog
+  // exists but lacks branching, the lookup MUST NOT fall through to a sibling
+  // spec.branching.pattern (which is a different config — backlog branching is
+  // for /ai-sdlc execute, while spec.branching could be a future workflow setting).
+  it('does NOT cross spec.backlog into a sibling top-level branching (section-scoped)', () => {
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      [
+        'spec:',
+        '  backlog:',
+        '    pullRequest:',
+        "      titleTemplate: 'feat: {issueTitle}'",
+        '  branching:',
+        "    pattern: 'WRONG/{issueIdLower}'",
+      ].join('\n') + '\n',
+    );
+    const logger = makeRecordingLogger();
+    // backlog has no branching.pattern → MUST return fallback, NOT 'WRONG/...'
+    // from the sibling spec.branching block.
+    expect(readBranchPattern(tmp, 'fallback/{slug}', logger)).toBe('fallback/{slug}');
+    expect(logger.warnings).toHaveLength(0);
+  });
 });
 
 // AISDLC-245.5 — migration equivalence: an adopter who edits pipeline-backlog.yaml
@@ -398,6 +421,10 @@ describe('Step 2 — migration equivalence (AISDLC-245.5)', () => {
     'ai-sdlc/{issueIdLower}-{slug}',
     'feat/{issueIdLower}/{slug}',
     'custom/{issueIdLower}',
+    // Test-reviewer round-2 suggestion: include a pattern with characters that
+    // are YAML-sensitive in unquoted scalar context (the YAML reader uses
+    // single-quoted form, but some adopters write the legacy shape unquoted).
+    'release/{issueIdLower}.{slug}',
   ];
 
   for (const pattern of PATTERNS) {

@@ -101,6 +101,38 @@ describe('validate()', () => {
     expect(result.valid).toBe(false);
   });
 
+  // AISDLC-245.5 — additional malformed-value rejection coverage (test-reviewer
+  // round-2 suggestion). Guards the new BacklogConfig schema against accidental
+  // type drift in adopter pipeline.yaml files.
+  it('rejects spec.backlog.branching.pattern when not a string', () => {
+    const doc = {
+      ...VALID_MINIMAL_PIPELINE,
+      spec: {
+        ...VALID_MINIMAL_PIPELINE.spec,
+        backlog: {
+          branching: { pattern: 12345 },
+        },
+      },
+    };
+    const result = validate('Pipeline', doc);
+    expect(result.valid).toBe(false);
+  });
+
+  it('rejects spec.backlog.pullRequest.descriptionSections when not an array', () => {
+    const doc = {
+      ...VALID_MINIMAL_PIPELINE,
+      spec: {
+        ...VALID_MINIMAL_PIPELINE.spec,
+        backlog: {
+          branching: { pattern: 'ai-sdlc/{issueIdLower}' },
+          pullRequest: { descriptionSections: 'summary,changes' },
+        },
+      },
+    };
+    const result = validate('Pipeline', doc);
+    expect(result.valid).toBe(false);
+  });
+
   it('rejects a Pipeline missing stages', () => {
     const doc = {
       apiVersion: 'ai-sdlc.io/v1alpha1',

@@ -124,6 +124,31 @@ describe('Step 11 — readTitleTemplate', () => {
     expect(readTitleTemplate(tmp, logger)).toMatch(/feat: \{issueTitle\}/);
     expect(logger.warnings).toHaveLength(0);
   });
+
+  // AISDLC-245.5 round-2 code-reviewer MAJOR regression: when spec.backlog
+  // exists but lacks pullRequest, the lookup MUST NOT fall through to a
+  // sibling spec.pullRequest.titleTemplate (which is a different config).
+  // Pre-fix the broad regex would silently misread spec.pullRequest.titleTemplate
+  // as if it were spec.backlog.pullRequest.titleTemplate.
+  it('does NOT cross spec.backlog into sibling spec.pullRequest (section-scoped)', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      [
+        'spec:',
+        '  backlog:',
+        '    branching:',
+        "      pattern: 'ai-sdlc/{issueIdLower}'",
+        '  pullRequest:',
+        "    titleTemplate: 'WRONG: {issueTitle}'",
+      ].join('\n') + '\n',
+    );
+    const logger = makeRecordingLogger();
+    // backlog has no pullRequest.titleTemplate → MUST return default,
+    // NOT 'WRONG: {issueTitle}' from the sibling spec.pullRequest.
+    expect(readTitleTemplate(tmp, logger)).toMatch(/feat: \{issueTitle\}/);
+    expect(logger.warnings).toHaveLength(0);
+  });
 });
 
 // AISDLC-245.5 — migration equivalence: an adopter who edits pipeline-backlog.yaml

@@ -27,7 +27,7 @@
  * @module steps/11-push-and-pr
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import {
@@ -36,6 +36,7 @@ import {
   type PushAndPrOptions,
   type PushAndPrResult,
 } from '../types.js';
+import { parseLegacyKey, parsePipelineBacklogKey } from './02-compute-branch.js';
 import { lateRebase } from './11-late-rebase.js';
 
 export interface PushAndPrStepOptions extends PushAndPrOptions {
@@ -64,47 +65,29 @@ const DEFAULT_TITLE_TEMPLATE = 'feat: {issueTitle} ({issueId})';
  */
 export function readTitleTemplate(workDir: string, logger?: PipelineLogger): string {
   // --- 1. Canonical path: pipeline.yaml spec.backlog.pullRequest.titleTemplate ---
+  // Uses real YAML parsing (js-yaml via parsePipelineBacklogKey from step-02)
+  // so the lookup is properly section-scoped: a missing
+  // `spec.backlog.pullRequest.titleTemplate` does NOT fall through to a
+  // sibling `spec.pullRequest.titleTemplate` (AISDLC-245.5 code-reviewer
+  // round-2 MAJOR finding).
   const pipelineYamlPath = join(workDir, '.ai-sdlc', 'pipeline.yaml');
   if (existsSync(pipelineYamlPath)) {
-    let raw: string;
-    try {
-      raw = readFileSync(pipelineYamlPath, 'utf8');
-    } catch {
-      raw = '';
-    }
-    // Match `backlog:` section with nested `pullRequest:` → `titleTemplate:`.
-    const backlogSection = raw.match(/^backlog:\s*[\r\n]((?:[ \t]+[^\r\n]*[\r\n])*)/m);
-    if (backlogSection) {
-      const m = backlogSection[0].match(
-        /pullRequest:\s*[\r\n]+\s*titleTemplate:\s*['"]?([^'"\r\n]+)['"]?/,
-      );
-      if (m) return m[1].trim();
-    }
-    // Also handle full Pipeline kind document shape.
-    const specBacklogM = raw.match(
-      /spec:\s*[\r\n](?:[\s\S]*?)backlog:\s*[\r\n](?:[\s\S]*?)pullRequest:\s*[\r\n]\s*titleTemplate:\s*['"]?([^'"\r\n]+)['"]?/,
-    );
-    if (specBacklogM) return specBacklogM[1].trim();
+    const tpl = parsePipelineBacklogKey<string>(pipelineYamlPath, ['pullRequest', 'titleTemplate']);
+    if (typeof tpl === 'string' && tpl.length > 0) return tpl;
   }
 
   // --- 2. Deprecated shim: pipeline-backlog.yaml pullRequest.titleTemplate ---
   const legacyPath = join(workDir, '.ai-sdlc', 'pipeline-backlog.yaml');
   if (!existsSync(legacyPath)) return DEFAULT_TITLE_TEMPLATE;
-  let raw: string;
-  try {
-    raw = readFileSync(legacyPath, 'utf8');
-  } catch {
-    return DEFAULT_TITLE_TEMPLATE;
-  }
-  const m = raw.match(/pullRequest:\s*[\r\n]+\s*titleTemplate:\s*['"]?([^'"\r\n]+)['"]?/);
-  if (m) {
+  const tpl = parseLegacyKey<string>(legacyPath, ['pullRequest', 'titleTemplate']);
+  if (typeof tpl === 'string' && tpl.length > 0) {
     const log = logger ?? DEFAULT_LOGGER;
     log.warn(
       '[ai-sdlc] DEPRECATION: reading pullRequest.titleTemplate from .ai-sdlc/pipeline-backlog.yaml. ' +
         'Migrate this setting to .ai-sdlc/pipeline.yaml under spec.backlog.pullRequest.titleTemplate. ' +
         'pipeline-backlog.yaml will be removed in the next major release (AISDLC-245.5).',
     );
-    return m[1].trim();
+    return tpl;
   }
   return DEFAULT_TITLE_TEMPLATE;
 }

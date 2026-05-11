@@ -17,6 +17,7 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { load as yamlLoad } from 'js-yaml';
 import {
   DEFAULT_LOGGER,
   type ComputeBranchResult,
@@ -74,52 +75,100 @@ export function readBranchPattern(
   logger?: PipelineLogger,
 ): string {
   // --- 1. Canonical path: pipeline.yaml spec.backlog.branching.pattern ---
+  // Uses real YAML parsing (js-yaml) so the lookup is properly section-scoped:
+  // `spec.backlog.branching.pattern` cannot accidentally fall through to a
+  // sibling `spec.branching.pattern` if backlog lacks the key.
   const pipelineYamlPath = join(workDir, '.ai-sdlc', 'pipeline.yaml');
   if (existsSync(pipelineYamlPath)) {
-    let raw: string;
-    try {
-      raw = readFileSync(pipelineYamlPath, 'utf8');
-    } catch {
-      raw = '';
-    }
-    // Look for `backlog:` block with a nested `branching:` → `pattern:` key.
-    // Uses a two-pass regex: first capture the `backlog:` section, then extract
-    // `branching.pattern` from within it (tolerates arbitrary nesting depth).
-    const backlogSection = raw.match(/^backlog:\s*[\r\n]((?:[ \t]+[^\r\n]*[\r\n])*)/m);
-    if (backlogSection) {
-      const m = backlogSection[0].match(/branching:\s*[\r\n]+\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/);
-      if (m) return m[1].trim();
-    }
-    // Also handle `spec:\n  backlog:\n    branching:\n      pattern:` shape
-    // (full Pipeline kind document).
-    const specBacklogM = raw.match(
-      /spec:\s*[\r\n](?:[\s\S]*?)backlog:\s*[\r\n](?:[\s\S]*?)branching:\s*[\r\n]\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/,
-    );
-    if (specBacklogM) return specBacklogM[1].trim();
+    const pattern = parsePipelineBacklogKey<string>(pipelineYamlPath, ['branching', 'pattern']);
+    if (typeof pattern === 'string' && pattern.length > 0) return pattern;
   }
 
   // --- 2. Deprecated shim: pipeline-backlog.yaml branching.pattern ---
   const legacyPath = join(workDir, '.ai-sdlc', 'pipeline-backlog.yaml');
   if (existsSync(legacyPath)) {
-    let raw: string;
-    try {
-      raw = readFileSync(legacyPath, 'utf8');
-    } catch {
-      return fallback;
-    }
-    const m = raw.match(/branching:\s*[\r\n]+\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/);
-    if (m) {
+    const pattern = parseLegacyKey<string>(legacyPath, ['branching', 'pattern']);
+    if (typeof pattern === 'string' && pattern.length > 0) {
       const log = logger ?? DEFAULT_LOGGER;
       log.warn(
         '[ai-sdlc] DEPRECATION: reading branching.pattern from .ai-sdlc/pipeline-backlog.yaml. ' +
           'Migrate this setting to .ai-sdlc/pipeline.yaml under spec.backlog.branching.pattern. ' +
           'pipeline-backlog.yaml will be removed in the next major release (AISDLC-245.5).',
       );
-      return m[1].trim();
+      return pattern;
     }
   }
 
   return fallback;
+}
+
+/**
+ * Read `<keyPath>` from `pipeline.yaml`'s backlog section, accepting BOTH
+ * shapes the schema permits:
+ *   - top-level `backlog:` block
+ *   - nested `spec.backlog:` block (canonical Pipeline kind document)
+ *
+ * Returns the resolved value or `undefined`. Section-scoped — a missing key
+ * inside `backlog` does NOT fall through to a sibling `spec.<key>` block
+ * (AISDLC-245.5 code-reviewer round-2 finding).
+ *
+ * Exported for internal reuse by step-11 (`readTitleTemplate`).
+ */
+export function parsePipelineBacklogKey<T>(
+  pipelineYamlPath: string,
+  keyPath: readonly string[],
+): T | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(pipelineYamlPath, 'utf8');
+  } catch {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = yamlLoad(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object') return undefined;
+  const root = parsed as Record<string, unknown>;
+  const backlog = (root.backlog ?? (root.spec as Record<string, unknown> | undefined)?.backlog) as
+    | Record<string, unknown>
+    | undefined;
+  if (!backlog || typeof backlog !== 'object') return undefined;
+  return walkKeyPath<T>(backlog, keyPath);
+}
+
+/**
+ * Read `<keyPath>` from `pipeline-backlog.yaml`'s top-level shape. Returns
+ * `undefined` when absent. Used by deprecated-fallback paths only.
+ *
+ * Exported for internal reuse by step-11.
+ */
+export function parseLegacyKey<T>(legacyPath: string, keyPath: readonly string[]): T | undefined {
+  let raw: string;
+  try {
+    raw = readFileSync(legacyPath, 'utf8');
+  } catch {
+    return undefined;
+  }
+  let parsed: unknown;
+  try {
+    parsed = yamlLoad(raw);
+  } catch {
+    return undefined;
+  }
+  if (parsed === null || typeof parsed !== 'object') return undefined;
+  return walkKeyPath<T>(parsed as Record<string, unknown>, keyPath);
+}
+
+function walkKeyPath<T>(root: Record<string, unknown>, keyPath: readonly string[]): T | undefined {
+  let cur: unknown = root;
+  for (const segment of keyPath) {
+    if (!cur || typeof cur !== 'object') return undefined;
+    cur = (cur as Record<string, unknown>)[segment];
+  }
+  return cur as T | undefined;
 }
 
 export async function computeBranchName(opts: ComputeBranchOptions): Promise<ComputeBranchResult> {
