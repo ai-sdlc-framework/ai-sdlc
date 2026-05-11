@@ -1,7 +1,7 @@
 ---
 id: AISDLC-248
 title: Release readiness + project repositioning (beyond "governance")
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-09 19:30'
 labels:
@@ -53,3 +53,26 @@ This task GATES on the current backlog reaching zero open PRs. Don't dispatch su
 - [ ] #4 Operator confirms website messaging matches the new positioning before release announcement
 <!-- SECTION:ACCEPTANCE:END -->
 <!-- SECTION:DESCRIPTION:END -->
+
+## Final Summary
+
+**Closed: all 3 sub-phases shipped 2026-05-11.**
+
+| Sub-task | Outcome |
+|---|---|
+| 248.1 release runbook + cut release | ✅ shipped — v0.10.0 across all publishable workspaces (PR #449) |
+| 248.2 docs refresh (README + CLAUDE.md + docs/operations) | ✅ shipped earlier in the sprint |
+| 248.3 website messaging update | ✅ shipped to ai-sdlc-io main (4 commits) |
+
+Acceptance criteria:
+- AC #1 (all 3 sub-tasks Done) ✅
+- AC #2 (released version ships on npm with all workspaces bumped consistently) ✅ — verified via `npm view`
+- AC #3 (README's first 3 paragraphs accurately position as autonomous AI-SDLC framework) ✅ — covered in 248.2
+- AC #4 (operator confirms website messaging matches new positioning before release announcement) ✅ — operator confirmed close-out 2026-05-11
+
+The project's repositioning from "AI-SDLC governance" to "the autonomous AI-SDLC framework" is now reflected in:
+- README + CLAUDE.md (in repo)
+- docs/operations runbooks
+- Website hero + features grid + footer + metadata
+- New `content/docs/concepts/` section covering the five pillars
+- Spec primer Section 1
