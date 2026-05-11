@@ -75,6 +75,43 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 |-------|-------------|
 | `ai-sdlc-governance` | Auto-loaded governance rules, blocked actions, and pre-commit checklist |
 
+## Path resolution conventions (AISDLC-245.4)
+
+Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scripts. They must work in two layouts:
+
+| Layout | `CLAUDE_PLUGIN_DIR` | `pipeline-cli` location |
+|--------|---------------------|-------------------------|
+| Adopter install (npm/marketplace) | Set by Claude Code to the plugin install dir | `$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/` |
+| Dogfood monorepo (this repo) | Unset | `$(pwd)/pipeline-cli/` |
+
+**Rule: never hardcode `node pipeline-cli/bin/cli-XXX.mjs` or `node ai-sdlc-plugin/scripts/XXX.mjs` in a slash command body.** Use the portable variables established at the top of every command body:
+
+```bash
+# PIPELINE_CLI_BIN — resolves pipeline-cli/bin in both layouts:
+if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
+  PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
+else
+  PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
+fi
+
+# PLUGIN_SCRIPTS_DIR — resolves plugin-internal scripts (compute-slug.mjs etc.):
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-$(pwd)/ai-sdlc-plugin}/scripts"
+```
+
+Then invoke CLIs as:
+
+```bash
+# pipeline-cli binary
+node "$PIPELINE_CLI_BIN/cli-deps.mjs" preflight "$TASK_ID" ...
+
+# plugin-internal script
+node "$PLUGIN_SCRIPTS_DIR/compute-slug.mjs" "$TASK_FILE"
+```
+
+**Note on `CLAUDE_PLUGIN_ROOT`:** for plugin-internal scripts already using `${CLAUDE_PLUGIN_ROOT}` (e.g. `sign-attestation.mjs` invocations in `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase`), leave those unchanged — Claude Code injects `CLAUDE_PLUGIN_ROOT` at session start and it is always available in the main session context. `PLUGIN_SCRIPTS_DIR` is only needed for early invocations (before the session hook fires) or in adopter layouts where the harness version may differ.
+
+**Enforcement:** `ai-sdlc-plugin/commands/execute.test.mjs` and `orchestrator-tick.test.mjs` both contain assertions (AISDLC-245.4 suite) that scan the command body for bare `node pipeline-cli/bin/...` invocations and fail the test run if found. When adding a new slash command, copy the path-resolution preamble above and add a similar regression test.
+
 ## Cross-harness review
 
 See `docs/operations/cross-harness-review.md` for the bidirectional convention, cost/latency comparison, and Codex CLI prerequisites.

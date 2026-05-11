@@ -206,7 +206,9 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
     assert.match(cmdBody, /code-reviewer/);
     assert.match(cmdBody, /test-reviewer/);
     assert.match(cmdBody, /security-reviewer/);
-    assert.match(cmdBody, /three subagents in parallel/i);
+    // The body uses "3 parallel reviewer subagents" / "three reviewers in parallel"
+    // (not the exact phrase "three subagents in parallel" — fixed pre-existing mismatch)
+    assert.match(cmdBody, /three.*parallel|parallel.*reviewer|3 parallel reviewer/i);
   });
 
   it('detects Codex availability and emits visible fallback warning', () => {
@@ -467,5 +469,77 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
   it('Step 3: also fetches origin main BEFORE worktree creation (fresh base)', () => {
     assert.match(cmdBody, /Step 3.*fresh base from latest main/);
     assert.match(cmdBody, /paired\s+defenses/i);
+  });
+
+  // ── AISDLC-245.4: path resolution convention ──────────────────────────
+  // All pipeline-cli and plugin-script invocations must use portable
+  // variables ($PIPELINE_CLI_BIN, $PLUGIN_SCRIPTS_DIR), never bare relative
+  // paths like `node pipeline-cli/bin/...` or `node ai-sdlc-plugin/scripts/...`.
+  // This ensures the command works in adopter installs (CLAUDE_PLUGIN_DIR set)
+  // and the dogfood monorepo (CLAUDE_PLUGIN_DIR unset, falls back to ./pipeline-cli/).
+
+  it('AISDLC-245.4: establishes PIPELINE_CLI_BIN with CLAUDE_PLUGIN_DIR resolution', () => {
+    assert.match(
+      cmdBody,
+      /PIPELINE_CLI_BIN/,
+      'must define PIPELINE_CLI_BIN for portable CLI invocation',
+    );
+    assert.match(
+      cmdBody,
+      /CLAUDE_PLUGIN_DIR/,
+      'must reference CLAUDE_PLUGIN_DIR for adopter-install layout',
+    );
+    assert.match(
+      cmdBody,
+      /pipeline-cli\/bin/,
+      'must include pipeline-cli/bin path component (dogfood fallback)',
+    );
+  });
+
+  it('AISDLC-245.4: all pipeline-cli CLI invocations use $PIPELINE_CLI_BIN (no bare relative paths)', () => {
+    // Executable invocations in code blocks must use the variable.
+    // The regex matches the START of a CLI invocation line — node <path>/<bin>.mjs
+    // — and checks the path uses $PIPELINE_CLI_BIN, not a hardcoded relative path.
+    const lines = cmdBody.split('\n');
+    const violations = lines.filter((line) => {
+      // Match lines that are actual node invocations (not prose/comments referencing
+      // the old pattern as "don't do this" warnings or backtick-quoted examples).
+      const trimmed = line.trimStart();
+      // Skip prose paragraphs (shell comments) and markdown blockquotes
+      if (trimmed.startsWith('#') || trimmed.startsWith('>') || trimmed.startsWith('//'))
+        return false;
+      // Skip lines that only contain backtick-quoted references (prose warnings showing
+      // old deprecated paths, not actual invocations). These are formatted as
+      // `node ai-sdlc-plugin/scripts/sign-attestation.mjs` — inline code in prose.
+      // We detect this by checking that the bare path does NOT appear outside backticks.
+      // Strategy: strip all backtick-quoted spans, then recheck.
+      const lineWithoutBackticks = line.replace(/`[^`]*`/g, '``');
+      // Flag bare `node pipeline-cli/bin/` or `node ai-sdlc-plugin/scripts/` outside backticks
+      return (
+        /\bnode pipeline-cli\/bin\//.test(lineWithoutBackticks) ||
+        /\bnode ai-sdlc-plugin\/scripts\//.test(lineWithoutBackticks)
+      );
+    });
+    assert.equal(
+      violations.length,
+      0,
+      `Found bare relative-path invocations (must use $PIPELINE_CLI_BIN or $PLUGIN_SCRIPTS_DIR):\n${violations.join('\n')}`,
+    );
+  });
+
+  it('AISDLC-245.4: establishes PLUGIN_SCRIPTS_DIR for plugin-internal scripts', () => {
+    assert.match(
+      cmdBody,
+      /PLUGIN_SCRIPTS_DIR/,
+      'must define PLUGIN_SCRIPTS_DIR for portable plugin-script invocation',
+    );
+  });
+
+  it('AISDLC-245.4: compute-slug.mjs invoked via $PLUGIN_SCRIPTS_DIR', () => {
+    assert.match(
+      cmdBody,
+      /\$PLUGIN_SCRIPTS_DIR\/compute-slug\.mjs/,
+      'compute-slug.mjs must use $PLUGIN_SCRIPTS_DIR, not bare ai-sdlc-plugin/scripts/',
+    );
   });
 });

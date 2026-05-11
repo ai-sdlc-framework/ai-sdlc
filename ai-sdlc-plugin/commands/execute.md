@@ -42,6 +42,50 @@ Step 4 below writes the active-task sentinel at `<worktree>/.active-task` (per-w
 
 If you find yourself trying to write `.worktrees/.active-task` at the project root, stop — that's the wrong path and would race with parallel runs.
 
+## Path resolution (AISDLC-245.4)
+
+<!-- PATH-RESOLUTION:BEGIN
+  Convention: every pipeline-cli CLI invocation and every plugin-internal script invocation
+  uses variables established here. This makes the command body work in two layouts:
+
+  1. Adopter install (npm/marketplace): CLAUDE_PLUGIN_DIR is set by Claude Code to the
+     plugin's install directory, which contains node_modules/@ai-sdlc/pipeline-cli.
+  2. Dogfood monorepo (this repo): CLAUDE_PLUGIN_DIR is unset; the pipeline-cli workspace
+     lives at $(pwd)/pipeline-cli/ relative to the project root.
+
+  For plugin-internal scripts (compute-slug.mjs, sign-attestation.mjs, etc.),
+  CLAUDE_PLUGIN_ROOT is already set by Claude Code to the plugin directory — use that
+  for scripts that ship with the plugin itself. PLUGIN_SCRIPTS_DIR is an alias for it
+  with a dogfood fallback, used only for scripts invoked early (before CLAUDE_PLUGIN_ROOT
+  is guaranteed by the harness).
+
+  These variables MUST be established before the first CLI invocation and MUST NOT be
+  re-assigned within a step. See ai-sdlc-plugin/README.md "Path resolution conventions".
+PATH-RESOLUTION:END -->
+
+```bash
+# AISDLC-245.4: Resolve pipeline-cli binaries and plugin scripts portably.
+#
+# PIPELINE_CLI_BIN — directory containing cli-*.mjs binaries:
+#   - Adopter install: $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin
+#   - Dogfood monorepo (CLAUDE_PLUGIN_DIR unset): ./pipeline-cli/bin
+#
+if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
+  PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
+else
+  PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
+fi
+
+# PLUGIN_SCRIPTS_DIR — plugin-internal scripts (compute-slug.mjs etc.):
+#   - Adopter install: $CLAUDE_PLUGIN_DIR/scripts  (CLAUDE_PLUGIN_ROOT is the same)
+#   - Dogfood monorepo: $(pwd)/ai-sdlc-plugin/scripts
+#
+# For scripts that already use CLAUDE_PLUGIN_ROOT (sign-attestation.mjs), leave
+# those invocations unchanged — CLAUDE_PLUGIN_ROOT is injected by Claude Code
+# at session start and is always available in the main session context.
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-$(pwd)/ai-sdlc-plugin}/scripts"
+```
+
 ## Step 0 — Self-heal orchestrator state + sweep merged worktrees
 
 First, ensure the parent (orchestrator) repo is in the right state for worktree creation. The parent's working tree on `main` is **read-only** by Pattern C contract (project memory `project_orchestrator_repo_layout.md`) — all edits happen in `.worktrees/<task-id>/`. This makes it safe to auto-sync the parent to current `origin/main` at the start of every dispatch.
@@ -105,7 +149,7 @@ This step is a **safety net** (backstop). AISDLC-216 is the upstream fix; Step 0
 7. If all untracked task files are already on `origin/main` → no-op (logs "already there, skipping").
 
 ```bash
-SYNC_RESULT=$(node pipeline-cli/bin/ai-sdlc-pipeline.mjs sync-parent --work-dir "$(pwd)" 2>&1)
+SYNC_RESULT=$(node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs" sync-parent --work-dir "$(pwd)" 2>&1)
 SYNC_EXIT=$?
 if [ "$SYNC_EXIT" -ne 0 ]; then
   echo "ERROR (Step 0.5): $SYNC_RESULT"
@@ -116,7 +160,7 @@ fi
 echo "[Step 0.5] $SYNC_RESULT"
 ```
 
-> **Implementation note.** The `sync-parent` subcommand is backed by `pipeline-cli/src/steps/00-5-sync-parent.ts` (`syncParentUntrackedFiles`). It follows the same `Runner` injection pattern as all other steps so it is fully hermetic under test. Invoke via `node pipeline-cli/bin/ai-sdlc-pipeline.mjs` (never `pnpm exec` — see CLAUDE.md "CI behavior" / AISDLC-156).
+> **Implementation note.** The `sync-parent` subcommand is backed by `pipeline-cli/src/steps/00-5-sync-parent.ts` (`syncParentUntrackedFiles`). It follows the same `Runner` injection pattern as all other steps so it is fully hermetic under test. Invoke via `node "$PIPELINE_CLI_BIN/ai-sdlc-pipeline.mjs"` (never `pnpm exec` — see CLAUDE.md "CI behavior" / AISDLC-156).
 
 > **Non-blocking contract.** Even when the sync PR opens, Step 0.5 returns immediately and Step 1 proceeds. The parent's untracked files remain until the operator runs `git clean -f backlog/tasks/aisdlc-N*.md` (or until the next Step 0 self-heal after the sync PR merges — at that point the files are on `origin/main`, `git reset --hard origin/main` is safe, and the parent is fully clean again).
 
@@ -147,13 +191,13 @@ Before creating the worktree, refuse to start a task whose dependencies aren't a
 # cli-deps is the AISDLC-117 dependency-graph CLI shipped from @ai-sdlc/pipeline-cli.
 # Exits 0 if every dependency is in backlog/completed/; exits non-zero with a
 # JSON `{ok, reason, blockers, dangling}` envelope on stderr otherwise.
-PREFLIGHT_OUT=$(node pipeline-cli/bin/cli-deps.mjs preflight "$TASK_ID" --work-dir "$(pwd)" 2>&1)
+PREFLIGHT_OUT=$(node "$PIPELINE_CLI_BIN/cli-deps.mjs" preflight "$TASK_ID" --work-dir "$(pwd)" 2>&1)
 PREFLIGHT_EXIT=$?
 if [ "$PREFLIGHT_EXIT" -ne 0 ]; then
   echo "ERROR: dependency preflight failed for $TASK_ID:"
   echo "$PREFLIGHT_OUT"
   echo ""
-  echo "To inspect the dispatch-ready frontier instead: node pipeline-cli/bin/cli-deps.mjs frontier --format table"
+  echo "To inspect the dispatch-ready frontier instead: node \"$PIPELINE_CLI_BIN/cli-deps.mjs\" frontier --format table"
   exit 1
 fi
 ```
@@ -165,10 +209,10 @@ This step is fail-closed: if `cli-deps` itself errors (binary not built, broken 
 For `/loop /ai-sdlc execute` runs (and ad-hoc multi-task dispatch), the operator should consult the dispatch-ready frontier before picking a candidate rather than relying on instinct. This is the same data the AISDLC-117 task description called out as the cure for "manual dependency tracing":
 
 ```bash
-node pipeline-cli/bin/cli-deps.mjs frontier --format table
+node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format table
 ```
 
-If `$TASK_ID` is on the printed list (or independent of the listed items), proceed. If not, the task's blockers are still open — `node pipeline-cli/bin/cli-deps.mjs blockers $TASK_ID --format table` lists what to ship first. The loop driver SHOULD prefer frontier tasks; the slash command body's Step 1.5 is the hard gate that refuses non-ready tasks regardless of where the dispatch decision came from.
+If `$TASK_ID` is on the printed list (or independent of the listed items), proceed. If not, the task's blockers are still open — `node "$PIPELINE_CLI_BIN/cli-deps.mjs" blockers $TASK_ID --format table` lists what to ship first. The loop driver SHOULD prefer frontier tasks; the slash command body's Step 1.5 is the hard gate that refuses non-ready tasks regardless of where the dispatch decision came from.
 
 ## Step 2 — Compute branch name
 
@@ -183,7 +227,9 @@ BRANCH_PATTERN=$(grep -A2 'branching:' .ai-sdlc/pipeline-backlog.yaml | grep 'pa
 # then yielded a malformed branch like `ai-sdlc/aisdlc-178.1-`. The script
 # is dependency-free (no js-yaml), handles every title form the serializer
 # emits, and exits non-zero with a clear error if the slug would be empty.
-SLUG=$(node ai-sdlc-plugin/scripts/compute-slug.mjs "$TASK_FILE") || {
+# AISDLC-245.4: $PLUGIN_SCRIPTS_DIR resolves to $CLAUDE_PLUGIN_DIR/scripts
+# (adopter install) or ./ai-sdlc-plugin/scripts (dogfood monorepo).
+SLUG=$(node "$PLUGIN_SCRIPTS_DIR/compute-slug.mjs" "$TASK_FILE") || {
   echo "ERROR: failed to compute slug for $TASK_ID — see stderr above"
   exit 1
 }
@@ -307,7 +353,7 @@ mkdir -p "$ARTIFACTS_DIR"
 # A non-zero exit from the CLI itself would abort, but the CLI is designed
 # to fall open and exit 0 with a fellOpen=true decision instead — see
 # pipeline-cli/src/cli/classify-pr.ts.
-CLASSIFIER_JSON=$(node pipeline-cli/bin/cli-classify-pr.mjs classify \
+CLASSIFIER_JSON=$(node "$PIPELINE_CLI_BIN/cli-classify-pr.mjs" classify \
   --paths-file "/tmp/pr-files-${TASK_ID}.txt" \
   --issue-id "$TASK_ID" \
   --artifacts-dir "$ARTIFACTS_DIR" 2>/dev/null || echo '{"reviewers":["testing","critic","security"],"fellOpen":true,"fellOpenReason":"invocation-failed","confidence":0}')
@@ -421,7 +467,7 @@ fi
 
 # Pass --comments-json-file (NOT --comments-file) so the CLI's trusted-author
 # filter runs as defense-in-depth on top of the gh --jq filter above.
-INCREMENTAL_JSON=$(node pipeline-cli/bin/cli-incremental-decide.mjs decide \
+INCREMENTAL_JSON=$(node "$PIPELINE_CLI_BIN/cli-incremental-decide.mjs" decide \
   --comments-json-file "$PR_COMMENTS_JSON" \
   --base-ref origin/main \
   --head-ref HEAD \
@@ -849,7 +895,7 @@ ONLY if the gate decision in Step 8 was APPROVED (skip when `[needs-human-attent
 
 ```bash
 HEAD_SHA=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
-MARKER_BODY=$(node pipeline-cli/bin/cli-incremental-decide.mjs format-marker \
+MARKER_BODY=$(node "$PIPELINE_CLI_BIN/cli-incremental-decide.mjs" format-marker \
   --content-hash "$INCR_CONTENT_HASH" \
   --reviewed-sha "$HEAD_SHA")
 

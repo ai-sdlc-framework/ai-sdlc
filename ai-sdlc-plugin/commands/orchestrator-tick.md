@@ -44,15 +44,33 @@ orchestrator's tick loop.
 /ai-sdlc orchestrator-tick
   │
   ├── 1. Check AI_SDLC_AUTONOMOUS_ORCHESTRATOR is set
-  ├── 2. node pipeline-cli/bin/cli-orchestrator.mjs tick --max-concurrent 1
+  ├── 2. node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1
   │         └── if spawner=claude-cli: writes dispatch-manifest.json,
   │               returns {status: 'manifest-emitted'}
   ├── 3. Detect manifest-emitted in tick output
   ├── 4. Read $ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json
   ├── 5. Invoke Agent tool with manifest parameters
   ├── 6. Write result to $ARTIFACTS_DIR/_orchestrator/dispatch-result.json
-  ├── 7. node pipeline-cli/bin/cli-orchestrator.mjs tick (continues pipeline)
+  ├── 7. node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick (continues pipeline)
   └── 8. ScheduleWakeup(30s) — OR exit if --once passed
+```
+
+## Path resolution (AISDLC-245.4)
+
+<!-- PATH-RESOLUTION:BEGIN
+  Same convention as /ai-sdlc execute. See ai-sdlc-plugin/README.md
+  "Path resolution conventions" for details.
+PATH-RESOLUTION:END -->
+
+```bash
+# AISDLC-245.4: Resolve pipeline-cli binaries portably.
+#   - Adopter install: $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin
+#   - Dogfood monorepo (CLAUDE_PLUGIN_DIR unset): ./pipeline-cli/bin
+if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
+  PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
+else
+  PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
+fi
 ```
 
 ## Step 1 — Feature-flag guard
@@ -71,7 +89,7 @@ AISDLC-156 — never `pnpm --filter ... exec cli-orchestrator`):
 
 ```bash
 TICK_OUTPUT=$(AI_SDLC_AUTONOMOUS_ORCHESTRATOR="$AI_SDLC_AUTONOMOUS_ORCHESTRATOR" \
-  node pipeline-cli/bin/cli-orchestrator.mjs tick --max-concurrent 1 2>&1)
+  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1 2>&1)
 TICK_EXIT=$?
 echo "[orchestrator-tick] tick exited $TICK_EXIT"
 echo "$TICK_OUTPUT"
@@ -173,7 +191,7 @@ extract three values from the Agent's structured return:
   # succeeded.
 
   # After Agent completes, write dispatch-result.json
-  node pipeline-cli/bin/cli-orchestrator.mjs write-dispatch-result \
+  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" write-dispatch-result \
     --task-id "$TASK_ID" \
     --subagent-type "$SUBAGENT_TYPE" \
     --status "$STATUS" \
@@ -192,7 +210,7 @@ After the Agent result is written, run the continuation tick that picks up
 
 ```bash
 CONTINUATION_OUTPUT=$(AI_SDLC_AUTONOMOUS_ORCHESTRATOR="$AI_SDLC_AUTONOMOUS_ORCHESTRATOR" \
-  node pipeline-cli/bin/cli-orchestrator.mjs tick --max-concurrent 1 \
+  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1 \
     --continue-from-result 2>&1)
 echo "[orchestrator-tick] continuation tick: $CONTINUATION_OUTPUT"
 ```

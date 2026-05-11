@@ -109,10 +109,21 @@ describe('/ai-sdlc orchestrator-tick body — consumer bridge protocol', () => {
     );
   });
 
-  it('uses direct-node invocation for cli-orchestrator (CLAUDE.md AISDLC-156 rule)', () => {
+  it('uses direct-node invocation for cli-orchestrator via $PIPELINE_CLI_BIN (AISDLC-156, AISDLC-245.4)', () => {
+    // AISDLC-245.4: the bare relative path `node pipeline-cli/bin/cli-orchestrator.mjs`
+    // was replaced with `node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs"` so the command
+    // works in adopter installs (CLAUDE_PLUGIN_DIR set) and the dogfood monorepo.
     assert.ok(
-      cmdBody.includes('node pipeline-cli/bin/cli-orchestrator.mjs'),
-      'must invoke cli-orchestrator via node pipeline-cli/bin/cli-orchestrator.mjs',
+      cmdBody.includes('cli-orchestrator.mjs'),
+      'must reference cli-orchestrator.mjs binary',
+    );
+    assert.ok(
+      cmdBody.includes('PIPELINE_CLI_BIN'),
+      'must use $PIPELINE_CLI_BIN variable for cli-orchestrator invocation (AISDLC-245.4)',
+    );
+    assert.ok(
+      !cmdBody.includes('node pipeline-cli/bin/cli-orchestrator.mjs'),
+      'must NOT use bare relative path node pipeline-cli/bin/... (AISDLC-245.4)',
     );
     assert.ok(
       !cmdBody.includes('pnpm --filter @ai-sdlc/pipeline-cli exec cli-orchestrator'),
@@ -184,6 +195,45 @@ describe('/ai-sdlc orchestrator-tick body — hard rules', () => {
     assert.ok(
       cmdBody.includes('Never force-push') || cmdBody.includes('no.*force-push'),
       'must declare the no-force-push rule',
+    );
+  });
+});
+
+describe('/ai-sdlc orchestrator-tick body — AISDLC-245.4 path resolution', () => {
+  it('establishes PIPELINE_CLI_BIN with CLAUDE_PLUGIN_DIR resolution', () => {
+    assert.ok(
+      cmdBody.includes('PIPELINE_CLI_BIN'),
+      'must define PIPELINE_CLI_BIN for portable CLI invocation',
+    );
+    assert.ok(
+      cmdBody.includes('CLAUDE_PLUGIN_DIR'),
+      'must reference CLAUDE_PLUGIN_DIR for adopter-install layout',
+    );
+  });
+
+  it('all cli-orchestrator invocations use $PIPELINE_CLI_BIN, not bare relative paths', () => {
+    // Every actual invocation must use the portable variable.
+    // Prose explanations of the OLD pattern are allowed in backtick-quoted spans.
+    const lines = cmdBody.split('\n');
+    const violations = lines.filter((line) => {
+      const trimmed = line.trimStart();
+      if (trimmed.startsWith('#') || trimmed.startsWith('>') || trimmed.startsWith('//'))
+        return false;
+      // Strip backtick-quoted spans (inline code in prose warnings) before checking
+      const lineWithoutBackticks = line.replace(/`[^`]*`/g, '``');
+      return /\bnode pipeline-cli\/bin\//.test(lineWithoutBackticks);
+    });
+    assert.equal(
+      violations.length,
+      0,
+      `Found bare relative-path invocations (must use $PIPELINE_CLI_BIN):\n${violations.join('\n')}`,
+    );
+  });
+
+  it('includes dogfood fallback when CLAUDE_PLUGIN_DIR is unset', () => {
+    assert.ok(
+      cmdBody.includes('pipeline-cli/bin'),
+      'must include fallback path to dogfood monorepo pipeline-cli/bin',
     );
   });
 });
