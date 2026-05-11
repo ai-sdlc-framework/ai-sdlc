@@ -3,6 +3,19 @@ name: Release
 on:
   push:
     branches: [main]
+  # Manual trigger so an operator can regenerate a fresh release-please PR
+  # without needing a push to main. Useful when the existing release PR is
+  # closed/stale (release-please opens a new one only on the next push) or
+  # when the merge queue gets the existing PR into a wedged state and the
+  # cleanest reset is "delete the branch + start over".
+  #
+  # Usage:
+  #   gh workflow run release.yml --ref main
+  #
+  # The release-please action below detects the absence of the
+  # `release-please--branches--main` branch and creates a new one in the
+  # same job; no extra inputs needed.
+  workflow_dispatch: {}
 
 concurrency:
   group: release-${{ github.ref }}
