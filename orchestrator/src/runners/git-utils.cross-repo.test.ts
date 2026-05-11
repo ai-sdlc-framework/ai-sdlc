@@ -13,22 +13,21 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { detectCrossRepoWrites } from './git-utils.js';
-import { cleanGitEnv } from '../runtime/git-env.js';
+import { makeGitEnv } from '../__test-helpers/git-env.js';
 
 const execFileAsync = promisify(execFile);
 
-// cleanGitEnv() prevents leaked GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE
-// from binding these temp-repo commands to a parent worktree's git context
-// (the AISDLC-68 → AISDLC-72 surface story).
+// makeGitEnv() (AISDLC-257) constructs a minimal env that deliberately omits
+// GIT_DIR + GIT_WORK_TREE so test git commands always bind to the temp repo's
+// own .git, not a parent worktree's context. Identity is provided via
+// GIT_AUTHOR_* / GIT_COMMITTER_* so we don't need `git config user.email` writes.
 async function git(cwd: string, ...args: string[]): Promise<void> {
-  await execFileAsync('git', args, { cwd, env: cleanGitEnv() });
+  await execFileAsync('git', args, { cwd, env: makeGitEnv() });
 }
 
 async function makeRepo(dir: string): Promise<void> {
   await mkdir(dir);
   await git(dir, 'init', '-q');
-  await git(dir, 'config', 'user.email', 't@t.com');
-  await git(dir, 'config', 'user.name', 't');
   await writeFile(join(dir, 'README.md'), '# init\n');
   await git(dir, 'add', 'README.md');
   await git(dir, 'commit', '-q', '-m', 'init');

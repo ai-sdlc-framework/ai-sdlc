@@ -16,31 +16,23 @@ import { join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { captureCurrentBranch, restoreOriginalBranch } from './execute.js';
+import { makeGitEnv } from './__test-helpers/git-env.js';
 
 const execFileAsync = promisify(execFile);
 
-// Strip GIT_DIR / GIT_WORK_TREE / GIT_INDEX_FILE so test git commands run
-// inside tmpDir resolve against tmpDir's own .git rather than any parent
-// worktree's git dir. The husky pre-push hook exports GIT_DIR pointing at
-// the parent .git, which would otherwise corrupt these temp-repo commits
-// (and worse, leak commits into the parent branch). See AISDLC-72.
-function cleanGitEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env };
-  delete env.GIT_DIR;
-  delete env.GIT_WORK_TREE;
-  delete env.GIT_INDEX_FILE;
-  return env;
-}
+// makeGitEnv() (AISDLC-257) constructs a minimal env that deliberately omits
+// GIT_DIR + GIT_WORK_TREE so test git commands always bind to the temp repo's
+// own .git, not a parent worktree's context inherited from a husky hook.
+// Identity is provided via GIT_AUTHOR_* / GIT_COMMITTER_* so we don't need
+// `git config user.email` writes.
 
 async function git(cwd: string, ...args: string[]): Promise<void> {
-  await execFileAsync('git', args, { cwd, env: cleanGitEnv() });
+  await execFileAsync('git', args, { cwd, env: makeGitEnv() });
 }
 
 async function makeRepo(): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), 'execute-headrestore-'));
   await git(dir, 'init', '-q');
-  await git(dir, 'config', 'user.email', 'test@test.com');
-  await git(dir, 'config', 'user.name', 'test');
   await writeFile(join(dir, 'README.md'), '# initial\n');
   await git(dir, 'add', 'README.md');
   await git(dir, 'commit', '-q', '-m', 'initial');
@@ -71,7 +63,7 @@ describe('captureCurrentBranch', () => {
   it('falls back to commit SHA when HEAD is detached', async () => {
     const { stdout: sha } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
       cwd: repo,
-      env: cleanGitEnv(),
+      env: makeGitEnv(),
     });
     await git(repo, 'checkout', '--detach', sha.trim());
 
