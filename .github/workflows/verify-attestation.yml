@@ -221,11 +221,20 @@ jobs:
               if SOURCE_INFO=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefName,author --jq '{head: .headRefName, login: .author.login}'); then
                 SOURCE_HEAD_REF=$(printf '%s' "$SOURCE_INFO" | jq -r '.head // ""')
                 SOURCE_LOGIN=$(printf '%s' "$SOURCE_INFO" | jq -r '.login // ""')
-                # GitHub returns author.login WITHOUT the [bot] suffix that
-                # the pull_request payload carries (e.g. "github-actions"
-                # vs "github-actions[bot]"). Match both forms via a second
-                # regex that allows either suffix shape.
-                MERGE_GROUP_BOT_RE='^(github-actions(\[bot\])?|release-please(\[bot\])?)$'
+                # The `gh pr view --json author` flavor of `author.login` can
+                # come back in any of three shapes for a bot:
+                #   - "github-actions"          (rare bare form)
+                #   - "github-actions[bot]"     (pull_request webhook payload form)
+                #   - "app/github-actions"      (GraphQL `author` field returns
+                #                                this prefix for GitHub Apps —
+                #                                witnessed on PR #449's queue
+                #                                event log: "author 'app/github
+                #                                -actions' is NOT a trusted
+                #                                release bot")
+                # Accept all three forms for both github-actions and
+                # release-please. The optional `app/` prefix + optional
+                # `[bot]` suffix cover every shape we've observed.
+                MERGE_GROUP_BOT_RE='^(app/)?(github-actions|release-please)(\[bot\])?$'
                 if printf '%s' "$SOURCE_LOGIN" | grep -qE "$MERGE_GROUP_BOT_RE"; then
                   case "$SOURCE_HEAD_REF" in
                     release-please--*)
