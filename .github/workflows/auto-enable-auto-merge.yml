@@ -116,23 +116,24 @@ jobs:
         run: |
           echo "[auto-enable] no open PR for this event — nothing to arm."
 
-      - name: Skip drafts and fork PRs
+      - name: Skip drafts, fork PRs, and release-please PRs
         id: guard
-        if: steps.discover.outputs.pr != ''
         env:
           GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GH_REPO: ${{ github.repository }}
           PR: ${{ steps.discover.outputs.pr }}
           REPO: ${{ github.repository }}
+        if: steps.discover.outputs.pr != ''
         run: |
           set -euo pipefail
           # Use the full `owner/repo` of the PR head (NOT the bare repo name).
           # Forks always preserve the bare name, so a bare-name comparison would
           # accept fork PRs and contradict the same-repo intent below.
-          PR_INFO=$(gh pr view "$PR" --json isDraft,headRepositoryOwner,headRepository \
-            -q '{isDraft: .isDraft, headFull: (((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")) // "")}')
+          PR_INFO=$(gh pr view "$PR" --json isDraft,headRepositoryOwner,headRepository,headRefName \
+            -q '{isDraft: .isDraft, headRefName: .headRefName, headFull: (((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")) // "")}')
           IS_DRAFT=$(echo "$PR_INFO" | jq -r '.isDraft')
           HEAD_FULL=$(echo "$PR_INFO" | jq -r '.headFull')
+          HEAD_REF=$(echo "$PR_INFO" | jq -r '.headRefName')
           if [ "$IS_DRAFT" = "true" ]; then
             echo "[auto-enable] PR #$PR is draft — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -143,6 +144,14 @@ jobs:
             echo "skip=true" >> "$GITHUB_OUTPUT"
           elif [ "$HEAD_FULL" != "$REPO" ]; then
             echo "[auto-enable] PR #$PR is from a fork ($HEAD_FULL) — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif case "$HEAD_REF" in release-please--*) true ;; *) false ;; esac; then
+            # release-please PRs accumulate version bumps + CHANGELOG entries
+            # over multiple commits to main; the operator decides WHEN to cut
+            # the release. Auto-arming would race that decision (the PR would
+            # merge as soon as CI goes green on each push). Skip — operator
+            # arms manually with `gh pr merge --auto <pr>` when ready.
+            echo "[auto-enable] PR #$PR is a release-please PR ($HEAD_REF) — skipping. Arm manually when ready: gh pr merge --auto $PR"
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
