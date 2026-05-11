@@ -44,6 +44,16 @@ jobs:
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+          # GitHub's recursive-workflow-prevention rule blocks pushes made
+          # with `GITHUB_TOKEN` from triggering downstream workflows. Without
+          # this token override, every release-please regeneration would
+          # leave the new PR head with ZERO CI runs and the required
+          # `ai-sdlc/attestation` + `ai-sdlc/pr-ready` statuses would never
+          # fire, leaving the PR BLOCKED. `secrets.AI_SDLC_PAT` is the same
+          # fine-scoped PAT (or GitHub App token) used by
+          # `auto-rebase-open-prs.yml` for the same reason; see AISDLC-189
+          # for the canonical rationale.
+          token: ${{ secrets.AI_SDLC_PAT }}
 
   publish-npm:
     name: Publish npm packages
