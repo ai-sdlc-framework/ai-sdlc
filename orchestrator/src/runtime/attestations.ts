@@ -648,10 +648,15 @@ export function isAttestationEnvelopePath(path: string): boolean {
  */
 export const CONTENTHASHV4_IGNORE_FILES: readonly string[] = Object.freeze([
   'pnpm-lock.yaml',
-  'reference/src/core/generated-schemas.ts',
   'CHANGELOG.md',
   'pipeline-cli/CHANGELOG.md',
   'orchestrator/CHANGELOG.md',
+  // NOTE: `reference/src/core/generated-schemas.ts` was REMOVED from this
+  // list per AISDLC-258 code-review CRITICAL finding. Even though it's
+  // auto-generated from spec/schemas/, it remains a `.ts` source file
+  // shipped in reference/dist. An attacker who hand-edited it post-signing
+  // would bypass attestation. Keep it in the hash; PRs that change schemas
+  // pay the re-sign cost (which is correct — the schema change IS reviewable).
 ]);
 
 /**

@@ -2542,9 +2542,12 @@ describe('CONTENTHASHV4_IGNORE_FILES — list contents and isIgnoredForContentHa
     expect(CONTENTHASHV4_IGNORE_FILES).toContain('CHANGELOG.md');
     expect(CONTENTHASHV4_IGNORE_FILES).toContain('pipeline-cli/CHANGELOG.md');
     expect(CONTENTHASHV4_IGNORE_FILES).toContain('orchestrator/CHANGELOG.md');
-    expect(CONTENTHASHV4_IGNORE_FILES).toContain('reference/src/core/generated-schemas.ts');
     // package.json is NOT in the list — real dep changes are reviewable.
     expect(CONTENTHASHV4_IGNORE_FILES).not.toContain('package.json');
+    // generated-schemas.ts is NOT in the list — it's a .ts source file
+    // that ships compiled code; hand-edits would bypass attestation
+    // (AISDLC-258 code-review CRITICAL).
+    expect(CONTENTHASHV4_IGNORE_FILES).not.toContain('reference/src/core/generated-schemas.ts');
   });
 
   it('isIgnoredForContentHash returns true for every entry in the list', () => {
