@@ -55,13 +55,45 @@ describe('Step 11 — readTitleTemplate', () => {
     expect(readTitleTemplate('/no/such')).toMatch(/feat: \{issueTitle\}/);
   });
 
-  it('reads pullRequest.titleTemplate from yaml', () => {
+  it('reads pullRequest.titleTemplate from legacy pipeline-backlog.yaml (deprecated shim)', () => {
     mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
     writeFileSync(
       join(tmp, '.ai-sdlc', 'pipeline-backlog.yaml'),
       `pullRequest:\n  titleTemplate: 'fix: {issueTitle} ({issueId})'\n`,
     );
     expect(readTitleTemplate(tmp)).toBe('fix: {issueTitle} ({issueId})');
+  });
+
+  it('reads pullRequest.titleTemplate from pipeline.yaml spec.backlog section (canonical, AISDLC-245.5)', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      [
+        'spec:',
+        '  backlog:',
+        '    pullRequest:',
+        "      titleTemplate: 'chore: {issueTitle} ({issueId})'",
+      ].join('\n') + '\n',
+    );
+    expect(readTitleTemplate(tmp)).toBe('chore: {issueTitle} ({issueId})');
+  });
+
+  it('prefers pipeline.yaml over pipeline-backlog.yaml for title template (canonical wins)', () => {
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline.yaml'),
+      [
+        'spec:',
+        '  backlog:',
+        '    pullRequest:',
+        "      titleTemplate: 'canonical: {issueTitle}'",
+      ].join('\n') + '\n',
+    );
+    writeFileSync(
+      join(tmp, '.ai-sdlc', 'pipeline-backlog.yaml'),
+      `pullRequest:\n  titleTemplate: 'legacy: {issueTitle}'\n`,
+    );
+    expect(readTitleTemplate(tmp)).toBe('canonical: {issueTitle}');
   });
 });
 

@@ -2,7 +2,9 @@
  * Step 11 — Push the worktree branch and open the GitHub PR.
  *
  * Mirrors `execute-orchestrator.md` Step 11. Reads the PR title template
- * from `.ai-sdlc/pipeline-backlog.yaml` (`pullRequest.titleTemplate`),
+ * from `.ai-sdlc/pipeline.yaml` (`spec.backlog.pullRequest.titleTemplate`)
+ * with a fallback to the deprecated `.ai-sdlc/pipeline-backlog.yaml`
+ * (`pullRequest.titleTemplate`, AISDLC-245.5),
  * composes the PR body from the developer summary + changed files +
  * code reviewer summary, then runs `git push -u origin <branch>` followed
  * by `gh pr create`.
@@ -46,17 +48,45 @@ export interface PushAndPrStepOptions extends PushAndPrOptions {
 const DEFAULT_TITLE_TEMPLATE = 'feat: {issueTitle} ({issueId})';
 
 /**
- * Read `pullRequest.titleTemplate` from `.ai-sdlc/pipeline-backlog.yaml`.
- * Returns the default if the file is missing or the key isn't present.
+ * Read `pullRequest.titleTemplate` from the canonical location:
+ *   1. `.ai-sdlc/pipeline.yaml` → `spec.backlog.pullRequest.titleTemplate` (AISDLC-245.5)
+ *   2. `.ai-sdlc/pipeline-backlog.yaml` → `pullRequest.titleTemplate` (deprecated shim)
+ *
+ * Returns the default when neither file has the key.
  *
  * Exported for unit tests.
  */
 export function readTitleTemplate(workDir: string): string {
-  const path = join(workDir, '.ai-sdlc', 'pipeline-backlog.yaml');
-  if (!existsSync(path)) return DEFAULT_TITLE_TEMPLATE;
+  // --- 1. Canonical path: pipeline.yaml spec.backlog.pullRequest.titleTemplate ---
+  const pipelineYamlPath = join(workDir, '.ai-sdlc', 'pipeline.yaml');
+  if (existsSync(pipelineYamlPath)) {
+    let raw: string;
+    try {
+      raw = readFileSync(pipelineYamlPath, 'utf8');
+    } catch {
+      raw = '';
+    }
+    // Match `backlog:` section with nested `pullRequest:` → `titleTemplate:`.
+    const backlogSection = raw.match(/^backlog:\s*[\r\n]((?:[ \t]+[^\r\n]*[\r\n])*)/m);
+    if (backlogSection) {
+      const m = backlogSection[0].match(
+        /pullRequest:\s*[\r\n]+\s*titleTemplate:\s*['"]?([^'"\r\n]+)['"]?/,
+      );
+      if (m) return m[1].trim();
+    }
+    // Also handle full Pipeline kind document shape.
+    const specBacklogM = raw.match(
+      /spec:\s*[\r\n](?:[\s\S]*?)backlog:\s*[\r\n](?:[\s\S]*?)pullRequest:\s*[\r\n]\s*titleTemplate:\s*['"]?([^'"\r\n]+)['"]?/,
+    );
+    if (specBacklogM) return specBacklogM[1].trim();
+  }
+
+  // --- 2. Deprecated shim: pipeline-backlog.yaml pullRequest.titleTemplate ---
+  const legacyPath = join(workDir, '.ai-sdlc', 'pipeline-backlog.yaml');
+  if (!existsSync(legacyPath)) return DEFAULT_TITLE_TEMPLATE;
   let raw: string;
   try {
-    raw = readFileSync(path, 'utf8');
+    raw = readFileSync(legacyPath, 'utf8');
   } catch {
     return DEFAULT_TITLE_TEMPLATE;
   }

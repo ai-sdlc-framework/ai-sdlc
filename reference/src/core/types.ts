@@ -379,6 +379,17 @@ export interface BranchingConfig {
   cleanup?: 'on-merge' | 'on-close' | 'manual';
 }
 
+/**
+ * Backlog-workflow specific configuration. Canonical location for settings
+ * previously in pipeline-backlog.yaml (AISDLC-245.5). Reading priority:
+ * pipeline.yaml spec.backlog > pipeline-backlog.yaml (deprecated, warn-on-use).
+ */
+export interface BacklogConfig {
+  branching?: BranchingConfig;
+  pullRequest?: PullRequestConfig;
+  milestones?: Record<string, string[]>;
+}
+
 export interface PullRequestConfig {
   titleTemplate?: string;
   descriptionSections?: string[];
@@ -402,6 +413,8 @@ export interface PipelineSpec {
   stages: Stage[];
   routing?: Routing;
   branching?: BranchingConfig;
+  /** Backlog-workflow overrides. Canonical successor to pipeline-backlog.yaml (AISDLC-245.5). */
+  backlog?: BacklogConfig;
   pullRequest?: PullRequestConfig;
   notifications?: NotificationsConfig;
   costPolicy?: CostPolicy;

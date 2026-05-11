@@ -2926,6 +2926,9 @@ export const pipelineSchema = {
         branching: {
           $ref: '#/$defs/BranchingConfig',
         },
+        backlog: {
+          $ref: '#/$defs/BacklogConfig',
+        },
         pullRequest: {
           $ref: '#/$defs/PullRequestConfig',
         },
@@ -3140,6 +3143,28 @@ export const pipelineSchema = {
           type: 'string',
           enum: ['on-merge', 'on-close', 'manual'],
           description: 'When to delete the feature branch.',
+        },
+      },
+      additionalProperties: false,
+    },
+    BacklogConfig: {
+      type: 'object',
+      description:
+        'Backlog-workflow specific configuration. Canonical location for settings previously in pipeline-backlog.yaml (AISDLC-245.5). Readers fall back to pipeline-backlog.yaml with a deprecation warning when this section is absent.',
+      properties: {
+        branching: {
+          $ref: '#/$defs/BranchingConfig',
+        },
+        pullRequest: {
+          $ref: '#/$defs/PullRequestConfig',
+        },
+        milestones: {
+          type: 'object',
+          description: 'Milestone-to-backlog-task mapping for cross-cutting release planning.',
+          additionalProperties: {
+            type: 'array',
+            items: { type: 'string' },
+          },
         },
       },
       additionalProperties: false,

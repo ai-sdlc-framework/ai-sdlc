@@ -3,7 +3,7 @@ id: AISDLC-245.5
 title: >-
   Phase 5: Schema reconciliation — pipeline-backlog.yaml vs pipeline.yaml pick
   canonical
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-08 12:10'
 labels:

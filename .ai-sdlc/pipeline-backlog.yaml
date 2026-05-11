@@ -1,3 +1,9 @@
+# DEPRECATED (AISDLC-245.5) — This file is a legacy shim.
+# Settings here have been migrated to .ai-sdlc/pipeline.yaml under spec.backlog.
+# Pipeline-cli readers (step-02, step-11) and slash commands now read
+# pipeline.yaml first and fall back to this file with a deprecation warning.
+# This file will be REMOVED in the next major release.
+# Adopter migration guide: docs/operations/pipeline-backlog-migration.md
 apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
 metadata:

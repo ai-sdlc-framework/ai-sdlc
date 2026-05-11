@@ -2,8 +2,12 @@
  * Step 2 — Compute branch name + worktree path.
  *
  * Mirrors `execute-orchestrator.md` Step 2. Reads the branch pattern from
- * `<workDir>/.ai-sdlc/pipeline-backlog.yaml` (key: `branching.pattern`)
- * and substitutes `{issueIdLower}` + `{slug}` to produce the final branch
+ * `<workDir>/.ai-sdlc/pipeline.yaml` under `spec.backlog.branching.pattern`
+ * (AISDLC-245.5 canonical location). Falls back to
+ * `<workDir>/.ai-sdlc/pipeline-backlog.yaml` with a deprecation warning when
+ * the pipeline.yaml backlog section is absent (one-release grace period).
+ *
+ * Substitutes `{issueIdLower}` + `{slug}` to produce the final branch
  * name. The slug is a kebab-cased prefix of the task title capped at 50 chars.
  *
  * Pure: only reads from disk via `node:fs`; no git/network.
@@ -57,27 +61,74 @@ export function slugify(title: string): string {
 }
 
 /**
- * Read `branching.pattern` from `.ai-sdlc/pipeline-backlog.yaml`. Returns
- * the default pattern if the file is missing or the key isn't present.
+ * Read `branching.pattern` from the canonical location:
+ *   1. `.ai-sdlc/pipeline.yaml` → `spec.backlog.branching.pattern` (AISDLC-245.5)
+ *   2. `.ai-sdlc/pipeline-backlog.yaml` → `branching.pattern` (deprecated shim,
+ *      logs a warning on first use; will be removed in the next major release)
+ *
+ * Returns the `fallback` pattern when neither file has the key.
  */
-export function readBranchPattern(workDir: string, fallback: string = DEFAULT_PATTERN): string {
-  const yamlPath = join(workDir, '.ai-sdlc', 'pipeline-backlog.yaml');
-  if (!existsSync(yamlPath)) return fallback;
-  let raw: string;
-  try {
-    raw = readFileSync(yamlPath, 'utf8');
-  } catch {
-    return fallback;
+export function readBranchPattern(
+  workDir: string,
+  fallback: string = DEFAULT_PATTERN,
+  logger?: PipelineLogger,
+): string {
+  // --- 1. Canonical path: pipeline.yaml spec.backlog.branching.pattern ---
+  const pipelineYamlPath = join(workDir, '.ai-sdlc', 'pipeline.yaml');
+  if (existsSync(pipelineYamlPath)) {
+    let raw: string;
+    try {
+      raw = readFileSync(pipelineYamlPath, 'utf8');
+    } catch {
+      raw = '';
+    }
+    // Look for `backlog:` block with a nested `branching:` → `pattern:` key.
+    // Uses a two-pass regex: first capture the `backlog:` section, then extract
+    // `branching.pattern` from within it (tolerates arbitrary nesting depth).
+    const backlogSection = raw.match(/^backlog:\s*[\r\n]((?:[ \t]+[^\r\n]*[\r\n])*)/m);
+    if (backlogSection) {
+      const m = backlogSection[0].match(/branching:\s*[\r\n]+\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/);
+      if (m) return m[1].trim();
+    }
+    // Also handle `spec:\n  backlog:\n    branching:\n      pattern:` shape
+    // (full Pipeline kind document).
+    const specBacklogM = raw.match(
+      /spec:\s*[\r\n](?:[\s\S]*?)backlog:\s*[\r\n](?:[\s\S]*?)branching:\s*[\r\n]\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/,
+    );
+    if (specBacklogM) return specBacklogM[1].trim();
   }
-  // Look for `branching:\n  pattern: '...'` shape; tolerate single OR double
-  // quotes OR no quotes.
-  const m = raw.match(/branching:\s*[\r\n]+\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/);
-  return m ? m[1].trim() : fallback;
+
+  // --- 2. Deprecated shim: pipeline-backlog.yaml branching.pattern ---
+  const legacyPath = join(workDir, '.ai-sdlc', 'pipeline-backlog.yaml');
+  if (existsSync(legacyPath)) {
+    let raw: string;
+    try {
+      raw = readFileSync(legacyPath, 'utf8');
+    } catch {
+      return fallback;
+    }
+    const m = raw.match(/branching:\s*[\r\n]+\s*pattern:\s*['"]?([^'"\r\n]+)['"]?/);
+    if (m) {
+      const log = logger ?? DEFAULT_LOGGER;
+      log.warn(
+        '[ai-sdlc] DEPRECATION: reading branching.pattern from .ai-sdlc/pipeline-backlog.yaml. ' +
+          'Migrate this setting to .ai-sdlc/pipeline.yaml under spec.backlog.branching.pattern. ' +
+          'pipeline-backlog.yaml will be removed in the next major release (AISDLC-245.5).',
+      );
+      return m[1].trim();
+    }
+  }
+
+  return fallback;
 }
 
 export async function computeBranchName(opts: ComputeBranchOptions): Promise<ComputeBranchResult> {
   const taskIdLower = opts.taskId.toLowerCase();
-  const pattern = readBranchPattern(opts.workDir, opts.defaultPattern ?? DEFAULT_PATTERN);
+  const pattern = readBranchPattern(
+    opts.workDir,
+    opts.defaultPattern ?? DEFAULT_PATTERN,
+    opts.logger,
+  );
   const rawSlug = slugify(opts.task.title);
 
   // AISDLC-202.2 — degraded-input fallback. AISDLC-180 originally threw here

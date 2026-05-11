@@ -44,6 +44,63 @@ describe('validate()', () => {
     expect(result.valid).toBe(true);
   });
 
+  // AISDLC-245.5 — validate the new spec.backlog section
+  it('accepts a Pipeline with spec.backlog branching + pullRequest (canonical schema)', () => {
+    const doc = {
+      ...VALID_MINIMAL_PIPELINE,
+      spec: {
+        ...VALID_MINIMAL_PIPELINE.spec,
+        backlog: {
+          branching: {
+            pattern: 'ai-sdlc/{issueIdLower}-{slug}',
+            targetBranch: 'main',
+            cleanup: 'on-merge',
+          },
+          pullRequest: {
+            titleTemplate: 'feat: {issueTitle} ({issueId})',
+            closeKeyword: 'References',
+          },
+        },
+      },
+    };
+    const result = validate('Pipeline', doc);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toBeUndefined();
+  });
+
+  it('accepts a Pipeline with spec.backlog.milestones map', () => {
+    const doc = {
+      ...VALID_MINIMAL_PIPELINE,
+      spec: {
+        ...VALID_MINIMAL_PIPELINE.spec,
+        backlog: {
+          branching: { pattern: 'ai-sdlc/{issueIdLower}' },
+          milestones: {
+            'v1.0': ['AISDLC-1', 'AISDLC-2'],
+            'v2.0': ['AISDLC-50'],
+          },
+        },
+      },
+    };
+    const result = validate('Pipeline', doc);
+    expect(result.valid).toBe(true);
+  });
+
+  it('rejects spec.backlog with unknown extra key', () => {
+    const doc = {
+      ...VALID_MINIMAL_PIPELINE,
+      spec: {
+        ...VALID_MINIMAL_PIPELINE.spec,
+        backlog: {
+          branching: { pattern: 'ai-sdlc/{issueIdLower}' },
+          unknownKey: 'bad',
+        },
+      },
+    };
+    const result = validate('Pipeline', doc);
+    expect(result.valid).toBe(false);
+  });
+
   it('rejects a Pipeline missing stages', () => {
     const doc = {
       apiVersion: 'ai-sdlc.io/v1alpha1',

@@ -74,6 +74,23 @@ spec:
     - name: review
       qualityGates:
         - default-gates
+  # backlog: holds settings specific to the backlog-task (/ai-sdlc execute)
+  # workflow. These were formerly in a separate pipeline-backlog.yaml file
+  # (deprecated by AISDLC-245.5). Slash commands + pipeline-cli readers
+  # prefer this canonical location.
+  backlog:
+    branching:
+      pattern: 'ai-sdlc/{issueIdLower}-{slug}'
+      targetBranch: main
+      cleanup: on-merge
+    pullRequest:
+      titleTemplate: 'feat: {issueTitle} ({issueId})'
+      descriptionSections:
+        - summary
+        - changes
+        - closes
+      includeProvenance: true
+      closeKeyword: References
 `;
 
 /**

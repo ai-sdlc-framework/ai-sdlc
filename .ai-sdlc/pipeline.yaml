@@ -66,6 +66,26 @@ spec:
     pattern: 'ai-sdlc/issue-{issueNumber}'
     targetBranch: main
     cleanup: on-merge
+  # backlog: section holds settings specific to the backlog-task workflow
+  # (formerly in .ai-sdlc/pipeline-backlog.yaml, deprecated by AISDLC-245.5).
+  # Slash commands + pipeline-cli readers now prefer this canonical location.
+  backlog:
+    branching:
+      pattern: 'ai-sdlc/{issueIdLower}-{slug}'
+      targetBranch: main
+      cleanup: on-merge
+    pullRequest:
+      titleTemplate: 'feat: {issueTitle} ({issueId})'
+      descriptionSections:
+        - summary
+        - changes
+        - closes
+      includeProvenance: true
+      # `References` (not `Closes`) — backlog tasks aren't auto-closed by GitHub PR
+      # merges; the originating PR carries the task-file move (tasks/ → completed/)
+      # in its own diff via the `scripts/check-task-moved.sh` pre-push hook
+      # (AISDLC-220), so the task lifecycle close lands atomically with the work.
+      closeKeyword: References
   pullRequest:
     titleTemplate: 'fix: {issueTitle} (#{issueNumber})'
     descriptionSections:
