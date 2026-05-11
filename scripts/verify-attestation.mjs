@@ -67,6 +67,7 @@ import {
   computeContentHashV3,
   computeContentHashV4,
   isAttestationEnvelopePath,
+  isIgnoredForContentHash,
   validateTrustedReviewers,
 } from '../orchestrator/dist/runtime/attestations.js';
 
@@ -491,6 +492,11 @@ export function computeHeadContentHashV4(headSha, baseSha, repoRoot, gitFn = git
     // itself so the chore-commit pattern (sign at dev → add envelope at
     // chore → push) doesn't chicken-and-egg the hash.
     if (isAttestationEnvelopePath(p)) continue;
+    // AISDLC-258: shared-churn exclude list — same set the signer
+    // (`collectChangedFileDeltaEntries`) excludes. Must be applied on
+    // the verifier side too so signer and verifier compute the same
+    // hash even when the queue rebase changed an ignored file's blob.
+    if (isIgnoredForContentHash(p)) continue;
     let headBlobSha = '';
     try {
       const lsOut = gitFn(['ls-tree', '-r', headSha, '--', p], repoRoot);

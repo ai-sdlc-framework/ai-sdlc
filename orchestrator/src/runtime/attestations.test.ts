@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ACCEPTED_SCHEMA_VERSIONS,
   ATTESTATION_ENVELOPE_PATH_PATTERN,
+  CONTENTHASHV4_IGNORE_FILES,
   INDEPENDENCE_REQUIRED_ROLES,
   REQUIRED_REVIEWER_AGENT_IDS,
   REVIEWER_ROLE_EQUIVALENCES,
@@ -27,6 +28,7 @@ import {
   computeContentHashV4,
   generateSigningKeyPair,
   isAttestationEnvelopePath,
+  isIgnoredForContentHash,
   paeEncode,
   projectDeltaEntriesToHeadEntries,
   sha256Hex,
@@ -2524,5 +2526,170 @@ describe('verifyAttestation — cross-harness reviewer variants (AISDLC-252)', (
       expected: buildExpected(predicate),
     });
     expect(result.valid).toBe(true);
+  });
+});
+
+// ─── AISDLC-258: shared-churn exclude list (contentHashV4) ──────────────────
+
+describe('CONTENTHASHV4_IGNORE_FILES — list contents and isIgnoredForContentHash (AISDLC-258)', () => {
+  it('list is non-empty and frozen', () => {
+    expect(CONTENTHASHV4_IGNORE_FILES.length).toBeGreaterThan(0);
+    expect(Object.isFrozen(CONTENTHASHV4_IGNORE_FILES)).toBe(true);
+  });
+
+  it('list includes the expected shared-churn files and no source files', () => {
+    expect(CONTENTHASHV4_IGNORE_FILES).toContain('pnpm-lock.yaml');
+    expect(CONTENTHASHV4_IGNORE_FILES).toContain('CHANGELOG.md');
+    expect(CONTENTHASHV4_IGNORE_FILES).toContain('pipeline-cli/CHANGELOG.md');
+    expect(CONTENTHASHV4_IGNORE_FILES).toContain('orchestrator/CHANGELOG.md');
+    // package.json is NOT in the list — real dep changes are reviewable.
+    expect(CONTENTHASHV4_IGNORE_FILES).not.toContain('package.json');
+    // generated-schemas.ts is NOT in the list — it's a .ts source file
+    // that ships compiled code; hand-edits would bypass attestation
+    // (AISDLC-258 code-review CRITICAL).
+    expect(CONTENTHASHV4_IGNORE_FILES).not.toContain('reference/src/core/generated-schemas.ts');
+  });
+
+  it('isIgnoredForContentHash returns true for every entry in the list', () => {
+    for (const file of CONTENTHASHV4_IGNORE_FILES) {
+      expect(isIgnoredForContentHash(file)).toBe(true);
+    }
+  });
+
+  it('isIgnoredForContentHash returns false for reviewable source files', () => {
+    expect(isIgnoredForContentHash('package.json')).toBe(false);
+    expect(isIgnoredForContentHash('src/index.ts')).toBe(false);
+    expect(isIgnoredForContentHash('orchestrator/src/runtime/attestations.ts')).toBe(false);
+  });
+
+  it('isIgnoredForContentHash normalizes backslashes (Windows paths)', () => {
+    // pnpm-lock.yaml is at the repo root — no directory separator to normalize.
+    // We exercise normalization via the sub-path file.
+    expect(isIgnoredForContentHash('pipeline-cli\\CHANGELOG.md')).toBe(true);
+  });
+
+  it('isIgnoredForContentHash returns false for non-string input', () => {
+    expect(isIgnoredForContentHash(undefined as unknown as string)).toBe(false);
+    expect(isIgnoredForContentHash(null as unknown as string)).toBe(false);
+    expect(isIgnoredForContentHash(42 as unknown as string)).toBe(false);
+  });
+});
+
+describe('collectChangedFileDeltaEntries — CONTENTHASHV4_IGNORE_FILES exclusion (AISDLC-258)', () => {
+  it('does NOT include pnpm-lock.yaml in the returned delta set', () => {
+    // Signer scenario: the PR changes both a source file AND pnpm-lock.yaml.
+    // The lock file must be excluded so the signed hash survives a queue
+    // rebase that regenerates pnpm-lock.yaml.
+    const runGit = (args: string[]) => {
+      const cmd = args.join(' ');
+      if (cmd.includes('merge-base')) return 'a'.repeat(40);
+      if (cmd.includes('diff --name-only')) {
+        return 'src/index.ts\npnpm-lock.yaml\n';
+      }
+      // ls-tree for src/index.ts at mergeBase or HEAD
+      if (cmd.includes('ls-tree') && cmd.includes('src/index.ts')) {
+        return `100644 blob ${'1'.repeat(40)}\tsrc/index.ts\n`;
+      }
+      return '';
+    };
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', { runGit });
+    const paths = entries.map((e) => e.path);
+    expect(paths).toContain('src/index.ts');
+    expect(paths).not.toContain('pnpm-lock.yaml');
+  });
+
+  it('does NOT include CHANGELOG.md in the returned delta set', () => {
+    const runGit = (args: string[]) => {
+      const cmd = args.join(' ');
+      if (cmd.includes('merge-base')) return 'a'.repeat(40);
+      if (cmd.includes('diff --name-only')) return 'src/foo.ts\nCHANGELOG.md\n';
+      if (cmd.includes('ls-tree') && cmd.includes('src/foo.ts')) {
+        return `100644 blob ${'2'.repeat(40)}\tsrc/foo.ts\n`;
+      }
+      return '';
+    };
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', { runGit });
+    const paths = entries.map((e) => e.path);
+    expect(paths).toContain('src/foo.ts');
+    expect(paths).not.toContain('CHANGELOG.md');
+  });
+
+  it('does NOT include pipeline-cli/CHANGELOG.md in the returned delta set', () => {
+    const runGit = (args: string[]) => {
+      const cmd = args.join(' ');
+      if (cmd.includes('merge-base')) return 'a'.repeat(40);
+      if (cmd.includes('diff --name-only'))
+        return 'pipeline-cli/src/steps/step-1.ts\npipeline-cli/CHANGELOG.md\n';
+      if (cmd.includes('ls-tree') && cmd.includes('pipeline-cli/src/steps/step-1.ts')) {
+        return `100644 blob ${'3'.repeat(40)}\tpipeline-cli/src/steps/step-1.ts\n`;
+      }
+      return '';
+    };
+    const entries = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', { runGit });
+    const paths = entries.map((e) => e.path);
+    expect(paths).toContain('pipeline-cli/src/steps/step-1.ts');
+    expect(paths).not.toContain('pipeline-cli/CHANGELOG.md');
+  });
+
+  it('file NOT in ignore list does affect the hash', () => {
+    // Two runs: one with package.json (not ignored), one without.
+    // The hashes should differ.
+    const makeGit = (includePackageJson: boolean) => (args: string[]) => {
+      const cmd = args.join(' ');
+      if (cmd.includes('merge-base')) return 'a'.repeat(40);
+      if (cmd.includes('diff --name-only')) {
+        return includePackageJson ? 'src/foo.ts\npackage.json\n' : 'src/foo.ts\n';
+      }
+      if (cmd.includes('ls-tree') && cmd.includes('src/foo.ts')) {
+        return `100644 blob ${'4'.repeat(40)}\tsrc/foo.ts\n`;
+      }
+      if (cmd.includes('ls-tree') && cmd.includes('package.json')) {
+        return `100644 blob ${'5'.repeat(40)}\tpackage.json\n`;
+      }
+      return '';
+    };
+
+    const withPackageJson = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', {
+      runGit: makeGit(true),
+    });
+    const withoutPackageJson = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', {
+      runGit: makeGit(false),
+    });
+
+    const hashWith = computeContentHashV4(projectDeltaEntriesToHeadEntries(withPackageJson));
+    const hashWithout = computeContentHashV4(projectDeltaEntriesToHeadEntries(withoutPackageJson));
+    expect(hashWith).not.toBe(hashWithout);
+  });
+
+  it('file IN ignore list does NOT affect the computed hash', () => {
+    // Two runs: one diff includes pnpm-lock.yaml, one does not.
+    // The v4 hashes should be EQUAL (lock file is excluded from both).
+    const makeGit = (includeLock: boolean) => (args: string[]) => {
+      const cmd = args.join(' ');
+      if (cmd.includes('merge-base')) return 'a'.repeat(40);
+      if (cmd.includes('diff --name-only')) {
+        return includeLock ? 'src/bar.ts\npnpm-lock.yaml\n' : 'src/bar.ts\n';
+      }
+      if (cmd.includes('ls-tree') && cmd.includes('src/bar.ts')) {
+        return `100644 blob ${'6'.repeat(40)}\tsrc/bar.ts\n`;
+      }
+      if (cmd.includes('ls-tree') && cmd.includes('pnpm-lock.yaml')) {
+        // Return a different blob SHA to prove ignoring works despite a real blob change.
+        return `100644 blob ${'7'.repeat(40)}\tpnpm-lock.yaml\n`;
+      }
+      return '';
+    };
+
+    const withLock = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', {
+      runGit: makeGit(true),
+    });
+    const withoutLock = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', {
+      runGit: makeGit(false),
+    });
+
+    const hashWith = computeContentHashV4(projectDeltaEntriesToHeadEntries(withLock));
+    const hashWithout = computeContentHashV4(projectDeltaEntriesToHeadEntries(withoutLock));
+    // Both hashes must be equal because pnpm-lock.yaml is excluded.
+    expect(hashWith).toBe(hashWithout);
   });
 });

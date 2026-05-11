@@ -2353,3 +2353,116 @@ describe('runVerifier (AISDLC-237 — contentHashV4 merge-queue rebase stability
     );
   });
 });
+
+// ── AISDLC-258 — verifier honors CONTENTHASHV4_IGNORE_FILES ──────────────
+//
+// Test-reviewer MAJOR finding: the signer-side IGNORE list is unit-tested in
+// orchestrator/src/runtime/attestations.test.ts, but the verifier path
+// (computeHeadContentHashV4 here) reads the same constant and must produce
+// the SAME hash for the contract to hold across rebases. This describe block
+// asserts the verifier-side behavior end-to-end: sign at HEAD, modify only
+// an IGNORE-list file (pnpm-lock.yaml), re-run the verifier, expect VALID.
+
+describe('runVerifier (AISDLC-258 — IGNORE list applied verifier-side)', () => {
+  let fixture;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('returns valid when only pnpm-lock.yaml differs between signed HEAD and current HEAD', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+
+    // Add pnpm-lock.yaml to the signed HEAD.
+    writeFileSync(join(fixture.root, 'pnpm-lock.yaml'), 'lockfileVersion: 9\n');
+    git(['add', 'pnpm-lock.yaml'], fixture.root);
+    git(['commit', '-q', '-m', 'add lockfile'], fixture.root);
+    const signedHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    writeAttestation(fixture.root, signedHead, fixture.baseSha, signedHead, privateKeyPem);
+
+    // Simulate a merge-queue rebase that only touches pnpm-lock.yaml (e.g.,
+    // sibling PR added a transitive dep).
+    writeFileSync(
+      join(fixture.root, 'pnpm-lock.yaml'),
+      'lockfileVersion: 9\n# rebased — sibling PR updated the lock\n',
+    );
+    git(['add', 'pnpm-lock.yaml'], fixture.root);
+    git(['commit', '-q', '--amend', '--no-edit'], fixture.root);
+    const rebasedHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sanity: blob actually differs.
+    const blobBefore = git(['rev-parse', `${signedHead}:pnpm-lock.yaml`], fixture.root).trim();
+    const blobAfter = git(['rev-parse', `${rebasedHead}:pnpm-lock.yaml`], fixture.root).trim();
+    assert.notEqual(blobBefore, blobAfter, 'sanity: pnpm-lock.yaml blob must differ');
+
+    // Move the envelope to the new HEAD (mirrors what the chore-commit
+    // pattern produces in real flows: envelope at HEAD references the
+    // signed-HEAD's content but lives at the new HEAD's commit).
+    const oldEnv = readFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${signedHead}.dsse.json`),
+      'utf8',
+    );
+    writeFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${rebasedHead}.dsse.json`),
+      oldEnv,
+    );
+
+    const out = runVerifier({
+      headSha: rebasedHead,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+
+    // Pre-AISDLC-258 this would fail with "contentHashV4 mismatch" because
+    // the pnpm-lock.yaml blob differs. With the IGNORE list, the verifier
+    // skips it and returns valid.
+    assert.equal(
+      out.status,
+      'valid',
+      `expected valid (pnpm-lock.yaml is in IGNORE list), got ${out.status}: ${out.reason}`,
+    );
+  });
+
+  it('still rejects when a NON-ignored source file differs', () => {
+    // Negative-case companion: prove the IGNORE list isn't accidentally
+    // letting non-ignored file changes through.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+
+    // Modify feature.txt (NOT in IGNORE list) and amend.
+    writeFileSync(join(fixture.root, 'feature.txt'), 'feature\nUNREVIEWED CODE\n');
+    git(['add', 'feature.txt'], fixture.root);
+    git(['commit', '-q', '--amend', '--no-edit'], fixture.root);
+    const tamperedHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    const oldEnv = readFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`),
+      'utf8',
+    );
+    writeFileSync(
+      join(fixture.root, '.ai-sdlc', 'attestations', `${tamperedHead}.dsse.json`),
+      oldEnv,
+    );
+
+    const out = runVerifier({
+      headSha: tamperedHead,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid', `expected invalid, got ${out.status}: ${out.reason}`);
+    assert.match(out.reason, /contentHash(V3|V4) mismatch/);
+  });
+});
