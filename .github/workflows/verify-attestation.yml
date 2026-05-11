@@ -178,76 +178,62 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_HEAD_REF: ${{ github.head_ref }}
-          PR_USER_LOGIN: ${{ github.event.pull_request.user.login }}
           MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           set -euo pipefail
           IS_RP='false'
-          TRUSTED_BOT_RE='^(github-actions\[bot\]|release-please\[bot\])$'
 
-          is_trusted_bot() {
-            printf '%s' "$1" | grep -qE "$TRUSTED_BOT_RE"
-          }
+          # Trust signal: the `release-please--` branch-name prefix.
+          #
+          # We previously gated on BOTH the prefix AND a bot-identity allowlist
+          # (github-actions[bot] / release-please[bot] / app/github-actions).
+          # That broke the moment release-please-action started pushing under
+          # `secrets.AI_SDLC_PAT` (PR #450) — the resulting PR's `user.login`
+          # is the operator's identity (e.g. `deefactorial`), NOT a bot. Every
+          # legit release-please PR fell through to full verification and
+          # posted `contentHashV4 mismatch`.
+          #
+          # The defense-in-depth concern (a same-repo pusher could create a
+          # branch named `release-please--evil` and bypass attestation) is
+          # already mitigated by `auto-enable-auto-merge.yml`'s release-please
+          # skip (PR #445): release-please PRs do NOT auto-merge. The operator
+          # MUST manually arm `gh pr merge <N> --auto` to ship one. That
+          # human-in-the-loop step IS the trust gate. If a contributor opens
+          # a `release-please--evil` PR, the operator notices when reviewing
+          # before manually arming.
+          #
+          # Net: branch-prefix-only trust matches the actual security model.
+          # See PR #455 for the rationale + the security review verdict.
 
-          # pull_request: branch prefix AND trusted bot identity
+          # pull_request: branch prefix is sufficient
           case "${PR_HEAD_REF:-}" in
             release-please--*)
-              if is_trusted_bot "${PR_USER_LOGIN:-}"; then
-                IS_RP='true'
-                echo "pull_request release-please match: head_ref='${PR_HEAD_REF}', user='${PR_USER_LOGIN}'"
-              else
-                echo "::warning::PR head_ref '${PR_HEAD_REF}' looks like release-please but author '${PR_USER_LOGIN:-<empty>}' is NOT a trusted release bot — falling through to full verification"
-              fi
+              IS_RP='true'
+              echo "pull_request release-please match: head_ref='${PR_HEAD_REF}'"
               ;;
           esac
 
           # merge_group: parse PR number from queue branch, look up source
-          # PR's head_ref + author. Allow multi-segment protected branch
-          # names (e.g. `release/1.0`) — the queue branch is
-          # `gh-readonly-queue/<base>/pr-<N>-<sha>` where <base> may itself
-          # contain slashes, but pr-<N> always precedes the trailing -<sha>.
-          # GitHub passes the merge_group head_ref WITH a `refs/heads/`
-          # prefix (witnessed in workflow logs as
-          # `refs/heads/gh-readonly-queue/...`), so the regex makes the
-          # prefix optional. Without that, every release-please merge_group
-          # event fell through to full envelope verification and posted
-          # `contentHashV4 mismatch`, looping the queue.
+          # PR's head_ref. Allow multi-segment protected branch names
+          # (e.g. `release/1.0`) — the queue branch is
+          # `gh-readonly-queue/<base>/pr-<N>-<sha>`. GitHub passes the
+          # merge_group head_ref WITH a `refs/heads/` prefix (witnessed in
+          # workflow logs as `refs/heads/gh-readonly-queue/...`), so the
+          # regex makes the prefix optional.
           if [ "$IS_RP" = 'false' ] && [ -n "${MERGE_GROUP_HEAD_REF:-}" ]; then
             PR_NUM=$(printf '%s' "$MERGE_GROUP_HEAD_REF" | sed -nE 's|^(refs/heads/)?gh-readonly-queue/.*/pr-([0-9]+)-[^/]*$|\2|p')
             if [ -n "$PR_NUM" ]; then
               # No `|| echo ''` — we want gh failure to fail the step loud.
-              # `set -e` is on; non-zero exit surfaces as a step failure with
-              # an `::error::` line below for operator diagnostics.
-              if SOURCE_INFO=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefName,author --jq '{head: .headRefName, login: .author.login}'); then
-                SOURCE_HEAD_REF=$(printf '%s' "$SOURCE_INFO" | jq -r '.head // ""')
-                SOURCE_LOGIN=$(printf '%s' "$SOURCE_INFO" | jq -r '.login // ""')
-                # The `gh pr view --json author` flavor of `author.login` can
-                # come back in any of three shapes for a bot:
-                #   - "github-actions"          (rare bare form)
-                #   - "github-actions[bot]"     (pull_request webhook payload form)
-                #   - "app/github-actions"      (GraphQL `author` field returns
-                #                                this prefix for GitHub Apps —
-                #                                witnessed on PR #449's queue
-                #                                event log: "author 'app/github
-                #                                -actions' is NOT a trusted
-                #                                release bot")
-                # Accept all three forms for both github-actions and
-                # release-please. The optional `app/` prefix + optional
-                # `[bot]` suffix cover every shape we've observed.
-                MERGE_GROUP_BOT_RE='^(app/)?(github-actions|release-please)(\[bot\])?$'
-                if printf '%s' "$SOURCE_LOGIN" | grep -qE "$MERGE_GROUP_BOT_RE"; then
-                  case "$SOURCE_HEAD_REF" in
-                    release-please--*)
-                      IS_RP='true'
-                      echo "merge_group release-please match: PR=#${PR_NUM}, headRefName='${SOURCE_HEAD_REF}', author='${SOURCE_LOGIN}'"
-                      ;;
-                    *)
-                      echo "merge_group: PR=#${PR_NUM} author '${SOURCE_LOGIN}' is a trusted bot but headRefName '${SOURCE_HEAD_REF}' is NOT release-please — falling through to full verification"
-                      ;;
-                  esac
-                else
-                  echo "merge_group: PR=#${PR_NUM} author '${SOURCE_LOGIN}' is NOT a trusted release bot — falling through to full verification"
-                fi
+              if SOURCE_HEAD_REF=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefName --jq '.headRefName'); then
+                case "$SOURCE_HEAD_REF" in
+                  release-please--*)
+                    IS_RP='true'
+                    echo "merge_group release-please match: PR=#${PR_NUM}, headRefName='${SOURCE_HEAD_REF}'"
+                    ;;
+                  *)
+                    echo "merge_group: PR=#${PR_NUM} headRefName '${SOURCE_HEAD_REF}' is NOT release-please — falling through to full verification"
+                    ;;
+                esac
               else
                 echo "::error::Failed to resolve source PR #${PR_NUM} for merge_group head_ref '${MERGE_GROUP_HEAD_REF}'. Verify the workflow's permissions block grants 'pull-requests: read'. Manual unblock: post 'ai-sdlc/attestation: success' on the queue commit and re-run."
                 exit 1
@@ -255,7 +241,7 @@ jobs:
             fi
           fi
           echo "is_release_please=${IS_RP}" >> "${GITHUB_OUTPUT}"
-          echo "Release-please detection: head_ref='${PR_HEAD_REF:-}', user='${PR_USER_LOGIN:-}', merge_group_head_ref='${MERGE_GROUP_HEAD_REF:-}', is_release_please=${IS_RP}"
+          echo "Release-please detection: head_ref='${PR_HEAD_REF:-}', merge_group_head_ref='${MERGE_GROUP_HEAD_REF:-}', is_release_please=${IS_RP}"
 
       - name: Short-circuit — post ai-sdlc/attestation success (release-please)
         if: steps.release_please.outputs.is_release_please == 'true'
