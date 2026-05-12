@@ -280,6 +280,105 @@ describe('emitCheckpointCommit() — real git repo', () => {
   });
 });
 
+// ── AISDLC-260 regression: GIT_DIR / GIT_WORK_TREE bleed ──────────────────
+//
+// Reproduces the AISDLC-260 incident where running checkpoint tests under a
+// husky pre-push context (which exports GIT_DIR=<host>/.git to its child
+// processes) caused emitCheckpointCommit to land its commits on the HOST
+// branch instead of the test fixture, because the production code passed
+// `cwd` to execSync but inherited `GIT_DIR` from the test process — and git
+// honors GIT_DIR over cwd. Production now strips GIT_DIR + GIT_WORK_TREE
+// before each git call (see `productionGitEnv()` in checkpoint.ts).
+
+describe('emitCheckpointCommit() — AISDLC-260: env-bleed isolation', () => {
+  let fixtureRepo: string;
+  let hostRepo: string;
+  let originalGitDir: string | undefined;
+  let originalGitWorkTree: string | undefined;
+  let originalGitIndexFile: string | undefined;
+
+  beforeEach(() => {
+    fixtureRepo = makeGitRepo();
+    hostRepo = makeGitRepo();
+    originalGitDir = process.env['GIT_DIR'];
+    originalGitWorkTree = process.env['GIT_WORK_TREE'];
+    originalGitIndexFile = process.env['GIT_INDEX_FILE'];
+  });
+
+  afterEach(() => {
+    if (originalGitDir === undefined) delete process.env['GIT_DIR'];
+    else process.env['GIT_DIR'] = originalGitDir;
+    if (originalGitWorkTree === undefined) delete process.env['GIT_WORK_TREE'];
+    else process.env['GIT_WORK_TREE'] = originalGitWorkTree;
+    if (originalGitIndexFile === undefined) delete process.env['GIT_INDEX_FILE'];
+    else process.env['GIT_INDEX_FILE'] = originalGitIndexFile;
+  });
+
+  it('commits to the fixture worktree, not the bleed target, when GIT_DIR + GIT_WORK_TREE + GIT_INDEX_FILE are set', () => {
+    // Simulate the husky pre-push environment AND the symmetric GIT_INDEX_FILE
+    // vector at once — production's productionGitEnv() must strip all three
+    // (matches the cleanGitEnv() prior art in orchestrator/src/runtime/git-env.ts).
+    process.env['GIT_DIR'] = join(hostRepo, '.git');
+    process.env['GIT_WORK_TREE'] = hostRepo;
+    process.env['GIT_INDEX_FILE'] = join(hostRepo, '.git', 'index');
+
+    // Snapshot host HEAD before — must NOT change.
+    const hostHeadBefore = execSync('git rev-parse HEAD', {
+      cwd: hostRepo,
+      env: GIT_ENV,
+      encoding: 'utf8',
+    }).trim();
+
+    writeFileSync(join(fixtureRepo, 'fixture-only.ts'), 'export const x = 1;\n', 'utf8');
+
+    const result = emitCheckpointCommit({
+      worktreePath: fixtureRepo,
+      annotation: 'aisdlc-260 isolation test',
+      taskId: 'AISDLC-260',
+    });
+
+    expect(result.committed).toBe(true);
+
+    // Fixture HEAD advanced (commit landed where intended).
+    const fixtureLog = execSync('git log -1 --format=%s', {
+      cwd: fixtureRepo,
+      env: GIT_ENV,
+      encoding: 'utf8',
+    }).trim();
+    expect(fixtureLog).toBe('wip(checkpoint): aisdlc-260 isolation test (AISDLC-260)');
+
+    // Host HEAD unchanged (no bleed).
+    const hostHeadAfter = execSync('git rev-parse HEAD', {
+      cwd: hostRepo,
+      env: GIT_ENV,
+      encoding: 'utf8',
+    }).trim();
+    expect(hostHeadAfter).toBe(hostHeadBefore);
+  });
+
+  it('countCheckpointCommits / countCommitsBeyondMain ignore inherited GIT_DIR + GIT_INDEX_FILE', () => {
+    // Same setup: bleed target via GIT_DIR + GIT_INDEX_FILE. The count helpers
+    // operate on the worktreePath argument and must not be confused by either
+    // env override.
+    process.env['GIT_DIR'] = join(hostRepo, '.git');
+    process.env['GIT_WORK_TREE'] = hostRepo;
+    process.env['GIT_INDEX_FILE'] = join(hostRepo, '.git', 'index');
+
+    const { repoDir } = makeGitRepoWithOrigin();
+
+    // Add 1 wip(checkpoint) commit on the fixture's branch.
+    writeFileSync(join(repoDir, 'chk-260.ts'), 'export const c = 1;\n', 'utf8');
+    execSync(
+      `git add chk-260.ts && git -c commit.gpgsign=false commit --no-verify -m "wip(checkpoint): aisdlc-260 (AISDLC-260)"`,
+      { cwd: repoDir, env: GIT_ENV, stdio: 'pipe', shell: '/bin/sh' },
+    );
+
+    // Production count functions read the fixture, not the bleed target.
+    expect(countCheckpointCommits(repoDir)).toBe(1);
+    expect(countCommitsBeyondMain(repoDir)).toBe(1);
+  });
+});
+
 // ── countCheckpointCommits ────────────────────────────────────────────────
 
 describe('countCheckpointCommits()', () => {
