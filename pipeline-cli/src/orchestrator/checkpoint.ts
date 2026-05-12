@@ -41,6 +41,28 @@ import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+/**
+ * Return `process.env` with `GIT_DIR` and `GIT_WORK_TREE` stripped.
+ *
+ * AISDLC-260: when these vars are present (e.g. inside a husky pre-push
+ * hook, where `git push` exports `GIT_DIR=<host-repo>/.git` to its child
+ * processes), git ignores the `cwd` we pass to `execSync` and operates on
+ * the bleed target instead. That made checkpoint commits emitted from
+ * inside a test fixture land on the host worktree's branch — see
+ * AISDLC-260 for the post-mortem of the polluted `aisdlc-259` branch.
+ *
+ * Production callers still inherit identity (`user.email`, `user.name`)
+ * from per-repo `.git/config`, which git reads regardless of `GIT_DIR`.
+ */
+function productionGitEnv(): NodeJS.ProcessEnv {
+  // Spread is intentional: we want every other env var (PATH, HOME, etc.)
+  // to inherit. We only strip the two repo-discovery overrides.
+  const env = { ...process.env };
+  delete env['GIT_DIR'];
+  delete env['GIT_WORK_TREE'];
+  return env;
+}
+
 export interface CheckpointOptions {
   /**
    * Absolute path to the worktree root where the checkpoint commit should
@@ -109,6 +131,7 @@ export function emitCheckpointCommit(opts: CheckpointOptions): CheckpointResult 
   try {
     statusOutput = execSync('git status --porcelain', {
       cwd,
+      env: productionGitEnv(),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -126,6 +149,7 @@ export function emitCheckpointCommit(opts: CheckpointOptions): CheckpointResult 
   try {
     execSync('git add -A', {
       cwd,
+      env: productionGitEnv(),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -158,6 +182,7 @@ export function emitCheckpointCommit(opts: CheckpointOptions): CheckpointResult 
       ['-c', 'commit.gpgsign=false', 'commit', '--no-verify', '-m', subject],
       {
         cwd,
+        env: productionGitEnv(),
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
       },
@@ -186,6 +211,7 @@ export function countCheckpointCommits(worktreePath: string): number {
   try {
     const output = execSync(`git log --oneline --grep="^wip(checkpoint):" origin/main..HEAD`, {
       cwd: worktreePath,
+      env: productionGitEnv(),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
@@ -204,6 +230,7 @@ export function countCommitsBeyondMain(worktreePath: string): number {
   try {
     const output = execSync('git rev-list --count origin/main..HEAD', {
       cwd: worktreePath,
+      env: productionGitEnv(),
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     });
