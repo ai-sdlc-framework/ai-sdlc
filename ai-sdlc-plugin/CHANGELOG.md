@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.9.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.9.1...ai-sdlc-plugin-v0.9.2) (2026-05-12)
+
+
+### Bug Fixes
+
+* **plugin:** kill Stop-hook infinite loop in deferred-coverage-check ([#456](https://github.com/ai-sdlc-framework/ai-sdlc/issues/456)) ([e9cc422](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e9cc422fe971bbc305c6c8dfe789dbc5c7a7978f))
+
 ## [0.9.1](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.9.0...ai-sdlc-plugin-v0.9.1) (2026-05-11)
 
 
