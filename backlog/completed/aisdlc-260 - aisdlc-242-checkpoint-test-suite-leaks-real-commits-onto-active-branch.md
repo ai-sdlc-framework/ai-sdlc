@@ -11,8 +11,10 @@ labels:
   - blocker-class
 priority: high
 references:
-  - .worktrees/aisdlc-259
-  - memory/feedback_test_git_identity_bleed.md
+  - pipeline-cli/src/orchestrator/checkpoint.ts
+  - pipeline-cli/src/orchestrator/checkpoint.test.ts
+  - pipeline-cli/src/__test-helpers/git-env.ts
+  - orchestrator/src/runtime/git-env.ts
 ---
 
 ## Bug
