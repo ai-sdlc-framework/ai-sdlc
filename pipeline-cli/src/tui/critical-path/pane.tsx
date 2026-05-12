@@ -51,7 +51,7 @@ export function CriticalPathDetail({
   return (
     <Box flexDirection="column" borderStyle="double" paddingX={1} flexGrow={1}>
       <Text bold color="yellow">
-        🛤️ Critical Path — {row.record.id}
+        🛤 Critical Path — {row.record.id}
       </Text>
       <Box marginTop={1} flexDirection="column">
         <Text>
@@ -144,7 +144,7 @@ export function CriticalPathPaneContent({
   return (
     <Box flexDirection="column" borderStyle="single" paddingX={1} flexGrow={1}>
       <Text bold color="yellow">
-        🛤️ CRITICAL PATH ({rows.length} tasks)
+        🛤 CRITICAL PATH ({rows.length} tasks)
       </Text>
       {error && (
         <Box marginTop={1}>

@@ -16,7 +16,7 @@
  * but `string-width` measures the stripped line as N+1 visible columns.
  *
  * This means `assertNoOverflow()` reports a 1-col overflow on EVERY pane
- * that contains `▶`, `⚙`, `🛤️`, etc. in fixed-width content. The finding
+ * that contains `▶`, `⚙`, `🛤`, etc. in fixed-width content. The finding
  * is documented per-pane with an explicit `toThrow()` assertion so that
  * when the upstream issue is fixed, the test fails and needs to be updated.
  *
@@ -26,14 +26,19 @@
  *
  * Panes with known overflow (documented in explicit `toThrow` tests):
  *   - PRs pane:          ▶ focus indicator in rows (any width)
- *   - Critical Path:     ▶ focus indicator + 🛤️ in title (any width)
+ *   - Critical Path:     ▶ focus indicator in rows (any width)
  *   - Analytics:         ⚙ in PIPELINE THROUGHPUT heading (any width)
  *   - Config Browser:    ⚙ in CONFIGURATION title (any width)
+ *
+ * Note: The Critical Path title was previously `🛤️ CRITICAL PATH` (emoji +
+ * U+FE0F variation selector). The variation selector is zero-width per
+ * string-width but Ink's layout counted it as 1 extra cell, causing border
+ * misalignment in the overview layout. AISDLC-259 stripped the VS: `🛤`.
  *
  * Panes tested (AC#2):
  *   - PRs pane       (prs/pane.tsx)           — "📦 PRs IN FLIGHT"
  *   - Blockers pane  (panes/blockers.tsx)     — "🛑 / ✓ BLOCKERS"
- *   - Critical Path  (critical-path/pane.tsx) — "🛤️ CRITICAL PATH"
+ *   - Critical Path  (critical-path/pane.tsx) — "🛤 CRITICAL PATH"
  *   - Analytics      (panes/analytics.tsx)    — "👥 OPERATOR THROUGHPUT"
  *   - Events         (panes/events.tsx)       — "📡 EVENTS"
  *   - Config Browser (config-browser/pane.tsx)— "⚙ CONFIGURATION"
@@ -224,6 +229,12 @@ describe('Blockers pane — width-pinned rendering (AC#2, AC#3)', () => {
 // Known issue: rows use ▶ focus indicator (2-wide in string-width, 1-wide
 // in Ink) — causes assertNoOverflow to report 1-col overflow at ALL widths.
 // Border + title checks still run at all widths.
+//
+// Fixed (AISDLC-259): the title emoji `🛤️` (U+1F6E4 + U+FE0F variation
+// selector) was replaced with bare `🛤` (U+1F6E4). The variation selector
+// caused Ink to allocate 1 extra cell, shifting the right border by 1 column
+// and producing the doubled || artifact at the shared boundary in the overview
+// layout. The title overflow issue below is now only from ▶, not the emoji.
 
 describe('Critical Path pane — width-pinned rendering (AC#2, AC#3)', () => {
   const rows = [makeCriticalPathRow('AISDLC-100', 3), makeCriticalPathRow('AISDLC-101', 2)];
@@ -255,9 +266,9 @@ describe('Critical Path pane — width-pinned rendering (AC#2, AC#3)', () => {
       80,
     );
     // In the empty state there are no ▶ focus indicators in rows.
-    // The 🛤️ emoji in the title is rendered by Ink's border layout which
-    // absorbs the 2-wide character without producing an overflow line.
-    // assertNoOverflow() passes for the empty state.
+    // The 🛤 emoji in the title (bare U+1F6E4, no variation selector since
+    // AISDLC-259) is 2-wide per string-width AND per Ink's layout, so the
+    // border is correctly placed. assertNoOverflow() passes for the empty state.
     expect(() => result.assertNoOverflow()).not.toThrow();
   });
 
