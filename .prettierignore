@@ -5,3 +5,6 @@ spec/schemas/
 sdk-go/
 sdk-python/
 *.md
+
+ai-sdlc-plugin/plugin.json
+ai-sdlc-plugin/.claude-plugin/plugin.json
