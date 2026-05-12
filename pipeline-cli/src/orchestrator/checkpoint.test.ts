@@ -295,12 +295,14 @@ describe('emitCheckpointCommit() — AISDLC-260: env-bleed isolation', () => {
   let hostRepo: string;
   let originalGitDir: string | undefined;
   let originalGitWorkTree: string | undefined;
+  let originalGitIndexFile: string | undefined;
 
   beforeEach(() => {
     fixtureRepo = makeGitRepo();
     hostRepo = makeGitRepo();
     originalGitDir = process.env['GIT_DIR'];
     originalGitWorkTree = process.env['GIT_WORK_TREE'];
+    originalGitIndexFile = process.env['GIT_INDEX_FILE'];
   });
 
   afterEach(() => {
@@ -308,12 +310,17 @@ describe('emitCheckpointCommit() — AISDLC-260: env-bleed isolation', () => {
     else process.env['GIT_DIR'] = originalGitDir;
     if (originalGitWorkTree === undefined) delete process.env['GIT_WORK_TREE'];
     else process.env['GIT_WORK_TREE'] = originalGitWorkTree;
+    if (originalGitIndexFile === undefined) delete process.env['GIT_INDEX_FILE'];
+    else process.env['GIT_INDEX_FILE'] = originalGitIndexFile;
   });
 
-  it('commits to the fixture worktree, not the bleed target, when GIT_DIR is set', () => {
-    // Simulate the husky pre-push environment: GIT_DIR points at the host repo.
+  it('commits to the fixture worktree, not the bleed target, when GIT_DIR + GIT_WORK_TREE + GIT_INDEX_FILE are set', () => {
+    // Simulate the husky pre-push environment AND the symmetric GIT_INDEX_FILE
+    // vector at once — production's productionGitEnv() must strip all three
+    // (matches the cleanGitEnv() prior art in orchestrator/src/runtime/git-env.ts).
     process.env['GIT_DIR'] = join(hostRepo, '.git');
     process.env['GIT_WORK_TREE'] = hostRepo;
+    process.env['GIT_INDEX_FILE'] = join(hostRepo, '.git', 'index');
 
     // Snapshot host HEAD before — must NOT change.
     const hostHeadBefore = execSync('git rev-parse HEAD', {
@@ -349,11 +356,13 @@ describe('emitCheckpointCommit() — AISDLC-260: env-bleed isolation', () => {
     expect(hostHeadAfter).toBe(hostHeadBefore);
   });
 
-  it('countCheckpointCommits / countCommitsBeyondMain ignore inherited GIT_DIR', () => {
-    // Same setup: bleed target via GIT_DIR. The count helpers operate on the
-    // worktreePath argument and must not be confused by the env override.
+  it('countCheckpointCommits / countCommitsBeyondMain ignore inherited GIT_DIR + GIT_INDEX_FILE', () => {
+    // Same setup: bleed target via GIT_DIR + GIT_INDEX_FILE. The count helpers
+    // operate on the worktreePath argument and must not be confused by either
+    // env override.
     process.env['GIT_DIR'] = join(hostRepo, '.git');
     process.env['GIT_WORK_TREE'] = hostRepo;
+    process.env['GIT_INDEX_FILE'] = join(hostRepo, '.git', 'index');
 
     const { repoDir } = makeGitRepoWithOrigin();
 

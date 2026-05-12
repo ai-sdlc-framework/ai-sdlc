@@ -42,7 +42,8 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 /**
- * Return `process.env` with `GIT_DIR` and `GIT_WORK_TREE` stripped.
+ * Return `process.env` with `GIT_DIR`, `GIT_WORK_TREE`, and `GIT_INDEX_FILE`
+ * stripped.
  *
  * AISDLC-260: when these vars are present (e.g. inside a husky pre-push
  * hook, where `git push` exports `GIT_DIR=<host-repo>/.git` to its child
@@ -51,15 +52,25 @@ import { join } from 'node:path';
  * inside a test fixture land on the host worktree's branch — see
  * AISDLC-260 for the post-mortem of the polluted `aisdlc-259` branch.
  *
+ * The strip set matches the codebase's existing prior art:
+ * `cleanGitEnv()` in `orchestrator/src/runtime/git-env.ts` (AISDLC-72) and
+ * `ai-sdlc-plugin/scripts/sign-attestation.mjs`. `GIT_INDEX_FILE` is the
+ * symmetric vector to `GIT_DIR` — when set, it redirects `git add -A` to
+ * write a foreign index and `git commit` to build the tree from it. The
+ * husky pre-push trigger that surfaced AISDLC-260 only auto-exports
+ * `GIT_DIR`, but stripping all three closes the consistency gap and
+ * matches what every other production call site in the repo already does.
+ *
  * Production callers still inherit identity (`user.email`, `user.name`)
  * from per-repo `.git/config`, which git reads regardless of `GIT_DIR`.
  */
 function productionGitEnv(): NodeJS.ProcessEnv {
   // Spread is intentional: we want every other env var (PATH, HOME, etc.)
-  // to inherit. We only strip the two repo-discovery overrides.
+  // to inherit. We only strip the three repo-discovery overrides.
   const env = { ...process.env };
   delete env['GIT_DIR'];
   delete env['GIT_WORK_TREE'];
+  delete env['GIT_INDEX_FILE'];
   return env;
 }
 
