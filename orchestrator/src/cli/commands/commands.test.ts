@@ -56,6 +56,12 @@ const mockWriteFileSync = vi.fn<(p: string, data: string, enc?: string) => void>
 // readFileSync to honor the idempotency sentinel. Mock it so tests that
 // flip mockExistsSync to "true" don't crash on a missing real file.
 const mockReadFileSync = vi.fn<(p: string, enc?: string) => string>(() => '');
+// AISDLC-262: ensureGitignore uses appendFileSync (not writeFileSync), which
+// the original mock omitted. Without this mock, the real appendFileSync runs
+// against the actual repo .gitignore when resolveInstallTarget resolves
+// process.cwd() to the worktree root. Mock it to a no-op so tests stay
+// hermetic and never write to the real filesystem.
+const mockAppendFileSync = vi.fn<(p: string, data: string, enc?: string) => void>();
 
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
@@ -65,6 +71,7 @@ vi.mock('node:fs', async () => {
     mkdirSync: (p: string, opts?: object) => mockMkdirSync(p, opts),
     writeFileSync: (p: string, data: string, enc?: string) => mockWriteFileSync(p, data, enc),
     readFileSync: (p: string, enc?: string) => mockReadFileSync(p, enc),
+    appendFileSync: (p: string, data: string, enc?: string) => mockAppendFileSync(p, data, enc),
   };
 });
 
@@ -128,6 +135,8 @@ function resetInitCommandOptions(cmd: Awaited<ReturnType<typeof getInitProgram>>
   cmd.setOptionValue('withClassifier', undefined);
   cmd.setOptionValue('withBranchProtection', undefined);
   cmd.setOptionValue('add', undefined);
+  // AISDLC-262
+  cmd.setOptionValue('workspace', undefined);
 }
 
 describe('init command', () => {
@@ -161,7 +170,22 @@ describe('init command', () => {
   });
 
   it('skips files that already exist', async () => {
-    mockExistsSync.mockReturnValue(true);
+    // AISDLC-262: `resolveInstallTarget` checks whether `<git-root>/.ai-sdlc/`
+    // exists as a directory. If it returns true, init refuses with an error
+    // (nesting guard). To exercise the "skip existing files" path, we must
+    // return false for the configDir existence check (so we don't trigger the
+    // nesting guard) but true for individual file checks (so the 4-file
+    // scaffold sees them as "already present" and skips them).
+    // We use a path-aware mock: the configDir path ends exactly with `.ai-sdlc`
+    // (no trailing slash, no sub-path); individual files are deeper paths.
+    mockExistsSync.mockImplementation((p: string) => {
+      // Return false for the bare configDir check (AISDLC-262 nesting guard)
+      // so init proceeds without refusing. Return true for everything else
+      // (individual file paths) so init skips writing them.
+      const normalized = String(p).replace(/\\/g, '/');
+      if (/\/\.ai-sdlc$/.test(normalized)) return false;
+      return true;
+    });
 
     const cmd = await getInitProgram();
     resetInitCommandOptions(cmd);

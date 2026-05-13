@@ -29,6 +29,7 @@ import { execSync } from 'node:child_process';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
+import { resolveInstallTarget } from './init-features.js';
 
 /**
  * Initialize `dir` as a real git repo (with no remote) so detectGitRemote
@@ -176,6 +177,8 @@ async function runInit(argv: string[], projectDir: string = tmpDir): Promise<voi
   initCommand.setOptionValue('withClassifier', undefined);
   initCommand.setOptionValue('withBranchProtection', undefined);
   initCommand.setOptionValue('add', undefined);
+  // AISDLC-262 flags
+  initCommand.setOptionValue('workspace', undefined);
   await initCommand.parseAsync(argv, { from: 'user' });
 }
 
@@ -197,24 +200,19 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
     expect(out).toContain("'your-org' placeholder");
   });
 
-  it('falls back even when invoked from inside a host repo with its own origin (AISDLC-104)', async () => {
-    // AISDLC-104 regression witness. Recreates the failing topology:
+  it('AISDLC-104/AISDLC-262: init from subdir inside a host repo resolves to the git root and uses its remote', async () => {
+    // AISDLC-104 + AISDLC-262 combined witness. Recreates the topology:
     //   /tmp/host-with-origin/        <- has .git AND origin=acme-host/host-repo
-    //     /tmp/host-with-origin/proj/ <- the project we're initializing
-    //                                   (with an empty `.git/` dir like the
-    //                                    pre-AISDLC-104 single-repo test)
+    //     /tmp/host-with-origin/proj/ <- subdir WITHOUT its own .git/
     //
-    // Without GIT_CEILING_DIRECTORIES, git sees the empty `.git/` in proj/
-    // is invalid and walks UP looking for a real repo, finding hostDir's
-    // .git with origin=acme-host. The fallback then never fires — exactly
-    // the original ai-sdlc-framework bleed when the orchestrator tests
-    // are invoked from inside the framework checkout. With AISDLC-104's
-    // ceiling pin, git stops at proj/ and reports the no-remote fallback.
+    // AISDLC-262 behavior: `resolveInstallTarget` walks up via
+    // `git rev-parse --show-toplevel` from `proj/` and correctly finds
+    // `hostDir` as the real git root. Init is then applied to `hostDir`
+    // using `hostDir`'s real remote (acme-host) — no bleed in the sense
+    // that we correctly and deliberately use the repo's canonical remote.
+    // Files are written to `hostDir/.ai-sdlc/`, not to `proj/.ai-sdlc/`.
     const hostDir = mkdtempSync(join(tmpdir(), 'aisdlc-104-host-'));
     try {
-      // Build the host repo with a fake origin. Use the same direct-write
-      // layout as initBareRepo so this path is also immune to the parallel
-      // `git init` flake.
       initBareRepo(hostDir);
       execSync('git remote add origin git@github.com:acme-host/host-repo.git', {
         cwd: hostDir,
@@ -223,24 +221,21 @@ describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
 
       const projDir = join(hostDir, 'proj');
       mkdirSync(projDir);
-      // Empty `.git/` — enough for detectWorkspace's existsSync check, but
-      // invalid as a real git repo so git would walk up without our ceiling.
-      mkdirSync(join(projDir, '.git'));
+      // No .git/ here — projDir is a plain subdirectory of the git repo.
 
-      // Run init from inside the nested project. process.cwd() during
-      // the action will be projDir; without the ceiling-directories
-      // pin, git would walk up to hostDir and report acme-host/host-repo.
       await runInit(['--skip-mcp', '--yes'], projDir);
 
-      const pipeline = readFileSync(join(projDir, '.ai-sdlc', 'pipeline.yaml'), 'utf-8');
-      expect(pipeline).toContain('org: your-org');
-      expect(pipeline).not.toContain('acme-host');
+      // AISDLC-262: files land at the resolved git root (hostDir), not projDir.
+      expect(existsSync(join(projDir, '.ai-sdlc'))).toBe(false);
+      const pipeline = readFileSync(join(hostDir, '.ai-sdlc', 'pipeline.yaml'), 'utf-8');
+      // The real remote org should be used (this is intentional, correct behavior).
+      expect(pipeline).toContain('org: acme-host');
 
+      // The operator-visible log must mention the resolved target.
       const out = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-      expect(out).toContain('No git origin remote detected');
-      expect(out).not.toContain('acme-host');
+      expect(out).toContain('Resolved install target:');
+      expect(out).toContain(hostDir);
     } finally {
-      // chdir back before rm so we never try to rmdir our own cwd.
       process.chdir(prevCwd);
       rmSync(hostDir, { recursive: true, force: true });
     }
@@ -528,6 +523,175 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
     expect(out).not.toContain('AI_SDLC_CI_ATTESTOR_PRIVATE_KEY');
     expect(out).toContain('AISDLC-141');
     expect(out).toContain('ai-sdlc health');
+  });
+});
+
+// ── AISDLC-262: git-root resolution + nesting guard ─────────────────────
+//
+// These tests exercise the four scenarios called out in the AISDLC-262
+// acceptance criteria:
+//   1. Workspace-root with existing .ai-sdlc/ → refuse with clear message.
+//   2. `--workspace <name>` opts into per-workspace install at packages/<name>/.
+//   3. Plain (non-monorepo) repo resolves to git root by default.
+//   4. Non-git directory falls back to cwd (no .git → no rev-parse).
+//
+// All four are exercised via the `resolveInstallTarget` unit path rather
+// than the full Commander → initCommand path so they stay hermetic and
+// fast without needing a real subprocess for `git rev-parse`.
+
+describe('resolveInstallTarget (AISDLC-262)', () => {
+  it('AC #1: resolves to git root when cwd is a subdirectory', () => {
+    const gitRoot = mkdtempSync(join(tmpdir(), 'aisdlc-262-root-'));
+    const subDir = join(gitRoot, 'packages', 'frontend');
+    mkdirSync(subDir, { recursive: true });
+    try {
+      const result = resolveInstallTarget({
+        cwd: subDir,
+        gitShowToplevel: () => gitRoot,
+        exists: () => false, // .ai-sdlc/ does not exist yet
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.installDir).toBe(gitRoot);
+      expect(result.resolved).toBe(true); // cwd !== gitRoot
+    } finally {
+      rmSync(gitRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('AC #2: refuses with clear message when git-root already has .ai-sdlc/', () => {
+    const gitRoot = '/fake/repo/root';
+    const result = resolveInstallTarget({
+      cwd: join(gitRoot, 'packages', 'frontend'),
+      gitShowToplevel: () => gitRoot,
+      exists: (p) => p === join(gitRoot, '.ai-sdlc'),
+    });
+    expect(result.error).toBeDefined();
+    expect(result.error).toContain('already installed at');
+    expect(result.error).toContain(gitRoot);
+    expect(result.error).toContain('--workspace <name>');
+  });
+
+  it('AC #3a: --workspace <name> opts into packages/<name> when packages/ exists', () => {
+    const gitRoot = mkdtempSync(join(tmpdir(), 'aisdlc-262-ws-'));
+    mkdirSync(join(gitRoot, 'packages'), { recursive: true });
+    try {
+      const result = resolveInstallTarget({
+        cwd: join(gitRoot, 'packages', 'frontend'),
+        workspace: 'frontend',
+        gitShowToplevel: () => gitRoot,
+        exists: (p) => p === join(gitRoot, 'packages'), // packages/ exists
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.installDir).toBe(join(gitRoot, 'packages', 'frontend'));
+    } finally {
+      rmSync(gitRoot, { recursive: true, force: true });
+    }
+  });
+
+  it('AC #3b: --workspace <name> falls back to <git-root>/<name> when packages/ is absent', () => {
+    const gitRoot = '/fake/monorepo';
+    const result = resolveInstallTarget({
+      cwd: join(gitRoot, 'apps', 'backend'),
+      workspace: 'backend',
+      gitShowToplevel: () => gitRoot,
+      exists: () => false, // no packages/ dir and no .ai-sdlc/
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.installDir).toBe(join(gitRoot, 'backend'));
+  });
+
+  it('AC #1 (plain repo): cwd IS the git root — resolved=false, no error', () => {
+    const gitRoot = '/fake/plain-repo';
+    const result = resolveInstallTarget({
+      cwd: gitRoot,
+      gitShowToplevel: () => gitRoot,
+      exists: () => false,
+    });
+    expect(result.error).toBeUndefined();
+    expect(result.installDir).toBe(gitRoot);
+    expect(result.resolved).toBe(false); // cwd === gitRoot
+  });
+
+  it('AC non-git dir: no .git → falls back to cwd', () => {
+    const plainDir = mkdtempSync(join(tmpdir(), 'aisdlc-262-nongit-'));
+    try {
+      const result = resolveInstallTarget({
+        cwd: plainDir,
+        // Simulate: no git repo (rev-parse throws)
+        gitShowToplevel: () => {
+          throw new Error('fatal: not a git repository');
+        },
+        exists: () => false,
+      });
+      expect(result.error).toBeUndefined();
+      expect(result.installDir).toBe(plainDir);
+      expect(result.resolved).toBe(false);
+    } finally {
+      rmSync(plainDir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Integration: full init from a subdirectory → installs at git root
+
+describe('init — AISDLC-262 git-root install target (integration)', () => {
+  it('dry-run from subdir prints resolved target on first line', async () => {
+    // Set up: tmpDir is the git root; subDir is a packages/frontend subdir.
+    initBareRepo(tmpDir);
+    const subDir = join(tmpDir, 'packages', 'frontend');
+    mkdirSync(subDir, { recursive: true });
+
+    await runInit(['--skip-mcp', '--yes', '--dry-run'], subDir);
+
+    const out = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
+    // The resolved target must appear before the version block.
+    expect(out).toContain('Resolved install target:');
+    expect(out).toContain(tmpDir);
+    // And because it's dry-run, nothing should have been written.
+    expect(existsSync(join(tmpDir, '.ai-sdlc'))).toBe(false);
+  });
+
+  it('init from subdir installs at git root, not the subdir', async () => {
+    initBareRepo(tmpDir);
+    const subDir = join(tmpDir, 'packages', 'frontend');
+    mkdirSync(subDir, { recursive: true });
+
+    await runInit(['--skip-mcp', '--yes'], subDir);
+
+    // Should have written to tmpDir (the git root), NOT to subDir.
+    expect(existsSync(join(tmpDir, '.ai-sdlc', 'pipeline.yaml'))).toBe(true);
+    expect(existsSync(join(subDir, '.ai-sdlc'))).toBe(false);
+  });
+
+  it('refuses with exit-1 + clear message when git root already has .ai-sdlc/', async () => {
+    initBareRepo(tmpDir);
+    // Pre-create the .ai-sdlc dir at the git root to simulate a prior install.
+    mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await runInit(['--skip-mcp', '--yes'], tmpDir);
+      expect(process.exitCode).toBe(1);
+      const errOut = consoleErrorSpy.mock.calls.map((c) => c[0]).join('\n');
+      expect(errOut).toContain('already installed at');
+      expect(errOut).toContain('--workspace <name>');
+    } finally {
+      consoleErrorSpy.mockRestore();
+    }
+  });
+
+  it('--workspace <name> writes into packages/<name>/ without refusing', async () => {
+    initBareRepo(tmpDir);
+    // Pre-create .ai-sdlc at git root (simulates prior install) AND packages/ dir.
+    mkdirSync(join(tmpDir, '.ai-sdlc'), { recursive: true });
+    mkdirSync(join(tmpDir, 'packages', 'frontend'), { recursive: true });
+
+    await runInit(['--skip-mcp', '--yes', '--workspace', 'frontend'], tmpDir);
+
+    // Should have written to packages/frontend, not to the root.
+    expect(existsSync(join(tmpDir, 'packages', 'frontend', '.ai-sdlc', 'pipeline.yaml'))).toBe(
+      true,
+    );
   });
 });
 

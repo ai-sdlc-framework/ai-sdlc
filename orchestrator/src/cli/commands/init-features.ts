@@ -21,7 +21,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, execSync } from 'node:child_process';
 import {
   ATTESTATION_TEMPLATES,
   BASELINE_WORKFLOW_TEMPLATES,
@@ -77,6 +77,15 @@ export interface WizardFlags {
   add?: 'dor' | 'attestation' | 'classifier' | 'branch-protection';
   /** `--dry-run` — print what would be done, don't write. */
   dryRun: boolean;
+  /**
+   * `--workspace <name>` opts into a per-workspace install at
+   * `packages/<name>/.ai-sdlc/` instead of the git-root default.
+   * Only relevant when the git root already has an `.ai-sdlc/` directory
+   * (e.g. the repo root already has AI-SDLC installed and the operator
+   * wants to add a child-workspace install). Without this flag, init
+   * refuses to nest if the git root already has `.ai-sdlc/`.
+   */
+  workspace?: string;
 }
 
 /**
@@ -118,6 +127,125 @@ export interface FeatureAdapters {
   runCommand: (cmd: string, args: string[]) => { stdout: string; exitCode: number };
   /** Sink for operator-visible output (defaults to console.log). */
   log: (line: string) => void;
+}
+
+// ── Install-target resolution (AISDLC-262) ───────────────────────────────
+
+/**
+ * Result returned by `resolveInstallTarget`. The caller uses `installDir`
+ * as the `projectDir` argument passed down to `initProject` and the wizard
+ * stage. The `resolved` flag is true when the target differs from `cwd`
+ * (i.e. we walked up to the git root).
+ */
+export interface InstallTargetResult {
+  /** Absolute path to the directory where `.ai-sdlc/` should be written. */
+  installDir: string;
+  /** True when `installDir !== cwd` (we resolved up to the git root). */
+  resolved: boolean;
+  /** Error message when the target is refused; installDir is unset in this case. */
+  error?: string;
+}
+
+/**
+ * Options bag for `resolveInstallTarget`. Adapters allow tests to inject
+ * controlled filesystem / subprocess behaviour without touching real disk.
+ */
+export interface ResolveInstallTargetOptions {
+  /** Working directory to start from (defaults to `process.cwd()`). */
+  cwd?: string;
+  /** The `--workspace <name>` flag value, if provided. */
+  workspace?: string;
+  /** Config directory name (defaults to `.ai-sdlc`). */
+  configDirName?: string;
+  /**
+   * Override for `git rev-parse --show-toplevel`. Receives the cwd and
+   * returns the git root path, or throws if not inside a git repo.
+   */
+  gitShowToplevel?: (cwd: string) => string;
+  /** Override for existence checks (defaults to `node:fs.existsSync`). */
+  exists?: (path: string) => boolean;
+  /**
+   * When true, skip the "already installed at <root>" nesting check.
+   * Used by the `--add <feature>` extension path, which intentionally
+   * extends an already-initialized repo (the existing `.ai-sdlc/` IS
+   * the install the operator wants to extend).
+   */
+  skipExistingCheck?: boolean;
+}
+
+/**
+ * Resolve the AI-SDLC install target directory for the current invocation
+ * (AISDLC-262).
+ *
+ * ## Default behavior (no `--workspace` flag)
+ *
+ * 1. Shell out to `git rev-parse --show-toplevel` to find the repo root.
+ *    - If the cwd is not inside a git repo, install at cwd (plain-dir
+ *      fallback — same as the pre-AISDLC-262 behavior).
+ * 2. If `<git-root>/.ai-sdlc/` **already exists**, refuse with a clear
+ *    "already installed at <root>; pass --workspace <name>" message so
+ *    the operator knows exactly what to do next.
+ * 3. Otherwise install at the git root.
+ *
+ * ## `--workspace <name>` mode
+ *
+ * The operator explicitly wants a per-workspace install at
+ * `packages/<name>/.ai-sdlc/` (or `<name>/.ai-sdlc/` if `packages/` does
+ * not exist under the git root). No nesting check is performed — the
+ * operator has opted in.
+ *
+ * ## Dry-run output
+ *
+ * The resolved `installDir` is logged by the caller on the FIRST output
+ * line so adopters can sanity-check the target before any files are written.
+ */
+export function resolveInstallTarget(opts: ResolveInstallTargetOptions = {}): InstallTargetResult {
+  const cwd = opts.cwd ?? process.cwd();
+  const configDirName = opts.configDirName ?? '.ai-sdlc';
+  const exists = opts.exists ?? existsSync;
+
+  // Resolve git root (or fall back to cwd when not in a git repo).
+  let gitRoot: string;
+  try {
+    const getToplevel =
+      opts.gitShowToplevel ??
+      ((dir: string) =>
+        execSync(`git rev-parse --show-toplevel`, {
+          cwd: dir,
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        }).trim());
+    gitRoot = getToplevel(cwd);
+  } catch {
+    // Not inside a git repo — install at cwd (plain-dir fallback).
+    gitRoot = cwd;
+  }
+
+  if (opts.workspace) {
+    // Per-workspace install: `<git-root>/packages/<name>` if packages/ exists,
+    // otherwise `<git-root>/<name>`.
+    const packagesDir = join(gitRoot, 'packages');
+    const workspaceBase = exists(packagesDir) ? packagesDir : gitRoot;
+    const installDir = join(workspaceBase, opts.workspace);
+    return { installDir, resolved: installDir !== cwd };
+  }
+
+  // Default: install at git root. If `.ai-sdlc/` already exists there,
+  // refuse with a helpful message — UNLESS `skipExistingCheck` is set
+  // (used by `--add <feature>`, which intentionally extends an existing
+  // install and thus expects the directory to already be present).
+  const rootConfigDir = join(gitRoot, configDirName);
+  if (exists(rootConfigDir) && !opts.skipExistingCheck) {
+    return {
+      installDir: gitRoot,
+      resolved: gitRoot !== cwd,
+      error:
+        `AI-SDLC is already installed at ${gitRoot}; ` +
+        `pass --workspace <name> to add a child install at packages/<name>/.ai-sdlc/`,
+    };
+  }
+
+  return { installDir: gitRoot, resolved: gitRoot !== cwd };
 }
 
 // ── Production adapter factory ───────────────────────────────────────────
