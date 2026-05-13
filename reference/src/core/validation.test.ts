@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { validate, validateResource, formatValidationErrors } from './validation.js';
+import {
+  validate,
+  validateResource,
+  formatValidationErrors,
+  type ValidationResult,
+} from './validation.js';
 
 const VALID_MINIMAL_PIPELINE = {
   apiVersion: 'ai-sdlc.io/v1alpha1',
@@ -181,10 +186,39 @@ describe('validateResource()', () => {
     expect(result.errors![0].message).toContain('kind');
   });
 
-  it('rejects unknown kind', () => {
+  it('skips unknown kind gracefully (loader-private / adopter-extension)', () => {
+    // Unknown kinds should produce { valid: true, skipped: true } rather than
+    // a false-positive "Unknown resource kind" error.  This covers adopter
+    // patterns like `kind: MaintainersList` or `kind: SoulTrackMap` that are
+    // read by loader-private helpers, not by the AI-SDLC reference validator.
     const result = validateResource({ kind: 'FakeKind' });
-    expect(result.valid).toBe(false);
-    expect(result.errors![0].message).toContain('Unknown resource kind');
+    expect(result.valid).toBe(true);
+    expect(result.skipped).toBe(true);
+    expect(result.errors).toBeUndefined();
+  });
+
+  it('skips MaintainersList kind without false-positive warning (AISDLC-265)', () => {
+    const doc = {
+      apiVersion: 'ai-sdlc/v1',
+      kind: 'MaintainersList',
+      maintainers: ['alice', 'bob'],
+    };
+    const result: ValidationResult = validateResource(doc);
+    expect(result.valid).toBe(true);
+    expect(result.skipped).toBe(true);
+    expect(result.errors).toBeUndefined();
+  });
+
+  it('skips SoulTrackMap kind without false-positive warning (AISDLC-265)', () => {
+    const doc = {
+      apiVersion: 'ai-sdlc/v1',
+      kind: 'SoulTrackMap',
+      tracks: { 'track:enchantment': 0.85, 'track:reflect': 0.85 },
+    };
+    const result: ValidationResult = validateResource(doc);
+    expect(result.valid).toBe(true);
+    expect(result.skipped).toBe(true);
+    expect(result.errors).toBeUndefined();
   });
 
   it('rejects null input', () => {

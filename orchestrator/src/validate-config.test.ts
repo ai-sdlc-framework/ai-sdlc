@@ -429,4 +429,72 @@ describe('validateConfigFiles()', () => {
     expect(typeof result.valid).toBe('boolean');
     expect(Array.isArray(result.errors)).toBe(true);
   });
+
+  // ---------- Loader-private / adopter-extension kinds (AISDLC-265) ----------
+
+  it('silently skips loader-private kind MaintainersList (no false-positive warning)', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReaddirSync.mockReturnValue(['maintainers.yaml'] as unknown as ReturnType<
+      typeof readdirSync
+    >);
+    mockedReadFileSync.mockReturnValue('kind: MaintainersList');
+    mockedParseYaml.mockReturnValue({
+      apiVersion: 'ai-sdlc/v1',
+      kind: 'MaintainersList',
+      maintainers: ['alice', 'bob'],
+    });
+    // validateResource returns { valid: true, skipped: true } for unknown kinds
+    mockedValidateResource.mockReturnValue({ valid: true, skipped: true });
+
+    const results = validateConfigFiles('/some/dir');
+
+    // Skipped files are omitted from results entirely — no false-positive errors
+    expect(results).toHaveLength(0);
+  });
+
+  it('silently skips adopter-extension kind SoulTrackMap (no false-positive warning)', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReaddirSync.mockReturnValue(['soul-tracks.yaml'] as unknown as ReturnType<
+      typeof readdirSync
+    >);
+    mockedReadFileSync.mockReturnValue('kind: SoulTrackMap');
+    mockedParseYaml.mockReturnValue({
+      apiVersion: 'ai-sdlc/v1',
+      kind: 'SoulTrackMap',
+      tracks: { 'track:enchantment': 0.85 },
+    });
+    // validateResource returns { valid: true, skipped: true } for unknown kinds
+    mockedValidateResource.mockReturnValue({ valid: true, skipped: true });
+
+    const results = validateConfigFiles('/some/dir');
+
+    expect(results).toHaveLength(0);
+  });
+
+  it('processes valid known-kind files alongside skipped loader-private files', () => {
+    mockedExistsSync.mockReturnValue(true);
+    mockedReaddirSync.mockReturnValue([
+      'pipeline.yaml',
+      'maintainers.yaml',
+    ] as unknown as ReturnType<typeof readdirSync>);
+
+    mockedReadFileSync
+      .mockReturnValueOnce('kind: Pipeline')
+      .mockReturnValueOnce('kind: MaintainersList');
+
+    mockedParseYaml
+      .mockReturnValueOnce({ kind: 'Pipeline' })
+      .mockReturnValueOnce({ apiVersion: 'ai-sdlc/v1', kind: 'MaintainersList' });
+
+    mockedValidateResource
+      .mockReturnValueOnce({ valid: true })
+      .mockReturnValueOnce({ valid: true, skipped: true });
+
+    const results = validateConfigFiles('/some/dir');
+
+    // Only the Pipeline result is returned — MaintainersList is silently skipped
+    expect(results).toHaveLength(1);
+    expect(results[0].file).toBe('pipeline.yaml');
+    expect(results[0].valid).toBe(true);
+  });
 });

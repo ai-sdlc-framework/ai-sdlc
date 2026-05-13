@@ -16,6 +16,16 @@ export interface ValidationResult<T = AnyResource> {
   valid: boolean;
   data?: T;
   errors?: ValidationError[];
+  /**
+   * True when the document's `kind` is not in the AI-SDLC schema registry.
+   *
+   * Loader-private or adopter-extension kinds (e.g. `MaintainersList`,
+   * `SoulTrackMap`) produce `{ valid: true, skipped: true }` so callers
+   * can distinguish "validated clean" from "skipped — unknown kind".
+   * See `docs/operations/schema-extensions.md` for the wrapper-less
+   * convention that avoids the need for `kind:` on loader-private files.
+   */
+  skipped?: boolean;
 }
 
 export interface ValidationError {
@@ -218,10 +228,13 @@ export function validateResource(data: unknown): ValidationResult {
 
   const kind = (data as { kind: string }).kind as ResourceKind;
   if (!(kind in SCHEMA_FILES)) {
-    return {
-      valid: false,
-      errors: [{ path: '/kind', message: `Unknown resource kind: ${kind}`, keyword: 'enum' }],
-    };
+    // Unknown kinds are loader-private or adopter-extension resources that
+    // AI-SDLC has no schema for.  Rather than emit a false-positive warning
+    // we skip them gracefully.  Callers can inspect `result.skipped` to
+    // distinguish "validated clean" from "unknown kind, skipped".
+    // See `docs/operations/schema-extensions.md` for the wrapper-less
+    // convention that avoids needing `kind:` on loader-private YAML files.
+    return { valid: true, skipped: true };
   }
 
   return validate(kind, data);

@@ -118,6 +118,13 @@ export function loadConfig(configDir: string): AiSdlcConfig {
     }
 
     const result = validateResource(doc);
+    if (result.skipped) {
+      // Loader-private or adopter-extension kind — not in the AI-SDLC schema
+      // registry.  Silently skip so adopter configs that include files like
+      // `MaintainersList` or `SoulTrackMap` don't emit false-positive warnings.
+      // See docs/operations/schema-extensions.md for the wrapper-less convention.
+      continue;
+    }
     if (!result.valid) {
       const msgs = (result.errors ?? []).map((e) => `${e.path}: ${e.message}`).join('; ');
       // Forward-looking schemas are common during incremental adoption
