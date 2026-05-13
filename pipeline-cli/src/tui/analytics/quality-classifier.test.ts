@@ -235,6 +235,29 @@ describe('classifyFailure', () => {
     expect(result.captureRecord?.auditTrail.originalFailure.exitCode).toBe(1);
   });
 
+  // AISDLC-270 PR #481 review fix: regression for circular reference.
+  // Before the fix, `result.captureRecord.auditTrail.classificationResult`
+  // pointed back at `result`, creating a cycle. JSON.stringify(captureRecord)
+  // threw and appendFrameworkCapture's catch swallowed it, silently dropping
+  // every framework-misbehaved capture. The fix snapshots the classification
+  // before assigning captureRecord. This test pins the contract: the returned
+  // captureRecord MUST be JSON-serialisable.
+  it('captureRecord is JSON-serialisable (no circular reference)', () => {
+    const stderr = 'developer returned prose instead of JSON envelope';
+    const result = classifyFailure(signal(stderr, 1) as FailureSignal, {
+      taskId: 'AISDLC-123',
+      workerId: 'worker-abc',
+    });
+    expect(result.captureRecord).not.toBeNull();
+    // Reverting the snapshot fix would make this throw
+    // 'Converting circular structure to JSON'.
+    expect(() => JSON.stringify(result.captureRecord)).not.toThrow();
+    // The auditTrail.classificationResult must be a snapshot — captureRecord
+    // on the snapshot stays null (otherwise the cycle would re-form).
+    const serialized = JSON.parse(JSON.stringify(result.captureRecord));
+    expect(serialized.auditTrail.classificationResult.captureRecord).toBeNull();
+  });
+
   // Severity axes override
   it('respects caller-provided severityAxes override', () => {
     const result = classifyFailure(signal('developer returned prose', 1) as FailureSignal, {

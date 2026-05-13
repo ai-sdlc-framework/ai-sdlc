@@ -415,6 +415,23 @@ export function classifyFailure(
       rationale,
     };
 
+    // AISDLC-270 fix (post-#481 review): snapshot the classification BEFORE
+    // assigning captureRecord. Embedding `result` directly inside
+    // `auditTrail.classificationResult` creates a cycle —
+    // result → captureRecord → auditTrail → classificationResult → captureRecord
+    // — and JSON.stringify throws "Converting circular structure to JSON"
+    // inside appendFrameworkCapture, where the catch swallows the error.
+    // Result: every framework-misbehaved capture was silently dropped and
+    // the corpus never accumulated. The snapshot below is a flat copy with
+    // `captureRecord: null` so the outer captureRecord serialises cleanly.
+    const classificationSnap: ClassificationResult = {
+      class: 'framework-misbehaved',
+      subclass: detectedSubclass,
+      severity,
+      captureRecord: null,
+      rationale,
+    };
+
     result.captureRecord = {
       ts,
       class: 'framework-misbehaved',
@@ -425,7 +442,7 @@ export function classifyFailure(
       workerId: ctx.workerId,
       source: signal.source,
       auditTrail: {
-        classificationResult: result,
+        classificationResult: classificationSnap,
         originalFailure: {
           stderr: stderr.slice(0, 2000), // truncate for storage
           exitCode: signal.exitCode,

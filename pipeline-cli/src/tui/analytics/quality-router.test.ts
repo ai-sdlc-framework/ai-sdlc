@@ -157,4 +157,37 @@ describe('resolveCodeownersAssignee', () => {
     writeFileSync(join(githubDir, 'CODEOWNERS'), '* @owner\n');
     expect(resolveCodeownersAssignee(workdir, undefined)).toEqual([]);
   });
+
+  // AISDLC-270 PR #481 review fix: regression for CODEOWNERS prefix matching.
+  // Pre-fix bug 1: glob conversion ran `*` replacement before `**`, so `**/x.ts`
+  // never expanded as cross-directory.
+  // Pre-fix bug 2: regex was unanchored, so pattern `docs/` matched anywhere
+  // in the source-hint string and attributed `pipeline-cli/docs/foo.ts` to the
+  // wrong team.
+  it('AISDLC-270: prefix-matching follows CODEOWNERS semantics (anchored)', () => {
+    const githubDir = join(workdir, '.github');
+    mkdirSync(githubDir, { recursive: true });
+    writeFileSync(
+      join(githubDir, 'CODEOWNERS'),
+      // Two patterns. `docs/` should ONLY match top-level docs/, not nested.
+      'docs/ @docs-team\npipeline-cli/ @pipeline-team\n',
+    );
+    // Top-level docs/ → docs-team
+    expect(resolveCodeownersAssignee(workdir, 'docs/operations/foo.md')).toContain('@docs-team');
+    // Nested docs under pipeline-cli/ → pipeline-team (NOT docs-team)
+    const nested = resolveCodeownersAssignee(workdir, 'pipeline-cli/docs/generated-api.ts');
+    expect(nested).toContain('@pipeline-team');
+    expect(nested).not.toContain('@docs-team');
+  });
+
+  it('AISDLC-270: ** glob matches across directories', () => {
+    const githubDir = join(workdir, '.github');
+    mkdirSync(githubDir, { recursive: true });
+    writeFileSync(join(githubDir, 'CODEOWNERS'), '**/*.ts @ts-owner\n');
+    // Pre-fix bug: `**` got replaced by `*` first, leaving `[^/]*[^/]*/[^/]*.ts` —
+    // would NOT match deeply-nested files.
+    expect(
+      resolveCodeownersAssignee(workdir, 'pipeline-cli/src/tui/analytics/quality-router.ts'),
+    ).toContain('@ts-owner');
+  });
 });

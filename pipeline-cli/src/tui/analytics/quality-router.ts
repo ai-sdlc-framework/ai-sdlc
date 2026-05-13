@@ -122,8 +122,14 @@ export function resolveCodeownersAssignee(workDir: string, sourceHint?: string):
     const pattern = parts[0] ?? '';
     const owners = parts.slice(1);
     if (!pattern || owners.length === 0) continue;
-    // Simple glob match: replace '*' with '.*' and match anywhere in path
-    const regexStr = pattern.replace(/\*/g, '[^/]*').replace(/\*\*/g, '.*');
+    // AISDLC-270 fix (post-#481 review): single-pass glob conversion handles
+    // `**` → `.*` and `*` → `[^/]*` in one alternation. Sequential replaces
+    // don't work — replacing `**` first to `.*` would then have the `*` in
+    // `.*` re-replaced to `[^/]*`, mangling the cross-directory match into
+    // single-level. Also anchor at start to match CODEOWNERS prefix-matching
+    // semantics — unanchored matched `docs/` against `pipeline-cli/docs/...`
+    // and attributed wrong team.
+    const regexStr = '^' + pattern.replace(/\*\*|\*/g, (m) => (m === '**' ? '.*' : '[^/]*'));
     try {
       if (new RegExp(regexStr).test(sourceHint)) {
         bestOwners = owners;
