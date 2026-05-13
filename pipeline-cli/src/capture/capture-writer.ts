@@ -13,7 +13,25 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
+
+/**
+ * AISDLC-269 PR #483 review fix: validate captureId before using it in path
+ * construction. captureId comes from CLI args / AI-agent output; raw `..`
+ * segments would let a caller read/overwrite arbitrary .jsonl files outside
+ * the captures dir. We accept ONLY the canonical pattern emitted by
+ * makeCaptureId(): `cap_YYYY-MM-DDTHH-MM-SS_<6-hex>`. Anything else throws.
+ */
+const CAPTURE_ID_PATTERN = /^cap_[\d-]+T[\d-]+_[a-f0-9]{6}$/;
+function assertSafeCaptureId(captureId: string): void {
+  // Reject path traversal even when the canonical pattern would otherwise
+  // happen to look valid — basename() strips dir components defensively.
+  if (basename(captureId) !== captureId || !CAPTURE_ID_PATTERN.test(captureId)) {
+    throw new Error(
+      `[cli-capture] invalid captureId: ${captureId} — expected cap_YYYY-MM-DDTHH-MM-SS_<6-hex>`,
+    );
+  }
+}
 import {
   generateCaptureId,
   isTerminalTriage,
@@ -178,6 +196,7 @@ export interface TriageUpdateOpts {
  */
 export function applyTriageUpdate(opts: TriageUpdateOpts): CaptureRecord {
   const now = opts.now ?? new Date();
+  assertSafeCaptureId(opts.captureId);
   const dir = resolveCapturesDir(opts.artifactsDir);
   const filePath = join(dir, `${opts.captureId}.jsonl`);
 
@@ -253,6 +272,7 @@ export interface RedactCaptureOpts {
  */
 export function redactCapture(opts: RedactCaptureOpts): CaptureRecord {
   const now = opts.now ?? new Date();
+  assertSafeCaptureId(opts.captureId);
   const dir = resolveCapturesDir(opts.artifactsDir);
   const filePath = join(dir, `${opts.captureId}.jsonl`);
 

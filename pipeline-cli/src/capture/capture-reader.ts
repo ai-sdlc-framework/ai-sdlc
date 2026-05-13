@@ -10,7 +10,21 @@
  */
 
 import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
+
+/**
+ * AISDLC-269 PR #483 review fix: validate captureId before path construction.
+ * Mirrors capture-writer.ts assertSafeCaptureId — kept as a separate const
+ * here to avoid a cross-module circular dependency.
+ */
+const CAPTURE_ID_PATTERN = /^cap_[\d-]+T[\d-]+_[a-f0-9]{6}$/;
+function assertSafeCaptureId(captureId: string): void {
+  if (basename(captureId) !== captureId || !CAPTURE_ID_PATTERN.test(captureId)) {
+    throw new Error(
+      `[cli-capture] invalid captureId: ${captureId} — expected cap_YYYY-MM-DDTHH-MM-SS_<6-hex>`,
+    );
+  }
+}
 import {
   validateCaptureRecord,
   type CaptureRecord,
@@ -119,6 +133,9 @@ export function loadCaptures(opts: LoadCapturesOpts = {}): LoadCapturesResult {
  * Load a single capture by ID. Returns null if not found or invalid.
  */
 export function loadCaptureById(captureId: string, artifactsDir?: string): CaptureRecord | null {
+  // loadCaptureById returns null on not-found but throws on invalid IDs:
+  // a malformed ID is a programming error, not a "file not present" condition.
+  assertSafeCaptureId(captureId);
   const dir = resolveCapturesDir(artifactsDir);
   const filePath = join(dir, `${captureId}.jsonl`);
 

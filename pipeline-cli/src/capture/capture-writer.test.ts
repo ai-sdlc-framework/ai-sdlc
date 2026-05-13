@@ -35,6 +35,51 @@ describe('resolveCapturesDir', () => {
   });
 });
 
+// AISDLC-269 PR #483 review fix: regression for path-traversal via captureId.
+// Pre-fix: applyTriageUpdate / redactCapture / loadCaptureById joined the raw
+// captureId into the path with no validation, so `..` segments escaped the
+// _captures dir and let a caller read+overwrite arbitrary .jsonl files.
+// Fix: assertSafeCaptureId() validates against /^cap_[\d-]+T[\d-]+_[a-f0-9]{6}$/.
+// These tests pin the contract: any non-canonical ID throws.
+describe('AISDLC-269 path-traversal hardening (PR #483 review fix)', () => {
+  const malicious = ['../../etc/passwd', '..', '../foo', 'foo/bar', 'cap_2026/x', ''];
+  for (const id of malicious) {
+    it(`applyTriageUpdate rejects malformed captureId: ${JSON.stringify(id)}`, () => {
+      expect(() =>
+        applyTriageUpdate({
+          captureId: id,
+          triage: 'new-issue',
+          artifactsDir,
+        }),
+      ).toThrow(/invalid captureId/);
+    });
+    it(`redactCapture rejects malformed captureId: ${JSON.stringify(id)}`, () => {
+      expect(() =>
+        redactCapture({
+          captureId: id,
+          actor: 'op',
+          artifactsDir,
+        }),
+      ).toThrow(/invalid captureId/);
+    });
+    it(`loadCaptureById rejects malformed captureId: ${JSON.stringify(id)}`, () => {
+      expect(() => loadCaptureById(id, artifactsDir)).toThrow(/invalid captureId/);
+    });
+  }
+  it('canonical captureId is accepted (negative control)', () => {
+    // applyTriageUpdate throws "not found" rather than "invalid captureId" for
+    // a canonical-shape ID that doesn't exist on disk — proves the validator
+    // passed it through to the file-existence check.
+    expect(() =>
+      applyTriageUpdate({
+        captureId: 'cap_2026-05-13T14-30-00_abc123',
+        triage: 'new-issue',
+        artifactsDir,
+      }),
+    ).toThrow(/not found/);
+  });
+});
+
 describe('writeCapture', () => {
   it('writes a capture record and returns it', () => {
     const record = writeCapture({
