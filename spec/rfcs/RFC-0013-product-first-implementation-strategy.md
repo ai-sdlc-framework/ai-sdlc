@@ -1,11 +1,11 @@
 ---
 id: RFC-0013
 title: AI-SDLC Orchestrator — Product Strategy
-status: Draft
-lifecycle: Draft
+status: Implemented
+lifecycle: Implemented
 author: AI-SDLC Contributors
 created: 2026-02-11
-updated: 2026-02-12
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 # Strategic / conceptual RFC — defines product positioning rather than a
 # user-facing capability that needs tutorials or API docs. The companion
@@ -17,11 +17,11 @@ requiresDocs: []
 
 # RFC-0013: AI-SDLC Orchestrator — Product Strategy
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Implemented
+**Lifecycle:** Implemented
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-11
-**Updated:** 2026-02-12
+**Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
 
 ---
@@ -1555,11 +1555,19 @@ The core orchestration engine never becomes paid. Governance gates, autonomy man
 
 ## Open Questions (Remaining)
 
+> **Retrofit (2026-05-13):** OQs resolved against the implementation that shipped. `@ai-sdlc/orchestrator` v0.10.0 is the strategy realized — every load-bearing claim in the RFC has a corresponding shipped artifact. Lifecycle promoted to `Implemented`.
+
 1. **License choice for orchestrator** — Apache 2.0 is maximally permissive but allows competitors to offer a hosted service without contributing back. Should the orchestrator use BSL (like HashiCorp) or AGPL (like Grafana) to protect the commercial cloud offering? Apache 2.0 builds faster community adoption but risks a "free-rider" managed service from a cloud provider. The spec remains Apache 2.0 regardless.
+
+   **Resolution (2026-05-13):** Apache-2.0 across the board. `orchestrator/package.json` v0.10.0 ships under Apache-2.0, matching every other workspace package and the repo-root `LICENSE`. `CHARTER.md`'s CNCF Alignment section makes this binding: CNCF Sandbox eligibility requires Apache-2.0 as the project license. The BSL/AGPL alternative was considered and rejected — vendor-neutral foundation governance (CNCF) is the strategic moat against free-rider managed services, not a restrictive license. The IP policy is explicit: no CLA beyond Apache-2.0 terms, contributors retain copyright, patent grants flow through the Apache-2.0 patent clause. Future commercial differentiation lives in the Team Cloud / Enterprise feature tiers (Appendix A), not in the license.
 
 2. **Agent compute cost attribution** — When the orchestrator invokes agents, who pays for the compute? The orchestrator itself is lightweight, but the agents it invokes consume API credits (Anthropic, OpenAI) or compute (self-hosted models). Should the orchestrator track and report per-pipeline agent costs? This would be valuable for the "cost per task" metric but requires integration with billing APIs.
 
+   **Resolution (2026-05-13):** Resolved. The orchestrator tracks per-pipeline agent cost end-to-end via the `cost_ledger` table and the `CostTracker` API (`orchestrator/src/cost-tracker.ts`, `orchestrator/src/state/schema.ts:107-124`). Each ledger entry binds cost to `runId`, `agentName`, `pipelineType`, `model`/`modelAlias`, `stageName`, and `issueId`/`prNumber`, with separate accounting for input, output, and cache-read tokens. The `CostGovernancePlugin` (`orchestrator/src/cost-governance.ts`) enforces budget alerts, soft/hard spend limits, and circuit-breaker `abort`/`require-approval` actions over day/week/month/quarter windows. Costs are computed deterministically from a model price table (`DEFAULT_MODEL_COSTS` in `orchestrator/src/defaults.ts`) rather than scraped from live provider billing APIs — this gives "cost per task" and "cost per agent" without depending on Anthropic/OpenAI invoice latency, and supports `shadowCostUsd` so subscription-billed work can record what pay-per-token would have cost. Live billing-API reconciliation remains a non-goal.
+
 3. **AAIF contribution timing** — At what point does the orchestrator have enough traction to propose the spec as a governance layer for the AAIF? The target should be quantifiable (e.g., 1,000+ governed repos, 5+ enterprise customers, multiple agent runners proven in production).
+
+   **Resolution (2026-05-13):** **Moot.** The premise has shifted: `CHARTER.md`'s "CNCF Alignment" section commits the project to seeking **CNCF Sandbox** acceptance, not AAIF contribution. AAIF is the upstream home for MCP and A2A (which the orchestrator consumes as primitives, per the non-goal at §Goals/Non-Goals), but the AI-SDLC spec's governance pathway runs through CNCF — chosen because CNCF has the mature governance handbook, the Apache-2.0 licensing requirement that already matches the project's posture, and a clearer Sandbox→Incubating→Graduated traction ladder. The AAIF question therefore doesn't need quantitative traction thresholds; it has been answered by selecting a different foundation. Any future AAIF engagement would be at the MCP/A2A protocol-consumption layer, not as a candidate AAIF-governed specification.
 
 ## References
 
