@@ -287,23 +287,65 @@ const DESIGN_AUTHORITY_BASE_WEIGHT: Readonly<
 });
 
 /**
- * Compute the C5 design-authority weight per §A.5.
+ * Compute the C5 design-authority weight per §A.5 (Source 1) plus
+ * the RFC-0008 §C5 Source 3 compliance-assessment signal.
  *
+ * Source 1 (principal participation):
  *   non-authority           → 0.0
  *   authority + positive    → +0.6 × modulation
  *   authority + negative    → -0.4 × modulation
  *   authority + no type     → +0.3 × modulation
  *
- * where `modulation = 1.2 - areaComplianceScore` when the score is
- * supplied, else `1.0` (unmodulated base weight).
+ *   where `modulation = 1.2 - areaComplianceScore` when the score is
+ *   supplied, else `1.0` (unmodulated base weight).
+ *
+ * Source 3 (compliance assessment — additive):
+ *   `signal.complianceSignal` contributes directly when present (see
+ *   `buildDesignAuthoritySignal`). This fires from DSB health data
+ *   alone — no principal participation required — so a fully-loaded DSB
+ *   with high token compliance produces `hcDesign > 0` regardless of
+ *   whether a design-authority principal commented on the issue.
  */
 export function computeDesignAuthorityWeight(signal: DesignAuthoritySignal | undefined): number {
-  if (!signal || !signal.isDesignAuthority) return 0;
-  const signalType = signal.signalType ?? 'unspecified';
-  const base = DESIGN_AUTHORITY_BASE_WEIGHT[signalType];
-  const modulation =
-    signal.areaComplianceScore !== undefined ? 1.2 - signal.areaComplianceScore : 1;
-  return base * modulation;
+  if (!signal) return 0;
+  // Source 1: principal-participation weight.
+  const participationWeight = signal.isDesignAuthority
+    ? (() => {
+        const signalType = signal.signalType ?? 'unspecified';
+        const base = DESIGN_AUTHORITY_BASE_WEIGHT[signalType];
+        const modulation =
+          signal.areaComplianceScore !== undefined ? 1.2 - signal.areaComplianceScore : 1;
+        return base * modulation;
+      })()
+    : 0;
+  // Source 3: compliance-assessment signal (additive).
+  const complianceWeight = signal.complianceSignal ?? 0;
+  return participationWeight + complianceWeight;
+}
+
+/**
+ * RFC-0008 §C5 Source 3 — map DSB token-compliance coverage to a
+ * small automatic signal for HC_design.
+ *
+ *   >= 0.8 (80 %)  → +0.3  (design system is healthy — small positive)
+ *   < 0.4  (40 %)  → −0.2  (design system is fragile — small negative)
+ *   otherwise      →  0.0  (neutral)
+ *
+ * The signal is intentionally small so it cannot outweigh Source 1
+ * (principal-participation, which carries base weights up to ±0.6).
+ * A DSB with missing status data returns 0 (graceful degradation).
+ */
+function computeComplianceSignal(
+  binding: import('@ai-sdlc/reference').DesignSystemBinding,
+): number {
+  const rawCoverage = binding.status?.tokenCompliance?.currentCoverage;
+  if (rawCoverage === undefined || Number.isNaN(rawCoverage)) return 0;
+  // Normalise: values > 1 are percent (0-100), values ≤ 1 are already fractions.
+  const coverage = rawCoverage > 1 ? rawCoverage / 100 : rawCoverage;
+  const clamped = Math.min(1, Math.max(0, coverage));
+  if (clamped >= 0.8) return 0.3;
+  if (clamped < 0.4) return -0.2;
+  return 0;
 }
 
 function buildDesignAuthoritySignal(
@@ -314,10 +356,10 @@ function buildDesignAuthoritySignal(
   // AISDLC-171: surface whether the DSB declares any design authority
   // principals at all. This is a diagnostic flag — it does NOT participate
   // in the HC_design weight calculation (per RFC-0008 §14.2, only
-  // principals who participate as author/commenter can emit HC_design).
-  // Surfacing it lets pillarBreakdown distinguish "DSB has no design
-  // authority structure" from "DSB has design authority but no principal
-  // participated in this issue".
+  // principals who participate as author/commenter can emit HC_design via
+  // Source 1). The flag lets pillarBreakdown distinguish "DSB has no
+  // design authority structure" from "DSB has design authority but no
+  // principal participated in this issue".
   const principalsDeclared =
     (ctx.designSystemBinding.spec.stewardship.designAuthority.principals?.length ?? 0) > 0;
   const { isDesignAuthority, signalType } = checkDesignAuthority(
@@ -328,13 +370,22 @@ function buildDesignAuthoritySignal(
     },
     ctx.designSystemBinding,
   );
+  // RFC-0008 §C5 Source 3: compliance-assessment auto-signal from DSB health.
+  // Fires regardless of principal participation — gives a fully-loaded DSB
+  // a non-zero hcDesign even when no design-authority principal commented.
+  const complianceSignal = computeComplianceSignal(ctx.designSystemBinding);
   if (!isDesignAuthority) {
-    return { isDesignAuthority: false, principalsDeclared };
+    return {
+      isDesignAuthority: false,
+      principalsDeclared,
+      ...(complianceSignal !== 0 ? { complianceSignal } : {}),
+    };
   }
   return {
     isDesignAuthority: true,
     signalType,
     principalsDeclared,
+    ...(complianceSignal !== 0 ? { complianceSignal } : {}),
     ...(ctx.areaComplianceScore !== undefined
       ? { areaComplianceScore: ctx.areaComplianceScore }
       : {}),

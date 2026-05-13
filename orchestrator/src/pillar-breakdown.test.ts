@@ -327,3 +327,91 @@ describe('AISDLC-171 — pillarBreakdown.shared.hcComposite design channel state
     expect(breakdown.shared.hcComposite.designAuthorityConfigured).toBe(false);
   });
 });
+
+// AISDLC-266 — end-to-end fixture for the HC_design Source 3 compliance-assessment wire.
+// A fully-loaded DSB with non-empty designAuthority.principals AND high
+// tokenCompliance must produce pillarBreakdown.shared.hcComposite.design > 0
+// even when no design-authority principal participated as author/commenter.
+describe('AISDLC-266 — fully-loaded DSB produces hcComposite.design > 0 via Source 3', () => {
+  function dsbWithComplianceStatus(
+    principals: string[],
+    tokenComplianceCoverage: number,
+  ): DesignSystemBinding {
+    return {
+      apiVersion: 'ai-sdlc.io/v1alpha1' as const,
+      kind: 'DesignSystemBinding',
+      metadata: { name: 'ds' },
+      spec: {
+        stewardship: {
+          designAuthority: { principals, scope: [] },
+          engineeringAuthority: { principals: ['eng'], scope: [] },
+        },
+        designToolAuthority: 'collaborative',
+        tokens: {
+          provider: 'p',
+          format: 'w3c-dtcg',
+          source: { repository: 'r' },
+          versionPolicy: 'minor',
+        },
+        catalog: { provider: 'c' },
+        compliance: { coverage: { minimum: 85 } },
+      },
+      status: { tokenCompliance: { currentCoverage: tokenComplianceCoverage } },
+    };
+  }
+
+  it('AC: non-principal author + DSB with high tokenCompliance → design > 0', () => {
+    // Forge repro: cli-admit scores a backlog task with --enrich-from-state.
+    // The DSB has designAuthority.principals: ['alice', 'bob'] and
+    // status.tokenCompliance.currentCoverage: 90 (%). The task's createdBy
+    // is 'mallory' (not a principal). Pre-fix: design=0. Post-fix: design>0.
+    const dsb = dsbWithComplianceStatus(['alice', 'bob'], 90);
+    const enriched = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01' },
+    );
+    const composite = computeAdmissionComposite(enriched);
+    const breakdown = computePillarBreakdown(composite);
+
+    // Source 3 compliance signal fires: complianceSignal=+0.3
+    // hcDesign = clamp(0.3, -1, 1) = 0.3
+    // normalizeSigned(0.3) = (0.3+1)/2 = 0.65
+    // designSystemReadiness = 1.0 (no status.catalogHealth, bootstrap-safe)
+    // designSignal = mean([1.0, 0.65]) = 0.825
+    expect(breakdown.shared.hcComposite.design).toBeCloseTo(0.3, 6);
+    expect(breakdown.shared.hcComposite.design).toBeGreaterThan(0);
+    // designAuthorityConfigured=true: principals were declared
+    expect(breakdown.shared.hcComposite.designAuthorityConfigured).toBe(true);
+  });
+
+  it('non-principal author + DSB with low tokenCompliance → design < 0', () => {
+    const dsb = dsbWithComplianceStatus(['alice'], 30);
+    const enriched = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01' },
+    );
+    const composite = computeAdmissionComposite(enriched);
+    const breakdown = computePillarBreakdown(composite);
+
+    // Source 3 compliance signal: complianceSignal=-0.2
+    // hcDesign = clamp(-0.2, -1, 1) = -0.2
+    expect(breakdown.shared.hcComposite.design).toBeCloseTo(-0.2, 6);
+    expect(breakdown.shared.hcComposite.design).toBeLessThan(0);
+  });
+
+  it('principal participates + high compliance → design = Source1 + Source3', () => {
+    // Both sources fire: principal participation (0.6) + compliance (+0.3).
+    const dsb = dsbWithComplianceStatus(['alice'], 90);
+    const enriched = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'alice', labels: ['design/advances-coherence'] },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01' },
+    );
+    const composite = computeAdmissionComposite(enriched);
+    const breakdown = computePillarBreakdown(composite);
+
+    // Source 1: 0.6 (advances-design-coherence, no area modulation)
+    // Source 3: +0.3 (high compliance)
+    // Combined weight: 0.9 → clamped to 1.0 in deriveHcDesign? No: clamp(0.9,-1,1)=0.9
+    expect(breakdown.shared.hcComposite.design).toBeCloseTo(0.9, 6);
+  });
+});

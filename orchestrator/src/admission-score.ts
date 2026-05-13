@@ -142,6 +142,24 @@ export interface DesignAuthoritySignal {
    * RFC's §14.2 weighting constraint.
    */
   principalsDeclared?: boolean;
+  /**
+   * RFC-0008 §C5 Source 3 — automated compliance-assessment signal in [-1, 1].
+   *
+   * Populated by `buildDesignAuthoritySignal` when the resolved DSB carries
+   * `status.tokenCompliance.currentCoverage`:
+   *   >= 0.8 (80 %) → small positive signal (+0.3): design system is healthy here
+   *   < 0.4  (40 %) → small negative signal (-0.2): design system is fragile here
+   *   otherwise     → 0 (neutral)
+   *
+   * This signal fires from the DSB health data alone — no principal participation
+   * required. It is additive to the principal-participation weight in
+   * `computeDesignAuthorityWeight`, so a fully-loaded DSB with high compliance
+   * produces `hcDesign > 0` even when no design-authority principal commented.
+   *
+   * Absent (undefined) when no DSB is resolved or the DSB lacks token-compliance
+   * status — callers treat absence the same as 0.
+   */
+  complianceSignal?: number;
 }
 
 export interface AdmissionThresholds {
