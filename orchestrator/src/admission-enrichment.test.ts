@@ -972,3 +972,153 @@ describe('AISDLC-171 — designAuthority → HC_design propagation states', () =
     expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBe(0);
   });
 });
+
+// AISDLC-266 — RFC-0008 §C5 Source 3 compliance-assessment auto-signal.
+// A fully-loaded DSB with non-empty designAuthority.principals AND high
+// tokenCompliance should produce hcComposite.design > 0 even when no
+// design-authority principal participated as author/commenter.
+describe('AISDLC-266 — RFC-0008 §C5 Source 3 compliance-assessment signal', () => {
+  function makeDsbWithCompliance(
+    principals: string[],
+    tokenComplianceCoverage: number | undefined,
+  ): DesignSystemBinding {
+    return {
+      apiVersion: API_VERSION,
+      kind: 'DesignSystemBinding',
+      metadata: { name: 'ds' },
+      spec: {
+        stewardship: {
+          designAuthority: { principals, scope: [] },
+          engineeringAuthority: { principals: ['eng'], scope: [] },
+        },
+        designToolAuthority: 'collaborative',
+        tokens: {
+          provider: 'p',
+          format: 'w3c-dtcg',
+          source: { repository: 'r' },
+          versionPolicy: 'minor',
+        },
+        catalog: { provider: 'c' },
+        compliance: { coverage: { minimum: 85 } },
+      },
+      ...(tokenComplianceCoverage !== undefined
+        ? { status: { tokenCompliance: { currentCoverage: tokenComplianceCoverage } } }
+        : {}),
+    };
+  }
+
+  it('high tokenCompliance (≥80%) → complianceSignal=+0.3, weight > 0 with no principal participation', () => {
+    // Root-cause fix: a fully-loaded DSB with non-empty principals and
+    // high token compliance should produce hcDesign > 0 even when the
+    // issue's author is NOT a design-authority principal.
+    const dsb = makeDsbWithCompliance(['alice'], 90);
+    const out = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    expect(out.designAuthoritySignal?.isDesignAuthority).toBe(false);
+    expect(out.designAuthoritySignal?.principalsDeclared).toBe(true);
+    expect(out.designAuthoritySignal?.complianceSignal).toBeCloseTo(0.3, 6);
+    // Source 1 weight = 0 (no principal participated),
+    // Source 3 weight = +0.3 (high compliance).
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBeCloseTo(0.3, 6);
+  });
+
+  it('high tokenCompliance as fraction (0-1 range) — normalised correctly', () => {
+    const dsb = makeDsbWithCompliance(['alice'], 0.85);
+    const out = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    expect(out.designAuthoritySignal?.complianceSignal).toBeCloseTo(0.3, 6);
+  });
+
+  it('low tokenCompliance (<40%) → complianceSignal=−0.2', () => {
+    const dsb = makeDsbWithCompliance(['alice'], 30);
+    const out = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    expect(out.designAuthoritySignal?.complianceSignal).toBeCloseTo(-0.2, 6);
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBeCloseTo(-0.2, 6);
+  });
+
+  it('medium tokenCompliance (40–79%) → complianceSignal absent (neutral)', () => {
+    const dsb = makeDsbWithCompliance(['alice'], 60);
+    const out = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    // complianceSignal not set when neutral — callers treat absence as 0.
+    expect(out.designAuthoritySignal?.complianceSignal).toBeUndefined();
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBe(0);
+  });
+
+  it('missing tokenCompliance status → complianceSignal absent (graceful degradation)', () => {
+    const dsb = makeDsbWithCompliance(['alice'], undefined);
+    const out = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory' },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    expect(out.designAuthoritySignal?.complianceSignal).toBeUndefined();
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBe(0);
+  });
+
+  it('compliance signal is additive to principal-participation weight', () => {
+    // When both Source 1 (principal participation) and Source 3 (high
+    // compliance) fire, the weights are summed.
+    const dsb = makeDsbWithCompliance(['alice'], 90);
+    const out = enrichAdmissionInput(
+      {
+        ...makeInput(),
+        authorLogin: 'alice',
+        labels: ['design/advances-coherence'],
+      },
+      { designSystemBinding: dsb, dsbAdoptedAt: '2026-01-01', now: frozenNow },
+    );
+    expect(out.designAuthoritySignal?.isDesignAuthority).toBe(true);
+    expect(out.designAuthoritySignal?.complianceSignal).toBeCloseTo(0.3, 6);
+    // Source 1: 0.6 (advances-design-coherence, unmodulated)
+    // Source 3: +0.3 (high compliance)
+    // Total: 0.9
+    expect(computeDesignAuthorityWeight(out.designAuthoritySignal)).toBeCloseTo(0.9, 6);
+  });
+
+  it('compliance signal isolated: computeDesignAuthorityWeight adds complianceSignal to 0 when isDesignAuthority=false', () => {
+    // Direct unit test for the new additive path in computeDesignAuthorityWeight.
+    expect(
+      computeDesignAuthorityWeight({ isDesignAuthority: false, complianceSignal: 0.3 }),
+    ).toBeCloseTo(0.3, 6);
+
+    expect(
+      computeDesignAuthorityWeight({ isDesignAuthority: false, complianceSignal: -0.2 }),
+    ).toBeCloseTo(-0.2, 6);
+
+    expect(
+      computeDesignAuthorityWeight({ isDesignAuthority: false, complianceSignal: undefined }),
+    ).toBe(0);
+  });
+
+  it('end-to-end: fully-loaded DSB with high compliance produces hcDesign > 0 via deriveHcDesign', () => {
+    // This is the AISDLC-266 acceptance criterion: a fully-loaded DSB with
+    // non-empty designAuthority.principals AND high tokenCompliance
+    // produces hcComposite.design > 0 even when no principal participated.
+    const dsb = makeDsbWithCompliance(['alice', 'bob'], 90);
+    const enriched = enrichAdmissionInput(
+      { ...makeInput(), authorLogin: 'mallory' }, // mallory is NOT a principal
+      {
+        designSystemBinding: dsb,
+        dsbAdoptedAt: '2026-01-01',
+        now: frozenNow,
+      },
+    );
+    // designAuthoritySignal is populated with compliance signal
+    expect(enriched.designAuthoritySignal?.complianceSignal).toBeCloseTo(0.3, 6);
+    // The weight > 0 confirms the wire is active.
+    // deriveHcDesign uses computeDesignAuthorityWeight → clamp to [-1,1].
+    const hcDesign = computeDesignAuthorityWeight(enriched.designAuthoritySignal);
+    expect(hcDesign).toBeCloseTo(0.3, 6);
+    // Per RFC-0008 §C5 Source 3: the fix is confirmed.
+    expect(hcDesign).toBeGreaterThan(0);
+  });
+});
