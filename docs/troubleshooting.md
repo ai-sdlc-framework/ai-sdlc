@@ -229,6 +229,92 @@ Regenerate or update JSON schemas to match type changes, then rebuild:
 pnpm --filter @ai-sdlc/reference validate-schemas
 ```
 
+## Admission Confidence
+
+### Confidence stuck at or below 0.5 with fully-loaded inputs
+
+**Symptom:** `overallConfidence` stays at `~0.5` even when DID + DSB +
+maintainers + soul-tracks all loaded without errors. The admission engine never
+recommends the high-conviction fast path.
+
+**Root cause (AISDLC-267 / AISDLC-172):** The admission confidence formula
+blends two independent evidence channels in a 50/50 split:
+
+1. **Mapper coverage** — fraction of 9 issue-signal fields that
+   `mapIssueToPriorityInput` extracted from the issue/backlog entry (soul
+   alignment, demand signal, consensus, conviction, complexity, bug severity,
+   explicit priority, competitive drift, customer request count).
+
+2. **Enrichment loaded** — fraction of 5 RFC-0008 enrichment slots present on
+   the input: `designSystemContext` (DSB loader), `autonomyContext` (DID/
+   AutonomyPolicy loader), `codeAreaQuality` (code-area metrics loader),
+   `designAuthoritySignal` (maintainers loader), and `soulAlignmentOverride`
+   (soul-tracks SA-1 loader).
+
+Each loaded enrichment reader contributes `+0.1` to confidence (1/5 × 0.5
+weight). If all five readers report success, the enrichment channel reaches its
+maximum of `0.5`, and with full mapper coverage (~7-9 fields), the combined
+confidence reaches `0.75-0.9`.
+
+**How to inspect which fields are populated:**
+
+```typescript
+import {
+  mapIssueToPriorityInput,
+  computeAdmissionConfidence,
+} from '@ai-sdlc/orchestrator';
+
+const priorityInput = mapIssueToPriorityInput(admissionInput);
+
+// Mapper coverage: which of the 9 fields did the mapper extract?
+const ADMISSION_MAPPER_FIELDS = [
+  'soulAlignment', 'demandSignal', 'teamConsensus', 'builderConviction',
+  'complexity', 'bugSeverity', 'explicitPriority', 'competitiveDrift',
+  'customerRequestCount',
+] as const;
+for (const field of ADMISSION_MAPPER_FIELDS) {
+  console.log(`${field}: ${priorityInput[field] !== undefined ? priorityInput[field] : '(not set)'}`);
+}
+
+// Enrichment coverage: which readers loaded context?
+const enrichmentSlots = {
+  designSystemContext: admissionInput.designSystemContext,
+  autonomyContext: admissionInput.autonomyContext,
+  codeAreaQuality: admissionInput.codeAreaQuality,
+  designAuthoritySignal: admissionInput.designAuthoritySignal,
+  soulAlignmentOverride: options?.soulAlignmentOverride,
+};
+for (const [slot, value] of Object.entries(enrichmentSlots)) {
+  console.log(`${slot}: ${value !== undefined ? 'loaded' : 'missing'}`);
+}
+
+const confidence = computeAdmissionConfidence(admissionInput, priorityInput, options);
+console.log(`confidence: ${confidence}`); // target: >= 0.7 with all 5 readers
+```
+
+**Common causes and fixes:**
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Confidence ~0.39 with all readers loaded | Using old `computeConfidence(priorityInput)` from `priority.ts` directly | Use `computeAdmissionConfidence` from `admission-composite.ts` instead |
+| Confidence ~0.39, no enrichment readers | All 5 enrichment slots undefined on `AdmissionInput` | Wire the DSB / DID / maintainers / soul-tracks loaders into your `enrichAdmissionInput()` call |
+| Confidence ~0.5, only mapper fields | Enrichment readers are called but result is not attached to `AdmissionInput` | Confirm each reader's output is passed as the correct `AdmissionInput` field |
+| Confidence < 0.5 even with full inputs | `bugSeverity` or `explicitPriority` absent (no `bug`/priority label) | Expected — these are genuinely optional; 7/9 mapper coverage + 5/5 enrichment yields ~0.79 |
+
+**Confidence bands and their meaning:**
+
+| Range | Interpretation |
+|---|---|
+| `>= 0.7` | High-conviction — all enrichment readers loaded + good mapper coverage |
+| `0.5 – 0.69` | Medium — enrichment partially loaded or mapper fields sparse |
+| `< 0.5` | Low — most enrichment slots empty (no readers configured) |
+| `0` | Veto — `soulAlignment = 0` (Draft / security-rejected / Needs Clarification) |
+
+**Note:** If the `minimumConfidence` threshold on your admission gate is set
+higher than the confidence your enrichment setup can produce, lower the threshold
+or add the missing enrichment readers. The high-conviction threshold used by the
+fast-path policy is typically `0.7`.
+
 ## Getting Help
 
 - **[API Reference](api-reference/)** -- Full SDK reference
