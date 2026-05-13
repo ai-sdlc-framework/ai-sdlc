@@ -205,6 +205,16 @@ The Shard-DID-only scope constraint has no practical effect on single-product pl
 
 ## 12. Open Questions
 
+> **Partial Implementation Status (2026-05-13):** Trigger source + calibration substrate shipped; `DIDRevisionProposal` mechanism pending.
+>
+> **What ships:**
+> - `orchestrator/src/sa-scoring/drift-monitor.ts` — fully implements the `SoulDriftDetected` event (the §2.1 trigger source), with rolling-window mean/stddev/consecutive-violation logic plus structural-vs-LLM-mean disambiguation. Exported from `orchestrator/src/index.ts`.
+> - `orchestrator/src/sa-scoring/feedback-store.ts`, `calibration.ts`, `auto-calibrate.ts` — the flywheel substrate the proposal mechanism would consume.
+>
+> **What's pending:** the `DIDRevisionProposal` event itself, healthy/unhealthy/ambiguous drift classification (§3), triad-vs-pillar-lead approval routing (§4), 14-day expiry (§5). Drift is detected; nothing yet proposes a revision.
+>
+> Lifecycle remains `Draft` — the 5 OQs below (§12.1–12.5) still need operator walkthrough. A follow-up backlog task (`chore: complete RFC-0031 DIDRevisionProposal mechanism`) should track the unbuilt portion.
+
 ### 12.1 Confidence calibration
 
 The `confidence` field is `high | medium | low` but the inputs to confidence inference aren't fully specified. **Position**: confidence = function of (sample size of trigger evidence, classification clarity, identityClass). Concrete computation deferred to an implementation memo; this RFC requires only that confidence be reported.

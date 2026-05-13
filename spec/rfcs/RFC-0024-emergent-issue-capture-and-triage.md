@@ -325,6 +325,16 @@ Total: ~5–6 weeks wall-clock, parallelizable phases 4 + 5.
 
 ## 15. Open questions
 
+> **Partial Implementation Status (2026-05-13):** Detection substrate shipped; capture authoring + main triage flow pending.
+>
+> **What ships:**
+> - `pipeline-cli/src/tui/blockers/detector.ts` — Rule 3 detects `triage: tbd` captures and surfaces them as TUI blockers (citing RFC-0024 directly).
+> - `pipeline-cli/src/tui/corpus/aggregate.ts` — `TuiCaptureFiled` event aggregation tied to RFC-0024 capture IDs.
+>
+> **What's pending:** capture authoring CLI (`cli-capture`, `cli-emergent`) per §5.1, triage-decision flow per §7, backlog Issue creation from captures per §9.2, in-code marker linter (§5.3), AI-agent direct-capture path (§5.4), DoR integration (§8).
+>
+> Lifecycle remains `Draft` — the 12 OQs below still need operator walkthrough before the capture authoring layer can land. A follow-up backlog task (`chore: complete RFC-0024 capture authoring + triage flow`) should track the unbuilt portion.
+
 These need operator walkthrough before Lifecycle: Draft → Ready for Review.
 
 **OQ-1 — Capture privacy:** Should capture records be operator-private by default (only visible to the capturer) or team-shared? Trade-off: privacy lowers capture friction (operator might capture half-formed thoughts) but team-shared makes the audit trail richer. Recommendation: team-shared (matches the rest of the framework's transparency contract).

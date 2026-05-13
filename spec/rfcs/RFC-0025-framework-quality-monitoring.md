@@ -260,6 +260,16 @@ Total: ~5–6 weeks wall-clock; sequenced after RFC-0024 Phases 1+2 (which must 
 
 ## 13. Open questions
 
+> **Partial Implementation Status (2026-05-13):** Reliability-trend reader + failure-mode handlers shipped; auto-classification + framework-bug routing + severity rubric pending.
+>
+> **What ships:**
+> - `pipeline-cli/src/tui/analytics/quality-reader.ts` — reads `_quality/captures.jsonl`, computes reliability trend (the §8 primary signal). The file itself notes "RFC-0025 has not yet shipped Phase 5" and treats missing input as `available: false`.
+> - `pipeline-cli/src/orchestrator/playbook/handlers/` — 9 catalogued failure-mode handlers (verification-failure, push-race, rebase-conflict, attestation-verify-mismatch, etc.) implementing the spirit of the §3 failure-mode taxonomy.
+>
+> **What's pending:** `cli-quality-corpus aggregate` (referenced as "eventual" in the reader), automatic `triage: framework-bug` routing into backlog (§6), severity-scoring rubric in code (§7), MTTR / recurrence metric computation (§8), `framework-determinism-violated` detection mechanism (OQ-7).
+>
+> Lifecycle remains `Draft` — the 10 OQs below still need operator walkthrough. A follow-up backlog task (`chore: complete RFC-0025 quality monitoring auto-classification`) should track the unbuilt portion.
+
 These need operator walkthrough before Lifecycle: Draft → Ready for Review.
 
 **OQ-1 — Default classification when ambiguous:** When the classifier can't decide between `operator-under-decided` and `framework-misbehaved`, default to `ambiguous` (operator triages) or default to `operator-under-decided` (less alarming) or default to `framework-misbehaved` (more alarming, more honest)? Recommendation: `ambiguous` — preserves operator agency while honest about uncertainty.
