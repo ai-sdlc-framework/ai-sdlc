@@ -1675,6 +1675,12 @@ function toBlockedEvent(
       // AlreadyInFlight rejections are handled as `OrchestratorTaskAlreadyInFlight`
       // events separately in the loop — they don't map to a `BlockedEvent` arm.
       return null;
+    case 'captures-pending':
+      // RFC-0024 §9.3 — captures-pending is logged in the filter trace;
+      // no dedicated event type in the schema yet (follow-up: add
+      // OrchestratorBlockedByCapturesPending to the event schema in a
+      // follow-up task).
+      return null;
   }
 }
 

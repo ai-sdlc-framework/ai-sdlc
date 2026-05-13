@@ -8,6 +8,7 @@
  */
 
 export { checkAlreadyInFlight, type CheckAlreadyInFlightOpts } from './already-in-flight.js';
+export { checkCapturesPending, type CheckCapturesPendingOpts } from './captures-pending.js';
 export {
   checkBlastRadiusOverlap,
   defaultComputeBlastRadiusFiles,
@@ -42,6 +43,7 @@ export type {
   AlreadyInFlightDetail,
   AwaitingExternalDetail,
   BlockedDetail,
+  CapturesPendingDetail,
   DependencyBlockedDetail,
   DispatchabilityBlockedDetail as DispatchabilityDetail,
   DorBlockedDetail,

@@ -93,12 +93,14 @@ describe('runFilterChain — all-pass', () => {
     });
     expect(result.passed).toBe(true);
     expect(result.failure).toBeNull();
-    expect(result.trace).toHaveLength(8);
+    expect(result.trace).toHaveLength(9);
     // AISDLC-175 prepended `OrphanParent`. AISDLC-227 inserted `AlreadyInFlight`
     // second. DependencyReadiness runs third (before BlastRadiusOverlap so that
     // dep-blocked tasks report the dep failure, not the overlap). AISDLC-231
     // inserted `BlastRadiusOverlap` fourth. AISDLC-243 inserted `Dispatchability`
-    // after BlastRadiusOverlap. AISDLC-223 appended `Blocked` last.
+    // after BlastRadiusOverlap. AISDLC-223 appended `Blocked` after ExternalDeps.
+    // RFC-0024 / AISDLC-269 appended `CapturesPending` last (degrade-open when
+    // AI_SDLC_EMERGENT_CAPTURE is unset).
     expect(result.trace.map((r) => r.filter)).toEqual([
       'OrphanParent',
       'AlreadyInFlight',
@@ -108,6 +110,7 @@ describe('runFilterChain — all-pass', () => {
       'DorReadiness',
       'ExternalDependencies',
       'Blocked',
+      'CapturesPending',
     ]);
     expect(result.trace.every((r) => r.passed)).toBe(true);
   });

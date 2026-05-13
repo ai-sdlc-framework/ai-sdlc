@@ -47,6 +47,7 @@ import {
   type CheckExternalDependenciesOpts,
 } from './external-dependencies.js';
 import { checkOrphanParent, type CheckOrphanParentOpts } from './orphan-parent.js';
+import { checkCapturesPending, type CheckCapturesPendingOpts } from './captures-pending.js';
 import type { FilterChainResult, FilterResult } from './types.js';
 
 export interface RunFilterChainOpts {
@@ -108,6 +109,16 @@ export interface RunFilterChainOpts {
     CheckBlastRadiusOverlapOpts,
     'repoRoot' | 'backlogDir' | 'listOpenPRs' | 'computeBlastRadiusFiles'
   >;
+  /**
+   * AISDLC-269 — options forwarded to `checkCapturesPending`. When undefined
+   * the filter uses defaults (reads `AI_SDLC_EMERGENT_CAPTURE` from the
+   * environment; degrade-open when flag is unset). Tests inject `hasPendingCaptures`
+   * stubs so they can drive the filter without a real captures directory.
+   */
+  capturesPendingOpts?: Pick<
+    CheckCapturesPendingOpts,
+    'artifactsDir' | 'hasPendingCaptures' | 'env'
+  >;
 }
 
 /**
@@ -118,7 +129,7 @@ export interface RunFilterChainOpts {
  * Order: OrphanParent (AISDLC-175) → AlreadyInFlight (AISDLC-227) →
  * DependencyReadiness → BlastRadiusOverlap (AISDLC-231) →
  * Dispatchability (AISDLC-243) → DorReadiness → ExternalDependencies →
- * Blocked (AISDLC-223).
+ * Blocked (AISDLC-223) → CapturesPending (RFC-0024 / AISDLC-269).
  *
  * Rationale for DependencyReadiness BEFORE BlastRadiusOverlap: a task
  * that is both dep-blocked AND overlapping an in-flight blast-radius
@@ -127,7 +138,9 @@ export interface RunFilterChainOpts {
  * until deps are clear so it only fires when the overlap is the actual
  * blocker. Dispatchability runs AFTER BlastRadiusOverlap and BEFORE DoR
  * so permanently non-dispatchable tasks skip the DoR log scan entirely.
- * Blocked runs last per AC #3 of AISDLC-223.
+ * Blocked runs after ExternalDependencies per AC #3 of AISDLC-223.
+ * CapturesPending runs last — it does a filesystem scan of the captures
+ * directory and only fires when AI_SDLC_EMERGENT_CAPTURE is set (degrade-open).
  */
 export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const trace: FilterResult[] = [];
@@ -212,7 +225,7 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   trace.push(ext);
   if (!ext.passed) return { passed: false, trace, failure: ext };
 
-  // Filter 5 — operator-blocked gate (AISDLC-223). Runs last per AC #3.
+  // Filter 5 — operator-blocked gate (AISDLC-223). Runs after ExternalDeps per AC #3.
   const blockedOpts: CheckBlockedOpts = {
     taskId: opts.taskId,
     blocked: opts.taskBlocked,
@@ -220,6 +233,17 @@ export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const blocked = checkBlocked(blockedOpts);
   trace.push(blocked);
   if (!blocked.passed) return { passed: false, trace, failure: blocked };
+
+  // Filter 6 — captures-pending gate (RFC-0024 §9.3 / AISDLC-269). Runs last
+  // so all other gates short-circuit before the filesystem scan. Degrade-open:
+  // only fires when AI_SDLC_EMERGENT_CAPTURE is set.
+  const capturesPendingOpts: CheckCapturesPendingOpts = {
+    taskId: opts.taskId,
+    ...opts.capturesPendingOpts,
+  };
+  const capturesPending = checkCapturesPending(capturesPendingOpts);
+  trace.push(capturesPending);
+  if (!capturesPending.passed) return { passed: false, trace, failure: capturesPending };
 
   return { passed: true, trace, failure: null };
 }
@@ -270,6 +294,8 @@ function humanFilterName(filter: FilterResult['filter']): string {
       return 'External deps';
     case 'Blocked':
       return 'Operator-blocked check';
+    case 'CapturesPending':
+      return 'Captures-pending check (RFC-0024)';
   }
 }
 
@@ -291,6 +317,8 @@ function terminalNote(failure: FilterResult): string {
       return 'orphan parent needs closure';
     case 'blocked':
       return `operator-blocked: ${failure.reason ?? 'no reason'}`;
+    case 'captures-pending':
+      return `emergent captures pending triage for ${failure.detail.issueId} — run cli-capture list --pending`;
     default:
       return failure.reason ?? 'filter rejected';
   }
