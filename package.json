@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:docs-only-classifier",
+    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:docs-only-classifier && pnpm test:audit-gate",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -33,6 +33,7 @@
     "test:gate-workflow": "node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs",
     "test:review-workflow": "node --test .github/workflows/__tests__/ai-sdlc-review.test.mjs",
     "test:docs-only-classifier": "node --test scripts/is-docs-only-changeset.test.mjs",
+    "test:audit-gate": "node --test scripts/audit-with-ignores.test.mjs",
     "rfc:check": "node scripts/check-rfc-docs.mjs",
     "rfc:test": "node --test scripts/check-rfc-docs.test.mjs",
     "prepare": "husky"

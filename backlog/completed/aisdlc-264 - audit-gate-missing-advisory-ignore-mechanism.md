@@ -1,7 +1,7 @@
 ---
 id: AISDLC-264
 title: pre-push audit gate has no per-CVE advisory-ignore mechanism
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 23:55'
 labels:
@@ -14,6 +14,46 @@ priority: medium
 references:
   - .husky/pre-push
   - scripts/check-coverage.sh
+  - scripts/audit-with-ignores.mjs
+  - scripts/audit-with-ignores.test.mjs
+  - spec/schemas/audit-ignores.schema.json
+  - docs/operations/audit-gate.md
+finalSummary: |
+  ## Summary
+  Shipped the canonical per-CVE time-bound audit-ignore pattern as part of the AI-SDLC framework.
+  Adopters can now drop `.audit-ignores.json` at their repo root and run
+  `node scripts/audit-with-ignores.mjs` instead of bare `pnpm audit --audit-level=high`.
+  Expired entries fail the gate, forcing regular re-evaluation. Every run appends to
+  `$ARTIFACTS_DIR/_audit/audit.jsonl` for a paper-trail.
+
+  ## Changes
+  - `spec/schemas/audit-ignores.schema.json` (new): JSON Schema for `.audit-ignores.json`
+    with `{cveId, justification, expiresAt}` per entry.
+  - `scripts/audit-with-ignores.mjs` (new): reference implementation — runs `pnpm audit
+    --json`, filters against `.audit-ignores.json`, exits non-zero if non-ignored highs
+    remain or expired entries exist.
+  - `scripts/audit-with-ignores.test.mjs` (new): 28 hermetic tests covering filtering,
+    expiry enforcement, audit-log append, both pnpm JSON shapes, and dry-run mode.
+  - `docs/operations/audit-gate.md` (new): adopter-facing docs with field reference,
+    CLI usage, expiry renewal runbook, and audit-log format.
+  - `package.json` (modified): added `test:audit-gate` script + wired into `pnpm test`.
+
+  ## Design decisions
+  - **Expired entries fail the gate even with no new advisories**: forces the operator to
+    consciously renew or fix, rather than silently letting stale exemptions accumulate.
+  - **Both pnpm audit JSON shapes supported**: pnpm v7 uses `advisories` key, newer versions
+    use `vulnerabilities` key. The implementation detects shape at runtime.
+  - **Audit log is append-only JSONL**: mirrors the existing `reference/src/audit/file-sink.ts`
+    pattern; easy to `tail -f` and parse.
+
+  ## Verification
+  - `node --test scripts/audit-with-ignores.test.mjs` — 28 pass, 0 fail
+  - `pnpm lint` — 0 errors (2 pre-existing warnings in pipeline-cli, unrelated)
+  - `pnpm format:check` — clean
+
+  ## Follow-up
+  - AISDLC-261 (init scaffold) should include this script + schema in `--with-workflows`.
+  - A `cli-audit-renew` operator command (mentioned in the task) is a follow-up item.
 ---
 
 ## Bug
