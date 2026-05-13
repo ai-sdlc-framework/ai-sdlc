@@ -176,9 +176,12 @@ async function runInit(argv: string[], projectDir: string = tmpDir): Promise<voi
   initCommand.setOptionValue('withAttestation', undefined);
   initCommand.setOptionValue('withClassifier', undefined);
   initCommand.setOptionValue('withBranchProtection', undefined);
+  initCommand.setOptionValue('withWorkflows', undefined);
   initCommand.setOptionValue('add', undefined);
   // AISDLC-262 flags
   initCommand.setOptionValue('workspace', undefined);
+  // AISDLC-261 flags
+  initCommand.setOptionValue('force', undefined);
   await initCommand.parseAsync(argv, { from: 'user' });
 }
 
@@ -440,6 +443,7 @@ describe('init — AISDLC-143 wizard scaffolding', () => {
       '--with-attestation',
       '--with-classifier',
       '--with-branch-protection',
+      '--with-workflows',
     ]);
     // Same assertions as --yes — every feature should be on.
     expect(existsSync(join(tmpDir, '.ai-sdlc', 'dor-config.yaml'))).toBe(true);

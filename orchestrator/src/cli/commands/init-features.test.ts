@@ -109,8 +109,10 @@ const baseFlags: WizardFlags = {
   withAttestation: false,
   withClassifier: false,
   withBranchProtection: false,
+  withWorkflows: false,
   add: undefined,
   dryRun: false,
+  force: false,
 };
 
 // ── resolveFeatureSelection ──────────────────────────────────────────────
@@ -142,7 +144,7 @@ describe('resolveFeatureSelection', () => {
 
   it('AC #1: prompts in the documented order when no flags are set', async () => {
     const { state, adapters } = makeStub({
-      promptAnswers: [true, false, true, false],
+      promptAnswers: [true, false, true, false, true],
     });
     const sel = await resolveFeatureSelection(baseFlags, adapters);
     expect(state.promptCalls.map((c) => c.question)).toEqual([
@@ -150,18 +152,20 @@ describe('resolveFeatureSelection', () => {
       'Do you want attestation infrastructure (audit-only)?',
       'Add review classifier for cost-optimized reviews?',
       'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
+      'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
     ]);
     expect(sel).toEqual({
       dor: true,
       attestation: false,
       classifier: true,
       branchProtection: false,
+      workflows: true,
     });
   });
 
   it('AC #3: --with-X flags suppress the matching prompt', async () => {
-    const { state, adapters } = makeStub({ promptAnswers: [true, true] });
-    // withDor + withClassifier set → only attestation + branchProtection are prompted
+    const { state, adapters } = makeStub({ promptAnswers: [true, true, true] });
+    // withDor + withClassifier set → only attestation + branchProtection + workflows are prompted
     const sel = await resolveFeatureSelection(
       { ...baseFlags, withDor: true, withClassifier: true },
       adapters,
@@ -169,6 +173,7 @@ describe('resolveFeatureSelection', () => {
     expect(state.promptCalls.map((c) => c.question)).toEqual([
       'Do you want attestation infrastructure (audit-only)?',
       'Apply recommended branch protection? (required: ai-sdlc/pr-ready + codecov/patch)',
+      'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
     ]);
     expect(sel).toEqual(ALL_FEATURES);
   });
@@ -194,7 +199,7 @@ describe('resolveFeatureSelection', () => {
   });
 
   it('default-No prompt answer is honored', async () => {
-    const { adapters } = makeStub({ promptAnswers: [false, false, false, false] });
+    const { adapters } = makeStub({ promptAnswers: [false, false, false, false, false] });
     const sel = await resolveFeatureSelection(baseFlags, adapters);
     expect(sel).toEqual(NO_FEATURES);
   });
@@ -390,6 +395,155 @@ describe('applyFeatureSelection', () => {
     expect(sentinelCount2).toBe(1);
     expect(result2.skipped).toContain('.husky/pre-push');
   });
+
+  // ── AISDLC-261: workflows feature ───────────────────────────────────────
+
+  it('AISDLC-261: --with-workflows writes all 4 canonical workflow files', async () => {
+    const { state, adapters } = makeStub();
+    await applyFeatureSelection('/proj', { ...NO_FEATURES, workflows: true }, baseFlags, adapters);
+    expect(state.files.has('/proj/.github/workflows/ai-sdlc-gate.yml')).toBe(true);
+    expect(state.files.has('/proj/.github/workflows/verify-attestation.yml')).toBe(true);
+    expect(state.files.has('/proj/.github/workflows/ai-sdlc-review.yml')).toBe(true);
+    expect(state.files.has('/proj/.github/workflows/auto-enable-auto-merge.yml')).toBe(true);
+
+    // Spot-check content of each workflow
+    const gate = state.files.get('/proj/.github/workflows/ai-sdlc-gate.yml')!;
+    expect(gate).toContain('ai-sdlc/pr-ready');
+    expect(gate).toContain('re-actors/alls-green');
+
+    const verify = state.files.get('/proj/.github/workflows/verify-attestation.yml')!;
+    expect(verify).toContain('audit');
+
+    const review = state.files.get('/proj/.github/workflows/ai-sdlc-review.yml')!;
+    expect(review).toContain('Post Review Results');
+
+    const autoMerge = state.files.get('/proj/.github/workflows/auto-enable-auto-merge.yml')!;
+    expect(autoMerge).toContain('auto-merge');
+    expect(autoMerge).toContain('release-please--');
+  });
+
+  it('AISDLC-261: --add workflows writes all 4 workflow files (skips baseline duplication)', async () => {
+    const { state, adapters } = makeStub();
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, workflows: true },
+      { ...baseFlags, add: 'workflows' },
+      adapters,
+    );
+    // All 4 workflows are present even in --add mode (workflows IS the feature)
+    expect(state.files.has('/proj/.github/workflows/ai-sdlc-gate.yml')).toBe(true);
+    expect(state.files.has('/proj/.github/workflows/verify-attestation.yml')).toBe(true);
+    expect(state.files.has('/proj/.github/workflows/ai-sdlc-review.yml')).toBe(true);
+    expect(state.files.has('/proj/.github/workflows/auto-enable-auto-merge.yml')).toBe(true);
+    // Non-workflow baseline files are NOT written in --add workflows mode
+    // (the wizard doesn't push BASELINE_WORKFLOW_TEMPLATES separately in --add mode)
+  });
+
+  it('AISDLC-261: idempotent — re-run skips existing workflow files by default', async () => {
+    const { adapters } = makeStub();
+    // First run: all 4 workflow files are created
+    const result1 = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, workflows: true },
+      baseFlags,
+      adapters,
+    );
+    expect(result1.created).toContain('.github/workflows/ai-sdlc-gate.yml');
+
+    // Second run: all 4 workflow files are skipped (already exist)
+    const result2 = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, workflows: true },
+      baseFlags,
+      adapters,
+    );
+    expect(result2.skipped).toContain('.github/workflows/ai-sdlc-gate.yml');
+    expect(result2.skipped).toContain('.github/workflows/verify-attestation.yml');
+    expect(result2.skipped).toContain('.github/workflows/ai-sdlc-review.yml');
+    expect(result2.skipped).toContain('.github/workflows/auto-enable-auto-merge.yml');
+    expect(result2.created).toHaveLength(0);
+  });
+
+  it('AISDLC-261: --force overwrites existing workflow files', async () => {
+    const { state, adapters } = makeStub();
+    // Pre-seed an "old" version of the gate workflow
+    state.files.set('/proj/.github/workflows/ai-sdlc-gate.yml', '# old gate workflow content\n');
+
+    const result = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, workflows: true },
+      { ...baseFlags, force: true },
+      adapters,
+    );
+
+    // The gate workflow was overwritten
+    expect(result.created).toContain('.github/workflows/ai-sdlc-gate.yml');
+    const newContent = state.files.get('/proj/.github/workflows/ai-sdlc-gate.yml')!;
+    expect(newContent).toContain('ai-sdlc/pr-ready');
+    expect(newContent).not.toBe('# old gate workflow content\n');
+    // Log confirms the overwrite
+    const logLine = state.log.find((l) => l.includes('overwrite') && l.includes('ai-sdlc-gate'));
+    expect(logLine).toBeDefined();
+  });
+
+  it('AISDLC-261: --force only affects workflow files (non-workflow files still skip)', async () => {
+    const { state, adapters } = makeStub();
+    // Pre-seed a non-workflow file AND a workflow file
+    state.files.set('/proj/.ai-sdlc/dor-config.yaml', '# user-edited dor config\n');
+    state.files.set('/proj/.github/workflows/ai-sdlc-gate.yml', '# old gate\n');
+
+    await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, dor: true, workflows: true },
+      { ...baseFlags, force: true },
+      adapters,
+    );
+
+    // dor-config.yaml is NOT overwritten (--force only applies to workflow files)
+    expect(state.files.get('/proj/.ai-sdlc/dor-config.yaml')).toBe('# user-edited dor config\n');
+    // ai-sdlc-gate.yml IS overwritten (it's a workflow file + --force)
+    const gateContent = state.files.get('/proj/.github/workflows/ai-sdlc-gate.yml')!;
+    expect(gateContent).not.toBe('# old gate\n');
+    expect(gateContent).toContain('ai-sdlc/pr-ready');
+  });
+
+  it('AISDLC-261: --add workflows resolveFeatureSelection short-circuit', async () => {
+    const { state, adapters } = makeStub();
+    const sel = await resolveFeatureSelection({ ...baseFlags, add: 'workflows' }, adapters);
+    expect(state.promptCalls.length).toBe(0);
+    expect(sel).toEqual({ ...NO_FEATURES, workflows: true });
+  });
+
+  it('AISDLC-261: --with-workflows flag suppresses the prompt', async () => {
+    const { state, adapters } = makeStub({ promptAnswers: [true, true, true, true] });
+    // withWorkflows set → only the 4 non-workflows prompts fire
+    const sel = await resolveFeatureSelection({ ...baseFlags, withWorkflows: true }, adapters);
+    expect(state.promptCalls.map((c) => c.question)).not.toContain(
+      'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
+    );
+    expect(sel.workflows).toBe(true);
+  });
+
+  it('AISDLC-261: dry-run with --force logs "would overwrite" for existing workflow files', async () => {
+    const { state, adapters } = makeStub();
+    state.files.set('/proj/.github/workflows/ai-sdlc-gate.yml', '# old\n');
+
+    const result = await applyFeatureSelection(
+      '/proj',
+      { ...NO_FEATURES, workflows: true },
+      { ...baseFlags, dryRun: true, force: true },
+      adapters,
+    );
+    // No files written in dry-run
+    expect(state.files.size).toBe(1); // only the pre-seeded file
+    // wouldCreate populated
+    expect(result.wouldCreate).toContain('.github/workflows/ai-sdlc-gate.yml');
+    // Log says "would overwrite" for the existing file
+    const overwriteLog = state.log.find(
+      (l) => l.includes('would overwrite') && l.includes('ai-sdlc-gate'),
+    );
+    expect(overwriteLog).toBeDefined();
+  });
 });
 
 // ── applyBranchProtection ────────────────────────────────────────────────
@@ -519,6 +673,10 @@ describe('renderNextSteps', () => {
     // Branch-protection success line
     expect(out).toContain('Branch protection');
 
+    // AISDLC-261: workflows summary included when workflows=true
+    expect(out).toContain('GitHub Actions workflows were scaffolded');
+    expect(out).toContain('auto-enable-auto-merge.yml');
+
     // Always: ai-sdlc health hint
     expect(out).toContain('ai-sdlc health');
 
@@ -537,6 +695,8 @@ describe('renderNextSteps', () => {
     expect(out).not.toContain('AI_SDLC_CI_ATTESTOR_PRIVATE_KEY');
     expect(out).not.toContain('AISDLC-141');
     expect(out).not.toContain('Branch protection');
+    // AISDLC-261: no workflows section when workflows=false
+    expect(out).not.toContain('GitHub Actions workflows were scaffolded');
     // Always-present hint + commit instructions still emitted
     expect(out).toContain('ai-sdlc health');
     expect(out).toContain('Commit the scaffolded files');

@@ -28,6 +28,7 @@ import {
   CLASSIFIER_TEMPLATES,
   DOR_TEMPLATES,
   HUSKY_PREPUSH_SIGN_SNIPPET,
+  WORKFLOWS_TEMPLATES,
   type FeatureTemplateSet,
 } from './init-templates.js';
 
@@ -39,6 +40,12 @@ export interface FeatureSelection {
   attestation: boolean;
   classifier: boolean;
   branchProtection: boolean;
+  /**
+   * `workflows` — scaffold the full GitHub Actions workflow bundle
+   * (ai-sdlc-gate, verify-attestation, ai-sdlc-review, auto-enable-auto-merge).
+   * Enabled by `--with-workflows` flag or `--add workflows` subcommand (AISDLC-261).
+   */
+  workflows: boolean;
 }
 
 /** All feature flags off — used as the initial state before flags + prompts. */
@@ -47,6 +54,7 @@ export const NO_FEATURES: FeatureSelection = {
   attestation: false,
   classifier: false,
   branchProtection: false,
+  workflows: false,
 };
 
 /** All features on — the answer used by `--yes` (accept all defaults). */
@@ -55,6 +63,7 @@ export const ALL_FEATURES: FeatureSelection = {
   attestation: true,
   classifier: true,
   branchProtection: true,
+  workflows: true,
 };
 
 /** Flag-bag controlling wizard behavior (already parsed from argv). */
@@ -70,11 +79,17 @@ export interface WizardFlags {
   /** `--with-branch-protection` forces branch-protection on without prompting. */
   withBranchProtection: boolean;
   /**
+   * `--with-workflows` scaffolds the full GitHub Actions workflow bundle
+   * (ai-sdlc-gate, verify-attestation, ai-sdlc-review, auto-enable-auto-merge)
+   * without prompting (AISDLC-261).
+   */
+  withWorkflows: boolean;
+  /**
    * `--add <feature>` extends an already-initialized repo with a single
    * feature without re-prompting. AC #7 (idempotent extension). When set,
    * the wizard short-circuits to scaffold ONLY this feature.
    */
-  add?: 'dor' | 'attestation' | 'classifier' | 'branch-protection';
+  add?: 'dor' | 'attestation' | 'classifier' | 'branch-protection' | 'workflows';
   /** `--dry-run` — print what would be done, don't write. */
   dryRun: boolean;
   /**
@@ -86,6 +101,11 @@ export interface WizardFlags {
    * refuses to nest if the git root already has `.ai-sdlc/`.
    */
   workspace?: string;
+  /**
+   * `--force` — when set, overwrite workflow files that already exist instead
+   * of skipping them. Only applies to the `workflows` feature (AISDLC-261).
+   */
+  force: boolean;
 }
 
 /**
@@ -345,6 +365,9 @@ export async function resolveFeatureSelection(
       case 'branch-protection':
         sel.branchProtection = true;
         break;
+      case 'workflows':
+        sel.workflows = true;
+        break;
     }
     return sel;
   }
@@ -409,6 +432,16 @@ export async function resolveFeatureSelection(
     );
   }
 
+  // GitHub Actions workflows bundle (AISDLC-261)
+  if (flags.withWorkflows) {
+    sel.workflows = true;
+  } else {
+    sel.workflows = await adapters.prompt(
+      'Scaffold GitHub Actions workflows (gate, review, attestation, auto-merge)?',
+      true,
+    );
+  }
+
   return sel;
 }
 
@@ -434,6 +467,10 @@ export interface ApplyResult {
  * Idempotent: any file that already exists at the target path is skipped
  * with a "skip" log line. This is what makes `--add <feature>` safe to
  * run on an already-initialized repo (AC #7).
+ *
+ * The `workflows` feature (AISDLC-261) supports `--force` to overwrite
+ * existing workflow files with the current template versions. Use this
+ * to upgrade a pre-261 repo to the full workflow bundle.
  */
 export async function applyFeatureSelection(
   projectDir: string,
@@ -447,24 +484,37 @@ export async function applyFeatureSelection(
   const templateSets: FeatureTemplateSet[] = [];
 
   // `--add` mode: skip the baseline (we're EXTENDING an existing init).
+  // Exception: `--add workflows` must write the workflows bundle even in
+  // --add mode (the bundle IS the feature; it's not an extension of baseline).
   if (!flags.add) {
     templateSets.push(BASELINE_WORKFLOW_TEMPLATES);
   }
   if (selection.dor) templateSets.push(DOR_TEMPLATES);
   if (selection.attestation) templateSets.push(ATTESTATION_TEMPLATES);
   if (selection.classifier) templateSets.push(CLASSIFIER_TEMPLATES);
+  if (selection.workflows) templateSets.push(WORKFLOWS_TEMPLATES);
 
   for (const set of templateSets) {
     for (const [relPath, contents] of Object.entries(set.files)) {
       const absPath = join(projectDir, relPath);
 
       if (flags.dryRun) {
+        const isWorkflowFileDry = relPath.startsWith('.github/workflows/');
+        const wouldForce = isWorkflowFileDry && flags.force && adapters.exists(absPath);
         result.wouldCreate.push(relPath);
-        adapters.log(`  would create ${relPath}`);
+        adapters.log(
+          wouldForce ? `  would overwrite ${relPath} (--force)` : `  would create ${relPath}`,
+        );
         continue;
       }
 
-      if (adapters.exists(absPath)) {
+      // For the workflows feature: `--force` overwrites existing files.
+      // For all other features: existing files are always skipped (idempotent).
+      const isWorkflowFile = relPath.startsWith('.github/workflows/');
+      const shouldForce = isWorkflowFile && flags.force;
+      const alreadyExists = adapters.exists(absPath);
+
+      if (alreadyExists && !shouldForce) {
         result.skipped.push(relPath);
         adapters.log(`  skip ${relPath} (already exists)`);
         continue;
@@ -474,7 +524,11 @@ export async function applyFeatureSelection(
       adapters.mkdirp(dirname(absPath));
       adapters.writeFile(absPath, contents);
       result.created.push(relPath);
-      adapters.log(`  created ${relPath}`);
+      if (alreadyExists && shouldForce) {
+        adapters.log(`  overwrite ${relPath} (--force)`);
+      } else {
+        adapters.log(`  created ${relPath}`);
+      }
     }
   }
 
@@ -704,6 +758,22 @@ export function renderNextSteps(
     lines.push(`${stepN}. Review classifier config was scaffolded.`);
     lines.push('     The classifier RUNTIME ships in AISDLC-141 (follow-up). Until');
     lines.push('     that lands, .ai-sdlc/review-classifier.yaml is advisory only.');
+    lines.push('');
+    stepN++;
+  }
+
+  if (selection.workflows) {
+    lines.push(`${stepN}. GitHub Actions workflows were scaffolded into .github/workflows/.`);
+    lines.push('     Four files are now in place:');
+    lines.push('       - ai-sdlc-gate.yml       — ai-sdlc/pr-ready rollup check');
+    lines.push('       - verify-attestation.yml  — DSSE attestation verifier (audit-only)');
+    lines.push('       - ai-sdlc-review.yml      — PR review status (stub: wire your reviewers)');
+    lines.push('       - auto-enable-auto-merge.yml — arms auto-merge on same-repo PRs');
+    lines.push('     To activate auto-merge:');
+    lines.push('       a) Enable "Allow auto-merge" in GitHub Settings → General.');
+    lines.push('       b) Set the AI_SDLC_PAT secret with write access to the repo.');
+    lines.push('     Re-run with --force to overwrite workflows on a pre-261 repo:');
+    lines.push('       ai-sdlc init --add workflows --force');
     lines.push('');
     stepN++;
   }

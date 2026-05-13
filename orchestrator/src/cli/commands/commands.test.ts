@@ -134,9 +134,12 @@ function resetInitCommandOptions(cmd: Awaited<ReturnType<typeof getInitProgram>>
   cmd.setOptionValue('withAttestation', undefined);
   cmd.setOptionValue('withClassifier', undefined);
   cmd.setOptionValue('withBranchProtection', undefined);
+  cmd.setOptionValue('withWorkflows', undefined);
   cmd.setOptionValue('add', undefined);
   // AISDLC-262
   cmd.setOptionValue('workspace', undefined);
+  // AISDLC-261
+  cmd.setOptionValue('force', undefined);
 }
 
 describe('init command', () => {

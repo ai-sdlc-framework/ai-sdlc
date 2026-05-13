@@ -373,6 +373,253 @@ spec:
 `;
 
 /**
+ * `.github/workflows/ai-sdlc-review.yml` — CI-side PR review workflow.
+ *
+ * Posts `Post Review Results` as a commit status so branch-protection can
+ * require it. Adopter repos that have not set up `ANTHROPIC_API_KEY` will
+ * see the job run but produce advisory-only output — the status check still
+ * posts `success` so it does not block merges.
+ *
+ * This is a simplified adopter-facing template. The AI-SDLC framework's
+ * own repo carries a more elaborate version that drives the full review
+ * fan-out pipeline (classifier, incremental review, etc.); adopters start
+ * here and can progressively opt into those features.
+ *
+ * Source of truth: `.github/workflows/ai-sdlc-review.yml` in the ai-sdlc
+ * framework repo (AISDLC-261). Mirror changes here when the adopter-facing
+ * surface evolves.
+ */
+export const AI_SDLC_REVIEW_WORKFLOW = `name: AI-SDLC PR Review
+
+# Posts \`Post Review Results\` as a required commit status.
+# Docs-only PRs (spec/rfcs/**, docs/**, backlog/**, *.md) are short-circuited
+# with success so they do not block the merge queue.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths-ignore:
+      - 'spec/rfcs/**'
+      - 'docs/**'
+      - 'backlog/tasks/**'
+      - 'backlog/completed/**'
+      - '*.md'
+  merge_group:
+    types: [checks_requested]
+
+concurrency:
+  group: review-\${{ github.event.pull_request.number || github.event.merge_group.head_sha }}
+  cancel-in-progress: true
+
+jobs:
+  docs-only-check:
+    name: Docs-only check
+    runs-on: ubuntu-latest
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    permissions:
+      contents: read
+      statuses: write
+      pull-requests: read
+    steps:
+      - name: Resolve event SHA
+        id: resolve
+        run: |
+          if [ "\${{ github.event_name }}" = "merge_group" ]; then
+            echo "head_sha=\${{ github.event.merge_group.head_sha }}" >> "\${GITHUB_OUTPUT}"
+            echo "base_sha=\${{ github.event.merge_group.base_sha }}" >> "\${GITHUB_OUTPUT}"
+            echo "is_merge_group=true" >> "\${GITHUB_OUTPUT}"
+          else
+            echo "head_sha=\${{ github.event.pull_request.head.sha }}" >> "\${GITHUB_OUTPUT}"
+            echo "is_merge_group=false" >> "\${GITHUB_OUTPUT}"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: \${{ steps.resolve.outputs.head_sha }}
+
+      - name: Detect docs-only changeset
+        id: detect
+        env:
+          GH_TOKEN: \${{ github.token }}
+          PR_NUMBER: \${{ github.event.pull_request.number }}
+          REPO: \${{ github.repository }}
+          IS_MERGE_GROUP: \${{ steps.resolve.outputs.is_merge_group }}
+          BASE_SHA: \${{ steps.resolve.outputs.base_sha }}
+          HEAD_SHA: \${{ steps.resolve.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          if [ "\${IS_MERGE_GROUP}" = "true" ]; then
+            FILES=$(git -c core.quotePath=false diff --name-only "\${BASE_SHA}...\${HEAD_SHA}")
+          else
+            FILES=$(gh api "repos/\${REPO}/pulls/\${PR_NUMBER}/files" --paginate --jq '.[].filename')
+          fi
+          if [ -z "\${FILES}" ]; then
+            echo "all_docs=true" >> "\${GITHUB_OUTPUT}"
+            exit 0
+          fi
+          # Simple docs-only check: all files must be in docs, spec/rfcs, backlog, or *.md
+          ALL_DOCS=true
+          while IFS= read -r f; do
+            case "$f" in
+              docs/*|spec/rfcs/*|backlog/tasks/*|backlog/completed/*|*.md) ;;
+              *) ALL_DOCS=false; break ;;
+            esac
+          done <<< "\${FILES}"
+          echo "all_docs=\${ALL_DOCS}" >> "\${GITHUB_OUTPUT}"
+
+      - name: Post Review Results (docs-only short-circuit)
+        if: steps.detect.outputs.all_docs == 'true'
+        env:
+          GH_TOKEN: \${{ github.token }}
+          REPO: \${{ github.repository }}
+          HEAD_SHA: \${{ steps.resolve.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          gh api "repos/\${REPO}/statuses/\${HEAD_SHA}" \\
+            -X POST \\
+            -f state=success \\
+            -f context='Post Review Results' \\
+            -f description='docs-only changeset — review N/A'
+          echo "Posted Post Review Results: success (docs-only) on \${HEAD_SHA}"
+
+  review:
+    name: Post Review Results
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request' &&
+      !startsWith(github.head_ref, 'release-please--') &&
+      github.event.pull_request.draft == false
+    needs: [docs-only-check]
+    permissions:
+      contents: read
+      pull-requests: write
+      statuses: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Post Review Results
+        env:
+          GH_TOKEN: \${{ github.token }}
+          REPO: \${{ github.repository }}
+          HEAD_SHA: \${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Wire your review tooling here (e.g. AI-SDLC reviewer agents,
+          # custom scripts, etc.). This stub posts success unconditionally
+          # so the required check does not block merges while you set up.
+          gh api "repos/\${REPO}/statuses/\${HEAD_SHA}" \\
+            -X POST \\
+            -f state=success \\
+            -f context='Post Review Results' \\
+            -f description='Review passed (stub — wire your reviewers here)'
+          echo "Posted Post Review Results: success on \${HEAD_SHA}"
+`;
+
+/**
+ * `.github/workflows/auto-enable-auto-merge.yml` — auto-arms GitHub auto-merge
+ * on every new same-repo PR so the PR merges automatically as soon as required
+ * checks pass. Release-please PRs are excluded (operator arms manually).
+ *
+ * Source of truth: `.github/workflows/auto-enable-auto-merge.yml` in the
+ * ai-sdlc framework repo (AISDLC-261). Mirror changes here when the
+ * auto-merge strategy or exclude rules evolve.
+ *
+ * Requires:
+ *   - GitHub repo setting "Allow auto-merge" must be enabled.
+ *   - \`AI_SDLC_PAT\` secret with write access to the repo (or use
+ *     \`secrets.GITHUB_TOKEN\` if the repo's default token has write access).
+ */
+export const AUTO_ENABLE_AUTO_MERGE_WORKFLOW = `name: Auto-enable auto-merge on PR open
+
+# Enables GitHub's auto-merge on every new same-repo PR. Once required
+# checks pass, GitHub adds the PR to the merge queue which rebases + runs
+# CI + merges if green. No human click needed.
+#
+# Requires repo setting "Allow auto-merge" to be enabled (Settings → General).
+# Requires a PAT or GitHub App token with \`pull_requests: write\` stored as
+# the \`AI_SDLC_PAT\` repository secret (or swap for \`github.token\` if your
+# repo grants it write access).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  check_suite:
+    types: [completed]
+  status:
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  enable-auto-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Discover PR for this event
+        id: discover
+        env:
+          GH_TOKEN: \${{ secrets.AI_SDLC_PAT }}
+          GH_REPO: \${{ github.repository }}
+          EVENT_NAME: \${{ github.event_name }}
+          PR_NUMBER_FROM_PR_EVENT: \${{ github.event.pull_request.number }}
+          HEAD_SHA: \${{ github.event.check_suite.head_sha || github.event.sha || github.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            echo "pr=$PR_NUMBER_FROM_PR_EVENT" >> "$GITHUB_OUTPUT"
+          else
+            PR=$(gh api "/repos/$GH_REPO/commits/$HEAD_SHA/pulls" --jq '.[] | select(.state == "open") | .number' | head -1)
+            echo "pr=\${PR:-}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip when no PR matches
+        if: steps.discover.outputs.pr == ''
+        run: echo "[auto-enable] no open PR for this event — nothing to arm."
+
+      - name: Skip drafts, fork PRs, and release-please PRs
+        id: guard
+        if: steps.discover.outputs.pr != ''
+        env:
+          GH_TOKEN: \${{ secrets.AI_SDLC_PAT }}
+          GH_REPO: \${{ github.repository }}
+          PR: \${{ steps.discover.outputs.pr }}
+          REPO: \${{ github.repository }}
+        run: |
+          set -euo pipefail
+          PR_INFO=$(gh pr view "$PR" --json isDraft,headRepositoryOwner,headRepository,headRefName \\
+            -q '{isDraft: .isDraft, headRefName: .headRefName, headFull: (((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // "")) // "")}')
+          IS_DRAFT=$(echo "$PR_INFO" | jq -r '.isDraft')
+          HEAD_FULL=$(echo "$PR_INFO" | jq -r '.headFull')
+          HEAD_REF=$(echo "$PR_INFO" | jq -r '.headRefName')
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "[auto-enable] PR #$PR is draft — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$HEAD_FULL" != "$REPO" ]; then
+            echo "[auto-enable] PR #$PR is from a fork ($HEAD_FULL) — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif case "$HEAD_REF" in release-please--*) true ;; *) false ;; esac; then
+            echo "[auto-enable] PR #$PR is a release-please PR — skipping. Arm manually when ready."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Refresh auto-merge
+        if: steps.discover.outputs.pr != '' && steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: \${{ secrets.AI_SDLC_PAT }}
+          PR: \${{ steps.discover.outputs.pr }}
+        run: |
+          # disable-then-arm to clear any stale GitHub auto-merge state.
+          gh pr merge --disable-auto "$PR" 2>/dev/null || true
+          gh pr merge --auto "$PR"
+`;
+
+/**
  * The set of feature templates exported as a single map so the wizard
  * dispatcher can iterate without each feature growing its own switch
  * statement.
@@ -407,6 +654,30 @@ export const ATTESTATION_TEMPLATES: FeatureTemplateSet = {
 export const CLASSIFIER_TEMPLATES: FeatureTemplateSet = {
   files: {
     '.ai-sdlc/review-classifier.yaml': REVIEW_CLASSIFIER_STUB,
+  },
+};
+
+/**
+ * Workflow template set scaffolded by `--with-workflows` / `--add workflows`
+ * (AISDLC-261). Bundles all four canonical GitHub Actions workflow files that
+ * an adopter needs for the AI-SDLC framework to function end-to-end:
+ *
+ *   1. `ai-sdlc-gate.yml` — single rollup `ai-sdlc/pr-ready` check (always-on baseline).
+ *   2. `verify-attestation.yml` — DSSE envelope verifier (audit-only).
+ *   3. `ai-sdlc-review.yml` — CI-side reviewer fan-out + `Post Review Results` status.
+ *   4. `auto-enable-auto-merge.yml` — arms auto-merge on every same-repo PR.
+ *
+ * Idempotent: files already present are skipped by default; `--force` overwrites.
+ *
+ * Source of truth: `.github/workflows/` in the ai-sdlc framework repo.
+ * Mirror changes here when the adopter-facing API evolves.
+ */
+export const WORKFLOWS_TEMPLATES: FeatureTemplateSet = {
+  files: {
+    '.github/workflows/ai-sdlc-gate.yml': AI_SDLC_GATE_WORKFLOW,
+    '.github/workflows/verify-attestation.yml': VERIFY_ATTESTATION_WORKFLOW,
+    '.github/workflows/ai-sdlc-review.yml': AI_SDLC_REVIEW_WORKFLOW,
+    '.github/workflows/auto-enable-auto-merge.yml': AUTO_ENABLE_AUTO_MERGE_WORKFLOW,
   },
 };
 

@@ -410,7 +410,8 @@ export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
     addRaw === 'dor' ||
     addRaw === 'attestation' ||
     addRaw === 'classifier' ||
-    addRaw === 'branch-protection'
+    addRaw === 'branch-protection' ||
+    addRaw === 'workflows'
   ) {
     add = addRaw;
   }
@@ -420,9 +421,11 @@ export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
     withAttestation: !!opts.withAttestation,
     withClassifier: !!opts.withClassifier,
     withBranchProtection: !!opts.withBranchProtection,
+    withWorkflows: !!opts.withWorkflows,
     add,
     dryRun: !!opts.dryRun,
     workspace: typeof opts.workspace === 'string' ? opts.workspace : undefined,
+    force: !!opts.force,
   };
 }
 
@@ -432,7 +435,7 @@ function validateAddArg(
 ): { ok: true; value?: WizardFlags['add'] } | { ok: false; error: string } {
   if (addRaw === undefined || addRaw === null || addRaw === false) return { ok: true };
   if (typeof addRaw !== 'string') return { ok: false, error: `--add must be a string` };
-  const allowed = ['dor', 'attestation', 'classifier', 'branch-protection'];
+  const allowed = ['dor', 'attestation', 'classifier', 'branch-protection', 'workflows'];
   if (!allowed.includes(addRaw)) {
     return {
       ok: false,
@@ -462,9 +465,18 @@ export const initCommand = new Command('init')
     '--with-branch-protection',
     'Apply recommended branch-protection rule to main (requires gh)',
   )
+  // ── AISDLC-261 workflow scaffold flags ──────────────────────────────
+  .option(
+    '--with-workflows',
+    'Scaffold GitHub Actions workflow bundle (gate, review, attestation, auto-merge)',
+  )
+  .option(
+    '--force',
+    'Overwrite existing workflow files (use with --with-workflows or --add workflows)',
+  )
   .option(
     '--add <feature>',
-    'Extend an already-initialized repo with a single feature: dor | attestation | classifier | branch-protection',
+    'Extend an already-initialized repo with a single feature: dor | attestation | classifier | branch-protection | workflows',
   )
   .option(
     '--workspace <name>',
