@@ -1,7 +1,7 @@
 ---
-id: AISDLC-269
+id: AISDLC-272
 title: /ai-sdlc execute is not portable to adopter projects — pipeline-cli bundle + CLAUDE_PLUGIN_DIR resolution
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 23:55'
 labels:
@@ -17,6 +17,52 @@ references:
   - ai-sdlc-plugin/.claude-plugin/plugin.json
   - ai-sdlc-plugin/plugin.json
   - .claude-plugin/marketplace.json
+finalSummary: |
+  ## Summary
+  Fixed /ai-sdlc execute portability for adopter projects by (A) adding an
+  `install-runtime-deps.sh` script that self-heals missing pipeline-cli deps in
+  the plugin cache, and (B) extending path resolution from a binary two-case branch
+  to a five-topology chain that handles CLAUDE_PLUGIN_DIR set+correct, set+useless
+  (broken local marketplace install), CLAUDE_PLUGIN_ROOT fallback, plugin cache probe,
+  and dogfood monorepo. Resolution is delegated to a new `resolve-pipeline-cli.sh`
+  helper. When all topologies fail, the command exits 1 with an actionable error
+  message naming the broken topology and fix options.
+
+  ## Changes
+  - `ai-sdlc-plugin/scripts/install-runtime-deps.sh` (new): idempotent npm install
+    of runtimeDependencies into a plugin cache dir; used as self-heal from resolve script.
+  - `ai-sdlc-plugin/scripts/resolve-pipeline-cli.sh` (new): 5-topology resolution
+    algorithm with self-heal, cache probe, and actionable error on total failure.
+  - `ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs` (new): hermetic topology
+    tests (1-5) using isolated tmp dirs + fake pipeline-cli bins.
+  - `ai-sdlc-plugin/commands/execute.md` (modified): path-resolution preamble updated
+    to delegate to resolve-pipeline-cli.sh; PLUGIN_SCRIPTS_DIR now includes
+    CLAUDE_PLUGIN_ROOT in fallback chain; PIPELINE_CLI_BIN supports env override.
+  - `ai-sdlc-plugin/commands/execute.test.mjs` (modified): fixed 2 pre-existing test
+    failures caused by AISDLC-133 architecture drift (Step 10 signing moved to pre-push
+    hook); added 5 new AISDLC-272 assertions for multi-topology resolution.
+  - `ai-sdlc-plugin/README.md` (modified): expanded path resolution docs to cover all
+    5 install topologies + manual self-heal instructions.
+
+  ## Design decisions
+  - **Script-based resolution instead of inline bash**: isolates the complex
+    5-topology logic into a testable, versioned helper. The execute.md preamble
+    becomes a simple delegate call.
+  - **PIPELINE_CLI_BIN env override**: allows operators to bypass all resolution
+    when they have a known-good install path (e.g. dogfood dev pointing at monorepo).
+  - **Self-heal via npm install**: the local marketplace cache never runs npm install,
+    so the only portable fix is to run it ourselves when deps are missing. The script
+    is idempotent and checks for the sentinel file before running.
+
+  ## Verification
+  - `pnpm build` — clean
+  - `pnpm test` — 69 execute.test.mjs + 8 resolve-pipeline-cli.test.mjs
+  - `pnpm lint` — 0 errors
+  - `pnpm format:check` — clean
+
+  ## Follow-up
+  - End-to-end verification on a clean adopter project (forge) once TASK-708
+    exemption window closes (2026-06-15).
 ---
 
 ## Bug

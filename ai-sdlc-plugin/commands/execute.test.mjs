@@ -381,20 +381,37 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
     );
   });
 
-  // ── AISDLC-74: review attestation contract ────────────────────────
-  // Step 10 must build + sign + write a DSSE envelope BEFORE the chore
-  // commit so CI's verify-attestation workflow can verify it on push.
+  // ── AISDLC-74 / AISDLC-133: review attestation contract ─────────────────
+  // AISDLC-133 moved signing from this step into the pre-push hook — the slash
+  // command body now writes a per-worktree verdicts file which the hook reads at
+  // push time to auto-sign + commit the DSSE envelope. Step 10 no longer calls
+  // scripts/sign-attestation.mjs directly; that would double-sign and create two
+  // attestation commits. The hook owns signing; Step 10 owns the verdicts file.
 
   it('Step 10: refuses to sign when ~/.ai-sdlc/signing-key.pem is missing', () => {
     assert.match(cmdBody, /\$HOME\/\.ai-sdlc\/signing-key\.pem/);
     assert.match(cmdBody, /\/ai-sdlc init-signing-key/);
   });
 
-  it('Step 10: invokes scripts/sign-attestation.mjs with verdicts + iteration + harness-note', () => {
-    assert.match(cmdBody, /scripts\/sign-attestation\.mjs/);
-    assert.match(cmdBody, /--review-verdicts/);
-    assert.match(cmdBody, /--iteration-count/);
-    assert.match(cmdBody, /--harness-note/);
+  it('Step 10: writes per-worktree verdicts file for pre-push hook (AISDLC-133)', () => {
+    // AISDLC-133: Step 10 writes .ai-sdlc/verdicts/<task-id-lower>.json.
+    // The pre-push hook reads it in Step 11 to auto-sign the DSSE envelope.
+    // Signing (sign-attestation.mjs) is the hook's job, NOT Step 10's.
+    assert.match(cmdBody, /AISDLC-133/);
+    assert.match(cmdBody, /\.ai-sdlc\/verdicts\//);
+    // The hook still invokes sign-attestation.mjs (referenced in the comment),
+    // but Step 10 must NOT call it with --review-verdicts directly.
+    assert.doesNotMatch(
+      cmdBody,
+      /node.*sign-attestation\.mjs.*--review-verdicts/s,
+      'Step 10 must NOT call sign-attestation.mjs with --review-verdicts — hook owns signing (AISDLC-133)',
+    );
+  });
+
+  it('Step 10: mentions AI_SDLC_ITERATION_COUNT and AI_SDLC_HARNESS_NOTE env exports for hook', () => {
+    // The hook picks up iteration count + harness note from env vars.
+    assert.match(cmdBody, /AI_SDLC_ITERATION_COUNT/);
+    assert.match(cmdBody, /AI_SDLC_HARNESS_NOTE/);
   });
 
   it('Step 10: skips the signing step when iteration cap was exceeded', () => {
@@ -402,11 +419,23 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
     assert.match(cmdBody, /Skip this step entirely if the iteration cap was exceeded/i);
   });
 
-  it('Step 10: stages the .ai-sdlc/attestations/ file in the chore commit', () => {
-    assert.match(cmdBody, /git add backlog\/tasks backlog\/completed \.ai-sdlc\/attestations/);
+  it('Step 10: stages backlog only (NOT .ai-sdlc/attestations — hook adds that)', () => {
+    // AISDLC-133: the chore commit at Step 10 stages backlog/* only.
+    // The attestation envelope is added by the pre-push hook on a SEPARATE
+    // follow-up chore commit after Step 11 — it must NOT appear here.
+    assert.match(cmdBody, /git add backlog\/tasks backlog\/completed/);
+    // Ensure the old .ai-sdlc/attestations inclusion is absent from this line.
+    const lines = cmdBody.split('\n');
+    const addLine = lines.find((l) => /git add backlog\/tasks backlog\/completed/.test(l));
+    assert.ok(addLine, 'must have git add backlog/... line');
+    assert.doesNotMatch(
+      addLine,
+      /\.ai-sdlc\/attestations/,
+      'Step 10 git add must NOT include .ai-sdlc/attestations — pre-push hook owns that commit (AISDLC-133)',
+    );
   });
 
-  it('Step 10: writes the envelope at .ai-sdlc/attestations/<head-sha>.dsse.json', () => {
+  it('Step 10: writes the envelope at .ai-sdlc/attestations/<head-sha>.dsse.json (via hook)', () => {
     assert.match(cmdBody, /\.ai-sdlc\/attestations\/<head-sha>\.dsse\.json/);
   });
 
@@ -540,6 +569,65 @@ describe('/ai-sdlc execute body — pipeline lives inline (AISDLC-98)', () => {
       cmdBody,
       /\$PLUGIN_SCRIPTS_DIR\/compute-slug\.mjs/,
       'compute-slug.mjs must use $PLUGIN_SCRIPTS_DIR, not bare ai-sdlc-plugin/scripts/',
+    );
+  });
+
+  // ── AISDLC-272: portable execute across all install topologies ────────────
+  // The original two-case CLAUDE_PLUGIN_DIR branch assumed either "env set +
+  // bundled deps" (adopter) or "env unset" (dogfood). In practice the local
+  // marketplace cache never runs npm install, so CLAUDE_PLUGIN_DIR can be set
+  // but deps missing — the old logic blindly used a path that didn't exist.
+  //
+  // AISDLC-272 extends resolution to 5 topologies:
+  //   1. CLAUDE_PLUGIN_DIR set + deps present → use it
+  //   2. CLAUDE_PLUGIN_DIR set + deps missing → self-heal via install-runtime-deps.sh
+  //   3. CLAUDE_PLUGIN_DIR unset + CLAUDE_PLUGIN_ROOT set → try CLAUDE_PLUGIN_ROOT
+  //   4. CLAUDE_PLUGIN_DIR unset → probe ~/.claude/plugins/cache/
+  //   5. All env vars unset → $(pwd)/pipeline-cli/bin (dogfood)
+
+  it('AISDLC-272: PIPELINE_CLI_BIN resolution references CLAUDE_PLUGIN_ROOT as fallback', () => {
+    assert.match(
+      cmdBody,
+      /CLAUDE_PLUGIN_ROOT/,
+      'must reference CLAUDE_PLUGIN_ROOT for topology 3 (env set but CLAUDE_PLUGIN_DIR unset)',
+    );
+  });
+
+  it('AISDLC-272: resolution delegates to resolve-pipeline-cli.sh', () => {
+    assert.match(
+      cmdBody,
+      /resolve-pipeline-cli\.sh/,
+      'must delegate to resolve-pipeline-cli.sh for multi-topology resolution',
+    );
+  });
+
+  it('AISDLC-272: PIPELINE_CLI_BIN supports external override via env var', () => {
+    // Operators can skip all resolution by pre-exporting PIPELINE_CLI_BIN.
+    // The body must guard with [ -z "${PIPELINE_CLI_BIN:-}" ] or equivalent.
+    assert.match(
+      cmdBody,
+      /PIPELINE_CLI_BIN:-/,
+      'must allow PIPELINE_CLI_BIN override via environment variable',
+    );
+  });
+
+  it('AISDLC-272: PLUGIN_SCRIPTS_DIR uses CLAUDE_PLUGIN_ROOT as secondary fallback', () => {
+    // PLUGIN_SCRIPTS_DIR must fall back to CLAUDE_PLUGIN_ROOT when CLAUDE_PLUGIN_DIR
+    // is unset — not just to $(pwd)/ai-sdlc-plugin. This handles topology 3.
+    assert.match(
+      cmdBody,
+      /PLUGIN_SCRIPTS_DIR=.*CLAUDE_PLUGIN_ROOT/,
+      'PLUGIN_SCRIPTS_DIR must include CLAUDE_PLUGIN_ROOT in its fallback chain',
+    );
+  });
+
+  it('AISDLC-272: resolution exits with actionable error when all topologies fail', () => {
+    // When resolve-pipeline-cli.sh exits 1, the command body must catch it
+    // and emit a clear error message rather than silently continuing.
+    assert.match(
+      cmdBody,
+      /cannot continue.*@ai-sdlc\/pipeline-cli not found|@ai-sdlc\/pipeline-cli not found.*cannot continue/i,
+      'must emit actionable error when @ai-sdlc/pipeline-cli cannot be found in any topology',
     );
   });
 });

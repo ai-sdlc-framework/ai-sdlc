@@ -75,27 +75,47 @@ This makes harness selection transparent to the Step 8 verdict aggregator — no
 |-------|-------------|
 | `ai-sdlc-governance` | Auto-loaded governance rules, blocked actions, and pre-commit checklist |
 
-## Path resolution conventions (AISDLC-245.4)
+## Install topologies + path resolution (AISDLC-245.4, AISDLC-272)
 
-Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scripts. They must work in two layouts:
+Slash command bodies invoke `@ai-sdlc/pipeline-cli` CLIs and plugin-internal scripts. They must work across **five distinct install topologies**:
 
-| Layout | `CLAUDE_PLUGIN_DIR` | `pipeline-cli` location |
-|--------|---------------------|-------------------------|
-| Adopter install (npm/marketplace) | Set by Claude Code to the plugin install dir | `$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/` |
-| Dogfood monorepo (this repo) | Unset | `$(pwd)/pipeline-cli/` |
+| # | Topology | `CLAUDE_PLUGIN_DIR` | `CLAUDE_PLUGIN_ROOT` | `pipeline-cli` location |
+|---|----------|---------------------|----------------------|-------------------------|
+| 1 | Remote marketplace install (bundled deps) | Set — deps present | Set | `$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/` |
+| 2 | Local marketplace install (no npm install) | Set — **deps missing** | Set | Self-heal via `install-runtime-deps.sh`, then probe cache |
+| 3 | Marketplace (env injection variant) | Unset | Set — deps present | `$CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/` |
+| 4 | Plugin cache probe (env unset) | Unset | Unset | `~/.claude/plugins/cache/<mp>/ai-sdlc/<version>/node_modules/@ai-sdlc/pipeline-cli/` |
+| 5 | Dogfood monorepo (this repo) | Unset | Unset | `$(pwd)/pipeline-cli/` relative to repo root |
 
-**Rule: never hardcode `node pipeline-cli/bin/cli-XXX.mjs` or `node ai-sdlc-plugin/scripts/XXX.mjs` in a slash command body.** Use the portable variables established at the top of every command body:
+> **Why topology 2 exists:** The local marketplace installer (`/claude plugin install` against a local `marketplace.json`) copies plugin files to `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/` but does NOT run `npm install`. So `runtimeDependencies` declared in `plugin.json` are never installed for local marketplace setups. The `scripts/install-runtime-deps.sh` self-heal script fills this gap.
+
+### Resolution algorithm
+
+`scripts/resolve-pipeline-cli.sh` tries each topology in order and exits 0 with the path on the first match, or exits 1 with a clear actionable error naming the broken topology:
+
+```
+1. $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin exists → use it
+2. $CLAUDE_PLUGIN_DIR set but deps missing → self-heal via install-runtime-deps.sh
+3. $CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/bin exists → use it
+4. ~/.claude/plugins/cache/*/ai-sdlc/*/node_modules/... exists → use highest version
+5. $(pwd)/pipeline-cli/bin exists → use it (dogfood monorepo)
+6. Nothing found → exit 1 with actionable error + PIPELINE_CLI_BIN override hint
+```
+
+### Usage in slash command bodies
+
+**Rule: never hardcode `node pipeline-cli/bin/cli-XXX.mjs` or `node ai-sdlc-plugin/scripts/XXX.mjs` in a slash command body.** Use the portable preamble:
 
 ```bash
-# PIPELINE_CLI_BIN — resolves pipeline-cli/bin in both layouts:
-if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
-  PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
-else
-  PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
-fi
-
 # PLUGIN_SCRIPTS_DIR — resolves plugin-internal scripts (compute-slug.mjs etc.):
-PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-$(pwd)/ai-sdlc-plugin}/scripts"
+# Must be set FIRST — resolve-pipeline-cli.sh lives under PLUGIN_SCRIPTS_DIR.
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
+
+# PIPELINE_CLI_BIN — resolves across all 5 install topologies (AISDLC-272).
+# Override: export PIPELINE_CLI_BIN=/path/to/pipeline-cli/bin to skip resolution.
+if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
+  PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || exit 1
+fi
 ```
 
 Then invoke CLIs as:
@@ -108,9 +128,23 @@ node "$PIPELINE_CLI_BIN/cli-deps.mjs" preflight "$TASK_ID" ...
 node "$PLUGIN_SCRIPTS_DIR/compute-slug.mjs" "$TASK_FILE"
 ```
 
-**Note on `CLAUDE_PLUGIN_ROOT`:** for plugin-internal scripts already using `${CLAUDE_PLUGIN_ROOT}` (e.g. `sign-attestation.mjs` invocations in `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase`), leave those unchanged — Claude Code injects `CLAUDE_PLUGIN_ROOT` at session start and it is always available in the main session context. `PLUGIN_SCRIPTS_DIR` is only needed for early invocations (before the session hook fires) or in adopter layouts where the harness version may differ.
+### Manual self-heal (local marketplace installs)
 
-**Enforcement:** `ai-sdlc-plugin/commands/execute.test.mjs` and `orchestrator-tick.test.mjs` both contain assertions (AISDLC-245.4 suite) that scan the command body for bare `node pipeline-cli/bin/...` invocations and fail the test run if found. When adding a new slash command, copy the path-resolution preamble above and add a similar regression test.
+If you installed via a local marketplace and `@ai-sdlc/pipeline-cli` is missing:
+
+```bash
+bash ~/.claude/plugins/cache/ai-sdlc-local/ai-sdlc/<version>/scripts/install-runtime-deps.sh
+```
+
+Or override `PIPELINE_CLI_BIN` in your shell before launching Claude Code:
+
+```bash
+export PIPELINE_CLI_BIN=/path/to/ai-sdlc/pipeline-cli/bin
+```
+
+**Note on `CLAUDE_PLUGIN_ROOT`:** for plugin-internal scripts already using `${CLAUDE_PLUGIN_ROOT}` (e.g. `sign-attestation.mjs` invocations in `/ai-sdlc execute` Step 10.5 and `/ai-sdlc rebase`), leave those unchanged — Claude Code injects `CLAUDE_PLUGIN_ROOT` at session start and it is always available in the main session context.
+
+**Enforcement:** `ai-sdlc-plugin/commands/execute.test.mjs` and `orchestrator-tick.test.mjs` both contain assertions (AISDLC-245.4 + AISDLC-272 suites) that scan the command body for bare `node pipeline-cli/bin/...` invocations and fail the test run if found. `ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs` tests each topology in isolation. When adding a new slash command, copy the path-resolution preamble above and add a similar regression test.
 
 ## `ai-sdlc init` — CI-safe by default (AISDLC-263)
 
@@ -151,6 +185,9 @@ node --test ai-sdlc-plugin/agents/agents.test.mjs
 
 # Command body tests
 node --test ai-sdlc-plugin/commands/execute.test.mjs
+
+# Path resolution topology tests (AISDLC-272)
+node --test ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs
 
 # MCP server tests (Vitest)
 pnpm --filter @ai-sdlc/plugin-mcp-server test

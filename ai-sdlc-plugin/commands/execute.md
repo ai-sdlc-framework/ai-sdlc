@@ -42,16 +42,32 @@ Step 4 below writes the active-task sentinel at `<worktree>/.active-task` (per-w
 
 If you find yourself trying to write `.worktrees/.active-task` at the project root, stop — that's the wrong path and would race with parallel runs.
 
-## Path resolution (AISDLC-245.4)
+## Path resolution (AISDLC-245.4, AISDLC-272)
 
 <!-- PATH-RESOLUTION:BEGIN
   Convention: every pipeline-cli CLI invocation and every plugin-internal script invocation
-  uses variables established here. This makes the command body work in two layouts:
+  uses variables established here. This makes the command body work across all install
+  topologies (AISDLC-272 added topology 2 + 3 to the original 2-case binary):
 
-  1. Adopter install (npm/marketplace): CLAUDE_PLUGIN_DIR is set by Claude Code to the
-     plugin's install directory, which contains node_modules/@ai-sdlc/pipeline-cli.
-  2. Dogfood monorepo (this repo): CLAUDE_PLUGIN_DIR is unset; the pipeline-cli workspace
-     lives at $(pwd)/pipeline-cli/ relative to the project root.
+  1. Marketplace install (set+correct): CLAUDE_PLUGIN_DIR is set by Claude Code and
+     $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin exists → use it.
+
+  2. Marketplace install (set+useless): CLAUDE_PLUGIN_DIR is set but the bundle is
+     missing (local marketplace cache never runs npm install). Auto-detect and self-heal
+     via scripts/install-runtime-deps.sh, then probe the cache.
+
+  3. CLAUDE_PLUGIN_DIR unset but CLAUDE_PLUGIN_ROOT set: Claude Code injects
+     CLAUDE_PLUGIN_ROOT in all main-session contexts even when CLAUDE_PLUGIN_DIR is
+     absent. Try $CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/bin first.
+
+  4. Plugin cache probe (env unset): Walk ~/.claude/plugins/cache/<marketplace>/ai-sdlc/
+     <version>/ to find the newest installed version that has pipeline-cli bundled.
+
+  5. Dogfood monorepo (all env vars unset): $(pwd)/pipeline-cli/bin.
+
+  Resolution is delegated to scripts/resolve-pipeline-cli.sh which handles self-heal
+  and all fallback steps. The script prints the resolved path to stdout; exit 1 on
+  complete failure with an actionable error message naming the broken topology.
 
   For plugin-internal scripts (compute-slug.mjs, sign-attestation.mjs, etc.),
   CLAUDE_PLUGIN_ROOT is already set by Claude Code to the plugin directory — use that
@@ -60,30 +76,48 @@ If you find yourself trying to write `.worktrees/.active-task` at the project ro
   is guaranteed by the harness).
 
   These variables MUST be established before the first CLI invocation and MUST NOT be
-  re-assigned within a step. See ai-sdlc-plugin/README.md "Path resolution conventions".
+  re-assigned within a step. See ai-sdlc-plugin/README.md "Path resolution conventions
+  + install topologies".
 PATH-RESOLUTION:END -->
 
 ```bash
-# AISDLC-245.4: Resolve pipeline-cli binaries and plugin scripts portably.
+# AISDLC-245.4 / AISDLC-272: Resolve pipeline-cli binaries and plugin scripts portably.
 #
-# PIPELINE_CLI_BIN — directory containing cli-*.mjs binaries:
-#   - Adopter install: $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin
-#   - Dogfood monorepo (CLAUDE_PLUGIN_DIR unset): ./pipeline-cli/bin
-#
-if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
-  PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
-else
-  PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
-fi
-
 # PLUGIN_SCRIPTS_DIR — plugin-internal scripts (compute-slug.mjs etc.):
-#   - Adopter install: $CLAUDE_PLUGIN_DIR/scripts  (CLAUDE_PLUGIN_ROOT is the same)
-#   - Dogfood monorepo: $(pwd)/ai-sdlc-plugin/scripts
+#   - Marketplace install: $CLAUDE_PLUGIN_DIR/scripts  (CLAUDE_PLUGIN_ROOT is the same)
+#   - Dogfood monorepo:    $(pwd)/ai-sdlc-plugin/scripts
 #
-# For scripts that already use CLAUDE_PLUGIN_ROOT (sign-attestation.mjs), leave
-# those invocations unchanged — CLAUDE_PLUGIN_ROOT is injected by Claude Code
-# at session start and is always available in the main session context.
-PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-$(pwd)/ai-sdlc-plugin}/scripts"
+# Must be set FIRST because resolve-pipeline-cli.sh lives under PLUGIN_SCRIPTS_DIR.
+PLUGIN_SCRIPTS_DIR="${CLAUDE_PLUGIN_DIR:-${CLAUDE_PLUGIN_ROOT:-$(pwd)/ai-sdlc-plugin}}/scripts"
+
+# PIPELINE_CLI_BIN — directory containing cli-*.mjs binaries.
+#
+# AISDLC-272: the original two-case branch was too binary:
+#   - "CLAUDE_PLUGIN_DIR set"  → adopter install  (but local mp cache has no node_modules)
+#   - "CLAUDE_PLUGIN_DIR unset" → dogfood monorepo (wrong in adopter projects)
+#
+# Delegate resolution to resolve-pipeline-cli.sh which handles all five topologies
+# (set+correct, set+useless with self-heal, CLAUDE_PLUGIN_ROOT fallback, cache probe,
+# dogfood) and exits 1 with an actionable error when nothing resolves.
+#
+# Override: export PIPELINE_CLI_BIN=/path/to/pipeline-cli/bin to skip resolution.
+if [ -z "${PIPELINE_CLI_BIN:-}" ]; then
+  if [ -f "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh" ]; then
+    PIPELINE_CLI_BIN=$(bash "$PLUGIN_SCRIPTS_DIR/resolve-pipeline-cli.sh") || {
+      echo "ERROR: /ai-sdlc execute cannot continue — @ai-sdlc/pipeline-cli not found." >&2
+      echo "See the error above for fix options, or export PIPELINE_CLI_BIN=/path/to/pipeline-cli/bin" >&2
+      exit 1
+    }
+  else
+    # Fallback for the dogfood monorepo where PLUGIN_SCRIPTS_DIR contains resolve-pipeline-cli.sh
+    # but we haven't shipped that script yet (upgrade in place). Use the old two-case logic.
+    if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
+      PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
+    else
+      PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
+    fi
+  fi
+fi
 ```
 
 ## Step 0 — Self-heal orchestrator state + sweep merged worktrees
