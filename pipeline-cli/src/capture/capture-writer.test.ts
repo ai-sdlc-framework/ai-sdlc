@@ -49,6 +49,7 @@ describe('AISDLC-269 path-traversal hardening (PR #483 review fix)', () => {
         applyTriageUpdate({
           captureId: id,
           triage: 'new-issue',
+          resolvedBy: 'test-op',
           artifactsDir,
         }),
       ).toThrow(/invalid captureId/);
@@ -57,7 +58,8 @@ describe('AISDLC-269 path-traversal hardening (PR #483 review fix)', () => {
       expect(() =>
         redactCapture({
           captureId: id,
-          actor: 'op',
+          redactedBy: 'test-op',
+          reason: 'test-redact',
           artifactsDir,
         }),
       ).toThrow(/invalid captureId/);
@@ -74,6 +76,7 @@ describe('AISDLC-269 path-traversal hardening (PR #483 review fix)', () => {
       applyTriageUpdate({
         captureId: 'cap_2026-05-13T14-30-00_abc123',
         triage: 'new-issue',
+        resolvedBy: 'test-op',
         artifactsDir,
       }),
     ).toThrow(/not found/);
