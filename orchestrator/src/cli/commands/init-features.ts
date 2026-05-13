@@ -226,6 +226,21 @@ export async function resolveFeatureSelection(
     return { ...ALL_FEATURES };
   }
 
+  // ── Path 2b: non-TTY auto-fall-through ────────────────────────────────
+  // When stdin is not a TTY (CI runners, agent bash, piped input, Docker
+  // containers without `-it`), interactive prompts hang then throw an
+  // unhandled ExitPromptError. Auto-fall-through to ALL_FEATURES (same
+  // as --yes) so adopters can run `ai-sdlc init` in CI without any
+  // additional flags. This matches the documented behavior of --yes, which
+  // is defined as "accept all defaults non-interactively".
+  if (!process.stdin.isTTY) {
+    adapters.log(
+      'Non-TTY stdin detected — auto-accepting all feature defaults (equivalent to --yes).',
+    );
+    adapters.log('Pass --yes explicitly to suppress this message.');
+    return { ...ALL_FEATURES };
+  }
+
   // ── Path 3+4: `--with-X` overrides + prompts for the rest ─────────────
   const sel: FeatureSelection = { ...NO_FEATURES };
 

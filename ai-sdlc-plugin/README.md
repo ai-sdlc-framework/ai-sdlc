@@ -112,6 +112,29 @@ node "$PLUGIN_SCRIPTS_DIR/compute-slug.mjs" "$TASK_FILE"
 
 **Enforcement:** `ai-sdlc-plugin/commands/execute.test.mjs` and `orchestrator-tick.test.mjs` both contain assertions (AISDLC-245.4 suite) that scan the command body for bare `node pipeline-cli/bin/...` invocations and fail the test run if found. When adding a new slash command, copy the path-resolution preamble above and add a similar regression test.
 
+## `ai-sdlc init` — CI-safe by default (AISDLC-263)
+
+`ai-sdlc init` runs the interactive feature wizard by default. When `process.stdin` is not a TTY (CI runners, agent bash sessions, Docker containers without `-it`, piped input), the wizard automatically falls through to `--yes` defaults — all features on — rather than hanging or throwing an unhandled error.
+
+```bash
+# These all work without hanging or prompting:
+ai-sdlc init               # in any CI step / agent bash
+ai-sdlc init < /dev/null   # explicit non-TTY simulation
+```
+
+When auto-fall-through fires, the CLI prints:
+
+```
+Non-TTY stdin detected — auto-accepting all feature defaults (equivalent to --yes).
+Pass --yes explicitly to suppress this message.
+```
+
+To be explicit, pass `--yes` (recommended for CI scripts — makes intent clear and suppresses the auto-fall-through log line):
+
+```bash
+ai-sdlc init --yes
+```
+
 ## Cross-harness review
 
 See `docs/operations/cross-harness-review.md` for the bidirectional convention, cost/latency comparison, and Codex CLI prerequisites.

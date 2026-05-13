@@ -15,7 +15,7 @@
  * complementary instead of duplicative.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -116,6 +116,23 @@ const baseFlags: WizardFlags = {
 // ── resolveFeatureSelection ──────────────────────────────────────────────
 
 describe('resolveFeatureSelection', () => {
+  // The test runner itself runs in a non-TTY context (stdin is not a TTY),
+  // so tests that exercise the interactive prompt path must stub isTTY to
+  // true to prevent the AISDLC-263 non-TTY guard from short-circuiting.
+  // The nested AISDLC-263 describe restores isTTY to undefined to test
+  // the non-TTY path explicitly.
+  let originalIsTTY: boolean | undefined;
+  beforeAll(() => {
+    originalIsTTY = process.stdin.isTTY;
+    Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+  });
+  afterAll(() => {
+    Object.defineProperty(process.stdin, 'isTTY', {
+      value: originalIsTTY,
+      configurable: true,
+    });
+  });
+
   it('AC #2: --yes accepts ALL defaults without prompting', async () => {
     const { state, adapters } = makeStub();
     const sel = await resolveFeatureSelection({ ...baseFlags, yes: true }, adapters);
@@ -180,6 +197,47 @@ describe('resolveFeatureSelection', () => {
     const { adapters } = makeStub({ promptAnswers: [false, false, false, false] });
     const sel = await resolveFeatureSelection(baseFlags, adapters);
     expect(sel).toEqual(NO_FEATURES);
+  });
+
+  describe('AISDLC-263: non-TTY auto-fall-through', () => {
+    // The outer beforeAll set isTTY=true for prompt tests. For non-TTY
+    // tests, we need to temporarily restore the falsy (undefined) value.
+    beforeAll(() => {
+      Object.defineProperty(process.stdin, 'isTTY', { value: undefined, configurable: true });
+    });
+    afterAll(() => {
+      // Restore to true so the sibling tests in the outer describe continue
+      // to behave as interactive-TTY. The outer afterAll will do the final
+      // restore to whatever the real runtime value was.
+      Object.defineProperty(process.stdin, 'isTTY', { value: true, configurable: true });
+    });
+
+    it('AC #1 (AISDLC-263): auto-accepts ALL_FEATURES when stdin is not a TTY (no prompts, no error)', async () => {
+      // Simulate a non-TTY context (CI, agent bash, `ai-sdlc init < /dev/null`).
+      // process.stdin.isTTY is undefined in non-TTY contexts; we stub it to
+      // undefined (falsy) to replicate that.
+      const { state, adapters } = makeStub();
+      const sel = await resolveFeatureSelection(baseFlags, adapters);
+      expect(sel).toEqual(ALL_FEATURES);
+      // No prompts should have been called — the non-TTY guard must short-circuit.
+      expect(state.promptCalls.length).toBe(0);
+      // A descriptive log message should have been emitted so the operator
+      // knows why the wizard skipped interactive prompts.
+      const joined = state.log.join('\n');
+      expect(joined).toContain('Non-TTY stdin detected');
+      expect(joined).toContain('--yes');
+    });
+
+    it('AC #1 (AISDLC-263): --yes still wins when both --yes flag and non-TTY are present (no log about non-TTY)', async () => {
+      const { state, adapters } = makeStub();
+      // --yes path is checked BEFORE the non-TTY guard so no non-TTY message
+      // is emitted — the flag is explicit user intent.
+      const sel = await resolveFeatureSelection({ ...baseFlags, yes: true }, adapters);
+      expect(sel).toEqual(ALL_FEATURES);
+      expect(state.promptCalls.length).toBe(0);
+      // The non-TTY log message must NOT appear when --yes was explicit.
+      expect(state.log.join('\n')).not.toContain('Non-TTY stdin detected');
+    });
   });
 });
 
