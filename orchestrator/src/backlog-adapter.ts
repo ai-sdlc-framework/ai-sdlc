@@ -23,6 +23,139 @@ import { parse as parseYaml } from 'yaml';
 import type { PriorityInput, QualityFlag } from '@ai-sdlc/reference';
 import { normalizeBacklogPriority, type AdmissionInput } from './admission-score.js';
 
+// ── Code-area extraction ────────────────────────────────────────────
+
+/**
+ * Extract a code-area string from a list of file/path references.
+ *
+ * Algorithm:
+ *   1. Filter references down to path-like strings (not URLs, not AISDLC-N
+ *      IDs, not RFC-NNNN IDs) — the path-like entries are the ones that
+ *      carry blast-radius signal.
+ *   2. Compute the deepest common path prefix across all filtered paths
+ *      at the directory level (e.g. `pipeline-cli/src/orchestrator/filters/x.ts`
+ *      + `pipeline-cli/src/orchestrator/loop.ts` → `pipeline-cli/src/orchestrator`).
+ *   3. Return the prefix, or `undefined` when there are no path references.
+ *
+ * The caller uses the result to populate `EnrichmentContext.codeArea` so
+ * `buildCodeAreaQuality()` can look up per-area metrics instead of the
+ * uniform Eρ variance of 0.30.
+ *
+ * @param references  Raw reference strings from frontmatter `references:` AND
+ *                    any `## References` body section — callers are responsible
+ *                    for merging both sources before calling here.
+ */
+export function extractCodeAreaFromReferences(references: string[]): string | undefined {
+  // Strip leading/trailing backtick pairs, parentheses, brackets and whitespace
+  // (common in `## References` bullet items like `` `path/to/file.ts` ``).
+  const cleaned = references.map((r) =>
+    r
+      .replace(/^[`(['"]*/, '')
+      .replace(/[`)\]'"]*$/, '')
+      .trim(),
+  );
+
+  // Keep only path-like references. Exclude:
+  //   - URLs (http://, https://, ...)
+  //   - AISDLC-N IDs
+  //   - RFC-NNNN IDs
+  //   - Plain words with no path separator
+  //   - Empty strings
+  const pathRefs = cleaned.filter((r) => {
+    if (!r) return false;
+    if (/^https?:\/\//i.test(r)) return false;
+    if (/^aisdlc-\d+$/i.test(r)) return false;
+    if (/^rfc-\d{4}/i.test(r)) return false;
+    // Must contain at least one path separator to be treated as a file path.
+    // Also accept paths that look like `dir/file.ext` with an extension.
+    return r.includes('/');
+  });
+
+  if (pathRefs.length === 0) return undefined;
+  if (pathRefs.length === 1) {
+    return pathPrefix(pathRefs[0]!);
+  }
+
+  // Compute the deepest common directory prefix.
+  const segments = pathRefs.map((r) => pathPrefix(r).split('/'));
+  let common = segments[0]!;
+  for (let i = 1; i < segments.length; i++) {
+    common = commonPrefix(common, segments[i]!);
+  }
+  if (common.length === 0) return undefined;
+  return common.join('/');
+}
+
+/**
+ * Return the directory portion of a path reference.
+ * `pipeline-cli/src/foo.ts` → `pipeline-cli/src`
+ * `pipeline-cli/src/orchestrator/` → `pipeline-cli/src/orchestrator`
+ * `pipeline-cli/src/orchestrator` → `pipeline-cli/src`  (no trailing slash → treat as file)
+ */
+function pathPrefix(ref: string): string {
+  const stripped = ref.replace(/\/$/, ''); // remove trailing slash
+  const lastSlash = stripped.lastIndexOf('/');
+  // If the last segment looks like a file (has an extension) or the path has a
+  // trailing slash (already a directory reference), take the parent. Otherwise
+  // treat the whole thing as a directory.
+  const lastSegment = lastSlash >= 0 ? stripped.slice(lastSlash + 1) : stripped;
+  if (lastSlash < 0) return stripped; // bare filename with no directory
+  // Has a dot in the last segment AND it's not a hidden dir like `.ai-sdlc` → file
+  if (lastSegment.includes('.') && !lastSegment.startsWith('.')) {
+    return stripped.slice(0, lastSlash);
+  }
+  return stripped; // already a directory path
+}
+
+/**
+ * Longest common prefix of two string arrays (segment-by-segment).
+ */
+function commonPrefix(a: string[], b: string[]): string[] {
+  const result: string[] = [];
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    if (a[i] !== b[i]) break;
+    result.push(a[i]!);
+  }
+  return result;
+}
+
+/**
+ * Parse file-path references from a `## References` markdown section.
+ *
+ * The body format is a bullet list where each item may be a bare path,
+ * a backtick-quoted path, a description with an inline path, or a mix.
+ * We extract the first backtick-quoted segment or the first slash-
+ * containing word from each bullet.
+ */
+export function parseBodyReferences(body: string): string[] {
+  // Split the body by `## ` headings (preserving each section in its entirety)
+  // then find the `## References` section specifically. This avoids regex
+  // backtracking issues with greedy vs lazy quantifiers when the body contains
+  // multiple `## ` headings.
+  const sections = body.split(/\n(?=##\s)/);
+  const section = sections.find((s) => /^##\s+References\b/i.test(s));
+  if (!section) return [];
+
+  const out: string[] = [];
+  for (const line of section.split(/\r?\n/)) {
+    // Must be a bullet item.
+    if (!/^\s*-\s/.test(line)) continue;
+    const content = line.replace(/^\s*-\s+/, '');
+    // Prefer backtick-quoted path.
+    const btMatch = content.match(/`([^`]+)`/);
+    if (btMatch) {
+      out.push(btMatch[1]!);
+      continue;
+    }
+    // Fall back to the first slash-containing token.
+    const tokens = content.split(/\s+/);
+    const pathToken = tokens.find((t) => t.includes('/'));
+    if (pathToken) out.push(pathToken);
+  }
+  return out;
+}
+
 // ── Snapshot shape ──────────────────────────────────────────────────
 
 export interface BacklogAcceptanceCriterion {
@@ -46,6 +179,11 @@ export interface BacklogTaskSnapshot {
   createdBy?: string;
   acceptanceCriteria: BacklogAcceptanceCriterion[];
   references: string[];
+  /**
+   * References extracted from the `## References` body section.
+   * Merged with frontmatter `references` when computing `codeArea`.
+   */
+  bodyReferences: string[];
   /** Task IDs this task is blocked by (frontmatter `dependencies`). */
   dependencies: string[];
   /** Filesystem path the snapshot was read from. */
@@ -71,6 +209,10 @@ export function parseBacklogTask(content: string, sourcePath?: string): BacklogT
   const dependencies = normaliseStringArray(fm.dependencies);
   const description = extractSection(content, 'Description');
   const acceptanceCriteria = extractAcceptanceCriteria(content);
+  // Strip frontmatter block before parsing body sections (the `---` block
+  // can contain `## References`-like content that would confuse body parsing).
+  const bodyOnly = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+  const bodyReferences = parseBodyReferences(bodyOnly);
 
   return {
     id,
@@ -85,6 +227,7 @@ export function parseBacklogTask(content: string, sourcePath?: string): BacklogT
     createdBy: fm.created_by ? String(fm.created_by).trim() : undefined,
     acceptanceCriteria,
     references,
+    bodyReferences,
     dependencies,
     sourcePath,
   };
@@ -256,6 +399,16 @@ export interface BacklogAdmissionMapping {
   priorityInputOverrides: Partial<PriorityInput>;
   /** Quality flags surfaced for renderers (zombie close, etc). */
   qualityFlags: QualityFlag[];
+  /**
+   * Deepest common path prefix computed from all references in the task
+   * (frontmatter `references:` + `## References` body section).
+   *
+   * Pass to `EnrichmentContext.codeArea` when calling `enrichAdmissionInput()`
+   * so `buildCodeAreaQuality()` can look up per-area metrics instead of the
+   * uniform Eρ variance of 0.30. Undefined when the task has no file-path
+   * references — callers should fall through to the uniform default.
+   */
+  codeArea: string | undefined;
 }
 
 /**
@@ -399,6 +552,13 @@ export function mapBacklogTaskToAdmissionInput(
     },
   };
 
+  // ── Code-area extraction ─────────────────────────────────────────
+  // Merge frontmatter references + body references and compute the deepest
+  // common path prefix. The result is forwarded to EnrichmentContext.codeArea
+  // so admission scoring can use per-area Eρ variance instead of 0.30.
+  const allReferences = [...snap.references, ...snap.bodyReferences];
+  const codeArea = extractCodeAreaFromReferences(allReferences);
+
   const priorityInputOverrides: Partial<PriorityInput> = {};
   if (soulAlignment !== 0.5) priorityInputOverrides.soulAlignment = soulAlignment;
   if (bugSeverity !== undefined) priorityInputOverrides.bugSeverity = bugSeverity;
@@ -411,7 +571,7 @@ export function mapBacklogTaskToAdmissionInput(
   if (defectRiskFactor !== undefined) priorityInputOverrides.defectRiskFactor = defectRiskFactor;
   if (qualityFlags.length > 0) priorityInputOverrides.qualityFlags = qualityFlags;
 
-  return { input, priorityInputOverrides, qualityFlags };
+  return { input, priorityInputOverrides, qualityFlags, codeArea };
 }
 
 function buildAdmissionBody(snap: BacklogTaskSnapshot, complexity: number | undefined): string {

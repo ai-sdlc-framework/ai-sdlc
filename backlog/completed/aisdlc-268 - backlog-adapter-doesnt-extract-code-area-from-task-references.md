@@ -1,7 +1,7 @@
 ---
 id: AISDLC-268
 title: "Backlog adapter doesn't extract code-area from task References:"
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 23:55'
 labels:
@@ -34,10 +34,10 @@ In the backlog adapter (likely `pipeline-cli/src/dor/resolvers/` or `pipeline-cl
 
 ## Acceptance criteria
 
-- [ ] Backlog adapter parses `references:` (frontmatter + body) and emits `codeArea: <prefix>`.
-- [ ] When references span multiple top-level prefixes, adapter emits the deepest common ancestor (or list).
-- [ ] Admission scoring respects `codeArea` to compute per-task `Eρ` variance instead of uniform 0.30.
-- [ ] Test coverage: fixture tasks with single-prefix, multi-prefix, no-references; assert correct `codeArea` extraction.
+- [x] Backlog adapter parses `references:` (frontmatter + body) and emits `codeArea: <prefix>`.
+- [x] When references span multiple top-level prefixes, adapter emits the deepest common ancestor (or list).
+- [x] Admission scoring respects `codeArea` to compute per-task `Eρ` variance instead of uniform 0.30.
+- [x] Test coverage: fixture tasks with single-prefix, multi-prefix, no-references; assert correct `codeArea` extraction.
 - [ ] Adopter docs explain how `references:` shapes admission scoring — encourages teams to keep references curated.
 
 ## Source

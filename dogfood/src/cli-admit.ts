@@ -378,12 +378,15 @@ async function main(): Promise<void> {
         // State DB may not exist yet — enrichment degrades gracefully.
       }
 
+      // codeArea: explicit --code-area flag wins over the backlog-derived
+      // value so operators can override without editing the task file.
+      const resolvedCodeArea = args.codeArea ?? backlogMapping?.codeArea;
       const ctx: EnrichmentContext = {
         ...(stateStore ? { stateStore } : {}),
         ...(dsb ? { designSystemBinding: dsb } : {}),
         ...(did ? { designIntentDocument: did } : {}),
         ...(autonomyPolicy ? { autonomyPolicy } : {}),
-        ...(args.codeArea ? { codeArea: args.codeArea } : {}),
+        ...(resolvedCodeArea ? { codeArea: resolvedCodeArea } : {}),
       };
 
       enrichedInput = enrichAdmissionInput(admissionInput, ctx);

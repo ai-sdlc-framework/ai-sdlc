@@ -7,6 +7,8 @@ import {
   loadBacklogTaskFromRoot,
   mapBacklogTaskToAdmissionInput,
   loadSoulTracks,
+  extractCodeAreaFromReferences,
+  parseBodyReferences,
   type BacklogTaskSnapshot,
 } from './backlog-adapter.js';
 
@@ -58,6 +60,7 @@ function snapWith(overrides: Partial<BacklogTaskSnapshot>): BacklogTaskSnapshot 
     updatedDate: '2026-04-25 09:00',
     acceptanceCriteria: [],
     references: [],
+    bodyReferences: [],
     dependencies: [],
     ...overrides,
   };
@@ -562,5 +565,183 @@ describe('loadSoulTracks', () => {
     } finally {
       rmSync(tmp, { recursive: true });
     }
+  });
+});
+
+// ── extractCodeAreaFromReferences fixture tests ─────────────────────
+
+describe('extractCodeAreaFromReferences', () => {
+  it('returns undefined for an empty references list', () => {
+    expect(extractCodeAreaFromReferences([])).toBeUndefined();
+  });
+
+  it('returns undefined when references contain no file paths (only URLs / IDs)', () => {
+    expect(
+      extractCodeAreaFromReferences(['https://example.com/design', 'AISDLC-42', 'RFC-0008']),
+    ).toBeUndefined();
+  });
+
+  it('single-prefix: all refs under same directory → returns that directory', () => {
+    const refs = [
+      'pipeline-cli/src/orchestrator/filters/chain.ts',
+      'pipeline-cli/src/orchestrator/filters/blocked.ts',
+      'pipeline-cli/src/orchestrator/loop.ts',
+    ];
+    expect(extractCodeAreaFromReferences(refs)).toBe('pipeline-cli/src/orchestrator');
+  });
+
+  it('single ref → returns its parent directory', () => {
+    expect(extractCodeAreaFromReferences(['orchestrator/src/admission-score.ts'])).toBe(
+      'orchestrator/src',
+    );
+  });
+
+  it('single ref that is a directory path → returns it as-is', () => {
+    expect(extractCodeAreaFromReferences(['pipeline-cli/src/orchestrator/'])).toBe(
+      'pipeline-cli/src/orchestrator',
+    );
+  });
+
+  it('multi-prefix: refs spanning different top-level dirs → undefined (no common ancestor)', () => {
+    const refs = ['pipeline-cli/src/dor/evaluate.ts', 'orchestrator/src/admission-score.ts'];
+    // No common segment → undefined
+    expect(extractCodeAreaFromReferences(refs)).toBeUndefined();
+  });
+
+  it('mixed depth: refs in same top-level package but different subdirs → package common prefix', () => {
+    const refs = [
+      'pipeline-cli/src/dor/evaluate.ts',
+      'pipeline-cli/src/orchestrator/loop.ts',
+      'pipeline-cli/src/types.ts',
+    ];
+    expect(extractCodeAreaFromReferences(refs)).toBe('pipeline-cli/src');
+  });
+
+  it('strips backtick wrapping before processing', () => {
+    expect(extractCodeAreaFromReferences(['`pipeline-cli/src/dor/evaluate.ts`'])).toBe(
+      'pipeline-cli/src/dor',
+    );
+  });
+
+  it('ignores URL refs mixed with path refs', () => {
+    const refs = [
+      'https://github.com/org/repo',
+      'pipeline-cli/src/dor/types.ts',
+      'pipeline-cli/src/dor/evaluate.ts',
+    ];
+    expect(extractCodeAreaFromReferences(refs)).toBe('pipeline-cli/src/dor');
+  });
+
+  it('ignores AISDLC IDs mixed with path refs', () => {
+    const refs = ['AISDLC-115', 'pipeline-cli/src/orchestrator/filters/chain.ts'];
+    expect(extractCodeAreaFromReferences(refs)).toBe('pipeline-cli/src/orchestrator/filters');
+  });
+});
+
+// ── parseBodyReferences fixture tests ──────────────────────────────
+
+describe('parseBodyReferences', () => {
+  it('returns empty array when no ## References section exists', () => {
+    expect(parseBodyReferences('## Description\n\nfoo')).toEqual([]);
+  });
+
+  it('extracts backtick-quoted paths from bullet items', () => {
+    const body = `## References\n\n- \`pipeline-cli/src/orchestrator/filters/\` (existing filters)\n- \`pipeline-cli/src/orchestrator/loop.ts\` (where filter chain is wired)\n`;
+    expect(parseBodyReferences(body)).toEqual([
+      'pipeline-cli/src/orchestrator/filters/',
+      'pipeline-cli/src/orchestrator/loop.ts',
+    ]);
+  });
+
+  it('falls back to first slash-containing token when no backticks', () => {
+    const body = `## References\n\n- orchestrator/src/admission-score.ts — description here\n`;
+    expect(parseBodyReferences(body)).toEqual(['orchestrator/src/admission-score.ts']);
+  });
+
+  it('ignores non-bullet lines in the References section', () => {
+    const body = `## References\n\nThis is prose, not a bullet.\n- \`pipeline-cli/src/dor/types.ts\`\n`;
+    expect(parseBodyReferences(body)).toEqual(['pipeline-cli/src/dor/types.ts']);
+  });
+
+  it('stops at the next ## header', () => {
+    const body = `## References\n\n- \`pipeline-cli/src/dor/types.ts\`\n\n## Source\n\n- \`should/not/appear.ts\`\n`;
+    expect(parseBodyReferences(body)).toEqual(['pipeline-cli/src/dor/types.ts']);
+  });
+});
+
+// ── mapBacklogTaskToAdmissionInput — codeArea extraction ────────────
+
+describe('mapBacklogTaskToAdmissionInput — codeArea extraction', () => {
+  it('no references → codeArea is undefined', () => {
+    const m = mapBacklogTaskToAdmissionInput(snapWith({ references: [], bodyReferences: [] }));
+    expect(m.codeArea).toBeUndefined();
+  });
+
+  it('single frontmatter reference → codeArea is parent directory', () => {
+    const m = mapBacklogTaskToAdmissionInput(
+      snapWith({ references: ['pipeline-cli/src/dor/evaluate.ts'], bodyReferences: [] }),
+    );
+    expect(m.codeArea).toBe('pipeline-cli/src/dor');
+  });
+
+  it('multi-prefix frontmatter references → deepest common ancestor', () => {
+    const m = mapBacklogTaskToAdmissionInput(
+      snapWith({
+        references: [
+          'pipeline-cli/src/orchestrator/filters/chain.ts',
+          'pipeline-cli/src/orchestrator/loop.ts',
+        ],
+        bodyReferences: [],
+      }),
+    );
+    expect(m.codeArea).toBe('pipeline-cli/src/orchestrator');
+  });
+
+  it('body references merged with frontmatter references for codeArea', () => {
+    const m = mapBacklogTaskToAdmissionInput(
+      snapWith({
+        references: ['pipeline-cli/src/dor/types.ts'],
+        bodyReferences: ['pipeline-cli/src/dor/evaluate.ts'],
+      }),
+    );
+    expect(m.codeArea).toBe('pipeline-cli/src/dor');
+  });
+
+  it('spec/rfcs path reference → codeArea is spec/rfcs', () => {
+    const m = mapBacklogTaskToAdmissionInput(
+      snapWith({
+        references: ['spec/rfcs/RFC-0008-ppa-triad-integration-final-combined.md'],
+        bodyReferences: [],
+      }),
+    );
+    expect(m.codeArea).toBe('spec/rfcs');
+  });
+
+  it('parseBacklogTask populates bodyReferences from ## References section', () => {
+    const content = `---
+id: AISDLC-99
+title: Test
+status: To Do
+references:
+  - pipeline-cli/src/dor/types.ts
+---
+
+## Description
+
+Test description.
+
+## References
+
+- \`pipeline-cli/src/dor/evaluate.ts\` (the evaluator)
+- \`pipeline-cli/src/dor/composite.ts\` (composite)
+`;
+    const snap = parseBacklogTask(content);
+    expect(snap.bodyReferences).toEqual([
+      'pipeline-cli/src/dor/evaluate.ts',
+      'pipeline-cli/src/dor/composite.ts',
+    ]);
+    // Both frontmatter + body refs land in codeArea
+    const m = mapBacklogTaskToAdmissionInput(snap);
+    expect(m.codeArea).toBe('pipeline-cli/src/dor');
   });
 });

@@ -232,6 +232,8 @@ export {
   mapBacklogTaskToAdmissionInput,
   loadSoulTracks,
   loadMaintainers,
+  extractCodeAreaFromReferences,
+  parseBodyReferences,
   type BacklogTaskSnapshot,
   type BacklogAcceptanceCriterion,
   type BacklogMappingOptions,
