@@ -78,7 +78,7 @@ on:
   # AISDLC-230: status events (used by some external CI providers like
   # Codecov) carry the same staleness risk. Inexpensive to handle: the
   # discover-PR step is gated to a single PR per head SHA.
-  status: {}
+  status:
 
 permissions:
   pull-requests: write
