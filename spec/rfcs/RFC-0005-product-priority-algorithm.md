@@ -1,11 +1,11 @@
 ---
 id: RFC-0005
 title: Product Priority Algorithm (PPA)
-status: Draft
-lifecycle: Draft
+status: Approved
+lifecycle: Signed Off
 author: Alexander Kline (Arcana Concept Studio), AI-SDLC Contributors
 created: 2026-03-24
-updated: 2026-03-24
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 requiresDocs:
   - api-reference
@@ -14,11 +14,11 @@ requiresDocs:
 
 # RFC-0005: Product Priority Algorithm (PPA)
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Approved
+**Lifecycle:** Signed Off
 **Author:** Alexander Kline (Arcana Concept Studio), AI-SDLC Contributors
 **Created:** 2026-03-24
-**Updated:** 2026-03-24
+**Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
 
 ---
@@ -342,15 +342,27 @@ Adopt an existing prioritization framework rather than creating a new composite 
 
 ## Open Questions
 
+> **Retrofit (2026-05-13):** OQs resolved against the implementation that shipped. Most of the runtime resolution lives under RFC-0008 (PPA Triad Integration, Implemented), which extends rather than supersedes this RFC. The admission subset is wired; the full runtime composite (Mφ, Eτ, Cκ as products of feedback flywheel) is currently deferred to PPA v1.1 per RFC-0008 §17. Lifecycle promoted to `Signed Off` (design locked; implementation partial).
+
 1. **Soul Alignment via LLM**: Computing Sα₂ (Vibe Coherence) requires an LLM call. Should this be computed asynchronously on a schedule (e.g., when issues are created) or synchronously in the scoring path? The current implementation accepts pre-computed `soulAlignment` as input, deferring this decision to the caller.
+
+   **Resolution (2026-05-13):** **Resolved by RFC-0008 Addendum B.** SA scoring uses a three-layer architecture: Layer 1 (deterministic scope/constraint gating), Layer 2 (BM25 structural relevance, deterministic), Layer 3 (LLM-structured assessment with confidence filter ≥ 0.5 and a CI-Boundary preamble that forbids re-assessing Layer 1's verified findings). The decision is *neither* purely sync nor purely async — it is **phase-staged**: Phase 2a runs all three layers but uses label-based `soulAlignment` for ranking (shadow); Phase 2b/2c blend the structural+LLM result with calibrating weights; Phase 3 is flywheel-calibrated. The admission composite (`AdmissionCompositeOptions.soulAlignmentOverride` at `orchestrator/src/admission-composite.ts:62-67`) accepts the resolved SA-1 from the upstream scorer, leaving the caller control over sync invocation vs. async pre-computation. Implementation: `orchestrator/src/sa-scoring/{layer1-deterministic,layer2-structural,layer3-llm,composite,index}.ts`.
 
 2. **Product lifecycle sensitivity**: Should dimension weights shift based on product phase? Pre-launch products may need Soul Alignment to dominate; post-launch may need Demand Pressure. If so, the model needs a lifecycle-phase parameter.
 
+   **Resolution (2026-05-13):** **Partially resolved — Eρ₄ only; deferred for other dimensions to PPA v1.1.** RFC-0008 Amendment 3 adds a `lifecyclePhase: preDesignSystem | catalogBootstrap | postDesignSystem` qualifier scoped to **Eρ₄ Design System Readiness only** (an escape valve, not a general weight schedule). RFC-0008 §17 (v1.1-3) explicitly acknowledges this is "an ad-hoc escape valve, not a general solution" and queues "a `ProductLifecyclePhase` classifier (bootstrap, growth, maturity, plateau) and a dimension weight schedule keyed to lifecycle phase" as PPA v1.1 work. The shipped code (`orchestrator/src/admission-composite.ts`, `orchestrator/src/admission-enrichment.ts`) consumes only the design-system-scoped flag (`DesignSystemContext.inBootstrapPhase`). Broader lifecycle-aware Soul/Demand/Market weights remain the canonical PPA v1.1 input.
+
 3. **Multi-product portfolio**: Does each product get its own PPA instance or is there a portfolio-level meta-algorithm? This is explicitly a non-goal for v1 but should be considered for the schema's extensibility.
+
+   **Resolution (2026-05-13):** **Open / explicit non-goal preserved.** Single-product remains the v1 contract. The implementation operates on a single DID per scoring call; no `productId` / `portfolioId` discriminator exists on `AdmissionInput`, `PriorityConfig`, or the calibration feedback store. RFC-0008's "portfolio-level" framing of the `SoulDriftDetected` event (`orchestrator/src/sa-scoring/drift-monitor.ts`) refers to the population of scored items inside a single product, not multiple products in an org. Multi-product portfolio resource allocation remains future work; the schema extension hooks identified in §Alternatives (a standalone `PriorityPolicy` resource type) are the right escape hatch when this becomes a real requirement.
 
 4. **Soul health diagnostic**: When PPA scores cluster in the 0.3-0.5 range (nothing high, nothing low), it may signal the product's soul purpose needs revisiting. Should this trigger an automatic alert?
 
+   **Resolution (2026-05-13):** **Resolved by RFC-0008 Addendum B §B.9.2.** The `SoulDriftDetected` event is the soul-health diagnostic — but the trigger is sharper than this RFC's sketch: instead of detecting a mid-range cluster (0.3-0.5), it fires when the 30-day rolling mean of SA-1 drops below 0.4 OR stddev exceeds 0.15 for 3 consecutive windows. The event payload separates `structuralScoreMean` from `llmScoreMean` so operators distinguish product-identity drift (DID review needed) from LLM-layer drift (exemplar-bank recalibration needed). Notification routes to product-lead, design-lead, and engineering-lead. Hysteresis (`recoveryMs`, default 7d) prevents alert thrash. Implementation: `orchestrator/src/sa-scoring/drift-monitor.ts`.
+
 5. **Calibration data retention**: How long should priority-vs-outcome calibration data be retained? The default `lookbackPeriod: 90d` is a starting point but may need tuning per product velocity.
+
+   **Resolution (2026-05-13):** **Open / genuinely deferred.** The implementation chose "keep everything, filter by query-time window" rather than enforcing retention. The DoR calibration log (`pipeline-cli/src/dor/calibration-log.ts`) is documented as intentionally append-only with no GC. The SA feedback store (`orchestrator/src/sa-scoring/feedback-store.ts`) supports a `PrecisionWindow.since` query filter, and the drift monitor uses a 30-day rolling window, but neither prunes underlying storage. The `priorityPolicy.calibration.lookbackPeriod: 90d` schema field declared in this RFC §1 is **not consumed by any production code path**. Retention policy becomes necessary once the JSONL log size becomes operationally relevant; at current scale, deferral is rational. Likely resolution when re-opened: per-product configurable retention window with an Operator TUI surface, not a hard-coded global default.
 
 ## References
 

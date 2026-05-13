@@ -1,11 +1,11 @@
 ---
 id: RFC-0003
 title: Infrastructure Provider Adapters
-status: Draft
-lifecycle: Draft
+status: Implemented
+lifecycle: Implemented
 author: AI-SDLC Contributors
 created: 2026-02-10
-updated: 2026-02-10
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 requiresDocs:
   - tutorial
@@ -16,11 +16,11 @@ requiresDocs:
 
 # RFC-0003: Infrastructure Provider Adapters
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Implemented
+**Lifecycle:** Implemented
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-10
-**Updated:** 2026-02-10
+**Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
 
 ---
@@ -240,11 +240,19 @@ Implement a separate plugin system with lifecycle hooks, distinct from the adapt
 
 ## Open Questions
 
+> **Retrofit (2026-05-13):** OQs resolved against the implementation that shipped. All three questions answered the same way: stay simple. RFC-0010 §13 (`HarnessAdapter`) is orthogonal to this RFC's infrastructure-adapter framework, not a supersession. Lifecycle promoted to `Implemented`.
+
 1. **Should `MemoryStore` support transactions?** The current key-value interface is intentionally simple. Backends like Redis and DynamoDB support atomic operations, but adding transactions increases interface complexity. The proposal starts simple; a future RFC could add optional transaction support.
+
+   **Resolution (2026-05-13):** **No.** `MemoryStore` shipped with the four-method key-value contract (`read`, `write`, `delete`, `list`) at `reference/src/agents/memory/types.ts` and published in `spec/adapters.md §3.4`. The only built-in implementation (`createInMemoryMemoryStore`) is a `Map` wrapper with no atomicity beyond per-call. No subsequent RFC has revisited transactions; the tier interfaces (`WorkingMemory`/`SharedMemory`/etc.) carry their own per-tier semantics on top of the store. Future adapters that wrap transactional backends MAY surface atomic helpers via their concrete factory's options, but the abstract `MemoryStore` interface stays at lowest-common-denominator KV.
 
 2. **Should `EventBus` support message acknowledgment?** Cloud pub/sub systems (SQS, Cloud Pub/Sub) support at-least-once delivery with ack/nack. The current fire-and-forget interface is simpler but may lose events. The proposal starts with at-most-once delivery; a future RFC could add delivery guarantees.
 
+   **Resolution (2026-05-13):** **No.** `EventBus` shipped with the two-method fire-and-forget contract (`publish`, `subscribe`) at `reference/src/adapters/interfaces.ts:379-384`. The reference `createInProcessEventBus` is an `EventEmitter` wrapper with at-most-once delivery; the published spec (`adapters.md §3.5`) constrains the contract to async delivery without ack semantics. The framework has not adopted a durable pub/sub backend in production usage to date — operators wanting at-least-once semantics would today encode ack handling inside their concrete adapter. If/when a durable backend lands, a future RFC should add an optional `subscribeAck(topic, handler)` variant rather than retrofitting the existing `subscribe`.
+
 3. **Should `SecretStore` support secret versioning?** Vault and AWS Secrets Manager support versioned secrets. The current interface returns the latest version. Adding version support would complicate the interface but enable secret rotation workflows.
+
+   **Resolution (2026-05-13):** **No.** `SecretStore` shipped with the read-biased contract (`get`, `getRequired`, optional `set(name, value, ttl?)`, optional `delete`) at `reference/src/security/interfaces.ts:32-41`. There is no `version` parameter on any method and no version-listing surface. The only built-in implementation (`createEnvSecretStore`) is environment-variable-backed and intrinsically un-versioned. Operator-side secret rotation is handled out-of-band today (Vault leases, AWS Secrets Manager rotation lambdas, GitHub Actions environment redeploys). If a future adapter needs to address a specific historical version, it MAY expose a versioned helper on its concrete type, but the abstract `SecretStore` interface stays unversioned.
 
 ## References
 

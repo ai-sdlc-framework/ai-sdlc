@@ -1,11 +1,11 @@
 ---
 id: RFC-0004
 title: Cost Governance and Attribution
-status: Draft
-lifecycle: Draft
+status: Implemented
+lifecycle: Implemented
 author: AI-SDLC Contributors
 created: 2026-02-16
-updated: 2026-02-16
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 requiresDocs:
   - tutorial
@@ -15,11 +15,11 @@ requiresDocs:
 
 # RFC-0004: Cost Governance and Attribution
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Implemented
+**Lifecycle:** Implemented
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-16
-**Updated:** 2026-02-16
+**Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
 
 ---
@@ -1030,15 +1030,27 @@ spec:
 
 ## Open Questions
 
+> **Retrofit (2026-05-13):** OQs resolved against the implementation that shipped. The CostPolicy / CostReconciler / CostTracker surface is shipped end-to-end (`orchestrator/src/cost-tracker.ts`, `orchestrator/src/cost-governance.ts`, `reference/src/reconciler/cost-reconciler.ts`); lifecycle promoted to `Implemented`. Three of the five OQs remain genuinely open as explicit deferrals — they wait for a concrete consumer demand. RFC-0032 (Cost-Governance Seam, Draft) extends this RFC's substrate but does NOT supersede it.
+
 1. **Human review cost estimation** — How should the orchestrator estimate the cost of human review time? Options: (a) configure an hourly rate per reviewer role, (b) measure actual review time via PR event timestamps (review_requested → review_submitted), (c) use industry averages. Option (b) is most accurate but requires tracking PR review lifecycle events.
+
+   **Resolution (2026-05-13):** **Open / deferred.** The `humanReviewCost` field is reserved on `CostBreakdown` (`reference/src/core/types.ts:269`) and documented as the dominant TCO term (`docs/api-reference/cost.md:208-210`), but no implementation populates it — `CostTracker.computeCost` (`orchestrator/src/cost-tracker.ts:47-74`) covers only token math. Question remains open and is appropriate to revisit when a concrete consumer (chargeback report, TCO dashboard) materializes. Recommended approach when re-opened: option (b) — measured `review_requested → review_submitted` latency × configurable role rate.
 
 2. **Cross-provider cost normalization** — When the fallback chain routes to a different provider (Anthropic → OpenAI), costs are not directly comparable (different pricing, different token counts for the same task). Should the spec define a normalized cost unit, or report raw provider-specific costs?
 
+   **Resolution (2026-05-13):** **Open / deferred — raw provider-specific costs reported.** The `DEFAULT_MODEL_COSTS` table (`orchestrator/src/defaults.ts:210-219`) covers only Anthropic Claude models; unknown-model fallback collapses to Sonnet pricing (`orchestrator/src/cost-tracker.ts:55-65`) — silently wrong for non-Anthropic providers. The implicit shipped answer is "raw provider-specific costs in USD," but cross-provider parity remains unsolved. Currently latent: the dogfood stack is Anthropic-only, making the normalization gap academic. Revisit when the framework genuinely operates a cross-provider fleet.
+
 3. **Cache savings attribution** — When a cached response avoids a $2 API call, who gets credit for the $2 savings? The agent that populated the cache, or the agent that benefited from the cache hit? This affects cost-per-agent metrics.
+
+   **Resolution (2026-05-13):** **Resolved — consumer attribution.** The shipped implementation attributes cache-read tokens (and the reduced cost) to the **consuming agent** — the one whose API call returned `cache_read_input_tokens`. `CostTracker.computeCost` (`orchestrator/src/cost-tracker.ts:47-74`) accepts `cacheReadTokens` and applies the model's `cacheReadPer1M` rate; the `cost_ledger` table (`orchestrator/src/state/store.ts:507,525`) stores `cache_read_tokens` per entry keyed by `agent_name` + `stage_name`. No bookkeeping exists for "who populated the cache," so the populating agent receives no credit. Defensible default: provider-side prompt caching is an Anthropic-managed implementation detail and there's no reliable way for the orchestrator to know which prior call seeded a given hit.
 
 4. **Cost forecasting model** — The CostReconciler uses linear extrapolation for `projectedMonthEnd`. Real usage patterns are often non-linear (higher at sprint start, lower at sprint end). Should the spec define a specific forecasting method, or leave it to implementations?
 
+   **Resolution (2026-05-13):** **Resolved — linear extrapolation with injectable override.** `CostTracker.getBudgetStatus` (`orchestrator/src/cost-tracker.ts:144-157`) computes `projectedMonthlyUsd` as `dailyRate × 30` (straight linear); the `CostReconciler` deps interface (`reference/src/reconciler/cost-reconciler.ts:58,87`) leaves the door open via `getProjectedSpend` for adopters who need seasonality. Same approach in `orchestrator/src/scheduling/burn-down.ts:25` for subscription-quota burn-down. The schema description (`reference/src/core/generated-schemas.ts:3640`) explicitly acknowledges linear extrapolation. Adopters needing sprint-start spikes or deadline crunches supply their own `getProjectedSpend`.
+
 5. **Infrastructure cost allocation** — The orchestrator itself consumes compute (CI/CD runners, server hosting). How should this baseline cost be allocated? Options: (a) exclude from pipeline costs (treat as overhead), (b) distribute evenly across all pipeline executions, (c) allocate proportionally to execution duration.
+
+   **Resolution (2026-05-13):** **Open / deferred — option (a) by omission.** The `computeCost` field is reserved on `CostBreakdown` (`reference/src/core/types.ts:268`) for self-hosted GPU scenarios but is never populated by the reference. No CI-runner-minute accounting, proportional allocation logic, or overhead bucket ships. The shipped framework treats orchestrator infrastructure as out-of-band overhead not attributed to individual pipeline executions. Revisit when a self-hosted-model deployment or a chargeback consumer with sufficient fidelity need materializes.
 
 ## References
 

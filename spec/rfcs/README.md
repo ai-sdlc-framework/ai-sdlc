@@ -248,46 +248,284 @@ The registry covers four states:
 
 ## Registry
 
-| #     | Title                                                                                                | Status      | Lifecycle    | Author                                                          | File                                                                              | Notes                                                                                                       |
-| ----- | ---------------------------------------------------------------------------------------------------- | ----------- | ------------ | --------------------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 0001  | Template                                                                                             | n/a         | Template     | —                                                               | [RFC-0001-template.md](RFC-0001-template.md)                                      | Skeleton for new RFCs; not normative.                                                                       |
-| 0002  | Pipeline Orchestration Policy                                                                        | Draft       | Draft        | AI-SDLC Contributors                                            | [RFC-0002-pipeline-orchestration.md](RFC-0002-pipeline-orchestration.md)          | requiresDocs: tutorial, api-reference, example                                                              |
-| 0003  | Infrastructure Provider Adapters                                                                     | Draft       | Draft        | AI-SDLC Contributors                                            | [RFC-0003-infrastructure-adapters.md](RFC-0003-infrastructure-adapters.md)        | Slot collision resolved in AISDLC-109 (product-strategy renumbered to RFC-0013).                            |
-| 0004  | Cost Governance and Attribution                                                                      | Draft       | Draft        | AI-SDLC Contributors                                            | [RFC-0004-cost-governance-and-attribution.md](RFC-0004-cost-governance-and-attribution.md) | requiresDocs: tutorial, api-reference, operator-runbook                                                     |
-| 0005  | Product Priority Algorithm (PPA)                                                                     | Draft       | Draft        | Alexander Kline (Arcana Concept Studio), AI-SDLC Contributors    | [RFC-0005-product-priority-algorithm.md](RFC-0005-product-priority-algorithm.md)  | requiresDocs: api-reference, operator-runbook                                                               |
-| 0006  | Design System Governance Pipeline                                                                    | Final       | Implemented  | Dominique Legault, Morgan Hirtle, Alexander Kline                | [RFC-0006-design-system-governance-v5-final.md](RFC-0006-design-system-governance-v5-final.md) | requiresDocs: tutorial, operator-runbook, api-reference                                                     |
-| 0007  | Figma Make Pipeline Integration                                                                      | Final       | Signed Off   | Dominique Legault, Morgan Hirtle, Alexander Kline                | [RFC-0007-figma-make-pipeline-integration-v1-final.md](RFC-0007-figma-make-pipeline-integration-v1-final.md) | requires RFC-0002, RFC-0004, RFC-0006.                                                                      |
-| 0008  | PPA Triad Integration                                                                                | Final       | Implemented  | Dominique Legault, Morgan Hirtle, Alexander Kline                | [RFC-0008-ppa-triad-integration-final-combined.md](RFC-0008-ppa-triad-integration-final-combined.md) | requiresDocs: api-reference, operator-runbook                                                               |
-| 0009  | Tessellated Design Intent Documents                                                                  | Draft       | Ready for Review | Alexander Kline                                                  | [RFC-0009-tessellated-design-intent-documents.md](RFC-0009-tessellated-design-intent-documents.md) | v3.4 (2026-05-04) resolves all 13 OQs; OQ-3 + OQ-7 carve out follow-on patterns reserved as RFC-0017, RFC-0018, RFC-0020, RFC-0021. Engineering ✅ + Design ✅ signed v3.4; Product v3.4 sign-off pending (Alex authored v3.2). |
-| 0010  | Parallel Execution and Worktree Pooling                                                              | Draft       | Implemented  | Dominique Legault                                                | [RFC-0010-parallel-execution-worktree-pooling.md](RFC-0010-parallel-execution-worktree-pooling.md) | Legacy `status: Draft` retained; AISDLC-70.1–70.9 all Done. amends RFC-0002 + RFC-0004.                     |
-| 0011  | Definition-of-Ready Gate for Pipeline Admission                                                      | Draft       | Signed Off   | dominique@reliablegenius.io                                      | [RFC-0011-definition-of-ready-gate.md](RFC-0011-definition-of-ready-gate.md)      | requiresDocs: [] (phased rollout — docs land per phase).                                                    |
-| 0012  | Two-Tier Pipeline Architecture with Shared Core Library                                              | Approved    | Signed Off   | dominique@reliablegenius.io                                      | [RFC-0012-two-tier-pipeline-architecture.md](RFC-0012-two-tier-pipeline-architecture.md) | Internal architecture; no user-facing docs required.                                                        |
-| 0013  | AI-SDLC Orchestrator — Product Strategy                                                              | Draft       | Draft        | AI-SDLC Contributors                                            | [RFC-0013-product-first-implementation-strategy.md](RFC-0013-product-first-implementation-strategy.md) | Strategic / conceptual. Renumbered from former RFC-0003 collision (AISDLC-109).                             |
-| 0014  | Dependency Graph Composition for Pipeline Decisions                                                  | Draft       | Draft        | dominique@reliablegenius.io                                      | [RFC-0014-dependency-graph-composition.md](RFC-0014-dependency-graph-composition.md) | Phased rollout; no docs surfaces yet.                                                                       |
-| 0015  | Autonomous Pipeline Orchestrator                                                                     | Draft       | Ready for Review | dominique@reliablegenius.io                                  | [RFC-0015-autonomous-pipeline-orchestrator.md](RFC-0015-autonomous-pipeline-orchestrator.md) | requires RFC-0010, RFC-0011, RFC-0012, RFC-0014.                                                            |
-| 0016  | Estimation Calibration with T-Shirt Sizes                                                            | Draft       | Ready for Review | dominique@reliablegenius.io                                  | [RFC-0016-estimation-calibration-tshirt-sizes.md](RFC-0016-estimation-calibration-tshirt-sizes.md) | requires RFC-0011, RFC-0015.                                                                                |
-| 0017  | In-Soul Variant Pattern                                                              | Draft       | Draft        | Morgan Hirtle                                                   | [RFC-0017-in-soul-variant-pattern.md](RFC-0017-in-soul-variant-pattern.md)        | Carved out of RFC-0009 per OQ-3. Variant = a soul-scoped sub-theme with distinct visual identity and audience specialization. Practitioner validation via InternalAdopter product suite (ProductA / ProductB / ProductC / ProductD as four souls on shared substrate). requires RFC-0009. |
-| 0018  | In-Soul Journey Pattern                                                              | Draft       | Draft        | Morgan Hirtle                                                   | [RFC-0018-in-soul-journey-pattern.md](RFC-0018-in-soul-journey-pattern.md)        | Carved out of RFC-0009 per OQ-3. Journey = a temporally-ordered user flow within a soul that carries distinct design intent and completion criteria. Practitioner validation via InternalAdopter accessibility audit pipeline. requires RFC-0009, RFC-0017. |
-| 0019  | Embedding Provider Adapter Framework                                                                 | Draft       | Draft        | dominique@reliablegenius.io                                      | [RFC-0019-embedding-provider-adapter.md](RFC-0019-embedding-provider-adapter.md)  | Adapter framework for text→vector embedding providers; OpenAI text-embedding-3-small ships as default; adopters can plug custom adapters per the harness-adapter pattern (RFC-0010 §13). |
-| 0020  | Session-bug + Severity Scoring Rule                                                                  | Draft       | Draft        | —                                                               | (none yet — reservation only; draft ships in follow-on PR)                        | Carved out of RFC-0009 §13.5 per OQ-7 reversal of Position-stated; Dπ₃ refinement with practitioner validation.                          |
-| 0021  | Incident Monitoring + Root-Cause Analysis                                                            | Reserved    | Placeholder  | —                                                               | (none yet)                                                                        | Carved out of RFC-0009 §13.6 per OQ-7 reversal of Position-stated; pending adopter incident data before normative spec.                  |
-| 0022  | Compliance Posture + Audit Surface                                                                   | Draft       | Draft        | dominique@reliablegenius.io                                      | [RFC-0022-compliance-posture-audit-surface.md](RFC-0022-compliance-posture-audit-surface.md) | Adopter declares regulatory posture (HIPAA/SOC2/PCI-DSS/GDPR/etc.); framework derives gate defaults (DB pool isolation, secret-scan strictness, attestation requirement, retention) and exports audit evidence packs. RFC-0020 and RFC-0021 carved out of RFC-0009 (OQ-7); RFC-0009 OQ-11 trigger checklist references RFC-0022 as the canonical regime-declaration surface. |
-| 0023  | Operator TUI — Pipeline Monitoring + Steering Surface                                                | Draft       | Ready for Review | dominique@reliablegenius.io                                      | [RFC-0023-operator-tui-pipeline-monitoring.md](RFC-0023-operator-tui-pipeline-monitoring.md) | Operator-facing terminal interface to monitor + unblock the autonomous pipeline (post-RFC-0015). Required panes: PRs + next-step + human-in-loop blockers, dependency graph (RFC-0014 snapshot), pipeline journey overview, pipeline config editing, operator usage analytics. **All 10 OQs resolved** (Ink render boundary, $EDITOR config flow, both-analytics-surfaces, heuristic decision-pending detection, link-out-only kanban, polling v1, single-workspace v1, opt-OUT telemetry, affirming empty-state, aggregate-by-mode failures). Foregrounds decisions-pending per Decision Engine framing. Does not duplicate backlog.md kanban. |
-| 0024  | Emergent Issue Capture + Triage Pattern                                                              | Draft       | Draft        | dominique@reliablegenius.io                                      | [RFC-0024-emergent-issue-capture-and-triage.md](RFC-0024-emergent-issue-capture-and-triage.md) | Sidecar mechanism for capturing findings mid-work without breaking flow; triage rubric (quick-fix task vs scope-creep into current work vs new RFC); "decision-pending" → "decision-deferred" handoff so the orchestrator isn't blocked indefinitely. Addresses VISION.md §5 emergent-work gap. |
-| 0025  | Framework Quality Monitoring (Non-Decision Failure Modes)                                            | Draft       | Draft        | dominique@reliablegenius.io                                      | [RFC-0025-framework-quality-monitoring.md](RFC-0025-framework-quality-monitoring.md) | Distinguishes "operator under-decided" failures (fix the issue) from "framework misbehaved" failures (fix the framework); auto-routes the latter into bugfix backlog with severity scoring; closes the AISDLC-176-style "valid commit stranded" loop. Operationalizes VISION.md §4 honest failure modes. |
-| 0026  | Exploration Workstream Pattern                                                                       | Draft       | Draft        | dominique@reliablegenius.io                                      | [RFC-0026-exploration-workstream-pattern.md](RFC-0026-exploration-workstream-pattern.md) | First-class "spike/research" workstream type that bypasses DoR's decision-frontloading gate (since the goal IS to discover the unknowns); explicit time-box + handoff back to standard execution flow when knowns crystallize. Addresses VISION.md §5 exploration-mode gap. |
+The `OQs` column reports **unresolved open questions** per RFC. Source-of-truth is the RFC body's Open Questions section (typically §13 / §14 / §15). `0` means all OQs are resolved; `—` means the RFC has no OQ section (template, reserved-without-file, or non-normative strategic RFC). For the per-RFC OQ breakdown see [Open Questions Inventory](#open-questions-inventory); for the dependency graph rooted at RFC-0035 see [Critical Path to RFC-0035](#critical-path-to-rfc-0035-decision-catalog).
 
-| 0027  | Design Coherence Drift Detection                                                                     | Reserved    | Placeholder  | Morgan Hirtle                                                   | (none yet)                                                                        | Design Authority sign-off condition C3 from RFC-0009. Defines DesignCoherenceDrift reconciliation event: fires when delta between soul's design.imperatives and what DSB/component catalog implements exceeds threshold. Fourth Eτ_tessellation_drift detection rule. requires RFC-0009, RFC-0006. |
-| 0028  | Engineering-Axis Substrate Enforcement for Multi-Soul Platforms                                      | Draft       | Draft        | Alexander Kline                                                 | [RFC-0028-engineering-axis-substrate-enforcement.md](RFC-0028-engineering-axis-substrate-enforcement.md) | requires RFC-0008, RFC-0009. Substrate Contract pattern: which fields are `core` (locked, identity-class) vs `evolving` (override-permitted) at substrate level for multi-soul platforms. **4 open questions remaining (§7.1–7.4).** |
-| 0029  | Product Pillar — Architectural Vision (Design Principles, Framework Positions, Strategic Direction)  | Draft       | Draft        | Alexander Kline                                                 | [RFC-0029-product-pillar-architectural-vision.md](RFC-0029-product-pillar-architectural-vision.md) | requires RFC-0005, RFC-0008, RFC-0009. Strategic / vision RFC: Product pillar's positions on active RFCs (0014/0015/0016/0017/0018/0019/0022/0023/0024) + six design principles. **0 open questions** (vision doc; positions stated). |
-| 0030  | Signal Ingestion Pipeline (Demand Sources → D1)                                                       | Draft       | Draft        | Alexander Kline                                                 | [RFC-0030-signal-ingestion-pipeline.md](RFC-0030-signal-ingestion-pipeline.md)    | requires RFC-0005, RFC-0008, RFC-0011, RFC-0029. Adapter framework for ingesting demand signals (interviews, tickets, telemetry, ICP cohort data) into PPA's D1 channel. Tier weighting + clustering + SA Resonance filtering. **5 open questions remaining (§13.1–13.5).** |
-| 0031  | Calibration-Driven DID Revision Proposal Mechanism                                                   | Draft       | Draft        | Alexander Kline                                                 | [RFC-0031-calibration-driven-did-revision-proposal.md](RFC-0031-calibration-driven-did-revision-proposal.md) | requires RFC-0005, RFC-0008, RFC-0009, RFC-0029, RFC-0030. Closes calibration loop: framework auto-proposes DID revisions for operator review when calibration data shows consistent drift. **5 open questions remaining (§12.1–12.5).** |
-| 0032  | Cost-Governance Seam (Continuous ER Cost Pressure + Burst Spend Mechanism)                           | Draft       | Draft        | Alexander Kline                                                 | [RFC-0032-cost-governance-seam.md](RFC-0032-cost-governance-seam.md) | requires RFC-0004, RFC-0005, RFC-0008, RFC-0009, RFC-0010. Adds continuous Eρ_cost pressure to PPA scoring + explicit burst-spend mechanism for high-priority work bypassing steady-state ceilings. **5 open questions remaining (§10.1–10.5).** |
-| 0033  | Governance Reporting Layer (Periodic Synthesis of the Admission Chain)                                | Draft       | Draft        | Alexander Kline                                                 | [RFC-0033-governance-reporting-layer.md](RFC-0033-governance-reporting-layer.md) | requires RFC-0005, RFC-0008, RFC-0011, RFC-0014, RFC-0015. GovernanceReport resource: read-only periodic synthesis (scoring + cost + quality + calibration + R&D evidence sections). Composes with RFC-0022 audit packs. **5 open questions remaining (§9.1–9.5).** |
-| 0034  | PR Merge Critical-Path Ordering                                                                       | Reserved    | Placeholder  | dominique@reliablegenius.io                                      | (none yet — reservation only; AISDLC-178.4.1 ships the minimum derivation in RFC-0023 §7.2) | Longer-term home for auto-rebase trigger semantics, `depends-on` label conventions (canonical syntax + body-marker spec), and multi-repo PR ordering. AISDLC-178.4.1 reserved this number per its AC #8 (originally numbered RFC-0028 in the task spec; that slot was already taken by Engineering-Axis Substrate Enforcement, so this is the actual reservation). requires RFC-0014, RFC-0023.                                              |
-| 0035  | Decision Catalog and Operator Decision Routing                                                        | Draft       | Draft        | dominique@reliablegenius.io                                      | [RFC-0035-decision-catalog-operator-routing.md](RFC-0035-decision-catalog-operator-routing.md) | requires RFC-0011, RFC-0023, RFC-0024, RFC-0029. Operationalizes VISION.md §3 (operator-as-decision-steward): `Decision` resource type + deterministic-first evaluation ladder (mirrors RFC-0011 §4.4 + review-calibration) + actor-routing rubric (RFC-0029 pillar model) + capacity/fatigue model + decision-support surface (recommendation, counter-arguments, sub-decision graphs). **14 open questions** (§15). |
-| 0036  | Spec-Kit Bridge and Adopter Spec-Authoring Surface                                                    | Draft       | Draft        | dominique@reliablegenius.io                                      | [RFC-0036-spec-kit-bridge-adopter-authoring.md](RFC-0036-spec-kit-bridge-adopter-authoring.md) | requires RFC-0010, RFC-0011. Bridges [GitHub Spec Kit](https://github.com/github/spec-kit) (front-of-funnel artifact authoring) with ai-sdlc (back-of-funnel execution + governance). Defines the three-tier adopter authoring model (RFC → Spec → Task), the spec-kit import path (`ai-sdlc import-spec`), an optional adopter RFC scaffold (`ai-sdlc rfc init`), and the positioning updates that operationalize the AISDLC-248 repositioning. **12 open questions** (§14). |
+| #    | Title                                                                                                | Status      | Lifecycle    | OQs | Author                                                       | File                                                                              | Notes                                                                                                       |
+| ---- | ---------------------------------------------------------------------------------------------------- | ----------- | ------------ | --- | ------------------------------------------------------------ | --------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| 0001 | Template                                                                                             | n/a         | Template     | —   | —                                                            | [RFC-0001-template.md](RFC-0001-template.md)                                      | Skeleton for new RFCs; not normative.                                                                       |
+| 0002 | Pipeline Orchestration Policy                                                                        | Implemented | Implemented  | 1   | AI-SDLC Contributors                                         | [RFC-0002-pipeline-orchestration.md](RFC-0002-pipeline-orchestration.md)          | requiresDocs: tutorial, api-reference, example. Retrofit 2026-05-13 — design locked; OQ-3 `onTimeout: escalate` runtime not wired (RFC-0015 PR-labeling is the de-facto path). |
+| 0003 | Infrastructure Provider Adapters                                                                     | Implemented | Implemented  | 0   | AI-SDLC Contributors                                         | [RFC-0003-infrastructure-adapters.md](RFC-0003-infrastructure-adapters.md)        | Slot collision resolved in AISDLC-109 (product-strategy renumbered to RFC-0013). Retrofit 2026-05-13 — all 3 OQs resolved (no transactions, no ack, no versioning); RFC-0010 §13 `HarnessAdapter` is orthogonal, not superseding. |
+| 0004 | Cost Governance and Attribution                                                                      | Implemented | Implemented  | 3   | AI-SDLC Contributors                                         | [RFC-0004-cost-governance-and-attribution.md](RFC-0004-cost-governance-and-attribution.md) | requiresDocs: tutorial, api-reference, operator-runbook. Retrofit 2026-05-13 — CostPolicy / CostReconciler / CostTracker shipped end-to-end; 3 OQs deferred (humanReviewCost compute, cross-provider normalization, infra cost allocation). RFC-0032 extends, does not supersede. |
+| 0005 | Product Priority Algorithm (PPA)                                                                     | Approved    | Signed Off   | 2   | Alexander Kline (Arcana Concept Studio), AI-SDLC Contributors | [RFC-0005-product-priority-algorithm.md](RFC-0005-product-priority-algorithm.md)  | requiresDocs: api-reference, operator-runbook. Retrofit 2026-05-13 — design locked; admission subset wired (`orchestrator/src/admission-composite.ts`, `sa-scoring/`); full runtime composite deferred to PPA v1.1 per RFC-0008 §17. 2 OQs deferred (lifecycle weights for non-Eρ₄ dimensions, calibration retention). |
+| 0006 | Design System Governance Pipeline                                                                    | Final       | Implemented  | 1   | Dominique Legault, Morgan Hirtle, Alexander Kline             | [RFC-0006-design-system-governance-v5-final.md](RFC-0006-design-system-governance-v5-final.md) | requiresDocs: tutorial, operator-runbook, api-reference. Design locked; OQ-7 tooling-decision portion remains. |
+| 0007 | Figma Make Pipeline Integration                                                                      | Final       | Signed Off   | 5   | Dominique Legault, Morgan Hirtle, Alexander Kline             | [RFC-0007-figma-make-pipeline-integration-v1-final.md](RFC-0007-figma-make-pipeline-integration-v1-final.md) | requires RFC-0002, RFC-0004, RFC-0006. Design locked; 5 OQs framed as implementation-refinement items.        |
+| 0008 | PPA Triad Integration                                                                                | Final       | Implemented  | 0   | Dominique Legault, Morgan Hirtle, Alexander Kline             | [RFC-0008-ppa-triad-integration-final-combined.md](RFC-0008-ppa-triad-integration-final-combined.md) | requiresDocs: api-reference, operator-runbook                                                               |
+| 0009 | Tessellated Design Intent Documents                                                                  | Draft       | Ready for Review | 0 | Alexander Kline                                              | [RFC-0009-tessellated-design-intent-documents.md](RFC-0009-tessellated-design-intent-documents.md) | v3.4 (2026-05-04) resolves all 13 OQs; OQ-3 + OQ-7 carve out follow-on patterns reserved as RFC-0017, RFC-0018, RFC-0020, RFC-0021. Engineering ✅ + Design ✅ signed v3.4; Product v3.4 sign-off pending (Alex authored v3.2). |
+| 0010 | Parallel Execution and Worktree Pooling                                                              | Draft       | Implemented  | 0   | Dominique Legault                                            | [RFC-0010-parallel-execution-worktree-pooling.md](RFC-0010-parallel-execution-worktree-pooling.md) | Legacy `status: Draft` retained; AISDLC-70.1–70.9 all Done. amends RFC-0002 + RFC-0004.                     |
+| 0011 | Definition-of-Ready Gate for Pipeline Admission                                                      | Draft       | Signed Off   | 1   | dominique@reliablegenius.io                                  | [RFC-0011-definition-of-ready-gate.md](RFC-0011-definition-of-ready-gate.md)      | requiresDocs: [] (phased rollout — docs land per phase). Design locked; Q10 cost confirmation deferred to Phase 2b. |
+| 0012 | Two-Tier Pipeline Architecture with Shared Core Library                                              | Approved    | Signed Off   | 4   | dominique@reliablegenius.io                                  | [RFC-0012-two-tier-pipeline-architecture.md](RFC-0012-two-tier-pipeline-architecture.md) | Internal architecture; no user-facing docs required. Design locked; Q5–Q8 are implementation questions.       |
+| 0013 | AI-SDLC Orchestrator — Product Strategy                                                              | Draft       | Draft        | 3   | AI-SDLC Contributors                                         | [RFC-0013-product-first-implementation-strategy.md](RFC-0013-product-first-implementation-strategy.md) | Strategic / conceptual. Renumbered from former RFC-0003 collision (AISDLC-109).                             |
+| 0014 | Dependency Graph Composition for Pipeline Decisions                                                  | Draft       | Draft        | 0   | dominique@reliablegenius.io                                  | [RFC-0014-dependency-graph-composition.md](RFC-0014-dependency-graph-composition.md) | All 6 OQs resolved inline 2026-05-01; lifecycle promotion pending. Phased rollout; no docs surfaces yet.    |
+| 0015 | Autonomous Pipeline Orchestrator                                                                     | Draft       | Ready for Review | 0 | dominique@reliablegenius.io                              | [RFC-0015-autonomous-pipeline-orchestrator.md](RFC-0015-autonomous-pipeline-orchestrator.md) | requires RFC-0010, RFC-0011, RFC-0012, RFC-0014. All 12 OQs resolved 2026-05-01.                              |
+| 0016 | Estimation Calibration with T-Shirt Sizes                                                            | Draft       | Ready for Review | 0 | dominique@reliablegenius.io                              | [RFC-0016-estimation-calibration-tshirt-sizes.md](RFC-0016-estimation-calibration-tshirt-sizes.md) | requires RFC-0011, RFC-0015. All 8 OQs resolved via operator walkthrough 2026-05-03 (documented in §15 Resolutions). |
+| 0017 | In-Soul Variant Pattern                                                                              | Draft       | Draft        | 8   | Morgan Hirtle                                                | [RFC-0017-in-soul-variant-pattern.md](RFC-0017-in-soul-variant-pattern.md)        | Carved out of RFC-0009 per OQ-3. Variant = a soul-scoped sub-theme with distinct visual identity and audience specialization. Practitioner validation via InternalAdopter product suite (ProductA / ProductB / ProductC / ProductD as four souls on shared substrate). requires RFC-0009. |
+| 0018 | In-Soul Journey Pattern                                                                              | Draft       | Draft        | 10  | Morgan Hirtle                                                | [RFC-0018-in-soul-journey-pattern.md](RFC-0018-in-soul-journey-pattern.md)        | Carved out of RFC-0009 per OQ-3. Journey = a temporally-ordered user flow within a soul that carries distinct design intent and completion criteria. Practitioner validation via InternalAdopter accessibility audit pipeline. requires RFC-0009, RFC-0017. |
+| 0019 | Embedding Provider Adapter Framework                                                                 | Draft       | Draft        | 7   | dominique@reliablegenius.io                                  | [RFC-0019-embedding-provider-adapter.md](RFC-0019-embedding-provider-adapter.md)  | Adapter framework for text→vector embedding providers; OpenAI text-embedding-3-small ships as default; adopters can plug custom adapters per the harness-adapter pattern (RFC-0010 §13). |
+| 0020 | Session-bug + Severity Scoring Rule                                                                  | Draft       | Draft        | —   | —                                                            | (none yet — reservation only; draft ships in follow-on PR)                        | Carved out of RFC-0009 §13.5 per OQ-7 reversal of Position-stated; Dπ₃ refinement with practitioner validation. |
+| 0021 | Incident Monitoring + Root-Cause Analysis                                                            | Reserved    | Placeholder  | —   | —                                                            | (none yet)                                                                        | Carved out of RFC-0009 §13.6 per OQ-7 reversal of Position-stated; pending adopter incident data before normative spec. |
+| 0022 | Compliance Posture + Audit Surface                                                                   | Draft       | Draft        | 7   | dominique@reliablegenius.io                                  | [RFC-0022-compliance-posture-audit-surface.md](RFC-0022-compliance-posture-audit-surface.md) | Adopter declares regulatory posture (HIPAA/SOC2/PCI-DSS/GDPR/etc.); framework derives gate defaults (DB pool isolation, secret-scan strictness, attestation requirement, retention) and exports audit evidence packs. RFC-0020 and RFC-0021 carved out of RFC-0009 (OQ-7); RFC-0009 OQ-11 trigger checklist references RFC-0022 as the canonical regime-declaration surface. |
+| 0023 | Operator TUI — Pipeline Monitoring + Steering Surface                                                | Draft       | Ready for Review | 0 | dominique@reliablegenius.io                              | [RFC-0023-operator-tui-pipeline-monitoring.md](RFC-0023-operator-tui-pipeline-monitoring.md) | requires RFC-0014, RFC-0015. Operator-facing terminal interface to monitor + unblock the autonomous pipeline (post-RFC-0015). Required panes: PRs + next-step + human-in-loop blockers, dependency graph (RFC-0014 snapshot), pipeline journey overview, pipeline config editing, operator usage analytics. All 10 OQs resolved via operator walkthrough 2026-05-03 (§15 Resolved questions). Foregrounds decisions-pending per Decision Engine framing. Does not duplicate backlog.md kanban. |
+| 0024 | Emergent Issue Capture + Triage Pattern                                                              | Draft       | Draft        | 12  | dominique@reliablegenius.io                                  | [RFC-0024-emergent-issue-capture-and-triage.md](RFC-0024-emergent-issue-capture-and-triage.md) | requires RFC-0011, RFC-0015. Sidecar mechanism for capturing findings mid-work without breaking flow; triage rubric (quick-fix task vs scope-creep into current work vs new RFC); "decision-pending" → "decision-deferred" handoff so the orchestrator isn't blocked indefinitely. Addresses VISION.md §5 emergent-work gap. |
+| 0025 | Framework Quality Monitoring (Non-Decision Failure Modes)                                            | Draft       | Draft        | 10  | dominique@reliablegenius.io                                  | [RFC-0025-framework-quality-monitoring.md](RFC-0025-framework-quality-monitoring.md) | requires RFC-0015, RFC-0024. Distinguishes "operator under-decided" failures (fix the issue) from "framework misbehaved" failures (fix the framework); auto-routes the latter into bugfix backlog with severity scoring; closes the AISDLC-176-style "valid commit stranded" loop. Operationalizes VISION.md §4 honest failure modes. |
+| 0026 | Exploration Workstream Pattern                                                                       | Draft       | Draft        | 12  | dominique@reliablegenius.io                                  | [RFC-0026-exploration-workstream-pattern.md](RFC-0026-exploration-workstream-pattern.md) | requires RFC-0011, RFC-0015, RFC-0024. First-class "spike/research" workstream type that bypasses DoR's decision-frontloading gate (since the goal IS to discover the unknowns); explicit time-box + handoff back to standard execution flow when knowns crystallize. Addresses VISION.md §5 exploration-mode gap. |
+| 0027 | Design Coherence Drift Detection                                                                     | Reserved    | Placeholder  | —   | Morgan Hirtle                                                | (none yet)                                                                        | Design Authority sign-off condition C3 from RFC-0009. Defines DesignCoherenceDrift reconciliation event: fires when delta between soul's design.imperatives and what DSB/component catalog implements exceeds threshold. Fourth Eτ_tessellation_drift detection rule. requires RFC-0009, RFC-0006. |
+| 0028 | Engineering-Axis Substrate Enforcement for Multi-Soul Platforms                                      | Draft       | Draft        | 4   | Alexander Kline                                              | [RFC-0028-engineering-axis-substrate-enforcement.md](RFC-0028-engineering-axis-substrate-enforcement.md) | requires RFC-0008, RFC-0009. Substrate Contract pattern: which fields are `core` (locked, identity-class) vs `evolving` (override-permitted) at substrate level for multi-soul platforms. |
+| 0029 | Product Pillar — Architectural Vision (Design Principles, Framework Positions, Strategic Direction)  | Draft       | Draft        | —   | Alexander Kline                                              | [RFC-0029-product-pillar-architectural-vision.md](RFC-0029-product-pillar-architectural-vision.md) | requires RFC-0005, RFC-0008, RFC-0009. Strategic / vision RFC: Product pillar's positions on active RFCs (0014/0015/0016/0017/0018/0019/0022/0023/0024) + six design principles. No OQ section by design (vision doc; positions stated).             |
+| 0030 | Signal Ingestion Pipeline (Demand Sources → D1)                                                      | Draft       | Draft        | 5   | Alexander Kline                                              | [RFC-0030-signal-ingestion-pipeline.md](RFC-0030-signal-ingestion-pipeline.md)    | requires RFC-0005, RFC-0008, RFC-0011, RFC-0029. Adapter framework for ingesting demand signals (interviews, tickets, telemetry, ICP cohort data) into PPA's D1 channel. Tier weighting + clustering + SA Resonance filtering. |
+| 0031 | Calibration-Driven DID Revision Proposal Mechanism                                                   | Draft       | Draft        | 5   | Alexander Kline                                              | [RFC-0031-calibration-driven-did-revision-proposal.md](RFC-0031-calibration-driven-did-revision-proposal.md) | requires RFC-0005, RFC-0008, RFC-0009, RFC-0029, RFC-0030. Closes calibration loop: framework auto-proposes DID revisions for operator review when calibration data shows consistent drift. |
+| 0032 | Cost-Governance Seam (Continuous ER Cost Pressure + Burst Spend Mechanism)                           | Draft       | Draft        | 5   | Alexander Kline                                              | [RFC-0032-cost-governance-seam.md](RFC-0032-cost-governance-seam.md) | requires RFC-0004, RFC-0005, RFC-0008, RFC-0009, RFC-0010, RFC-0029. Adds continuous Eρ_cost pressure to PPA scoring + explicit burst-spend mechanism for high-priority work bypassing steady-state ceilings. |
+| 0033 | Governance Reporting Layer (Periodic Synthesis of the Admission Chain)                               | Draft       | Draft        | 5   | Alexander Kline                                              | [RFC-0033-governance-reporting-layer.md](RFC-0033-governance-reporting-layer.md) | requires RFC-0005, RFC-0008, RFC-0011, RFC-0014, RFC-0015, RFC-0022, RFC-0029, RFC-0030. GovernanceReport resource: read-only periodic synthesis (scoring + cost + quality + calibration + R&D evidence sections). Composes with RFC-0022 audit packs. |
+| 0034 | PR Merge Critical-Path Ordering                                                                      | Reserved    | Placeholder  | —   | dominique@reliablegenius.io                                  | (none yet — reservation only; AISDLC-178.4.1 ships the minimum derivation in RFC-0023 §7.2) | Longer-term home for auto-rebase trigger semantics, `depends-on` label conventions (canonical syntax + body-marker spec), and multi-repo PR ordering. AISDLC-178.4.1 reserved this number per its AC #8 (originally numbered RFC-0028 in the task spec; that slot was already taken by Engineering-Axis Substrate Enforcement, so this is the actual reservation). requires RFC-0014, RFC-0023. |
+| 0035 | Decision Catalog and Operator Decision Routing                                                       | Draft       | Draft        | 14  | dominique@reliablegenius.io                                  | [RFC-0035-decision-catalog-operator-routing.md](RFC-0035-decision-catalog-operator-routing.md) | requires RFC-0011, RFC-0023, RFC-0024, RFC-0029. Operationalizes VISION.md §3 (operator-as-decision-steward): `Decision` resource type + deterministic-first evaluation ladder (mirrors RFC-0011 §4.4 + review-calibration) + actor-routing rubric (RFC-0029 pillar model) + capacity/fatigue model + decision-support surface (recommendation, counter-arguments, sub-decision graphs). |
+| 0036 | Spec-Kit Bridge and Adopter Spec-Authoring Surface                                                   | Draft       | Draft        | 12  | dominique@reliablegenius.io                                  | [RFC-0036-spec-kit-bridge-adopter-authoring.md](RFC-0036-spec-kit-bridge-adopter-authoring.md) | requires RFC-0010, RFC-0011. Bridges [GitHub Spec Kit](https://github.com/github/spec-kit) (front-of-funnel artifact authoring) with ai-sdlc (back-of-funnel execution + governance). Defines the three-tier adopter authoring model (RFC → Spec → Task), the spec-kit import path (`ai-sdlc import-spec`), an optional adopter RFC scaffold (`ai-sdlc rfc init`), and the positioning updates that operationalize the AISDLC-248 repositioning. |
 
 **Next available number:** RFC-0037.
 
 > **Historical note (RFC-0003 collision):** Two different proposals (`-infrastructure-adapters` and `-product-first-implementation-strategy`) were both numbered 0003. AISDLC-109 resolved the collision by renumbering the product-strategy RFC to RFC-0013; RFC-0003 now refers unambiguously to the infrastructure-adapters RFC. Numbers are NOT recycled — slot collisions are confusing, so withdrawn entries keep their row in the registry.
+
+## Open Questions Inventory
+
+> **Audited:** 2026-05-13 (manual). Until [RFC-0035](RFC-0035-decision-catalog-operator-routing.md) ships the Decision Catalog, this section is regenerated by hand when meaningful RFC churn happens. Source-of-truth for each OQ is the body of the linked RFC; titles below are summarized.
+>
+> **Totals:** 31 active RFCs audited (excluding template + reservation-only entries). **~146 unresolved OQs**, **~84 resolved**. RFC-0029 has no OQ section by design (vision doc; positions stated). 2026-05-13 retrofit closed 12 OQs in RFC-0002 / RFC-0003 / RFC-0004 / RFC-0005 against shipped implementation; remaining residuals are documented in *Design locked* below.
+
+### Active design walkthroughs (Draft lifecycle, OQs pending resolution)
+
+These RFCs need operator / owner decisions before they can promote to Ready for Review.
+
+**RFC-0013 — Orchestrator Product Strategy** (3 OQs)
+- License choice for orchestrator
+- Agent compute cost attribution
+- AAIF contribution timing
+
+**RFC-0017 — In-Soul Variant Pattern** (8 OQs; first 5)
+- Maximum variants per Soul
+- Nested variants
+- Variant lifecycle (deprecation, removal)
+- Cross-variant scoring rule precedence
+- `designOverrides` extensibility
+
+**RFC-0018 — In-Soul Journey Pattern** (10 OQs; first 5)
+- Maximum journeys per Soul/Variant
+- State cardinality limits
+- Sub-journeys (journey-within-journey)
+- Completion-criteria expressiveness
+- Success-metrics source
+
+**RFC-0019 — Embedding Provider Adapter** (7 OQs; first 5)
+- Vector storage backend for v1 (JSONL vs sqlite)
+- Stale-vector policy default (lazy-re-embed vs fail-loud)
+- Cross-provider compatibility (explicit no-op vs auto-migrate)
+- Embedding provider deprecation grace period
+- Where in pipeline-cli vs orchestrator the framework lives
+
+**RFC-0022 — Compliance Posture + Audit Surface** (7 OQs; first 5)
+- Regime → controls mapping location
+- Operator override audit trail
+- Source of truth for control mappings
+- Audit export format (single tar vs per-kind directory)
+- Real-time compliance monitoring vs on-demand export
+
+**RFC-0024 — Emergent Issue Capture + Triage** (12 OQs; first 5) — *on RFC-0035 critical path*
+- Capture privacy
+- AI-agent auto-triage threshold
+- Capture-vs-comment for in-PR findings
+- In-code marker syntax
+- Severity inference
+
+**RFC-0025 — Framework Quality Monitoring** (10 OQs; first 5)
+- Default classification when ambiguous
+- Severity weight tuning surface
+- Recurrence detection window
+- Framework-bug attribution to module owners
+- Adopter telemetry opt-in
+
+**RFC-0026 — Exploration Workstream Pattern** (12 OQs; first 5)
+- Default budget
+- Crystallization required to close
+- Iteration vs Exploration boundary
+- Multi-operator exploration
+- Exploration of explorations
+
+**RFC-0028 — Engineering-Axis Substrate Enforcement** (4 OQs)
+- `identityClass: core | evolving` at substrate-field level (§7.1)
+- Structural-vs-statistical drift pairing (§7.2)
+- Centroid computation slot (§7.3)
+- Cross-reference path back to RFC-0009 §7.2 (§7.4)
+
+**RFC-0030 — Signal Ingestion Pipeline** (5 OQs)
+- Adapter authentication / credential management (§13.1)
+- Multi-language signal processing (§13.2)
+- Privacy / customer-data residency (§13.3)
+- Manual signal entry (§13.4)
+- Adversarial signal injection (§13.5)
+
+**RFC-0031 — Calibration-Driven DID Revision** (5 OQs)
+- Confidence calibration (§12.1)
+- Multi-field bundling (§12.2)
+- Operator opt-out per field (§12.3)
+- Cross-pillar coordination (§12.4)
+- Rejection learnings (§12.5)
+
+**RFC-0032 — Cost-Governance Seam** (5 OQs)
+- Executive layer identity (§10.1)
+- Multi-shard burst contention (§10.2)
+- Auto-approve thresholds (§10.3)
+- Burst-rejection learnings (§10.4)
+- Per-pillar cost-veto (§10.5)
+
+**RFC-0033 — Governance Reporting Layer** (5 OQs)
+- LLM-augmented narrative generation (§9.1)
+- Cross-project rollups (§9.2)
+- Evidence freshness (§9.3)
+- PII / sensitive content in narratives (§9.4)
+- Tamper-evidence (§9.5)
+
+**RFC-0035 — Decision Catalog and Operator Decision Routing** (14 OQs; first 5) — *target RFC*
+- Catalog vs projection
+- Load-bearing measurement
+- LLM-confidence cold start
+- Task-vs-decision boundary
+- Cross-source dedup
+
+**RFC-0036 — Spec-Kit Bridge and Adopter Spec-Authoring Surface** (12 OQs; first 5)
+- Seam artifact granularity
+- `specRef` drift semantics
+- DoR strictness at import
+- Adopter RFC storage convention
+- RFC template variants
+
+### Awaiting lifecycle promotion (0 OQs; sign-off mechanics only)
+
+OQs are resolved; what remains is per-owner sign-off ceremony, not new design work.
+
+- **RFC-0009** Tessellated Design Intent — Lifecycle: Ready for Review. v3.4 resolves all 13 OQs; awaiting Product (Alex) sign-off on v3.4.
+- **RFC-0014** Dependency Graph Composition — Lifecycle: Draft. All 6 OQs resolved 2026-05-01; lifecycle promotion to Ready for Review pending.
+- **RFC-0015** Autonomous Pipeline Orchestrator — Lifecycle: Ready for Review. All 12 OQs resolved 2026-05-01; awaiting sign-off.
+- **RFC-0016** Estimation Calibration (T-Shirt Sizes) — Lifecycle: Ready for Review. All 8 OQs resolved via operator walkthrough 2026-05-03.
+- **RFC-0023** Operator TUI — Lifecycle: Ready for Review. All 10 OQs resolved via operator walkthrough 2026-05-03.
+
+### Design locked (residual OQs are implementation refinements)
+
+These RFCs are Signed Off or Implemented. Remaining OQs are implementation-tier questions; they do not affect downstream RFCs' design contracts.
+
+- **RFC-0002** Pipeline Orchestration Policy — Lifecycle: Implemented (retrofit 2026-05-13). 1 residual: OQ-3 `onTimeout: escalate` runtime not wired — the schema enum lands but `ApprovalWorkflow` has no timeout reconciler; RFC-0015's PR-labeling is the de-facto escalation path.
+- **RFC-0003** Infrastructure Provider Adapters — Lifecycle: Implemented (retrofit 2026-05-13). All 3 OQs resolved as "stay simple" (no transactions, no ack, no versioning); design closed. RFC-0010 §13 `HarnessAdapter` is orthogonal, not superseding.
+- **RFC-0004** Cost Governance and Attribution — Lifecycle: Implemented (retrofit 2026-05-13). 3 deferred OQs: OQ-1 humanReviewCost compute, OQ-2 cross-provider normalization, OQ-5 infrastructure cost allocation — all revisitable when a concrete consumer materializes. RFC-0032 (Draft) extends, does NOT supersede.
+- **RFC-0005** Product Priority Algorithm — Lifecycle: Signed Off (retrofit 2026-05-13). Admission subset wired (`orchestrator/src/admission-composite.ts`, `sa-scoring/`); full runtime composite deferred to PPA v1.1 per RFC-0008 §17. 2 deferred OQs: OQ-2 lifecycle weights for non-Eρ₄ dimensions, OQ-5 calibration data retention.
+- **RFC-0006** Design System Governance — Lifecycle: Implemented. 1 partial OQ (Q7 autonomy-threshold tooling decision); design locked.
+- **RFC-0007** Figma Make Pipeline Integration — Lifecycle: Signed Off. 5 OQs framed as "must be resolved before advancing from draft," but RFC is Signed Off; treat as implementation-refinement queue.
+- **RFC-0011** DoR Gate — Lifecycle: Signed Off. 1 partial OQ (Q10 cost confirmation deferred to Phase 2b); design locked.
+- **RFC-0012** Two-Tier Pipeline Architecture — Lifecycle: Signed Off. 4 implementation questions (subagent invocation discovery, per-tenant spawner config, integration testing without quota burn, plugin install path).
+
+## Critical Path to RFC-0035 (Decision Catalog)
+
+This section computes the dependency chain that must be design-stable for **RFC-0035 (Decision Catalog and Operator Decision Routing)** to ship. Source: `requires:` frontmatter edges, traced transitively. Two milestones are distinct:
+
+1. **Sign-off-ready** — RFC-0035's direct dependencies are Signed Off (or Ready for Review with no open design questions) so the contract surface is stable. This is the near-term milestone the operator burns OQs to reach.
+2. **Implementation-ready** — the dependent infrastructure (DoR Gate, dep graph, TUI, emergent-capture) is shipped to a degree that RFC-0035's Phase 1-11 implementation plan can land. This follows sign-off and is driven by milestone tracking, not OQ debt.
+
+### Dependency graph
+
+```mermaid
+graph BT
+    %% Critical-path graph rooted at RFC-0035 (Decision Catalog)
+    %% Edge direction: child requires parent (bottom-up)
+    %% Color: green = design locked, blue = signed off, yellow = ready for review / 0 OQs draft, red = OQs open, bold = target
+
+    RFC0002["RFC-0002<br/>Pipeline Orch.<br/>Implemented"]
+    RFC0004["RFC-0004<br/>Cost Gov.<br/>Implemented (3 deferred)"]
+    RFC0005["RFC-0005<br/>PPA<br/>Signed Off (2 deferred)"]
+    RFC0006["RFC-0006<br/>Design Sys.<br/>Implemented"]
+    RFC0008["RFC-0008<br/>PPA Triad<br/>Implemented"]
+    RFC0009["RFC-0009<br/>TDID<br/>Ready for Review / 0 OQs"]
+    RFC0010["RFC-0010<br/>Parallel Exec<br/>Implemented"]
+    RFC0011["RFC-0011<br/>DoR Gate<br/>Signed Off"]
+    RFC0012["RFC-0012<br/>2-Tier Pipeline<br/>Signed Off"]
+    RFC0014["RFC-0014<br/>Dep Graph<br/>Draft / 0 OQs"]
+    RFC0015["RFC-0015<br/>Auto Orchestrator<br/>Ready for Review / 0 OQs"]
+    RFC0023["RFC-0023<br/>Operator TUI<br/>Ready for Review / 0 OQs"]
+    RFC0024["RFC-0024<br/>Emergent Capture<br/>Draft / 12 OQs"]
+    RFC0029["RFC-0029<br/>Product Pillar<br/>Draft / no OQ section"]
+    RFC0035["RFC-0035<br/>Decision Catalog<br/>Draft / 14 OQs"]
+
+    RFC0002 --> RFC0006
+    RFC0004 --> RFC0006
+    RFC0006 --> RFC0008
+    RFC0002 --> RFC0010
+    RFC0008 --> RFC0010
+    RFC0010 --> RFC0015
+    RFC0011 --> RFC0015
+    RFC0012 --> RFC0015
+    RFC0014 --> RFC0015
+    RFC0014 --> RFC0023
+    RFC0015 --> RFC0023
+    RFC0011 --> RFC0024
+    RFC0015 --> RFC0024
+    RFC0005 --> RFC0029
+    RFC0008 --> RFC0029
+    RFC0009 --> RFC0029
+    RFC0011 --> RFC0035
+    RFC0023 --> RFC0035
+    RFC0024 --> RFC0035
+    RFC0029 --> RFC0035
+
+    classDef implemented fill:#d4edda,stroke:#155724,color:#155724
+    classDef signedOff fill:#d1ecf1,stroke:#0c5460,color:#0c5460
+    classDef readyOrZero fill:#fff3cd,stroke:#856404,color:#856404
+    classDef draftOpen fill:#f8d7da,stroke:#721c24,color:#721c24
+    classDef target fill:#cce5ff,stroke:#004085,color:#004085,stroke-width:3px
+
+    class RFC0002,RFC0004,RFC0006,RFC0008,RFC0010 implemented
+    class RFC0005,RFC0011,RFC0012 signedOff
+    class RFC0009,RFC0014,RFC0015,RFC0023 readyOrZero
+    class RFC0024,RFC0029 draftOpen
+    class RFC0035 target
+```
+
+### Critical-path status table
+
+The rows are listed in dependency order (ancestors first). The **Blocks RFC-0035?** column reports whether the RFC's current state blocks RFC-0035's near-term sign-off.
+
+| RFC | Title | Lifecycle | Unresolved OQs | Blocks RFC-0035 sign-off? | Recommended next action |
+|---|---|---|---|---|---|
+| RFC-0008 | PPA Triad | Implemented | 0 | No | — |
+| RFC-0009 | Tessellated Design Intent | Ready for Review | 0 | No (transitive only) | Land Alex's Product sign-off on v3.4 |
+| RFC-0011 | DoR Gate | Signed Off | 1 partial | No | Q10 confirmation deferred to Phase 2b — non-blocking |
+| RFC-0023 | Operator TUI | Ready for Review | 0 | Yes — direct dep | Promote to Signed Off (Engineering + Operator + Product sign-offs) |
+| RFC-0024 | Emergent Issue Capture | Draft | **12** | **Yes — direct dep** | Run operator walkthrough of all 12 OQs; promote to Ready for Review then Signed Off |
+| RFC-0029 | Product Pillar | Draft | — (no OQ section) | Yes — direct dep | Promote to Signed Off (Product sign-off; vision doc, no OQ walkthrough needed) |
+| RFC-0035 | Decision Catalog | Draft | **14** | (target) | Run operator walkthrough of all 14 OQs once RFC-0024 + RFC-0029 sign-offs unblock the design contract |
+
+### Action sequence (near-term decision burn)
+
+The bulk of operator decision time before RFC-0035 sign-off is concentrated in two RFCs:
+
+1. **RFC-0024 walkthrough** — 12 OQs. RFC-0035's `source: emergent-finding` feeder behavior depends on RFC-0024's capture / triage contract. Resolve first because RFC-0035 OQs (e.g. OQ-5 cross-source dedup, OQ-7 catalog vs projection) read out of RFC-0024's resolution.
+2. **RFC-0035 walkthrough** — 14 OQs. Resolve after RFC-0024 lands so design coherence is preserved.
+
+**Parallel sign-off ceremonies (no new design work):**
+
+- RFC-0023 → Signed Off (Engineering + Operator + Product sign on §15 Resolved questions)
+- RFC-0029 → Signed Off (Product sign-off; vision doc has no OQ surface)
+- RFC-0009 → Signed Off (Alex's v3.4 Product sign-off)
+
+**Total operator decision-burn for RFC-0035 sign-off: ~26 OQs** (12 in RFC-0024 + 14 in RFC-0035).
+
+### What this section becomes once RFC-0035 ships
+
+Once the Decision Catalog ships, this manually-curated section is replaced by a `cli-decisions critical-path --target RFC-0035` query that traverses the live catalog and the registry's `requires:` edges automatically. The Mermaid graph above is a snapshot — the live tool will regenerate it per-target on demand and reflect override events, deferred decisions, and capacity-aware prioritization (§7 of RFC-0035). For now, regenerate this section by hand when:
+
+- A critical-path RFC's lifecycle changes (Draft → Ready for Review → Signed Off → Implemented)
+- A critical-path RFC's OQs are resolved or new ones are added
+- RFC-0035's `requires:` edges change

@@ -1,11 +1,11 @@
 ---
 id: RFC-0002
 title: Pipeline Orchestration Policy
-status: Draft
-lifecycle: Draft
+status: Implemented
+lifecycle: Implemented
 author: AI-SDLC Contributors
 created: 2026-02-09
-updated: 2026-02-09
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 requiresDocs:
   - tutorial
@@ -15,11 +15,11 @@ requiresDocs:
 
 # RFC-0002: Pipeline Orchestration Policy
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Implemented
+**Lifecycle:** Implemented
 **Author:** AI-SDLC Contributors
 **Created:** 2026-02-09
-**Updated:** 2026-02-09
+**Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
 
 ---
@@ -569,15 +569,27 @@ This minimal pipeline is valid under both the current and proposed schemas. All 
 
 ## Open Questions
 
+> **Retrofit (2026-05-13):** OQs resolved against the implementation that shipped. Resolution markers added inline per question. Lifecycle promoted to `Implemented`.
+
 1. **Stage dependencies vs. strict ordering** — Should stages support a `dependsOn` field for DAG-style execution, or is the current sequential ordering sufficient? Sequential ordering covers the common case. DAG support adds significant complexity and may be better deferred to a future RFC.
+
+   **Resolution (2026-05-13):** Sequential ordering kept; no DAG support added. `Pipeline.spec.stages` is normatively an "Ordered list of execution stages" (spec.md §5.1.1); no `dependsOn` was added to the Stage object in `spec/schemas/pipeline.schema.json`. Cross-issue parallelism shipped via `Pipeline.spec.parallelism` (RFC-0010) at a higher granularity (one whole pipeline run per worktree slot). The only stage-to-stage cross-reference is `requiresIndependentHarnessFrom` for harness-exclusion (RFC-0010 §13.10) — not a scheduling DAG. DAG support remains explicitly out of scope.
 
 2. **Notification template language** — Is simple `{placeholder}` interpolation sufficient, or do templates need conditionals (e.g., "show reviewer name if present")? The proposal starts with simple interpolation; a future RFC could introduce a lightweight template language if needed.
 
+   **Resolution (2026-05-13):** Simple `{placeholder}` interpolation shipped; no template engine adopted. Both code paths — `orchestrator/src/notifications.ts:renderTemplate` (issue/PR comments) and `orchestrator/src/notifications/notification-router.ts:renderTemplate` (Slack/Teams) — implement `{key}` placeholder substitution with the unknown-key-passthrough behavior the RFC specified. No `handlebars`/`mustache`/`eta` dependency was introduced. Stage-specific content is rendered upstream and passed in via `{details}`. Future RFC if conditional rendering becomes a real demand.
+
 3. **Approval escalation semantics** — When `onTimeout: escalate` is specified, what does "escalate" mean concretely? The proposal leaves this to implementations (e.g., notify a higher-level approver, post to a Slack channel). Should the spec define escalation targets?
+
+   **Resolution (2026-05-13):** **Partially resolved.** The schema enum `abort | escalate | auto-approve` shipped as-specified (`spec/schemas/pipeline.schema.json:428-432`), but the reference runtime did not wire approval-timeout polling — `ApprovalWorkflow` (`reference/dist/security/interfaces.d.ts:70-79`) only exposes `submit / approve / reject / getStatus`. Today's "escalation" is the RFC-0015 autonomous-orchestrator concept implemented in `pipeline-cli/src/orchestrator/loop.ts:buildDefaultEscalate` — labels the PR `needs-human-attention` and logs a warning. `escalate` as an approval-timeout response is **not implemented**; declaring `onTimeout: escalate` on a Stage today is schema-valid but a runtime no-op. Either future work wires `ApprovalWorkflow` to a timeout reconciler, or a future RFC narrows the enum to `abort | auto-approve`.
 
 4. **Fix-CI as a separate pipeline or stage** — The dogfood pipeline has a distinct fix-CI flow (`fix-ci.ts`) that is triggered by CI failures, not by issue assignment. Should the spec model this as a separate Pipeline resource triggered by `ci.failed`, or as a retry strategy within the `implement` stage? The current proposal models it via `onFailure.strategy: retry`, but the fix-CI flow has distinct logic (fetching CI logs, passing error context to agent).
 
+   **Resolution (2026-05-13):** **Hybrid.** Fix-CI shipped as an independent execution path, not a stage within the main Pipeline. The trigger is `workflow_run.conclusion == 'failure'` in `.github/workflows/ai-sdlc-fix-ci.yml`, the implementation is a standalone `@ai-sdlc/orchestrator` entry point (`executeFixCI` / `executeFixReview`), and the local-operator shim `/ai-sdlc fix-pr` chains the two. However, the retry caps are sourced from the *main* Pipeline's `stages[code].onFailure.maxRetries` and `stages[review].onFailure.maxRetries` (`fix-ci.ts:191`, `fix-review.ts:219`) — so this RFC's failure-policy schema *is* the source of truth for the bound. Fix-CI is neither a "separate Pipeline" nor an "embedded retry strategy" but a third option: a sibling executor that consumes the RFC-0002 retry policy. The spec was not extended with a `ci.failed` trigger enum or a `kind: FixCiPipeline`.
+
 5. **Credential scope standardization** — Should the spec define a standard set of scope strings (e.g., `repo:read`, `repo:write`, `ci:trigger`), or leave them adapter-specific? Standardizing enables portable policies but may not cover all adapter capabilities.
+
+   **Resolution (2026-05-13):** Left adapter-specific; no canonical vocabulary defined. `CredentialPolicy.scope` is `array[string]` with no enum (`spec/schemas/pipeline.schema.json:381-403`); `DEFAULT_JIT_SCOPE = ['repo:read', 'repo:write']` (`orchestrator/src/defaults.ts:154`) is a sensible default, not a normative vocabulary. In production, the framework distinguishes credentials by *identity*, not by scope-string semantics: `AI_SDLC_PAT` (recursive-workflow-trigger-capable PAT, AISDLC-189), `GITHUB_TOKEN` (default per-job), and the ed25519 attestation signing key (per-contributor, via `/ai-sdlc init-signing-key`). `CredentialPolicy.scope` is honored end-to-end (`orchestrator/src/execute.ts:773-874`); the strings remain adapter-defined.
 
 ## References
 
