@@ -1,7 +1,7 @@
 ---
 id: AISDLC-271
 title: 'chore: complete RFC-0031 DIDRevisionProposal mechanism'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-13 18:48'
 labels:
@@ -17,6 +17,32 @@ references:
   - orchestrator/src/calibration.ts
   - orchestrator/src/sa-scoring/auto-calibrate.ts
 priority: medium
+finalSummary: |
+  ## Summary
+  Implemented the complete DIDRevisionProposal mechanism per RFC-0031 (AISDLC-271). The trigger source (SoulDriftDetected) and flywheel substrate were already shipped; this task added the proposal event itself, drift classification, approval routing, expiry, lockNoProposal opt-out, and rejection learnings.
+
+  ## Changes
+  - `orchestrator/src/sa-scoring/revision-proposal.ts` (new): DIDRevisionProposal event, SoulHealthDiagnosticEvent, DIDRevisionProposalExpiredEvent, classifyDrift() per §3, deriveApprovalPath() per §4, 14-day expiry + archiveExpiredProposals() per §5, lockNoProposal opt-out per OQ-12.3, recordRejection() + computeRejectionPrecedentFactor() per OQ-12.5, computeConfidence() per OQ-12.1, evaluateRevisionProposal() one-field-per-proposal entry point per OQ-12.2.
+  - `orchestrator/src/sa-scoring/revision-proposal.test.ts` (new): Full test coverage for all ACs.
+  - `orchestrator/src/index.ts` (modified): All new exports added to barrel.
+  - `spec/rfcs/RFC-0031-calibration-driven-did-revision-proposal.md` (modified): Lifecycle flipped to Implemented; all 5 OQs resolved with normative answers.
+  - `spec/rfcs/README.md` (modified): Registry row updated to Implemented (0 OQs); OQ inventory updated.
+
+  ## Design decisions
+  - **crypto.randomUUID() over uuid package**: Node built-in, no dependency needed.
+  - **One-field-per-proposal in v1**: OQ-12.2 resolved; bundling deferred. The evaluateRevisionProposal() signature accepts one field to make this explicit.
+  - **Ambiguous drift fires BOTH events**: §7 spec — both DIDRevisionProposal (flagged for triad) and SoulHealthDiagnosticEvent are emitted.
+  - **Rejection precedent as a multiplier factor**: OQ-12.5 resolved; computeRejectionPrecedentFactor() returns [0.2, 1.0] for callers to apply against computed confidence.
+
+  ## Verification
+  - `pnpm build` — clean
+  - `pnpm test` — all new tests pass
+  - `pnpm lint` — clean
+  - `pnpm format:check` — clean
+
+  ## Follow-up
+  - Operator TUI (RFC-0023) Decisions pane to surface pending DIDRevisionProposal events
+  - v2 multi-field bundling (OQ-12.2 deferred)
 ---
 
 ## Description
