@@ -41,6 +41,7 @@ import {
   ensureClaudeMdPointer,
   renderNextSteps,
   resolveFeatureSelection,
+  resolveInstallTarget,
   type FeatureAdapters,
   type FeatureSelection,
   type WizardFlags,
@@ -421,6 +422,7 @@ export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
     withBranchProtection: !!opts.withBranchProtection,
     add,
     dryRun: !!opts.dryRun,
+    workspace: typeof opts.workspace === 'string' ? opts.workspace : undefined,
   };
 }
 
@@ -464,10 +466,39 @@ export const initCommand = new Command('init')
     '--add <feature>',
     'Extend an already-initialized repo with a single feature: dor | attestation | classifier | branch-protection',
   )
+  .option(
+    '--workspace <name>',
+    'Opt into a per-workspace install at packages/<name>/.ai-sdlc/ instead of the git-root default',
+  )
   .action(async (opts) => {
-    const projectDir = process.cwd();
     const configDirName = opts.dir ?? '.ai-sdlc';
     const dryRun = !!opts.dryRun;
+
+    // ── AISDLC-262: resolve install target via git rev-parse --show-toplevel ─
+    // Default: install at the git root. If the root already has .ai-sdlc/,
+    // refuse with a clear message unless --workspace <name> is passed.
+    // Printed on the first output line so adopters can sanity-check the
+    // resolved target before any files are written (AC #4).
+    const targetResult = resolveInstallTarget({
+      cwd: process.cwd(),
+      workspace: typeof opts.workspace === 'string' ? opts.workspace : undefined,
+      configDirName,
+      // --add is the extension path: the root's .ai-sdlc/ already exists by
+      // design, so the "already installed" nesting check must be suppressed.
+      skipExistingCheck: !!opts.add,
+    });
+
+    if (targetResult.error) {
+      console.error(`Error: ${targetResult.error}`);
+      process.exitCode = 1;
+      return;
+    }
+
+    const projectDir = targetResult.installDir;
+    if (targetResult.resolved) {
+      console.log(`Resolved install target: ${projectDir}`);
+      console.log('');
+    }
     const tierInput = (opts.role ?? 'coding') as string;
     if (!AGENT_ROLE_TIERS.includes(tierInput as AgentRoleTier)) {
       console.error(
