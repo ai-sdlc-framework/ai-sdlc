@@ -8,7 +8,7 @@ Complete working examples demonstrating AI-SDLC SDK usage.
 |---|---|
 | [builder-examples.ts](builder-examples.ts) | All 5 resource builders with validation |
 | [gate-enforcement.ts](gate-enforcement.ts) | Programmatic quality gate evaluation with override and failure scenarios |
-| [adapter-implementation.ts](adapter-implementation.ts) | Custom adapter from scratch, registry, webhook bridge, EventBus |
+| [adapter-implementation.ts](adapter-implementation.ts) | Custom adapter from scratch, registry, webhook bridge, EventBus (RFC-0003 §3 example — IssueTracker pattern extended to the five infrastructure interfaces) |
 | [orchestration-patterns.ts](orchestration-patterns.ts) | All 5 orchestration patterns with execution and handoff validation |
 
 ## YAML Examples
