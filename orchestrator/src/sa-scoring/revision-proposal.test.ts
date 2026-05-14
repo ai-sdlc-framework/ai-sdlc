@@ -544,13 +544,23 @@ describe('rejection learnings (AC #6 + OQ-12.5)', () => {
 
   it('recordRejection maps medium confidence to 0.5 weight', () => {
     const proposal = makeProposal({ confidence: 'medium' });
-    const record = recordRejection(proposal, 'dom@example.com', 'not yet — needs more drift evidence', () => NOW_MS);
+    const record = recordRejection(
+      proposal,
+      'dom@example.com',
+      'not yet — needs more drift evidence',
+      () => NOW_MS,
+    );
     expect(record.rejectionPrecedentWeight).toBe(0.5);
   });
 
   it('recordRejection maps low confidence to 0.2 weight', () => {
     const proposal = makeProposal({ confidence: 'low' });
-    const record = recordRejection(proposal, 'morgan@example.com', 'noise — appears stochastic, hold off', () => NOW_MS);
+    const record = recordRejection(
+      proposal,
+      'morgan@example.com',
+      'noise — appears stochastic, hold off',
+      () => NOW_MS,
+    );
     expect(record.rejectionPrecedentWeight).toBe(0.2);
   });
 
@@ -646,9 +656,7 @@ describe('one-field-per-proposal (AC #7 + OQ-12.2)', () => {
 describe('AISDLC-271 PR #476: defensive input validation', () => {
   it('deriveApprovalPath rejects non-enum identityClass', () => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    expect(() => deriveApprovalPath('hostile' as any, 'healthy')).toThrow(
-      /invalid identityClass/,
-    );
+    expect(() => deriveApprovalPath('hostile' as any, 'healthy')).toThrow(/invalid identityClass/);
   });
 
   it('isProposalExpired rejects malformed expiresAt', () => {
@@ -658,8 +666,14 @@ describe('AISDLC-271 PR #476: defensive input validation', () => {
   });
 
   it('recordRejection rejects empty/short rejectedBy', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const proposal = { proposalId: 'p1', shardId: 's', field: 'f', classification: 'healthy', confidence: 'medium' } as any;
+    const proposal = {
+      proposalId: 'p1',
+      shardId: 's',
+      field: 'f',
+      classification: 'healthy',
+      confidence: 'medium',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
     expect(() =>
       recordRejection(proposal, '', 'a long enough rationale here', () => NOW_MS),
     ).toThrow(/invalid actor identity/);
@@ -669,11 +683,17 @@ describe('AISDLC-271 PR #476: defensive input validation', () => {
   });
 
   it('recordRejection rejects short rationale', () => {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const proposal = { proposalId: 'p1', shardId: 's', field: 'f', classification: 'healthy', confidence: 'medium' } as any;
-    expect(() =>
-      recordRejection(proposal, 'op@example.com', 'short', () => NOW_MS),
-    ).toThrow(/rationale must be/);
+    const proposal = {
+      proposalId: 'p1',
+      shardId: 's',
+      field: 'f',
+      classification: 'healthy',
+      confidence: 'medium',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any;
+    expect(() => recordRejection(proposal, 'op@example.com', 'short', () => NOW_MS)).toThrow(
+      /rationale must be/,
+    );
   });
 
   it('evaluateRevisionProposal validates identityClass at entry', () => {
@@ -681,10 +701,22 @@ describe('AISDLC-271 PR #476: defensive input validation', () => {
       evaluateRevisionProposal({
         shardId: 's',
         field: 'f',
+        currentValue: 'old',
+        proposedValue: 'new',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         identityClass: 'corrupted' as any,
-        triggerConditions: { dismissSignals: 0, escalateSignals: 0, demandMisalignment: 0, driftEvents: 0 },
-        classificationEvidence: { icpMatchRate: 0.9, dismissToEscalateRatio: 1.0, coreDIDFieldsAffected: false },
+        triggerConditions: {
+          dismissSignals: 0,
+          escalateSignals: 0,
+          demandMisalignment: 0,
+          driftEvents: 0,
+        },
+        classificationEvidence: {
+          demandClusterICPMatchRate: 0.9,
+          demandClusterChurnCorrelation: 0.5,
+          dismissToEscalateRatio: 1.0,
+          coreDIDFieldsAffected: false,
+        },
         now: () => NOW_MS,
       }),
     ).toThrow(/invalid identityClass/);
