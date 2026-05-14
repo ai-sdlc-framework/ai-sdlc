@@ -171,6 +171,71 @@ spec:
     }
   });
 
+  // AISDLC-265 PR #474 review fix: typo'd canonical kinds and loader-private
+  // kinds both produce a `skipped` validation result. Pre-fix the config loader
+  // silently dropped them with NO warning entry — security-relevant misconfigs
+  // (e.g. `kind: AutonomyPolcy` typo) ended up running with default permissive
+  // policy. Fix: surface skipped kinds in `config.warnings` so operators see
+  // the dropped file. This test pins both the typo case AND the legitimate
+  // loader-private case.
+  it('AISDLC-265: skipped kinds (typo or loader-private) produce a warning', async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join } = await import('node:path');
+    const tmp = mkdtempSync(join(tmpdir(), 'config-skip-warn-'));
+    try {
+      mkdirSync(tmp, { recursive: true });
+      writeFileSync(
+        join(tmp, 'pipeline.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: Pipeline
+metadata:
+  name: test-pipeline
+spec:
+  triggers:
+    - event: issue.labeled
+      filter:
+        labels: [ai-eligible]
+  providers: {}
+  stages:
+    - name: validate
+`,
+      );
+      // Typo of canonical kind — should produce a warning, not silent drop.
+      writeFileSync(
+        join(tmp, 'autonomy-policy-typo.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: AutonomyPolcy
+metadata:
+  name: oops
+spec: {}
+`,
+      );
+      // Legitimate loader-private (also produces a warning so operator can verify).
+      writeFileSync(
+        join(tmp, 'maintainers.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: MaintainersList
+metadata:
+  name: project-maintainers
+spec:
+  maintainers: []
+`,
+      );
+      const config = loadConfig(tmp);
+      expect(config.pipeline).toBeDefined();
+      expect(config.warnings).toBeDefined();
+      const warningFiles = config.warnings!.map((w) => w.file).sort();
+      expect(warningFiles).toContain('autonomy-policy-typo.yaml');
+      expect(warningFiles).toContain('maintainers.yaml');
+      const typoWarning = config.warnings!.find((w) => w.file === 'autonomy-policy-typo.yaml');
+      expect(typoWarning?.error).toContain('AutonomyPolcy');
+      expect(typoWarning?.error).toContain('skipped');
+    } finally {
+      rmSync(tmp, { recursive: true });
+    }
+  });
+
   it('does not include warnings field when every file loads cleanly', () => {
     const config = loadConfig(CONFIG_DIR);
     expect(config.warnings).toBeUndefined();
