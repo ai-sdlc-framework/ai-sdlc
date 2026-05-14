@@ -126,20 +126,13 @@ describe('validateIgnores() — AISDLC-264 PR #473 hardening', () => {
     // PR #473 review fix #3: regex is case-insensitive; partitionIgnores +
     // extractAdvisories lowercase to canonical so case mismatch can't break
     // suppression. Operators can write either case.
-    assert.doesNotThrow(() =>
-      validateIgnores([{ ...VALID_ENTRY, cveId: 'GHSA-ABCD-EFGH-IJKL' }]),
-    );
+    assert.doesNotThrow(() => validateIgnores([{ ...VALID_ENTRY, cveId: 'GHSA-ABCD-EFGH-IJKL' }]));
   });
   it('rejects malformed CVE format', () => {
-    assert.throws(
-      () => validateIgnores([{ ...VALID_ENTRY, cveId: 'CVE-bad' }]),
-      /invalid cveId/,
-    );
+    assert.throws(() => validateIgnores([{ ...VALID_ENTRY, cveId: 'CVE-bad' }]), /invalid cveId/);
   });
   it('accepts canonical lowercase GHSA', () => {
-    assert.doesNotThrow(() =>
-      validateIgnores([{ ...VALID_ENTRY, cveId: 'ghsa-abcd-efgh-ijkl' }]),
-    );
+    assert.doesNotThrow(() => validateIgnores([{ ...VALID_ENTRY, cveId: 'ghsa-abcd-efgh-ijkl' }]));
   });
   it('rejects entry with short justification', () => {
     assert.throws(
@@ -154,10 +147,7 @@ describe('validateIgnores() — AISDLC-264 PR #473 hardening', () => {
     );
   });
   it('rejects entry with unparseable expiresAt', () => {
-    assert.throws(
-      () => validateIgnores([{ ...VALID_ENTRY, expiresAt: 'never' }]),
-      /expiresAt/,
-    );
+    assert.throws(() => validateIgnores([{ ...VALID_ENTRY, expiresAt: 'never' }]), /expiresAt/);
   });
 });
 
