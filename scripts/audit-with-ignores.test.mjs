@@ -24,6 +24,8 @@ import { tmpdir } from 'node:os';
 
 import {
   isActive,
+  AuditGateError,
+  validateIgnores,
   partitionIgnores,
   extractAdvisories,
   appendAuditLog,
@@ -93,6 +95,73 @@ describe('isActive()', () => {
 });
 
 // ---------------------------------------------------------------------------
+// AISDLC-264 PR #473 review fixes #2 + #4: validateIgnores
+// ---------------------------------------------------------------------------
+
+describe('validateIgnores() — AISDLC-264 PR #473 hardening', () => {
+  const VALID_ENTRY = {
+    cveId: 'CVE-2024-12345',
+    justification: 'transitive dep, no fix yet, monitoring upstream',
+    expiresAt: FUTURE,
+  };
+
+  it('accepts a valid array of canonical entries', () => {
+    assert.doesNotThrow(() => validateIgnores([VALID_ENTRY]));
+  });
+  it('accepts empty array', () => {
+    assert.doesNotThrow(() => validateIgnores([]));
+  });
+  it('rejects non-array top-level (PR #473 fix #4)', () => {
+    assert.throws(() => validateIgnores({}), AuditGateError);
+    assert.throws(() => validateIgnores('string'), AuditGateError);
+    assert.throws(() => validateIgnores(null), AuditGateError);
+  });
+  it('rejects "UNKNOWN" sentinel cveId (PR #473 fix #2 — primary attack)', () => {
+    assert.throws(
+      () => validateIgnores([{ ...VALID_ENTRY, cveId: 'UNKNOWN' }]),
+      /invalid cveId.*UNKNOWN.*reserved/,
+    );
+  });
+  it('accepts uppercase GHSA — case-insensitive (normalised to lowercase at lookup)', () => {
+    // PR #473 review fix #3: regex is case-insensitive; partitionIgnores +
+    // extractAdvisories lowercase to canonical so case mismatch can't break
+    // suppression. Operators can write either case.
+    assert.doesNotThrow(() =>
+      validateIgnores([{ ...VALID_ENTRY, cveId: 'GHSA-ABCD-EFGH-IJKL' }]),
+    );
+  });
+  it('rejects malformed CVE format', () => {
+    assert.throws(
+      () => validateIgnores([{ ...VALID_ENTRY, cveId: 'CVE-bad' }]),
+      /invalid cveId/,
+    );
+  });
+  it('accepts canonical lowercase GHSA', () => {
+    assert.doesNotThrow(() =>
+      validateIgnores([{ ...VALID_ENTRY, cveId: 'ghsa-abcd-efgh-ijkl' }]),
+    );
+  });
+  it('rejects entry with short justification', () => {
+    assert.throws(
+      () => validateIgnores([{ ...VALID_ENTRY, justification: 'too short' }]),
+      /justification/,
+    );
+  });
+  it('rejects entry missing cveId', () => {
+    assert.throws(
+      () => validateIgnores([{ justification: 'long enough text here', expiresAt: FUTURE }]),
+      /invalid cveId/,
+    );
+  });
+  it('rejects entry with unparseable expiresAt', () => {
+    assert.throws(
+      () => validateIgnores([{ ...VALID_ENTRY, expiresAt: 'never' }]),
+      /expiresAt/,
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // partitionIgnores
 // ---------------------------------------------------------------------------
 
@@ -107,8 +176,11 @@ describe('partitionIgnores()', () => {
     assert.equal(active.size, 2);
     assert.equal(expired.length, 1);
     assert.equal(expired[0].cveId, 'CVE-2024-00002');
-    assert.ok(active.has('CVE-2024-00001'));
-    assert.ok(active.has('GHSA-xxxx-yyyy-zzzz'));
+    // AISDLC-264 PR #473 review fix #3: keys are lowercased at storage so
+    // case-mismatch between operator-written cveId and runtime-extracted ID
+    // can't break suppression. See partitionIgnores for the rationale.
+    assert.ok(active.has('cve-2024-00001'));
+    assert.ok(active.has('ghsa-xxxx-yyyy-zzzz'));
   });
 
   it('returns empty active map and empty expired array when ignores list is empty', () => {
@@ -168,8 +240,10 @@ describe('extractAdvisories() — Shape A (advisories key)', () => {
       },
     ]);
     const [adv] = extractAdvisories(json, 'high');
-    assert.ok(adv.ids.includes('GHSA-aaaa-bbbb-cccc'));
-    assert.ok(adv.ids.includes('CVE-2024-99999'));
+    // AISDLC-264 PR #473 review fix #3: IDs are lowercased so they match
+    // the lowercased active map keys.
+    assert.ok(adv.ids.includes('ghsa-aaaa-bbbb-cccc'));
+    assert.ok(adv.ids.includes('cve-2024-99999'));
     assert.equal(adv.affectedPackage, 'vulnerable-pkg');
     assert.equal(adv.title, 'Remote code execution');
   });
@@ -197,7 +271,7 @@ describe('extractAdvisories() — Shape B (vulnerabilities key)', () => {
     ]);
     const results = extractAdvisories(json, 'high');
     assert.equal(results.length, 1);
-    assert.ok(results[0].ids.includes('GHSA-XXXX-YYYY-ZZZZ'));
+    assert.ok(results[0].ids.includes('ghsa-xxxx-yyyy-zzzz'));
     assert.equal(results[0].affectedPackage, 'evil-dep');
   });
 
@@ -226,9 +300,14 @@ describe('extractAdvisories() — Shape B (vulnerabilities key)', () => {
     assert.ok(results[0].ids.includes('UNKNOWN'));
   });
 
-  it('returns empty for unknown JSON shape', () => {
-    const results = extractAdvisories({ something: 'unexpected' }, 'high');
-    assert.deepEqual(results, []);
+  // AISDLC-264 PR #473 review fix #1 (CRITICAL): unrecognised shape used to
+  // return empty (gate passed silently). Now throws AuditGateError → main
+  // script catches + exits 2 (fail-closed).
+  it('AISDLC-264 PR #473 fix #1: throws AuditGateError on unknown JSON shape', () => {
+    assert.throws(
+      () => extractAdvisories({ something: 'unexpected' }, 'high'),
+      /unrecognised pnpm audit JSON shape/,
+    );
   });
 });
 

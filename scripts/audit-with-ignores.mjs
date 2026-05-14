@@ -23,10 +23,37 @@
  *   2  Unexpected error (pnpm audit unavailable, JSON parse failure, etc.)
  */
 
-import { execFileSync, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, appendFileSync, readFileSync } from 'node:fs';
 import { dirname, resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+/**
+ * AISDLC-264 PR #473 review fix: validate cveId against the canonical
+ * pattern before trusting it as a Map lookup key. Pre-fix, loadIgnores
+ * accepted any string — including the runtime sentinel "UNKNOWN" — which
+ * let an attacker write `{"cveId": "UNKNOWN"}` to .audit-ignores.json and
+ * silently suppress every Shape B transitive advisory whose CVE/GHSA ID
+ * couldn't be extracted from the URL.
+ *
+ * Pattern matches the JSON Schema at spec/schemas/audit-ignores.schema.json:
+ * lowercase only — Shape B GHSA extraction is also normalised to lowercase
+ * (PR #473 review fix #3 below) so case mismatch can't break lookups.
+ */
+const CVE_ID_PATTERN = /^(CVE-\d{4}-\d{4,}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})$/i;
+
+/**
+ * AISDLC-264 PR #473 review fix: error class for fail-closed validation.
+ * Thrown from pure helpers (extractAdvisories, loadIgnores) so unit tests
+ * can assert via assert.throws(). The main script catches this at the top
+ * level and exits 2 so the operator sees a non-zero exit code.
+ */
+export class AuditGateError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'AuditGateError';
+  }
+}
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -70,22 +97,68 @@ if (!SEVERITY_LEVELS.includes(auditLevel)) {
  * @param {string} path
  * @returns {Array<{cveId: string, justification: string, expiresAt: string}>}
  */
+/**
+ * Validate a parsed ignores array. Throws AuditGateError on any violation.
+ * AISDLC-264 PR #473 review fixes #2 + #4: rejects non-array top-level,
+ * malformed entries, and any cveId that doesn't match CVE_ID_PATTERN
+ * (closes the "UNKNOWN" sentinel attack).
+ *
+ * Exported so tests can assert.throws() on each validation failure.
+ */
+export function validateIgnores(parsed, path = '<inline>') {
+  if (!Array.isArray(parsed)) {
+    throw new AuditGateError(
+      `${path} top-level value must be a JSON array (got ${typeof parsed}). ` +
+        `Edit the file to wrap entries in [...] or delete the file to disable exemptions.`,
+    );
+  }
+  for (let i = 0; i < parsed.length; i++) {
+    const entry = parsed[i];
+    if (!entry || typeof entry !== 'object') {
+      throw new AuditGateError(
+        `${path} entry #${i} is not an object. Each entry must be {cveId, justification, expiresAt}.`,
+      );
+    }
+    if (typeof entry.cveId !== 'string' || !CVE_ID_PATTERN.test(entry.cveId)) {
+      throw new AuditGateError(
+        `${path} entry #${i} has invalid cveId ${JSON.stringify(entry.cveId)}. ` +
+          `Must match: CVE-YYYY-NNNN+ OR GHSA-xxxx-xxxx-xxxx (lowercase). ` +
+          `The runtime sentinel "UNKNOWN" is reserved and cannot be ignored.`,
+      );
+    }
+    if (typeof entry.justification !== 'string' || entry.justification.length < 20) {
+      throw new AuditGateError(
+        `${path} entry #${i} (${entry.cveId}) requires a non-empty justification ` +
+          `of at least 20 chars (currently ${typeof entry.justification === 'string' ? entry.justification.length : 'missing'}).`,
+      );
+    }
+    if (typeof entry.expiresAt !== 'string' || isNaN(new Date(entry.expiresAt).getTime())) {
+      throw new AuditGateError(
+        `${path} entry #${i} (${entry.cveId}) requires a parseable ISO-8601 expiresAt.`,
+      );
+    }
+  }
+}
+
 function loadIgnores(path) {
   if (!existsSync(path)) {
     return [];
   }
+  let parsed;
   try {
     const raw = readFileSync(path, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      process.stderr.write(`[audit-gate] WARN: ${path} is not a JSON array — ignoring the file.\n`);
-      return [];
-    }
-    return parsed;
+    parsed = JSON.parse(raw);
   } catch (err) {
     process.stderr.write(`[audit-gate] ERROR: failed to parse ${path}: ${err.message}\n`);
     process.exit(2);
   }
+  try {
+    validateIgnores(parsed, path);
+  } catch (err) {
+    process.stderr.write(`[audit-gate] ERROR: ${err.message}\n`);
+    process.exit(2);
+  }
+  return parsed;
 }
 
 /**
@@ -111,7 +184,11 @@ export function partitionIgnores(ignores, now = new Date()) {
   const expired = [];
   for (const entry of ignores) {
     if (isActive(entry, now)) {
-      active.set(entry.cveId, entry);
+      // AISDLC-264 PR #473 review fix: lowercase the lookup key so
+      // case-mismatch between operator-written cveId and runtime-extracted
+      // ID can't break suppression. Advisory IDs are also lowercased at
+      // extraction (see extractAdvisories Shape A + B).
+      active.set(entry.cveId.toLowerCase(), entry);
     } else {
       expired.push(entry);
     }
@@ -190,8 +267,11 @@ export function extractAdvisories(auditJson, minSeverity) {
           ids.unshift(String(adv.id));
         }
 
-        // Deduplicate while preserving order.
-        const uniqueIds = [...new Set(ids)];
+        // AISDLC-264 PR #473 review fix: lowercase normalisation matches
+        // partitionIgnores' lookup-key normalisation so case-mismatch
+        // between the advisory's emitted ID and the operator's cveId entry
+        // can't break suppression.
+        const uniqueIds = [...new Set(ids.map((id) => String(id).toLowerCase()))];
 
         findings.push({
           ids: uniqueIds.length > 0 ? uniqueIds : [String(adv.id ?? 'UNKNOWN')],
@@ -216,7 +296,12 @@ export function extractAdvisories(auditJson, minSeverity) {
           // Extract GHSA from the advisory URL (e.g. https://github.com/advisories/GHSA-xxxx-yyyy-zzzz)
           if (via.url) {
             const m = via.url.match(/GHSA-[a-z0-9-]+/i);
-            if (m) ids.push(m[0].toUpperCase());
+            // AISDLC-264 PR #473 review fix #3 (MAJOR): normalise GHSA to
+            // lowercase to match the schema pattern. Pre-fix the extraction
+            // uppercased while the schema required lowercase, so every
+            // schema-valid GHSA ignore in .audit-ignores.json missed the
+            // lookup and the gate fired on advisories meant to be suppressed.
+            if (m) ids.push(m[0].toLowerCase());
           }
           if (via.cve) ids.push(via.cve);
           findings.push({
@@ -240,11 +325,16 @@ export function extractAdvisories(auditJson, minSeverity) {
     return findings;
   }
 
-  // Unknown shape — return empty (gate passes; user should investigate).
-  process.stderr.write(
-    '[audit-gate] WARN: unrecognised pnpm audit JSON shape; no advisories extracted.\n',
+  // AISDLC-264 PR #473 review fix #1 (CRITICAL): unrecognised shape used
+  // to return empty (gate passes). A shimmed `pnpm` binary or future pnpm
+  // version emitting `{}` could silently suppress every advisory. Now throws
+  // AuditGateError (fail-closed) — main script catches and exits 2.
+  // Throwing rather than process.exit lets unit tests use assert.throws.
+  throw new AuditGateError(
+    'unrecognised pnpm audit JSON shape — neither `advisories` nor `vulnerabilities` keys present. ' +
+      'Refusing to pass the gate without an authoritative advisory list. ' +
+      'Inspect pnpm audit output manually: pnpm audit --json | jq keys',
   );
-  return findings;
 }
 
 /**
@@ -374,13 +464,24 @@ if (isMain) {
 
   const auditJson = runPnpmAudit(REPO_ROOT);
 
-  const { blockers, suppressed, expiredIgnores, exitCode } = runAuditGate({
-    auditJson,
-    ignores,
-    minSeverity: auditLevel,
-    logPath,
-    dryRun,
-  });
+  // AISDLC-264 PR #473 review fix: catch AuditGateError thrown from pure
+  // helpers (extractAdvisories on unknown shape) and map to exit 2.
+  let blockers, suppressed, expiredIgnores, exitCode;
+  try {
+    ({ blockers, suppressed, expiredIgnores, exitCode } = runAuditGate({
+      auditJson,
+      ignores,
+      minSeverity: auditLevel,
+      logPath,
+      dryRun,
+    }));
+  } catch (err) {
+    if (err instanceof AuditGateError) {
+      process.stderr.write(`[audit-gate] ERROR: ${err.message}\n`);
+      process.exit(2);
+    }
+    throw err;
+  }
 
   // Print summary.
   if (suppressed.length > 0) {
