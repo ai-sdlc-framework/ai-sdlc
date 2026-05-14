@@ -8,15 +8,25 @@
 > a custom one, and the empirical resolutions to the open questions that
 > RFC-0012 §15 left for implementation.
 
+> **Adopters / billing**: this doc is the engineer-facing reference. For the
+> adopter-facing "which dispatch path costs what" guide, see
+> [`docs/operations/billing-and-cost-optimization.md`](../../docs/operations/billing-and-cost-optimization.md).
+> Notably, the 2026-06-15 Anthropic Agent SDK credit changes the billing
+> footprint of both `ShellClaudePSpawner` (`claude -p`) and
+> `ClaudeCodeSDKSpawner` (Anthropic SDK + API key) — both now draw from the
+> per-plan monthly Agent SDK credit pool ($200/mo on Max-20x) BEFORE any
+> API-key overflow charges fire.
+
 ## TL;DR — which spawner do I want?
 
-| Context | Use | Notes |
+| Context | Use | Bills against (post-2026-06-15) |
 |---|---|---|
-| **`/ai-sdlc execute` slash command body (Tier 1)** | None — slash command body uses the main session's `Agent` tool directly | `executePipeline()` is NOT called from Tier 1; the slash command body interleaves CLI subcommands with `Agent` tool calls. No `SubagentSpawner` needed because `Agent` IS the dispatch boundary for the main Claude Code session. |
-| **`pnpm --filter @ai-sdlc/dogfood watch` (Tier 2, subscription)** | `defaultSpawner()` → resolves to `ShellClaudePSpawner` when `claude` CLI is on PATH | Reuses the operator's logged-in Claude Code Max session. No tokens spent. |
-| **CI runner / webhook server / Forge tenant (Tier 2, API key)** | `defaultSpawner()` → resolves to `ClaudeCodeSDKSpawner` when `ANTHROPIC_API_KEY` is set | Also: install `@anthropic-ai/claude-code` (lazy peer — see below). |
-| **Custom auth, tenant routing, alt SDK shape** | Implement your own `SubagentSpawner` (see [Custom spawner howto](#custom-spawner-howto)) | The interface is two methods: `spawn` + `spawnParallel`. |
-| **Unit / integration tests** | `MockSpawner` from `@ai-sdlc/pipeline-cli` | Per-type fixtures or callbacks; `getCallCount` for assertions. |
+| **`/ai-sdlc execute` slash command body (Tier 1)** | None — slash command body uses the main session's `Agent` tool directly | Operator's interactive Claude Code quota. `executePipeline()` is NOT called from Tier 1; the slash command body interleaves CLI subcommands with `Agent` tool calls. |
+| **`cli-orchestrator start` (autonomous loop)** | `defaultSpawner()` → resolves to `ShellClaudePSpawner` when `claude` CLI is on PATH | Operator's monthly Agent SDK credit ($200/mo on Max-20x). `claude -p` is explicitly covered by the new SDK credit pool. |
+| **`pnpm --filter @ai-sdlc/dogfood watch` (Tier 2, subscription)** | `defaultSpawner()` → `ShellClaudePSpawner` | Same — Agent SDK credit pool. |
+| **CI runner / webhook server / Forge tenant (Tier 2, SDK + API key)** | `defaultSpawner()` → resolves to `ClaudeCodeSDKSpawner` when `ANTHROPIC_API_KEY` is set | If the API key authenticates against a paid Claude subscription: Agent SDK credit pool first, then API-key overflow. Pure API key (no subscription): pay-as-you-go directly. Also: install `@anthropic-ai/claude-code` (lazy peer — see below). |
+| **Custom auth, tenant routing, alt SDK shape** | Implement your own `SubagentSpawner` (see [Custom spawner howto](#custom-spawner-howto)) | Whatever your spawner authenticates against. |
+| **Unit / integration tests** | `MockSpawner` from `@ai-sdlc/pipeline-cli` | Free — no LLM calls. |
 
 When in doubt, call `defaultSpawner()` — it picks the right one for your
 environment and throws a clear instructional error if neither subscription nor
@@ -74,8 +84,21 @@ opposite of the lifecycle Step 13 cleanup is meant to enforce.
 
 Shells out to the operator's installed `claude` CLI (Claude Code), running one
 short-lived non-interactive (`--print`) session per `spawn` call. Uses the
-operator's logged-in subscription auth — no API tokens consumed, the cost lands
-on the same Claude Code Max-20x plan that backs `/ai-sdlc execute`.
+operator's logged-in subscription auth.
+
+**Billing**:
+
+- **Pre-2026-06-15**: cost lands on the operator's interactive Claude
+  subscription quota (same pool that backs `/ai-sdlc execute` typed in chat).
+- **Post-2026-06-15**: per the Anthropic Agent SDK credit announcement,
+  `claude -p` (non-interactive) is explicitly covered by the new monthly
+  Agent SDK credit ($200/mo on Max-20x). This is a SEPARATE pool from the
+  interactive quota — `ShellClaudePSpawner` no longer competes with the
+  operator's typing-in-chat usage. Overflow falls through to API-key
+  pay-as-you-go only if explicitly enabled.
+
+See [`docs/operations/billing-and-cost-optimization.md`](../../docs/operations/billing-and-cost-optimization.md)
+for the full breakdown.
 
 ```ts
 import { ShellClaudePSpawner, executePipeline } from '@ai-sdlc/pipeline-cli';
@@ -117,7 +140,7 @@ stdout as `output` and tries to extract structured JSON from `result`
 string). When parsing fails the `parsed` field stays undefined and the caller's
 Step 6 logic falls back to parsing the raw `output` string.
 
-### `ClaudeCodeSDKSpawner` — API-key billing
+### `ClaudeCodeSDKSpawner` — Agent SDK credit (or API-key overflow)
 
 Uses the `@anthropic-ai/claude-code` SDK programmatically rather than shelling
 out. Authenticates via an explicit `ANTHROPIC_API_KEY` (or the SDK's own
@@ -125,6 +148,17 @@ out. Authenticates via an explicit `ANTHROPIC_API_KEY` (or the SDK's own
 environments without subscription auth: bare CI runners, customer tenants on
 their own keys, webhooks invoked from servers that aren't logged into a Claude
 Code session.
+
+**Billing**:
+
+- **Pre-2026-06-15**: API-key pay-as-you-go for every dispatch.
+- **Post-2026-06-15**: per the Anthropic Agent SDK credit announcement, SDK
+  usage authenticated against a paid Claude subscription draws from the
+  monthly Agent SDK credit pool FIRST ($20/Pro, $100/Max-5x, $200/Max-20x),
+  with API-key overflow only firing once the credit is exhausted AND
+  overflow is explicitly enabled. Operators must claim the credit one-time
+  via the email Anthropic sends to eligible accounts. See
+  [`docs/operations/billing-and-cost-optimization.md`](../../docs/operations/billing-and-cost-optimization.md).
 
 ```ts
 import { ClaudeCodeSDKSpawner, executePipeline } from '@ai-sdlc/pipeline-cli';
