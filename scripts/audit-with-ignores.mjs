@@ -303,7 +303,10 @@ export function extractAdvisories(auditJson, minSeverity) {
             // lookup and the gate fired on advisories meant to be suppressed.
             if (m) ids.push(m[0].toLowerCase());
           }
-          if (via.cve) ids.push(via.cve);
+          // AISDLC-264 PR #473 review fix #3 (round 2): also lowercase via.cve
+          // for consistency with the Shape A normalisation. Pre-fix would
+          // miss `via.cve = 'CVE-2024-1234'` against active key `cve-2024-1234`.
+          if (via.cve) ids.push(String(via.cve).toLowerCase());
           findings.push({
             ids: ids.length > 0 ? ids : ['UNKNOWN'],
             severity: vuln.severity,
