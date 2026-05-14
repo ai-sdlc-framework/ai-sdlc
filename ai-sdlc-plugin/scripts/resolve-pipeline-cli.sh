@@ -125,57 +125,23 @@ if [ -d "$CACHE_ROOT" ]; then
     printf '%s' "$BEST_CANDIDATE"
     exit 0
   fi
-
-  # Cache dirs exist but no @ai-sdlc/pipeline-cli found — try self-heal on the
-  # newest version dir (so adopters who just installed get auto-repaired).
-  NEWEST_DIR=""
-  for marketplace_dir in "$CACHE_ROOT"/*/; do
-    [ -d "$marketplace_dir" ] || continue
-    PLUGIN_VERSIONS_DIR="${marketplace_dir}ai-sdlc"
-    [ -d "$PLUGIN_VERSIONS_DIR" ] || continue
-    for version_dir in "$PLUGIN_VERSIONS_DIR"/*/; do
-      [ -d "$version_dir" ] || continue
-      SELF_HEAL_SCRIPT="${version_dir%/}/scripts/install-runtime-deps.sh"
-      if [ -f "$SELF_HEAL_SCRIPT" ]; then
-        VERSION="$(basename "$version_dir")"
-        # Pick newest among heal-capable dirs.
-        if [ -z "$NEWEST_DIR" ] || \
-           printf '%s\n%s\n' "$(basename "$NEWEST_DIR")" "$VERSION" | sort -rV | head -1 | grep -q "^$VERSION$"; then
-          NEWEST_DIR="${version_dir%/}"
-        fi
-      fi
-    done
-  done
-
-  if [ -n "$NEWEST_DIR" ]; then
-    SELF_HEAL_SCRIPT="$NEWEST_DIR/scripts/install-runtime-deps.sh"
-    echo "resolve-pipeline-cli.sh: trying self-heal in cache at $NEWEST_DIR ..." >&2
-    if bash "$SELF_HEAL_SCRIPT" "$NEWEST_DIR" >&2; then
-      CANDIDATE="$NEWEST_DIR/$PIPELINE_CLI_REL"
-      if _is_usable "$CANDIDATE"; then
-        echo "resolve-pipeline-cli.sh: self-heal (cache) succeeded" >&2
-        printf '%s' "$CANDIDATE"
-        exit 0
-      fi
-    fi
-  fi
 fi
 
-# ── Topology 5: Monorepo dogfood fallback ───────────────────────────────────
+# ── Topology 4: Monorepo dogfood fallback ───────────────────────────────────
 DOGFOOD_BIN="$(pwd)/pipeline-cli/bin"
 if _is_usable "$DOGFOOD_BIN"; then
   printf '%s' "$DOGFOOD_BIN"
   exit 0
 fi
 
-# ── Topology 6: Nothing found ────────────────────────────────────────────────
+# ── Topology 5: Nothing found ────────────────────────────────────────────────
 cat >&2 <<'EOF'
 resolve-pipeline-cli.sh: ERROR — @ai-sdlc/pipeline-cli binary not found.
 
 Tried all install topologies:
   1. $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin  (marketplace install)
   2. $CLAUDE_PLUGIN_ROOT/node_modules/@ai-sdlc/pipeline-cli/bin (plugin root)
-  3. ~/.claude/plugins/cache/*/ai-sdlc/*/node_modules/@ai-sdlc/pipeline-cli/bin (cache probe)
+  3. ~/.claude/plugins/cache/*/ai-sdlc/*/node_modules/@ai-sdlc/pipeline-cli/bin (cache probe, read-only)
   4. $(pwd)/pipeline-cli/bin  (dogfood monorepo)
 
 Fix options (choose one):
@@ -183,8 +149,11 @@ Fix options (choose one):
        /claude plugin install ai-sdlc
        Then restart Claude Code.
 
-  B. If using the local marketplace, run:
-       bash ~/.claude/plugins/cache/ai-sdlc-local/ai-sdlc/<version>/scripts/install-runtime-deps.sh
+  B. From your plugin install root, run:
+       bash "$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh" "$CLAUDE_PLUGIN_ROOT"
+     (Self-heal is operator-initiated only; the resolver no longer auto-execs
+      install-runtime-deps.sh from the user-writable plugin cache, since that
+      would run any script an attacker could plant under ~/.claude/plugins/cache/.)
 
   C. If running from the ai-sdlc monorepo, cd to the repo root before invoking /ai-sdlc execute.
 

@@ -6,8 +6,11 @@
  *
  * Topologies under test:
  *   1. CLAUDE_PLUGIN_DIR set + node_modules present (happy path — marketplace)
- *   2. CLAUDE_PLUGIN_DIR set + node_modules missing (broken install → self-heal)
+ *   2. CLAUDE_PLUGIN_DIR set + node_modules missing (broken install → self-heal
+ *      from CLAUDE_PLUGIN_ROOT only; no auto-exec from user-writable cache)
  *   3. CLAUDE_PLUGIN_DIR unset + CLAUDE_PLUGIN_ROOT set + node_modules present
+ *   3b. Plugin cache probe (read-only — refuses to auto-exec install scripts
+ *       found there; PR #482 security fix)
  *   4. All env vars unset + $(pwd)/pipeline-cli/bin present (dogfood monorepo)
  *   5. All paths broken → exit 1 with actionable error
  *
@@ -210,9 +213,9 @@ describe('Topology 5: All paths broken — exits 1 with actionable error', () =>
   });
 });
 
-describe('Plugin cache probe — topology 4b', () => {
+describe('Plugin cache probe — topology 3 (read-only)', () => {
   it('resolves from ~/.claude/plugins/cache/<mp>/ai-sdlc/<version> when present', () => {
-    const fakeHome = join(tmpDir, 'topology4b-home');
+    const fakeHome = join(tmpDir, 'topology3probe-home');
     const cacheDir = join(
       fakeHome,
       '.claude',
@@ -224,7 +227,7 @@ describe('Plugin cache probe — topology 4b', () => {
     );
     const expectedBin = join(cacheDir, PIPELINE_CLI_REL);
     createFakePipelineBin(expectedBin);
-    const fakeCwd = join(tmpDir, 'topology4b-cwd');
+    const fakeCwd = join(tmpDir, 'topology3probe-cwd');
     mkdirSync(fakeCwd, { recursive: true });
 
     const { stdout, exitCode } = runScript(
@@ -238,5 +241,58 @@ describe('Plugin cache probe — topology 4b', () => {
 
     assert.equal(exitCode, 0, 'must exit 0 when plugin cache has pipeline-cli');
     assert.equal(normPath(stdout), normPath(expectedBin), 'must return path from plugin cache');
+  });
+
+  it('SECURITY: refuses to auto-exec install-runtime-deps.sh from user-writable cache (PR #482 critical fix)', () => {
+    // Plant an attacker-controlled install-runtime-deps.sh under a cache dir
+    // that has NO usable pipeline-cli bin. The pre-fix resolver would walk
+    // the cache, pick the highest-semver dir, and `bash` the script with
+    // arbitrary code execution. The post-fix resolver must NOT execute it.
+    //
+    // Regression test for the two CRITICAL findings on PR #482:
+    //   - resolve-pipeline-cli.sh:138 — exec'd unverified script from cache
+    //   - install-runtime-deps.sh:46 — npm install runs malicious postinstall
+    //
+    // The attack is detected by writing a sentinel file from the planted
+    // script. If the resolver still execs it, the sentinel will appear on
+    // disk after running. The test asserts the sentinel does NOT exist.
+    const fakeHome = join(tmpDir, 'security-fix-home');
+    const cacheDir = join(
+      fakeHome,
+      '.claude',
+      'plugins',
+      'cache',
+      'evil-marketplace',
+      'ai-sdlc',
+      '99.0.0',
+    );
+    const scriptsDir = join(cacheDir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    const sentinel = join(tmpDir, 'security-fix-pwn-sentinel');
+    // The planted script writes the sentinel to prove it was executed.
+    writeFileSync(
+      join(scriptsDir, 'install-runtime-deps.sh'),
+      `#!/usr/bin/env bash\ntouch "${sentinel}"\nexit 0\n`,
+    );
+    // No node_modules under the cache dir → pre-fix resolver would fall
+    // through to the self-heal block and exec the planted script.
+    const fakeCwd = join(tmpDir, 'security-fix-cwd');
+    mkdirSync(fakeCwd, { recursive: true });
+
+    const { exitCode } = runScript(
+      {
+        CLAUDE_PLUGIN_DIR: '',
+        CLAUDE_PLUGIN_ROOT: '',
+        HOME: fakeHome,
+      },
+      fakeCwd,
+    );
+
+    assert.equal(exitCode, 1, 'must exit 1 (no usable bin) — must NOT self-heal from cache');
+    assert.equal(
+      existsSync(sentinel),
+      false,
+      'planted install-runtime-deps.sh MUST NOT execute — would be RCE via user-writable cache',
+    );
   });
 });
