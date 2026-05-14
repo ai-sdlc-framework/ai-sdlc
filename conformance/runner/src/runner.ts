@@ -125,6 +125,11 @@ export async function runConformanceTests(fixturesDir?: string): Promise<RunnerR
     const isPass = validation.skipped
       ? false
       : validation.valid === expectedValid;
+    const skippedKind = validation.skipped
+      ? typeof (doc as { kind?: unknown }).kind === 'string'
+        ? (doc as { kind: string }).kind
+        : String((doc as { kind?: unknown }).kind)
+      : null;
     schemaResults.push({
       file,
       expectedValid,
@@ -134,7 +139,8 @@ export async function runConformanceTests(fixturesDir?: string): Promise<RunnerR
         ? [
             {
               path: '/kind',
-              message: `unknown kind — fixture skipped without exercising schema`,
+              message: `unknown kind '${skippedKind}' — fixture skipped without exercising schema`,
+              keyword: 'unknown-kind',
             },
           ]
         : validation.valid
