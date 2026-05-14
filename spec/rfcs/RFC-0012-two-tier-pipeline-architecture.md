@@ -1,22 +1,22 @@
 ---
 id: RFC-0012
 title: Two-Tier Pipeline Architecture with Shared Core Library
-status: Approved
-lifecycle: Signed Off
+status: Implemented
+lifecycle: Implemented
 author: dominique@reliablegenius.io
 created: 2026-04-30
-updated: 2026-05-09
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 requiresDocs: []
 ---
 
 # RFC-0012: Two-Tier Pipeline Architecture with Shared Core Library
 
-**Status:** Accepted (signed off 2026-04-30; ready for implementation)
-**Lifecycle:** Signed Off (Engineering + Operator owners signed; Product owner sign-off intentionally omitted — see Sign-Off note below)
+**Status:** Implemented (pipeline-cli is the production runtime substrate; AISDLC-100.{1,2,3,5,6,7,8} phase tasks shipped + Codex adaptation AISDLC-202.{1,2,3,4} shipped; umbrella-task close-out lost in re-org per operator confirmation 2026-05-13)
+**Lifecycle:** Implemented (lifecycle audit 2026-05-13 promoted Signed Off → Implemented; the two-tier slash-command + library contract runs every `/ai-sdlc execute` invocation today)
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-04-30
-**Updated:** 2026-04-30
+**Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
 **Supersedes:** AISDLC-82 (execute-orchestrator-as-subagent — empirically unimplementable)
 
