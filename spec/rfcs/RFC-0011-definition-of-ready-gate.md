@@ -1,11 +1,11 @@
 ---
 id: RFC-0011
 title: Definition-of-Ready Gate for Pipeline Admission
-status: Draft
-lifecycle: Signed Off
+status: Implemented
+lifecycle: Implemented
 author: dominique@reliablegenius.io
 created: 2026-04-30
-updated: 2026-04-30
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 # Conceptual / strategic + future-feature RFC. Phase 1 (AISDLC-115.1) ships
 # only the schemas + status enum. Per-surface tutorials/api docs land with
@@ -15,11 +15,11 @@ requiresDocs: []
 
 # RFC-0011: Definition-of-Ready Gate for Pipeline Admission
 
-**Status:** Signed off (Engineering + Operator 2026-04-30; Product 2026-05-04)
-**Lifecycle:** Signed Off (all three owners signed; design locked)
+**Status:** Implemented (AISDLC-115 umbrella + all 9 phases 115.1–115.9 shipped; `evaluationMode: enforce` live in dogfood since 2026-05-03)
+**Lifecycle:** Implemented (lifecycle audit 2026-05-13 promoted from Signed Off)
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-04-30
-**Updated:** 2026-04-30
+**Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
 
 ---

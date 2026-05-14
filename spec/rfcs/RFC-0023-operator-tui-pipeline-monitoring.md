@@ -1,11 +1,11 @@
 ---
 id: RFC-0023
 title: Operator TUI — Pipeline Monitoring + Steering Surface
-status: Draft
-lifecycle: Ready for Review
+status: Approved
+lifecycle: Signed Off
 author: dominique@reliablegenius.io
 created: 2026-05-03
-updated: 2026-05-03
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 requires: [RFC-0014, RFC-0015]
 requiresDocs: []
@@ -13,10 +13,11 @@ requiresDocs: []
 
 # RFC-0023: Operator TUI — Pipeline Monitoring + Steering Surface
 
-**Status:** Draft (v0.2 — all 10 OQs resolved via operator walkthrough 2026-05-03)
-**Lifecycle:** Ready for Review (Engineering + Operator signed; awaiting Product Lead)
+**Status:** Approved (AISDLC-178 umbrella + all 7 phases 178.1–178.7 + extension 178.4.1 shipped; all 10 OQs resolved via operator walkthrough 2026-05-03)
+**Lifecycle:** Signed Off (lifecycle audit 2026-05-13 promoted from Ready for Review; flag default-on follows the same opt-in pattern as RFC-0014 / RFC-0015)
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-03
+**Updated:** 2026-05-13
 **Target Spec Version:** v1alpha1
 **Depends on:** RFC-0014 (dependency graph composition), RFC-0015 (autonomous pipeline orchestrator)
 
