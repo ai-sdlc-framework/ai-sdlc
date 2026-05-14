@@ -1,5 +1,5 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://ai-sdlc.dev/schemas/capture-record.v1.schema.json",
   "title": "CaptureRecord",
   "description": "RFC-0024 emergent issue capture record. Immutable once written; auditTrail accumulates state transitions.",
