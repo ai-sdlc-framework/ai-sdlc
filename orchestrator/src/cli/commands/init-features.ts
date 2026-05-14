@@ -494,8 +494,18 @@ export async function applyFeatureSelection(
   if (selection.classifier) templateSets.push(CLASSIFIER_TEMPLATES);
   if (selection.workflows) templateSets.push(WORKFLOWS_TEMPLATES);
 
+  // AISDLC-261 PR #480 review fix: dedupe across template sets so e.g.
+  // `ai-sdlc-gate.yml` (in BOTH BASELINE_WORKFLOW_TEMPLATES and
+  // WORKFLOWS_TEMPLATES) doesn't get written twice on
+  // `--with-workflows --force` (which would log "overwrite ${relPath}
+  // (--force)" against the duplicate, doubling result.created entries).
+  // First-set wins (BASELINE comes first, then feature bundles).
+  const seenRelPaths = new Set<string>();
+
   for (const set of templateSets) {
     for (const [relPath, contents] of Object.entries(set.files)) {
+      if (seenRelPaths.has(relPath)) continue;
+      seenRelPaths.add(relPath);
       const absPath = join(projectDir, relPath);
 
       if (flags.dryRun) {

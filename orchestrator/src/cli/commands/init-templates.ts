@@ -45,8 +45,12 @@ export const AI_SDLC_GATE_WORKFLOW = `name: AI-SDLC PR Ready Gate
 # pytest, pip-tools, Open edX, PyCA, PyPA, Mergify.
 
 on:
+  # AISDLC-261 PR #480 review fix: include 'ready_for_review' so the gate
+  # fires when adopters using the draft-PR flow (AISDLC-218) flip a PR
+  # from draft to ready. Without it, ai-sdlc/pr-ready stays unposted on
+  # the ready transition and branch protection fails.
   pull_request:
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
     types: [checks_requested]
 
@@ -501,22 +505,34 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Post Review Results
+      - name: Post Review Results (stub — fails closed by default)
         env:
           GH_TOKEN: \${{ github.token }}
           REPO: \${{ github.repository }}
           HEAD_SHA: \${{ github.event.pull_request.head.sha }}
+          # AISDLC-261 PR #480 review fix (CRITICAL): the stub now defaults to
+          # FAILURE so adopters who configure 'Post Review Results' as a required
+          # branch-protection check + enable auto-merge don't accidentally ship
+          # a phantom review gate that auto-merges every PR with zero review.
+          # To opt in to auto-pass while wiring your reviewers, set the repo
+          # variable AISDLC_REVIEW_STUB_AUTOPASS=true. Real reviewer wiring
+          # should replace this entire step.
+          AUTOPASS: \${{ vars.AISDLC_REVIEW_STUB_AUTOPASS }}
         run: |
           set -euo pipefail
-          # Wire your review tooling here (e.g. AI-SDLC reviewer agents,
-          # custom scripts, etc.). This stub posts success unconditionally
-          # so the required check does not block merges while you set up.
+          if [ "\${AUTOPASS:-}" = "true" ]; then
+            STATE=success
+            DESC='Review passed (STUB AUTOPASS — wire your reviewers, then unset AISDLC_REVIEW_STUB_AUTOPASS)'
+          else
+            STATE=failure
+            DESC='Review stub not wired. Either replace this workflow step with your reviewers OR set repo var AISDLC_REVIEW_STUB_AUTOPASS=true (acknowledged risk).'
+          fi
           gh api "repos/\${REPO}/statuses/\${HEAD_SHA}" \\
             -X POST \\
-            -f state=success \\
+            -f state="\${STATE}" \\
             -f context='Post Review Results' \\
-            -f description='Review passed (stub — wire your reviewers here)'
-          echo "Posted Post Review Results: success on \${HEAD_SHA}"
+            -f description="\${DESC}"
+          echo "Posted Post Review Results: \${STATE} on \${HEAD_SHA}"
 `;
 
 /**
@@ -597,6 +613,12 @@ jobs:
           HEAD_REF=$(echo "$PR_INFO" | jq -r '.headRefName')
           if [ "$IS_DRAFT" = "true" ]; then
             echo "[auto-enable] PR #$PR is draft — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif [ "$HEAD_FULL" = "/" ] || [ -z "$HEAD_FULL" ]; then
+            # AISDLC-261 PR #480 review fix: defensive — head repository was
+            # deleted or API returned an empty shape. Refuse to arm; operator
+            # can re-arm manually if intended.
+            echo "[auto-enable] PR #$PR has no resolvable head repository — skipping."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           elif [ "$HEAD_FULL" != "$REPO" ]; then
             echo "[auto-enable] PR #$PR is from a fork ($HEAD_FULL) — skipping."
