@@ -122,9 +122,7 @@ export async function runConformanceTests(fixturesDir?: string): Promise<RunnerR
     // failed regardless of expectedValid so a fixture file with a typo'd or
     // wrong `kind` value can never silently report passing — the schema was
     // never exercised.
-    const isPass = validation.skipped
-      ? false
-      : validation.valid === expectedValid;
+    const isPass = validation.skipped ? false : validation.valid === expectedValid;
     const skippedKind = validation.skipped
       ? typeof (doc as { kind?: unknown }).kind === 'string'
         ? (doc as { kind: string }).kind
