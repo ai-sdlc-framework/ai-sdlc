@@ -544,13 +544,13 @@ describe('rejection learnings (AC #6 + OQ-12.5)', () => {
 
   it('recordRejection maps medium confidence to 0.5 weight', () => {
     const proposal = makeProposal({ confidence: 'medium' });
-    const record = recordRejection(proposal, 'dom@example.com', 'not yet', () => NOW_MS);
+    const record = recordRejection(proposal, 'dom@example.com', 'not yet — needs more drift evidence', () => NOW_MS);
     expect(record.rejectionPrecedentWeight).toBe(0.5);
   });
 
   it('recordRejection maps low confidence to 0.2 weight', () => {
     const proposal = makeProposal({ confidence: 'low' });
-    const record = recordRejection(proposal, 'morgan@example.com', 'noise', () => NOW_MS);
+    const record = recordRejection(proposal, 'morgan@example.com', 'noise — appears stochastic, hold off', () => NOW_MS);
     expect(record.rejectionPrecedentWeight).toBe(0.2);
   });
 
@@ -565,7 +565,7 @@ describe('rejection learnings (AC #6 + OQ-12.5)', () => {
         shardId: 'acme',
         field: 'soulPurpose.mission',
         rejectedBy: 'alex@example.com',
-        rationale: 'nope',
+        rationale: 'nope — see prior consensus',
         rejectedAt: new Date(NOW_MS).toISOString(),
         classification: 'healthy',
         rejectionPrecedentWeight: 0.8,
@@ -583,7 +583,7 @@ describe('rejection learnings (AC #6 + OQ-12.5)', () => {
         shardId: 'acme',
         field: 'f',
         rejectedBy: 'a',
-        rationale: 'r',
+        rationale: 'rejected — followup PR pending',
         rejectedAt: '',
         classification: 'healthy',
         rejectionPrecedentWeight: 1.6, // artificially high to test clamp
@@ -600,7 +600,7 @@ describe('rejection learnings (AC #6 + OQ-12.5)', () => {
         shardId: 'acme',
         field: 'OTHER.field',
         rejectedBy: 'a',
-        rationale: 'r',
+        rationale: 'rejected — followup PR pending',
         rejectedAt: '',
         classification: 'healthy',
         rejectionPrecedentWeight: 0.8,
@@ -634,5 +634,59 @@ describe('one-field-per-proposal (AC #7 + OQ-12.2)', () => {
       // No array of fields — one field per proposal in v1
       expect(typeof result.event.field).toBe('string');
     }
+  });
+});
+
+// ── AISDLC-271 PR #476 round-2: defensive input validation ─────────────
+//
+// Per security-reviewer round 1 — when persistence/HTTP layer is added,
+// callers must validate identityClass against compiled DID schema, not
+// trust caller input. These tests pin the in-library defensive guards.
+
+describe('AISDLC-271 PR #476: defensive input validation', () => {
+  it('deriveApprovalPath rejects non-enum identityClass', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => deriveApprovalPath('hostile' as any, 'healthy')).toThrow(
+      /invalid identityClass/,
+    );
+  });
+
+  it('isProposalExpired rejects malformed expiresAt', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const proposal = { expiresAt: 'never' } as any;
+    expect(() => isProposalExpired(proposal, NOW_MS)).toThrow(/invalid expiresAt/);
+  });
+
+  it('recordRejection rejects empty/short rejectedBy', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const proposal = { proposalId: 'p1', shardId: 's', field: 'f', classification: 'healthy', confidence: 'medium' } as any;
+    expect(() =>
+      recordRejection(proposal, '', 'a long enough rationale here', () => NOW_MS),
+    ).toThrow(/invalid actor identity/);
+    expect(() =>
+      recordRejection(proposal, 'ab', 'a long enough rationale here', () => NOW_MS),
+    ).toThrow(/invalid actor identity/);
+  });
+
+  it('recordRejection rejects short rationale', () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const proposal = { proposalId: 'p1', shardId: 's', field: 'f', classification: 'healthy', confidence: 'medium' } as any;
+    expect(() =>
+      recordRejection(proposal, 'op@example.com', 'short', () => NOW_MS),
+    ).toThrow(/rationale must be/);
+  });
+
+  it('evaluateRevisionProposal validates identityClass at entry', () => {
+    expect(() =>
+      evaluateRevisionProposal({
+        shardId: 's',
+        field: 'f',
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        identityClass: 'corrupted' as any,
+        triggerConditions: { dismissSignals: 0, escalateSignals: 0, demandMisalignment: 0, driftEvents: 0 },
+        classificationEvidence: { icpMatchRate: 0.9, dismissToEscalateRatio: 1.0, coreDIDFieldsAffected: false },
+        now: () => NOW_MS,
+      }),
+    ).toThrow(/invalid identityClass/);
   });
 });

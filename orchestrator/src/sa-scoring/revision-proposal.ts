@@ -168,6 +168,11 @@ export function deriveApprovalPath(
   identityClass: IdentityClass | undefined,
   classification: DriftClassification,
 ): ApprovalPath {
+  // AISDLC-271 PR #476 round-2: reject non-enum identityClass to prevent
+  // a future caller from passing untrusted input that downgrades the
+  // approval requirement (e.g. attacker passes 'evolving' for a core field
+  // → triad → pillarLead, weaker authorization).
+  assertValidIdentityClass(identityClass, 'deriveApprovalPath');
   // Ambiguous drift always requires triad review regardless of identityClass (§7).
   if (classification === 'ambiguous') return 'triad';
   if (identityClass === 'evolving') return 'pillarLead';
@@ -296,6 +301,11 @@ export type EvaluateRevisionProposalResult =
 export function evaluateRevisionProposal(
   input: EvaluateRevisionProposalInput,
 ): EvaluateRevisionProposalResult {
+  // AISDLC-271 PR #476 round-2: validate identityClass at the entry point
+  // so any future caller passing untrusted input fails fast. Callers MUST
+  // derive identityClass from the compiled DID document (did-compiler.ts
+  // output), never from external request payloads or mutable records.
+  assertValidIdentityClass(input.identityClass, 'evaluateRevisionProposal');
   // Opt-out check (OQ-12.3)
   if (input.lockConfig && isFieldLocked(input.field, input.lockConfig)) {
     return { kind: 'skipped', reason: 'locked' };
@@ -416,9 +426,66 @@ function buildDiagnosticEvent(
 // ── Proposal expiry (§9) ─────────────────────────────────────────────
 
 /**
+ * AISDLC-271 PR #476 round-2 hardening: defensive validators for the
+ * caller-supplied surface that becomes attack surface once persistence /
+ * HTTP layers ship (RFC §9 explicitly defers those layers to a future
+ * task; until then these functions are pure-library and not reachable
+ * from external input — but the validators are still correct on
+ * trusted input AND lock down the contract for the future caller).
+ *
+ * IDENTITY_CLASS_VALUES + ALLOWED_IDENTITY_TYPES enforce the schema
+ * boundary: callers MUST derive identityClass from the compiled DID
+ * document (did-compiler.ts output), not from a request payload. This
+ * runtime check ensures no future caller accidentally trusts a
+ * webhook / issue-body / mutable-record value.
+ *
+ * `assertValidExpiresAt` ensures the persisted proposal record's
+ * expiresAt is a parseable ISO-8601 timestamp. Re-armed-past-expiry
+ * via mutation requires the persistence layer to enforce immutability
+ * AT WRITE TIME — see RFC-0031 §9 follow-up.
+ */
+const IDENTITY_CLASS_VALUES: readonly IdentityClass[] = ['core', 'evolving'];
+
+function assertValidIdentityClass(identityClass: IdentityClass | undefined, where: string): void {
+  if (identityClass === undefined) return; // undefined → triad default per §8 — safe
+  if (!IDENTITY_CLASS_VALUES.includes(identityClass)) {
+    throw new Error(
+      `[revision-proposal] ${where}: invalid identityClass ${JSON.stringify(identityClass)}. ` +
+        `Must be one of ${JSON.stringify(IDENTITY_CLASS_VALUES)}. ` +
+        `Callers MUST derive identityClass from the compiled DID document, never from external input.`,
+    );
+  }
+}
+
+function assertValidExpiresAt(expiresAt: unknown, where: string): void {
+  if (typeof expiresAt !== 'string' || isNaN(Date.parse(expiresAt))) {
+    throw new Error(
+      `[revision-proposal] ${where}: invalid expiresAt ${JSON.stringify(expiresAt)}. ` +
+        `Must be ISO-8601 string. ` +
+        `Persistence layer MUST treat expiresAt as immutable to prevent re-arming past expiry.`,
+    );
+  }
+}
+
+function assertValidActor(actor: unknown, where: string): void {
+  if (typeof actor !== 'string' || actor.trim().length < 3) {
+    throw new Error(
+      `[revision-proposal] ${where}: invalid actor identity ${JSON.stringify(actor)}. ` +
+        `Must be a non-empty string of length ≥ 3. ` +
+        `Persistence/HTTP callers MUST validate actor matches an authenticated session identity.`,
+    );
+  }
+}
+
+/**
  * Check whether a proposal has passed its `expiresAt` timestamp.
+ *
+ * AISDLC-271 PR #476 round-2: validates expiresAt is parseable. Pre-fix
+ * a malformed (or attacker-mutated) expiresAt would silently NEVER
+ * expire because Date.parse returns NaN and `NaN <= now` is always false.
  */
 export function isProposalExpired(proposal: DIDRevisionProposalEvent, nowMs?: number): boolean {
+  assertValidExpiresAt(proposal.expiresAt, 'isProposalExpired');
   const now = nowMs ?? Date.now();
   return Date.parse(proposal.expiresAt) <= now;
 }
@@ -487,6 +554,20 @@ export function recordRejection(
   rationale: string,
   now?: () => number,
 ): ProposalRejectionRecord {
+  // AISDLC-271 PR #476 round-2: defensive validation of rejectedBy. The
+  // persistence/HTTP layer (when added) MUST validate this against the
+  // authenticated session identity — without it, an attacker who can call
+  // recordRejection forges identity strings and floods the rejection log
+  // to permanently suppress proposals via computeRejectionPrecedentFactor.
+  // This length check is the in-library minimum; the calling layer is
+  // responsible for the authoritative authorization check.
+  assertValidActor(rejectedBy, 'recordRejection');
+  if (typeof rationale !== 'string' || rationale.trim().length < 10) {
+    throw new Error(
+      `[revision-proposal] recordRejection: rationale must be ≥10 chars (got ${typeof rationale === 'string' ? rationale.length : 'non-string'}). ` +
+        `Persistence layer captures this in the calibration log for future trigger evaluations.`,
+    );
+  }
   const nowMs = (now ?? (() => Date.now()))();
 
   const weightByConfidence: Record<ProposalConfidence, number> = {
