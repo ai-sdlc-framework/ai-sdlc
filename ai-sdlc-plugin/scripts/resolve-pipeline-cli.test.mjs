@@ -9,10 +9,10 @@
  *   2. CLAUDE_PLUGIN_DIR set + node_modules missing (broken install → self-heal
  *      from CLAUDE_PLUGIN_ROOT only; no auto-exec from user-writable cache)
  *   3. CLAUDE_PLUGIN_DIR unset + CLAUDE_PLUGIN_ROOT set + node_modules present
- *   3b. Plugin cache probe (read-only — refuses to auto-exec install scripts
- *       found there; PR #482 security fix)
- *   4. All env vars unset + $(pwd)/pipeline-cli/bin present (dogfood monorepo)
- *   5. All paths broken → exit 1 with actionable error
+ *   4. Plugin cache probe (read-only — refuses to auto-exec install scripts
+ *      found there; PR #482 security fix)
+ *   5. All env vars unset + $(pwd)/pipeline-cli/bin present (dogfood monorepo)
+ *   6. All paths broken → exit 1 with actionable error
  *
  * Run with: node --test ai-sdlc-plugin/scripts/resolve-pipeline-cli.test.mjs
  */
@@ -213,7 +213,7 @@ describe('Topology 5: All paths broken — exits 1 with actionable error', () =>
   });
 });
 
-describe('Plugin cache probe — topology 3 (read-only)', () => {
+describe('Plugin cache probe — topology 4 (read-only)', () => {
   it('resolves from ~/.claude/plugins/cache/<mp>/ai-sdlc/<version> when present', () => {
     const fakeHome = join(tmpDir, 'topology3probe-home');
     const cacheDir = join(

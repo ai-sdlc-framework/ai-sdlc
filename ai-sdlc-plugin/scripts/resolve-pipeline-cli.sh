@@ -127,14 +127,14 @@ if [ -d "$CACHE_ROOT" ]; then
   fi
 fi
 
-# ── Topology 4: Monorepo dogfood fallback ───────────────────────────────────
+# ── Topology 5: Monorepo dogfood fallback ───────────────────────────────────
 DOGFOOD_BIN="$(pwd)/pipeline-cli/bin"
 if _is_usable "$DOGFOOD_BIN"; then
   printf '%s' "$DOGFOOD_BIN"
   exit 0
 fi
 
-# ── Topology 5: Nothing found ────────────────────────────────────────────────
+# ── Nothing found (all topologies exhausted) ────────────────────────────────
 cat >&2 <<'EOF'
 resolve-pipeline-cli.sh: ERROR — @ai-sdlc/pipeline-cli binary not found.
 
