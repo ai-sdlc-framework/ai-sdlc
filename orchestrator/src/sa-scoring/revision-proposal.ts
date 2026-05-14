@@ -196,6 +196,13 @@ export function computeConfidence(
   classification: DriftClassification,
   identityClass: IdentityClass | undefined,
 ): ProposalConfidence {
+  // AISDLC-271 PR #476 round-2 security follow-up: also guard the exported
+  // computeConfidence entry point. Without this an HTTP caller bypassing
+  // evaluateRevisionProposal could pass an invalid identityClass and
+  // receive an incorrect confidence weight (not a privilege escalation
+  // since deriveApprovalPath is separately guarded, but inconsistent
+  // defense-in-depth posture).
+  assertValidIdentityClass(identityClass, 'computeConfidence');
   const sampleSize =
     triggerEvidence.dismissSignals + triggerEvidence.escalateSignals + triggerEvidence.driftEvents;
 
@@ -433,8 +440,8 @@ function buildDiagnosticEvent(
  * from external input — but the validators are still correct on
  * trusted input AND lock down the contract for the future caller).
  *
- * IDENTITY_CLASS_VALUES + ALLOWED_IDENTITY_TYPES enforce the schema
- * boundary: callers MUST derive identityClass from the compiled DID
+ * IDENTITY_CLASS_VALUES enforces the schema boundary: callers MUST
+ * derive identityClass from the compiled DID
  * document (did-compiler.ts output), not from a request payload. This
  * runtime check ensures no future caller accidentally trusts a
  * webhook / issue-body / mutable-record value.
@@ -471,7 +478,7 @@ function assertValidActor(actor: unknown, where: string): void {
   if (typeof actor !== 'string' || actor.trim().length < 3) {
     throw new Error(
       `[revision-proposal] ${where}: invalid actor identity ${JSON.stringify(actor)}. ` +
-        `Must be a non-empty string of length ≥ 3. ` +
+        `Must be a non-empty string of length ≥ 3 after trimming whitespace. ` +
         `Persistence/HTTP callers MUST validate actor matches an authenticated session identity.`,
     );
   }
@@ -564,7 +571,8 @@ export function recordRejection(
   assertValidActor(rejectedBy, 'recordRejection');
   if (typeof rationale !== 'string' || rationale.trim().length < 10) {
     throw new Error(
-      `[revision-proposal] recordRejection: rationale must be ≥10 chars (got ${typeof rationale === 'string' ? rationale.length : 'non-string'}). ` +
+      `[revision-proposal] recordRejection: rationale must be ≥10 chars after trimming ` +
+        `(got ${typeof rationale === 'string' ? rationale.trim().length : 'non-string'}). ` +
         `Persistence layer captures this in the calibration log for future trigger evaluations.`,
     );
   }
