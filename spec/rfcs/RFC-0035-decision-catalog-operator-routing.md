@@ -2,10 +2,10 @@
 id: RFC-0035
 title: Decision Catalog and Operator Decision Routing
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: dominique@reliablegenius.io
 created: 2026-05-08
-updated: 2026-05-08
+updated: 2026-05-15
 targetSpecVersion: v1alpha1
 requires: [RFC-0011, RFC-0023, RFC-0024, RFC-0029]
 # Strategic / framework RFC. User-facing surfaces (operator runbook, API reference)
@@ -15,11 +15,11 @@ requiresDocs: []
 
 # RFC-0035: Decision Catalog and Operator Decision Routing
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Draft (v0.2 — all 14 OQs resolved via operator walkthrough 2026-05-15; §15.1 Design Patterns codifies the architectural coherence)
+**Lifecycle:** Ready for Review (14/14 OQs resolved; awaiting per-owner sign-off)
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-08
-**Updated:** 2026-05-08
+**Updated:** 2026-05-15
 **Target Spec Version:** v1alpha1
 
 ---
@@ -478,20 +478,85 @@ Per the project's promotion convention (`docs/operations/dor-promotion.md`, `doc
 
 ## 15. Open Questions
 
+> **Operator walkthrough complete (2026-05-15):** All 14 of 14 OQs resolved with normative answers per Resolution markers below. Lifecycle promoted Draft → Ready for Review; awaits per-owner sign-off. The §15.1 *Design Patterns* subsection codifies the architectural coherence that emerged across the resolutions — 8 normative principles that anchor v1 implementation and serve as reusable design lessons for future operator-decision-pending subsystems.
+
 1. **Catalog vs projection.** Is the `Decision` a first-class write-through resource, or a projection over existing markdown? What's the maintenance cost of each path? (See §13.1.)
+
+   **Resolution (2026-05-15):** **Append-only event log (event sourcing).** Decisions are projections of an event log at `.ai-sdlc/_decisions/events.jsonl` (sibling to RFC-0015's existing `events.jsonl` substrate; consider unification later). Initial event types: `decision-opened | recommendation-issued | operator-answered | timebox-fired | overridden | calibration-adjusted | superseded`. Current state of any Decision is materialized on-demand via `cli-decisions show <id>` with optional cache. Schema evolution: explicit `eventVersion` field per record; migrations are append-only event-type additions. Selected over first-class write-through (Option A) because the Decision Catalog's core requirements *are* event-sourcing requirements: evolving state, override history, calibration replay, multi-consumer views. Reuses existing `events.jsonl` substrate; audit trail + calibration corpus come free from the log.
+
 2. **Load-bearing measurement.** How do we score load-bearing-ness deterministically beyond `blockedTaskCount`? Does a decision blocking 1 critical task outscore one blocking 10 chores? Does deadline distance multiply linearly or non-linearly?
+
+   **Resolution (2026-05-15):** **Hybrid: deterministic baseline (RFC-0014 max-blocked-task-priority + log(count)) + operator override with 14d TTL.** Default formula: `loadBearing = max(taskPriority(t)) + log(blockedTaskCount)` — composes with RFC-0014's shipped dep-graph priority; the `log` of count gives diminishing returns (blocking 100 tasks isn't 10× more load-bearing than blocking 10). Per-org tunable via `.ai-sdlc/decisions-config.yaml: loadBearingFormula`. Operator override via TUI expires after 14d unless re-affirmed (per timebox principle — operator priorities drift; computed value re-asserts). Override events feed the OQ-1 event log → calibration corpus → detect systematic divergence between computed and operator-set priority.
+
 3. **LLM-confidence cold start.** How is LLM-confidence computed for a brand-new decision class with no exemplars? Self-reported by the LLM (untrustworthy)? Rubric-driven (manual)? Conservative-default-until-N-samples?
+
+   **Resolution (2026-05-15):** **Auto-apply with 24-hour operator-override window (the Linear AI / Datadog auto-grouping pattern).** Reversible decisions auto-apply immediately upon Stage C completion; TUI surfaces "Auto-decided: <recommendation>; override within 24h?" with countdown. Operator override during window = negative exemplar (LLM was wrong); operator silence through window = positive exemplar (tacit acceptance). After window: decision is "settled"; override still possible but requires explicit re-decision. Multi-surface notification at decision time (TUI + Slack DM + 12h email digest if unacknowledged) prevents operator-on-vacation false-positives. Reversibility gate: `Decision.reversible: bool` (default `true`); `false` falls back to explicit confirm (no auto-apply). Override window per-org configurable (`overrideWindowHours: 24`). Operator-fatigue-aware: silence ≠ approval when fatigue active. Selected over phased clamp because the override-window pattern solves cold-start calibration without "Phase 1 auto-apply nothing" theater — corpus accumulates from day one via operator behavior.
+
 4. **Task-vs-decision boundary.** Some tasks ARE decision trees ("design the auth flow" implies dozens of decisions). Do we recurse — task contains decisions, decisions can spawn tasks? Or is the boundary: decisions resolve to a chosen option; tasks deliver code?
+
+   **Resolution (2026-05-15):** **Clean separation — distinct artifact types with frontmatter cross-references.** Decisions live in the OQ-1 event log; Tasks live in `backlog/tasks/`. Cross-refs: a Task frontmatter declares `depends-on: [DEC-0042]`; a Decision's `decision-answered` event includes `unblocks: [AISDLC-273]`. A Task with unresolved `depends-on` Decisions is non-dispatchable (extends AISDLC-243 dispatchability filter). `DEC-NNNN` IDs parallel `AISDLC-NNNN`. Selected over recursive nesting because ADR / BMad / Aha! converged on clean separation industry-wide; Decisions and Tasks have genuinely different lifecycles (Decision: open → answered → superseded; Task: To Do → In Progress → Done); cross-references handle the fuzzy "design the auth flow" case without artificial hierarchy. Decisions resolve to options (what); Tasks deliver code (how).
+
 5. **Cross-source dedup.** If RFC-0011 raises "which dashboard?" via DoR clarification AND RFC-0024 raises the same question via emergent capture, is that one `Decision` or two? Auto-merge, or operator-choice?
+
+   **Resolution (2026-05-15):** **Classifier-suggests-operator-confirms dedup, with 24h auto-expire (composes with OQ-3 pattern).** Single LLM classifier across triage, severity, DoR-new-concern, AND dedup — one shared corpus for calibration. Classifier scans queue periodically; ≥ 0.85 confidence (higher than triage 0.7 because false-positive merges cost more) surfaces as "possible duplicate: DEC-0042 ≈ DEC-0045; merge?" suggestion. Operator confirms via `cli-decisions merge` or dismisses; unhandled suggestion auto-expires after 24h. Schema: `Decision.dedupCandidates: [DecisionID]`. New event types: `decision-dedup-suggested | decision-merged | decision-dedup-dismissed`. Selected over manual-only because dev-tool industry standard for fuzzy semantic dedup is classifier-suggests + operator-confirms (Linear/Jira manual-only patterns apply to crisp-fingerprint dedup like stack traces); selected over auto-merge because false-positive merges destroy decision history.
+
 6. **Capacity defaults.** What numbers ship by default for `large/medium/small` per-day budgets? Should the framework learn the operator's actual rate from history, or stay configurable-only?
+
+   **Resolution (2026-05-15):** **Compose with RFC-0016 t-shirt sizing (XS / S / M / L / XL) — no parallel capacity model.** Each Decision gets a `tShirtSize` field computed by RFC-0016's Stage A algorithm (deterministic signals → bucket; LLM tie-breaks ambiguous cases). Capacity as per-tier daily slots: `XS: 30/day, S: 15/day, M: 6/day, L: 2/day, XL: 1/day`. Per-org configurable in `.ai-sdlc/decisions-config.yaml`. Calibration substrate already shipped (RFC-0016 Implementation): Decision Catalog's event log emits `decision-opened`/`decision-answered` events with timestamps; wall-clock actual feeds RFC-0016's per-class bias multipliers; operator sees `uncalibrated | warming | calibrated` token in TUI. Selected over inventing parallel capacity model because RFC-0016 already shipped the calibration loop, t-shirt buckets, and Stage A/B/C structure — duplicating violates the compose-don't-duplicate principle.
+
 7. **Migration of existing OQ markdown.** Do we eventually migrate `§ Open Questions` markdown blocks in RFCs to catalog records, or leave them as authoritative source the catalog projects from indefinitely?
+
+   **Resolution (2026-05-15):** **Don't migrate; event log references RFC source artifacts.** RFC §Open Questions markdown blocks stay authoritative for OQ *text* (the question, recommendation, counter-argument). The Decision Catalog event log captures decision *events* with `(rfc-id, oq-section)` references back to source. No double source of truth. When an OQ resolves via operator walkthrough, the RFC body gains a Resolution marker AND the event log gains a `decision-answered` event — both pointing at the same logical decision, neither requiring sync. Selected over one-time migration because RFCs are bounded artifacts with strong locality (an RFC's OQs belong with the RFC), and the event log model handles cross-RFC lifecycle without moving content.
+
 8. **Fatigue inference vs explicit-only.** Should the framework infer fatigue from override-rate / throughput drop, or trust only explicit operator declarations? Inferred signals may misfire on legitimate disagreement runs.
+
+   **Resolution (2026-05-15):** **Explicit operator signal as default + opt-in inferred from behavior.** Explicit fatigue: operator command (`ai-sdlc operator-state fatigue --on` or TUI button) sets `fatigueActive: true` in `.ai-sdlc/operator-state.yaml`. Inferred fatigue (opt-in): override-rate > 50% in last hour OR throughput drops > 60% from rolling baseline → soft-suppresses dispatch with operator notification. Inferred is OFF by default (`inferFatigue: false` in config). Under fatigue (explicit or inferred), timebox auto-defaults still fire per [decisions-degrade-gracefully memory](memory:feedback_decisions_degrade_gracefully); operator catches up retroactively. Selected over explicit-only because inferred provides a soft check for fatigued operators who don't realize it; selected over always-both because inferred misfires on legitimate disagreement runs.
+
 9. **Counter-argument generation pattern.** Steel-man each option independently, or adversarially attack the recommendation? Different prompts; different operator UX. Both have failure modes.
+
+   **Resolution (2026-05-15):** **Single sharp adversarial counter-argument on the recommendation.** Decision-support surface (§8) generates one CA per decision that steel-mans the strongest alternative to the recommendation. Cheaper than exhaustive option steel-manning; focuses operator attention; matches the format proven through the 14-OQ walkthrough session itself (every OQ had one sharp CA, and several decisions flipped to the alternative as a result — OQ-3 → E, OQ-6 → compose-with-RFC-0016). Single LLM call; deterministic prompt template. Selected over per-option steel-manning because attention is finite — N steel-mans for N options produces operator drowning, not better decisions; selected over no-CA because the walkthrough showed CAs add real signal.
+
 10. **Sub-decision graph fidelity.** Text outline, Mermaid, or interactive — what's the v1 floor? Mermaid is cheap and good-enough; richer rendering is expensive. Phase the upgrade?
+
+    **Resolution (2026-05-15):** **Mermaid for markdown/web surfaces; text outline fallback for TUI.** Sub-decision graphs render as Mermaid `flowchart TD` in RFC bodies and the future web operator surface (both render Mermaid natively). The Ink-based TUI falls back to indented text outlines for the same data — same graph data model, different rendering surface. Future-phase upgrade to interactive D3/React only when the web operator surface ships and needs richer interaction (Phase 8 of §14 Implementation Plan). Selected over text-only because complex sub-decision trees become unreadable; selected over interactive-only because TUI is text-rendered and there's no web surface yet.
+
 11. **Operator-override exemplar promotion.** Every override → exemplar candidate, or only when the operator explicitly tags it? Auto-promotion has noise; manual tagging has friction.
+
+    **Resolution (2026-05-15):** **All overrides feed the corpus automatically; aggregator filters anchors.** Every override (decision-time or during OQ-3 24h window) emits an `overridden` event in the OQ-1 log. Calibration corpus is the projection of those events. A separate aggregator (`cli-decisions-corpus aggregate`) periodically promotes high-signal overrides to "calibration anchors" — exemplars used for prompt-anchoring in subsequent Stage C calls. Promotion criteria: ≥ 3 overrides of the same recommendation class with consistent corrected-class, OR explicit operator tagging via `cli-decisions tag-anchor <event-id>`. Selected over operator-only-tagging because dogfood-tier volume can't sustain manual tagging; selected over auto-promote-at-confidence because anchor poisoning is a real risk and a 3-event threshold is honest about needing repeated signal.
+
 12. **Decision deadline semantics.** Soft (priority decay), hard (auto-defer past deadline), or both? Hard deadlines may push the operator into fatigue mode counterproductively.
+
+    **Resolution (2026-05-15):** **Hard timebox + default-on-silence for reversible decisions; soft priority decay only for irreversible.** Reversible decisions (`Decision.reversible: true`, default for new classes): per-OQ timebox fires, default-on-silence auto-action applies, operator can undo within window or with explicit override afterward. Irreversible decisions (`reversible: false`): no auto-fire; priority decays as timebox expires to signal urgency, but operator must explicitly answer or decision stays open. Composes with OQ-3 (auto-apply + override window — reversible uses the 24h window; irreversible doesn't). Composes with [decisions-degrade-gracefully memory](memory:feedback_decisions_degrade_gracefully): "not making a decision is a decision, except when consequences are irreversible." Selected over hard-only because auto-firing irreversible decisions violates operator authority; selected over soft-only because that reintroduces the indefinite-pending problem the timebox principle exists to fix.
+
 13. **Multi-actor decisions.** When a decision touches Engineering AND Product AND Design, is sign-off concurrent or sequenced? Does any-pillar-blocks behavior produce deadlock under disagreement?
+
+    **Resolution (2026-05-15):** **Operator routes multi-pillar decisions (per §6.2).** When a Decision touches multiple pillars (Engineering + Product + Design), the routing rubric assigns it to the operator (cross-pillar role per [team-roles memory](memory:project_team_roles): dominique = Engineering + Operator). Operator decides; pillar leads see the decision in their digest with `multi-pillar: true` marker but don't gate resolution. Single-pillar decisions still route to that pillar's lead per §6.2. Selected over concurrent sign-off because cross-pillar consensus is deadlock-prone under disagreement; selected over sequenced because sequencing serializes logically-parallel work; selected over pillar-primary auto-routing because cross-pillar decisions need cross-pillar context single-pillar primaries don't have. The operator-as-decision-steward framing in VISION.md §3 anchors this.
+
 14. **Auto-decision audit.** Every framework auto-decision logs to the digest — but does the operator see *all* of them, only divergent-from-rubric ones, or only those flagged by the override calibration?
+
+    **Resolution (2026-05-15):** **Per-organization configurable; default = overridden-only (signal-only digest).** `.ai-sdlc/decisions-config.yaml: auditDigest: { mode: 'overridden-only' | 'all' | 'anomalous' }`. Default `overridden-only`: operator sees auto-decisions that were subsequently overridden — the cases where the framework was wrong; actionable signal. `all` mode: every auto-decision; high-volume; appropriate for compliance-heavy orgs. `anomalous` mode: auto-decisions deviating from rubric expected output; requires rubric calibration to be meaningful. Mode selectable per-digest-frequency (daily / weekly / monthly). Selected over hardcoded mode because audit-signal preferences vary widely by org (3-person dogfood vs 50-person enterprise); `overridden-only` default is the actionable signal in the smallest payload.
+
+### 15.1 Design Patterns (the Decision Catalog Architecture)
+
+The 14 OQ resolutions converge on **8 normative design principles** for the v1 Decision Catalog. These also cross-reference the framework's existing pattern library so the catalog composes with substrate rather than duplicating it. They are reusable architectural lessons for future framework subsystems with operator-decision-pending state.
+
+1. **Event-sourcing data model** (OQ-1, OQ-7, OQ-11). Decisions are projections of an append-only event log (`.ai-sdlc/_decisions/events.jsonl`). Reuses RFC-0015's `events.jsonl` substrate. Free audit trail, free override history, free calibration corpus. RFCs stay authoritative for OQ text; events reference them.
+
+2. **Clean separation: Tasks deliver code; Decisions resolve options** (OQ-4). Distinct resource types with frontmatter cross-references (`depends-on: [DEC-0042]`, `unblocks: [AISDLC-273]`). Matches ADR / BMad / Aha! industry convention. Different lifecycles, different storage, related artifacts.
+
+3. **Auto-apply with operator-override window for reversible decisions** (OQ-3, OQ-12). The Linear AI / Datadog auto-grouping pattern: reversible decisions auto-fire immediately; 24h override window captures negative exemplars; silence is acceptance signal. `Decision.reversible: bool` schema field; `false` falls back to explicit-confirm. Composes with [decisions-degrade-gracefully memory](memory:feedback_decisions_degrade_gracefully).
+
+4. **Single shared LLM classifier corpus** (OQ-3, OQ-5, OQ-11; mirrors RFC-0024 OQs 2/3/5/11). One Haiku-class classifier services triage, severity, DoR-new-concern detection, AND cross-source dedup. One calibration corpus across all use cases. Threshold 0.7 for content classification; 0.85 for dedup (higher-cost false-positive). Aggregator promotes high-signal exemplars to calibration anchors at ≥ 3 consistent overrides.
+
+5. **Composition over duplication** (OQ-2 with RFC-0014; OQ-6 with RFC-0016). The Decision Catalog reuses existing substrate: RFC-0014's `cli-deps frontier` for blocked-task priority; RFC-0016's t-shirt sizing + per-class bias multipliers for capacity + calibration; RFC-0015's `events.jsonl` writer for the event log. No parallel infrastructure.
+
+6. **Per-organization configurability is mandatory** (every OQ). Every timebox, threshold, capacity slot, label set, digest mode is overridable in `.ai-sdlc/decisions-config.yaml`. Organizations process decisions at different velocities; framework constants don't scale.
+
+7. **Operator-fatigue-aware but non-blocking** (OQ-8, OQ-12, composes with [decision-fatigue-signal memory](memory:feedback_decision_fatigue_signal)). Explicit fatigue declaration is the contract; inferred fatigue (override-rate, throughput) is opt-in. Auto-defaults fire even under fatigue — the operator catches up retroactively rather than blocking pipeline.
+
+8. **Deterministic-first → LLM-as-last-resort → operator with timebox** (Stage A / Stage B / Stage C pattern across §4, §5, §6, §7, §8; mirrors RFC-0011 §4.4 DoR ladder + review-calibration system). Cheap deterministic checks resolve ~95% of decisions; LLM classifier with confidence-threshold gates handle ambiguity; operator surfaces with timebox + default-on-silence handle the residual.
+
+These 8 patterns are normative for the v1 Decision Catalog implementation. RFC-0024 (Capture + Triage) already follows the same patterns; RFC-0011 (DoR Gate) shares the Stage A/B/C structure; RFC-0037 (Cost-Gated Heartbeat) inherits the timebox + default-on-silence convention. Future framework subsystems with operator-decision-pending state SHOULD compose these patterns rather than reinventing them.
 
 ## 16. References
 
