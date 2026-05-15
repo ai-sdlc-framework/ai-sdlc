@@ -275,7 +275,7 @@ The `OQs` column reports **unresolved open questions** per RFC. Source-of-truth 
 | 0021 | Incident Monitoring + Root-Cause Analysis                                                            | Reserved    | Placeholder  | —   | —                                                            | (none yet)                                                                        | Carved out of RFC-0009 §13.6 per OQ-7 reversal of Position-stated; pending adopter incident data before normative spec. |
 | 0022 | Compliance Posture + Audit Surface                                                                   | Draft       | Draft        | 7   | dominique@reliablegenius.io                                  | [RFC-0022-compliance-posture-audit-surface.md](RFC-0022-compliance-posture-audit-surface.md) | Adopter declares regulatory posture (HIPAA/SOC2/PCI-DSS/GDPR/etc.); framework derives gate defaults (DB pool isolation, secret-scan strictness, attestation requirement, retention) and exports audit evidence packs. RFC-0020 and RFC-0021 carved out of RFC-0009 (OQ-7); RFC-0009 OQ-11 trigger checklist references RFC-0022 as the canonical regime-declaration surface. |
 | 0023 | Operator TUI — Pipeline Monitoring + Steering Surface                                                | Approved    | Signed Off   | 0   | dominique@reliablegenius.io                                  | [RFC-0023-operator-tui-pipeline-monitoring.md](RFC-0023-operator-tui-pipeline-monitoring.md) | requires RFC-0014, RFC-0015. Operator-facing terminal interface to monitor + unblock the autonomous pipeline. All 10 OQs resolved via operator walkthrough 2026-05-03. Lifecycle audit 2026-05-13 promoted Ready for Review → Signed Off: AISDLC-178 umbrella + all 7 phases 178.1–178.7 + extension 178.4.1 shipped. Flag default-on follows the same opt-in pattern as RFC-0014 / RFC-0015. |
-| 0024 | Emergent Issue Capture + Triage Pattern                                                              | Draft       | Draft        | 4   | dominique@reliablegenius.io                                  | [RFC-0024-emergent-issue-capture-and-triage.md](RFC-0024-emergent-issue-capture-and-triage.md) | requires RFC-0011, RFC-0015. Sidecar mechanism for capturing findings mid-work without breaking flow; triage rubric + "decision-pending" → "decision-deferred" handoff. Addresses VISION.md §5 emergent-work gap. **Partial impl 2026-05-13** — `tui/blockers/detector.ts` Rule 3 + `tui/corpus/aggregate.ts` ship capture-detection; authoring CLI / triage flow pending (AISDLC-269). **OQ walkthrough 2026-05-15** — 8 of 12 OQs resolved (OQ-1/2/3/4/5/6/9/11) with Resolution markers per §15; lifecycle defaults captured in new §15.1 (timebox + default-on-silence convention; per-org configurable). 4 low-stakes conventions still open. |
+| 0024 | Emergent Issue Capture + Triage Pattern                                                              | Draft       | Ready for Review | 0 | dominique@reliablegenius.io                              | [RFC-0024-emergent-issue-capture-and-triage.md](RFC-0024-emergent-issue-capture-and-triage.md) | requires RFC-0011, RFC-0015. Sidecar mechanism for capturing findings mid-work + triage rubric + decision-deferred handoff. Addresses VISION.md §5 emergent-work gap. **Partial impl 2026-05-13** — detector + aggregator ship; authoring CLI / triage flow pending (AISDLC-269). **OQ walkthrough complete 2026-05-15** — all 12 OQs resolved with Resolution markers per §15; lifecycle defaults captured in §15.1 (timebox + default-on-silence convention; per-org configurable). Lifecycle promoted Draft → Ready for Review; awaiting per-owner sign-off. |
 | 0025 | Framework Quality Monitoring (Non-Decision Failure Modes)                                            | Draft       | Draft        | 10  | dominique@reliablegenius.io                                  | [RFC-0025-framework-quality-monitoring.md](RFC-0025-framework-quality-monitoring.md) | requires RFC-0015, RFC-0024. Distinguishes "operator under-decided" failures (fix the issue) from "framework misbehaved" failures (fix the framework); auto-routes the latter into bugfix backlog with severity scoring; closes the AISDLC-176-style "valid commit stranded" loop. Operationalizes VISION.md §4 honest failure modes. **Partial impl 2026-05-13** — `tui/analytics/quality-reader.ts` + 9 playbook handlers ship; `cli-quality-corpus aggregate` / auto-routing / severity rubric pending. |
 | 0026 | Exploration Workstream Pattern                                                                       | Draft       | Draft        | 12  | dominique@reliablegenius.io                                  | [RFC-0026-exploration-workstream-pattern.md](RFC-0026-exploration-workstream-pattern.md) | requires RFC-0011, RFC-0015, RFC-0024. First-class "spike/research" workstream type that bypasses DoR's decision-frontloading gate (since the goal IS to discover the unknowns); explicit time-box + handoff back to standard execution flow when knowns crystallize. Addresses VISION.md §5 exploration-mode gap. |
 | 0027 | Design Coherence Drift Detection                                                                     | Reserved    | Placeholder  | —   | Morgan Hirtle                                                | (none yet)                                                                        | Design Authority sign-off condition C3 from RFC-0009. Defines DesignCoherenceDrift reconciliation event: fires when delta between soul's design.imperatives and what DSB/component catalog implements exceeds threshold. Fourth Eτ_tessellation_drift detection rule. requires RFC-0009, RFC-0006. |
@@ -297,7 +297,7 @@ The `OQs` column reports **unresolved open questions** per RFC. Source-of-truth 
 
 > **Audited:** 2026-05-13 (manual). Until [RFC-0035](RFC-0035-decision-catalog-operator-routing.md) ships the Decision Catalog, this section is regenerated by hand when meaningful RFC churn happens. Source-of-truth for each OQ is the body of the linked RFC; titles below are summarized.
 >
-> **Totals:** 31 active RFCs audited (excluding template + reservation-only entries). **~135 unresolved OQs**, **~95 resolved**. RFC-0029 has no OQ section by design (vision doc; positions stated). 2026-05-13 retrofit closed 15 OQs across RFC-0002 / RFC-0003 / RFC-0004 / RFC-0005 / RFC-0013 against shipped implementation; 2026-05-15 operator walkthrough closed 8 more in RFC-0024 (§15 Resolution markers); remaining residuals are documented in *Design locked* below.
+> **Totals:** 31 active RFCs audited (excluding template + reservation-only entries). **~131 unresolved OQs**, **~99 resolved**. RFC-0029 has no OQ section by design (vision doc; positions stated). 2026-05-13 retrofit closed 15 OQs across RFC-0002 / RFC-0003 / RFC-0004 / RFC-0005 / RFC-0013 against shipped implementation; 2026-05-15 operator walkthrough closed all 12 in RFC-0024 (lifecycle promoted Draft → Ready for Review); remaining residuals documented in *Design locked* below.
 
 ### Active design walkthroughs (Draft lifecycle, OQs pending resolution)
 
@@ -331,15 +331,7 @@ These RFCs need operator / owner decisions before they can promote to Ready for 
 - Audit export format (single tar vs per-kind directory)
 - Real-time compliance monitoring vs on-demand export
 
-**RFC-0024 — Emergent Issue Capture + Triage** (4 OQs remaining; 8 resolved 2026-05-15) — *on RFC-0035 critical path; substrate partially shipped (2026-05-13)*
-- OQ-7 Capture deletion
-- OQ-8 Issue labeling on auto-created Issues
-- OQ-10 Multi-capture from one source
-- OQ-12 CLI ergonomics for "capture against current PR"
-
-> *Partial impl:* `tui/blockers/detector.ts` Rule 3 detects pending-triage captures; `tui/corpus/aggregate.ts` aggregates `TuiCaptureFiled` events. Pending: capture authoring CLI (`cli-capture`/`cli-emergent`), triage-decision flow, backlog Issue creation from captures.
->
-> *OQ walkthrough 2026-05-15:* 8 of 12 OQs resolved per §15 Resolution markers — Draft→Shared state machine (OQ-1), threshold-gated auto-triage at 0.7 (OQ-2), bidirectional sync + LLM classifier (OQ-3), `// ai-sdlc:capture` prefix (OQ-4), threshold-gated severity (OQ-5), per-agent rate ceiling at 50/day (OQ-6), multi-surface stale ladder + 21d auto-archive (OQ-9), classifier-driven DoR new-concern detection (OQ-11). Lifecycle defaults captured in new §15.1 with per-org configurability.
+**RFC-0024 — Emergent Issue Capture + Triage** — *moved to Awaiting lifecycle promotion (12/12 OQs resolved 2026-05-15)*
 
 **RFC-0025 — Framework Quality Monitoring** (10 OQs; first 5) — *substrate partially shipped (2026-05-13)*
 - Default classification when ambiguous
@@ -413,6 +405,7 @@ OQs are resolved; what remains is per-owner sign-off ceremony, not new design wo
 
 - **RFC-0009** Tessellated Design Intent — Lifecycle: Ready for Review. v3.4 resolves all 13 OQs; awaiting Product (Alex) sign-off on v3.4.
 - **RFC-0016** Estimation Calibration (T-Shirt Sizes) — Lifecycle: Ready for Review. All 8 OQs resolved via operator walkthrough 2026-05-03.
+- **RFC-0024** Emergent Issue Capture + Triage — Lifecycle: Ready for Review (promoted 2026-05-15). All 12 OQs resolved via operator walkthrough; §15.1 codifies timebox + default-on-silence convention with per-org configurability. Substrate partially shipped (`detector.ts` + `corpus/aggregate.ts`); authoring CLI + triage flow tracked in AISDLC-269.
 
 ### Design locked (residual OQs are implementation refinements)
 
@@ -458,7 +451,7 @@ graph BT
     RFC0014["RFC-0014<br/>Dep Graph<br/>Implemented"]
     RFC0015["RFC-0015<br/>Auto Orchestrator<br/>Signed Off"]
     RFC0023["RFC-0023<br/>Operator TUI<br/>Signed Off"]
-    RFC0024["RFC-0024<br/>Emergent Capture<br/>Draft / 4 OQs"]
+    RFC0024["RFC-0024<br/>Emergent Capture<br/>Ready for Review / 0 OQs"]
     RFC0029["RFC-0029<br/>Product Pillar<br/>Draft / no OQ section"]
     RFC0035["RFC-0035<br/>Decision Catalog<br/>Draft / 14 OQs"]
 
@@ -491,8 +484,8 @@ graph BT
 
     class RFC0002,RFC0004,RFC0006,RFC0008,RFC0010,RFC0011,RFC0012,RFC0014 implemented
     class RFC0005,RFC0015,RFC0023 signedOff
-    class RFC0009 readyOrZero
-    class RFC0024,RFC0029 draftOpen
+    class RFC0009,RFC0024 readyOrZero
+    class RFC0029 draftOpen
     class RFC0035 target
 ```
 
@@ -506,7 +499,7 @@ The rows are listed in dependency order (ancestors first). The **Blocks RFC-0035
 | RFC-0009 | Tessellated Design Intent | Ready for Review | 0 | No (transitive only) | Land Alex's Product sign-off on v3.4 |
 | RFC-0011 | DoR Gate | Implemented | 1 partial | No | Q10 confirmation deferred to Phase 2b — non-blocking |
 | RFC-0023 | Operator TUI | Signed Off | 0 | No (direct dep, design locked) | Implementation phases 178.1–178.7 shipped; flag promotion follows opt-in pattern |
-| RFC-0024 | Emergent Issue Capture | Draft | **4** | Yes — direct dep | 8 of 12 OQs resolved 2026-05-15; complete remaining 4 (OQ-7/8/10/12 — low-stakes conventions) then promote to Ready for Review → Signed Off |
+| RFC-0024 | Emergent Issue Capture | Ready for Review | 0 | No (direct dep, design locked) | All 12 OQs resolved 2026-05-15; lifecycle promoted to Ready for Review; awaits per-owner sign-off |
 | RFC-0029 | Product Pillar | Draft | — (no OQ section) | Yes — direct dep | Promote to Signed Off (Product sign-off; vision doc, no OQ walkthrough needed) |
 | RFC-0035 | Decision Catalog | Draft | **14** | (target) | Run operator walkthrough of all 14 OQs once RFC-0024 + RFC-0029 sign-offs unblock the design contract |
 
@@ -523,7 +516,7 @@ The bulk of operator decision time before RFC-0035 sign-off is concentrated in t
 - RFC-0029 → Signed Off (Product sign-off; vision doc has no OQ surface)
 - RFC-0009 → Signed Off (Alex's v3.4 Product sign-off)
 
-**Total operator decision-burn for RFC-0035 sign-off: ~18 OQs** (4 in RFC-0024 remaining + 14 in RFC-0035). RFC-0024 closed 8 of 12 on 2026-05-15; remaining 4 are low-stakes conventions (OQ-7 deletion, OQ-8 Issue labeling, OQ-10 multi-capture, OQ-12 CLI ergonomics).
+**Total operator decision-burn for RFC-0035 sign-off: ~14 OQs** (RFC-0035 itself; RFC-0024 closed 12 of 12 on 2026-05-15 and is awaiting per-owner sign-off).
 
 ### What this section becomes once RFC-0035 ships
 

@@ -2,7 +2,7 @@
 id: RFC-0024
 title: Emergent Issue Capture + Triage Pattern
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: dominique@reliablegenius.io
 created: 2026-05-03
 updated: 2026-05-15
@@ -13,10 +13,11 @@ requiresDocs: []
 
 # RFC-0024: Emergent Issue Capture + Triage Pattern
 
-**Status:** Draft v0.2 — abstraction pass: terminology lifted from ai-sdlc-internal (backlog tasks, RFCs) to framework-level (Issues via configured adapter, Feature Issues for upstream-design-work).
-**Lifecycle:** Draft
+**Status:** Draft (v0.3 — all 12 OQs resolved via operator walkthrough 2026-05-15; §15.1 Capture Lifecycle Defaults added)
+**Lifecycle:** Ready for Review (12/12 OQs resolved; awaiting per-owner sign-off)
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-03
+**Updated:** 2026-05-15
 **Target Spec Version:** v1alpha1
 **Depends on:** RFC-0011 (DoR gate), RFC-0015 (autonomous orchestrator)
 **Anchor:** [VISION.md §5](../../VISION.md) — emergent-work gap
@@ -333,9 +334,9 @@ Total: ~5–6 weeks wall-clock, parallelizable phases 4 + 5.
 >
 > **What's pending:** capture authoring CLI (`cli-capture`, `cli-emergent`) per §5.1, triage-decision flow per §7, backlog Issue creation from captures per §9.2, in-code marker linter (§5.3), AI-agent direct-capture path (§5.4), DoR integration (§8).
 >
-> **OQ resolution status (2026-05-15 operator walkthrough):** 8 of 12 OQs resolved with normative answers per Resolution markers below (OQ-1, 2, 3, 4, 5, 6, 9, 11). 4 OQs still open as low-stakes convention follow-ups (OQ-7 deletion, OQ-8 Issue labeling, OQ-10 multi-capture, OQ-12 CLI ergonomics). The lifecycle stays `Draft` until all 12 OQs resolve and the capture authoring layer ships per AISDLC-269.
+> **OQ resolution status (2026-05-15 operator walkthrough — complete):** **All 12 of 12 OQs resolved** with normative answers per Resolution markers below. Lifecycle promoted Draft → Ready for Review; awaits per-owner sign-off. Implementation tracked in AISDLC-269 (capture authoring + triage flow).
 
-These need operator walkthrough before Lifecycle: Draft → Ready for Review.
+All 12 OQs resolved 2026-05-15. Lifecycle: Ready for Review.
 
 **OQ-1 — Capture privacy:** Should capture records be operator-private by default (only visible to the capturer) or team-shared? Trade-off: privacy lowers capture friction (operator might capture half-formed thoughts) but team-shared makes the audit trail richer. Recommendation: team-shared (matches the rest of the framework's transparency contract).
 
@@ -363,7 +364,11 @@ These need operator walkthrough before Lifecycle: Draft → Ready for Review.
 
 **OQ-7 — Capture deletion:** Records are immutable per §11. Can the operator EVER delete a capture (e.g., accidentally captured PII)? Recommendation: yes via `cli-capture redact <id> --reason <text>` which scrubs the `finding` field but preserves the audit trail. Hard delete is operator-only via filesystem (not a CLI affordance).
 
+   **Resolution (2026-05-15):** **Tiered deletion** (composes with OQ-1 D state machine). Drafts (operator-local in `.ai-sdlc/captures-drafts/`) are hard-deletable via `cli-capture discard <id> --reason <text>` — clean removal, no audit footprint because the draft was never team-shared. Submitted captures (team-shared in `backlog/captures/`) get `cli-capture redact <id> --reason <text>` — scrubs the `finding` field but preserves the shell + audit trail per §11's immutability contract. Hard delete of submitted captures is operator-only via filesystem (not a CLI affordance) for irreversible-action safety. Selected over redact-only because draft `discard` is honest (operator hasn't shared yet, no audit obligation) and the asymmetry mirrors OQ-1's draft/submit state-machine boundary.
+
 **OQ-8 — Issue labeling on auto-created Issues:** Should auto-created Issues carry a label distinguishing them from operator-curated Issues (e.g., `emergent-capture`)? Recommendation: yes — useful for analytics + lets operator filter "Issues I personally framed" vs "Issues the framework surfaced." Adapter implementations MUST surface a `kind: emergent-capture` label or equivalent in the tracker's native label space.
+
+   **Resolution (2026-05-15):** **Single `emergent-capture` label + `source-agent-<role>` label when AI-originated.** Every auto-created Issue from a capture gets the `emergent-capture` label (filterable; analytics-friendly). When the source was an AI agent (vs operator-authored), an additional `source-agent-<role>` label is applied (e.g. `source-agent-code-reviewer`, `source-agent-security-reviewer`). Adapter implementations MUST surface both via the tracker's native label space. Selected over single-label-only because AI-attribution is a real analytics dimension (operator wants to know "is the framework's auto-classification getting better over time?"); kept to ≤ 2 labels to avoid the label-sprawl problem operators tune out.
 
 **OQ-9 — Decision-deferred timeout:** An Issue gated on a `tbd` capture stays in `Needs Clarification`. Should there be a timeout (e.g., capture sits >14 days → escalate notification)? Recommendation: yes, surfaces in TUI with growing-louder visual treatment but no auto-action.
 
@@ -371,11 +376,15 @@ These need operator walkthrough before Lifecycle: Draft → Ready for Review.
 
 **OQ-10 — Multi-capture from one source:** When an agent finds 5 things in one PR review, are those 5 captures or 1 capture with 5 findings? Recommendation: 5 captures — each must be independently triageable (one might be quick-fix, one new-feature-issue).
 
+   **Resolution (2026-05-15):** **One capture per finding (N captures from one source).** When an agent finds 5 things in one PR review, the framework files 5 capture records — each independently triageable, each with its own confidence/severity/triage state. Volume bounded by OQ-6's per-agent rate ceiling (50/day default) and OQ-1's draft state (low-confidence drafts stay operator-local). Selected over bundling because bundling kills independent triage — one of the 5 findings might be `quick-fix-task`, one `new-feature-issue`, one `scope-creep-into-current-work`; collapsing them into a bullet list inside one record forces a single triage decision on multiple actual decisions. LLM-classifier-bundling considered but deferred — the rate ceiling already addresses flood risk; classifier-driven grouping can be added later if the corpus shows operators routinely manually-grouping related captures.
+
 **OQ-11 — Capture during DoR refinement:** When the refinement reviewer (RFC-0011 Stage B) asks an operator question and the operator's answer reveals a NEW concern, is that a capture or a DoR comment edit? Recommendation: capture — preserves the audit trail across the DoR + capture corpora.
 
    **Resolution (2026-05-15):** **Reuse the OQ-3 LLM classifier on DoR clarification answers.** When the operator answers a DoR Stage B refinement question, the classifier (single-corpus, same model as OQ-3) evaluates each segment of the answer for `clarification | new-concern | ambiguous` with confidence; new-concern segments auto-extract to capture records referencing the DoR thread by ID. Same 0.7 threshold as OQ-2 / OQ-3 / OQ-5 (shared corpus calibration). Operator confirms in TUI before commit; multi-segment answers can split capture from clarification. **Selected over operator-flagged-inline-syntax** for the same reason as OQ-3 — busy operators won't reliably tag, and reusing the classifier maintains architectural coherence. RFC-0011 (Implemented) gains a side-effect (classifier on clarification responses) but its rubric and admission semantics stay unchanged.
 
 **OQ-12 — CLI ergonomics for "capture against current PR":** When the operator is mid-PR-review, `cli-capture --against-current-pr` should auto-detect the PR from cwd / branch context. Worth shipping in Phase 1 or defer? Recommendation: ship in Phase 1 — the convenience drives adoption.
+
+   **Resolution (2026-05-15):** **Ship in Phase 1 with auto-detect.** `cli-capture file --against-current-pr "<finding>"` auto-detects the current PR via `gh pr view --json number` (cwd → branch → PR). Explicit `--pr=<N>` flag remains available as override. Matches the modern dev-CLI convention (`gh pr ...`, Linear CLI, Jira CLI all auto-detect from branch). Selected over deferring to Phase 2 because auto-detection is table-stakes UX for the capture flow — without it, operators have to copy-paste the PR number while mid-review, defeating the "low-friction capture" motivation in §2.2. Implementation cost is small (one `gh` shell-out + a fallback "no PR detected; specify `--pr` explicitly" error path).
 
 ### 15.1 Capture Lifecycle Defaults (Timebox + Default-on-Silence Convention)
 
