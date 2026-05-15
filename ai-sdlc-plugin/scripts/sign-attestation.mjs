@@ -272,6 +272,56 @@ async function main() {
 
   const outDir = join(repoRoot, '.ai-sdlc', 'attestations');
   mkdirSync(outDir, { recursive: true });
+
+  // AISDLC-274: single-envelope-per-PR invariant.
+  //
+  // Before writing the new envelope, scan for any envelope files that were
+  // ADDED by earlier commits in the current PR (vs origin/main). Stale
+  // envelopes accumulate when a PR is queue-rebased and re-signed across
+  // multiple iterations — each sign adds a new <sha>.dsse.json without
+  // removing the one from the previous iteration. The verifier then walks
+  // multiple envelopes, can't resolve the orphan SHAs, and surfaces a
+  // misleading `contentHashV4 mismatch` error.
+  //
+  // We use `git diff --name-only --diff-filter=A origin/main..HEAD` to
+  // list files ADDED by the PR (the diff-filter=A ensures we only see
+  // files that are new on this branch, not pre-existing attestation files
+  // from merged PRs). Any *.dsse.json in .ai-sdlc/attestations/ in that
+  // list is a stale envelope from a previous sign of this PR — delete it.
+  let prAddedEnvelopes = [];
+  try {
+    const diffOut = git(
+      [
+        'diff',
+        '--name-only',
+        '--diff-filter=A',
+        'origin/main..HEAD',
+        '--',
+        '.ai-sdlc/attestations/',
+      ],
+      repoRoot,
+    );
+    prAddedEnvelopes = diffOut
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.endsWith('.dsse.json') && l.startsWith('.ai-sdlc/attestations/'));
+  } catch {
+    // origin/main unreachable or diff fails — skip cleanup and proceed.
+    // The new envelope will still be written; worst case we leave an orphan
+    // (the original bug) rather than failing the entire sign.
+  }
+
+  const { unlinkSync } = await import('node:fs');
+  for (const staleRelPath of prAddedEnvelopes) {
+    const staleAbsPath = join(repoRoot, staleRelPath);
+    try {
+      unlinkSync(staleAbsPath);
+      process.stderr.write(`[sign-attestation] removed stale envelope: ${staleRelPath}\n`);
+    } catch {
+      // Best-effort — if deletion fails (permissions, already gone), continue.
+    }
+  }
+
   const outPath = join(outDir, `${headSha}.dsse.json`);
   writeFileSync(outPath, JSON.stringify(envelope, null, 2) + '\n');
   process.stdout.write(`${outPath}\n`);

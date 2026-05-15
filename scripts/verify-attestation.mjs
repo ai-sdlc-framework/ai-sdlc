@@ -170,6 +170,75 @@ export function parseTrustedReviewers(text) {
 }
 
 /**
+ * Detect orphan envelope files on a PR branch — envelopes added by the PR
+ * (visible in `git diff --name-only --diff-filter=A <baseSha>...<headSha>`)
+ * whose filename SHA can no longer be resolved as a git object.
+ *
+ * Returns an object with:
+ *   - `orphans`: string[] — relative paths of orphan envelope files
+ *   - `total`: number — total PR-added envelopes found (including non-orphans)
+ *
+ * An orphan arises when a queue rebase shifts the parent SHA: the old
+ * `<sha>.dsse.json` still exists in the tree but that SHA is gone from the
+ * branch history. AISDLC-274.
+ *
+ * Exported for unit testing.
+ *
+ * @param {string} headSha
+ * @param {string} baseSha
+ * @param {string} repoRoot
+ * @param {Function} [gitFn]
+ */
+export function detectOrphanEnvelopes(headSha, baseSha, repoRoot, gitFn = git) {
+  let nameOnly;
+  try {
+    nameOnly = gitFn(
+      [
+        'diff',
+        '--name-only',
+        '--diff-filter=A',
+        `${baseSha}...${headSha}`,
+        '--',
+        '.ai-sdlc/attestations/',
+      ],
+      repoRoot,
+    );
+  } catch {
+    // Diff failed — can't determine orphans; return empty so we don't
+    // false-positive block a valid push.
+    return { orphans: [], total: 0 };
+  }
+  const prAddedEnvelopes = nameOnly
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.endsWith('.dsse.json') && l.startsWith('.ai-sdlc/attestations/'));
+
+  if (prAddedEnvelopes.length === 0) {
+    return { orphans: [], total: 0 };
+  }
+
+  const orphans = [];
+  for (const relPath of prAddedEnvelopes) {
+    // Extract SHA from filename: `.ai-sdlc/attestations/<sha>.dsse.json`
+    const fileName = relPath.split('/').pop() ?? '';
+    const sha = fileName.replace(/\.dsse\.json$/, '');
+    if (!/^[0-9a-f]{40}$/i.test(sha)) continue; // not a well-formed SHA filename
+    // Try to resolve the SHA as a git object.
+    let resolvable = false;
+    try {
+      gitFn(['rev-parse', '--verify', `${sha}^{object}`], repoRoot);
+      resolvable = true;
+    } catch {
+      resolvable = false;
+    }
+    if (!resolvable) {
+      orphans.push(relPath);
+    }
+  }
+  return { orphans, total: prAddedEnvelopes.length };
+}
+
+/**
  * Read every `.ai-sdlc/attestations/*.dsse.json`, decode the predicate, and
  * return parsed entries. Skips files we can't parse — the verifier later
  * re-derives matches by predicate content, so unparseable junk is non-fatal
@@ -797,6 +866,44 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       status: 'invalid',
       reason: `no envelope present at ${shortSha(lowerHead)} (no .ai-sdlc/attestations/*.dsse.json on PR branch — push via /ai-sdlc execute to generate one)`,
     };
+  }
+
+  // --- AISDLC-274: orphan-envelope early detection ----------------------
+  // When a PR has been queue-rebased and re-signed multiple times, stale
+  // envelope files accumulate (.ai-sdlc/attestations/<old-sha>.dsse.json).
+  // Those files are still on disk but the SHA in their filename no longer
+  // maps to any commit on the branch. The verifier previously fell through
+  // to the content-hash matching loop and surfaced a confusing
+  // `contentHashV4 mismatch` even when the freshly-signed envelope was
+  // valid.
+  //
+  // Surface a clear, actionable error BEFORE the content-hash loop so
+  // the operator sees the real problem and the exact recovery command.
+  //
+  // When orphans are detected we return immediately with the actionable
+  // message — there's no point running the hash-matching loop because the
+  // multi-envelope state itself is the thing to fix first.
+  //
+  // Only run this check when we have more than one envelope on disk, or
+  // when the diff scan shows ≥1 orphan (multi-envelope being the
+  // overwhelming common case for this bug, but the check also catches a
+  // single orphan from a clean-rebase-then-re-sign cycle).
+  if (all.length >= 1) {
+    const { orphans, total } = detectOrphanEnvelopes(lowerHead, baseSha, repoRoot);
+    if (orphans.length > 0) {
+      const orphanNames = orphans.map((p) => p.split('/').pop() ?? p);
+      const orphanList = orphanNames.slice(0, 3).join(', ');
+      const more = orphanNames.length > 3 ? ` (+${orphanNames.length - 3} more)` : '';
+      const rmArgs = orphans.map((p) => `rm ${p}`).join('; ');
+      return {
+        status: 'invalid',
+        reason:
+          `orphan envelope(s) detected: ${orphanList}${more} ` +
+          `(${total} PR-added envelope${total !== 1 ? 's' : ''}, ${orphans.length} orphan${orphans.length !== 1 ? 's' : ''} with unresolvable SHAs — ` +
+          `stale from a queue-rebase+re-sign cycle). ` +
+          `Recovery: ${rmArgs}; git commit --amend --no-edit; node ai-sdlc-plugin/scripts/sign-attestation.mjs --review-verdicts <verdicts.json>`,
+      };
+    }
   }
 
   // Per-envelope: try to resolve a subject SHA whose recomputed

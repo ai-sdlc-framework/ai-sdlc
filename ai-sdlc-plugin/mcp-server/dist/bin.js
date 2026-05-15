@@ -2991,7 +2991,7 @@ var require_compile = __commonJS({
       const schOrFunc = root.refs[ref];
       if (schOrFunc)
         return schOrFunc;
-      let _sch = resolve7.call(this, root, ref);
+      let _sch = resolve8.call(this, root, ref);
       if (_sch === void 0) {
         const schema2 = (_a2 = root.localRefs) === null || _a2 === void 0 ? void 0 : _a2[ref];
         const { schemaId } = this.opts;
@@ -3018,7 +3018,7 @@ var require_compile = __commonJS({
     function sameSchemaEnv(s1, s2) {
       return s1.schema === s2.schema && s1.root === s2.root && s1.baseId === s2.baseId;
     }
-    function resolve7(root, ref) {
+    function resolve8(root, ref) {
       let sch;
       while (typeof (sch = this.refs[ref]) == "string")
         ref = sch;
@@ -3593,7 +3593,7 @@ var require_fast_uri = __commonJS({
       }
       return uri;
     }
-    function resolve7(baseURI, relativeURI, options) {
+    function resolve8(baseURI, relativeURI, options) {
       const schemelessOptions = options ? Object.assign({ scheme: "null" }, options) : { scheme: "null" };
       const resolved = resolveComponent(parse3(baseURI, schemelessOptions), parse3(relativeURI, schemelessOptions), schemelessOptions, true);
       schemelessOptions.skipEscape = true;
@@ -3820,7 +3820,7 @@ var require_fast_uri = __commonJS({
     var fastUri = {
       SCHEMES,
       normalize: normalize2,
-      resolve: resolve7,
+      resolve: resolve8,
       resolveComponent,
       equal,
       serialize,
@@ -6801,8 +6801,8 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync34, readdirSync as readdirSync13, statSync as statSync11 } from "node:fs";
-import { join as join36 } from "node:path";
+import { existsSync as existsSync36, readdirSync as readdirSync14, statSync as statSync12 } from "node:fs";
+import { join as join39 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
     "use strict";
@@ -12906,12 +12906,12 @@ var StdioServerTransport = class {
     this.onclose?.();
   }
   send(message) {
-    return new Promise((resolve7) => {
+    return new Promise((resolve8) => {
       const json2 = serializeMessage(message);
       if (this._stdout.write(json2)) {
-        resolve7();
+        resolve8();
       } else {
-        this._stdout.once("drain", resolve7);
+        this._stdout.once("drain", resolve8);
       }
     });
   }
@@ -18973,7 +18973,7 @@ var Protocol = class {
           return;
         }
         const pollInterval = task2.pollInterval ?? this._options?.defaultTaskPollInterval ?? 1e3;
-        await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
+        await new Promise((resolve8) => setTimeout(resolve8, pollInterval));
         options?.signal?.throwIfAborted();
       }
     } catch (error2) {
@@ -18990,7 +18990,7 @@ var Protocol = class {
    */
   request(request, resultSchema, options) {
     const { relatedRequestId, resumptionToken, onresumptiontoken, task, relatedTask } = options ?? {};
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve8, reject) => {
       const earlyReject = (error2) => {
         reject(error2);
       };
@@ -19068,7 +19068,7 @@ var Protocol = class {
           if (!parseResult.success) {
             reject(parseResult.error);
           } else {
-            resolve7(parseResult.data);
+            resolve8(parseResult.data);
           }
         } catch (error2) {
           reject(error2);
@@ -19329,12 +19329,12 @@ var Protocol = class {
       }
     } catch {
     }
-    return new Promise((resolve7, reject) => {
+    return new Promise((resolve8, reject) => {
       if (signal.aborted) {
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
         return;
       }
-      const timeoutId = setTimeout(resolve7, interval);
+      const timeoutId = setTimeout(resolve8, interval);
       signal.addEventListener("abort", () => {
         clearTimeout(timeoutId);
         reject(new McpError(ErrorCode.InvalidRequest, "Request cancelled"));
@@ -20293,7 +20293,7 @@ var McpServer = class {
     let task = createTaskResult.task;
     const pollInterval = task.pollInterval ?? 5e3;
     while (task.status !== "completed" && task.status !== "failed" && task.status !== "cancelled") {
-      await new Promise((resolve7) => setTimeout(resolve7, pollInterval));
+      await new Promise((resolve8) => setTimeout(resolve8, pollInterval));
       const updatedTask = await extra.taskStore.getTask(taskId);
       if (!updatedTask) {
         throw new McpError(ErrorCode.InternalError, `Task ${taskId} not found during polling`);
@@ -21927,7 +21927,7 @@ var ShellClaudePSpawner = class {
     const start = Date.now();
     const argv = this.buildArgv(opts);
     const timeoutMs = opts.timeout ?? this.defaultTimeoutMs;
-    return new Promise((resolve7) => {
+    return new Promise((resolve8) => {
       let child;
       try {
         child = this.processSpawner(this.binary, argv, { cwd: opts.cwd });
@@ -21941,7 +21941,7 @@ var ShellClaudePSpawner = class {
           argv,
           failureType: "claude-cli-spawn-error"
         };
-        resolve7({
+        resolve8({
           type: opts.type,
           output: "",
           status: "error",
@@ -21960,7 +21960,7 @@ var ShellClaudePSpawner = class {
           return;
         settled = true;
         clearTimeout(timer);
-        resolve7(result);
+        resolve8(result);
       };
       const timer = setTimeout(() => {
         watchdogFired = true;
@@ -22246,11 +22246,11 @@ var TimeoutError = class extends Error {
   }
 };
 function withTimeout(p, timeoutMs) {
-  return new Promise((resolve7, reject) => {
+  return new Promise((resolve8, reject) => {
     const timer = setTimeout(() => reject(new TimeoutError(timeoutMs)), timeoutMs);
     p.then((v) => {
       clearTimeout(timer);
-      resolve7(v);
+      resolve8(v);
     }, (e) => {
       clearTimeout(timer);
       reject(e);
@@ -25274,8 +25274,8 @@ async function withWorktreeMutex(fn, opts = {}) {
   const mutex = opts._mutex ?? _globalMutex;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_MUTEX_TIMEOUT_MS;
   let releaseLock;
-  const newTail = new Promise((resolve7) => {
-    releaseLock = resolve7;
+  const newTail = new Promise((resolve8) => {
+    releaseLock = resolve8;
   });
   const prevTail = mutex.queue;
   mutex.queue = newTail;
@@ -25304,7 +25304,7 @@ async function withWorktreeMutex(fn, opts = {}) {
       if (tryAcquireFileLock(opts.workDir)) {
         fileLockAcquired = true;
       } else {
-        await new Promise((resolve7) => setTimeout(resolve7, 200));
+        await new Promise((resolve8) => setTimeout(resolve8, 200));
       }
     }
     if (!fileLockAcquired) {
@@ -25364,21 +25364,25 @@ function findClaudeSubprocess(psOutput, taskId) {
 }
 async function isSafeToAutoClean(runner, workDir, taskId, branch, worktreePath2, opts) {
   const taskIdLower = taskId.toLowerCase();
-  const prResult = await runner("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number"], { cwd: workDir, allowFailure: true });
+  const prResult = await runner("gh", ["pr", "list", "--head", branch, "--state", "open", "--json", "number,isDraft"], { cwd: workDir, allowFailure: true });
   if (prResult.code !== 0) {
     console.info(`[step-3] ${taskIdLower}: keeping branch (gh pr list failed; fail-closed)`);
     return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
   }
   let hadOpenPR = false;
+  let hadDraftPR = false;
   try {
     const parsed = JSON.parse(prResult.stdout.trim() || "[]");
     hadOpenPR = Array.isArray(parsed) && parsed.length > 0;
+    hadDraftPR = hadOpenPR && parsed.every((pr) => pr.isDraft === true);
   } catch {
     hadOpenPR = prResult.stdout.trim().length > 0;
+    hadDraftPR = false;
   }
   if (hadOpenPR) {
-    console.info(`[step-3] ${taskIdLower}: keeping branch (open PR found for ${branch})`);
-    return { safe: false, hadOpenPR: true, hadUncommittedChanges: false };
+    const kind = hadDraftPR ? "draft PR" : "ready PR";
+    console.info(`[step-3] ${taskIdLower}: keeping branch (${kind} found for ${branch})`);
+    return { safe: false, hadOpenPR: true, hadUncommittedChanges: false, hadDraftPR };
   }
   let hadUncommittedChanges = false;
   const statusResult = await runner("git", ["-C", worktreePath2, "status", "--porcelain"], {
@@ -29833,12 +29837,12 @@ var YargsInstance = class {
   async getCompletion(args, done) {
     argsert("<array> [function]", [args, done], arguments.length);
     if (!done) {
-      return new Promise((resolve7, reject) => {
+      return new Promise((resolve8, reject) => {
         __classPrivateFieldGet(this, _YargsInstance_completion, "f").getCompletion(args, (err, completions) => {
           if (err)
             reject(err);
           else
-            resolve7(completions);
+            resolve8(completions);
         });
       });
     } else {
@@ -31569,8 +31573,8 @@ import { existsSync as existsSync22 } from "node:fs";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
-import { existsSync as existsSync33, readFileSync as readFileSync31 } from "node:fs";
-import { join as join34 } from "node:path";
+import { existsSync as existsSync35, readFileSync as readFileSync33 } from "node:fs";
+import { join as join37 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/dispatch-result.js
 import { mkdirSync as mkdirSync10, readFileSync as readFileSync21, writeFileSync as writeFileSync9 } from "node:fs";
@@ -31578,62 +31582,74 @@ import { dirname as dirname8 } from "node:path";
 
 // ../../pipeline-cli/dist/cli/execute.js
 import { mkdirSync as mkdirSync12, writeFileSync as writeFileSync12 } from "node:fs";
-import { join as join24 } from "node:path";
+import { join as join26 } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/claude-cli-inline.js
 import { mkdirSync as mkdirSync11, writeFileSync as writeFileSync10 } from "node:fs";
 import { dirname as dirname9 } from "node:path";
 
-// ../../pipeline-cli/dist/orchestrator/rollback.js
-import { execSync as execSync4 } from "node:child_process";
-import { existsSync as existsSync23, readFileSync as readFileSync22, statSync as statSync9, writeFileSync as writeFileSync11 } from "node:fs";
+// ../../pipeline-cli/dist/orchestrator/checkpoint.js
+import { execFileSync, execSync as execSync4 } from "node:child_process";
+import { existsSync as existsSync23, readFileSync as readFileSync22 } from "node:fs";
 import { join as join23 } from "node:path";
+
+// ../../pipeline-cli/dist/orchestrator/rollback.js
+import { execSync as execSync5 } from "node:child_process";
+import { existsSync as existsSync24, readFileSync as readFileSync23, statSync as statSync9, writeFileSync as writeFileSync11 } from "node:fs";
+import { join as join24 } from "node:path";
 var SENTINEL_ACTIVE_THRESHOLD_MS2 = 6 * 60 * 60 * 1e3;
 
+// ../../pipeline-cli/dist/cli/resume-from-draft.js
+import { existsSync as existsSync25 } from "node:fs";
+import { join as join25 } from "node:path";
+
 // ../../pipeline-cli/dist/orchestrator/events.js
-import { appendFileSync as appendFileSync2, existsSync as existsSync24, mkdirSync as mkdirSync13, readFileSync as readFileSync23, readdirSync as readdirSync10 } from "node:fs";
-import { dirname as dirname10, join as join25 } from "node:path";
+import { appendFileSync as appendFileSync2, existsSync as existsSync26, mkdirSync as mkdirSync13, readFileSync as readFileSync24, readdirSync as readdirSync10 } from "node:fs";
+import { dirname as dirname10, join as join27 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/already-in-flight.js
-import { execSync as execSync5 } from "node:child_process";
-import { existsSync as existsSync25 } from "node:fs";
-import { join as join26 } from "node:path";
+import { execSync as execSync6 } from "node:child_process";
+import { existsSync as existsSync27 } from "node:fs";
+import { join as join28 } from "node:path";
+
+// ../../pipeline-cli/dist/capture/capture-reader.js
+import { readdirSync as readdirSync11, readFileSync as readFileSync26, statSync as statSync10 } from "node:fs";
+import { basename as basename7, join as join30 } from "node:path";
+
+// ../../pipeline-cli/dist/capture/capture-writer.js
+import { existsSync as existsSync28, mkdirSync as mkdirSync14, readFileSync as readFileSync25, writeFileSync as writeFileSync13 } from "node:fs";
+import { basename as basename6, join as join29, resolve as resolve7 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/blast-radius-overlap.js
-import { execSync as execSync6 } from "node:child_process";
-import { existsSync as existsSync26, readdirSync as readdirSync11, readFileSync as readFileSync24 } from "node:fs";
-import { join as join27 } from "node:path";
+import { execSync as execSync7 } from "node:child_process";
+import { existsSync as existsSync29, readdirSync as readdirSync12, readFileSync as readFileSync27 } from "node:fs";
+import { join as join31 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/dor-readiness.js
-import { existsSync as existsSync27, readFileSync as readFileSync25 } from "node:fs";
+import { existsSync as existsSync30, readFileSync as readFileSync28 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/calibration-log.js
-import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync14 } from "node:fs";
-import { dirname as dirname11, join as join28 } from "node:path";
+import { appendFileSync as appendFileSync3, mkdirSync as mkdirSync15 } from "node:fs";
+import { dirname as dirname11, join as join32 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/filters/external-dependencies.js
-import { existsSync as existsSync28, readFileSync as readFileSync26 } from "node:fs";
-import { join as join29 } from "node:path";
+import { existsSync as existsSync31, readFileSync as readFileSync29 } from "node:fs";
+import { join as join33 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/in-flight.js
-import { existsSync as existsSync29, readdirSync as readdirSync12, readFileSync as readFileSync27, statSync as statSync10 } from "node:fs";
-import { join as join30 } from "node:path";
+import { existsSync as existsSync32, readdirSync as readdirSync13, readFileSync as readFileSync30, statSync as statSync11 } from "node:fs";
+import { join as join34 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/catalogue.js
-import { existsSync as existsSync30, readFileSync as readFileSync28 } from "node:fs";
-import { join as join31 } from "node:path";
+import { existsSync as existsSync33, readFileSync as readFileSync31 } from "node:fs";
+import { join as join35 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/playbook/handlers/long-running-pr.js
 var LONG_RUNNING_PR_THRESHOLD_MS = 2 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/orchestrator/playbook/state-machine.js
-import { existsSync as existsSync31, mkdirSync as mkdirSync15, readFileSync as readFileSync29, writeFileSync as writeFileSync13 } from "node:fs";
-import { dirname as dirname12, join as join32 } from "node:path";
-
-// ../../pipeline-cli/dist/orchestrator/checkpoint.js
-import { execFileSync, execSync as execSync7 } from "node:child_process";
-import { existsSync as existsSync32, readFileSync as readFileSync30 } from "node:fs";
-import { join as join33 } from "node:path";
+import { existsSync as existsSync34, mkdirSync as mkdirSync16, readFileSync as readFileSync32, writeFileSync as writeFileSync14 } from "node:fs";
+import { dirname as dirname12, join as join36 } from "node:path";
 
 // ../../pipeline-cli/dist/orchestrator/loop.js
 var MAX_IDLE_SLEEP_SEC = 5 * 60;
@@ -31643,7 +31659,7 @@ import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 // ../../pipeline-cli/dist/classifier/classifier.js
 import { appendFile, mkdir } from "node:fs/promises";
-import { dirname as dirname13, join as join35 } from "node:path";
+import { dirname as dirname13, join as join38 } from "node:path";
 
 // ../../pipeline-cli/dist/classifier/budget-classifier.js
 var BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
@@ -31656,8 +31672,8 @@ init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync35, readFileSync as readFileSync32, readdirSync as readdirSync14, statSync as statSync12 } from "node:fs";
-import { basename as basename6, join as join37, relative as relative2 } from "node:path";
+import { existsSync as existsSync37, readFileSync as readFileSync34, readdirSync as readdirSync15, statSync as statSync13 } from "node:fs";
+import { basename as basename8, join as join40, relative as relative2 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
 var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
@@ -31666,22 +31682,22 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync36, readFileSync as readFileSync33 } from "node:fs";
-import { join as join38 } from "node:path";
+import { existsSync as existsSync38, readFileSync as readFileSync35 } from "node:fs";
+import { join as join41 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/ingress-claude.js
-import { existsSync as existsSync37, readFileSync as readFileSync34, readdirSync as readdirSync15 } from "node:fs";
-import { join as join39 } from "node:path";
+import { existsSync as existsSync39, readFileSync as readFileSync36, readdirSync as readdirSync16 } from "node:fs";
+import { join as join42 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync38, readFileSync as readFileSync35 } from "node:fs";
+import { existsSync as existsSync40, readFileSync as readFileSync37 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync39, readFileSync as readFileSync36 } from "node:fs";
-import { join as join40 } from "node:path";
+import { existsSync as existsSync41, readFileSync as readFileSync38 } from "node:fs";
+import { join as join43 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {

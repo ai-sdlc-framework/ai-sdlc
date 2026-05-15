@@ -169,7 +169,7 @@ VERDICTS_EOF
   fi
 fi
 
-# ── Step 4: idempotency check ────────────────────────────────────────
+# ── Step 4: idempotency check + stale-envelope detection ─────────────
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo '')
 if [ -z "$HEAD_SHA" ]; then
   echo "[attestation-sign] WARN: cannot resolve HEAD; skipping" >&2
@@ -183,6 +183,43 @@ if [ -f "$ATT_FILE" ]; then
   # HEAD with the envelope present), or the operator pre-signed manually.
   # Either way: nothing to do, push proceeds.
   exit 0
+fi
+
+# ── Step 4c: stale-envelope detection (AISDLC-274) ───────────────────
+#
+# After a queue rebase the branch's parent SHA shifts. The envelope written
+# in the previous iteration was named after the old dev-commit SHA, so
+# `<old-sha>.dsse.json` still exists on disk but that SHA is no longer
+# the commit immediately before HEAD. The idempotency check above correctly
+# falls through (the NEW head SHA has no envelope), but we must also
+# remove the stale envelope BEFORE signing so the PR diff doesn't accumulate
+# orphan files.
+#
+# Predicate: get HEAD~1 SHA (the last code-commit before HEAD, or HEAD
+# itself when there's only one commit). Any `.dsse.json` file in
+# `.ai-sdlc/attestations/` whose basename (without `.dsse.json`) is NOT
+# equal to HEAD~1 SHA (and NOT equal to HEAD_SHA — the new envelope we're
+# about to write) is stale from a previous rebase+sign cycle. Remove it.
+#
+# We enumerate via `git diff --name-only --diff-filter=A origin/main..HEAD`
+# (same filter as the signer uses) so we only consider files ADDED by the
+# PR, not pre-existing attestations from merged work.
+HEAD_PARENT_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD 2>/dev/null || echo '')
+if [ -n "$HEAD_PARENT_SHA" ]; then
+  PR_ADDED_ENVELOPES=$(git diff --name-only --diff-filter=A "origin/main..HEAD" -- ".ai-sdlc/attestations/" 2>/dev/null || echo '')
+  for ENVELOPE_PATH in $PR_ADDED_ENVELOPES; do
+    # Extract the SHA from the filename (strip directory prefix and .dsse.json suffix).
+    ENVELOPE_FILE="${ENVELOPE_PATH##*/}"        # basename
+    ENVELOPE_SHA="${ENVELOPE_FILE%.dsse.json}"  # strip suffix
+    # Only remove if it's neither the current HEAD SHA nor the parent SHA.
+    if [ "$ENVELOPE_SHA" != "$HEAD_SHA" ] && [ "$ENVELOPE_SHA" != "$HEAD_PARENT_SHA" ]; then
+      STALE_ABS="$WT_ROOT/$ENVELOPE_PATH"
+      if [ -f "$STALE_ABS" ]; then
+        rm -f "$STALE_ABS"
+        echo "[attestation-sign] removed stale envelope (rebase cycle): $ENVELOPE_PATH" >&2
+      fi
+    fi
+  done
 fi
 
 # ── Step 4b: upstream auto-sign chore detection (AISDLC-135) ─────────

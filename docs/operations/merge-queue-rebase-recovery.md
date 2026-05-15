@@ -8,6 +8,18 @@ The `verify-attestation.yml` workflow correctly detects this: `contentHashV4 mis
 
 **This is correct behavior, not a bug.** The reviewed content genuinely changed — a sibling PR contributed additional lines to the same files. The attestation must be re-signed to bind the new combined content.
 
+## AISDLC-274: Stale-envelope accumulation is now prevented automatically
+
+As of AISDLC-274, the three-layer fix should make **manual recovery unnecessary in normal flow**:
+
+1. **Signer single-envelope invariant (AC #1)**: `sign-attestation.mjs` now scans `git diff --name-only --diff-filter=A origin/main..HEAD` before writing the new envelope and **deletes any prior envelopes added by the current PR**. Each sign leaves exactly one envelope in the PR's diff.
+
+2. **Pre-push hook stale detection (AC #2)**: `check-attestation-sign.sh` detects when the existing envelope file's filename SHA does not match `HEAD~1` (the usual dev-commit SHA it should bind to) and removes the stale file before re-signing. This catches the case where the signer didn't run but the hook did.
+
+3. **Verifier actionable error (AC #3)**: If orphan envelopes somehow slip through, `verify-attestation.mjs` now detects them at the start of the verification run and surfaces a **specific, actionable error message** including the orphan filenames and the exact recovery command — instead of the previously misleading `contentHashV4 mismatch` error.
+
+**In practice:** after AISDLC-274, a typical rebase+re-sign cycle should produce zero operator-visible friction. The signer cleans up its own orphans, and the hook cleans up any the signer missed.
+
 ## Shared-churn files that never require re-sign (AISDLC-258)
 
 As of AISDLC-258, a fixed set of **shared-churn files** is excluded from `contentHashV4` on BOTH the signer and verifier sides. These files are generated automatically by tooling (pnpm, release-please, schema generators) and change in most PRs. When a merge-queue rebase changes ONLY these files, `contentHashV4` is unaffected and the PR merges without operator intervention.
@@ -34,6 +46,12 @@ Current exclude list (`CONTENTHASHV4_IGNORE_FILES` in `orchestrator/src/runtime/
 **When does this NOT happen?**
 
 If your PR's non-ignored files don't overlap with any sibling PRs that land ahead of you in the queue, `contentHashV4` is fully stable across the rebase. No manual action needed.
+
+## When does manual recovery still occur?
+
+After AISDLC-274, manual recovery is needed only when the reviewed content **genuinely changed** — specifically, when a sibling PR modified the same non-ignored source files as your PR and merged ahead of you. In that case `contentHashV4 mismatch` is correct and you must re-review + re-sign the combined content.
+
+**If you see `orphan envelope(s) detected`** in the CI status, that is the AISDLC-274 safety net. The verifier will show you the exact `rm` and `sign-attestation.mjs` commands to run — follow them verbatim.
 
 ## Recovery Steps
 
@@ -97,8 +115,11 @@ But when a sibling PR modifies the same file, the merge_group commit has a DIFFE
 
 - `CLAUDE.md` — "Review attestations" section, contentHashV4 contract and IGNORE list
 - `orchestrator/src/runtime/attestations.ts` — `CONTENTHASHV4_IGNORE_FILES` + `isIgnoredForContentHash`
-- `scripts/verify-attestation.mjs` — verifier implementation
+- `ai-sdlc-plugin/scripts/sign-attestation.mjs` — signer with AISDLC-274 single-envelope invariant
+- `scripts/check-attestation-sign.sh` — pre-push hook with AISDLC-274 stale-envelope detection
+- `scripts/verify-attestation.mjs` — verifier with AISDLC-274 orphan-detection actionable error
 - `scripts/verify-attestation.test.mjs` — AISDLC-237 regression tests (non-overlapping stable + overlapping correctly rejects)
+- AISDLC-274 — stale-envelope accumulation fix (signer + hook + verifier)
 - AISDLC-258 — shared-churn exclude list for pnpm-lock.yaml, CHANGELOG
 - AISDLC-237 — root-cause analysis and fix tracking
 - AISDLC-193.1 — introducing contentHashV4

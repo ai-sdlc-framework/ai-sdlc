@@ -33,6 +33,7 @@ import { fileURLToPath } from 'node:url';
 
 import {
   buildGithubOutputLines,
+  detectOrphanEnvelopes,
   findChoreCommitViolations,
   loadAllAttestations,
   parseTrustedReviewers,
@@ -93,7 +94,10 @@ function git(args, cwd) {
 const REVIEW_POLICY = '# review policy v1\nGolden rule: when in doubt, approve.\n';
 const AGENT_FILES = {
   'code-reviewer': '---\nname: code-reviewer\n---\nbody1\n',
+  // AISDLC-252: codex variants are also read by the verifier.
+  'code-reviewer-codex': '---\nname: code-reviewer-codex\n---\nbody1-codex\n',
   'test-reviewer': '---\nname: test-reviewer\n---\nbody2\n',
+  'test-reviewer-codex': '---\nname: test-reviewer-codex\n---\nbody2-codex\n',
   'security-reviewer': '---\nname: security-reviewer\n---\nbody3\n',
 };
 // Plugin manifest baseline. Tests can override by writing a different
@@ -2464,5 +2468,159 @@ describe('runVerifier (AISDLC-258 — IGNORE list applied verifier-side)', () =>
     });
     assert.equal(out.status, 'invalid', `expected invalid, got ${out.status}: ${out.reason}`);
     assert.match(out.reason, /contentHash(V3|V4) mismatch/);
+  });
+});
+
+// ─── AISDLC-274 — orphan-envelope detection ──────────────────────────
+//
+// When a PR is queue-rebased and re-signed multiple times, stale envelope
+// files accumulate. The verifier must detect these orphans and surface an
+// actionable error message instead of falling through to a misleading
+// `contentHashV4 mismatch`.
+
+describe('detectOrphanEnvelopes (AISDLC-274)', () => {
+  let fixture;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('returns empty orphans when there are no PR-added envelopes', () => {
+    const { orphans, total } = detectOrphanEnvelopes(
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.root,
+    );
+    assert.equal(orphans.length, 0, 'no PR-added envelopes should yield no orphans');
+    assert.equal(total, 0);
+  });
+
+  it('returns empty orphans when the only PR-added envelope has a resolvable SHA', () => {
+    // Sign an envelope at headSha (which is a real commit reachable in the repo).
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    // Stage + commit the envelope so git diff sees it as PR-added.
+    git(['add', join(fixture.root, '.ai-sdlc', 'attestations')], fixture.root);
+    git(['commit', '-q', '-m', 'chore: add envelope'], fixture.root);
+    const newHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    const { orphans, total } = detectOrphanEnvelopes(newHead, fixture.baseSha, fixture.root);
+    // headSha is a real commit — not an orphan.
+    assert.equal(orphans.length, 0, `expected 0 orphans, got: ${orphans.join(', ')}`);
+    assert.equal(total, 1, 'exactly 1 PR-added envelope');
+  });
+
+  it('detects an envelope whose filename SHA is not a valid git object (orphan)', () => {
+    // Create an envelope file with a SHA that doesn't exist in the repo.
+    const fakeSha = '0000000000000000000000000000000000000001';
+    const attDir = join(fixture.root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    const fakeEnvPath = join(attDir, `${fakeSha}.dsse.json`);
+    writeFileSync(fakeEnvPath, '{"_test":"orphan"}\n');
+    // Stage + commit so git diff sees it as PR-added.
+    git(['add', '.'], fixture.root);
+    git(['commit', '-q', '-m', 'chore: stale envelope from old sign'], fixture.root);
+    const newHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    const { orphans, total } = detectOrphanEnvelopes(newHead, fixture.baseSha, fixture.root);
+    assert.equal(orphans.length, 1, `expected 1 orphan, got: ${orphans.join(', ')}`);
+    assert.ok(orphans[0].includes(fakeSha), `orphan path must include the fake SHA: ${orphans[0]}`);
+    assert.equal(total, 1);
+  });
+});
+
+describe('runVerifier (AISDLC-274 — orphan-envelope actionable error)', () => {
+  let fixture;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('surfaces actionable error when orphan envelope accumulates after queue rebase', () => {
+    // Simulates the full scenario from PR #481 (AISDLC-270):
+    //   1. Sign at headSha (round 1). Commit envelope.
+    //   2. Queue rebase → add new commit on top (newHead). Old envelope file
+    //      has an unresolvable SHA.
+    //   3. Verifier should detect the orphan and surface the recovery command,
+    //      NOT the misleading `contentHashV4 mismatch`.
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, publicKeyPem);
+
+    // Round 1: sign + commit envelope at headSha.
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      privateKeyPem,
+    );
+    git(['add', join(fixture.root, '.ai-sdlc', 'attestations')], fixture.root);
+    git(['commit', '-q', '-m', 'chore: round-1 envelope'], fixture.root);
+
+    // Simulate a queue rebase by adding a new code commit on top. The
+    // round-1 envelope file (`${fixture.headSha}.dsse.json`) is now in the
+    // repo but `fixture.headSha` is still a reachable commit. To make it
+    // truly orphan-like in the PR diff context, we instead write a fake
+    // stale envelope with an unresolvable SHA alongside the round-1 one.
+    const orphanSha = '0000000000000000000000000000000000000002';
+    const attDir = join(fixture.root, '.ai-sdlc', 'attestations');
+    const orphanPath = join(attDir, `${orphanSha}.dsse.json`);
+    writeFileSync(orphanPath, '{"_test":"orphan-round-2"}\n');
+    git(['add', '.'], fixture.root);
+    git(['commit', '-q', '-m', 'chore: stale envelope from queue rebase'], fixture.root);
+
+    // Add a new dev commit (simulates the new code after rebase).
+    writeFileSync(join(fixture.root, 'post-rebase.txt'), 'post-rebase code\n');
+    git(['add', 'post-rebase.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: post-rebase feature'], fixture.root);
+    const newHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Verifier should detect the orphan envelope (orphanSha not resolvable)
+    // and surface the actionable error.
+    const out = runVerifier({
+      headSha: newHead,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+
+    assert.equal(
+      out.status,
+      'invalid',
+      `expected invalid (orphan detected), got ${out.status}: ${out.reason}`,
+    );
+    // Must mention "orphan" (not "contentHashV4 mismatch").
+    assert.match(
+      out.reason,
+      /orphan envelope/i,
+      `expected orphan-envelope error, got: ${out.reason}`,
+    );
+    // Must NOT surface the misleading contentHashV4 mismatch wording.
+    assert.equal(
+      out.reason.includes('contentHashV4 mismatch'),
+      false,
+      `must not surface contentHashV4 mismatch for orphan-envelope case: ${out.reason}`,
+    );
+    // Must include the orphan filename.
+    assert.ok(out.reason.includes(orphanSha), `reason must name the orphan SHA: ${out.reason}`);
+    // Must include the recovery command keyword.
+    assert.match(
+      out.reason,
+      /rm .ai-sdlc\/attestations|node ai-sdlc-plugin\/scripts\/sign-attestation/i,
+    );
   });
 });

@@ -570,4 +570,67 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
       );
     }
   });
+
+  // ── AISDLC-274: stale-envelope detection ─────────────────────────────
+
+  it('AISDLC-274: hook removes stale envelope + signs fresh after queue-rebase simulation', () => {
+    // Simulates the rebase-stale case: there is an envelope file in
+    // .ai-sdlc/attestations/ from a prior sign cycle, but its filename SHA
+    // is NOT HEAD~1 (the rebase shifted the parent SHA). The hook must
+    // detect the stale envelope, remove it, and proceed to sign fresh.
+    //
+    // Setup:
+    //   baseline (origin/main) → dev commit → chore commit (has old envelope)
+    //   Then: add a NEW dev commit (simulating post-rebase code change).
+    //   HEAD is now the new dev commit. HEAD~1 is the chore commit.
+    //   The old envelope in .ai-sdlc/attestations/ has an unrelated SHA.
+    //
+    // Expected: hook fires (no envelope at HEAD), removes the stale file,
+    // signs fresh, commits a new chore, exits 1.
+
+    writeFileSync(join(root, '.active-task'), 'AISDLC-274\n');
+    writeVerdictFile(root, 'AISDLC-274');
+
+    // Simulate a stale envelope from a prior sign cycle: write an envelope
+    // with a random (non-existent) SHA filename. This represents what happens
+    // after a queue rebase — the old SHA is no longer on the branch.
+    const staleShaPart = '0000000000000000000000000000000000000001';
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    mkdirSync(attDir, { recursive: true });
+    const staleEnvPath = join(attDir, `${staleShaPart}.dsse.json`);
+    writeFileSync(staleEnvPath, '{"_test":"stale-envelope"}\n');
+
+    // Commit the stale envelope so it's tracked in git (it would normally
+    // be staged from a previous sign chore commit). We must also commit
+    // a new dev commit on top so origin/main sees the stale envelope as
+    // a PR-added file.
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-274-old'], root);
+    // Move origin/main forward to the baseline (not to include this commit)
+    // so git diff origin/main..HEAD shows the stale envelope as PR-added.
+    // Actually origin/main already points at the baseline; just add a new dev commit.
+    writeFileSync(join(root, 'new-feature.txt'), 'new feature after rebase\n');
+    git(['add', 'new-feature.txt'], root);
+    git(['commit', '-q', '-m', 'feat: new feature after queue-rebase'], root);
+    // HEAD is now the new dev commit. HEAD~1 is the chore commit with the stale envelope.
+    const newDevSha = git(['rev-parse', 'HEAD'], root).trim();
+
+    const { cmd } = installFakeSigner(root);
+    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+
+    // Hook must fire (no envelope at new dev HEAD).
+    assert.equal(
+      r.status,
+      1,
+      `expected 1 (signed fresh after rebase), got ${r.status}: stderr=${r.stderr}`,
+    );
+    // Must report stale envelope removal.
+    assert.match(r.stderr, /stale envelope/i, `expected stale-envelope message: ${r.stderr}`);
+
+    // Stale envelope must be gone.
+    assert.equal(existsSync(staleEnvPath), false, 'stale envelope must be removed before new sign');
+    // New envelope must exist at the dev commit's SHA (the signer writes it).
+    const newEnvPath = join(attDir, `${newDevSha}.dsse.json`);
+    assert.equal(existsSync(newEnvPath), true, `new envelope must exist at ${newDevSha}`);
+  });
 });

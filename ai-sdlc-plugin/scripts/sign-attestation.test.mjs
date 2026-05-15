@@ -9,7 +9,15 @@
 
 import { describe, it, beforeEach, afterEach, before } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  readdirSync,
+  rmSync,
+} from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -311,6 +319,101 @@ describe('sign-attestation.mjs', () => {
       predicate.contentHash,
       undefined,
       'AISDLC-103: v3 envelope must NOT carry legacy contentHash field',
+    );
+  });
+
+  // ── AISDLC-274: single-envelope-per-PR invariant ──────────────────────
+
+  it('AISDLC-274: second sign deletes the first envelope (single-envelope invariant)', () => {
+    // Simulates the stale-envelope accumulation bug: sign at HEAD (round 1),
+    // then simulate a rebase by adding a new commit and updating origin/main
+    // to point at the old HEAD, then signing again at the new HEAD (round 2).
+    // The second sign must:
+    //   (a) delete the round-1 envelope (it was added by this PR vs origin/main)
+    //   (b) write the round-2 envelope at the new HEAD SHA
+    //   (c) leave exactly 1 envelope in .ai-sdlc/attestations/
+    writeKey(tmpHome);
+
+    const verdicts = JSON.stringify([
+      {
+        agentId: 'code-reviewer',
+        harness: 'codex',
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      },
+      {
+        agentId: 'test-reviewer',
+        harness: 'codex',
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      },
+      {
+        agentId: 'security-reviewer',
+        harness: 'codex',
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      },
+    ]);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(verdictsPath, verdicts);
+
+    // Round 1: sign at the current HEAD (fixture.headSha).
+    const res1 = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(res1.status, 0, `round-1 sign failed: ${res1.stderr}`);
+    const round1Envelope = join(
+      fixture.root,
+      '.ai-sdlc',
+      'attestations',
+      `${fixture.headSha}.dsse.json`,
+    );
+    assert.ok(existsSync(round1Envelope), 'round-1 envelope must exist after first sign');
+
+    // Simulate a queue rebase: commit the attestation file as a chore commit
+    // (so it's on the branch), then add another commit on top (new HEAD).
+    git(['add', join(fixture.root, '.ai-sdlc', 'attestations')], fixture.root);
+    git(['commit', '-q', '-m', 'chore: auto-sign attestation for AISDLC-274'], fixture.root);
+    // Simulate a rebase by making a new dev commit on top.
+    writeFileSync(join(fixture.root, 'feature2.txt'), 'second feature\n');
+    git(['add', 'feature2.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: second feature (post-rebase)'], fixture.root);
+    const newHeadSha = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Round 2: sign at the new HEAD. The old envelope (round1Envelope) was
+    // added by the PR's diff vs origin/main and must be deleted.
+    writeFileSync(verdictsPath, verdicts);
+    const res2 = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(res2.status, 0, `round-2 sign failed: ${res2.stderr}`);
+
+    // The round-1 envelope must be gone.
+    assert.equal(
+      existsSync(round1Envelope),
+      false,
+      'round-1 envelope must be deleted by the second sign (AISDLC-274)',
+    );
+    // The round-2 envelope must exist at the new HEAD SHA.
+    const round2Envelope = join(
+      fixture.root,
+      '.ai-sdlc',
+      'attestations',
+      `${newHeadSha}.dsse.json`,
+    );
+    assert.ok(existsSync(round2Envelope), 'round-2 envelope must exist at the new HEAD SHA');
+
+    // Exactly 1 envelope must remain.
+    const attDir = join(fixture.root, '.ai-sdlc', 'attestations');
+    const envelopes = readdirSync(attDir).filter((f) => f.endsWith('.dsse.json'));
+    assert.equal(
+      envelopes.length,
+      1,
+      `expected exactly 1 envelope after round-2 sign, got ${envelopes.length}: ${envelopes.join(', ')}`,
     );
   });
 });
