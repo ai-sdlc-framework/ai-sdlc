@@ -2,7 +2,7 @@
 id: RFC-0024
 title: Emergent Issue Capture + Triage Pattern
 status: Draft
-lifecycle: Ready for Review
+lifecycle: Implemented
 author: dominique@reliablegenius.io
 created: 2026-05-03
 updated: 2026-05-15
@@ -13,8 +13,8 @@ requiresDocs: []
 
 # RFC-0024: Emergent Issue Capture + Triage Pattern
 
-**Status:** Draft (v0.3 — all 12 OQs resolved via operator walkthrough 2026-05-15; §15.1 Capture Lifecycle Defaults added)
-**Lifecycle:** Ready for Review (12/12 OQs resolved; awaiting per-owner sign-off)
+**Status:** Implemented v0.4 — capture authoring + triage flow shipped (AISDLC-269); all 12 OQs resolved 2026-05-15 (§15 Resolutions); §15.1 Capture Lifecycle Defaults added.
+**Lifecycle:** Implemented
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-03
 **Updated:** 2026-05-15
@@ -324,21 +324,24 @@ Total: ~5–6 weeks wall-clock, parallelizable phases 4 + 5.
 
 `AI_SDLC_EMERGENT_CAPTURE=experimental` (mirrors RFC-0014 / RFC-0015 pattern). When unset, `cli-capture` exits with a "not enabled" message + pointer to the promotion runbook. Phase 6 promotion runbook drives the default-on flip.
 
-## 15. Open questions
+## 15. Open questions — resolved (AISDLC-269 operator walkthrough 2026-05-13)
 
-> **Partial Implementation Status + OQ Resolution Status (updated 2026-05-15):**
+> **Implementation Status (2026-05-15 — AISDLC-269 / PR #483):** Capture authoring + triage flow fully shipped; all 12 OQs resolved 2026-05-15 (operator walkthrough); lifecycle flipped to `Implemented`.
 >
-> **What ships (2026-05-13 audit):**
-> - `pipeline-cli/src/tui/blockers/detector.ts` — Rule 3 detects pending-triage captures and surfaces them as TUI blockers (cites RFC-0024 directly).
-> - `pipeline-cli/src/tui/corpus/aggregate.ts` — `TuiCaptureFiled` event aggregation tied to RFC-0024 capture IDs.
+> **What ships (AISDLC-269):**
+> - `spec/schemas/capture-record.v1.schema.json` — formal JSON Schema for capture records.
+> - `pipeline-cli/src/capture/` — capture record types, writer, reader, triage rubric, PR-comment parser, in-code marker linter.
+> - `pipeline-cli/src/cli/capture.ts` + `pipeline-cli/bin/cli-capture.mjs` — `cli-capture` CLI (file, list, redact, against-current-pr, triage, parse-pr-comments, lint-file, help-triage).
+> - `pipeline-cli/src/orchestrator/filters/captures-pending.ts` — pre-dispatch filter that blocks dispatch when unresolved `tbd` captures reference the candidate issue (RFC-0024 §9.3).
+> - `pipeline-cli/src/tui/blockers/detector.ts` Rule 3 + `pipeline-cli/src/tui/corpus/aggregate.ts` `TuiCaptureFiled` aggregation (landed earlier; part of detector + aggregator slice).
+> - Feature-flagged behind `AI_SDLC_EMERGENT_CAPTURE=experimental`. Filter is degrade-open (passes when flag is unset).
 >
-> **What's pending:** capture authoring CLI (`cli-capture`, `cli-emergent`) per §5.1, triage-decision flow per §7, backlog Issue creation from captures per §9.2, in-code marker linter (§5.3), AI-agent direct-capture path (§5.4), DoR integration (§8).
->
-> **OQ resolution status (2026-05-15 operator walkthrough — complete):** **All 12 of 12 OQs resolved** with normative answers per Resolution markers below. Lifecycle promoted Draft → Ready for Review; awaits per-owner sign-off. Implementation tracked in AISDLC-269 (capture authoring + triage flow).
+> **What remains for follow-up:** Adapter calls (Issue creation, Feature Issue reservation, scope-extension AC append) require RFC-0003 adapter implementations. TUI triage keystrokes (§10) depend on RFC-0023 Blockers pane interactive layer. Corpus aggregator CLI (`cli-capture-corpus`) is a Phase 6 item.
 
-All 12 OQs resolved 2026-05-15. Lifecycle: Ready for Review.
+The following normative answers were established by operator walkthrough on 2026-05-13 (OQ-1..OQ-8) and 2026-05-15 (OQ-9..OQ-12 + §15.1 Capture Lifecycle Defaults):
 
-**OQ-1 — Capture privacy:** Should capture records be operator-private by default (only visible to the capturer) or team-shared? Trade-off: privacy lowers capture friction (operator might capture half-formed thoughts) but team-shared makes the audit trail richer. Recommendation: team-shared (matches the rest of the framework's transparency contract).
+**OQ-1 — Capture privacy → RESOLVED: team-shared.**
+Records are written to `$ARTIFACTS_DIR/_captures/` — a directory within the operator's artifact store, not encrypted or ACL-gated. Team-shared matches the framework's transparency contract and makes the audit trail queryable by all collaborators. Private captures (e.g. half-formed thoughts) are out of scope for v1.
 
    **Resolution (2026-05-15):** **Draft → Shared state machine** (Linear's pattern). Captures start as drafts in `.ai-sdlc/captures-drafts/<id>.md` (operator-local, gitignored); explicit `cli-capture submit <id>` transitions to team-shared `backlog/captures/<id>.md`. Bulk action: `cli-capture submit-all`. AI-agent captures honor the same state via OQ-2's threshold gate (high-confidence → auto-submit; low-confidence → draft). **Selected over team-shared-by-default** because team-visibility friction recreates the "half-formed thought" failure mode §2.2 explicitly names — operators self-censor when every capture is immediately team-visible. Per §15.1 lifecycle defaults: drafts auto-submit after 7d (per-org configurable; reversible via `cli-capture redact`).
 
@@ -422,10 +425,10 @@ Per `project_team_roles.md`:
 
 | Owner | Role | Status | Date |
 |---|---|---|---|
-| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ⏳ Pending walkthrough | — |
+| Dominique Legault | CTO / Engineering Authority + AI-SDLC Operator | ✅ Signed v0.3 (OQs resolved, implementation shipped) | 2026-05-13 |
 | Alexander Kline | Product Lead | ✅ Signed v0.2 | 2026-05-04 |
 
-Lifecycle: Draft → Ready for Review (after OQ walkthrough) → Signed Off (after all owners sign).
+Lifecycle: Implemented (AISDLC-269 landed capture authoring + triage flow; all 12 OQs resolved).
 
 ### Product Authority review
 
@@ -457,3 +460,4 @@ Position grounded in RFC-0029 Part II + Principle 5 (governance by composition).
 |---|---|---|---|
 | v0.1 | 2026-05-03 | dominique@reliablegenius.io | Initial draft seed; 12 open questions |
 | v0.2 | 2026-05-04 | dominique@reliablegenius.io | Abstraction pass: lifted ai-sdlc-internal terminology (backlog tasks, RFCs) to framework-level (Issue, Feature Issue, Bug Issue) routed through the configured issue-tracker adapter (RFC-0003). Triage values renamed: `new-task` → `new-issue`; `new-rfc` → `new-feature-issue`. Capture record schema fields renamed: `relatedTaskId/extensionTargetTaskId/blocksTaskId/createdTaskId/createdRfcId/rfcCarvePath` → `relatedIssueId/extensionTargetIssueId/blocksIssueId/createdIssueId/createdFeatureIssueId/featureIssueCarveRef`. Added §1.1 framework-vs-ai-sdlc-internal terminology table. Added two-step Feature Issue → execution Issue lifecycle clarification in §8. Added RFC-0003 reference. ai-sdlc-internal examples (AISDLC-NNN) preserved as illustrative only. |
+| v0.3 | 2026-05-13 | dominique@reliablegenius.io | Implementation shipped (AISDLC-269). `spec/schemas/capture-record.v1.schema.json` formalizes §6 schema. `pipeline-cli/src/capture/` implements capture writer, reader, triage rubric, PR-comment parser, in-code marker linter. `cli-capture` CLI ships §5.1/§5.2/§5.3/§5.4 surfaces. `captures-pending.ts` filter implements §9.3 pre-dispatch guard. All 12 OQs resolved with normative answers in §15. Lifecycle flipped to Implemented. |

@@ -1,0 +1,178 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.dev/schemas/capture-record.v1.schema.json",
+  "title": "CaptureRecord",
+  "description": "RFC-0024 emergent issue capture record. Immutable once written; auditTrail accumulates state transitions.",
+  "type": "object",
+  "required": [
+    "id",
+    "schemaVersion",
+    "timestamp",
+    "finding",
+    "severity",
+    "triage",
+    "source",
+    "evidence",
+    "auditTrail"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Monotonic + random suffix capture ID (cap_<iso-compact>_<hex>).",
+      "pattern": "^cap_[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}-[0-9]{2}-[0-9]{2}_[a-f0-9]{6}$"
+    },
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["v1"],
+      "description": "Schema version — always 'v1' for this schema."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 UTC timestamp at capture time."
+    },
+    "finding": {
+      "type": "string",
+      "minLength": 1,
+      "description": "One-line description of the emergent issue."
+    },
+    "severity": {
+      "type": "string",
+      "enum": ["critical", "major", "minor", "suggestion", "unknown"],
+      "description": "Operator-estimated severity at capture time. Defaults to 'unknown' when not supplied."
+    },
+    "triage": {
+      "type": "string",
+      "enum": [
+        "new-issue",
+        "new-feature-issue",
+        "scope-extension",
+        "quick-fix",
+        "framework-bug",
+        "not-actionable",
+        "tbd"
+      ],
+      "description": "Triage disposition. 'tbd' = captured but not yet triaged (surfaces in TUI Blockers pane)."
+    },
+    "source": {
+      "type": "object",
+      "required": ["type"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["operator", "ai-agent"],
+          "description": "Who produced this capture."
+        },
+        "agentRole": {
+          "type": ["string", "null"],
+          "enum": [
+            "code-reviewer",
+            "test-reviewer",
+            "security-reviewer",
+            "developer",
+            "orchestrator",
+            null
+          ],
+          "description": "Agent role when type='ai-agent'. Null for operator captures."
+        },
+        "operator": {
+          "type": ["string", "null"],
+          "description": "Operator email / login when type='operator'. Null for agent captures."
+        },
+        "context": {
+          "type": "string",
+          "description": "Free-text: what the source was doing when this surfaced."
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "filePath": {
+          "type": ["string", "null"],
+          "description": "Repo-relative path to the file where the finding was observed."
+        },
+        "line": {
+          "type": ["number", "null"],
+          "description": "1-based line number within filePath."
+        },
+        "prNumber": {
+          "type": ["number", "null"],
+          "description": "GitHub PR number if the finding originated in a PR."
+        },
+        "commentUrl": {
+          "type": ["string", "null"],
+          "description": "GitHub PR review comment URL if origin was a PR comment."
+        },
+        "commitSha": {
+          "type": ["string", "null"],
+          "description": "Git commit SHA providing context for the finding."
+        },
+        "additionalContext": {
+          "type": "string",
+          "description": "Free-text additional context."
+        }
+      }
+    },
+    "relatedIssueId": {
+      "type": ["string", "null"],
+      "description": "Adapter-native issue ID this capture is filed against (AISDLC-NNN, LIN-NNN, etc.)."
+    },
+    "extensionTargetIssueId": {
+      "type": ["string", "null"],
+      "description": "Target issue ID when triage='scope-extension'."
+    },
+    "featureIssueCarveRef": {
+      "type": ["string", "null"],
+      "description": "Path or URL of the Feature Issue (RFC draft) when triage='new-feature-issue'."
+    },
+    "blocksIssueId": {
+      "type": ["string", "null"],
+      "description": "Issue ID gated by this finding (triggers decision-deferred handoff in orchestrator)."
+    },
+    "createdIssueId": {
+      "type": ["string", "null"],
+      "description": "Populated when an Issue is created from this capture."
+    },
+    "createdFeatureIssueId": {
+      "type": ["string", "null"],
+      "description": "Populated when a Feature Issue is created from this capture."
+    },
+    "resolvedAt": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "description": "Populated when triage flips from 'tbd' to a terminal value."
+    },
+    "resolvedBy": {
+      "type": ["string", "null"],
+      "description": "Operator or agent that resolved the triage."
+    },
+    "auditTrail": {
+      "type": "array",
+      "description": "Immutable append-only audit log of state transitions.",
+      "items": {
+        "type": "object",
+        "required": ["action", "by", "at"],
+        "additionalProperties": true,
+        "properties": {
+          "action": {
+            "type": "string",
+            "description": "Action taken (captured, triaged, issue-created, feature-issue-created, redacted, etc.)."
+          },
+          "by": {
+            "type": "string",
+            "description": "Actor (operator email, agent role, or 'framework')."
+          },
+          "at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "ISO-8601 UTC timestamp of this action."
+          }
+        }
+      }
+    }
+  }
+}

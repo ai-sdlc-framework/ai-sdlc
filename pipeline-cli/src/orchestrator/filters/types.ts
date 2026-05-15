@@ -21,6 +21,7 @@ import type { ExternalDependency } from '../../deps/dependency-graph.js';
 import type { AlreadyInFlightDetail } from './already-in-flight.js';
 import type { BlastRadiusOverlapDetail } from './blast-radius-overlap.js';
 import type { BlockedDetail } from './blocked.js';
+import type { CapturesPendingDetail } from './captures-pending.js';
 import type { DispatchabilityBlockedDetail } from './dispatchability.js';
 
 /**
@@ -48,7 +49,8 @@ export type FilterName =
   | 'Dispatchability'
   | 'DorReadiness'
   | 'ExternalDependencies'
-  | 'Blocked';
+  | 'Blocked'
+  | 'CapturesPending';
 
 /**
  * Single-filter outcome. `passed: true` clears the candidate; `passed: false`
@@ -83,12 +85,14 @@ export type FilterDetail =
   | AlreadyInFlightDetail
   | BlastRadiusOverlapDetail
   | BlockedDetail
-  | DispatchabilityBlockedDetail;
+  | DispatchabilityBlockedDetail
+  | CapturesPendingDetail;
 
 // Re-export detail types so callers can narrow the union without extra imports.
 export type { AlreadyInFlightDetail } from './already-in-flight.js';
 export type { BlastRadiusOverlapDetail } from './blast-radius-overlap.js';
 export type { BlockedDetail } from './blocked.js';
+export type { CapturesPendingDetail } from './captures-pending.js';
 export type { DispatchabilityBlockedDetail } from './dispatchability.js';
 
 /**
