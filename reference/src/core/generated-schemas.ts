@@ -440,6 +440,53 @@ export const agentRoleSchema = {
   },
 } as const;
 
+export const auditIgnoresSchema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/audit-ignores.schema.json',
+  title: 'AI-SDLC Audit Ignores',
+  description:
+    'Per-CVE time-bound exemption list for the pre-push audit gate. Place this file at .audit-ignores.json in your repo root. Each entry allows scripts/audit-with-ignores.mjs to suppress a specific advisory until expiresAt; after that date the entry is treated as if it does not exist and the gate fails as normal.',
+  type: 'array',
+  items: {
+    $ref: '#/$defs/AuditIgnoreEntry',
+  },
+  $defs: {
+    AuditIgnoreEntry: {
+      type: 'object',
+      title: 'Audit Ignore Entry',
+      description:
+        'A single CVE exemption. All three fields are required — there is no open-ended waiver.',
+      required: ['cveId', 'justification', 'expiresAt'],
+      additionalProperties: false,
+      properties: {
+        cveId: {
+          type: 'string',
+          description:
+            "The CVE identifier (e.g. 'CVE-2024-12345') or GHSA identifier (e.g. 'GHSA-xxxx-yyyy-zzzz') as reported by `pnpm audit`. Must be an exact match to the advisory ID in the audit output.",
+          pattern: '^(CVE-\\d{4}-\\d{4,}|GHSA-[a-z0-9]{4}-[a-z0-9]{4}-[a-z0-9]{4})$',
+          examples: ['CVE-2024-12345', 'GHSA-4jqc-xw3x-m5hv'],
+        },
+        justification: {
+          type: 'string',
+          description:
+            'Human-readable reason why this advisory is being exempted. Should include: (1) why no upstream fix is available or applicable, (2) any compensating controls in place, and (3) who approved the exemption.',
+          minLength: 20,
+          examples: [
+            'No fix available in dependency-xyz as of 2026-05-13. Attack vector requires direct filesystem access which is blocked by our sandbox policy. Approved by @security-lead.',
+          ],
+        },
+        expiresAt: {
+          type: 'string',
+          description:
+            'ISO 8601 date (YYYY-MM-DD) or datetime (YYYY-MM-DDTHH:MM:SSZ) after which this exemption is no longer valid. The gate treats expired entries as absent — i.e., the advisory is no longer ignored. Must be in the future at creation time; recommended renewal cadence is 30-90 days.',
+          format: 'date-time',
+          examples: ['2026-08-13T00:00:00Z', '2026-06-01T00:00:00Z'],
+        },
+      },
+    },
+  },
+} as const;
+
 export const autonomyPolicySchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/autonomy-policy.schema.json',
@@ -716,7 +763,7 @@ export const autonomyPolicySchema = {
 } as const;
 
 export const captureRecordV1Schema = {
-  $schema: 'http://json-schema.org/draft-07/schema#',
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.dev/schemas/capture-record.v1.schema.json',
   title: 'CaptureRecord',
   description:
@@ -4827,6 +4874,7 @@ export const worktreePoolSchema = {
 export const SCHEMAS: Record<string, object> = {
   'adapter-binding.schema.json': adapterBindingSchema,
   'agent-role.schema.json': agentRoleSchema,
+  'audit-ignores.schema.json': auditIgnoresSchema,
   'autonomy-policy.schema.json': autonomyPolicySchema,
   'capture-record.v1.schema.json': captureRecordV1Schema,
   'common.schema.json': commonSchema,

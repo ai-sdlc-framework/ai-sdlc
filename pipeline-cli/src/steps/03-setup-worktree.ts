@@ -149,7 +149,12 @@ async function isSafeToAutoClean(
     readProcessTable?: () => string;
     nowMs?: () => number;
   },
-): Promise<{ safe: boolean; hadOpenPR: boolean; hadUncommittedChanges: boolean }> {
+): Promise<{
+  safe: boolean;
+  hadOpenPR: boolean;
+  hadUncommittedChanges: boolean;
+  hadDraftPR?: boolean;
+}> {
   const taskIdLower = taskId.toLowerCase();
 
   // Predicate 1: open-PR check.
@@ -159,9 +164,18 @@ async function isSafeToAutoClean(
   // and `git branch -D` would delete the local branch backing the live
   // PR. Mitigation: treat any gh-failure as "unknown PR state → unsafe".
   // (Code-reviewer + security-reviewer #377 both flagged this fail-open.)
+  //
+  // AISDLC-273 — differentiate DRAFT from READY PRs. A draft PR is the
+  // intended mid-state in the AISDLC-218 workflow (dev pushes, opens
+  // draft, reviewers run while draft, then `gh pr ready` flips it).
+  // Auto-cleanup should STILL be refused (the branch has committed work),
+  // but we surface a richer `hadDraftPR` signal so the caller can offer
+  // the `--resume-from-draft` path instead of the generic "open PR found"
+  // block. Ready PRs (reviewers already approved + CI running) are refused
+  // with the same hard block as before.
   const prResult = await runner(
     'gh',
-    ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number'],
+    ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,isDraft'],
     { cwd: workDir, allowFailure: true },
   );
   if (prResult.code !== 0) {
@@ -170,16 +184,25 @@ async function isSafeToAutoClean(
     return { safe: false, hadOpenPR: false, hadUncommittedChanges: false };
   }
   let hadOpenPR = false;
+  let hadDraftPR = false;
   try {
-    const parsed = JSON.parse(prResult.stdout.trim() || '[]') as unknown[];
+    const parsed = JSON.parse(prResult.stdout.trim() || '[]') as Array<{
+      number: number;
+      isDraft: boolean;
+    }>;
     hadOpenPR = Array.isArray(parsed) && parsed.length > 0;
+    // A PR is "draft-only" when EVERY open PR for this branch is a draft.
+    // In practice there will only ever be one, but be defensive.
+    hadDraftPR = hadOpenPR && parsed.every((pr) => pr.isDraft === true);
   } catch {
-    // gh returned non-JSON — treat conservatively as having an open PR
+    // gh returned non-JSON — treat conservatively as having a ready open PR
     hadOpenPR = prResult.stdout.trim().length > 0;
+    hadDraftPR = false;
   }
   if (hadOpenPR) {
-    console.info(`[step-3] ${taskIdLower}: keeping branch (open PR found for ${branch})`);
-    return { safe: false, hadOpenPR: true, hadUncommittedChanges: false };
+    const kind = hadDraftPR ? 'draft PR' : 'ready PR';
+    console.info(`[step-3] ${taskIdLower}: keeping branch (${kind} found for ${branch})`);
+    return { safe: false, hadOpenPR: true, hadUncommittedChanges: false, hadDraftPR };
   }
 
   // Predicate 2: uncommitted-changes check (only if worktree path exists)
@@ -450,4 +473,38 @@ export async function setupWorktree(opts: SetupWorktreeOptions): Promise<SetupWo
 
     return { branch: opts.branch, worktreePath: opts.worktreePath, baseSha };
   }, opts.mutexOpts);
+}
+
+/**
+ * AISDLC-273 — detect whether an open PR for the given branch is a DRAFT PR
+ * (vs a ready-for-review PR). This is the basis for the `--resume-from-draft`
+ * recovery path: a draft PR is the intended AISDLC-218 mid-state, while a
+ * ready PR means reviewers have already been notified and CI may be running.
+ *
+ * Returns null when gh fails or no open PR exists. Returns a shape describing
+ * the PR state when one is found.
+ */
+export async function detectDraftPrForBranch(
+  runner: Runner,
+  workDir: string,
+  branch: string,
+): Promise<{ prNumber: number; isDraft: boolean; prUrl: string } | null> {
+  const result = await runner(
+    'gh',
+    ['pr', 'list', '--head', branch, '--state', 'open', '--json', 'number,isDraft,url'],
+    { cwd: workDir, allowFailure: true },
+  );
+  if (result.code !== 0) return null;
+  try {
+    const parsed = JSON.parse(result.stdout.trim() || '[]') as Array<{
+      number: number;
+      isDraft: boolean;
+      url: string;
+    }>;
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    const pr = parsed[0];
+    return { prNumber: pr.number, isDraft: pr.isDraft === true, prUrl: pr.url ?? '' };
+  } catch {
+    return null;
+  }
 }

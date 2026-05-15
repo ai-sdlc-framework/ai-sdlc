@@ -96,7 +96,10 @@ import {
   subprocessCodexSpawnAgent,
 } from '../runtime/spawners/codex-harness.js';
 import { ROLLBACK_OUTCOMES, RECOVERABLE_ABORT_OUTCOMES } from '../orchestrator/loop.js';
+import { detectRecoverableWorktree } from '../orchestrator/checkpoint.js';
 import { rollbackDispatch, type RollbackResult } from '../orchestrator/rollback.js';
+import { runResumeFromDraft, type ResumeFromDraftResult } from './resume-from-draft.js';
+import { runReworkPr, type ReworkPrResult } from './rework-pr.js';
 import {
   DEFAULT_LOGGER,
   type AggregatedVerdict,
@@ -306,6 +309,17 @@ export interface ExecuteCommandOptions {
   dryRun: boolean;
   /** Explicit operator intent to allow filesystem/network mutation. */
   run?: boolean;
+  /**
+   * AISDLC-273 — `--resume-from-draft <task-id>`: opt-in recovery path for
+   * a stalled dispatch where the draft PR is open but attestation/reviewers
+   * didn't complete. When set, `taskId` is the task to resume.
+   */
+  resumeFromDraft?: boolean;
+  /**
+   * AISDLC-273 — `--rework-pr <pr-number>`: re-dispatch the developer on top
+   * of an existing PR branch to fix reviewer findings, then re-run Steps 5-13.
+   */
+  reworkPrNumber?: number;
   /** Override spawner factory — tests inject a stub. */
   spawnerFactory?: (kind: SpawnerKind) => Promise<SubagentSpawner>;
   /** Override the executePipeline invocation — tests inject a stub. */
@@ -318,6 +332,14 @@ export interface ExecuteCommandOptions {
    * real git tree.
    */
   rollback?: typeof rollbackDispatch;
+  /**
+   * AISDLC-273 — override the resume-from-draft runner for tests.
+   */
+  resumeFromDraftRunner?: typeof runResumeFromDraft;
+  /**
+   * AISDLC-273 — override the rework-pr runner for tests.
+   */
+  reworkPrRunner?: typeof runReworkPr;
   /** Override the logger — tests inject a stub. */
   logger?: PipelineLogger;
 }
@@ -348,6 +370,27 @@ export interface ExecuteCommandResult {
    * `quarantine/<task>-<ts>` ref.
    */
   rollback?: RollbackResult;
+  /**
+   * AISDLC-273 — result of the `--resume-from-draft` recovery path.
+   * Populated when the command ran in resume-from-draft mode.
+   */
+  resumeFromDraft?: ResumeFromDraftResult;
+  /**
+   * AISDLC-273 — result of the `--rework-pr` path.
+   * Populated when the command ran in rework-pr mode.
+   */
+  reworkPr?: ReworkPrResult;
+  /**
+   * AISDLC-273 / AISDLC-242 — populated when `executePipeline` detected a
+   * recoverable-abort state (worktree + sentinel + commits, but no PR yet).
+   * Operators can inspect this to understand what the previous dispatch
+   * preserved and decide whether to resume or rollback.
+   */
+  recoverableAbort?: {
+    worktreePath: string;
+    commitCount: number;
+    checkpointCount: number;
+  };
 }
 
 /**
@@ -369,6 +412,8 @@ export async function runExecuteCommand(
   const exec = opts.executor ?? executePipeline;
   const writer = opts.verdictWriter ?? writeVerdictFile;
   const rollback = opts.rollback ?? rollbackDispatch;
+  const resumeRunner = opts.resumeFromDraftRunner ?? runResumeFromDraft;
+  const reworkRunner = opts.reworkPrRunner ?? runReworkPr;
 
   logger.progress('execute', `task=${opts.taskId} spawner=${opts.spawnerKind}`);
 
@@ -394,6 +439,70 @@ export async function runExecuteCommand(
         worktreePath: branch.worktreePath,
         maxIterations: opts.maxIterations,
       },
+    };
+  }
+
+  // ── AISDLC-273: --resume-from-draft path ──────────────────────────────────
+  // Explicit opt-in recovery for the AISDLC-218 mid-state: draft PR exists
+  // but attestation/reviewers didn't complete. This path does NOT re-dispatch
+  // the developer. It picks up at the first incomplete step after push.
+  if (opts.resumeFromDraft) {
+    if (opts.spawnerKind === 'mock') {
+      return {
+        ok: false,
+        reason: '`--resume-from-draft` requires a real spawner (--spawner api-key or claude-cli).',
+      };
+    }
+    let spawner: SubagentSpawner;
+    try {
+      spawner = await factory(opts.spawnerKind);
+    } catch (err) {
+      return { ok: false, reason: (err as Error).message };
+    }
+    logger.progress('execute', `resume-from-draft mode for task=${opts.taskId}`);
+    const resumeResult = await resumeRunner({
+      taskId: opts.taskId,
+      workDir: opts.workDir,
+      spawner,
+      logger,
+      verdictWriter: writer,
+    });
+    return {
+      ok: resumeResult.ok,
+      resumeFromDraft: resumeResult,
+      reason: resumeResult.ok ? undefined : resumeResult.reason,
+    };
+  }
+
+  // ── AISDLC-273: --rework-pr path ──────────────────────────────────────────
+  // Re-dispatch developer to fix reviewer findings on an existing PR branch,
+  // then re-run Steps 5-13.
+  if (opts.reworkPrNumber !== undefined) {
+    if (opts.spawnerKind === 'mock') {
+      return {
+        ok: false,
+        reason: '`--rework-pr` requires a real spawner (--spawner api-key or claude-cli).',
+      };
+    }
+    let spawner: SubagentSpawner;
+    try {
+      spawner = await factory(opts.spawnerKind);
+    } catch (err) {
+      return { ok: false, reason: (err as Error).message };
+    }
+    logger.progress('execute', `rework-pr mode for PR #${opts.reworkPrNumber}`);
+    const reworkResult = await reworkRunner({
+      prNumber: opts.reworkPrNumber,
+      workDir: opts.workDir,
+      spawner,
+      maxReworkIterations: opts.maxIterations,
+      logger,
+      verdictWriter: writer,
+    });
+    return {
+      ok: reworkResult.ok,
+      reworkPr: reworkResult,
+      reason: reworkResult.ok ? undefined : reworkResult.reason,
     };
   }
 
@@ -557,9 +666,34 @@ export async function runExecuteCommand(
     }
   }
 
+  // ── AISDLC-273 / AISDLC-242 — recoverable-abort surface ──────────────────
+  // When the outcome is `aborted`, detect whether the previous dispatch left
+  // a recoverable state (worktree + sentinel + commits but no PR). Emit the
+  // signal so the operator can decide whether to `--resume-from-draft` or
+  // rollback manually. This mirrors what `runOrchestratorTick` does but
+  // surfaces it in the umbrella CLI path too (the gap AISDLC-273 AC #4 closes).
+  let recoverableAbort: ExecuteCommandResult['recoverableAbort'];
+  if (result.outcome === 'aborted' && !result.prUrl) {
+    const recoverable = detectRecoverableWorktree(opts.workDir, opts.taskId);
+    if (recoverable) {
+      recoverableAbort = {
+        worktreePath: recoverable.worktreePath,
+        commitCount: recoverable.commitCount,
+        checkpointCount: recoverable.checkpointCount,
+      };
+      logger.progress(
+        'execute',
+        `recoverable-abort detected: ${recoverable.commitCount} commit(s) ` +
+          `(${recoverable.checkpointCount} checkpoint(s)) on branch; ` +
+          `re-run with --resume-from-draft ${opts.taskId} to continue`,
+      );
+    }
+  }
+
   const out: ExecuteCommandResult = { ok: true, pipeline: result };
   if (verdictFilePath) out.verdictFilePath = verdictFilePath;
   if (rollbackResult) out.rollback = rollbackResult;
+  if (recoverableAbort) out.recoverableAbort = recoverableAbort;
   return out;
 }
 
@@ -607,6 +741,21 @@ export function executeCommand(): CommandModule {
             'Plan + log; skip the actual dispatch. This is also the default when --run is omitted.',
           type: 'boolean',
           default: false,
+        })
+        .option('resume-from-draft', {
+          describe:
+            'AISDLC-273 — Recovery path: detect existing draft PR + branch + worktree and ' +
+            'resume from the first incomplete step (reviewers, attestation, or ready-promotion). ' +
+            'Does NOT re-dispatch the developer. Use with --spawner api-key.',
+          type: 'boolean',
+          default: false,
+        })
+        .option('rework-pr', {
+          describe:
+            'AISDLC-273 — Rework path: re-dispatch the developer on top of the existing PR branch ' +
+            'to fix reviewer findings, then re-run Steps 5-13. Provide the PR number as the value. ' +
+            'Use with --spawner api-key. Example: --rework-pr 42',
+          type: 'number',
         }),
     handler: async (argv) => {
       const result = await runExecuteCommand({
@@ -616,6 +765,8 @@ export function executeCommand(): CommandModule {
         maxIterations: Number(argv['max-iterations']),
         dryRun: Boolean(argv['dry-run']),
         run: Boolean(argv.run),
+        resumeFromDraft: Boolean(argv['resume-from-draft']),
+        reworkPrNumber: argv['rework-pr'] !== undefined ? Number(argv['rework-pr']) : undefined,
       });
       process.stdout.write(JSON.stringify(result, null, 2) + '\n');
       if (!result.ok) {

@@ -262,6 +262,25 @@ export function worktreePath(workDir: string, taskId: string): string {
 }
 
 /**
+ * AISDLC-273 — commit subject patterns that are considered "resumable mid-states"
+ * (i.e. checkpoint or auto-sign chore commits only, not substantive dev work).
+ * When a draft PR's branch has only these patterns beyond `origin/main` the
+ * branch is considered resumable without re-dispatching the developer.
+ */
+export const RESUMABLE_COMMIT_PATTERNS = [
+  /^wip\(checkpoint\):/,
+  /^chore: auto-sign attestation/,
+  /^chore\(spec\): re-sign attestation/,
+] as const;
+
+/**
+ * Check whether a commit subject matches any resumable mid-state pattern.
+ */
+export function isResumableCommit(subject: string): boolean {
+  return RESUMABLE_COMMIT_PATTERNS.some((p) => p.test(subject));
+}
+
+/**
  * Detect whether a recoverable-abort sentinel exists for the given task ID.
  *
  * A recoverable worktree is one that:
