@@ -65,6 +65,14 @@ export function validateConfigFiles(
           ? ((doc as { kind: string }).kind as ResourceKind)
           : null;
 
+      if (result.skipped) {
+        // Loader-private or adopter-extension kind — not in the AI-SDLC
+        // schema registry.  Skip silently so adopter pipelines that use
+        // kinds like `MaintainersList` or `SoulTrackMap` don't get
+        // false-positive warnings.  See docs/operations/schema-extensions.md.
+        continue;
+      }
+
       if (result.valid) {
         results.push({ file, kind, valid: true, errors: [] });
       } else {

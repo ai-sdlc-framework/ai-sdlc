@@ -117,12 +117,33 @@ export async function runConformanceTests(fixturesDir?: string): Promise<RunnerR
     const validation = validateResource(doc);
     const conformanceLevel = classifyFixtureLevel(file, dir);
 
+    // AISDLC-265 PR #474 review fix: a skipped result (unknown kind) is NOT
+    // the same as a valid result for conformance accounting. Treat skipped as
+    // failed regardless of expectedValid so a fixture file with a typo'd or
+    // wrong `kind` value can never silently report passing — the schema was
+    // never exercised.
+    const isPass = validation.skipped ? false : validation.valid === expectedValid;
+    const skippedKind = validation.skipped
+      ? typeof (doc as { kind?: unknown }).kind === 'string'
+        ? (doc as { kind: string }).kind
+        : String((doc as { kind?: unknown }).kind)
+      : null;
     schemaResults.push({
       file,
       expectedValid,
       actualValid: validation.valid,
-      passed: validation.valid === expectedValid,
-      errors: validation.valid ? undefined : validation.errors,
+      passed: isPass,
+      errors: validation.skipped
+        ? [
+            {
+              path: '/kind',
+              message: `unknown kind '${skippedKind}' — fixture skipped without exercising schema`,
+              keyword: 'unknown-kind',
+            },
+          ]
+        : validation.valid
+          ? undefined
+          : validation.errors,
       conformanceLevel,
     });
   }

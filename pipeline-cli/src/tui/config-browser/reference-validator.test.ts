@@ -130,3 +130,44 @@ describe('reference-validator delegate — error shape mapping', () => {
     COLD_IMPORT_TIMEOUT_MS,
   );
 });
+
+describe('reference-validator delegate — skipped-kind handling (PR #474 coverage)', () => {
+  beforeEach(() => {
+    __resetReferenceCacheForTests();
+  });
+
+  it(
+    'surfaces unknown kind as a single warning at /kind (string kind)',
+    async () => {
+      const validator = await loadReferenceSchemaValidator();
+      const issues = validator!('TotallyMadeUpKind', {
+        apiVersion: 'ai-sdlc.io/v1alpha1',
+        kind: 'TotallyMadeUpKind',
+        metadata: { name: 'noop' },
+      });
+      expect(issues).not.toBeNull();
+      expect(issues!.length).toBe(1);
+      expect(issues![0].path).toBe('/kind');
+      expect(issues![0].message).toMatch(/unknown kind 'TotallyMadeUpKind'/);
+      expect(issues![0].message).toMatch(/loader-private convention or typo/);
+    },
+    COLD_IMPORT_TIMEOUT_MS,
+  );
+
+  it(
+    'stringifies non-string kind values when surfacing the warning',
+    async () => {
+      const validator = await loadReferenceSchemaValidator();
+      const issues = validator!('NotARealKind', {
+        apiVersion: 'ai-sdlc.io/v1alpha1',
+        // Numeric kind exercises the typeof !== 'string' branch.
+        kind: 42 as unknown as string,
+      });
+      expect(issues).not.toBeNull();
+      expect(issues!.length).toBe(1);
+      expect(issues![0].path).toBe('/kind');
+      expect(issues![0].message).toMatch(/unknown kind '42'/);
+    },
+    COLD_IMPORT_TIMEOUT_MS,
+  );
+});

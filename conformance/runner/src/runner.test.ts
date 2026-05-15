@@ -1,4 +1,7 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   runConformanceTests,
   expectedValidity,
@@ -94,5 +97,45 @@ describe('runConformanceTests()', () => {
     // Total across levels should equal total schema results
     const totalAcrossLevels = levels.core.total + levels.adapter.total + levels.full.total;
     expect(totalAcrossLevels).toBe(report.results.length);
+  });
+});
+
+describe('runConformanceTests() — skipped-kind handling (PR #474 coverage)', () => {
+  let tmp: string;
+
+  beforeAll(() => {
+    // Build a tmp fixtures dir with a single fixture whose `kind` is unknown
+    // to the schema registry. The runner's skipped-kind branch must (a) mark
+    // the result as failed regardless of expectedValid, (b) attach an
+    // unknown-kind error with /kind path + 'unknown-kind' keyword.
+    tmp = mkdtempSync(join(tmpdir(), 'aisdlc-265-runner-skipped-'));
+    const subdir = join(tmp, 'pipeline');
+    mkdirSync(subdir, { recursive: true });
+    // Despite the `valid-` prefix the unknown kind makes this NOT exercise
+    // the schema, so the runner must still report it as failed.
+    writeFileSync(
+      join(subdir, 'valid-unknown-kind.yaml'),
+      'apiVersion: ai-sdlc.io/v1alpha1\nkind: TotallyMadeUpKind\nmetadata:\n  name: planted\n',
+    );
+  });
+
+  afterAll(() => {
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('marks unknown-kind fixture as failed even when filename says valid-*', async () => {
+    const report = await runConformanceTests(tmp);
+    expect(report.total).toBe(1);
+    expect(report.failed).toBe(1);
+    const r = report.results[0];
+    expect(r.passed).toBe(false);
+    expect(r.expectedValid).toBe(true);
+    expect(r.actualValid).toBe(true);
+    expect(r.errors).toBeDefined();
+    expect(r.errors!.length).toBe(1);
+    expect(r.errors![0].path).toBe('/kind');
+    expect(r.errors![0].keyword).toBe('unknown-kind');
+    expect(r.errors![0].message).toMatch(/unknown kind 'TotallyMadeUpKind'/);
+    expect(r.errors![0].message).toMatch(/skipped without exercising schema/);
   });
 });

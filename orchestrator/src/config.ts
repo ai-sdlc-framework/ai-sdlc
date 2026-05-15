@@ -118,6 +118,23 @@ export function loadConfig(configDir: string): AiSdlcConfig {
     }
 
     const result = validateResource(doc);
+    if (result.skipped) {
+      // AISDLC-265 PR #474 review fix: skipped kinds get an INFO-level warning
+      // entry so typo'd canonical kinds (e.g. `kind: AutonomyPolcy` instead of
+      // `AutonomyPolicy`) don't silently disappear. The legitimate loader-private
+      // kinds (MaintainersList, SoulTrackMap) appear in this list too, but
+      // operators can recognise them and ignore — the dangerous case before the
+      // fix was a silent drop with NO surface, which let security-relevant
+      // misconfigurations (typo'd AutonomyPolicy → no policy loaded → permissive
+      // defaults) ship undetected. See docs/operations/schema-extensions.md.
+      const docKind = (doc as { kind?: unknown }).kind;
+      const kindStr = typeof docKind === 'string' ? docKind : String(docKind);
+      warnings.push({
+        file,
+        error: `unknown kind '${kindStr}' — skipped (loader-private convention or typo of canonical kind?)`,
+      });
+      continue;
+    }
     if (!result.valid) {
       const msgs = (result.errors ?? []).map((e) => `${e.path}: ${e.message}`).join('; ');
       // Forward-looking schemas are common during incremental adoption
