@@ -5,7 +5,7 @@ status: Draft
 lifecycle: Draft
 author: dominique@reliablegenius.io
 created: 2026-05-03
-updated: 2026-05-03
+updated: 2026-05-15
 targetSpecVersion: v1alpha1
 requires: [RFC-0011, RFC-0015]
 requiresDocs: []
@@ -325,29 +325,41 @@ Total: ~5–6 weeks wall-clock, parallelizable phases 4 + 5.
 
 ## 15. Open questions
 
-> **Partial Implementation Status (2026-05-13):** Detection substrate shipped; capture authoring + main triage flow pending.
+> **Partial Implementation Status + OQ Resolution Status (updated 2026-05-15):**
 >
-> **What ships:**
-> - `pipeline-cli/src/tui/blockers/detector.ts` — Rule 3 detects `triage: tbd` captures and surfaces them as TUI blockers (citing RFC-0024 directly).
+> **What ships (2026-05-13 audit):**
+> - `pipeline-cli/src/tui/blockers/detector.ts` — Rule 3 detects pending-triage captures and surfaces them as TUI blockers (cites RFC-0024 directly).
 > - `pipeline-cli/src/tui/corpus/aggregate.ts` — `TuiCaptureFiled` event aggregation tied to RFC-0024 capture IDs.
 >
 > **What's pending:** capture authoring CLI (`cli-capture`, `cli-emergent`) per §5.1, triage-decision flow per §7, backlog Issue creation from captures per §9.2, in-code marker linter (§5.3), AI-agent direct-capture path (§5.4), DoR integration (§8).
 >
-> Lifecycle remains `Draft` — the 12 OQs below still need operator walkthrough before the capture authoring layer can land. A follow-up backlog task (`chore: complete RFC-0024 capture authoring + triage flow`) should track the unbuilt portion.
+> **OQ resolution status (2026-05-15 operator walkthrough):** 8 of 12 OQs resolved with normative answers per Resolution markers below (OQ-1, 2, 3, 4, 5, 6, 9, 11). 4 OQs still open as low-stakes convention follow-ups (OQ-7 deletion, OQ-8 Issue labeling, OQ-10 multi-capture, OQ-12 CLI ergonomics). The lifecycle stays `Draft` until all 12 OQs resolve and the capture authoring layer ships per AISDLC-269.
 
 These need operator walkthrough before Lifecycle: Draft → Ready for Review.
 
 **OQ-1 — Capture privacy:** Should capture records be operator-private by default (only visible to the capturer) or team-shared? Trade-off: privacy lowers capture friction (operator might capture half-formed thoughts) but team-shared makes the audit trail richer. Recommendation: team-shared (matches the rest of the framework's transparency contract).
 
+   **Resolution (2026-05-15):** **Draft → Shared state machine** (Linear's pattern). Captures start as drafts in `.ai-sdlc/captures-drafts/<id>.md` (operator-local, gitignored); explicit `cli-capture submit <id>` transitions to team-shared `backlog/captures/<id>.md`. Bulk action: `cli-capture submit-all`. AI-agent captures honor the same state via OQ-2's threshold gate (high-confidence → auto-submit; low-confidence → draft). **Selected over team-shared-by-default** because team-visibility friction recreates the "half-formed thought" failure mode §2.2 explicitly names — operators self-censor when every capture is immediately team-visible. Per §15.1 lifecycle defaults: drafts auto-submit after 7d (per-org configurable; reversible via `cli-capture redact`).
+
 **OQ-2 — AI-agent auto-triage threshold:** Should AI agents auto-set the `triage` field, or always default to `tbd` and require operator confirmation? Recommendation: agents auto-set triage with confidence score; operator confirms in TUI. Forces operator awareness without losing the agent's signal.
+
+   **Resolution (2026-05-15):** **Threshold-gated dual axis** (Datadog/PagerDuty pattern). Single confidence threshold (default **0.7**) gates BOTH auto-triage AND auto-submit. High-confidence (≥ threshold): agent's triage auto-applied; capture auto-submitted to team; TUI shows "AI auto-triaged this; confirm?" badge. Low-confidence (< threshold): `triage: pending`, draft state; surfaces in operator review queue. Per-agent threshold override allowed in agent role config (e.g. security-reviewer stricter, code-reviewer looser). Calibration loop via RFC-0025 corpus: operator-overrides of auto-triages feed back as signal; threshold adjusts. Per §15.1 lifecycle defaults: pending triage auto-classifies via OQ-3 classifier after 14d (per-org configurable; reversible via re-triage).
 
 **OQ-3 — Capture-vs-comment for in-PR findings:** When a reviewer finds something in a PR review, should the framework prefer a GitHub PR review comment (visible in standard PR UI) OR a capture record (typed, triaged)? Recommendation: both — the PR comment includes the capture marker (§5.2), so it's visible in GitHub UI AND in the capture corpus.
 
+   **Resolution (2026-05-15):** **Bidirectional sync + LLM auto-classifier** (Linear AI / Jira Service Management AI pattern). PR review comments stay in GitHub as the source of truth; a Haiku-class classifier evaluates each comment for "is this a capture?" with confidence; classified-yes comments are indexed in the RFC-0024 capture corpus with a reference to the GitHub comment URL. Capture marker syntax (OQ-4) becomes optional refinement, not the only signal. Threshold: confidence ≥ 0.5 indexed; < 0.5 ignored. Conflict resolution: GitHub-edit-wins; capture re-syncs on next webhook. AI-agent captures from reviewers bypass the classifier (they're already typed). **Selected over marker-only** because busy reviewers won't reliably tag — without the auto-classifier the corpus would have ~20% of actual review signal.
+
 **OQ-4 — In-code marker syntax:** Match the `// TODO:` ergonomic ("operators already type this") or use a distinctive prefix to make linting unambiguous? Recommendation: `// ai-sdlc:capture` prefix — distinctive, lint-able, doesn't collide with existing TODO conventions that the operator might use for other purposes.
+
+   **Resolution (2026-05-15):** **`// ai-sdlc:capture` distinctive prefix** (matches `@ts-`, `// eslint-`, `// prettier-`, BMad's `@bmad-capture` industry-standard pattern). Default form: `// ai-sdlc:capture <triage?> <finding>` where `<triage>` is optional and matches OQ-2's threshold-gated triage values; without it, defaults to `pending`. Case-insensitive parser. Brownfield migration handled separately via `cli-capture migrate-todos --pattern <regex>` tooling (not a syntax concern). Selected over hybrid `// TODO(capture):` because greenfield clarity outweighs brownfield-migration friction, and the prefix pattern is unambiguous for the parser.
 
 **OQ-5 — Severity inference:** When the capturer doesn't supply `severity`, should the framework infer (based on agent role, finding text classifier, etc.) or leave as `unknown`? Recommendation: leave as `unknown`; operator triages with severity in mind.
 
+   **Resolution (2026-05-15):** **Threshold-gated severity** (same pattern as OQ-2). Shared 0.7 threshold and corpus with OQ-2 / OQ-3 / OQ-11. Above threshold: severity auto-set with "AI suggested" badge in TUI; operator confirms at triage. Below threshold: severity stays `unknown` until operator sets at triage time. Calibration via RFC-0025 corpus. **Selected over leaving `unknown` as final state** for architectural consistency with OQ-2 and because `unknown` would become a useless filter dimension if it persisted. Per §15.1 lifecycle defaults: unknown severity auto-classifies via OQ-3 classifier after 14d (per-org configurable; reversible via re-classify).
+
 **OQ-6 — Capture quota / rate-limiting:** AI agents could theoretically capture excessively (every minor lint observation). Should the framework rate-limit? Recommendation: no hard limit, but corpus aggregator surfaces "agent X captured Y findings/day" so operator can adjust agent prompts if needed.
+
+   **Resolution (2026-05-15):** **Soft warning + multi-surface notification at per-agent ceiling** (composes with OQ-9). Default ceiling **50 submitted captures/day/agent role**; configurable per role in `.ai-sdlc/capture-config.yaml`. Threshold notification surfaces via Slack DM + TUI; full volume continues to corpus (no drops). Volume is naturally bounded by OQ-1 D (low-confidence drafts stay operator-local) and OQ-2 C (threshold gates team-shared volume); OQ-6 catches anomalies above natural baseline. Cost-rail integration via RFC-0004 `CostPolicy` deferred to RFC-0037 Phase 3+. **Selected over hard-ceiling-with-drops** because silent drops contaminate trust; selected over no-limit-with-analytics because the operator-saved cost-cap incident showed passive analytics-only fails the active-notification test.
 
 **OQ-7 — Capture deletion:** Records are immutable per §11. Can the operator EVER delete a capture (e.g., accidentally captured PII)? Recommendation: yes via `cli-capture redact <id> --reason <text>` which scrubs the `finding` field but preserves the audit trail. Hard delete is operator-only via filesystem (not a CLI affordance).
 
@@ -355,11 +367,45 @@ These need operator walkthrough before Lifecycle: Draft → Ready for Review.
 
 **OQ-9 — Decision-deferred timeout:** An Issue gated on a `tbd` capture stays in `Needs Clarification`. Should there be a timeout (e.g., capture sits >14 days → escalate notification)? Recommendation: yes, surfaces in TUI with growing-louder visual treatment but no auto-action.
 
+   **Resolution (2026-05-15):** **Multi-surface notification ladder + auto-resolve** (composes with [Slack integration intent](memory:project_slack_integration)). Ladder: day 3 TUI highlight → day 7 Slack DM → day 14 email digest (weekly Sunday) → day 21 classify-via-OQ-3-classifier + archive to `backlog/captures/archived/<id>.md`. Each threshold configurable per `.ai-sdlc/capture-config.yaml`. Auto-resolve at 21d preserves audit (archived, not deleted) + signal (classifier guess attached for searchability) while removing from operator's active queue. **Selected over indefinite-pending** because "not making a decision is a decision" — the cumulative cost of N pending captures exceeds the cost of being wrong on any single auto-resolve. Per §15.1 lifecycle defaults.
+
 **OQ-10 — Multi-capture from one source:** When an agent finds 5 things in one PR review, are those 5 captures or 1 capture with 5 findings? Recommendation: 5 captures — each must be independently triageable (one might be quick-fix, one new-feature-issue).
 
 **OQ-11 — Capture during DoR refinement:** When the refinement reviewer (RFC-0011 Stage B) asks an operator question and the operator's answer reveals a NEW concern, is that a capture or a DoR comment edit? Recommendation: capture — preserves the audit trail across the DoR + capture corpora.
 
+   **Resolution (2026-05-15):** **Reuse the OQ-3 LLM classifier on DoR clarification answers.** When the operator answers a DoR Stage B refinement question, the classifier (single-corpus, same model as OQ-3) evaluates each segment of the answer for `clarification | new-concern | ambiguous` with confidence; new-concern segments auto-extract to capture records referencing the DoR thread by ID. Same 0.7 threshold as OQ-2 / OQ-3 / OQ-5 (shared corpus calibration). Operator confirms in TUI before commit; multi-segment answers can split capture from clarification. **Selected over operator-flagged-inline-syntax** for the same reason as OQ-3 — busy operators won't reliably tag, and reusing the classifier maintains architectural coherence. RFC-0011 (Implemented) gains a side-effect (classifier on clarification responses) but its rubric and admission semantics stay unchanged.
+
 **OQ-12 — CLI ergonomics for "capture against current PR":** When the operator is mid-PR-review, `cli-capture --against-current-pr` should auto-detect the PR from cwd / branch context. Worth shipping in Phase 1 or defer? Recommendation: ship in Phase 1 — the convenience drives adoption.
+
+### 15.1 Capture Lifecycle Defaults (Timebox + Default-on-Silence Convention)
+
+The framework's contract: **"not making a decision is a decision; the framework keeps work moving while respecting operator authority."** Every capture-lifecycle state with operator-decision-pending carries an explicit timebox + default-on-silence auto-action. Auto-actions fire even under operator fatigue — the operator catches up retroactively rather than blocking the pipeline.
+
+| State | Default timebox | Default action on expiry | Reversibility |
+|---|---|---|---|
+| Draft (OQ-1) | 7d | Auto-submit to team-shared | Reversible via `cli-capture redact` |
+| `triage: pending` (OQ-2) | 14d | Auto-run OQ-3 classifier; apply highest-confidence triage | Reversible via re-triage |
+| `severity: unknown` (OQ-5) | 14d | Auto-run OQ-3 classifier; apply highest-confidence severity | Reversible via re-classify |
+| Stale capture ladder (OQ-9) | 21d (after 3d TUI / 7d Slack / 14d email tiers) | Classify + archive to `backlog/captures/archived/` | Archived, not deleted (audit preserved) |
+
+**Per-organization configurability is mandatory.** Organizations process captures at different velocities — a 100-issues/day team's draft is "ancient" after a day; a few-issues/day team's draft is "fresh" after a week. Each timebox is overridable in `.ai-sdlc/capture-config.yaml`:
+
+```yaml
+capture:
+  lifecycle:
+    draftAutoSubmitDays: 7        # OQ-1 — default 7
+    pendingTriageDays: 14         # OQ-2 — default 14
+    unknownSeverityDays: 14       # OQ-5 — default 14
+    staleNotificationLadder:      # OQ-9
+      tuiHighlightDays: 3
+      slackDmDays: 7
+      emailDigestDays: 14
+      autoArchiveDays: 21
+```
+
+Default constants ship in the `ai-sdlc init` capture-config template. Auto-tuning from observed corpus throughput is future work (composes with RFC-0014 dep-graph signal + RFC-0025 quality monitoring substrate); operator-configurable from day one.
+
+When fatigue is active (per RFC-0035 §7 once that ships), timeboxes continue to fire — the operator catches up retroactively. The whole point of the timebox is that it's non-blocking.
 
 ## 16. Sign-off
 
