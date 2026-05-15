@@ -1,11 +1,11 @@
 ---
 id: RFC-0031
 title: Calibration-Driven DID Revision Proposal Mechanism
-status: Draft
-lifecycle: Draft
+status: Implemented
+lifecycle: Implemented
 author: Alexander Kline
 created: 2026-05-04
-updated: 2026-05-04
+updated: 2026-05-13
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0005
@@ -205,35 +205,40 @@ The Shard-DID-only scope constraint has no practical effect on single-product pl
 
 ## 12. Open Questions
 
-> **Partial Implementation Status (2026-05-13):** Trigger source + calibration substrate shipped; `DIDRevisionProposal` mechanism pending.
+> **Implementation Status (2026-05-13):** All items shipped. `DIDRevisionProposal` mechanism implemented in `orchestrator/src/sa-scoring/revision-proposal.ts`; exported from `orchestrator/src/index.ts`. Lifecycle flipped to `Implemented`.
 >
 > **What ships:**
-> - `orchestrator/src/sa-scoring/drift-monitor.ts` — fully implements the `SoulDriftDetected` event (the §2.1 trigger source), with rolling-window mean/stddev/consecutive-violation logic plus structural-vs-LLM-mean disambiguation. Exported from `orchestrator/src/index.ts`.
-> - `orchestrator/src/sa-scoring/feedback-store.ts`, `calibration.ts`, `auto-calibrate.ts` — the flywheel substrate the proposal mechanism would consume.
->
-> **What's pending:** the `DIDRevisionProposal` event itself, healthy/unhealthy/ambiguous drift classification (§3), triad-vs-pillar-lead approval routing (§4), 14-day expiry (§5). Drift is detected; nothing yet proposes a revision.
->
-> Lifecycle remains `Draft` — the 5 OQs below (§12.1–12.5) still need operator walkthrough. A follow-up backlog task (`chore: complete RFC-0031 DIDRevisionProposal mechanism`) should track the unbuilt portion.
+> - `orchestrator/src/sa-scoring/drift-monitor.ts` — `SoulDriftDetected` event (the §2.1 trigger source). Exported from `orchestrator/src/index.ts`.
+> - `orchestrator/src/sa-scoring/feedback-store.ts`, `calibration.ts`, `auto-calibrate.ts` — flywheel substrate.
+> - `orchestrator/src/sa-scoring/revision-proposal.ts` — `DIDRevisionProposal` event, drift classification (§3), approval routing (§4), 14-day expiry + `DIDRevisionProposalExpired` event (§5), `lockNoProposal` opt-out (OQ-12.3), rejection learnings flowing back via `ProposalRejectionRecord` + `computeRejectionPrecedentFactor` (OQ-12.5). OQs 12.1–12.5 resolved below.
 
-### 12.1 Confidence calibration
+The 5 OQs below have been resolved through the AISDLC-271 walkthrough. All answers are now normative.
 
-The `confidence` field is `high | medium | low` but the inputs to confidence inference aren't fully specified. **Position**: confidence = function of (sample size of trigger evidence, classification clarity, identityClass). Concrete computation deferred to an implementation memo; this RFC requires only that confidence be reported.
+### 12.1 Confidence calibration (RESOLVED)
 
-### 12.2 Multi-field bundling
+**Normative answer:** `confidence = f(sample size, classification clarity, identityClass)`:
 
-Should related field revisions be bundled into one proposal (e.g., if mission + experientialTargets both drift together)? **Position**: defer to v2; v1 is one-field-per-proposal. Bundling adds complexity to approval routing (which identityClass dominates? which pillar lead approves?) without clear v1 benefit.
+- `high` — sample size ≥ 20 AND classification ≠ `ambiguous` AND identityClass = `evolving`
+- `low`  — sample size < 5 OR classification = `ambiguous` OR identityClass = `core` (higher-stakes fields default to low confidence)
+- `medium` — everything else
 
-### 12.3 Operator opt-out per field
+Sample size is `dismissSignals + escalateSignals + driftEvents` from the trigger evidence window. This is implemented in `computeConfidence()` in `revision-proposal.ts`.
 
-Some fields may be operator-locked ("never auto-propose revisions to this") even when triggers fire. **Position**: yes — `.ai-sdlc/calibration.yaml` SHOULD support a `field:lockNoProposal` list. Proposal generation skips locked fields; operators can opt back in by removing the entry. This is a v1 must-have.
+### 12.2 Multi-field bundling (RESOLVED — deferred to v2)
 
-### 12.4 Cross-pillar coordination
+**Normative answer:** v1 is one-field-per-proposal. Multi-field bundling is explicitly out of scope for v1. Bundling would require resolving: which `identityClass` dominates when fields differ? Which pillar lead approves? Without clear answers these questions add complexity without v1 benefit. Each field is evaluated and proposed independently; callers wanting cross-field correlation must compose multiple calls. v2 can introduce a `ProposalBundle` concept when the cross-field scenarios are better understood.
 
-When a healthy-drift proposal would update a Design-pillar-owned field (e.g., voiceRegister), should Product Authority be the proposer or the reviewer? **Position**: PPA generates the proposal regardless (the flywheel evidence belongs to PPA); Design Authority is the approving pillar lead per identityClass routing. PPA's proposal is data; Design's approval is authority. Same pattern for Engineering-pillar-owned fields.
+### 12.3 Operator opt-out per field (RESOLVED — v1 must-have, shipped)
 
-### 12.5 Rejection learnings
+**Normative answer:** `.ai-sdlc/calibration.yaml` MUST support a `lockNoProposal` list of JSON-path field identifiers. Proposal generation skips locked fields; the function returns `{ kind: 'skipped', reason: 'locked' }`. Operators remove entries to opt back in. Implemented as `isFieldLocked()` + `CalibrationLockConfig` in `revision-proposal.ts`. The `evaluateRevisionProposal()` entry point accepts `lockConfig` and checks it before trigger evaluation (opt-out takes precedence over trigger state).
 
-When the triad rejects a proposal, what feedback flows back into the flywheel? **Position**: rejection rationale captured in calibration log; future trigger evaluations weight rejection-precedent into confidence. Implementation deferred but the flywheel hook is required.
+### 12.4 Cross-pillar coordination (RESOLVED)
+
+**Normative answer:** PPA generates the proposal regardless of which pillar owns the drifted field. The flywheel evidence belongs to PPA. The owning pillar lead (Design for `voiceRegister`, Engineering for substrate fields, etc.) is the _approving_ authority per `identityClass` routing in §8, not the proposing authority. `approvalPath = pillarLead` means "owning pillar lead + one other pillar lead" — the owning lead is determined by the field's pillar in the DID schema, which is resolved by the caller at review time. PPA proposes data; pillar lead approves authority. Implemented in `deriveApprovalPath()`.
+
+### 12.5 Rejection learnings (RESOLVED — flywheel hook shipped)
+
+**Normative answer:** When a proposal is rejected, `recordRejection()` captures the rationale + a `rejectionPrecedentWeight` (0.8 for high-confidence rejections, 0.5 for medium, 0.2 for low). The weight is stored in a `ProposalRejectionRecord` in the calibration log. Future trigger evaluations for the same field should call `computeRejectionPrecedentFactor(field, rejections)` to get a factor in `[0.2, 1.0]` that penalises confidence proportionally: `factor = max(0.2, 1.0 - avgWeight × 0.5)`. High-confidence rejections produce a factor of 0.6, reducing future proposal confidence. Both functions are exported from `revision-proposal.ts`.
 
 ## 13. Non-Goals (re-stated)
 
