@@ -894,7 +894,12 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       const orphanNames = orphans.map((p) => p.split('/').pop() ?? p);
       const orphanList = orphanNames.slice(0, 3).join(', ');
       const more = orphanNames.length > 3 ? ` (+${orphanNames.length - 3} more)` : '';
-      const rmArgs = orphans.map((p) => `rm ${p}`).join('; ');
+      // Use `git rm` (not `rm`) so the deletion is staged. A bare `rm` only
+      // touches the working tree; a subsequent `git commit --amend --no-edit`
+      // sees no staged changes and the orphan stays committed → CI re-fires
+      // the same orphan error → operator stuck in an infinite loop. See
+      // PR #490 round-1 code-review finding (AISDLC-274).
+      const rmArgs = orphans.map((p) => `git rm ${p}`).join('; ');
       return {
         status: 'invalid',
         reason:
