@@ -59,8 +59,51 @@ const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'secur
 export const REVIEWER_FINDINGS_MARKER = '<!-- ai-sdlc:reviewer-findings -->';
 
 /**
+ * Branches that the recovery-flow commands MUST refuse to force-push to,
+ * even when the PR metadata or worktree state would otherwise permit it.
+ * Mirrors the `/ai-sdlc rebase` resolver's protected-branch list and the
+ * CLAUDE.md "Never force-push to main/master" rule.
+ */
+export const PROTECTED_BRANCHES = new Set(['main', 'master']);
+
+/**
+ * GitHub author associations that are trusted for reviewer-findings injection.
+ * Comments from drive-by/external accounts (NONE, CONTRIBUTOR, FIRST_TIMER,
+ * FIRST_TIME_CONTRIBUTOR) are IGNORED to prevent prompt-injection attacks where
+ * a hostile commenter pastes the REVIEWER_FINDINGS_MARKER substring followed
+ * by adversarial text that the rework dev subagent would otherwise treat as
+ * authoritative reviewer guidance (PR #489 round-1 security finding).
+ *
+ * The set matches GitHub's `authorAssociation` enum:
+ * https://docs.github.com/en/graphql/reference/enums#commentauthorassociation
+ */
+const TRUSTED_AUTHOR_ASSOCIATIONS = new Set(['OWNER', 'MEMBER', 'COLLABORATOR']);
+
+/**
+ * Bot accounts whose comments are ALSO trusted for reviewer-findings injection
+ * (regardless of authorAssociation, which is often NONE for bots). Add the bot
+ * accounts your CI uses to post reviewer findings here. By default this set is
+ * empty; operators MUST explicitly opt in by editing this list.
+ */
+const TRUSTED_BOT_LOGINS = new Set<string>([]);
+
+interface PrComment {
+  body: string;
+  author?: { login?: string } | null;
+  authorAssociation?: string;
+}
+
+/**
  * Fetch PR reviewer findings from PR comments.
- * Returns an array of raw comment bodies that contain the reviewer-findings marker.
+ *
+ * Returns raw bodies of comments that BOTH:
+ *   1. contain the `REVIEWER_FINDINGS_MARKER` substring, AND
+ *   2. were authored by a trusted account (`authorAssociation` in
+ *      `TRUSTED_AUTHOR_ASSOCIATIONS`, OR `author.login` in `TRUSTED_BOT_LOGINS`).
+ *
+ * The author-trust filter prevents a prompt-injection attack where a
+ * drive-by GitHub commenter pastes the marker followed by text that
+ * subverts the rework dev subagent's task.
  */
 export async function fetchReviewerFindings(
   prNumber: number,
@@ -73,9 +116,18 @@ export async function fetchReviewerFindings(
   });
   if (result.code !== 0) return [];
   try {
-    const parsed = JSON.parse(result.stdout.trim()) as { comments?: Array<{ body: string }> };
+    const parsed = JSON.parse(result.stdout.trim()) as { comments?: PrComment[] };
     const comments = parsed.comments ?? [];
-    return comments.map((c) => c.body).filter((body) => body.includes(REVIEWER_FINDINGS_MARKER));
+    return comments
+      .filter((c) => {
+        if (!c?.body || !c.body.includes(REVIEWER_FINDINGS_MARKER)) return false;
+        const association = c.authorAssociation ?? '';
+        if (TRUSTED_AUTHOR_ASSOCIATIONS.has(association)) return true;
+        const login = c.author?.login ?? '';
+        if (login && TRUSTED_BOT_LOGINS.has(login)) return true;
+        return false;
+      })
+      .map((c) => c.body);
   } catch {
     return [];
   }
@@ -149,6 +201,20 @@ export async function runReworkPr(opts: ReworkPrOptions): Promise<ReworkPrResult
 
   const branch = prMeta.headRefName;
   const prUrl = prMeta.url;
+
+  // Refuse to operate on a PR whose head branch is main/master. The branch
+  // is derived from PR metadata, so a misconfigured PR (or one targeting the
+  // wrong refspec) could otherwise let a downstream `git push --force-with-lease`
+  // rewrite main. CLAUDE.md: "Never force-push to main/master."
+  if (PROTECTED_BRANCHES.has(branch)) {
+    return {
+      ok: false,
+      prUrl,
+      outcome: 'failed',
+      reason: `refusing to rework PR with head branch '${branch}': main/master are protected. Operator: rebase the PR onto a non-default branch first.`,
+      iterations: 0,
+    };
+  }
 
   // 2. Extract task ID from branch name (e.g. ai-sdlc/aisdlc-273-... → AISDLC-273)
   const taskIdMatch = branch.match(/aisdlc-(\d+(?:\.\d+)?)/i);

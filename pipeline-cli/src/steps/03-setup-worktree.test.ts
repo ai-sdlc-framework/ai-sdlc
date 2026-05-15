@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setupWorktree } from './03-setup-worktree.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
 import { FakeRunner, fail, ok } from '../__test-helpers/fake-runner.js';
@@ -814,6 +814,103 @@ describe('Step 3 — isSafeToAutoClean AISDLC-228 signals', () => {
       );
       expect(branchDeleteCall, 'cleanup must run when all signals are quiet').toBeDefined();
     } finally {
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
+});
+
+/**
+ * AISDLC-273 — isSafeToAutoClean draft-PR differentiation.
+ *
+ * When the only open PR for the branch is DRAFT, the predicate still refuses
+ * cleanup (auto-cleanup behaviour is unchanged), but it surfaces a richer
+ * `hadDraftPR` signal so the caller can suggest `--resume-from-draft`.
+ *
+ * Round-1 test review (PR #489) flagged the new isDraft branch as untested:
+ * existing open-PR tests pass `[{"number":42}]` (no isDraft field) so the
+ * `parsed.every((pr) => pr.isDraft === true)` branch never fires.
+ */
+describe('Step 3 — isSafeToAutoClean draft-PR differentiation (AISDLC-273)', () => {
+  const STDERR_BRANCH_EXISTS = "fatal: a branch named 'ai-sdlc/aisdlc-99' already exists";
+  const LOCAL_BRANCH = 'ai-sdlc/aisdlc-99';
+  const LOCAL_TASK_ID = 'AISDLC-99';
+  const localWorktreePath = (): string => join(tmp, '.worktrees', 'aisdlc-99');
+
+  it('refuses cleanup AND logs "draft PR" kind when the only open PR is draft', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        .on(
+          (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+          fail(STDERR_BRANCH_EXISTS, 128),
+        )
+        .on(/^gh pr list/, ok('[{"number":42,"isDraft":true}]\n'));
+
+      await expect(
+        setupWorktree({
+          taskId: LOCAL_TASK_ID,
+          branch: LOCAL_BRANCH,
+          worktreePath: localWorktreePath(),
+          workDir: tmp,
+          runner: fake.toRunner(),
+          autonomousMode: true,
+        }),
+      ).rejects.toThrow(/branch already exists|cleanup AISDLC-99/);
+
+      // The "kind = hadDraftPR ? 'draft PR' : 'ready PR'" branch must have
+      // selected 'draft PR' for an isDraft:true payload.
+      const drafLog = consoleSpy.mock.calls.find((c) => String(c[0] ?? '').includes('draft PR'));
+      expect(drafLog, 'console.info must log "draft PR" kind').toBeDefined();
+      const readyLog = consoleSpy.mock.calls.find((c) => String(c[0] ?? '').includes('ready PR'));
+      expect(
+        readyLog,
+        'console.info must NOT log "ready PR" for an isDraft:true payload',
+      ).toBeUndefined();
+    } finally {
+      consoleSpy.mockRestore();
+      if (originalEnv === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = originalEnv;
+      }
+    }
+  });
+
+  it('logs "ready PR" kind when the open PR is NOT draft', async () => {
+    const originalEnv = process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
+    process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP = '1';
+    const consoleSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    try {
+      const fake = new FakeRunner()
+        .on(/^git fetch origin main/, ok())
+        .on(
+          (cmd, args) => cmd === 'git' && args[0] === 'worktree' && args[1] === 'add',
+          fail(STDERR_BRANCH_EXISTS, 128),
+        )
+        .on(/^gh pr list/, ok('[{"number":42,"isDraft":false}]\n'));
+
+      await expect(
+        setupWorktree({
+          taskId: LOCAL_TASK_ID,
+          branch: LOCAL_BRANCH,
+          worktreePath: localWorktreePath(),
+          workDir: tmp,
+          runner: fake.toRunner(),
+          autonomousMode: true,
+        }),
+      ).rejects.toThrow(/branch already exists|cleanup AISDLC-99/);
+
+      const readyLog = consoleSpy.mock.calls.find((c) => String(c[0] ?? '').includes('ready PR'));
+      expect(readyLog, 'console.info must log "ready PR" kind').toBeDefined();
+    } finally {
+      consoleSpy.mockRestore();
       if (originalEnv === undefined) {
         delete process.env.AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP;
       } else {

@@ -62,6 +62,7 @@ import {
   type SubagentSpawner,
 } from '../types.js';
 import { writeVerdictFile } from './execute.js';
+import { PROTECTED_BRANCHES } from './rework-pr.js';
 
 const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
 
@@ -218,6 +219,20 @@ export async function runResumeFromDraft(
     workDir: opts.workDir,
   });
   const { branch, worktreePath } = branchResult;
+
+  // Refuse to operate against main/master. The branch is computed from the
+  // task ID + branching pattern, so the only path to main/master here is a
+  // catastrophically misconfigured `branching.pattern`. Refuse early to
+  // honor CLAUDE.md's "Never force-push to main/master" rule.
+  if (PROTECTED_BRANCHES.has(branch)) {
+    return {
+      ok: false,
+      resumedFrom: 'pre-flight',
+      prUrl: null,
+      outcome: 'failed',
+      reason: `refusing to resume on protected branch '${branch}'. Check .ai-sdlc/pipeline-backlog.yaml branching.pattern — it must not collapse to a default branch name.`,
+    };
+  }
 
   // Step 2: detect state
   const state = await detectDraftPrState(opts.taskId, branch, worktreePath, opts.workDir, runner);
