@@ -17,6 +17,7 @@ import { findTaskFile, parseSimpleYaml, parseTaskFile } from '../steps/01-valida
 import { buildDependencyGraph, blockers } from '../deps/dependency-graph.js';
 import { aggregate } from './aggregator.js';
 import { assignClass } from './class-assignment.js';
+import { assignClassCached } from './cache.js';
 import {
   blockedPathsSignal,
   classDefaultSignal,
@@ -40,6 +41,21 @@ export interface StageAOptions {
    * `unknown`.
    */
   loc?: number;
+  /**
+   * Optional artifacts directory for the Phase 2 class-assignment cache.
+   * When omitted, `assignClassCached` falls back to `$ARTIFACTS_DIR` /
+   * `<cwd>/artifacts`. Tests inject a tmp dir; production leaves this
+   * undefined.
+   */
+  artifactsDir?: string;
+  /**
+   * Skip the Phase 2 cache and use the pure `assignClass` heuristic
+   * directly. Off by default; the cache is the production path. Tests
+   * that probe the §5.3 worked-example shape — and the Phase 1 test
+   * suite that ran before Phase 2 cached — pass `true` so a stale cache
+   * row from a previous run can't shadow the fresh classification.
+   */
+  skipClassCache?: boolean;
 }
 
 /**
@@ -61,11 +77,33 @@ export function runStageA(opts: StageAOptions): StageAResult {
   // or fall back to the title heuristic. The frontmatter value isn't
   // surfaced through `parseTaskFile` because it isn't part of the core
   // `TaskSpec` shape, so we re-parse just the YAML block here.
+  //
+  // Phase 2 — the heuristic stand-in for the §6.1 LLM classifier is
+  // routed through the on-disk cache (`assignClassCached`) so the
+  // assigner runs at most ONCE per repo per unique (title, description)
+  // pair. Phase 4+ swaps the underlying assigner for the real LLM with
+  // zero changes here.
   const frontmatterClass = readFrontmatterClass(taskFilePath);
-  const cls = assignClass({
-    frontmatterClass,
-    title: task.title,
-  });
+  const cls = opts.skipClassCache
+    ? assignClass({ frontmatterClass, title: task.title })
+    : (() => {
+        const cached = assignClassCached({
+          taskId: task.id,
+          title: task.title,
+          description: task.description ?? '',
+          ...(frontmatterClass !== undefined ? { frontmatterClass } : {}),
+          ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
+        });
+        // The Stage A result type's `classSource` is the narrower
+        // assigner-side enum (`frontmatter | heuristic | default`).
+        // `llm` is reserved for Phase 4+ when the assigner gets swapped;
+        // it cannot appear in Phase 2 (the underlying assigner is still
+        // the heuristic). Narrow defensively in case the cache is
+        // pre-populated from a future-version assigner.
+        const source: 'frontmatter' | 'heuristic' | 'default' =
+          cached.source === 'llm' ? 'default' : cached.source;
+        return { taskClass: cached.taskClass, source };
+      })();
 
   const references = task.references ?? [];
 

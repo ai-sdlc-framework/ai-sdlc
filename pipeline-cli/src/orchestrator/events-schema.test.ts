@@ -300,6 +300,31 @@ describe('orchestrator-events.v1.schema.json — accepts every emitted type', ()
       mergedAt: '2026-05-09T12:00:00Z',
     });
   });
+
+  it('accepts EstimateCaptured (RFC-0016 Phase 2 / AISDLC-280)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'EstimateCaptured',
+      taskId: 'AISDLC-280',
+      bucket: 'S',
+      finalBucket: 'S',
+      class: 'feature',
+      estimateInputHash: 'sha256:' + 'a'.repeat(64),
+      runIndex: 1,
+      confidence: 'high',
+      escalateToStageB: false,
+    });
+  });
+
+  it('accepts EstimateInputChanged (RFC-0016 §8.4 / AISDLC-280)', () => {
+    expectValid({
+      ts: baseTs,
+      type: 'EstimateInputChanged',
+      taskId: 'AISDLC-280',
+      oldHash: 'sha256:' + 'b'.repeat(64),
+      newHash: 'sha256:' + 'c'.repeat(64),
+    });
+  });
 });
 
 describe('orchestrator-events.v1.schema.json — rejects malformed events', () => {

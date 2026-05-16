@@ -147,7 +147,27 @@ export type OrchestratorEventType =
    * `branch`, `mergedAt`. Lets operators grep events.jsonl to audit the
    * automatic cleanup history without reading the filesystem.
    */
-  | 'OrchestratorWorktreeSwept';
+  | 'OrchestratorWorktreeSwept'
+  /**
+   * AISDLC-280 (RFC-0016 Phase 2) — emitted on every successful Stage
+   * A capture. Per-event fields: `taskId`, `bucket`, `finalBucket`,
+   * `class`, `estimateInputHash`, `runIndex`, `confidence`,
+   * `escalateToStageB`. Lets the orchestrator's capacity planner
+   * (Phase 5+) and downstream observability surfaces (cli-status,
+   * Slack, dashboard) react to estimates without re-reading
+   * `_estimates/log.jsonl`.
+   */
+  | 'EstimateCaptured'
+  /**
+   * AISDLC-280 (RFC-0016 Phase 2 / Q5 §8.4) — emitted when a Stage A
+   * capture for an already-known `taskId` carries a different
+   * `estimateInputHash` than the previous capture (task title /
+   * description / signals / class changed materially). Per-event fields:
+   * `taskId`, `oldHash`, `newHash`. Marks the boundary between two
+   * ensemble batches so the Phase 3 calibration collector stops
+   * aggregating across the transition.
+   */
+  | 'EstimateInputChanged';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

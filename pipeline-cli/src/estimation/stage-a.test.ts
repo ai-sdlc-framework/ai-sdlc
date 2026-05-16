@@ -15,13 +15,24 @@ import { runStageA } from './stage-a.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
 
 let tmp: string;
+let savedArtifactsDir: string | undefined;
 
 beforeEach(() => {
   tmp = makeTmpProject();
+  // Route the Phase 2 class-assignment cache writes into the tmp
+  // project so the runStageA flow doesn't leak `artifacts/_estimates/`
+  // under the test runner's cwd.
+  savedArtifactsDir = process.env.ARTIFACTS_DIR;
+  process.env.ARTIFACTS_DIR = tmp;
 });
 
 afterEach(() => {
   cleanupTmpProject(tmp);
+  if (savedArtifactsDir === undefined) {
+    delete process.env.ARTIFACTS_DIR;
+  } else {
+    process.env.ARTIFACTS_DIR = savedArtifactsDir;
+  }
 });
 
 describe('runStageA — end-to-end', () => {

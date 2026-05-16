@@ -2863,6 +2863,58 @@ export const orchestratorEventsV1Schema = {
       description:
         "ISO-8601 timestamp (or 'unknown') when the PR was merged. Present on `OrchestratorWorktreeSwept` (AISDLC-256).",
     },
+    bucket: {
+      type: 'string',
+      enum: ['XS', 'S', 'M', 'L', 'XL'],
+      description:
+        'Stage A candidate bucket — RFC-0016 §4.1 t-shirt size. Present on `EstimateCaptured` (AISDLC-280).',
+    },
+    finalBucket: {
+      type: 'string',
+      enum: ['XS', 'S', 'M', 'L', 'XL'],
+      description:
+        'Final bucket after Stage A + (Phase 4+) Stage B reconciliation. In Phase 2 always equals `bucket`. Present on `EstimateCaptured` (AISDLC-280).',
+    },
+    class: {
+      type: 'string',
+      enum: ['bug', 'feature', 'chore', 'uncategorized'],
+      description: 'RFC-0016 §6.1 task class. Present on `EstimateCaptured` (AISDLC-280).',
+    },
+    estimateInputHash: {
+      type: 'string',
+      pattern: '^sha256:[0-9a-f]{64}$',
+      description:
+        'RFC-0016 §8.4 content hash over `(taskTitle, taskDescription, stageA_signals, classAssignment)`. Present on `EstimateCaptured` and as `newHash` on `EstimateInputChanged` (AISDLC-280).',
+    },
+    runIndex: {
+      type: 'integer',
+      minimum: 1,
+      description:
+        'Ensemble run index (1, 2, 3 …) for repeated runs against the same `estimateInputHash`. Present on `EstimateCaptured` (AISDLC-280).',
+    },
+    confidence: {
+      type: 'string',
+      enum: ['high', 'medium', 'low'],
+      description:
+        'RFC-0016 §5.2 Stage A confidence rating. Present on `EstimateCaptured` (AISDLC-280).',
+    },
+    escalateToStageB: {
+      type: 'boolean',
+      description:
+        'RFC-0016 §5.2 Phase 4 hook — true when Stage A signals split across non-adjacent buckets. Present on `EstimateCaptured` (AISDLC-280).',
+    },
+    oldHash: {
+      type: 'string',
+      pattern: '^sha256:[0-9a-f]{64}$',
+      description:
+        'Previous `estimateInputHash` for the task. Present on `EstimateInputChanged` (AISDLC-280).',
+    },
+    newHash: {
+      type: 'string',
+      pattern: '^sha256:[0-9a-f]{64}$',
+      description:
+        "New `estimateInputHash` for the task — same value as the next `EstimateCaptured` event's hash. Present on `EstimateInputChanged` (AISDLC-280).",
+    },
   },
   additionalProperties: false,
   $defs: {
@@ -2891,6 +2943,8 @@ export const orchestratorEventsV1Schema = {
         'TaskBlocked',
         'WorktreeAutoCleaned',
         'OrchestratorWorktreeSwept',
+        'EstimateCaptured',
+        'EstimateInputChanged',
       ],
     },
   },

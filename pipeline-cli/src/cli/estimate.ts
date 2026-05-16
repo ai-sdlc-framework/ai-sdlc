@@ -21,8 +21,10 @@ import {
   estimationDisabledMessage,
   isEstimationEnabled,
 } from '../estimation/feature-flag.js';
+import { captureEstimate } from '../estimation/log-writer.js';
 import { runStageA } from '../estimation/stage-a.js';
 import type { SignalOutput, StageAResult } from '../estimation/types.js';
+import { findTaskFile, parseTaskFile } from '../steps/01-validate.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -136,6 +138,12 @@ export function buildEstimateCli(): Argv {
             type: 'string',
             choices: ['json', 'table'] as const,
             default: 'json' as const,
+          })
+          .option('capture', {
+            type: 'boolean',
+            default: true,
+            describe:
+              'Append the verdict to $ARTIFACTS_DIR/_estimates/log.jsonl (RFC-0016 Phase 2). Use --no-capture to preview without writing.',
           }),
       (argv) => {
         if (!isEstimationEnabled()) {
@@ -153,11 +161,36 @@ export function buildEstimateCli(): Argv {
         }
 
         try {
+          const workDir = String(argv.workdir);
+          const taskId = String(argv['task-id']);
           const result = runStageA({
-            taskId: String(argv['task-id']),
-            workDir: String(argv.workdir),
+            taskId,
+            workDir,
             ...(argv.loc !== undefined ? { loc: Number(argv.loc) } : {}),
           });
+          // RFC-0016 Phase 2 capture (AC #1) — append to log.jsonl
+          // unless explicitly opted out with --no-capture. Best-effort:
+          // a write failure is surfaced on stderr but doesn't fail the
+          // verdict emission.
+          if (argv.capture) {
+            const taskFilePath = findTaskFile(taskId, workDir);
+            if (taskFilePath) {
+              const task = parseTaskFile(taskFilePath);
+              try {
+                captureEstimate({
+                  stageA: result,
+                  taskTitle: task.title,
+                  taskDescription: task.description ?? '',
+                });
+              } catch (err) {
+                process.stderr.write(
+                  `[estimate-log] capture failed: ${
+                    err instanceof Error ? err.message : String(err)
+                  }\n`,
+                );
+              }
+            }
+          }
           if (argv.format === 'json') {
             emit(result);
           } else {

@@ -12,3 +12,25 @@ export * from './class-assignment.js';
 export * from './signals.js';
 export * from './aggregator.js';
 export { runStageA, type StageAOptions } from './stage-a.js';
+export {
+  computeEstimateInputHash,
+  sortedJsonStringify,
+  type EstimateInputHashArgs,
+} from './hash.js';
+export {
+  assignClassCached,
+  readCacheEntry,
+  type AssignClassCachedOpts,
+  type AssignClassCachedResult,
+  type CacheEntry,
+  type CacheFile,
+} from './cache.js';
+export {
+  captureEstimate,
+  estimateLogPath,
+  readEstimateLog,
+  type CaptureEstimateOpts,
+  type CaptureEstimateResult,
+  type EstimateLogRecord,
+  type ReadLogOpts,
+} from './log-writer.js';

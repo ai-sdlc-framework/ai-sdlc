@@ -29,6 +29,9 @@ let stderrBuf = '';
 
 beforeEach(() => {
   tmp = makeTmpProject();
+  // Isolate the Phase 2 estimate-log writer to the tmp project so the
+  // CLI's default `--capture` doesn't leak artifacts into the real cwd.
+  process.env.ARTIFACTS_DIR = tmp;
   stdoutBuf = '';
   stderrBuf = '';
   stdoutSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: unknown) => {
@@ -114,5 +117,37 @@ describe('cli-estimate stage-a — degrade-open (AC #5)', () => {
       (call) => call[0] !== undefined && call[0] !== 0,
     );
     expect(nonZeroExits.length).toBeGreaterThan(0);
+  });
+});
+
+describe('cli-estimate stage-a — Phase 2 capture (--capture default)', () => {
+  it('writes _estimates/log.jsonl by default and skips the write under --no-capture', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    process.env[ESTIMATION_FLAG] = 'experimental';
+    writeTaskFile(tmp, {
+      id: 'AISDLC-CAP-1',
+      title: 'feat: capture probe',
+      description: 'capture test body',
+      references: ['src/a.ts'],
+    });
+    const logPath = path.join(tmp, '_estimates', 'log.jsonl');
+
+    // First call: --no-capture → log.jsonl absent.
+    const cli1 = buildEstimateCli();
+    await cli1.parseAsync(['stage-a', 'AISDLC-CAP-1', '--workdir', tmp, '--no-capture']);
+    expect(fs.existsSync(logPath)).toBe(false);
+
+    // Second call: default --capture → log.jsonl created with one row.
+    const cli2 = buildEstimateCli();
+    await cli2.parseAsync(['stage-a', 'AISDLC-CAP-1', '--workdir', tmp]);
+    expect(fs.existsSync(logPath)).toBe(true);
+    const lines = fs.readFileSync(logPath, 'utf8').split('\n').filter(Boolean);
+    expect(lines).toHaveLength(1);
+    const row = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(row.taskId).toBe('AISDLC-CAP-1');
+    expect(row.stageA).toBeDefined();
+    expect(row.finalBucket).toBeDefined();
+    expect(typeof row.estimateInputHash).toBe('string');
   });
 });
