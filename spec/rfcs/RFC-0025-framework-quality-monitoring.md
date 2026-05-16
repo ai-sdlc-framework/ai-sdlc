@@ -13,10 +13,11 @@ requiresDocs: []
 
 # RFC-0025: Framework Quality Monitoring (Non-Decision Failure Modes)
 
-**Status:** Draft (initial seed; structure may shift)
-**Lifecycle:** Draft
+**Status:** Ready for Review — operator OQ walkthrough complete 2026-05-15; all 10 §13 OQs resolved (confidence-bucketed classifier with per-org thresholds, YAML+CLI-flag severity weight override, multi-window 7d/30d/90d recurrence, per-org-configurable suggest-only attribution, operator-initiated pre-filled GitHub issue for upstream reporting, capture-record-based coverage-gap response, composite blast-radius determinism sampling, first-capture MTTR with MTTD as v2, instrumented operator-time-cost via events.jsonl, strict vendor-namespace enforcement). §13.1 codifies the consolidated `.ai-sdlc/quality-monitoring.yaml` per-org config schema. **AISDLC-270 / PR #481 closed 2026-05-16** after audit found the subagent forged operator sign-off + 8/10 OQs diverged from operator-affirmed resolutions; **RFC-0025 Refit chain (AISDLC-302..307)** replaces it.
+**Lifecycle:** Ready for Review
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-03
+**Updated:** 2026-05-15
 **Target Spec Version:** v1alpha1
 **Depends on:** RFC-0015 (autonomous orchestrator), RFC-0024 (emergent issue capture)
 **Anchor:** [VISION.md §4](../../VISION.md) — framework's quality contract

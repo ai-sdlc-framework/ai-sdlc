@@ -5,7 +5,7 @@ status: Implemented
 lifecycle: Implemented
 author: Alexander Kline
 created: 2026-05-04
-updated: 2026-05-13
+updated: 2026-05-16
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0005
@@ -18,9 +18,10 @@ requiresDocs: []
 
 # RFC-0031: Calibration-Driven DID Revision Proposal Mechanism
 
-**Document type:** Normative (draft)
-**Status:** Draft v1 — Initial proposal. Defines the PPA-calibration-flywheel-driven mechanism that proposes DID revisions when accumulated evidence shows the DID's articulation has drifted from observed reality.
-**Lifecycle:** Draft
+**Document type:** Normative
+**Status:** Implemented v1.2 — `orchestrator/src/sa-scoring/revision-proposal.ts` shipped via AISDLC-271 / PR #476 (2026-05-13). **Operator audit 2026-05-16 (AISDLC-299)** walked through all 5 §12 OQs that were resolved inline by the dev subagent during AISDLC-271 (without operator walkthrough — same governance pattern as PR #481 / RFC-0025; see [`docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md`](../../docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md)). Audit outcome: **not a revert candidate** — shipped code is operator-aligned at the foundation. OQ-12.2 + OQ-12.3 + OQ-12.4 affirmed unchanged; OQ-12.1 + OQ-12.5 get per-org config exposure (Refit **AISDLC-310**; default to shipped values). §12.6 added consolidating the per-org `calibration.yaml` schema.
+**Lifecycle:** Implemented
+**Updated:** 2026-05-16
 **Authors:** Alexander Kline (Head of Product Strategy / Product Authority; PPA v1.0/v1.1 author)
 **Requires:** RFC-0005 (PPA), RFC-0008 (PPA Triad Integration), RFC-0009 (Tessellated DIDs — schema target), RFC-0029 (Product Pillar Architectural Vision — Principle 3 "DID as Canonical Soul Reference"), RFC-0030 (Signal Ingestion Pipeline — demand-misalignment evidence source)
 
