@@ -7,7 +7,7 @@ author: dominique@reliablegenius.io
 created: 2026-05-08
 updated: 2026-05-15
 targetSpecVersion: v1alpha1
-requires: [RFC-0011, RFC-0023, RFC-0024, RFC-0029]
+requires: [RFC-0011, RFC-0023, RFC-0024, RFC-0025, RFC-0029]
 # Strategic / framework RFC. User-facing surfaces (operator runbook, API reference)
 # land at sign-off; intentionally empty at Draft stage.
 requiresDocs: []
@@ -108,6 +108,16 @@ This RFC is largely about **composition**, not invention. The deterministic-firs
 
 ### 3.1 Goals
 
+- **G0 — Non-Blocking Pipeline Contract.** The Decision Catalog substrate guarantees **zero pipeline-halting events**. Every potential operator interruption is logged as a `Decision` record with an auto-resolution policy (per Stage A/B/C confidence) OR a timeboxed default-on-silence action (per [RFC-0024 §15.1](RFC-0024-emergent-issue-capture-and-triage.md) lifecycle-defaults convention). The operator's role is decision *stewardship* — reviewing prioritized batches retroactively and exercising 24h override windows — not decision *throughput*. Implementation tasks continue against their dispatched-version contract while Decisions resolve asynchronously. Throughput rigor and decision rigor are orthogonal axes; the catalog's job is to make both maximal simultaneously.
+
+    **Anti-patterns explicitly prohibited under G0:**
+    - "Block PR / task / pipeline-tick until operator confirms" — every such case MUST be re-shaped as a Decision with auto-resolution or timeboxed default-on-silence.
+    - "Halt admission on missing operator input" — instead, refuse via a Decision-Catalog-emitted clarification task back upstream; pipeline continues on whatever else is dispatchable.
+    - "Real-time prompt at the moment of decision" — the catalog batches + prioritizes; the operator processes asynchronously.
+    - "Single blocking-event surface" — there is no such thing in this framework. If a design surfaces one, it routes through the catalog instead.
+
+    G0 is **measurable** by RFC-0025: every `decision-routed-to-operator-unnecessarily` event is a `framework-misbehaved` sub-class that closes the calibration loop on this contract. See §10 for the audit-dep relationship.
+
 - **G1.** Catalog every open decision across the workspace as a `Decision` resource with a stable schema and a single source-of-truth location.
 - **G2.** Score each `Decision` deterministically first, structurally second, with an LLM only as a last resort — same ladder as RFC-0011 §4.4 and review-calibration.
 - **G3.** Route each `Decision` to a specific actor (or to the framework, when LLM-eligible) using an explicit, auditable rubric.
@@ -118,12 +128,13 @@ This RFC is largely about **composition**, not invention. The deterministic-firs
 
 ### 3.2 Non-Goals
 
-- **N1.** Replacing Claude Code's `AskUserQuestion` tool. This RFC defines the framework's operator-decision surface; in-IDE prompts continue to use Claude Code's native UX.
-- **N2.** Auto-deciding load-bearing decisions without operator sign-off. Per `VISION.md` §6 ("You decide. We don't override."), the framework recommends; the operator decides.
+- **N1.** Replacing Claude Code's `AskUserQuestion` tool. This RFC defines the framework's operator-decision surface; in-IDE prompts continue to use Claude Code's native UX. (Note: per G0, `AskUserQuestion` is only used when the catalog has *already* prioritized and surfaced a Decision — never as a real-time pipeline interrupt.)
+- **N2.** Auto-deciding load-bearing decisions without operator sign-off. Per `VISION.md` §6 ("You decide. We don't override."), the framework recommends; the operator decides. (G0 still applies: load-bearing decisions sit in the prioritized queue with timeboxed defaults; they don't halt the pipeline.)
 - **N3.** Cross-organization actor routing. Single-workspace v1, mirroring [RFC-0023 §10](RFC-0023-operator-tui-pipeline-monitoring.md) (single-workspace OQ resolution).
 - **N4.** Generating the operator UI itself. RFC-0023 owns the TUI; this RFC owns the data the TUI reads.
 - **N5.** Replacing RFC-0011's DoR rubric. DoR clarifications **feed** the catalog as `Decision` records; the rubric stays.
 - **N6.** Replacing the backlog issue model. A `Decision` is not an `Issue`; some decisions produce issues (or RFC amendments) when answered, but most do not.
+- **N7.** Adopter-side blocking events. Adopters' downstream tooling (CI, IDE, etc.) is outside this RFC's scope — they may have their own real-time interrupt surfaces. The framework's contract under G0 is: pipeline operations *the framework owns* (orchestrator tick, task dispatch, admission, attestation, merge) never halt on operator decisions; the catalog absorbs all of them.
 
 ## 4. The Decision Resource
 
@@ -345,7 +356,7 @@ Aggregated metrics surface in the operator analytics pane (RFC-0023 §6).
 | [RFC-0014](RFC-0014-dependency-graph-composition.md) Dep Graph | Provides blast-radius computation | Stage A input |
 | [RFC-0023](RFC-0023-operator-tui-pipeline-monitoring.md) Operator TUI | Surfaces the catalog (decisions-pending pane) | Downstream consumer; this RFC defines the data |
 | [RFC-0024](RFC-0024-emergent-issue-capture-and-triage.md) Emergent Capture | Some emergent findings produce decisions, not issues | Upstream feeder |
-| [RFC-0025](RFC-0025-framework-quality-monitoring.md) Quality Monitoring | Catches "framework decided wrong" cases | Closes calibration loop on routing/auto-decision errors |
+| [RFC-0025](RFC-0025-framework-quality-monitoring.md) Quality Monitoring | **Hard runtime dep for Phase 7 (fatigue signal) + Phase 9 (calibration loop).** Audits Decision Catalog routing for `decision-routed-to-operator-unnecessarily` events — a `framework-misbehaved` sub-class that measures whether the catalog is keeping its G0 non-blocking contract. | Without this dep, G0 is unenforced (unmeasurable). RFC-0025 §5.2's `framework-misbehaved` taxonomy extends with `decision-over-blocked`, `decision-mis-routed-to-operator`, `decision-confidence-mis-tuned` sub-classes; events feed the calibration corpus that tunes the Stage C confidence threshold over time. |
 | [RFC-0029](RFC-0029-product-pillar-architectural-vision.md) Product Pillar | Provides the actor model | Routing rubric input |
 | [RFC-0031](RFC-0031-calibration-driven-did-revision-proposal.md) Calibration Loop | Calibration-driven proposal pattern | Reused for decision exemplar promotion |
 | [RFC-0033](RFC-0033-governance-reporting-layer.md) Governance Reporting | Includes decision metrics in periodic synthesis | Downstream consumer of feedback store |

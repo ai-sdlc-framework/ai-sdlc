@@ -11,6 +11,7 @@ labels:
   - critical-path
 dependencies:
   - AISDLC-289
+  - AISDLC-306
 references:
   - spec/rfcs/RFC-0035-decision-catalog-operator-routing.md
 priority: high
