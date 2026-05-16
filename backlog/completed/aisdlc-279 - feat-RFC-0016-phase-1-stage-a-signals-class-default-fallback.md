@@ -1,7 +1,7 @@
 ---
 id: AISDLC-279
 title: 'feat: RFC-0016 Phase 1 — Stage A signals + class-default fallback'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-15'
 labels:
