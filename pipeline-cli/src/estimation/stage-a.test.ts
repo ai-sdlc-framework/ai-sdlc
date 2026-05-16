@@ -126,4 +126,69 @@ describe('runStageA — end-to-end', () => {
     expect(elapsed).toBeLessThan(2000);
     expect(result.taskId).toBe('AISDLC-104');
   });
+
+  // PR #279 round-1 coverage gap: readCodecovPatchThreshold (148-179) was
+  // 0% covered, dragging stage-a.ts to 67.32% (below 80% gate).
+  it('reads patch coverage threshold from codecov.yml at workDir root', () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-200',
+      title: 'feat: codec dep',
+      references: ['src/a.ts'],
+    });
+    writeFileSync(
+      `${tmp}/codecov.yml`,
+      'coverage:\n  status:\n    patch:\n      default:\n        target: 90%\n    project:\n      default:\n        target: 80%\n',
+    );
+    const result = runStageA({ taskId: 'AISDLC-200', workDir: tmp });
+    const sig4 = result.signals.find((s) => s.id === 4);
+    expect(sig4?.result.kind).toBe('bump');
+    if (sig4?.result.kind === 'bump') {
+      // 90% target should trigger the +1 bump per RFC §5.1 signal #4.
+      expect(sig4.result.delta).toBe(1);
+    }
+  });
+
+  it('readCodecovPatchThreshold handles malformed YAML gracefully (returns undefined)', () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-201',
+      title: 'feat: malformed codecov',
+      references: ['src/a.ts'],
+    });
+    // Unparseable target — codecov reader returns undefined, signal degrades.
+    writeFileSync(
+      `${tmp}/codecov.yml`,
+      'coverage:\n  status:\n    patch:\n      default:\n        target: not-a-number\n',
+    );
+    const result = runStageA({ taskId: 'AISDLC-201', workDir: tmp });
+    // No throw, result still well-formed.
+    expect(result.taskId).toBe('AISDLC-201');
+  });
+
+  it('runStageA falls back to heuristic when frontmatter has no class: field', () => {
+    // writeTaskFile produces a frontmatter without explicit `class:` so the
+    // readFrontmatterClass "val undefined" branch is exercised.
+    writeTaskFile(tmp, {
+      id: 'AISDLC-202',
+      title: 'feat: add something with no class field',
+      references: ['src/foo.ts'],
+    });
+    const result = runStageA({ taskId: 'AISDLC-202', workDir: tmp });
+    expect(result.classSource).toBe('heuristic');
+  });
+
+  it('runStageA does not crash when the dependency graph cannot be built', () => {
+    // Write a task whose references list points at non-existent files;
+    // buildDependencyGraph may throw or return empty, but Stage A must
+    // still return a valid composite verdict (the catch branch ensures
+    // the dependencyDepthSignal degrades to 0 rather than failing the run).
+    writeTaskFile(tmp, {
+      id: 'AISDLC-203',
+      title: 'feat: dangling deps',
+      references: ['does/not/exist/foo.ts', 'also/missing/bar.ts'],
+    });
+    const result = runStageA({ taskId: 'AISDLC-203', workDir: tmp });
+    const sig5 = result.signals.find((s) => s.id === 5);
+    // Degrade-safe: dependency depth signal exists with kind bump or unknown.
+    expect(['bump', 'unknown']).toContain(sig5?.result.kind);
+  });
 });

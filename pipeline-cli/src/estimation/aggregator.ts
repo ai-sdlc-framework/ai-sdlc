@@ -43,6 +43,15 @@ export interface AggregateResult {
 }
 
 /**
+ * Phase-1 cheap voter ids per RFC-0016 §5.1: file-scope (1), LOC delta (3),
+ * file-type breakdown (7). Signals #2 (historical actuals) + #8 (reviewer
+ * iterations) are Phase-3 surfaces and MUST NOT be silently routed through
+ * the cheap-voter pool — they are "primary voters" that need their own
+ * pool (Phase-3 work). Signal #9 is the class-default fallback.
+ */
+const CHEAP_VOTER_IDS = new Set<number>([1, 3, 7]);
+
+/**
  * Aggregate the per-signal outputs into the final Stage A verdict.
  *
  * Algorithm:
@@ -75,13 +84,21 @@ export function aggregate(signals: readonly SignalOutput[]): AggregateResult {
       const idx = BUCKET_INDEX[s.result.bucket];
       const contrib: VoterContribution = { id: s.id, low: idx, high: idx };
       if (s.id === 9) fallbackVoters.push(contrib);
-      else cheapVoters.push(contrib);
+      else if (CHEAP_VOTER_IDS.has(s.id)) cheapVoters.push(contrib);
+      // Other ids (2 = historical actuals, 8 = reviewer iterations) are
+      // Phase-3 signals. Today they always return `unknown` so this branch
+      // is unreachable in Phase 1; once they ship real bucket results,
+      // Phase 3 must extend this with a `primaryVoters` pool that
+      // overrides cheap voters when resolved (the RFC's intent: historical
+      // actuals "replaces guesswork" rather than voting peer-equal with
+      // file-scope). Tracked separately as a Phase-3 prerequisite.
     } else if (s.result.kind === 'range') {
       const lo = BUCKET_INDEX[s.result.low];
       const hi = BUCKET_INDEX[s.result.high];
       const contrib: VoterContribution = { id: s.id, low: lo, high: hi };
       if (s.id === 9) fallbackVoters.push(contrib);
-      else cheapVoters.push(contrib);
+      else if (CHEAP_VOTER_IDS.has(s.id)) cheapVoters.push(contrib);
+      // (See comment above re: Phase-3 ids 2 / 8.)
     } else if (s.result.kind === 'bump') {
       if (s.result.delta !== 0) {
         bumps.push({ id: s.id, delta: s.result.delta });
