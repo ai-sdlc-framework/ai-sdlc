@@ -2,24 +2,27 @@
 id: RFC-0019
 title: Embedding Provider Adapter Framework
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: dominique@reliablegenius.io
 created: 2026-05-03
-updated: 2026-05-03
+updated: 2026-05-16
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0010
+  - RFC-0024
+  - RFC-0025
+  - RFC-0035
 requiresDocs: []
 ---
 
 # RFC-0019: Embedding Provider Adapter Framework
 
-**Document type:** Normative (draft)
-**Status:** Draft (initial seed; structure may shift; open questions in §15)
-**Lifecycle:** Draft
+**Document type:** Normative
+**Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 7 §15 OQs resolved (JSONL storage backend; lazy-re-embed default with per-org fail-loud opt-in; explicit no-op for cross-provider comparison; 90d deprecation warning + hard-removal; orchestrator placement; `embeddingTokens` cost-tracker line item; separate from SubscriptionLedger). Operator-impacting events (stale-vector encounters, cross-provider attempts, deprecation crossings, cost-budget breaches) **route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts; catalog absorbs with auto-action OR timeboxed default-on-silence. §15.1 codifies the per-org config schema. Implementation broken into 5 phase tasks (AISDLC-337..341).
+**Lifecycle:** Ready for Review
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-05-03
-**Updated:** 2026-05-03
+**Updated:** 2026-05-16
 **Target Spec Version:** v1alpha1
 
 ---
@@ -45,6 +48,7 @@ Engineering domain ownership; Product endorses with the structural-floor + enric
 | Version | Date       | Author    | Notes                                                                                                                                |
 | ------- | ---------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | v1      | 2026-05-03 | dominique | Initial draft per RFC-0009 OQ-6 sub-decision; mirrors RFC-0010 §13 harness adapter pattern + §11 alias deprecation lifecycle.        |
+| v0.2    | 2026-05-16 | dominique | Operator OQ walkthrough resolved all 7 §15 OQs. Resolutions: JSONL storage backend (OQ-1), lazy-re-embed default with per-org fail-loud opt-in (OQ-2), explicit no-op for cross-provider comparison (OQ-3), 90d deprecation warning with per-org gracePeriodDays override (OQ-4), orchestrator placement for framework code with pipeline-cli for CLIs (OQ-5), `embeddingTokens` cost-tracker line item distinct from input/output tokens (OQ-6), separate from SubscriptionLedger (OQ-7). §15.1 added consolidating per-org `.ai-sdlc/embedding-config.yaml` schema. Cross-cutting framing: operator-impacting events (stale-vector, cross-provider, deprecation, cost-budget) route through RFC-0035 G0 catalog. Lifecycle promoted Draft → Ready for Review. Implementation broken into 5 phase tasks: AISDLC-337 (Phase 1 interface + registry + OpenAI default), AISDLC-338 (Phase 2 JSONL storage + GC), AISDLC-339 (Phase 3 migration tooling), AISDLC-340 (Phase 4 pipeline integration + schema), AISDLC-341 (Phase 5 soak + promotion). |
 
 ---
 
@@ -569,27 +573,27 @@ Amends RFC-0004 §4 cost-attribution categories with a new line item for embeddi
 
 **Rejected for v1, deferred to Phase 6+.** pgvector, Qdrant, Pinecone, etc. each add a service dependency, an authentication story, and a backup/restore story. JSONL has none of those — `git diff` on the file is the audit trail, `cp` is the backup, `rm` is the cleanup. v1 ships JSONL; the storage-backend interface (§8.3) keeps the door open for vector-DB backends in adopter forks today and in-tree later.
 
-## 15. Open Questions
+## 15. Open Questions — resolved (operator walkthrough 2026-05-16)
 
-The operator (dominique) will walk through these before promoting the RFC out of Draft. Each question lists the lean to enable concrete Phase 1 work to begin.
+> **Resolution status (2026-05-16):** All 7 OQs resolved via operator walkthrough. Lifecycle promoted Draft → Ready for Review. **Cross-cutting framing:** every operator-impacting resolution (stale-vector encounters, cross-provider attempts, deprecation crossings, cost-budget breaches) routes through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md) — strict outcomes preserved (rigor), but "block + operator confirm" patterns reshaped as Decisions with auto-resolution OR timeboxed default-on-silence. §15.1 codifies the per-org config schema. Implementation broken into 5 phase tasks: AISDLC-337 through AISDLC-341.
 
 ### Q1: Vector storage backend for v1 — JSONL vs sqlite?
 
 **Lean: JSONL.** Mirrors `_dor/calibration.jsonl`, `_deps/snapshot.jsonl`, `_subscription-ledger/*.jsonl` patterns; trivial to inspect with `jq`/`grep`; GC by mtime; no schema-migration story to author. sqlite would give us indexed lookups but adds a real migration story and breaks the "one cat command shows you the data" debugging pattern.
 
-**Decide before Phase 2.**
+**Resolution (2026-05-16):** **JSONL** per the author Lean. Matches every other framework substrate (`_dor/`, `_deps/`, `_subscription-ledger/`, `_captures/`, `_decisions/`). Storage backend is pluggable via `Pipeline.spec.embedding.storageBackend` — adopters needing indexed lookups can register a custom sqlite backend later; v1 defaults to JSONL. **Selected over sqlite** because consistent debugging surface across all framework substrates outweighs the indexed-lookup benefit for v1 corpus sizes.
 
 ### Q2: Stale-vector policy default — lazy-re-embed vs fail-loud?
 
 **Lean: lazy-re-embed.** Operator-friendly: pipelines keep working after an adapter swap, slow first-reads amortize the migration cost across actual usage, no manual `cli-embedding-bump --execute` step required for the common case. Strict-provenance shops can flip to `fail-loud` via config. The risk with `lazy-re-embed` as default is that it masks accidental adapter swaps — but the PR-level adapter-swap is loud (config change) so the masking risk is low.
 
-**Decide before Phase 4.**
+**Resolution (2026-05-16):** **`lazy-re-embed` default; per-org `fail-loud` opt-in via `embedding-config.yaml`.** Stale-vector encounter under `lazy` mode → `Decision: stale-vector-encountered` → Stage A auto-classifies: re-embed silently + log to catalog (no operator interrupt; default-on-silence). Under `fail-loud`: refuse comparison → emit `cli-embedding-bump` migration task + surface in operator batch review. Strict-provenance adopters get rigor; default adopters get throughput. Composes with G0: pipeline never halts in either mode. **Selected over `fail-loud` default** because adapter swaps are rare + PR-level visible; lazy re-embed is the operator-friendly default for the common case.
 
 ### Q3: Cross-provider compatibility — explicit no-op or auto-migrate?
 
 **Lean: explicit no-op.** Vectors from `openai-text-embedding-3-small` (1536 dims) are NOT comparable to vectors from `openai-text-embedding-3-large` (3072 dims) even within the same provider family. The framework MUST refuse to compare across `(provider, modelVersion)` boundaries; adopters who change adapters MUST run `cli-embedding-bump`. Auto-migration on read is technically possible (the `lazy-re-embed` policy in Q2 already does it on a per-vector basis) but framework-level "magic" cross-provider migration would obscure the identity-of-vectors invariant.
 
-**Decide before Phase 3.**
+**Resolution (2026-05-16):** **Explicit no-op** per the author Lean. Cross-`(provider, modelVersion)` comparison attempt → `Decision: cross-provider-comparison-attempted` → auto-action: emit `cli-embedding-bump` migration task + log Decision for operator's batch review. Strict + non-blocking. Refusal is at the comparison API; pipeline continues on whatever else is dispatchable. **Selected over auto-migrate** because framework-level "magic" cross-provider migration obscures the identity-of-vectors invariant — exact same failure mode the operator's recurring rigor thesis catches.
 
 ### Q4: Embedding provider deprecation grace period?
 
@@ -598,25 +602,59 @@ The operator (dominique) will walk through these before promoting the RFC out of
 - Error starts: at `deprecatedAt` (operator-strict mode); warning continues in default mode.
 - Pipeline-load FAILS: at `removedAt`; operator MUST run `cli-embedding-bump` to migrate.
 
-**Decide before Phase 1.**
+**Resolution (2026-05-16):** **90d warning + hard removal at `removedAt`; per-org `gracePeriodDays` override.** Warning threshold crossed → `Decision: embedding-provider-deprecated` → catalog routes per Stage A/B/C; default-on-silence in batch review (per RFC-0024 §15.1 timebox convention). At `removedAt`: pipeline-load emits `Decision: embedding-provider-removed` → auto-action: emit `cli-embedding-bump` migration task. **Pipeline never halts** — the catalog absorbs the removal event; downstream consumers of the removed adapter degrade gracefully (e.g., `Eτ_tessellation_drift` rule emits "embedding-substrate-unavailable" Decision instead of comparing vectors). **Selected over no-grace-period or longer-grace** because 90d is conservative within OpenAI's typical 12-month window; per-org override handles fast-moving providers.
 
 ### Q5: Where in `pipeline-cli` vs `orchestrator` does the framework live?
 
 **Lean: orchestrator.** RFC-0010's HarnessAdapter and DatabaseBranchAdapter both live under `orchestrator/src/<surface>/`. Embedding adapters are the same shape (interface + registry + lifecycle + invocation); they belong in the same package for consistency. The `cli-embedding-bump` and `cli-embedding-gc` CLIs live under `pipeline-cli/bin/` (CLI conventions are pipeline-cli-side per existing pattern), but the framework code itself lives in orchestrator.
 
-**Decide before Phase 1.**
+**Resolution (2026-05-16):** **`orchestrator/src/embedding/` for framework code; `pipeline-cli/bin/` for CLIs** per the author Lean. Matches HarnessAdapter / DatabaseBranchAdapter / capture / decision substrates' placement convention exactly. Pure architectural placement; no operator-facing surface; no Decision routing needed. **Selected over pipeline-cli placement** because framework substrate consistency outweighs the (negligible) cross-package import overhead.
 
 ### Q6: Token budget tracking for embedding calls?
 
 **Lean: yes, embedded under `embeddingTokens` line item in cost-tracker.** OpenAI charges per token embedded; the framework MUST track this against `Pipeline.spec.costBudget`. New line item `embeddingTokens` (not conflated with `inputTokens`/`outputTokens` from harness calls) — keeps the cost-attribution story clean for adopters who want to break out embedding spend separately.
 
-**Decide before Phase 1** (Phase 1 ships the cost-tracker integration alongside the OpenAI default adapter so the very first vector written records cost correctly).
+**Resolution (2026-05-16):** **Yes — new `embeddingTokens` line item in cost-tracker, distinct from `inputTokens` / `outputTokens`.** Per the author Lean. Cost-budget breaches (per RFC-0004) → `Decision: cost-budget-exceeded` → catalog-routed per RFC-0035 G0 (auto-defer with timebox; never halts pipeline). **Selected over conflating embedding-spend with harness-call tokens** because adopters who break out embedding spend separately (CFO-facing line-item visibility) need the distinction; conflation would force re-instrumentation later.
 
 ### Q7: How does this interact with RFC-0010 SubscriptionLedger?
 
 **Lean: track separately, don't conflate.** Embedding API calls are pay-per-token (OpenAI bills against the API key directly), not subscription-quota-based. The SubscriptionLedger (RFC-0010 §14) tracks Claude Code Max / Codex subscription windows; embedding spend is a separate dollar-denominated cost that surfaces under cost-tracker's `embeddingTokens` line item. Conflating them would distort burn-down pacing in §14.4 (subscription quota would appear consumed by embedding calls that don't actually count against it).
 
-**Decide before Phase 4** (ledger interaction matters when pipeline-level budgeting decisions are made).
+**Resolution (2026-05-16):** **Track separately — embedding cost is pay-per-token (API-key direct billing), distinct from SubscriptionLedger (window-based subscription quotas).** Per the author Lean. Embedding spend surfaces in cost-tracker `embeddingTokens` line item (per OQ-6); SubscriptionLedger tracks Claude Code Max / Codex window consumption. Burn-down pacing (RFC-0010 §14.4) computes only against actual subscription quota — embedding-call costs do NOT consume window quota. **Selected over conflating them** because mixing pay-per-token costs with window-based quotas distorts both signals; adopters need clean separation for cost attribution + capacity planning.
+
+### 15.1 Configuration Schema (per-org defaults)
+
+Per-organization configurability is mandatory across the resolved OQs. The consolidated `.ai-sdlc/embedding-config.yaml` schema:
+
+```yaml
+embedding:
+  provider: openai-text-embedding-3-small   # default adapter (OQ-5 + Phase 1)
+
+  storage:                              # OQ-1 — JSONL backend
+    backend: jsonl
+    path: $ARTIFACTS_DIR/_embeddings/
+    gcRetentionDays: 90                 # mtime-based GC threshold
+
+  staleVectorPolicy:                    # OQ-2 — per-org default / opt-in
+    default: lazy-re-embed              # alternatives: fail-loud
+    laxLogToCatalog: true               # log every lazy-re-embed event as Decision
+
+  crossProviderPolicy:                  # OQ-3 — strict no-op
+    behavior: refuse                    # refusal -> Decision: cross-provider-comparison-attempted
+
+  deprecation:                          # OQ-4 — 90d default + per-org override
+    gracePeriodDays: 90                 # warning starts (gracePeriodDays before deprecatedAt)
+    strictModeAtDeprecatedAt: false     # set true for operator-strict mode (errors at deprecatedAt, not removedAt)
+
+  cost-tracking:                        # OQ-6 — distinct line item
+    lineItem: embeddingTokens           # NOT conflated with inputTokens/outputTokens
+    budgetIntegration: rfc-0004         # composes with CostPolicy
+
+  subscription-ledger-interaction:      # OQ-7 — explicit separation
+    consumeQuota: false                 # embedding spend does NOT consume subscription window quota
+```
+
+Default constants ship in the `ai-sdlc init` embedding-config template. Operator-configurable from day one. Per-org override via the standard config-precedence convention.
 
 ## 16. References
 
@@ -638,3 +676,4 @@ The operator (dominique) will walk through these before promoting the RFC out of
 | Version | Date       | Author    | Notes                                                                                                                                |
 | ------- | ---------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | v1      | 2026-05-03 | dominique | Initial draft per RFC-0009 OQ-6 sub-decision; mirrors RFC-0010 §13 harness adapter pattern + §11 alias deprecation lifecycle.        |
+| v0.2    | 2026-05-16 | dominique | Operator OQ walkthrough resolved all 7 §15 OQs. Resolutions: JSONL storage backend (OQ-1), lazy-re-embed default with per-org fail-loud opt-in (OQ-2), explicit no-op for cross-provider comparison (OQ-3), 90d deprecation warning with per-org gracePeriodDays override (OQ-4), orchestrator placement for framework code with pipeline-cli for CLIs (OQ-5), `embeddingTokens` cost-tracker line item distinct from input/output tokens (OQ-6), separate from SubscriptionLedger (OQ-7). §15.1 added consolidating per-org `.ai-sdlc/embedding-config.yaml` schema. Cross-cutting framing: operator-impacting events (stale-vector, cross-provider, deprecation, cost-budget) route through RFC-0035 G0 catalog. Lifecycle promoted Draft → Ready for Review. Implementation broken into 5 phase tasks: AISDLC-337 (Phase 1 interface + registry + OpenAI default), AISDLC-338 (Phase 2 JSONL storage + GC), AISDLC-339 (Phase 3 migration tooling), AISDLC-340 (Phase 4 pipeline integration + schema), AISDLC-341 (Phase 5 soak + promotion). |
