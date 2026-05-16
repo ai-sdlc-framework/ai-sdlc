@@ -1,5 +1,5 @@
 ---
-id: AISDLC-274
+id: AISDLC-321
 title: 'feat: RFC-0024 Refit Phase 2 — Shared classifier substrate (Haiku + 0.7 threshold + calibration corpus)'
 status: To Do
 assignee: []
@@ -12,7 +12,7 @@ labels:
   - critical-path-rfc-0035
   - classifier-keystone
 dependencies:
-  - AISDLC-273
+  - AISDLC-320
 references:
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md
   - spec/rfcs/RFC-0025-framework-quality-monitoring.md

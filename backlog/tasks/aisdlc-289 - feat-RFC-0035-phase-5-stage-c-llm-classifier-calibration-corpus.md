@@ -11,7 +11,7 @@ labels:
   - critical-path
 dependencies:
   - AISDLC-287
-  - AISDLC-274
+  - AISDLC-321
 references:
   - spec/rfcs/RFC-0035-decision-catalog-operator-routing.md
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md

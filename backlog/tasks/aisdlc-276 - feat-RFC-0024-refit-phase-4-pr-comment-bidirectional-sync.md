@@ -11,7 +11,7 @@ labels:
   - phase-4
   - critical-path-rfc-0035
 dependencies:
-  - AISDLC-274
+  - AISDLC-321
 references:
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md
   - pipeline-cli/src/capture/pr-comment-parser.ts

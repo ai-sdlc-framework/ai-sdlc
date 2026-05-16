@@ -133,10 +133,10 @@ The deeper substrate replacement is **RFC-0035 Decision Catalog** (Ready for Rev
 | Phase | Task | Scope |
 |---|---|---|
 | 1 | AISDLC-302 | Substrate cleanup + salvage from closed PR #481 |
-| 2 | AISDLC-303 | Confidence-bucketed classifier (OQ-1; composes with AISDLC-274) |
+| 2 | AISDLC-303 | Confidence-bucketed classifier (OQ-1; composes with AISDLC-321) |
 | 3 | AISDLC-304 | Multi-window recurrence + first-capture MTTR (OQ-3 + OQ-8) |
 | 4 | AISDLC-305 | Suggest-only attribution + quality-monitoring.yaml schema (OQ-2 + OQ-4) |
-| 5 | AISDLC-306 | Coverage-gap capture + composite determinism + instrumented operator-time-cost (OQ-6 + OQ-7 + OQ-9; composes with AISDLC-273, RFC-0014, RFC-0015) |
+| 5 | AISDLC-306 | Coverage-gap capture + composite determinism + instrumented operator-time-cost (OQ-6 + OQ-7 + OQ-9; composes with AISDLC-320, RFC-0014, RFC-0015) |
 | 6 | AISDLC-307 | Upstream reporting + vendor-namespace enforcement (OQ-5 + OQ-10); flips RFC-0025 lifecycle Ready for Review → Implemented |
 
 ## Lessons

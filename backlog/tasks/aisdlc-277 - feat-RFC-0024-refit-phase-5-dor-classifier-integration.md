@@ -11,7 +11,7 @@ labels:
   - phase-5
   - critical-path-rfc-0035
 dependencies:
-  - AISDLC-274
+  - AISDLC-321
 references:
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md
   - spec/rfcs/RFC-0011-definition-of-ready-gate.md

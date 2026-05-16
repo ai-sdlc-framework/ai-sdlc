@@ -11,7 +11,7 @@ labels:
   - critical-path-rfc-0035
 dependencies:
   - AISDLC-302
-  - AISDLC-273
+  - AISDLC-320
 references:
   - spec/rfcs/RFC-0025-framework-quality-monitoring.md
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md

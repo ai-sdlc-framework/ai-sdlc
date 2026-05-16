@@ -11,8 +11,8 @@ labels:
   - phase-6
   - critical-path-rfc-0035
 dependencies:
-  - AISDLC-273
-  - AISDLC-274
+  - AISDLC-320
+  - AISDLC-321
   - AISDLC-275
 references:
   - spec/rfcs/RFC-0024-emergent-issue-capture-and-triage.md

@@ -22,7 +22,7 @@ priority: critical
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
-RFC-0031 was implemented in a single development iteration (AISDLC-271) with all 5 OQs resolved inline by the dev subagent — without operator walkthrough. This task retroactively walks through the §12 OQ resolutions; the operator confirms or revises each. If revisions are needed, this task either files a Refit chain (per the AISDLC-273..278 RFC-0024 pattern) OR triggers reversion of the merged code.
+RFC-0031 was implemented in a single development iteration (AISDLC-271) with all 5 OQs resolved inline by the dev subagent — without operator walkthrough. This task retroactively walks through the §12 OQ resolutions; the operator confirms or revises each. If revisions are needed, this task either files a Refit chain (per the AISDLC-320 / 321 + 275-278 RFC-0024 pattern) OR triggers reversion of the merged code.
 
 ## Why this matters
 
@@ -40,7 +40,7 @@ The user's reaction to the same pattern in AISDLC-269 / RFC-0024: "if they were 
 
 ## Linked decisions
 
-- AISDLC-269 / RFC-0024 had the same pattern; user has already decided to refit (AISDLC-273..278). This task asks the same question for RFC-0031.
+- AISDLC-269 / RFC-0024 had the same pattern; user has already decided to refit (AISDLC-320 / 321 + 275-278). This task asks the same question for RFC-0031.
 <!-- SECTION:DESCRIPTION:END -->
 
 ## Acceptance Criteria
