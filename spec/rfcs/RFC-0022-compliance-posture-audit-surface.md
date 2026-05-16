@@ -2,10 +2,10 @@
 id: RFC-0022
 title: Compliance Posture + Audit Surface
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: dominique@reliablegenius.io
 created: 2026-05-03
-updated: 2026-05-03
+updated: 2026-05-16
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0008
@@ -15,12 +15,12 @@ requiresDocs: []
 
 # RFC-0022: Compliance Posture + Audit Surface
 
-**Document type:** Normative (draft)
-**Status:** Draft (initial seed; structure may shift; open questions in §13)
-**Lifecycle:** Draft
+**Document type:** Normative
+**Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 7 §13 OQs resolved (in-tree YAML defaults with adopter override in v1, forced attestedNotes + attestedAt + attestedBy auto-fill, hand-curated control-feature-map with per-RFC reviewer check, single .tar.gz audit export, on-demand export only for v1, single posture per project for v1 with loader API designed for v2 multi-posture additive composition, PR template + reviewer-subagent check). §13.1 codifies the consolidated `.ai-sdlc/compliance.yaml` per-org config schema. Implementation broken into 4 phase tasks (AISDLC-322..325).
+**Lifecycle:** Ready for Review
 **Author:** dominique@reliablegenius.io (with Claude assist)
 **Created:** 2026-05-03
-**Updated:** 2026-05-03
+**Updated:** 2026-05-16
 **Target Spec Version:** v1alpha1
 
 ---
@@ -50,6 +50,7 @@ Position grounded in RFC-0029 Part II (RFC-0022 endorsement) + Principle 1 (thre
 | Version | Date       | Author    | Notes                                                                                                                                |
 | ------- | ---------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | v1      | 2026-05-03 | dominique | Initial draft surfacing compliance-tracking gap identified during RFC-0009 OQ-11 walkthrough; mirrors RFC-0019's adapter-pattern document structure. |
+| v0.2    | 2026-05-16 | dominique | Operator OQ walkthrough resolved all 7 §13 OQs. Resolutions: in-tree YAML defaults + adopter override in v1 (OQ-1), forced attestedNotes + attestedAt + attestedBy auto-fill (OQ-2), hand-curated control-feature-map + per-RFC reviewer check via AISDLC-298 (OQ-3), single .tar.gz audit export with deterministic tar sort (OQ-4), on-demand export only for v1 (OQ-5), single posture per project for v1 with loader API taking CompliancePosture[] list for v2 forward-compat (OQ-6), PR template + reviewer-subagent check composing with AISDLC-298 (OQ-7). §13.1 added consolidating per-org `.ai-sdlc/compliance.yaml` config schema. Lifecycle promoted Draft → Ready for Review. Implementation broken into 4 phase tasks: AISDLC-322 (Phase 1 schema + loader), AISDLC-323 (Phase 2 mapping + composer), AISDLC-324 (Phase 3 init wizard), AISDLC-325 (Phase 4 audit export CLI). |
 
 ---
 
@@ -441,51 +442,92 @@ v1 keeps the manifest at the canonical `.ai-sdlc/compliance.yaml` path; no `Pipe
 
 **Rejected.** Forcing every adopter to research SOC2 / HIPAA / PCI-DSS gate defaults from scratch defeats the purpose of a "framework derives defaults from declared posture" pattern. Ship the canonical leans in-tree (§6) and let adopters override per project; the framework's opinion is the value.
 
-## 13. Open Questions
+## 13. Open Questions — resolved (operator walkthrough 2026-05-16)
 
-The operator (dominique) will walk through these before promoting the RFC out of Draft. Each carries a lean to enable concrete Phase 1 work to begin without blocking on every OQ resolution.
+> **Resolution status (2026-05-16):** All 7 OQs resolved via operator walkthrough. Lifecycle promoted Draft → Ready for Review. §13.1 below codifies the consolidated `.ai-sdlc/compliance.yaml` per-org config schema. Implementation broken into 4 phase tasks: AISDLC-322 (Phase 1 schema + loader), AISDLC-323 (Phase 2 mapping + composer), AISDLC-324 (Phase 3 init wizard), AISDLC-325 (Phase 4 audit export CLI).
+
+The following normative answers were established by operator walkthrough on **2026-05-16**:
 
 ### Q1: Where does the regime → controls mapping live? Versioned with the framework or external?
 
 **Lean: versioned with the framework** at `spec/compliance/regime-mappings.yaml`. Changes go through PR review; adopters can override per project via a future `compliance.yaml`-side `regimeOverrides` field if they need to (deferred — not in v1). External hosting (e.g., a compliance-mappings-as-a-service surface) introduces a runtime fetch and a versioning story; in-tree YAML is simpler and matches how the framework versions other reference data (`spec/schemas/`, `spec/compliance/control-feature-map.md`).
 
-**Decide before Phase 2.**
+**Resolution (2026-05-16):** **Hybrid — in-tree YAML defaults + adopter override exposed in v1.** `spec/compliance/regime-mappings.yaml` ships in-tree (matches OPA / HashiCorp Sentinel / Chef InSpec / ESLint convention). Adopter override via `compliance.yaml regimeOverrides: { <regimeKey>: { <controlName>: <value> } }` exposed from day 1 (not deferred to v2). Matches the per-org-configurability convention adopted across RFC-0024 / 0025 / 0031 / 0035. **Selected over in-tree-only** because regulated-industry adopters always have bespoke interpretations of compliance frameworks; the override hook is small schema surface that future-proofs the framework for the inevitable adopter who reads HIPAA differently than the framework's reference interpretation.
 
 ### Q2: How are operator overrides on `derivedGates` audited?
 
 **Lean: every override carries an `attestedNotes` entry; framework refuses to load a posture if an override is present without notes.** Forcing explicit rationale makes overrides audit-traceable — an auditor can inspect `compliance.yaml` and see "shared-with-rls because our auditor accepts X with quarterly policy review evidence" rather than discovering an undocumented deviation. The schema keeps notes in a sibling `_notes` map keyed by field name to preserve override-value typing.
 
-**Decide before Phase 1** (loader-side validation lands in Phase 1).
+**Resolution (2026-05-16):** **Forced `attestedNotes` + auto-filled `attestedAt` + `attestedBy` from git committer.** Loader rejects override without notes per the author Lean. **Two additional zero-cost audit-richness fields added:** `attestedAt: <ISO-timestamp>` (auto-filled at write time via `cli-compliance set-override`) and `attestedBy: <email>` (auto-filled from git committer config; matches the "Co-Authored-By" convention). Auditor sees who/when/why in one read; PCI-DSS / SOC2 audit pattern requires in-document rationale, not commit-message archaeology. **Selected over notes-only** because the auto-fill fields cost zero operator friction; adopters needing stricter attestation can layer a 2-person workflow on top (out of scope for v1).
 
 ### Q3: What's the source of truth for "control" mappings (SOC2 CC6.6 → which AI-SDLC feature produces evidence)?
 
 **Lean: maintain `spec/compliance/control-feature-map.md` as a hand-curated cross-reference, reviewed annually.** Auto-generation from regime documents would be nice but requires parsing legalese (every framework's control language is different). Hand curation with annual review is the pragmatic v1 answer; if the cross-reference becomes a maintenance burden, a future RFC can introduce structured-data sourcing.
 
-**Decide before Phase 2.**
+**Resolution (2026-05-16):** **Hand-curated `spec/compliance/control-feature-map.md` (structured markdown tables, parseable for tooling later) + per-RFC compliance-impact reviewer check (composes with OQ-7 and AISDLC-298 reviewer-subagent).** Annual review remains the backstop; per-RFC inline updates catch drift as new RFCs ship. **Selected over structured-YAML-+-renderer** because markdown tables are effectively structured (parseable) without an extra schema + renderer + CI sync step; defer YAML migration to a future RFC if a gap-linter or compliance dashboard surfaces actual demand. Selected over auto-generation because legalese-parsing fragility means generated mappings need human verification anyway.
 
 ### Q4: Audit export format — single tar OR per-kind directory?
 
 **Lean: single `.tar.gz` for portability.** Auditors get one file; uploading 5 separate directories to a portal is friction. The bundle layout (§8) preserves directory structure inside the archive so an extracted bundle is still navigable per-kind. `.tar.gz` over `.zip` because `tar` preserves POSIX permissions and content-hash determinism is easier (gzip with `-n` strips timestamps).
 
-**Decide before Phase 4.**
+**Resolution (2026-05-16):** **Single `.tar.gz`** per the author Lean. POSIX permissions matter for attestation files; content-hash determinism is foundational for compliance integrity. `tar` with `--sort=name --mtime=...` (Reproducible Builds pattern) ensures byte-identical bundles for identical-content periods. Bundle layout (§8) preserves directory structure inside the archive. **Selected over `.zip`** despite Windows-auditor familiarity because the technical-determinism benefit outweighs the one-line documentation cost (auditors use 7-zip on Windows; AI-SDLC's audit consumers are sophisticated as it's a developer-tooling framework).
 
 ### Q5: Real-time compliance monitoring vs on-demand export?
 
 **Lean: on-demand export only for v1.** Continuous monitoring (alert on every secret-scan failure, every reviewer-allowlist change, every retention-policy violation) is a real adopter ask but adds an event-streaming substrate, an alert routing story, and an integration matrix the framework doesn't have today. v1 ships the export; if adopters demand continuous monitoring, a future RFC layers it on the same posture substrate (the events are already JSONL — a streaming consumer is additive, not blocking).
 
-**Decide before Phase 4.**
+**Resolution (2026-05-16):** **On-demand export only for v1** per the author Lean. Events already accumulate in `events.jsonl` (RFC-0015 substrate); a future v2 RFC can layer a streaming consumer that tails the file with per-org cadence + alert taxonomy properly designed. **Selected over hybrid digest** because digest cadence (weekly vs monthly vs quarterly) + delivery surface (email vs Slack vs S3 upload) is per-org configurable and deserves a properly-scoped v2 RFC, not a cheap v1 cron addition.
 
 ### Q6: How does this interact with multi-tenant SubscriptionPlan (RFC-0010)?
 
 **Lean: each tenant has its own `CompliancePosture`; framework composes the union with "tightest wins" semantics.** A platform adopter running multiple SubscriptionPlans where one tenant is HIPAA-bound and another is unregulated should get HIPAA-tier defaults globally (the framework can't selectively apply per-shard isolation only to the HIPAA tenant — that's a per-tenant concern at the data layer, not a framework default). Multi-tenant composition is mostly out of scope for v1 (single posture per project), but the loader should be designed so multi-posture composition is additive in v2.
 
-**Decide before Phase 2.**
+**Resolution (2026-05-16):** **Single posture per project for v1; v2 designs multi-tenant tightest-wins** per the author Lean. **Critical design constraint baked into v1:** loader API takes a `CompliancePosture[]` list (single-element in v1) — NOT a `CompliancePosture` — so v2 multi-tenant is additive, not a breaking change. The "additive in v2" claim only holds if v1's loader is shaped this way. **Selected over multi-tenant-from-v1** because composition rules (tightest-wins union vs per-tenant isolation) need actual multi-tenant adopters to validate against; designing without that evidence risks the wrong default.
 
 ### Q7: When the framework adds a new feature, what process ensures the regime mapping is updated?
 
 **Lean: PR template includes a "compliance impact" checkbox; reviewer asks for `regime-mappings.yaml` + `control-feature-map.md` updates if applicable.** Lightweight process discipline rather than a tooling gate (a static analyzer that flags "this PR touches secret-scan but doesn't update the mapping" is over-engineered for v1). If the discipline slips, a future RFC can add a CI gate.
 
-**Decide before Phase 4** (PR template lands when the audit-export surface ships).
+**Resolution (2026-05-16):** **PR template checkbox + reviewer-subagent gate (composes with AISDLC-298).** Author's checkbox + reviewer-ask as the human-facing surface, backed by AISDLC-298's reviewer-subagent that flags "PR touches `spec/compliance/*` or related code paths without updating mapping files" as a critical finding. **Phased rollout:** ship the PR template alone in Phase 4 (RFC-0022 implementation); layer the reviewer-subagent rule once AISDLC-298 ships (additive enhancement, doesn't block RFC-0022). **Selected over checkbox-only** because pure-process discipline slips when reviewers are busy; the subagent gate catches misses without requiring a separate CI workflow.
+
+### 13.1 Configuration Schema (per-org defaults)
+
+Per-organization configurability is mandatory across the resolved OQs. The consolidated `.ai-sdlc/compliance.yaml` schema:
+
+```yaml
+compliance:
+  posture:                              # OQ-6 — single posture in v1; loader API takes list for v2 forward-compat
+    regimes:                            # adopter declares applicable regimes
+      - hipaa
+      - soc2
+    attestation:                        # OQ-2 — auto-filled audit fields
+      attestedBy: dominique@reliablegenius.io    # auto-filled from git committer
+      attestedAt: "2026-05-16T14:30:00Z"          # auto-filled at write time
+
+  regimeOverrides:                      # OQ-1 — adopter overrides ship in v1, not deferred to v2
+    hipaa:
+      db-isolation: shared-with-rls     # operator override
+      _notes:
+        db-isolation: "Our auditor accepts shared-with-rls with quarterly policy review evidence (case #ABC-123)"
+
+  derivedGates:                         # composed from regimes + overrides
+    secret-scan: strict
+    db-isolation: shared-with-rls       # operator override applied
+    retention-days: 2190                # 6 years for HIPAA
+    attestation-required: true
+    _notes:                             # OQ-2 — sibling map; loader rejects override without notes
+      db-isolation: "See compliance.regimeOverrides.hipaa._notes"
+
+  audit-export:                         # OQ-4 — single .tar.gz
+    format: tar.gz
+    bundleLayoutVersion: 1
+    sortMode: deterministic             # tar --sort=name --mtime=<fixed> for content-hash determinism
+
+  monitoring:                           # OQ-5 — on-demand only for v1
+    mode: on-demand                     # 'continuous' deferred to future RFC
+```
+
+Default constants ship in the `ai-sdlc init` compliance template. The regime → derived-gates mapping lives in-tree at `spec/compliance/regime-mappings.yaml` (OQ-1 base) + control-feature cross-reference at `spec/compliance/control-feature-map.md` (OQ-3). Auto-tuning + continuous monitoring + multi-tenant composition are future work; operator-configurable from day one.
 
 ## 14. References
 
@@ -510,3 +552,4 @@ The operator (dominique) will walk through these before promoting the RFC out of
 | Version | Date       | Author    | Notes                                                                                                                                |
 | ------- | ---------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | v1      | 2026-05-03 | dominique | Initial draft surfacing compliance-tracking gap identified during RFC-0009 OQ-11 walkthrough; mirrors RFC-0019's adapter-pattern document structure. |
+| v0.2    | 2026-05-16 | dominique | Operator OQ walkthrough resolved all 7 §13 OQs. Resolutions: in-tree YAML defaults + adopter override in v1 (OQ-1), forced attestedNotes + attestedAt + attestedBy auto-fill (OQ-2), hand-curated control-feature-map + per-RFC reviewer check via AISDLC-298 (OQ-3), single .tar.gz audit export with deterministic tar sort (OQ-4), on-demand export only for v1 (OQ-5), single posture per project for v1 with loader API taking CompliancePosture[] list for v2 forward-compat (OQ-6), PR template + reviewer-subagent check composing with AISDLC-298 (OQ-7). §13.1 added consolidating per-org `.ai-sdlc/compliance.yaml` config schema. Lifecycle promoted Draft → Ready for Review. Implementation broken into 4 phase tasks: AISDLC-322 (Phase 1 schema + loader), AISDLC-323 (Phase 2 mapping + composer), AISDLC-324 (Phase 3 init wizard), AISDLC-325 (Phase 4 audit export CLI). |
