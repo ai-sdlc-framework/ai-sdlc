@@ -2,12 +2,12 @@
 id: RFC-0036
 title: Spec-Kit Bridge and Adopter Spec-Authoring Surface
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: dominique@reliablegenius.io
 created: 2026-05-13
-updated: 2026-05-13
+updated: 2026-05-16
 targetSpecVersion: v1alpha1
-requires: [RFC-0010, RFC-0011]
+requires: [RFC-0010, RFC-0011, RFC-0024, RFC-0025, RFC-0035]
 # Adopter-facing positioning + tooling RFC. Tutorial + getting-started surfaces
 # land at sign-off; intentionally empty at Draft stage.
 requiresDocs: []
@@ -15,11 +15,11 @@ requiresDocs: []
 
 # RFC-0036: Spec-Kit Bridge and Adopter Spec-Authoring Surface
 
-**Status:** Draft
-**Lifecycle:** Draft
+**Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 12 §14 OQs resolved. **Cross-cutting framing:** every operator-impacting resolution is **routed through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — strict outcomes (tasks.md only, no fallback; drift requires explicit operator decision; full DoR rubric at import; strict schema versioning) are preserved while all "blocking + operator confirm" patterns are reshaped as Decisions with auto-resolution OR timeboxed default-on-silence. Pipeline never halts on RFC-0036 operations. §14.1 codifies the per-org config schema. Implementation broken into 11 phase tasks (AISDLC-326..336).
+**Lifecycle:** Ready for Review
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-13
-**Updated:** 2026-05-13
+**Updated:** 2026-05-16
 **Target Spec Version:** v1alpha1
 
 ---
@@ -460,20 +460,127 @@ Phased rollout behind feature flag `AI_SDLC_ADOPTER_AUTHORING=experimental` (mir
 - [ ] **Phase 10.** Adapter-pattern documentation for non-spec-kit upstreams (Linear, Notion, plain markdown templates)
 - [ ] **Phase 11.** Hybrid promotion runbook to flip default-on (`docs/operations/adopter-authoring-promotion.md`)
 
-## 14. Open Questions
+## 14. Open Questions — resolved (operator walkthrough 2026-05-16)
 
-1. **Seam artifact granularity.** Does the bridge import from `tasks.md` only, or also from `spec.md` (one-task-per-AC) when `tasks.md` is absent? Spec-kit's `tasks.md` is usually present, but adopters running partial flows may stop earlier.
-2. **specRef drift semantics.** When an imported task is In Progress and upstream `tasks.md` changes, do we (a) block the change with operator confirmation, (b) auto-fork a new task, or (c) surface a warning and let the operator resolve? Different fault models.
-3. **DoR strictness at import.** Default `--rubric warn` softens import-time failures into warnings. Should `strict` be the default once Phase 5 stabilizes? Strictness changes the upstream feedback signal materially.
-4. **Adopter RFC storage convention.** Default to `<adopter-repo>/rfcs/` — but adopters with multi-repo setups (e.g. one repo per service) may want a central RFC repo. Config-only, or convention?
-5. **RFC template variants.** Ship one template, or three (architecture, product-decision, retrospective)? More templates = more cognitive load at scaffold time; one template requires editing for variant uses.
-6. **Cross-tool bridges.** Phase 10 hints at Linear / Notion / plain markdown adapters. Does each need a first-party adapter, or is a single documented "bring your own translator" pattern sufficient?
-7. **Spec-kit `/speckit.analyze` overlap with DoR.** When spec-kit's analyze pass already runs upstream, should DoR at import be a no-op (or stripped to the gates analyze doesn't cover)? Avoiding duplicate clarification rounds is high-leverage.
-8. **Constitution composition.** Spec-kit's `constitution.md` ≈ ai-sdlc's `CLAUDE.md` + governance YAML. Does the bridge merge them, expose them separately, or ignore the constitution entirely (adopter sets it up once via their tool)?
-9. **Positioning leadership.** Does the framework lead with "spec-driven development" terminology, or with the existing "Decision Engine" framing from `VISION.md`? They're compatible but the primary message matters for adoption.
-10. **What happens when DoR rejects an imported task.** The task isn't created — but the work needs to happen somewhere. Do we (a) create the task with `dorBlocked: true` status, (b) refuse import entirely, or (c) create a placeholder + emit a clarification task back to spec-kit?
-11. **Versioning the seam contract.** Spec-kit will evolve their artifact formats. Do we pin a supported version range, or auto-detect schema and refuse on unknown formats?
-12. **CLI vs slash-command surface.** `ai-sdlc import-spec` is shown as a CLI; should it also exist as `/ai-sdlc import-spec` inside Claude Code? Mirrors the dual-surface pattern of other ai-sdlc commands.
+> **Resolution status (2026-05-16):** All 12 OQs resolved via operator walkthrough. Lifecycle promoted Draft → Ready for Review. **Cross-cutting framing:** every operator-impacting resolution routes through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md) — strict outcomes preserved (rigor), but "blocking + operator confirm" patterns reshaped as Decisions with auto-resolution OR timeboxed default-on-silence. §14.1 codifies the per-org config schema. Implementation broken into 11 phase tasks: AISDLC-326 through AISDLC-336.
+
+### OQ-1: Seam artifact granularity
+
+Does the bridge import from `tasks.md` only, or also from `spec.md` (one-task-per-AC) when `tasks.md` is absent?
+
+**Resolution (2026-05-16):** **`tasks.md` only — no fallback.** Catalog-routed: spec-kit project lacking `tasks.md` → `cli-import-spec` emits `Decision: incomplete-spec-detected` → Stage A classifies as "upstream-incomplete" → auto-action: emit clarification task back to spec-kit project (e.g., "run `/speckit.tasks` then re-import") + log Decision for operator's batch review. Pipeline keeps running on whatever else is dispatchable. Strict + non-blocking. **Selected over fallback** because incomplete-spec fallbacks cause incomplete implementations — the exact failure mode the framework's quality contract prevents.
+
+### OQ-2: specRef drift semantics
+
+When an imported task is In Progress and upstream `tasks.md` changes, how do we handle drift?
+
+**Resolution (2026-05-16):** **Catalog-routed drift handling via RFC-0035 Stage A/B/C.** Drift detected → `Decision: spec-drift-detected` → Stage A classifies severity (typo / cosmetic / semantic / scope) → **low-severity auto-syncs** (catalog applies the change) → **high-severity auto-defers with 24h override window** (per RFC-0024 §15.1 default-on-silence pattern) → operator surfaces in next batch review. **In-progress task continues against its dispatched version** — never halts. Default-on-silence at 24h expiry = no-fork (continue against dispatched version); operator can override during the window. Composes with G0: rigor preserved (drift is explicit decision) + zero blocking (no real-time pipeline interrupt).
+
+### OQ-3: DoR strictness at import
+
+Default `--rubric warn` softens import-time failures into warnings. Should `strict` be the default?
+
+**Resolution (2026-05-16):** **Strict default; `--rubric warn` opt-out flag.** Matches modern dev-tool convention (TypeScript strict, Cargo, Renovate). Failed-DoR-at-import → `Decision: import-blocked-on-dor` → auto-action: emit clarification task back upstream (spec-kit project gets actionable feedback) + log Decision for operator's batch review. Strict + non-blocking. **Selected over warn-default** because the DoR rubric is the framework's quality contract; loosening it by default contradicts the contract.
+
+### OQ-4: Adopter RFC storage convention
+
+Default `<adopter-repo>/rfcs/` — but multi-repo adopters may want a central RFC repo.
+
+**Resolution (2026-05-16):** **`<adopter-repo>/rfcs/` default; per-org override via `.ai-sdlc/adopter-authoring.yaml`.** Per-org-configurable convention matches the pattern adopted across RFC-0024 / 0025 / 0031 / 0035 / 0022. Default works for single-repo adopters (most common); multi-repo adopters override to point at the central RFC repo. No runtime Decision needed; pure config.
+
+### OQ-5: RFC template variants
+
+Ship one template, or three (architecture, product-decision, retrospective)?
+
+**Resolution (2026-05-16):** **One template.** Cognitive load < flexibility for v1. Demand for variants becomes a future Decision in the catalog (operator weighs adopter demand signal); if signal is strong, future RFC splits the template.
+
+### OQ-6: Cross-tool bridges
+
+Does each non-spec-kit upstream (Linear, Notion, plain markdown) need a first-party adapter?
+
+**Resolution (2026-05-16):** **Single documented "bring your own translator" pattern + spec-kit first-party adapter only.** Adapter-pattern convention (RFC-0003). v1 avoids N adapters; adopters with non-spec-kit upstreams write their own translator that emits the canonical task-import format. New first-party adapter requests become Decisions in the catalog (auto-defer; operator weighs adopter demand). Composes with G0: adapter-demand signal accumulates in catalog without blocking framework releases.
+
+### OQ-7: Spec-kit `/speckit.analyze` overlap with DoR
+
+When spec-kit's analyze pass already ran upstream, should DoR at import be a no-op?
+
+**Resolution (2026-05-16):** **Full DoR runs; catalog auto-resolves analyze-covered Decisions via analyze metadata.** DoR generates Decisions per gate; analyze metadata (when available at `.specify/analyze.json`) auto-resolves matching gates via the catalog; only NEW gaps reach the operator. Falls back to full rubric when analyze metadata unavailable. **Selected over no-op trust-transitivity** because DoR is the framework's quality contract — no skip; selected over "always full rubric, accept duplicate cost" because the catalog mediates the trust + verify cleanly. Composes with G0: no duplicate operator prompts (catalog absorbs the overlap).
+
+### OQ-8: Constitution composition
+
+Spec-kit's `constitution.md` ≈ ai-sdlc's `CLAUDE.md` + governance YAML. Merge, separate, or ignore?
+
+**Resolution (2026-05-16):** **Separate + drift detection via Decision Catalog.** Each tool owns its file (preserves both ecosystems' ownership). Bridge detects drift on shared-norm sections (start simple: rebase-vs-merge policy, branch-naming convention, review cadence) → emits `Decision: constitution-claudemd-drift` → catalog routes per Stage A/B/C → operator-batch review. Default-on-silence = drift accepted as intentional. **Selected over CLAUDE.md-canonical-auto-derive** because forcing framework norms onto spec-kit's constitution surface violates "spec-kit is recommended, not required" (§1). Composes with G0: drift surfaces but never blocks.
+
+### OQ-9: Positioning leadership
+
+"Spec-driven development" or "Decision Engine" as primary framing?
+
+**Resolution (2026-05-16):** **Lead with "Decision Engine"; secondary "for spec-driven AI workflows" context.** Emphasizes the framework's unique value (operator-as-decision-steward + Decision Catalog substrate). Spec-driven is the broader category we participate in; Decision Engine is HOW we do it distinctively. **Selected over leading with spec-driven** because the framework's distinctive value is the substrate, not the category. Per `project_team_roles.md`, Product Authority (Alex) sign-off on this positioning is the path forward.
+
+### OQ-10: What happens when DoR rejects an imported task
+
+Create with `dorBlocked: true`, refuse import entirely, or create placeholder + emit clarification back to spec-kit?
+
+**Resolution (2026-05-16):** **(c) Refuse import; emit clarification task back to spec-kit; log Decision for operator's batch review.** Composes directly with OQ-3 (strict default) + G0 (non-blocking). Refuse → fix upstream → re-import = correct loop. `dorBlocked: true` placeholder rejected because placeholders contaminate the backlog with non-dispatchable noise. Catalog absorbs the rejection event so adopter feedback is visible + actionable without blocking the pipeline.
+
+### OQ-11: Versioning the seam contract
+
+Pin supported spec-kit version range, or auto-detect schema and refuse unknowns?
+
+**Resolution (2026-05-16):** **Auto-detect schema; refuse unknown formats via Decision routing.** Unknown spec-kit version → `Decision: upstream-schema-unknown` → auto-action: emit "upgrade ai-sdlc to support spec-kit v<N>" task + add to operator's batch review. Strict default (refuse unknown) + non-blocking (catalog absorbs the rejection). **Selected over pinned-version-range** because pinned ranges require explicit version bumps in the framework's release cycle; auto-detect + Decision-routing handles the long tail of spec-kit version drift without forcing framework releases for every spec-kit minor version.
+
+### OQ-12: CLI vs slash-command surface
+
+`ai-sdlc import-spec` shown as CLI; should it also exist as `/ai-sdlc import-spec` inside Claude Code?
+
+**Resolution (2026-05-16):** **Both.** Existing dual-surface convention (`/ai-sdlc *` slash + `cli-*` bin). Established pattern across `/ai-sdlc execute`, `/ai-sdlc rebase`, etc.; no judgment needed for a new command following the same pattern.
+
+### 14.1 Configuration Schema (per-org defaults)
+
+Per-organization configurability is mandatory across the resolved OQs. The consolidated `.ai-sdlc/adopter-authoring.yaml` schema:
+
+```yaml
+adopter-authoring:
+  rfc-scaffold:                       # OQ-4 — per-org RFC location override
+    rfcDir: rfcs/                     # default; multi-repo override example: "../company-rfcs/"
+
+  rfc-templates:                      # OQ-5 — one template in v1; variants future Decision
+    defaultTemplate: framework-rfc.md
+
+  import:                             # OQ-1 + OQ-3 + OQ-10 strict-by-default config
+    artifactGranularity: tasks-md-only       # OQ-1: no fallback
+    dorStrictness: strict                     # OQ-3: warn opt-out via --rubric flag
+    dorRejection: refuse-emit-clarification   # OQ-10: refuse + emit upstream task
+
+  drift-handling:                     # OQ-2 — drift Decision policy
+    severityThresholds:
+      typoCosmetic: auto-sync         # low severity: catalog auto-applies
+      semanticScope: defer-24h-window # high severity: Decision with 24h override
+
+  speckit-bridge:                     # OQ-7 + OQ-11 schema versioning
+    analyzeMetadataPath: ".specify/analyze.json"   # null = skip analyze-aware DoR auto-resolve
+    schemaDetection: auto             # auto-detect; refuse unknown
+    refuseOnUnknown: true             # OQ-11 strict default
+
+  cross-tool:                         # OQ-6 — single BYO translator pattern
+    firstPartyAdapters: [speckit]
+    byoTranslatorPath: ".ai-sdlc/translators/<adopter>.ts"
+
+  constitution-drift:                 # OQ-8 — separate + drift detection
+    detectionMode: shared-norm-sections
+    rules:
+      - rebase-vs-merge
+      - branch-naming-convention
+      - review-cadence
+    driftAction: decision-batch       # surface via Decision Catalog, never block
+
+  positioning:                        # OQ-9 (informational; not runtime-configurable)
+    primary: decision-engine
+    secondary: spec-driven-ai-workflows
+```
+
+Default constants ship in the `ai-sdlc init` adopter-authoring template. Auto-tuning + cross-tool first-party adapters are future Decisions in the catalog; operator-configurable from day one.
 
 ## 15. References
 
