@@ -12,7 +12,7 @@
  *   1. The adapter writes a single JSON line to stdin:
  *        { agentType, systemPrompt, userPrompt, cwd, timeoutMs }
  *   2. This bridge reads that line, invokes `codex exec` with the correct
- *      flags (see below), captures output, and writes a single JSON line to
+ *      role-specific sandbox (see below), captures output, and writes a single JSON line to
  *      stdout:
  *        { output: string, parsed?: unknown }
  *   3. This bridge exits 0 on success; non-zero exits surface stderr as the
@@ -20,20 +20,22 @@
  *
  * ## Verified flag set (AISDLC-249/247 smoke test — codex-cli 0.128.0)
  *
- * Use: `codex exec -s read-only --skip-git-repo-check --color never`
+ * Use:
+ *   - developer: `codex exec -s workspace-write --skip-git-repo-check --color never`
+ *   - reviewers: `codex exec -s read-only --skip-git-repo-check --color never`
  *
  * DO NOT use `--quiet` (errors with "unexpected argument" on codex 0.128.0).
  * DO NOT use `--model o4-mini` (HTTP 400 on ChatGPT-account auth).
  *
- * The prompt is written to a temp file and passed via `--file` so that long
- * system/user prompts are not mangled by shell argument length limits.
+ * The prompt is written to `codex exec` stdin with `-` as the prompt argument
+ * so long system/user prompts are not mangled by shell argument length limits.
  *
  * ## Per-field overrides
  *
  * The request envelope's optional fields are all honoured if present:
- *   - `extraArgs`: array of additional CLI flags inserted after the verified
- *     base flags. Operators can use this to pass `--model <m>` when their
- *     Codex auth supports it without touching the script.
+ *   - `extraArgs`: optional model/provider flags inserted after the verified
+ *     base flags. Only `--model`/`-m`, `--oss`, and `--local-provider` are
+ *     forwarded; sandbox/config/cwd overrides are deliberately stripped.
  *
  * ## Usage
  *
@@ -44,9 +46,6 @@
  */
 
 import { spawn } from 'node:child_process';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 /** Reads all of stdin and resolves with the complete string. */
 function readStdin() {
@@ -68,73 +67,60 @@ function readStdin() {
  * @param {string} cwd - Working directory for the codex process.
  * @param {number} timeoutMs - Process kill timeout in milliseconds.
  * @param {string[]} extraArgs - Additional CLI flags (optional overrides).
+ * @param {string} agentType - AI-SDLC subagent type being dispatched.
  * @returns {Promise<string>} stdout from codex exec.
  */
-function runCodexExec(promptText, cwd, timeoutMs, extraArgs = []) {
+function runCodexExec(promptText, cwd, timeoutMs, extraArgs = [], agentType = 'developer') {
   return new Promise((resolve, reject) => {
-    // Write prompt to a temp file to avoid shell argument limits.
-    const tmpDir = mkdtempSync(join(tmpdir(), 'codex-bridge-'));
-    const promptFile = join(tmpDir, 'prompt.md');
-    writeFileSync(promptFile, promptText, 'utf-8');
-
-    const cleanup = () => {
-      try {
-        rmSync(tmpDir, { recursive: true, force: true });
-      } catch {
-        // best-effort
-      }
-    };
-
     // Verified flag set from AISDLC-249/247 smoke testing (codex-cli 0.128.0,
     // ChatGPT-account auth). DO NOT add --quiet or --model o4-mini here.
     //
-    // SECURITY (AISDLC-251 codex code-reviewer finding): filter extraArgs to
-    // reject any flag that would override the read-only sandbox guarantee.
-    // The bridge MUST run codex in read-only mode regardless of caller input.
-    const SANDBOX_OVERRIDE_FLAGS = new Set([
-      '-s',
-      '--sandbox',
-      '--sandbox-mode',
-      '--dangerously-bypass-approvals-and-sandbox',
-    ]);
+    // SECURITY (AISDLC-251 codex code-reviewer finding): only allow optional
+    // model/provider flags. Rejecting config/profile/cd/add-dir and unknown
+    // flags prevents callers from overriding the bridge-selected sandbox.
+    // Developers need workspace-write to edit the task worktree; reviewers
+    // remain read-only. Callers cannot relax either mode via extraArgs.
     const safeExtraArgs = [];
     for (let i = 0; i < extraArgs.length; i++) {
       const arg = extraArgs[i];
-      const flagPart = typeof arg === 'string' ? arg.split('=')[0] : '';
-      if (SANDBOX_OVERRIDE_FLAGS.has(flagPart)) {
-        // Skip the flag AND its value (if separated by space). Bare-flag forms
-        // like --dangerously-bypass-approvals-and-sandbox have no value.
-        if (
-          (flagPart === '-s' || flagPart === '--sandbox' || flagPart === '--sandbox-mode') &&
-          arg === flagPart
-        ) {
-          i += 1; // skip the next argv (the sandbox value)
+      if (typeof arg !== 'string') continue;
+      if (arg === '--oss') {
+        safeExtraArgs.push(arg);
+        continue;
+      }
+      if (arg === '-m' || arg === '--model' || arg === '--local-provider') {
+        const value = extraArgs[i + 1];
+        if (typeof value === 'string') {
+          safeExtraArgs.push(arg, value);
+          i += 1;
         }
         continue;
       }
-      safeExtraArgs.push(arg);
+      if (arg.startsWith('--model=') || arg.startsWith('--local-provider=')) {
+        safeExtraArgs.push(arg);
+      }
     }
+
+    const sandboxMode = agentType === 'developer' ? 'workspace-write' : 'read-only';
 
     const baseArgs = [
       'exec',
       '-s',
-      'read-only',
+      sandboxMode,
       '--skip-git-repo-check',
       '--color',
       'never',
       ...safeExtraArgs,
-      '--file',
-      promptFile,
+      '-',
     ];
 
     let child;
     try {
       child = spawn('codex', baseArgs, {
         cwd,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch (err) {
-      cleanup();
       reject(new Error(`failed to spawn codex: ${String(err)}`));
       return;
     }
@@ -147,7 +133,6 @@ function runCodexExec(promptText, cwd, timeoutMs, extraArgs = []) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      cleanup();
       fn();
     };
 
@@ -178,8 +163,25 @@ function runCodexExec(promptText, cwd, timeoutMs, extraArgs = []) {
         );
         return;
       }
+      if (!stdout.trim()) {
+        settle(() =>
+          reject(
+            new Error(
+              `codex exec exited 0 with empty stdout for ${agentType}; expected agent output. ` +
+                'Check Codex CLI auth, prompt handling, and output mode.',
+            ),
+          ),
+        );
+        return;
+      }
       settle(() => resolve(stdout));
     });
+
+    try {
+      child.stdin?.end(promptText);
+    } catch (err) {
+      settle(() => reject(new Error(`failed to write prompt to codex: ${String(err)}`)));
+    }
   });
 }
 
@@ -234,6 +236,7 @@ async function main() {
   }
 
   const {
+    agentType = 'developer',
     systemPrompt = '',
     userPrompt = '',
     cwd = process.cwd(),
@@ -242,13 +245,13 @@ async function main() {
   } = request;
 
   // Compose a single prompt string: system context followed by user prompt.
-  // `codex exec --file` reads the file as the user message; we prepend the
-  // system prompt as a clearly labelled section so the model has full context.
+  // `codex exec -` reads stdin as the user message; we prepend the system
+  // prompt as a clearly labelled section so the model has full context.
   const promptText = systemPrompt ? `${systemPrompt}\n\n---\n\n${userPrompt}` : userPrompt;
 
   let output;
   try {
-    output = await runCodexExec(promptText, cwd, timeoutMs, extraArgs);
+    output = await runCodexExec(promptText, cwd, timeoutMs, extraArgs, agentType);
   } catch (err) {
     process.stderr.write(`codex-spawn-agent-bridge: ${String(err)}\n`);
     process.exit(1);

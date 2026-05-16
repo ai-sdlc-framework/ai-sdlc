@@ -256,9 +256,19 @@ node ./pipeline-cli/bin/ai-sdlc-pipeline.mjs execute AISDLC-NNN --run --spawner 
 ```
 
 The canonical bridge uses the verified flag set for codex-cli 0.128.0:
-`codex exec -s read-only --skip-git-repo-check --color never`.
+`codex exec -s workspace-write --skip-git-repo-check --color never` for
+developer dispatch, and `codex exec -s read-only --skip-git-repo-check
+--color never` for reviewer dispatch. A developer agent must be able to edit
+the task worktree; reviewers remain read-only. The composed prompt is passed on
+stdin with `-` as the prompt argument.
 DO NOT use `--quiet` (errors with "unexpected argument") or `--model o4-mini`
 (HTTP 400 on ChatGPT-account auth) — see AISDLC-249/247 smoke test notes.
+If the bridge or `codex exec` exits 0 with empty stdout, the adapter treats
+that as a bridge error with diagnostics instead of returning an empty developer
+JSON envelope.
+The bridge only forwards safe model/provider `extraArgs` (`--model`/`-m`,
+`--oss`, `--local-provider`) and strips config, sandbox, cwd, and writable-root
+overrides.
 
 Two ways to use it:
 

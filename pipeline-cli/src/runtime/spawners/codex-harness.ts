@@ -432,7 +432,15 @@ export function subprocessCodexSpawnAgent(
         }
         const trimmed = stdout.trim();
         if (!trimmed) {
-          settle(() => resolve({ output: '' }));
+          settle(() =>
+            reject(
+              new Error(
+                'codex spawn_agent bridge exited 0 with empty stdout; expected JSON envelope ' +
+                  '{ output: string, parsed?: unknown }. Check CODEX_SPAWN_AGENT_BIN and ' +
+                  'the bridge/codex exec diagnostics.',
+              ),
+            ),
+          );
           return;
         }
         let envelope: unknown;

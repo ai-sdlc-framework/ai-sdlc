@@ -536,6 +536,27 @@ describe('subprocessCodexSpawnAgent', () => {
     expect(response.parsed).toBeUndefined();
   });
 
+  it('rejects when the bridge exits zero with empty stdout', async () => {
+    const fakeSpawn = makeFakeSpawn({
+      stdout: '',
+      exitCode: 0,
+    });
+    const fn = subprocessCodexSpawnAgent({
+      bridgeBin: '/tmp/fake-bridge',
+      spawn: fakeSpawn.spawn,
+    });
+
+    await expect(
+      fn({
+        agentType: 'developer',
+        systemPrompt: '',
+        userPrompt: '',
+        cwd: '/cwd',
+        timeoutMs: 1000,
+      }),
+    ).rejects.toThrow(/empty stdout.*expected JSON envelope/);
+  });
+
   it('times out the bridge when it never closes', async () => {
     vi.useFakeTimers();
     try {
