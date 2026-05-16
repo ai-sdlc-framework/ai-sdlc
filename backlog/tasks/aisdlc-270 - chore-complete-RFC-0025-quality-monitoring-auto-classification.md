@@ -1,23 +1,42 @@
 ---
 id: AISDLC-270
-title: 'chore: complete RFC-0025 quality monitoring auto-classification'
-status: To Do
+title: 'chore: complete RFC-0025 quality monitoring auto-classification [SUPERSEDED]'
+status: Superseded
 assignee: []
 created_date: '2026-05-13 18:48'
 labels:
   - rfc-0025
   - retrofit-followup
   - framework-quality
+  - superseded
+dispatchable: false
+dispatchableReason: 'Superseded by Refit chain AISDLC-302..307. The original implementation attempt (PR #481) was closed on 2026-05-16 after the operator audit found 8/10 OQs decided by the dev subagent diverged from operator-affirmed resolutions + the subagent had forged the operator sign-off on RFC-0025 §14. See `docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md`. Re-implementation work lives in the AISDLC-302..307 Refit chain (substrate cleanup + cherry-pick from closed PR #481 → per-OQ phases against operator-affirmed §13 / §13.1).'
 dependencies: []
 references:
   - spec/rfcs/RFC-0025-framework-quality-monitoring.md
-  - pipeline-cli/src/tui/analytics/quality-reader.ts
+  - docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md
 priority: medium
 ---
 
 ## Description
 
 <!-- SECTION:DESCRIPTION:BEGIN -->
+**⚠️ SUPERSEDED 2026-05-16.** Re-implementation work lives in the AISDLC-302..307 Refit chain. This task is preserved for audit history only — do not dispatch.
+
+## Why superseded
+
+1. PR #481 (the original implementation attempt) was closed on 2026-05-16. See [`docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md`](../../docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md) for the full audit.
+2. The 2026-05-15 operator OQ walkthrough produced normative resolutions for all 10 RFC-0025 §13 OQs that **diverge from PR #481's subagent-decided implementations** (8/10 diverged or were skipped; 2/10 matched).
+3. The new design substrate is RFC-0025 §13 (operator-affirmed resolutions) + §13.1 (consolidated `.ai-sdlc/quality-monitoring.yaml` per-org config schema). Implementation against the new design is broken into 6 phases:
+   - **AISDLC-302** — Substrate cleanup + salvage from closed PR #481 (~30-40% of code cherry-picks)
+   - **AISDLC-303** — Confidence-bucketed classifier (OQ-1)
+   - **AISDLC-304** — Multi-window recurrence + first-capture MTTR (OQ-3 + OQ-8)
+   - **AISDLC-305** — Suggest-only attribution + quality-monitoring.yaml schema (OQ-2 + OQ-4)
+   - **AISDLC-306** — Coverage-gap capture + composite determinism + instrumented operator-time-cost (OQ-6 + OQ-7 + OQ-9)
+   - **AISDLC-307** — Upstream reporting + vendor-namespace enforcement (OQ-5 + OQ-10)
+
+## Original task body (preserved for audit history only)
+
 Complete the unbuilt portion of RFC-0025 (Framework Quality Monitoring — Non-Decision Failure Modes). The reliability-trend reader and failure-mode handlers ship today; the auto-classification, framework-bug routing, and severity rubric do not.
 
 ## What ships today (per 2026-05-13 audit)
