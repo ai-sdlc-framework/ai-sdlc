@@ -129,6 +129,7 @@ import type {
 
 export const DEFAULT_TICK_INTERVAL_SEC = 30;
 export const DEFAULT_MAX_CONCURRENT = 1;
+export const ORCHESTRATOR_SPAWNER_ENV = 'AI_SDLC_ORCHESTRATOR_SPAWNER';
 /** RFC-0015 Phase 3 (Q3/Q5) — exponential backoff caps the idle sleep at 5min. */
 export const MAX_IDLE_SLEEP_SEC = 5 * 60;
 /** RFC-0015 §4.3 — emit `OrchestratorStuckCandidate` after this many consecutive skips. */
@@ -494,7 +495,11 @@ export async function runOrchestratorTick(
   //        fails as `developer-json-contract-violated`. Reverting the
   //        default to the legacy path unblocks orchestrator dispatch
   //        until AISDLC-225 closes the consumer loop.
-  const useUmbrella = (process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA ?? '').trim() === '1';
+  const envUmbrellaSpawner = resolveEnvUmbrellaSpawnerKind();
+  const useUmbrella =
+    (process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA ?? '').trim() === '1' ||
+    adapters.umbrellaSpawnerKind !== undefined ||
+    envUmbrellaSpawner !== undefined;
   // AISDLC-240 — `adapters.umbrellaExecutor` is the test-injection hook for
   // stubbing the umbrella's internal `runExecuteCommand` call. Its presence
   // means the test is exercising the umbrella path, so opt INTO the umbrella
@@ -2038,14 +2043,26 @@ function buildDefaultDispatchableLoader(workDir: string): (taskId: string) => {
  *
  * Decision tree:
  *   1. If `adapters.umbrellaSpawnerKind` is explicitly set, use it.
- *   2. If `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set AND the
+ *   2. If `AI_SDLC_ORCHESTRATOR_SPAWNER` is set, use it.
+ *   3. If `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set AND the
  *      umbrella will need the fallback (checked post-hoc after the umbrella
  *      runs — see `buildDefaultUmbrellaDispatch`), fall back to `api-key`.
- *   3. Otherwise default to `claude-cli` (AISDLC-198 inline manifest mode).
+ *   4. Otherwise default to `claude-cli` (AISDLC-198 inline manifest mode).
  */
 function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): SpawnerKind {
   if (adapters.umbrellaSpawnerKind) return adapters.umbrellaSpawnerKind;
+  const envKind = resolveEnvUmbrellaSpawnerKind();
+  if (envKind) return envKind;
   return 'claude-cli';
+}
+
+function resolveEnvUmbrellaSpawnerKind(): SpawnerKind | undefined {
+  const raw = (process.env[ORCHESTRATOR_SPAWNER_ENV] ?? '').trim();
+  if (!raw) return undefined;
+  if (raw === 'mock' || raw === 'api-key' || raw === 'claude-cli' || raw === 'codex') {
+    return raw;
+  }
+  throw new Error(`${ORCHESTRATOR_SPAWNER_ENV} must be one of: mock, api-key, claude-cli, codex`);
 }
 
 /**
@@ -2253,7 +2270,7 @@ function buildDefaultUmbrellaDispatch(
     // …retry once with `api-key`.
     const fallbackEnv = process.env.AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK;
     const wantFallback = fallbackEnv === 'api-key';
-    if (!execResult.ok && wantFallback && spawnerKind !== 'api-key') {
+    if (!execResult.ok && wantFallback && spawnerKind === 'claude-cli') {
       const reason = execResult.reason ?? '';
       // Spawner-unavailable signatures: missing API key, manifest errors,
       // or explicit ANTHROPIC_API_KEY requirement message.

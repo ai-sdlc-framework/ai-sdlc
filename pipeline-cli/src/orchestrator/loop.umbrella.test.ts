@@ -21,8 +21,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { runOrchestratorTick, type OrchestratorAdapters } from './index.js';
-import { defaultOrchestratorConfig } from './loop.js';
+import { defaultOrchestratorConfig, ORCHESTRATOR_SPAWNER_ENV } from './loop.js';
 import type { PipelineLogger, PipelineResult } from '../types.js';
 import type { ExecuteCommandResult } from '../cli/execute.js';
 import type { RichDispatchResult } from './types.js';
@@ -373,6 +376,78 @@ describe('runOrchestratorTick — umbrella dispatch (AISDLC-229)', () => {
     expect(outcome.pipeline!.iterations).toBe(2);
   });
 
+  it('uses AI_SDLC_ORCHESTRATOR_SPAWNER=codex for the default umbrella executor', async () => {
+    const previousSpawner = process.env[ORCHESTRATOR_SPAWNER_ENV];
+    const previousUseUmbrella = process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA;
+    delete process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA;
+    process.env[ORCHESTRATOR_SPAWNER_ENV] = 'codex';
+
+    try {
+      const taskId = 'AISDLC-326-ENV-CODEX';
+      const calls: Array<{ taskId: string; spawnerKind: string }> = [];
+
+      const umbrellaExecutor = async (t: string, k: string): Promise<ExecuteCommandResult> => {
+        calls.push({ taskId: t, spawnerKind: k });
+        return successExecResult(t);
+      };
+
+      const tick = await runOrchestratorTick(
+        config,
+        {
+          logger: silentLogger(),
+          frontier: fakeFrontier([taskId]),
+          umbrellaExecutor: umbrellaExecutor as unknown as OrchestratorAdapters['umbrellaExecutor'],
+          escalate: async () => {},
+          ...hermeticFilterAdapters(),
+        },
+        1,
+      );
+
+      expect(calls).toEqual([{ taskId, spawnerKind: 'codex' }]);
+      expect(tick.dispatched).toEqual([taskId]);
+      expect(tick.outcomes[0].outcome).toBe('approved');
+    } finally {
+      if (previousSpawner === undefined) {
+        delete process.env[ORCHESTRATOR_SPAWNER_ENV];
+      } else {
+        process.env[ORCHESTRATOR_SPAWNER_ENV] = previousSpawner;
+      }
+      if (previousUseUmbrella === undefined) {
+        delete process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA;
+      } else {
+        process.env.AI_SDLC_ORCHESTRATOR_USE_UMBRELLA = previousUseUmbrella;
+      }
+    }
+  });
+
+  it('surfaces missing CODEX_SPAWN_AGENT_BIN as spawner-unavailable before rollback work', async () => {
+    const taskId = 'AISDLC-326-CODEX-MISSING-BRIDGE';
+    const umbrellaExecutor = async (): Promise<ExecuteCommandResult> => ({
+      ok: false,
+      reason:
+        '`--spawner codex` requires CODEX_SPAWN_AGENT_BIN in the environment before dispatch.',
+    });
+
+    const tick = await runOrchestratorTick(
+      config,
+      {
+        logger: silentLogger(),
+        frontier: fakeFrontier([taskId]),
+        umbrellaSpawnerKind: 'codex',
+        umbrellaExecutor: umbrellaExecutor as unknown as OrchestratorAdapters['umbrellaExecutor'],
+        escalate: async () => {},
+        ...hermeticFilterAdapters(),
+      },
+      1,
+    );
+
+    expect(tick.dispatched).toEqual([taskId]);
+    const outcome = tick.outcomes[0];
+    expect(outcome.failure?.type).toBe('spawner-unavailable');
+    expect(outcome.failure?.message).toContain('CODEX_SPAWN_AGENT_BIN');
+    expect(outcome.pipeline).toBeUndefined();
+  });
+
   // ── AC #2: spawner fallback ────────────────────────────────────────────
 
   describe('spawner-fallback (AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key)', () => {
@@ -459,6 +534,74 @@ describe('runOrchestratorTick — umbrella dispatch (AISDLC-229)', () => {
       const outcome = tick.outcomes[0];
       // Umbrella failed without fallback → failure recorded.
       expect(outcome.failure).toBeDefined();
+    });
+
+    it('does NOT fall back from explicit codex selection to api-key', async () => {
+      process.env.AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK = 'api-key';
+      const taskId = 'AISDLC-326-CODEX-NOFALLBACK';
+      const calls: Array<string> = [];
+
+      const umbrellaExecutor = async (_t: string, kind: string): Promise<ExecuteCommandResult> => {
+        calls.push(kind);
+        return {
+          ok: false,
+          reason: '`--spawner codex` requires CODEX_SPAWN_AGENT_BIN in the environment.',
+        };
+      };
+
+      const tick = await runOrchestratorTick(
+        config,
+        {
+          logger: silentLogger(),
+          frontier: fakeFrontier([taskId]),
+          umbrellaSpawnerKind: 'codex',
+          umbrellaExecutor: umbrellaExecutor as unknown as OrchestratorAdapters['umbrellaExecutor'],
+          escalate: async () => {},
+          ...hermeticFilterAdapters(),
+        },
+        1,
+      );
+
+      expect(calls).toEqual(['codex']);
+      const outcome = tick.outcomes[0];
+      expect(outcome.failure?.type).toBe('spawner-unavailable');
+      expect(outcome.failure?.message).toContain('CODEX_SPAWN_AGENT_BIN');
+    });
+
+    it('real codex spawner path fails before task mutation when CODEX_SPAWN_AGENT_BIN is unset', async () => {
+      const previousBridge = process.env.CODEX_SPAWN_AGENT_BIN;
+      delete process.env.CODEX_SPAWN_AGENT_BIN;
+      process.env.AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK = 'api-key';
+      const workDir = mkdtempSync(join(tmpdir(), 'aisdlc-326-codex-missing-'));
+      const taskId = 'AISDLC-326-REAL-CODEX';
+
+      try {
+        const tick = await runOrchestratorTick(
+          defaultOrchestratorConfig({ workDir, maxConcurrent: 1, maxTicks: 1 }),
+          {
+            logger: silentLogger(),
+            frontier: fakeFrontier([taskId]),
+            umbrellaSpawnerKind: 'codex',
+            escalate: async () => {},
+            ...hermeticFilterAdapters(),
+          },
+          1,
+        );
+
+        expect(tick.dispatched).toEqual([taskId]);
+        const outcome = tick.outcomes[0];
+        expect(outcome.failure?.type).toBe('spawner-unavailable');
+        expect(outcome.failure?.message).toContain('CODEX_SPAWN_AGENT_BIN');
+        expect(existsSync(join(workDir, '.worktrees'))).toBe(false);
+        expect(existsSync(join(workDir, 'backlog'))).toBe(false);
+      } finally {
+        if (previousBridge === undefined) {
+          delete process.env.CODEX_SPAWN_AGENT_BIN;
+        } else {
+          process.env.CODEX_SPAWN_AGENT_BIN = previousBridge;
+        }
+        rmSync(workDir, { recursive: true, force: true });
+      }
     });
   });
 

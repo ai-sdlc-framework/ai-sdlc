@@ -83,7 +83,38 @@ task now runs the full Step 0-13 pipeline:
 - Step 12: open sibling-repo PRs (when `permittedExternalPaths` declared)
 - Step 13: cleanup `.active-task` sentinel
 
-### Spawner choice: `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK`
+### Spawner choice: `--spawner` / `AI_SDLC_ORCHESTRATOR_SPAWNER`
+
+`cli-orchestrator tick` and `cli-orchestrator start` can explicitly select
+the umbrella spawner:
+
+```bash
+export AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental
+export CODEX_SPAWN_AGENT_BIN="$(pwd)/scripts/codex-spawn-agent-bridge.mjs"
+node pipeline-cli/bin/cli-orchestrator.mjs tick --spawner codex --max-concurrent 1
+```
+
+The same selection can be made with an environment variable, which is useful
+for systemd, cron, and long-running `start` processes:
+
+```bash
+export AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental
+export AI_SDLC_ORCHESTRATOR_SPAWNER=codex
+export CODEX_SPAWN_AGENT_BIN="$(pwd)/scripts/codex-spawn-agent-bridge.mjs"
+node pipeline-cli/bin/cli-orchestrator.mjs start --max-concurrent 1
+```
+
+Supported values are `mock`, `api-key`, `claude-cli`, and `codex`. Selecting
+a spawner explicitly opts the orchestrator into umbrella dispatch for admitted
+tasks. When no spawner is selected and `AI_SDLC_ORCHESTRATOR_USE_UMBRELLA` is
+unset, the existing default behavior is unchanged.
+
+For `codex`, the underlying `ai-sdlc-pipeline execute --spawner codex` path
+constructs `CodexHarnessAdapter` from `CODEX_SPAWN_AGENT_BIN`. If the bridge
+is unset, the command fails during spawner resolution before task validation,
+worktree setup, or status mutation.
+
+### Fallback: `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK`
 
 The default spawner for the umbrella is `claude-cli` (inline manifest mode,
 AISDLC-198). This requires the AISDLC-225 consumer bridge to be deployed so

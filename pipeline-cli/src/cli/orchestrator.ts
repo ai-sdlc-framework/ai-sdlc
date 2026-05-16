@@ -33,6 +33,7 @@ import {
   DEFAULT_TICK_INTERVAL_SEC,
   isOrchestratorEnabled,
   ORCHESTRATOR_FLAG,
+  ORCHESTRATOR_SPAWNER_ENV,
   orchestratorDisabledMessage,
   OrchestratorDisabledError,
   runOrchestratorLoop,
@@ -46,6 +47,7 @@ import {
   type DispatchResult,
 } from '../runtime/spawners/dispatch-result.js';
 import { checkAndRebuildIfStale, type DistStalenessOptions } from './dist-staleness.js';
+import { SPAWNER_KINDS, type SpawnerKind } from './execute.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -68,6 +70,20 @@ function buildConfig(argv: Record<string, unknown>): OrchestratorConfig {
     maxTicks: maxTicks === null || Number.isNaN(maxTicks) ? null : maxTicks,
     dryRun: Boolean(argv['dry-run']),
   });
+}
+
+function buildAdapters(
+  argv: Record<string, unknown>,
+  adapters?: OrchestratorAdapters,
+): OrchestratorAdapters {
+  const rawSpawner = argv.spawner;
+  if (rawSpawner === undefined || rawSpawner === null) {
+    return adapters ?? {};
+  }
+  return {
+    ...(adapters ?? {}),
+    umbrellaSpawnerKind: String(rawSpawner) as SpawnerKind,
+  };
 }
 
 /**
@@ -108,6 +124,13 @@ export function buildOrchestratorCli(
       type: 'number',
       default: DEFAULT_MAX_CONCURRENT,
     })
+    .option('spawner', {
+      describe:
+        `Spawner for umbrella dispatch. Also configurable with ${ORCHESTRATOR_SPAWNER_ENV}. ` +
+        'Defaults to claude-cli only when umbrella mode is otherwise enabled.',
+      type: 'string',
+      choices: SPAWNER_KINDS,
+    })
     .command(
       'start',
       'Run the polling loop until SIGINT/SIGTERM. Foreground process — supervise via terminal, systemd, Docker, or GH Actions self-hosted runner.',
@@ -123,7 +146,10 @@ export function buildOrchestratorCli(
         checkAndRebuildIfStale(distStaleness);
         const config = buildConfig(argv as Record<string, unknown>);
         try {
-          const ticks = await runOrchestratorLoop(config, adapters ?? {});
+          const ticks = await runOrchestratorLoop(
+            config,
+            buildAdapters(argv as Record<string, unknown>, adapters),
+          );
           emit({
             ok: true,
             mode: 'start',
@@ -179,7 +205,7 @@ export function buildOrchestratorCli(
             : undefined;
 
         const tickAdapters: OrchestratorAdapters = {
-          ...(adapters ?? {}),
+          ...buildAdapters(argv as Record<string, unknown>, adapters),
           ...(continueFromResultPath !== undefined ? { continueFromResultPath } : {}),
         };
 

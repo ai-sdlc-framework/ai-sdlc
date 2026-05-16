@@ -140,6 +140,46 @@ describe('cli-orchestrator router', () => {
       expect(out.ok).toBe(true);
       expect(out.mode).toBe('start');
       expect(out.ticksRun).toBe(2);
+    }, 30000);
+
+    it('threads --spawner codex into start umbrella dispatch', async () => {
+      process.env[ORCHESTRATOR_FLAG] = 'experimental';
+      const calls: string[] = [];
+      const adapters: OrchestratorAdapters = {
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        frontier: () => [{ id: 'AISDLC-START-CODEX', title: 'AISDLC-START-CODEX' }],
+        escalate: async () => {},
+        umbrellaExecutor: async (taskId, spawnerKind) => {
+          calls.push(`${taskId}:${spawnerKind}`);
+          return {
+            ok: true,
+            pipeline: approvedResult(taskId),
+          };
+        },
+        graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
+        taskLabelsLoader: () => [],
+        calibrationLogPath: '/nonexistent-bypass.jsonl',
+      };
+      setArgv(
+        'start',
+        '--max-ticks',
+        '1',
+        '--tick-interval-sec',
+        '0',
+        '--max-concurrent',
+        '1',
+        '--spawner',
+        'codex',
+      );
+
+      await buildOrchestratorCli(adapters).parseAsync();
+
+      expect(calls).toEqual(['AISDLC-START-CODEX:codex']);
+      const out = stdoutJson() as { ok: boolean; mode: string; ticksRun: number };
+      expect(out.ok).toBe(true);
+      expect(out.mode).toBe('start');
+      expect(out.ticksRun).toBe(1);
     });
   });
 
@@ -160,6 +200,36 @@ describe('cli-orchestrator router', () => {
       expect(out.ok).toBe(true);
       expect(out.mode).toBe('tick');
       expect(out.tick.dispatched).toEqual(['AISDLC-Z']);
+    });
+
+    it('threads --spawner codex into tick umbrella dispatch', async () => {
+      process.env[ORCHESTRATOR_FLAG] = 'experimental';
+      const calls: string[] = [];
+      const adapters: OrchestratorAdapters = {
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        frontier: () => [{ id: 'AISDLC-TICK-CODEX', title: 'AISDLC-TICK-CODEX' }],
+        escalate: async () => {},
+        umbrellaExecutor: async (taskId, spawnerKind) => {
+          calls.push(`${taskId}:${spawnerKind}`);
+          return {
+            ok: true,
+            pipeline: approvedResult(taskId),
+          };
+        },
+        graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
+        taskLabelsLoader: () => [],
+        calibrationLogPath: '/nonexistent-bypass.jsonl',
+      };
+      setArgv('tick', '--max-concurrent', '1', '--spawner', 'codex');
+
+      await buildOrchestratorCli(adapters).parseAsync();
+
+      expect(calls).toEqual(['AISDLC-TICK-CODEX:codex']);
+      const out = stdoutJson() as { ok: boolean; mode: string; tick: { dispatched: string[] } };
+      expect(out.ok).toBe(true);
+      expect(out.mode).toBe('tick');
+      expect(out.tick.dispatched).toEqual(['AISDLC-TICK-CODEX']);
     });
 
     it('honors --dry-run by reporting candidates without dispatching', async () => {
