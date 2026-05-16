@@ -207,7 +207,7 @@ The Shard-DID-only scope constraint has no practical effect on single-product pl
 
 ## 12. Open Questions — resolved (initial 2026-05-13 subagent-inline; operator audit 2026-05-16)
 
-> **Implementation Status (2026-05-13 / audit 2026-05-16):** `DIDRevisionProposal` mechanism shipped via AISDLC-271 / PR #476 on 2026-05-13. All 5 §12 OQs were resolved inline by the dev subagent during implementation, **without operator walkthrough** — same governance pattern as PR #481 / RFC-0025 (see [`docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md`](../../docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md) for the full root-cause analysis). The operator audit (AISDLC-299, 2026-05-16) walked through each OQ. Outcome: shipped code is operator-aligned at the foundation; OQ-12.2 + OQ-12.3 affirmed unchanged; OQ-12.1 + OQ-12.5 get per-org config exposure as additive refinement (Refit AISDLC-310); OQ-12.4 revised from uniform 2-approver to identityClass-graduated (Refit AISDLC-309). **Not a revert candidate.**
+> **Implementation Status (2026-05-13 / audit 2026-05-16):** `DIDRevisionProposal` mechanism shipped via AISDLC-271 / PR #476 on 2026-05-13. All 5 §12 OQs were resolved inline by the dev subagent during implementation, **without operator walkthrough** — same governance pattern as PR #481 / RFC-0025 (see [`docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md`](../../docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md) for the full root-cause analysis). The operator audit (AISDLC-299, 2026-05-16) walked through each OQ. Outcome: shipped code is operator-aligned at the foundation; OQ-12.2 + OQ-12.3 + OQ-12.4 affirmed unchanged; OQ-12.1 + OQ-12.5 get per-org config exposure as additive refinement (Refit AISDLC-310). **Not a revert candidate.** (OQ-12.4 was initially audited as "revised" based on a misread of shipped behavior — `deriveApprovalPath()` already graduates by `identityClass` per §8 routing: `core` → `triad` (3 approvers), `evolving` → `pillarLead` (2 approvers). Re-audit confirmed the shipped graduation matches operator intent; AISDLC-309 retracted.)
 >
 > **What ships:**
 > - `orchestrator/src/sa-scoring/drift-monitor.ts` — `SoulDriftDetected` event (the §2.1 trigger source). Exported from `orchestrator/src/index.ts`.
@@ -244,9 +244,9 @@ Some fields may be operator-locked ("never auto-propose revisions to this") even
 
 When a healthy-drift proposal would update a Design-pillar-owned field (e.g., voiceRegister), should Product Authority be the proposer or the reviewer? **Position (Alex, 2026-05-13)**: PPA generates the proposal regardless (the flywheel evidence belongs to PPA); Design Authority is the approving pillar lead per identityClass routing. PPA's proposal is data; Design's approval is authority. Same pattern for Engineering-pillar-owned fields.
 
-   **First-pass (AISDLC-271 subagent, 2026-05-13):** PPA generates; owning pillar lead approves per `identityClass`. **Subagent-added specificity:** `approvalPath = pillarLead` means "owning pillar lead + **one other pillar lead**" — uniformly 2 approvers regardless of identityClass. Implemented in `deriveApprovalPath()`.
+   **First-pass (AISDLC-271 subagent, 2026-05-13):** PPA generates; owning pillar lead approves per `identityClass`. `approvalPath` is graduated by §8 routing: `core` → `triad` (3 approvers — all three pillar leads), `evolving` → `pillarLead` (2 approvers — owning lead + one other). The "owning lead + one other" definition scopes what the `pillarLead` path means; not a uniform behavior. Implemented in `deriveApprovalPath()`.
 
-   **Resolution (operator audit, 2026-05-16):** **Revised — graduate approval count by `identityClass`.** `core` fields → 2 approvers (owning lead + one other; preserves the subagent's high-stakes-needs-two-approvers logic). `evolving` fields → 1 approver (owning lead only; matches §8's already-existing identityClass differentiation). The subagent's uniform 2-approver was overcautious for evolving fields — §8 explicitly graduates routing by identityClass, so the approval count should follow the same axis. **Refit task:** [[AISDLC-309]] revise `deriveApprovalPath()` to graduate by `identityClass`. Industry pattern: GitHub branch protection / AWS IAM / k8s admission all graduate approver-count by stakes, not blanket.
+   **Resolution (operator audit, 2026-05-16):** **Operator-affirmed.** Shipped code already graduates by `identityClass` per §8 routing (`core` → 3 approvers via triad path; `evolving` → 2 approvers via pillarLead path). This matches industry patterns (GitHub branch protection / AWS IAM / k8s admission all graduate approver-count by stakes) and operator intent. Initial audit pass mis-framed shipped behavior as "uniform 2-approver" and filed AISDLC-309 to revise; re-audit on 2026-05-16 corrected the misread — **AISDLC-309 retracted, no code change.**
 
 ### 12.5 Rejection learnings
 
@@ -258,7 +258,7 @@ When the triad rejects a proposal, what feedback flows back into the flywheel? *
 
 ### 12.6 Configuration Schema (per-org defaults)
 
-Audit decision: per-org configurability is mandatory for OQ-12.1 (confidence thresholds), OQ-12.4 (approval counts), and OQ-12.5 (rejection weights/formula). The existing `.ai-sdlc/calibration.yaml` from OQ-12.3 is extended:
+Audit decision: per-org configurability is added for OQ-12.1 (confidence thresholds) and OQ-12.5 (rejection weights/formula). OQ-12.4 approval routing is already graduated by `identityClass` per §8 (shipped behavior, operator-affirmed — no config exposure needed). The existing `.ai-sdlc/calibration.yaml` from OQ-12.3 is extended:
 
 ```yaml
 calibration:
@@ -269,10 +269,6 @@ calibration:
   confidenceThresholds:              # OQ-12.1 — NEW per-org (Refit AISDLC-310)
     highSampleSize: 20               # default; raise to be more conservative
     lowSampleSize: 5                 # default; lower to be more sensitive
-
-  approvalCounts:                    # OQ-12.4 — NEW per-org (Refit AISDLC-309)
-    coreFields: 2                    # owning pillar lead + one other
-    evolvingFields: 1                # owning pillar lead only
 
   rejectionPrecedent:                # OQ-12.5 — NEW per-org (Refit AISDLC-310)
     weights:
