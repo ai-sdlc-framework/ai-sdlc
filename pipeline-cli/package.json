@@ -34,7 +34,8 @@
     "cli-tui-corpus": "bin/cli-tui-corpus.mjs",
     "cli-capture": "bin/cli-capture.mjs",
     "cli-task-complete": "bin/cli-task-complete.mjs",
-    "cli-backlog-verify": "bin/cli-backlog-verify.mjs"
+    "cli-backlog-verify": "bin/cli-backlog-verify.mjs",
+    "cli-estimate": "bin/cli-estimate.mjs"
   },
   "exports": {
     ".": {
@@ -76,6 +77,10 @@
     "./orchestrator": {
       "types": "./dist/orchestrator/index.d.ts",
       "import": "./dist/orchestrator/index.js"
+    },
+    "./estimation": {
+      "types": "./dist/estimation/index.d.ts",
+      "import": "./dist/estimation/index.js"
     }
   },
   "publishConfig": {
