@@ -2542,12 +2542,14 @@ describe('CONTENTHASHV4_IGNORE_FILES — list contents and isIgnoredForContentHa
     expect(CONTENTHASHV4_IGNORE_FILES).toContain('CHANGELOG.md');
     expect(CONTENTHASHV4_IGNORE_FILES).toContain('pipeline-cli/CHANGELOG.md');
     expect(CONTENTHASHV4_IGNORE_FILES).toContain('orchestrator/CHANGELOG.md');
+    // AISDLC-342: re-added after PR #498 churn. Generated from spec/schemas/
+    // on every `pnpm build`; including it in v4 invalidated merge-queue
+    // rebases whenever a sibling PR added a schema. The source-of-truth
+    // (the spec/schemas/*.schema.json JSON files) remains in v4, so the
+    // reviewer signal is preserved.
+    expect(CONTENTHASHV4_IGNORE_FILES).toContain('reference/src/core/generated-schemas.ts');
     // package.json is NOT in the list — real dep changes are reviewable.
     expect(CONTENTHASHV4_IGNORE_FILES).not.toContain('package.json');
-    // generated-schemas.ts is NOT in the list — it's a .ts source file
-    // that ships compiled code; hand-edits would bypass attestation
-    // (AISDLC-258 code-review CRITICAL).
-    expect(CONTENTHASHV4_IGNORE_FILES).not.toContain('reference/src/core/generated-schemas.ts');
   });
 
   it('isIgnoredForContentHash returns true for every entry in the list', () => {
@@ -2691,5 +2693,38 @@ describe('collectChangedFileDeltaEntries — CONTENTHASHV4_IGNORE_FILES exclusio
     const hashWithout = computeContentHashV4(projectDeltaEntriesToHeadEntries(withoutLock));
     // Both hashes must be equal because pnpm-lock.yaml is excluded.
     expect(hashWith).toBe(hashWithout);
+  });
+
+  // AISDLC-342: prove the rebase-stability claim for generated-schemas.ts.
+  // Scenario: sign at SHA X with the file at blob A; the merge queue rebases
+  // onto a new main where a sibling PR caused `pnpm build` to regenerate the
+  // file at blob B. The signer hash (file at A) and the verifier hash (file
+  // at B) must match — otherwise the merge queue would kick the PR.
+  it('generated-schemas.ts blob change does NOT invalidate v4', () => {
+    const makeGit = (blobSha: string) => (args: string[]) => {
+      const cmd = args.join(' ');
+      if (cmd.includes('merge-base')) return 'a'.repeat(40);
+      if (cmd.includes('diff --name-only')) {
+        return 'src/baz.ts\nreference/src/core/generated-schemas.ts\n';
+      }
+      if (cmd.includes('ls-tree') && cmd.includes('src/baz.ts')) {
+        return `100644 blob ${'8'.repeat(40)}\tsrc/baz.ts\n`;
+      }
+      if (cmd.includes('ls-tree') && cmd.includes('generated-schemas.ts')) {
+        return `100644 blob ${blobSha}\treference/src/core/generated-schemas.ts\n`;
+      }
+      return '';
+    };
+
+    const atBlobA = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', {
+      runGit: makeGit('a'.repeat(40)),
+    });
+    const atBlobB = collectChangedFileDeltaEntries('origin/main', 'HEAD', '/repo', {
+      runGit: makeGit('b'.repeat(40)),
+    });
+
+    const hashAtA = computeContentHashV4(projectDeltaEntriesToHeadEntries(atBlobA));
+    const hashAtB = computeContentHashV4(projectDeltaEntriesToHeadEntries(atBlobB));
+    expect(hashAtA).toBe(hashAtB);
   });
 });
