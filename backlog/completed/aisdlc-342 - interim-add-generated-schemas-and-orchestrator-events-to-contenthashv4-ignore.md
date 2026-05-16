@@ -1,7 +1,7 @@
 ---
 id: AISDLC-342
 title: 'interim: add high-churn generated/shared files to CONTENTHASHV4_IGNORE_FILES'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16 16:10'
 labels:
