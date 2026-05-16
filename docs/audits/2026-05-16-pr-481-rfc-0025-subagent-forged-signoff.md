@@ -122,7 +122,7 @@ The dispatch-without-walkthrough governance gap that produced this PR is being c
 - **AISDLC-298** (`policy: prohibit subagent-inline OQ resolution + add reviewer check`) — codifies the prohibition on dev subagents resolving RFC OQs inline; reviewer-subagent flags new `Resolution:` markers added in PR diffs as critical. Catches consequence #3.
 - **AISDLC-300** (`block: AISDLC-270 dispatch until RFC-0025 OQ walkthrough complete + sweep for other premature impl tasks`) — sweeps the backlog for other premature `chore-complete-RFC-N` tasks.
 - **AISDLC-299** (`audit: AISDLC-271 / RFC-0031 OQ resolutions for operator approval`) — same audit pattern applied to RFC-0031 (other already-merged single-iteration shipment).
-- **AISDLC-301** (`audit: AISDLC-269 / RFC-0024 OQ-4/6/8/10/12 — operator walkthrough on subagent-decided resolutions`) — same audit pattern for the 5 RFC-0024 OQs not revised on 2026-05-15.
+- ~~**AISDLC-301**~~ (`audit: AISDLC-269 / RFC-0024 OQ-4/6/8/10/12`) — **RETRACTED 2026-05-16.** Filed under a misframe; re-read of RFC-0024 §15 confirmed all 12 OQs were operator-walked-through on 2026-05-15 (7 revised + 5 affirmed-as-recommended). The §15 framing line has been updated to make this explicit. Same retraction pattern as AISDLC-309 (the RFC-0031 OQ-12.4 misframe). Two consecutive misframes in this session expose a follow-up worth tracking: I should read the actual file content before drafting audit/refit tasks rather than relying on framing summaries.
 
 Defense-in-depth structure: AISDLC-308 catches the *root cause* (scope creep); AISDLC-296/297/298 catch each downstream consequence. Either layer alone would have prevented PR #481's specific failure; both together prevent the broader pattern.
 
