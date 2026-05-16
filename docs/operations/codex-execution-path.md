@@ -171,21 +171,29 @@ programmatic `--spawner codex` dispatch.
    a. Ensure `codex` CLI 0.128.0+ is on your PATH and authenticated.
    b. Set the env var as shown above — point it at the canonical bridge.
    c. Run `ai-sdlc-pipeline execute <task-id> --run --spawner codex`.
-   d. The bridge invokes `codex exec -s read-only --skip-git-repo-check
-      --color never` for each agent dispatch. DO NOT add `--quiet` or
-      `--model o4-mini` — those flags fail on codex 0.128.0 with
-      ChatGPT-account auth (verified empirically in AISDLC-249/247 smoke
-      testing: `--quiet` → "unexpected argument", `--model o4-mini` → HTTP 400).
-   e. Per-field overrides: add `"extraArgs": ["--some-flag"]` in the request
-      envelope if your Codex auth supports additional flags.
+   d. The bridge invokes `codex exec -s workspace-write --skip-git-repo-check
+      --color never` for developer dispatch and `codex exec -s read-only
+      --skip-git-repo-check --color never` for reviewer dispatch. The developer
+      agent needs write access to the task worktree; reviewers remain read-only.
+      The composed prompt is sent on stdin with `-` as the prompt argument.
+      DO NOT add `--quiet` or `--model o4-mini` — those flags fail on codex
+      0.128.0 with ChatGPT-account auth (verified empirically in AISDLC-249/247
+      smoke testing: `--quiet` → "unexpected argument", `--model o4-mini` →
+      HTTP 400).
+   e. Per-field overrides: add safe model/provider options such as
+      `"extraArgs": ["--model", "gpt-5.4"]` in the request envelope if your
+      Codex auth supports them. The canonical bridge strips config, sandbox,
+      cwd, and writable-root overrides so callers cannot relax the selected
+      sandbox mode.
 
    The bridge implements the JSON-line wire protocol from
    `pipeline-cli/src/runtime/spawners/codex-harness.ts`:
    reads `{ agentType, systemPrompt, userPrompt, cwd, timeoutMs }` from stdin,
-   invokes `codex exec`, writes `{ output, parsed? }` to stdout.
+   invokes `codex exec`, writes `{ output, parsed? }` to stdout. Empty stdout
+   from the bridge or from `codex exec` is treated as a bridge error with
+   diagnostics, not as an empty developer JSON envelope.
 
 4. **Developer dispatch via Codex (Codex develops, Claude reviews):** The
    attended path works today via the Codex host's `spawn_agent` tool. Use the
    Claude Code reviewer variants (no `-codex` suffix) as reviewers — they
    provide the cross-harness independence benefit in this direction.
-

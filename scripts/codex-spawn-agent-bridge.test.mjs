@@ -11,7 +11,7 @@
 
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, chmodSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
@@ -44,14 +44,39 @@ let fakeCodexDir;
  * @param {string} opts.rawOutput - Raw text to write to stdout (the agent output).
  * @param {number} [opts.exitCode=0] - Exit code the fake should use.
  * @param {string} [opts.stderr=''] - Text to write to stderr before exiting.
+ * @param {boolean} [opts.echoArgs=false] - When true, write received argv to stdout.
+ * @param {boolean} [opts.echoStdin=false] - When true, write stdin to stdout.
+ * @param {boolean} [opts.rejectUnsupportedFlags=false] - Fail on flags unsupported by codex 0.128.0.
  */
-function writeFakeCodex({ rawOutput, exitCode = 0, stderr = '' }) {
+function writeFakeCodex({
+  rawOutput,
+  exitCode = 0,
+  stderr = '',
+  echoArgs = false,
+  echoStdin = false,
+  rejectUnsupportedFlags = false,
+}) {
   const bin = join(fakeCodexDir, 'codex');
   const stderrLine = stderr ? `echo "${stderr.replace(/"/g, '\\"')}" >&2\n` : '';
+  const unsupportedFlagGuard = rejectUnsupportedFlags
+    ? `for arg in "$@"; do
+  case "$arg" in
+    --file|-c|--config|--enable|--disable|-p|--profile|-C|--cd|--add-dir|--dangerously-bypass-approvals-and-sandbox)
+      echo "unsupported argument: $arg" >&2
+      exit 64
+      ;;
+  esac
+done
+`
+    : '';
   const body =
     exitCode === 0
-      ? `${stderrLine}printf '%s' '${rawOutput.replace(/'/g, "'\\''")}'\nexit 0\n`
-      : `${stderrLine}exit ${exitCode}\n`;
+      ? echoArgs
+        ? `${stderrLine}${unsupportedFlagGuard}printf '%s' "$*"\nexit 0\n`
+        : echoStdin
+          ? `${stderrLine}${unsupportedFlagGuard}cat\nexit 0\n`
+          : `${stderrLine}${unsupportedFlagGuard}printf '%s' '${rawOutput.replace(/'/g, "'\\''")}'\nexit 0\n`
+      : `${stderrLine}${unsupportedFlagGuard}exit ${exitCode}\n`;
   writeFileSync(bin, `#!/bin/sh\n${body}`, { encoding: 'utf-8', mode: 0o755 });
 }
 
@@ -139,6 +164,49 @@ describe('codex-spawn-agent-bridge.mjs stdin/stdout protocol', () => {
     assert.ok(r.stderr.length > 0, 'expected stderr output on codex failure');
   });
 
+  it('exits non-zero when codex exits zero with empty stdout', () => {
+    writeFakeCodex({ rawOutput: '' });
+
+    const r = runBridge(BASE_REQUEST);
+    assert.notEqual(r.status, 0, 'expected non-zero exit on empty codex stdout');
+    assert.match(r.stderr, /empty stdout/);
+  });
+
+  it('uses workspace-write sandbox for developer dispatch', () => {
+    writeFakeCodex({ rawOutput: '', echoArgs: true, rejectUnsupportedFlags: true });
+
+    const r = runBridge({ ...BASE_REQUEST, agentType: 'developer' });
+    assert.equal(r.status, 0, `expected exit 0: ${r.stderr}`);
+
+    const envelope = JSON.parse(r.stdout.trim());
+    assert.match(envelope.output, /exec -s workspace-write/);
+    assert.doesNotMatch(envelope.output, /--file/);
+    assert.match(envelope.output, / -$/);
+  });
+
+  it('uses read-only sandbox for reviewer dispatch', () => {
+    writeFakeCodex({ rawOutput: '', echoArgs: true, rejectUnsupportedFlags: true });
+
+    const r = runBridge({ ...BASE_REQUEST, agentType: 'security-reviewer' });
+    assert.equal(r.status, 0, `expected exit 0: ${r.stderr}`);
+
+    const envelope = JSON.parse(r.stdout.trim());
+    assert.match(envelope.output, /exec -s read-only/);
+    assert.doesNotMatch(envelope.output, /--file/);
+    assert.match(envelope.output, / -$/);
+  });
+
+  it('passes the composed prompt over stdin', () => {
+    writeFakeCodex({ rawOutput: '', echoStdin: true, rejectUnsupportedFlags: true });
+
+    const r = runBridge(BASE_REQUEST);
+    assert.equal(r.status, 0, `expected exit 0: ${r.stderr}`);
+
+    const envelope = JSON.parse(r.stdout.trim());
+    assert.match(envelope.output, /You are the AI-SDLC developer agent/);
+    assert.match(envelope.output, /Implement the task/);
+  });
+
   it('exits 1 and writes to stderr when stdin is empty', () => {
     writeFakeCodex({ rawOutput: 'unused' });
 
@@ -178,16 +246,19 @@ describe('codex-spawn-agent-bridge.mjs stdin/stdout protocol', () => {
     assert.equal(r.status, 0, `expected exit 0 with explicit cwd: ${r.stderr}`);
   });
 
-  it('includes extraArgs from request without breaking the protocol', () => {
-    // The fake `codex` doesn't parse args, so this just confirms the bridge
-    // doesn't crash when extraArgs is non-empty.
-    writeFakeCodex({ rawOutput: '{"summary":"done"}' });
+  it('allows safe model extraArgs and strips sandbox/config overrides', () => {
+    writeFakeCodex({ rawOutput: '', echoArgs: true, rejectUnsupportedFlags: true });
 
-    const r = runBridge({ ...BASE_REQUEST, extraArgs: ['--some-future-flag'] });
+    const r = runBridge({
+      ...BASE_REQUEST,
+      extraArgs: ['--model', 'gpt-5.4', '--config', 'sandbox_permissions=["danger-full-access"]'],
+    });
     assert.equal(r.status, 0, `expected exit 0 with extraArgs: ${r.stderr}`);
 
     const envelope = JSON.parse(r.stdout.trim());
-    assert.ok('output' in envelope);
+    assert.match(envelope.output, /--model gpt-5.4/);
+    assert.doesNotMatch(envelope.output, /--config/);
+    assert.doesNotMatch(envelope.output, /danger-full-access/);
   });
 
   it('handles both systemPrompt and userPrompt being present without error', () => {
