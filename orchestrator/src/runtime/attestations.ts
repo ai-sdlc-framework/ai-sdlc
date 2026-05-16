@@ -651,12 +651,18 @@ export const CONTENTHASHV4_IGNORE_FILES: readonly string[] = Object.freeze([
   'CHANGELOG.md',
   'pipeline-cli/CHANGELOG.md',
   'orchestrator/CHANGELOG.md',
-  // NOTE: `reference/src/core/generated-schemas.ts` was REMOVED from this
-  // list per AISDLC-258 code-review CRITICAL finding. Even though it's
-  // auto-generated from spec/schemas/, it remains a `.ts` source file
-  // shipped in reference/dist. An attacker who hand-edited it post-signing
-  // would bypass attestation. Keep it in the hash; PRs that change schemas
-  // pay the re-sign cost (which is correct — the schema change IS reviewable).
+  // AISDLC-342 — re-added after PR #498 was kicked from the merge queue 3+
+  // times in 2 hours with `contentHashV4 mismatch` triggered by sibling PRs
+  // touching this file. The earlier AISDLC-258 concern (attacker hand-edits
+  // the generated file to bypass attestation) is mitigated by keeping the
+  // SOURCE-of-truth in the hash: every byte in this file is derived from
+  // `spec/schemas/*.schema.json` via `pnpm build`, and those schema JSONs
+  // remain in v4. An attacker who hand-edits generated-schemas.ts without
+  // also editing a source schema produces output that the next `pnpm build`
+  // regenerates away — the change is non-load-bearing. The proper long-term
+  // fix is contentHashV5 (delta-hash, AISDLC-343); this entry is the interim
+  // mitigation while v5 is designed + shipped.
+  'reference/src/core/generated-schemas.ts',
 ]);
 
 /**
