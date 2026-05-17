@@ -1,7 +1,7 @@
 ---
 id: AISDLC-343
 title: 'feat: RFC-0030 Phase 1 — source adapter interface + registry + 2 default adapters (support-ticket + community-thread)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
