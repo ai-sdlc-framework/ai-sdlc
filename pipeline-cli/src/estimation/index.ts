@@ -1,9 +1,14 @@
 /**
- * @ai-sdlc/pipeline-cli/estimation — RFC-0016 Phase 1 public surface.
+ * @ai-sdlc/pipeline-cli/estimation — RFC-0016 public surface.
  *
- * Re-exports the Stage A entry point + supporting types so consumers
- * outside `pipeline-cli` (orchestrator, dashboard) can import without
- * reaching into the internal module layout.
+ * Re-exports the Stage A + Stage B entry points + supporting types so
+ * consumers outside `pipeline-cli` (orchestrator, dashboard) can import
+ * without reaching into the internal module layout.
+ *
+ * Phase 4 (AISDLC-282) adds the Stage B surface: `runStageB`,
+ * `shouldEscalateToStageB`, `buildStageBPrompt`, `parseStageBResponse`,
+ * `aggregateStageBEnsemble`, `computeEnsembleVarianceForHash`,
+ * `computeStageBCallRate`.
  */
 
 export * from './types.js';
@@ -32,6 +37,7 @@ export {
   type CaptureEstimateOpts,
   type CaptureEstimateResult,
   type EstimateLogRecord,
+  type EstimateLogStageBRecord,
   type ReadLogOpts,
 } from './log-writer.js';
 export {
@@ -49,3 +55,20 @@ export {
   type QueryReviewerIterationsOpts,
   type ReviewerIterationResult,
 } from './calibration-writer.js';
+export {
+  runStageB,
+  shouldEscalateToStageB,
+  buildStageBPrompt,
+  parseStageBResponse,
+  aggregateStageBEnsemble,
+  computeEnsembleVarianceForHash,
+  computeStageBCallRate,
+  STAGE_B_CALL_RATE_THRESHOLD,
+  type RunStageBOpts,
+  type StageBResult,
+  type StageBSkipped,
+  type StageBVerdict,
+  type StageBInvoker,
+  type EscalationInput,
+  type StageBEnsembleResult,
+} from './stage-b.js';

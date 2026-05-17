@@ -50,18 +50,36 @@ import type { Bucket, SignalOutput, StageAConfidence, StageAResult, TaskClass } 
 // ── Capture record (one JSONL line) ─────────────────────────────────────
 
 /**
+ * Stage B on-disk shape per RFC §6.3. Stored alongside `stageA` in
+ * `_estimates/log.jsonl`. Added by Phase 4 (AISDLC-282).
+ */
+export interface EstimateLogStageBRecord {
+  /** Whether Stage B was invoked for this row. */
+  invoked: boolean;
+  /** `sha256:<hex>` of the Stage B prompt — audit only. Present when `invoked: true`. */
+  promptHash?: string;
+  /** Single bucket (low end when Stage B returned a range). Present when `invoked: true`. */
+  bucket?: Bucket;
+  /** High end of the 2-bucket range. Present when `invoked: true` and Stage B returned a range. */
+  bucketHigh?: Bucket;
+  /** Justification string (≤2 sentences). Present when `invoked: true`. */
+  justification?: string;
+  /** Skip reason. Present when `invoked: false`. */
+  skipReason?: string;
+}
+
+/**
  * The on-disk shape of one row in `_estimates/log.jsonl`.
  *
  * Field set is the union of:
  *  - RFC §7.1 capture record fields (`ts`, `predictedBy`, `taskId`,
  *    `class`, `bucket`, `context`)
- *  - RFC §6.3 Stage A/B verdict structure (`stageA`)
+ *  - RFC §6.3 Stage A/B verdict structure (`stageA`, `stageB`)
  *  - RFC §8.4 ensemble fields (`estimateInputHash`, `runIndex`)
  *  - Acceptance criterion #2: `finalBucket`
  *
- * Stage B fields are intentionally absent — Phase 4 lands them
- * additively (the schema is `additionalProperties: true` on the
- * stageA branch).
+ * Phase 4 (AISDLC-282) adds the optional `stageB` field additively —
+ * rows captured before Phase 4 remain valid (no `stageB` field).
  */
 export interface EstimateLogRecord {
   ts: string;
@@ -83,6 +101,12 @@ export interface EstimateLogRecord {
     escalateToStageB: boolean;
     rationale: string;
   };
+  /**
+   * RFC §6.3 Stage B verdict. Present only when Stage B was attempted
+   * (invoked OR skipped with a documented reason). Absent for Phase 1-3
+   * rows captured before Phase 4 shipped.
+   */
+  stageB?: EstimateLogStageBRecord;
   /** RFC §8.4 content hash. `sha256:<hex>`. */
   estimateInputHash: string;
   /** RFC §8.4 ensemble run index (1, 2, 3 for repeated runs against the same hash). */
@@ -131,6 +155,14 @@ export interface CaptureEstimateOpts {
   now?: () => Date;
   /** Optional logger — surfaces best-effort write failures. */
   logger?: PipelineLogger;
+  /**
+   * Stage B verdict to record alongside Stage A. Phase 4 (AISDLC-282).
+   * When present, `finalBucket` is taken from Stage B's verdict bucket
+   * (or falls back to Stage A's `candidateBucket` if Stage B was skipped).
+   * When absent, `finalBucket` stays as Stage A's `candidateBucket`
+   * (Phase 1-3 behaviour).
+   */
+  stageB?: EstimateLogStageBRecord;
 }
 
 export interface CaptureEstimateResult {
@@ -174,6 +206,15 @@ export function captureEstimate(opts: CaptureEstimateOpts): CaptureEstimateResul
   const previousHash = mostRecentHashForTask(existing, opts.stageA.taskId);
   const hashTransitioned = previousHash !== undefined && previousHash !== estimateInputHash;
 
+  // Phase 4: when Stage B ran successfully, use its verdict bucket as
+  // finalBucket (the Stage B bucket overrides Stage A's candidateBucket).
+  // When Stage B was skipped or absent, finalBucket = Stage A's candidateBucket.
+  const stageBBucket =
+    opts.stageB?.invoked === true && opts.stageB.bucket !== undefined
+      ? opts.stageB.bucket
+      : undefined;
+  const finalBucket = stageBBucket ?? opts.stageA.candidateBucket;
+
   const record: EstimateLogRecord = {
     ts,
     predictedBy: opts.predictedBy ?? 'stage-a-deterministic',
@@ -181,7 +222,7 @@ export function captureEstimate(opts: CaptureEstimateOpts): CaptureEstimateResul
     class: opts.stageA.taskClass,
     bucket: opts.stageA.candidateBucket,
     ...(opts.stageA.candidateRange ? { bucketRange: opts.stageA.candidateRange } : {}),
-    finalBucket: opts.stageA.candidateBucket,
+    finalBucket,
     stageA: {
       signals: opts.stageA.signals,
       candidateBucket: opts.stageA.candidateBucket,
@@ -190,6 +231,7 @@ export function captureEstimate(opts: CaptureEstimateOpts): CaptureEstimateResul
       escalateToStageB: opts.stageA.escalateToStageB,
       rationale: opts.stageA.rationale,
     },
+    ...(opts.stageB !== undefined ? { stageB: opts.stageB } : {}),
     estimateInputHash,
     runIndex,
     ...(opts.context !== undefined ? { context: opts.context } : {}),
