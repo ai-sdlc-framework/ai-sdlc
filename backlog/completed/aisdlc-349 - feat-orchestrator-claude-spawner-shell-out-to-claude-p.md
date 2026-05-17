@@ -1,7 +1,7 @@
 ---
 id: AISDLC-349
 title: 'feat(orchestrator): add --spawner claude that actually shells out to `claude -p` for autonomous tick'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
