@@ -1,8 +1,12 @@
 /**
- * `cli-estimate` subcommand router — RFC-0016 Phase 1 (AISDLC-279).
+ * `cli-estimate` subcommand router — RFC-0016 Phase 1-6 (AISDLC-279..284).
  *
  * Subcommands:
  *  - `stage-a <task-id>` — emit Stage A signals + candidate bucket.
+ *  - `show <class>`       — per-class calibration stats + Stage-A-coverage
+ *                           (RFC-0016 Phase 6, AC #3).
+ *  - `digest`             — weekly calibration digest across all classes
+ *                           (RFC-0016 Phase 6, AC #2).
  *
  * Output is JSON on stdout by default; pass `--format table` for a
  * human-readable column layout. Behind feature flag
@@ -24,7 +28,17 @@ import {
 import { captureEstimate } from '../estimation/log-writer.js';
 import { runStageA } from '../estimation/stage-a.js';
 import type { SignalOutput, StageAResult } from '../estimation/types.js';
+import { TASK_CLASSES, type TaskClass } from '../estimation/types.js';
 import { findTaskFile, parseTaskFile } from '../steps/01-validate.js';
+import {
+  generateDigest,
+  formatDigestText,
+  queryStageACoverage,
+  formatCalibrationStateToken,
+  calibrationState,
+} from '../estimation/digest.js';
+import { queryHistoricalActuals } from '../estimation/calibration-writer.js';
+import { detectBiasDrift } from '../estimation/bias-drift.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -201,7 +215,176 @@ export function buildEstimateCli(): Argv {
         }
       },
     )
-    .demandCommand(1, 'A subcommand is required (try `stage-a <task-id>`).')
+    .command(
+      'show <class>',
+      'Show per-class calibration stats + Stage-A-coverage (RFC-0016 Phase 6 AC #3).',
+      (y) =>
+        y
+          .positional('class', {
+            type: 'string',
+            describe:
+              'Task class to inspect (bug / feature / chore / uncategorized). Use "all" for a cross-class summary.',
+            demandOption: true,
+          })
+          .option('artifacts-dir', {
+            type: 'string',
+            describe: 'Override $ARTIFACTS_DIR.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'table'] as const,
+            default: 'table' as const,
+          })
+          .option('check-drift', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Also run bias-drift detection for the class (emits EstimateBiasOverCorrected event when triggered).',
+          }),
+      (argv) => {
+        if (!isEstimationEnabled()) {
+          process.stderr.write(estimationDisabledMessage() + '\n');
+          emit({ ok: false, disabled: true, flag: ESTIMATION_FLAG });
+          return;
+        }
+        try {
+          const artifactsDir = argv['artifacts-dir'] ? String(argv['artifacts-dir']) : undefined;
+          const classArg = String(argv.class);
+          const isAll = classArg === 'all';
+
+          const targetClasses: TaskClass[] = isAll
+            ? (TASK_CLASSES.filter((c) => c !== 'uncategorized') as TaskClass[])
+            : (() => {
+                if (!(TASK_CLASSES as readonly string[]).includes(classArg) && classArg !== 'all') {
+                  fail(
+                    `Unknown class "${classArg}". Valid values: ${TASK_CLASSES.join(', ')}, all`,
+                  );
+                }
+                return [classArg as TaskClass];
+              })();
+
+          type ShowRow = {
+            taskClass: TaskClass;
+            n: number;
+            meanBucketMiss: number;
+            medianBucketMiss: number;
+            stageACoverageRate: number;
+            logRows: number;
+            calibrationStateToken: string;
+            driftCheck?: ReturnType<typeof detectBiasDrift>['checks'][0];
+          };
+          const rows: ShowRow[] = [];
+
+          for (const taskClass of targetClasses) {
+            const historical = queryHistoricalActuals({
+              taskClass,
+              artifactsDir,
+            });
+            const coverage = queryStageACoverage({ taskClass, artifactsDir });
+            const n = historical.n;
+            const state = calibrationState(n);
+            const stateToken = formatCalibrationStateToken({
+              state,
+              n,
+              meanMiss: historical.meanBucketMiss !== null ? historical.meanBucketMiss : undefined,
+            });
+
+            let driftCheck: ShowRow['driftCheck'];
+            if (argv['check-drift']) {
+              const driftResult = detectBiasDrift({ taskClass, artifactsDir });
+              driftCheck = driftResult.checks.find((c) => c.taskClass === taskClass);
+            }
+
+            rows.push({
+              taskClass,
+              n,
+              meanBucketMiss: historical.meanBucketMiss ?? 0,
+              medianBucketMiss:
+                historical.medianBucket !== null
+                  ? ((): number => {
+                      const BUCKET_IDX: Record<string, number> = {
+                        XS: 0,
+                        S: 1,
+                        M: 2,
+                        L: 3,
+                        XL: 4,
+                      };
+                      return BUCKET_IDX[historical.medianBucket!] ?? 0;
+                    })()
+                  : 0,
+              stageACoverageRate: coverage.coverageRate,
+              logRows: coverage.totalLogRows,
+              calibrationStateToken: stateToken,
+              driftCheck,
+            });
+          }
+
+          if (argv.format === 'json') {
+            emit({ ok: true, rows });
+          } else {
+            const lines: string[] = [];
+            for (const row of rows) {
+              lines.push(`Class: ${row.taskClass}  ${row.calibrationStateToken}`);
+              lines.push(`  Calibration records: ${row.n}`);
+              if (row.n > 0) {
+                const sign = row.meanBucketMiss >= 0 ? '+' : '';
+                lines.push(`  Mean bucket miss:    ${sign}${row.meanBucketMiss.toFixed(2)}`);
+              }
+              lines.push(
+                `  Stage-A coverage:    ${(row.stageACoverageRate * 100).toFixed(1)}% of ${row.logRows} estimates`,
+              );
+              if (row.driftCheck) {
+                const dc = row.driftCheck;
+                lines.push(
+                  `  Drift:               ${dc.overCorrected ? 'OVER-CORRECTED (event emitted)' : 'none detected'}`,
+                );
+              }
+              lines.push('');
+            }
+            emitText(lines.join('\n'));
+          }
+        } catch (err) {
+          fail(err instanceof Error ? err.message : String(err));
+        }
+      },
+    )
+    .command(
+      'digest',
+      'Generate the weekly calibration digest across all classes (RFC-0016 Phase 6 AC #2).',
+      (y) =>
+        y
+          .option('artifacts-dir', {
+            type: 'string',
+            describe: 'Override $ARTIFACTS_DIR.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'table'] as const,
+            default: 'table' as const,
+          }),
+      (argv) => {
+        if (!isEstimationEnabled()) {
+          process.stderr.write(estimationDisabledMessage() + '\n');
+          emit({ ok: false, disabled: true, flag: ESTIMATION_FLAG });
+          return;
+        }
+        try {
+          const artifactsDir = argv['artifacts-dir'] ? String(argv['artifacts-dir']) : undefined;
+          const digest = generateDigest({ artifactsDir });
+          if (argv.format === 'json') {
+            emit(digest);
+          } else {
+            emitText(formatDigestText(digest));
+          }
+        } catch (err) {
+          fail(err instanceof Error ? err.message : String(err));
+        }
+      },
+    )
+    .demandCommand(
+      1,
+      'A subcommand is required (try `stage-a <task-id>`, `show <class>`, or `digest`).',
+    )
     .strict()
     .help()
     .alias('h', 'help')
