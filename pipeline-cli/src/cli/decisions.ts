@@ -24,18 +24,24 @@ import { hideBin } from 'yargs/helpers';
 
 import {
   appendDecisionEvent,
+  computeStageACoverage,
   DECISION_SOURCES,
   decisionCatalogDisabledMessage,
   isDecisionCatalogEnabled,
   listDecisions,
   makeDecisionOpenedEvent,
+  makeRecommendationIssuedEvent,
   nextDecisionId,
   projectDecision,
   resolveEventLogPath,
+  runStageA,
+  STAGE_A_COVERAGE_TARGET,
   type Decision,
   type DecisionOption,
   type DecisionSource,
 } from '../decisions/index.js';
+import { buildDependencyGraph } from '../deps/dependency-graph.js';
+import { isCompositionEnabled } from '../deps/snapshot.js';
 
 // ── Output helpers ────────────────────────────────────────────────────────────
 
@@ -501,6 +507,145 @@ export function buildDecisionsCli(): Argv {
           exists: existsSync(path),
           sizeBytes: existsSync(path) ? readFileSync(path, 'utf8').length : 0,
         });
+      },
+    )
+    .command(
+      'score-a <id>',
+      'Run Stage A deterministic scorer on a decision (RFC-0035 Phase 2).',
+      (y) =>
+        y
+          .positional('id', {
+            type: 'string',
+            demandOption: true,
+            describe: 'Decision id (DEC-NNNN).',
+          })
+          .option('store', {
+            type: 'boolean',
+            default: false,
+            describe:
+              'Emit a recommendation-issued event to persist the Stage A result on the Decision record (AC#4).',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+          }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        const id = String(argv.id);
+        if (!/^DEC-\d{4,}$/.test(id)) {
+          fail(`invalid decision id: ${id} — expected DEC-NNNN`);
+        }
+        if (!isDecisionCatalogEnabled()) {
+          warnToStderr(decisionCatalogDisabledMessage());
+          if (String(argv.format) === 'json') {
+            emit({ ok: true, enabled: false, stageA: null });
+          } else {
+            emitText('(decision catalog feature flag is off — no decisions)');
+          }
+          return;
+        }
+
+        const decision = projectDecision(id, { workDir });
+        if (decision === null) {
+          fail(`decision not found: ${id}`);
+        }
+
+        const { decisions: allOpen } = listDecisions({ workDir });
+        const openDecisions = allOpen.filter((d) => d.metadata.id !== id);
+
+        // Load RFC-0014 dep-graph when AI_SDLC_DEPS_COMPOSITION is enabled.
+        let graph: ReturnType<typeof buildDependencyGraph> | undefined;
+        if (isCompositionEnabled()) {
+          try {
+            graph = buildDependencyGraph({ workDir });
+          } catch {
+            warnToStderr('[score-a] dep-graph unavailable — blast-radius will default to zeros');
+          }
+        }
+
+        const stageA = runStageA({ decision, openDecisions, graph, workDir });
+
+        if (argv.store) {
+          const event = makeRecommendationIssuedEvent({ decisionId: id, stageAOutput: stageA });
+          appendDecisionEvent(event, { workDir });
+        }
+
+        if (String(argv.format) === 'json') {
+          emit({ ok: true, enabled: true, decisionId: id, stageA, stored: Boolean(argv.store) });
+        } else {
+          emitText(`Stage A score for ${id}`);
+          emitText(`  priority:       ${stageA.prioritySignal.toFixed(3)}`);
+          emitText(`  resolvedByStageA: ${stageA.resolvedByStageA}`);
+          emitText(`  routingActor:   ${stageA.routingActor ?? '(none — needs Stage B)'}`);
+          emitText(`  reversibility:  ${stageA.reversibility}`);
+          emitText(
+            `  blast-radius:   tasks=${stageA.blastRadius.blockedTaskCount}  rfcs=${stageA.blastRadius.blockedRfcCount}  pillars=[${stageA.blastRadius.affectedPillars.join(', ')}]`,
+          );
+          emitText(`  treeDepth:      ${stageA.decisionTreeDepth}`);
+          emitText(
+            `  schema:         ${stageA.schemaValidity.valid ? 'valid' : 'invalid: ' + stageA.schemaValidity.reasons.join('; ')}`,
+          );
+          emitText(
+            `  refs:           ${stageA.referenceResolution.resolved ? 'resolved' : 'broken: ' + stageA.referenceResolution.broken.join('; ')}`,
+          );
+          emitText(
+            `  capacity:       ${stageA.capacityCheck.withinBudget ? 'within budget' : 'over budget'} — ${stageA.capacityCheck.reason}`,
+          );
+          emitText(
+            `  duplicate:      ${stageA.duplicateDetection.isDuplicate ? 'candidate-dup: ' + stageA.duplicateDetection.candidateId : 'unique'} (sim=${stageA.duplicateDetection.similarity.toFixed(3)})`,
+          );
+          if (argv.store) emitText('  (Stage A result stored as recommendation-issued event)');
+        }
+      },
+    )
+    .command(
+      'coverage',
+      'Report Stage A coverage across the catalog (target ≥40% per RFC-0035 AC#6).',
+      (y) =>
+        y.option('format', {
+          type: 'string',
+          choices: ['json', 'text'] as const,
+          default: 'text' as const,
+        }),
+      async (argv) => {
+        const workDir = String(argv['work-dir']);
+        if (!isDecisionCatalogEnabled()) {
+          warnToStderr(decisionCatalogDisabledMessage());
+          if (String(argv.format) === 'json') {
+            emit({ ok: true, enabled: false, coverage: null });
+          } else {
+            emitText('(decision catalog feature flag is off — no decisions)');
+          }
+          return;
+        }
+
+        const { decisions } = listDecisions({ workDir });
+
+        let graph: ReturnType<typeof buildDependencyGraph> | undefined;
+        if (isCompositionEnabled()) {
+          try {
+            graph = buildDependencyGraph({ workDir });
+          } catch {
+            warnToStderr('[coverage] dep-graph unavailable — blast-radius defaults to zeros');
+          }
+        }
+
+        const coverage = computeStageACoverage(decisions, { graph, workDir });
+
+        if (String(argv.format) === 'json') {
+          emit({
+            ok: true,
+            enabled: true,
+            coverage,
+            target: STAGE_A_COVERAGE_TARGET,
+          });
+        } else {
+          emitText(`Stage A coverage: ${coverage.resolvedByStageA}/${coverage.totalDecisions}`);
+          emitText(`  rate:   ${(coverage.coverageRate * 100).toFixed(1)}%`);
+          emitText(`  target: ≥${(STAGE_A_COVERAGE_TARGET * 100).toFixed(0)}%`);
+          emitText(`  meets target: ${coverage.meetsTarget ? 'yes' : 'no'}`);
+        }
       },
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')

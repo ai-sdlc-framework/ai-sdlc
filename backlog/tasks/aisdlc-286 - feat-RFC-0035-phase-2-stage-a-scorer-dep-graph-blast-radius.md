@@ -1,7 +1,7 @@
 ---
 id: AISDLC-286
 title: 'feat: RFC-0035 Phase 2 — Stage A deterministic scorer + dep-graph blast-radius'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15'
 labels:
