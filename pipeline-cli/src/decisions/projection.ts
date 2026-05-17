@@ -16,7 +16,12 @@
  */
 
 import { readDecisionEvents, type ReadEventsOpts } from './event-log.js';
-import type { Decision, DecisionEvent, DecisionOpenedEvent } from './decision-record.js';
+import type {
+  Decision,
+  DecisionEvent,
+  DecisionOpenedEvent,
+  OperatorAnsweredEvent,
+} from './decision-record.js';
 
 /**
  * Apply one event to the projected Decision state. `null` for `current`
@@ -58,6 +63,25 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
       decisionLog: [...(current?.decisionLog ?? []), event],
     };
     return decision;
+  }
+
+  if (event.type === 'operator-answered') {
+    // RFC-0035 Phase 4 / AC#3 — fold operator answer into the Decision
+    // state: lifecycle → 'answered', capture chosenOptionId + actor + ts.
+    if (current === null) return null; // no base state to fold into
+    const answered = event as OperatorAnsweredEvent;
+    return {
+      ...current,
+      metadata: { ...current.metadata, updated: event.ts },
+      status: {
+        ...current.status,
+        lifecycle: 'answered',
+        answeredOptionId: answered.chosenOptionId,
+        answeredBy: event.by ?? null,
+        answeredAt: event.ts,
+      },
+      decisionLog: [...current.decisionLog, event],
+    };
   }
 
   // Unknown / forward-compat events: log only, no state mutation. The
