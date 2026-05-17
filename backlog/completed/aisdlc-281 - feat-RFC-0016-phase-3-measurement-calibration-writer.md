@@ -1,7 +1,7 @@
 ---
 id: AISDLC-281
 title: 'feat: RFC-0016 Phase 3 — Measurement + monthly-rotated calibration writer'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-15'
 labels:
