@@ -34,3 +34,18 @@ export {
   type EstimateLogRecord,
   type ReadLogOpts,
 } from './log-writer.js';
+export {
+  recordCalibration,
+  queryHistoricalActuals,
+  queryReviewerIterations,
+  calibrationFilePath,
+  listCalibrationFiles,
+  wallClockSecToBucket,
+  type CalibrationRecord,
+  type RecordCalibrationOpts,
+  type RecordCalibrationResult,
+  type QueryHistoricalActualsOpts,
+  type HistoricalActualsResult,
+  type QueryReviewerIterationsOpts,
+  type ReviewerIterationResult,
+} from './calibration-writer.js';

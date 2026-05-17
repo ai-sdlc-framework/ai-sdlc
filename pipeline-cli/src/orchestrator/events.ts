@@ -167,7 +167,16 @@ export type OrchestratorEventType =
    * ensemble batches so the Phase 3 calibration collector stops
    * aggregating across the transition.
    */
-  | 'EstimateInputChanged';
+  | 'EstimateInputChanged'
+  /**
+   * AISDLC-281 (RFC-0016 Phase 3) — emitted when a completed task's
+   * predicted bucket is paired with the actual wall-clock derived from
+   * events.jsonl and written to the monthly-rotated
+   * `_estimates/calibration-YYYY-MM.jsonl`. Per-event fields: `taskId`,
+   * `predictedBucket`, `actualBucket`, `bucketMiss`,
+   * `actualWallClockSec`, `estimateVariance`, `class`.
+   */
+  | 'EstimateActualsRecorded';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional
