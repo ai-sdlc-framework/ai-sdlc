@@ -41,6 +41,7 @@ import {
   type DorConfig,
   type DorEvaluationMode,
 } from './dor-config.js';
+import { checkUpstreamOqs, type UpstreamOqCheckResult } from './upstream-oq-gate.js';
 import type { IssueInput, RefinementVerdict } from './types.js';
 
 export interface RefineBacklogTaskOpts {
@@ -56,6 +57,12 @@ export interface RefineBacklogTaskOpts {
   artifactsDir?: string;
   /** Override the on-disk task file path resolution (tests). */
   taskFilePathOverride?: string;
+  /**
+   * Override the RFC file reader for the upstream-OQ gate.
+   * Tests inject this to avoid filesystem I/O. Production uses the
+   * default disk reader.
+   */
+  readRfcFile?: (filePath: string) => string | null;
 }
 
 export interface RefineBacklogTaskResult {
@@ -70,6 +77,16 @@ export interface RefineBacklogTaskResult {
   evaluationMode: DorEvaluationMode;
   /** Path of the calibration log entry that was written. */
   calibrationLogPath?: string;
+  /**
+   * Upstream-OQ gate result (AISDLC-296). Present on every run — the
+   * orchestration layer MAY use `upstreamOqCheck.rejected` to provide a
+   * richer refusal message than the seven-gate rubric alone.
+   *
+   * Note: `shouldRefuseExecution` already incorporates the upstream-OQ
+   * gate result when `evaluationMode === 'enforce'`, so callers that only
+   * need the pass/fail outcome should check `shouldRefuseExecution`.
+   */
+  upstreamOqCheck: UpstreamOqCheckResult;
 }
 
 /**
@@ -107,14 +124,20 @@ function readdirOrEmpty(dir: string): string[] {
  * Also extracts `created_by` (the Backlog.md authorship marker) so the
  * auto-pass dispatcher can match rules whose `sources` reference the
  * generator identity (e.g. `ai-sdlc/signal-pipeline`) — RFC §6.4 + Phase 4.
+ *
+ * Returns the raw frontmatter text (without `---` delimiters) for the
+ * upstream-OQ gate (AISDLC-296) to parse `blocked.reason` and
+ * `references:` fields without re-reading the file.
  */
 export function stripFrontmatter(raw: string): {
   title: string;
   body: string;
   createdBy?: string;
+  /** Raw YAML frontmatter without the `---` delimiters. Empty string when absent. */
+  frontmatter: string;
 } {
   const fmMatch = raw.match(/^---\n([\s\S]*?)\n---\n?([\s\S]*)$/);
-  if (!fmMatch) return { title: '', body: raw };
+  if (!fmMatch) return { title: '', body: raw, frontmatter: '' };
   const fm = fmMatch[1] ?? '';
   const body = fmMatch[2] ?? '';
   const titleMatch = fm.match(/^title:\s*(.+?)\s*$/m);
@@ -123,7 +146,11 @@ export function stripFrontmatter(raw: string): {
   const title = titleRaw.replace(/^['"]|['"]$/g, '');
   const createdByMatch = fm.match(/^created_by:\s*(.+?)\s*$/m);
   const createdByRaw = createdByMatch?.[1]?.replace(/^['"]|['"]$/g, '');
-  const out: { title: string; body: string; createdBy?: string } = { title, body };
+  const out: { title: string; body: string; createdBy?: string; frontmatter: string } = {
+    title,
+    body,
+    frontmatter: fm,
+  };
   if (createdByRaw) out.createdBy = createdByRaw;
   return out;
 }
@@ -150,9 +177,20 @@ export async function refineBacklogTask(
     );
   }
   const raw = readFileSync(taskFile, 'utf8');
-  const { title, body, createdBy } = stripFrontmatter(raw);
+  const { title, body, createdBy, frontmatter } = stripFrontmatter(raw);
 
   const config = opts.config ?? loadDorConfig({ workDir });
+
+  // AISDLC-296 — upstream-OQ gate. Run BEFORE the seven-gate rubric so the
+  // operator sees the upstream-RFC issue in the refusal message before
+  // spending Stage B LLM budget on a task that shouldn't be dispatched at all.
+  const upstreamOqCheck = checkUpstreamOqs({
+    taskId,
+    frontmatter,
+    body,
+    workDir,
+    readRfcFile: opts.readRfcFile,
+  });
 
   const input: IssueInput = {
     source: 'backlog',
@@ -200,9 +238,10 @@ export async function refineBacklogTask(
 
   // Per RFC §10 evaluation modes: 'warn-only' posts comments + flags
   // but does NOT block execution; 'enforce' refuses execution on a
-  // needs-clarification verdict.
+  // needs-clarification verdict OR on upstream-OQ rejection.
   const shouldRefuseExecution =
-    config.evaluationMode === 'enforce' && verdict.overallVerdict === 'needs-clarification';
+    config.evaluationMode === 'enforce' &&
+    (verdict.overallVerdict === 'needs-clarification' || upstreamOqCheck.rejected);
 
   return {
     taskId,
@@ -211,6 +250,7 @@ export async function refineBacklogTask(
     shouldRefuseExecution,
     evaluationMode: config.evaluationMode,
     calibrationLogPath: calib.path,
+    upstreamOqCheck,
   };
 }
 

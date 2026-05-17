@@ -31,6 +31,7 @@ export * from './bypass.js';
 export * from './escalation.js';
 export * from './trusted-reviewers-check.js';
 export * from './gates/index.js';
+export * from './upstream-oq-gate.js';
 export {
   DEFAULT_RESOLVERS,
   resolveReference,
