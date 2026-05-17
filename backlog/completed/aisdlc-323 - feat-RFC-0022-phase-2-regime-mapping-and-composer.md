@@ -1,7 +1,7 @@
 ---
 id: AISDLC-323
 title: 'feat: RFC-0022 Phase 2 — Regime → DerivedGates mapping + composer + control-feature-map'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
