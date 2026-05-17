@@ -323,10 +323,15 @@ export function findUnresolvedOqs(rfcContent: string): string[] {
   }
   if (current) blocks.push(current);
 
-  // For each block, check if a resolution marker appears in the block text.
+  // For each block, check if a resolution marker appears anywhere in the
+  // block — including the heading line itself. RFC-0011's §13 uses inline
+  // resolution markers (`1. **Q1: ...** ✅ **RESOLVED (date)** — answer`)
+  // where the marker sits on the heading line, not on a separate body line;
+  // missing this case falsely rejected every task referencing RFC-0011
+  // (AISDLC-296 inline code-review MAJOR fix).
   const unresolved: string[] = [];
   for (const block of blocks) {
-    const blockText = block.lines.join('\n');
+    const blockText = [block.heading, ...block.lines].join('\n');
     const hasResolution = RESOLUTION_MARKERS.some((re) => re.test(blockText));
     if (!hasResolution) {
       unresolved.push(block.heading);

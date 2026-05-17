@@ -260,6 +260,15 @@ describe('findUnresolvedOqs', () => {
     const content = `---\nlifecycle: Implemented\n---\n## Open Questions\n**OQ-1 — Bar?**\n\n✅ RESOLVED: Confirmed.\n`;
     expect(findUnresolvedOqs(content)).toHaveLength(0);
   });
+
+  // AISDLC-296 code-review MAJOR regression test: RFC-0011's §13 puts the
+  // resolution marker on the SAME LINE as the question heading. Pre-fix, the
+  // scanner only checked block.lines (the body lines after the heading), so
+  // inline-resolved questions were falsely flagged as unresolved.
+  it('detects inline RESOLVED marker on the question heading line (RFC-0011 format)', () => {
+    const content = `---\nlifecycle: Implemented\n---\n## Open Questions\n\n1. **Q1: Should we ship?** ✅ **RESOLVED (2026-04-30)** — Yes, after sign-off.\n2. **Q2: When?** ✅ **RESOLVED (2026-05-01)** — Next sprint.\n`;
+    expect(findUnresolvedOqs(content)).toHaveLength(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
