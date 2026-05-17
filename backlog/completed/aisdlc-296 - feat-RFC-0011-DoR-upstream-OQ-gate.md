@@ -1,7 +1,7 @@
 ---
 id: AISDLC-296
 title: 'feat: RFC-0011 DoR upstream-OQ gate (reject impl tasks when referenced RFC has open OQs)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-15'
 labels:
