@@ -68,17 +68,25 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
 
   if (event.type === 'recommendation-issued') {
     // Phase 2 — AC#4: store Stage A signal breakdown on the Decision record.
+    // Phase 3 — also fold Stage B rubric scores + routing (actorRationale, subActors).
     if (current === null) return null;
     const rec = event as RecommendationIssuedEvent;
+
+    // Build evaluation update: always set stageA; set stageB when present.
+    const evaluationUpdate: Record<string, unknown> = {
+      ...(current.status.evaluation ?? {}),
+      stageA: rec.stageA,
+    };
+    if (rec.stageB !== undefined) {
+      evaluationUpdate.stageB = rec.stageB;
+    }
+
     return {
       ...current,
       metadata: { ...current.metadata, updated: event.ts },
       status: {
         ...current.status,
-        evaluation: {
-          ...(current.status.evaluation ?? {}),
-          stageA: rec.stageA,
-        },
+        evaluation: evaluationUpdate,
         priority: rec.prioritySignal,
         ...(rec.routing !== undefined ? { routing: rec.routing } : {}),
       },

@@ -98,6 +98,11 @@ export interface DecisionRouting {
   assignedActor?: string | null;
   actorRationale?: string | null;
   llmEligible?: boolean;
+  /**
+   * For multi-pillar decisions: email addresses of all involved pillar owners
+   * (Stage B — AC#3). Empty or absent for single-actor routing.
+   */
+  subActors?: string[];
 }
 
 export interface DecisionCapacity {
@@ -266,23 +271,158 @@ export interface StageAOutput {
   routingActor: string | null;
 }
 
-// ── recommendation-issued event (Phase 2) ────────────────────────────────────
+// ── Stage B output types (Phase 3) ──────────────────────────────────────────
+
+/**
+ * RFC-0035 §5.2 — Load-bearing-ness rubric sub-scores.
+ * 3/4 deterministic in Phase 3; reversibility may need LLM for novel
+ * categories (Phase 5 will fill the fourth dimension via Haiku-class call).
+ */
+export interface StageBLoadBearingScore {
+  /** Composite load-bearing-ness score [0,1]. */
+  score: number;
+  /** Reversibility sub-score: one-way=1.0, unknown=0.5, reversible=0.0. */
+  reversibility: number;
+  /** Blast-radius sub-score (log-diminishing per OQ-2). */
+  blastRadius: number;
+  /** Downstream-decision count sub-score (decision tree depth). */
+  downstreamDecisions: number;
+  /** Deadline-criticality sub-score: overdue=1.0, no deadline=0.0. */
+  deadlineCriticality: number;
+}
+
+/**
+ * RFC-0035 §5.2 — LLM-confidence rubric sub-scores.
+ * Phase 3 implements 2/4 deterministic dimensions; novelty and
+ * exemplar-similarity default to 0.5 (conservative placeholder) until
+ * Phase 5 adds the Haiku-class LLM calls.
+ */
+export interface StageBLlmConfidenceScore {
+  /** Composite LLM-confidence score [0,1]. */
+  score: number;
+  /** Whether the decision body references an RFC-stated position. */
+  rfcStatedPositionPresence: number;
+  /** Completeness of the decision's evidence (body + option consequences). */
+  evidenceCompleteness: number;
+  /** Novelty score — 0.5 (placeholder) until Phase 5. */
+  novelty: number;
+  /** Exemplar-similarity score — 0.5 (placeholder) until Phase 5. */
+  exemplarSimilarity: number;
+}
+
+/**
+ * RFC-0035 §5.2 — Actor-fit rubric sub-scores.
+ * Fully deterministic given RFC-0029 pillar tagging.
+ * Override-history and expertise-tag are 0.5 placeholders until Phase 9.
+ */
+export interface StageBActorFitScore {
+  /** Composite actor-fit score [0,1]. */
+  score: number;
+  /** Single-pillar=1.0, multi-pillar=0.5, no-pillars=0.0. */
+  declaredPillarMatch: number;
+  /** Within budget=1.0, over budget=0.0. */
+  capacityAvailability: number;
+  /** Override-history fit — 0.5 until Phase 9 (no history). */
+  overrideHistoryFit: number;
+  /** Expertise-tag match — 0.5 until Phase 9 (no tag data). */
+  expertiseTagMatch: number;
+}
+
+/**
+ * RFC-0035 §5.2 — Cost-of-block rubric sub-scores.
+ * Fully deterministic from dep-graph + deadline + tier.
+ * Downstream-PR count is 0.0 in Phase 3 (no PR data).
+ */
+export interface StageBCostOfBlockScore {
+  /** Composite cost-of-block score [0,1]. */
+  score: number;
+  /** blockedTaskCount × tier-weight, log-normalised. */
+  taskBlockScore: number;
+  /** Deadline distance score: overdue=1.0, no deadline=0.0. */
+  deadlineScore: number;
+  /** Downstream-PR count score — 0.0 until Phase 8 (no PR data). */
+  downstreamPRScore: number;
+}
+
+/**
+ * RFC-0035 §5.2 — Stage B rubric scores (four dimensions each [0,1]).
+ */
+export interface StageBRubricScores {
+  loadBearing: StageBLoadBearingScore;
+  llmConfidence: StageBLlmConfidenceScore;
+  actorFit: StageBActorFitScore;
+  costOfBlock: StageBCostOfBlockScore;
+}
+
+/**
+ * RFC-0035 §6.2 — Actor routing result from Stage B.
+ *
+ * AC#2: single primary actor + sub-actor list.
+ * AC#3: multi-pillar decisions populate `subActors` with each pillar's owner.
+ * AC#4: `subActors` only contains CONFIGURED owners (never auto-fills all three).
+ */
+export interface StageBActorRoute {
+  /**
+   * Primary actor: email / 'framework' / 'operator' / 'pillar:<name>'.
+   * 'framework' = auto-decide; 'operator' = escalate to cross-pillar owner.
+   */
+  primaryActor: string;
+  /**
+   * For multi-pillar decisions: email addresses of all involved pillar owners.
+   * Empty when routing is single-actor. Never contains actors not in the
+   * PillarOwnerConfig (AC#4 — never auto-fills missing entries).
+   */
+  subActors: string[];
+  /**
+   * Human-readable rationale for this routing decision (AC#6 — stored on
+   * Decision record via projection into `status.routing.actorRationale`).
+   */
+  rationale: string;
+  /** Whether the decision is LLM-auto-resolve eligible (Stage A+B assessment). */
+  llmEligible: boolean;
+}
+
+/**
+ * RFC-0035 Phase 3 — Stage B output.
+ *
+ * Produced by `runStageB()` in `stage-b.ts`. Stored on the Decision record
+ * via a `recommendation-issued` event (AC#6 — `routing.rationale` projected
+ * into `status.routing.actorRationale`).
+ */
+export interface StageBOutput {
+  rubricScores: StageBRubricScores;
+  routing: StageBActorRoute;
+  /** Composite confidence score [0,1] — weighted average of the 4 rubric scores. */
+  compositeScore: number;
+  /**
+   * Whether Stage B was able to determine routing without Stage C LLM.
+   * Per §5.3: Stage C fires when compositeScore is in the mid-band [0.4, 0.7].
+   * True when compositeScore >= 0.7 (high confidence) or < 0.4 (low confidence).
+   */
+  resolvedByStageB: boolean;
+}
+
+// ── recommendation-issued event (Phase 2+3) ──────────────────────────────────
 
 /**
  * Emitted when Stage A (and optionally Stage B/C) produces a recommendation.
- * Phase 2 ships the Stage A portion; Stage B/C fields are added in later
- * phases. Stored on the Decision record via the projection (AC#4).
+ * Phase 2 ships the Stage A portion; Phase 3 adds the optional `stageB` field.
+ * Stored on the Decision record via the projection (AC#4).
  */
 export interface RecommendationIssuedEvent extends DecisionEventEnvelope {
   type: 'recommendation-issued';
-  /** Stage A output — always present for Phase 2 events. */
+  /** Stage A output — always present for Phase 2+ events. */
   stageA: StageAOutput;
+  /** Stage B output — present when Phase 3 rubric scoring has run. */
+  stageB?: StageBOutput;
   /** Composite priority signal carried here for quick access in the projection. */
   prioritySignal: number;
-  /** Routing recommendation from Stage A. */
+  /** Routing recommendation from Stage A or Stage B. */
   routing?: DecisionRouting;
   /** AC#3 — whether Stage A resolved routing without Stage B/C. */
   resolvedByStageA: boolean;
+  /** Whether Stage B resolved routing without Stage C LLM. */
+  resolvedByStageB?: boolean;
 }
 
 // ── Validators ───────────────────────────────────────────────────────────────
