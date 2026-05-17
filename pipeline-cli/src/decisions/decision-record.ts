@@ -177,18 +177,32 @@ export interface DecisionOpenedEvent extends DecisionEventEnvelope {
 }
 
 /**
+ * RFC-0035 Phase 4 — `operator-answered` event.
+ *
+ * Emitted when an operator (or the framework, per Stage A/B/C auto-decision)
+ * resolves a Decision by picking one of its declared options. The projection
+ * folds this event into `status.lifecycle = 'answered'`.
+ */
+export interface OperatorAnsweredEvent extends DecisionEventEnvelope {
+  type: 'operator-answered';
+  /** The `id` field of the chosen `DecisionOption`. */
+  chosenOptionId: string;
+  /** Optional free-text rationale for the choice. */
+  rationale?: string;
+}
+
+/**
  * Discriminated union of every event the projection knows how to fold.
- * Phase 1 only emits `DecisionOpenedEvent`; the remaining types are
- * declared for forward-compat (later phases populate). The projection
- * tolerates unknown event types so the reader stays forward-compatible
- * when a later phase adds a new type.
+ * Phase 1 only emits `DecisionOpenedEvent`; Phase 4 adds `OperatorAnsweredEvent`.
+ * The projection tolerates unknown event types so the reader stays
+ * forward-compatible when a later phase adds a new type.
  */
 export type DecisionEvent =
   | DecisionOpenedEvent
-  | (DecisionEventEnvelope & { type: Exclude<DecisionEventType, 'decision-opened'> } & Record<
-        string,
-        unknown
-      >);
+  | OperatorAnsweredEvent
+  | (DecisionEventEnvelope & {
+      type: Exclude<DecisionEventType, 'decision-opened' | 'operator-answered'>;
+    } & Record<string, unknown>);
 
 // ── Validators ───────────────────────────────────────────────────────────────
 

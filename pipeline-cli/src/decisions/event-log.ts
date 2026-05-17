@@ -24,6 +24,7 @@ import {
   validateDecisionEvent,
   type DecisionEvent,
   type DecisionOpenedEvent,
+  type OperatorAnsweredEvent,
 } from './decision-record.js';
 
 // ── Path resolution ──────────────────────────────────────────────────────────
@@ -187,6 +188,40 @@ export function makeDecisionOpenedEvent(input: OpenDecisionInput): DecisionOpene
   if (input.routing !== undefined) event.routing = input.routing;
   if (input.capacity !== undefined) event.capacity = input.capacity;
   if (input.deadline !== undefined) event.deadline = input.deadline;
+  if (input.by !== undefined) event.by = input.by;
+  return event;
+}
+
+// ── Operator-answered event factory (Phase 4) ────────────────────────────────
+
+export interface AnswerDecisionInput {
+  decisionId: string;
+  /** The `id` of the chosen `DecisionOption`. */
+  chosenOptionId: string;
+  /** Optional free-text rationale for the choice. */
+  rationale?: string;
+  /** Actor email / login identifier. */
+  by?: string;
+  now?: Date;
+}
+
+/**
+ * Build a well-formed `operator-answered` event without writing it.
+ * Call {@link appendDecisionEvent} afterwards to persist.
+ *
+ * RFC-0035 Phase 4 — AC#3: operator answers feed back into Decision
+ * resolution. The projection folds this event to set `lifecycle: 'answered'`.
+ */
+export function makeOperatorAnsweredEvent(input: AnswerDecisionInput): OperatorAnsweredEvent {
+  const ts = (input.now ?? new Date()).toISOString();
+  const event: OperatorAnsweredEvent = {
+    eventVersion: 'v1',
+    type: 'operator-answered',
+    ts,
+    decisionId: input.decisionId,
+    chosenOptionId: input.chosenOptionId,
+  };
+  if (input.rationale !== undefined) event.rationale = input.rationale;
   if (input.by !== undefined) event.by = input.by;
   return event;
 }
