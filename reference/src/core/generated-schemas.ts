@@ -1171,8 +1171,8 @@ export const compliancePostureV1Schema = {
         },
         attestedAt: {
           type: 'string',
-          description: 'ISO 8601 date when the regime was attested.',
-          format: 'date',
+          description:
+            "ISO 8601 timestamp (date-only OR full date-time) when the regime was attested. Examples: '2026-05-16' or '2026-05-16T14:30:00Z'. Validated by regex only — `format` is intentionally omitted because neither 'date' nor 'date-time' covers both shapes under strict ajv-formats (AISDLC-322 inline code-review MAJOR fix).",
           pattern: '^\\d{4}-\\d{2}-\\d{2}(T[\\d:.Z+-]+)?$',
         },
         attestedNotes: {
