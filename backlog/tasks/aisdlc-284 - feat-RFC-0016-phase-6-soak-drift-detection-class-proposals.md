@@ -1,7 +1,7 @@
 ---
 id: AISDLC-284
 title: 'feat: RFC-0016 Phase 6 — Soak + drift detection + class proposals'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15'
 labels:

@@ -176,7 +176,21 @@ export type OrchestratorEventType =
    * `predictedBucket`, `actualBucket`, `bucketMiss`,
    * `actualWallClockSec`, `estimateVariance`, `class`.
    */
-  | 'EstimateActualsRecorded';
+  | 'EstimateActualsRecorded'
+  /**
+   * AISDLC-284 (RFC-0016 Phase 6 / §7.4) — emitted when the bias
+   * over-correction pattern is detected: after the historical mean miss
+   * was positive (overestimate), the last ≥3 consecutive calibration
+   * records for the same class all have negative or zero bucket miss
+   * (underestimate or exact). Signals that the bias multiplier was
+   * over-corrected. Per-event fields: `taskClass`, `consecutiveMisses`
+   * (count of consecutive sign-flipped records), `meanMissOverall`
+   * (mean over all records for the class before the flip window),
+   * `meanMissRecent` (mean over the consecutive flip window).
+   *
+   * Operators should re-check the bias-multiplier value after this event.
+   */
+  | 'EstimateBiasOverCorrected';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional
