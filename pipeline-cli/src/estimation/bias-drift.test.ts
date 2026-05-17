@@ -155,6 +155,80 @@ describe('detectBiasDrift — AC #1 over-correction detection', () => {
     expect(choreCheck?.consecutiveNonPositive).toBe(1); // only the last one
   });
 
+  it('sets alreadyEmitted=false on first call and alreadyEmitted=true on second call with same records', () => {
+    // Over-correction pattern: historical overestimate, recent underestimate
+    writeCalibration(tmpDir, [
+      { taskId: 'AISDLC-1', class: 'feature', bucketMiss: 2, ts: '2026-04-01T10:00:00Z' },
+      { taskId: 'AISDLC-2', class: 'feature', bucketMiss: 1, ts: '2026-04-02T10:00:00Z' },
+      { taskId: 'AISDLC-3', class: 'feature', bucketMiss: 2, ts: '2026-04-03T10:00:00Z' },
+      { taskId: 'AISDLC-4', class: 'feature', bucketMiss: -1, ts: '2026-05-01T10:00:00Z' },
+      { taskId: 'AISDLC-5', class: 'feature', bucketMiss: 0, ts: '2026-05-02T10:00:00Z' },
+      { taskId: 'AISDLC-6', class: 'feature', bucketMiss: -1, ts: '2026-05-03T10:00:00Z' },
+    ]);
+
+    // First call — should detect over-correction and emit the event.
+    const result1 = detectBiasDrift({ artifactsDir: tmpDir, taskClass: 'feature' });
+    const check1 = result1.checks.find((c) => c.taskClass === 'feature');
+    expect(check1?.overCorrected).toBe(true);
+    expect(check1?.eventEmitted).toBe(true);
+    expect(check1?.alreadyEmitted).toBe(false);
+    expect(check1?.windowSignature).toBeDefined();
+
+    // Second call — same calibration data, same window signature.
+    // Must NOT re-emit the event (idempotency guarantee).
+    const result2 = detectBiasDrift({ artifactsDir: tmpDir, taskClass: 'feature' });
+    const check2 = result2.checks.find((c) => c.taskClass === 'feature');
+    expect(check2?.overCorrected).toBe(true);
+    expect(check2?.eventEmitted).toBe(false);
+    expect(check2?.alreadyEmitted).toBe(true);
+    // The window signature must be the same on both calls.
+    expect(check2?.windowSignature).toBe(check1?.windowSignature);
+  });
+
+  it('emits a fresh event when new calibration records extend the window', () => {
+    writeCalibration(tmpDir, [
+      { taskId: 'AISDLC-1', class: 'feature', bucketMiss: 2, ts: '2026-04-01T10:00:00Z' },
+      { taskId: 'AISDLC-2', class: 'feature', bucketMiss: 1, ts: '2026-04-02T10:00:00Z' },
+      { taskId: 'AISDLC-3', class: 'feature', bucketMiss: 2, ts: '2026-04-03T10:00:00Z' },
+      { taskId: 'AISDLC-4', class: 'feature', bucketMiss: -1, ts: '2026-05-01T10:00:00Z' },
+      { taskId: 'AISDLC-5', class: 'feature', bucketMiss: 0, ts: '2026-05-02T10:00:00Z' },
+      { taskId: 'AISDLC-6', class: 'feature', bucketMiss: -1, ts: '2026-05-03T10:00:00Z' },
+    ]);
+
+    // First call — emit event for tail window [AISDLC-4, AISDLC-5, AISDLC-6].
+    const result1 = detectBiasDrift({ artifactsDir: tmpDir, taskClass: 'feature' });
+    expect(result1.checks.find((c) => c.taskClass === 'feature')?.eventEmitted).toBe(true);
+    const sig1 = result1.checks.find((c) => c.taskClass === 'feature')?.windowSignature;
+
+    // Write a new record to a second calibration file (2026-06 month). The
+    // readCalibrationRecords helper reads ALL calibration-*.jsonl files, so the
+    // tail window shifts to [AISDLC-5, AISDLC-6, AISDLC-7] — a new signature.
+    writeFileSync(
+      join(tmpDir, '_estimates', 'calibration-2026-06.jsonl'),
+      JSON.stringify({
+        ts: '2026-06-01T10:00:00Z',
+        taskId: 'AISDLC-7',
+        class: 'feature',
+        predictedBucket: 'M',
+        actualBucket: 'L',
+        bucketMiss: -1,
+        actualWallClockSec: 4500,
+        source: 'events.jsonl',
+        estimateInputHash: 'sha256:xyz',
+        runIndex: 1,
+        estimateVariance: 0,
+      }) + '\n',
+    );
+
+    // Second call — extended tail → different signature → fresh event.
+    const result2 = detectBiasDrift({ artifactsDir: tmpDir, taskClass: 'feature' });
+    const check2 = result2.checks.find((c) => c.taskClass === 'feature');
+    expect(check2?.overCorrected).toBe(true);
+    expect(check2?.alreadyEmitted).toBe(false);
+    expect(check2?.eventEmitted).toBe(true);
+    expect(check2?.windowSignature).not.toBe(sig1);
+  });
+
   it('checks all non-uncategorized classes when taskClass is omitted', () => {
     // Only feature has over-correction; bug does not
     writeCalibration(tmpDir, [

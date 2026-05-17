@@ -210,6 +210,83 @@ describe('autoPromote — AC #5', () => {
     expect(result2.yamlUpdated).toBe(false);
   });
 
+  it('preserves existing class structure when a second distinct class is promoted', () => {
+    // This is the data-loss regression test: promote docs-rewrite first,
+    // then accumulate 3 infra-rebuild proposals and promote again.
+    // Both classes must retain their full structure after the second call.
+    for (let i = 0; i < 3; i++) {
+      appendProposal({
+        aiSdlcDir: tmpDir,
+        proposal: { ...EXAMPLE_PROPOSAL, taskId: `DR-${i}` },
+      });
+    }
+    autoPromote({ aiSdlcDir: tmpDir, now: () => new Date('2026-05-17T10:00:00Z') });
+
+    // Verify docs-rewrite was promoted with its full structure.
+    const classesAfterFirst = readClassesYaml(tmpDir);
+    expect('docs-rewrite' in classesAfterFirst).toBe(true);
+    expect(classesAfterFirst['docs-rewrite']!.definition).toBe(
+      EXAMPLE_PROPOSAL.structure.definition,
+    );
+    expect(classesAfterFirst['docs-rewrite']!.exemplars).toEqual(
+      EXAMPLE_PROPOSAL.structure.exemplars,
+    );
+    expect(classesAfterFirst['docs-rewrite']!.synonyms).toEqual(
+      EXAMPLE_PROPOSAL.structure.synonyms,
+    );
+
+    // Now accumulate 3 infra-rebuild proposals.
+    const infraProposal: Omit<ClassProposal, 'accepted'> = {
+      ts: '2026-05-17T11:00:00Z',
+      taskId: 'IR-0',
+      proposedClass: 'infra-rebuild',
+      structure: {
+        definition: 'Infrastructure rebuild with no user-visible feature change.',
+        exemplars: ['Rebuild Terraform modules from scratch'],
+        anti_patterns: ['Fix a bug in CI (this is bug)'],
+        synonyms: ['infra-rebuild', 'rebuild'],
+      },
+      confidence: 0.85,
+      rationale: 'Pure infrastructure rebuild task',
+    };
+    for (let i = 0; i < 3; i++) {
+      appendProposal({ aiSdlcDir: tmpDir, proposal: { ...infraProposal, taskId: `IR-${i}` } });
+    }
+
+    const result2 = autoPromote({ aiSdlcDir: tmpDir, now: () => new Date('2026-05-17T12:00:00Z') });
+    expect(result2.promotedCount).toBe(1);
+    expect(result2.promotedClasses).toContain('infra-rebuild');
+    expect(result2.yamlUpdated).toBe(true);
+
+    const classesAfterSecond = readClassesYaml(tmpDir);
+
+    // docs-rewrite structure must NOT have been wiped.
+    expect('docs-rewrite' in classesAfterSecond).toBe(true);
+    expect(classesAfterSecond['docs-rewrite']!.definition).toBe(
+      EXAMPLE_PROPOSAL.structure.definition,
+    );
+    expect(classesAfterSecond['docs-rewrite']!.exemplars).toEqual(
+      EXAMPLE_PROPOSAL.structure.exemplars,
+    );
+    expect(classesAfterSecond['docs-rewrite']!.synonyms).toEqual(
+      EXAMPLE_PROPOSAL.structure.synonyms,
+    );
+
+    // infra-rebuild must have been added with its full structure.
+    expect('infra-rebuild' in classesAfterSecond).toBe(true);
+    expect(classesAfterSecond['infra-rebuild']!.definition).toBe(
+      infraProposal.structure.definition,
+    );
+    expect(classesAfterSecond['infra-rebuild']!.exemplars).toEqual(
+      infraProposal.structure.exemplars,
+    );
+
+    // Starter classes must still be intact.
+    expect('bug' in classesAfterSecond).toBe(true);
+    expect('feature' in classesAfterSecond).toBe(true);
+    expect('chore' in classesAfterSecond).toBe(true);
+  });
+
   it('does not promote built-in starter classes when proposed', () => {
     // Even if someone proposes a class named "bug" with 3+ instances,
     // it should NOT clobber the starter.

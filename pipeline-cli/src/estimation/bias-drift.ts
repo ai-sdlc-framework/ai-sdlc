@@ -27,11 +27,15 @@
  *       recent record is an underestimate or exact).
  *  5. Emits `EstimateBiasOverCorrected` (RFC-0015 gated, best-effort).
  *
- * The detector is idempotent over a single calibration state: calling
- * it twice on the same records produces at most one event (the second
- * call returns `alreadyEmitted: true` once an event has been written for
- * the current window). A new over-correction event fires when fresh
- * calibration records extend the window.
+ * The detector is idempotent across processes: calling it twice on the
+ * same calibration state produces at most one event. Idempotency is
+ * enforced via a `windowSignature` — the SHA-256 of the sorted
+ * `taskId@ts` tuples of the tail window that triggered detection. Before
+ * emitting, the detector scans the date-rotated events files for an
+ * existing event with the same `taskClass` + `windowSignature`. If found,
+ * the call returns `alreadyEmitted: true` and skips the write. A new
+ * over-correction event fires only when fresh calibration records extend
+ * the window (changing the signature).
  *
  * Best-effort I/O: failures are surfaced via the optional logger but
  * never rethrown — a disk hiccup can't interrupt the pipeline.
@@ -39,6 +43,7 @@
  * @module estimation/bias-drift
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -90,8 +95,26 @@ export interface DriftCheckResult {
    * `bucketMiss ≤ 0`.
    */
   consecutiveNonPositive: number;
-  /** Whether a `EstimateBiasOverCorrected` event was emitted. */
+  /** Whether a `EstimateBiasOverCorrected` event was emitted in this call. */
   eventEmitted: boolean;
+  /**
+   * Whether a `EstimateBiasOverCorrected` event had already been emitted
+   * for this calibration window in a previous call. When `true`,
+   * `eventEmitted` is `false` (we did not re-emit the duplicate).
+   *
+   * Idempotency key: the SHA-256 of the concatenated `taskId@ts` tuples of
+   * the tail records that triggered the over-correction detection, stored
+   * as `windowSignature` on the emitted event. A second call with the same
+   * calibration state (same tail records) finds the matching event in
+   * `_orchestrator/events-*.jsonl` and short-circuits.
+   */
+  alreadyEmitted: boolean;
+  /**
+   * The window-level idempotency fingerprint (present when
+   * `overCorrected === true`). Included in the emitted event payload so
+   * that subsequent calls can de-duplicate without re-analysing all records.
+   */
+  windowSignature?: string;
 }
 
 export interface DetectBiasDriftResult {
@@ -128,21 +151,36 @@ export function detectBiasDrift(opts: DetectBiasDriftOpts = {}): DetectBiasDrift
     const check = analyzeClass(taskClass, records, threshold);
 
     let eventEmitted = false;
+    let alreadyEmitted = false;
+    let windowSignature: string | undefined;
+
     if (check.overCorrected) {
-      eventEmitted = writeEvent(
-        {
-          ts: (opts.now ?? ((): Date => new Date()))().toISOString(),
-          type: 'EstimateBiasOverCorrected',
-          taskClass,
-          consecutiveMisses: check.consecutiveNonPositive,
-          meanMissOverall: check.meanMissOverall,
-          meanMissRecent: check.meanMissRecent,
-        },
-        { artifactsDir, now: opts.now, logger: opts.logger },
+      // Sort ascending so the tail slice is deterministic.
+      const sorted = [...records].sort(
+        (a, b) => new Date(a.ts).getTime() - new Date(b.ts).getTime(),
       );
+      windowSignature = computeWindowSignature(sorted, threshold);
+
+      // Idempotency: only emit if no event with this windowSignature exists yet.
+      if (hasOverCorrectedEventInHistory(artifactsDir, taskClass, windowSignature)) {
+        alreadyEmitted = true;
+      } else {
+        eventEmitted = writeEvent(
+          {
+            ts: (opts.now ?? ((): Date => new Date()))().toISOString(),
+            type: 'EstimateBiasOverCorrected',
+            taskClass,
+            consecutiveMisses: check.consecutiveNonPositive,
+            meanMissOverall: check.meanMissOverall,
+            meanMissRecent: check.meanMissRecent,
+            windowSignature,
+          },
+          { artifactsDir, now: opts.now, logger: opts.logger },
+        );
+      }
     }
 
-    checks.push({ ...check, eventEmitted });
+    checks.push({ ...check, eventEmitted, alreadyEmitted, windowSignature });
   }
 
   const overCorrectedCount = checks.filter((c) => c.overCorrected).length;
@@ -151,12 +189,16 @@ export function detectBiasDrift(opts: DetectBiasDriftOpts = {}): DetectBiasDrift
 
 // ── Analysis ──────────────────────────────────────────────────────────────
 
+// Pure-analysis return type — excludes I/O fields (eventEmitted, alreadyEmitted, windowSignature)
+// that the caller sets based on the event-history check.
+type AnalysisResult = Omit<DriftCheckResult, 'eventEmitted' | 'alreadyEmitted' | 'windowSignature'>;
+
 function analyzeClass(
   taskClass: TaskClass,
   records: CalibrationRecord[],
   threshold: number,
-): Omit<DriftCheckResult, 'eventEmitted'> {
-  const base: Omit<DriftCheckResult, 'eventEmitted'> = {
+): AnalysisResult {
+  const base: AnalysisResult = {
     taskClass,
     overCorrected: false,
     totalRecords: records.length,
@@ -207,6 +249,77 @@ function analyzeClass(
 
 function resolveArtifactsDir(explicit: string | undefined): string {
   return explicit ?? process.env.ARTIFACTS_DIR ?? join(process.cwd(), 'artifacts');
+}
+
+/**
+ * Compute a stable fingerprint for the tail window of calibration records
+ * that triggered over-correction detection. Used as the idempotency key
+ * stored on the emitted `EstimateBiasOverCorrected` event.
+ *
+ * The signature is the SHA-256 hex of the sorted `taskId@ts` tuples of
+ * the last `windowSize` records (already sorted ascending by `ts` by the
+ * caller). Sorting the tuples makes the fingerprint order-independent
+ * within the window, which is robust against records being rewritten with
+ * the same logical content but different physical ordering.
+ */
+function computeWindowSignature(sortedRecords: CalibrationRecord[], windowSize: number): string {
+  const tail = sortedRecords.slice(-windowSize);
+  const canonical = tail
+    .map((r) => `${r.taskId}@${r.ts}`)
+    .sort()
+    .join('|');
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+/**
+ * Scan the date-rotated events files for an existing
+ * `EstimateBiasOverCorrected` event that matches `taskClass` and
+ * `windowSignature`. Returns `true` when found (caller should skip
+ * re-emission).
+ *
+ * Best-effort: any I/O error returns `false` (allow re-emission rather
+ * than silently swallowing a legitimate event).
+ */
+function hasOverCorrectedEventInHistory(
+  artifactsDir: string,
+  taskClass: TaskClass,
+  windowSignature: string,
+): boolean {
+  const dir = join(artifactsDir, '_orchestrator');
+  if (!existsSync(dir)) return false;
+
+  let files: string[];
+  try {
+    files = readdirSync(dir).filter((f) => /^events-\d{4}-\d{2}-\d{2}\.jsonl$/.test(f));
+  } catch {
+    return false;
+  }
+
+  for (const fileName of files) {
+    const filePath = join(dir, fileName);
+    let raw: string;
+    try {
+      raw = readFileSync(filePath, 'utf8');
+    } catch {
+      continue;
+    }
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const event = JSON.parse(line) as Record<string, unknown>;
+        if (
+          event.type === 'EstimateBiasOverCorrected' &&
+          event.taskClass === taskClass &&
+          event.windowSignature === windowSignature
+        ) {
+          return true;
+        }
+      } catch {
+        // Malformed line — skip silently.
+      }
+    }
+  }
+  return false;
 }
 
 function readCalibrationRecords(artifactsDir: string, taskClass: TaskClass): CalibrationRecord[] {

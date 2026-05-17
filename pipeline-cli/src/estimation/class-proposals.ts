@@ -414,28 +414,83 @@ function jsonStr(s: string): string {
 }
 
 /**
- * Minimal YAML parser for the classes file we wrote.
- * Returns the starter classes on any parse failure.
+ * Parse a YAML scalar value produced by `serializeClassesYaml` /
+ * `jsonStr`. Two forms are possible:
+ *  - JSON-quoted string (starts AND ends with `"`): unwrap via JSON.parse.
+ *  - Plain string (no surrounding quotes): return trimmed as-is.
  */
-function parseClassesYaml(raw: string): Record<string, ClassProposal['structure']> {
-  // We only need to recover the class names for the "skip if already exists"
-  // check. Full structure recovery is not needed for auto-promotion safety.
-  const result: Record<string, ClassProposal['structure']> = {};
-  const classNameRe = /^ {2}(\w[\w-]*):$/;
-  for (const line of raw.split('\n')) {
-    const m = classNameRe.exec(line);
-    if (m) {
-      const name = m[1]!;
-      // Populate a minimal structure so the key exists in the map.
-      result[name] = {
-        definition: '',
-        exemplars: [],
-        anti_patterns: [],
-        synonyms: [],
-      };
+function parseYamlScalar(raw: string): string {
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+    try {
+      return JSON.parse(trimmed) as string;
+    } catch {
+      // Malformed JSON-string escape — fall through to raw value.
     }
   }
-  // Always include the starters if they're not overridden.
+  return trimmed;
+}
+
+/**
+ * Full-fidelity YAML parser for the classes file we produce.
+ *
+ * Recovers the complete per-class structure (definition + exemplars +
+ * anti_patterns + synonyms) so that repeated `autoPromote` calls can
+ * round-trip through the file without losing previously promoted class
+ * content. The parser is a state-machine tuned to the exact indent layout
+ * emitted by `serializeClassesYaml` — it is NOT a general YAML parser.
+ *
+ * Returns the starter classes on any parse failure (empty result).
+ */
+function parseClassesYaml(raw: string): Record<string, ClassProposal['structure']> {
+  const result: Record<string, ClassProposal['structure']> = {};
+
+  type ListField = 'exemplars' | 'anti_patterns' | 'synonyms';
+  let currentClass: string | null = null;
+  let currentList: ListField | null = null;
+
+  // Regex patterns matched against our controlled serialization format.
+  const classNameRe = /^ {2}(\w[\w-]*):\s*$/;
+  const definitionRe = /^ {4}definition: (.+)$/;
+  const listHeaderRe = /^ {4}(exemplars|anti_patterns|synonyms):\s*$/;
+  const listItemRe = /^ {6}- (.+)$/;
+
+  for (const line of raw.split('\n')) {
+    // Skip comment and blank lines.
+    if (line.startsWith('#') || line.trim() === '' || line.trim() === 'classes:') continue;
+
+    const classMatch = classNameRe.exec(line);
+    if (classMatch) {
+      currentClass = classMatch[1]!;
+      currentList = null;
+      result[currentClass] = { definition: '', exemplars: [], anti_patterns: [], synonyms: [] };
+      continue;
+    }
+
+    if (!currentClass) continue;
+
+    const defMatch = definitionRe.exec(line);
+    if (defMatch) {
+      currentList = null;
+      result[currentClass]!.definition = parseYamlScalar(defMatch[1]!);
+      continue;
+    }
+
+    const listHeaderMatch = listHeaderRe.exec(line);
+    if (listHeaderMatch) {
+      currentList = listHeaderMatch[1] as ListField;
+      continue;
+    }
+
+    if (currentList !== null) {
+      const itemMatch = listItemRe.exec(line);
+      if (itemMatch) {
+        result[currentClass]![currentList].push(parseYamlScalar(itemMatch[1]!));
+      }
+    }
+  }
+
+  // Return starter classes when the file is empty or completely unparseable.
   if (Object.keys(result).length === 0) {
     return JSON.parse(JSON.stringify(STARTER_CLASSES)) as Record<
       string,
