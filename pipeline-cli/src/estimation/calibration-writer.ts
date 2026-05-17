@@ -226,7 +226,7 @@ export function recordCalibration(opts: RecordCalibrationOpts): RecordCalibratio
   const actualIdx = BUCKET_INDEX[actualBucket];
   const bucketMiss = predictedIdx - actualIdx; // positive = overestimate
 
-  // Step 6 — build and append the calibration record.
+  // Step 6 — build the calibration record.
   const record: CalibrationRecord = {
     ts,
     taskId: opts.taskId,
@@ -245,6 +245,24 @@ export function recordCalibration(opts: RecordCalibrationOpts): RecordCalibratio
   // backfills go into the correct historical file.
   const monthKey = ts.slice(0, 7); // "YYYY-MM"
   const calibrationPath = join(artifactsDir, '_estimates', `calibration-${monthKey}.jsonl`);
+
+  // Idempotency guard (AISDLC-281 inline code-review MAJOR fix): if a row
+  // for this taskId already exists in the current month's calibration
+  // file, skip the append. The orchestrator can re-emit
+  // `OrchestratorCompleted` on resume-from-checkpoint or spawner-fallback
+  // paths; without this guard, downstream signals (#2 historical actuals,
+  // #8 reviewer iterations) would double-count the task in their median
+  // + mean.
+  const existing = readCalibrationRecords(join(artifactsDir, '_estimates'), latestLog.class);
+  if (existing.some((r) => r.taskId === opts.taskId)) {
+    return {
+      record: null,
+      calibrationPath,
+      eventEmitted: false,
+      skipReason: `calibration record for ${opts.taskId} already exists (idempotency guard)`,
+    };
+  }
+
   appendCalibrationRecord(calibrationPath, record, opts.logger);
 
   // Step 7 — emit event (RFC-0015 flag gated, best-effort).
@@ -355,13 +373,20 @@ export function queryReviewerIterations(
   }
   const classTaskIds = new Set(classRecords.map((r) => r.taskId));
 
-  // Read all events and count IterateDev events per task.
+  // Read all events and count IterateDev transitions per task. The
+  // orchestrator loop does NOT emit a dedicated `OrchestratorIterateDev`
+  // event type — `ITERATE_DEV` is a WorkerState that arrives via
+  // `WorkerStateTransition` (see pipeline-cli/src/orchestrator/playbook/
+  // types.ts WorkerState union + loop.ts forwarding block ~line 889).
+  // Filtering for the never-emitted event type made signal #8 dead on
+  // arrival (AISDLC-281 inline code-review MAJOR fix).
   const allEvents = readOrchestratorEvents(orchestratorDir);
   const iterateEvents = allEvents.filter(
     (e) =>
       typeof e.taskId === 'string' &&
       classTaskIds.has(e.taskId) &&
-      e.type === 'OrchestratorIterateDev',
+      e.type === 'WorkerStateTransition' &&
+      (e['to'] === 'ITERATE_DEV' || e['toState'] === 'ITERATE_DEV'),
   );
 
   // Count per task.

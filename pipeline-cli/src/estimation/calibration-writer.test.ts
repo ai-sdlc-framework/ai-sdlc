@@ -14,7 +14,7 @@
  *  - Monthly rotation: records written in different months land in separate files.
  *  - Best-effort: missing events → skip (no crash).
  *  - queryHistoricalActuals returns unknown below n=5 threshold.
- *  - queryReviewerIterations counts OrchestratorIterateDev events per class.
+ *  - queryReviewerIterations counts WorkerStateTransition→ITERATE_DEV events per class.
  *  - estimateVariance computed correctly across same-hash ensemble rows.
  */
 
@@ -271,6 +271,40 @@ describe('recordCalibration — basic write (AC #1, AC #2)', () => {
     expect(files).toHaveLength(2);
     expect(files[0]).toContain('calibration-2026-05.jsonl');
     expect(files[1]).toContain('calibration-2026-06.jsonl');
+  });
+
+  // AISDLC-281 inline code-review MAJOR fix: orchestrator can re-emit
+  // OrchestratorCompleted on resume-from-checkpoint or spawner-fallback
+  // paths. Without the idempotency guard, a second recordCalibration()
+  // call for the same taskId would append a duplicate row + double-count
+  // the task in downstream signals.
+  it('refuses to append a duplicate row for the same taskId (idempotency guard)', () => {
+    writeEstimateLogRow(workdir, {
+      taskId: 'AISDLC-IDEMPOTENT',
+      taskClass: 'feature',
+      finalBucket: 'M',
+    });
+    writeEventsFile(workdir, '2026-05-15', [
+      { ts: '2026-05-15T10:00:00Z', type: 'OrchestratorDispatched', taskId: 'AISDLC-IDEMPOTENT' },
+      { ts: '2026-05-15T10:30:00Z', type: 'OrchestratorCompleted', taskId: 'AISDLC-IDEMPOTENT' },
+    ]);
+    const fixedNow = (): Date => new Date('2026-05-15T10:31:00Z');
+
+    const first = recordCalibration({
+      taskId: 'AISDLC-IDEMPOTENT',
+      artifactsDir: workdir,
+      now: fixedNow,
+    });
+    expect(first.record).not.toBeNull();
+    expect(first.skipReason).toBeUndefined();
+
+    const second = recordCalibration({
+      taskId: 'AISDLC-IDEMPOTENT',
+      artifactsDir: workdir,
+      now: fixedNow,
+    });
+    expect(second.record).toBeNull();
+    expect(second.skipReason).toMatch(/idempotency guard|already exists/i);
   });
 });
 
@@ -607,7 +641,7 @@ describe('queryReviewerIterations', () => {
     expect(r.meanIterations).toBe(0);
   });
 
-  it('counts OrchestratorIterateDev events per task in the class', () => {
+  it('counts WorkerStateTransition→ITERATE_DEV events per task in the class', () => {
     // Seed 2 feature tasks in calibration.
     writeCalibrationRecord(workdir, {
       taskId: 'FEAT-A',
@@ -626,8 +660,18 @@ describe('queryReviewerIterations', () => {
 
     // FEAT-A had 2 iterations, FEAT-B had 0.
     writeEventsFile(workdir, '2026-05-01', [
-      { ts: '2026-05-01T10:00:00Z', type: 'OrchestratorIterateDev', taskId: 'FEAT-A' },
-      { ts: '2026-05-01T10:30:00Z', type: 'OrchestratorIterateDev', taskId: 'FEAT-A' },
+      {
+        ts: '2026-05-01T10:00:00Z',
+        type: 'WorkerStateTransition',
+        to: 'ITERATE_DEV',
+        taskId: 'FEAT-A',
+      },
+      {
+        ts: '2026-05-01T10:30:00Z',
+        type: 'WorkerStateTransition',
+        to: 'ITERATE_DEV',
+        taskId: 'FEAT-A',
+      },
       // FEAT-B events but different type (not iteration)
       { ts: '2026-05-01T11:00:00Z', type: 'OrchestratorCompleted', taskId: 'FEAT-B' },
     ]);
@@ -654,8 +698,18 @@ describe('queryReviewerIterations', () => {
     });
 
     writeEventsFile(workdir, '2026-05-01', [
-      { ts: '2026-05-01T10:00:00Z', type: 'OrchestratorIterateDev', taskId: 'BUG-A' },
-      { ts: '2026-05-01T10:30:00Z', type: 'OrchestratorIterateDev', taskId: 'BUG-A' },
+      {
+        ts: '2026-05-01T10:00:00Z',
+        type: 'WorkerStateTransition',
+        to: 'ITERATE_DEV',
+        taskId: 'BUG-A',
+      },
+      {
+        ts: '2026-05-01T10:30:00Z',
+        type: 'WorkerStateTransition',
+        to: 'ITERATE_DEV',
+        taskId: 'BUG-A',
+      },
     ]);
 
     // Only querying feature class — FEAT-A has 0 iteration events.
@@ -713,10 +767,30 @@ describe('reviewerIterationSignal (signal #8)', () => {
 
     // BUG-A: 3 iterations; BUG-B: 1 iteration → mean = 2.0 > 1.0 → +1 bump
     writeEventsFile(workdir, '2026-05-01', [
-      { ts: '2026-05-01T10:00:00Z', type: 'OrchestratorIterateDev', taskId: 'BUG-A' },
-      { ts: '2026-05-01T10:30:00Z', type: 'OrchestratorIterateDev', taskId: 'BUG-A' },
-      { ts: '2026-05-01T11:00:00Z', type: 'OrchestratorIterateDev', taskId: 'BUG-A' },
-      { ts: '2026-05-01T12:00:00Z', type: 'OrchestratorIterateDev', taskId: 'BUG-B' },
+      {
+        ts: '2026-05-01T10:00:00Z',
+        type: 'WorkerStateTransition',
+        to: 'ITERATE_DEV',
+        taskId: 'BUG-A',
+      },
+      {
+        ts: '2026-05-01T10:30:00Z',
+        type: 'WorkerStateTransition',
+        to: 'ITERATE_DEV',
+        taskId: 'BUG-A',
+      },
+      {
+        ts: '2026-05-01T11:00:00Z',
+        type: 'WorkerStateTransition',
+        to: 'ITERATE_DEV',
+        taskId: 'BUG-A',
+      },
+      {
+        ts: '2026-05-01T12:00:00Z',
+        type: 'WorkerStateTransition',
+        to: 'ITERATE_DEV',
+        taskId: 'BUG-B',
+      },
     ]);
 
     const out = reviewerIterationSignal({ taskClass: 'bug', artifactsDir: workdir });
