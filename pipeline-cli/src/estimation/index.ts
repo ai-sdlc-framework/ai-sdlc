@@ -72,3 +72,23 @@ export {
   type EscalationInput,
   type StageBEnsembleResult,
 } from './stage-b.js';
+export {
+  calibrationStateFor,
+  computeBiasStats,
+  computeStageAVsStageBAccuracy,
+  formatStateToken,
+  bucketMissToBiasPercent,
+  type CalibrationState,
+  type AgentBiasStats,
+  type ClassBiasStats,
+  type ComputeBiasStatsOpts,
+  type StageAccuracyStats,
+} from './bias.js';
+export {
+  renderEstimateComment,
+  hasEstimateMarker,
+  renderCalibrationStateToken,
+  ESTIMATE_COMMENT_MARKER,
+  type RenderEstimateCommentOpts,
+  type RenderEstimateCommentResult,
+} from './pr-comment.js';

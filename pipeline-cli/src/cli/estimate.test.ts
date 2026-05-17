@@ -1,8 +1,9 @@
 /**
- * cli-estimate tests — RFC-0016 Phase 1 (AISDLC-279).
+ * cli-estimate tests — RFC-0016 Phase 1 + Phase 5 (AISDLC-279/283).
  *
  * Covers AC #5 (degrade-open when the feature flag is disabled) +
- * the JSON / table output shapes.
+ * the JSON / table output shapes for `stage-a`, `show`, and
+ * `render-pr-comment` subcommands.
  *
  * Each test snapshots `process.env`, mutates the flag, runs the CLI
  * via the `buildEstimateCli()` factory (no subprocess spawn), and
@@ -149,5 +150,100 @@ describe('cli-estimate stage-a — Phase 2 capture (--capture default)', () => {
     expect(row.stageA).toBeDefined();
     expect(row.finalBucket).toBeDefined();
     expect(typeof row.estimateInputHash).toBe('string');
+  });
+});
+
+// ── Phase 5: show <class> ─────────────────────────────────────────────────
+
+describe('cli-estimate show — Phase 5 (AC #1)', () => {
+  it('degrades open when flag is unset', async () => {
+    delete process.env[ESTIMATION_FLAG];
+    const cli = buildEstimateCli();
+    await cli.parseAsync(['show', 'feature']);
+    const out = JSON.parse(stdoutBuf.trim()) as { ok: boolean; disabled: boolean };
+    expect(out.ok).toBe(false);
+    expect(out.disabled).toBe(true);
+    const nonZeroExits = (exitSpy.mock.calls as unknown[][]).filter(
+      (call) => call[0] !== undefined && call[0] !== 0,
+    );
+    expect(nonZeroExits).toHaveLength(0);
+  });
+
+  it('returns JSON with bias + accuracy + historicalActuals for an empty calibration dir', async () => {
+    process.env[ESTIMATION_FLAG] = 'experimental';
+    const cli = buildEstimateCli();
+    await cli.parseAsync(['show', 'feature', '--workdir', tmp]);
+    const out = JSON.parse(stdoutBuf.trim()) as {
+      taskClass: string;
+      bias: { n: number; stateToken: string };
+      accuracy: { totalLogRows: number };
+      historicalActuals: { n: number; medianBucket: string | null };
+    };
+    expect(out.taskClass).toBe('feature');
+    expect(out.bias.n).toBe(0);
+    expect(out.bias.stateToken).toBe('(uncalibrated)');
+    expect(out.accuracy.totalLogRows).toBe(0);
+    expect(out.historicalActuals.n).toBe(0);
+    expect(out.historicalActuals.medianBucket).toBeNull();
+  });
+
+  it('rejects unknown class with non-zero exit', async () => {
+    process.env[ESTIMATION_FLAG] = 'experimental';
+    const cli = buildEstimateCli();
+    await cli.parseAsync(['show', 'not-a-class', '--workdir', tmp]);
+    expect(stderrBuf).toMatch(/unknown class/);
+    const nonZeroExits = (exitSpy.mock.calls as unknown[][]).filter(
+      (call) => call[0] !== undefined && call[0] !== 0,
+    );
+    expect(nonZeroExits.length).toBeGreaterThan(0);
+  });
+
+  it('emits table format when --format table is passed', async () => {
+    process.env[ESTIMATION_FLAG] = 'experimental';
+    const cli = buildEstimateCli();
+    await cli.parseAsync(['show', 'bug', '--workdir', tmp, '--format', 'table']);
+    expect(stdoutBuf).toContain('Class: bug');
+    expect(stdoutBuf).toContain('State:');
+    expect(stdoutBuf).toContain('Stage A vs Stage B accuracy');
+  });
+});
+
+// ── Phase 5: render-pr-comment ────────────────────────────────────────────
+
+describe('cli-estimate render-pr-comment — Phase 5 (AC #4)', () => {
+  it('degrades open when flag is unset', async () => {
+    delete process.env[ESTIMATION_FLAG];
+    const cli = buildEstimateCli();
+    await cli.parseAsync(['render-pr-comment', '--task-id', 'AISDLC-TEST']);
+    const out = JSON.parse(stdoutBuf.trim()) as { ok: boolean; disabled: boolean };
+    expect(out.ok).toBe(false);
+    expect(out.disabled).toBe(true);
+  });
+
+  it('renders comment body with idempotent marker for a valid task', async () => {
+    process.env[ESTIMATION_FLAG] = 'experimental';
+    writeTaskFile(tmp, {
+      id: 'AISDLC-PR1',
+      title: 'feat: render-pr-comment test',
+      references: ['src/a.ts'],
+    });
+    const cli = buildEstimateCli();
+    await cli.parseAsync(['render-pr-comment', '--task-id', 'AISDLC-PR1', '--workdir', tmp]);
+    // stdout should be the raw comment body (not JSON)
+    expect(stdoutBuf).toContain('<!-- ai-sdlc:estimate -->');
+    expect(stdoutBuf).toContain('**Estimated:**');
+    expect(stdoutBuf).toContain('**Class:**');
+    expect(stdoutBuf).toContain('(uncalibrated)'); // no calibration data yet
+  });
+
+  it('fails with non-zero exit when the task does not exist', async () => {
+    process.env[ESTIMATION_FLAG] = 'experimental';
+    const cli = buildEstimateCli();
+    await cli.parseAsync(['render-pr-comment', '--task-id', 'AISDLC-NOPE', '--workdir', tmp]);
+    expect(stderrBuf).toMatch(/task file not found/i);
+    const nonZeroExits = (exitSpy.mock.calls as unknown[][]).filter(
+      (call) => call[0] !== undefined && call[0] !== 0,
+    );
+    expect(nonZeroExits.length).toBeGreaterThan(0);
   });
 });

@@ -211,10 +211,28 @@ function runPsAx(): string {
  * We accept both uppercase and lowercase forms of the task ID in the process
  * table (the task ID is in the developer agent prompt which the spawner passes
  * via argv).
+ *
+ * ## Word-boundary matching (substring false-positive fix)
+ *
+ * Task IDs follow the pattern `AISDLC-NNN` (alpha prefix + hyphen + digits).
+ * Simple `String.includes()` produces false positives when the candidate task
+ * ID is a prefix of the running task's ID — e.g. checking for `AISDLC-2` in
+ * a process running `AISDLC-283` would match because `'AISDLC-283'.includes(
+ * 'AISDLC-2')` is truthy. To prevent this, we require that the task ID NOT be
+ * immediately followed by another digit character in the command string.
+ * This ensures `AISDLC-2` only matches `AISDLC-2` (followed by a non-digit),
+ * never `AISDLC-28` or `AISDLC-283`.
  */
 function findClaudeSubprocess(psOutput: string, taskId: string): number | null {
   const taskIdLower = taskId.toLowerCase();
-  const taskIdUpper = taskId.toUpperCase();
+  // Escape any regex special chars in the task ID (defensive; standard IDs
+  // are alphanumeric + hyphen and don't require escaping, but guard anyway).
+  const escapedId = taskIdLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Require the task ID to NOT be followed by a digit so `AISDLC-2` doesn't
+  // match inside `AISDLC-283`. Lookbehind is omitted intentionally: task IDs
+  // appear as standalone tokens (never embedded in a longer word that starts
+  // with the same prefix), so we only need the lookahead guard.
+  const taskPattern = new RegExp(`${escapedId}(?!\\d)`, 'i');
 
   for (const line of psOutput.split('\n')) {
     const trimmed = line.trim();
@@ -231,8 +249,8 @@ function findClaudeSubprocess(psOutput: string, taskId: string): number | null {
     if (!command.includes('claude')) continue;
     if (!command.includes('--print') && !/ -p(\s|$)/.test(command)) continue;
 
-    // Must reference the task ID.
-    if (command.includes(taskIdLower) || command.includes(taskIdUpper)) {
+    // Must reference the task ID with word-boundary protection (no digit suffix).
+    if (taskPattern.test(command)) {
       return pid;
     }
   }

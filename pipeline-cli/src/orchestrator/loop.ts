@@ -321,6 +321,20 @@ export interface OrchestratorAdapters {
     import('./filters/blast-radius-overlap.js').CheckBlastRadiusOverlapOpts,
     'taskId'
   >;
+  /**
+   * AISDLC-283 — options forwarded to the `AlreadyInFlight` filter.
+   * Tests inject `{ detectSubprocess: false, listOpenPRs: () => [] }` to
+   * keep the filter hermetic (no real `ps` or `gh` calls). When undefined the
+   * filter uses defaults (reads `AI_SDLC_ORCHESTRATOR_DETECT_SUBPROCESS` env,
+   * calls `gh pr list`, and runs `ps -ax` on Darwin/Linux).
+   *
+   * Typed as `Omit<..., 'taskId'>` so the adapter cannot supply a stray
+   * `taskId` that would override the per-candidate id injected by the chain.
+   */
+  alreadyInFlightOpts?: Omit<
+    import('./filters/already-in-flight.js').CheckAlreadyInFlightOpts,
+    'taskId'
+  >;
   /** RFC-0015 Phase 3 — wall-clock for event timestamps. Defaults to `Date.now()`. */
   now?: () => Date;
   /**
@@ -699,6 +713,13 @@ export async function runOrchestratorTick(
       // `references:`, scans `.worktrees/` sentinels, calls `gh`).
       ...(adapters.blastRadiusOverlapOpts !== undefined
         ? { blastRadiusOverlapOpts: adapters.blastRadiusOverlapOpts }
+        : {}),
+      // AISDLC-283 — pass already-in-flight options when provided.
+      // Tests inject `{ detectSubprocess: false, listOpenPRs: () => [] }` so
+      // the filter stays hermetic (no live `ps -ax` or `gh` calls). Production
+      // leaves this undefined and the filter reads env + real `gh`/`ps`.
+      ...(adapters.alreadyInFlightOpts !== undefined
+        ? { alreadyInFlightOpts: adapters.alreadyInFlightOpts }
         : {}),
     });
     logger.info(formatFilterTrace(candidate.id, chainResult));

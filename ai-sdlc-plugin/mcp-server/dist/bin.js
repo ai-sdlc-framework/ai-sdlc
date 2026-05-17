@@ -6801,8 +6801,8 @@ var require_dist = __commonJS({
 });
 
 // ../../pipeline-cli/dist/dor/resolvers/file-existence.js
-import { existsSync as existsSync37, readdirSync as readdirSync14, statSync as statSync12 } from "node:fs";
-import { join as join40 } from "node:path";
+import { existsSync as existsSync38, readdirSync as readdirSync15, statSync as statSync12 } from "node:fs";
+import { join as join41 } from "node:path";
 var init_file_existence = __esm({
   "../../pipeline-cli/dist/dor/resolvers/file-existence.js"() {
     "use strict";
@@ -21888,17 +21888,25 @@ var DEFAULT_LOGGER = {
 
 // ../../pipeline-cli/dist/runtime/shell-claude-p-spawner.js
 import { spawn as nodeSpawn } from "node:child_process";
+var DEFAULT_MODELS = {
+  developer: "claude-sonnet-4-6",
+  "code-reviewer": "claude-sonnet-4-6",
+  "test-reviewer": "claude-sonnet-4-6",
+  "security-reviewer": "claude-opus-4-6"
+};
 var DEFAULT_TIMEOUT_MS = 30 * 60 * 1e3;
 var ShellClaudePSpawner = class {
   binary;
   processSpawner;
   defaultTimeoutMs;
   extraArgs;
+  models;
   constructor(options = {}) {
     this.binary = options.binary ?? "claude";
     this.processSpawner = options.spawn ?? nodeSpawn;
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.extraArgs = options.extraArgs ?? [];
+    this.models = { ...DEFAULT_MODELS, ...options.models ?? {} };
   }
   async spawnParallel(opts) {
     return Promise.all(opts.map((o) => this.spawn1(o)));
@@ -21911,6 +21919,8 @@ var ShellClaudePSpawner = class {
    * inlined) so tests can assert the exact CLI shape without invoking `spawn`.
    */
   buildArgv(opts) {
+    const model = this.models[opts.type];
+    const modelArgv = model ? ["--model", model] : [];
     return [
       "--print",
       "--output-format",
@@ -21919,6 +21929,7 @@ var ShellClaudePSpawner = class {
       "bypassPermissions",
       "--agent",
       opts.type,
+      ...modelArgv,
       ...this.extraArgs,
       opts.prompt
     ];
@@ -22092,15 +22103,66 @@ function parseClaudeOutput(stdout) {
   if (typeof envelope === "object" && envelope !== null && "result" in envelope) {
     const result = envelope.result;
     if (typeof result === "string") {
-      try {
-        return JSON.parse(result);
-      } catch {
-        return result;
-      }
+      const parsed = tryParseJsonWithFenceStripping(result);
+      return parsed !== void 0 ? parsed : result;
     }
     return result;
   }
   return envelope;
+}
+function tryParseJsonWithFenceStripping(s) {
+  try {
+    return JSON.parse(s);
+  } catch {
+  }
+  const fenceMatch = s.match(/^\s*```(?:[a-zA-Z]+)?\s*\n([\s\S]*?)\n```\s*$/);
+  if (fenceMatch && fenceMatch[1]) {
+    try {
+      return JSON.parse(fenceMatch[1]);
+    } catch {
+    }
+  }
+  let cursor = s.indexOf("{");
+  while (cursor !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escape2 = false;
+    let end = -1;
+    for (let i = cursor; i < s.length; i++) {
+      const ch = s[i];
+      if (escape2) {
+        escape2 = false;
+        continue;
+      }
+      if (ch === "\\") {
+        escape2 = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString)
+        continue;
+      if (ch === "{")
+        depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+    if (end === -1)
+      return void 0;
+    try {
+      return JSON.parse(s.slice(cursor, end + 1));
+    } catch {
+      cursor = s.indexOf("{", cursor + 1);
+    }
+  }
+  return void 0;
 }
 function stringifyError(err) {
   if (err instanceof Error)
@@ -31671,13 +31733,17 @@ var BUDGET_EXHAUSTED_SUBSTRINGS = Object.freeze([
 import { appendFileSync as appendFileSync4, existsSync as existsSync36, mkdirSync as mkdirSync17, readFileSync as readFileSync34 } from "node:fs";
 import { dirname as dirname14, join as join39 } from "node:path";
 
+// ../../pipeline-cli/dist/decisions/stage-a.js
+import { existsSync as existsSync37, readdirSync as readdirSync14, readFileSync as readFileSync35 } from "node:fs";
+import { join as join40 } from "node:path";
+
 // ../../pipeline-cli/dist/dor/resolvers/index.js
 init_file_existence();
 init_file_existence();
 
 // ../../pipeline-cli/dist/dor/corpus.js
-import { existsSync as existsSync38, readFileSync as readFileSync35, readdirSync as readdirSync15, statSync as statSync13 } from "node:fs";
-import { basename as basename8, join as join41, relative as relative2 } from "node:path";
+import { existsSync as existsSync39, readFileSync as readFileSync36, readdirSync as readdirSync16, statSync as statSync13 } from "node:fs";
+import { basename as basename8, join as join42, relative as relative2 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/stage-b.js
 var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
@@ -31686,26 +31752,26 @@ var STAGE_B_EVALUATOR_VERSION = "stage-b-2026.05.01";
 var E2E_EVALUATOR_VERSION = `e2e-${STAGE_B_EVALUATOR_VERSION}`;
 
 // ../../pipeline-cli/dist/dor/dor-config.js
-import { existsSync as existsSync39, readFileSync as readFileSync36 } from "node:fs";
-import { join as join42 } from "node:path";
+import { existsSync as existsSync40, readFileSync as readFileSync37 } from "node:fs";
+import { join as join43 } from "node:path";
 
 // ../../pipeline-cli/dist/dor/ingress-claude.js
+import { existsSync as existsSync42, readFileSync as readFileSync39, readdirSync as readdirSync18 } from "node:fs";
+import { join as join45 } from "node:path";
+
+// ../../pipeline-cli/dist/dor/upstream-oq-gate.js
 import { existsSync as existsSync41, readFileSync as readFileSync38, readdirSync as readdirSync17 } from "node:fs";
 import { join as join44 } from "node:path";
 
-// ../../pipeline-cli/dist/dor/upstream-oq-gate.js
-import { existsSync as existsSync40, readFileSync as readFileSync37, readdirSync as readdirSync16 } from "node:fs";
-import { join as join43 } from "node:path";
-
 // ../../pipeline-cli/dist/dor/stats.js
-import { existsSync as existsSync42, readFileSync as readFileSync39 } from "node:fs";
+import { existsSync as existsSync43, readFileSync as readFileSync40 } from "node:fs";
 
 // ../../pipeline-cli/dist/dor/slack-digest.js
 var MS_PER_DAY = 24 * 60 * 60 * 1e3;
 
 // ../../pipeline-cli/dist/dor/trusted-reviewers-check.js
-import { existsSync as existsSync43, readFileSync as readFileSync40 } from "node:fs";
-import { join as join45 } from "node:path";
+import { existsSync as existsSync44, readFileSync as readFileSync41 } from "node:fs";
+import { join as join46 } from "node:path";
 
 // src/tools/pipeline-tools.ts
 var defaultStepRunners = {

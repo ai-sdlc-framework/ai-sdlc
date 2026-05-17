@@ -332,6 +332,39 @@ describe('checkAlreadyInFlight — signal (c): live subprocess', () => {
     });
     expect(result.passed).toBe(true);
   });
+
+  it('does NOT produce a false positive when the task ID is a prefix of a longer running task ID', () => {
+    // Guard against the AISDLC-2 vs AISDLC-283 false-positive: a process
+    // running task AISDLC-283 would previously match a filter check for
+    // AISDLC-2 because "AISDLC-283".includes("AISDLC-2") is truthy.
+    // The fix: require the task ID NOT be followed by a digit.
+    const psOutput = [
+      '  900 claude --print "Implement AISDLC-283 per the following instructions..."',
+    ].join('\n');
+
+    const result = checkAlreadyInFlight({
+      taskId: 'AISDLC-2', // looking for AISDLC-2 — should NOT match AISDLC-283
+      repoRoot: tmp,
+      listOpenPRs: () => [],
+      readProcessTable: () => psOutput,
+      detectSubprocess: true,
+    });
+    expect(result.passed).toBe(true); // No false positive
+  });
+
+  it('still matches when the shorter task ID IS exactly present (e.g. AISDLC-2 in a process for AISDLC-2)', () => {
+    const psOutput = ['  901 claude --print "Implement AISDLC-2 the short task"'].join('\n');
+
+    const result = checkAlreadyInFlight({
+      taskId: 'AISDLC-2',
+      repoRoot: tmp,
+      listOpenPRs: () => [],
+      readProcessTable: () => psOutput,
+      detectSubprocess: true,
+    });
+    expect(result.passed).toBe(false);
+    expect(result.detail).toMatchObject({ signal: 'live-subprocess', subprocessPid: 901 });
+  });
 });
 
 // ─── Signal priority ──────────────────────────────────────────────────────────
