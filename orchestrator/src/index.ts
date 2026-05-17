@@ -945,6 +945,32 @@ export {
   type MigrationDivergedEvent,
 } from './database/index.js';
 
+// RFC-0030 signal ingestion source adapters
+export {
+  AdapterCredentialInvalid,
+  CommunityThreadSignalSourceAdapter,
+  ManualSignalIncomplete,
+  ManualSignalSourceAdapter,
+  SignalSourceRegistry,
+  SignalSourceUnavailable,
+  SupportTicketSignalSourceAdapter,
+  UnknownSignalSource,
+  createDefaultSignalSourceRegistry,
+  fetchSignalsFromAvailableAdapters,
+  getSignalSourceAdapter,
+  type AdapterCredentialInvalidDecision,
+  type CommunityThreadAdapterOptions,
+  type CustomerTier,
+  type ManualSignalIncompleteDecision,
+  type ManualSignalInput,
+  type RawSignal,
+  type SignalFetchResult,
+  type SignalSourceAdapter,
+  type SignalSourceName,
+  type SignalTier,
+  type SupportTicketAdapterOptions,
+} from './signal-ingestion/index.js';
+
 // RFC-0010 artifacts (heartbeat + event stream + atomic JSON + state listing)
 export {
   StateWriter,
