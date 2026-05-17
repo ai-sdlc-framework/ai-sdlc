@@ -2,26 +2,32 @@
 id: RFC-0030
 title: Signal Ingestion Pipeline (Demand Sources → D1)
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: Alexander Kline
 created: 2026-05-04
-updated: 2026-05-04
+updated: 2026-05-16
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0005
   - RFC-0008
   - RFC-0011
+  - RFC-0019
+  - RFC-0022
+  - RFC-0024
+  - RFC-0025
   - RFC-0029
+  - RFC-0035
 requiresDocs: []
 ---
 
 # RFC-0030: Signal Ingestion Pipeline (Demand Sources → D1)
 
-**Document type:** Normative (draft)
-**Status:** Draft v1 — Initial proposal. Reformulates D1 (Demand Pressure / Customer Signal Accumulation) to consume classified, clustered, SA-filtered demand from external sources rather than human-authored backlog items.
-**Lifecycle:** Draft
+**Document type:** Normative
+**Status:** Ready for Review v0.2 — operator OQ walkthrough complete 2026-05-16; all 5 §13 OQs resolved (credential management deferred to future RFC; English-only v1 with multi-language deferred to v2; data residency delegated to RFC-0022 Compliance Posture; manual signal entry via `signal-source-manual` adapter with forced `attestedBy` + `attestedAt`; adversarial injection partial defense via Tier 2 significance threshold + future reputation-weighting). Operator-impacting events (unsupported language, residency violation, attestation gap, flooding detection) **route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts on signal-substrate edge cases. Implementation broken into 6 phase tasks (AISDLC-343..348).
+**Lifecycle:** Ready for Review
+**Updated:** 2026-05-16
 **Authors:** Alexander Kline (Head of Product Strategy / Product Authority; PPA v1.0/v1.1 author)
-**Requires:** RFC-0005 (PPA), RFC-0008 (PPA Triad Integration), RFC-0011 (DoR Gate), RFC-0029 (Product Pillar Architectural Vision — Principle 4 "The Soul Holds")
+**Requires:** RFC-0005 (PPA), RFC-0008 (PPA Triad Integration), RFC-0011 (DoR Gate), RFC-0019 (Embedding Provider Adapter — clustering option), RFC-0022 (Compliance Posture — data residency per OQ-13.3), RFC-0024 (Emergent Capture — catalog substrate), RFC-0025 (Framework Quality Monitoring — over-blocking audit), RFC-0029 (Product Pillar Architectural Vision — Principle 4 "The Soul Holds"), RFC-0035 (Decision Catalog — G0 non-blocking routing)
 
 > The bold-style status block above is preserved for human readability. The YAML frontmatter at the top of the file is the source of truth for tooling.
 
@@ -40,6 +46,7 @@ requiresDocs: []
 | Version | Date | Author | Notes |
 |---------|------|--------|-------|
 | v1 | 2026-05-04 | Alexander | Initial draft. Defines the signal ingestion pipeline (frontline + community + CRM + competitive + in-app sources → classified clusters → SA filter → D1 input). Reformulates D1 to consume cluster-level demand instead of raw backlog items. Specifies tier multipliers (configurable per deployment) + recency decay + Tier 2 significance threshold. |
+| v0.2 | 2026-05-16 | dominique | Operator OQ walkthrough resolved all 5 §13 OQs. Resolutions: delegate adapter credentials to future RFC (OQ-13.1); English-only v1 with multi-language deferred to v2 (OQ-13.2); delegate data residency to RFC-0022 Compliance Posture (OQ-13.3); `signal-source-manual` adapter with forced `attestedBy` + auto-filled `attestedAt` from git committer (OQ-13.4; reuses RFC-0022 OQ-2 audit-trail pattern); Tier 2 significance threshold as v1 partial defense with reputation-weighting as future Decision (OQ-13.5). Cross-cutting framing: operator-impacting events (unsupported language, residency violation, attestation gap, flooding) route through RFC-0035 G0 catalog. Frontmatter requires expanded: added RFC-0019 (embedding clustering option), RFC-0022 (residency), RFC-0024 (capture substrate), RFC-0025 (audit), RFC-0035 (catalog routing). Lifecycle promoted Draft → Ready for Review. Implementation broken into 6 phase tasks: AISDLC-343 (Phase 1 adapter interface + 2 default adapters), AISDLC-344 (Phase 2 classification), AISDLC-345 (Phase 3 clustering BM25 default + embedding option), AISDLC-346 (Phase 4 significance + SA + flooding), AISDLC-347 (Phase 5 D1 formula + RFC-0008 integration), AISDLC-348 (Phase 6 schema + governance events + runbook). |
 
 ---
 
@@ -296,27 +303,39 @@ Gates 2, 3, 7 (markers, references, dependencies) still run as structural checks
 
 This requires AdmissionInput to gain a `sourceType: 'signal-pipeline'` field per RFC-0029 Part II's RFC-0024 cross-reference.
 
-## 13. Open Questions
+## 13. Open Questions — resolved (operator walkthrough 2026-05-16)
+
+> **Resolution status (2026-05-16):** All 5 OQs resolved via operator walkthrough. Lifecycle promoted Draft → Ready for Review. **Cross-cutting framing:** operator-impacting events (unsupported language drop, residency violation, attestation gap, flooding detection) route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md) — pipeline never halts on signal-substrate edge cases; catalog absorbs with auto-action OR timeboxed default-on-silence. §11 already codifies per-org `.ai-sdlc/signal-ingestion.yaml` config schema. Implementation broken into 6 phase tasks: AISDLC-343 through AISDLC-348.
 
 ### 13.1 Adapter authentication / credential management
 
 The pipeline needs OAuth tokens / API keys for many sources. Should credential management be in this RFC, or delegated to a future RFC? **Position**: delegate to a future "Adapter Credential Management" RFC; this RFC requires only that adapters can self-validate.
 
+**Resolution (2026-05-16):** **Delegate to future "Adapter Credential Management" RFC** per the author Position. This RFC requires adapter `isAvailable()` self-validation only (similar to RFC-0010 HarnessAdapter + RFC-0019 EmbeddingAdapter `isAvailable()` pattern). Adapter auth failures during pipeline-load → `Decision: adapter-credential-invalid` → auto-action: emit credential-setup task for operator's batch review; pipeline continues with the remaining valid adapters. **Selected over inline credential management** because credential lifecycle (rotation, revocation, scope boundaries, OAuth refresh) is a substantial separate concern; conflating with signal-ingestion bloats this RFC's surface. Decision-Catalog tracks credential-setup demand to inform when the future RFC is justified.
+
 ### 13.2 Multi-language signal processing
 
 Sources may produce signals in non-English languages. Tier classification works on metadata (language-independent); ICP resonance and clustering on text payloads do not. **Position**: defer multi-language support to v2; v1 ships English-only with the limitation documented.
+
+**Resolution (2026-05-16):** **English-only v1; multi-language deferred to v2** per the author Position. Non-English signal detection at classifier → `Decision: signal-language-unsupported` → auto-action: drop signal + log to catalog (no pipeline halt; signal accumulates as visible-gap metric for operator batch review). Per-org `acceptedLanguages: [en]` config in `.ai-sdlc/signal-ingestion.yaml` (default; future-extensible to multi-language when v2 ships). **Selected over multi-language v1** because tier classification works on metadata (no blocker) but ICP resonance + clustering require language-specific tokenization/embeddings; that's a substantial v2 scope. The visible-gap accumulation surfaces actual adopter demand for the v2 work.
 
 ### 13.3 Privacy / customer-data residency
 
 Signals from EU customers may be subject to GDPR; signals from healthcare may be HIPAA-protected. **Position**: delegate to RFC-0022 (Compliance Posture). Adopters declaring HIPAA / GDPR posture get adapter-level data-handling guidance derived from regime mapping.
 
+**Resolution (2026-05-16):** **Delegate to RFC-0022 Compliance Posture** per the author Position. RFC-0022 (Ready for Review as of 2026-05-16) owns regime declaration + `derivedGates` composition. This RFC's adapters consume per-regime data-handling guidance via `compliance.derivedGates` lookup — e.g., GDPR-declared adopter gets adapter-level data-retention overrides, EU-residency adapter routing, right-to-erasure hooks. Residency violation detected at adapter level → `Decision: signal-residency-violation` → auto-action: refuse signal + log to catalog + emit `compliance.yaml regimeOverrides` clarification task. **Selected over inline privacy specification** because regime-derived gates are RFC-0022's substrate; conflating would duplicate the regime → controls mapping logic.
+
 ### 13.4 Manual signal entry
 
 Operators may want to enter signals manually (e.g., from a phone call). Should the pipeline accept manual entries? **Position**: yes, via a `signal-source-manual` adapter that requires `attestedBy` + `attestedAt` fields. Treats manual entries as Tier 1.
 
+**Resolution (2026-05-16):** **Yes — `signal-source-manual` adapter with forced `attestedBy` + auto-filled `attestedAt` from git committer + manual entries default to Tier 1** per the author Position. **Reuses the exact audit-trail pattern from RFC-0022 OQ-2** (forced rationale + auto-filled timestamp + auto-filled committer email). Manual entries missing required fields → `Decision: manual-signal-incomplete` → auto-action: refuse entry + emit clarification task; pipeline continues on automated sources. **Selected over informal manual entry** because operator-attested signals are higher-stakes than automated ones; explicit audit-trail prevents the manual-entry path from becoming a quality-substrate bypass.
+
 ### 13.5 Adversarial signal injection
 
 A bad actor could flood the community channel with fabricated signals. **Position**: the Tier 2 significance threshold (≥1 Tier 1 signal required) provides partial defense. A future RFC can add reputation-weighting per source if observed in practice.
+
+**Resolution (2026-05-16):** **Tier 2 significance threshold provides partial v1 defense; reputation-weighting per source = future Decision** per the author Position. Suspicious flooding detected (volume spike + low source diversity) → `Decision: signal-flooding-detected` → Stage A classifies severity (volume threshold + source-diversity threshold + per-source baseline drift) → auto-throttle low-confidence sources at per-org configurable threshold OR surface to operator batch review for high-severity cases. Composes with G0: pipeline never halts on flooding; the catalog batches the events. **Selected over reputation-weighting in v1** because per-source reputation requires meaningful corpus-window observation to calibrate; v1 ships the structural defense (Tier 2 threshold = "≥1 Tier 1 signal required"), v2 adds the calibrated reputation layer once corpus data justifies it.
 
 ## 14. Non-goals (re-stated)
 
