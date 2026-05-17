@@ -354,14 +354,18 @@ export class ShellClaudePSpawner implements SubagentSpawner {
 /**
  * Best-effort parse of the JSON envelope `claude --output-format json` emits.
  *
- * Handles three shapes:
+ * Handles four shapes:
  *
  *  1. `{ "type": "result", "result": "<json-string>", ... }` — the common case
  *     when the subagent returns structured JSON (per its return contract).
  *     We parse `result` as JSON and return that object.
- *  2. `{ "type": "result", "result": <object>, ... }` — when the CLI already
+ *  2. `{ "type": "result", "result": "```json\n{...}\n```", ... }` — when the
+ *     subagent wraps its JSON in a markdown code fence (LLMs do this even
+ *     when explicitly asked for raw JSON). AISDLC-351 inline-strips the
+ *     fence before parsing.
+ *  3. `{ "type": "result", "result": <object>, ... }` — when the CLI already
  *     returned `result` as a parsed object.
- *  3. The whole stdout is itself JSON — parse and return as-is.
+ *  4. The whole stdout is itself JSON — parse and return as-is.
  *
  * If none of these shape-checks succeed, returns `undefined` so the caller
  * can fall back to parsing the raw `output` string (which is what the
@@ -381,15 +385,84 @@ export function parseClaudeOutput(stdout: string): unknown | undefined {
   if (typeof envelope === 'object' && envelope !== null && 'result' in envelope) {
     const result = (envelope as { result: unknown }).result;
     if (typeof result === 'string') {
-      try {
-        return JSON.parse(result);
-      } catch {
-        return result;
-      }
+      const parsed = tryParseJsonWithFenceStripping(result);
+      // Returns the parsed value if any of the strategies worked; otherwise
+      // returns the raw string so the caller can still get the human text.
+      return parsed !== undefined ? parsed : result;
     }
     return result;
   }
   return envelope;
+}
+
+/**
+ * Try to parse `s` as JSON, with progressive fence-stripping fallbacks.
+ *
+ * Strategy order:
+ *   1. Direct `JSON.parse(s)` — works when LLM returned raw JSON.
+ *   2. Strip surrounding markdown code fence (```json\n...\n``` or ```\n...\n```)
+ *      — works when LLM wrapped JSON in a fenced code block.
+ *   3. Extract first balanced `{...}` substring + parse — works when LLM
+ *      prefaced the JSON with narrative text.
+ *
+ * Returns the parsed value on success, or `undefined` if all strategies fail.
+ * Defensive: never throws. AISDLC-351.
+ */
+export function tryParseJsonWithFenceStripping(s: string): unknown | undefined {
+  // Strategy 1: direct parse.
+  try {
+    return JSON.parse(s);
+  } catch {
+    // fall through
+  }
+
+  // Strategy 2: strip markdown code fence. Match `\`\`\`json\n` or `\`\`\`\n`
+  // at the start and `\n\`\`\`` at the end.
+  const fenceMatch = s.match(/^\s*```(?:[a-zA-Z]+)?\s*\n([\s\S]*?)\n```\s*$/);
+  if (fenceMatch && fenceMatch[1]) {
+    try {
+      return JSON.parse(fenceMatch[1]);
+    } catch {
+      // fall through to embedded-JSON extraction
+    }
+  }
+
+  // Strategy 3: find the first balanced `{...}` substring + parse. Useful
+  // when the LLM prefaced or suffixed the JSON with narrative text or when
+  // the fence regex didn't match (e.g. trailing whitespace after fence).
+  const start = s.indexOf('{');
+  if (start === -1) return undefined;
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < s.length; i++) {
+    const ch = s[i];
+    if (escape) {
+      escape = false;
+      continue;
+    }
+    if (ch === '\\') {
+      escape = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      continue;
+    }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') {
+      depth--;
+      if (depth === 0) {
+        try {
+          return JSON.parse(s.slice(start, i + 1));
+        } catch {
+          return undefined;
+        }
+      }
+    }
+  }
+  return undefined;
 }
 
 function stringifyError(err: unknown): string {

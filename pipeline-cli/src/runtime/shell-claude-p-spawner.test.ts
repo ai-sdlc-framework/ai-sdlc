@@ -200,6 +200,63 @@ describe('ShellClaudePSpawner', () => {
       expect(parseClaudeOutput('   ')).toBeUndefined();
       expect(parseClaudeOutput('not json {{{')).toBeUndefined();
     });
+
+    // AISDLC-351: LLMs (reviewer subagents) wrap JSON in markdown fences even
+    // when asked for raw JSON. The parser must strip fences before JSON.parse,
+    // otherwise the inner verdict object never reaches coerceReviewerVerdict
+    // and the pipeline synthesizes critical "no parseable verdict" findings.
+    it('strips markdown code fences around the result JSON (```json ... ```)', () => {
+      const stdout = JSON.stringify({
+        type: 'result',
+        result: '```json\n{"approved":true,"findings":[],"summary":"ok"}\n```',
+      });
+      expect(parseClaudeOutput(stdout)).toEqual({
+        approved: true,
+        findings: [],
+        summary: 'ok',
+      });
+    });
+
+    it('strips bare markdown fences without language tag (``` ... ```)', () => {
+      const stdout = JSON.stringify({
+        type: 'result',
+        result: '```\n{"approved":false,"findings":[]}\n```',
+      });
+      expect(parseClaudeOutput(stdout)).toEqual({ approved: false, findings: [] });
+    });
+
+    it('extracts embedded JSON when the LLM prefixes narrative text', () => {
+      const stdout = JSON.stringify({
+        type: 'result',
+        result:
+          'Here is my review:\n\n{"approved":true,"findings":[],"summary":"looks good"}\n\nLet me know if you have questions.',
+      });
+      expect(parseClaudeOutput(stdout)).toEqual({
+        approved: true,
+        findings: [],
+        summary: 'looks good',
+      });
+    });
+
+    it('extracts embedded JSON with nested objects/strings containing braces', () => {
+      const stdout = JSON.stringify({
+        type: 'result',
+        result:
+          'Sure:\n```json\n{"approved":true,"findings":[{"severity":"minor","message":"watch for {x:y} patterns"}]}\n```',
+      });
+      expect(parseClaudeOutput(stdout)).toEqual({
+        approved: true,
+        findings: [{ severity: 'minor', message: 'watch for {x:y} patterns' }],
+      });
+    });
+
+    it('falls back to raw string only when ALL parse strategies fail', () => {
+      const stdout = JSON.stringify({
+        type: 'result',
+        result: 'truly plain prose with no JSON anywhere',
+      });
+      expect(parseClaudeOutput(stdout)).toBe('truly plain prose with no JSON anywhere');
+    });
   });
 
   describe('failure modes', () => {
