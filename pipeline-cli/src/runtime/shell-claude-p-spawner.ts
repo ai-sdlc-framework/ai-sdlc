@@ -107,7 +107,28 @@ export interface ShellClaudePSpawnerOptions {
    * Useful for tests + advanced use cases (model override, beta flags).
    */
   extraArgs?: readonly string[];
+  /**
+   * Per-role model override. Merges with `DEFAULT_MODELS` (the same per-role
+   * split `ClaudeCliInlineSpawner` uses: sonnet for dev/code/test, opus for
+   * security). When a model is resolved for `opts.type`, the spawner emits
+   * `--model <model>` so the subagent runs on the intended tier instead of
+   * inheriting the session default. AISDLC-349 inline code-review MAJOR fix.
+   */
+  models?: Partial<Record<SubagentType, string>>;
 }
+
+/**
+ * Per-subagent-type model defaults — mirrors `DEFAULT_MODELS` in
+ * `claude-cli-inline.ts` so both spawners enforce the same split:
+ * dev/code/test on sonnet, security on opus (the costly reasoning-heavy
+ * tier). Documented in CLAUDE.md and AISDLC-349.
+ */
+const DEFAULT_MODELS: Partial<Record<SubagentType, string>> = {
+  developer: 'claude-sonnet-4-6',
+  'code-reviewer': 'claude-sonnet-4-6',
+  'test-reviewer': 'claude-sonnet-4-6',
+  'security-reviewer': 'claude-opus-4-6',
+};
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000; // 30 min
 
@@ -116,6 +137,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
   private readonly processSpawner: ProcessSpawner;
   private readonly defaultTimeoutMs: number;
   private readonly extraArgs: readonly string[];
+  private readonly models: Partial<Record<SubagentType, string>>;
 
   constructor(options: ShellClaudePSpawnerOptions = {}) {
     this.binary = options.binary ?? 'claude';
@@ -125,6 +147,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
     this.processSpawner = options.spawn ?? (nodeSpawn as ProcessSpawner);
     this.defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.extraArgs = options.extraArgs ?? [];
+    this.models = { ...DEFAULT_MODELS, ...(options.models ?? {}) };
   }
 
   async spawnParallel(opts: SpawnOpts[]): Promise<SubagentResult[]> {
@@ -140,6 +163,8 @@ export class ShellClaudePSpawner implements SubagentSpawner {
    * inlined) so tests can assert the exact CLI shape without invoking `spawn`.
    */
   buildArgv(opts: SpawnOpts): string[] {
+    const model = this.models[opts.type];
+    const modelArgv = model ? ['--model', model] : [];
     return [
       '--print',
       '--output-format',
@@ -148,6 +173,7 @@ export class ShellClaudePSpawner implements SubagentSpawner {
       'bypassPermissions',
       '--agent',
       opts.type,
+      ...modelArgv,
       ...this.extraArgs,
       opts.prompt,
     ];

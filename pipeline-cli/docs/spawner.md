@@ -22,11 +22,19 @@
 | Context | Use | Bills against (post-2026-06-15) |
 |---|---|---|
 | **`/ai-sdlc execute` slash command body (Tier 1)** | None — slash command body uses the main session's `Agent` tool directly | Operator's interactive Claude Code quota. `executePipeline()` is NOT called from Tier 1; the slash command body interleaves CLI subcommands with `Agent` tool calls. |
+| **`cli-orchestrator tick --spawner claude` (autonomous tick from cron/daemon, AISDLC-349)** | `ShellClaudePSpawner` (resolved via the `claude` spawner kind) | Operator's monthly Agent SDK credit ($200/mo on Max-20x). |
 | **`cli-orchestrator start` (autonomous loop)** | `defaultSpawner()` → resolves to `ShellClaudePSpawner` when `claude` CLI is on PATH | Operator's monthly Agent SDK credit ($200/mo on Max-20x). `claude -p` is explicitly covered by the new SDK credit pool. |
 | **`pnpm --filter @ai-sdlc/dogfood watch` (Tier 2, subscription)** | `defaultSpawner()` → `ShellClaudePSpawner` | Same — Agent SDK credit pool. |
 | **CI runner / webhook server / Forge tenant (Tier 2, SDK + API key)** | `defaultSpawner()` → resolves to `ClaudeCodeSDKSpawner` when `ANTHROPIC_API_KEY` is set | If the API key authenticates against a paid Claude subscription: Agent SDK credit pool first, then API-key overflow. Pure API key (no subscription): pay-as-you-go directly. Also: install `@anthropic-ai/claude-code` (lazy peer — see below). |
 | **Custom auth, tenant routing, alt SDK shape** | Implement your own `SubagentSpawner` (see [Custom spawner howto](#custom-spawner-howto)) | Whatever your spawner authenticates against. |
 | **Unit / integration tests** | `MockSpawner` from `@ai-sdlc/pipeline-cli` | Free — no LLM calls. |
+
+### `--spawner claude` vs `--spawner claude-cli` — naming gotcha
+
+The two kinds look similar but do different things:
+
+- **`--spawner claude-cli`** — emits a `dispatch-manifest.json` to `$ARTIFACTS_DIR/_orchestrator/`; the calling Claude Code slash command body reads the manifest + invokes the `Agent` tool. Use this for the `/ai-sdlc execute` flow where a slash command body IS the session. **Silently fails with `developer-json-contract-violated` when run from a plain shell** because nothing reads the manifest.
+- **`--spawner claude`** (AISDLC-349) — actually shells out to `claude -p` via `child_process.spawn`. Use this for `cli-orchestrator tick` from a cron / daemon / sidecar context where there is no slash command body. Same subscription billing as `claude-cli` would have been (both use the operator's logged-in Claude Code session), just executed differently. Honors the same per-role model split (`developer`/`code-reviewer`/`test-reviewer` → `claude-sonnet-4-6`; `security-reviewer` → `claude-opus-4-6`) that `ClaudeCliInlineSpawner` emits in its manifest.
 
 When in doubt, call `defaultSpawner()` — it picks the right one for your
 environment and throws a clear instructional error if neither subscription nor

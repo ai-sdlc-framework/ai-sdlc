@@ -151,11 +151,33 @@ describe('resolveSpawner', () => {
     const spawner = await resolveSpawner('claude');
     expect(typeof spawner.spawn).toBe('function');
     expect(typeof spawner.spawnParallel).toBe('function');
-    // Constructor-level check: the spawner advertises a `binary` field
-    // defaulting to 'claude'. Cast through unknown to peek at the
-    // private-by-convention field without exposing it in the public API.
-    const peek = spawner as unknown as { binary?: string };
-    expect(peek.binary).toBe('claude');
+    // Public-API check: buildArgv() returns the actual `claude -p` argv +
+    // resolves the per-role model. security-reviewer must pin to opus.
+    const argv = (
+      spawner as unknown as {
+        buildArgv: (opts: { type: string; prompt: string; cwd: string }) => string[];
+      }
+    ).buildArgv({ type: 'security-reviewer', prompt: 'noop', cwd: '/tmp' });
+    expect(argv).toContain('--print');
+    expect(argv).toContain('--output-format');
+    expect(argv).toContain('--agent');
+    expect(argv).toContain('security-reviewer');
+    // AISDLC-349 inline code-review MAJOR fix: per-role model split enforced
+    // at the spawner level via --model flag (agent files have model:inherit,
+    // so without --model the role would inherit session default).
+    expect(argv).toContain('--model');
+    expect(argv).toContain('claude-opus-4-6');
+  });
+
+  it('per-role model split: developer uses sonnet via --spawner claude (AISDLC-349)', async () => {
+    const spawner = await resolveSpawner('claude');
+    const argv = (
+      spawner as unknown as {
+        buildArgv: (opts: { type: string; prompt: string; cwd: string }) => string[];
+      }
+    ).buildArgv({ type: 'developer', prompt: 'noop', cwd: '/tmp' });
+    expect(argv).toContain('--model');
+    expect(argv).toContain('claude-sonnet-4-6');
   });
 
   it('returns a CodexHarnessAdapter when kind=codex and CODEX_SPAWN_AGENT_BIN is set (AISDLC-202.2)', async () => {

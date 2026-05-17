@@ -69,9 +69,11 @@ const opts = (overrides: Partial<SpawnOpts> = {}): SpawnOpts => ({
 
 describe('ShellClaudePSpawner', () => {
   describe('argv shape', () => {
-    it('builds the expected argv: --print, --output-format json, --permission-mode bypassPermissions, --agent <type>, prompt LAST', () => {
+    it('builds the expected argv: --print, --output-format json, --permission-mode bypassPermissions, --agent <type>, --model <per-role>, prompt LAST', () => {
       const spawner = new ShellClaudePSpawner();
       const argv = spawner.buildArgv(opts({ type: 'code-reviewer', prompt: 'review please' }));
+      // AISDLC-349: --model <per-role> is now emitted automatically per
+      // DEFAULT_MODELS (code-reviewer → claude-sonnet-4-6).
       expect(argv).toEqual([
         '--print',
         '--output-format',
@@ -80,15 +82,19 @@ describe('ShellClaudePSpawner', () => {
         'bypassPermissions',
         '--agent',
         'code-reviewer',
+        '--model',
+        'claude-sonnet-4-6',
         'review please',
       ]);
     });
 
     it('includes extraArgs BEFORE the prompt positional', () => {
       const spawner = new ShellClaudePSpawner({
-        extraArgs: ['--model', 'opus', '--effort', 'high'],
+        extraArgs: ['--effort', 'high'],
       });
       const argv = spawner.buildArgv(opts({ prompt: 'X' }));
+      // AISDLC-349: --model claude-sonnet-4-6 (developer default) comes
+      // BEFORE extraArgs but AFTER --agent.
       expect(argv).toEqual([
         '--print',
         '--output-format',
@@ -98,7 +104,7 @@ describe('ShellClaudePSpawner', () => {
         '--agent',
         'developer',
         '--model',
-        'opus',
+        'claude-sonnet-4-6',
         '--effort',
         'high',
         'X',
