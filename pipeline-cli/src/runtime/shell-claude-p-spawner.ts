@@ -427,39 +427,53 @@ export function tryParseJsonWithFenceStripping(s: string): unknown | undefined {
     }
   }
 
-  // Strategy 3: find the first balanced `{...}` substring + parse. Useful
-  // when the LLM prefaced or suffixed the JSON with narrative text or when
-  // the fence regex didn't match (e.g. trailing whitespace after fence).
-  const start = s.indexOf('{');
-  if (start === -1) return undefined;
-  let depth = 0;
-  let inString = false;
-  let escape = false;
-  for (let i = start; i < s.length; i++) {
-    const ch = s[i];
-    if (escape) {
-      escape = false;
-      continue;
-    }
-    if (ch === '\\') {
-      escape = true;
-      continue;
-    }
-    if (ch === '"') {
-      inString = !inString;
-      continue;
-    }
-    if (inString) continue;
-    if (ch === '{') depth++;
-    else if (ch === '}') {
-      depth--;
-      if (depth === 0) {
-        try {
-          return JSON.parse(s.slice(start, i + 1));
-        } catch {
-          return undefined;
+  // Strategy 3: scan forward for balanced `{...}` substrings and try
+  // JSON.parse on each candidate. AISDLC-351 code-review inline-fix: an
+  // earlier version returned `undefined` on the FIRST candidate's parse
+  // fail, which defeated the strategy when the LLM emitted bare brace
+  // expressions before the real JSON (e.g. `Summary of {x:y} changes:
+  // {"approved":true,...}` — the first candidate `{x:y}` fails parse, and
+  // pre-fix the function gave up before reaching the real JSON). Now we
+  // search forward from each `{` until we find one whose balanced span
+  // parses cleanly, falling through to `undefined` only when ALL candidates
+  // fail.
+  let cursor = s.indexOf('{');
+  while (cursor !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    let end = -1;
+    for (let i = cursor; i < s.length; i++) {
+      const ch = s[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          end = i;
+          break;
         }
       }
+    }
+    if (end === -1) return undefined; // no closing brace found
+    try {
+      return JSON.parse(s.slice(cursor, end + 1));
+    } catch {
+      // try the next `{` after the current position — could be a later
+      // balanced span that parses cleanly
+      cursor = s.indexOf('{', cursor + 1);
     }
   }
   return undefined;

@@ -257,6 +257,19 @@ describe('ShellClaudePSpawner', () => {
       });
       expect(parseClaudeOutput(stdout)).toBe('truly plain prose with no JSON anywhere');
     });
+
+    // AISDLC-351 code-review minor #1: strategy 3 used to give up on the
+    // FIRST balanced-brace candidate's JSON.parse fail. That defeated the
+    // fix when an LLM emitted bare brace expressions BEFORE the real JSON.
+    // Now strategy 3 scans forward until it finds a span that parses
+    // cleanly, OR exhausts all `{` positions.
+    it('strategy 3 scans forward past invalid brace candidates to find real JSON', () => {
+      const stdout = JSON.stringify({
+        type: 'result',
+        result: 'Summary of {x:y} changes and {also-not-json}: {"approved":true,"findings":[]}',
+      });
+      expect(parseClaudeOutput(stdout)).toEqual({ approved: true, findings: [] });
+    });
   });
 
   describe('failure modes', () => {
