@@ -20,6 +20,7 @@ import type {
   Decision,
   DecisionEvent,
   DecisionOpenedEvent,
+  RecommendationIssuedEvent,
   OperatorAnsweredEvent,
 } from './decision-record.js';
 
@@ -63,6 +64,26 @@ function applyEvent(current: Decision | null, event: DecisionEvent): Decision | 
       decisionLog: [...(current?.decisionLog ?? []), event],
     };
     return decision;
+  }
+
+  if (event.type === 'recommendation-issued') {
+    // Phase 2 — AC#4: store Stage A signal breakdown on the Decision record.
+    if (current === null) return null;
+    const rec = event as RecommendationIssuedEvent;
+    return {
+      ...current,
+      metadata: { ...current.metadata, updated: event.ts },
+      status: {
+        ...current.status,
+        evaluation: {
+          ...(current.status.evaluation ?? {}),
+          stageA: rec.stageA,
+        },
+        priority: rec.prioritySignal,
+        ...(rec.routing !== undefined ? { routing: rec.routing } : {}),
+      },
+      decisionLog: [...current.decisionLog, event],
+    };
   }
 
   if (event.type === 'operator-answered') {

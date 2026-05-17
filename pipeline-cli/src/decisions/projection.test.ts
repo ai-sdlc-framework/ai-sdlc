@@ -56,12 +56,17 @@ describe('projectDecision', () => {
     expect(d!.decisionLog[0].type).toBe('decision-opened');
   });
 
-  it('appends unknown forward-compat events into decisionLog without state mutation', () => {
+  it('appends not-yet-handled forward-compat events into decisionLog without state mutation', () => {
     openDecision('DEC-0001', 'first', '2026-05-15T10:00:00Z');
+    // `timebox-fired` is a known event type in the registry but not yet
+    // handled by the Phase 2 projection — it should be appended to decisionLog
+    // and update metadata.updated without mutating spec/status fields.
+    // (Note: `operator-answered` is now handled by Phase 4 logic merged via
+    // AISDLC-288/#511, so we use `timebox-fired` as the forward-compat example.)
     appendDecisionEvent(
       {
         eventVersion: 'v1',
-        type: 'recommendation-issued',
+        type: 'timebox-fired',
         ts: '2026-05-15T11:00:00.000Z',
         decisionId: 'DEC-0001',
         by: 'framework',
@@ -70,7 +75,7 @@ describe('projectDecision', () => {
     );
     const d = projectDecision('DEC-0001', { workDir });
     expect(d!.decisionLog).toHaveLength(2);
-    expect(d!.status.lifecycle).toBe('open'); // unchanged by Phase 1 projection
+    expect(d!.status.lifecycle).toBe('open'); // unchanged by forward-compat path
     expect(d!.metadata.updated).toBe('2026-05-15T11:00:00.000Z');
   });
 });

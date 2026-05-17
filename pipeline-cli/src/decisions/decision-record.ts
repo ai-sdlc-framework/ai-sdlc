@@ -193,16 +193,97 @@ export interface OperatorAnsweredEvent extends DecisionEventEnvelope {
 
 /**
  * Discriminated union of every event the projection knows how to fold.
- * Phase 1 only emits `DecisionOpenedEvent`; Phase 4 adds `OperatorAnsweredEvent`.
- * The projection tolerates unknown event types so the reader stays
- * forward-compatible when a later phase adds a new type.
+ * Phase 1 only emits `DecisionOpenedEvent`; Phase 2 adds `RecommendationIssuedEvent`;
+ * Phase 4 adds `OperatorAnsweredEvent`. The projection tolerates unknown event
+ * types so the reader stays forward-compatible when a later phase adds a new type.
  */
 export type DecisionEvent =
   | DecisionOpenedEvent
+  | RecommendationIssuedEvent
   | OperatorAnsweredEvent
   | (DecisionEventEnvelope & {
-      type: Exclude<DecisionEventType, 'decision-opened' | 'operator-answered'>;
+      type: Exclude<
+        DecisionEventType,
+        'decision-opened' | 'recommendation-issued' | 'operator-answered'
+      >;
     } & Record<string, unknown>);
+
+// ── Stage A output types (Phase 2) ──────────────────────────────────────────
+
+/**
+ * RFC-0035 §5.1 blast-radius from RFC-0014 dep-graph traversal.
+ */
+export interface StageABlastRadius {
+  /** Open tasks whose dep-on list includes this decision (or scope-referenced task). */
+  blockedTaskCount: number;
+  /** RFCs with open questions that this decision's scope references. */
+  blockedRfcCount: number;
+  /** Engineering / product / design pillars affected. */
+  affectedPillars: string[];
+}
+
+/**
+ * Duplicate-detection result (Levenshtein + normalized-summary).
+ */
+export interface StageADuplicateCheck {
+  isDuplicate: boolean;
+  /** DEC-NNNN of the candidate, or null when unique. */
+  candidateId: string | null;
+  /** Normalised similarity score [0,1] — 1 = identical. */
+  similarity: number;
+}
+
+/**
+ * Per-decision Stage A signal breakdown stored on the Decision record
+ * (AC#4 — stored in `status.evaluation.stageA`).
+ */
+export interface StageAOutput {
+  /** 1. Schema validity — JSON-schema + structural checks. */
+  schemaValidity: { valid: boolean; reasons: string[] };
+  /** 2. Blast-radius from RFC-0014 dep-graph (AC#2). */
+  blastRadius: StageABlastRadius;
+  /** 3. Reference resolution — scope + dependsOn refs resolved against graph. */
+  referenceResolution: { resolved: boolean; broken: string[] };
+  /** 4. Decision-tree depth — max depth of declared subDecisions[]. */
+  decisionTreeDepth: number;
+  /** 5. Capacity arithmetic — proposed actor vs remaining daily budget. */
+  capacityCheck: { withinBudget: boolean; reason: string };
+  /** 6. Reversibility — pattern-match against irreversible categories. */
+  reversibility: 'reversible' | 'one-way' | 'unknown';
+  /** 7. Duplicate detection — Levenshtein against open decisions. */
+  duplicateDetection: StageADuplicateCheck;
+  /** Composite priority signal [0,1]. Higher = more urgent. */
+  prioritySignal: number;
+  /**
+   * AC#3 — true when all inputs are deterministic and no Stage B/C LLM call
+   * is needed to determine routing and priority.
+   */
+  resolvedByStageA: boolean;
+  /**
+   * Actor determined unambiguously by Stage A alone, or null when Stage B/C
+   * is needed to resolve routing.
+   */
+  routingActor: string | null;
+}
+
+// ── recommendation-issued event (Phase 2) ────────────────────────────────────
+
+/**
+ * Emitted when Stage A (and optionally Stage B/C) produces a recommendation.
+ * Phase 2 ships the Stage A portion; Stage B/C fields are added in later
+ * phases. Stored on the Decision record via the projection (AC#4).
+ */
+export interface RecommendationIssuedEvent extends DecisionEventEnvelope {
+  type: 'recommendation-issued';
+  /** Stage A output — always present for Phase 2 events. */
+  stageA: StageAOutput;
+  /** Composite priority signal carried here for quick access in the projection. */
+  prioritySignal: number;
+  /** Routing recommendation from Stage A. */
+  routing?: DecisionRouting;
+  /** AC#3 — whether Stage A resolved routing without Stage B/C. */
+  resolvedByStageA: boolean;
+}
 
 // ── Validators ───────────────────────────────────────────────────────────────
 

@@ -338,3 +338,151 @@ describe('log-path subcommand', () => {
     expect(r.exists).toBe(false);
   });
 });
+
+// ── score-a subcommand (AC#1, AC#2, AC#3, AC#4) ──────────────────────────────
+
+describe('score-a subcommand (Phase 2 AC#1 AC#2 AC#3 AC#4)', () => {
+  async function seedAndScore(
+    summary: string,
+    extra: string[] = [],
+  ): Promise<Record<string, unknown>> {
+    setArgv(
+      'add',
+      '--summary',
+      summary,
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--option',
+      'opt-b:B',
+      '--reversible',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+    const addResult = stdoutJson<{ decisionId: string }>();
+    const id = addResult.decisionId;
+
+    stdoutChunks = [];
+    setArgv('score-a', id, '--format', 'json', ...extra);
+    await buildDecisionsCli().parseAsync();
+    return stdoutJson<Record<string, unknown>>();
+  }
+
+  it('returns a Stage A result with all required fields', async () => {
+    const r = await seedAndScore('choose a deployment strategy');
+    expect(r.ok).toBe(true);
+    expect(r.enabled).toBe(true);
+    expect(r.stageA).toBeTruthy();
+    const stageA = r.stageA as Record<string, unknown>;
+    expect(typeof stageA.prioritySignal).toBe('number');
+    expect(typeof stageA.resolvedByStageA).toBe('boolean');
+    expect(stageA.schemaValidity).toBeTruthy();
+    expect(stageA.blastRadius).toBeTruthy();
+    expect(stageA.reversibility).toBeTruthy();
+    expect(stageA.duplicateDetection).toBeTruthy();
+  });
+
+  it('stores the result when --store is passed (AC#4)', async () => {
+    const r = await seedAndScore('a reversible decision to store', ['--store']);
+    expect(r.stored).toBe(true);
+
+    // The decision should now have stageA in its evaluation
+    stdoutChunks = [];
+    const id = r.decisionId as string;
+    setArgv('show', id, '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const showResult = stdoutJson<{
+      decision: { status: { evaluation: Record<string, unknown> } };
+    }>();
+    expect(showResult.decision.status.evaluation?.stageA).toBeTruthy();
+  });
+
+  it('degrades open when flag is unset', async () => {
+    delete process.env.AI_SDLC_DECISION_CATALOG;
+    setArgv('score-a', 'DEC-0001', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ enabled: boolean }>();
+    expect(r.enabled).toBe(false);
+  });
+
+  it('fails for unknown decision id', async () => {
+    setArgv('score-a', 'DEC-9999', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+  });
+
+  it('rejects malformed decision ids', async () => {
+    setArgv('score-a', 'not-an-id', '--format', 'json');
+    await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+    expect(stderrText()).toMatch(/invalid decision id/);
+  });
+});
+
+// ── coverage subcommand (AC#6) ────────────────────────────────────────────────
+
+describe('coverage subcommand (Phase 2 AC#6)', () => {
+  it('returns coverage=0 for an empty catalog', async () => {
+    setArgv('coverage', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      ok: boolean;
+      coverage: { totalDecisions: number; coverageRate: number };
+      target: number;
+    }>();
+    expect(r.ok).toBe(true);
+    expect(r.coverage.totalDecisions).toBe(0);
+    expect(r.coverage.coverageRate).toBe(0);
+    expect(r.target).toBe(0.4);
+  });
+
+  it('reports non-zero coverage when reversible decisions exist', async () => {
+    // Seed one reversible decision
+    setArgv(
+      'add',
+      '--summary',
+      'reversible-decision',
+      '--scope',
+      'workspace',
+      '--option',
+      'opt-a:A',
+      '--reversible',
+      '--format',
+      'json',
+    );
+    await buildDecisionsCli().parseAsync();
+
+    stdoutChunks = [];
+    setArgv('coverage', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{
+      coverage: {
+        totalDecisions: number;
+        resolvedByStageA: number;
+        coverageRate: number;
+        meetsTarget: boolean;
+      };
+    }>();
+    expect(r.coverage.totalDecisions).toBe(1);
+    // Reversible + valid schema + no broken refs + no dups → resolvedByStageA=true
+    expect(r.coverage.resolvedByStageA).toBe(1);
+    expect(r.coverage.coverageRate).toBe(1);
+    expect(r.coverage.meetsTarget).toBe(true);
+  });
+
+  it('degrades open when flag is unset', async () => {
+    delete process.env.AI_SDLC_DECISION_CATALOG;
+    setArgv('coverage', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ enabled: boolean }>();
+    expect(r.enabled).toBe(false);
+  });
+
+  it('prints text output by default', async () => {
+    setArgv('coverage');
+    await buildDecisionsCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/Stage A coverage/);
+    expect(out).toMatch(/target/);
+  });
+});
