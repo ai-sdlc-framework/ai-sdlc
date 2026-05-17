@@ -1,0 +1,85 @@
+# Regime → DerivedGates mapping (RFC-0022 §6)
+#
+# Canonical source of truth for what gate values each regulatory regime requires.
+# Data, not schema — changes go through PR review (see RFC-0022 §13 Q7 + Q1).
+#
+# Tightest-constraint composition semantics (RFC-0022 §6):
+#   databaseBranchPool:    'per-shard' beats 'shared-with-rls'
+#   secretScanStrictness:  ordinal min<standard<strict; max wins
+#   attestationRequired:   true beats false
+#   auditRetentionDays:    max wins
+#   reviewerAuthorityModel: ordinal open<allowlist<allowlist+role; max wins
+#
+# Adopter override: compliance.yaml 'regimeOverrides' lets adopters supply
+# per-regime control overrides before the operator-override pass (OQ-1, v1).
+#
+# Reviewed annually per RFC-0022 §13 Q3; updated per-RFC when a new RFC adds
+# framework features (§13 Q7 process discipline).
+
+regimes:
+  SOC2-T2:
+    # SOC 2 Type 2 — Service Organization Control; 12-month audit period.
+    # DB pool: per-shard recommended (auditors accept shared+RLS with controls evidence)
+    # but the framework defaults to per-shard to avoid undocumented deviation.
+    databaseBranchPool: per-shard
+    secretScanStrictness: strict
+    attestationRequired: true
+    # 365 days hot + 6 years cold = 2555 days minimum retention floor.
+    auditRetentionDays: 2555
+    reviewerAuthorityModel: allowlist+role
+
+  HIPAA:
+    # Health Insurance Portability and Accountability Act (US healthcare).
+    # HIPAA §164.310(d)(2)(iii) requires per-entity PHI isolation — per-shard REQUIRED.
+    databaseBranchPool: per-shard
+    secretScanStrictness: strict
+    attestationRequired: true
+    # HIPAA §164.530(j): records retention 6 years from creation or last effective date.
+    auditRetentionDays: 2190
+    reviewerAuthorityModel: allowlist+role
+
+  PCI-DSS-L1:
+    # Payment Card Industry Data Security Standard Level 1.
+    # PCI-DSS Req. 7 (access control) + Req. 10 (logging) drive per-shard + audit retention.
+    databaseBranchPool: per-shard
+    secretScanStrictness: strict
+    attestationRequired: true
+    # PCI-DSS Req. 10.7: audit trail history for at least 1 year (365 days).
+    auditRetentionDays: 365
+    reviewerAuthorityModel: allowlist+role
+
+  GDPR:
+    # General Data Protection Regulation (EU).
+    # Per-shard isolation required when EU residency data is processed; the framework
+    # defaults to per-shard to conservatively enforce the right to erasure.
+    databaseBranchPool: per-shard
+    # GDPR Art. 32: "appropriate technical measures" — standard scan covers common
+    # cloud-provider credential patterns without requiring full entropy detection.
+    secretScanStrictness: standard
+    attestationRequired: true
+    # GDPR Art. 5(1)(e): data minimisation — "minimum necessary" retention.
+    # The framework encodes this as 365 days (1 year); adopters SHOULD override
+    # downward for categories with shorter necessity (e.g., logs vs transactional data).
+    auditRetentionDays: 365
+    reviewerAuthorityModel: allowlist
+
+  FedRAMP-Moderate:
+    # US Federal Risk and Authorization Management Program — Moderate baseline.
+    # NIST SP 800-53 AC-2, AU-9 + FedRAMP SCRs require per-shard isolation.
+    databaseBranchPool: per-shard
+    secretScanStrictness: strict
+    attestationRequired: true
+    # FedRAMP AU-11: audit record retention 3 years (1095 days).
+    auditRetentionDays: 1095
+    reviewerAuthorityModel: allowlist+role
+
+  ISO-27001:2022:
+    # ISO/IEC 27001:2022 — Information security management systems.
+    # Annex A.8.2 (information classification) + A.8.10 (secure disposal).
+    databaseBranchPool: per-shard
+    secretScanStrictness: strict
+    attestationRequired: true
+    # ISO 27001 A.8.15: logging — minimum 365 days; no mandated multi-year floor,
+    # so the framework uses 365 days as the hot-storage minimum.
+    auditRetentionDays: 365
+    reviewerAuthorityModel: allowlist+role
