@@ -1,7 +1,7 @@
 ---
 id: AISDLC-343
 title: 'feat: RFC-0030 Phase 1 — source adapter interface + registry + 2 default adapters (support-ticket + community-thread)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -34,12 +34,12 @@ Phase 1 of RFC-0030. Establishes the source-adapter substrate matching the Harne
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `SignalSourceAdapter` interface ships at `orchestrator/src/signal-ingestion/types.ts`
-- [ ] #2 Registry + `getSignalSourceAdapter()` ships
-- [ ] #3 Default `signal-source-support-ticket` adapter ships
-- [ ] #4 Default `signal-source-community-thread` adapter ships
-- [ ] #5 `signal-source-manual` adapter ships with forced `attestedBy` + auto-filled `attestedAt` (per OQ-13.4)
-- [ ] #6 Adapter `isAvailable()` self-validation; credential lifecycle deferred (per OQ-13.1)
-- [ ] #7 Auth failure routes through `Decision: adapter-credential-invalid`; pipeline continues on remaining adapters
-- [ ] #8 Schema `spec/schemas/signal-source-adapter.v1.schema.json` ships
+- [x] #1 `SignalSourceAdapter` interface ships at `orchestrator/src/signal-ingestion/types.ts`
+- [x] #2 Registry + `getSignalSourceAdapter()` ships
+- [x] #3 Default `signal-source-support-ticket` adapter ships
+- [x] #4 Default `signal-source-community-thread` adapter ships
+- [x] #5 `signal-source-manual` adapter ships with forced `attestedBy` + auto-filled `attestedAt` (per OQ-13.4)
+- [x] #6 Adapter `isAvailable()` self-validation; credential lifecycle deferred (per OQ-13.1)
+- [x] #7 Auth failure routes through `Decision: adapter-credential-invalid`; pipeline continues on remaining adapters
+- [x] #8 Schema `spec/schemas/signal-source-adapter.v1.schema.json` ships
 <!-- AC:END -->

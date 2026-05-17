@@ -4722,6 +4722,44 @@ export const saExemplarSchema = {
   },
 } as const;
 
+export const signalSourceAdapterV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.dev/schemas/signal-source-adapter.v1.schema.json',
+  title: 'Signal Source Adapter v1',
+  type: 'object',
+  additionalProperties: false,
+  required: ['name', 'defaultTier', 'interface'],
+  properties: {
+    interface: {
+      const: 'SignalSourceAdapter@v1',
+    },
+    name: {
+      type: 'string',
+      minLength: 1,
+      examples: [
+        'signal-source-support-ticket',
+        'signal-source-community-thread',
+        'signal-source-manual',
+      ],
+    },
+    defaultTier: {
+      type: 'integer',
+      enum: [1, 2],
+    },
+    description: {
+      type: 'string',
+    },
+    requiresCredentials: {
+      type: 'boolean',
+      default: false,
+    },
+    manualAttestationRequired: {
+      type: 'boolean',
+      default: false,
+    },
+  },
+} as const;
+
 export const subscriptionPlanSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/subscription-plan.schema.json',
@@ -4943,6 +4981,7 @@ export const SCHEMAS: Record<string, object> = {
   'refinement-verdict.v1.schema.json': refinementVerdictV1Schema,
   'rfc.schema.json': rfcSchema,
   'sa-exemplar.schema.json': saExemplarSchema,
+  'signal-source-adapter.v1.schema.json': signalSourceAdapterV1Schema,
   'subscription-plan.schema.json': subscriptionPlanSchema,
   'worktree-pool.schema.json': worktreePoolSchema,
 };
