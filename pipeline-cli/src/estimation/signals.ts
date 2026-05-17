@@ -19,6 +19,7 @@
  */
 
 import { type Bucket, CLASS_DEFAULT_BUCKET, type SignalOutput, type TaskClass } from './types.js';
+import { queryHistoricalActuals, queryReviewerIterations } from './calibration-writer.js';
 
 // ── #1 File scope count ──────────────────────────────────────────────
 
@@ -58,27 +59,62 @@ export function fileScopeSignal(args: { fileCount: number }): SignalOutput {
   };
 }
 
-// ── #2 Historical actuals (Phase 3 stub) ─────────────────────────────
+// ── #2 Historical actuals (Phase 3 live) ─────────────────────────────
 
 /**
  * §5.1 row #2 — calibration.jsonl-driven median bucket per class.
  *
- * Phase 3 surface; Phase 1 always returns `unknown` because the
- * `_estimates/calibration*.jsonl` writer doesn't ship until Phase 3.
- * The stub still records the class it WOULD have looked up so the
- * §5.3 worked-example layout matches the RFC verbatim. When this
- * signal returns `unknown`, signal #9 (class-default fallback)
- * activates — see `classDefaultSignal` below.
+ * Phase 3 live implementation. Queries the monthly-rotated
+ * `_estimates/calibration-YYYY-MM.jsonl` files via
+ * `queryHistoricalActuals()`. Returns `unknown` when n < 5 (insufficient
+ * data to trust the median); signal #9 (class-default fallback) activates
+ * when this signal is `unknown`.
+ *
+ * `artifactsDir` is optional — falls back to `ARTIFACTS_DIR` env then
+ * `<cwd>/artifacts`, matching the calibration writer's own fallback.
  */
-export function historicalActualsSignal(args: { taskClass: TaskClass }): SignalOutput {
+export function historicalActualsSignal(args: {
+  taskClass: TaskClass;
+  artifactsDir?: string;
+}): SignalOutput {
+  const MIN_N = 5;
+  let result: ReturnType<typeof queryHistoricalActuals>;
+  try {
+    result = queryHistoricalActuals({ taskClass: args.taskClass, artifactsDir: args.artifactsDir });
+  } catch {
+    return {
+      id: 2,
+      name: 'historical actuals',
+      inputs: { taskClass: args.taskClass, n: 0 },
+      result: { kind: 'unknown', reason: 'failed to read calibration data' },
+    };
+  }
+
+  if (result.n < MIN_N || result.medianBucket === null) {
+    return {
+      id: 2,
+      name: 'historical actuals',
+      inputs: { taskClass: args.taskClass, n: result.n },
+      result: {
+        kind: 'unknown',
+        reason:
+          result.n === 0
+            ? `no calibration data for class "${args.taskClass}" yet`
+            : `insufficient calibration data for class "${args.taskClass}" (n=${result.n}, need ≥${MIN_N})`,
+      },
+    };
+  }
+
   return {
     id: 2,
     name: 'historical actuals',
-    inputs: { taskClass: args.taskClass, n: 0 },
-    result: {
-      kind: 'unknown',
-      reason: 'no calibration data yet (Phase 3 surface; n<5 per class)',
+    inputs: {
+      taskClass: args.taskClass,
+      n: result.n,
+      medianBucket: result.medianBucket,
+      meanBucketMiss: result.meanBucketMiss,
     },
+    result: { kind: 'bucket', bucket: result.medianBucket },
   };
 }
 
@@ -329,26 +365,66 @@ function extOf(ref: string): string {
   return tail.slice(dot).toLowerCase();
 }
 
-// ── #8 Reviewer-iteration history (Phase 3 stub) ─────────────────────
+// ── #8 Reviewer-iteration history (Phase 3 live) ─────────────────────
 
 /**
- * §5.1 row #8 — `events.jsonl` `ITERATE_DEV` count per class.
+ * §5.1 row #8 — `events.jsonl` `OrchestratorIterateDev` count per class.
  *
- * Phase 3 surface; Phase 1 always returns `unknown`. The stub
- * records the class it WOULD have looked up so the §5.3 layout
- * matches verbatim. When real data flows in Phase 3, this signal
- * bumps the bucket up by 0-1 based on mean iteration count for the
- * class (>1.0 → +1 per the §5.1 description).
+ * Phase 3 live implementation. Queries `queryReviewerIterations()` which
+ * reads all orchestrator events files and counts `OrchestratorIterateDev`
+ * events for tasks of this class (cross-referencing with calibration
+ * records to know which task IDs belong to this class).
+ *
+ * Per §5.1: mean iteration count > 1.0 → +1 bucket (coordination overhead).
+ * Returns `unknown` when n === 0 (no completed class tasks in the events
+ * stream yet).
+ *
+ * `artifactsDir` is optional — falls back to `ARTIFACTS_DIR` env then
+ * `<cwd>/artifacts`, matching the calibration writer's own fallback.
  */
-export function reviewerIterationSignal(args: { taskClass: TaskClass }): SignalOutput {
+export function reviewerIterationSignal(args: {
+  taskClass: TaskClass;
+  artifactsDir?: string;
+}): SignalOutput {
+  let result: ReturnType<typeof queryReviewerIterations>;
+  try {
+    result = queryReviewerIterations({
+      taskClass: args.taskClass,
+      artifactsDir: args.artifactsDir,
+    });
+  } catch {
+    return {
+      id: 8,
+      name: 'reviewer-iteration history',
+      inputs: { taskClass: args.taskClass, n: 0 },
+      result: { kind: 'unknown', reason: 'failed to read events data' },
+    };
+  }
+
+  if (result.n === 0 || result.meanIterations === null) {
+    return {
+      id: 8,
+      name: 'reviewer-iteration history',
+      inputs: { taskClass: args.taskClass, n: 0 },
+      result: {
+        kind: 'unknown',
+        reason: `no OrchestratorIterateDev history for class "${args.taskClass}" yet`,
+      },
+    };
+  }
+
+  // Per §5.1: mean iterations > 1.0 → +1 bucket (tasks of this class
+  // routinely require additional dev iterations, systematically longer).
+  const delta = result.meanIterations > 1.0 ? 1 : 0;
   return {
     id: 8,
     name: 'reviewer-iteration history',
-    inputs: { taskClass: args.taskClass, n: 0 },
-    result: {
-      kind: 'unknown',
-      reason: 'no events.jsonl history yet (Phase 3 surface)',
+    inputs: {
+      taskClass: args.taskClass,
+      n: result.n,
+      meanIterations: result.meanIterations,
     },
+    result: { kind: 'bump', delta },
   };
 }
 
