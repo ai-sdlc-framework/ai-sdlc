@@ -1,7 +1,7 @@
 ---
 id: AISDLC-351
 title: 'fix(pipeline-cli): parseClaudeOutput strips markdown code fences (reviewer subagents wrap JSON in ```json fences)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:
