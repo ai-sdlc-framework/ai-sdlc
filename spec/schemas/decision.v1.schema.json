@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.dev/schemas/decision.v1.schema.json",
+  "title": "Decision",
+  "description": "RFC-0035 Decision resource. Decisions are projections of an append-only event log at .ai-sdlc/_decisions/events.jsonl (OQ-1). This schema describes the projected (materialized) view; events that compose into it are described by DecisionEvent.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec", "status"],
+  "additionalProperties": false,
+  "properties": {
+    "apiVersion": {
+      "type": "string",
+      "const": "ai-sdlc.io/v1alpha1"
+    },
+    "kind": {
+      "type": "string",
+      "const": "Decision"
+    },
+    "metadata": {
+      "type": "object",
+      "required": ["id", "source", "scope", "created", "updated"],
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Decision ID — DEC-NNNN (parallel to AISDLC-NNNN). Globally unique within the catalog.",
+          "pattern": "^DEC-[0-9]{4,}$"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "dor-clarification",
+            "rfc-open-question",
+            "emergent-finding",
+            "framework-calibration",
+            "subagent-escalation",
+            "ad-hoc"
+          ],
+          "description": "Generator class — see RFC-0035 §4.1."
+        },
+        "scope": {
+          "type": "string",
+          "description": "Free-form scope reference: 'rfc:RFC-0035', 'issue:AISDLC-285', 'workspace', etc."
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updated": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "spec": {
+      "type": "object",
+      "required": ["summary", "options"],
+      "additionalProperties": false,
+      "properties": {
+        "summary": {
+          "type": "string",
+          "minLength": 1,
+          "description": "One-line description of the decision."
+        },
+        "body": {
+          "type": "string",
+          "description": "Full problem statement (markdown)."
+        },
+        "reversible": {
+          "type": "boolean",
+          "description": "OQ-3/OQ-12 resolution — auto-apply + override-window gate. Default true.",
+          "default": true
+        },
+        "options": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["id", "description"],
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9-]*$",
+                "description": "Slug — e.g. 'opt-a'."
+              },
+              "description": {
+                "type": "string",
+                "minLength": 1
+              },
+              "consequences": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Bulleted consequences if this option is chosen."
+              },
+              "dependents": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Downstream artifacts that depend on this option (issues, RFCs)."
+              },
+              "subDecisions": {
+                "type": "array",
+                "items": { "type": "string" },
+                "description": "Follow-up decisions implied by choosing this option."
+              }
+            }
+          }
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Decision IDs (DEC-NNNN) that gate this decision."
+        }
+      }
+    },
+    "status": {
+      "type": "object",
+      "required": ["lifecycle"],
+      "additionalProperties": false,
+      "properties": {
+        "lifecycle": {
+          "type": "string",
+          "enum": ["proposed", "open", "deferred", "answered", "superseded", "archived"],
+          "description": "RFC-0035 §4.2 lifecycle state."
+        },
+        "answeredOptionId": {
+          "type": ["string", "null"],
+          "description": "Populated when lifecycle='answered' — the option chosen."
+        },
+        "answeredBy": {
+          "type": ["string", "null"],
+          "description": "Actor (operator email, agent role, 'framework') that resolved the decision."
+        },
+        "answeredAt": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        },
+        "supersededBy": {
+          "type": ["string", "null"],
+          "description": "When lifecycle='superseded', the DEC-NNNN id that replaces this one."
+        },
+        "routing": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "assignedActor": { "type": ["string", "null"] },
+            "actorRationale": { "type": ["string", "null"] },
+            "llmEligible": { "type": "boolean" }
+          }
+        },
+        "evaluation": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Stage A/B/C scoring output — schema-loose at Phase 1 (later phases populate)."
+        },
+        "priority": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "capacity": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tier": {
+              "type": "string",
+              "enum": ["xs", "s", "m", "l", "xl"],
+              "description": "RFC-0016 t-shirt size — OQ-6 resolution composes capacity with sizing."
+            }
+          }
+        },
+        "deadline": {
+          "type": ["string", "null"],
+          "format": "date-time"
+        }
+      }
+    },
+    "decisionLog": {
+      "type": "array",
+      "description": "Full event history projected onto this decision (oldest → newest). Each entry is one DecisionEvent from .ai-sdlc/_decisions/events.jsonl.",
+      "items": {
+        "type": "object",
+        "required": ["eventVersion", "type", "ts", "decisionId"],
+        "additionalProperties": true,
+        "properties": {
+          "eventVersion": {
+            "type": "string",
+            "const": "v1"
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "decision-opened",
+              "recommendation-issued",
+              "operator-answered",
+              "timebox-fired",
+              "overridden",
+              "calibration-adjusted",
+              "superseded",
+              "deferred",
+              "archived",
+              "dedup-merged",
+              "routing-changed"
+            ],
+            "description": "OQ-1 event-type set. Schema evolution = additive only."
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "decisionId": {
+            "type": "string",
+            "pattern": "^DEC-[0-9]{4,}$"
+          },
+          "by": {
+            "type": "string",
+            "description": "Actor (operator email, agent role, 'framework')."
+          }
+        }
+      }
+    }
+  }
+}

@@ -33,6 +33,7 @@
     "cli-tui": "bin/cli-tui.mjs",
     "cli-tui-corpus": "bin/cli-tui-corpus.mjs",
     "cli-capture": "bin/cli-capture.mjs",
+    "cli-decisions": "bin/cli-decisions.mjs",
     "cli-task-complete": "bin/cli-task-complete.mjs",
     "cli-backlog-verify": "bin/cli-backlog-verify.mjs",
     "cli-estimate": "bin/cli-estimate.mjs"
@@ -73,6 +74,10 @@
     "./orchestrator-corpus": {
       "types": "./dist/cli/orchestrator-corpus.d.ts",
       "import": "./dist/cli/orchestrator-corpus.js"
+    },
+    "./decisions": {
+      "types": "./dist/decisions/index.d.ts",
+      "import": "./dist/decisions/index.js"
     },
     "./orchestrator": {
       "types": "./dist/orchestrator/index.d.ts",

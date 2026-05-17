@@ -96,6 +96,43 @@ export {
   type ReviewerRawOutput,
 } from './classifier/budget-classifier.js';
 
+// RFC-0035 Phase 1 — Decision Catalog substrate (AISDLC-285).
+export {
+  appendDecisionEvent,
+  DECISION_CATALOG_FLAG,
+  decisionCatalogDisabledMessage,
+  DECISION_EVENT_TYPES,
+  DECISION_LIFECYCLES,
+  DECISION_SOURCES,
+  DECISION_TIERS,
+  formatDecisionId,
+  isDecisionCatalogEnabled,
+  isValidDecisionId,
+  listDecisions,
+  makeDecisionOpenedEvent,
+  nextDecisionId,
+  projectAll as projectAllDecisions,
+  projectDecision,
+  readDecisionEvents,
+  resolveDecisionsDir,
+  resolveEventLogPath,
+  validateDecisionEvent,
+  type Decision,
+  type DecisionCapacity,
+  type DecisionEvent,
+  type DecisionEventEnvelope,
+  type DecisionEventType,
+  type DecisionLifecycle,
+  type DecisionMetadata,
+  type DecisionOpenedEvent,
+  type DecisionOption,
+  type DecisionRouting,
+  type DecisionSource,
+  type DecisionSpec,
+  type DecisionStatus,
+  type DecisionTier,
+} from './decisions/index.js';
+
 // RFC-0011 Phase 2a — Definition-of-Ready Stage A.
 export {
   evaluateIssue,
