@@ -143,6 +143,21 @@ describe('resolveSpawner', () => {
     }
   });
 
+  it('returns a ShellClaudePSpawner when kind=claude (AISDLC-349)', async () => {
+    // AISDLC-349: the `claude` spawner actually shells out to `claude -p`,
+    // unlike `claude-cli` which only emits a dispatch manifest. Use this
+    // from a shell-driven `cli-orchestrator tick` (cron/daemon/sidecar)
+    // where no slash command body is around to read the manifest.
+    const spawner = await resolveSpawner('claude');
+    expect(typeof spawner.spawn).toBe('function');
+    expect(typeof spawner.spawnParallel).toBe('function');
+    // Constructor-level check: the spawner advertises a `binary` field
+    // defaulting to 'claude'. Cast through unknown to peek at the
+    // private-by-convention field without exposing it in the public API.
+    const peek = spawner as unknown as { binary?: string };
+    expect(peek.binary).toBe('claude');
+  });
+
   it('returns a CodexHarnessAdapter when kind=codex and CODEX_SPAWN_AGENT_BIN is set (AISDLC-202.2)', async () => {
     const saved = process.env.CODEX_SPAWN_AGENT_BIN;
     process.env.CODEX_SPAWN_AGENT_BIN = '/tmp/fake-codex-bridge';

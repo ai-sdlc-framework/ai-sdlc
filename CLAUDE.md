@@ -127,9 +127,17 @@ This prevents retroactive blocking of in-flight tasks and allows a graceful migr
 |---|---|---|
 | Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` | Subscription (Claude Code Max) |
 | Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
+| Shell-driven autonomous tick (cron/daemon/sidecar) | `cli-orchestrator tick --spawner claude` | Subscription (shells out to `claude -p`) |
 | GitHub issue / unattended / CI | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
 
 `/ai-sdlc execute` is the default for internal work. Worktree-isolated, auto-creates sibling-repo PRs from `permittedExternalPaths`, marks Done + moves task file in the same PR.
+
+**Spawner kinds for `cli-orchestrator tick --spawner <kind>`** (AISDLC-349):
+- `mock` — fixtures only; for plumbing tests
+- `api-key` — uses `ANTHROPIC_API_KEY` via the Claude Code SDK (API token billing)
+- `claude-cli` — emits a `dispatch-manifest.json` for the calling slash command body to consume via the `Agent` tool. **Only works when called from inside a Claude Code session** (e.g. via `/ai-sdlc execute`); fails silently with `developer-json-contract-violated` when run from a plain shell.
+- `claude` — shells out to `claude -p` via `child_process.spawn`. Subscription billing, same as `claude-cli` but actually invokes the CLI. **Use this for autonomous tick from a shell** (cron/daemon/sidecar context where no slash command body is around). AISDLC-349.
+- `codex` — dispatches via Codex CLI bridge (`CODEX_SPAWN_AGENT_BIN`)
 
 The Step 0-13 pipeline lives in `pipeline-cli/` (`@ai-sdlc/pipeline-cli`). Tier 1 = slash command body (subscription). Tier 2 = `executePipeline()` library + `SubagentSpawner` injection (API-key, MockSpawner, etc.). Refs: `pipeline-cli/{README,docs/spawner,docs/steps}.md`, RFC-0012.
 

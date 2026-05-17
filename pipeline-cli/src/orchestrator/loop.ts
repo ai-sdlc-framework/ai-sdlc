@@ -2059,10 +2059,18 @@ function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): SpawnerKind
 function resolveEnvUmbrellaSpawnerKind(): SpawnerKind | undefined {
   const raw = (process.env[ORCHESTRATOR_SPAWNER_ENV] ?? '').trim();
   if (!raw) return undefined;
-  if (raw === 'mock' || raw === 'api-key' || raw === 'claude-cli' || raw === 'codex') {
+  if (
+    raw === 'mock' ||
+    raw === 'api-key' ||
+    raw === 'claude-cli' ||
+    raw === 'claude' ||
+    raw === 'codex'
+  ) {
     return raw;
   }
-  throw new Error(`${ORCHESTRATOR_SPAWNER_ENV} must be one of: mock, api-key, claude-cli, codex`);
+  throw new Error(
+    `${ORCHESTRATOR_SPAWNER_ENV} must be one of: mock, api-key, claude-cli, claude, codex`,
+  );
 }
 
 /**
