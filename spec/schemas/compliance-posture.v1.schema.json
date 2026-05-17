@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/compliance-posture.v1.schema.json",
+  "title": "AI-SDLC CompliancePosture",
+  "description": "Declares which regulatory regimes apply to a project and derives gate defaults from them. Lives at .ai-sdlc/compliance.yaml. Phase 1 schema — RFC-0022 §5.",
+  "type": "object",
+  "required": ["apiVersion", "kind", "metadata", "spec"],
+  "properties": {
+    "apiVersion": {
+      "$ref": "common.schema.json#/$defs/apiVersion"
+    },
+    "kind": {
+      "type": "string",
+      "const": "CompliancePosture"
+    },
+    "metadata": {
+      "$ref": "common.schema.json#/$defs/metadata"
+    },
+    "spec": {
+      "type": "object",
+      "required": ["regimes", "auditExports"],
+      "properties": {
+        "regimes": {
+          "type": "array",
+          "description": "Declared regulatory regimes. Empty array is valid (means 'none declared' — baseline posture applies).",
+          "items": {
+            "$ref": "#/$defs/Regime"
+          },
+          "default": []
+        },
+        "derivedGates": {
+          "description": "Operator overrides for derived gate values. Each override field MUST have a corresponding non-empty entry in _notes. The loader rejects any override missing a notes entry (OQ-2 enforcement).",
+          "allOf": [
+            { "$ref": "#/$defs/PartialDerivedGates" }
+          ]
+        },
+        "auditExports": {
+          "type": "array",
+          "description": "Evidence bundles to produce on `cli-compliance-audit export`. Each entry specifies a kind + format + retention policy.",
+          "items": {
+            "$ref": "#/$defs/AuditExportSpec"
+          },
+          "default": []
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "Regime": {
+      "type": "object",
+      "description": "A single regulatory regime declaration with attestation metadata. The 'attestedBy' and 'attestedAt' fields are REQUIRED at load time — the loader throws MissingComplianceAttestation for any regime missing either field. They are not in the JSON Schema 'required' array so the loader can produce a more actionable error than the generic schema validation error.",
+      "required": ["id"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Canonical regime identifier. Convention: '<framework>-<tier-or-version>'. Examples: 'SOC2-T2', 'HIPAA', 'PCI-DSS-L1', 'GDPR', 'FedRAMP-Moderate', 'ISO-27001:2022'.",
+          "minLength": 1
+        },
+        "controls": {
+          "type": "array",
+          "description": "Optional explicit control list from the regime that the adopter is claiming coverage for. Examples: ['CC6.6', 'CC8.1'] for SOC2; ['§164.308(a)(4)', '§164.312(a)'] for HIPAA.",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "auditFrequency": {
+          "type": "string",
+          "description": "Audit cadence — drives default retention windows and export pre-staging.",
+          "enum": ["annual", "continuous", "on-demand"]
+        },
+        "attestedBy": {
+          "type": "string",
+          "description": "Who declared this regime applies. E.g., 'dominique@reliablegenius.io' or 'Acme Legal LLP'. REQUIRED — compliance regimes are legal claims; the framework refuses to load a posture with regimes lacking this field.",
+          "minLength": 1
+        },
+        "attestedAt": {
+          "type": "string",
+          "description": "ISO 8601 date when the regime was attested.",
+          "format": "date",
+          "pattern": "^\\d{4}-\\d{2}-\\d{2}(T[\\d:.Z+-]+)?$"
+        },
+        "attestedNotes": {
+          "type": "string",
+          "description": "Operator's rationale for declaring this regime. Recommended for audit trail; not required by schema but strongly encouraged."
+        }
+      },
+      "additionalProperties": false
+    },
+    "DerivedGates": {
+      "type": "object",
+      "description": "Gate values derived from declared regimes. When all regimes are resolved, the tightest constraint wins per axis.",
+      "required": [
+        "databaseBranchPool",
+        "secretScanStrictness",
+        "attestationRequired",
+        "auditRetentionDays",
+        "reviewerAuthorityModel"
+      ],
+      "properties": {
+        "databaseBranchPool": {
+          "type": "string",
+          "description": "Per RFC-0009 OQ-11. 'shared-with-rls' = single Postgres branch with row-level security. 'per-shard' = one branch per shard/customer.",
+          "enum": ["shared-with-rls", "per-shard"]
+        },
+        "secretScanStrictness": {
+          "type": "string",
+          "description": "Per AISDLC-128. 'minimal' = framework-default patterns only. 'standard' = + common cloud provider keys. 'strict' = + entropy-based detection + adopter-supplied custom patterns.",
+          "enum": ["minimal", "standard", "strict"]
+        },
+        "attestationRequired": {
+          "type": "boolean",
+          "description": "Per AISDLC-74/146. When true, framework refuses to merge PRs without a valid DSSE attestation envelope at HEAD."
+        },
+        "auditRetentionDays": {
+          "type": "integer",
+          "description": "Floor for log retention in days. Framework keeps logs for at least this many days.",
+          "minimum": 1
+        },
+        "reviewerAuthorityModel": {
+          "type": "string",
+          "description": "Per config/trusted-reviewers.yaml. 'open' = any GitHub user. 'allowlist' = explicit reviewer list. 'allowlist+role' = allowlist + per-role authority.",
+          "enum": ["open", "allowlist", "allowlist+role"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "PartialDerivedGates": {
+      "type": "object",
+      "description": "Operator-supplied partial overrides for DerivedGates. Each overridden field MUST have a corresponding non-empty entry in _notes (OQ-2). The loader rejects overrides missing notes.",
+      "properties": {
+        "databaseBranchPool": {
+          "type": "string",
+          "enum": ["shared-with-rls", "per-shard"]
+        },
+        "secretScanStrictness": {
+          "type": "string",
+          "enum": ["minimal", "standard", "strict"]
+        },
+        "attestationRequired": {
+          "type": "boolean"
+        },
+        "auditRetentionDays": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "reviewerAuthorityModel": {
+          "type": "string",
+          "enum": ["open", "allowlist", "allowlist+role"]
+        },
+        "_notes": {
+          "type": "object",
+          "description": "Sibling map of field-name → rationale string for each overridden gate field. Loader rejects any override whose corresponding _notes entry is missing or empty (MissingDerivedGateOverrideNotes). The emptiness check is enforced at load time (not in schema) so the loader can produce an actionable error with the specific field name.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "AuditExportSpec": {
+      "type": "object",
+      "description": "Specification for a single evidence bundle included in `cli-compliance-audit export`.",
+      "required": ["kind", "format", "retentionPolicy"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "Which kind of evidence to include in the export bundle.",
+          "enum": [
+            "dsse-envelope",
+            "dor-calibration",
+            "trusted-reviewers",
+            "enforcement-events",
+            "access-control-changes"
+          ]
+        },
+        "format": {
+          "type": "string",
+          "description": "Output format for this evidence bundle.",
+          "enum": ["json", "jsonl", "csv"]
+        },
+        "retentionPolicy": {
+          "type": "object",
+          "description": "Retention policy for this evidence bundle.",
+          "required": ["days"],
+          "properties": {
+            "days": {
+              "type": "integer",
+              "description": "Retention floor in days. Framework GC removes after days + grace period.",
+              "minimum": 1
+            },
+            "tier": {
+              "type": "string",
+              "description": "hot = on local disk; cold = expected to be archived externally.",
+              "enum": ["hot", "cold"]
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

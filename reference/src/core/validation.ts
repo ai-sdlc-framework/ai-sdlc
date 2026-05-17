@@ -43,6 +43,7 @@ const SCHEMA_FILES: Record<ResourceKind, string> = {
   DesignSystemBinding: 'design-system-binding.schema.json',
   DesignIntentDocument: 'design-intent-document.schema.json',
   DorConfig: 'dor-config.v1.schema.json',
+  CompliancePosture: 'compliance-posture.v1.schema.json',
 };
 
 /**

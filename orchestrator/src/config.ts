@@ -74,6 +74,10 @@ const KIND_KEY: Record<
     // (`.ai-sdlc/dor-config.yaml`) — it is NOT loaded through the generic
     // config-directory walk, so it doesn't need a `KIND_KEY` mapping yet.
     | 'DorConfig'
+    // RFC-0022 Phase 1 (AISDLC-322): CompliancePosture has its own loader path
+    // (`.ai-sdlc/compliance.yaml`) — it is NOT loaded through the generic
+    // config-directory walk, so it doesn't need a `KIND_KEY` mapping here.
+    | 'CompliancePosture'
   >,
   keyof AiSdlcConfig
 > = {

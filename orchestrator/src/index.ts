@@ -514,6 +514,28 @@ export {
   listSupportedFrameworks,
 } from './compliance-extended.js';
 
+// RFC-0022 Phase 1 — CompliancePosture schema + loader
+export {
+  loadCompliancePosture,
+  DEFAULT_COMPLIANCE_MANIFEST_PATH,
+  type LoadCompliancePostureOptions,
+} from './compliance/loader.js';
+export {
+  MissingComplianceAttestation,
+  MissingDerivedGateOverrideNotes,
+  UnknownRegime,
+  CompliancePostureValidationError,
+} from './compliance/errors.js';
+export {
+  BASELINE_DERIVED_GATES,
+  BASELINE_POSTURE,
+  type CompliancePosture,
+  type Regime,
+  type DerivedGates,
+  type PartialDerivedGatesOverrides,
+  type AuditExportSpec,
+} from './compliance/types.js';
+
 // Extended telemetry
 export {
   createSilentLogger,
