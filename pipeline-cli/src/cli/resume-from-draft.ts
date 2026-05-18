@@ -106,10 +106,14 @@ export async function detectPrByTaskIdTitle(
       title: string;
     }>;
     if (!Array.isArray(parsed) || parsed.length === 0) return null;
-    // Filter to PRs whose title actually contains the task ID (GitHub search
-    // can be fuzzy — prefer an exact-ID match to avoid spurious hits).
+    // Filter to PRs whose title actually contains the task ID. GitHub's
+    // `in:title` query syntax is not always strictly enforced — a PR whose
+    // body mentions the task ID can surface in the search results. If no
+    // title-match is found, RETURN NULL rather than picking parsed[0] (which
+    // would auto-arm/merge an unrelated PR). AISDLC-356 code-reviewer MAJOR.
     const taskIdUpper = taskId.toUpperCase();
-    const match = parsed.find((pr) => pr.title.toUpperCase().includes(taskIdUpper)) ?? parsed[0];
+    const match = parsed.find((pr) => pr.title.toUpperCase().includes(taskIdUpper));
+    if (!match) return null;
     return { prNumber: match.number, isDraft: match.isDraft === true, prUrl: match.url ?? '' };
   } catch {
     return null;
