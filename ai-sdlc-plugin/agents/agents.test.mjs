@@ -321,3 +321,88 @@ describe('AISDLC-247: Codex reviewer variants', () => {
     }
   });
 });
+
+describe('AISDLC-298: OQ-resolution prohibition reviewer gate', () => {
+  // AISDLC-271 / RFC-0031 shipped with all 5 OQs resolved by the dev subagent
+  // inline — architectural decisions made without operator walkthrough or
+  // cross-pillar review. This policy prohibits that pattern and requires
+  // reviewers to flag inline resolutions as critical findings.
+
+  it('code-reviewer.md body instructs flagging Resolution markers in RFC diffs as critical', () => {
+    const body = readFileSync(join(__dirname, 'code-reviewer.md'), 'utf-8');
+    assert.ok(
+      body.includes('Resolution'),
+      'code-reviewer must instruct checking for Resolution markers in RFC diffs',
+    );
+    assert.ok(
+      body.includes('critical'),
+      'code-reviewer must flag inline OQ resolutions as critical severity',
+    );
+  });
+
+  it('test-reviewer.md body instructs flagging resolution-codifying tests as critical', () => {
+    const body = readFileSync(join(__dirname, 'test-reviewer.md'), 'utf-8');
+    assert.ok(
+      body.includes('Resolution') || body.includes('OQ'),
+      'test-reviewer must instruct checking for tests that codify OQ resolutions',
+    );
+    assert.ok(
+      body.includes('critical'),
+      'test-reviewer must flag resolution-codifying tests as critical severity',
+    );
+  });
+
+  it('developer.md body includes OQ escalation instruction as hard rule #8', () => {
+    const body = readFileSync(join(__dirname, 'developer.md'), 'utf-8');
+    assert.ok(
+      body.includes('Open Question') || body.includes('OQ'),
+      'developer must include OQ escalation instruction in hard rules',
+    );
+    assert.ok(
+      body.includes('escalate'),
+      'developer must instruct escalating when OQs block or constrain implementation',
+    );
+  });
+
+  it('synthetic PR diff with Resolution marker matches reviewer detection pattern', () => {
+    // Fixture: a synthetic diff where a dev subagent added a Resolution marker
+    // to an RFC Open Questions section — the exact anti-pattern from AISDLC-271.
+    const syntheticDiff = [
+      'diff --git a/spec/rfcs/RFC-0042-example.md b/spec/rfcs/RFC-0042-example.md',
+      '--- a/spec/rfcs/RFC-0042-example.md',
+      '+++ b/spec/rfcs/RFC-0042-example.md',
+      '@@ -10,3 +10,6 @@ ## Open Questions',
+      ' 1. **Should we use JWT or session cookies?**',
+      '+',
+      '+   **Resolution:** Use JWT tokens with 24h expiry. Selected because JWT is',
+      '+   stateless and scales across replicas without a session store.',
+    ].join('\n');
+
+    // The reviewer uses this regex to detect inline OQ resolution in a diff.
+    // Added lines (+ prefix) in spec/rfcs/ files matching **Resolution are critical.
+    const resolutionAddedPattern = /^\+\s*\*\*Resolution/m;
+    assert.ok(
+      resolutionAddedPattern.test(syntheticDiff),
+      'synthetic diff with new **Resolution:** marker must match reviewer detection pattern',
+    );
+  });
+
+  it('synthetic PR diff without Resolution marker does not trigger the reviewer pattern', () => {
+    // Negative fixture: a clean diff with no Resolution marker should not fire
+    const cleanDiff = [
+      'diff --git a/spec/rfcs/RFC-0042-example.md b/spec/rfcs/RFC-0042-example.md',
+      '--- a/spec/rfcs/RFC-0042-example.md',
+      '+++ b/spec/rfcs/RFC-0042-example.md',
+      '@@ -10,3 +10,5 @@ ## Open Questions',
+      ' 1. **Should we use JWT or session cookies?**',
+      '+',
+      '+   (See RFC-0035 Decision Catalog for routing to operator.)',
+    ].join('\n');
+
+    const resolutionAddedPattern = /^\+\s*\*\*Resolution/m;
+    assert.ok(
+      !resolutionAddedPattern.test(cleanDiff),
+      'clean diff without Resolution marker must NOT trigger the reviewer detection pattern',
+    );
+  });
+});
