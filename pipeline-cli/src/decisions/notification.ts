@@ -121,7 +121,7 @@ export function postSlackWebhook(
 
     req.on('error', (err) => resolve({ ok: false, error: err.message }));
     req.setTimeout(5_000, () => {
-      req.destroy();
+      req.destroy(new Error('request timed out (5s)'));
       resolve({ ok: false, error: 'request timed out (5s)' });
     });
     req.write(body);

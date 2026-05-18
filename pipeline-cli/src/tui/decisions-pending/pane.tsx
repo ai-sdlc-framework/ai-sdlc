@@ -155,7 +155,7 @@ function DecisionDetail({
 
   useInput((input, key) => {
     if (key.escape || input === 'q') onClose();
-    if (input === 'x') onResolve(decision);
+    else if (input === 'x') onResolve(decision);
   });
 
   return (
@@ -350,10 +350,12 @@ export function DecisionsPendingPane({
 }: DecisionsPendingPaneProps = {}): React.ReactElement {
   const effectiveWorkDir = workDir ?? process.cwd();
 
-  // Load config once (tui renders on every tick — stable reader ref is fine
-  // because config changes require a restart per the existing TUI pattern).
-  const config = loadDecisionsConfig({ workDir: effectiveWorkDir, reader: configReader });
-  const resolvedConfig = resolveDecisionsConfig(config);
+  // Load config once at mount (TUI re-renders on every keypress + 15s poll).
+  // useState initializer guarantees readFileSync runs exactly once per session.
+  const [config] = useState(() =>
+    loadDecisionsConfig({ workDir: effectiveWorkDir, reader: configReader }),
+  );
+  const resolvedConfig = React.useMemo(() => resolveDecisionsConfig(config), [config]);
 
   // Hook: read pending decisions.
   const { decisions, error } = useDecisionsPending({
