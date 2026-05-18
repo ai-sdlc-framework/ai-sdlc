@@ -410,6 +410,21 @@ export interface OrchestratorAdapters {
    * pre-populate via this adapter to assert the filter fires.
    */
   inFlight?: InFlightMap;
+  /**
+   * AISDLC-358 — parent-branch guard called at the start of every tick,
+   * BEFORE the frontier scan. In production, `runParentBranchGuard()`
+   * reads the parent working tree's current branch and auto-recovers or
+   * refuses when the parent is not on `main` (Pattern-C contract
+   * enforcement).
+   *
+   * Tests inject `async () => {}` to skip the guard entirely so they
+   * don't require the parent to be on `main` (or any real git state).
+   * AISDLC-363: all test files MUST inject this no-op to prevent
+   * `gh-readonly-queue/` CI branches from triggering the guard.
+   *
+   * When undefined, the production `runParentBranchGuard()` is called.
+   */
+  parentBranchGuard?: () => Promise<void>;
 }
 
 /**
@@ -457,6 +472,17 @@ export async function runOrchestratorTick(
   // a try/catch so a thrown injected sink never crashes the tick.
   // Built early so the sweep block below can emit events with runId + tick.
   const emit = buildEmitter(config, adapters, tickNumber);
+
+  // AISDLC-358 — parent-branch guard: enforce Pattern-C contract that the
+  // parent working tree is on `main` before any frontier work begins.
+  // Tests inject `parentBranchGuard: async () => {}` to skip the git check.
+  // Production uses `runParentBranchGuard` which auto-recovers clean trees
+  // and refuses dirty ones. AISDLC-363 adds skip logic for gh-readonly-queue/
+  // branches and shallow-clone environments.
+  const branchGuardFn =
+    adapters.parentBranchGuard ??
+    (() => runParentBranchGuard(config.workDir, adapters.runner, logger));
+  await branchGuardFn();
 
   // AISDLC-256 — self-clean merged worktrees before frontier scan so stale
   // worktrees don't accumulate across autonomous-loop ticks. Try/catch ensures
@@ -1958,6 +1984,122 @@ export class OrchestratorDisabledError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'OrchestratorDisabledError';
+  }
+}
+
+// ── AISDLC-358: parent-branch guard ──────────────────────────────────
+
+/**
+ * AISDLC-358 — Pattern-C contract enforcement: parent working tree MUST
+ * be on `main` before any tick runs. Auto-recovers when clean; refuses
+ * when dirty.
+ *
+ * AISDLC-363 — defense-in-depth additions:
+ *   1. GH merge-queue probe: when the current branch starts with
+ *      `gh-readonly-queue/`, skip silently. The queue's ephemeral
+ *      branch is not an operator mistake; checking out `main` from
+ *      inside a queue probe would defeat the queue's purpose.
+ *   2. Shallow-clone / missing local ref: if `git checkout main` fails
+ *      with `pathspec 'main' did not match`, the repo is a shallow CI
+ *      clone with no local `main` ref. Skip with warn rather than
+ *      throw — the guard is a Pattern-C operator workflow protection,
+ *      not a CI gate.
+ *
+ * Exported so callers can inject it as a named function in production
+ * without having to wire up a full shell script. Tests inject
+ * `parentBranchGuard: async () => {}` to keep their workdirs hermetic.
+ */
+export async function runParentBranchGuard(
+  workDir: string,
+  runner: Runner = defaultRunner,
+  logger: PipelineLogger = DEFAULT_LOGGER,
+): Promise<void> {
+  // Resolve current branch.
+  const branchResult = await runner('git', ['symbolic-ref', '--short', 'HEAD'], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+  if (branchResult.code !== 0) {
+    // Detached HEAD or not a git repo — can't enforce the contract; skip.
+    logger.warn(
+      `[orchestrator] parent-branch-guard: cannot resolve HEAD (code=${branchResult.code}); skipping`,
+    );
+    return;
+  }
+  const currentBranch = branchResult.stdout.trim();
+
+  if (currentBranch === 'main') return; // Already on main — nothing to do.
+
+  // AISDLC-363 defense-in-depth: GH merge-queue probe branches are sanctioned
+  // ephemeral state; skip silently so CI never fires the guard.
+  if (currentBranch.startsWith('gh-readonly-queue/')) {
+    logger.warn(
+      `[orchestrator] parent-branch-guard: running in GH merge-queue branch ` +
+        `(${currentBranch}); skipping guard`,
+    );
+    return;
+  }
+
+  logger.warn(
+    `[orchestrator] parent-branch-guard: parent working tree is on ` +
+      `'${currentBranch}' (expected 'main'); attempting auto-recovery`,
+  );
+
+  // Check working-tree cleanliness before any destructive op.
+  const statusResult = await runner('git', ['status', '--porcelain'], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+  const dirtyLines = (statusResult.stdout ?? '')
+    .split('\n')
+    .filter((l) => l.trim() !== '' && !l.startsWith('??'));
+
+  if (dirtyLines.length > 0) {
+    const sample = dirtyLines.slice(0, 5).join('\n');
+    logger.error(
+      `[orchestrator] parent-branch-guard: parent working tree is DIRTY on '${currentBranch}'.\n` +
+        `Uncommitted tracked changes:\n${sample}\n` +
+        `Recovery: stash, commit, or discard, then re-run.`,
+    );
+    throw new ParentNotOnMainError(
+      `Parent working tree is on '${currentBranch}' with uncommitted changes. ` +
+        `Auto-recovery aborted — resolve manually: git stash && git checkout main.`,
+    );
+  }
+
+  // Working tree is clean — auto-checkout main.
+  const checkoutResult = await runner('git', ['checkout', 'main'], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+
+  if (checkoutResult.code !== 0) {
+    const errText = (checkoutResult.stderr ?? '') + (checkoutResult.stdout ?? '');
+
+    // AISDLC-363 defense-in-depth: shallow CI clone has no local `main` ref.
+    if (errText.includes("pathspec 'main' did not match")) {
+      logger.warn(
+        `[orchestrator] parent-branch-guard: 'git checkout main' failed with pathspec error — ` +
+          `likely a shallow CI clone with no local main ref; skipping guard`,
+      );
+      return;
+    }
+
+    throw new ParentNotOnMainError(
+      `Failed to checkout main from '${currentBranch}': ${errText.slice(0, 200)}`,
+    );
+  }
+
+  logger.info(
+    `[orchestrator] parent-branch-guard: auto-recovered parent from '${currentBranch}' to main`,
+  );
+}
+
+/** Raised by `runParentBranchGuard` when it cannot auto-recover the parent branch. */
+export class ParentNotOnMainError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ParentNotOnMainError';
   }
 }
 

@@ -43,6 +43,30 @@ fi
 PARENT_ROOT=$(dirname "$GIT_COMMON_DIR_ABS")
 cd "$PARENT_ROOT"
 
+# AISDLC-363: skip the orchestrator state check when running inside a GH
+# merge-queue read-only probe branch or a shallow CI clone.
+#
+# GH merge-queue probe: ephemeral `gh-readonly-queue/main/pr-N-<sha>` branches
+# are created by GitHub to test mergeability. They are read-only and have no
+# local `main` ref, so `git checkout main` would fail. The parent-branch guard
+# and state reset are meaningless in this context.
+#
+# Shallow clone: CI systems (GitHub Actions default checkout) may produce a
+# shallow clone where `refs/heads/main` is absent. `git checkout main` returns
+# "pathspec 'main' did not match any file(s) known to git" in that case.
+CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+if [[ "$CURRENT_BRANCH" == gh-readonly-queue/* ]]; then
+  echo "[orchestrator-state] skipping: running inside GH merge-queue probe branch (${CURRENT_BRANCH})"
+  exit 0
+fi
+
+# Detect shallow clone: if git rev-parse refs/heads/main fails, we're likely
+# in a shallow checkout without a local main ref.
+if ! git rev-parse refs/heads/main >/dev/null 2>&1; then
+  echo "[orchestrator-state] skipping: local refs/heads/main not present — likely a shallow CI clone"
+  exit 0
+fi
+
 # 1. Auto-correct core.bare if it's true. Some local editor extensions / tools
 #    flip this back periodically; we re-correct it on every dispatch.
 BARE=$(git config --get core.bare 2>/dev/null || echo "false")

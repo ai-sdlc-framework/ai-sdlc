@@ -75,6 +75,7 @@ function hermeticFilterAdapters(): Pick<
   | 'calibrationLogPath'
   | 'alreadyInFlightOpts'
   | 'openPRExistsOpts'
+  | 'parentBranchGuard'
 > {
   return {
     graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
@@ -93,6 +94,8 @@ function hermeticFilterAdapters(): Pick<
     openPRExistsOpts: {
       listOpenPRsByBranch: () => [],
     },
+    // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+    parentBranchGuard: async () => {},
   };
 }
 
@@ -165,6 +168,7 @@ describe('runOrchestratorLoop — feature flag enforcement', () => {
       logger: silentLogger(),
       frontier: fakeFrontier([]),
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
     const ticks = await runOrchestratorLoop(config, adapters);
     expect(ticks).toHaveLength(1);
@@ -177,7 +181,7 @@ describe('runOrchestratorTick — happy path', () => {
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxTicks: 1 });
     const result = await runOrchestratorTick(
       config,
-      { logger: silentLogger(), frontier: fakeFrontier([]) },
+      { logger: silentLogger(), frontier: fakeFrontier([]), parentBranchGuard: async () => {} },
       1,
     );
     expect(result.empty).toBe(true);

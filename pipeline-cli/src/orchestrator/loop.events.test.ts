@@ -80,6 +80,8 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'fixture-run-uuid',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 7);
 
@@ -132,6 +134,8 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'r2',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -171,6 +175,8 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'r3',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -207,6 +213,8 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       frontier: fakeFrontier([]),
       emitEvent: sink,
       runId: 'r4',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -240,6 +248,8 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       dispatch: async (taskId) => approvedResult(taskId),
       emitEvent: sink,
       runId: 'r5',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -306,6 +316,8 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'r-retry',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -350,6 +362,8 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'r-wireup',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     // Tick proceeds without calling the dispatcher (empty frontier).
     // The point is the loop accepts the new dispatcher signature.
@@ -368,6 +382,8 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
         throw new Error('events bus exploded');
       },
       runId: 'r6',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     // Must not throw — the emitter swallows.
     const result = await runOrchestratorTick(config, adapters, 1);

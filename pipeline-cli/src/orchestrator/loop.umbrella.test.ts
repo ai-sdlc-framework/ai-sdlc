@@ -52,12 +52,14 @@ function fakeFrontier(ids: string[]): () => Array<{ id: string; title: string }>
  */
 function hermeticFilterAdapters(): Pick<
   OrchestratorAdapters,
-  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath'
+  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath' | 'parentBranchGuard'
 > {
   return {
     graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
     taskLabelsLoader: () => [],
     calibrationLogPath: '/nonexistent-aisdlc-229-bypass.jsonl',
+    // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+    parentBranchGuard: async () => {},
   };
 }
 

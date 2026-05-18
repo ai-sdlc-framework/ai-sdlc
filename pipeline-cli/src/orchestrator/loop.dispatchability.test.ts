@@ -122,6 +122,8 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -184,6 +186,8 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -221,6 +225,8 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);

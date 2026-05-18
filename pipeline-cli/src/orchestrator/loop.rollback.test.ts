@@ -160,6 +160,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -216,6 +218,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -245,6 +249,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -275,6 +281,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -302,6 +310,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -332,6 +342,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -370,6 +382,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -439,6 +453,8 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
