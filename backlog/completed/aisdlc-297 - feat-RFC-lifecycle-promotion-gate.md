@@ -1,7 +1,7 @@
 ---
 id: AISDLC-297
 title: 'feat: RFC lifecycle promotion gate — enforce Draft → Ready for Review → Signed Off → Implemented ladder'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-15'
 labels:
