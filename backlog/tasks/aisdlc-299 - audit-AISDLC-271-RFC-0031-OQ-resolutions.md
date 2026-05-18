@@ -1,7 +1,7 @@
 ---
 id: AISDLC-299
 title: 'audit: AISDLC-271 / RFC-0031 OQ resolutions for operator approval (revert candidate)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-15'
 labels:
@@ -17,6 +17,38 @@ references:
   - orchestrator/src/sa-scoring/revision-proposal.test.ts
   - backlog/completed/aisdlc-271 - chore-complete-RFC-0031-DIDRevisionProposal-mechanism.md
 priority: critical
+finalSummary: |
+  ## Summary
+  Operator walkthrough of all 5 RFC-0031 §12 OQs (AISDLC-271 subagent-inline resolutions) completed 2026-05-16. Outcome: **not a revert candidate** — shipped code is operator-aligned at the foundation. RFC-0031 v1.2 revision history entry records operator approval. Two OQs (12.1 + 12.5) get additive per-org config exposure via Refit AISDLC-310; three OQs (12.2, 12.3, 12.4) affirmed unchanged.
+
+  ## Changes
+  - `spec/rfcs/RFC-0031-calibration-driven-did-revision-proposal.md` (modified, on main): v1.2 revision history entry added; §12 rewritten to preserve original question + first-pass + resolution per OQ; §12.6 added consolidating the per-org calibration.yaml schema.
+  - `backlog/tasks/aisdlc-310 - feat-RFC-0031-refit-per-org-calibration-config.md` (new, on main): Refit task filed for OQ-12.1 + OQ-12.5 per-org config exposure.
+  - `backlog/tasks/aisdlc-299 - audit-AISDLC-271-RFC-0031-OQ-resolutions.md` (this file): ACs marked complete, finalSummary added, status → Done.
+
+  ## Decision matrix per OQ
+
+  | OQ | Subject | Operator verdict | Action |
+  |---|---|---|---|
+  | 12.1 | Confidence calibration thresholds | Affirmed shipped defaults (≥20 / <5); add per-org config exposure | Refit AISDLC-310 |
+  | 12.2 | Multi-field bundling deferral | Affirmed — shipped matches Alex's position exactly | No action |
+  | 12.3 | lockNoProposal opt-out (lock-precedes-trigger) | Affirmed — JSON-path / deny-precedes-allow pattern correct | No action |
+  | 12.4 | Cross-pillar approval routing graduation | Affirmed — `deriveApprovalPath()` already graduates per §8 (core→triad, evolving→pillarLead); initial misread corrected, AISDLC-309 retracted | No action |
+  | 12.5 | Rejection learnings (weights + flat-mean) | Affirmed shipped defaults (0.8/0.5/0.2, floor 0.2); add per-org config exposure + document recency-decay gap | Refit AISDLC-310 |
+
+  ## Design decisions
+  - **Not a revert candidate**: shipped code is operator-aligned at the foundation; additive per-org config is the correct refinement path.
+  - **AISDLC-309 retracted**: initial audit pass mis-framed OQ-12.4 behavior as "uniform 2-approver"; re-read of `deriveApprovalPath()` confirmed shipped graduation matches operator intent.
+  - **Governance pattern documented**: RFC-0031 §12 rewritten preserving original-question + subagent-first-pass + resolution, same pattern as RFC-0025 §13 walkthrough. `docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md` cross-referenced.
+
+  ## Verification
+  - `pnpm build` — clean
+  - `pnpm test` — clean
+  - `pnpm lint` — clean
+  - `pnpm format:check` — clean
+
+  ## Follow-up
+  - AISDLC-310: expose `confidenceThresholds` + `rejectionPrecedent` in `.ai-sdlc/calibration.yaml` (per-org config for OQ-12.1 + OQ-12.5)
 ---
 
 ## Description
@@ -46,10 +78,10 @@ The user's reaction to the same pattern in AISDLC-269 / RFC-0024: "if they were 
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 Operator walkthrough completed for each of RFC-0031 §12 OQs (5 total)
-- [ ] #2 Each operator-affirmed resolution compared against shipped `revision-proposal.ts`
-- [ ] #3 Decision matrix outcome documented (no action / refit / revert) per OQ
-- [ ] #4 If "no action": RFC-0031 v0.X revision history entry records operator approval
-- [ ] #5 If "refit": file targeted refit tasks
-- [ ] #6 If "revert": file revert task + re-implementation plan
+- [x] #1 Operator walkthrough completed for each of RFC-0031 §12 OQs (5 total)
+- [x] #2 Each operator-affirmed resolution compared against shipped `revision-proposal.ts`
+- [x] #3 Decision matrix outcome documented (no action / refit / revert) per OQ
+- [x] #4 If "no action": RFC-0031 v0.X revision history entry records operator approval
+- [x] #5 If "refit": file targeted refit tasks
+- [x] #6 If "revert": file revert task + re-implementation plan
 <!-- AC:END -->
