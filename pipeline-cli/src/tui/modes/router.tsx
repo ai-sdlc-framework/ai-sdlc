@@ -27,6 +27,7 @@ import { AnalyticsPane } from '../panes/analytics.js';
 import { HelpScreen } from './help.js';
 import { DepsFullScreen } from './deps-full.js';
 import { ConfigBrowserPane } from '../config-browser/pane.js';
+import { DecisionsPendingPane } from '../decisions-pending/pane.js';
 import { writeInteraction, type WriteInteractionOpts } from '../analytics/interactions-writer.js';
 
 // ── Refresh context (AC#10) ──────────────────────────────────────────────────
@@ -302,6 +303,8 @@ function ModeContent({
       return <ConfigBrowserPane filterQuery={searchQuery} />;
     case 'analytics':
       return <AnalyticsPane />;
+    case 'decisions':
+      return <DecisionsPendingPane />;
     case 'help':
       return <HelpScreen />;
     case 'overview':

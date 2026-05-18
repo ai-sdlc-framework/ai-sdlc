@@ -16,3 +16,5 @@ export * from './projection.js';
 export * from './stage-a.js';
 export * from './stage-b.js';
 export * from './dor-bridge.js';
+export * from './decisions-config.js';
+export * from './notification.js';

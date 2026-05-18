@@ -31,3 +31,13 @@ export function prDecisionsPath(artifactsDir?: string): string {
 export function interactionsPath(artifactsDir?: string): string {
   return join(operatorDirPath(artifactsDir), 'interactions.jsonl');
 }
+
+/** Path for the TUI self-observability event log (RFC-0023 §12). */
+export function tuiEventsPath(artifactsDir?: string): string {
+  return join(resolveArtifactsDir({ artifactsDir }), '_tui', 'events.jsonl');
+}
+
+/** Path for the operator notification queue (RFC-0035 Phase 8 / AC#4). */
+export function notificationsPath(artifactsDir?: string): string {
+  return join(operatorDirPath(artifactsDir), 'notifications.jsonl');
+}

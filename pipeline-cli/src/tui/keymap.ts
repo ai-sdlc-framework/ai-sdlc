@@ -6,7 +6,15 @@
  * The router (`modes/router.tsx`) consumes the same `keymap.key` values to
  * dispatch mode switches.
  */
-export type ModeId = 'overview' | 'blockers' | 'prs' | 'deps' | 'config' | 'analytics' | 'help';
+export type ModeId =
+  | 'overview'
+  | 'blockers'
+  | 'prs'
+  | 'deps'
+  | 'config'
+  | 'analytics'
+  | 'decisions'
+  | 'help';
 
 export interface KeyBinding {
   /** The keystroke (single character or sentinel like 'Esc'). */
@@ -50,6 +58,13 @@ export const KEYMAP: ReadonlyArray<KeyBinding> = [
     footerLabel: 'analytics',
     description: 'Open Analytics full-screen — operator throughput + pipeline metrics drill-down',
     mode: 'analytics',
+  },
+  {
+    key: 'n',
+    footerLabel: 'decisions',
+    description:
+      'Open Decisions-Pending pane — RFC-0035 Decision catalog; resolve pending items from TUI',
+    mode: 'decisions',
   },
   {
     key: '/',

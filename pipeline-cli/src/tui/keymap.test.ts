@@ -11,8 +11,8 @@ import { describe, expect, it } from 'vitest';
 import { KEYMAP, isModeKey, modeForKey } from './keymap.js';
 
 describe('KEYMAP', () => {
-  it('contains exactly 9 entries (b/p/d/c/a/// r/?/q)', () => {
-    expect(KEYMAP.map((b) => b.key)).toEqual(['b', 'p', 'd', 'c', 'a', '/', 'r', '?', 'q']);
+  it('contains exactly 10 entries (b/p/d/c/a/n// /r/?/q)', () => {
+    expect(KEYMAP.map((b) => b.key)).toEqual(['b', 'p', 'd', 'c', 'a', 'n', '/', 'r', '?', 'q']);
   });
 
   it('every binding has a non-empty footerLabel and description', () => {
@@ -22,9 +22,9 @@ describe('KEYMAP', () => {
     }
   });
 
-  it('mode-switch keys (b/p/d/c/a/?) carry a mode; others do not', () => {
+  it('mode-switch keys (b/p/d/c/a/n/?) carry a mode; others do not', () => {
     const modeKeys = KEYMAP.filter((b) => b.mode !== null).map((b) => b.key);
-    expect(modeKeys.sort()).toEqual(['?', 'a', 'b', 'c', 'd', 'p'].sort());
+    expect(modeKeys.sort()).toEqual(['?', 'a', 'b', 'c', 'd', 'n', 'p'].sort());
   });
 });
 
@@ -35,6 +35,7 @@ describe('modeForKey', () => {
     expect(modeForKey('d')).toBe('deps');
     expect(modeForKey('c')).toBe('config');
     expect(modeForKey('a')).toBe('analytics');
+    expect(modeForKey('n')).toBe('decisions');
     expect(modeForKey('?')).toBe('help');
   });
 
@@ -49,7 +50,7 @@ describe('modeForKey', () => {
 
 describe('isModeKey', () => {
   it('recognises every binding with a mode', () => {
-    for (const k of ['b', 'p', 'd', 'c', 'a', '?']) {
+    for (const k of ['b', 'p', 'd', 'c', 'a', 'n', '?']) {
       expect(isModeKey(k)).toBe(true);
     }
   });

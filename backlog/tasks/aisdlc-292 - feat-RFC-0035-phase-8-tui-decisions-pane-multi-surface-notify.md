@@ -1,7 +1,7 @@
 ---
 id: AISDLC-292
 title: 'feat: RFC-0035 Phase 8 — RFC-0023 TUI decisions-pending pane + multi-surface notification'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-15'
 labels:
