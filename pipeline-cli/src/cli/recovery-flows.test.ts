@@ -1045,3 +1045,264 @@ describe('runExecuteCommand recoverable-abort detection (AISDLC-242 extension)',
     expect(result.recoverableAbort).toBeUndefined();
   });
 });
+
+// ── AISDLC-355: Bug 1 — stale synthetic-critical verdict detection ──────────
+
+describe('runResumeFromDraft — AISDLC-355 Bug 1: stale synthetic-critical verdict', () => {
+  it('re-runs reviewers when verdict file contains synthetic-critical "returned no parseable verdict" finding', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-355', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-355');
+    mkdirSync(worktreePath, { recursive: true });
+
+    // Write a verdict file that looks like the synthetic-critical placeholder
+    // from coerceReviewerVerdict (the stale failure case)
+    const verdictDir = join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdictDir, { recursive: true });
+    const stalePlaceholder = [
+      {
+        agentId: 'code-reviewer',
+        harness: 'claude-code',
+        approved: false,
+        findings: [
+          {
+            severity: 'critical',
+            message: 'code-reviewer returned no parseable verdict (status=error)',
+          },
+        ],
+      },
+      {
+        agentId: 'test-reviewer',
+        harness: 'claude-code',
+        approved: false,
+        findings: [
+          {
+            severity: 'critical',
+            message: 'test-reviewer returned no parseable verdict (status=error)',
+          },
+        ],
+      },
+      {
+        agentId: 'security-reviewer',
+        harness: 'claude-code',
+        approved: false,
+        findings: [
+          {
+            severity: 'critical',
+            message: 'security-reviewer returned no parseable verdict (status=error)',
+          },
+        ],
+      },
+    ];
+    writeFileSync(join(verdictDir, 'aisdlc-355.json'), JSON.stringify(stalePlaceholder));
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok('')) // no attestation
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok());
+    const fakeRunner = fakeRunnerObj.toRunner();
+
+    const spawner = makeApprovingSpawner();
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-355',
+      workDir: tmp,
+      spawner,
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+
+    // Reviewers must have been re-run (verdict file was treated as stale)
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.ok).toBe(true);
+    // Verdict from fresh reviewer run must be the approving spawner's result
+    expect(result.finalVerdict?.decision).toBe('APPROVED');
+    // Spawner must have been called (reviewers ran)
+    expect(spawner.getCallCount('code-reviewer')).toBeGreaterThan(0);
+  });
+
+  it('also re-runs reviewers when verdict file uses nested VerdictFilePayload shape with synthetic-critical', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-355', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-355');
+    mkdirSync(worktreePath, { recursive: true });
+
+    // Write a verdict in the nested VerdictFilePayload shape (from writeVerdictFile)
+    const verdictDir = join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdictDir, { recursive: true });
+    const nestedPlaceholder = {
+      taskId: 'AISDLC-355',
+      decision: 'CHANGES_REQUESTED',
+      approved: false,
+      iteration: 1,
+      counts: { critical: 3, major: 0, minor: 0, suggestion: 0 },
+      harnessNote: '',
+      summary: 'CHANGES_REQUESTED',
+      verdicts: [
+        {
+          agentId: 'code-reviewer',
+          harness: 'claude-code',
+          approved: false,
+          findings: [
+            {
+              severity: 'critical',
+              message: 'code-reviewer returned no parseable verdict (status=error)',
+            },
+          ],
+        },
+      ],
+    };
+    writeFileSync(join(verdictDir, 'aisdlc-355.json'), JSON.stringify(nestedPlaceholder));
+
+    const fakeRunner = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .toRunner();
+
+    const spawner = makeApprovingSpawner();
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-355',
+      workDir: tmp,
+      spawner,
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(spawner.getCallCount('code-reviewer')).toBeGreaterThan(0);
+  });
+
+  it('respects --force-reviewers to bypass a valid verdict file and re-run reviewers', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-355', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-355');
+    mkdirSync(worktreePath, { recursive: true });
+
+    // Write a VALID verdict file (not stale — normally would skip reviewers)
+    const verdictDir = join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdictDir, { recursive: true });
+    const validVerdict = [
+      {
+        agentId: 'code-reviewer',
+        harness: 'claude-code',
+        approved: true,
+        findings: [],
+        summary: 'lgtm',
+      },
+      {
+        agentId: 'test-reviewer',
+        harness: 'claude-code',
+        approved: true,
+        findings: [],
+        summary: 'lgtm',
+      },
+      {
+        agentId: 'security-reviewer',
+        harness: 'claude-code',
+        approved: true,
+        findings: [],
+        summary: 'lgtm',
+      },
+    ];
+    writeFileSync(join(verdictDir, 'aisdlc-355.json'), JSON.stringify(validVerdict));
+
+    const fakeRunner = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .toRunner();
+
+    const spawner = makeApprovingSpawner();
+    // forceReviewers=true must bypass the valid verdict file
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-355',
+      workDir: tmp,
+      spawner,
+      runner: fakeRunner,
+      logger: silentLogger(),
+      forceReviewers: true,
+    });
+    expect(result.outcome).toBe('resumed-and-ready');
+    // With forceReviewers, reviewers should have run even though file was valid
+    expect(spawner.getCallCount('code-reviewer')).toBeGreaterThan(0);
+  });
+});
+
+// ── AISDLC-355: Bug 2 — verdict file shape: resume-from-draft writes flat array ──
+
+describe('runResumeFromDraft — AISDLC-355 Bug 2: verdict file shape', () => {
+  it('writes a flat JSON array (not nested VerdictFilePayload) to the verdict file', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-355', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-355');
+    mkdirSync(worktreePath, { recursive: true });
+    // No verdict file — will trigger Case C (run reviewers + write file)
+
+    const fakeRunner = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .toRunner();
+
+    const { readFileSync: realReadFileSync, existsSync: realExistsSync } = await import('node:fs');
+
+    await runResumeFromDraft({
+      taskId: 'AISDLC-355',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+
+    // Verify the verdict file was written as a flat array
+    const verdictPath = join(worktreePath, '.ai-sdlc', 'verdicts', 'aisdlc-355.json');
+    expect(realExistsSync(verdictPath)).toBe(true);
+    const raw = realReadFileSync(verdictPath, 'utf-8');
+    const parsed = JSON.parse(raw);
+    // Must be a flat array, NOT a nested object
+    expect(Array.isArray(parsed)).toBe(true);
+    // Each entry must have agentId
+    for (const entry of parsed) {
+      expect(typeof entry.agentId).toBe('string');
+    }
+  });
+});

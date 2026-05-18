@@ -41,7 +41,7 @@
  * @module cli/resume-from-draft
  */
 
-import { existsSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { defaultRunner, type Runner } from '../runtime/exec.js';
 import { detectDraftPrForBranch } from '../steps/03-setup-worktree.js';
@@ -49,8 +49,8 @@ import {
   aggregateVerdicts,
   buildReviewPrompts,
   cleanupTask,
-  coerceReviewerVerdict,
   computeBranchName,
+  spawnReviewerWithRetry,
   validateTask,
 } from '../steps/index.js';
 import {
@@ -163,6 +163,12 @@ export interface ResumeFromDraftOptions {
   logger?: PipelineLogger;
   /** Override for tests — inject a fake executor. */
   verdictWriter?: typeof writeVerdictFile;
+  /**
+   * AISDLC-355: when true, force-bypass any existing verdict file and re-run
+   * reviewers regardless of whether the file looks stale or valid.
+   * Equivalent operator override to `rm .ai-sdlc/verdicts/<task-id>.json`.
+   */
+  forceReviewers?: boolean;
 }
 
 /** Result from `runResumeFromDraft`. */
@@ -196,7 +202,9 @@ export async function runResumeFromDraft(
 ): Promise<ResumeFromDraftResult> {
   const logger = opts.logger ?? DEFAULT_LOGGER;
   const runner = opts.runner ?? defaultRunner;
-  const writer = opts.verdictWriter ?? writeVerdictFile;
+  // opts.verdictWriter is kept in the interface for API compatibility but
+  // resume-from-draft now writes the flat verdicts array directly (Bug 2 fix).
+  void opts.verdictWriter;
 
   logger.progress('resume-from-draft', `detecting state for ${opts.taskId}`);
 
@@ -299,10 +307,64 @@ export async function runResumeFromDraft(
     };
   }
 
+  // Bug 1 (AISDLC-355): A prior failed run may have written a synthetic-critical
+  // placeholder verdict (from `coerceReviewerVerdict` fallback). If the verdict
+  // file exists but contains a "returned no parseable verdict" finding, treat it
+  // as absent so reviewers re-run rather than re-using the stale failure.
+  // --force-reviewers provides an explicit operator override to bypass any
+  // existing verdict file and always re-run reviewers.
+  let verdictFileIsStale = opts.forceReviewers === true;
+  if (verdictFileIsStale && state.hasVerdictFile) {
+    logger.info(
+      `[ai-sdlc] resume-from-draft: --force-reviewers set; bypassing existing verdict file for ${opts.taskId}`,
+    );
+  }
+  if (state.hasVerdictFile && !verdictFileIsStale) {
+    const taskIdLower = opts.taskId.toLowerCase();
+    const verdictPath = join(worktreePath, '.ai-sdlc', 'verdicts', `${taskIdLower}.json`);
+    try {
+      const raw = readFileSync(verdictPath, 'utf-8');
+      const parsed = JSON.parse(raw) as unknown;
+      // Handle both flat array and nested VerdictFilePayload shapes.
+      const verdictEntries: unknown[] = Array.isArray(parsed)
+        ? parsed
+        : typeof parsed === 'object' && parsed !== null && 'verdicts' in parsed
+          ? ((parsed as { verdicts: unknown[] }).verdicts ?? [])
+          : [];
+      const hasSyntheticCritical = verdictEntries.some((v) => {
+        if (!v || typeof v !== 'object') return false;
+        const entry = v as { findings?: unknown };
+        if (!Array.isArray(entry.findings)) return false;
+        return entry.findings.some(
+          (f: unknown) =>
+            typeof f === 'object' &&
+            f !== null &&
+            typeof (f as { message?: unknown }).message === 'string' &&
+            /returned no parseable verdict/i.test((f as { message: string }).message),
+        );
+      });
+      if (hasSyntheticCritical) {
+        verdictFileIsStale = true;
+        logger.info(
+          `[ai-sdlc] resume-from-draft: verdict file for ${opts.taskId} contains synthetic-critical placeholder — treating as absent; will re-run reviewers`,
+        );
+      }
+    } catch {
+      // If we can't read/parse the verdict, treat it as stale to be safe.
+      verdictFileIsStale = true;
+      logger.info(
+        `[ai-sdlc] resume-from-draft: verdict file for ${opts.taskId} is unreadable — treating as absent; will re-run reviewers`,
+      );
+    }
+  }
+
+  // Effective hasVerdictFile: stale files are treated as absent.
+  const effectiveHasVerdictFile = state.hasVerdictFile && !verdictFileIsStale;
+
   // Case B: verdict file exists but no attestation → re-sign + flip
   // The pre-push hook handles attestation signing. We just push the branch
   // (which triggers the attestation hook) and then flip to ready.
-  if (state.hasVerdictFile && !state.hasAttestationCommit) {
+  if (effectiveHasVerdictFile && !state.hasAttestationCommit) {
     logger.progress(
       'resume-from-draft',
       `verdict file present; pushing to trigger attestation hook, then flipping PR #${prNumber} to ready`,
@@ -373,15 +435,18 @@ export async function runResumeFromDraft(
     runner,
   });
 
-  const reviewerResults = await opts.spawner.spawnParallel(
-    reviewBuild.prompts.map((p) => ({
-      type: p.reviewer,
-      prompt: p.prompt,
-      cwd: worktreePath,
-    })),
-  );
-  const verdicts: ReviewerVerdict[] = reviewerResults.map((r, i) =>
-    coerceReviewerVerdict(REVIEWER_TYPES[i], r),
+  // Bug 3 (AISDLC-355): Use spawnReviewerWithRetry so degenerate reviewer
+  // results are retried once before falling through to the synthetic-critical
+  // placeholder. Runs the 3 reviewers in parallel (same as the main pipeline).
+  const verdicts: ReviewerVerdict[] = await Promise.all(
+    reviewBuild.prompts.map((p, i) =>
+      spawnReviewerWithRetry(
+        opts.spawner,
+        { type: p.reviewer, prompt: p.prompt, cwd: worktreePath },
+        REVIEWER_TYPES[i],
+        logger,
+      ),
+    ),
   );
 
   const aggregated = await aggregateVerdicts({
@@ -389,18 +454,21 @@ export async function runResumeFromDraft(
     harnessNote: reviewBuild.harnessNote,
   });
 
-  // Write verdict file
+  // Bug 2 (AISDLC-355): Write the FLAT verdicts array so sign-attestation.mjs
+  // can read it directly. The nested VerdictFilePayload shape stays in memory
+  // for in-process orchestration (via the `aggregated` object) but is NOT what
+  // gets serialized to disk for the pre-push attestation hook.
   let verdictFilePath: string | undefined;
   try {
-    verdictFilePath = writer({
-      taskId: opts.taskId,
-      worktreePath,
-      iteration: 1,
-      verdict: aggregated,
-    });
+    const taskIdLower = opts.taskId.toLowerCase();
+    const verdictDir = join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdictDir, { recursive: true });
+    verdictFilePath = join(verdictDir, `${taskIdLower}.json`);
+    writeFileSync(verdictFilePath, JSON.stringify(aggregated.verdicts, null, 2) + '\n', 'utf8');
     logger.progress('resume-from-draft', `verdict written: ${aggregated.decision}`);
   } catch (err) {
     logger.warn(`[ai-sdlc] verdict write failed (non-fatal): ${(err as Error).message}`);
+    verdictFilePath = undefined;
   }
 
   // Push (triggers attestation hook) + flip to ready

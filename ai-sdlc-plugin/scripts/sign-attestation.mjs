@@ -193,9 +193,28 @@ async function main() {
     fail(err.message ?? String(err));
   }
   const policy = readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8');
-  const verdicts = JSON.parse(readFileSync(verdictsPath, 'utf-8'));
-  if (!Array.isArray(verdicts)) {
-    fail(`${verdictsPath} must contain a JSON array of reviewer verdicts`);
+  const verdictsRaw = JSON.parse(readFileSync(verdictsPath, 'utf-8'));
+  // AISDLC-355 — support both shapes during transition:
+  //   Flat array:       [{agentId, harness, approved, findings}, ...]
+  //     (written by resume-from-draft after the Bug 2 fix)
+  //   Nested object:    {taskId, decision, counts, verdicts: [...]}
+  //     (written by writeVerdictFile in execute.ts / VerdictFilePayload shape)
+  //   Docs-only shape:  [{agentId, harness, approved, findings, summary}, ...]
+  //     (synthesized by check-attestation-sign.sh for docs-only PRs, AISDLC-215)
+  // Extract the flat array from whichever shape was written.
+  let verdicts;
+  if (Array.isArray(verdictsRaw)) {
+    verdicts = verdictsRaw;
+  } else if (
+    verdictsRaw !== null &&
+    typeof verdictsRaw === 'object' &&
+    Array.isArray(verdictsRaw.verdicts)
+  ) {
+    verdicts = verdictsRaw.verdicts;
+  } else {
+    fail(
+      `${verdictsPath} must contain either a JSON array of reviewer verdicts or an object with a 'verdicts' array key`,
+    );
   }
   const reviewers = verdicts.map((v) => {
     if (!v?.agentId) fail(`reviewer verdict missing agentId: ${JSON.stringify(v)}`);

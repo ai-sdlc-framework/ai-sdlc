@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { coerceReviewerVerdict, iterateReviewLoop } from './09-iterate.js';
+import {
+  coerceReviewerVerdict,
+  isDegenerateVerdict,
+  iterateReviewLoop,
+  spawnReviewerWithRetry,
+} from './09-iterate.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
 import { aggregateVerdicts } from './08-aggregate-verdicts.js';
 import { cleanupTmpProject, makeTmpProject } from '../__test-helpers/make-task.js';
@@ -448,5 +453,168 @@ describe('Step 9 — re-uses Step 8 aggregator', () => {
       ] as ReviewerVerdict[],
     });
     expect(r.decision).toBe('CHANGES_REQUESTED');
+  });
+});
+
+// ── AISDLC-355: Bug 3 — isDegenerateVerdict + spawnReviewerWithRetry ───────
+
+describe('AISDLC-355 — isDegenerateVerdict', () => {
+  it('returns true for synthetic-critical "returned no parseable verdict" placeholder', () => {
+    const v: ReviewerVerdict = {
+      agentId: 'code-reviewer',
+      harness: 'claude-code',
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message: 'code-reviewer returned no parseable verdict (status=error)',
+        },
+      ],
+    };
+    expect(isDegenerateVerdict(v)).toBe(true);
+  });
+
+  it('returns true for fully empty degenerate verdict (no approval, no findings, no summary)', () => {
+    const v: ReviewerVerdict = {
+      agentId: 'code-reviewer',
+      harness: 'claude-code',
+      approved: false,
+      findings: [],
+      summary: '',
+    };
+    expect(isDegenerateVerdict(v)).toBe(true);
+  });
+
+  it('returns false for a substantive rejection with real findings', () => {
+    const v: ReviewerVerdict = {
+      agentId: 'code-reviewer',
+      harness: 'claude-code',
+      approved: false,
+      findings: [{ severity: 'major', message: 'function is not pure' }],
+      summary: 'needs work',
+    };
+    expect(isDegenerateVerdict(v)).toBe(false);
+  });
+
+  it('returns false for an approval', () => {
+    const v: ReviewerVerdict = {
+      agentId: 'code-reviewer',
+      harness: 'claude-code',
+      approved: true,
+      findings: [],
+      summary: 'lgtm',
+    };
+    expect(isDegenerateVerdict(v)).toBe(false);
+  });
+});
+
+describe('AISDLC-355 — spawnReviewerWithRetry (Bug 3: degenerate-reviewer one-time retry)', () => {
+  it('returns the first result when it is substantive (no retry needed)', async () => {
+    const spawner = new MockSpawner({
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'lgtm' },
+        status: 'success',
+        durationMs: 0,
+      },
+    });
+    const verdict = await spawnReviewerWithRetry(
+      spawner,
+      { type: 'code-reviewer', prompt: 'review this', cwd: tmp },
+      'code-reviewer',
+    );
+    expect(verdict.approved).toBe(true);
+    expect(spawner.getCallCount('code-reviewer')).toBe(1);
+  });
+
+  it('retries once on degenerate first result and uses second result', async () => {
+    const retryLogs: string[] = [];
+    const mockLogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      progress: (stage: string, status: string) => retryLogs.push(`${stage}: ${status}`),
+    };
+
+    const spawner = new MockSpawner({
+      'code-reviewer': (_opts, callIndex): SubagentResult => {
+        if (callIndex === 0) {
+          // First call: returns error (no parseable verdict)
+          return {
+            type: 'code-reviewer',
+            output: 'pure prose, no JSON',
+            status: 'error',
+            error: 'truncated',
+            durationMs: 0,
+          };
+        }
+        // Second call: substantive verdict
+        return {
+          type: 'code-reviewer',
+          output: '',
+          parsed: { approved: true, findings: [], summary: 'lgtm on retry' },
+          status: 'success',
+          durationMs: 0,
+        };
+      },
+    });
+
+    const verdict = await spawnReviewerWithRetry(
+      spawner,
+      { type: 'code-reviewer', prompt: 'review this', cwd: tmp },
+      'code-reviewer',
+      mockLogger,
+    );
+
+    expect(verdict.approved).toBe(true);
+    expect(verdict.summary).toBe('lgtm on retry');
+    expect(spawner.getCallCount('code-reviewer')).toBe(2);
+    // Must emit the retry progress line
+    expect(retryLogs).toContain('reviewer-retry: code-reviewer attempt=2');
+  });
+
+  it('does NOT retry on timeout status — emits reviewer-timeout finding instead', async () => {
+    const spawner = new MockSpawner({
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: '',
+        status: 'timeout',
+        durationMs: 60000,
+      },
+    });
+    const verdict = await spawnReviewerWithRetry(
+      spawner,
+      { type: 'code-reviewer', prompt: 'review this', cwd: tmp },
+      'code-reviewer',
+    );
+    // Should NOT retry (timeout = real failure)
+    expect(spawner.getCallCount('code-reviewer')).toBe(1);
+    // Must produce a critical finding (not a retry)
+    expect(verdict.approved).toBe(false);
+    expect(verdict.findings[0].message).toMatch(/timed out/);
+    expect(verdict.summary).toBe('reviewer-timeout');
+  });
+
+  it('max 1 retry per call — if second call is also degenerate, returns that degenerate result', async () => {
+    // Both calls return unparseable output — no infinite loop
+    const spawner = new MockSpawner({
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: 'still prose',
+        status: 'error',
+        durationMs: 0,
+      },
+    });
+    const verdict = await spawnReviewerWithRetry(
+      spawner,
+      { type: 'code-reviewer', prompt: 'review this', cwd: tmp },
+      'code-reviewer',
+    );
+    // Exactly 2 calls (1 original + 1 retry), no more
+    expect(spawner.getCallCount('code-reviewer')).toBe(2);
+    // Result is still the synthetic-critical from the second attempt
+    expect(verdict.approved).toBe(false);
+    expect(verdict.findings[0].severity).toBe('critical');
   });
 });

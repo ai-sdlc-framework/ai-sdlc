@@ -21,9 +21,12 @@ import { aggregateVerdicts, formatFeedback } from './08-aggregate-verdicts.js';
 import type {
   IterateReviewLoopOptions,
   IterateReviewLoopResult,
+  PipelineLogger,
   ReviewerType,
   ReviewerVerdict,
+  SpawnOpts,
   SubagentResult,
+  SubagentSpawner,
 } from '../types.js';
 
 const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
@@ -129,12 +132,14 @@ export async function iterateReviewLoop(
       workDir: opts.worktreePath,
     });
 
-    const reviewSpawn = await opts.spawner.spawnParallel(
-      prompts.map((p) => ({ type: p.reviewer, prompt: p.prompt, cwd: opts.worktreePath })),
-    );
-
-    const newVerdicts: ReviewerVerdict[] = reviewSpawn.map((r: SubagentResult, i) =>
-      coerceReviewerVerdict(REVIEWER_TYPES[i], r),
+    const newVerdicts: ReviewerVerdict[] = await Promise.all(
+      prompts.map((p, i) =>
+        spawnReviewerWithRetry(
+          opts.spawner!,
+          { type: p.reviewer, prompt: p.prompt, cwd: opts.worktreePath },
+          REVIEWER_TYPES[i],
+        ),
+      ),
     );
     currentVerdict = await aggregateVerdicts({
       verdicts: newVerdicts,
@@ -201,4 +206,85 @@ export function coerceReviewerVerdict(agentId: ReviewerType, r: SubagentResult):
     findings: Array.isArray(obj.findings) ? (obj.findings as ReviewerVerdict['findings']) : [],
     summary: typeof obj.summary === 'string' ? obj.summary : undefined,
   };
+}
+
+/**
+ * Return true when a verdict looks degenerate: it was produced by the
+ * synthetic-critical fallback in `coerceReviewerVerdict` (approved=false,
+ * no findings array entries with real content, empty summary).
+ *
+ * Used by `spawnReviewerWithRetry` to decide whether to retry.
+ *
+ * Exported for unit tests.
+ */
+export function isDegenerateVerdict(v: ReviewerVerdict): boolean {
+  // Synthetic-critical placeholder produced by coerceReviewerVerdict:
+  // approved=false, findings contains the "returned no parseable verdict" sentinel.
+  if (
+    !v.approved &&
+    Array.isArray(v.findings) &&
+    v.findings.some((f) => /returned no parseable verdict/i.test(f.message))
+  ) {
+    return true;
+  }
+  // Fully empty degenerate: no approval, no findings, no summary.
+  if (!v.approved && v.findings.length === 0 && (!v.summary || v.summary === '')) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Spawn a single reviewer subagent and coerce its result into a ReviewerVerdict.
+ * When the result is degenerate (unparseable / empty), retries ONCE with the
+ * same opts before falling through to the synthetic-critical placeholder.
+ *
+ * - If the first call's status is `timeout`, skips the retry (a timeout is a
+ *   real infrastructure failure, not a parser-recovery opportunity) and
+ *   synthesizes a `reviewer-timeout` finding instead of `reviewer-degenerate`.
+ * - Emits `[ai-sdlc-progress] reviewer-retry: <agentId> attempt=2` on retry.
+ * - Max 1 retry per call (prevents infinite loops).
+ *
+ * Exported so `runResumeFromDraft` can reuse the same retry logic.
+ */
+export async function spawnReviewerWithRetry(
+  spawner: SubagentSpawner,
+  opts: SpawnOpts,
+  agentId: ReviewerType,
+  logger?: PipelineLogger,
+): Promise<ReviewerVerdict> {
+  const firstResult = await spawner.spawn(opts);
+
+  // Timeout is a real infrastructure failure — no point retrying.
+  if (firstResult.status === 'timeout') {
+    return {
+      agentId,
+      harness: 'claude-code',
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message: `${agentId} timed out (status=timeout${
+            firstResult.error ? ', error=' + firstResult.error : ''
+          })`,
+        },
+      ],
+      summary: 'reviewer-timeout',
+    };
+  }
+
+  const firstVerdict = coerceReviewerVerdict(agentId, firstResult);
+  if (!isDegenerateVerdict(firstVerdict)) {
+    return firstVerdict;
+  }
+
+  // First attempt was degenerate — retry once.
+  if (logger) {
+    logger.progress('reviewer-retry', `${agentId} attempt=2`);
+  } else {
+    console.log(`[ai-sdlc-progress] reviewer-retry: ${agentId} attempt=2`);
+  }
+
+  const retryResult = await spawner.spawn(opts);
+  return coerceReviewerVerdict(agentId, retryResult);
 }
