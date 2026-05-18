@@ -642,6 +642,57 @@ jobs:
 `;
 
 /**
+ * `.ai-sdlc/calibration.yaml` — per-org calibration config for the
+ * RFC-0031 DIDRevisionProposal mechanism (Refit AISDLC-310).
+ *
+ * Exposes OQ-12.1 (confidence thresholds) and OQ-12.5 (rejection weights +
+ * penalty floor) as per-org configurable defaults. All values default to
+ * the operator-affirmed shipped defaults from AISDLC-271 / PR #476.
+ *
+ * Drift policy: when `parseRevisionProposalCalibrationYaml()` in
+ * `orchestrator/src/sa-scoring/revision-proposal-config.ts` gains new
+ * config fields, mirror them here. The values in this template MUST match
+ * the DEFAULT_* constants exported from that module.
+ */
+export const CALIBRATION_YAML_STUB = `# RFC-0031 DIDRevisionProposal calibration config (Refit AISDLC-310).
+#
+# Configures per-org thresholds and weights for the calibration-driven
+# DID revision proposal mechanism. All values below are the shipped
+# defaults (operator-affirmed 2026-05-16 audit). Adjust to tune the
+# mechanism for your SOUL-drift cadence and review culture.
+#
+# Validation rules (enforced at load time by the runtime):
+#   - confidenceThresholds.highSampleSize > lowSampleSize > 0
+#   - all rejectionPrecedent.weights in [0, 1]
+#   - rejectionPrecedent.confidencePenaltyFloor in [0, 1]
+
+calibration:
+  # Fields that should never receive auto-proposals (OQ-12.3).
+  # Add JSON-path identifiers for fields the triad has decided to lock.
+  # Operators remove entries from this list to opt back in.
+  lockNoProposal: []
+    # - $.identityClass.evolving.voiceRegister
+    # - $.identityClass.core.soulPurpose.mission
+
+  # Confidence threshold configuration (OQ-12.1).
+  # Sample size = dismissSignals + escalateSignals + driftEvents.
+  confidenceThresholds:
+    highSampleSize: 20     # sample size >= this → HIGH confidence (if other conditions met)
+    lowSampleSize: 5       # sample size <  this → LOW confidence (regardless of other conditions)
+
+  # Rejection precedent configuration (OQ-12.5).
+  # When a proposal is rejected, a weight is stored in the rejection record
+  # and averaged across prior rejections to suppress future confidence for
+  # the same field.  Formula: factor = max(floor, 1.0 - avgWeight x 0.5)
+  rejectionPrecedent:
+    weights:
+      highConfidenceRejection: 0.8   # strong disagreement signal
+      mediumConfidenceRejection: 0.5 # moderate disagreement
+      lowConfidenceRejection: 0.2    # expected noise level; low weight
+    confidencePenaltyFloor: 0.2      # max 80% suppression; raise to be more conservative
+`;
+
+/**
  * The set of feature templates exported as a single map so the wizard
  * dispatcher can iterate without each feature growing its own switch
  * statement.

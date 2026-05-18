@@ -24,6 +24,36 @@
  */
 
 import { randomUUID } from 'crypto';
+import {
+  type ResolvedRevisionProposalCalibrationConfig,
+  DEFAULT_CONFIDENCE_HIGH_SAMPLE_SIZE,
+  DEFAULT_CONFIDENCE_LOW_SAMPLE_SIZE,
+  DEFAULT_REJECTION_WEIGHT_HIGH,
+  DEFAULT_REJECTION_WEIGHT_MEDIUM,
+  DEFAULT_REJECTION_WEIGHT_LOW,
+  DEFAULT_CONFIDENCE_PENALTY_FLOOR,
+} from './revision-proposal-config.js';
+
+// Re-export config types so callers can import everything from this module.
+export type { ResolvedRevisionProposalCalibrationConfig };
+export {
+  type RevisionProposalCalibrationConfig,
+  type ConfidenceThresholdsConfig,
+  type RejectionPrecedentConfig,
+  type RejectionPrecedentWeightsConfig,
+  type ConfigValidationResult,
+  type ConfigValidationError,
+  DEFAULT_CONFIDENCE_HIGH_SAMPLE_SIZE,
+  DEFAULT_CONFIDENCE_LOW_SAMPLE_SIZE,
+  DEFAULT_REJECTION_WEIGHT_HIGH,
+  DEFAULT_REJECTION_WEIGHT_MEDIUM,
+  DEFAULT_REJECTION_WEIGHT_LOW,
+  DEFAULT_CONFIDENCE_PENALTY_FLOOR,
+  DEFAULT_RESOLVED_CALIBRATION_CONFIG,
+  validateRevisionProposalCalibrationConfig,
+  resolveRevisionProposalCalibrationConfig,
+  parseRevisionProposalCalibrationYaml,
+} from './revision-proposal-config.js';
 
 // ── Constants ────────────────────────────────────────────────────────
 
@@ -187,14 +217,21 @@ export function deriveApprovalPath(
  * + identityClass (OQ-12.1 resolved position: confidence = f(sample size,
  * classification clarity, identityClass)).
  *
- * - high:   sampleSize ≥ 20 AND classification != 'ambiguous' AND identityClass = 'evolving'
- * - low:    sampleSize < 5  OR classification = 'ambiguous'   OR identityClass = 'core'
+ * Thresholds are per-org configurable via `.ai-sdlc/calibration.yaml`
+ * (Refit AISDLC-310). Defaults match the shipped AISDLC-271 values:
+ *
+ * - high:   sampleSize ≥ highSampleSize (default 20) AND classification != 'ambiguous' AND identityClass = 'evolving'
+ * - low:    sampleSize < lowSampleSize  (default 5)  OR classification = 'ambiguous'   OR identityClass = 'core'
  * - medium: everything else
+ *
+ * @param calibrationConfig Optional resolved config from `parseRevisionProposalCalibrationYaml()`.
+ *   When omitted, shipped defaults (20 / 5) are used.
  */
 export function computeConfidence(
   triggerEvidence: TriggerEvidence,
   classification: DriftClassification,
   identityClass: IdentityClass | undefined,
+  calibrationConfig?: ResolvedRevisionProposalCalibrationConfig,
 ): ProposalConfidence {
   // AISDLC-271 PR #476 round-2 security follow-up: also guard the exported
   // computeConfidence entry point. Without this an HTTP caller bypassing
@@ -206,10 +243,19 @@ export function computeConfidence(
   const sampleSize =
     triggerEvidence.dismissSignals + triggerEvidence.escalateSignals + triggerEvidence.driftEvents;
 
-  if (sampleSize >= 20 && classification !== 'ambiguous' && identityClass === 'evolving') {
+  const highSampleSize =
+    calibrationConfig?.confidenceThresholds.highSampleSize ?? DEFAULT_CONFIDENCE_HIGH_SAMPLE_SIZE;
+  const lowSampleSize =
+    calibrationConfig?.confidenceThresholds.lowSampleSize ?? DEFAULT_CONFIDENCE_LOW_SAMPLE_SIZE;
+
+  if (
+    sampleSize >= highSampleSize &&
+    classification !== 'ambiguous' &&
+    identityClass === 'evolving'
+  ) {
     return 'high';
   }
-  if (sampleSize < 5 || classification === 'ambiguous' || identityClass === 'core') {
+  if (sampleSize < lowSampleSize || classification === 'ambiguous' || identityClass === 'core') {
     return 'low';
   }
   return 'medium';
@@ -284,6 +330,12 @@ export interface EvaluateRevisionProposalInput {
   classificationEvidence: ClassificationEvidence;
   lockConfig?: CalibrationLockConfig;
   config?: TriggerConfig & { expiryDays?: number };
+  /**
+   * Per-org calibration config loaded from `.ai-sdlc/calibration.yaml`.
+   * When omitted, shipped AISDLC-271 defaults are used for confidence
+   * thresholds (Refit AISDLC-310 / RFC-0031 §12.6).
+   */
+  calibrationConfig?: ResolvedRevisionProposalCalibrationConfig;
   /** Clock injection for tests. */
   now?: () => number;
 }
@@ -339,7 +391,12 @@ export function evaluateRevisionProposal(
 
   const classification = classifyDrift(input.classificationEvidence);
   const approvalPath = deriveApprovalPath(input.identityClass, classification);
-  const confidence = computeConfidence(triggerEvidence, classification, input.identityClass);
+  const confidence = computeConfidence(
+    triggerEvidence,
+    classification,
+    input.identityClass,
+    input.calibrationConfig,
+  );
 
   if (classification === 'healthy') {
     const event: DIDRevisionProposalEvent = {
@@ -547,19 +604,24 @@ export function archiveExpiredProposals(
  * rejection rationale captured in calibration log; future trigger evaluations
  * weight rejection-precedent into confidence).
  *
- * Weight formula:
- *   - high-confidence proposals that were rejected signal strong disagreement → 0.8
- *   - medium-confidence → 0.5
- *   - low-confidence → 0.2 (expected noise level, lower weight)
+ * Weight formula (defaults from AISDLC-271, per-org configurable via
+ * `calibration.yaml` — Refit AISDLC-310 / RFC-0031 §12.6):
+ *   - high-confidence proposals that were rejected → 0.8 (default)
+ *   - medium-confidence → 0.5 (default)
+ *   - low-confidence → 0.2 default (expected noise level, lower weight)
  *
  * Callers persist this record to their calibration log; the next trigger
  * evaluation should factor it in by reducing effective confidence.
+ *
+ * @param calibrationConfig Optional resolved config from `parseRevisionProposalCalibrationYaml()`.
+ *   When omitted, shipped AISDLC-271 weights (0.8 / 0.5 / 0.2) are used.
  */
 export function recordRejection(
   proposal: DIDRevisionProposalEvent,
   rejectedBy: string,
   rationale: string,
   now?: () => number,
+  calibrationConfig?: ResolvedRevisionProposalCalibrationConfig,
 ): ProposalRejectionRecord {
   // AISDLC-271 PR #476 round-2: defensive validation of rejectedBy. The
   // persistence/HTTP layer (when added) MUST validate this against the
@@ -578,10 +640,11 @@ export function recordRejection(
   }
   const nowMs = (now ?? (() => Date.now()))();
 
+  const w = calibrationConfig?.rejectionPrecedent.weights;
   const weightByConfidence: Record<ProposalConfidence, number> = {
-    high: 0.8,
-    medium: 0.5,
-    low: 0.2,
+    high: w?.highConfidenceRejection ?? DEFAULT_REJECTION_WEIGHT_HIGH,
+    medium: w?.mediumConfidenceRejection ?? DEFAULT_REJECTION_WEIGHT_MEDIUM,
+    low: w?.lowConfidenceRejection ?? DEFAULT_REJECTION_WEIGHT_LOW,
   };
 
   return {
@@ -601,12 +664,19 @@ export function recordRejection(
  * When a field has prior rejection records, the aggregated precedent
  * weight penalises future proposals for the same field.
  *
- * Returns a factor in [0.2, 1.0] to multiply against any computed
- * confidence score. Callers decide how to interpret.
+ * Formula (RFC-0031 §12.6): `factor = max(floor, 1.0 - avgWeight × 0.5)`
+ * where `floor` is `confidencePenaltyFloor` from calibration config
+ * (default 0.2 — at most 80% suppression).
+ *
+ * Returns a factor in `[floor, 1.0]`. Callers decide how to interpret.
+ *
+ * @param calibrationConfig Optional resolved config from `parseRevisionProposalCalibrationYaml()`.
+ *   When omitted, shipped AISDLC-271 floor (0.2) is used.
  */
 export function computeRejectionPrecedentFactor(
   field: string,
   rejections: readonly ProposalRejectionRecord[],
+  calibrationConfig?: ResolvedRevisionProposalCalibrationConfig,
 ): number {
   const fieldRejections = rejections.filter((r) => r.field === field);
   if (fieldRejections.length === 0) return 1.0;
@@ -619,5 +689,8 @@ export function computeRejectionPrecedentFactor(
   // The precedent factor reduces future proposal confidence:
   // higher avg rejection weight → lower factor (penalty)
   const rawFactor = 1.0 - avgWeight * 0.5;
-  return Math.max(0.2, rawFactor);
+  const floor =
+    calibrationConfig?.rejectionPrecedent.confidencePenaltyFloor ??
+    DEFAULT_CONFIDENCE_PENALTY_FLOOR;
+  return Math.max(floor, rawFactor);
 }

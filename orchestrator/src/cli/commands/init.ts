@@ -46,6 +46,7 @@ import {
   type FeatureSelection,
   type WizardFlags,
 } from './init-features.js';
+import { CALIBRATION_YAML_STUB } from './init-templates.js';
 
 export const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
@@ -340,6 +341,10 @@ function initProject(
     { name: 'agent-role.yaml', content: getAgentRoleYaml(options.tier) },
     { name: 'quality-gate.yaml', content: QUALITY_GATE_YAML },
     { name: 'autonomy-policy.yaml', content: AUTONOMY_POLICY_YAML },
+    // RFC-0031 §12.6 per-org calibration config (Refit AISDLC-310):
+    // confidence thresholds + rejection weights/floor for the DID revision
+    // proposal mechanism. Defaults match the operator-affirmed shipped values.
+    { name: 'calibration.yaml', content: CALIBRATION_YAML_STUB },
   ];
 
   if (dryRun) {
