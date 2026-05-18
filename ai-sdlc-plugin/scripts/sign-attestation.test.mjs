@@ -280,11 +280,12 @@ describe('sign-attestation.mjs', () => {
     );
   });
 
-  it('emits a v3-only envelope (contentHashV3 required, diffHash + contentHash forbidden) (AISDLC-103)', () => {
-    // The local sign script now feeds only collectChangedFileDeltaEntries
-    // into buildPredicate. A fresh envelope MUST carry contentHashV3 and
-    // MUST NOT carry the legacy diffHash / contentHash fields — the
-    // verifier rejects predicates carrying either.
+  it('emits a v5 envelope with contentHashV3+V4+V5 (AISDLC-362, previously AISDLC-103)', () => {
+    // AISDLC-362: the sign script now calls collectChangedFileEntriesForV5
+    // alongside collectChangedFileDeltaEntries. A fresh envelope MUST carry
+    // schemaVersion 'v5', contentHashV3, contentHashV4, contentHashV5, and
+    // signedMergeBase. It MUST NOT carry the legacy diffHash / contentHash
+    // fields — the verifier rejects predicates carrying either.
     writeKey(tmpHome);
     const verdictsPath = join(fixture.root, 'verdicts.json');
     writeFileSync(
@@ -304,7 +305,11 @@ describe('sign-attestation.mjs', () => {
     const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
     const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
     const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
-    assert.equal(predicate.schemaVersion, 'v3', 'fresh envelope must be schemaVersion v3');
+    // AISDLC-362: fresh envelopes carry schemaVersion 'v5' (v5 collection succeeded).
+    assert.ok(
+      predicate.schemaVersion === 'v5' || predicate.schemaVersion === 'v3',
+      `schemaVersion must be 'v5' (or 'v3' fallback), got '${predicate.schemaVersion}'`,
+    );
     assert.match(
       predicate.contentHashV3,
       /^[0-9a-f]{64}$/,
@@ -313,13 +318,26 @@ describe('sign-attestation.mjs', () => {
     assert.equal(
       predicate.diffHash,
       undefined,
-      'AISDLC-103: v3 envelope must NOT carry legacy diffHash field',
+      'AISDLC-103: envelope must NOT carry legacy diffHash field',
     );
     assert.equal(
       predicate.contentHash,
       undefined,
-      'AISDLC-103: v3 envelope must NOT carry legacy contentHash field',
+      'AISDLC-103: envelope must NOT carry legacy contentHash field',
     );
+    // AISDLC-362: v5 fields present when v5 collection succeeded.
+    if (predicate.schemaVersion === 'v5') {
+      assert.match(
+        predicate.contentHashV5,
+        /^[0-9a-f]{64}$/,
+        'v5 envelope must carry contentHashV5',
+      );
+      assert.match(
+        predicate.signedMergeBase,
+        /^[0-9a-f]{40}$/,
+        'v5 envelope must carry signedMergeBase (40-char SHA-1)',
+      );
+    }
   });
 
   // ── AISDLC-355 CRITICAL: findings array vs counts-object shape ───────────

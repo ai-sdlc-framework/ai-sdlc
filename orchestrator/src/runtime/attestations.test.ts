@@ -16,6 +16,7 @@ import { describe, it, expect } from 'vitest';
 import {
   ACCEPTED_SCHEMA_VERSIONS,
   ATTESTATION_ENVELOPE_PATH_PATTERN,
+  CONTENTHASH_SHARED_CHURN_FILES,
   CONTENTHASHV4_IGNORE_FILES,
   INDEPENDENCE_REQUIRED_ROLES,
   REQUIRED_REVIEWER_AGENT_IDS,
@@ -23,9 +24,11 @@ import {
   buildPredicate,
   collectChangedFileDeltaEntries,
   collectChangedFileEntries,
+  collectChangedFileEntriesForV5,
   computeContentHash,
   computeContentHashV3,
   computeContentHashV4,
+  computeContentHashV5,
   generateSigningKeyPair,
   isAttestationEnvelopePath,
   isIgnoredForContentHash,
@@ -38,6 +41,7 @@ import {
   verifyAttestation,
   type AttestationPredicate,
   type ChangedFileHeadEntry,
+  type ChangedFileV5Entry,
   type DsseEnvelope,
   type TrustedReviewer,
 } from './attestations.js';
@@ -533,11 +537,13 @@ describe('validateTrustedReviewers', () => {
 });
 
 describe('ACCEPTED_SCHEMA_VERSIONS', () => {
-  it('includes v3 only (AISDLC-103 narrowed allowlist)', () => {
+  it('includes v3 and v5 (AISDLC-103 narrowed to v3; AISDLC-362 adds v5)', () => {
     expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v3');
+    expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v5');
     expect(ACCEPTED_SCHEMA_VERSIONS).not.toContain('v1');
     expect(ACCEPTED_SCHEMA_VERSIONS).not.toContain('v2');
-    expect(ACCEPTED_SCHEMA_VERSIONS).toHaveLength(1);
+    expect(ACCEPTED_SCHEMA_VERSIONS).not.toContain('v4'); // v4 was never a schemaVersion
+    expect(ACCEPTED_SCHEMA_VERSIONS).toHaveLength(2);
   });
 });
 
@@ -2726,5 +2732,295 @@ describe('collectChangedFileDeltaEntries — CONTENTHASHV4_IGNORE_FILES exclusio
     const hashAtA = computeContentHashV4(projectDeltaEntriesToHeadEntries(atBlobA));
     const hashAtB = computeContentHashV4(projectDeltaEntriesToHeadEntries(atBlobB));
     expect(hashAtA).toBe(hashAtB);
+  });
+});
+
+// ─── AISDLC-362: contentHashV5 — delta-hash with embedded signedMergeBase ────
+
+describe('computeContentHashV5', () => {
+  const FROZEN_MERGE_BASE = 'c'.repeat(40);
+
+  it('is deterministic for identical entries and signedMergeBase', () => {
+    const entries: ChangedFileV5Entry[] = [
+      { path: 'src/foo.ts', blobSha: '1'.repeat(40) },
+      { path: 'src/bar.ts', blobSha: '2'.repeat(40) },
+    ];
+    const h1 = computeContentHashV5(entries, FROZEN_MERGE_BASE);
+    const h2 = computeContentHashV5(entries, FROZEN_MERGE_BASE);
+    expect(h1).toBe(h2);
+    expect(h1).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('produces different hash when signedMergeBase differs', () => {
+    const entries: ChangedFileV5Entry[] = [{ path: 'src/foo.ts', blobSha: '1'.repeat(40) }];
+    const h1 = computeContentHashV5(entries, 'c'.repeat(40));
+    const h2 = computeContentHashV5(entries, 'd'.repeat(40));
+    expect(h1).not.toBe(h2);
+  });
+
+  it('produces different hash when a blob SHA changes (sibling-overlap case)', () => {
+    const base: ChangedFileV5Entry[] = [{ path: 'src/foo.ts', blobSha: '1'.repeat(40) }];
+    const modified: ChangedFileV5Entry[] = [
+      { path: 'src/foo.ts', blobSha: '2'.repeat(40) }, // overlapping sibling changed this blob
+    ];
+    const h1 = computeContentHashV5(base, FROZEN_MERGE_BASE);
+    const h2 = computeContentHashV5(modified, FROZEN_MERGE_BASE);
+    expect(h1).not.toBe(h2);
+  });
+
+  it('is stable when a non-overlapping file appears at verification time (the whole point of v5)', () => {
+    // This simulates a queue rebase where a sibling merged a file we did NOT
+    // touch. With v5 (frozen merge-base), the file enumeration is:
+    //   git diff <signedMergeBase>..HEAD
+    // which yields only OUR file — the sibling's file does NOT appear because
+    // it wasn't in the frozen diff range. So both hashes match.
+    const ourEntries: ChangedFileV5Entry[] = [{ path: 'src/foo.ts', blobSha: '1'.repeat(40) }];
+    // At verify time, the diff against the FROZEN merge-base yields the same
+    // entries (the sibling's file only shows up in origin/main..HEAD, not in
+    // signedMergeBase..HEAD because signedMergeBase predates the sibling).
+    const h1 = computeContentHashV5(ourEntries, FROZEN_MERGE_BASE);
+    const h2 = computeContentHashV5(ourEntries, FROZEN_MERGE_BASE);
+    expect(h1).toBe(h2);
+  });
+
+  it('produces a sha256 — 64 lowercase hex chars', () => {
+    const h = computeContentHashV5([], FROZEN_MERGE_BASE);
+    expect(h).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('deduplicates by path (last-entry-wins)', () => {
+    const entries: ChangedFileV5Entry[] = [
+      { path: 'src/foo.ts', blobSha: '1'.repeat(40) },
+      { path: 'src/foo.ts', blobSha: '2'.repeat(40) }, // duplicate — last wins
+    ];
+    const h = computeContentHashV5(entries, FROZEN_MERGE_BASE);
+    const hSingle = computeContentHashV5(
+      [{ path: 'src/foo.ts', blobSha: '2'.repeat(40) }],
+      FROZEN_MERGE_BASE,
+    );
+    expect(h).toBe(hSingle);
+  });
+
+  it('sorts by path so insertion order does not affect the hash', () => {
+    const e1: ChangedFileV5Entry[] = [
+      { path: 'b.ts', blobSha: '1'.repeat(40) },
+      { path: 'a.ts', blobSha: '2'.repeat(40) },
+    ];
+    const e2: ChangedFileV5Entry[] = [
+      { path: 'a.ts', blobSha: '2'.repeat(40) },
+      { path: 'b.ts', blobSha: '1'.repeat(40) },
+    ];
+    expect(computeContentHashV5(e1, FROZEN_MERGE_BASE)).toBe(
+      computeContentHashV5(e2, FROZEN_MERGE_BASE),
+    );
+  });
+
+  it('throws on non-sha1 signedMergeBase', () => {
+    expect(() => computeContentHashV5([], 'not-a-sha')).toThrow(/signedMergeBase/);
+  });
+
+  it('throws on empty path', () => {
+    expect(() =>
+      computeContentHashV5([{ path: '', blobSha: '1'.repeat(40) }], FROZEN_MERGE_BASE),
+    ).toThrow(/path must be a non-empty string/);
+  });
+
+  it('throws on path with tab', () => {
+    expect(() =>
+      computeContentHashV5([{ path: 'a\tb', blobSha: '1'.repeat(40) }], FROZEN_MERGE_BASE),
+    ).toThrow(/tab or newline/);
+  });
+});
+
+describe('collectChangedFileEntriesForV5', () => {
+  const MERGE_BASE = 'e'.repeat(40);
+
+  function makeGit(mergeBase: string, files: string[], blobMap: Record<string, string>) {
+    return (args: string[]): string => {
+      const cmd = args.join(' ');
+      if (cmd.includes('merge-base')) return `${mergeBase}\n`;
+      if (cmd.includes('diff --name-only')) return files.join('\n') + (files.length ? '\n' : '');
+      // ls-tree lookup
+      for (const [path, sha] of Object.entries(blobMap)) {
+        if (cmd.includes(`ls-tree`) && cmd.includes(path)) {
+          return `100644 blob ${sha}\t${path}\n`;
+        }
+      }
+      return '';
+    };
+  }
+
+  it('returns the frozen merge-base and file entries', () => {
+    const runGit = makeGit(MERGE_BASE, ['src/foo.ts'], { 'src/foo.ts': '1'.repeat(40) });
+    const { entries, signedMergeBase } = collectChangedFileEntriesForV5(
+      '/repo',
+      'origin/main',
+      'HEAD',
+      { runGit },
+    );
+    expect(signedMergeBase).toBe(MERGE_BASE);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].path).toBe('src/foo.ts');
+    expect(entries[0].blobSha).toBe('1'.repeat(40));
+  });
+
+  it('excludes attestation envelope files', () => {
+    const runGit = makeGit(MERGE_BASE, ['src/foo.ts', '.ai-sdlc/attestations/abc123.dsse.json'], {
+      'src/foo.ts': '1'.repeat(40),
+    });
+    const { entries } = collectChangedFileEntriesForV5('/repo', 'origin/main', 'HEAD', { runGit });
+    expect(entries.every((e) => !e.path.includes('.dsse.json'))).toBe(true);
+    expect(entries).toHaveLength(1);
+  });
+
+  it('excludes shared-churn files (pnpm-lock.yaml)', () => {
+    const runGit = makeGit(MERGE_BASE, ['src/foo.ts', 'pnpm-lock.yaml'], {
+      'src/foo.ts': '1'.repeat(40),
+      'pnpm-lock.yaml': '2'.repeat(40),
+    });
+    const { entries } = collectChangedFileEntriesForV5('/repo', 'origin/main', 'HEAD', { runGit });
+    expect(entries.every((e) => e.path !== 'pnpm-lock.yaml')).toBe(true);
+  });
+
+  it('handles deleted files (empty blobSha)', () => {
+    const runGit = makeGit(MERGE_BASE, ['deleted.ts'], {}); // no blob in map → empty
+    const { entries } = collectChangedFileEntriesForV5('/repo', 'origin/main', 'HEAD', { runGit });
+    expect(entries[0].blobSha).toBe('');
+  });
+
+  it('throws when git merge-base fails', () => {
+    const runGit = (_args: string[]): string => {
+      throw new Error('git failed');
+    };
+    expect(() =>
+      collectChangedFileEntriesForV5('/repo', 'origin/main', 'HEAD', { runGit }),
+    ).toThrow(/merge-base failed/);
+  });
+});
+
+describe('buildPredicate with v5', () => {
+  const MERGE_BASE = 'f'.repeat(40);
+  const V5_ENTRIES: ChangedFileV5Entry[] = [{ path: 'src/foo.ts', blobSha: '1'.repeat(40) }];
+
+  it('emits schemaVersion v5 and contentHashV5 when v5Entries + v5MergeBase provided', () => {
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      v5Entries: V5_ENTRIES,
+      v5MergeBase: MERGE_BASE,
+    });
+    expect(predicate.schemaVersion).toBe('v5');
+    expect(predicate.contentHashV5).toBeDefined();
+    expect(predicate.signedMergeBase).toBe(MERGE_BASE);
+    expect(predicate.contentHashV5).toBe(computeContentHashV5(V5_ENTRIES, MERGE_BASE));
+    // Also still emits v3 + v4 for backward compat
+    expect(predicate.contentHashV3).toBeDefined();
+    expect(predicate.contentHashV4).toBeDefined();
+  });
+
+  it('falls back to schemaVersion v3 when v5Entries omitted', () => {
+    const predicate = buildPredicate(DEFAULT_INPUTS);
+    expect(predicate.schemaVersion).toBe('v3');
+    expect((predicate as unknown as Record<string, unknown>).contentHashV5).toBeUndefined();
+    expect((predicate as unknown as Record<string, unknown>).signedMergeBase).toBeUndefined();
+  });
+
+  it('round-trips through sign + verify with v5 (happy path)', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      v5Entries: V5_ENTRIES,
+      v5MergeBase: MERGE_BASE,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'dev@example.com:laptop' });
+
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        contentHashV4: predicate.contentHashV4,
+        contentHashV5: predicate.contentHashV5,
+      },
+    });
+    expect(result.valid).toBe(true);
+    if (result.valid) expect(result.predicate.schemaVersion).toBe('v5');
+  });
+
+  it('v5 mismatch rejects (sibling overlap — overlapping blob SHA changed)', () => {
+    const { privateKeyPem, publicKeyPem } = generateSigningKeyPair();
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      v5Entries: V5_ENTRIES,
+      v5MergeBase: MERGE_BASE,
+    });
+    const envelope = signAttestation({ predicate, privateKeyPem, keyid: 'k' });
+
+    // Simulate a sibling PR that touched the same file — the blob SHA is now different.
+    const differentV5 = computeContentHashV5(
+      [{ path: 'src/foo.ts', blobSha: '9'.repeat(40) }],
+      MERGE_BASE,
+    );
+    const result = verifyAttestation({
+      envelope,
+      trustedReviewers: [makeTrustedReviewer(publicKeyPem)],
+      expected: {
+        ...buildExpected(predicate),
+        contentHashV5: differentV5,
+      },
+    });
+    expect(result.valid).toBe(false);
+    if (!result.valid) expect(result.reason).toMatch(/contentHashV5/);
+  });
+
+  it('validatePredicateShape accepts valid v5 predicate fields', () => {
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      v5Entries: V5_ENTRIES,
+      v5MergeBase: MERGE_BASE,
+    });
+    const err = validatePredicateShape(predicate);
+    expect(err).toBeNull();
+  });
+
+  it('validatePredicateShape rejects invalid contentHashV5', () => {
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      v5Entries: V5_ENTRIES,
+      v5MergeBase: MERGE_BASE,
+    });
+    const bad = { ...predicate, contentHashV5: 'not-a-hash' };
+    const err = validatePredicateShape(bad);
+    expect(err).toMatch(/contentHashV5/);
+  });
+
+  it('validatePredicateShape rejects invalid signedMergeBase', () => {
+    const predicate = buildPredicate({
+      ...DEFAULT_INPUTS,
+      v5Entries: V5_ENTRIES,
+      v5MergeBase: MERGE_BASE,
+    });
+    const bad = { ...predicate, signedMergeBase: 'not-a-sha' };
+    const err = validatePredicateShape(bad);
+    expect(err).toMatch(/signedMergeBase/);
+  });
+});
+
+describe('CONTENTHASH_SHARED_CHURN_FILES backward-compat alias', () => {
+  it('CONTENTHASHV4_IGNORE_FILES is the same reference as CONTENTHASH_SHARED_CHURN_FILES', () => {
+    // The rename in AISDLC-362 must not break callers that import the old name.
+    expect(CONTENTHASHV4_IGNORE_FILES).toBe(CONTENTHASH_SHARED_CHURN_FILES);
+  });
+
+  it('contains all expected paths', () => {
+    expect(CONTENTHASH_SHARED_CHURN_FILES).toContain('pnpm-lock.yaml');
+    expect(CONTENTHASH_SHARED_CHURN_FILES).toContain('CHANGELOG.md');
+    expect(CONTENTHASH_SHARED_CHURN_FILES).toContain('reference/src/core/generated-schemas.ts');
+  });
+});
+
+describe('ACCEPTED_SCHEMA_VERSIONS includes v5', () => {
+  it('accepts both v3 and v5', () => {
+    expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v3');
+    expect(ACCEPTED_SCHEMA_VERSIONS).toContain('v5');
   });
 });

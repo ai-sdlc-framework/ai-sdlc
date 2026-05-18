@@ -66,6 +66,7 @@ import {
   sha256Hex,
   computeContentHashV3,
   computeContentHashV4,
+  computeContentHashV5,
   isAttestationEnvelopePath,
   isIgnoredForContentHash,
   validateTrustedReviewers,
@@ -324,20 +325,31 @@ export function predicateMatchReason(predicate, expected) {
       detail: `schemaVersion '${safeForReason(predicate.schemaVersion, 16)}' not in allowlist [${expected.acceptedSchemaVersions.join(', ')}]`,
     };
   }
-  // AISDLC-193.1: v4-prefer, v3-fallback. When BOTH the envelope and
-  // the expected state carry contentHashV4, we check v4 ONLY (skip v3
-  // entirely — v3 invalidates on every queue rebase even though the
-  // reviewed content is unchanged, so consulting v3 here would
-  // false-reject in the same scenario v4 was added to fix).
+  // AISDLC-362: v5-prefer, v4-fallback, v3-last-resort.
   //
-  // When the envelope is legacy v3-only (no contentHashV4), fall back
-  // to the v3 ancestor walk that the surrounding runVerifier already
-  // does — same as pre-AISDLC-193.1 behavior.
+  // Priority: v5 > v4 > v3 (highest rebase-stability first). When a
+  // higher-priority hash is present on BOTH the envelope and the expected
+  // state, we check that hash ONLY (skip lower-priority hashes). This
+  // mirrors the exact same priority logic in `verifyAttestation` (orchestrator
+  // runtime) and `resolveSubjectShaForEnvelope` (verifier).
+  const envelopeHasV5 =
+    typeof predicate.contentHashV5 === 'string' && predicate.contentHashV5.length > 0;
+  const expectedHasV5 =
+    typeof expected.contentHashV5 === 'string' && expected.contentHashV5.length > 0;
   const envelopeHasV4 =
     typeof predicate.contentHashV4 === 'string' && predicate.contentHashV4.length > 0;
   const expectedHasV4 =
     typeof expected.contentHashV4 === 'string' && expected.contentHashV4.length > 0;
-  if (envelopeHasV4 && expectedHasV4) {
+
+  if (envelopeHasV5 && expectedHasV5) {
+    if (predicate.contentHashV5 !== expected.contentHashV5) {
+      return {
+        field: 'contentHashV5',
+        detail: 'contentHashV5 mismatch (PR content differs from attested content)',
+      };
+    }
+    // v5 matched → skip v4 and v3.
+  } else if (envelopeHasV4 && expectedHasV4) {
     if (predicate.contentHashV4 !== expected.contentHashV4) {
       return {
         field: 'contentHashV4',
@@ -348,7 +360,7 @@ export function predicateMatchReason(predicate, expected) {
     // post-rebase (merge-base moved forward) but that's exactly what
     // v4 was added to handle.
   } else {
-    // Legacy v3-only OR caller didn't supply expected.contentHashV4 →
+    // Legacy v3-only OR caller didn't supply expected.contentHashV4/V5 →
     // consult v3 (same as pre-AISDLC-193.1).
     if (predicate.contentHashV3 !== expected.contentHashV3) {
       return {
@@ -396,8 +408,9 @@ export function predicateMatchReason(predicate, expected) {
  */
 const MISMATCH_RANK = {
   schemaVersion: 0,
-  // v4 + v3 share the same rank — both are content bindings, the
-  // verifier picks one or the other based on the envelope shape.
+  // v5 + v4 + v3 share the same rank — all are content bindings, the
+  // verifier picks the highest-priority one based on the envelope shape.
+  contentHashV5: 1,
   contentHashV4: 1,
   contentHashV3: 1,
   policyHash: 2,
@@ -583,6 +596,66 @@ export function computeHeadContentHashV4(headSha, baseSha, repoRoot, gitFn = git
 }
 
 /**
+ * Recompute `contentHashV5` for `<headSha>` using the FROZEN `signedMergeBase`
+ * embedded in the envelope predicate (AISDLC-362).
+ *
+ * The key difference from `computeHeadContentHashV4`:
+ *   - v4 enumerates files via `baseSha...headSha` (moving diff base).
+ *   - v5 enumerates files via `signedMergeBase..headSha` (FROZEN diff base).
+ *
+ * The frozen merge-base is read from the predicate; the verifier does NOT
+ * recompute it — using the frozen value is what makes v5 stable across
+ * non-overlapping sibling merges.
+ *
+ * Returns the 64-char hex sha256 on success, or `null` on git failure.
+ *
+ * Exported for unit testing.
+ */
+export function computeHeadContentHashV5(headSha, signedMergeBase, repoRoot, gitFn = git) {
+  if (typeof signedMergeBase !== 'string' || !/^[0-9a-f]{40}$/i.test(signedMergeBase)) {
+    return null;
+  }
+  let nameOnly;
+  try {
+    // Two-dot range with the FROZEN merge-base. This reproduces the EXACT
+    // file enumeration the signer used, regardless of where `origin/main`
+    // points today.
+    nameOnly = gitFn(
+      ['diff', '--name-only', '--no-renames', `${signedMergeBase}..${headSha}`],
+      repoRoot,
+    );
+  } catch {
+    return null;
+  }
+  const paths = nameOnly.split('\n').filter((l) => l.length > 0);
+  const entries = [];
+  for (const p of paths) {
+    if (p.includes('\t') || p.includes('\n')) {
+      return null;
+    }
+    if (isAttestationEnvelopePath(p)) continue;
+    if (isIgnoredForContentHash(p)) continue;
+    let blobSha = '';
+    try {
+      const lsOut = gitFn(['ls-tree', '-r', headSha, '--', p], repoRoot);
+      const line = lsOut.split('\n').find((l) => l.length > 0);
+      if (line) {
+        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+        if (m) blobSha = m[1];
+      }
+    } catch {
+      // ls-tree failed → empty marker (file deleted at head).
+    }
+    entries.push({ path: p, blobSha });
+  }
+  try {
+    return computeContentHashV5(entries, signedMergeBase);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Try to resolve a "subject SHA" usable for content-recomputation against
  * this envelope's `predicate.contentHashV3`. Returns `{ sha, source }` on
  * success or `null` on failure. `source` is `'subject'` if the envelope's
@@ -593,6 +666,11 @@ export function computeHeadContentHashV4(headSha, baseSha, repoRoot, gitFn = git
  * `contentHashV4`, recompute v4 for PR HEAD and short-circuit on match
  * (`source='v4-subject'` if the envelope's subject SHA is still
  * reachable, else `source='v4-head'`).
+ *
+ * AISDLC-362 added a v5 fast-path (highest priority): when the envelope
+ * carries `contentHashV5` and `signedMergeBase`, recompute v5 for PR HEAD
+ * against the FROZEN merge-base and short-circuit on match. v5 is checked
+ * BEFORE v4 because it is more rebase-stable.
  *
  * Algorithm (AISDLC-103, Verifier Phase 3 — v3-only):
  *  1. If `subject.digest.sha1` is well-formed AND reachable from PR HEAD
@@ -621,6 +699,54 @@ export function resolveSubjectShaForEnvelope({
   depth,
   gitFn = git,
 }) {
+  // AISDLC-362: v5-prefer fast path (HIGHEST PRIORITY). When the envelope
+  // carries `contentHashV5` and `signedMergeBase`, recompute the v5 hash
+  // for PR HEAD using the FROZEN merge-base and check for equality. v5 is
+  // the most rebase-stable because the diff enumeration uses the frozen
+  // merge-base rather than the moving `origin/main`.
+  //
+  // The frozen merge-base approach means non-overlapping sibling merges
+  // (siblings that touched different files than this PR) do NOT change
+  // the file enumeration → v5 hash stays stable → no re-sign needed.
+  // Overlapping sibling merges (same file touched by sibling) → head blob
+  // SHA differs → v5 hash flips → verifier correctly rejects.
+  const expectedContentHashV5 = predicate?.contentHashV5;
+  const signedMergeBase = predicate?.signedMergeBase;
+  if (
+    typeof expectedContentHashV5 === 'string' &&
+    expectedContentHashV5.length > 0 &&
+    typeof signedMergeBase === 'string' &&
+    /^[0-9a-f]{40}$/.test(signedMergeBase)
+  ) {
+    const v5 = computeHeadContentHashV5(headSha, signedMergeBase, repoRoot, gitFn);
+    if (v5 !== null && v5 === expectedContentHashV5) {
+      // v5 matched at PR HEAD → no walk needed. Reuse the same subject-SHA
+      // anchoring pattern as v4 for the chore-commit allowlist check.
+      const subjectShaRaw = predicate?.subject?.digest?.sha1;
+      const subjectSha =
+        typeof subjectShaRaw === 'string' ? subjectShaRaw.toLowerCase() : undefined;
+      if (typeof subjectSha === 'string' && /^[0-9a-f]{40}$/.test(subjectSha)) {
+        let isAncestor = false;
+        try {
+          gitFn(['merge-base', '--is-ancestor', subjectSha, headSha], repoRoot);
+          isAncestor = true;
+        } catch {
+          isAncestor = false;
+        }
+        if (isAncestor) {
+          return { sha: subjectSha, source: 'v5-subject' };
+        }
+      }
+      // Subject SHA not on branch (queue-rebase). Fall back to PR HEAD as
+      // the chore-commit diff anchor (same reasoning as v4-head case).
+      return { sha: headSha, source: 'v5-head' };
+    }
+    // v5 didn't match — fall through to v4 then v3. A v5 mismatch means
+    // the head blobs genuinely differ (overlapping sibling merge or
+    // content tampering), but we still try v4/v3 to surface the best
+    // possible reason string if those also fail.
+  }
+
   // AISDLC-193.1: v4-prefer fast path. When the envelope carries
   // `contentHashV4`, recompute the v4 hash for PR HEAD against current
   // tree state and check for equality. v4 is base-INDEPENDENT, so we
@@ -944,9 +1070,11 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       // AISDLC-193.1: also synthesize a sentinel expected.contentHashV4
       // so v4-carrying envelopes that DIDN'T match v4 in resolution get
       // the v4 mismatch reason rather than a v3 mismatch reason.
+      // AISDLC-362: same for v5.
       const reason = predicateMatchReason(entry.predicate, {
         contentHashV3: '0'.repeat(64), // sentinel — does not match any real content
         contentHashV4: '0'.repeat(64), // sentinel for the v4-prefer path
+        contentHashV5: '0'.repeat(64), // sentinel for the v5-prefer path
         policyHash,
         expectedAgentFileHashes,
         pluginVersion,
@@ -958,21 +1086,23 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
         // GitHub status description when this envelope happens to be the
         // closest match. The downstream `closest` selector below
         // rewrites contentHashV3 → `contentHashV3 mismatch (v3
-        // fallback)` and contentHashV4 → `contentHashV4 mismatch`, so
-        // we keep the predicateMatchReason output verbatim — those
-        // rewrites apply uniformly regardless of which mismatch entry
-        // wins. The `reason ?? {...}` synthesized fallback is only
-        // exercised when predicateMatchReason returns null on the
-        // sentinel inputs (= every check passed except the synthetic
-        // contentHashVx mismatch), in which case we still bucket it as
-        // a content-hash field for the rewrite.
+        // fallback)`, contentHashV4 → `contentHashV4 mismatch`, and
+        // contentHashV5 → `contentHashV5 mismatch`, so we keep the
+        // predicateMatchReason output verbatim — those rewrites apply
+        // uniformly regardless of which mismatch entry wins.
         reason: reason ?? {
           field:
-            typeof entry.predicate?.contentHashV4 === 'string' ? 'contentHashV4' : 'contentHashV3',
+            typeof entry.predicate?.contentHashV5 === 'string'
+              ? 'contentHashV5'
+              : typeof entry.predicate?.contentHashV4 === 'string'
+                ? 'contentHashV4'
+                : 'contentHashV3',
           detail:
-            typeof entry.predicate?.contentHashV4 === 'string'
-              ? 'contentHashV4 mismatch'
-              : 'contentHashV3 mismatch (v3 fallback)',
+            typeof entry.predicate?.contentHashV5 === 'string'
+              ? 'contentHashV5 mismatch'
+              : typeof entry.predicate?.contentHashV4 === 'string'
+                ? 'contentHashV4 mismatch'
+                : 'contentHashV3 mismatch (v3 fallback)',
         },
       });
       continue;
@@ -1042,6 +1172,8 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       // itself is more scannable and the AISDLC-207 ACs spell the
       // exact wording. Matching tests assert against `/contentHashV4/`.
       detail = 'contentHashV4 mismatch';
+    } else if (closest.reason.field === 'contentHashV5') {
+      detail = 'contentHashV5 mismatch';
     }
     return {
       status: 'invalid',
@@ -1157,9 +1289,10 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   //
   // AISDLC-103: `contentHashV3` is passed; AISDLC-193.1: also forward
   // `contentHashV4` (when the envelope carries it) so the runtime
-  // verifier's v4-prefer path is exercised. Both values are forwarded
-  // from the envelope's own predicate since we've already content-matched
-  // upstream — the runtime check is identity-equal by construction.
+  // verifier's v4-prefer path is exercised; AISDLC-362: also forward
+  // `contentHashV5` for v5 envelopes. All values forwarded from the
+  // envelope's own predicate since we've already content-matched upstream
+  // — the runtime check is identity-equal by construction.
   const result = verifyAttestation({
     envelope: chosen.entry.envelope,
     trustedReviewers,
@@ -1167,6 +1300,7 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       commitSha: chosen.entry.predicate?.subject?.digest?.sha1 ?? '0'.repeat(40),
       contentHashV3: chosen.entry.predicate.contentHashV3,
       contentHashV4: chosen.entry.predicate.contentHashV4,
+      contentHashV5: chosen.entry.predicate.contentHashV5,
       policyHash,
       expectedAgentFileHashes,
     },
