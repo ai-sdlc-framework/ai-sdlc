@@ -1,14 +1,22 @@
 #!/usr/bin/env bash
-# AISDLC-137: orchestrator-repo state hardening.
+# AISDLC-137 + AISDLC-358: orchestrator-repo state hardening.
 #
-# Idempotent self-heal for the parent repo's bare-flag + main-branch staleness.
-# Runs at the start of every /ai-sdlc execute dispatch (Step 0) so the
-# orchestrator state is correct before any worktree is created.
+# Idempotent self-heal for the parent repo's branch + bare-flag + main-branch
+# staleness. Runs at the start of every /ai-sdlc execute dispatch (Step 0) AND
+# at the entry of every autonomous orchestrator tick so the orchestrator state
+# is correct before any worktree is created or frontier work begins.
 #
 # Pattern C contract (memory: project_orchestrator_repo_layout.md):
 #   - Parent dir = non-bare, has main checked out
 #   - Parent's working tree on main is READ-ONLY by contract
 #   - All edits happen in .worktrees/<task-id>/
+#
+# Hard guards (AISDLC-358):
+#   1. Parent MUST be on `main`. If not:
+#      - Clean working tree → auto-checkout main + reset hard. Log recovery.
+#      - Dirty working tree → REFUSE (exit 1). Print branch + dirty paths + fix cmd.
+#   2. core.bare MUST be false (AISDLC-137). Auto-correct if true.
+#   3. Parent main ref MUST match origin/main. Reset --hard if clean + stale.
 #
 # Because parent is read-only, it's safe to git-reset --hard to origin/main
 # whenever a sync is needed — but only when the working tree is verifiably
@@ -44,16 +52,10 @@ PARENT_ROOT=$(dirname "$GIT_COMMON_DIR_ABS")
 cd "$PARENT_ROOT"
 
 # AISDLC-363: skip the orchestrator state check when running inside a GH
-# merge-queue read-only probe branch or a shallow CI clone.
-#
-# GH merge-queue probe: ephemeral `gh-readonly-queue/main/pr-N-<sha>` branches
-# are created by GitHub to test mergeability. They are read-only and have no
-# local `main` ref, so `git checkout main` would fail. The parent-branch guard
-# and state reset are meaningless in this context.
-#
-# Shallow clone: CI systems (GitHub Actions default checkout) may produce a
-# shallow clone where `refs/heads/main` is absent. `git checkout main` returns
-# "pathspec 'main' did not match any file(s) known to git" in that case.
+# merge-queue read-only probe branch or a shallow CI clone. These run BEFORE
+# the AISDLC-358 parent-on-main guard because the queue probe IS a non-main
+# branch by design (sanctioned ephemeral state) and the guard would otherwise
+# try (and fail) to recover.
 CURRENT_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
 if [[ "$CURRENT_BRANCH" == gh-readonly-queue/* ]]; then
   echo "[orchestrator-state] skipping: running inside GH merge-queue probe branch (${CURRENT_BRANCH})"
@@ -67,7 +69,34 @@ if ! git rev-parse refs/heads/main >/dev/null 2>&1; then
   exit 0
 fi
 
-# 1. Auto-correct core.bare if it's true. Some local editor extensions / tools
+# 1a. AISDLC-358: Pattern-C contract — parent MUST be on main.
+#     Read the symbolic HEAD ref. If it's detached or on a feature branch,
+#     auto-recover (clean tree) or refuse (dirty tree).
+if [ -z "$CURRENT_BRANCH" ]; then
+  echo "[orchestrator-state] WARN: parent HEAD is detached; skipping branch check (manual recovery needed)"
+elif [ "$CURRENT_BRANCH" != "main" ]; then
+  # Parent is on the wrong branch. Inspect working tree cleanliness.
+  DIRTY_TRACKED_BRANCH=$(git status --porcelain 2>/dev/null | grep -vE "^\?\?" | head -1 || true)
+  if [ -n "$DIRTY_TRACKED_BRANCH" ]; then
+    # Dirty — cannot auto-recover safely. Refuse with clear instructions.
+    echo "[orchestrator-state] ERROR: parent working tree is on branch '$CURRENT_BRANCH' (expected 'main') AND has uncommitted tracked changes."
+    echo "[orchestrator-state]       Dirty paths:"
+    git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]         /'
+    echo "[orchestrator-state] Recovery: stash or commit your changes, then run:"
+    echo "[orchestrator-state]   git -C \"${PARENT_ROOT}\" checkout main"
+    echo "[orchestrator-state]   git -C \"${PARENT_ROOT}\" reset --hard origin/main"
+    exit 1
+  else
+    # Clean tree — auto-recover: checkout main + reset to origin/main.
+    echo "[orchestrator-state] auto-recovering parent from '${CURRENT_BRANCH}' to main"
+    git checkout main 2>/dev/null
+    git reset --hard origin/main >/dev/null
+    echo "[orchestrator-state] auto-recovered parent from '${CURRENT_BRANCH}' to main at $(git rev-parse --short HEAD)"
+    exit 0
+  fi
+fi
+
+# 1b. (AISDLC-137) Auto-correct core.bare if it's true. Some local editor extensions / tools
 #    flip this back periodically; we re-correct it on every dispatch.
 BARE=$(git config --get core.bare 2>/dev/null || echo "false")
 if [ "$BARE" = "true" ]; then
