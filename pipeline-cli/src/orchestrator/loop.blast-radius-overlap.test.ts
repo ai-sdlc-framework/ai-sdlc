@@ -152,6 +152,7 @@ describe('runOrchestratorTick — blast-radius overlap integration (Major 3)', (
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      parentBranchGuard: async () => {},
       emitEvent: (ev) => emittedEvents.push(ev),
       blastRadiusOverlapOpts: {
         // AISDLC-100 has an open PR from a prior tick — visible to all candidates.
@@ -243,6 +244,7 @@ describe('runOrchestratorTick — OrchestratorBlockedByBlastRadiusOverlapEvent s
       }),
       dispatch: async (taskId) => approvedResult(taskId),
       escalate: async () => {},
+      parentBranchGuard: async () => {},
       now: () => now,
       blastRadiusOverlapOpts: {
         // AISDLC-150 has an open PR — branch name uses canonical numeric pattern.
@@ -330,6 +332,7 @@ describe('runOrchestratorTick — OrchestratorBlockedByBlastRadiusOverlapEvent s
       }),
       dispatch: async (taskId) => approvedResult(taskId),
       escalate: async () => {},
+      parentBranchGuard: async () => {},
       blastRadiusOverlapOpts: {
         listOpenPRs: () => [],
         computeBlastRadiusFiles: (taskId: string) => {
