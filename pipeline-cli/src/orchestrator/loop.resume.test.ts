@@ -190,6 +190,8 @@ describe('runOrchestratorTick — aborted outcome (AISDLC-242)', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -220,6 +222,8 @@ describe('runOrchestratorTick — aborted outcome (AISDLC-242)', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -260,6 +264,8 @@ describe('runOrchestratorTick — aborted outcome (AISDLC-242)', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -405,6 +411,8 @@ describe('runOrchestratorTick — resume path (AISDLC-242 AC #7)', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 2);
@@ -530,6 +538,8 @@ describe('runOrchestratorTick — in-flight bypass for recoverable worktrees (AI
       // Inject the pre-populated in-flight map to simulate a cold-start
       // reconstruction that erroneously blocks a recoverable worktree.
       inFlight: preloadedInFlight,
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -587,6 +597,8 @@ describe('runOrchestratorTick — in-flight bypass for recoverable worktrees (AI
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
       inFlight: preloadedInFlight,
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);

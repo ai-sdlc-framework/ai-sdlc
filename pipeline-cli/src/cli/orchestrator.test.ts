@@ -116,6 +116,8 @@ function fakeAdapters(ids: string[]): OrchestratorAdapters {
       return approvedResult(taskId);
     },
     escalate: async () => {},
+    // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+    parentBranchGuard: async () => {},
   };
 }
 
@@ -160,6 +162,8 @@ describe('cli-orchestrator router', () => {
         graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
         taskLabelsLoader: () => [],
         calibrationLogPath: '/nonexistent-bypass.jsonl',
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       };
       setArgv(
         'start',
@@ -220,6 +224,8 @@ describe('cli-orchestrator router', () => {
         graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
         taskLabelsLoader: () => [],
         calibrationLogPath: '/nonexistent-bypass.jsonl',
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       };
       setArgv('tick', '--max-concurrent', '1', '--spawner', 'codex');
 
@@ -464,6 +470,8 @@ describe('cli-orchestrator tick --continue-from-result (AISDLC-225)', () => {
       calibrationLogPath: '/nonexistent-bypass.jsonl',
       // AISDLC-225: inject the continuation path
       continueFromResultPath: resultPath,
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     setArgv('tick', '--max-concurrent', '1', '--continue-from-result', resultPath);
@@ -507,6 +515,8 @@ describe('cli-orchestrator tick --continue-from-result (AISDLC-225)', () => {
       frontier: () => [], // empty frontier → idle tick (no dispatch attempt)
       dispatch: async (taskId) => approvedResult(taskId),
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     setArgv('tick', '--max-concurrent', '1', '--continue-from-result');

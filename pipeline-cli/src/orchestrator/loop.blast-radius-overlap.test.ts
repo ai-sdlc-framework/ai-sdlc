@@ -165,6 +165,8 @@ describe('runOrchestratorTick — blast-radius overlap integration (Major 3)', (
           ] as { number: number; headRefName: string }[],
         computeBlastRadiusFiles: (taskId: string) => blastRadiusMap[taskId.toUpperCase()] ?? [],
       },
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -259,6 +261,8 @@ describe('runOrchestratorTick — OrchestratorBlockedByBlastRadiusOverlapEvent s
           return [];
         },
       },
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -334,6 +338,8 @@ describe('runOrchestratorTick — OrchestratorBlockedByBlastRadiusOverlapEvent s
           return [];
         },
       },
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);

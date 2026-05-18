@@ -194,6 +194,8 @@ describe('runOrchestratorTick — Phase 3 4-task fixture acceptance', () => {
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     const tick = await runOrchestratorTick(config, adapters, 1);
 
@@ -248,6 +250,8 @@ describe('runOrchestratorTick — Phase 3 4-task fixture acceptance', () => {
         taskLabelsLoader: () => [],
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );
@@ -289,6 +293,8 @@ describe('runOrchestratorTick — stuck-candidate counter', () => {
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
         stuckCounters,
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       };
       let stuckEmissions = 0;
       // Run THRESHOLD+2 consecutive ticks. The first THRESHOLD don't emit; the
@@ -330,6 +336,8 @@ describe('runOrchestratorTick — stuck-candidate counter', () => {
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
         stuckCounters,
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );
@@ -347,6 +355,8 @@ describe('runOrchestratorTick — stuck-candidate counter', () => {
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
         stuckCounters,
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       2,
     );
@@ -374,6 +384,8 @@ describe('runOrchestratorTick — exponential backoff cadence', () => {
       dispatch: async (id) => approvedResult(id),
       escalate: async () => {},
       cadenceState: cadence,
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     // Drive enough idle ticks to saturate the cap. 30 → 60 → 120 → 240 → 300 (cap)
     const intervals: number[] = [];
@@ -411,6 +423,8 @@ describe('runOrchestratorTick — exponential backoff cadence', () => {
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
         cadenceState: cadence,
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );
@@ -451,6 +465,8 @@ describe('runOrchestratorTick — exponential backoff cadence', () => {
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
         cadenceState: cadence,
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );
@@ -474,6 +490,8 @@ describe('runOrchestratorTick — exponential backoff cadence', () => {
         taskLabelsLoader: () => [],
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );
@@ -497,6 +515,8 @@ describe('runOrchestratorTick — exponential backoff cadence', () => {
         taskLabelsLoader: () => [],
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );
@@ -530,6 +550,8 @@ describe('runOrchestratorLoop — uses tick.nextSleepSec for inter-tick sleep', 
       dispatch: async (id) => approvedResult(id),
       escalate: async () => {},
       cadenceState: cadence,
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     });
     // 3 ticks → 2 inter-tick sleeps (no sleep after the last tick because
     // the loop breaks on maxTicks before sleeping).
@@ -586,6 +608,8 @@ describe('runOrchestratorTick — AISDLC-175 orphan-parent witness regression', 
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     const tick = await runOrchestratorTick(config, adapters, 1);
 
@@ -636,6 +660,8 @@ describe('runOrchestratorTick — AISDLC-175 orphan-parent witness regression', 
         emitEvent: (event) => {
           captured.push(event as { type: string; taskId?: string; completedChildren?: string[] });
         },
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );
@@ -690,6 +716,8 @@ describe('runOrchestratorTick — AISDLC-223 operator-blocked filter (AC #6 + AC
       emitEvent: (event) => {
         captured.push(event as { type: string; taskId?: string; reason?: string });
       },
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     const tick = await runOrchestratorTick(config, adapters, 1);
 
@@ -738,6 +766,8 @@ describe('runOrchestratorTick — AISDLC-223 operator-blocked filter (AC #6 + AC
           return approvedResult(taskId);
         },
         escalate: async () => {},
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );

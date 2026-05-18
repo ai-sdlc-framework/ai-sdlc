@@ -61,6 +61,8 @@ describe('runOrchestratorTick — playbook integration', () => {
       },
       catalogue: forceBudget(DEFAULT_CATALOGUE, 'VerificationFailure', 1),
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1 });
     const result = await runOrchestratorTick(config, adapters, 1);
@@ -89,6 +91,8 @@ describe('runOrchestratorTick — playbook integration', () => {
       // Force budget=0 so the playbook escalates immediately.
       catalogue: forceBudget(DEFAULT_CATALOGUE, 'VerificationFailure', 0),
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1 });
     const result = await runOrchestratorTick(config, adapters, 1);
@@ -111,6 +115,8 @@ describe('runOrchestratorTick — playbook integration', () => {
       },
       catalogue: DEFAULT_CATALOGUE,
       escalate: async () => {},
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1 });
     const result = await runOrchestratorTick(config, adapters, 1);
@@ -140,6 +146,8 @@ describe('runOrchestratorTick — playbook integration', () => {
         labelled = true;
       },
       catalogue: DEFAULT_CATALOGUE,
+      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+      parentBranchGuard: async () => {},
     };
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxConcurrent: 1 });
     const result = await runOrchestratorTick(config, adapters, 1);
