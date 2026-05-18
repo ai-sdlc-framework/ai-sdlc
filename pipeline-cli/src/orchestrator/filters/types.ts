@@ -23,25 +23,31 @@ import type { BlastRadiusOverlapDetail } from './blast-radius-overlap.js';
 import type { BlockedDetail } from './blocked.js';
 import type { CapturesPendingDetail } from './captures-pending.js';
 import type { DispatchabilityBlockedDetail } from './dispatchability.js';
+import type { OpenPullRequestExistsDetail } from './open-pull-request-exists.js';
 
 /**
  * Names of the filters in the order the chain runs them. Used in trace
  * lines + event payloads so operators can grep for a specific filter without
  * decoding the human-readable reason string.
  *
- * `OrphanParent` (AISDLC-175) is the cheapest filter — a constant-time graph
- * lookup against the candidate's own node + the already-loaded parent map —
- * so it runs FIRST and short-circuits before the costlier dependency walk.
- * `AlreadyInFlight` (AISDLC-227) runs second — it checks for open PRs,
- * active worktree sentinels, and live subprocesses before the costlier
- * dependency walk. `BlastRadiusOverlap` (AISDLC-231) runs third — it
- * serializes tasks that would touch the same files as an in-flight task,
- * preventing stale-rebase fan-out collisions in parallel dispatch. The other
- * filters preserve the RFC §4.3 ordering among themselves. `Blocked`
- * (AISDLC-223) runs last — it catches tasks the operator has explicitly
- * marked as blocked via `blocked.reason` in frontmatter.
+ * `OpenPullRequestExists` (AISDLC-361) is the FIRST filter — it checks
+ * whether the task's canonical branch already has an open GitHub PR. This
+ * catches tasks stuck in review or blocked mid-pipeline before they reach
+ * Step 3 (worktree-create), which would abort on the same condition and
+ * waste the tick slot.
+ * `OrphanParent` (AISDLC-175) runs second — a constant-time graph lookup
+ * against the candidate's own node + the already-loaded parent map.
+ * `AlreadyInFlight` (AISDLC-227) runs third — it checks for open PRs via a
+ * wildcard pattern, active worktree sentinels, and live subprocesses.
+ * `BlastRadiusOverlap` (AISDLC-231) runs fourth — serialises tasks that
+ * would touch the same files as an in-flight task, preventing stale-rebase
+ * fan-out collisions in parallel dispatch. The other filters preserve the
+ * RFC §4.3 ordering among themselves. `Blocked` (AISDLC-223) runs last —
+ * it catches tasks the operator has explicitly marked as blocked via
+ * `blocked.reason` in frontmatter.
  */
 export type FilterName =
+  | 'OpenPullRequestExists'
   | 'OrphanParent'
   | 'AlreadyInFlight'
   | 'BlastRadiusOverlap'
@@ -86,7 +92,8 @@ export type FilterDetail =
   | BlastRadiusOverlapDetail
   | BlockedDetail
   | DispatchabilityBlockedDetail
-  | CapturesPendingDetail;
+  | CapturesPendingDetail
+  | OpenPullRequestExistsDetail;
 
 // Re-export detail types so callers can narrow the union without extra imports.
 export type { AlreadyInFlightDetail } from './already-in-flight.js';
@@ -94,6 +101,7 @@ export type { BlastRadiusOverlapDetail } from './blast-radius-overlap.js';
 export type { BlockedDetail } from './blocked.js';
 export type { CapturesPendingDetail } from './captures-pending.js';
 export type { DispatchabilityBlockedDetail } from './dispatchability.js';
+export type { OpenPREntry, OpenPullRequestExistsDetail } from './open-pull-request-exists.js';
 
 /**
  * AISDLC-175 — the candidate is a parent task whose every declared child is

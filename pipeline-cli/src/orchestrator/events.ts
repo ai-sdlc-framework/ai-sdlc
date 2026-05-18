@@ -176,7 +176,16 @@ export type OrchestratorEventType =
    * `predictedBucket`, `actualBucket`, `bucketMiss`,
    * `actualWallClockSec`, `estimateVariance`, `class`.
    */
-  | 'EstimateActualsRecorded';
+  | 'EstimateActualsRecorded'
+  /**
+   * AISDLC-361 — emitted on every tick that the `OpenPullRequestExists`
+   * admission filter rejects a candidate because the task's canonical branch
+   * already has an open GitHub PR. Per-event fields: `taskId`, `prNumber`,
+   * `prState` (`'draft'` | `'open'`), `branchName`, optional `prUrl`.
+   * Operators can grep events.jsonl for this type to find stuck tasks
+   * (PRs that exist but are stuck in review or blocked mid-pipeline).
+   */
+  | 'OrchestratorBlockedByOpenPullRequest';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

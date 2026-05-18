@@ -7,11 +7,18 @@
  * requeueing the candidate for the next tick.
  *
  * Order is significant:
- *   - OrphanParent runs first — constant-time graph lookup, most decisive
+ *   - OpenPullRequestExists (AISDLC-361) runs FIRST — checks the exact
+ *     canonical branch name against `gh pr list --state open`. Catches
+ *     tasks stuck in review (PR open from a prior run) before they reach
+ *     Step 3 (worktree-create), which would abort on the same condition
+ *     and waste the tick slot. Results are cached per tick (Map keyed by
+ *     branch name) to avoid N+1 gh calls when many candidates share the
+ *     same branch pattern.
+ *   - OrphanParent runs second — constant-time graph lookup, most decisive
  *     (an orphan parent isn't real dispatch work at all).
- *   - AlreadyInFlight runs second — catches mid-dispatch duplicates before
+ *   - AlreadyInFlight runs third — catches mid-dispatch duplicates before
  *     the costlier dep/blast-radius checks.
- *   - DependencyReadiness runs third — in-memory graph walk (~µs), the
+ *   - DependencyReadiness runs fourth — in-memory graph walk (~µs), the
  *     most common blocking condition in practice. A dep-blocked task also
  *     overlapping a blast-radius should report the dep block (more
  *     actionable for the operator), so dep runs BEFORE blast-radius.
@@ -48,6 +55,10 @@ import {
 } from './external-dependencies.js';
 import { checkOrphanParent, type CheckOrphanParentOpts } from './orphan-parent.js';
 import { checkCapturesPending, type CheckCapturesPendingOpts } from './captures-pending.js';
+import {
+  checkOpenPullRequestExists,
+  type CheckOpenPullRequestExistsOpts,
+} from './open-pull-request-exists.js';
 import type { FilterChainResult, FilterResult } from './types.js';
 
 export interface RunFilterChainOpts {
@@ -91,6 +102,16 @@ export interface RunFilterChainOpts {
    */
   taskBlocked?: BlockedFrontmatter;
   /**
+   * AISDLC-361 — options forwarded to `checkOpenPullRequestExists`. When
+   * undefined the filter uses defaults (derives the branch from the on-disk
+   * pipeline config + task title, and calls the real `gh pr list`). Tests
+   * inject `listOpenPRsByBranch` + `prListCache` to stay hermetic.
+   */
+  openPRExistsOpts?: Pick<
+    CheckOpenPullRequestExistsOpts,
+    'workDir' | 'taskTitle' | 'listOpenPRsByBranch' | 'prListCache'
+  >;
+  /**
    * AISDLC-227 — options forwarded to `checkAlreadyInFlight`. When undefined
    * the filter uses defaults (reads `AI_SDLC_ORCHESTRATOR_DETECT_SUBPROCESS`
    * from the environment; repoRoot defaults to `process.cwd()`).
@@ -122,15 +143,19 @@ export interface RunFilterChainOpts {
 }
 
 /**
- * Run the eight filters in chain order against a single candidate.
+ * Run the nine filters in chain order against a single candidate.
  * Short-circuits on the first failure but ALWAYS returns the partial trace
  * so the loop's event emission carries the prefix of cleared filters.
  *
- * Order: OrphanParent (AISDLC-175) → AlreadyInFlight (AISDLC-227) →
- * DependencyReadiness → BlastRadiusOverlap (AISDLC-231) →
- * Dispatchability (AISDLC-243) → DorReadiness → ExternalDependencies →
- * Blocked (AISDLC-223) → CapturesPending (RFC-0024 / AISDLC-269).
+ * Order: OpenPullRequestExists (AISDLC-361) → OrphanParent (AISDLC-175) →
+ * AlreadyInFlight (AISDLC-227) → DependencyReadiness →
+ * BlastRadiusOverlap (AISDLC-231) → Dispatchability (AISDLC-243) →
+ * DorReadiness → ExternalDependencies → Blocked (AISDLC-223) →
+ * CapturesPending (RFC-0024 / AISDLC-269).
  *
+ * OpenPullRequestExists runs first — it checks the exact canonical branch
+ * name against GitHub open PRs and catches tasks stuck in review from prior
+ * runs before they reach Step 3 (worktree-create) and waste a tick slot.
  * Rationale for DependencyReadiness BEFORE BlastRadiusOverlap: a task
  * that is both dep-blocked AND overlapping an in-flight blast-radius
  * should emit `OrchestratorBlockedByDependency` — the root cause visible
@@ -144,6 +169,19 @@ export interface RunFilterChainOpts {
  */
 export function runFilterChain(opts: RunFilterChainOpts): FilterChainResult {
   const trace: FilterResult[] = [];
+
+  // Filter -1 — open-PR-by-branch detection (AISDLC-361). Runs FIRST so
+  // tasks with a stuck open PR (opened in a prior run, stuck in review) never
+  // reach Step 3 (worktree-create), which would abort on the same condition
+  // and waste the tick slot. Results are cached in `opts.openPRExistsOpts.prListCache`
+  // (shared across the tick) so each branch is queried at most once.
+  const openPROpts: CheckOpenPullRequestExistsOpts = {
+    taskId: opts.taskId,
+    ...opts.openPRExistsOpts,
+  };
+  const openPR = checkOpenPullRequestExists(openPROpts);
+  trace.push(openPR);
+  if (!openPR.passed) return { passed: false, trace, failure: openPR };
 
   // Filter 0 — orphan-parent detection (AISDLC-175). Cheapest + most
   // decisive: an orphan parent is bookkeeping work the framework should
@@ -278,6 +316,8 @@ export function formatFilterTrace(taskId: string, result: FilterChainResult): st
 
 function humanFilterName(filter: FilterResult['filter']): string {
   switch (filter) {
+    case 'OpenPullRequestExists':
+      return 'Open-PR-by-branch check (AISDLC-361)';
     case 'OrphanParent':
       return 'Orphan-parent check';
     case 'AlreadyInFlight':
@@ -301,6 +341,10 @@ function humanFilterName(filter: FilterResult['filter']): string {
 
 function terminalNote(failure: FilterResult): string {
   switch (failure.detail?.kind) {
+    case 'open-pull-request-exists': {
+      const urlNote = failure.detail.prUrl ? ` ${failure.detail.prUrl}` : '';
+      return `open PR #${failure.detail.prNumber}${urlNote} already exists for branch ${failure.detail.branchName}`;
+    }
     case 'already-in-flight':
       return `already in flight (${failure.detail.description})`;
     case 'blast-radius-overlap':

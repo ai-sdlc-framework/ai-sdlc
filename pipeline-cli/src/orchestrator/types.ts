@@ -120,6 +120,9 @@ export interface OrchestratorFilterEvent {
  * permanently marked non-dispatchable via `dispatchable: false` frontmatter.
  * AISDLC-231 adds `OrchestratorBlockedByBlastRadiusOverlap` for tasks
  * whose file-level blast-radius overlaps with an in-flight task.
+ * AISDLC-361 adds `OrchestratorBlockedByOpenPullRequest` for tasks
+ * whose canonical branch already has an open GitHub PR (stuck in review
+ * or blocked mid-pipeline from a prior run).
  */
 export type OrchestratorBlockedEvent =
   | OrchestratorBlockedByDependencyEvent
@@ -128,7 +131,8 @@ export type OrchestratorBlockedEvent =
   | OrchestratorOrphanParentEvent
   | OrchestratorTaskBlockedEvent
   | OrchestratorBlockedByDispatchabilityEvent
-  | OrchestratorBlockedByBlastRadiusOverlapEvent;
+  | OrchestratorBlockedByBlastRadiusOverlapEvent
+  | OrchestratorBlockedByOpenPullRequestEvent;
 
 export interface OrchestratorBlockedByDependencyEvent {
   type: 'OrchestratorBlockedByDependency';
@@ -228,6 +232,36 @@ export interface OrchestratorBlockedByBlastRadiusOverlapEvent {
   overlap: string[];
   /** Total number of overlapping files. */
   overlapCount: number;
+}
+
+/**
+ * AISDLC-361 — emitted on every tick that the `OpenPullRequestExists`
+ * admission filter rejects a candidate. The task's canonical branch already
+ * has an open GitHub PR (opened in a prior run, stuck in review, or blocked
+ * mid-pipeline). Without this filter, every tick re-admits the task, reaches
+ * Step 3 (worktree-create), and aborts there — wasting the tick slot. With
+ * `--max-concurrent 2` and 2 stuck PRs, the orchestrator deadlocks.
+ *
+ * Operators can grep events.jsonl for this type to see how often stuck PRs
+ * are consuming tick slots. The `prUrl` field (when present) can be clicked
+ * through directly to investigate the PR.
+ */
+export interface OrchestratorBlockedByOpenPullRequestEvent {
+  type: 'OrchestratorBlockedByOpenPullRequest';
+  ts: string;
+  taskId: string;
+  /** PR number of the open PR for the canonical branch. */
+  prNumber: number;
+  /** Whether the PR is a draft (`true`) or fully open (`false`). */
+  isDraft: boolean;
+  /** The canonical branch name the filter checked against. */
+  branchName: string;
+  /**
+   * PR URL — populated when `gh pr list` returns a `url` field. Allows
+   * operators to click through to the stuck PR directly from the
+   * events.jsonl stream or `cli-status --orchestrator` output.
+   */
+  prUrl?: string;
 }
 
 /**
