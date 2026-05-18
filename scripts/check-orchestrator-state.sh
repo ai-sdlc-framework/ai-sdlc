@@ -89,8 +89,14 @@ elif [ "$CURRENT_BRANCH" != "main" ]; then
   else
     # Clean tree — auto-recover: checkout main + reset to origin/main.
     echo "[orchestrator-state] auto-recovering parent from '${CURRENT_BRANCH}' to main"
-    git checkout main 2>/dev/null
-    git reset --hard origin/main >/dev/null
+    if ! git checkout main; then
+      echo "[orchestrator-state] ERROR: git checkout main failed in ${PARENT_ROOT}" >&2
+      exit 1
+    fi
+    if ! git reset --hard origin/main; then
+      echo "[orchestrator-state] ERROR: git reset --hard origin/main failed in ${PARENT_ROOT}" >&2
+      exit 1
+    fi
     echo "[orchestrator-state] auto-recovered parent from '${CURRENT_BRANCH}' to main at $(git rev-parse --short HEAD)"
     exit 0
   fi
