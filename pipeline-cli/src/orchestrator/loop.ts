@@ -2032,8 +2032,10 @@ export async function runParentBranchGuard(
 
   // AISDLC-363 defense-in-depth: GH merge-queue probe branches are sanctioned
   // ephemeral state; skip silently so CI never fires the guard.
+  // Use logger.info (not warn) — this is an EXPECTED skip on every queue probe,
+  // not an anomaly that requires operator attention. AISDLC-363 code-reviewer MAJOR.
   if (currentBranch.startsWith('gh-readonly-queue/')) {
-    logger.warn(
+    logger.info(
       `[orchestrator] parent-branch-guard: running in GH merge-queue branch ` +
         `(${currentBranch}); skipping guard`,
     );
