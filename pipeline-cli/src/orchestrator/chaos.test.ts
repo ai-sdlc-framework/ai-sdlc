@@ -122,8 +122,6 @@ describe('chaos — mid-dispatch SIGTERM (Q2 resume)', () => {
       parentBranchGuard: async () => {},
       artifactsDir: workdir,
       runId: 'run-chaos-mid-dispatch',
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
-      parentBranchGuard: async () => {},
     };
 
     const result = await runOrchestratorTick(config, adapters, 1);
@@ -179,8 +177,6 @@ describe('chaos — mid-dispatch SIGTERM (Q2 resume)', () => {
       parentBranchGuard: async () => {},
       artifactsDir: workdir,
       runId: 'run-chaos-resume',
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
-      parentBranchGuard: async () => {},
     };
 
     // Tick 1 — crashes.
@@ -221,8 +217,6 @@ describe('chaos — mid-finalize SIGTERM (events sink throws)', () => {
       parentBranchGuard: async () => {},
       artifactsDir: workdir,
       runId: 'run-chaos-mid-finalize',
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
-      parentBranchGuard: async () => {},
       emitEvent: (ev) => {
         sinkCalls += 1;
         captured.push(ev);
@@ -360,8 +354,6 @@ describe('chaos — events.jsonl append-only integrity', () => {
       parentBranchGuard: async () => {},
       artifactsDir: workdir,
       runId: 'run-chaos-integ',
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
-      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -423,8 +415,6 @@ describe('chaos — SIGTERM drain (Q2 resume contract)', () => {
       parentBranchGuard: async () => {},
       artifactsDir: workdir,
       runId: 'run-A',
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
-      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adaptersA, 1);
 
@@ -439,8 +429,6 @@ describe('chaos — SIGTERM drain (Q2 resume contract)', () => {
       parentBranchGuard: async () => {},
       artifactsDir: workdir,
       runId: 'run-B',
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
-      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adaptersB, 1);
 
