@@ -1,11 +1,17 @@
 ---
 name: orchestrator-tick
 description: >-
-  Run one orchestrator tick inline — reads the dispatch frontier, invokes the
-  Agent tool for any admitted task (via the ClaudeCliInlineSpawner manifest
-  protocol), writes the result back for the orchestrator tick loop, then
-  optionally wakes again via ScheduleWakeup. This is the consumer-bridge
-  half of AISDLC-198 Option 3.
+  [SUBSCRIPTION-ONLY PATH post-2026-06-15] Run one orchestrator tick inline —
+  reads the dispatch frontier, invokes the Agent tool for any admitted task (via
+  the ClaudeCliInlineSpawner manifest protocol), writes the result back for the
+  orchestrator tick loop, then wakes again via ScheduleWakeup(30s). Because the
+  Agent tool call runs inside this interactive session turn, it draws from the
+  operator's interactive Max-20x quota — NOT the $200/mo Agent SDK credit pool.
+  Zero incremental cost above the subscription fee. Preferred over
+  `cli-orchestrator tick --spawner claude` (cron/daemon) for high-throughput
+  backlog churning as long as one Claude Code session stays alive. See
+  docs/operations/billing-and-cost-optimization.md §1b. This is the
+  consumer-bridge half of AISDLC-198 Option 3.
 argument-hint: "[--once]"
 allowed-tools:
   - Read
