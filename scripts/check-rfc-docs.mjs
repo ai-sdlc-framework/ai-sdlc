@@ -38,7 +38,7 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, basename, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import {
   checkAllTransitions,
   reportTransitionsAndExit,
@@ -368,9 +368,12 @@ export function collectRfcTransitionsFromGit({ rfcsDir, repoRoot, baseRef, prBod
   let changedRfcs;
   try {
     // List RFC files changed between baseRef and HEAD, additions + modifications only.
+    // Use execFileSync (not execSync) to avoid shell interpolation — baseRef comes from
+    // a CLI argument or env var and must not be passed through a shell (security: AISDLC-297).
     const rfcRelDir = relative(repoRoot, rfcsDir).replace(/\\/g, '/');
-    const diffOut = execSync(
-      `git diff --name-only --diff-filter=AM "${baseRef}" HEAD -- "${rfcRelDir}"`,
+    const diffOut = execFileSync(
+      'git',
+      ['diff', '--name-only', '--diff-filter=AM', baseRef, 'HEAD', '--', rfcRelDir],
       { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
     ).trim();
 
@@ -389,9 +392,10 @@ export function collectRfcTransitionsFromGit({ rfcsDir, repoRoot, baseRef, prBod
     const rfcId = basename(relPath).replace(/^(RFC-\d{4}).*/, '$1');
 
     // "Before" content from baseRef — null when the file is newly added.
+    // Use execFileSync to avoid shell interpolation of baseRef/relPath.
     let fromContent = null;
     try {
-      fromContent = execSync(`git show "${baseRef}:${relPath}"`, {
+      fromContent = execFileSync('git', ['show', `${baseRef}:${relPath}`], {
         cwd: repoRoot,
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -511,17 +515,27 @@ function parseArgs(argv) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
 
+  // When --base-ref is not explicitly provided, fall back to GitHub Actions
+  // environment variables. GITHUB_BASE_REF is set automatically for
+  // pull_request and merge_group events (e.g. 'main'). This ensures the
+  // lifecycle-transition check fires in CI even when the rfc:check npm script
+  // is invoked without an explicit --base-ref flag (AC #3: forbidden transitions
+  // fail CI). collectRfcTransitionsFromGit handles git errors gracefully (returns [])
+  // so a missing/unreachable ref degrades cleanly rather than failing the build.
+  const effectiveBaseRef =
+    args.baseRef || (process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : null);
+
   // Phase 1: docs-surface check (requiresDocs vs actual doc files).
   const report = checkAllRfcs(args);
   const docsExitCode = reportAndExit(report);
 
   // Phase 2: lifecycle-transition check (wired in per AISDLC-297).
-  // Only runs when --base-ref is provided; gracefully skipped otherwise.
-  if (args.baseRef) {
+  // Runs when --base-ref is provided OR when GITHUB_BASE_REF env var is set (CI).
+  if (effectiveBaseRef) {
     const transitions = collectRfcTransitionsFromGit({
       rfcsDir: args.rfcsDir,
       repoRoot: REPO_ROOT,
-      baseRef: args.baseRef,
+      baseRef: effectiveBaseRef,
       prBody: args.prBody,
     });
     const lifecycleReport = checkAllTransitions(transitions);

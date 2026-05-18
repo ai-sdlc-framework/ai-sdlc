@@ -675,6 +675,21 @@ describe('CLI', () => {
     });
     assert.equal(r.status, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
   });
+
+  it('GITHUB_BASE_REF env var triggers lifecycle check when --base-ref is absent', () => {
+    // Simulate what GitHub Actions sets for pull_request events.
+    // origin/nonexistent-branch will not resolve, so collectRfcTransitionsFromGit
+    // degrades gracefully (returns []) and the lifecycle check reports 0 clean transitions.
+    // The key assertion: the [rfc-lifecycle] OK line IS printed, proving the check fired.
+    const r = spawnSync('node', [SCRIPT], {
+      encoding: 'utf-8',
+      env: { ...process.env, GITHUB_BASE_REF: 'nonexistent-branch-for-test' },
+    });
+    assert.equal(r.status, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
+    assert.match(r.stdout, /\[rfc-check\] OK:/);
+    // Lifecycle check code path was entered — report line is present even with empty diff.
+    assert.match(r.stdout, /\[rfc-lifecycle\] OK:/);
+  });
 });
 
 // ---------------------------------------------------------- Module hygiene
