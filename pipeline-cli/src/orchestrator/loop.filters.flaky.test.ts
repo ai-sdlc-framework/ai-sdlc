@@ -160,12 +160,14 @@ describe('runOrchestratorTick — Phase 3 4-task fixture acceptance [FLAKY]', ()
       graphLoader: () => graph,
       taskLabelsLoader: () => [],
       calibrationLogPath: logPath,
+      openPRExistsOpts: { listOpenPRsByBranch: () => [] },
+      alreadyInFlightOpts: { listOpenPRs: () => [], detectSubprocess: false },
+      blastRadiusOverlapOpts: { listOpenPRs: () => [], computeBlastRadiusFiles: () => [] },
       dispatch: async (taskId) => {
         dispatched.push(taskId);
         return approvedResult(taskId);
       },
       escalate: async () => {},
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
       parentBranchGuard: async () => {},
     };
     const tick = await runOrchestratorTick(config, adapters, 1);
