@@ -290,6 +290,21 @@ BRANCH=$(echo "$BRANCH_PATTERN" | sed "s|{issueIdLower}|$TASK_ID_LOWER|g; s|{slu
 WORKTREE_PATH=".worktrees/$TASK_ID_LOWER"
 ```
 
+> **AISDLC-356 — canonical branch slug for manual worktrees.** When creating a
+> worktree manually with `git worktree add -b <branch>`, the branch slug MUST match
+> what this step would compute — otherwise `--resume-from-draft` cannot find the PR
+> by branch name and will fall back to a title search (which may find a different PR
+> if the title is ambiguous). To compute the canonical slug before creating the
+> worktree, run:
+>
+> ```bash
+> node "$PIPELINE_CLI_BIN/cli-deps.mjs" print-canonical-branch AISDLC-NNN --work-dir "$(pwd)"
+> ```
+>
+> This prints the exact branch name the orchestrator would use (e.g.
+> `ai-sdlc/aisdlc-356-fix-auto-rearm-and-canonical-branch-slug`). Use that as the
+> `-b` argument to `git worktree add`.
+
 ## Step 3 — Set up the worktree (fresh base from latest main)
 
 ```bash

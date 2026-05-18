@@ -5,6 +5,7 @@
  *   2. `--rework-pr` — re-dispatch developer on an existing PR branch.
  *   3. AISDLC-242 recoverable-abort surface extension to `executePipeline()`.
  *   4. Step 3 draft-PR differentiation (isSafeToAutoClean with isDraft field).
+ *   5. AISDLC-356: auto-rearm after force-push (Bug 1), title-search fallback (Bug 2b).
  *
  * All tests are hermetic: no real git/gh/network. Runners and spawners are
  * injected stubs.
@@ -18,7 +19,11 @@ import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-help
 import { FakeRunner, ok, fail } from '../__test-helpers/fake-runner.js';
 import { MockSpawner } from '../runtime/subagent-spawner.js';
 import { runExecuteCommand } from './execute.js';
-import { detectDraftPrState, runResumeFromDraft } from './resume-from-draft.js';
+import {
+  detectDraftPrState,
+  detectPrByTaskIdTitle,
+  runResumeFromDraft,
+} from './resume-from-draft.js';
 import { fetchReviewerFindings, REVIEWER_FINDINGS_MARKER, runReworkPr } from './rework-pr.js';
 import { detectDraftPrForBranch } from '../steps/03-setup-worktree.js';
 import { isResumableCommit } from '../orchestrator/checkpoint.js';
@@ -1351,5 +1356,257 @@ describe('runResumeFromDraft — AISDLC-355 Bug 2: verdict file shape', () => {
     for (const entry of parsed) {
       expect(typeof entry.agentId).toBe('string');
     }
+  });
+});
+
+// ── AISDLC-356: Bug 1 — auto-rearm after force-push ───────────────────────
+
+describe('AISDLC-356: auto-rearm after force-push (Bug 1)', () => {
+  it('Case B: calls gh pr merge --auto after force-push when verdict file present', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-356', title: 'auto rearm task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-356');
+    mkdirSync(worktreePath, { recursive: true });
+    // Write a verdict file (non-stale)
+    const verdictDir = join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdictDir, { recursive: true });
+    writeFileSync(
+      join(verdictDir, 'aisdlc-356.json'),
+      JSON.stringify([{ agentId: 'code-reviewer', approved: true, findings: [], summary: 'lgtm' }]),
+    );
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list.*--head/,
+        ok(
+          JSON.stringify([
+            { number: 356, isDraft: true, url: 'https://github.com/owner/repo/pull/356' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok('')) // no attestation commit
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr merge.*--auto/, ok('Auto-merge enabled'))
+      .on(/^gh pr ready/, ok());
+    const fakeRunner = fakeRunnerObj.toRunner();
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-356',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.ok).toBe(true);
+
+    // gh pr merge --auto MUST have been called after force-push
+    const autoMergeCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('merge') && c.args.includes('--auto'),
+    );
+    expect(autoMergeCalls.length).toBeGreaterThan(0);
+    expect(autoMergeCalls[0].args).toContain('356');
+  });
+
+  it('Case C: calls gh pr merge --auto after force-push when reviewers ran', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-356', title: 'auto rearm task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-356');
+    mkdirSync(worktreePath, { recursive: true });
+    // No verdict file — Case C (reviewers will run)
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list.*--head/,
+        ok(
+          JSON.stringify([
+            { number: 356, isDraft: true, url: 'https://github.com/owner/repo/pull/356' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('2\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr merge.*--auto/, ok('Auto-merge enabled'))
+      .on(/^gh pr ready/, ok());
+    const fakeRunner = fakeRunnerObj.toRunner();
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-356',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.ok).toBe(true);
+
+    // gh pr merge --auto MUST have been called
+    const autoMergeCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('merge') && c.args.includes('--auto'),
+    );
+    expect(autoMergeCalls.length).toBeGreaterThan(0);
+  });
+
+  it('auto-rearm failure is non-fatal (swallows non-zero exit)', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-356', title: 'auto rearm task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-356');
+    mkdirSync(worktreePath, { recursive: true });
+    const verdictDir = join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdictDir, { recursive: true });
+    writeFileSync(
+      join(verdictDir, 'aisdlc-356.json'),
+      JSON.stringify([{ agentId: 'code-reviewer', approved: true, findings: [], summary: 'lgtm' }]),
+    );
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list.*--head/,
+        ok(
+          JSON.stringify([
+            { number: 356, isDraft: true, url: 'https://github.com/owner/repo/pull/356' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      // auto-rearm fails with non-zero exit (e.g. auto-merge not enabled in repo)
+      .on(/^gh pr merge.*--auto/, fail('auto-merge not enabled', 1))
+      .on(/^gh pr ready/, ok());
+    const fakeRunner = fakeRunnerObj.toRunner();
+
+    // MUST still succeed overall — auto-rearm failure is non-fatal
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-356',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.ok).toBe(true);
+  });
+});
+
+// ── AISDLC-356: Bug 2b — title-search fallback ────────────────────────────
+
+describe('AISDLC-356: detectPrByTaskIdTitle (Bug 2b title-search fallback)', () => {
+  it('returns null when gh fails', async () => {
+    const runner = new FakeRunner().on(/^gh pr list/, fail('gh error', 1)).toRunner();
+    const result = await detectPrByTaskIdTitle(runner, tmp, 'AISDLC-356');
+    expect(result).toBeNull();
+  });
+
+  it('returns null when no matching PRs', async () => {
+    const runner = new FakeRunner().on(/^gh pr list/, ok('[]')).toRunner();
+    const result = await detectPrByTaskIdTitle(runner, tmp, 'AISDLC-356');
+    expect(result).toBeNull();
+  });
+
+  it('returns the first PR when title contains the task ID', async () => {
+    const runner = new FakeRunner()
+      .on(
+        /^gh pr list.*--search/,
+        ok(
+          JSON.stringify([
+            {
+              number: 514,
+              isDraft: true,
+              url: 'https://github.com/owner/repo/pull/514',
+              title: 'fix(orchestrator): AISDLC-356 auto rearm',
+            },
+          ]),
+        ),
+      )
+      .toRunner();
+    const result = await detectPrByTaskIdTitle(runner, tmp, 'AISDLC-356');
+    expect(result).not.toBeNull();
+    expect(result!.prNumber).toBe(514);
+    expect(result!.isDraft).toBe(true);
+    expect(result!.prUrl).toBe('https://github.com/owner/repo/pull/514');
+  });
+
+  it('prefers exact task-ID match over fuzzy match', async () => {
+    const runner = new FakeRunner()
+      .on(
+        /^gh pr list.*--search/,
+        ok(
+          JSON.stringify([
+            // First result does NOT contain exact task ID
+            {
+              number: 513,
+              isDraft: false,
+              url: 'https://github.com/owner/repo/pull/513',
+              title: 'feat: some unrelated work',
+            },
+            // Second result DOES contain exact task ID
+            {
+              number: 514,
+              isDraft: true,
+              url: 'https://github.com/owner/repo/pull/514',
+              title: 'fix: AISDLC-356 canonical branch fix',
+            },
+          ]),
+        ),
+      )
+      .toRunner();
+    const result = await detectPrByTaskIdTitle(runner, tmp, 'AISDLC-356');
+    expect(result).not.toBeNull();
+    // Prefers the entry with the exact task ID match
+    expect(result!.prNumber).toBe(514);
+  });
+});
+
+describe('AISDLC-356: runResumeFromDraft title-search fallback (Bug 2b integration)', () => {
+  it('finds a PR by task-ID-in-title when branch-name lookup returns no PR', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-356', title: 'canonical branch slug task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-356');
+    mkdirSync(worktreePath, { recursive: true });
+    // Write attestation sentinel so we only need to flip to ready (Case A)
+    writeFileSync(join(worktreePath, '.active-task'), 'AISDLC-356');
+
+    const fakeRunnerObj = new FakeRunner()
+      // Branch-name lookup returns EMPTY (non-canonical branch used)
+      .on(/^gh pr list.*--head/, ok('[]'))
+      // Title-search fallback returns a PR with task ID in title
+      .on(
+        /^gh pr list.*--search/,
+        ok(
+          JSON.stringify([
+            {
+              number: 514,
+              isDraft: true,
+              url: 'https://github.com/owner/repo/pull/514',
+              title: 'fix: AISDLC-356 canonical branch slug fix',
+            },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('2\n'))
+      .on(/^git log.*auto-sign/, ok('abc1234 chore: auto-sign attestation for aisdlc-356\n'))
+      .on(/^gh pr ready/, ok());
+    const fakeRunner = fakeRunnerObj.toRunner();
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-356',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+
+    // MUST find the PR via title-search and proceed — NOT return no-draft-pr
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.ok).toBe(true);
+    expect(result.prUrl).toBe('https://github.com/owner/repo/pull/514');
+
+    // Confirm the title-search call was made
+    const titleSearchCalls = fakeRunnerObj.calls.filter(
+      (c) =>
+        c.command === 'gh' && c.args.includes('list') && c.args.some((a) => a.includes('in:title')),
+    );
+    expect(titleSearchCalls.length).toBeGreaterThan(0);
   });
 });

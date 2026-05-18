@@ -1,7 +1,7 @@
 ---
 id: AISDLC-356
 title: 'fix(orchestrator): auto-rearm auto-merge after force-push + canonical branch-slug doc/guard'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:

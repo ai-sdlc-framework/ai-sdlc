@@ -19,7 +19,8 @@
  * @module cli/deps
  */
 
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import {
@@ -43,7 +44,8 @@ import {
   type SnapshotTag,
   writeSnapshot,
 } from '../deps/snapshot.js';
-import { parseSimpleYaml } from '../steps/01-validate.js';
+import { parseSimpleYaml, parseTaskFile } from '../steps/01-validate.js';
+import { computeBranchName } from '../steps/02-compute-branch.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -500,6 +502,73 @@ export function buildDepsCli(): Argv {
             skipped: result.skipped,
             count: result.entries.length,
           });
+        }
+      },
+    )
+    .command(
+      'print-canonical-branch <task-id>',
+      'AISDLC-356 — print the canonical branch slug the orchestrator would compute for a given task ID. Operators creating manual worktrees should use this to ensure the branch name matches what resume-from-draft will look up.',
+      (y) =>
+        y
+          .positional('task-id', {
+            describe: 'Backlog task ID (e.g. AISDLC-356)',
+            type: 'string',
+            demandOption: true,
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+            describe:
+              'Output format: "text" prints just the branch name; "json" emits { branch, worktreePath, slug, taskIdLower }',
+          }),
+      async (argv) => {
+        const taskId = argv['task-id'] as string;
+        const workDir = argv['work-dir'] as string;
+
+        // Locate the task file in backlog/tasks/ or backlog/completed/.
+        const taskIdLower = taskId.toLowerCase();
+
+        let taskFile: string | undefined;
+        for (const dir of ['backlog/tasks', 'backlog/completed']) {
+          const candidate = join(workDir, dir);
+          if (!existsSync(candidate)) continue;
+          const found = readdirSync(candidate)
+            .filter((f: string) => f.toLowerCase().startsWith(taskIdLower) && f.endsWith('.md'))
+            .map((f: string) => join(candidate, f));
+          if (found.length > 0) {
+            taskFile = found[0];
+            break;
+          }
+        }
+
+        if (!taskFile || !existsSync(taskFile)) {
+          fail(`Task file for ${taskId} not found under ${workDir}/backlog/{tasks,completed}/`);
+        }
+
+        let task: Awaited<ReturnType<typeof parseTaskFile>>;
+        try {
+          task = parseTaskFile(taskFile!);
+        } catch (err) {
+          fail(`Failed to parse task file ${taskFile}: ${(err as Error).message}`);
+        }
+
+        const result = await computeBranchName({
+          taskId,
+          task: task!,
+          workDir,
+        });
+
+        if ((argv.format as string) === 'json') {
+          emit({
+            ok: true,
+            branch: result.branch,
+            worktreePath: result.worktreePath,
+            slug: result.slug,
+            taskIdLower: result.taskIdLower,
+          });
+        } else {
+          emitText(result.branch);
         }
       },
     )

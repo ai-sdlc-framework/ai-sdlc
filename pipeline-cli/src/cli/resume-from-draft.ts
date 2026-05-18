@@ -67,6 +67,84 @@ import { PROTECTED_BRANCHES } from './rework-pr.js';
 const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
 
 /**
+ * Bug 2b (AISDLC-356) — title-search fallback for when a PR exists but was
+ * opened under a non-canonical branch slug.
+ *
+ * Falls back to `gh pr list --search "<task-id> in:title"` when the canonical
+ * branch-name lookup returns no PR. This covers the case where an operator
+ * manually created a worktree with a custom branch slug that differs from the
+ * orchestrator's computed slug, resulting in a PR that cannot be found by
+ * branch name alone.
+ *
+ * Returns the first matching open PR, or null when none found.
+ */
+export async function detectPrByTaskIdTitle(
+  runner: Runner,
+  workDir: string,
+  taskId: string,
+): Promise<{ prNumber: number; isDraft: boolean; prUrl: string } | null> {
+  const result = await runner(
+    'gh',
+    [
+      'pr',
+      'list',
+      '--search',
+      `${taskId} in:title`,
+      '--state',
+      'open',
+      '--json',
+      'number,isDraft,url,title',
+    ],
+    { cwd: workDir, allowFailure: true },
+  );
+  if (result.code !== 0) return null;
+  try {
+    const parsed = JSON.parse(result.stdout.trim() || '[]') as Array<{
+      number: number;
+      isDraft: boolean;
+      url: string;
+      title: string;
+    }>;
+    if (!Array.isArray(parsed) || parsed.length === 0) return null;
+    // Filter to PRs whose title actually contains the task ID (GitHub search
+    // can be fuzzy — prefer an exact-ID match to avoid spurious hits).
+    const taskIdUpper = taskId.toUpperCase();
+    const match = parsed.find((pr) => pr.title.toUpperCase().includes(taskIdUpper)) ?? parsed[0];
+    return { prNumber: match.number, isDraft: match.isDraft === true, prUrl: match.url ?? '' };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Bug 1 (AISDLC-356) — re-arm auto-merge after a force-push clears it.
+ *
+ * GitHub clears the PR's auto-merge request on every force-push. This helper
+ * calls `gh pr merge <n> --auto` after every force-push to re-arm it.
+ *
+ * Non-fatal: swallows non-zero exits (PR may already be armed, may not have
+ * auto-merge enabled in repo settings, or the PR number may not exist yet).
+ */
+async function rearmAutoMerge(
+  runner: Runner,
+  workDir: string,
+  prNumber: number,
+  logger: PipelineLogger,
+): Promise<void> {
+  const result = await runner('gh', ['pr', 'merge', String(prNumber), '--auto'], {
+    cwd: workDir,
+    allowFailure: true,
+  });
+  if (result.code !== 0) {
+    logger.info(
+      `[ai-sdlc] resume-from-draft: auto-merge rearm for PR #${prNumber} failed (non-fatal): ${result.stderr.trim() || result.stdout.trim() || 'unknown error'}`,
+    );
+  } else {
+    logger.progress('resume-from-draft', `auto-merge re-armed for PR #${prNumber}`);
+  }
+}
+
+/**
  * The completion state of an existing draft-PR dispatch — which steps
  * have already run based on on-disk signals.
  */
@@ -118,8 +196,12 @@ export async function detectDraftPrState(
     }
   }
 
-  // Check for open PR (draft or ready)
-  const prInfo = await detectDraftPrForBranch(runner, workDir, branch);
+  // Check for open PR (draft or ready) — first by branch name, then by task ID
+  // in title (Bug 2b: title-search fallback for non-canonical branch slugs).
+  let prInfo = await detectDraftPrForBranch(runner, workDir, branch);
+  if (prInfo === null) {
+    prInfo = await detectPrByTaskIdTitle(runner, workDir, taskId);
+  }
   const hasDraftPr = prInfo?.isDraft === true;
   const hasReadyPr = prInfo !== null && prInfo.isDraft === false;
 
@@ -383,6 +465,8 @@ export async function runResumeFromDraft(
         reason: `re-push failed: ${pushResult.stderr.trim() || 'unknown error'}`,
       };
     }
+    // Bug 1 (AISDLC-356): re-arm auto-merge after force-push (GitHub clears it).
+    await rearmAutoMerge(runner, opts.workDir, prNumber, logger);
     const readyResult = await runner('gh', ['pr', 'ready', String(prNumber)], {
       cwd: opts.workDir,
       allowFailure: true,
@@ -486,6 +570,9 @@ export async function runResumeFromDraft(
       finalVerdict: aggregated,
     };
   }
+
+  // Bug 1 (AISDLC-356): re-arm auto-merge after force-push (GitHub clears it).
+  await rearmAutoMerge(runner, opts.workDir, prNumber, logger);
 
   const readyResult = await runner('gh', ['pr', 'ready', String(prNumber)], {
     cwd: opts.workDir,

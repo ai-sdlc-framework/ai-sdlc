@@ -365,4 +365,52 @@ describe('cli-deps router', () => {
       }
     });
   });
+
+  // ── AISDLC-356: Bug 2a — print-canonical-branch subcommand ─────────────
+  describe('print-canonical-branch (AISDLC-356)', () => {
+    it('text format prints just the branch name', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-356', title: 'fix auto rearm and branch slug' });
+      setArgv('print-canonical-branch', 'AISDLC-356', '--work-dir', tmp, '--format', 'text');
+      await buildDepsCli().parseAsync();
+      const output = stdoutText().trim();
+      // Branch must start with the default pattern prefix
+      expect(output).toMatch(/^ai-sdlc\/aisdlc-356-/);
+      // Must contain the slug derived from the title
+      expect(output).toContain('fix-auto-rearm');
+    });
+
+    it('json format emits { ok, branch, worktreePath, slug, taskIdLower }', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-356', title: 'fix auto rearm and branch slug' });
+      setArgv('print-canonical-branch', 'AISDLC-356', '--work-dir', tmp, '--format', 'json');
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        ok: boolean;
+        branch: string;
+        worktreePath: string;
+        slug: string;
+        taskIdLower: string;
+      };
+      expect(r.ok).toBe(true);
+      expect(r.branch).toMatch(/^ai-sdlc\/aisdlc-356-/);
+      expect(r.taskIdLower).toBe('aisdlc-356');
+      expect(typeof r.slug).toBe('string');
+      expect(r.slug.length).toBeGreaterThan(0);
+      expect(r.worktreePath).toContain('aisdlc-356');
+    });
+
+    it('finds task file in backlog/completed/ as well', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-356', title: 'completed task', completed: true });
+      setArgv('print-canonical-branch', 'AISDLC-356', '--work-dir', tmp, '--format', 'text');
+      await buildDepsCli().parseAsync();
+      const output = stdoutText().trim();
+      expect(output).toMatch(/^ai-sdlc\/aisdlc-356-/);
+    });
+
+    it('fails with exit 1 when task file does not exist', async () => {
+      setArgv('print-canonical-branch', 'AISDLC-999', '--work-dir', tmp);
+      await expect(buildDepsCli().parseAsync()).rejects.toThrow('process.exit(1)');
+      const errOut = stderrChunks.join('');
+      expect(errOut).toContain('not found');
+    });
+  });
 });

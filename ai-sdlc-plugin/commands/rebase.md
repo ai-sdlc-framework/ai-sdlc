@@ -293,6 +293,19 @@ If the push is rejected (someone pushed to the same branch under us),
 do NOT escalate to plain `--force`. Print the rejection and tell the
 operator to investigate.
 
+After a successful push, re-arm auto-merge — GitHub clears the PR's
+auto-merge request on every force-push (AISDLC-356):
+
+```bash
+PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number' 2>/dev/null || echo '')
+if [ -n "$PR_NUMBER" ]; then
+  gh pr merge "$PR_NUMBER" --auto 2>/dev/null || true
+fi
+```
+
+Swallow non-zero exits — auto-merge may not be enabled in the repo or
+the PR may not yet be ready. The re-arm is best-effort.
+
 ## Step 7 — Report
 
 Print a tight summary:
