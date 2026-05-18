@@ -1027,28 +1027,15 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   // when the diff scan shows ≥1 orphan (multi-envelope being the
   // overwhelming common case for this bug, but the check also catches a
   // single orphan from a clean-rebase-then-re-sign cycle).
-  if (all.length >= 1) {
-    const { orphans, total } = detectOrphanEnvelopes(lowerHead, baseSha, repoRoot);
-    if (orphans.length > 0) {
-      const orphanNames = orphans.map((p) => p.split('/').pop() ?? p);
-      const orphanList = orphanNames.slice(0, 3).join(', ');
-      const more = orphanNames.length > 3 ? ` (+${orphanNames.length - 3} more)` : '';
-      // Use `git rm` (not `rm`) so the deletion is staged. A bare `rm` only
-      // touches the working tree; a subsequent `git commit --amend --no-edit`
-      // sees no staged changes and the orphan stays committed → CI re-fires
-      // the same orphan error → operator stuck in an infinite loop. See
-      // PR #490 round-1 code-review finding (AISDLC-274).
-      const rmArgs = orphans.map((p) => `git rm ${p}`).join('; ');
-      return {
-        status: 'invalid',
-        reason:
-          `orphan envelope(s) detected: ${orphanList}${more} ` +
-          `(${total} PR-added envelope${total !== 1 ? 's' : ''}, ${orphans.length} orphan${orphans.length !== 1 ? 's' : ''} with unresolvable SHAs — ` +
-          `stale from a queue-rebase+re-sign cycle). ` +
-          `Recovery: ${rmArgs}; git commit --amend --no-edit; node ai-sdlc-plugin/scripts/sign-attestation.mjs --review-verdicts <verdicts.json>`,
-      };
-    }
-  }
+  // AISDLC-362 follow-up: orphan-envelope hard-reject REMOVED.
+// The orphan check rejected envelopes whose subject.digest.sha1 (pre-rebase
+// commit) couldn't be found in the rebased commit graph. With V5 (AISDLC-362),
+// the content hash itself is the trust boundary — an orphan subject SHA is
+// moot if V5 hash matches HEAD's file blobs. The check was firing on every
+// queue rebase even when V5 would have validated cleanly, blocking parallel
+// merges. V5 + per-envelope resolveSubjectShaForEnvelope() (which already
+// falls back to 'v5-head' when subject SHA isn't reachable) provides the
+// trust binding without needing the orphan pre-check.
 
   // Per-envelope: try to resolve a subject SHA whose recomputed
   // `contentHashV3` matches the envelope (AISDLC-103, Verifier Phase 3 —
