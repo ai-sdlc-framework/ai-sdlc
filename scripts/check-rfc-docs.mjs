@@ -38,6 +38,11 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { join, basename, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execSync } from 'node:child_process';
+import {
+  checkAllTransitions,
+  reportTransitionsAndExit,
+} from './check-rfc-lifecycle-transitions.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
@@ -339,6 +344,75 @@ export function validateRfc(frontmatter, { docsDir, today = new Date() }) {
 }
 
 /**
+ * Collect RFC lifecycle transitions for changed files by diffing git.
+ *
+ * Returns an array of `{ rfcId, fromContent, toContent, prBody? }` for each
+ * RFC file that changed between `baseRef` and HEAD. The result is suitable
+ * for passing directly to `checkAllTransitions` from the lifecycle-transitions
+ * module.
+ *
+ * Returns `[]` when:
+ *   - `baseRef` is falsy / not provided
+ *   - git is unavailable or the diff command fails
+ *   - no RFC files were changed in the range
+ *
+ * Pure-ish: the only side-effect is spawning git commands. Exported so tests
+ * can call it independently.
+ *
+ * @param {{ rfcsDir: string, repoRoot: string, baseRef: string, prBody?: string }} opts
+ * @returns {Array<{ rfcId: string, fromContent: string|null, toContent: string|null, prBody?: string }>}
+ */
+export function collectRfcTransitionsFromGit({ rfcsDir, repoRoot, baseRef, prBody = '' }) {
+  if (!baseRef) return [];
+
+  let changedRfcs;
+  try {
+    // List RFC files changed between baseRef and HEAD, additions + modifications only.
+    const rfcRelDir = relative(repoRoot, rfcsDir).replace(/\\/g, '/');
+    const diffOut = execSync(
+      `git diff --name-only --diff-filter=AM "${baseRef}" HEAD -- "${rfcRelDir}"`,
+      { cwd: repoRoot, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] },
+    ).trim();
+
+    if (!diffOut) return [];
+
+    changedRfcs = diffOut
+      .split('\n')
+      .map((f) => f.trim())
+      .filter((f) => f && f.endsWith('.md') && !f.includes(TEMPLATE_FILENAME));
+  } catch {
+    // git unavailable or diff failed — gracefully degrade.
+    return [];
+  }
+
+  return changedRfcs.map((relPath) => {
+    const rfcId = basename(relPath).replace(/^(RFC-\d{4}).*/, '$1');
+
+    // "Before" content from baseRef — null when the file is newly added.
+    let fromContent = null;
+    try {
+      fromContent = execSync(`git show "${baseRef}:${relPath}"`, {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch {
+      // File did not exist at baseRef (new file); fromContent stays null.
+    }
+
+    // "After" content from the working tree.
+    let toContent = null;
+    try {
+      toContent = readFileSync(join(repoRoot, relPath), 'utf-8');
+    } catch {
+      // File was deleted; toContent stays null.
+    }
+
+    return { rfcId, fromContent, toContent, prBody };
+  });
+}
+
+/**
  * Walk the RFC tree, validate each, return an aggregated report.
  * Caller decides whether to print + exit. Pure-ish — only reads fs.
  */
@@ -414,13 +488,17 @@ export function reportAndExit({ files, failures, warnings, enforcedCount, skippe
 }
 
 function parseArgs(argv) {
-  const args = { rfcsDir: DEFAULT_RFCS_DIR, docsDir: DEFAULT_DOCS_DIR };
+  const args = { rfcsDir: DEFAULT_RFCS_DIR, docsDir: DEFAULT_DOCS_DIR, baseRef: null, prBody: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--rfcs-dir') args.rfcsDir = resolve(argv[++i]);
     else if (a === '--docs-dir') args.docsDir = resolve(argv[++i]);
+    else if (a === '--base-ref') args.baseRef = argv[++i];
+    else if (a === '--pr-body') args.prBody = argv[++i];
     else if (a === '--help' || a === '-h') {
-      console.log('Usage: node scripts/check-rfc-docs.mjs [--rfcs-dir <path>] [--docs-dir <path>]');
+      console.log(
+        'Usage: node scripts/check-rfc-docs.mjs [--rfcs-dir <path>] [--docs-dir <path>] [--base-ref <git-ref>] [--pr-body <text>]',
+      );
       process.exit(0);
     } else {
       console.error(`Unknown argument: ${a}`);
@@ -432,8 +510,26 @@ function parseArgs(argv) {
 
 function main() {
   const args = parseArgs(process.argv.slice(2));
+
+  // Phase 1: docs-surface check (requiresDocs vs actual doc files).
   const report = checkAllRfcs(args);
-  process.exit(reportAndExit(report));
+  const docsExitCode = reportAndExit(report);
+
+  // Phase 2: lifecycle-transition check (wired in per AISDLC-297).
+  // Only runs when --base-ref is provided; gracefully skipped otherwise.
+  if (args.baseRef) {
+    const transitions = collectRfcTransitionsFromGit({
+      rfcsDir: args.rfcsDir,
+      repoRoot: REPO_ROOT,
+      baseRef: args.baseRef,
+      prBody: args.prBody,
+    });
+    const lifecycleReport = checkAllTransitions(transitions);
+    const lifecycleExitCode = reportTransitionsAndExit(lifecycleReport);
+    process.exit(Math.max(docsExitCode, lifecycleExitCode));
+  } else {
+    process.exit(docsExitCode);
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

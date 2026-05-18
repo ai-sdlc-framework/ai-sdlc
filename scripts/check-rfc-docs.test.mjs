@@ -23,6 +23,7 @@ import {
   reportAndExit,
   listRfcFiles,
   findReferences,
+  collectRfcTransitionsFromGit,
   SURFACE_TO_SUBDIR,
   ENFORCED_STATUSES,
   KNOWN_STATUSES,
@@ -534,6 +535,50 @@ describe('checkAllRfcs (integration)', () => {
   });
 });
 
+// --------------------------------------- collectRfcTransitionsFromGit
+
+describe('collectRfcTransitionsFromGit', () => {
+  it('returns [] when baseRef is falsy/not provided', () => {
+    assert.deepEqual(
+      collectRfcTransitionsFromGit({ rfcsDir: '/any', repoRoot: '/any', baseRef: '' }),
+      [],
+    );
+    assert.deepEqual(
+      collectRfcTransitionsFromGit({ rfcsDir: '/any', repoRoot: '/any', baseRef: null }),
+      [],
+    );
+    assert.deepEqual(
+      collectRfcTransitionsFromGit({ rfcsDir: '/any', repoRoot: '/any', baseRef: undefined }),
+      [],
+    );
+  });
+
+  it('returns [] gracefully when git is unavailable (bad repoRoot)', () => {
+    // /tmp is not a git repo — execSync will throw; function should not propagate the error.
+    const result = collectRfcTransitionsFromGit({
+      rfcsDir: '/tmp/no-such-rfcs',
+      repoRoot: '/tmp',
+      baseRef: 'HEAD~1',
+    });
+    assert.deepEqual(result, []);
+  });
+
+  it('returns [] when baseRef points to no RFC changes in actual repo', () => {
+    // Use the real repo but diff a range known to have no RFC changes: HEAD..HEAD (empty diff).
+    const result = collectRfcTransitionsFromGit({
+      rfcsDir: join(__dirname, '..', 'spec', 'rfcs'),
+      repoRoot: join(__dirname, '..'),
+      baseRef: 'HEAD',
+    });
+    // HEAD..HEAD → no changed files → empty array.
+    assert.deepEqual(result, []);
+  });
+
+  it('is exported (API contract)', () => {
+    assert.equal(typeof collectRfcTransitionsFromGit, 'function');
+  });
+});
+
 // ------------------------------------------------------- reportAndExit + CLI
 
 describe('reportAndExit', () => {
@@ -604,6 +649,31 @@ describe('CLI', () => {
     const r = spawnSync('node', [SCRIPT, '--help'], { encoding: 'utf-8' });
     assert.equal(r.status, 0);
     assert.match(r.stdout, /Usage:/);
+  });
+
+  it('--base-ref HEAD produces no lifecycle violations (HEAD..HEAD = empty diff)', () => {
+    // When diffing HEAD against itself there are no changed RFC files, so the
+    // lifecycle check short-circuits cleanly. This verifies the wiring works
+    // end-to-end without needing a fabricated diff.
+    const r = spawnSync('node', [SCRIPT, '--base-ref', 'HEAD'], { encoding: 'utf-8' });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 with --base-ref HEAD; stdout=${r.stdout} stderr=${r.stderr}`,
+    );
+    // Both phases should report OK.
+    assert.match(r.stdout, /\[rfc-check\] OK:/);
+    assert.match(r.stdout, /\[rfc-lifecycle\] OK:/);
+  });
+
+  it('--base-ref with --pr-body override propagates the PR body to lifecycle check', () => {
+    // No RFC files changed in HEAD..HEAD, so override marker has nothing to override —
+    // the test verifies the flag is accepted without error.
+    const marker = '<!-- ai-sdlc:lifecycle-jump-approved-by:test reason:unit-test -->';
+    const r = spawnSync('node', [SCRIPT, '--base-ref', 'HEAD', '--pr-body', marker], {
+      encoding: 'utf-8',
+    });
+    assert.equal(r.status, 0, `stdout=${r.stdout} stderr=${r.stderr}`);
   });
 });
 
