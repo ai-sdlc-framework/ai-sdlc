@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.10.0...pipeline-cli-v0.11.0) (2026-05-18)
+
+
+### Features
+
+* allow orchestrator Codex spawner selection (AISDLC-326) ([#497](https://github.com/ai-sdlc-framework/ai-sdlc/issues/497)) ([b38f429](https://github.com/ai-sdlc-framework/ai-sdlc/commit/b38f4292c971f0fd013a1f994e8676341aeca2f2))
+* **orchestrator:** add --spawner claude (real shell-out to claude -p) (AISDLC-349) ([#510](https://github.com/ai-sdlc-framework/ai-sdlc/issues/510)) ([36eeac2](https://github.com/ai-sdlc-framework/ai-sdlc/commit/36eeac2cb9d1a4e9ba698761f46bc8a45aaf2194))
+* **orchestrator:** add resume-from-draft + rework-pr recovery paths (AISDLC-273) ([#489](https://github.com/ai-sdlc-framework/ai-sdlc/issues/489)) ([39acbcb](https://github.com/ai-sdlc-framework/ai-sdlc/commit/39acbcb4fd44650cbbbeace5bbaf2e6772998bac))
+* **orchestrator:** RFC-0016 Phase 4 — Stage B LLM tie-breaker + Q5 ensemble (AISDLC-282) ([#514](https://github.com/ai-sdlc-framework/ai-sdlc/issues/514)) ([53efd12](https://github.com/ai-sdlc-framework/ai-sdlc/commit/53efd12c2707f9d47083f7d22a4623f376e39abf))
+* **orchestrator:** rfc-0016 phase 5 — per-class bias + 3-state token + pr-comment (AISDLC-283) ([#522](https://github.com/ai-sdlc-framework/ai-sdlc/issues/522)) ([c76c443](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c76c44303e248b671fef2b344f61aa9e9d71b9d8))
+* **pipeline-cli:** RFC-0035 Phase 1 — Decision resource schema + cli-decisions {list, show, add} (AISDLC-285) ([#504](https://github.com/ai-sdlc-framework/ai-sdlc/issues/504)) ([019cdfe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/019cdfe265a3301580c003c06a792d6e1ef89c03))
+* RFC-0011 DoR upstream-OQ gate (AISDLC-296) ([#507](https://github.com/ai-sdlc-framework/ai-sdlc/issues/507)) ([8332994](https://github.com/ai-sdlc-framework/ai-sdlc/commit/83329947a4fa0987968a06d7ca99b72945c5a725))
+* RFC-0016 Phase 1 — Stage A signals + class-default fallback (AISDLC-279) ([#495](https://github.com/ai-sdlc-framework/ai-sdlc/issues/495)) ([5c8dd02](https://github.com/ai-sdlc-framework/ai-sdlc/commit/5c8dd02163f81e00ba439eb00ef4acaf6d997661))
+* RFC-0016 Phase 2 — estimate log writer + class cache (AISDLC-280) ([#498](https://github.com/ai-sdlc-framework/ai-sdlc/issues/498)) ([023e845](https://github.com/ai-sdlc-framework/ai-sdlc/commit/023e8454479ad452e19ba4273f8fab958e8f7f1f))
+* RFC-0016 Phase 3 — measurement + monthly-rotated calibration writer (AISDLC-281) ([#508](https://github.com/ai-sdlc-framework/ai-sdlc/issues/508)) ([bedec2e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bedec2e3c0b40cf097ad9f05fc27b8d444016619))
+* RFC-0035 phase 2 — stage-a scorer and dep-graph blast-radius (AISDLC-286) ([#512](https://github.com/ai-sdlc-framework/ai-sdlc/issues/512)) ([d926466](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d926466cb4f6f2b41055f45cf21e295b080d76b0))
+* rfc-0035 phase 3 — stage B rubric scorer + actor routing (AISDLC-287) ([#521](https://github.com/ai-sdlc-framework/ai-sdlc/issues/521)) ([d2a9eb4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/d2a9eb4f7dda662b85bc708839a28b3560204777))
+* wire rfc-0011 dor clarification rounds into decision catalog (AISDLC-288) ([#511](https://github.com/ai-sdlc-framework/ai-sdlc/issues/511)) ([bec9699](https://github.com/ai-sdlc-framework/ai-sdlc/commit/bec96993f13e450013ffe48518a21fbcf6a1242e))
+
+
+### Bug Fixes
+
+* harden Codex spawn bridge output handling ([#500](https://github.com/ai-sdlc-framework/ai-sdlc/issues/500)) ([42ed716](https://github.com/ai-sdlc-framework/ai-sdlc/commit/42ed7160152b99884225873f65186d9559a8d4ea))
+* **orchestrator:** parseClaudeOutput strips markdown fences + extracts embedded JSON (AISDLC-351) ([#515](https://github.com/ai-sdlc-framework/ai-sdlc/issues/515)) ([a03dd41](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a03dd416112c12dbcbc6cd2ccea548133fe0a0b2))
+* **orchestrator:** resume-from-draft stale verdict + verdict shape + degenerate retry (AISDLC-355) ([#527](https://github.com/ai-sdlc-framework/ai-sdlc/issues/527)) ([117f4b9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/117f4b9f33b23b3df4c4ffdea6aa32c43a6416fb))
+* **orchestrator:** scrub GIT_DIR/GIT_WORK_TREE/GIT_INDEX_FILE in checkpoint.ts production git calls (AISDLC-260) ([#461](https://github.com/ai-sdlc-framework/ai-sdlc/issues/461)) ([af8c8ca](https://github.com/ai-sdlc-framework/ai-sdlc/commit/af8c8ca59814cf23d5cb6b53d49038955359293e))
+* **reference:** handle loader-private YAML kinds without false-positive warnings (AISDLC-265) ([#474](https://github.com/ai-sdlc-framework/ai-sdlc/issues/474)) ([e51029c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e51029c0da04ac4ef6025281579361470e2039ff))
+* **tui:** align CRITICAL PATH + OPERATOR THROUGHPUT panel borders (AISDLC-259) ([#459](https://github.com/ai-sdlc-framework/ai-sdlc/issues/459)) ([4326a80](https://github.com/ai-sdlc-framework/ai-sdlc/commit/4326a800967158f3807ea778d8259e7f607246b7))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.11.0
+
 ## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/pipeline-cli-v0.1.0...pipeline-cli-v0.10.0) (2026-05-11)
 
 

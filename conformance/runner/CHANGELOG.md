@@ -1,5 +1,20 @@
 # @ai-sdlc/conformance
 
+## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.10.0...conformance/runner-v0.11.0) (2026-05-18)
+
+
+### Bug Fixes
+
+* **reference:** handle loader-private YAML kinds without false-positive warnings (AISDLC-265) ([#474](https://github.com/ai-sdlc-framework/ai-sdlc/issues/474)) ([e51029c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e51029c0da04ac4ef6025281579361470e2039ff))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.11.0
+    * @ai-sdlc/orchestrator bumped to 0.11.0
+
 ## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/conformance/runner-v0.9.0...conformance/runner-v0.10.0) (2026-05-11)
 
 

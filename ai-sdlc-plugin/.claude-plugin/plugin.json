@@ -1,6 +1,6 @@
 {
   "name": "ai-sdlc",
-  "version": "0.9.2",
+  "version": "0.10.0",
   "description": "AI-SDLC governance framework for Claude Code — action enforcement, telemetry, quality gates, and review agents",
   "author": {
     "name": "AI-SDLC Framework",

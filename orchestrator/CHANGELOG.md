@@ -28,6 +28,33 @@
 
 The `AI_SDLC_PARALLELISM` flag defaults to `on` as of AISDLC-116 (this Unreleased cycle). The original promotion criteria — chaos-test plan in `docs/operations/operator-runbook.md` plus a 1-week dogfood soak window — were dropped by maintainer directive 2026-05-01 in favor of substantive readiness (no parallelism-related incidents in the trailing observation window). Operators who want to pin the pre-promotion mode can still set `AI_SDLC_PARALLELISM=experimental`; operators who want to disable parallelism entirely can set `AI_SDLC_PARALLELISM=off` (or `disabled`/`false`/`0`).
 
+## [0.11.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.10.0...orchestrator-v0.11.0) (2026-05-18)
+
+
+### Features
+
+* **adapter:** extract codeArea from task references (AISDLC-268) ([#475](https://github.com/ai-sdlc-framework/ai-sdlc/issues/475)) ([7e04f3e](https://github.com/ai-sdlc-framework/ai-sdlc/commit/7e04f3e29570985a65a8e99ffcb676211332fec1))
+* add signal source adapter substrate ([#506](https://github.com/ai-sdlc-framework/ai-sdlc/issues/506)) ([f4ee355](https://github.com/ai-sdlc-framework/ai-sdlc/commit/f4ee355bbfc8a3a9d7d69c807861d739e6abad0a))
+* **orchestrator:** RFC-0022 Phase 1 — CompliancePosture schema + loader (AISDLC-322) ([#505](https://github.com/ai-sdlc-framework/ai-sdlc/issues/505)) ([23f5816](https://github.com/ai-sdlc-framework/ai-sdlc/commit/23f58169ee5b461a289acd33750cde76e31af026))
+* **orchestrator:** RFC-0022 Phase 2 — Regime → DerivedGates composer (AISDLC-323) ([#516](https://github.com/ai-sdlc-framework/ai-sdlc/issues/516)) ([a0caca4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a0caca46c20ac3e49a6c1fbe51a99c6de5995235))
+* **orchestrator:** scaffold .github/workflows on ai-sdlc init (AISDLC-261) ([#480](https://github.com/ai-sdlc-framework/ai-sdlc/issues/480)) ([8dca58f](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8dca58f74ac6a3e08a482e7391ab6586c62a1641))
+
+
+### Bug Fixes
+
+* **orchestrator:** add generated-schemas.ts to CONTENTHASHV4_IGNORE_FILES (AISDLC-342) ([#502](https://github.com/ai-sdlc-framework/ai-sdlc/issues/502)) ([a2a32d4](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a2a32d4392cb1002ed5e4363ca13bcca2e68bf27))
+* **orchestrator:** init auto-yields to defaults in non-TTY contexts (AISDLC-263) ([#472](https://github.com/ai-sdlc-framework/ai-sdlc/issues/472)) ([cf8996d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cf8996d53425ca8f101355d1c01b38efa34dfb9e))
+* **orchestrator:** init resolves to git root by default (AISDLC-262) ([#478](https://github.com/ai-sdlc-framework/ai-sdlc/issues/478)) ([a961602](https://github.com/ai-sdlc-framework/ai-sdlc/commit/a96160276545e02b2712d0f02ff19e2e32c01a93))
+* **orchestrator:** wire HC_design Source 3 compliance signal from DSB (AISDLC-266) ([#477](https://github.com/ai-sdlc-framework/ai-sdlc/issues/477)) ([8854a00](https://github.com/ai-sdlc-framework/ai-sdlc/commit/8854a0035129a51e471483f81ca74ef9561af4a5))
+* **reference:** handle loader-private YAML kinds without false-positive warnings (AISDLC-265) ([#474](https://github.com/ai-sdlc-framework/ai-sdlc/issues/474)) ([e51029c](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e51029c0da04ac4ef6025281579361470e2039ff))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @ai-sdlc/reference bumped to 0.11.0
+
 ## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.9.0...orchestrator-v0.10.0) (2026-05-11)
 
 
