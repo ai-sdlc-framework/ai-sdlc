@@ -175,13 +175,16 @@ async function main() {
       `${orchestratorBarrel} not found. Run \`pnpm --filter @ai-sdlc/orchestrator build\` first.`,
     );
   }
-  const { buildPredicate, signAttestation, collectChangedFileDeltaEntries } = await import(
-    orchestratorBarrel
-  );
+  const {
+    buildPredicate,
+    signAttestation,
+    collectChangedFileDeltaEntries,
+    collectChangedFileEntriesForV5,
+  } = await import(orchestratorBarrel);
 
   // Gather inputs.
   const headSha = git(['rev-parse', 'HEAD'], repoRoot).trim();
-  // AISDLC-103 (Verifier Phase 3): only collect per-file (base, head) blob
+  // AISDLC-103 (Verifier Phase 3): collect per-file (base, head) blob
   // deltas for `contentHashV3`. The legacy `diffHash` (sha256 of literal
   // git diff) and `contentHash` (head blob SHA per file) are no longer
   // emitted — see CLAUDE.md "What CI rejects" / "What CI accepts" for the
@@ -191,6 +194,22 @@ async function main() {
     changedFileDeltas = collectChangedFileDeltaEntries('origin/main', 'HEAD', repoRoot);
   } catch (err) {
     fail(err.message ?? String(err));
+  }
+  // AISDLC-362 (contentHashV5): collect the frozen-merge-base file set.
+  // This is the load-bearing fix: the merge-base is computed ONCE here and
+  // frozen into the envelope so the verifier can reproduce the EXACT diff
+  // base the signer used — regardless of how many sibling PRs merge on
+  // `origin/main` between sign time and verify time.
+  let v5Result;
+  try {
+    v5Result = collectChangedFileEntriesForV5(repoRoot, 'origin/main', 'HEAD');
+  } catch (err) {
+    // Non-fatal: if v5 collection fails (unusual environment, no fetch),
+    // degrade gracefully to a v3+v4 envelope. The verifier will fall back.
+    process.stderr.write(
+      `[sign-attestation] WARNING: v5 collection failed (${err.message ?? String(err)}); falling back to v3+v4 envelope\n`,
+    );
+    v5Result = null;
   }
   const policy = readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8');
   const verdictsRaw = JSON.parse(readFileSync(verdictsPath, 'utf-8'));
@@ -295,6 +314,9 @@ async function main() {
     iterationCount,
     harnessNote,
     changedFileDeltas,
+    // AISDLC-362: pass v5 data when collection succeeded. When null, the
+    // predicate falls back to a v3+v4 envelope (schemaVersion: 'v3').
+    ...(v5Result ? { v5Entries: v5Result.entries, v5MergeBase: v5Result.signedMergeBase } : {}),
   });
 
   const privateKeyPem = readFileSync(keyPath, 'utf-8');

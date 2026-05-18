@@ -53,9 +53,14 @@ import { cleanGitEnv } from './git-env.js';
  *    a v3 envelope smuggling either field is rejected by
  *    `validatePredicateShape`).
  *
+ * AISDLC-362 (contentHashV5): adds `'v5'` to the allowlist. v5 envelopes
+ * carry `contentHashV5` AND `signedMergeBase` in addition to v3+v4 hashes
+ * (backward-compat dual-write). The schemaVersion field is bumped to `'v5'`
+ * on new envelopes so verifiers can detect the v5 fast-path immediately.
+ *
  * Exported so the `verify-attestation` workflow can `import`/inline it.
  */
-export const ACCEPTED_SCHEMA_VERSIONS = ['v3'] as const;
+export const ACCEPTED_SCHEMA_VERSIONS = ['v3', 'v5'] as const;
 export type SchemaVersion = (typeof ACCEPTED_SCHEMA_VERSIONS)[number];
 
 /**
@@ -160,6 +165,45 @@ export interface AttestationPredicate {
    * ancestor walk in that case.
    */
   contentHashV4?: string;
+  /**
+   * Delta-hash with embedded frozen merge-base (AISDLC-362 — contentHashV5).
+   *
+   * SHA-256 of canonical JSON: `JSON.stringify({schemaVersion:'v5',
+   * signedMergeBase:'<40-char-sha>',files:[{path,blobSha}...]})` where:
+   *   - `signedMergeBase` is `git merge-base origin/main HEAD` captured at
+   *     sign time and embedded in BOTH the envelope predicate AND the v5 hash
+   *     input so verifier can REPRODUCE the EXACT diff the signer used.
+   *   - `files` is `git diff <signedMergeBase>..HEAD --name-only` with blob
+   *     SHAs from HEAD — same approach as v4 `{path, headBlobSha}` but
+   *     diffed against the FROZEN merge-base, not the moving `origin/main`.
+   *
+   * Why this is the ultimate fix:
+   *   - v4 (`{path, headBlobSha}` from `origin/main..HEAD`) still invalidates
+   *     when a sibling PR merges and its files overlap with our PR — the
+   *     diff base moves from `merge-base-A` to `merge-base-B` and new files
+   *     appear in the diff enumeration even though OUR blobs didn't change.
+   *   - v5 FREEZES the diff base at `signedMergeBase`. On queue rebase:
+   *     verifier uses `git diff <signedMergeBase>..<probe-HEAD>` which
+   *     enumerates the SAME file set as the signer. Non-overlapping sibling
+   *     merges don't add new files to the set → v5 matches.
+   *   - Overlapping sibling merges (a sibling changed the SAME file our PR
+   *     touches) → the head blob SHA of that file differs → v5 hash flips →
+   *     verifier correctly rejects (operator must re-review).
+   *
+   * Optional (populated for v5 envelopes, absent for v3-only legacy envelopes).
+   * When present, the verifier prefers v5 over v4 over v3 (priority order).
+   */
+  contentHashV5?: string;
+  /**
+   * The `git merge-base origin/main HEAD` SHA captured at sign time.
+   * Embedded in the envelope predicate so the verifier can reproduce the
+   * EXACT diff the signer used (`git diff <signedMergeBase>..<probe-HEAD>`).
+   *
+   * Only present when `contentHashV5` is populated (= v5 envelopes). Absent
+   * on legacy v3/v4 envelopes; the verifier falls back to v4 then v3 in
+   * those cases.
+   */
+  signedMergeBase?: string;
   /** sha256 of `.ai-sdlc/review-policy.md` at attestation time. */
   policyHash: string;
   /** Reviewer entries — typically 3 (code/test/security). */
@@ -372,6 +416,25 @@ export function validatePredicateShape(parsed: unknown): string | null {
     const ch4 = p['contentHashV4'];
     if (typeof ch4 !== 'string' || !SHA256_HEX.test(ch4)) {
       return 'schema validation failed: contentHashV4 does not match pattern';
+    }
+  }
+
+  // contentHashV5 (AISDLC-362) — OPTIONAL. When present, MUST be a 64-char
+  // hex sha256. v5 envelopes also carry `signedMergeBase` (40-char SHA-1).
+  if (p['contentHashV5'] !== undefined) {
+    const ch5 = p['contentHashV5'];
+    if (typeof ch5 !== 'string' || !SHA256_HEX.test(ch5)) {
+      return 'schema validation failed: contentHashV5 does not match pattern';
+    }
+  }
+
+  // signedMergeBase (AISDLC-362) — OPTIONAL, accompanies contentHashV5.
+  // When present, MUST be a 40-char SHA-1 hex string (the frozen merge-base
+  // that the v5 diff was computed against at sign time).
+  if (p['signedMergeBase'] !== undefined) {
+    const smb = p['signedMergeBase'];
+    if (typeof smb !== 'string' || !SHA1_HEX.test(smb)) {
+      return 'schema validation failed: signedMergeBase does not match SHA-1 pattern';
     }
   }
 
@@ -614,15 +677,15 @@ export function isAttestationEnvelopePath(path: string): boolean {
 }
 
 /**
- * The "shared churn" exclude list for `contentHashV4` (AISDLC-258).
+ * The "shared churn" exclude list for content-hash computations (AISDLC-258,
+ * AISDLC-362). Applied to v3, v4, and v5 file collectors on BOTH the signer
+ * and verifier sides.
  *
- * Files in this list are EXCLUDED from the v4 file collector in BOTH the
- * signer (`collectChangedFileDeltaEntries`) and the verifier
- * (`computeHeadContentHashV4` in `scripts/verify-attestation.mjs`). When
- * a file appears in this list, changes to it after signing (e.g. from a
- * merge-queue rebase that regenerated `pnpm-lock.yaml`) do NOT cause
- * `contentHashV4` to mismatch, so the operator is never asked to re-sign
- * just because a shared tooling file was regenerated automatically.
+ * Files in this list are EXCLUDED from all file collectors. When a file
+ * appears in this list, changes to it after signing (e.g. from a merge-queue
+ * rebase that regenerated `pnpm-lock.yaml`) do NOT cause content-hash
+ * mismatches, so the operator is never asked to re-sign just because a shared
+ * tooling file was regenerated automatically.
  *
  * **Security trade-off (operator-approved, 2026-05-10):** An attacker
  * COULD slip malicious changes through these files undetected (the
@@ -646,7 +709,7 @@ export function isAttestationEnvelopePath(path: string): boolean {
  * Exported so `scripts/verify-attestation.mjs` can import it from the
  * orchestrator barrel and apply the same exclusions on the verifier side.
  */
-export const CONTENTHASHV4_IGNORE_FILES: readonly string[] = Object.freeze([
+export const CONTENTHASH_SHARED_CHURN_FILES: readonly string[] = Object.freeze([
   'pnpm-lock.yaml',
   'CHANGELOG.md',
   'pipeline-cli/CHANGELOG.md',
@@ -657,18 +720,24 @@ export const CONTENTHASHV4_IGNORE_FILES: readonly string[] = Object.freeze([
   // the generated file to bypass attestation) is mitigated by keeping the
   // SOURCE-of-truth in the hash: every byte in this file is derived from
   // `spec/schemas/*.schema.json` via `pnpm build`, and those schema JSONs
-  // remain in v4. An attacker who hand-edits generated-schemas.ts without
+  // remain in v4/v5. An attacker who hand-edits generated-schemas.ts without
   // also editing a source schema produces output that the next `pnpm build`
-  // regenerates away — the change is non-load-bearing. The proper long-term
-  // fix is contentHashV5 (delta-hash, AISDLC-343); this entry is the interim
-  // mitigation while v5 is designed + shipped.
+  // regenerates away — the change is non-load-bearing.
   'reference/src/core/generated-schemas.ts',
 ]);
 
 /**
- * Predicate to determine whether a file path should be excluded from the
- * `contentHashV4` computation because it is a "shared churn" file (see
- * `CONTENTHASHV4_IGNORE_FILES`). Defensive about backslash normalization.
+ * Backward-compatible alias for `CONTENTHASH_SHARED_CHURN_FILES` (renamed in
+ * AISDLC-362). Callers that imported the v4-specific name continue to work.
+ * @deprecated Use `CONTENTHASH_SHARED_CHURN_FILES` instead.
+ */
+export const CONTENTHASHV4_IGNORE_FILES: readonly string[] = CONTENTHASH_SHARED_CHURN_FILES;
+
+/**
+ * Predicate to determine whether a file path should be excluded from
+ * content-hash computations (v3/v4/v5) because it is a "shared churn" file
+ * (see `CONTENTHASH_SHARED_CHURN_FILES`). Defensive about backslash
+ * normalization.
  *
  * Note: this predicate is intentionally separate from
  * `isAttestationEnvelopePath` because the two exclusions serve different
@@ -678,7 +747,7 @@ export const CONTENTHASHV4_IGNORE_FILES: readonly string[] = Object.freeze([
 export function isIgnoredForContentHash(path: string): boolean {
   if (typeof path !== 'string') return false;
   const normalized = path.replace(/\\/g, '/');
-  return (CONTENTHASHV4_IGNORE_FILES as string[]).includes(normalized);
+  return (CONTENTHASH_SHARED_CHURN_FILES as string[]).includes(normalized);
 }
 
 /**
@@ -708,6 +777,222 @@ export function isIgnoredForContentHash(path: string): boolean {
 export interface ChangedFileHeadEntry {
   path: string;
   headBlobSha: string;
+}
+
+/**
+ * One entry in the v5 file set used by `computeContentHashV5` (AISDLC-362).
+ * Structurally identical to `ChangedFileHeadEntry` — `path` plus the HEAD
+ * blob SHA. The difference from v4 is that the FILE SET is enumerated via
+ * `git diff <signedMergeBase>..HEAD` (frozen diff base) instead of
+ * `git diff origin/main..HEAD` (moving diff base). Same fields, different
+ * enumeration semantics — separate type for clarity.
+ */
+export interface ChangedFileV5Entry {
+  path: string;
+  blobSha: string;
+}
+
+/**
+ * Return shape of `collectChangedFileEntriesForV5`. Bundles the frozen
+ * `signedMergeBase` SHA with the file entries so the signer can embed it in
+ * the predicate and the hash without a separate git call.
+ */
+export interface V5CollectResult {
+  /** Files changed between `signedMergeBase` and `headRef`. */
+  entries: ChangedFileV5Entry[];
+  /**
+   * The `git merge-base <baseRef> <headRef>` SHA captured at collection time.
+   * This is the FROZEN diff base embedded in the envelope predicate and the
+   * v5 hash. The verifier uses it to reproduce the exact file set the signer
+   * used: `git diff <signedMergeBase>..<probe-HEAD> --name-only`.
+   */
+  signedMergeBase: string;
+}
+
+/**
+ * Compute the rebase-stable `contentHashV5` (AISDLC-362) over a file set
+ * and a frozen merge-base SHA.
+ *
+ * Canonical form: `SHA-256(JSON.stringify({schemaVersion:'v5',
+ * signedMergeBase:'<40-char>', files:[{path,blobSha}...]}))` where `files`
+ * is sorted ascending by path.
+ *
+ * Why v5 beats v4 for rebase-stability:
+ *   - v4 enumerates files via `git diff origin/main..HEAD`. When a sibling
+ *     PR merges between sign-time and verify-time, `origin/main` moves
+ *     forward. Files the sibling touched now appear in the v4 diff that
+ *     weren't there at sign-time → v4 hash diverges even though OUR blobs
+ *     are unchanged.
+ *   - v5 enumerates files via `git diff <signedMergeBase>..HEAD`. The
+ *     `signedMergeBase` is computed ONCE at sign time and frozen in the
+ *     envelope. At verify time, the verifier recomputes
+ *     `git diff <signedMergeBase>..<probe-HEAD>` using the SAME frozen
+ *     base → same file set → same hash, regardless of how many sibling
+ *     PRs merged on `main` in the interim.
+ *   - Overlapping sibling merges (sibling changed a file OUR PR also touches)
+ *     → the head blob SHA of that file differs from what we signed → v5
+ *     hash flips → verifier correctly rejects (operator must re-review).
+ *
+ * Threat model preserved: any genuine post-sign content tampering flips the
+ * head blob SHA → v5 hash flips → verifier rejects.
+ *
+ * Pure function. Idempotent against double-enumeration via dedup-by-path.
+ */
+export function computeContentHashV5(
+  entries: ChangedFileV5Entry[],
+  signedMergeBase: string,
+): string {
+  if (typeof signedMergeBase !== 'string' || !/^[0-9a-f]{40}$/i.test(signedMergeBase)) {
+    throw new Error(
+      `computeContentHashV5: signedMergeBase must be a 40-char hex SHA-1, got ${JSON.stringify(signedMergeBase)}`,
+    );
+  }
+  // Dedup by path (last entry wins) — mirrors computeContentHashV4 and
+  // computeContentHashV3 for idempotency.
+  const byPath = new Map<string, string>();
+  for (const e of entries) {
+    if (typeof e?.path !== 'string' || e.path.length === 0) {
+      throw new Error(`computeContentHashV5: entry path must be a non-empty string`);
+    }
+    if (typeof e.blobSha !== 'string') {
+      throw new Error(`computeContentHashV5: entry blobSha must be a string for path ${e.path}`);
+    }
+    // Reject path entries containing JSON-control characters.
+    if (e.path.includes('\t') || e.path.includes('\n')) {
+      throw new Error(
+        `computeContentHashV5: entry path must not contain tab or newline characters (got ${JSON.stringify(e.path)})`,
+      );
+    }
+    const normalizedPath = e.path.replace(/\\/g, '/');
+    byPath.set(normalizedPath, e.blobSha.toLowerCase());
+  }
+  const sortedFiles = [...byPath.entries()]
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([path, blobSha]) => ({ path, blobSha }));
+  const canonical = JSON.stringify({
+    schemaVersion: 'v5',
+    signedMergeBase: signedMergeBase.toLowerCase(),
+    files: sortedFiles,
+  });
+  return sha256Hex(canonical);
+}
+
+/**
+ * Collect the file set for `computeContentHashV5` (AISDLC-362).
+ *
+ * This is the LOAD-BEARING CHANGE vs v4:
+ *   - v4: `git diff origin/main..HEAD` — the base moves as siblings merge.
+ *   - v5: `git merge-base <baseRef> <headRef>` → frozen SHA, then
+ *         `git diff <signedMergeBase>..HEAD` — the base is FROZEN.
+ *
+ * The frozen merge-base is returned alongside the entries so the signer can
+ * embed it in both the v5 hash and the predicate's `signedMergeBase` field.
+ *
+ * File enumeration applies the same exclusions as v3/v4:
+ *   - Attestation envelope files (`ATTESTATION_ENVELOPE_PATH_PATTERN`)
+ *   - Shared churn files (`CONTENTHASH_SHARED_CHURN_FILES`)
+ *
+ * Blob SHAs are resolved from `headRef` (= HEAD at sign time).
+ *
+ * @param repoRoot  Absolute path to the git worktree root.
+ * @param baseRef   Typically `'origin/main'`. Used ONLY for computing the
+ *                  merge-base — the diff itself is against the frozen SHA.
+ * @param headRef   Typically `'HEAD'`.
+ * @param options   Optional injection points for tests (stub `runGit`).
+ */
+export function collectChangedFileEntriesForV5(
+  repoRoot: string,
+  baseRef: string = 'origin/main',
+  headRef: string = 'HEAD',
+  options: CollectChangedFileEntriesOptions = {},
+): V5CollectResult {
+  const runGit =
+    options.runGit ??
+    ((args: string[], cwd: string): string =>
+      execFileSync('git', args, {
+        cwd,
+        env: cleanGitEnv(),
+        encoding: 'utf-8',
+        maxBuffer: 64 * 1024 * 1024,
+      }));
+
+  // Step 1: compute and FREEZE the merge-base. This is the key invariant:
+  // sign once, freeze the base, verify against the frozen base — NOT against
+  // the moving `origin/main`.
+  let signedMergeBase: string;
+  try {
+    signedMergeBase = runGit(['merge-base', baseRef, headRef], repoRoot).trim();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`collectChangedFileEntriesForV5: git merge-base failed: ${msg}`);
+  }
+  if (!/^[0-9a-f]{40}$/i.test(signedMergeBase)) {
+    throw new Error(
+      `collectChangedFileEntriesForV5: git merge-base returned non-SHA output: ${JSON.stringify(signedMergeBase)}`,
+    );
+  }
+
+  // Step 2: enumerate files changed between the FROZEN merge-base and HEAD.
+  // Using two-dot range (`<signedMergeBase>..<headRef>`) — NOT three-dot —
+  // because the merge-base is already resolved. Three-dot would re-compute
+  // merge-base(mergeBase, headRef) = mergeBase itself, which is fine, but
+  // two-dot is more explicit and avoids any ambiguity.
+  let nameOnly: string;
+  try {
+    nameOnly = runGit(
+      [
+        '-c',
+        'core.quotepath=false',
+        'diff',
+        '--name-only',
+        '--no-renames',
+        `${signedMergeBase}..${headRef}`,
+      ],
+      repoRoot,
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new Error(`collectChangedFileEntriesForV5: git diff --name-only failed: ${msg}`);
+  }
+
+  const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+  const entries: ChangedFileV5Entry[] = [];
+
+  /**
+   * Resolve a file's blob SHA at `headRef` via `git ls-tree -r`. Returns the
+   * empty string when the path doesn't exist at the ref (= deleted file).
+   */
+  const resolveBlobSha = (path: string): string => {
+    try {
+      const lsOut = runGit(
+        ['-c', 'core.quotepath=false', 'ls-tree', '-r', headRef, '--', path],
+        repoRoot,
+      );
+      const line = lsOut.split('\n').find((l) => l.length > 0);
+      if (line) {
+        const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+        if (m) return m[1];
+      }
+    } catch {
+      // ls-tree failed → treat as deleted.
+    }
+    return '';
+  };
+
+  for (const path of paths) {
+    if (path.includes('\t') || path.includes('\n')) {
+      throw new Error(
+        `collectChangedFileEntriesForV5: path must not contain tab or newline characters (got ${JSON.stringify(path)})`,
+      );
+    }
+    // Exclude the attestation envelope itself (chore-commit pattern).
+    if (isAttestationEnvelopePath(path)) continue;
+    // Exclude shared-churn files (same set as v3/v4).
+    if (isIgnoredForContentHash(path)) continue;
+    entries.push({ path, blobSha: resolveBlobSha(path) });
+  }
+
+  return { entries, signedMergeBase: signedMergeBase.toLowerCase() };
 }
 
 /** Inputs for building an attestation predicate. */
@@ -753,6 +1038,19 @@ export interface BuildPredicateInputs {
    * still verifiable).
    */
   changedFileDeltas: ChangedFileDeltaEntry[];
+  /**
+   * v5 file entries from `collectChangedFileEntriesForV5` (AISDLC-362).
+   * Optional — when omitted, no `contentHashV5` or `signedMergeBase` fields
+   * are emitted in the predicate (= a legacy v3+v4 envelope). When provided
+   * alongside `v5MergeBase`, the predicate carries all three hashes (v3, v4,
+   * v5) for maximum backward + forward compatibility.
+   */
+  v5Entries?: ChangedFileV5Entry[];
+  /**
+   * The frozen merge-base SHA from `collectChangedFileEntriesForV5`.
+   * Required when `v5Entries` is provided. Must be a 40-char hex SHA-1.
+   */
+  v5MergeBase?: string;
 }
 
 /**
@@ -1236,6 +1534,10 @@ export function projectDeltaEntriesToHeadEntries(
  * MUST provide `changedFileDeltas` (use `[]` for no-op PRs); the legacy
  * `diff` + `changedFiles` inputs were dropped along with the legacy
  * `diffHash` + `contentHash` fields.
+ *
+ * AISDLC-362 (contentHashV5): when `v5Entries` + `v5MergeBase` are provided,
+ * also emits `contentHashV5` and `signedMergeBase` in the predicate and bumps
+ * `schemaVersion` to `'v5'`. The verifier prefers v5 when present.
  */
 export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredicate {
   if (!/^[0-9a-f]{40}$/i.test(inputs.commitSha)) {
@@ -1270,8 +1572,17 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
   // Producers therefore can't accidentally compute v3 over one file
   // set and v4 over another.
   const headEntries = projectDeltaEntriesToHeadEntries(inputs.changedFileDeltas);
+
+  // AISDLC-362: emit v5 when the caller provided v5 collection results.
+  const hasV5 =
+    Array.isArray(inputs.v5Entries) &&
+    typeof inputs.v5MergeBase === 'string' &&
+    /^[0-9a-f]{40}$/i.test(inputs.v5MergeBase);
+
   const predicate: AttestationPredicate = {
-    schemaVersion: 'v3',
+    // Bump schemaVersion to 'v5' when v5 data is present. Backward-compat:
+    // the verifier's ACCEPTED_SCHEMA_VERSIONS now includes both 'v3' and 'v5'.
+    schemaVersion: hasV5 ? 'v5' : 'v3',
     subject: { digest: { sha1: inputs.commitSha.toLowerCase() } },
     contentHashV3: computeContentHashV3(inputs.changedFileDeltas),
     contentHashV4: computeContentHashV4(headEntries),
@@ -1288,6 +1599,14 @@ export function buildPredicate(inputs: BuildPredicateInputs): AttestationPredica
     harnessNote: inputs.harnessNote,
     signedAt: inputs.signedAt ?? new Date().toISOString(),
   };
+  // AISDLC-362: embed the frozen merge-base and v5 hash when available.
+  if (hasV5) {
+    predicate.signedMergeBase = (inputs.v5MergeBase as string).toLowerCase();
+    predicate.contentHashV5 = computeContentHashV5(
+      inputs.v5Entries as ChangedFileV5Entry[],
+      inputs.v5MergeBase as string,
+    );
+  }
   // AISDLC-100.6: include `pipelineVersion` only when the caller provided
   // it. Omitted otherwise so envelopes signed in environments without
   // pipeline-cli installed still round-trip identically through
@@ -1404,6 +1723,16 @@ export interface VerifyOptions {
      * of whether `expected.contentHashV4` is supplied.
      */
     contentHashV4?: string;
+    /**
+     * AISDLC-362 frozen-merge-base delta hash. Optional — callers that
+     * want v5-prefer behavior pass it; callers without v5 leave it
+     * undefined (fallback to v4 then v3).
+     *
+     * When BOTH this AND the envelope's `contentHashV5` are present,
+     * the verifier prefers v5 (highest rebase-stability). When v5
+     * matches, v4 and v3 are NOT consulted.
+     */
+    contentHashV5?: string;
     policyHash: string;
     expectedAgentFileHashes: Record<string, string>;
   };
@@ -1515,28 +1844,32 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
       reason: `subject digest mismatch (envelope was signed for a different commit)`,
     };
   }
-  // AISDLC-193.1: v4-prefer, v3-fallback. The verifier prefers
-  // `contentHashV4` (base-independent — survives queue rebases) when
-  // BOTH the envelope and the expected state carry it. v3 is only
-  // consulted when the envelope is legacy v3-only OR when v4 is
-  // present but doesn't match (unusual — implies the head blobs
-  // genuinely changed, which we still reject below).
+  // AISDLC-362: v5-prefer, v4-fallback, v3-last-resort.
   //
-  // Why prefer v4 absolute when both are present:
-  //   - v3 binds to (base_blob, head_blob) per file. The merge queue's
-  //     rebase moves the merge-base forward → base_blob changes for
-  //     shared files → v3 mismatches even though reviewed content is
-  //     unchanged. Net: required check fails on every queued PR.
-  //   - v4 binds only to head_blob per file. Reviewers approved the
-  //     content at head_blob; whatever the rebase did to base, v4
-  //     stays valid.
+  // Priority order (highest rebase-stability first):
+  //   1. v5 (frozen merge-base delta hash) — prefers when BOTH envelope AND
+  //      expected carry contentHashV5. Survives non-overlapping sibling merges.
+  //   2. v4 (base-independent head-blob hash) — prefers when BOTH carry v4
+  //      but not v5. Survives queue rebases when files don't overlap.
+  //   3. v3 (base+head blob-pair delta hash) — legacy fallback only.
   //
-  // Threat model preserved: a genuine post-sign content tampering
-  // (someone amends the PR to add unreviewed code) flips head_blob →
-  // v4 flips → verifier rejects.
+  // When a higher-priority hash matches, lower-priority hashes are NOT
+  // consulted (the merge-base shift that would invalidate them is exactly
+  // what the higher-priority hash was designed to survive).
+  const envelopeHasV5 = typeof predicate.contentHashV5 === 'string';
+  const expectedHasV5 = typeof opts.expected.contentHashV5 === 'string';
   const envelopeHasV4 = typeof predicate.contentHashV4 === 'string';
   const expectedHasV4 = typeof opts.expected.contentHashV4 === 'string';
-  if (envelopeHasV4 && expectedHasV4) {
+
+  if (envelopeHasV5 && expectedHasV5) {
+    if (predicate.contentHashV5 !== opts.expected.contentHashV5) {
+      return {
+        valid: false,
+        reason: 'contentHashV5 mismatch (PR content changed since attestation)',
+      };
+    }
+    // v5 matched → skip v4 and v3 entirely.
+  } else if (envelopeHasV4 && expectedHasV4) {
     if (predicate.contentHashV4 !== opts.expected.contentHashV4) {
       return {
         valid: false,
@@ -1547,7 +1880,7 @@ export function verifyAttestation(opts: VerifyOptions): VerifyResult {
     // computed against a base ref that may have moved on by now (queue
     // rebase, sibling overlap); the v4 match is the source of truth.
   } else {
-    // Legacy v3-only envelope OR caller did not supply expected.contentHashV4
+    // Legacy v3-only envelope OR caller did not supply expected.contentHashV4/V5
     // → fall back to v3. Same as pre-AISDLC-193.1 behavior.
     if (predicate.contentHashV3 !== opts.expected.contentHashV3) {
       return {
