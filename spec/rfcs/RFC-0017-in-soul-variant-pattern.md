@@ -2,24 +2,31 @@
 id: RFC-0017
 title: In-Soul Variant Pattern
 status: Draft
-lifecycle: Draft
+lifecycle: Ready for Review
 author: morgan@sprypoint.com
 created: 2026-05-04
-updated: 2026-05-04
+updated: 2026-05-18
 targetSpecVersion: v1alpha1
 requires:
   - RFC-0009
+  - RFC-0024
+  - RFC-0025
+  - RFC-0029
+  - RFC-0035
 requiresDocs: []
 ---
 
 # RFC-0017: In-Soul Variant Pattern
 
-**Document type:** Normative (draft)
-**Status:** Draft v0.2 — Initial spec expansion (Engineering pass on Mo's v0.1 stub). Practitioner-validation gates in §11 unresolved; full normative status awaits InternalAdopter four-soul implementation pass + Mo's design-authority editorial review of §3-§13.
+**Document type:** Normative
+**Status:** Ready for Review v0.3 — operator OQ walkthrough complete 2026-05-18; all 8 §10 OQs resolved with full rubric (problem statement → industry research → 3-4 options with tradeoffs → recommendation + counter-argument). **Cross-cutting framing:** every operator-impacting variant lifecycle event (count thresholds, deprecation transitions, Engineering substrate-cost review, cardinality activation requests) **routes through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md)** — pipeline never halts on variant-substrate edge cases. §10.1 codifies per-Soul / per-org config schema. Practitioner-validation gates in §11 remain unresolved pending InternalAdopter four-soul implementation pass. Implementation broken into 5 phase tasks (AISDLC-352..356).
+**Lifecycle:** Ready for Review
 **Created:** 2026-05-04
+**Updated:** 2026-05-18
 **Authors:** Morgan Hirtle (Design Authority, InternalAdopter)
-**Engineering pass:** Dominique Legault, Claude Opus 4.7 (orchestrator), 2026-05-04 — fleshed §3-§13 from Mo's v0.1 stub. Design-vertex semantics (specifically §5.3 inheritance table + §10 OQs) deferred to Mo for editorial pass.
-**Requires:** RFC-0009 (Tessellated Design Intent Documents)
+**Engineering pass:** Dominique Legault, Claude Opus 4.7 (orchestrator), 2026-05-04 — fleshed §3-§13 from Mo's v0.1 stub.
+**OQ walkthrough:** Dominique Legault (Operator), 2026-05-18 — full-rubric resolution of all 8 §10 OQs.
+**Requires:** RFC-0009 (Tessellated Design Intent Documents), RFC-0024 (Emergent Capture — catalog substrate), RFC-0025 (Framework Quality Monitoring — over-blocking audit), RFC-0029 (Product Pillar Architectural Vision — pillar model + Engineering/Design ownership), RFC-0035 (Decision Catalog — G0 non-blocking routing)
 
 > The bold-style status block above is preserved for human readability. The
 > YAML frontmatter at the top of the file is the source of truth for tooling
@@ -318,25 +325,87 @@ The "use the existing Soul DID model" answer. **Rejected for the homogeneous-sub
 - [ ] Conformance test suite — variant declaration round-trip; admission-scoring composition; inheritance enforcement
 - [ ] Author/update each user-facing doc surface declared in `requiresDocs` (currently `[]` — pending tutorial/runbook decision)
 
-## 10. Open Questions
+## 10. Open Questions — resolved (operator walkthrough 2026-05-18)
 
-These need design + operator walkthrough before Lifecycle: Draft → Ready for Review.
+> **Resolution status (2026-05-18):** All 8 §10 OQs resolved via operator walkthrough with full rubric (problem → industry research → options → recommendation + counter-argument). Lifecycle promoted Draft → Ready for Review. **Cross-cutting framing:** operator-impacting variant-substrate events (count thresholds, deprecation transitions, Engineering substrate-cost review, cardinality activation requests) route through [RFC-0035 G0 non-blocking pipeline contract](RFC-0035-decision-catalog-operator-routing.md). §10.1 codifies per-Soul / per-org config. Implementation broken into 5 phase tasks: AISDLC-352..356.
 
 **OQ-1 — Maximum variants per Soul:** Should the schema cap variant count (e.g., max 5) to discourage over-fragmentation, or trust operators? Recommendation: soft warning at 5+, hard limit at 20 (sanity check, not design constraint).
 
+   **Resolution (2026-05-18):** **Per-org configurable; defaults 5 (soft warn) / 20 (hard limit).** Author's research-grounded defaults (5 ≈ Miller's 7±2 cognitive-load threshold; 20 ≈ re-architect-as-multi-soul threshold per RFC-0009 §3) wrapped in the per-org-configurability convention established across this session. Soft warn → `Decision: variant-count-soft-warning` (non-blocking batch review). Hard limit → refuse declaration + `Decision: variant-count-hard-limit-exceeded` + clarification task ("consider re-architecting as multi-soul"). **Selected over fixed 5/20** because adopters may surface tuning needs (e.g., marketplace with 30 vendor variants); marginal config surface vs. "file an RFC to bump the constant" friction.
+
 **OQ-2 — Nested variants:** Can a variant declare its own sub-variants? Recommendation: NO for v1 — adds complexity for a use case (variant-of-variant) we have no practitioner evidence for. Revisit if InternalAdopter or another adopter surfaces a real need.
+
+   **Resolution (2026-05-18):** **Schema-enforced flat: `variants[]` cannot contain `variants[]`** (design-tokens pattern: Tailwind / Material / Stripe / Vercel). Schema rejects nested declarations at validation. Future RFC lifts when ≥2 adopters surface concrete sub-variant use cases (mirrors OQ-8 cardinality threshold). **Selected over convention-only NO (author rec)** because schema-permissive + convention-gated is the design-token-explosion anti-pattern; schema enforcement keeps the design-authority loop intact.
 
 **OQ-3 — Variant lifecycle (deprecation, removal):** §6.3 sketches the removal flow. What's the right deprecation-window default — 30 days, 90 days, or operator-configured per Soul? Recommendation: configurable per Soul with 30-day default.
 
+   **Resolution (2026-05-18):** **Composite: 30d default + per-Soul `deprecationWindowDays` override + explicit G0-routed lifecycle states.** Lifecycle: (1) deprecation declared → `Decision: variant-deprecation-declared` (log; no interrupt); (2) approaching → `Decision: variant-deprecation-approaching` → operator batch surface; (3) at removal with consumers still referencing → `Decision: variant-removal-consumers-pending` → **auto-action:** keep variant in degraded mode + emit migration tasks. Pipeline never halts. 30d reflects internal-config cadence (vs RFC-0019's 90d for external providers). **Selected over fixed 30d** because per-Soul override accommodates slower migration cadences (large adopters needing 60-90d); selected over implicit-lifecycle because explicit specification prevents "we forgot to ship at-removal-degraded-mode" drift.
+
 **OQ-4 — Cross-variant scoring rule precedence:** RFC-0009 §7.2 sets `min` as cross-soul default. Same default for cross-variant within a soul, OR should variants default to `max` (since they're more loosely coupled than souls within a tessellation)? Recommendation: same `min` default for consistency.
+
+   **Resolution (2026-05-18):** **Per-Soul configurable, default `min`** (matches RFC-0009 §7.2 cross-soul). `min` matches RFC-0009 (consistency across tessellation hierarchy) AND matches industry safety-critical aggregation convention (compliance / security / performance all use `min`). Variants share substrate + compliance + foundational triad per §3.2 — they're MORE tightly coupled than tessellated souls, so safety-critical aggregation applies even more strongly. Per-Soul `crossVariantAggregation` config accommodates adopters with genuine reasons to override (e.g., experimental-variant promotion via `max`). **Selected over fixed `min`** because per-org-config has been the recurring pattern this session; consistency matters for adopter expectations.
 
 **OQ-5 — designOverrides extensibility:** §6.1 lists `voiceRegister`, `colorPaletteOverlay`, `densityProfile`. Should this be open-ended (any field name) or closed-enum? Recommendation: closed-enum for v1 to force design-authority discipline; expand as new override needs surface.
 
+   **Resolution (2026-05-18):** **Closed framework enum + vendor-prefix extension** (composes with RFC-0025 OQ-10 vendor-namespace pattern + Kubernetes CRD / JSON Schema / HTML `data-*` conventions). Framework owns `voiceRegister`, `colorPaletteOverlay`, `densityProfile` (closed; expanding requires RFC amendment with Design sign-off). Adopters extend via vendor reverse-DNS prefix (e.g., `acme.com/accessibilityProfile`); schema validates prefix. **Selected over closed-enum-only (author rec)** because vendor-prefix pattern is already established in this codebase (RFC-0025 OQ-10) and across the ecosystem; provides extension flexibility without compromising Design Authority's loop on framework-owned fields.
+
 **OQ-6 — Variant ID URI representation in DID:** RFC-0009 uses `did:platform-x:soul:engage`. What's the variant URI? Options: (a) `did:platform-x:soul:engage/variant:small-utility`, (b) `did:platform-x:soul:engage:small-utility` (slug-concat), (c) `did:platform-x:variant:engage/small-utility`. Recommendation: (a) — preserves explicit hierarchy.
+
+   **Resolution (2026-05-18):** **Option (a) — `did:platform-x:soul:engage/variant:small-utility`** (path-style with explicit `variant:` keyword) per author rec. Matches Kubernetes resource paths / HTTP REST / AWS ARN / DID Web conventions (hierarchical resource systems consistently use path-style with explicit kind keywords). Preserves the structural inheritance relationship (variant is a CHILD of soul per §3.2). Composes naturally with future nested-variant extension AND with future in-soul partition types from RFC-0018 (`/journey:onboarding-flow`). **Selected over slug-concat (b)** because (b) has parser ambiguity; **selected over option (c)** because (c) treats variant as peer of soul, contradicting the inheritance model.
 
 **OQ-7 — Engineering authority on variant declarations:** RFC-0009 makes Design Authority the owner of `design.*` fields with Engineering as reviewer. Same model for variant declarations? Or does Engineering own `targetAudience` (since audience determines load characteristics)? Recommendation: Design owns variant declaration; Engineering reviews + may block on substrate-cost grounds.
 
+   **Resolution (2026-05-18):** **Design owns + Engineering review routed through Decision Catalog.** Author's pillar-model split (Design owns; Engineering reviews) is architecturally correct per RFC-0029 Principle 1 + project_team_roles.md. Engineering's review becomes a tracked `Decision: variant-substrate-cost-review` in the catalog. Substrate-cost block → `Decision: variant-substrate-cost-block` → Design/Engineering routing per RFC-0029 actor model. **Selected over convention-only review-may-block** because convention-only is the same anti-pattern that produced AISDLC-269's "forgot to operator-walk-through" failure — explicit Decision-Catalog routing makes the review loop AUDITABLE.
+
 **OQ-8 — `cardinality` field activation:** §5.2 reserves `cardinality: primary | secondary | experimental` for v2. What's the v1 → v2 trigger to activate this — practitioner demand, or a specific lifecycle event? Recommendation: defer activation to a follow-on RFC when at least 2 adopters request lifecycle distinctions.
+
+   **Resolution (2026-05-18):** **Future Decision in catalog; auto-promote on ≥2 adopter requests.** Author's threshold expressed through the Decision Catalog substrate. Each adopter request → `Decision: variant-cardinality-activation-request` → Stage A counter; at threshold, Decision auto-promotes to operator batch review with "file follow-on RFC" recommendation. Composes with RFC-0036 OQ-6 first-party-adapter graduation pattern (identical shape). **Selected over convention-only** because "we'll notice when adopters ask" relies on operator manually catching the signal — same anti-pattern surfaced elsewhere this session.
+
+### 10.1 Configuration Schema (per-Soul / per-org defaults)
+
+Per-organization configurability across the OQ resolutions. Per-Soul overrides codify variant-substrate config:
+
+```yaml
+# .ai-sdlc/variant-config.yaml (per-org defaults)
+variant:
+  limits:                                    # OQ-1
+    softWarnAt: 5                            # Miller's 7±2 cognitive-load threshold
+    hardLimit: 20                            # re-architect-as-multi-soul threshold per RFC-0009 §3
+
+  lifecycle:                                 # OQ-3
+    deprecationWindowDays: 30                # internal-config cadence default
+    routing:
+      onDeclared: log-catalog-no-interrupt
+      onApproaching: operator-batch-surface
+      onConsumersPending: degraded-mode-and-migration-tasks
+
+  scoring:                                   # OQ-4
+    crossVariantAggregation: min             # matches RFC-0009 cross-soul default
+
+  overrides:                                 # OQ-5
+    framework:
+      - voiceRegister
+      - colorPaletteOverlay
+      - densityProfile
+    adopterExtensionsAllowed: true           # via vendor reverse-DNS prefix
+
+  uri:                                       # OQ-6
+    format: 'did:{method}:{platform}:soul:{soul-id}/variant:{variant-id}'
+
+  authority:                                 # OQ-7
+    declarationOwner: design
+    substrateCostReview:
+      reviewer: engineering
+      routing: decision-catalog
+      blockDecision: variant-substrate-cost-block
+
+  cardinality:                               # OQ-8
+    activationThreshold:
+      adopterRequests: 2
+    routing: decision-catalog-auto-promote
+```
+
+Default constants ship in the `ai-sdlc init` variant-config template. Per-Soul overrides via the soul's `spec.variantConfig` block (composes with RFC-0009 substrate). Schema enforces limits at variant-declaration load, lifecycle states at deprecation transitions, vendor-prefix for adopter override fields.
 
 ## 11. Practitioner Validation Plan
 
@@ -367,3 +436,4 @@ Validation criteria (Mo's edits welcome):
 |---|---|---|---|
 | v0.1 | 2026-05-04 | Morgan Hirtle | Initial stub (carve-out from RFC-0009 OQ-3). Established summary + practitioner-validation source. |
 | v0.2 | 2026-05-04 | Engineering pass (Dominique + Claude Opus 4.7) | Filled §3-§13 from boilerplate. Schema sketch, inheritance table, admission-scoring composition, boundary-vs-separate-soul, alternatives, 8 open questions, InternalAdopter validation plan. Awaiting Mo's design-authority editorial pass on §5.3 + §10. |
+| v0.3 | 2026-05-18 | Dominique (Operator OQ walkthrough) | Full-rubric resolution of all 8 §10 OQs (problem → industry research → 3-4 options → recommendation + counter-argument per OQ). Resolutions: per-org configurable variant count limits (OQ-1, defaults 5 soft / 20 hard); schema-enforced flat (no nested variants for v1 — OQ-2); composite deprecation lifecycle with 30d default + per-Soul override + G0-routed degraded-mode (OQ-3); per-Soul configurable cross-variant aggregation with `min` default (OQ-4, matches RFC-0009); closed framework enum + vendor-prefix extension for designOverrides (OQ-5, composes with RFC-0025 OQ-10 pattern); path-style URI `did:.../variant:...` (OQ-6); Design owns + Engineering review via Decision Catalog (OQ-7); cardinality activation via catalog auto-promote on ≥2 adopter requests (OQ-8). §10.1 added consolidating per-Soul / per-org `.ai-sdlc/variant-config.yaml` schema. Cross-cutting framing: all operator-impacting variant lifecycle events route through RFC-0035 G0 non-blocking pipeline contract. Frontmatter requires expanded: added RFC-0024 (capture substrate), RFC-0025 (audit), RFC-0029 (pillar model), RFC-0035 (catalog routing). Lifecycle promoted Draft → Ready for Review. Implementation broken into 5 phase tasks: AISDLC-352 (Phase 1 schema additions), AISDLC-353 (Phase 2 admission scorer composition), AISDLC-354 (Phase 3 Eτ_tessellation_drift extension + deprecation lifecycle), AISDLC-355 (Phase 4 InternalAdopter four-product reference impl), AISDLC-356 (Phase 5 glossary + conformance test suite + doc surfaces). Practitioner-validation gates in §11 remain unresolved pending InternalAdopter implementation pass. |
