@@ -741,10 +741,23 @@ export function resolveSubjectShaForEnvelope({
       // the chore-commit diff anchor (same reasoning as v4-head case).
       return { sha: headSha, source: 'v5-head' };
     }
-    // v5 didn't match — fall through to v4 then v3. A v5 mismatch means
-    // the head blobs genuinely differ (overlapping sibling merge or
-    // content tampering), but we still try v4/v3 to surface the best
-    // possible reason string if those also fail.
+    // v5 didn't match — HARD REJECT (AISDLC-362 code-reviewer MAJOR).
+    // When an envelope carries v5 + signedMergeBase, v5 is the
+    // AUTHORITATIVE hash. A mismatch means the head blobs genuinely
+    // differ from what was signed (overlapping sibling merge changed a
+    // file, or content tampering). Falling through to v4 would let an
+    // overlapping-sibling scenario silently slip past v5's stronger
+    // boundary if v4's enumeration happens to produce the same hash
+    // (possible in edge rebase scenarios). v5 is the trust boundary;
+    // do not allow downgrade.
+    if (v5 === null) {
+      // computeHeadContentHashV5 returned null → couldn't reproduce v5
+      // hash (e.g., shallow clone where signedMergeBase is unreachable).
+      // Fall through to v4/v3 in this case — that's the documented
+      // backward-compat fallback for environments that can't compute v5.
+    } else {
+      return null;
+    }
   }
 
   // AISDLC-193.1: v4-prefer fast path. When the envelope carries
@@ -1109,13 +1122,16 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     }
     // Subject resolved — now check the OTHER bindings (policy / agents /
     // plugin version / schema) using the envelope's own contentHashV3 /
-    // contentHashV4 as expected (since we've already established the
-    // subject matches by construction). For v4-carrying envelopes we
-    // forward the predicate's v4 so the predicateMatchReason v4-prefer
-    // path is identity-equal by construction.
+    // contentHashV4 / contentHashV5 as expected (since we've already
+    // established the subject matches by construction). For v5-carrying
+    // envelopes we forward the predicate's v5 so the predicateMatchReason
+    // v5-prefer path is identity-equal by construction (AISDLC-362
+    // code-reviewer MAJOR — previously omitted, causing v5 envelopes to be
+    // re-checked via v4 in this secondary validation).
     const reason = predicateMatchReason(entry.predicate, {
       contentHashV3: entry.predicate.contentHashV3, // identity match — already validated upstream
       contentHashV4: entry.predicate.contentHashV4, // may be undefined for legacy v3-only envelopes
+      contentHashV5: entry.predicate.contentHashV5, // may be undefined for legacy pre-v5 envelopes
       policyHash,
       expectedAgentFileHashes,
       pluginVersion,
