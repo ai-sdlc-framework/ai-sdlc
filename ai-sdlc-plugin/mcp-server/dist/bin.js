@@ -31755,6 +31755,9 @@ import { dirname as dirname11, join as join32 } from "node:path";
 import { existsSync as existsSync31, readFileSync as readFileSync30 } from "node:fs";
 import { join as join33 } from "node:path";
 
+// ../../pipeline-cli/dist/orchestrator/filters/open-pull-request-exists.js
+import { execSync as execSync8 } from "node:child_process";
+
 // ../../pipeline-cli/dist/orchestrator/in-flight.js
 import { existsSync as existsSync32, readdirSync as readdirSync13, readFileSync as readFileSync31, statSync as statSync11 } from "node:fs";
 import { join as join34 } from "node:path";
