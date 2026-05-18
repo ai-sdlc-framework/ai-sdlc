@@ -38,7 +38,7 @@
  */
 
 import { execSync } from 'node:child_process';
-import { slugify, readBranchPattern } from '../../steps/02-compute-branch.js';
+import { slugify, readBranchPattern, FALLBACK_SLUG } from '../../steps/02-compute-branch.js';
 import type { FilterResult } from './types.js';
 
 /** Single entry returned by `gh pr list` for an open PR. */
@@ -111,8 +111,14 @@ export function checkOpenPullRequestExists(opts: CheckOpenPullRequestExistsOpts)
   const workDir = opts.workDir ?? process.cwd();
 
   // --- Compute the canonical branch name (sync, mirrors step 02) ---
+  // AISDLC-361 code-reviewer MAJOR: mirror step 02's FALLBACK_SLUG logic when
+  // slugify returns empty (pure-punctuation or non-ASCII title). The filter
+  // would otherwise check a different branch than the worktree-create step
+  // → admits the task → Step 3 aborts on the open PR → the very deadlock
+  // this filter was built to prevent.
   const pattern = readBranchPattern(workDir);
-  const slug = opts.taskTitle ? slugify(opts.taskTitle) || taskIdLower : taskIdLower;
+  const rawSlug = opts.taskTitle ? slugify(opts.taskTitle) : '';
+  const slug = rawSlug !== '' ? rawSlug : pattern.includes('{slug}') ? FALLBACK_SLUG : taskIdLower;
   const branchName = pattern.replace(/\{issueIdLower\}/g, taskIdLower).replace(/\{slug\}/g, slug);
 
   // --- Cache lookup (AC #2: at most one gh call per branch per tick) ---

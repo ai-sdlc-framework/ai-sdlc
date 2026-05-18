@@ -161,7 +161,7 @@ describe('checkOpenPullRequestExists — branch name derivation', () => {
     expect(calledWith).toBe('ai-sdlc/aisdlc-361-fix-admission-filter-for-open-pr');
   });
 
-  it('falls back to task ID as slug when title is absent', () => {
+  it('falls back to FALLBACK_SLUG when title is absent (mirrors step 02)', () => {
     let calledWith: string | null = null;
     checkOpenPullRequestExists({
       taskId: 'AISDLC-361',
@@ -171,8 +171,27 @@ describe('checkOpenPullRequestExists — branch name derivation', () => {
         return [];
       },
     });
-    // No taskTitle → slug = taskIdLower
-    expect(calledWith).toBe('ai-sdlc/aisdlc-361-aisdlc-361');
+    // No taskTitle → slug = FALLBACK_SLUG ('task') because pattern has {slug}.
+    // Mirrors step 02 computeBranchName so filter checks the same branch the
+    // worktree-create step would (AISDLC-361 code-reviewer MAJOR fix).
+    expect(calledWith).toBe('ai-sdlc/aisdlc-361-task');
+  });
+
+  it('falls back to FALLBACK_SLUG when title slugifies to empty (pure punctuation)', () => {
+    let calledWith: string | null = null;
+    checkOpenPullRequestExists({
+      taskId: 'AISDLC-361',
+      taskTitle: '---',
+      workDir: tmp,
+      listOpenPRsByBranch: (branch) => {
+        calledWith = branch;
+        return [];
+      },
+    });
+    // Title '---' slugifies to '' → FALLBACK_SLUG. Pre-fix the filter used
+    // taskIdLower here and diverged from step 02 — admitting tasks whose
+    // actual branch already had an open PR.
+    expect(calledWith).toBe('ai-sdlc/aisdlc-361-task');
   });
 
   it('reads custom branch pattern from pipeline.yaml when present', () => {
