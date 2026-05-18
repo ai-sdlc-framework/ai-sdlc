@@ -11,6 +11,7 @@
  *   3. The branch-protection helper (applyBranchProtection) including the
  *      `--dry-run` JSON-print path required by AC #6.
  *   4. The "next steps" summary printed at the end of init (AC #5).
+ *   5. The compliance-posture wizard step (RFC-0022 §7 / AISDLC-324).
  *
  * Test surface: every public function takes a small options bag with
  * injectable side-effect adapters (prompter, writeFile, runCommand) so the
@@ -20,8 +21,10 @@
  */
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { execFileSync, execSync } from 'node:child_process';
+import type { DerivedGates } from '../../compliance/types.js';
+import { BASELINE_DERIVED_GATES } from '../../compliance/types.js';
 import {
   ATTESTATION_TEMPLATES,
   BASELINE_WORKFLOW_TEMPLATES,
@@ -31,6 +34,454 @@ import {
   WORKFLOWS_TEMPLATES,
   type FeatureTemplateSet,
 } from './init-templates.js';
+
+// ── Compliance wizard types (RFC-0022 §7 / AISDLC-324) ───────────────────
+
+/**
+ * A single regulatory regime option shown in the init wizard multi-select.
+ */
+export interface ComplianceRegimeChoice {
+  /** Canonical regime identifier (e.g. 'HIPAA', 'SOC2-T2'). */
+  value: string;
+  /** Human-readable label shown in the prompt. */
+  label: string;
+}
+
+/**
+ * Canonical list of regulatory regimes presented in the compliance wizard.
+ * Mirrors the entries in spec/compliance/regime-mappings.yaml.
+ */
+export const COMPLIANCE_REGIME_CHOICES: readonly ComplianceRegimeChoice[] = [
+  { value: 'SOC2-T2', label: 'SOC2 Type 2 (Service Organization Control)' },
+  { value: 'HIPAA', label: 'HIPAA (Health Insurance Portability and Accountability Act)' },
+  { value: 'PCI-DSS-L1', label: 'PCI-DSS Level 1 (Payment Card Industry Data Security Standard)' },
+  { value: 'GDPR', label: 'GDPR (General Data Protection Regulation; EU)' },
+  { value: 'FedRAMP-Moderate', label: 'FedRAMP Moderate (US federal)' },
+  { value: 'ISO-27001:2022', label: 'ISO 27001:2022' },
+] as const;
+
+/**
+ * Inline regime → DerivedGates mapping for the init wizard.
+ * Mirrors spec/compliance/regime-mappings.yaml so the wizard works in
+ * installed-package contexts (where the YAML file is not bundled).
+ *
+ * NOTE: This data is intentionally duplicated from regime-mappings.yaml to
+ * avoid a runtime file-read dependency in the init wizard. When regime-mappings.yaml
+ * is updated, this table MUST be updated in sync. The RFC-0022 §13 Q7 PR-template
+ * compliance-impact checkbox enforces this via reviewer check.
+ */
+const INIT_WIZARD_REGIME_GATES: Readonly<Record<string, DerivedGates>> = {
+  'SOC2-T2': {
+    databaseBranchPool: 'per-shard',
+    secretScanStrictness: 'strict',
+    attestationRequired: true,
+    auditRetentionDays: 2555,
+    reviewerAuthorityModel: 'allowlist+role',
+  },
+  HIPAA: {
+    databaseBranchPool: 'per-shard',
+    secretScanStrictness: 'strict',
+    attestationRequired: true,
+    auditRetentionDays: 2190,
+    reviewerAuthorityModel: 'allowlist+role',
+  },
+  'PCI-DSS-L1': {
+    databaseBranchPool: 'per-shard',
+    secretScanStrictness: 'strict',
+    attestationRequired: true,
+    auditRetentionDays: 365,
+    reviewerAuthorityModel: 'allowlist+role',
+  },
+  GDPR: {
+    databaseBranchPool: 'per-shard',
+    secretScanStrictness: 'standard',
+    attestationRequired: true,
+    auditRetentionDays: 365,
+    reviewerAuthorityModel: 'allowlist',
+  },
+  'FedRAMP-Moderate': {
+    databaseBranchPool: 'per-shard',
+    secretScanStrictness: 'strict',
+    attestationRequired: true,
+    auditRetentionDays: 1095,
+    reviewerAuthorityModel: 'allowlist+role',
+  },
+  'ISO-27001:2022': {
+    databaseBranchPool: 'per-shard',
+    secretScanStrictness: 'strict',
+    attestationRequired: true,
+    auditRetentionDays: 365,
+    reviewerAuthorityModel: 'allowlist+role',
+  },
+} as const;
+
+/**
+ * Ordinal scales for tightest-wins composition.
+ */
+const SECRET_SCAN_ORDINAL: Record<DerivedGates['secretScanStrictness'], number> = {
+  minimal: 0,
+  standard: 1,
+  strict: 2,
+};
+const REVIEWER_AUTHORITY_ORDINAL: Record<DerivedGates['reviewerAuthorityModel'], number> = {
+  open: 0,
+  allowlist: 1,
+  'allowlist+role': 2,
+};
+
+/**
+ * Compute DerivedGates from a list of regime IDs using tightest-wins semantics.
+ * Unknown regime IDs are skipped (the wizard's informational display degrades
+ * gracefully rather than throwing).
+ *
+ * This is a lightweight inline computation used exclusively by the init wizard.
+ * The canonical composer (orchestrator/src/compliance/composer.ts) is used for
+ * all post-init runtime gate resolution.
+ */
+export function computeInitWizardDerivedGates(regimes: string[]): DerivedGates {
+  if (regimes.length === 0) return { ...BASELINE_DERIVED_GATES };
+
+  let accumulated: DerivedGates = { ...BASELINE_DERIVED_GATES };
+
+  for (const regimeId of regimes) {
+    const entry = INIT_WIZARD_REGIME_GATES[regimeId];
+    if (!entry) continue; // Unknown regime — skip gracefully
+
+    // databaseBranchPool: per-shard beats shared-with-rls
+    if (entry.databaseBranchPool === 'per-shard') {
+      accumulated = { ...accumulated, databaseBranchPool: 'per-shard' };
+    }
+
+    // secretScanStrictness: ordinal max
+    if (
+      SECRET_SCAN_ORDINAL[entry.secretScanStrictness] >
+      SECRET_SCAN_ORDINAL[accumulated.secretScanStrictness]
+    ) {
+      accumulated = { ...accumulated, secretScanStrictness: entry.secretScanStrictness };
+    }
+
+    // attestationRequired: boolean OR
+    if (entry.attestationRequired) {
+      accumulated = { ...accumulated, attestationRequired: true };
+    }
+
+    // auditRetentionDays: max
+    if (entry.auditRetentionDays > accumulated.auditRetentionDays) {
+      accumulated = { ...accumulated, auditRetentionDays: entry.auditRetentionDays };
+    }
+
+    // reviewerAuthorityModel: ordinal max
+    if (
+      REVIEWER_AUTHORITY_ORDINAL[entry.reviewerAuthorityModel] >
+      REVIEWER_AUTHORITY_ORDINAL[accumulated.reviewerAuthorityModel]
+    ) {
+      accumulated = { ...accumulated, reviewerAuthorityModel: entry.reviewerAuthorityModel };
+    }
+  }
+
+  return accumulated;
+}
+
+/**
+ * Result of the compliance posture wizard step.
+ */
+export interface ComplianceStepResult {
+  /** Regime IDs declared by the operator (empty = "(none declared)" baseline). */
+  regimes: string[];
+  /** Who attested the regimes apply. Auto-filled from git config user.email. */
+  attestedBy: string;
+  /** ISO-8601 timestamp of attestation. Auto-filled at wizard run time. */
+  attestedAt: string;
+  /** Optional operator rationale for the attestation. */
+  attestedNotes?: string;
+  /** Derived gate values computed from the declared regimes. */
+  derivedGates: DerivedGates;
+  /** Absolute path of the written compliance.yaml file. */
+  yamlPath: string;
+  /** True if compliance.yaml was written; false in dry-run or if already exists. */
+  written: boolean;
+}
+
+/**
+ * Build the .ai-sdlc/compliance.yaml content for a given compliance declaration.
+ *
+ * The written file contains the declared `spec.regimes` with attestation metadata.
+ * The computed `derivedGates` are added as YAML comments (read-only reference)
+ * so the loader continues to compute them from regimes (not from spec.derivedGates,
+ * which is the operator-override field requiring _notes for each entry).
+ *
+ * Pure function — no filesystem side-effects, fully testable.
+ */
+export function buildComplianceYaml(opts: {
+  projectName: string;
+  regimes: string[];
+  attestedBy: string;
+  attestedAt: string;
+  attestedNotes?: string;
+  derivedGates: DerivedGates;
+}): string {
+  const { projectName, regimes, attestedBy, attestedAt, attestedNotes, derivedGates } = opts;
+
+  const regimesBlock =
+    regimes.length === 0
+      ? '  regimes: []\n'
+      : regimes
+          .map((id) => {
+            const lines = [
+              `  - id: ${id}`,
+              `    attestedBy: ${attestedBy}`,
+              `    attestedAt: "${attestedAt}"`,
+            ];
+            if (attestedNotes) {
+              lines.push(`    attestedNotes: "${attestedNotes.replace(/"/g, '\\"')}"`);
+            }
+            return lines.join('\n');
+          })
+          .join('\n') + '\n';
+
+  const derivedGatesComment = [
+    '# --- Derived gates (computed from declared regimes; read-only) ---',
+    `# databaseBranchPool: ${derivedGates.databaseBranchPool}`,
+    `# secretScanStrictness: ${derivedGates.secretScanStrictness}`,
+    `# attestationRequired: ${derivedGates.attestationRequired}`,
+    `# auditRetentionDays: ${derivedGates.auditRetentionDays}`,
+    `# reviewerAuthorityModel: ${derivedGates.reviewerAuthorityModel}`,
+    '#',
+    '# To override a gate, add spec.derivedGates.<field> with a sibling _notes entry.',
+    '# See docs/operations/compliance-posture.md for override patterns.',
+  ].join('\n');
+
+  return [
+    `apiVersion: ai-sdlc.io/v1alpha1`,
+    `kind: CompliancePosture`,
+    `metadata:`,
+    `  name: ${projectName}`,
+    `spec:`,
+    `  regimes:`,
+    regimesBlock.trimEnd(),
+    `  auditExports: []`,
+    '',
+    derivedGatesComment,
+    '',
+  ].join('\n');
+}
+
+/**
+ * Format the derived gates for console display (the "✓ Wrote ... with derived gates:" block).
+ */
+export function formatDerivedGatesDisplay(derivedGates: DerivedGates): string {
+  return [
+    `   databaseBranchPool: ${derivedGates.databaseBranchPool}`,
+    `   secretScanStrictness: ${derivedGates.secretScanStrictness}`,
+    `   attestationRequired: ${derivedGates.attestationRequired}`,
+    `   auditRetentionDays: ${derivedGates.auditRetentionDays}`,
+    `   reviewerAuthorityModel: ${derivedGates.reviewerAuthorityModel}`,
+  ].join('\n');
+}
+
+/**
+ * DB-pool rationale displayed when a compliance regime forces `per-shard`.
+ * Returns null if the DB-pool is `shared-with-rls` (no rationale needed).
+ */
+export function getDbPoolRationale(regimes: string[], derivedGates: DerivedGates): string | null {
+  if (derivedGates.databaseBranchPool !== 'per-shard') return null;
+  if (regimes.length === 0) return null;
+  const forcingRegimes = regimes.filter(
+    (id) => INIT_WIZARD_REGIME_GATES[id]?.databaseBranchPool === 'per-shard',
+  );
+  if (forcingRegimes.length === 0) return null;
+  return `  (${forcingRegimes.join(', ')} declared at .ai-sdlc/compliance.yaml requires per-shard isolation)`;
+}
+
+/**
+ * Run the compliance posture wizard step (RFC-0022 §7 / AISDLC-324).
+ *
+ * Inserted into the init wizard BEFORE the gate-config feature prompts.
+ * Always runs — even for unregulated projects (declaring "(none)" is the
+ * explicit choice; the resulting compliance.yaml carries that decision).
+ *
+ * Flow:
+ *  1. Auto-detect git config user.email for attestedBy default.
+ *  2. If --yes or non-TTY: use baseline (no regimes), auto-fill attestedBy.
+ *  3. Otherwise: multi-select regimes, text-input attestedBy + notes.
+ *  4. Compute derivedGates via inline tightest-wins composition.
+ *  5. Write .ai-sdlc/compliance.yaml (skips if file already exists and not
+ *     in --add compliance mode).
+ *  6. Log derived gates + DB-pool rationale.
+ */
+export async function runComplianceStep(
+  projectDir: string,
+  flags: WizardFlags,
+  adapters: FeatureAdapters,
+): Promise<ComplianceStepResult> {
+  const compliancePath = join(projectDir, '.ai-sdlc', 'compliance.yaml');
+
+  // ── Auto-detect git email for attestedBy default ──────────────────────
+  let gitEmail = '';
+  try {
+    const result = adapters.runCommand('git', ['config', 'user.email']);
+    if (result.exitCode === 0) {
+      gitEmail = result.stdout.trim();
+    }
+  } catch {
+    // Ignore — git config may not be set; attestedBy will be empty default
+  }
+
+  // Resolve project name from git remote or directory basename.
+  const projectName = (() => {
+    try {
+      const r = adapters.runCommand('git', ['remote', 'get-url', 'origin']);
+      if (r.exitCode === 0) {
+        // Extract repo name from remote URL (ssh: git@github.com:org/repo.git, https: .../org/repo.git)
+        const m = r.stdout.trim().match(/\/([^/]+?)(\.git)?$/);
+        if (m) return m[1];
+      }
+    } catch {
+      // Ignore
+    }
+    return basename(projectDir);
+  })();
+
+  // ── --yes / non-TTY path: baseline (no regimes) ───────────────────────
+  if (flags.yes || !process.stdin.isTTY) {
+    const derivedGates = computeInitWizardDerivedGates([]);
+    const attestedAt = new Date().toISOString();
+    const written = writeComplianceYaml({
+      projectDir,
+      compliancePath,
+      projectName,
+      regimes: [],
+      attestedBy: gitEmail,
+      attestedAt,
+      attestedNotes: undefined,
+      derivedGates,
+      flags,
+      adapters,
+    });
+    adapters.log('');
+    adapters.log(`  Compliance posture: no regimes declared (unregulated baseline)`);
+    adapters.log(`  derivedGates: ${JSON.stringify(derivedGates)}`);
+    return {
+      regimes: [],
+      attestedBy: gitEmail,
+      attestedAt,
+      attestedNotes: undefined,
+      derivedGates,
+      yamlPath: compliancePath,
+      written,
+    };
+  }
+
+  // ── Interactive path ──────────────────────────────────────────────────
+  adapters.log('> Compliance posture');
+  adapters.log('');
+
+  const selectedRegimes = await adapters.multiSelect(
+    'Which regulatory regimes apply to this project? (space to toggle, enter to confirm)',
+    COMPLIANCE_REGIME_CHOICES as ComplianceRegimeChoice[],
+  );
+
+  const attestedBy = await adapters.textInput(
+    'Who is attesting these regimes apply?',
+    gitEmail || undefined,
+  );
+
+  const attestedNotesRaw = await adapters.textInput(
+    'Notes on the attestation (optional, audit-visible):',
+    undefined,
+  );
+  const attestedNotes = attestedNotesRaw.trim() || undefined;
+
+  const attestedAt = new Date().toISOString();
+  const derivedGates = computeInitWizardDerivedGates(selectedRegimes);
+
+  const written = writeComplianceYaml({
+    projectDir,
+    compliancePath,
+    projectName,
+    regimes: selectedRegimes,
+    attestedBy,
+    attestedAt,
+    attestedNotes,
+    derivedGates,
+    flags,
+    adapters,
+  });
+
+  adapters.log('');
+  if (written) {
+    adapters.log(`✓ Wrote .ai-sdlc/compliance.yaml with derived gates:`);
+  } else {
+    adapters.log(
+      `  .ai-sdlc/compliance.yaml already exists — skipped (run --add compliance to update)`,
+    );
+    adapters.log(`  Derived gates (from existing compliance.yaml, if unchanged):`);
+  }
+  adapters.log(formatDerivedGatesDisplay(derivedGates));
+
+  // DB-pool rationale (AC #6: gate-config step reads compliance.yaml and
+  // surfaces the rationale when a regime forces per-shard)
+  const dbRationale = getDbPoolRationale(selectedRegimes, derivedGates);
+  if (dbRationale) {
+    adapters.log('');
+    adapters.log(`  DatabaseBranchPool pre-selection: per-shard`);
+    adapters.log(dbRationale);
+  }
+
+  adapters.log('');
+  adapters.log(`  Review with: cat .ai-sdlc/compliance.yaml`);
+  adapters.log(
+    `  Override any field with the attestedNotes pattern (see docs/operations/compliance-posture.md).`,
+  );
+
+  return {
+    regimes: selectedRegimes,
+    attestedBy,
+    attestedAt,
+    attestedNotes,
+    derivedGates,
+    yamlPath: compliancePath,
+    written,
+  };
+}
+
+/** Helper: write .ai-sdlc/compliance.yaml (or skip if exists). Returns true if written. */
+function writeComplianceYaml(opts: {
+  projectDir: string;
+  compliancePath: string;
+  projectName: string;
+  regimes: string[];
+  attestedBy: string;
+  attestedAt: string;
+  attestedNotes?: string;
+  derivedGates: DerivedGates;
+  flags: WizardFlags;
+  adapters: FeatureAdapters;
+}): boolean {
+  const { compliancePath, flags, adapters } = opts;
+
+  if (flags.dryRun) {
+    adapters.log(`  would write .ai-sdlc/compliance.yaml`);
+    return false;
+  }
+
+  if (adapters.exists(compliancePath)) {
+    return false;
+  }
+
+  const yamlContent = buildComplianceYaml({
+    projectName: opts.projectName,
+    regimes: opts.regimes,
+    attestedBy: opts.attestedBy,
+    attestedAt: opts.attestedAt,
+    attestedNotes: opts.attestedNotes,
+    derivedGates: opts.derivedGates,
+  });
+
+  adapters.mkdirp(join(opts.projectDir, '.ai-sdlc'));
+  adapters.writeFile(compliancePath, yamlContent);
+  return true;
+}
 
 // ── Types ────────────────────────────────────────────────────────────────
 
@@ -147,6 +598,18 @@ export interface FeatureAdapters {
   runCommand: (cmd: string, args: string[]) => { stdout: string; exitCode: number };
   /** Sink for operator-visible output (defaults to console.log). */
   log: (line: string) => void;
+  /**
+   * Multi-select prompt — returns the array of selected choice values.
+   * Production adapter uses `@inquirer/prompts` `checkbox`.
+   * Tests inject a stub that returns scripted selections.
+   */
+  multiSelect: (question: string, choices: ComplianceRegimeChoice[]) => Promise<string[]>;
+  /**
+   * Text input prompt — returns the entered string.
+   * Production adapter uses `@inquirer/prompts` `input`.
+   * Tests inject a stub that returns scripted values.
+   */
+  textInput: (question: string, defaultValue?: string) => Promise<string>;
 }
 
 // ── Install-target resolution (AISDLC-262) ───────────────────────────────
@@ -287,6 +750,17 @@ export function buildProductionAdapters(): FeatureAdapters {
       // Lazy import — see docblock above for why.
       const { confirm } = await import('@inquirer/prompts');
       return confirm({ message: question, default: defaultYes });
+    },
+    multiSelect: async (question, choices) => {
+      const { checkbox } = await import('@inquirer/prompts');
+      return checkbox({
+        message: question,
+        choices: choices.map((c) => ({ name: c.label, value: c.value })),
+      });
+    },
+    textInput: async (question, defaultValue) => {
+      const { input } = await import('@inquirer/prompts');
+      return input({ message: question, default: defaultValue });
     },
     writeFile: (path, contents) => writeFileSync(path, contents, 'utf-8'),
     appendOnce: (path, contents, sentinel) => {

@@ -42,6 +42,7 @@ import {
   renderNextSteps,
   resolveFeatureSelection,
   resolveInstallTarget,
+  runComplianceStep,
   type FeatureAdapters,
   type FeatureSelection,
   type WizardFlags,
@@ -686,6 +687,12 @@ export const initCommand = new Command('init')
  */
 async function runWizardStage(projectDir: string, flags: WizardFlags): Promise<void> {
   const adapters: FeatureAdapters = buildProductionAdapters();
+  console.log('');
+  console.log('━━━ Compliance posture ━━━');
+  console.log('');
+  // RFC-0022 §7 / AISDLC-324: compliance step runs BEFORE gate-config feature prompts
+  await runComplianceStep(projectDir, flags, adapters);
+
   console.log('');
   console.log('━━━ Feature wizard ━━━');
   console.log('');
