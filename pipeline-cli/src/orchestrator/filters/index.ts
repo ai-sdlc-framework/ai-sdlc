@@ -38,6 +38,12 @@ export {
   type CheckExternalDependenciesOpts,
 } from './external-dependencies.js';
 export { checkOrphanParent, type CheckOrphanParentOpts } from './orphan-parent.js';
+export {
+  checkOpenPullRequestExists,
+  type CheckOpenPullRequestExistsOpts,
+  type OpenPREntry,
+  type OpenPullRequestExistsDetail,
+} from './open-pull-request-exists.js';
 export { formatFilterTrace, runFilterChain, type RunFilterChainOpts } from './chain.js';
 export type {
   AlreadyInFlightDetail,

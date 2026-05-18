@@ -61,10 +61,20 @@ function fakeFrontier(ids: string[]): () => Array<{ id: string; title: string }>
  * The underlying production bug is also fixed in `findClaudeSubprocess`
  * (word-boundary lookahead), but belt-and-suspenders isolation here keeps
  * the test hermetic regardless of which Claude session is running.
+ *
+ * `openPRExistsOpts.listOpenPRsByBranch: () => []` — short-circuits the real
+ * `gh pr list` call that the OpenPullRequestExists filter (AISDLC-361) would
+ * otherwise make for every candidate in every tick. Without this stub the
+ * Phase 1 tests require a working GitHub API token + network, which breaks
+ * offline/CI-isolated runs.
  */
 function hermeticFilterAdapters(): Pick<
   OrchestratorAdapters,
-  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath' | 'alreadyInFlightOpts'
+  | 'graphLoader'
+  | 'taskLabelsLoader'
+  | 'calibrationLogPath'
+  | 'alreadyInFlightOpts'
+  | 'openPRExistsOpts'
 > {
   return {
     graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
@@ -77,6 +87,11 @@ function hermeticFilterAdapters(): Pick<
     alreadyInFlightOpts: {
       detectSubprocess: false,
       listOpenPRs: () => [],
+    },
+    // Stub out the gh pr list call so OpenPullRequestExists admits every
+    // candidate without requiring a real GitHub API token or network.
+    openPRExistsOpts: {
+      listOpenPRsByBranch: () => [],
     },
   };
 }

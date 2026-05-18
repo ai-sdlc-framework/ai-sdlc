@@ -82,6 +82,7 @@ export type {
   OrchestratorBlockedByDependencyEvent,
   OrchestratorBlockedByDispatchabilityEvent,
   OrchestratorBlockedByDorEvent,
+  OrchestratorBlockedByOpenPullRequestEvent,
   OrchestratorBlockedEvent,
   OrchestratorConfig,
   OrchestratorFilterEvent,
@@ -155,11 +156,13 @@ export {
 // RFC-0015 Phase 3 — pre-dispatch admission filters (AISDLC-169.3).
 // AISDLC-175 — orphan-parent filter (parent task whose every child is done).
 // AISDLC-223 — blocked filter (operator-marked tasks with blocked.reason).
+// AISDLC-361 — open-PR-by-branch filter (task has open PR on canonical branch).
 export {
   checkBlocked,
   checkDependencyReadiness,
   checkDorReadiness,
   checkExternalDependencies,
+  checkOpenPullRequestExists,
   checkOrphanParent,
   DOR_BYPASS_LABEL,
   formatFilterTrace,
@@ -171,6 +174,7 @@ export {
   type CheckDependencyReadinessOpts,
   type CheckDorReadinessOpts,
   type CheckExternalDependenciesOpts,
+  type CheckOpenPullRequestExistsOpts,
   type CheckOrphanParentOpts,
   type DependencyBlockedDetail,
   type DorBlockedDetail,
@@ -178,6 +182,8 @@ export {
   type FilterDetail,
   type FilterName,
   type FilterResult,
+  type OpenPREntry,
+  type OpenPullRequestExistsDetail,
   type OrphanParentDetail,
   type RunFilterChainOpts,
 } from './filters/index.js';

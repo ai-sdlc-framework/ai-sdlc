@@ -110,6 +110,7 @@ import type {
   FrontierFn,
   OrchestratorBlockedByBlastRadiusOverlapEvent,
   OrchestratorBlockedByDispatchabilityEvent,
+  OrchestratorBlockedByOpenPullRequestEvent,
   OrchestratorBlockedEvent,
   OrchestratorConfig,
   OrchestratorFilterEvent,
@@ -334,6 +335,25 @@ export interface OrchestratorAdapters {
   alreadyInFlightOpts?: Omit<
     import('./filters/already-in-flight.js').CheckAlreadyInFlightOpts,
     'taskId'
+  >;
+  /**
+   * AISDLC-361 — options forwarded to the `OpenPullRequestExists` filter.
+   * Tests inject `listOpenPRsByBranch` and a pre-populated `prListCache` to
+   * stay hermetic (no real `gh pr list` calls). Production leaves this
+   * undefined and the filter calls `gh pr list --head <branch> --state open`.
+   *
+   * `prListCache` is the tick-scoped cache: a Map keyed by branch name,
+   * pre-populated by the test or empty at tick start. The loop creates a
+   * fresh empty cache when `prListCache` is not injected, ensuring at most
+   * one gh call per branch per tick (AC #2).
+   *
+   * Typed as `Omit<..., 'taskId' | 'taskTitle' | 'workDir'>` so the adapter
+   * does not need to know which task is being evaluated — the loop injects
+   * `taskId`, `taskTitle`, and `workDir` per-candidate.
+   */
+  openPRExistsOpts?: Pick<
+    import('./filters/open-pull-request-exists.js').CheckOpenPullRequestExistsOpts,
+    'listOpenPRsByBranch' | 'prListCache'
   >;
   /** RFC-0015 Phase 3 — wall-clock for event timestamps. Defaults to `Date.now()`. */
   now?: () => Date;
@@ -628,6 +648,15 @@ export async function runOrchestratorTick(
   const alreadyInFlightEvents: OrchestratorTaskAlreadyInFlightEvent[] = [];
   const picks: string[] = [];
 
+  // AISDLC-361 — per-tick cache for the OpenPullRequestExists filter. Shared
+  // across all filter evaluations in one tick so each branch is queried via
+  // `gh pr list` at most once regardless of candidate count (AC #2). The Map
+  // is keyed by the exact canonical branch name; the filter itself populates
+  // it on first access. Tests pre-populate via `adapters.openPRExistsOpts.prListCache`.
+  const openPRListCache =
+    adapters.openPRExistsOpts?.prListCache ??
+    new Map<string, import('./filters/open-pull-request-exists.js').OpenPREntry[]>();
+
   // RFC-0015 / AISDLC-179 — in-flight pre-filter. Before running the
   // (potentially expensive) §4.3 filter chain we drop any candidate that's
   // already mid-dispatch. Original-bug witness: with `maxConcurrent: 1` and
@@ -691,6 +720,18 @@ export async function runOrchestratorTick(
       graph,
       taskId: candidate.id,
       taskLabels: labels,
+      // AISDLC-361 — pass open-PR-exists options: the tick-scoped cache
+      // prevents N+1 gh calls, and the task title (from the frontier node)
+      // is needed to compute the canonical branch slug. Tests inject
+      // `listOpenPRsByBranch` + a pre-populated `prListCache` to stay hermetic.
+      openPRExistsOpts: {
+        workDir: config.workDir,
+        taskTitle: candidate.title || undefined,
+        prListCache: openPRListCache,
+        ...(adapters.openPRExistsOpts?.listOpenPRsByBranch !== undefined
+          ? { listOpenPRsByBranch: adapters.openPRExistsOpts.listOpenPRsByBranch }
+          : {}),
+      },
       // AISDLC-243 — pass the pre-loaded dispatchable flag + reason so the
       // Dispatchability filter doesn't need to re-read the task file.
       ...(dispatchableFm.dispatchable !== undefined
@@ -1697,6 +1738,18 @@ function toBlockedEvent(
       };
       return ev;
     }
+    case 'open-pull-request-exists': {
+      const ev: OrchestratorBlockedByOpenPullRequestEvent = {
+        type: 'OrchestratorBlockedByOpenPullRequest',
+        ts,
+        taskId,
+        prNumber: detail.prNumber,
+        isDraft: detail.isDraft,
+        branchName: detail.branchName,
+      };
+      if (detail.prUrl !== undefined) ev.prUrl = detail.prUrl;
+      return ev;
+    }
     case 'already-in-flight':
       // AlreadyInFlight rejections are handled as `OrchestratorTaskAlreadyInFlight`
       // events separately in the loop — they don't map to a `BlockedEvent` arm.
@@ -1768,6 +1821,17 @@ function toEmittableBlockedEvent(blocked: OrchestratorBlockedEvent): Omit<Orches
         overlap: [...blocked.overlap],
         overlapCount: blocked.overlapCount,
       };
+    case 'OrchestratorBlockedByOpenPullRequest': {
+      const payload: Omit<OrchestratorEvent, 'ts'> = {
+        type: 'OrchestratorBlockedByOpenPullRequest',
+        taskId: blocked.taskId,
+        prNumber: blocked.prNumber,
+        isDraft: blocked.isDraft,
+        branchName: blocked.branchName,
+      };
+      if (blocked.prUrl !== undefined) payload.prUrl = blocked.prUrl;
+      return payload;
+    }
   }
 }
 

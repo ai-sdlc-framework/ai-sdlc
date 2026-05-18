@@ -744,3 +744,177 @@ describe('runOrchestratorTick — AISDLC-223 operator-blocked filter (AC #6 + AC
     expect(dispatched).toEqual(['AISDLC-OK']);
   });
 });
+
+// ── AISDLC-361 — OpenPullRequestExists filter (AC #1 + #3 + #4) ──────────────
+
+describe('runOrchestratorTick — AISDLC-361 OpenPullRequestExists filter', () => {
+  it('skips a task whose canonical branch has an open PR; dispatches a ready task; emits OrchestratorBlockedByOpenPullRequest event (AC #1, #3, #4)', async () => {
+    // Scenario: two tasks on the frontier.
+    //   AISDLC-STUCK — canonical branch `ai-sdlc/aisdlc-stuck-stuck-task`
+    //     already has open PR #42 (as if a prior run opened it and the
+    //     worktree was subsequently deleted but the PR was never merged).
+    //   AISDLC-READY — no open PR → admitted.
+    const graph = buildGraph([node('AISDLC-STUCK'), node('AISDLC-READY')]);
+
+    const dispatched: string[] = [];
+    const capturedEvents: Array<{ type: string; taskId?: string; prNumber?: number }> = [];
+    const config = defaultOrchestratorConfig({
+      workDir: tmp,
+      maxConcurrent: 2,
+      maxTicks: 1,
+      tickIntervalSec: 0,
+    });
+
+    // Per-tick cache shared across filter evaluations (AC #2 — injected as
+    // empty Map; the filter populates it on first access via listOpenPRsByBranch).
+    const prListCache = new Map<
+      string,
+      import('./filters/open-pull-request-exists.js').OpenPREntry[]
+    >();
+
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      sleep: () => Promise.resolve(),
+      frontier: () => [
+        { id: 'AISDLC-STUCK', title: 'stuck task' },
+        { id: 'AISDLC-READY', title: 'ready task' },
+      ],
+      graphLoader: () => graph,
+      taskLabelsLoader: () => [],
+      // Inject the open-PR stub: AISDLC-STUCK's branch has PR #42;
+      // AISDLC-READY has no open PR.
+      openPRExistsOpts: {
+        listOpenPRsByBranch: (branch: string) => {
+          if (branch === 'ai-sdlc/aisdlc-stuck-stuck-task') {
+            return [
+              {
+                number: 42,
+                isDraft: false,
+                url: 'https://github.com/org/repo/pull/42',
+              },
+            ];
+          }
+          return [];
+        },
+        prListCache,
+      },
+      dispatch: async (taskId) => {
+        dispatched.push(taskId);
+        return approvedResult(taskId);
+      },
+      escalate: async () => {},
+      emitEvent: (event) => {
+        capturedEvents.push(event as { type: string; taskId?: string; prNumber?: number });
+      },
+    };
+
+    const tick = await runOrchestratorTick(config, adapters, 1);
+
+    // AC #1: AISDLC-STUCK is skipped; AISDLC-READY is dispatched.
+    expect(dispatched).toEqual(['AISDLC-READY']);
+    expect(tick.dispatched).toEqual(['AISDLC-READY']);
+
+    // AC #3: filter trace surfaces the rejection for AISDLC-STUCK.
+    const stuckEvt = tick.filterEvents.find((e) => e.taskId === 'AISDLC-STUCK');
+    expect(stuckEvt?.trace.passed).toBe(false);
+    expect(stuckEvt?.trace.failure?.filter).toBe('OpenPullRequestExists');
+    expect(stuckEvt?.trace.failure?.detail).toMatchObject({
+      kind: 'open-pull-request-exists',
+      prNumber: 42,
+      isDraft: false,
+      branchName: 'ai-sdlc/aisdlc-stuck-stuck-task',
+      prUrl: 'https://github.com/org/repo/pull/42',
+    });
+
+    // AC #4: events.jsonl gets an OrchestratorBlockedByOpenPullRequest entry.
+    const blockedEvent = capturedEvents.find(
+      (e) => e.type === 'OrchestratorBlockedByOpenPullRequest',
+    );
+    expect(blockedEvent).toBeDefined();
+    expect(blockedEvent?.taskId).toBe('AISDLC-STUCK');
+    expect(blockedEvent?.prNumber).toBe(42);
+
+    // AC #5 (filter trace UX): the formatted trace includes the PR URL.
+    const readyEvt = tick.filterEvents.find((e) => e.taskId === 'AISDLC-READY');
+    expect(readyEvt?.trace.passed).toBe(true);
+  });
+
+  it('admits a task when no open PR exists for its branch (AC #3 negative path)', async () => {
+    const graph = buildGraph([node('AISDLC-CLEAN')]);
+    const dispatched: string[] = [];
+    const config = defaultOrchestratorConfig({
+      workDir: tmp,
+      maxConcurrent: 1,
+      maxTicks: 1,
+      tickIntervalSec: 0,
+    });
+    const tick = await runOrchestratorTick(
+      config,
+      {
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        frontier: () => [{ id: 'AISDLC-CLEAN', title: 'clean task' }],
+        graphLoader: () => graph,
+        taskLabelsLoader: () => [],
+        openPRExistsOpts: { listOpenPRsByBranch: () => [] },
+        dispatch: async (taskId) => {
+          dispatched.push(taskId);
+          return approvedResult(taskId);
+        },
+        escalate: async () => {},
+      },
+      1,
+    );
+    expect(dispatched).toEqual(['AISDLC-CLEAN']);
+    const evt = tick.filterEvents.find((e) => e.taskId === 'AISDLC-CLEAN');
+    expect(evt?.trace.passed).toBe(true);
+  });
+
+  it('uses the tick-scoped cache: gh stub called once per unique branch (AC #2)', async () => {
+    const graph = buildGraph([node('AISDLC-A'), node('AISDLC-B')]);
+    const dispatched: string[] = [];
+    let callCount = 0;
+    const prListCache = new Map<
+      string,
+      import('./filters/open-pull-request-exists.js').OpenPREntry[]
+    >();
+    const config = defaultOrchestratorConfig({
+      workDir: tmp,
+      maxConcurrent: 2,
+      maxTicks: 1,
+      tickIntervalSec: 0,
+    });
+    await runOrchestratorTick(
+      config,
+      {
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        frontier: () => [
+          { id: 'AISDLC-A', title: 'task a' },
+          { id: 'AISDLC-B', title: 'task b' },
+        ],
+        graphLoader: () => graph,
+        taskLabelsLoader: () => [],
+        openPRExistsOpts: {
+          listOpenPRsByBranch: () => {
+            callCount += 1;
+            return [];
+          },
+          prListCache,
+        },
+        dispatch: async (taskId) => {
+          dispatched.push(taskId);
+          return approvedResult(taskId);
+        },
+        escalate: async () => {},
+      },
+      1,
+    );
+    // Two distinct branches → two calls, not one (different task IDs → different branch names).
+    // Cache means a second tick with the SAME candidates would not fire again.
+    expect(callCount).toBe(2);
+    expect(dispatched).toHaveLength(2);
+    // Cache is populated: both branch names should be present.
+    expect(prListCache.size).toBe(2);
+  });
+});
