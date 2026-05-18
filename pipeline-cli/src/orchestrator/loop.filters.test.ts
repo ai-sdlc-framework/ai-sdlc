@@ -250,6 +250,8 @@ describe('runOrchestratorTick — Phase 3 4-task fixture acceptance', () => {
         taskLabelsLoader: () => [],
         dispatch: async (id) => approvedResult(id),
         escalate: async () => {},
+        // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
+        parentBranchGuard: async () => {},
       },
       1,
     );
