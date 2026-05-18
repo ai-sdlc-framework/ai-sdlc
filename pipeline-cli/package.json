@@ -37,7 +37,8 @@
     "cli-task-complete": "bin/cli-task-complete.mjs",
     "cli-backlog-verify": "bin/cli-backlog-verify.mjs",
     "cli-estimate": "bin/cli-estimate.mjs",
-    "cli-verify-attestation-debug": "bin/cli-verify-attestation-debug.mjs"
+    "cli-verify-attestation-debug": "bin/cli-verify-attestation-debug.mjs",
+    "cli-quality-corpus": "bin/cli-quality-corpus.mjs"
   },
   "exports": {
     ".": {
