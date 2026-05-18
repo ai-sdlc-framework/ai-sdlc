@@ -157,6 +157,7 @@ describe('runOrchestratorLoop — feature flag enforcement', () => {
       logger: silentLogger(),
       frontier: fakeFrontier([]),
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
     const ticks = await runOrchestratorLoop(config, adapters);
     expect(ticks).toHaveLength(1);

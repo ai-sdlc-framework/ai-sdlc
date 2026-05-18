@@ -80,6 +80,7 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'fixture-run-uuid',
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 7);
 
@@ -132,6 +133,7 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'r2',
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -171,6 +173,7 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'r3',
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -207,6 +210,7 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       frontier: fakeFrontier([]),
       emitEvent: sink,
       runId: 'r4',
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -240,6 +244,7 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       dispatch: async (taskId) => approvedResult(taskId),
       emitEvent: sink,
       runId: 'r5',
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -306,6 +311,7 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'r-retry',
+      parentBranchGuard: async () => {},
     };
     await runOrchestratorTick(config, adapters, 1);
 
@@ -350,6 +356,7 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
       escalate: async () => {},
       emitEvent: sink,
       runId: 'r-wireup',
+      parentBranchGuard: async () => {},
     };
     // Tick proceeds without calling the dispatcher (empty frontier).
     // The point is the loop accepts the new dispatcher signature.
@@ -368,6 +375,7 @@ describe('runOrchestratorTick — events.jsonl emission', () => {
         throw new Error('events bus exploded');
       },
       runId: 'r6',
+      parentBranchGuard: async () => {},
     };
     // Must not throw — the emitter swallows.
     const result = await runOrchestratorTick(config, adapters, 1);

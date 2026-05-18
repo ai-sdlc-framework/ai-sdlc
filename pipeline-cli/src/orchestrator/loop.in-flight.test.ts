@@ -32,12 +32,15 @@ function fakeFrontier(ids: string[]): () => Array<{ id: string; title: string }>
 
 function hermeticFilterAdapters(): Pick<
   OrchestratorAdapters,
-  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath'
+  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath' | 'parentBranchGuard'
 > {
   return {
     graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
     taskLabelsLoader: () => [],
     calibrationLogPath: '/nonexistent-in-flight-tests-bypass.jsonl',
+    // Stub out the parent-branch guard so tests are hermetic regardless of
+    // the git working tree context during coverage runs.
+    parentBranchGuard: async () => {},
   };
 }
 
