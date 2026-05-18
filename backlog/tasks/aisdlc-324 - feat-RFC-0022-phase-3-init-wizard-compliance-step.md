@@ -1,7 +1,7 @@
 ---
 id: AISDLC-324
 title: 'feat: RFC-0022 Phase 3 — `ai-sdlc init` compliance-posture wizard step'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -42,11 +42,11 @@ New init flow tested end-to-end against a fresh checkout; OQ-11 default flips co
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 RFC-0011 init wizard adds §7 "Compliance posture" step
-- [ ] #2 Multi-select prompt for HIPAA / SOC2 / PCI-DSS / GDPR / FedRAMP / ISO-27001
-- [ ] #3 Attestation prompt confirms operator awareness
-- [ ] #4 `attestedBy` auto-filled from git config; `attestedAt` auto-filled to ISO-8601 now per OQ-2
-- [ ] #5 `.ai-sdlc/compliance.yaml` written with declared regimes + composed `derivedGates`
-- [ ] #6 Gate-config step reads `compliance.yaml` + pre-selects DB-pool default per RFC-0009 OQ-11 trigger checklist
-- [ ] #7 Integration test: HIPAA declaration → per-shard DB-pool default
+- [x] #1 RFC-0011 init wizard adds §7 "Compliance posture" step
+- [x] #2 Multi-select prompt for HIPAA / SOC2 / PCI-DSS / GDPR / FedRAMP / ISO-27001
+- [x] #3 Attestation prompt confirms operator awareness
+- [x] #4 `attestedBy` auto-filled from git config; `attestedAt` auto-filled to ISO-8601 now per OQ-2
+- [x] #5 `.ai-sdlc/compliance.yaml` written with declared regimes + composed `derivedGates`
+- [x] #6 Gate-config step reads `compliance.yaml` + pre-selects DB-pool default per RFC-0009 OQ-11 trigger checklist
+- [x] #7 Integration test: HIPAA declaration → per-shard DB-pool default
 <!-- AC:END -->
