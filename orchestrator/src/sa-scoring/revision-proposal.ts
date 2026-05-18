@@ -366,7 +366,13 @@ export function evaluateRevisionProposal(
   // output), never from external request payloads or mutable records.
   assertValidIdentityClass(input.identityClass, 'evaluateRevisionProposal');
   // Opt-out check (OQ-12.3)
+  // AISDLC-310 review fix: honor both the legacy lockConfig AND the
+  // calibrationConfig.lockNoProposal field (populated from calibration.yaml).
+  // Either signal locks the field — they're additive opt-outs.
   if (input.lockConfig && isFieldLocked(input.field, input.lockConfig)) {
+    return { kind: 'skipped', reason: 'locked' };
+  }
+  if (input.calibrationConfig?.lockNoProposal?.includes(input.field)) {
     return { kind: 'skipped', reason: 'locked' };
   }
 
