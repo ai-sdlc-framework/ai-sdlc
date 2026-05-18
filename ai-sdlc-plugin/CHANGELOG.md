@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.9.2...ai-sdlc-plugin-v0.10.0) (2026-05-18)
+
+
+### Features
+
+* **orchestrator:** rfc-0016 phase 5 — per-class bias + 3-state token + pr-comment (AISDLC-283) ([#522](https://github.com/ai-sdlc-framework/ai-sdlc/issues/522)) ([c76c443](https://github.com/ai-sdlc-framework/ai-sdlc/commit/c76c44303e248b671fef2b344f61aa9e9d71b9d8))
+* **pipeline-cli:** RFC-0035 Phase 1 — Decision resource schema + cli-decisions {list, show, add} (AISDLC-285) ([#504](https://github.com/ai-sdlc-framework/ai-sdlc/issues/504)) ([019cdfe](https://github.com/ai-sdlc-framework/ai-sdlc/commit/019cdfe265a3301580c003c06a792d6e1ef89c03))
+
+
+### Bug Fixes
+
+* **ci:** prevent stale-envelope accumulation across queue rebases (AISDLC-274) ([#490](https://github.com/ai-sdlc-framework/ai-sdlc/issues/490)) ([e78b0a0](https://github.com/ai-sdlc-framework/ai-sdlc/commit/e78b0a029972c3ade9f5adce1d8624675e7ea7e1))
+* make /ai-sdlc execute portable to adopter projects (AISDLC-272) ([#482](https://github.com/ai-sdlc-framework/ai-sdlc/issues/482)) ([98b5a51](https://github.com/ai-sdlc-framework/ai-sdlc/commit/98b5a51b0a386daf7128f251797a354b71df345d))
+* **orchestrator:** init auto-yields to defaults in non-TTY contexts (AISDLC-263) ([#472](https://github.com/ai-sdlc-framework/ai-sdlc/issues/472)) ([cf8996d](https://github.com/ai-sdlc-framework/ai-sdlc/commit/cf8996d53425ca8f101355d1c01b38efa34dfb9e))
+* **orchestrator:** resume-from-draft stale verdict + verdict shape + degenerate retry (AISDLC-355) ([#527](https://github.com/ai-sdlc-framework/ai-sdlc/issues/527)) ([117f4b9](https://github.com/ai-sdlc-framework/ai-sdlc/commit/117f4b9f33b23b3df4c4ffdea6aa32c43a6416fb))
+
 ## [0.9.2](https://github.com/ai-sdlc-framework/ai-sdlc/compare/ai-sdlc-plugin-v0.9.1...ai-sdlc-plugin-v0.9.2) (2026-05-12)
 
 
