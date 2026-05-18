@@ -111,6 +111,89 @@ A clean rebase (no overlapping files) leaves the blobs identical:
 
 But when a sibling PR modifies the same file, the merge_group commit has a DIFFERENT blob for that file (it contains both PRs' changes). The blob mismatch is intentional — the content changed, and the operator must re-attest that the new combined content was reviewed.
 
+## Coverage gate flake (AISDLC-357)
+
+`pnpm test:coverage` (invoked by `scripts/check-coverage.sh` during pre-push) can show up to 17
+transient test failures across 3 files when multiple worktrees run pre-push hooks concurrently.
+The root cause is shared `/tmp` space: integration tests that create real git worktrees under
+`/tmp` can collide with each other during parallel runs.
+
+**Tests most likely to flake:**
+- `pipeline-cli/src/execute-pipeline.test.ts` — integration tests that create git worktrees
+- Any test file that reads/writes shared `/tmp/ai-sdlc-*` paths without per-run isolation
+
+**Retry recipe:**
+
+1. If you see transient coverage failures during pre-push, the fastest fix is to re-run in isolation:
+
+   ```bash
+   # Skip coverage gate for THIS push, then verify coverage separately
+   AI_SDLC_SKIP_COVERAGE_GATE=1 git push
+
+   # Then verify coverage in isolation (no other worktrees running tests)
+   pnpm -r test:coverage
+   ```
+
+2. Alternatively, wait for other worktree test runs to finish, then retry:
+
+   ```bash
+   git push  # retry after concurrent tests have completed
+   ```
+
+3. If a specific test file is consistently failing (not transient), check whether it uses
+   a shared tmpdir path. The fix is to use `mkdtemp` for per-run isolation:
+
+   ```typescript
+   // Instead of: const tmpDir = '/tmp/ai-sdlc-test'
+   const tmpDir = mkdtempSync(join(tmpdir(), 'ai-sdlc-test-'))
+   try {
+     // ... test code ...
+   } finally {
+     rmSync(tmpDir, { recursive: true, force: true })
+   }
+   ```
+
+The `.husky/pre-push` comment (AISDLC-357) also documents this retry pattern inline.
+
+## Manual envelope cleanup helper (AISDLC-357)
+
+For the AISDLC-360 v4-kick pattern or any recovery flow where stale attestation envelopes
+accumulate after a rebase, use the helper script:
+
+```bash
+# Dry-run: see which envelopes are stale (no changes made)
+node scripts/drop-stale-attestation-envelope.mjs
+
+# Apply: remove stale envelopes and get re-sign instructions
+node scripts/drop-stale-attestation-envelope.mjs --apply
+```
+
+The script:
+1. Compares each envelope's embedded `subject.digest.sha1` against the current HEAD SHA.
+2. Reports mismatches (stale) vs matches (current).
+3. In `--apply` mode, runs `git rm` on each stale envelope.
+4. Prints the exact re-sign command to run after cleanup.
+
+**Full manual recovery sequence when automatic cleanup fails:**
+
+```bash
+# 1. Identify and remove stale envelopes
+node scripts/drop-stale-attestation-envelope.mjs --apply
+
+# 2. Re-sign against the current HEAD
+node ai-sdlc-plugin/scripts/sign-attestation.mjs \
+  --review-verdicts .ai-sdlc/verdicts/<task-id-lower>.json \
+  --iteration-count 1 \
+  --harness-note ""
+
+# 3. Stage and commit the new envelope
+git add .ai-sdlc/attestations/
+git commit -m "chore: re-sign attestation after rebase"
+
+# 4. Push
+git push --force-with-lease
+```
+
 ## Related
 
 - `CLAUDE.md` — "Review attestations" section, contentHashV4 contract and IGNORE list
@@ -119,6 +202,8 @@ But when a sibling PR modifies the same file, the merge_group commit has a DIFFE
 - `scripts/check-attestation-sign.sh` — pre-push hook with AISDLC-274 stale-envelope detection
 - `scripts/verify-attestation.mjs` — verifier with AISDLC-274 orphan-detection actionable error
 - `scripts/verify-attestation.test.mjs` — AISDLC-237 regression tests (non-overlapping stable + overlapping correctly rejects)
+- `scripts/drop-stale-attestation-envelope.mjs` — AISDLC-357 manual cleanup helper
+- AISDLC-357 — mcp-bundle sync gate + coverage flake docs + envelope-drop helper
 - AISDLC-274 — stale-envelope accumulation fix (signer + hook + verifier)
 - AISDLC-258 — shared-churn exclude list for pnpm-lock.yaml, CHANGELOG
 - AISDLC-237 — root-cause analysis and fix tracking
