@@ -5,9 +5,16 @@
  * dependency-injection path for the lister override.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import React from 'react';
+import { render } from 'ink-testing-library';
+import { Text } from 'ink';
 
-import { filterAndSort, DECISIONS_POLL_INTERVAL_MS } from './use-decisions-pending.js';
+import {
+  filterAndSort,
+  DECISIONS_POLL_INTERVAL_MS,
+  useDecisionsPending,
+} from './use-decisions-pending.js';
 import type { Decision } from '../../decisions/decision-record.js';
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
@@ -91,5 +98,29 @@ describe('filterAndSort', () => {
 describe('DECISIONS_POLL_INTERVAL_MS', () => {
   it('is 15 seconds', () => {
     expect(DECISIONS_POLL_INTERVAL_MS).toBe(15_000);
+  });
+});
+
+// ── Hook error path (AISDLC-292 coverage) ─────────────────────────────────────
+
+describe('useDecisionsPending — lister throws', () => {
+  function Probe(props: {
+    lister: () => { decisions: Decision[]; skipped: number };
+  }): React.ReactElement {
+    const { error, decisions } = useDecisionsPending({
+      intervalMs: 999_999_999,
+      lister: props.lister,
+    });
+    return <Text>{`error=${error ?? 'null'} count=${decisions.length}`}</Text>;
+  }
+
+  it('sets state.error = source-unavailable when initial lister throws (lazy init)', () => {
+    const throwingLister = vi.fn(() => {
+      throw new Error('disk full');
+    });
+    const { lastFrame } = render(<Probe lister={throwingLister} />);
+    expect(lastFrame()).toContain('error=source-unavailable');
+    expect(lastFrame()).toContain('count=0');
+    expect(throwingLister).toHaveBeenCalled();
   });
 });
