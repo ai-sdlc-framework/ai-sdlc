@@ -322,6 +322,181 @@ describe('sign-attestation.mjs', () => {
     );
   });
 
+  // ── AISDLC-355 CRITICAL: findings array vs counts-object shape ───────────
+  //
+  // Three shapes must all produce correct per-severity counts in the predicate:
+  //   1. Flat array with findings:[{severity,message},...] (new resume-from-draft shape)
+  //   2. Nested {taskId, decision, verdicts:[{findings:[...]}]} (VerdictFilePayload)
+  //   3. Legacy counts-object findings:{critical:N, major:N,...}
+
+  it('AISDLC-355: flat-array findings produce correct per-severity counts in the predicate', () => {
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    // Flat array with findings as ReviewerFinding[] — the shape resume-from-draft writes.
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify([
+        {
+          agentId: 'code-reviewer',
+          harness: 'claude-code',
+          approved: false,
+          findings: [
+            { severity: 'critical', message: 'null dereference' },
+            { severity: 'major', message: 'missing auth check' },
+            { severity: 'major', message: 'missing input validation' },
+            { severity: 'minor', message: 'add a test' },
+          ],
+        },
+        {
+          agentId: 'test-reviewer',
+          harness: 'claude-code',
+          approved: true,
+          findings: [{ severity: 'suggestion', message: 'rename variable' }],
+        },
+        {
+          agentId: 'security-reviewer',
+          harness: 'claude-code',
+          approved: true,
+          findings: [],
+        },
+      ]),
+    );
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+
+    // code-reviewer: 1 critical, 2 major, 1 minor
+    const codeReviewer = predicate.reviewers.find((r) => r.agentId === 'code-reviewer');
+    assert.ok(codeReviewer, 'code-reviewer must appear in predicate reviewers');
+    assert.equal(codeReviewer.findings.critical, 1, 'code-reviewer critical count');
+    assert.equal(codeReviewer.findings.major, 2, 'code-reviewer major count');
+    assert.equal(codeReviewer.findings.minor, 1, 'code-reviewer minor count');
+    assert.equal(codeReviewer.findings.suggestion, 0, 'code-reviewer suggestion count');
+
+    // test-reviewer: 1 suggestion
+    const testReviewer = predicate.reviewers.find((r) => r.agentId === 'test-reviewer');
+    assert.ok(testReviewer, 'test-reviewer must appear in predicate reviewers');
+    assert.equal(testReviewer.findings.critical, 0, 'test-reviewer critical count');
+    assert.equal(testReviewer.findings.suggestion, 1, 'test-reviewer suggestion count');
+
+    // Branch must still be main after signing (AISDLC-355 minor: AC2 main+dirty)
+    const currentBranch = git(['rev-parse', '--abbrev-ref', 'HEAD'], fixture.root).trim();
+    assert.equal(currentBranch, 'main', 'signing must not change the current branch');
+  });
+
+  it('AISDLC-355: nested {taskId, decision, verdicts:[]} shape with findings-array produces correct counts', () => {
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    // Nested VerdictFilePayload shape — what writeVerdictFile in execute.ts writes.
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify({
+        taskId: 'AISDLC-355',
+        decision: 'CHANGES_REQUESTED',
+        approved: false,
+        iteration: 1,
+        counts: { critical: 1, major: 1, minor: 0, suggestion: 0 },
+        harnessNote: '',
+        summary: 'CHANGES_REQUESTED',
+        verdicts: [
+          {
+            agentId: 'code-reviewer',
+            harness: 'claude-code',
+            approved: false,
+            findings: [
+              { severity: 'critical', message: 'use-after-free' },
+              { severity: 'major', message: 'off by one' },
+            ],
+          },
+          {
+            agentId: 'test-reviewer',
+            harness: 'claude-code',
+            approved: true,
+            findings: [],
+          },
+          {
+            agentId: 'security-reviewer',
+            harness: 'claude-code',
+            approved: true,
+            findings: [],
+          },
+        ],
+      }),
+    );
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+
+    const codeReviewer = predicate.reviewers.find((r) => r.agentId === 'code-reviewer');
+    assert.ok(codeReviewer, 'code-reviewer must appear in predicate reviewers');
+    assert.equal(
+      codeReviewer.findings.critical,
+      1,
+      'code-reviewer critical count from nested shape',
+    );
+    assert.equal(codeReviewer.findings.major, 1, 'code-reviewer major count from nested shape');
+  });
+
+  it('AISDLC-355: legacy counts-object findings:{critical:N,...} shape still produces correct counts (backward compat)', () => {
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    // Legacy counts-object shape — pre-AISDLC-355 verdict files.
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify([
+        {
+          agentId: 'code-reviewer',
+          harness: 'codex',
+          approved: false,
+          findings: { critical: 2, major: 3, minor: 1, suggestion: 0 },
+        },
+        {
+          agentId: 'test-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 1 },
+        },
+        {
+          agentId: 'security-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+      ]),
+    );
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${fixture.headSha}.dsse.json`);
+    const envelope = JSON.parse(readFileSync(envPath, 'utf-8'));
+    const predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+
+    const codeReviewer = predicate.reviewers.find((r) => r.agentId === 'code-reviewer');
+    assert.ok(codeReviewer, 'code-reviewer must appear in predicate reviewers');
+    assert.equal(codeReviewer.findings.critical, 2, 'legacy: code-reviewer critical count');
+    assert.equal(codeReviewer.findings.major, 3, 'legacy: code-reviewer major count');
+    assert.equal(codeReviewer.findings.minor, 1, 'legacy: code-reviewer minor count');
+
+    const testReviewer = predicate.reviewers.find((r) => r.agentId === 'test-reviewer');
+    assert.ok(testReviewer, 'test-reviewer must appear in predicate reviewers');
+    assert.equal(testReviewer.findings.suggestion, 1, 'legacy: test-reviewer suggestion count');
+  });
+
   // ── AISDLC-274: single-envelope-per-PR invariant ──────────────────────
 
   it('AISDLC-274: second sign deletes the first envelope (single-envelope invariant)', () => {

@@ -216,6 +216,29 @@ async function main() {
       `${verdictsPath} must contain either a JSON array of reviewer verdicts or an object with a 'verdicts' array key`,
     );
   }
+  // AISDLC-355 CRITICAL: handle both the new flat-array `findings` form and
+  // the legacy counts-object form so sign-attestation never silently reports
+  // 0 findings when the verdict file uses the flat-array shape.
+  function countBySeverity(findings) {
+    if (Array.isArray(findings)) {
+      // New flat-array form: count by severity field.
+      const counts = { critical: 0, major: 0, minor: 0, suggestion: 0 };
+      for (const f of findings) {
+        if (f && typeof f === 'object' && f.severity in counts) {
+          counts[f.severity]++;
+        }
+      }
+      return counts;
+    }
+    // Legacy counts-object form (or missing/null): read directly with ?? 0.
+    return {
+      critical: findings?.critical ?? 0,
+      major: findings?.major ?? 0,
+      minor: findings?.minor ?? 0,
+      suggestion: findings?.suggestion ?? 0,
+    };
+  }
+
   const reviewers = verdicts.map((v) => {
     if (!v?.agentId) fail(`reviewer verdict missing agentId: ${JSON.stringify(v)}`);
     const agentFile = join(repoRoot, 'ai-sdlc-plugin', 'agents', `${v.agentId}.md`);
@@ -225,12 +248,7 @@ async function main() {
       agentFileContent: readFileSync(agentFile, 'utf-8'),
       harness: v.harness ?? 'unknown',
       approved: Boolean(v.approved),
-      findings: {
-        critical: v.findings?.critical ?? 0,
-        major: v.findings?.major ?? 0,
-        minor: v.findings?.minor ?? 0,
-        suggestion: v.findings?.suggestion ?? 0,
-      },
+      findings: countBySeverity(v.findings),
     };
   });
   const pluginManifest = JSON.parse(

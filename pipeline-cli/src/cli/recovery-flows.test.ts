@@ -1257,6 +1257,53 @@ describe('runResumeFromDraft — AISDLC-355 Bug 1: stale synthetic-critical verd
   });
 });
 
+// ── AISDLC-355: code-minor #1 — corrupt JSON in verdict file triggers re-run ──
+
+describe('runResumeFromDraft — AISDLC-355 corrupt JSON verdict file', () => {
+  it('re-runs reviewers when verdict file contains corrupt JSON', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-355', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-355');
+    mkdirSync(worktreePath, { recursive: true });
+
+    // Write a verdict file with corrupt JSON (the "{broken" case from the minor finding).
+    const verdictDir = join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdictDir, { recursive: true });
+    writeFileSync(join(verdictDir, 'aisdlc-355.json'), '{broken');
+
+    const fakeRunner = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok('')) // no attestation
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .toRunner();
+
+    const spawner = makeApprovingSpawner();
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-355',
+      workDir: tmp,
+      spawner,
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+
+    // Corrupt JSON must be treated as stale → reviewers re-run.
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.ok).toBe(true);
+    // Reviewers must have run (stale/corrupt file treated as absent)
+    expect(spawner.getCallCount('code-reviewer')).toBeGreaterThan(0);
+  });
+});
+
 // ── AISDLC-355: Bug 2 — verdict file shape: resume-from-draft writes flat array ──
 
 describe('runResumeFromDraft — AISDLC-355 Bug 2: verdict file shape', () => {

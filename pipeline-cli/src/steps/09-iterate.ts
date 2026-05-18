@@ -286,5 +286,28 @@ export async function spawnReviewerWithRetry(
   }
 
   const retryResult = await spawner.spawn(opts);
+
+  // AISDLC-355 MAJOR: propagate timeout on the retry attempt with the same
+  // reviewer-timeout summary used for first-attempt timeouts, rather than
+  // falling through to coerceReviewerVerdict which would generate a
+  // "returned no parseable verdict (status=timeout)" message — inconsistent
+  // with the first-attempt path.
+  if (retryResult.status === 'timeout') {
+    return {
+      agentId,
+      harness: 'claude-code',
+      approved: false,
+      findings: [
+        {
+          severity: 'critical',
+          message: `${agentId} timed out on retry (status=timeout${
+            retryResult.error ? ', error=' + retryResult.error : ''
+          })`,
+        },
+      ],
+      summary: 'reviewer-timeout',
+    };
+  }
+
   return coerceReviewerVerdict(agentId, retryResult);
 }
