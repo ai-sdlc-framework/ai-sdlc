@@ -63,8 +63,8 @@ describe('runParentBranchGuard — AISDLC-363 AC #4', () => {
     expect(infos).toHaveLength(0);
   });
 
-  it('skips with warn when on a GH merge-queue probe branch', async () => {
-    const { logger, warns } = captureLogger();
+  it('skips with info when on a GH merge-queue probe branch (AISDLC-363 code-reviewer)', async () => {
+    const { logger, warns, infos } = captureLogger();
     const queueBranch = 'gh-readonly-queue/main/pr-42-a1b2c3d4e5f6';
     const runner = makeStubRunner({
       'git symbolic-ref --short HEAD': { stdout: `${queueBranch}\n`, stderr: '', code: 0 },
@@ -72,8 +72,10 @@ describe('runParentBranchGuard — AISDLC-363 AC #4', () => {
 
     await runParentBranchGuard('/tmp/test-workdir', runner, logger);
 
-    // Should emit one warning containing the queue branch name.
-    expect(warns.some((w) => w.includes(queueBranch))).toBe(true);
+    // Should emit one info containing the queue branch name (info, not warn —
+    // queue probe is sanctioned ephemeral state, not an anomaly).
+    expect(infos.some((m) => m.includes(queueBranch))).toBe(true);
+    expect(warns).toHaveLength(0);
     // Should NOT throw — the function must return normally.
   });
 
