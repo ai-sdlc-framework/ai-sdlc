@@ -1,7 +1,7 @@
 ---
 id: AISDLC-302
 title: 'feat: RFC-0025 Refit Phase 1 — Substrate cleanup + salvage from closed PR #481'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
