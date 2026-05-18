@@ -3,9 +3,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 
 import type { Decision } from './decision-record.js';
-import { sendDecisionNotifications } from './notification.js';
+import { postSlackWebhook, sendDecisionNotifications } from './notification.js';
 
 // ── Fixture ───────────────────────────────────────────────────────────────────
 
@@ -181,5 +183,52 @@ describe('sendDecisionNotifications — multi-surface', () => {
     expect(records).toHaveLength(2);
     const surfaces = records.map((r) => r.surface).sort();
     expect(surfaces).toEqual(['email', 'slack']);
+  });
+});
+
+// ── postSlackWebhook direct tests ─────────────────────────────────────────────
+
+describe('postSlackWebhook — direct', () => {
+  it('returns ok:false with explicit error for invalid URL', async () => {
+    const result = await postSlackWebhook('not a url', '{}');
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('invalid webhook URL');
+  });
+
+  it('returns ok:true on 2xx HTTP response', async () => {
+    const server: Server = createServer((_req, res) => {
+      res.statusCode = 200;
+      res.end('ok');
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const result = await postSlackWebhook(`http://127.0.0.1:${port}/hook`, '{"x":1}');
+      expect(result.ok).toBe(true);
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
+  it('returns ok:false with HTTP <status> on non-2xx', async () => {
+    const server: Server = createServer((_req, res) => {
+      res.statusCode = 500;
+      res.end('boom');
+    });
+    await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address() as AddressInfo;
+    try {
+      const result = await postSlackWebhook(`http://127.0.0.1:${port}/hook`, '{}');
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('500');
+    } finally {
+      await new Promise<void>((r) => server.close(() => r()));
+    }
+  });
+
+  it('returns ok:false on connection error', async () => {
+    const result = await postSlackWebhook('http://127.0.0.1:1/hook', '{}');
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeDefined();
   });
 });
