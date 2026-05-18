@@ -819,6 +819,128 @@ describe('integration — executePipeline (full Step 0-13)', () => {
     expect(privateMutex.depth).toBe(0);
   });
 
+  // ── AISDLC-354 — Step 11 auto-promote coverage ───────────────────────────
+  //
+  // The three tests below cover the auto-promote block (lines 344-370 of
+  // execute-pipeline.ts): gh pr ready invocation, gh pr merge --auto
+  // invocation, and the non-zero-exit swallow branches on each call.
+
+  it('AISDLC-354: APPROVED verdict triggers gh pr ready + gh pr merge --auto invocations', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-354-HAPPY',
+      title: 'auto-promote happy path',
+      status: 'To Do',
+      acceptanceCriteria: ['auto-promote fires on approved'],
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-354-happy'), { recursive: true });
+
+    const fakeRunnerObj = makeHappyRunner()
+      .on(/^gh pr ready/, ok())
+      .on(/^gh pr merge.*--auto/, ok());
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-354-HAPPY',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunnerObj.toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 2,
+    });
+
+    expect(result.outcome).toBe('approved');
+    expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
+
+    // gh pr ready must have been invoked with PR number '42'
+    const readyCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('ready'),
+    );
+    expect(readyCalls.length).toBeGreaterThan(0);
+    expect(readyCalls[0]?.args).toContain('42');
+
+    // gh pr merge --auto must have been invoked with PR number '42'
+    const mergeCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('merge') && c.args.includes('--auto'),
+    );
+    expect(mergeCalls.length).toBeGreaterThan(0);
+    expect(mergeCalls[0]?.args).toContain('42');
+  });
+
+  it('AISDLC-354: gh pr ready non-zero exit is swallowed as warning (outcome stays approved)', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-354-READY-FAIL',
+      title: 'auto-promote ready nonzero',
+      status: 'To Do',
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-354-ready-fail'), { recursive: true });
+
+    const warnings: string[] = [];
+
+    const fakeRunnerObj = makeHappyRunner()
+      .on(/^gh pr ready/, fail('not eligible for conversion', 1))
+      .on(/^gh pr merge.*--auto/, ok());
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-354-READY-FAIL',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunnerObj.toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 2,
+      logger: {
+        info: () => {},
+        warn: (msg) => warnings.push(msg),
+        error: () => {},
+        progress: () => {},
+      },
+    });
+
+    // Non-zero exit from gh pr ready must NOT fail the pipeline
+    expect(result.outcome).toBe('approved');
+    expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
+
+    // logger.warn must have been called with the non-zero exit message
+    expect(warnings.some((w) => /gh pr ready exited non-zero/.test(w))).toBe(true);
+    expect(warnings.some((w) => /not eligible for conversion/.test(w))).toBe(true);
+  });
+
+  it('AISDLC-354: gh pr merge --auto non-zero exit is swallowed as warning (outcome stays approved)', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-354-MERGE-FAIL',
+      title: 'auto-promote merge nonzero',
+      status: 'To Do',
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-354-merge-fail'), { recursive: true });
+
+    const warnings: string[] = [];
+
+    const fakeRunnerObj = makeHappyRunner()
+      .on(/^gh pr ready/, ok())
+      .on(/^gh pr merge.*--auto/, fail('already armed for auto-merge', 1));
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-354-MERGE-FAIL',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunnerObj.toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 2,
+      logger: {
+        info: () => {},
+        warn: (msg) => warnings.push(msg),
+        error: () => {},
+        progress: () => {},
+      },
+    });
+
+    // Non-zero exit from gh pr merge --auto must NOT fail the pipeline
+    expect(result.outcome).toBe('approved');
+    expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
+
+    // logger.warn must have been called with the non-zero exit message
+    expect(warnings.some((w) => /gh pr merge --auto exited non-zero/.test(w))).toBe(true);
+    expect(warnings.some((w) => /already armed for auto-merge/.test(w))).toBe(true);
+  });
+
   // AISDLC-200 — Counter-test: post-setup throws (e.g. a buggy step 7
   // implementation) MUST NOT pre-clean the worktree from inside the
   // finally. The wrapper's `rollbackDispatch()` needs the branch ref to

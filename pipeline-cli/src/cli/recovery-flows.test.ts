@@ -795,6 +795,179 @@ describe('runResumeFromDraft', () => {
     expect(result.reason).toMatch(/no commits beyond origin\/main/);
     expect(result.reason).toContain('#42');
   });
+
+  // ── AISDLC-354 — Case C auto-promote coverage ──────────────────────────
+  //
+  // The three tests below cover the auto-promote block in runResumeFromDraft
+  // (resume-from-draft.ts lines 505-518): gh pr merge --auto invocation on
+  // APPROVED, the non-zero-exit swallow branch (logger.warn), and the
+  // guard that skips the merge call when verdict is not APPROVED.
+
+  it('AISDLC-354 CaseC: gh pr merge --auto non-zero exit is swallowed as warning on reviewers path', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(worktreePath, { recursive: true });
+    // No verdict file — triggers Case C (run reviewers fresh + push)
+
+    const warnings: string[] = [];
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .on(/^gh pr merge/, fail('already armed for auto-merge', 1));
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-273',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunnerObj.toRunner(),
+      logger: {
+        info: () => {},
+        warn: (msg: string) => warnings.push(msg),
+        error: () => {},
+        progress: () => {},
+      },
+    });
+
+    // Non-zero exit from gh pr merge --auto must NOT fail the pipeline
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.finalVerdict?.decision).toBe('APPROVED');
+
+    // gh pr merge must have been called (the APPROVED branch executed)
+    const mergeCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('merge'),
+    );
+    expect(mergeCalls.length).toBeGreaterThan(0);
+
+    // logger.warn must have been called with the non-zero exit message
+    expect(warnings.some((w) => /gh pr merge --auto exited non-zero/.test(w))).toBe(true);
+    expect(warnings.some((w) => /already armed for auto-merge/.test(w))).toBe(true);
+  });
+
+  it('AISDLC-354 CaseC: gh pr merge --auto NOT called when verdict is not APPROVED on reviewers path', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(worktreePath, { recursive: true });
+    // No verdict file — triggers Case C (run reviewers fresh)
+
+    // Rejecting spawner — verdict will be CHANGES_REQUESTED
+    const rejectingSpawner = new MockSpawner({
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: '',
+        parsed: {
+          approved: false,
+          findings: [{ severity: 'major' as const, file: 'a.ts', line: 1, message: 'nope' }],
+          summary: 'rejected',
+        },
+        status: 'success',
+        durationMs: 0,
+      },
+      'test-reviewer': {
+        type: 'test-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'lgtm' },
+        status: 'success',
+        durationMs: 0,
+      },
+      'security-reviewer': {
+        type: 'security-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'lgtm' },
+        status: 'success',
+        durationMs: 0,
+      },
+    });
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok());
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-273',
+      workDir: tmp,
+      spawner: rejectingSpawner,
+      runner: fakeRunnerObj.toRunner(),
+      logger: silentLogger(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.finalVerdict?.decision).not.toBe('APPROVED');
+
+    // gh pr merge must NOT have been called (non-APPROVED branch skipped)
+    const mergeCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('merge'),
+    );
+    expect(mergeCalls.length).toBe(0);
+  });
+
+  it('AISDLC-354 CaseC: gh pr merge --auto is called with PR number on APPROVED reviewers path', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(worktreePath, { recursive: true });
+    // No verdict file — triggers Case C (run reviewers fresh + push)
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .on(/^gh pr merge/, ok());
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-273',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunnerObj.toRunner(),
+      logger: silentLogger(),
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.finalVerdict?.decision).toBe('APPROVED');
+
+    // gh pr merge must have been called with the PR number and --auto flag
+    const mergeCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('merge') && c.args.includes('--auto'),
+    );
+    expect(mergeCalls.length).toBeGreaterThan(0);
+    expect(mergeCalls[0].args).toContain('42');
+  });
 });
 
 // ── AISDLC-273 AC #3: --rework-pr ─────────────────────────────────────────
