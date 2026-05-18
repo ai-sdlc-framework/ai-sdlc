@@ -681,13 +681,9 @@ describe('runResumeFromDraft', () => {
     );
     expect(readyCalls.length).toBeGreaterThan(0);
 
-    // gh pr merge --auto --squash must have been invoked
+    // gh pr merge --auto must have been invoked (no method flag — see AISDLC-221)
     const mergeCalls = fakeRunnerObj.calls.filter(
-      (c) =>
-        c.command === 'gh' &&
-        c.args.includes('merge') &&
-        c.args.includes('--auto') &&
-        c.args.includes('--squash'),
+      (c) => c.command === 'gh' && c.args.includes('merge') && c.args.includes('--auto'),
     );
     expect(mergeCalls.length).toBeGreaterThan(0);
     // The first arg after 'merge' must be the PR number

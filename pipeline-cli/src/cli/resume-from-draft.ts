@@ -596,17 +596,13 @@ export async function runResumeFromDraft(
   // Bug 2 (AISDLC-354) — auto-promote to ready + arm auto-merge when verdict is APPROVED.
   // Both calls swallow non-zero exits: PR may already be ready, queue may already be armed.
   if (aggregated.decision === 'APPROVED') {
-    const mergeResult = await runner(
-      'gh',
-      ['pr', 'merge', String(prNumber), '--auto', '--squash'],
-      {
-        cwd: opts.workDir,
-        allowFailure: true,
-      },
-    );
+    const mergeResult = await runner('gh', ['pr', 'merge', String(prNumber), '--auto'], {
+      cwd: opts.workDir,
+      allowFailure: true,
+    });
     if (mergeResult.code !== 0) {
       logger.warn(
-        `[ai-sdlc] resume-from-draft: gh pr merge --auto --squash exited non-zero (non-fatal): ` +
+        `[ai-sdlc] resume-from-draft: gh pr merge --auto exited non-zero (non-fatal): ` +
           `${mergeResult.stderr.trim() || mergeResult.stdout.trim() || 'unknown error'}`,
       );
     }

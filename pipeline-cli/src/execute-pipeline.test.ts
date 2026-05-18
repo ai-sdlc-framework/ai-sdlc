@@ -994,13 +994,12 @@ describe('integration — defaultSpawner picks the right spawner per environment
     expect(readyCalls.length).toBeGreaterThan(0);
     expect(readyCalls[0].args).toContain('42');
 
-    // gh pr merge --auto --squash must have been invoked with PR number '42'
+    // gh pr merge --auto must have been invoked with PR number '42'
+    // (no method flag — the queue ruleset enforces the strategy; passing --squash
+    // matches the queue method and risks the AISDLC-221 method-must-differ deadlock
+    // if ruleset enforcement is ever weakened)
     const mergeCalls = fakeRunnerObj.calls.filter(
-      (c) =>
-        c.command === 'gh' &&
-        c.args.includes('merge') &&
-        c.args.includes('--auto') &&
-        c.args.includes('--squash'),
+      (c) => c.command === 'gh' && c.args.includes('merge') && c.args.includes('--auto'),
     );
     expect(mergeCalls.length).toBeGreaterThan(0);
     expect(mergeCalls[0].args).toContain('42');

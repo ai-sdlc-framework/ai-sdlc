@@ -356,17 +356,13 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
               `${readyResult.stderr.trim() || readyResult.stdout.trim() || 'unknown error'}`,
           );
         }
-        const mergeResult = await runner(
-          'gh',
-          ['pr', 'merge', String(prNum), '--auto', '--squash'],
-          {
-            cwd: opts.workDir,
-            allowFailure: true,
-          },
-        );
+        const mergeResult = await runner('gh', ['pr', 'merge', String(prNum), '--auto'], {
+          cwd: opts.workDir,
+          allowFailure: true,
+        });
         if (mergeResult.code !== 0) {
           logger.warn(
-            `[ai-sdlc] Step 11 auto-promote: gh pr merge --auto --squash exited non-zero (non-fatal): ` +
+            `[ai-sdlc] Step 11 auto-promote: gh pr merge --auto exited non-zero (non-fatal): ` +
               `${mergeResult.stderr.trim() || mergeResult.stdout.trim() || 'unknown error'}`,
           );
         }
