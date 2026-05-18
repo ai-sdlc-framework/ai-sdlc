@@ -1028,14 +1028,14 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   // overwhelming common case for this bug, but the check also catches a
   // single orphan from a clean-rebase-then-re-sign cycle).
   // AISDLC-362 follow-up: orphan-envelope hard-reject REMOVED.
-// The orphan check rejected envelopes whose subject.digest.sha1 (pre-rebase
-// commit) couldn't be found in the rebased commit graph. With V5 (AISDLC-362),
-// the content hash itself is the trust boundary — an orphan subject SHA is
-// moot if V5 hash matches HEAD's file blobs. The check was firing on every
-// queue rebase even when V5 would have validated cleanly, blocking parallel
-// merges. V5 + per-envelope resolveSubjectShaForEnvelope() (which already
-// falls back to 'v5-head' when subject SHA isn't reachable) provides the
-// trust binding without needing the orphan pre-check.
+  // The orphan check rejected envelopes whose subject.digest.sha1 (pre-rebase
+  // commit) couldn't be found in the rebased commit graph. With V5 (AISDLC-362),
+  // the content hash itself is the trust boundary — an orphan subject SHA is
+  // moot if V5 hash matches HEAD's file blobs. The check was firing on every
+  // queue rebase even when V5 would have validated cleanly, blocking parallel
+  // merges. V5 + per-envelope resolveSubjectShaForEnvelope() (which already
+  // falls back to 'v5-head' when subject SHA isn't reachable) provides the
+  // trust binding without needing the orphan pre-check.
 
   // Per-envelope: try to resolve a subject SHA whose recomputed
   // `contentHashV3` matches the envelope (AISDLC-103, Verifier Phase 3 —
