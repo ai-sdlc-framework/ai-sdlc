@@ -1,7 +1,7 @@
 ---
 id: AISDLC-298
 title: 'policy: prohibit subagent-inline OQ resolution + add reviewer check'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-15'
 labels:
