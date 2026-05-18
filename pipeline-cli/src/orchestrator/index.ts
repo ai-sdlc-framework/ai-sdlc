@@ -35,6 +35,7 @@ export {
   OrchestratorDisabledError,
   ParentNotOnMainError,
   RECOVERABLE_ABORT_OUTCOMES,
+  resolveUmbrellaSpawnerKind,
   ROLLBACK_OUTCOMES,
   runOrchestratorLoop,
   runOrchestratorTick,

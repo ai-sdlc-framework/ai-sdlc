@@ -36,6 +36,7 @@ import {
   ORCHESTRATOR_SPAWNER_ENV,
   orchestratorDisabledMessage,
   OrchestratorDisabledError,
+  resolveUmbrellaSpawnerKind,
   runOrchestratorLoop,
   runOrchestratorTick,
   type OrchestratorAdapters,
@@ -192,11 +193,16 @@ export function buildOrchestratorCli(
     .option('spawner', {
       describe:
         `Spawner for umbrella dispatch. Also configurable with ${ORCHESTRATOR_SPAWNER_ENV}. ` +
-        'Defaults to claude (subscription billing via claude -p). ' +
+        'Effective default is claude (subscription billing via claude -p) — resolved in ' +
+        'resolveUmbrellaSpawnerKind so the env var is honored when --spawner is absent. ' +
         'Pass --spawner claude-cli for the /ai-sdlc orchestrator-tick slash command body path.',
       type: 'string',
       choices: SPAWNER_KINDS,
-      default: 'claude' as (typeof SPAWNER_KINDS)[number],
+      // NO yargs `default` — see AISDLC-352 code-reviewer MAJOR. A yargs default
+      // populates argv.spawner unconditionally, which shadows AI_SDLC_ORCHESTRATOR_SPAWNER
+      // env var in resolveUmbrellaSpawnerKind. The 'claude' fallback lives in
+      // resolveUmbrellaSpawnerKind (loop.ts) ONLY, where it correctly runs AFTER the
+      // env-var check.
     })
     .command(
       'start',
@@ -214,9 +220,7 @@ export function buildOrchestratorCli(
         const config = buildConfig(argv as Record<string, unknown>);
         const resolvedAdapters = buildAdapters(argv as Record<string, unknown>, adapters);
         // AISDLC-352 — emit billing-safety warnings before dispatch
-        emitBillingSafetyWarnings(
-          resolvedAdapters.umbrellaSpawnerKind ?? String(argv.spawner ?? 'claude'),
-        );
+        emitBillingSafetyWarnings(resolveUmbrellaSpawnerKind(resolvedAdapters));
         try {
           const ticks = await runOrchestratorLoop(config, resolvedAdapters);
           emit({
@@ -279,9 +283,7 @@ export function buildOrchestratorCli(
         };
 
         // AISDLC-352 — emit billing-safety warnings before dispatch
-        emitBillingSafetyWarnings(
-          tickAdapters.umbrellaSpawnerKind ?? String(argv.spawner ?? 'claude'),
-        );
+        emitBillingSafetyWarnings(resolveUmbrellaSpawnerKind(tickAdapters));
 
         const result = await runOrchestratorTick(config, tickAdapters, 1);
         emit({ ok: true, mode: 'tick', tick: result });

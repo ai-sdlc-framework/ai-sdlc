@@ -94,8 +94,13 @@ Run the tick via the direct-node invocation pattern (CLAUDE.md "CI behavior" /
 AISDLC-156 — never `pnpm --filter ... exec cli-orchestrator`):
 
 ```bash
+# --spawner claude-cli is REQUIRED here: the default changed to `claude` in
+# AISDLC-352 (shell-out via claude -p), but the /ai-sdlc orchestrator-tick
+# slash command body needs `claude-cli` (manifest-emit mode) so it can read
+# the manifest + invoke Agent. Without the explicit flag, the new default
+# silently breaks the subscription-preserving path documented in AISDLC-353.
 TICK_OUTPUT=$(AI_SDLC_AUTONOMOUS_ORCHESTRATOR="$AI_SDLC_AUTONOMOUS_ORCHESTRATOR" \
-  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1 2>&1)
+  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1 --spawner claude-cli 2>&1)
 TICK_EXIT=$?
 echo "[orchestrator-tick] tick exited $TICK_EXIT"
 echo "$TICK_OUTPUT"
@@ -216,7 +221,7 @@ After the Agent result is written, run the continuation tick that picks up
 
 ```bash
 CONTINUATION_OUTPUT=$(AI_SDLC_AUTONOMOUS_ORCHESTRATOR="$AI_SDLC_AUTONOMOUS_ORCHESTRATOR" \
-  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1 \
+  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1 --spawner claude-cli \
     --continue-from-result 2>&1)
 echo "[orchestrator-tick] continuation tick: $CONTINUATION_OUTPUT"
 ```

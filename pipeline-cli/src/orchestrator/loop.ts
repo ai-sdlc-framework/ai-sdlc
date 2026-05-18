@@ -2287,7 +2287,7 @@ function buildDefaultDispatchableLoader(workDir: string): (taskId: string) => {
  *      mode); that is still valid for slash-command-body callers who pass
  *      `--spawner claude-cli` explicitly.
  */
-function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): SpawnerKind {
+export function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): SpawnerKind {
   if (adapters.umbrellaSpawnerKind) return adapters.umbrellaSpawnerKind;
   const envKind = resolveEnvUmbrellaSpawnerKind();
   if (envKind) return envKind;
