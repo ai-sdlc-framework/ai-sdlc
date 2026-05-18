@@ -1,7 +1,7 @@
 ---
 id: AISDLC-310
 title: 'feat: RFC-0031 Refit — per-org calibration.yaml config (OQ-12.1 + OQ-12.5)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
