@@ -182,4 +182,76 @@ describe('check-orchestrator-state.sh', () => {
     // Untracked file must SURVIVE the reset
     assert.ok(existsSync(join(env.local, 'untracked.txt')), 'untracked file should survive reset');
   });
+
+  // AISDLC-358: branch-guard tests — four canonical cases.
+
+  it('[AISDLC-358] parent on main, clean working tree → check passes', () => {
+    // Already on main (default after setupRepoPair). No changes. Should pass silently.
+    const r = runScript(env.local);
+    assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+    // No branch-recovery messages expected
+    assert.ok(!r.stdout.includes('auto-recovered'), `unexpected recovery: ${r.stdout}`);
+    assert.ok(
+      !r.stdout.includes('ERROR: parent working tree is on branch'),
+      `unexpected error: ${r.stdout}`,
+    );
+  });
+
+  it('[AISDLC-358] parent on main, dirty working tree → warns + skips reset (existing AISDLC-137 behavior)', () => {
+    // Move origin/main forward so the script needs to sync, then dirty local.
+    const sibling = join(env.root, 'sibling-dirty2');
+    sh(`git clone -q "${env.remote}" "${sibling}"`);
+    sh(`git -C "${sibling}" config user.email s@s.s && git -C "${sibling}" config user.name s`);
+    sh(`git -C "${sibling}" config commit.gpgsign false`);
+    writeFileSync(join(sibling, 'sibling2.txt'), 'sibling2\n');
+    sh(`git -C "${sibling}" add sibling2.txt && git -C "${sibling}" commit -q -m sibling2`);
+    sh(`git -C "${sibling}" push -q origin main`);
+
+    // Dirty the local tracked file (parent is STILL on main)
+    writeFileSync(join(env.local, 'README.md'), 'modified by test\n');
+
+    const r = runScript(env.local);
+    // Exit 0 — gracefully skip (AISDLC-137 behavior; parent is on main so no refusal)
+    assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+    assert.match(r.stdout, /uncommitted tracked changes; skipping reset/);
+    // File must NOT be reverted
+    assert.equal(sh(`cat "${join(env.local, 'README.md')}"`), 'modified by test');
+  });
+
+  it('[AISDLC-358] parent on feature-branch, clean working tree → auto-checkout main + reset + log recovery', () => {
+    // Create and check out a feature branch in the local repo.
+    sh(`git -C "${env.local}" checkout -q -b feature/test-branch`);
+    // Ensure we're on the feature branch
+    assert.equal(sh(`git -C "${env.local}" symbolic-ref --short HEAD`), 'feature/test-branch');
+
+    const r = runScript(env.local);
+    // Must succeed (exit 0)
+    assert.equal(r.status, 0, `stderr: ${r.stderr}`);
+    // Must log the auto-recovery
+    assert.match(r.stdout, /auto-recovered parent from 'feature\/test-branch' to main/);
+    // Parent must now be on main
+    assert.equal(sh(`git -C "${env.local}" symbolic-ref --short HEAD`), 'main');
+  });
+
+  it('[AISDLC-358] parent on feature-branch, dirty working tree → refuse + clear error', () => {
+    // Create and check out a feature branch in the local repo.
+    sh(`git -C "${env.local}" checkout -q -b feature/dirty-branch`);
+    // Dirty a tracked file
+    writeFileSync(join(env.local, 'README.md'), 'dirty feature branch content\n');
+
+    const r = runScript(env.local);
+    // Must fail (exit 1)
+    assert.equal(r.status, 1, `expected exit 1; stdout: ${r.stdout}`);
+    // Must print clear error naming the branch
+    assert.match(r.stdout, /ERROR: parent working tree is on branch 'feature\/dirty-branch'/);
+    // Must list dirty paths
+    assert.match(r.stdout, /Dirty paths/);
+    // Must print recovery command
+    assert.match(r.stdout, /Recovery:/);
+    assert.match(r.stdout, /checkout main/);
+    // File must NOT have been reverted
+    assert.equal(sh(`cat "${join(env.local, 'README.md')}"`), 'dirty feature branch content');
+    // Branch must still be the feature branch (no auto-recovery attempted)
+    assert.equal(sh(`git -C "${env.local}" symbolic-ref --short HEAD`), 'feature/dirty-branch');
+  });
 });

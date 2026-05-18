@@ -53,7 +53,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { dirname as pathDirname, join, resolve as pathResolve } from 'node:path';
 
 import {
   dispatchResultToSubagentResult,
@@ -390,6 +390,18 @@ export interface OrchestratorAdapters {
    * pre-populate via this adapter to assert the filter fires.
    */
   inFlight?: InFlightMap;
+  /**
+   * AISDLC-358 — parent-branch guard. When set, overrides the default
+   * inline branch check that runs at the top of every tick. Tests inject
+   * a no-op (`async () => {}`) to skip the real `git symbolic-ref` calls.
+   * The default implementation throws `ParentNotOnMainError` when the
+   * parent working tree is on a non-main branch with dirty tracked files,
+   * and auto-recovers (checkout + reset) when the tree is clean.
+   *
+   * Signature: `(workDir: string, runner: Runner, logger: PipelineLogger) => Promise<void>`.
+   * Throw to abort the tick; return normally to continue.
+   */
+  parentBranchGuard?: (workDir: string, runner: Runner, logger: PipelineLogger) => Promise<void>;
 }
 
 /**
@@ -437,6 +449,16 @@ export async function runOrchestratorTick(
   // a try/catch so a thrown injected sink never crashes the tick.
   // Built early so the sweep block below can emit events with runId + tick.
   const emit = buildEmitter(config, adapters, tickNumber);
+
+  // AISDLC-358 — Pattern-C contract: parent working tree MUST be on main
+  // before any frontier work begins. Run the branch guard before the sweep +
+  // frontier scan so a stale-branch parent never contaminates dispatch
+  // decisions. Tests inject `adapters.parentBranchGuard` as a no-op to skip
+  // the real git calls.
+  const parentBranchGuardFn =
+    adapters.parentBranchGuard ??
+    ((wd, runner, lgr) => runParentBranchGuard(wd, runner ?? defaultRunner, lgr));
+  await parentBranchGuardFn(config.workDir, adapters.runner ?? defaultRunner, logger);
 
   // AISDLC-256 — self-clean merged worktrees before frontier scan so stale
   // worktrees don't accumulate across autonomous-loop ticks. Try/catch ensures
@@ -1895,6 +1917,152 @@ export class OrchestratorDisabledError extends Error {
     super(message);
     this.name = 'OrchestratorDisabledError';
   }
+}
+
+/**
+ * AISDLC-358 — raised when the parent working tree is on a non-main branch
+ * AND has dirty tracked files. The tick is aborted; the operator must stash or
+ * commit their changes, then manually run:
+ *   git checkout main && git reset --hard origin/main
+ */
+export class ParentNotOnMainError extends Error {
+  constructor(
+    public readonly branch: string,
+    public readonly dirtyPaths: string[],
+    public readonly workDir: string,
+  ) {
+    const paths = dirtyPaths.slice(0, 5).join(', ');
+    const more = dirtyPaths.length > 5 ? ` (+${dirtyPaths.length - 5} more)` : '';
+    super(
+      `[orchestrator] parent working tree is on branch '${branch}' (expected 'main') ` +
+        `with dirty tracked files: ${paths}${more}. ` +
+        `Recovery: git -C "${workDir}" checkout main && git -C "${workDir}" reset --hard origin/main`,
+    );
+    this.name = 'ParentNotOnMainError';
+  }
+}
+
+/**
+ * AISDLC-358 — default parent-branch guard. Resolves the parent working tree
+ * root (via `git rev-parse --git-common-dir` + `dirname`), then reads the
+ * parent's current branch via `git symbolic-ref --short HEAD`. If it's not
+ * `main`:
+ *   - Clean working tree → auto-checkout main + reset hard, log recovery.
+ *   - Dirty working tree → throw `ParentNotOnMainError` (aborts the tick).
+ *
+ * Runs BEFORE the frontier scan on every tick so stale-branch contamination
+ * never corrupts the autonomous loop's dispatch decisions.
+ *
+ * **Worktree detection**: when invoked from inside a `.worktrees/<id>/`
+ * isolated worktree, `git rev-parse --git-common-dir` returns the PARENT
+ * repo's `.git` dir (an absolute path). The guard resolves the parent root
+ * from that path and checks the PARENT's branch, not the worktree's. If the
+ * git-common-dir cannot be resolved (no git repo, tmpdir test env) the guard
+ * skips silently — hermetic test setups without a real `.git` directory are
+ * always safe to skip.
+ */
+export async function runParentBranchGuard(
+  workDir: string,
+  runner: Runner,
+  logger: PipelineLogger,
+): Promise<void> {
+  // Resolve the git common dir so we always check the PARENT repo's HEAD,
+  // not the worktree's isolated HEAD (which correctly reflects the feature
+  // branch). This mirrors the shell script's `git rev-parse --git-common-dir`
+  // + `dirname` pattern.
+  let commonDirResult: import('../runtime/exec.js').ExecResult;
+  try {
+    commonDirResult = await runner('git', ['rev-parse', '--git-common-dir'], {
+      cwd: workDir,
+      allowFailure: true,
+    });
+  } catch {
+    // Runner threw (e.g. test doubles that throw unconditionally). Treat as
+    // "not in a git repo" — skip the guard so the calling tick can continue.
+    return;
+  }
+  if (commonDirResult.code !== 0 || !commonDirResult.stdout.trim()) {
+    // Not in a git repo (e.g., hermetic tmpdir test). Skip silently.
+    return;
+  }
+
+  const commonDir = commonDirResult.stdout.trim();
+  // When `--git-common-dir` returns `.git` (relative), we're in the parent
+  // repo itself. When it returns an absolute path, we're in a linked worktree.
+  // In either case, `dirname` of the resolved git dir is the parent root.
+  const commonDirAbs = commonDir === '.git' ? pathResolve(workDir, '.git') : commonDir;
+  const parentRoot = pathDirname(commonDirAbs);
+
+  // Read the PARENT's current branch from the parent root.
+  const branchResult = await runner('git', ['symbolic-ref', '--short', 'HEAD'], {
+    cwd: parentRoot,
+    allowFailure: true,
+  });
+  const currentBranch = branchResult.stdout.trim();
+
+  if (branchResult.code !== 0 || currentBranch === '') {
+    // Detached HEAD — cannot auto-recover; warn and continue.
+    logger.warn(
+      `[orchestrator] parent HEAD is detached; skipping branch guard (manual recovery needed)`,
+    );
+    return;
+  }
+
+  if (currentBranch === 'main') {
+    // Already on main — nothing to do.
+    return;
+  }
+
+  // On a non-main branch. Check working tree cleanliness (from the parent root).
+  const statusResult = await runner('git', ['status', '--porcelain'], {
+    cwd: parentRoot,
+    allowFailure: true,
+  });
+  const dirtyLines = (statusResult.stdout ?? '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0 && !l.startsWith('??'));
+
+  if (dirtyLines.length > 0) {
+    // Dirty — cannot auto-recover safely. Throw to abort the tick.
+    throw new ParentNotOnMainError(currentBranch, dirtyLines, parentRoot);
+  }
+
+  // Clean — auto-recover: checkout main + reset hard.
+  logger.warn(
+    `[orchestrator] parent working tree is on branch '${currentBranch}'; auto-recovering to main`,
+  );
+  const checkoutResult = await runner('git', ['checkout', 'main'], {
+    cwd: parentRoot,
+    allowFailure: true,
+  });
+  if (checkoutResult.code !== 0) {
+    throw new ParentNotOnMainError(
+      currentBranch,
+      [`git checkout main failed (exit ${checkoutResult.code}): ${checkoutResult.stderr.trim()}`],
+      parentRoot,
+    );
+  }
+  const resetResult = await runner('git', ['reset', '--hard', 'origin/main'], {
+    cwd: parentRoot,
+    allowFailure: true,
+  });
+  if (resetResult.code !== 0) {
+    throw new ParentNotOnMainError(
+      'main',
+      [
+        `git reset --hard origin/main failed (exit ${resetResult.code}): ${resetResult.stderr.trim()}`,
+      ],
+      parentRoot,
+    );
+  }
+  const headResult = await runner('git', ['rev-parse', '--short', 'HEAD'], {
+    cwd: parentRoot,
+    allowFailure: true,
+  });
+  logger.info(
+    `[orchestrator] auto-recovered parent from '${currentBranch}' to main at ${headResult.stdout.trim()}`,
+  );
 }
 
 // ── Default adapters ──────────────────────────────────────────────────

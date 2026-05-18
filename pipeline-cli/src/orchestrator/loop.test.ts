@@ -64,7 +64,11 @@ function fakeFrontier(ids: string[]): () => Array<{ id: string; title: string }>
  */
 function hermeticFilterAdapters(): Pick<
   OrchestratorAdapters,
-  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath' | 'alreadyInFlightOpts'
+  | 'graphLoader'
+  | 'taskLabelsLoader'
+  | 'calibrationLogPath'
+  | 'alreadyInFlightOpts'
+  | 'parentBranchGuard'
 > {
   return {
     graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
@@ -78,6 +82,9 @@ function hermeticFilterAdapters(): Pick<
       detectSubprocess: false,
       listOpenPRs: () => [],
     },
+    // Explicitly stub out the parent-branch guard so tests are hermetic
+    // regardless of whether /tmp happens to be inside a git repo.
+    parentBranchGuard: async () => {},
   };
 }
 
@@ -150,6 +157,7 @@ describe('runOrchestratorLoop — feature flag enforcement', () => {
       logger: silentLogger(),
       frontier: fakeFrontier([]),
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
     const ticks = await runOrchestratorLoop(config, adapters);
     expect(ticks).toHaveLength(1);

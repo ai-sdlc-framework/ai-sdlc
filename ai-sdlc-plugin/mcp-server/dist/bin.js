@@ -31686,7 +31686,7 @@ import { existsSync as existsSync22 } from "node:fs";
 // ../../pipeline-cli/dist/orchestrator/loop.js
 import { randomUUID } from "node:crypto";
 import { existsSync as existsSync35, readFileSync as readFileSync34 } from "node:fs";
-import { join as join37 } from "node:path";
+import { dirname as pathDirname, join as join37, resolve as pathResolve } from "node:path";
 
 // ../../pipeline-cli/dist/runtime/spawners/dispatch-result.js
 import { mkdirSync as mkdirSync10, readFileSync as readFileSync21, writeFileSync as writeFileSync9 } from "node:fs";

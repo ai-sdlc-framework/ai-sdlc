@@ -196,6 +196,7 @@ describe('AISDLC-256 — sweep wired into runOrchestratorTick', () => {
       frontier: () => [],
       // No-op sleep so the test doesn't wait.
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 0);
@@ -223,6 +224,7 @@ describe('AISDLC-256 — sweep wired into runOrchestratorTick', () => {
       emitEvent: sink,
       frontier: () => [],
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 0);
@@ -259,6 +261,7 @@ describe('AISDLC-256 — sweep wired into runOrchestratorTick', () => {
         return [];
       },
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
 
     // Should NOT throw despite the runner throwing inside sweepMergedWorktrees.
@@ -285,6 +288,7 @@ describe('AISDLC-256 — sweep wired into runOrchestratorTick', () => {
       emitEvent: sink,
       frontier: () => [],
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 0);
@@ -315,6 +319,7 @@ describe('AISDLC-256 — sweep wired into runOrchestratorTick', () => {
       emitEvent: sink,
       frontier: () => [],
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 0);
@@ -346,6 +351,7 @@ describe('AISDLC-256 — OrchestratorWorktreeSwept event envelope', () => {
       frontier: () => [],
       sleep: () => Promise.resolve(),
       runId: 'test-run-id-256',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 7);
@@ -388,6 +394,7 @@ describe('AISDLC-256 — AI_SDLC_SWEEP_DISABLED kill switch', () => {
       emitEvent: sink,
       frontier: () => [],
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 0);
@@ -417,6 +424,7 @@ describe('AISDLC-256 — AI_SDLC_SWEEP_DISABLED kill switch', () => {
         emitEvent: sink,
         frontier: () => [],
         sleep: () => Promise.resolve(),
+        parentBranchGuard: async () => {},
       };
 
       await runOrchestratorTick(config, adapters, 0);
@@ -442,6 +450,7 @@ describe('AISDLC-256 — AI_SDLC_SWEEP_DISABLED kill switch', () => {
       emitEvent: sink,
       frontier: () => [],
       sleep: () => Promise.resolve(),
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 0);

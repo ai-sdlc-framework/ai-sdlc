@@ -52,12 +52,15 @@ function fakeFrontier(ids: string[]): () => Array<{ id: string; title: string }>
  */
 function hermeticFilterAdapters(): Pick<
   OrchestratorAdapters,
-  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath'
+  'graphLoader' | 'taskLabelsLoader' | 'calibrationLogPath' | 'parentBranchGuard'
 > {
   return {
     graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
     taskLabelsLoader: () => [],
     calibrationLogPath: '/nonexistent-aisdlc-229-bypass.jsonl',
+    // Explicitly stub out the parent-branch guard so tests are hermetic
+    // regardless of whether /tmp happens to be inside a git repo.
+    parentBranchGuard: async () => {},
   };
 }
 

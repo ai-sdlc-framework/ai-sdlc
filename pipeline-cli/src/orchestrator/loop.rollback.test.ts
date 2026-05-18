@@ -160,6 +160,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -216,6 +217,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -245,6 +247,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -275,6 +278,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -302,6 +306,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -332,6 +337,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -370,6 +376,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);
@@ -439,6 +446,7 @@ describe('runOrchestratorTick — AISDLC-177 rollback wiring', () => {
       graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
       taskLabelsLoader: () => [],
       calibrationLogPath: '/nonexistent-bypass.jsonl',
+      parentBranchGuard: async () => {},
     };
 
     await runOrchestratorTick(config, adapters, 1);

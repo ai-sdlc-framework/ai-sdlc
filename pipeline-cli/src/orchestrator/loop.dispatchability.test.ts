@@ -122,6 +122,7 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -184,6 +185,7 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -221,6 +223,7 @@ describe('runOrchestratorTick — Dispatchability filter (AISDLC-243)', () => {
         return approvedResult(taskId);
       },
       escalate: async () => {},
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
