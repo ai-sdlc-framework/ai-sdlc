@@ -47,6 +47,9 @@ pnpm-debug.log*
 .ai-sdlc/state.db-wal
 .ai-sdlc/state/
 .ai-sdlc/memory/
+# AISDLC-320: RFC-0024 Refit Phase 1 — draft captures are operator-local (OQ-1).
+# Explicit submit (`cli-capture submit`) promotes to team-shared backlog/captures/.
+.ai-sdlc/captures-drafts/
 # AISDLC-133: per-task reviewer verdict files written by /ai-sdlc execute
 # Step 10 and consumed by `.husky/pre-push` (scripts/check-attestation-sign.sh)
 # to auto-sign the DSSE attestation. Ephemeral, per-worktree — never

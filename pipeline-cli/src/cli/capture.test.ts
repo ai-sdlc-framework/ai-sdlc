@@ -16,9 +16,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildCaptureCli } from './capture.js';
 import { writeCapture } from '../capture/capture-writer.js';
+import { writeDraftCaptureFile, writeSubmittedCaptureFile } from '../capture/draft-capture.js';
 import { renderRubricTable, getRubricEntry } from '../capture/triage-rubric.js';
 import { loadCaptures } from '../capture/capture-reader.js';
 import type { CaptureRecord } from '../capture/capture-record.js';
+import { generateCaptureId } from '../capture/capture-record.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 
@@ -32,6 +34,7 @@ let savedExit: typeof process.exit;
 let savedEnvCapture: string | undefined;
 let savedEnvArtifactsDir: string | undefined;
 let savedEnvUser: string | undefined;
+let savedEnvRepoRoot: string | undefined;
 
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'cli-capture-'));
@@ -44,6 +47,7 @@ beforeEach(() => {
   savedEnvCapture = process.env.AI_SDLC_EMERGENT_CAPTURE;
   savedEnvArtifactsDir = process.env.ARTIFACTS_DIR;
   savedEnvUser = process.env.USER;
+  savedEnvRepoRoot = process.env.CAPTURE_REPO_ROOT;
 
   process.stdout.write = ((chunk: string | Uint8Array) => {
     stdoutChunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
@@ -57,9 +61,10 @@ beforeEach(() => {
     throw new Error(`process.exit(${code})`);
   }) as typeof process.exit;
 
-  // Set feature flag and artifacts dir for every test.
+  // Set feature flag and directories for every test.
   process.env.AI_SDLC_EMERGENT_CAPTURE = 'experimental';
   process.env.ARTIFACTS_DIR = tmp;
+  process.env.CAPTURE_REPO_ROOT = tmp;
   process.env.USER = 'test-user';
 });
 
@@ -83,6 +88,11 @@ afterEach(() => {
     delete process.env.USER;
   } else {
     process.env.USER = savedEnvUser;
+  }
+  if (savedEnvRepoRoot === undefined) {
+    delete process.env.CAPTURE_REPO_ROOT;
+  } else {
+    process.env.CAPTURE_REPO_ROOT = savedEnvRepoRoot;
   }
 
   rmSync(tmp, { recursive: true, force: true });
@@ -302,12 +312,16 @@ describe('file subcommand', () => {
     expect(stderrText()).toMatch(/"finding" field is required/);
   });
 
-  it('persists the record to ARTIFACTS_DIR/_captures', async () => {
+  it('writes the record to .ai-sdlc/captures-drafts/<id>.md (draft state)', async () => {
     setArgv('file', 'persisted finding', '--operator', 'op@test.com');
     await buildCaptureCli().parseAsync();
     const rec = stdoutJson<CaptureRecord>();
-    const filePath = join(tmp, '_captures', `${rec.id}.jsonl`);
-    expect(existsSync(filePath)).toBe(true);
+    // AISDLC-320 Refit Phase 1: file now writes to draft directory, not legacy JSONL path.
+    const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${rec.id}.md`);
+    expect(existsSync(draftPath)).toBe(true);
+    // Legacy JSONL should NOT be created.
+    const legacyPath = join(tmp, '_captures', `${rec.id}.jsonl`);
+    expect(existsSync(legacyPath)).toBe(false);
   });
 });
 
@@ -1022,5 +1036,493 @@ describe('capture-reader: loadCaptures', () => {
     const { records } = loadCaptures({ artifactsDir: tmp, sourceType: 'operator' });
     expect(records).toHaveLength(1);
     expect(records[0].finding).toBe('operator');
+  });
+});
+
+// ── AISDLC-320: file command writes to draft path ────────────────────────────
+
+describe('file subcommand — draft state (AISDLC-320)', () => {
+  it('AI-agent --json with high confidence auto-submits to backlog/captures/', async () => {
+    const blob = JSON.stringify({
+      finding: 'high confidence finding',
+      severity: 'major',
+      triage: 'new-issue',
+      agentRole: 'code-reviewer',
+      confidence: 0.9, // >= 0.7 threshold
+    });
+    setArgv('file', 'ignored', '--json', blob);
+    await buildCaptureCli().parseAsync();
+    const rec = stdoutJson<CaptureRecord>();
+    const submittedPath = join(tmp, 'backlog', 'captures', `${rec.id}.md`);
+    const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${rec.id}.md`);
+    expect(existsSync(submittedPath)).toBe(true);
+    expect(existsSync(draftPath)).toBe(false);
+  });
+
+  it('AI-agent --json with low confidence goes to draft', async () => {
+    const blob = JSON.stringify({
+      finding: 'low confidence finding',
+      severity: 'minor',
+      triage: 'tbd',
+      agentRole: 'code-reviewer',
+      confidence: 0.3, // < 0.7 threshold
+    });
+    setArgv('file', 'ignored', '--json', blob);
+    await buildCaptureCli().parseAsync();
+    const rec = stdoutJson<CaptureRecord>();
+    const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${rec.id}.md`);
+    const submittedPath = join(tmp, 'backlog', 'captures', `${rec.id}.md`);
+    expect(existsSync(draftPath)).toBe(true);
+    expect(existsSync(submittedPath)).toBe(false);
+  });
+
+  it('AI-agent --json with no confidence field goes to draft', async () => {
+    const blob = JSON.stringify({
+      finding: 'no confidence field',
+      agentRole: 'developer',
+    });
+    setArgv('file', 'ignored', '--json', blob);
+    await buildCaptureCli().parseAsync();
+    const rec = stdoutJson<CaptureRecord>();
+    const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${rec.id}.md`);
+    expect(existsSync(draftPath)).toBe(true);
+  });
+
+  it('emits table format mentioning draft state', async () => {
+    setArgv('file', 'table draft', '--operator', 'op@test.com', '--format', 'table');
+    await buildCaptureCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/capture filed: cap_/);
+    expect(out).toMatch(/state: draft/);
+  });
+});
+
+// ── submit subcommand ─────────────────────────────────────────────────────────
+
+describe('submit subcommand', () => {
+  it('promotes a draft to submitted and emits JSON', async () => {
+    const now = new Date('2026-05-18T14:30:00Z');
+    const record: CaptureRecord = {
+      id: generateCaptureId(now),
+      schemaVersion: 'v1',
+      timestamp: now.toISOString(),
+      finding: 'draft to submit',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now.toISOString() }],
+    };
+    writeDraftCaptureFile(record, tmp);
+
+    setArgv('submit', record.id, '--by', 'op@test.com');
+    await buildCaptureCli().parseAsync();
+
+    const result = stdoutJson<CaptureRecord>();
+    expect(result.id).toBe(record.id);
+    expect(result.finding).toBe('draft to submit');
+
+    const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${record.id}.md`);
+    const submittedPath = join(tmp, 'backlog', 'captures', `${record.id}.md`);
+    expect(existsSync(draftPath)).toBe(false);
+    expect(existsSync(submittedPath)).toBe(true);
+  });
+
+  it('submit --format table emits human-readable output', async () => {
+    const now = new Date('2026-05-18T14:30:00Z');
+    const record: CaptureRecord = {
+      id: generateCaptureId(now),
+      schemaVersion: 'v1',
+      timestamp: now.toISOString(),
+      finding: 'table submit finding',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now.toISOString() }],
+    };
+    writeDraftCaptureFile(record, tmp);
+
+    setArgv('submit', record.id, '--by', 'op@test.com', '--format', 'table');
+    await buildCaptureCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/submitted:/);
+    expect(out).toMatch(/state: submitted/);
+  });
+
+  it('throws when draft does not exist', async () => {
+    const id = generateCaptureId(new Date('2026-05-18T10:00:00Z'));
+    setArgv('submit', id, '--by', 'op@test.com');
+    await expect(buildCaptureCli().parseAsync()).rejects.toThrow();
+  });
+});
+
+// ── submit-all subcommand ─────────────────────────────────────────────────────
+
+describe('submit-all subcommand', () => {
+  it('bulk-submits all drafts and prints table summary', async () => {
+    const now1 = new Date('2026-05-18T10:00:00Z');
+    const now2 = new Date('2026-05-18T11:00:00Z');
+    const r1: CaptureRecord = {
+      id: generateCaptureId(now1),
+      schemaVersion: 'v1',
+      timestamp: now1.toISOString(),
+      finding: 'first draft',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now1.toISOString() }],
+    };
+    const r2: CaptureRecord = {
+      id: generateCaptureId(now2),
+      schemaVersion: 'v1',
+      timestamp: now2.toISOString(),
+      finding: 'second draft',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now2.toISOString() }],
+    };
+    writeDraftCaptureFile(r1, tmp);
+    writeDraftCaptureFile(r2, tmp);
+
+    setArgv('submit-all', '--by', 'op@test.com');
+    await buildCaptureCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/submitted 2 capture\(s\)/);
+  });
+
+  it('submit-all --format json emits JSON result', async () => {
+    setArgv('submit-all', '--format', 'json');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ submitted: string[]; failed: unknown[] }>();
+    expect(Array.isArray(result.submitted)).toBe(true);
+    expect(Array.isArray(result.failed)).toBe(true);
+  });
+
+  it('prints "(no drafts to submit)" when drafts dir is empty', async () => {
+    setArgv('submit-all', '--by', 'op@test.com');
+    await buildCaptureCli().parseAsync();
+    expect(stdoutText()).toMatch(/no drafts to submit/);
+  });
+});
+
+// ── discard subcommand ────────────────────────────────────────────────────────
+
+describe('discard subcommand', () => {
+  it('hard-deletes a draft capture', async () => {
+    const now = new Date('2026-05-18T14:30:00Z');
+    const record: CaptureRecord = {
+      id: generateCaptureId(now),
+      schemaVersion: 'v1',
+      timestamp: now.toISOString(),
+      finding: 'to discard',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now.toISOString() }],
+    };
+    writeDraftCaptureFile(record, tmp);
+
+    const draftPath = join(tmp, '.ai-sdlc', 'captures-drafts', `${record.id}.md`);
+    expect(existsSync(draftPath)).toBe(true);
+
+    setArgv('discard', record.id, '--reason', 'half-formed thought', '--by', 'op@test.com');
+    await buildCaptureCli().parseAsync();
+    expect(stdoutText()).toMatch(/discarded:/);
+    expect(existsSync(draftPath)).toBe(false);
+  });
+
+  it('refuses to discard a submitted capture and prints pointer to redact', async () => {
+    const now = new Date('2026-05-18T14:30:00Z');
+    const record: CaptureRecord = {
+      id: generateCaptureId(now),
+      schemaVersion: 'v1',
+      timestamp: now.toISOString(),
+      finding: 'submitted capture',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now.toISOString() }],
+    };
+    writeSubmittedCaptureFile(record, tmp);
+
+    setArgv('discard', record.id, '--reason', 'want to delete', '--by', 'op@test.com');
+    await expect(buildCaptureCli().parseAsync()).rejects.toThrow();
+  });
+
+  it('throws when draft does not exist', async () => {
+    const id = generateCaptureId(new Date('2026-05-18T10:00:00Z'));
+    setArgv('discard', id, '--reason', 'cleanup', '--by', 'op@test.com');
+    await expect(buildCaptureCli().parseAsync()).rejects.toThrow();
+  });
+});
+
+// ── list with --source flag ───────────────────────────────────────────────────
+
+describe('list subcommand — multi-source (AISDLC-320)', () => {
+  it('shows legacy captures when --source legacy', async () => {
+    writeCapture({
+      finding: 'legacy only',
+      sourceType: 'operator',
+      operator: 'op@test.com',
+      artifactsDir: tmp,
+    });
+    setArgv('list', '--source', 'legacy', '--format', 'json');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ records: CaptureRecord[] }>();
+    expect(result.records.some((r) => r.finding === 'legacy only')).toBe(true);
+  });
+
+  it('shows submitted captures when --source submitted', async () => {
+    const now = new Date('2026-05-18T14:30:00Z');
+    const record: CaptureRecord = {
+      id: generateCaptureId(now),
+      schemaVersion: 'v1',
+      timestamp: now.toISOString(),
+      finding: 'submitted capture',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now.toISOString() }],
+    };
+    writeSubmittedCaptureFile(record, tmp);
+
+    setArgv('list', '--source', 'submitted', '--format', 'json');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ records: CaptureRecord[] }>();
+    expect(result.records).toHaveLength(1);
+    expect(result.records[0].finding).toBe('submitted capture');
+  });
+
+  it('shows all captures (legacy + submitted + drafts) when --source all', async () => {
+    // Legacy
+    writeCapture({
+      finding: 'legacy find',
+      sourceType: 'operator',
+      operator: 'op@test.com',
+      artifactsDir: tmp,
+    });
+
+    // Submitted
+    const now = new Date('2026-05-18T15:00:00Z');
+    const subRecord: CaptureRecord = {
+      id: generateCaptureId(now),
+      schemaVersion: 'v1',
+      timestamp: now.toISOString(),
+      finding: 'submitted find',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now.toISOString() }],
+    };
+    writeSubmittedCaptureFile(subRecord, tmp);
+
+    // Draft
+    const now2 = new Date('2026-05-18T16:00:00Z');
+    const draftRecord: CaptureRecord = {
+      id: generateCaptureId(now2),
+      schemaVersion: 'v1',
+      timestamp: now2.toISOString(),
+      finding: 'draft find',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now2.toISOString() }],
+    };
+    writeDraftCaptureFile(draftRecord, tmp);
+
+    setArgv('list', '--format', 'json');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ records: CaptureRecord[] }>();
+    const findings = result.records.map((r) => r.finding);
+    expect(findings).toContain('legacy find');
+    expect(findings).toContain('submitted find');
+    expect(findings).toContain('draft find');
+  });
+
+  it('deduplicates captures that appear in multiple sources', async () => {
+    const now = new Date('2026-05-18T14:30:00Z');
+    const record: CaptureRecord = {
+      id: generateCaptureId(now),
+      schemaVersion: 'v1',
+      timestamp: now.toISOString(),
+      finding: 'shared capture',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now.toISOString() }],
+    };
+    // Write to both submitted and draft dirs to simulate overlap.
+    writeSubmittedCaptureFile(record, tmp);
+    writeDraftCaptureFile(record, tmp);
+
+    setArgv('list', '--format', 'json');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ records: CaptureRecord[] }>();
+    // Should appear only once despite being in two dirs.
+    const matching = result.records.filter((r) => r.id === record.id);
+    expect(matching).toHaveLength(1);
+  });
+});
+
+// ── migrate-legacy subcommand ─────────────────────────────────────────────────
+
+describe('migrate-legacy subcommand', () => {
+  it('migrates legacy JSONL captures and prints table summary', async () => {
+    writeCapture({
+      finding: 'to migrate',
+      sourceType: 'operator',
+      operator: 'op@test.com',
+      artifactsDir: tmp,
+    });
+    setArgv('migrate-legacy');
+    await buildCaptureCli().parseAsync();
+    const out = stdoutText();
+    expect(out).toMatch(/migrated 1 capture\(s\)/);
+  });
+
+  it('--format json emits structured result', async () => {
+    writeCapture({
+      finding: 'json migration',
+      sourceType: 'operator',
+      operator: 'op@test.com',
+      artifactsDir: tmp,
+    });
+    setArgv('migrate-legacy', '--format', 'json');
+    await buildCaptureCli().parseAsync();
+    const result = stdoutJson<{ migrated: number; failed: number; ids: string[] }>();
+    expect(result.migrated).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.ids).toHaveLength(1);
+  });
+
+  it('prints "(no legacy captures found)" when nothing to migrate', async () => {
+    setArgv('migrate-legacy');
+    await buildCaptureCli().parseAsync();
+    expect(stdoutText()).toMatch(/no legacy captures found/);
+  });
+});
+
+// ── redact subcommand — submitted capture ─────────────────────────────────────
+
+describe('redact subcommand — submitted capture path (AISDLC-320)', () => {
+  it('redacts a submitted capture in backlog/captures/', async () => {
+    const now = new Date('2026-05-18T14:30:00Z');
+    const record: CaptureRecord = {
+      id: generateCaptureId(now),
+      schemaVersion: 'v1',
+      timestamp: now.toISOString(),
+      finding: 'PII in submitted capture',
+      severity: 'unknown',
+      triage: 'tbd',
+      source: { type: 'operator', agentRole: null, operator: 'op@test.com' },
+      evidence: {},
+      relatedIssueId: null,
+      extensionTargetIssueId: null,
+      featureIssueCarveRef: null,
+      blocksIssueId: null,
+      createdIssueId: null,
+      createdFeatureIssueId: null,
+      resolvedAt: null,
+      resolvedBy: null,
+      auditTrail: [{ action: 'captured', by: 'op@test.com', at: now.toISOString() }],
+    };
+    writeSubmittedCaptureFile(record, tmp);
+
+    setArgv('redact', record.id, '--reason', 'PII captured', '--by', 'op@test.com');
+    await buildCaptureCli().parseAsync();
+
+    const result = stdoutJson<CaptureRecord>();
+    expect(result.finding).toBe('[REDACTED]');
+    expect(result.auditTrail[result.auditTrail.length - 1].action).toBe('redacted');
   });
 });

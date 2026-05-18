@@ -7,6 +7,7 @@
 export * from './capture-record.js';
 export * from './capture-reader.js';
 export * from './capture-writer.js';
+export * from './draft-capture.js';
 export * from './incode-linter.js';
 export * from './pr-comment-parser.js';
 export * from './triage-rubric.js';
