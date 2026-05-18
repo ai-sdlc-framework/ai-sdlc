@@ -1,7 +1,7 @@
 ---
 id: AISDLC-287
 title: 'feat: RFC-0035 Phase 3 — Stage B rubric scorer + actor routing'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-15'
 labels:
