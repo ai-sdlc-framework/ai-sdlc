@@ -836,6 +836,8 @@ describe('runOrchestratorTick — AISDLC-361 OpenPullRequestExists filter', () =
       emitEvent: (event) => {
         capturedEvents.push(event as { type: string; taskId?: string; prNumber?: number });
       },
+      // AISDLC-363: inject no-op guard so test runs on any branch / worktree
+      parentBranchGuard: async () => {},
     };
 
     const tick = await runOrchestratorTick(config, adapters, 1);
@@ -892,6 +894,8 @@ describe('runOrchestratorTick — AISDLC-361 OpenPullRequestExists filter', () =
           return approvedResult(taskId);
         },
         escalate: async () => {},
+        // AISDLC-363: inject no-op guard so test runs on any branch / worktree
+        parentBranchGuard: async () => {},
       },
       1,
     );
@@ -937,6 +941,8 @@ describe('runOrchestratorTick — AISDLC-361 OpenPullRequestExists filter', () =
           return approvedResult(taskId);
         },
         escalate: async () => {},
+        // AISDLC-363: inject no-op guard so test runs on any branch / worktree
+        parentBranchGuard: async () => {},
       },
       1,
     );

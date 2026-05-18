@@ -57,6 +57,38 @@ Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` 
 
 - TypeScript strict, ESM. Prettier + ESLint. No premature abstractions — three similar lines beat one wrong abstraction.
 
+## Subagent Governance — OQ-resolution prohibition (AISDLC-298)
+
+**Dev subagents MUST NOT resolve RFC Open Questions inline during implementation.**
+
+AISDLC-271 / RFC-0031 shipped with all 5 OQs resolved by the dev subagent during a single development iteration — framework-level architectural decisions made without operator walkthrough or cross-pillar review. This is explicitly prohibited.
+
+### What counts as inline OQ resolution
+
+Any addition of a `**Resolution:**` (or `RESOLVED:` / `✅ RESOLVED`) marker to an RFC `## Open Questions` section by a developer subagent during task implementation. This includes:
+
+- Picking an implementation approach and writing the rationale directly into the RFC
+- Removing or replacing an OQ bullet with a concluded design decision
+- Writing code that implicitly resolves an OQ without documenting the escalation
+
+### Required behavior: escalate, do not resolve
+
+When a dev subagent encounters an open question that blocks or constrains implementation:
+
+1. **Stop and escalate** — do not pick an approach and resolve the OQ inline
+2. **Return `prUrl: null` with a `notes` field** explaining which OQ in which RFC is blocking and what options exist
+3. **Do not write Resolution markers** into RFC bodies — that is exclusively the operator's role after a walkthrough
+
+If an OQ is genuinely non-blocking (implementation can proceed without resolving it), proceed with a documented assumption in the PR body — not a Resolution marker in the RFC.
+
+### Long-term replacement: RFC-0035 Decision Catalog
+
+The long-term mechanism for OQ resolution is the [Decision Catalog (RFC-0035)](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md). OQs in RFC bodies will eventually project into the catalog as `Decision` records, routed to the appropriate actor (Engineering / Product / Operator), resolved asynchronously with full audit trail. Until that ships, escalate by returning `prUrl: null` per the protocol above.
+
+### Reviewer gate (AISDLC-298)
+
+The `code-reviewer` and `test-reviewer` subagents check for inline OQ resolutions in every PR diff. A new `**Resolution:**` marker added by a developer in an RFC's `## Open Questions` section is a **critical** finding that blocks approval.
+
 ## Review attestations
 
 **Attestation is required.** `/ai-sdlc execute` runs three reviewer subagents locally and writes a DSSE envelope to `.ai-sdlc/attestations/<sha>.dsse.json`. `verify-attestation.yml` posts `ai-sdlc/attestation: success/failure` (required status on `main` per AISDLC-193). Missing/invalid envelopes block merge. `ai-sdlc-review.yml`'s `Post Review Results` is the parallel review-tier required check (CI-side reviewers run when local attestation is missing as the cost-saver fallback). New envelopes carry BOTH `contentHashV3` (`sha256("<baseBlobSha> -> <headBlobSha>")` per changed file — partially rebase-stable, invalidates when sibling PRs touch the same files) AND `contentHashV4` (per-file `{path, headBlobSha}` JSON map, base-independent — survives merge-queue rebases when the PR's files don't overlap with sibling PRs; correctly rejects when a sibling PR modified the same files, because the reviewed content genuinely changed — operator must rebase + re-sign in that case, see `docs/operations/merge-queue-rebase-recovery.md`). The verifier prefers v5 when present, falls back to v4, then v3 for legacy envelopes. New envelopes carry ALL three hashes (v3+v4+v5) for maximum backward + forward compatibility, with `schemaVersion: 'v5'`. The file collector excludes the envelope file itself (`.ai-sdlc/attestations/<sha>.dsse.json`) so the chore-commit pattern (sign at dev → add envelope at chore → push) doesn't chicken-and-egg the hash. All collectors also exclude a fixed `CONTENTHASH_SHARED_CHURN_FILES` list (formerly `CONTENTHASHV4_IGNORE_FILES`, renamed AISDLC-362 with backward-compat alias) of shared-churn files (`pnpm-lock.yaml`, `CHANGELOG.md`, `pipeline-cli/CHANGELOG.md`, `orchestrator/CHANGELOG.md`, `reference/src/core/generated-schemas.ts`) that change in most PRs due to tooling automation — excluding them prevents the merge-queue rebase+re-sign loop when only these files differ (AISDLC-258, AISDLC-342). These files are excluded on BOTH the signer and verifier sides. DO NOT add source files, test files, configs, `package.json`, or RFCs to this list. `generated-schemas.ts` is the **only** sanctioned `.ts` source-file exception (AISDLC-342): it's regenerated from `spec/schemas/*.schema.json` on every `pnpm build` and carries zero human intent — the underlying schema JSON files remain in v5 so the reviewer signal is preserved. **v5 algorithm (AISDLC-362):** `computeContentHashV5(entries, signedMergeBase)` — SHA-256 of canonical JSON `{schemaVersion:'v5', signedMergeBase:'<sha>', files:[{path,blobSha}...]}`. `collectChangedFileEntriesForV5(repoRoot, baseRef, headRef)` — computes `git merge-base <baseRef> HEAD` ONCE at sign time (the FROZEN merge-base), then diffs `<signedMergeBase>..HEAD`. The verifier reproduces the diff using the frozen SHA from the predicate, not the moving `origin/main`. Non-overlapping sibling merges do not invalidate v5; overlapping (same file) sibling merges correctly invalidate it. Docs-only PRs (`spec/rfcs/**`, `docs/**`, `backlog/{tasks,completed}/**`, root `*.md`) bypass the full review+attestation pipeline: `paths-ignore` skips `ai-sdlc-review.yml` and `verify-attestation.yml` on `pull_request` events; on `merge_group` events (where `paths-ignore` does not apply), both workflows detect docs-only changesets inline via `scripts/is-docs-only-changeset.mjs` (AISDLC-206) and short-circuit with `success` statuses directly (AISDLC-214). The former fallback workflows (`ai-sdlc-review-docs-only.yml`, `verify-attestation-docs-only.yml`) have been retired — they caused CANCELLED races on the merge queue.
