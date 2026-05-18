@@ -2032,8 +2032,30 @@ export async function runParentBranchGuard(
   logger.warn(
     `[orchestrator] parent working tree is on branch '${currentBranch}'; auto-recovering to main`,
   );
-  await runner('git', ['checkout', 'main'], { cwd: parentRoot, allowFailure: true });
-  await runner('git', ['reset', '--hard', 'origin/main'], { cwd: parentRoot, allowFailure: true });
+  const checkoutResult = await runner('git', ['checkout', 'main'], {
+    cwd: parentRoot,
+    allowFailure: true,
+  });
+  if (checkoutResult.code !== 0) {
+    throw new ParentNotOnMainError(
+      currentBranch,
+      [`git checkout main failed (exit ${checkoutResult.code}): ${checkoutResult.stderr.trim()}`],
+      parentRoot,
+    );
+  }
+  const resetResult = await runner('git', ['reset', '--hard', 'origin/main'], {
+    cwd: parentRoot,
+    allowFailure: true,
+  });
+  if (resetResult.code !== 0) {
+    throw new ParentNotOnMainError(
+      'main',
+      [
+        `git reset --hard origin/main failed (exit ${resetResult.code}): ${resetResult.stderr.trim()}`,
+      ],
+      parentRoot,
+    );
+  }
   const headResult = await runner('git', ['rev-parse', '--short', 'HEAD'], {
     cwd: parentRoot,
     allowFailure: true,
