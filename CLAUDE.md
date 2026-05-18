@@ -126,8 +126,9 @@ This prevents retroactive blocking of in-flight tasks and allows a graceful migr
 | Use case | Command | Billing |
 |---|---|---|
 | Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` | Subscription (Claude Code Max) |
+| **Autonomous loop — zero incremental cost post-2026-06-15** | `/ai-sdlc orchestrator-tick` (once, then ScheduleWakeup loops) | Subscription interactive quota only — Agent SDK credit NOT drawn. Requires active Claude Code session. See `docs/operations/billing-and-cost-optimization.md` §1b. |
 | Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
-| Shell-driven autonomous tick (cron/daemon/sidecar) | `cli-orchestrator tick --spawner claude` | Subscription (shells out to `claude -p`) |
+| Shell-driven autonomous tick (cron/daemon/sidecar) | `cli-orchestrator tick --spawner claude` | Subscription (shells out to `claude -p`; draws Agent SDK credit pool post-2026-06-15) |
 | GitHub issue / unattended / CI | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
 
 `/ai-sdlc execute` is the default for internal work. Worktree-isolated, auto-creates sibling-repo PRs from `permittedExternalPaths`, marks Done + moves task file in the same PR.
