@@ -959,4 +959,108 @@ describe('integration — defaultSpawner picks the right spawner per environment
     expect(result.outcome).toBe('approved');
     expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
   });
+
+  // AISDLC-354 Bug 2 — Step 11 auto-promote: when verdict is APPROVED, executePipeline
+  // must invoke `gh pr ready <prNum>` + `gh pr merge <prNum> --auto --squash`.
+  it('Bug2(execute-pipeline): APPROVED outcome triggers gh pr ready + gh pr merge --auto --squash', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-354',
+      title: 'auto-promote test',
+      status: 'To Do',
+      acceptanceCriteria: ['verify auto-promote'],
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-354'), { recursive: true });
+
+    const fakeRunnerObj = makeHappyRunner()
+      .on(/^gh pr ready/, ok())
+      .on(/^gh pr merge.*--auto.*--squash/, ok());
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-354',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunnerObj.toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 2,
+    });
+
+    expect(result.outcome).toBe('approved');
+    expect(result.prUrl).toBe('https://github.com/owner/repo/pull/42');
+
+    // gh pr ready must have been invoked with PR number '42'
+    const readyCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('ready'),
+    );
+    expect(readyCalls.length).toBeGreaterThan(0);
+    expect(readyCalls[0].args).toContain('42');
+
+    // gh pr merge --auto --squash must have been invoked with PR number '42'
+    const mergeCalls = fakeRunnerObj.calls.filter(
+      (c) =>
+        c.command === 'gh' &&
+        c.args.includes('merge') &&
+        c.args.includes('--auto') &&
+        c.args.includes('--squash'),
+    );
+    expect(mergeCalls.length).toBeGreaterThan(0);
+    expect(mergeCalls[0].args).toContain('42');
+  });
+
+  // AISDLC-354 Bug 2 — needs-human-attention outcome must NOT trigger auto-promote.
+  it('Bug2(execute-pipeline): needs-human-attention outcome does NOT invoke gh pr merge --auto', async () => {
+    writeTaskFile(tmp, {
+      id: 'AISDLC-354',
+      title: 'auto-promote skip test',
+      status: 'To Do',
+      acceptanceCriteria: ['verify no auto-merge on nha'],
+    });
+    mkdirSync(join(tmp, '.worktrees', 'aisdlc-354'), { recursive: true });
+
+    // Rejecting code reviewer forces needs-human-attention
+    const rejectingSpawner = new MockSpawner({
+      developer: {
+        type: 'developer',
+        output: '',
+        parsed: goodDev,
+        status: 'success',
+        durationMs: 0,
+      },
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: '',
+        parsed: {
+          approved: false,
+          findings: [
+            { severity: 'major' as const, file: 'a.ts', line: 1, message: 'blocking issue' },
+          ],
+          summary: 'rejected',
+        },
+        status: 'success',
+        durationMs: 0,
+      },
+      'test-reviewer': approvedReviewer('test-reviewer'),
+      'security-reviewer': approvedReviewer('security-reviewer'),
+    });
+
+    const fakeRunnerObj = makeHappyRunner()
+      .on(/^gh pr ready/, ok())
+      .on(/^gh pr merge.*--auto.*--squash/, ok());
+
+    const result = await executePipeline({
+      taskId: 'AISDLC-354',
+      workDir: tmp,
+      spawner: rejectingSpawner,
+      runner: fakeRunnerObj.toRunner(),
+      skipFinalizeCommit: true,
+      maxReviewIterations: 1, // cap at 1 so we hit needs-human-attention quickly
+    });
+
+    expect(result.outcome).toBe('needs-human-attention');
+
+    // gh pr merge --auto must NOT have been invoked
+    const mergeCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('merge') && c.args.includes('--auto'),
+    );
+    expect(mergeCalls.length).toBe(0);
+  });
 });

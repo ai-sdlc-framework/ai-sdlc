@@ -339,6 +339,40 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       outcome = loop.needsHumanAttention ? 'needs-human-attention' : 'approved';
     }
 
+    // Bug 2 (AISDLC-354) — auto-promote to ready + arm auto-merge when verdict is APPROVED.
+    // Both calls swallow non-zero exits: PR may already be ready, queue may already be armed.
+    if (outcome === 'approved' && prUrl) {
+      const runner = opts.runner ?? defaultRunner;
+      const prNumMatch = prUrl.match(/\/pull\/(\d+)/);
+      const prNum = prNumMatch ? parseInt(prNumMatch[1], 10) : null;
+      if (prNum !== null) {
+        const readyResult = await runner('gh', ['pr', 'ready', String(prNum)], {
+          cwd: opts.workDir,
+          allowFailure: true,
+        });
+        if (readyResult.code !== 0) {
+          logger.warn(
+            `[ai-sdlc] Step 11 auto-promote: gh pr ready exited non-zero (non-fatal): ` +
+              `${readyResult.stderr.trim() || readyResult.stdout.trim() || 'unknown error'}`,
+          );
+        }
+        const mergeResult = await runner(
+          'gh',
+          ['pr', 'merge', String(prNum), '--auto', '--squash'],
+          {
+            cwd: opts.workDir,
+            allowFailure: true,
+          },
+        );
+        if (mergeResult.code !== 0) {
+          logger.warn(
+            `[ai-sdlc] Step 11 auto-promote: gh pr merge --auto --squash exited non-zero (non-fatal): ` +
+              `${mergeResult.stderr.trim() || mergeResult.stdout.trim() || 'unknown error'}`,
+          );
+        }
+      }
+    }
+
     // Step 12 — sibling PRs (only if main PR opened)
     if (prUrl) {
       const sibs = await siblingPrs({

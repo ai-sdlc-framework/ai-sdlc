@@ -22364,12 +22364,19 @@ async function defaultSpawner(options = {}) {
 import { execFile as execFile2 } from "node:child_process";
 import { promisify as promisify2 } from "node:util";
 var execFileP2 = promisify2(execFile2);
+var HOMEBREW_PATHS = ["/opt/homebrew/bin", "/usr/local/bin"];
+function augmentedPath() {
+  const current = process.env.PATH ?? "";
+  const parts = current.split(":");
+  const toAdd = HOMEBREW_PATHS.filter((p) => !parts.includes(p));
+  return toAdd.length > 0 ? [...toAdd, current].join(":") : current;
+}
 var defaultRunner = async (command2, args, opts = {}) => {
   try {
     const result = await execFileP2(command2, args, {
       cwd: opts.cwd,
       timeout: opts.timeout ?? 6e4,
-      env: { ...process.env, ...opts.env },
+      env: { ...process.env, PATH: augmentedPath(), ...opts.env },
       maxBuffer: 32 * 1024 * 1024
     });
     const stdout = result.stdout;

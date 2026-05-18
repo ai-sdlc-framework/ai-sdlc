@@ -1,7 +1,7 @@
 ---
 id: AISDLC-354
 title: 'fix(orchestrator): pipeline error propagation + PR auto-promote-to-ready + gh PATH detection'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:
@@ -47,9 +47,9 @@ All three blocked operator from understanding pipeline state. Grouping because t
 
 ## Acceptance criteria
 
-- [ ] **Bug 1**: `runResumeFromDraft` includes actual stderr from failed push in `reason`. Test: simulate a push that fails with a known error string; assert the error string appears in the returned envelope.
-- [ ] **Bug 2**: orchestrator auto-promotes PR to ready + arms auto-merge when `aggregatedVerdict.decision === 'APPROVED'`. Test: dispatch a task with mock approving reviewers; assert PR ends in `ready=true, autoMerge=enabled` state.
-- [ ] **Bug 3**: runner augments PATH with `/opt/homebrew/bin` + `/usr/local/bin` automatically. Test: spawn a child with a minimal env; confirm `gh` resolves via the augmented PATH. Alternative: add `GH_BIN` env override + use it in `detectDraftPrForBranch`.
+- [x] **Bug 1**: `runResumeFromDraft` includes actual stderr from failed push in `reason`. Test: simulate a push that fails with a known error string; assert the error string appears in the returned envelope.
+- [x] **Bug 2**: orchestrator auto-promotes PR to ready + arms auto-merge when `aggregatedVerdict.decision === 'APPROVED'`. Test: dispatch a task with mock approving reviewers; assert PR ends in `ready=true, autoMerge=enabled` state.
+- [x] **Bug 3**: runner augments PATH with `/opt/homebrew/bin` + `/usr/local/bin` automatically. Test: spawn a child with a minimal env; confirm `gh` resolves via the augmented PATH. Alternative: add `GH_BIN` env override + use it in `detectDraftPrForBranch`.
 
 ## Source
 

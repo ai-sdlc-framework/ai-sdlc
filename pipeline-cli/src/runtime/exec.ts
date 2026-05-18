@@ -31,6 +31,25 @@ export interface ExecResult {
 export type Runner = (command: string, args: string[], opts?: ExecOptions) => Promise<ExecResult>;
 
 /**
+ * Bug 3 (AISDLC-354) — augment PATH with macOS Homebrew + /usr/local/bin so
+ * that `gh`, `git`, and other tools installed in non-default locations are
+ * reliably found when Node spawns child processes with a minimal env (e.g.
+ * when the parent process was started by a daemon / launchd without a
+ * full login shell PATH).
+ *
+ * The GH_BIN env override takes precedence: when set, detectDraftPrForBranch
+ * and any other gh caller passes it directly via the opts.env mechanism.
+ */
+const HOMEBREW_PATHS = ['/opt/homebrew/bin', '/usr/local/bin'];
+
+function augmentedPath(): string {
+  const current = process.env.PATH ?? '';
+  const parts = current.split(':');
+  const toAdd = HOMEBREW_PATHS.filter((p) => !parts.includes(p));
+  return toAdd.length > 0 ? [...toAdd, current].join(':') : current;
+}
+
+/**
  * Default runner — backed by `child_process.execFile`. Steps that don't
  * receive an injected runner default to this.
  */
@@ -39,7 +58,7 @@ export const defaultRunner: Runner = async (command, args, opts = {}) => {
     const result = await execFileP(command, args, {
       cwd: opts.cwd,
       timeout: opts.timeout ?? 60_000,
-      env: { ...process.env, ...opts.env },
+      env: { ...process.env, PATH: augmentedPath(), ...opts.env },
       maxBuffer: 32 * 1024 * 1024,
     });
     const stdout = result.stdout as string | Buffer;

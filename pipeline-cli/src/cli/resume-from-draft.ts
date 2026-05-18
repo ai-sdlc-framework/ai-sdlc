@@ -466,7 +466,7 @@ export async function runResumeFromDraft(
         resumedFrom: 'Step 10/11 re-push for attestation',
         prUrl,
         outcome: 'failed',
-        reason: `re-push failed: ${pushResult.stderr.trim() || 'unknown error'}`,
+        reason: `re-push failed: ${pushResult.stderr.trim() || pushResult.stdout.trim() || 'unknown error'}`,
       };
     }
     // Bug 1 (AISDLC-356): re-arm auto-merge after force-push (GitHub clears it).
@@ -481,7 +481,7 @@ export async function runResumeFromDraft(
         resumedFrom: 'Step 13 flip-to-ready',
         prUrl,
         outcome: 'failed',
-        reason: `gh pr ready failed: ${readyResult.stderr.trim() || 'unknown error'}`,
+        reason: `gh pr ready failed: ${readyResult.stderr.trim() || readyResult.stdout.trim() || 'unknown error'}`,
       };
     }
     try {
@@ -570,7 +570,7 @@ export async function runResumeFromDraft(
       resumedFrom: 'Steps 7/8/10/11 (reviewers + re-push)',
       prUrl,
       outcome: 'failed',
-      reason: `re-push failed after review: ${pushResult.stderr.trim() || 'unknown error'}`,
+      reason: `re-push failed after review: ${pushResult.stderr.trim() || pushResult.stdout.trim() || 'unknown error'}`,
       finalVerdict: aggregated,
     };
   }
@@ -588,9 +588,28 @@ export async function runResumeFromDraft(
       resumedFrom: 'Step 13 flip-to-ready',
       prUrl,
       outcome: 'failed',
-      reason: `gh pr ready failed: ${readyResult.stderr.trim() || 'unknown error'}`,
+      reason: `gh pr ready failed: ${readyResult.stderr.trim() || readyResult.stdout.trim() || 'unknown error'}`,
       finalVerdict: aggregated,
     };
+  }
+
+  // Bug 2 (AISDLC-354) — auto-promote to ready + arm auto-merge when verdict is APPROVED.
+  // Both calls swallow non-zero exits: PR may already be ready, queue may already be armed.
+  if (aggregated.decision === 'APPROVED') {
+    const mergeResult = await runner(
+      'gh',
+      ['pr', 'merge', String(prNumber), '--auto', '--squash'],
+      {
+        cwd: opts.workDir,
+        allowFailure: true,
+      },
+    );
+    if (mergeResult.code !== 0) {
+      logger.warn(
+        `[ai-sdlc] resume-from-draft: gh pr merge --auto --squash exited non-zero (non-fatal): ` +
+          `${mergeResult.stderr.trim() || mergeResult.stdout.trim() || 'unknown error'}`,
+      );
+    }
   }
 
   try {

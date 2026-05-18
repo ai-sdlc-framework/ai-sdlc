@@ -560,6 +560,210 @@ describe('runResumeFromDraft', () => {
     expect(result.finalVerdict?.decision).toBe('APPROVED');
   });
 
+  // AISDLC-354 Bug 1 — push failure stderr is propagated, not swallowed as 'unknown error'.
+  it('Bug1: re-push failure propagates actual stderr in reason field', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(worktreePath, { recursive: true });
+    // Write a verdict file so it takes the Case B path (re-push for attestation)
+    const verdictDir = join(worktreePath, '.ai-sdlc', 'verdicts');
+    mkdirSync(verdictDir, { recursive: true });
+    writeFileSync(
+      join(verdictDir, 'aisdlc-273.json'),
+      JSON.stringify([{ agentId: 'code-reviewer', approved: true, findings: [], summary: 'lgtm' }]),
+    );
+
+    const specificStderr = 'remote: pre-receive hook declined -- branch policy violation';
+    const fakeRunner = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok('')) // no attestation commit → Case B path
+      .on(/^git push --force-with-lease/, fail(specificStderr, 1)) // push fails with real stderr
+      .toRunner();
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-273',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.outcome).toBe('failed');
+    // The actual stderr must appear in reason — not 'unknown error'
+    expect(result.reason).toContain(specificStderr);
+    expect(result.reason).not.toContain('unknown error');
+  });
+
+  // AISDLC-354 Bug 1 — stdout fallback when stderr is empty but push returns stdout error text.
+  it('Bug1: re-push failure propagates stdout when stderr is empty', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const fakeRunner = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      // push fails: stderr is empty but stdout has the error
+      .on(/^git push --force-with-lease/, {
+        stdout: 'error: failed to push some refs to origin',
+        stderr: '',
+        code: 1,
+      })
+      .toRunner();
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-273',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunner,
+      logger: silentLogger(),
+    });
+    expect(result.ok).toBe(false);
+    expect(result.reason).toContain('failed to push some refs');
+    expect(result.reason).not.toBe('re-push failed after review: unknown error');
+  });
+
+  // AISDLC-354 Bug 2 — when reviewers APPROVE, gh pr merge --auto --squash must be invoked.
+  it('Bug2: APPROVED verdict triggers gh pr ready + gh pr merge --auto --squash', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(worktreePath, { recursive: true });
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .on(/^gh pr merge.*--auto.*--squash/, ok());
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-273',
+      workDir: tmp,
+      spawner: makeApprovingSpawner(),
+      runner: fakeRunnerObj.toRunner(),
+      logger: silentLogger(),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.outcome).toBe('resumed-and-ready');
+    expect(result.finalVerdict?.decision).toBe('APPROVED');
+
+    // gh pr ready must have been invoked
+    const readyCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('ready'),
+    );
+    expect(readyCalls.length).toBeGreaterThan(0);
+
+    // gh pr merge --auto --squash must have been invoked
+    const mergeCalls = fakeRunnerObj.calls.filter(
+      (c) =>
+        c.command === 'gh' &&
+        c.args.includes('merge') &&
+        c.args.includes('--auto') &&
+        c.args.includes('--squash'),
+    );
+    expect(mergeCalls.length).toBeGreaterThan(0);
+    // The first arg after 'merge' must be the PR number
+    const mergeCallArgs = mergeCalls[0].args;
+    expect(mergeCallArgs[2]).toBe('42');
+  });
+
+  // AISDLC-354 Bug 2 — non-APPROVED verdict does NOT arm auto-merge.
+  it('Bug2: CHANGES_REQUESTED verdict does NOT invoke gh pr merge --auto', async () => {
+    writeTaskFile(tmp, { id: 'AISDLC-273', title: 'test task' });
+    const worktreePath = join(tmp, '.worktrees', 'aisdlc-273');
+    mkdirSync(worktreePath, { recursive: true });
+
+    // Spawner that always rejects
+    const rejectingSpawner = new MockSpawner({
+      'code-reviewer': {
+        type: 'code-reviewer',
+        output: '',
+        parsed: {
+          approved: false,
+          findings: [{ severity: 'major' as const, file: 'a.ts', line: 1, message: 'nope' }],
+          summary: 'rejected',
+        },
+        status: 'success',
+        durationMs: 0,
+      },
+      'test-reviewer': {
+        type: 'test-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'lgtm' },
+        status: 'success',
+        durationMs: 0,
+      },
+      'security-reviewer': {
+        type: 'security-reviewer',
+        output: '',
+        parsed: { approved: true, findings: [], summary: 'lgtm' },
+        status: 'success',
+        durationMs: 0,
+      },
+    });
+
+    const fakeRunnerObj = new FakeRunner()
+      .on(
+        /^gh pr list/,
+        ok(
+          JSON.stringify([
+            { number: 42, isDraft: true, url: 'https://github.com/owner/repo/pull/42' },
+          ]),
+        ),
+      )
+      .on(/^git rev-list --count/, ok('1\n'))
+      .on(/^git log.*auto-sign/, ok(''))
+      .on(/^git diff/, ok('--- diff ---\n'))
+      .on(/^git log/, ok(''))
+      .on(/^git push --force-with-lease/, ok())
+      .on(/^gh pr ready/, ok())
+      .on(/^gh pr merge.*--auto.*--squash/, ok());
+
+    const result = await runResumeFromDraft({
+      taskId: 'AISDLC-273',
+      workDir: tmp,
+      spawner: rejectingSpawner,
+      runner: fakeRunnerObj.toRunner(),
+      logger: silentLogger(),
+    });
+    expect(result.ok).toBe(true);
+    expect(result.finalVerdict?.decision).not.toBe('APPROVED');
+
+    // gh pr merge --auto must NOT have been invoked
+    const mergeCalls = fakeRunnerObj.calls.filter(
+      (c) => c.command === 'gh' && c.args.includes('merge') && c.args.includes('--auto'),
+    );
+    expect(mergeCalls.length).toBe(0);
+  });
+
   // PR #489 round-1 test review (MAJOR): the resume-from-draft.ts:352
   // 'commitCount === 0' guard is an untested code path. When a draft PR
   // exists but the branch has no commits beyond origin/main, the resume
