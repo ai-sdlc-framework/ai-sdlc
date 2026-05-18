@@ -208,10 +208,12 @@ export interface OrchestratorAdapters {
    */
   spawner?: SubagentSpawner;
   /**
-   * AISDLC-229 — spawner kind for the umbrella dispatcher. Defaults to
-   * `'claude-cli'` (inline manifest mode, AISDLC-198). Override via the
-   * `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK` env var or by injecting this
-   * field directly (tests).
+   * AISDLC-229 / AISDLC-352 — spawner kind for the umbrella dispatcher.
+   * Defaults to `'claude'` (subscription billing via `claude -p`, AISDLC-352).
+   * Pre-352 the default was `'claude-cli'` (inline manifest mode, AISDLC-198)
+   * — use `--spawner claude-cli` to preserve that behaviour in slash-command-
+   * body callers. Override via the `AI_SDLC_ORCHESTRATOR_SPAWNER` env var or
+   * by injecting this field directly (tests).
    *
    * When `claude-cli` is selected but `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key`
    * is set AND the umbrella reports the consumer bridge is missing (AISDLC-225
@@ -2268,21 +2270,28 @@ function buildDefaultDispatchableLoader(workDir: string): (taskId: string) => {
 }
 
 /**
- * AISDLC-229 — resolve which spawner kind to use for the umbrella dispatch.
+ * AISDLC-229 / AISDLC-352 — resolve which spawner kind to use for the
+ * umbrella dispatch.
  *
  * Decision tree:
  *   1. If `adapters.umbrellaSpawnerKind` is explicitly set, use it.
+ *      (The CLI always sets this via `buildAdapters`; since AISDLC-352 the
+ *      CLI default for `--spawner` is `claude`, so the adapter will carry
+ *      `claude` unless the operator passes an explicit flag.)
  *   2. If `AI_SDLC_ORCHESTRATOR_SPAWNER` is set, use it.
  *   3. If `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set AND the
  *      umbrella will need the fallback (checked post-hoc after the umbrella
  *      runs — see `buildDefaultUmbrellaDispatch`), fall back to `api-key`.
- *   4. Otherwise default to `claude-cli` (AISDLC-198 inline manifest mode).
+ *   4. Otherwise default to `claude` (subscription billing via `claude -p`,
+ *      AISDLC-352). Pre-352 the default was `claude-cli` (inline manifest
+ *      mode); that is still valid for slash-command-body callers who pass
+ *      `--spawner claude-cli` explicitly.
  */
 function resolveUmbrellaSpawnerKind(adapters: OrchestratorAdapters): SpawnerKind {
   if (adapters.umbrellaSpawnerKind) return adapters.umbrellaSpawnerKind;
   const envKind = resolveEnvUmbrellaSpawnerKind();
   if (envKind) return envKind;
-  return 'claude-cli';
+  return 'claude';
 }
 
 function resolveEnvUmbrellaSpawnerKind(): SpawnerKind | undefined {
@@ -2364,7 +2373,9 @@ function extractPipelineDetail(
  * (DSSE attestation sign), Step 11 (push + PR), Step 12 (sibling PRs).
  *
  * Spawner selection:
- *   1. Default: `claude-cli` (AISDLC-198 inline manifest mode).
+ *   1. Default: `claude` (subscription billing via `claude -p`, AISDLC-352).
+ *      Use `--spawner claude-cli` to opt into the AISDLC-198 inline manifest
+ *      mode for slash-command-body callers.
  *   2. Fallback: if `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set
  *      AND the umbrella returns `ok: false` with a spawner-unavailable reason
  *      (AISDLC-225 consumer bridge not yet shipped), retry with `api-key`.
@@ -2497,7 +2508,7 @@ function buildDefaultUmbrellaDispatch(
       });
     };
 
-    // First attempt with configured spawner (usually `claude-cli`).
+    // First attempt with configured spawner (default: `claude` since AISDLC-352).
     let execResult = await runUmbrella(spawnerKind);
 
     // AISDLC-229 AC #2 — spawner-unavailable fallback. When:

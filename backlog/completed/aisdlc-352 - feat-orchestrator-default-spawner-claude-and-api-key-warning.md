@@ -1,7 +1,7 @@
 ---
 id: AISDLC-352
 title: 'feat(orchestrator): default `cli-orchestrator tick` spawner to `claude` + warn when ANTHROPIC_API_KEY is set'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-17'
 labels:

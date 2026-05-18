@@ -133,12 +133,12 @@ This prevents retroactive blocking of in-flight tasks and allows a graceful migr
 
 `/ai-sdlc execute` is the default for internal work. Worktree-isolated, auto-creates sibling-repo PRs from `permittedExternalPaths`, marks Done + moves task file in the same PR.
 
-**Spawner kinds for `cli-orchestrator tick --spawner <kind>`** (AISDLC-349):
-- `mock` — fixtures only; for plumbing tests
-- `api-key` — uses `ANTHROPIC_API_KEY` via the Claude Code SDK (API token billing)
-- `claude-cli` — emits a `dispatch-manifest.json` for the calling slash command body to consume via the `Agent` tool. **Only works when called from inside a Claude Code session** (e.g. via `/ai-sdlc execute`); fails silently with `developer-json-contract-violated` when run from a plain shell.
-- `claude` — shells out to `claude -p` via `child_process.spawn`. Subscription billing, same as `claude-cli` but actually invokes the CLI. **Use this for autonomous tick from a shell** (cron/daemon/sidecar context where no slash command body is around). AISDLC-349.
-- `codex` — dispatches via Codex CLI bridge (`CODEX_SPAWN_AGENT_BIN`)
+**Spawner kinds for `cli-orchestrator tick --spawner <kind>`** (AISDLC-349, default changed AISDLC-352):
+- `mock` — fixtures only; for plumbing tests. Billing: none.
+- `api-key` — uses `ANTHROPIC_API_KEY` via the Claude Code SDK. Billing: API token (pay-as-you-go or Agent SDK credit pool post-2026-06-15).
+- `claude-cli` — emits a `dispatch-manifest.json` for the calling slash command body to consume via the `Agent` tool. **Only works when called from inside a Claude Code session** (e.g. via `/ai-sdlc orchestrator-tick`); fails silently with `developer-json-contract-violated` when run from a plain shell. Billing: operator's interactive Claude Code quota.
+- `claude` — **(DEFAULT since AISDLC-352)** shells out to `claude -p` via `child_process.spawn`. **Use this for autonomous tick from a shell** (cron/daemon/sidecar context where no slash command body is around). Billing: subscription (Agent SDK credit pool, $200/mo on Max-20x). AISDLC-349. **Warning**: if `ANTHROPIC_API_KEY` is also set in env and `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is configured, a spawner error can silently fall through to paid API tokens — the CLI warns at tick start.
+- `codex` — dispatches via Codex CLI bridge (`CODEX_SPAWN_AGENT_BIN`). Billing: Codex plan.
 
 The Step 0-13 pipeline lives in `pipeline-cli/` (`@ai-sdlc/pipeline-cli`). Tier 1 = slash command body (subscription). Tier 2 = `executePipeline()` library + `SubagentSpawner` injection (API-key, MockSpawner, etc.). Refs: `pipeline-cli/{README,docs/spawner,docs/steps}.md`, RFC-0012.
 

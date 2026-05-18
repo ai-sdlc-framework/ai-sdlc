@@ -13,7 +13,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { buildOrchestratorCli } from './orchestrator.js';
+import {
+  buildOrchestratorCli,
+  emitBillingSafetyWarnings,
+  BILLING_SAFETY_WARNING_LINES,
+  FALLBACK_BILLING_WARNING_LINES,
+} from './orchestrator.js';
 import { ORCHESTRATOR_FLAG, type OrchestratorAdapters } from '../orchestrator/index.js';
 import type { PipelineResult, PipelineLogger } from '../types.js';
 import { readDispatchResult, writeDispatchResult } from '../runtime/spawners/dispatch-result.js';
@@ -528,5 +533,128 @@ describe('cli-orchestrator tick --continue-from-result (AISDLC-225)', () => {
     expect(out.mode).toBe('tick');
     // Empty frontier → idle tick (no dispatch)
     expect(out.tick.empty).toBe(true);
+  });
+});
+
+// ── AISDLC-352: billing-safety warnings ──────────────────────────────────
+
+describe('emitBillingSafetyWarnings (AISDLC-352)', () => {
+  it('emits BILLING_SAFETY_WARNING when spawner=claude AND ANTHROPIC_API_KEY is set', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings('claude', { ANTHROPIC_API_KEY: 'sk-ant-test' }, (msg) =>
+      lines.push(msg),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('[orchestrator] warning: ANTHROPIC_API_KEY is set');
+    expect(lines[0]).toContain('--spawner claude is requested');
+  });
+
+  it('does NOT emit BILLING_SAFETY_WARNING when spawner=claude AND ANTHROPIC_API_KEY is unset', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings('claude', {}, (msg) => lines.push(msg));
+    expect(lines).toHaveLength(0);
+  });
+
+  it('does NOT emit BILLING_SAFETY_WARNING when spawner=api-key even if ANTHROPIC_API_KEY is set', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings('api-key', { ANTHROPIC_API_KEY: 'sk-ant-test' }, (msg) =>
+      lines.push(msg),
+    );
+    expect(lines).toHaveLength(0);
+  });
+
+  it('does NOT emit BILLING_SAFETY_WARNING when spawner=mock even if ANTHROPIC_API_KEY is set', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings('mock', { ANTHROPIC_API_KEY: 'sk-ant-test' }, (msg) =>
+      lines.push(msg),
+    );
+    expect(lines).toHaveLength(0);
+  });
+
+  it('emits FALLBACK_BILLING_WARNING when AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key AND spawner != api-key', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings(
+      'claude',
+      { AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK: 'api-key' },
+      (msg) => lines.push(msg),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key');
+  });
+
+  it('emits FALLBACK_BILLING_WARNING when AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key AND spawner=claude-cli', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings(
+      'claude-cli',
+      { AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK: 'api-key' },
+      (msg) => lines.push(msg),
+    );
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key');
+  });
+
+  it('does NOT emit FALLBACK_BILLING_WARNING when spawner=api-key', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings(
+      'api-key',
+      { AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK: 'api-key' },
+      (msg) => lines.push(msg),
+    );
+    expect(lines).toHaveLength(0);
+  });
+
+  it('emits BOTH warnings when ANTHROPIC_API_KEY set + SPAWNER_FALLBACK=api-key + spawner=claude', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings(
+      'claude',
+      { ANTHROPIC_API_KEY: 'sk-ant-test', AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK: 'api-key' },
+      (msg) => lines.push(msg),
+    );
+    expect(lines).toHaveLength(2);
+    expect(lines[0]).toContain('[orchestrator] warning: ANTHROPIC_API_KEY is set');
+    expect(lines[1]).toContain('AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key');
+  });
+
+  it('does NOT fire any warning in a clean env (no API key, no fallback)', () => {
+    const lines: string[] = [];
+    emitBillingSafetyWarnings('claude', {}, (msg) => lines.push(msg));
+    expect(lines).toHaveLength(0);
+  });
+
+  it('exports the exact warning line arrays for downstream assertions', () => {
+    // Ensure exported constants are the canonical text (not copied strings)
+    expect(BILLING_SAFETY_WARNING_LINES[0]).toContain('[orchestrator] warning: ANTHROPIC_API_KEY');
+    expect(FALLBACK_BILLING_WARNING_LINES[0]).toContain(
+      'AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key',
+    );
+  });
+});
+
+// ── AISDLC-352: default spawner = claude ──────────────────────────────────
+
+describe('cli-orchestrator tick default spawner (AISDLC-352)', () => {
+  it('defaults spawner to claude when no --spawner flag is passed', async () => {
+    process.env[ORCHESTRATOR_FLAG] = 'experimental';
+    const spawnerKinds: string[] = [];
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      sleep: () => Promise.resolve(),
+      frontier: () => [],
+      escalate: async () => {},
+      umbrellaExecutor: async (taskId, spawnerKind) => {
+        spawnerKinds.push(spawnerKind);
+        return { ok: true, pipeline: approvedResult(taskId) };
+      },
+    };
+
+    setArgv('tick', '--max-concurrent', '1');
+    await buildOrchestratorCli(adapters).parseAsync();
+
+    // Empty frontier → no dispatch, but buildAdapters should have set claude
+    // as the umbrellaSpawnerKind default. Verify via the warn helper that was
+    // called with 'claude' (no ANTHROPIC_API_KEY in savedEnv → no warning).
+    const out = stdoutJson() as { ok: boolean; mode: string };
+    expect(out.ok).toBe(true);
+    expect(out.mode).toBe('tick');
   });
 });

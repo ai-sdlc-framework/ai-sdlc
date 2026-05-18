@@ -58,6 +58,71 @@ function fail(reason: string, code = 1): never {
   process.exit(code);
 }
 
+/**
+ * AISDLC-352 — emit a billing-safety warning to stderr when there is a
+ * risk that subscription-billed dispatch could silently fall through to
+ * paid API tokens.
+ *
+ * Two conditions trigger the warning:
+ *
+ * 1. `--spawner claude` is requested AND `ANTHROPIC_API_KEY` is set in the
+ *    environment. The `claude` spawner uses the operator's logged-in
+ *    subscription auth — it does NOT consume the API key directly. But if
+ *    the dispatch falls back to `--spawner api-key` for any reason (e.g.
+ *    `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is also set), the key
+ *    WILL be billed. Surfacing this proactively lets operators unset the key
+ *    to force subscription-only billing before the tick runs.
+ *
+ * 2. `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set AND the
+ *    configured spawner is not `api-key`. This means the orchestrator will
+ *    silently fall back to API-key billing on spawner-unavailable errors
+ *    (e.g. when `claude-cli` can't find the manifest consumer). Operators
+ *    often don't realise the fallback is wired.
+ *
+ * Exported so tests can assert the exact message text.
+ */
+export const BILLING_SAFETY_WARNING_LINES = [
+  '[orchestrator] warning: ANTHROPIC_API_KEY is set but --spawner claude is requested.',
+  "If the dispatch falls back to --spawner api-key for any reason, you'll be billed",
+  'for paid API tokens. To force subscription-only, unset ANTHROPIC_API_KEY before',
+  'running the tick.',
+] as const;
+
+export const FALLBACK_BILLING_WARNING_LINES = [
+  '[orchestrator] warning: AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key is set.',
+  'If the configured spawner is unavailable the orchestrator will silently retry',
+  'with --spawner api-key, billing paid API tokens. Unset ANTHROPIC_API_KEY to',
+  'prevent API-key overflow, or unset AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK to',
+  'disable the silent fallback entirely.',
+] as const;
+
+/**
+ * Check whether billing-safety warnings should fire for the given spawner
+ * kind + environment, and write them to stderr. Called before every `tick`
+ * and `start` dispatch that goes through the umbrella dispatcher.
+ *
+ * Exported so tests can exercise the warning logic without going through
+ * the full yargs parse round-trip.
+ */
+export function emitBillingSafetyWarnings(
+  spawnerKind: string,
+  env: Record<string, string | undefined> = process.env,
+  stderrWrite: (msg: string) => void = (msg) => process.stderr.write(msg),
+): void {
+  const apiKeySet = Boolean(env.ANTHROPIC_API_KEY);
+  const fallbackEnv = (env.AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK ?? '').trim();
+
+  // Warning 1: spawner=claude + ANTHROPIC_API_KEY in env
+  if (spawnerKind === 'claude' && apiKeySet) {
+    stderrWrite(BILLING_SAFETY_WARNING_LINES.join('\n') + '\n');
+  }
+
+  // Warning 2: SPAWNER_FALLBACK=api-key AND configured spawner != api-key
+  if (fallbackEnv === 'api-key' && spawnerKind !== 'api-key') {
+    stderrWrite(FALLBACK_BILLING_WARNING_LINES.join('\n') + '\n');
+  }
+}
+
 function buildConfig(argv: Record<string, unknown>): OrchestratorConfig {
   const maxTicks =
     argv['max-ticks'] === undefined || argv['max-ticks'] === null
@@ -127,9 +192,11 @@ export function buildOrchestratorCli(
     .option('spawner', {
       describe:
         `Spawner for umbrella dispatch. Also configurable with ${ORCHESTRATOR_SPAWNER_ENV}. ` +
-        'Defaults to claude-cli only when umbrella mode is otherwise enabled.',
+        'Defaults to claude (subscription billing via claude -p). ' +
+        'Pass --spawner claude-cli for the /ai-sdlc orchestrator-tick slash command body path.',
       type: 'string',
       choices: SPAWNER_KINDS,
+      default: 'claude' as (typeof SPAWNER_KINDS)[number],
     })
     .command(
       'start',
@@ -145,11 +212,13 @@ export function buildOrchestratorCli(
         }
         checkAndRebuildIfStale(distStaleness);
         const config = buildConfig(argv as Record<string, unknown>);
+        const resolvedAdapters = buildAdapters(argv as Record<string, unknown>, adapters);
+        // AISDLC-352 — emit billing-safety warnings before dispatch
+        emitBillingSafetyWarnings(
+          resolvedAdapters.umbrellaSpawnerKind ?? String(argv.spawner ?? 'claude'),
+        );
         try {
-          const ticks = await runOrchestratorLoop(
-            config,
-            buildAdapters(argv as Record<string, unknown>, adapters),
-          );
+          const ticks = await runOrchestratorLoop(config, resolvedAdapters);
           emit({
             ok: true,
             mode: 'start',
@@ -208,6 +277,11 @@ export function buildOrchestratorCli(
           ...buildAdapters(argv as Record<string, unknown>, adapters),
           ...(continueFromResultPath !== undefined ? { continueFromResultPath } : {}),
         };
+
+        // AISDLC-352 — emit billing-safety warnings before dispatch
+        emitBillingSafetyWarnings(
+          tickAdapters.umbrellaSpawnerKind ?? String(argv.spawner ?? 'claude'),
+        );
 
         const result = await runOrchestratorTick(config, tickAdapters, 1);
         emit({ ok: true, mode: 'tick', tick: result });

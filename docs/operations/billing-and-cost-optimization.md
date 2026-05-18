@@ -235,6 +235,40 @@ The loop respects `AISDLC-242` recoverable-abort detection — interrupted dispa
 
 ---
 
+## Billing-safety checklist (AISDLC-352)
+
+Run through this before every autonomous tick session to avoid surprise API-key charges:
+
+1. **Use `--spawner claude` (or rely on the new default).**
+   Since AISDLC-352, `cli-orchestrator tick` defaults to `--spawner claude`. You no longer need to pass the flag explicitly for cron/daemon dispatch. If you have a legacy script that passes `--spawner claude-cli` from a plain shell (not inside a Claude Code session), update it to `--spawner claude` — the `claude-cli` spawner emits a manifest that nothing reads in a plain shell, causing silent `developer-json-contract-violated` failures.
+
+2. **Unset `ANTHROPIC_API_KEY` unless you intend to use API-key billing.**
+   When `ANTHROPIC_API_KEY` is set and you run `cli-orchestrator tick --spawner claude`, the CLI emits this warning to stderr:
+
+   ```
+   [orchestrator] warning: ANTHROPIC_API_KEY is set but --spawner claude is requested.
+   If the dispatch falls back to --spawner api-key for any reason, you'll be billed
+   for paid API tokens. To force subscription-only, unset ANTHROPIC_API_KEY before
+   running the tick.
+   ```
+
+   The `claude` spawner itself does NOT consume the API key. But if `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is also set, a spawner error will silently retry with paid API tokens. Unset `ANTHROPIC_API_KEY` to prevent any accidental billing.
+
+3. **Watch for the `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK` warning.**
+   When `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is set AND the configured spawner is not `api-key`, the CLI emits:
+
+   ```
+   [orchestrator] warning: AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key is set.
+   If the configured spawner is unavailable the orchestrator will silently retry
+   with --spawner api-key, billing paid API tokens. Unset ANTHROPIC_API_KEY to
+   prevent API-key overflow, or unset AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK to
+   disable the silent fallback entirely.
+   ```
+
+   This warning fires at the start of every tick so you can catch the misconfiguration before a billing event occurs.
+
+---
+
 ## Cost optimization patterns
 
 ### Pattern 1 — Always sign locally first ⭐ (most impactful)

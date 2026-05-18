@@ -362,9 +362,10 @@ describe('runOrchestratorTick — umbrella dispatch (AISDLC-229)', () => {
     );
 
     // umbrellaExecutor was called exactly once with the default spawner kind.
+    // AISDLC-352: default changed from 'claude-cli' to 'claude'.
     expect(calls).toHaveLength(1);
     expect(calls[0].taskId).toBe(taskId);
-    expect(calls[0].spawnerKind).toBe('claude-cli'); // default
+    expect(calls[0].spawnerKind).toBe('claude'); // default since AISDLC-352
 
     expect(tick.dispatched).toEqual([taskId]);
     const outcome = tick.outcomes[0];
@@ -490,6 +491,9 @@ describe('runOrchestratorTick — umbrella dispatch (AISDLC-229)', () => {
         {
           logger: silentLogger(),
           frontier: fakeFrontier([taskId]),
+          // AISDLC-352: explicitly select claude-cli to test the fallback path;
+          // the default spawner changed to 'claude' in AISDLC-352.
+          umbrellaSpawnerKind: 'claude-cli',
           umbrellaExecutor: umbrellaExecutor as unknown as OrchestratorAdapters['umbrellaExecutor'],
           escalate: async () => {},
           ...hermeticFilterAdapters(),
@@ -522,6 +526,9 @@ describe('runOrchestratorTick — umbrella dispatch (AISDLC-229)', () => {
         {
           logger: silentLogger(),
           frontier: fakeFrontier([taskId]),
+          // AISDLC-352: explicitly select claude-cli to test that no fallback is
+          // attempted; the default spawner changed to 'claude' in AISDLC-352.
+          umbrellaSpawnerKind: 'claude-cli',
           umbrellaExecutor: umbrellaExecutor as unknown as OrchestratorAdapters['umbrellaExecutor'],
           escalate: async () => {},
           ...hermeticFilterAdapters(),
