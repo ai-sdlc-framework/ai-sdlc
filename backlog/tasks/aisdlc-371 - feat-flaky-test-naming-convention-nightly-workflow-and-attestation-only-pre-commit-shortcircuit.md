@@ -116,7 +116,7 @@ Suspect order (most likely first): the new quality-* test files added under `pip
 - [ ] New a new workflow under `.github/workflows/` runs nightly with `continue-on-error: true`; manual `workflow_dispatch` works
 - [ ] a new operator-runbook doc under `docs/operations/` covers the convention + investigation flow + registry
 - [ ] `.husky/pre-commit` short-circuits on attestation-only commits
-- [ ] the open AISDLC-302 PR hang bisected; offending test file renamed to `*.flaky.test.ts`; #550 unblocks
+- [ ] the open AISDLC-302 PR hang bisected; offending test file renamed to `*.flaky.test.ts`; that PR unblocks
 - [ ] New code reaches 80%+ patch coverage (only workflow + script changes — coverage is trivially met)
 
 ## Out of scope
