@@ -1,7 +1,7 @@
 ---
 id: AISDLC-313
 title: 'feat: RFC-0009 Phase 2.1 — Admission composite tessellation routing + resolveAffectedSouls'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-16'
 labels:

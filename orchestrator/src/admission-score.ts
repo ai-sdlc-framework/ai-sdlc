@@ -38,6 +38,18 @@ export interface AdmissionInput {
   commentCount: number;
   /** ISO timestamp of issue creation. */
   createdAt: string;
+  /**
+   * Canonical work item ID for dep-graph lookups (RFC-0014 / RFC-0009 Phase 2.1).
+   *
+   * When present, used instead of `#${issueNumber}` to match the work item
+   * against dep-graph snapshot entries (which use backlog task IDs like
+   * `AISDLC-313`). Backlog adapters set this from the task's frontmatter `id`.
+   *
+   * Absent for GitHub-issue based inputs — the admission composite falls back
+   * to `#${issueNumber}` which is consistent with `mapIssueToPriorityInput`'s
+   * `itemId` field.
+   */
+  workItemId?: string;
   /** GitHub author_association — determines trust-based signal boosting. */
   authorAssociation?: AuthorAssociation;
   /** GitHub login of the issue author (used by C5 principal match). */

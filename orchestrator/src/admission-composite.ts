@@ -1,5 +1,5 @@
 /**
- * Admission-subset composite (RFC-0008 §A.6).
+ * Admission-subset composite (RFC-0008 §A.6 + RFC-0009 Phase 2.1).
  *
  * The admission gate uses a subset of the full PPA composite:
  *
@@ -23,6 +23,11 @@
  * The `override` bypass is preserved at position 1: when the input has
  * `override: true`, we return `composite = Infinity` without running
  * the admission math — identical to the legacy PPA behaviour.
+ *
+ * **RFC-0009 Phase 2.1 tessellation extension:**
+ * When `AdmissionCompositeOptions.tessellationContext` is provided, the
+ * composite routes SA and Eρ₄ (designSystemReadiness) through soul scope
+ * per RFC-0009 §6. See `tessellation-admission.ts` for the routing algorithm.
  */
 
 import type { PriorityConfig, PriorityInput, PriorityScore } from '@ai-sdlc/reference';
@@ -34,6 +39,11 @@ import {
   computeReadinessFromDesignSystemContext,
 } from './admission-enrichment.js';
 import { computeAdmissionHumanCurve, type AdmissionHumanCurveResult } from './admission-hc.js';
+import {
+  computeTessellatedScores,
+  type TessellationContext,
+  type TessellatedSaResult,
+} from './tessellation-admission.js';
 
 /**
  * Result of the admission composite — returns a `PriorityScore`
@@ -52,6 +62,12 @@ export interface AdmissionComposite {
     designSystemReadiness: number;
     executionReality: number;
     humanCurve: AdmissionHumanCurveResult;
+    /**
+     * RFC-0009 Phase 2.1 — tessellation routing result.
+     * Present when `AdmissionCompositeOptions.tessellationContext` was
+     * supplied. Absent (undefined) when the single-DID path was used.
+     */
+    tessellation?: TessellatedSaResult;
   };
 }
 
@@ -73,6 +89,21 @@ export interface AdmissionCompositeOptions {
    * cannot extract. Only fields with defined values overwrite.
    */
   priorityInputOverrides?: Partial<PriorityInput>;
+  /**
+   * RFC-0009 Phase 2.1 — Tessellated DID context.
+   *
+   * When present, SA and Eρ₄ (designSystemReadiness) are computed using
+   * soul-scope routing per RFC-0009 §6 instead of the platform-aggregate
+   * DSB. The routing algorithm:
+   *
+   *   resolveAffectedSouls(w) → scope filter from dep-graph snapshot
+   *   |souls| == 0 → min over ALL souls (substrate-only degenerate)
+   *   |souls| == 1 → score against that soul's DSB
+   *   |souls| > 1 → crossSoulScoringRule (default `min`) over affected souls
+   *
+   * @see tessellation-admission.ts + spec/rfcs/RFC-0009 §6
+   */
+  tessellationContext?: TessellationContext;
 }
 
 export function computeAdmissionComposite(
@@ -130,7 +161,7 @@ export function computeAdmissionComposite(
   }
 
   // ── SA (soul alignment) — SA-1 override (M5) or label-based fallback ──
-  const soulAlignment = clamp01(
+  const baseSoulAlignment = clamp01(
     options?.soulAlignmentOverride ?? priorityInput.soulAlignment ?? DEFAULT_SIGNAL,
   );
 
@@ -148,7 +179,26 @@ export function computeAdmissionComposite(
   const complexity = priorityInput.complexity ?? 5;
   const baseExecutionReality = clamp01(1 - complexity / 10);
   const autonomyFactor = computeAutonomyFactor(input.autonomyContext);
-  const designSystemReadiness = computeReadinessFromDesignSystemContext(input.designSystemContext);
+  const baseDesignSystemReadiness = computeReadinessFromDesignSystemContext(
+    input.designSystemContext,
+  );
+
+  // ── RFC-0009 Phase 2.1: tessellation soul-scope routing ────────
+  // When tessellationContext is present, route SA and Eρ₄ through soul
+  // scope per RFC-0009 §6. When absent, single-DID path applies.
+  //
+  // Prefer the canonical workItemId (e.g. "AISDLC-313") over the GitHub-style
+  // "#313" so the dep-graph snapshot lookup matches the backlog task ID format.
+  const workItemId = input.workItemId ?? `#${input.issueNumber}`;
+  const tessellationResult = computeTessellatedScores(
+    workItemId,
+    baseSoulAlignment,
+    baseDesignSystemReadiness,
+    options?.tessellationContext,
+  );
+
+  const soulAlignment = tessellationResult.soulAlignment;
+  const designSystemReadiness = tessellationResult.er4;
   const executionReality = Math.min(baseExecutionReality * autonomyFactor, designSystemReadiness);
 
   // ── HC (tanh-compressed with HC_design) ───────────────────────
@@ -178,6 +228,13 @@ export function computeAdmissionComposite(
     timestamp,
   };
 
+  // Only include tessellation breakdown when the caller provided a context
+  // (non-tessellated path produces routingPath: 'non-tessellated' but we
+  // elide the field to preserve backward compat with callers that don't
+  // destructure the breakdown exhaustively).
+  const tessellationBreakdown =
+    options?.tessellationContext !== undefined ? tessellationResult : undefined;
+
   return {
     score,
     breakdown: {
@@ -190,6 +247,7 @@ export function computeAdmissionComposite(
       designSystemReadiness,
       executionReality,
       humanCurve,
+      ...(tessellationBreakdown !== undefined ? { tessellation: tessellationBreakdown } : {}),
     },
   };
 }
