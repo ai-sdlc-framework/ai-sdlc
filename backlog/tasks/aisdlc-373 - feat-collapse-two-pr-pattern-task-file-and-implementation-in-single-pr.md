@@ -13,16 +13,15 @@ dependencies: []
 priority: critical
 references:
   - pipeline-cli/bin/cli-orchestrator.mjs
-  - pipeline-cli/src/orchestrator/admit.ts
   - docs/operations/operator-runbook.md
 ---
 
 ## Problem
 
-Today's task-to-merge flow requires **two PRs** for every new piece of work:
+Today's task-to-merge flow needs **two PRs** for every new piece of work:
 
-1. **PR A — task file**: agent/operator commits `backlog/tasks/aisdlc-N.md` and opens a PR. Waits for DoR clarifications, CI, queue (~15-30min)
-2. **PR B — implementation**: only AFTER PR A merges does the orchestrator dispatch a developer subagent that creates a worktree, implements, opens PR B
+1. **PR A — task file**: agent/operator commits the task body (`backlog/tasks/<id>.md`) and opens a PR. Waits for DoR clarifications, CI, queue (~15-30min)
+2. **PR B — implementation**: only once PR A is on main does the orchestrator dispatch a developer subagent that creates a worktree, implements, opens PR B
 
 This costs ~15-30min of wall-clock waiting between PR A merging and PR B's first commit, on top of the actual dev time. For operator-driven work where the operator already knows exactly what they want built, this round trip is pure overhead.
 
@@ -41,7 +40,7 @@ None of these justify the 2-PR cost for **operator-driven** work:
 ## Single-PR flow (proposed)
 
 ```
-1. Agent/operator creates task file in a worktree: .worktrees/<task-id>/backlog/tasks/aisdlc-N.md
+1. Agent/operator creates task file in a worktree (under `.worktrees/<task-id>/backlog/tasks/`)
 2. Agent implements alongside
 3. Commits: feat + task-file-add (or interleaved)
 4. Pre-push DoR gate (AISDLC-370) validates the task file locally
@@ -81,7 +80,7 @@ The dispatched developer subagent works in the same `.worktrees/aisdlc-380/`, pi
 
 ### B. DoR ingress workflow: scan PR-diff additions
 
-Update `.github/workflows/ai-sdlc-dor.yml` (or wherever the DoR ingress runs) to also check task files newly added in the PR diff, not just main-state task files. Same `checkUpstreamOqs()` / `refineBacklogTask()` engine; different file-list source:
+Update the DoR ingress workflow (under `.github/workflows/`) to also check task files newly added in the PR diff, not just main-state task files. Same `checkUpstreamOqs()` / `refineBacklogTask()` engine; different file-list source:
 
 ```bash
 # On pull_request events, scan BOTH the diff additions AND main state

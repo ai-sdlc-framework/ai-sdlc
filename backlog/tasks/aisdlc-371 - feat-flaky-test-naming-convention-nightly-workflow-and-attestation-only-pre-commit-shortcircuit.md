@@ -20,9 +20,9 @@ AISDLC-368 shipped the emergency CI throughput hotfix (Node 20 drop, 3 individua
 
 1. **No `*.flaky.test.ts` convention** — the 3 skips are inline `it.skip` with explanatory messages; future flake fixes require the same ad-hoc pattern with no consistent way to find or run them
 2. **No nightly flaky-test workflow** — flaky tests stay skipped forever; nothing periodically retries them to confirm they're still flaky vs. accidentally-skipped-real-tests
-3. **No `docs/operations/flaky-tests.md`** — convention isn't documented; future operators don't know what to do when a test bites
+3. **No a new operator-runbook doc under `docs/operations/`** — convention isn't documented; future operators don't know what to do when a test bites
 4. **No pre-commit short-circuit for attestation-only commits** — every chore-sign re-commit re-runs `tsc --noEmit` (10-15s); accumulates to several minutes per multi-cycle PR
-5. **No bisect/isolation of PR #550 Coverage hang** — that PR's CI Coverage job hangs 60+min on every retrigger; tests pass locally <1s; one of the new RFC-0025 quality-* test files is the culprit but unidentified
+5. **No bisect/isolation of the open AISDLC-302 PR Coverage hang** — that PR's CI Coverage job hangs 60+min on every retrigger; tests pass locally <1s; one of the new RFC-0025 quality-* test files is the culprit but unidentified
 
 ## Fix (single PR)
 
@@ -47,7 +47,7 @@ Remove the inline `it.skip` from the original files (now empty of the flaky case
 
 ### B. Nightly flaky-tests workflow
 
-`.github/workflows/flaky-tests.yml`:
+a new workflow under `.github/workflows/`:
 
 ```yaml
 name: Flaky Tests (nightly)
@@ -77,7 +77,7 @@ jobs:
 
 Job is `continue-on-error: true` so a flaky failure doesn't fail the workflow run — we just want signal.
 
-### C. `docs/operations/flaky-tests.md`
+### C. a new operator-runbook doc under `docs/operations/`
 
 Document:
 - The `*.flaky.test.ts` convention + how vitest excludes it
@@ -103,25 +103,20 @@ fi
 
 Saves ~10-15s per chore-sign commit; accumulates to several min on PRs that go through multiple re-sign cycles.
 
-### E. Bisect + isolate PR #550 Coverage hang
+### E. Bisect + isolate the open AISDLC-302 PR Coverage hang
 
-PR #550 (AISDLC-302) Coverage job hangs 60+min on every CI retrigger. Tests pass <1s locally. Bisect by `it.skip`-ing one test file at a time and pushing/measuring until the hang disappears. Then rename the culprit to `*.flaky.test.ts` per (A).
+the open AISDLC-302 PR (AISDLC-302) Coverage job hangs 60+min on every CI retrigger. Tests pass <1s locally. Bisect by `it.skip`-ing one test file at a time and pushing/measuring until the hang disappears. Then rename the culprit to `*.flaky.test.ts` per (A).
 
-Suspect order (most likely first):
-1. `pipeline-cli/src/tui/analytics/quality-router.test.ts` (writes JSONL)
-2. `pipeline-cli/src/tui/analytics/determinism-detector.test.ts` (sampling logic)
-3. `pipeline-cli/src/tui/analytics/quality-metrics.test.ts`
-4. `pipeline-cli/src/tui/analytics/quality-classifier.test.ts`
-5. `pipeline-cli/src/cli/quality-corpus.test.ts`
+Suspect order (most likely first): the new quality-* test files added under `pipeline-cli/src/tui/analytics/` and `pipeline-cli/src/cli/` by the AISDLC-302 PR. Likely culprits: a JSONL-writer test, a sampling-logic test, a metrics test, a classifier test, and a corpus CLI test. Implementer should `it.skip` them one at a time and re-run CI to find the hang.
 
 ## Acceptance criteria
 
 - [ ] Vitest configs in all workspace packages exclude `**/*.flaky.test.ts`
 - [ ] 3 known-flaky tests moved into sibling `*.flaky.test.ts` files; original `it.skip` markers removed
-- [ ] New `.github/workflows/flaky-tests.yml` runs nightly with `continue-on-error: true`; manual `workflow_dispatch` works
-- [ ] `docs/operations/flaky-tests.md` covers the convention + investigation flow + registry
+- [ ] New a new workflow under `.github/workflows/` runs nightly with `continue-on-error: true`; manual `workflow_dispatch` works
+- [ ] a new operator-runbook doc under `docs/operations/` covers the convention + investigation flow + registry
 - [ ] `.husky/pre-commit` short-circuits on attestation-only commits
-- [ ] PR #550 hang bisected; offending test file renamed to `*.flaky.test.ts`; #550 unblocks
+- [ ] the open AISDLC-302 PR hang bisected; offending test file renamed to `*.flaky.test.ts`; #550 unblocks
 - [ ] New code reaches 80%+ patch coverage (only workflow + script changes — coverage is trivially met)
 
 ## Out of scope
@@ -132,4 +127,4 @@ Suspect order (most likely first):
 
 ## Source
 
-Operator session 2026-05-19 follow-up: AISDLC-368 emergency hotfix shipped 5/9 acceptance criteria; this task tracks the remaining 4 + the PR #550 bisect needed to unblock the last code PR from that batch.
+Operator session 2026-05-19 follow-up: AISDLC-368 emergency hotfix shipped 5/9 acceptance criteria; this task tracks the remaining 4 + the the open AISDLC-302 PR bisect needed to unblock the last code PR from that batch.

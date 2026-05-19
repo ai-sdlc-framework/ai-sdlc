@@ -21,7 +21,7 @@ references:
 `codecov/patch` is the single longest-blocking required status on every PR. It blocks merges for two reasons:
 
 1. **Codecov SaaS processing latency**: codecov.io often takes 5-15min AFTER our upload to compute + post the status. This is third-party infrastructure with shared backpressure; we have no control over the delay.
-2. **App-source requirement**: branch protection requires the status to come from the codecov GitHub App specifically. Any PR where vitest produces 0 coverage data (PRs touching only `.github/workflows/`, `scripts/`, docs, etc.) leaves codecov with nothing to upload → codecov never posts → PR sits BLOCKED forever even when all our own checks pass. We hit this on PRs #553 and #554 in the AISDLC-370 development cycle and had to ship a workaround (empty-LCOV fallback).
+2. **App-source constraint**: branch protection accepts the status only from the codecov GitHub App. Any PR where vitest produces 0 coverage data (PRs touching only `.github/workflows/`, `scripts/`, docs, etc.) leaves codecov with nothing to upload → codecov never posts → PR sits BLOCKED forever even when all our own checks pass. We hit this on the AISDLC-370 docs PR and the AISDLC-370 implementation PR during that development cycle and shipped an empty-LCOV workaround.
 
 Combined effect: codecov/patch routinely adds 5-15min to every PR's wall-clock time, and occasionally deadlocks PRs entirely.
 
@@ -42,7 +42,7 @@ gh api -X PATCH repos/ai-sdlc-framework/ai-sdlc/branches/main/protection/require
 
 This is an operator-level branch-protection change. The implementation PR includes:
 
-- The exact `gh api` command above committed as `scripts/apply-codecov-drop.sh` so it's reproducible
+- The exact `gh api` command above committed as a new helper script under `scripts/` so it's reproducible
 - A `docs/operations/quality-gate.md` update naming the new required-check list + the rationale
 
 ### B. Keep codecov running as INFORMATIONAL
@@ -57,14 +57,14 @@ Update `docs/operations/quality-gate.md`:
 - Reaffirm `scripts/check-coverage.sh` as the authoritative 80% gate
 - Note that operators can still drop below 80% via `AI_SDLC_SKIP_COVERAGE_GATE=1` for emergencies (existing pattern)
 
-### D. Remove the empty-LCOV fallback after this lands
+### D. Remove the empty-LCOV fallback in this same PR
 
-The empty-LCOV workaround added in AISDLC-370 (PR #554) only exists to satisfy codecov/patch when no tests run. Once `codecov/patch` is no longer required, the fallback becomes dead code. Remove it in this PR — keep CI simple.
+The empty-LCOV workaround added by AISDLC-370 only exists to satisfy codecov/patch when no tests run. Once `codecov/patch` is no longer a required check, the fallback becomes dead code. Remove it in this same PR — keep CI simple.
 
 ## Acceptance criteria
 
 - [ ] `gh api PATCH .../branches/main/protection/required_status_checks` executed; `codecov/patch` no longer in `contexts[]`
-- [ ] Reproducible script at `scripts/apply-codecov-drop.sh` committed (operator can rerun if branch protection is recreated)
+- [ ] Reproducible script at a new helper script under `scripts/` committed (operator can rerun if branch protection is recreated)
 - [ ] `docs/operations/quality-gate.md` updated with new required-check list + rationale
 - [ ] Empty-LCOV fallback in `.github/workflows/ci.yml` Coverage steps removed (AISDLC-370 dead code)
 - [ ] Verified by opening a test PR touching only `.github/workflows/` (no test changes) and confirming it lands without operator manual unblocking
