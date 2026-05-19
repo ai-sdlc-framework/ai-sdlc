@@ -641,6 +641,9 @@ describe('cli-orchestrator tick default spawner (AISDLC-352)', () => {
       sleep: () => Promise.resolve(),
       frontier: () => [],
       escalate: async () => {},
+      // Bypass the real parentBranchGuard so this test passes in worktree
+      // environments (feature branches with uncommitted build artifacts).
+      parentBranchGuard: async () => {},
       umbrellaExecutor: async (taskId, spawnerKind) => {
         spawnerKinds.push(spawnerKind);
         return { ok: true, pipeline: approvedResult(taskId) };
