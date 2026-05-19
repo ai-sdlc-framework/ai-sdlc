@@ -8,15 +8,17 @@
 
 ## TL;DR
 
-Configure **one** required check on your protected branch:
+Configure **three** required checks on your protected branch:
 
 ```
+Backlog Drift
 ai-sdlc/pr-ready
+ai-sdlc/attestation
 ```
 
-That check is the rollup of every PR signal AI-SDLC needs (lint, build, test on Node 20+22, coverage, integration tests). The rollup runs on both `pull_request` and `merge_group` events, so it works whether or not you have GitHub Merge Queue enabled.
+`ai-sdlc/pr-ready` is the rollup of every PR signal AI-SDLC needs (lint, build, test on Node 22, coverage, integration tests). `Backlog Drift` is a standalone CI job that catches dangling task references. `ai-sdlc/attestation` is the DSSE review-attestation verifier. The rollup runs on both `pull_request` and `merge_group` events, so it works whether or not you have GitHub Merge Queue enabled.
 
-You no longer need to enumerate `CI OK`, `Post Review Results`, `codecov/patch`, `ai-sdlc/attestation`, `Build & Test (Node 20)`, etc. individually. The aggregator owns that list, in code you control.
+You no longer need to enumerate `CI OK`, `Post Review Results`, `codecov/patch`, `Build & Test (Node 20)`, etc. individually. `codecov/patch` was removed as a required check (AISDLC-372) — see ["Why codecov/patch is informational, not required"](#why-codecovpatch-is-informational-not-required-aisdlc-372) below. The aggregator owns the CI list, in code you control.
 
 ---
 
@@ -64,6 +66,46 @@ Per-archetype gating decisions:
 
 The verifier still runs and still posts `ai-sdlc/attestation` as a commit status — adopters or auditors can subscribe to it via webhook, slack notification, or weekly review without putting it in the merge gate.
 
+## Why codecov/patch is informational, not required (AISDLC-372)
+
+`codecov/patch` was removed from required branch-protection status checks. It stays configured in CI (`codecov/codecov-action@v5` in `.github/workflows/ci.yml`) for informational reporting — PR comments with line-by-line coverage annotations and the codecov.io dashboard — but **no longer gates merges**.
+
+### The two problems it caused
+
+1. **SaaS processing latency.** codecov.io computes and posts the `codecov/patch` status only *after* our CI uploads coverage data to their servers. This happens on their infrastructure with shared backpressure. In practice this added 5–15 min of wall-clock time to every PR's merge readiness window, even when all our own checks had already passed.
+
+2. **App-source deadlock on zero-coverage PRs.** Branch protection requires the status to come from the codecov GitHub App specifically; synthetic `gh api` statuses are rejected. PRs that produce no LCOV data (docs-only changesets, pure `.github/workflows/` changes, script-only changes) leave codecov with nothing to upload → codecov never posts its status → the PR sits in BLOCKED state permanently, even when every AI-SDLC gate is green. This was hit on PRs #553 and #554 during the AISDLC-370 cycle and required a workaround (empty-LCOV fallback) to undeadlock.
+
+### Why the local gate is sufficient and authoritative
+
+`scripts/check-coverage.sh` (the `pre-push` hook) enforces **80% lines coverage per package** before the push ever reaches GitHub. It:
+
+- Runs in under 1 minute on our own hardware.
+- Blocks the push before the PR is even opened.
+- Has no dependency on third-party SaaS infrastructure.
+- Is skippable for emergencies via `AI_SDLC_SKIP_COVERAGE_GATE=1` (existing escape hatch).
+
+The codecov/patch status measured the same 80%-lines property using a slower, less-reliable mechanism. Dropping it from required checks removes the latency and the deadlock risk without weakening the coverage gate.
+
+### Operator action to apply
+
+Branch protection changes require admin scope; CI does not have admin scope. After this PR merges, **run the apply script once**:
+
+```bash
+bash scripts/apply-codecov-drop.sh
+```
+
+This patches the required contexts to `[Backlog Drift, ai-sdlc/pr-ready, ai-sdlc/attestation]`, dropping `codecov/patch`. The script is idempotent — safe to re-run if branch protection is recreated. See [`scripts/apply-codecov-drop.sh`](../../scripts/apply-codecov-drop.sh) for the full command and dry-run mode.
+
+### Required contexts after the change
+
+| Context | Required | Source |
+|---|---|---|
+| `Backlog Drift` | yes | `ci.yml` `backlog-drift` job |
+| `ai-sdlc/pr-ready` | yes | `ai-sdlc-gate.yml` aggregator (alls-green) |
+| `ai-sdlc/attestation` | yes | `verify-attestation.yml` |
+| `codecov/patch` | **no** (informational only) | codecov GitHub App |
+
 ## Cutover procedure (operator action)
 
 This workflow ships in **additive mode**: it runs on every PR alongside the legacy required checks, but branch protection is not yet wired against it. Before cutover, validate that `ai-sdlc/pr-ready` matches expectation on a few real PRs (see "Pre-cutover validation" below).
@@ -76,13 +118,15 @@ When you're ready to cut over, the operator does the following on the protected 
    ```
 
 2. **Update the required-checks list.** In the GitHub UI under *Settings → Branches → Edit rule for `main`*:
-   - **Add:** `ai-sdlc/pr-ready`
-   - **Remove:** the legacy required checks. For ai-sdlc itself this set is `CI OK`, `Post Review Results`, `codecov/patch`, `ai-sdlc/attestation`. For adopters, remove whatever individual checks `ai-sdlc/pr-ready` now subsumes.
+   - **Add:** `ai-sdlc/pr-ready`, `Backlog Drift`, `ai-sdlc/attestation`
+   - **Remove:** the legacy required checks. For ai-sdlc itself this set is `CI OK`, `Post Review Results`, `codecov/patch`, `Build & Test (Node 20)`, etc. For adopters, remove whatever individual checks `ai-sdlc/pr-ready` now subsumes.
 
-   Or via `gh api`:
+   Or via `gh api` (this is the exact command used for ai-sdlc's own repo — see `scripts/apply-codecov-drop.sh`):
    ```bash
    gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
-     -f 'contexts[]=ai-sdlc/pr-ready' \
+     -F 'contexts[]=Backlog Drift' \
+     -F 'contexts[]=ai-sdlc/pr-ready' \
+     -F 'contexts[]=ai-sdlc/attestation' \
      -F 'strict=true'
    ```
 
