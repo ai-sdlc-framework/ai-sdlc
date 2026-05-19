@@ -236,81 +236,23 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
-      # AISDLC-370 hotfix: docs-only PRs run zero tests, so codecov has nothing
-      # to upload → required `codecov/patch` check never posts → PR deadlocks
-      # in BLOCKED state. Detect docs-only first; if true, post a synthetic
-      # codecov/patch=success via gh api (mirror of verify-attestation.yml's
-      # AISDLC-214 short-circuit) and skip the coverage steps entirely.
-      - name: Detect docs-only changeset
-        id: docs_only
-        if: github.event_name == 'pull_request'
-        run: |
-          set -euo pipefail
-          BASE_SHA="${{ github.event.pull_request.base.sha }}"
-          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
-          FILES=$(git -c core.quotePath=false diff --name-only "${BASE_SHA}...${HEAD_SHA}")
-          if [ -z "${FILES}" ]; then
-            ALL_DOCS=true
-          else
-            ALL_DOCS=$(printf '%s\n' "${FILES}" | node scripts/is-docs-only-changeset.mjs)
-          fi
-          echo "all_docs=${ALL_DOCS}" >> "${GITHUB_OUTPUT}"
-          echo "[docs-only-detect] all_docs=${ALL_DOCS}"
-      # Docs-only short-circuit: write an empty LCOV report and upload to codecov
-      # so the codecov app posts the required `codecov/patch` status itself
-      # (branch protection requires the codecov GitHub App as the source —
-      # synthetic statuses via gh api are rejected with "not set by the
-      # expected GitHub app"). Empty patch → codecov posts success.
-      - name: Empty-coverage upload (docs-only short-circuit)
-        if: github.event_name == 'pull_request' && steps.docs_only.outputs.all_docs == 'true'
-        run: |
-          mkdir -p .coverage
-          cat > .coverage/lcov.info <<'EOF'
-          TN:
-          end_of_record
-          EOF
-          echo "[docs-only] wrote empty LCOV report for codecov upload"
-      - uses: codecov/codecov-action@v5
-        if: github.event_name == 'pull_request' && steps.docs_only.outputs.all_docs == 'true'
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./.coverage/lcov.info
-          fail_ci_if_error: false
       - run: pnpm install --frozen-lockfile
-        if: steps.docs_only.outputs.all_docs != 'true' || github.event_name != 'pull_request'
       - run: pnpm build
-        if: steps.docs_only.outputs.all_docs != 'true' || github.event_name != 'pull_request'
       # AISDLC-368: PR coverage runs ONLY for tests that touch changed files
       # (vitest --changed origin/main). Cuts coverage job ~3-5min → ~30s on
       # small PRs. push/merge_group still run full coverage so the codecov
       # baseline stays accurate.
-      #
-      # Critical: when --changed finds no affected tests (e.g. PR touches
-      # only .github/workflows/, scripts/, or other non-test paths), vitest
-      # writes no coverage and codecov never posts the required
-      # `codecov/patch` status → PR deadlocks BLOCKED. Always-write fallback
-      # LCOV ensures codecov gets *something* to compute the empty patch
-      # against, which it correctly reports as 'success'.
       - name: Coverage (PR — changed files only)
-        if: github.event_name == 'pull_request' && steps.docs_only.outputs.all_docs != 'true'
+        if: github.event_name == 'pull_request'
         run: |
           git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || true
-          pnpm -r exec -- vitest run --coverage --changed origin/main || true
-          # Fallback empty LCOV so codecov-action has SOMETHING to upload
-          # even when --changed produced 0 affected test files.
-          mkdir -p .coverage
-          if [ ! -s .coverage/lcov.info ]; then
-            cat > .coverage/lcov.info <<'EOF'
-          TN:
-          end_of_record
-          EOF
-            echo "[coverage] no affected tests — wrote empty LCOV fallback"
-          fi
+          pnpm -r exec -- vitest run --coverage --changed origin/main || pnpm test:coverage
       - name: Coverage (push / merge_group — full)
         if: github.event_name != 'pull_request'
         run: pnpm test:coverage
+      # AISDLC-372: codecov/patch removed from required branch-protection. Upload
+      # stays so the codecov.io dashboard + PR comment remain informational.
       - uses: codecov/codecov-action@v5
-        if: steps.docs_only.outputs.all_docs != 'true' || github.event_name != 'pull_request'
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: .
