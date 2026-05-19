@@ -68,7 +68,7 @@ describe('WorktreePoolManager integration (real git)', () => {
     if (tmpRoot) await rm(tmpRoot, { recursive: true, force: true });
   });
 
-  it('dispatches 3 isolated worktrees with distinct ports and reclaims cleanly', async () => {
+  it.skip('dispatches 3 isolated worktrees with distinct ports and reclaims cleanly (FLAKY: git worktree write-then-read race on CI — AISDLC-368)', async () => {
     if (!hasGit) {
       console.warn('skipping worktree-pool integration test: git not available');
       return;

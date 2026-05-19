@@ -18,6 +18,12 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# AISDLC-368: opt the workflow into Node 24 for JavaScript actions to silence
+# the actions/checkout@v4 + dorny/paths-filter@v3 Node 20 deprecation warning
+# that appeared on every job. Pure annotation-suppression — no behavior change.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # AISDLC-218: skip every PR-event job when the PR is a draft. The guard
 # allows push (no PR context) + merge_group (always non-draft) through.
 jobs:
@@ -160,7 +166,10 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     strategy:
       matrix:
-        node-version: [20, 22]
+        # AISDLC-368: dropped Node 20 to halve Build & Test wall time.
+        # Node 22 is the canonical pin (engines.node ^22 across all packages);
+        # Node 20 was advisory-only and added ~5min per PR with little signal.
+        node-version: [22]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

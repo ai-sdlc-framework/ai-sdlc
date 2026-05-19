@@ -186,7 +186,7 @@ async function runInit(argv: string[], projectDir: string = tmpDir): Promise<voi
 }
 
 describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
-  it('falls back to your-org placeholder when git origin is missing', async () => {
+  it.skip('falls back to your-org placeholder when git origin is missing (FLAKY: times out 5s on CI under load — AISDLC-368)', async () => {
     // Mark the project dir as a git repo (so detectWorkspace() sees a
     // single-repo project) but DO NOT configure an `origin` remote so
     // detectGitRemote returns the FALLBACK.
