@@ -58,6 +58,7 @@ import {
   loadSubmittedCaptures,
   migrateLegacyCaptures,
   redactSubmittedCapture,
+  SubmittedCaptureNotFoundError,
   getAutoSubmitThreshold,
   resolveRepoRoot,
 } from '../capture/draft-capture.js';
@@ -561,15 +562,19 @@ export function buildCaptureCli(): Argv {
           let allRecords: CaptureRecord[] = [];
           let totalSkipped = 0;
 
-          if (source === 'all' || source === 'drafts') {
-            const d = loadDraftCaptures({ ...filterOpts, repoRoot });
-            allRecords = allRecords.concat(d.records);
-            totalSkipped += d.skippedFiles;
-          }
+          // AISDLC-320 review fix: load submitted FIRST so submitted wins on dedup.
+          // submitDraft is write-then-delete (not atomic); a crash between those
+          // steps leaves both files on disk. Always prefer submitted over draft so
+          // operators see the audit trail rather than a stale `triage=tbd` draft.
           if (source === 'all' || source === 'submitted') {
             const s = loadSubmittedCaptures({ ...filterOpts, repoRoot });
             allRecords = allRecords.concat(s.records);
             totalSkipped += s.skippedFiles;
+          }
+          if (source === 'all' || source === 'drafts') {
+            const d = loadDraftCaptures({ ...filterOpts, repoRoot });
+            allRecords = allRecords.concat(d.records);
+            totalSkipped += d.skippedFiles;
           }
           if (source === 'all' || source === 'legacy') {
             // AC-7 backward-compat: legacy $ARTIFACTS_DIR/_captures/ captures.
@@ -578,7 +583,7 @@ export function buildCaptureCli(): Argv {
             totalSkipped += l.skippedFiles;
           }
 
-          // Deduplicate by ID (in case a capture exists in multiple locations).
+          // Deduplicate by ID — first occurrence wins, so submitted beats draft.
           const seen = new Set<string>();
           const deduped = allRecords.filter((r) => {
             if (seen.has(r.id)) return false;
@@ -626,6 +631,10 @@ export function buildCaptureCli(): Argv {
           const repoRoot = resolveRepoRoot();
 
           // Try submitted captures first, then fall back to legacy JSONL.
+          // AISDLC-320 review fix: use SubmittedCaptureNotFoundError instanceof
+          // check rather than fragile message-string matching, so future
+          // refactors of either redact error string don't silently break the
+          // fallback path.
           try {
             const updated = redactSubmittedCapture({
               captureId,
@@ -637,8 +646,7 @@ export function buildCaptureCli(): Argv {
             return;
           } catch (e1) {
             // Not a submitted capture — try legacy JSONL.
-            const errMsg = (e1 as Error).message;
-            if (!errMsg.includes('not found:')) {
+            if (!(e1 instanceof SubmittedCaptureNotFoundError)) {
               throw e1;
             }
           }

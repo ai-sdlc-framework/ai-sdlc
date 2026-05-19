@@ -570,13 +570,26 @@ export interface RedactSubmittedOpts {
  * Scrubs the `finding` field (and `source.context` / `evidence.additionalContext`)
  * but preserves the audit trail, per RFC-0024 §11 immutability contract.
  */
+/**
+ * Typed error thrown when a submitted capture file is missing.
+ * AISDLC-320 review fix: use instanceof discriminator instead of message-string
+ * matching so the cli-capture redact fallback to legacy JSONL doesn't silently
+ * break if either error string is refactored.
+ */
+export class SubmittedCaptureNotFoundError extends Error {
+  constructor(public readonly filePath: string) {
+    super(`[cli-capture] not found: ${filePath}`);
+    this.name = 'SubmittedCaptureNotFoundError';
+  }
+}
+
 export function redactSubmittedCapture(opts: RedactSubmittedOpts): CaptureRecord {
   assertSafeCaptureId(opts.captureId);
   const submittedDir = resolveSubmittedDir(opts.repoRoot);
   const filePath = join(submittedDir, `${opts.captureId}.md`);
 
   if (!existsSync(filePath)) {
-    throw new Error(`[cli-capture] not found: ${filePath}`);
+    throw new SubmittedCaptureNotFoundError(filePath);
   }
 
   let content: string;
