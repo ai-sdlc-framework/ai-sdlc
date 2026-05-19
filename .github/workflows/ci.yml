@@ -26,12 +26,23 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     outputs:
-      python: ${{ steps.filter.outputs.python }}
-      go: ${{ steps.filter.outputs.go }}
+      python: ${{ steps.filter.outputs.python || steps.fallback.outputs.python }}
+      go: ${{ steps.filter.outputs.go || steps.fallback.outputs.go }}
     steps:
       - uses: actions/checkout@v4
+      # On merge_group, the queue head ref is ephemeral and gets deleted by
+      # GitHub between when the workflow starts and when paths-filter tries
+      # to fetch it. Skip the action there and force-enable both outputs so
+      # downstream SDK tests run unconditionally on merge_group — same
+      # effective behavior as a paths-changed=true result.
+      - id: fallback
+        if: github.event_name == 'merge_group'
+        run: |
+          echo "python=true" >> "$GITHUB_OUTPUT"
+          echo "go=true" >> "$GITHUB_OUTPUT"
       - uses: dorny/paths-filter@v3
         id: filter
+        if: github.event_name != 'merge_group'
         with:
           filters: |
             python:
