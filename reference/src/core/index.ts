@@ -8,6 +8,13 @@ export {
   type RoleOverrides,
 } from './init-did.js';
 export {
+  resolveSoulDsb,
+  resolveAllSoulDsbs,
+  mergeSoulDsb,
+  mergeSoulDsbSpec,
+  type SoulDsbResolution,
+} from './soul-dsb-resolver.js';
+export {
   validate,
   validateResource,
   formatValidationErrors,

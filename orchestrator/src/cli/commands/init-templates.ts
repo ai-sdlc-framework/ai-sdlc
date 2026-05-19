@@ -693,6 +693,91 @@ calibration:
 `;
 
 /**
+ * Per-soul DesignSystemBinding template (RFC-0009 Phase 2.2).
+ *
+ * Scaffolded at `.ai-sdlc/souls/<slug>/design-system-binding.yaml` for
+ * each soul in a Tessellated Platform. The `spec.extends` field records
+ * the parent platform-root DSB name, implementing the additive inheritance
+ * chain described in RFC-0009 §6.
+ *
+ * Drift policy: when `DesignSystemBindingSpec` gains new required fields,
+ * mirror them here so that freshly-scaffolded soul DSBs are immediately valid.
+ *
+ * @param soulSlug - the soul identifier (e.g. "soul-a"); used in resource name
+ * @param platformDsbName - the parent platform-root DSB name (defaults to
+ *   the literal placeholder `platform-dsb` for adopters to replace)
+ */
+export function buildSoulDsbTemplate(
+  soulSlug: string,
+  platformDsbName: string = 'platform-dsb',
+): string {
+  return `apiVersion: ai-sdlc.io/v1alpha1
+kind: DesignSystemBinding
+metadata:
+  name: ${soulSlug}-dsb
+  labels:
+    ai-sdlc/soul: "${soulSlug}"
+    ai-sdlc/scope: soul
+spec:
+  # Additively extends the platform-root DSB (RFC-0009 §6 resolution rules).
+  # Per-soul fields override / extend platform-root fields; absent fields
+  # fall through to the platform-root DSB at admission time.
+  extends: ${platformDsbName}
+
+  stewardship:
+    designAuthority:
+      # Soul-specific design authority — added to the platform-root authority set.
+      # Replace with your actual design authority contact(s).
+      principals:
+        - your-design-authority@example.com
+      scope:
+        - ${soulSlug}-design-intent
+    engineeringAuthority:
+      # Replace with your actual engineering authority contact(s).
+      principals:
+        - your-engineering-authority@example.com
+      scope:
+        - ${soulSlug}-compliance
+
+  designToolAuthority: specification
+
+  tokens:
+    provider: tokens-studio
+    format: w3c-dtcg
+    source:
+      repository: your-org/design-tokens
+      # Soul-specific token branch — override the platform-root source when
+      # this soul maintains divergent token values.
+      branch: soul/${soulSlug}
+      path: tokens/souls/${soulSlug}/
+    versionPolicy: minor
+
+  catalog:
+    provider: storybook
+    source:
+      # Soul-specific Storybook URL — override platform URL when souls have
+      # separate component catalogs.
+      storybookUrl: https://${soulSlug}.storybook.your-org.io
+
+  compliance:
+    coverage:
+      # Soul-specific coverage threshold (integer percent 0-100) — may be
+      # stricter than platform floor.
+      minimum: 70
+      target: 90
+
+  designReview:
+    required: true
+    # Soul-specific reviewers — unioned with platform-root reviewers at
+    # admission time per §6.3 additive resolution.
+    reviewers: []
+    scope:
+      - visual-quality
+      - accessibility-intent
+`;
+}
+
+/**
  * The set of feature templates exported as a single map so the wizard
  * dispatcher can iterate without each feature growing its own switch
  * statement.

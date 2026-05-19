@@ -47,7 +47,7 @@ import {
   type FeatureSelection,
   type WizardFlags,
 } from './init-features.js';
-import { CALIBRATION_YAML_STUB } from './init-templates.js';
+import { CALIBRATION_YAML_STUB, buildSoulDsbTemplate } from './init-templates.js';
 
 export const PIPELINE_YAML = `apiVersion: ai-sdlc.io/v1alpha1
 kind: Pipeline
@@ -295,6 +295,85 @@ spec:
       cooldown: 2w
 `;
 
+// ── RFC-0009 Phase 2.2 — Per-soul DSB scaffolding ─────────────────────
+
+/**
+ * Options for `scaffoldSoulDsbs`.
+ */
+export interface ScaffoldSoulDsbsOptions {
+  /**
+   * Name of the platform-root DesignSystemBinding resource.
+   * Referenced in each per-soul DSB's `spec.extends` field.
+   * Defaults to `'platform-dsb'` when not supplied.
+   */
+  platformDsbName?: string;
+  /**
+   * When true, print what would be created without writing files.
+   * Mirrors the `--dry-run` semantics of `initProject()`.
+   */
+  dryRun?: boolean;
+  /**
+   * Output prefix for console lines (e.g. '  ' for indented workspace output).
+   * Defaults to empty string.
+   */
+  prefix?: string;
+}
+
+/**
+ * Scaffold per-soul DesignSystemBinding template files for a Tessellated Platform.
+ *
+ * Creates `.ai-sdlc/souls/<slug>/design-system-binding.yaml` for each soul slug.
+ * Each file is a complete `DesignSystemBinding` resource that additively extends
+ * the platform-root DSB per RFC-0009 §6 resolution rules.
+ *
+ * Idempotent: existing soul DSB files are skipped (not overwritten).
+ *
+ * @param soulSlugs - soul identifiers to scaffold (e.g. ['soul-a', 'soul-b'])
+ * @param aiSdlcDir - absolute path to the `.ai-sdlc/` directory (config dir)
+ * @param options - optional configuration: platformDsbName, dryRun, prefix
+ *
+ * @example
+ * ```ts
+ * scaffoldSoulDsbs(['soul-a', 'soul-b', 'soul-c'], '/project/.ai-sdlc', {
+ *   platformDsbName: 'acme-platform-dsb',
+ * });
+ * // Created: /project/.ai-sdlc/souls/soul-a/design-system-binding.yaml
+ * // Created: /project/.ai-sdlc/souls/soul-b/design-system-binding.yaml
+ * // Created: /project/.ai-sdlc/souls/soul-c/design-system-binding.yaml
+ * ```
+ */
+export function scaffoldSoulDsbs(
+  soulSlugs: readonly string[],
+  aiSdlcDir: string,
+  options: ScaffoldSoulDsbsOptions = {},
+): void {
+  const { platformDsbName = 'platform-dsb', dryRun = false, prefix = '' } = options;
+
+  if (soulSlugs.length === 0) {
+    console.log(`${prefix}No soul slugs provided — skipping soul DSB scaffolding.`);
+    return;
+  }
+
+  for (const slug of soulSlugs) {
+    const soulDir = join(aiSdlcDir, 'souls', slug);
+    const dsbPath = join(soulDir, 'design-system-binding.yaml');
+
+    if (dryRun) {
+      console.log(`${prefix}Would create ${dsbPath}`);
+      continue;
+    }
+
+    if (existsSync(dsbPath)) {
+      console.log(`${prefix}  skip souls/${slug}/design-system-binding.yaml (already exists)`);
+      continue;
+    }
+
+    mkdirSync(soulDir, { recursive: true });
+    writeFileSync(dsbPath, buildSoulDsbTemplate(slug, platformDsbName), 'utf-8');
+    console.log(`${prefix}  created souls/${slug}/design-system-binding.yaml`);
+  }
+}
+
 const GITIGNORE_PATHS = ['.ai-sdlc/state.db', '.ai-sdlc/state/', '.ai-sdlc/audit.jsonl'];
 
 /** Ensure .gitignore includes AI-SDLC runtime artifact entries. */
@@ -438,17 +517,18 @@ export function buildWizardFlags(opts: Record<string, unknown>): WizardFlags {
 /** Validate a `--add` arg and return either the normalized value or null+error. */
 function validateAddArg(
   addRaw: unknown,
-): { ok: true; value?: WizardFlags['add'] } | { ok: false; error: string } {
+): { ok: true; value?: WizardFlags['add'] | 'souls' } | { ok: false; error: string } {
   if (addRaw === undefined || addRaw === null || addRaw === false) return { ok: true };
   if (typeof addRaw !== 'string') return { ok: false, error: `--add must be a string` };
-  const allowed = ['dor', 'attestation', 'classifier', 'branch-protection', 'workflows'];
+  const allowed = ['dor', 'attestation', 'classifier', 'branch-protection', 'workflows', 'souls'];
   if (!allowed.includes(addRaw)) {
     return {
       ok: false,
       error: `--add: unknown feature '${addRaw}'. Expected one of: ${allowed.join(', ')}.`,
     };
   }
-  return { ok: true, value: addRaw as WizardFlags['add'] };
+  // 'souls' is handled separately in the action; cast the rest to WizardFlags['add']
+  return { ok: true, value: addRaw as WizardFlags['add'] | 'souls' };
 }
 
 export const initCommand = new Command('init')
@@ -482,7 +562,17 @@ export const initCommand = new Command('init')
   )
   .option(
     '--add <feature>',
-    'Extend an already-initialized repo with a single feature: dor | attestation | classifier | branch-protection | workflows',
+    'Extend an already-initialized repo with a single feature: dor | attestation | classifier | branch-protection | workflows | souls',
+  )
+  // ── RFC-0009 Phase 2.2 — per-soul DSB scaffolding ──────────────────
+  .option(
+    '--souls <slugs>',
+    'Comma-separated soul slugs for --add souls (e.g. --souls soul-a,soul-b,soul-c)',
+  )
+  .option(
+    '--platform-dsb <name>',
+    'Platform-root DSB name for --add souls extends reference (default: platform-dsb)',
+    'platform-dsb',
   )
   .option(
     '--workspace <name>',
@@ -536,6 +626,50 @@ export const initCommand = new Command('init')
       return;
     }
     const flags = buildWizardFlags(opts);
+
+    // ── --add souls path (RFC-0009 Phase 2.2) ─────────────────────────
+    // Scaffold per-soul DSB templates for a Tessellated Platform.
+    // Usage: ai-sdlc init --add souls --souls soul-a,soul-b,soul-c
+    if (addCheck.value === 'souls') {
+      const soulsRaw = typeof opts.souls === 'string' ? opts.souls : '';
+      const platformDsbName =
+        typeof opts.platformDsb === 'string' ? opts.platformDsb : 'platform-dsb';
+      const soulSlugs = soulsRaw
+        .split(',')
+        .map((slug: string) => slug.trim())
+        .filter((slug: string) => slug.length > 0);
+
+      if (soulSlugs.length === 0) {
+        console.error(
+          'Error: --add souls requires --souls <slug1,slug2,...> with at least one soul slug.',
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      // Validate soul slugs (must match ^[a-z0-9-]+$ per RFC-0009 §5.2 soulId pattern)
+      const invalidSlugs = soulSlugs.filter((slug: string) => !/^[a-z0-9-]+$/.test(slug));
+      if (invalidSlugs.length > 0) {
+        console.error(
+          `Error: invalid soul slug(s): ${invalidSlugs.join(', ')}. Slugs must match ^[a-z0-9-]+$.`,
+        );
+        process.exitCode = 1;
+        return;
+      }
+
+      const aiSdlcDir = join(projectDir, configDirName);
+      console.log(`Scaffolding per-soul DSB templates in ${aiSdlcDir}/souls/:`);
+      console.log('');
+      scaffoldSoulDsbs(soulSlugs, aiSdlcDir, {
+        platformDsbName,
+        dryRun,
+        prefix: '  ',
+      });
+      console.log('');
+      console.log(`Done. Edit each .ai-sdlc/souls/<slug>/design-system-binding.yaml to`);
+      console.log(`configure soul-specific design system bindings.`);
+      return;
+    }
 
     // ── --add path: extend an already-initialized repo ────────────────
     // AC #7: skip the "always-scaffold-baseline" path entirely; the

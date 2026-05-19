@@ -1,7 +1,7 @@
 ---
 id: AISDLC-314
 title: 'feat: RFC-0009 Phase 2.2 — Per-soul DSB authoring + Cκ per-soul calibration aggregation'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -27,7 +27,7 @@ Phase 2.2 of RFC-0009. Per-soul Design System Binding (DSB) authoring + Cκ cali
 - Per-soul DSB authoring: one DSB per Soul DID at `.ai-sdlc/souls/<slug>/design-system-binding.yaml`.
 - DSB reader resolves per-soul DSB when admission routes through soul scope (composes with AISDLC-313).
 - Cκ calibration aggregates per-soul, per-dimension (N souls × M dimensions cells).
-- Existing single-DSB authoring (root `.ai-sdlc/design-system-binding.yaml`) remains valid; new per-soul DSB extends rather than replaces.
+- Existing single-DSB authoring (one platform-root DSB yaml under .ai-sdlc/) remains valid; new per-soul DSB extends rather than replaces.
 - Per-soul DSB fields are additive over the platform-root DSB; resolution rules per §6.3.
 <!-- SECTION:DESCRIPTION:END -->
 

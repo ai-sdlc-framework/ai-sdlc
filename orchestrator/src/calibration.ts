@@ -10,6 +10,12 @@
  *
  * Per v1.1 note: this adjusts the multiplicative Cκ term, NOT SA-2
  * directly. Per-dimension calibration lands in PPA v1.1 §17.
+ *
+ * RFC-0009 Phase 2.2 extension: `buildSoulCalibrationMatrix` aggregates
+ * Cκ coefficients per-soul × per-dimension (N×M cells). Feedback events
+ * tagged with a soul slug as their `category` and a SA dimension drive
+ * the matrix cells. Souls × dimensions with insufficient data are omitted
+ * from the matrix (callers fall back to the scalar coefficient or 1.0).
  */
 
 import type { SaDimension } from './state/types.js';
@@ -101,4 +107,138 @@ export function buildCategoryCoefficients(
     result[category] = computeCalibrationCoefficient(f);
   }
   return result;
+}
+
+// ── RFC-0009 Phase 2.2 — Per-soul × per-dimension Cκ matrix ─────────
+
+/**
+ * Input options for `buildSoulCalibrationMatrix`.
+ */
+export interface BuildSoulCalibrationMatrixInput {
+  /**
+   * Soul slugs to include in the matrix (N axis).
+   * Feedback events whose `category` matches a slug are collected.
+   */
+  souls: readonly string[];
+  /**
+   * SA dimensions to include in the matrix (M axis).
+   * When absent, all SA dimensions are sampled.
+   */
+  dimensions?: readonly SaDimension[];
+  /** Trailing-window filter (ISO timestamp). */
+  since?: string;
+  /**
+   * Minimum feedback event count per (soul, dimension) cell before a
+   * coefficient is emitted. Cells below this threshold are omitted from
+   * the matrix — callers should fall back to 1.0 (neutral) for absent cells.
+   */
+  minSampleSize?: number;
+}
+
+/**
+ * The N×M Cκ calibration matrix for a tessellated platform.
+ *
+ *   cells[soulSlug][dimension] = calibration coefficient in [0.7, 1.3]
+ *
+ * Cells omitted from the map have insufficient feedback data.
+ * Callers treat absent cells as 1.0 (neutral, no calibration adjustment).
+ */
+export interface SoulCalibrationMatrix {
+  /**
+   * N×M map: `{ soulSlug: { saDimension: coefficient } }`.
+   * Only cells with sufficient data are present.
+   */
+  cells: Record<string, Record<string, number>>;
+  /**
+   * Souls (N axis) included in this matrix — equal to `input.souls`.
+   * Useful for distinguishing "soul has data but coefficient is neutral"
+   * from "soul was not included in the query".
+   */
+  souls: readonly string[];
+  /**
+   * SA dimensions (M axis) sampled — equal to `input.dimensions` when
+   * provided, or all dimensions found in the feedback window.
+   */
+  dimensions: readonly string[];
+}
+
+/** All recognized SA dimensions for default matrix columns. */
+const ALL_SA_DIMENSIONS: readonly SaDimension[] = ['SA-1', 'SA-2'];
+
+/**
+ * Aggregate Cκ calibration coefficients per-soul × per-dimension (N×M cells).
+ *
+ * Feedback events tagged with:
+ *   - `category = <soul-slug>` (identifies which soul the feedback is for)
+ *   - `dimension = <SA-1 | SA-2>` (SA dimension the feedback applies to)
+ *
+ * ...drive the per-cell coefficient using the same formula as
+ * `computeCalibrationCoefficient`.
+ *
+ * Usage in tessellated admission scoring (RFC-0009 §6):
+ *   - Look up `matrix.cells[targetSoul][dimension]` for the effective Cκ
+ *   - Fall back to 1.0 (neutral) when the cell is absent (insufficient data)
+ *   - Cross-soul aggregate: apply `crossSoulScoringRule` over per-soul cells
+ *
+ * @example
+ * ```ts
+ * const matrix = buildSoulCalibrationMatrix(feedback, {
+ *   souls: ['soul-a', 'soul-b', 'soul-c'],
+ *   dimensions: ['SA-1', 'SA-2'],
+ *   minSampleSize: 5,
+ * });
+ * const ckSoulA = matrix.cells['soul-a']?.['SA-1'] ?? 1.0;
+ * ```
+ */
+export function buildSoulCalibrationMatrix(
+  feedback: SAFeedbackStore,
+  input: BuildSoulCalibrationMatrixInput,
+): SoulCalibrationMatrix {
+  const dims: readonly SaDimension[] = input.dimensions ?? ALL_SA_DIMENSIONS;
+  const cells: Record<string, Record<string, number>> = {};
+
+  for (const soul of input.souls) {
+    const soulCells: Record<string, number> = {};
+
+    for (const dim of dims) {
+      const window: PrecisionWindow = { dimension: dim, since: input.since };
+      const events = feedback.list(window).filter((e) => e.category === soul);
+
+      if (events.length === 0) continue;
+
+      const bucket: CategoryFeedback = {
+        accepts: 0,
+        dismisses: 0,
+        escalates: 0,
+        overrides: 0,
+      };
+      for (const e of events) {
+        switch (e.signal) {
+          case 'accept':
+            bucket.accepts++;
+            break;
+          case 'dismiss':
+            bucket.dismisses++;
+            break;
+          case 'escalate':
+            bucket.escalates++;
+            break;
+          case 'override':
+            bucket.overrides = (bucket.overrides ?? 0) + 1;
+            break;
+        }
+      }
+
+      const sampleSize = bucket.accepts + bucket.dismisses + bucket.escalates;
+      if (sampleSize < (input.minSampleSize ?? 1)) continue;
+
+      soulCells[dim] = computeCalibrationCoefficient(bucket);
+    }
+
+    if (Object.keys(soulCells).length > 0) {
+      cells[soul] = soulCells;
+    }
+  }
+
+  return { cells, souls: input.souls, dimensions: dims };
 }

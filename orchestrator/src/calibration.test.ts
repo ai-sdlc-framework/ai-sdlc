@@ -6,6 +6,7 @@ import {
   CALIBRATION_MAX,
   CALIBRATION_SLOPE,
   buildCategoryCoefficients,
+  buildSoulCalibrationMatrix,
   computeCalibrationCoefficient,
 } from './calibration.js';
 import { SAFeedbackStore } from './sa-scoring/feedback-store.js';
@@ -234,5 +235,146 @@ describe('buildCategoryCoefficients', () => {
       },
     );
     expect(result.dimensions.calibration).toBe(CALIBRATION_MAX);
+  });
+});
+
+// ── RFC-0009 Phase 2.2 — buildSoulCalibrationMatrix (AC #3) ──────────
+
+describe('buildSoulCalibrationMatrix (RFC-0009 Phase 2.2 AC #3)', () => {
+  let db: InstanceType<typeof Database>;
+  let store: StateStore;
+  let feedback: SAFeedbackStore;
+
+  beforeEach(() => {
+    db = new Database(':memory:');
+    store = StateStore.open(db);
+    feedback = new SAFeedbackStore(store);
+  });
+
+  afterEach(() => {
+    store.close();
+  });
+
+  function recordFeedback(
+    soul: string,
+    dimension: 'SA-1' | 'SA-2',
+    accepts: number,
+    escalates: number,
+    issueOffset = 0,
+  ) {
+    for (let i = 0; i < accepts; i++) {
+      feedback.record({
+        didName: 'd',
+        issueNumber: issueOffset + i,
+        dimension,
+        signal: 'accept',
+        category: soul,
+      });
+    }
+    for (let i = 0; i < escalates; i++) {
+      feedback.record({
+        didName: 'd',
+        issueNumber: issueOffset + accepts + i,
+        dimension,
+        signal: 'escalate',
+        category: soul,
+      });
+    }
+  }
+
+  it('AC #3: returns N×M cells for souls × dimensions', () => {
+    // soul-a: SA-1 → 10 accepts, 2 escalates → coefficient ≈ 1.2
+    recordFeedback('soul-a', 'SA-1', 10, 2);
+    // soul-b: SA-1 → 4 accepts, 4 escalates → coefficient = 1.0
+    recordFeedback('soul-b', 'SA-1', 4, 4, 100);
+    // soul-a: SA-2 → 6 accepts, 0 escalates → coefficient = 1.3 (clamped)
+    recordFeedback('soul-a', 'SA-2', 6, 0, 200);
+
+    const matrix = buildSoulCalibrationMatrix(feedback, {
+      souls: ['soul-a', 'soul-b', 'soul-c'],
+      dimensions: ['SA-1', 'SA-2'],
+    });
+
+    // soul-a: SA-1 coefficient ≈ 1.0 + (8/12) * 0.3 = 1.2
+    expect(matrix.cells['soul-a']?.['SA-1']).toBeCloseTo(1.2, 6);
+
+    // soul-a: SA-2 coefficient = 1.3 (clamped ceiling)
+    expect(matrix.cells['soul-a']?.['SA-2']).toBe(CALIBRATION_MAX);
+
+    // soul-b: SA-1 coefficient = 1.0 + (0/8) * 0.3 = 1.0
+    expect(matrix.cells['soul-b']?.['SA-1']).toBeCloseTo(1.0, 6);
+
+    // soul-b: SA-2 — no data → cell absent (caller falls back to 1.0)
+    expect(matrix.cells['soul-b']?.['SA-2']).toBeUndefined();
+
+    // soul-c: no data → no cells emitted
+    expect(matrix.cells['soul-c']).toBeUndefined();
+  });
+
+  it('AC #3: souls without data are absent from cells (not zero)', () => {
+    recordFeedback('soul-a', 'SA-1', 3, 0);
+
+    const matrix = buildSoulCalibrationMatrix(feedback, {
+      souls: ['soul-a', 'soul-b'],
+    });
+
+    expect(matrix.cells['soul-a']).toBeDefined();
+    expect(matrix.cells['soul-b']).toBeUndefined();
+  });
+
+  it('AC #3: souls and dimensions are correctly reported in the matrix metadata', () => {
+    const matrix = buildSoulCalibrationMatrix(feedback, {
+      souls: ['soul-a', 'soul-b'],
+      dimensions: ['SA-1', 'SA-2'],
+    });
+
+    expect(matrix.souls).toEqual(['soul-a', 'soul-b']);
+    expect(matrix.dimensions).toEqual(['SA-1', 'SA-2']);
+  });
+
+  it('AC #5: minSampleSize filters out cells with insufficient data', () => {
+    // Only 2 events — below minSampleSize=5
+    recordFeedback('soul-a', 'SA-1', 2, 0);
+
+    const matrix = buildSoulCalibrationMatrix(feedback, {
+      souls: ['soul-a'],
+      minSampleSize: 5,
+    });
+
+    // Cell should be absent because sample size < 5
+    expect(matrix.cells['soul-a']?.['SA-1']).toBeUndefined();
+  });
+
+  it('AC #3: defaults to all SA dimensions when dimensions not specified', () => {
+    recordFeedback('soul-a', 'SA-1', 5, 0);
+    recordFeedback('soul-a', 'SA-2', 5, 0, 100);
+
+    const matrix = buildSoulCalibrationMatrix(feedback, { souls: ['soul-a'] });
+
+    // Both SA-1 and SA-2 sampled by default
+    expect(matrix.dimensions).toContain('SA-1');
+    expect(matrix.dimensions).toContain('SA-2');
+    expect(matrix.cells['soul-a']?.['SA-1']).toBeDefined();
+    expect(matrix.cells['soul-a']?.['SA-2']).toBeDefined();
+  });
+
+  it('AC #3: returns empty cells when no souls provided', () => {
+    const matrix = buildSoulCalibrationMatrix(feedback, { souls: [] });
+    expect(Object.keys(matrix.cells)).toHaveLength(0);
+    expect(matrix.souls).toHaveLength(0);
+  });
+
+  it('cross-soul independence: soul-a calibration does not contaminate soul-b', () => {
+    // soul-a: very positive → 1.3 (clamped ceiling)
+    recordFeedback('soul-a', 'SA-1', 100, 0);
+    // soul-b: very negative → 0.7 (clamped floor)
+    recordFeedback('soul-b', 'SA-1', 0, 100, 200);
+
+    const matrix = buildSoulCalibrationMatrix(feedback, {
+      souls: ['soul-a', 'soul-b'],
+    });
+
+    expect(matrix.cells['soul-a']?.['SA-1']).toBe(CALIBRATION_MAX);
+    expect(matrix.cells['soul-b']?.['SA-1']).toBe(CALIBRATION_MIN);
   });
 });
