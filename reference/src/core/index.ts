@@ -1,6 +1,13 @@
 export * from './types.js';
 export { compareMetric, exceedsSeverity } from './compare.js';
 export {
+  initDid,
+  initDids,
+  buildDefaultTriad,
+  type InitDidOptions,
+  type RoleOverrides,
+} from './init-did.js';
+export {
   validate,
   validateResource,
   formatValidationErrors,

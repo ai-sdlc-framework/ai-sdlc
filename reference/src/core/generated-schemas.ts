@@ -1795,11 +1795,18 @@ export const designIntentDocumentSchema = {
     metadata: { $ref: 'common.schema.json#/$defs/metadata' },
     spec: {
       type: 'object',
-      required: ['stewardship', 'soulPurpose', 'designSystemRef'],
+      required: ['stewardship', 'soulPurpose', 'designSystemRef', 'triad'],
       properties: {
         stewardship: { $ref: '#/$defs/stewardshipSplit' },
         soulPurpose: { $ref: '#/$defs/soulPurpose' },
         designSystemRef: { $ref: '#/$defs/designSystemRef' },
+        triad: { $ref: '#/$defs/triad' },
+        tessellation: { $ref: '#/$defs/tessellation' },
+        parentTessellation: {
+          type: 'string',
+          description:
+            "Present only on Soul DIDs. References the parent Tessellated DID's URI (RFC-0009 §5.3).",
+        },
         brandIdentity: { $ref: '#/$defs/brandIdentity' },
         experientialTargets: { $ref: '#/$defs/experientialTargets' },
         plannedChanges: {
@@ -1820,6 +1827,181 @@ export const designIntentDocumentSchema = {
       enum: ['core', 'evolving'],
       description:
         'Identity class per Addendum B. `core` fields trigger full-backlog re-score on change; `evolving` fields only re-score the admission queue. Also weights BM25 corpus construction (core=2x, evolving=1x).',
+    },
+    triad: {
+      type: 'object',
+      description:
+        'The Fractal Triad (RFC-0009 §5.1). Required on every DID — single-product, Tessellated, and Soul. Carries the three pillar-authority declarations: design (expression), engineering (coherence), product (identity). `init` scaffolds ${operator} as default for all three authorities on single-product DIDs.',
+      required: ['design', 'engineering', 'product'],
+      properties: {
+        design: {
+          type: 'object',
+          description: "Design vertex — accountable for identity expression at this DID's scope.",
+          required: ['authority'],
+          properties: {
+            authority: {
+              type: 'string',
+              description:
+                "Principal accountable for the design vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs.",
+            },
+            inheritsFrom: {
+              type: 'string',
+              description:
+                "Path to parent DID's design vertex. Null/absent for top-level Tessellated DIDs and single-product DIDs.",
+            },
+            imperatives: {
+              type: 'array',
+              description:
+                'Soul-specific design imperatives (voice register, visual identity specialization, experiential invariants).',
+              items: { type: 'string' },
+            },
+            overrides: {
+              type: 'object',
+              description:
+                "Soul-specific overrides of parent Tessellated DID's design vertex declarations.",
+              additionalProperties: true,
+            },
+          },
+          additionalProperties: false,
+        },
+        engineering: {
+          type: 'object',
+          description:
+            'Engineering vertex — accountable for coherence between identity and expression at runtime.',
+          required: ['authority'],
+          properties: {
+            authority: {
+              type: 'string',
+              description:
+                "Principal accountable for the engineering vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs.",
+            },
+            inheritsFrom: {
+              type: 'string',
+              description: "Path to parent DID's engineering vertex. Absent for top-level DIDs.",
+            },
+            complianceRegimes: {
+              type: 'array',
+              description:
+                'Named regulatory or compliance constraints applied at this scope. Eρ₅ scope per RFC-0009 §7.1: HARD regulatory frameworks ONLY (GDPR, HIPAA, SOC2, PCI-DSS, FedRAMP, regional data-residency, regulated-industry rules).',
+              items: { type: 'string' },
+            },
+            performanceBudgets: {
+              type: 'object',
+              description: 'Soul-specific performance budgets.',
+              additionalProperties: true,
+            },
+            dataRetention: {
+              type: 'object',
+              description: 'Soul-specific data retention and isolation requirements.',
+              additionalProperties: true,
+            },
+            slaTier: {
+              type: 'string',
+              description: "SLA tier appropriate to this soul's workload.",
+            },
+            substrateInvariants: {
+              type: 'array',
+              description:
+                'Named invariants the substrate must honor for this soul. Violations trigger Eτ_tessellation_drift per RFC-0009 §7.2.',
+              items: { type: 'string' },
+            },
+          },
+          additionalProperties: false,
+        },
+        product: {
+          type: 'object',
+          description: "Product vertex — accountable for identity declaration at this DID's scope.",
+          required: ['authority'],
+          properties: {
+            authority: {
+              type: 'string',
+              description:
+                "Principal accountable for the product vertex at this DID's scope. Defaults to ${operator} on init for single-product DIDs.",
+            },
+            inheritsFrom: {
+              type: 'string',
+              description: "Path to parent DID's product vertex. Absent for top-level DIDs.",
+            },
+            targetAudience: {
+              type: 'string',
+              description: 'Target audience and persona for this soul.',
+            },
+            problemResonance: {
+              type: 'string',
+              description: "Source-of-truth for Sα₁ scoring at this DID's scope.",
+            },
+            successMetrics: {
+              type: 'array',
+              description: "Success metrics for this soul's work.",
+              items: { type: 'string' },
+            },
+            monetizationModel: {
+              type: 'string',
+              description: 'Monetization model per soul.',
+            },
+            endgamePhase: {
+              type: 'string',
+              description: 'Endgame phase mapping per platform lifecycle model.',
+            },
+          },
+          additionalProperties: false,
+        },
+      },
+      additionalProperties: false,
+    },
+    tessellation: {
+      type: 'object',
+      description:
+        'Present only on Tessellated DIDs (platform roots). Enumerates child Soul DIDs and cross-soul governance rules (RFC-0009 §5.2).',
+      required: ['souls'],
+      properties: {
+        souls: {
+          type: 'array',
+          description: 'Child Soul DIDs that tile into this Tessellated Platform.',
+          minItems: 1,
+          items: {
+            type: 'object',
+            required: ['soulId', 'didUri'],
+            properties: {
+              soulId: {
+                type: 'string',
+                pattern: '^[a-z0-9-]+$',
+                description: 'Slug identifier for this soul within the tessellation.',
+              },
+              didUri: {
+                type: 'string',
+                description: 'URI reference to the Soul DID resource.',
+              },
+              status: {
+                type: 'string',
+                enum: ['active', 'deprecated', 'draft'],
+                description: 'Lifecycle status of this soul within the tessellation.',
+              },
+              inheritsSubstrate: {
+                type: 'boolean',
+                default: true,
+                description:
+                  "Whether this soul inherits the platform Tessellated DID's substrate invariants. Defaults to true.",
+              },
+            },
+            additionalProperties: false,
+          },
+        },
+        crossSoulScoringRule: {
+          type: 'string',
+          enum: ['min', 'max', 'mean', 'weighted-traffic', 'weighted-revenue'],
+          default: 'min',
+          description:
+            'Aggregation rule when substrate work affects multiple souls. Default `min` per RFC-0009 OQ-2 resolution. `weighted-traffic` and `weighted-revenue` are advanced — they require a data source the adopter must provide.',
+        },
+        substrateInvariants: {
+          type: 'array',
+          description:
+            'Named invariants ALL souls must honor. Violations trigger Eτ_tessellation_drift cross-soul drift detection (RFC-0009 §7.2).',
+          items: { type: 'string' },
+        },
+      },
+      additionalProperties: false,
     },
     stewardshipSplit: {
       type: 'object',

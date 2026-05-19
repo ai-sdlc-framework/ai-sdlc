@@ -1,0 +1,114 @@
+# Soul-C DID — RFC-0009 Phase 1 production fixture.
+# Soul DID for the gamma-cohort product face of Platform-X.
+# Compliance: PCI-DSS (Eρ₅ scope). Inherits substrate from platform-x Tessellated DID.
+#
+# See RFC-0009 §11.5 substrate admission example — soul-b and soul-c are the
+# affected souls when `payment-validator.ts` is modified.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DesignIntentDocument
+metadata:
+  name: soul-c
+  labels:
+    ai-sdlc.io/did-type: soul
+    ai-sdlc.io/soul-id: soul-c
+spec:
+  stewardship:
+    productAuthority:
+      owner: alex
+      approvalRequired: [alex]
+      scope:
+        - soulPurpose.mission
+        - triad.product.targetAudience
+        - triad.product.problemResonance
+    designAuthority:
+      owner: morgan
+      approvalRequired: [morgan]
+      scope:
+        - brandIdentity
+        - triad.design.imperatives
+    engineeringReview:
+      role: reviewer
+      blockingScope:
+        - triad.engineering.complianceRegimes
+        - soulPurpose.designPrinciples[*].measurableSignals
+      rationale: Engineering blocks only on technical infeasibility or PCI-DSS boundary violations.
+    reviewCadence: quarterly
+
+  soulPurpose:
+    mission:
+      identityClass: core
+      value: >-
+        Soul-C serves the gamma cohort — payment operations teams who need a PCI-DSS-compliant
+        interface for managing cardholder data workflows with zero cardholder data exposure risk.
+    designPrinciples:
+      - id: pci-first-ux
+        name: PCI-First UX
+        identityClass: core
+        description: >-
+          Cardholder data is never visible in plain text in the UI. Every surface that touches
+          payment data uses tokenized representations. PCI-DSS boundary is enforced at the
+          design system level, not just the backend.
+        measurableSignals:
+          - id: pci-boundary-violations
+            metric: pci-boundary-violation-count
+            threshold: 0
+            operator: eq
+            scope: soul-c
+      - id: payment-precision
+        name: Payment Precision
+        identityClass: core
+        description: >-
+          Payment workflows tolerate zero ambiguity. Amount displays, confirmation steps, and
+          error recovery paths are designed for precision over convenience.
+        measurableSignals:
+          - id: payment-error-ambiguity
+            metric: payment-error-ambiguity-rate
+            threshold: 0
+            operator: eq
+            scope: soul-c
+    scopeBoundaries:
+      inScope:
+        - label: cardholder data workflows
+          identityClass: core
+        - label: PCI-DSS-compliant payment operations
+          identityClass: core
+      outOfScope:
+        - label: non-payment financial workflows
+          synonyms: [general ledger, payroll, non-payment]
+        - label: cardholder data storage
+          synonyms: [PANs, raw card numbers, full-track data]
+
+  designSystemRef:
+    name: platform-x-design-system
+    bindingType: authoritative
+
+  parentTessellation: did:platform-x:platform
+
+  triad:
+    design:
+      authority: morgan
+      inheritsFrom: did:platform-x:platform/triad/design
+      imperatives:
+        - 'voice-register: payment-precise'
+        - 'visual-identity: gamma-payment-aesthetic'
+        - 'pci-boundary: enforced-at-design-system-level'
+    engineering:
+      authority: dominique
+      inheritsFrom: did:platform-x:platform/triad/engineering
+      complianceRegimes:
+        - PCI-DSS
+      slaTier: high
+      dataRetention:
+        policy: PCI-DSS-standard
+        residency: us-east-1
+    product:
+      authority: alex
+      inheritsFrom: did:platform-x:platform/triad/product
+      targetAudience: gamma cohort — payment operations teams
+      problemResonance: >-
+        Payment ops teams need a PCI-DSS-compliant interface that makes cardholder data
+        boundaries structural and unambiguous — zero tolerance for accidental PHI exposure.
+      successMetrics:
+        - PCI-DSS boundary violation count == 0
+        - payment error ambiguity rate == 0
+        - payment workflow completion >= 0.99

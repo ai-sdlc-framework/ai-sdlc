@@ -1,0 +1,112 @@
+# Soul-A DID — RFC-0009 Phase 1 production fixture.
+# Soul DID for the alpha-cohort product face of Platform-X.
+# Compliance: HIPAA (Eρ₅ scope). Inherits substrate from platform-x Tessellated DID.
+#
+# See RFC-0009 §11.3 worked example for the admission-composite context.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DesignIntentDocument
+metadata:
+  name: soul-a
+  labels:
+    ai-sdlc.io/did-type: soul
+    ai-sdlc.io/soul-id: soul-a
+spec:
+  stewardship:
+    productAuthority:
+      owner: alex
+      approvalRequired: [alex]
+      scope:
+        - soulPurpose.mission
+        - triad.product.targetAudience
+        - triad.product.problemResonance
+    designAuthority:
+      owner: morgan
+      approvalRequired: [morgan]
+      scope:
+        - brandIdentity
+        - triad.design.imperatives
+    engineeringReview:
+      role: reviewer
+      blockingScope:
+        - triad.engineering.complianceRegimes
+        - soulPurpose.designPrinciples[*].measurableSignals
+      rationale: Engineering blocks only on technical infeasibility or compliance regime violations.
+    reviewCadence: quarterly
+
+  soulPurpose:
+    mission:
+      identityClass: core
+      value: >-
+        Soul-A serves the alpha cohort — healthcare-adjacent professionals who need a compliant,
+        trustworthy interface for managing sensitive clinical workflows under HIPAA.
+    designPrinciples:
+      - id: trust-first
+        name: Trust-First
+        identityClass: core
+        description: >-
+          Every interaction must reinforce safety and data stewardship. Trust signals are explicit,
+          never implied. PHI handling is made visible, never buried.
+        measurableSignals:
+          - id: trust-indicator-coverage
+            metric: explicit-trust-indicator-coverage
+            threshold: 1.0
+            operator: eq
+            scope: soul-a
+      - id: clinical-clarity
+        name: Clinical Clarity
+        identityClass: core
+        description: >-
+          Clinical terminology is used precisely. No consumer-UI euphemisms that obscure clinical
+          meaning. Forms and workflows match clinical mental models.
+        measurableSignals:
+          - id: clinical-term-accuracy
+            metric: clinical-terminology-accuracy-score
+            threshold: 0.95
+            operator: gte
+            scope: soul-a
+    scopeBoundaries:
+      inScope:
+        - label: clinical workflow management
+          identityClass: core
+        - label: HIPAA-compliant data handling
+          identityClass: core
+      outOfScope:
+        - label: consumer health tracking
+          synonyms: [wellness, fitness, self-monitoring]
+        - label: non-clinical administrative workflows
+          synonyms: [billing only, HR, non-clinical ops]
+
+  designSystemRef:
+    name: platform-x-design-system
+    bindingType: authoritative
+
+  parentTessellation: did:platform-x:platform
+
+  triad:
+    design:
+      authority: morgan
+      inheritsFrom: did:platform-x:platform/triad/design
+      imperatives:
+        - 'voice-register: clinical-and-precise'
+        - 'visual-identity: alpha-clinical-aesthetic'
+        - 'trust-signals: explicit-at-every-PHI-surface'
+    engineering:
+      authority: dominique
+      inheritsFrom: did:platform-x:platform/triad/engineering
+      complianceRegimes:
+        - HIPAA
+      slaTier: high
+      dataRetention:
+        policy: 7-years
+        residency: us-east-1
+    product:
+      authority: alex
+      inheritsFrom: did:platform-x:platform/triad/product
+      targetAudience: alpha cohort — healthcare-adjacent professionals
+      problemResonance: >-
+        Clinical teams managing PHI-adjacent workflows need a trustworthy, compliant interface
+        that respects clinical mental models and makes HIPAA obligations explicit.
+      successMetrics:
+        - HIPAA audit-pass rate >= 100%
+        - clinical-task completion >= 0.92
+        - trust-indicator coverage == 1.0

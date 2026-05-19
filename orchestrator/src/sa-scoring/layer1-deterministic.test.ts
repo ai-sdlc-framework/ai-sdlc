@@ -102,6 +102,12 @@ function makeDid(overrides: Partial<DesignIntentDocument['spec']> = {}): DesignI
         },
       },
       designSystemRef: { name: 'acme-ds' },
+      // RFC-0009 §5.1: triad is now required on every DID.
+      triad: {
+        design: { authority: '${operator}' },
+        engineering: { authority: '${operator}' },
+        product: { authority: '${operator}' },
+      },
       ...overrides,
     },
   };

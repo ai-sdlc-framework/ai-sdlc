@@ -1,0 +1,128 @@
+# Platform-X Tessellated DID — RFC-0009 Phase 1 production fixture.
+# Demonstrates the Tessellated DID shape: triad at platform scope + tessellation manifest.
+# Three Soul DIDs tile into this platform: soul-a (HIPAA), soul-b (SOC2), soul-c (PCI-DSS).
+#
+# See RFC-0009 §11.2 worked example for the admission-composite context.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DesignIntentDocument
+metadata:
+  name: platform-x
+  labels:
+    ai-sdlc.io/did-type: tessellated
+spec:
+  stewardship:
+    productAuthority:
+      owner: alex
+      approvalRequired: [alex]
+      scope:
+        - soulPurpose.mission
+        - triad.product
+    designAuthority:
+      owner: morgan
+      approvalRequired: [morgan]
+      scope:
+        - brandIdentity
+        - triad.design
+    sharedAuthority:
+      approvalRequired: [alex, morgan]
+      scope:
+        - tessellation.substrateInvariants
+    engineeringReview:
+      role: reviewer
+      blockingScope:
+        - soulPurpose.designPrinciples[*].measurableSignals
+        - triad.engineering.substrateInvariants
+      rationale: Engineering reviews all DID fields; blocks only on measurable-signal technical infeasibility.
+    reviewCadence: quarterly
+
+  soulPurpose:
+    mission:
+      identityClass: core
+      value: >-
+        Platform-X provides a multi-soul governance platform whose shared engineering substrate
+        enables multiple product faces to operate under categorically distinct compliance regimes
+        without sacrificing product coherence at any soul scope.
+    designPrinciples:
+      - id: substrate-neutrality
+        name: Substrate Neutrality
+        identityClass: core
+        description: >-
+          Shared substrate must not encode soul-specific identity strings, conditionals, or
+          behavioral branches. Every soul-distinct concern lives in soul scope, never substrate scope.
+        measurableSignals:
+          - id: soul-conditional-count
+            metric: substrate-soul-conditional-count
+            threshold: 0
+            operator: eq
+            scope: platform-substrate
+      - id: cross-soul-isolation
+        name: Cross-Soul Isolation
+        identityClass: core
+        description: >-
+          Persisted state from one soul must never appear in another soul's surface during
+          hydration. The isolation boundary is structural, not advisory.
+        measurableSignals:
+          - id: cross-soul-bleed-events
+            metric: cross-soul-state-bleed-count
+            threshold: 0
+            operator: eq
+            scope: platform-runtime
+    scopeBoundaries:
+      inScope:
+        - label: platform-level governance
+          identityClass: core
+        - label: shared engineering substrate
+          identityClass: core
+        - label: cross-soul scoring rules
+          identityClass: evolving
+      outOfScope:
+        - label: soul-specific product decisions
+          synonyms: [per-soul product, individual soul roadmap]
+        - label: in-soul variation patterns
+          synonyms: [variant, journey, theme, sub-theme]
+
+  designSystemRef:
+    name: platform-x-design-system
+    bindingType: authoritative
+
+  triad:
+    design:
+      authority: morgan
+      imperatives:
+        - 'accessibility-floor: WCAG-AA'
+        - 'shared-design-tokens-v3'
+        - 'platform-level visual identity is substrate; soul-specific identity lives in Soul DIDs'
+    engineering:
+      authority: dominique
+      substrateInvariants:
+        - no-soul-conditionals-in-substrate
+        - tenant-rls-required
+        - event-bus-v2
+        - shared-graph-schema-152
+      complianceRegimes: []
+    product:
+      authority: alex
+      targetAudience: >-
+        Platform-X serves multiple distinct audiences via Soul DIDs.
+        No platform-level audience declaration — each soul declares its own.
+      successMetrics:
+        - per-soul success metrics aggregate; no platform-level metric
+
+  tessellation:
+    souls:
+      - soulId: soul-a
+        didUri: did:platform-x:soul:soul-a
+        status: active
+        inheritsSubstrate: true
+      - soulId: soul-b
+        didUri: did:platform-x:soul:soul-b
+        status: active
+        inheritsSubstrate: true
+      - soulId: soul-c
+        didUri: did:platform-x:soul:soul-c
+        status: active
+        inheritsSubstrate: true
+    crossSoulScoringRule: min
+    substrateInvariants:
+      - no-soul-conditionals-in-substrate
+      - tenant-rls-required

@@ -1,0 +1,113 @@
+# Soul-B DID — RFC-0009 Phase 1 production fixture.
+# Soul DID for the beta-cohort product face of Platform-X.
+# Compliance: SOC2 (Eρ₅ scope). Inherits substrate from platform-x Tessellated DID.
+#
+# See RFC-0009 §11.5 substrate admission example — soul-b and soul-c are the
+# affected souls when `payment-validator.ts` is modified.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DesignIntentDocument
+metadata:
+  name: soul-b
+  labels:
+    ai-sdlc.io/did-type: soul
+    ai-sdlc.io/soul-id: soul-b
+spec:
+  stewardship:
+    productAuthority:
+      owner: alex
+      approvalRequired: [alex]
+      scope:
+        - soulPurpose.mission
+        - triad.product.targetAudience
+        - triad.product.problemResonance
+    designAuthority:
+      owner: morgan
+      approvalRequired: [morgan]
+      scope:
+        - brandIdentity
+        - triad.design.imperatives
+    engineeringReview:
+      role: reviewer
+      blockingScope:
+        - triad.engineering.complianceRegimes
+        - soulPurpose.designPrinciples[*].measurableSignals
+      rationale: Engineering blocks only on technical infeasibility or compliance regime violations.
+    reviewCadence: quarterly
+
+  soulPurpose:
+    mission:
+      identityClass: core
+      value: >-
+        Soul-B serves the beta cohort — enterprise operations teams who need audit-ready
+        workflows and transparent trust posture backed by SOC2 certification.
+    designPrinciples:
+      - id: audit-transparency
+        name: Audit Transparency
+        identityClass: core
+        description: >-
+          Every action that could appear in an audit trail is surfaced to the user before
+          it is taken. Audit outcomes are accessible, not buried in admin panels.
+        measurableSignals:
+          - id: audit-surface-coverage
+            metric: audit-trail-surface-coverage
+            threshold: 1.0
+            operator: eq
+            scope: soul-b
+      - id: enterprise-reliability
+        name: Enterprise Reliability
+        identityClass: core
+        description: >-
+          Enterprise teams depend on uptime, predictable behavior, and clear error recovery.
+          Soul-B design patterns prioritize recovery paths over optimistic-happy-path hiding.
+        measurableSignals:
+          - id: error-recovery-coverage
+            metric: error-recovery-path-coverage
+            threshold: 0.95
+            operator: gte
+            scope: soul-b
+    scopeBoundaries:
+      inScope:
+        - label: enterprise audit workflows
+          identityClass: core
+        - label: SOC2 trust-posture visibility
+          identityClass: core
+      outOfScope:
+        - label: consumer-oriented features
+          synonyms: [consumer, personal, individual-user]
+        - label: real-time collaboration
+          synonyms: [live-collab, concurrent-editing, multiplayer]
+
+  designSystemRef:
+    name: platform-x-design-system
+    bindingType: authoritative
+
+  parentTessellation: did:platform-x:platform
+
+  triad:
+    design:
+      authority: morgan
+      inheritsFrom: did:platform-x:platform/triad/design
+      imperatives:
+        - 'voice-register: enterprise-authoritative'
+        - 'visual-identity: beta-enterprise-aesthetic'
+        - 'audit-surface: visible-at-every-action-boundary'
+    engineering:
+      authority: dominique
+      inheritsFrom: did:platform-x:platform/triad/engineering
+      complianceRegimes:
+        - SOC2
+      slaTier: enterprise
+      dataRetention:
+        policy: 3-years
+        residency: us-east-1
+    product:
+      authority: alex
+      inheritsFrom: did:platform-x:platform/triad/product
+      targetAudience: beta cohort — enterprise operations and audit teams
+      problemResonance: >-
+        Enterprise ops teams need audit-ready workflows that make SOC2 trust posture visible
+        and actionable, without sacrificing day-to-day operational efficiency.
+      successMetrics:
+        - SOC2 audit-pass rate >= 100%
+        - audit-trail surface coverage == 1.0
+        - enterprise task completion >= 0.90

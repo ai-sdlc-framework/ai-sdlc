@@ -43,6 +43,12 @@ function makeMinimalDid(
         ],
       },
       designSystemRef: { name: 'acme-ds' },
+      // RFC-0009 §5.1: triad is now required on every DID.
+      triad: {
+        design: { authority: '${operator}' },
+        engineering: { authority: '${operator}' },
+        product: { authority: '${operator}' },
+      },
       ...overrides,
     },
   };
@@ -166,6 +172,12 @@ function makePhase2bReadyDid(): DesignIntentDocument {
         },
       },
       designSystemRef: { name: 'acme-ds' },
+      // RFC-0009 §5.1: triad is now required on every DID.
+      triad: {
+        design: { authority: '${operator}' },
+        engineering: { authority: '${operator}' },
+        product: { authority: '${operator}' },
+      },
     },
   };
 }

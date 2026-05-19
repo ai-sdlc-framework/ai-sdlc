@@ -63,7 +63,14 @@ spec:
             operator: gte
   designSystemRef:
     name: ${dsbName}
-${nsLine}`;
+${nsLine}  triad:
+    design:
+      authority: \${operator}
+    engineering:
+      authority: \${operator}
+    product:
+      authority: \${operator}
+`;
 }
 
 describe('loadConfig() with DesignIntentDocument', () => {
@@ -187,6 +194,12 @@ describe('validateDesignIntentDocumentReferences()', () => {
           ],
         },
         designSystemRef: { name: refName, namespace: refNamespace },
+        // RFC-0009 §5.1: triad is now required on every DID.
+        triad: {
+          design: { authority: '${operator}' },
+          engineering: { authority: '${operator}' },
+          product: { authority: '${operator}' },
+        },
       },
     };
   }

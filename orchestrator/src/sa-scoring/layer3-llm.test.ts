@@ -44,6 +44,12 @@ function makeDid(): DesignIntentDocument {
         ],
       },
       designSystemRef: { name: 'acme-ds' },
+      // RFC-0009 §5.1: triad is now required on every DID.
+      triad: {
+        design: { authority: '${operator}' },
+        engineering: { authority: '${operator}' },
+        product: { authority: '${operator}' },
+      },
     },
   };
 }
@@ -340,6 +346,12 @@ describe('SA-1 DID summary — experientialTargets rendering', () => {
           emotionalTone: undefined,
         } as unknown as DesignIntentDocument['spec']['experientialTargets'],
         designSystemRef: { name: 'acme-ds' },
+        // RFC-0009 §5.1: triad is now required on every DID.
+        triad: {
+          design: { authority: '${operator}' },
+          engineering: { authority: '${operator}' },
+          product: { authority: '${operator}' },
+        },
       },
     };
     const prompt = buildSa1Prompt({ issueText: 'x', did, preVerifiedSummary: SUMMARY });

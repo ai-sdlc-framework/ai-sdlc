@@ -41,6 +41,13 @@ function baseDid(overrides: Partial<DesignIntentDocument['spec']> = {}): DesignI
         ...(overrides.soulPurpose ?? {}),
       },
       designSystemRef: { name: 'acme-ds' },
+      // RFC-0009 §5.1: triad is now required on every DID.
+      // baseDid defaults to ${operator} for all three vertices (single-product pattern).
+      triad: {
+        design: { authority: '${operator}' },
+        engineering: { authority: '${operator}' },
+        product: { authority: '${operator}' },
+      },
       ...overrides,
     },
   };

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-312
 title: 'feat: RFC-0009 Phase 1 — DID schema amendments (triad/tessellation/parentTessellation) + init scaffolding + fixtures'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:

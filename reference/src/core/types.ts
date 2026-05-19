@@ -1203,10 +1203,136 @@ export interface PlannedChange {
   addedAt?: string;
 }
 
+// ── RFC-0009 Fractal Triad Types ───────────────────────────────────────
+
+/**
+ * Design vertex of the Fractal Triad (RFC-0009 §5.1).
+ * Accountable for identity expression at this DID's scope.
+ */
+export interface TriadDesignVertex {
+  /** Principal accountable for the design vertex. Defaults to ${operator} on init. */
+  authority: string;
+  /** Path to parent DID's design vertex. Absent for top-level DIDs. */
+  inheritsFrom?: string;
+  /** Soul-specific design imperatives (voice register, visual identity, experiential invariants). */
+  imperatives?: string[];
+  /** Soul-specific overrides of parent Tessellated DID's design vertex declarations. */
+  overrides?: Record<string, unknown>;
+}
+
+/**
+ * Engineering vertex of the Fractal Triad (RFC-0009 §5.1).
+ * Accountable for coherence between identity and expression at runtime.
+ */
+export interface TriadEngineeringVertex {
+  /** Principal accountable for the engineering vertex. Defaults to ${operator} on init. */
+  authority: string;
+  /** Path to parent DID's engineering vertex. Absent for top-level DIDs. */
+  inheritsFrom?: string;
+  /**
+   * Named regulatory or compliance constraints at this scope.
+   * HARD regulatory frameworks ONLY per RFC-0009 §7.1 (GDPR, HIPAA, SOC2, PCI-DSS, FedRAMP, etc.)
+   */
+  complianceRegimes?: string[];
+  /** Soul-specific performance budgets. */
+  performanceBudgets?: Record<string, unknown>;
+  /** Soul-specific data retention and isolation requirements. */
+  dataRetention?: Record<string, unknown>;
+  /** SLA tier appropriate to this soul's workload. */
+  slaTier?: string;
+  /** Named substrate invariants the substrate must honor for this soul. */
+  substrateInvariants?: string[];
+}
+
+/**
+ * Product vertex of the Fractal Triad (RFC-0009 §5.1).
+ * Accountable for identity declaration at this DID's scope.
+ */
+export interface TriadProductVertex {
+  /** Principal accountable for the product vertex. Defaults to ${operator} on init. */
+  authority: string;
+  /** Path to parent DID's product vertex. Absent for top-level DIDs. */
+  inheritsFrom?: string;
+  /** Target audience and persona for this soul. */
+  targetAudience?: string;
+  /** Source-of-truth for Sα₁ scoring at this DID's scope. */
+  problemResonance?: string;
+  /** Success metrics for this soul's work. */
+  successMetrics?: string[];
+  /** Monetization model per soul. */
+  monetizationModel?: string;
+  /** Endgame phase mapping per platform lifecycle model. */
+  endgamePhase?: string;
+}
+
+/**
+ * The Fractal Triad (RFC-0009 §5.1).
+ * Required on every DID — single-product, Tessellated, and Soul.
+ * `init` scaffolds ${operator} as default for all three authorities.
+ */
+export interface Triad {
+  /** Design vertex — accountable for identity expression. */
+  design: TriadDesignVertex;
+  /** Engineering vertex — accountable for coherence between identity and expression. */
+  engineering: TriadEngineeringVertex;
+  /** Product vertex — accountable for identity declaration. */
+  product: TriadProductVertex;
+}
+
+// ── RFC-0009 Tessellation Types ────────────────────────────────────────
+
+/**
+ * A single soul entry in the tessellation manifest (RFC-0009 §5.2).
+ */
+export interface TessellationSoul {
+  /** Slug identifier for this soul within the tessellation. Must match `^[a-z0-9-]+$`. */
+  soulId: string;
+  /** URI reference to the Soul DID resource. */
+  didUri: string;
+  /** Lifecycle status of this soul. */
+  status?: 'active' | 'deprecated' | 'draft';
+  /** Whether this soul inherits the platform's substrate invariants. Defaults to true. */
+  inheritsSubstrate?: boolean;
+}
+
+/**
+ * Tessellation manifest (RFC-0009 §5.2).
+ * Present only on Tessellated DIDs — enumerates child Soul DIDs and cross-soul governance.
+ */
+export interface Tessellation {
+  /** Child Soul DIDs tiling into this Tessellated Platform. At least one required. */
+  souls: TessellationSoul[];
+  /**
+   * Aggregation rule when substrate work affects multiple souls.
+   * Default `min` per RFC-0009 OQ-2 resolution.
+   */
+  crossSoulScoringRule?: 'min' | 'max' | 'mean' | 'weighted-traffic' | 'weighted-revenue';
+  /** Named invariants ALL souls must honor. Violations trigger Eτ_tessellation_drift. */
+  substrateInvariants?: string[];
+}
+
 export interface DesignIntentDocumentSpec {
   stewardship: StewardshipSplit;
   soulPurpose: SoulPurpose;
   designSystemRef: DIDDesignSystemRef;
+  /**
+   * The Fractal Triad (RFC-0009 §5.1).
+   * Required on every DID: single-product, Tessellated, and Soul.
+   * `init` scaffolds ${operator} defaults for single-product adopters.
+   */
+  triad: Triad;
+  /**
+   * Tessellation manifest (RFC-0009 §5.2).
+   * Present only on Tessellated DIDs (platform roots).
+   * Mutually exclusive with `parentTessellation`.
+   */
+  tessellation?: Tessellation;
+  /**
+   * Parent Tessellated DID URI (RFC-0009 §5.3).
+   * Present only on Soul DIDs.
+   * Mutually exclusive with `tessellation`.
+   */
+  parentTessellation?: string;
   brandIdentity?: BrandIdentity;
   experientialTargets?: ExperientialTargets;
   plannedChanges?: PlannedChange[];
