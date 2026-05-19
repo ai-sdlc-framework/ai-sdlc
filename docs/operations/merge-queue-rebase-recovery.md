@@ -194,6 +194,35 @@ git commit -m "chore: re-sign attestation after rebase"
 git push --force-with-lease
 ```
 
+## Branch-name resolution rule (AISDLC-369)
+
+`gh pr list --json` and other `gh pr` commands can return truncated or
+normalized branch names in some output paths (e.g. when branch names exceed
+a certain length or contain special characters). This can cause scripts that
+resolve a PR's branch name to compare a truncated name against the full name
+stored in GitHub's API.
+
+**Rule:** Always resolve the exact branch name via the single-PR API, not from
+list output:
+
+```bash
+# Correct — always use the exact headRefName from the PR's own endpoint.
+EXACT_REF=$(gh api repos/<owner>/<repo>/pulls/<n> --jq .head.ref)
+
+# Avoid — list output may truncate or normalize long branch names.
+# gh pr list --json headRefName ...  # may be truncated
+```
+
+In `auto-rearm-on-dequeue.yml` and `auto-enable-auto-merge.yml`, branch names
+are resolved via `gh pr view <N> --json headRefName` which uses the single-PR
+endpoint — not list output. This is the correct pattern.
+
+**Why this matters:** The merge-queue's `gh-readonly-queue/<base>/pr-<N>-<sha>`
+branch naming is parsed via regex in `verify-attestation.yml`. If the `headRefName`
+returned by `gh pr list` is truncated, the release-please detection regex
+`release-please--*` may not match, causing legitimate release-please PRs to fall
+through to full attestation verification and fail.
+
 ## Related
 
 - `CLAUDE.md` — "Review attestations" section, contentHashV4 contract and IGNORE list
@@ -201,8 +230,13 @@ git push --force-with-lease
 - `ai-sdlc-plugin/scripts/sign-attestation.mjs` — signer with AISDLC-274 single-envelope invariant
 - `scripts/check-attestation-sign.sh` — pre-push hook with AISDLC-274 stale-envelope detection
 - `scripts/verify-attestation.mjs` — verifier with AISDLC-274 orphan-detection actionable error
-- `scripts/verify-attestation.test.mjs` — AISDLC-237 regression tests (non-overlapping stable + overlapping correctly rejects)
+- `scripts/verify-attestation.test.mjs` — AISDLC-237 + AISDLC-369 regression tests
 - `scripts/drop-stale-attestation-envelope.mjs` — AISDLC-357 manual cleanup helper
+- `scripts/squash-attestation-chores.sh` — AISDLC-369 squash stacked chore-sign commits
+- `scripts/check-branch-name-resolution.test.sh` — AISDLC-369 regression test for branch-name resolution
+- `pipeline-cli/bin/cli-verify-attestation-debug.mjs` — AISDLC-369 v5/v4/v3 evaluation trace tool
+- `.github/workflows/auto-rearm-on-dequeue.yml` — AISDLC-369 auto-rearm after merge-queue dequeue
+- AISDLC-369 — v5 rebase fragility + queue/orchestration robustness
 - AISDLC-357 — mcp-bundle sync gate + coverage flake docs + envelope-drop helper
 - AISDLC-274 — stale-envelope accumulation fix (signer + hook + verifier)
 - AISDLC-258 — shared-churn exclude list for pnpm-lock.yaml, CHANGELOG

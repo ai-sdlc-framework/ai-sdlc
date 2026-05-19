@@ -1,0 +1,126 @@
+name: Auto-rearm auto-merge after merge-queue dequeue
+
+# When the merge queue dequeues a PR (UNMERGEABLE, failed_checks, etc.), GitHub
+# clears the auto-merge flag. The operator then has to manually re-arm with
+# `gh pr merge --auto`. This workflow automates that re-arm.
+#
+# GitHub doesn't expose a direct "dequeued" event. The workaround is:
+#   1. Re-arm on PR synchronize + ready_for_review (covers force-push + re-sign
+#      cycles that are the most common cause of dequeue + re-arm need).
+#   2. Poll on a 5-minute cron for open PRs that are clean + not armed.
+#      The cron catches any PRs dequeued between event-driven runs.
+#
+# AISDLC-369: complements auto-enable-auto-merge.yml (which fires on PR open
+# + check_suite events). This workflow focuses on the dequeue recovery path:
+# PRs that were armed, got dequeued (attestation failed, merge conflict, etc.),
+# and were re-signed/rebased — they need re-arming but the auto-enable workflow
+# fires on synchronize too, making the two workflows collaborate rather than
+# duplicate.
+#
+# Idempotency: `gh pr merge --disable-auto && gh pr merge --auto` is the safe
+# re-arm cycle. `--disable-auto` is a no-op when auto-merge is already off;
+# `--auto` is a no-op when already armed. Both commands are idempotent per PR.
+#
+# Skip: draft PRs, fork PRs, release-please PRs (same guards as auto-enable).
+
+on:
+  pull_request:
+    types: [synchronize, ready_for_review]
+  # Cron: every 5 minutes — catches PRs dequeued between event-driven runs.
+  # GitHub cron resolution is ~1 minute; using */5 is the documented minimum
+  # for high-frequency schedules.
+  schedule:
+    - cron: '*/5 * * * *'
+
+permissions:
+  pull-requests: write
+  contents: write
+
+jobs:
+  rearm:
+    name: Re-arm auto-merge
+    runs-on: ubuntu-latest
+    steps:
+      - name: Collect candidate PRs for re-arm
+        id: collect
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER_FROM_EVENT: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            # Event-driven: only re-arm the PR that triggered us.
+            echo "prs=${PR_NUMBER_FROM_EVENT}" >> "$GITHUB_OUTPUT"
+          else
+            # Cron: find all open non-draft same-repo PRs with mergeable_state==clean
+            # and auto_merge==null. These are the ones the queue dequeued and cleared.
+            # Limit to 20 to bound API cost per cron tick (each requires a gh call).
+            PRS=$(gh api "repos/${GH_REPO}/pulls?state=open&per_page=50" \
+              --jq '[.[] | select(
+                .draft == false
+                and .auto_merge == null
+                and .mergeable_state == "clean"
+                and .head.repo.full_name == $ENV.GH_REPO
+              ) | .number] | .[0:20] | join(",")')
+            echo "prs=${PRS:-}" >> "$GITHUB_OUTPUT"
+            echo "Cron candidates: ${PRS:-none}"
+          fi
+
+      - name: Skip when no candidate PRs
+        if: steps.collect.outputs.prs == ''
+        run: echo "[auto-rearm] no candidate PRs for this event — nothing to do."
+
+      - name: Re-arm auto-merge on candidate PRs
+        if: steps.collect.outputs.prs != ''
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          GH_REPO: ${{ github.repository }}
+          PRS_CSV: ${{ steps.collect.outputs.prs }}
+        run: |
+          set -euo pipefail
+          IFS=',' read -ra PR_NUMS <<< "$PRS_CSV"
+          for PR in "${PR_NUMS[@]}"; do
+            [ -z "$PR" ] && continue
+
+            # Fetch PR metadata: draft, head repo, head ref.
+            # AISDLC-369: use `gh pr view --json headRefName` (single-PR endpoint)
+            # not `gh pr list --json headRefName` to avoid truncation on long branch names.
+            PR_INFO=$(gh pr view "$PR" --json headRefName,isDraft,headRepositoryOwner,headRepository \
+              --repo "$GH_REPO" \
+              -q '{isDraft:.isDraft,headRefName:.headRefName,headFull:((.headRepositoryOwner.login//"")+"/"+ (.headRepository.name//""))}')
+            IS_DRAFT=$(echo "$PR_INFO" | jq -r '.isDraft')
+            HEAD_FULL=$(echo "$PR_INFO" | jq -r '.headFull')
+            HEAD_REF=$(echo "$PR_INFO" | jq -r '.headRefName')
+
+            # Skip drafts
+            if [ "$IS_DRAFT" = "true" ]; then
+              echo "[auto-rearm] PR #$PR is draft — skipping."
+              continue
+            fi
+
+            # Skip forks
+            if [ "$HEAD_FULL" != "$GH_REPO" ]; then
+              echo "[auto-rearm] PR #$PR is a fork ($HEAD_FULL) — skipping."
+              continue
+            fi
+
+            # Skip release-please PRs (operator arms manually)
+            case "$HEAD_REF" in
+              release-please--*)
+                echo "[auto-rearm] PR #$PR is release-please ($HEAD_REF) — skipping. Arm manually."
+                continue
+                ;;
+            esac
+
+            # Re-arm: disable-then-arm to clear any stale queue state.
+            # `|| true` on disable handles "wasn't armed" gracefully.
+            echo "[auto-rearm] re-arming PR #$PR (disable-then-arm cycle)..."
+            gh pr merge --disable-auto "$PR" 2>/dev/null || true
+            if gh pr merge --auto "$PR"; then
+              echo "[auto-rearm] PR #$PR auto-merge re-armed."
+            else
+              echo "[auto-rearm] PR #$PR re-arm failed — may require manual intervention."
+            fi
+          done

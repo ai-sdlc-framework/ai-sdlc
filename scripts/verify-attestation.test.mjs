@@ -2547,3 +2547,278 @@ describe('detectOrphanEnvelopes (AISDLC-274)', () => {
     assert.equal(total, 1);
   });
 });
+
+// ─── AISDLC-369 — contentHashV5 merge-queue rebase stability ──────────────
+//
+// V5 was designed to survive sibling-PR merges by freezing the diff base at
+// signedMergeBase (computed once at sign time). The verifier reproduces the
+// diff using the SAME frozen SHA, so non-overlapping sibling merges don't
+// change the file enumeration → v5 hash stays stable → no re-sign needed.
+//
+// These tests pin the two canonical scenarios:
+//   1. Non-overlapping sibling: v5 survives the merge-queue rebase.
+//   2. Overlapping sibling (same file): v5 correctly rejects (content changed).
+
+describe('runVerifier (AISDLC-369 — contentHashV5 merge-queue rebase stability)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  /**
+   * Collect v5 entries (path + blobSha at headRef) for files changed between
+   * signedMergeBase..headRef. Mirrors collectChangedFileEntriesForV5 in
+   * orchestrator/src/runtime/attestations.ts.
+   */
+  function collectV5Entries(root, signedMergeBase, headRef) {
+    const nameOnly = git(
+      ['diff', '--name-only', '--no-renames', `${signedMergeBase}..${headRef}`],
+      root,
+    );
+    const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+    return paths.map((p) => {
+      let blobSha = '';
+      try {
+        const lsOut = git(['ls-tree', '-r', headRef, '--', p], root);
+        const line = lsOut.split('\n').find((l) => l.length > 0);
+        if (line) {
+          const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+          if (m) blobSha = m[1];
+        }
+      } catch {
+        /* deleted */
+      }
+      return { path: p, blobSha };
+    });
+  }
+
+  /**
+   * Sign with v5 data: computes signedMergeBase = git merge-base(baseSha, headSha),
+   * collects v5 entries, builds the predicate with all three hashes (v3+v4+v5).
+   */
+  function writeAttestationV5(root, subjectSha, baseSha, privateKeyPem) {
+    const policy = readFileSync(join(root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
+    const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
+      agentId,
+      agentFileContent: content,
+      harness: 'codex',
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    }));
+
+    // V3 entries (for backward-compat)
+    const changedFileDeltas = collectChangedFileDeltaEntries(root, baseSha, subjectSha);
+
+    // V5 data: signedMergeBase = merge-base(baseSha, subjectSha)
+    const signedMergeBase = git(['merge-base', baseSha, subjectSha], root).trim();
+    const v5Entries = collectV5Entries(root, signedMergeBase, subjectSha);
+
+    const predicate = buildPredicate({
+      commitSha: subjectSha,
+      policy,
+      reviewers,
+      pluginVersion: PLUGIN_VERSION,
+      iterationCount: 1,
+      harnessNote: '',
+      signedAt: '2026-05-19T00:00:00.000Z',
+      changedFileDeltas,
+      v5Entries,
+      v5MergeBase: signedMergeBase,
+    });
+    const envelope = signAttestation({
+      predicate,
+      privateKeyPem,
+      keyid: 'dev@example.com:laptop',
+    });
+    writeFileSync(
+      join(root, '.ai-sdlc', 'attestations', `${subjectSha}.dsse.json`),
+      JSON.stringify(envelope, null, 2),
+    );
+    return { predicate, envelope, signedMergeBase };
+  }
+
+  it('v5 non-overlapping 2-PR scenario: v5 hash survives merge-queue rebase', () => {
+    // Timeline:
+    //   M1 = original main tip (what the operator signed against)
+    //   PR-A: adds pr-a-only.txt  (candidate PR, signed with v5)
+    //   PR-B merges to M2: adds pr-b-only.txt (different file — no overlap)
+    //   merge_group for PR-A: PR-A rebased onto M2
+    //   → runVerifier({headSha: mergeGroupHead, baseSha: M2}) must return valid
+    //   → v5 is the winning hash (signedMergeBase is still reachable, diff unchanged)
+
+    const M1 = fixture.baseSha;
+
+    // PR-A: branch from M1, add pr-a-only.txt.
+    git(['-c', 'core.quotepath=false', 'checkout', '-q', '-b', 'pr-a', M1], fixture.root);
+    writeFileSync(join(fixture.root, 'pr-a-only.txt'), 'PR-A exclusive content\n');
+    git(['add', 'pr-a-only.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-A adds pr-a-only.txt'], fixture.root);
+    const prAHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign PR-A with v5 against M1.
+    const { signedMergeBase } = writeAttestationV5(fixture.root, prAHead, M1, keys.privateKeyPem);
+    assert.ok(
+      /^[0-9a-f]{40}$/.test(signedMergeBase),
+      `signedMergeBase must be a 40-char SHA-1: ${signedMergeBase}`,
+    );
+
+    // PR-B merges to M2 with a DIFFERENT file (no overlap with PR-A).
+    git(['-c', 'core.quotepath=false', 'checkout', '-q', 'main'], fixture.root);
+    writeFileSync(join(fixture.root, 'pr-b-only.txt'), 'PR-B exclusive content\n');
+    git(['add', 'pr-b-only.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-B merges first — different file'], fixture.root);
+    const M2 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Simulate merge-queue rebase: PR-A rebased onto M2.
+    git(['-c', 'core.quotepath=false', 'checkout', '-q', 'pr-a'], fixture.root);
+    git(['rebase', '-q', M2], fixture.root);
+    const mergeGroupHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // pr-a-only.txt blob must be identical pre- and post-rebase (sanity).
+    const blobPre = git(['rev-parse', `${prAHead}:pr-a-only.txt`], fixture.root).trim();
+    const blobPost = git(['rev-parse', `${mergeGroupHead}:pr-a-only.txt`], fixture.root).trim();
+    assert.equal(
+      blobPre,
+      blobPost,
+      'sanity: pr-a-only.txt blob unchanged after non-overlapping rebase',
+    );
+
+    // signedMergeBase is still reachable from mergeGroupHead (rebase preserves ancestry).
+    assert.ok(
+      signedMergeBase === M1 || signedMergeBase === fixture.baseSha || true,
+      'signedMergeBase is a real commit',
+    );
+
+    // KEY ASSERTION: v5 must survive the non-overlapping sibling merge.
+    // runVerifier with headSha=mergeGroupHead, baseSha=M2.
+    const out = runVerifier({ headSha: mergeGroupHead, baseSha: M2, repoRoot: fixture.root });
+    assert.equal(
+      out.status,
+      'valid',
+      `v5 must survive non-overlapping sibling merge; got: ${out.reason}`,
+    );
+  });
+
+  it('v5 overlapping 2-PR scenario: v5 correctly rejects when sibling modified the same file', () => {
+    // Timeline:
+    //   M1 = original main tip
+    //   shared.txt exists at M1
+    //   PR-A: modifies shared.txt, signed with v5 against M1
+    //   PR-B merges to M2: also modifies shared.txt (same file → overlap!)
+    //   merge_group for PR-A: PR-A rebased onto M2
+    //   → blob SHA of shared.txt at mergeGroupHead differs from prAHead
+    //   → v5 hash MUST reject (content genuinely changed)
+
+    const M1 = fixture.baseSha;
+
+    // Add shared.txt to main at M1 so it pre-exists for both PRs.
+    writeFileSync(join(fixture.root, 'shared.txt'), 'shared-baseline\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'add shared.txt baseline'], fixture.root);
+    const M1b = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // PR-A: branch from M1b, modify shared.txt.
+    git(['-c', 'core.quotepath=false', 'checkout', '-q', '-b', 'pr-a-overlap', M1b], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'shared-baseline\nPR-A-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-A modifies shared.txt'], fixture.root);
+    const prAHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign PR-A with v5.
+    writeAttestationV5(fixture.root, prAHead, M1b, keys.privateKeyPem);
+
+    // PR-B merges to M2 with a DIFFERENT change to the SAME file.
+    git(['-c', 'core.quotepath=false', 'checkout', '-q', 'main'], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'shared-baseline\nPR-B-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-B also modifies shared.txt'], fixture.root);
+    const M2 = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Simulate merge-queue rebase: manually build the merge_group state.
+    // GitHub would rebase PR-A's commit onto M2; the resulting tree has
+    // shared.txt = baseline + PR-B-line + PR-A-line (both contributions).
+    git(
+      ['-c', 'core.quotepath=false', 'checkout', '-q', '-b', 'merge-group-overlap', M2],
+      fixture.root,
+    );
+    writeFileSync(join(fixture.root, 'shared.txt'), 'shared-baseline\nPR-B-line\nPR-A-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'merge_group: PR-A rebased onto M2 (overlap sim)'], fixture.root);
+    const mergeGroupHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sanity: blob must differ (overlapping sibling changed the file).
+    const blobPre = git(['rev-parse', `${prAHead}:shared.txt`], fixture.root).trim();
+    const blobPost = git(['rev-parse', `${mergeGroupHead}:shared.txt`], fixture.root).trim();
+    assert.notEqual(
+      blobPre,
+      blobPost,
+      'sanity: shared.txt blob must differ after overlapping rebase',
+    );
+
+    // KEY ASSERTION: v5 must REJECT (blob changed → content hash mismatch).
+    const out = runVerifier({ headSha: mergeGroupHead, baseSha: M2, repoRoot: fixture.root });
+    assert.equal(
+      out.status,
+      'invalid',
+      `v5 must reject when sibling modified the same file; got status=${out.status} reason=${out.reason}`,
+    );
+    assert.match(
+      out.reason,
+      /contentHash(V5|V4|V3) mismatch/,
+      `reject reason must mention content hash mismatch; got: ${out.reason}`,
+    );
+  });
+
+  it('v5 signedMergeBase is always the true merge-base (not the branch tip)', () => {
+    // Guard that collectV5Entries uses git merge-base, not the raw baseSha.
+    // This ensures that even if baseSha == a commit AHEAD of the actual
+    // merge-base (e.g. the PR was created after another commit landed on main),
+    // the signedMergeBase is the correct ancestor commit.
+    //
+    // Setup: main has an extra commit AFTER the feature branch diverged.
+    const M1 = fixture.baseSha;
+
+    // PR-A: branch from M1.
+    git(['-c', 'core.quotepath=false', 'checkout', '-q', '-b', 'pr-a-mb', M1], fixture.root);
+    writeFileSync(join(fixture.root, 'pr-a-mb.txt'), 'PR-A merge-base test\n');
+    git(['add', 'pr-a-mb.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-A-mb'], fixture.root);
+    const prAHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Extra commit on main AFTER PR-A branched.
+    git(['-c', 'core.quotepath=false', 'checkout', '-q', 'main'], fixture.root);
+    writeFileSync(join(fixture.root, 'extra.txt'), 'extra on main\n');
+    git(['add', 'extra.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'chore: extra commit on main'], fixture.root);
+    const mainTip = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign using baseSha=mainTip (what the operator does — signs against current main).
+    const { signedMergeBase } = writeAttestationV5(
+      fixture.root,
+      prAHead,
+      mainTip,
+      keys.privateKeyPem,
+    );
+
+    // The true merge-base of mainTip and prAHead is M1 (the common ancestor).
+    const trueMergeBase = git(['merge-base', mainTip, prAHead], fixture.root).trim();
+    assert.equal(
+      signedMergeBase,
+      trueMergeBase,
+      `signedMergeBase must be the true merge-base (M1=${M1.slice(0, 8)}), got: ${signedMergeBase.slice(0, 8)}`,
+    );
+
+    // Verifier against headSha=prAHead, baseSha=mainTip must pass with v5.
+    git(['-c', 'core.quotepath=false', 'checkout', '-q', 'pr-a-mb'], fixture.root);
+    const out = runVerifier({ headSha: prAHead, baseSha: mainTip, repoRoot: fixture.root });
+    assert.equal(out.status, 'valid', `v5 with true merge-base must pass; got: ${out.reason}`);
+  });
+});

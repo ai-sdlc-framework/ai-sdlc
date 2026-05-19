@@ -27,7 +27,13 @@
 #      {path, headBlobSha} per changed file; if the bundle rebuild happens
 #      AFTER attestation sign, the envelope hashes the OLD bundle while the
 #      PR diff contains the NEW bundle → verify-attestation rejects.
-#   4. Auto-sign attestation (AISDLC-133) — when the worktree has an active
+#   4. Squash stacked chore-sign commits (AISDLC-369) — when multiple
+#      consecutive "chore: sign attestation" commits accumulate at HEAD
+#      (from re-sign cycles), squashes them into one to keep history clean.
+#      ORDER: MUST run BEFORE attestation-sign (item 5 below) so the
+#      squashed HEAD is the one the attestation is signed against.
+#      No-op when there is 0 or 1 chore-sign commit at HEAD.
+#   5. Auto-sign attestation (AISDLC-133) — when the worktree has an active
 #      task + reviewer verdict file but no attestation at current HEAD, signs
 #      a chore commit on top + exits 1 with "re-push required". This removes
 #      the sign-attestation step from /ai-sdlc execute's LLM responsibility
@@ -35,7 +41,8 @@
 #
 # Skip individual gates with their respective env vars
 # (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_TASK_MOVE=1,
-# AI_SDLC_SKIP_MCP_BUNDLE_SYNC=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1)
+# AI_SDLC_SKIP_MCP_BUNDLE_SYNC=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
+# AI_SDLC_SKIP_ATTESTATION_SIGN=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -45,4 +52,7 @@ set -euo pipefail
 ./scripts/check-coverage.sh
 ./scripts/check-task-moved.sh
 ./scripts/check-mcp-bundle-sync.sh
+if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
+  ./scripts/squash-attestation-chores.sh
+fi
 ./scripts/check-attestation-sign.sh

@@ -544,6 +544,53 @@ describe('AISDLC-209: cli-backlog-verify end-to-end integration (AC#6)', () => {
   });
 });
 
+// ── AISDLC-369: cli-verify-attestation-debug bin shim guard ─────────────────
+//
+// Standalone .mjs bin (no TypeScript dist — imports orchestrator dist at
+// runtime). Guard: shim exists + --help exits 0 without requiring the
+// orchestrator to be built (arg parsing happens before the dynamic import).
+
+describe('AISDLC-369: cli-verify-attestation-debug bin shim guard', () => {
+  const binPath = join(PKG_ROOT, 'bin', 'cli-verify-attestation-debug.mjs');
+
+  it('bin shim file exists at the expected path', () => {
+    expect(existsSync(binPath), `missing bin shim: ${binPath}`).toBe(true);
+  });
+
+  it('exits 0 on --help without requiring orchestrator dist', () => {
+    const result = spawnSync(process.execPath, [binPath, '--help'], {
+      cwd: PKG_ROOT,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+    const detail = `\n--- exit ${result.status} ---\nstdout: ${result.stdout}\nstderr: ${result.stderr}`;
+    expect(result.status, `--help did not exit 0:${detail}`).toBe(0);
+    const out = result.stdout + result.stderr;
+    expect(
+      /Usage:/i.test(out) || /Options:/i.test(out) || /cli-verify-attestation-debug/.test(out),
+      `--help output didn't look like a help banner:${detail}`,
+    ).toBe(true);
+  });
+
+  it('exits non-zero when --head-sha and --base-sha are missing', () => {
+    const result = spawnSync(process.execPath, [binPath], {
+      cwd: PKG_ROOT,
+      encoding: 'utf-8',
+      stdio: 'pipe',
+      timeout: 10_000,
+    });
+    // Without orchestrator built the dynamic import fails, but the arg
+    // validation (which runs BEFORE the import) should surface a clear error.
+    expect(result.status, 'expected non-zero exit when SHAs missing').not.toBe(0);
+    const out = result.stdout + result.stderr;
+    expect(
+      /head-sha/.test(out) || /base-sha/.test(out) || /required/.test(out),
+      `expected SHA-missing error in output: ${out}`,
+    ).toBe(true);
+  });
+});
+
 // Coverage hint for callers reading this in isolation: the production
 // invocation patterns live in:
 //   - `.github/workflows/ai-sdlc-review.yml` — per-CLI cost-saver bins
@@ -554,4 +601,5 @@ describe('AISDLC-209: cli-backlog-verify end-to-end integration (AC#6)', () => {
 //     locally and in future workflow steps (using the direct-node form).
 //   - AISDLC-209: cli-task-complete + cli-backlog-verify end-to-end integration
 //     tests added to guard the full read-patch-rename pipeline through the shim.
+//   - AISDLC-369: cli-verify-attestation-debug — standalone .mjs debug tool.
 // Search for `node pipeline-cli/bin/` to enumerate them.

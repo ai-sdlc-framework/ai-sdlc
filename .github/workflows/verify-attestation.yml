@@ -280,6 +280,46 @@ jobs:
         if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
         run: pnpm --filter "@ai-sdlc/orchestrator..." build
 
+      # AISDLC-369: ensure signedMergeBase is reachable before running the
+      # verifier. Even with fetch-depth: 0, there can be edge cases where a
+      # specific commit SHA (signedMergeBase from a v5 envelope) is not yet
+      # in the local clone (e.g. a very recent merge that wasn't part of the
+      # normal fetch path). This step reads the signedMergeBase from every
+      # envelope on disk and explicitly fetches any that are unreachable.
+      # Non-fatal: if no envelopes or fetch fails, the verifier handles it.
+      - name: Fetch signedMergeBase if unreachable (v5 rebase-stability fix)
+        if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
+        run: |
+          set -euo pipefail
+          ATTDIR=".ai-sdlc/attestations"
+          if [ ! -d "$ATTDIR" ]; then
+            echo "[fetch-signedMergeBase] no attestations dir — skipping"
+            exit 0
+          fi
+          for env_file in "$ATTDIR"/*.dsse.json; do
+            [ -f "$env_file" ] || continue
+            # Extract signedMergeBase from the decoded payload (jq + base64).
+            SMB=$(node -e "
+              const {readFileSync} = require('fs');
+              const env = JSON.parse(readFileSync('${env_file}', 'utf-8'));
+              if (!env.payload) process.exit(0);
+              const pred = JSON.parse(Buffer.from(env.payload, 'base64').toString('utf-8'));
+              if (pred.signedMergeBase && /^[0-9a-f]{40}$/.test(pred.signedMergeBase)) {
+                process.stdout.write(pred.signedMergeBase + '\n');
+              }
+            " 2>/dev/null || true)
+            [ -z "$SMB" ] && continue
+            # Check reachability.
+            if git cat-file -t "$SMB" >/dev/null 2>&1; then
+              echo "[fetch-signedMergeBase] $SMB is reachable — no fetch needed"
+            else
+              echo "[fetch-signedMergeBase] $SMB unreachable — fetching from origin..."
+              git fetch --depth=1 origin "$SMB" 2>/dev/null \
+                || git fetch --unshallow origin 2>/dev/null \
+                || echo "[fetch-signedMergeBase] WARN: could not fetch $SMB — verifier will fall back to v4"
+            fi
+          done
+
       - name: Verify attestation
         id: verify
         if: steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'

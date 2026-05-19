@@ -254,4 +254,71 @@ describe('check-orchestrator-state.sh', () => {
     // Branch must still be the feature branch (no auto-recovery attempted)
     assert.equal(sh(`git -C "${env.local}" symbolic-ref --short HEAD`), 'feature/dirty-branch');
   });
+
+  // AISDLC-369: "behind on main with no local edits" — backlog task lifecycle files.
+  it('[AISDLC-369] parent on main, only backlog task file dirty → proceeds with reset', () => {
+    // Move origin/main forward so the script needs to sync.
+    const sibling = join(env.root, 'sibling-backlog');
+    sh(`git clone -q "${env.remote}" "${sibling}"`);
+    sh(`git -C "${sibling}" config user.email s@s.s && git -C "${sibling}" config user.name s`);
+    sh(`git -C "${sibling}" config commit.gpgsign false`);
+    writeFileSync(join(sibling, 'sibling-backlog.txt'), 'sibling\n');
+    sh(
+      `git -C "${sibling}" add sibling-backlog.txt && git -C "${sibling}" commit -q -m sibling-backlog`,
+    );
+    sh(`git -C "${sibling}" push -q origin main`);
+
+    // Dirty ONLY a backlog task file (simulate pipeline run that left a staged/modified task file)
+    mkdirSync(join(env.local, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(
+      join(env.local, 'backlog', 'tasks', 'aisdlc-test - test-task.md'),
+      '---\nid: AISDLC-TEST\n---\n',
+    );
+    sh(`git -C "${env.local}" add backlog/tasks/`);
+
+    // The working tree now has a staged backlog file — a tracked modification.
+    const dirtyCheck = sh(
+      `git -C "${env.local}" status --porcelain 2>/dev/null | grep -vE '^\\?\\?' | head -1 || true`,
+    );
+    assert.ok(dirtyCheck.length > 0, 'sanity: backlog task file should be staged/dirty');
+
+    const r = runScript(env.local);
+    // Must succeed (exit 0) — backlog task files are safe to reset
+    assert.equal(r.status, 0, `expected exit 0; stdout: ${r.stdout}\nstderr: ${r.stderr}`);
+    // Must log that it proceeded with reset (backlog task lifecycle recovery)
+    assert.ok(
+      r.stdout.includes('resetting parent working tree') ||
+        r.stdout.includes('auto-recovering: dirty paths are backlog'),
+      `expected reset or backlog-recovery log; stdout: ${r.stdout}`,
+    );
+  });
+
+  it('[AISDLC-369] parent on main, mix of backlog + non-backlog dirty → skips reset', () => {
+    // Move origin/main forward so the script needs to sync.
+    const sibling = join(env.root, 'sibling-mix');
+    sh(`git clone -q "${env.remote}" "${sibling}"`);
+    sh(`git -C "${sibling}" config user.email s@s.s && git -C "${sibling}" config user.name s`);
+    sh(`git -C "${sibling}" config commit.gpgsign false`);
+    writeFileSync(join(sibling, 'sibling-mix.txt'), 'sibling\n');
+    sh(`git -C "${sibling}" add sibling-mix.txt && git -C "${sibling}" commit -q -m sibling-mix`);
+    sh(`git -C "${sibling}" push -q origin main`);
+
+    // Dirty BOTH a backlog task file AND a non-backlog tracked file (README.md).
+    mkdirSync(join(env.local, 'backlog', 'tasks'), { recursive: true });
+    writeFileSync(
+      join(env.local, 'backlog', 'tasks', 'aisdlc-mix - test-task.md'),
+      '---\nid: AISDLC-MIX\n---\n',
+    );
+    writeFileSync(join(env.local, 'README.md'), 'local edit to README\n');
+    sh(`git -C "${env.local}" add backlog/tasks/`);
+    // README.md is a tracked modification (not staged, just dirty working tree).
+
+    const r = runScript(env.local);
+    // Must exit 0 (graceful skip) — non-backlog dirty file blocks reset
+    assert.equal(r.status, 0, `expected exit 0; stdout: ${r.stdout}`);
+    // Must warn about uncommitted tracked changes, NOT proceed with reset
+    assert.match(r.stdout, /uncommitted tracked changes; skipping reset/);
+    // README.md must NOT be reverted
+    assert.equal(sh(`cat "${join(env.local, 'README.md')}"`), 'local edit to README');
+  });
 });

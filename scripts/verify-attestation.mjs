@@ -597,11 +597,28 @@ export function computeHeadContentHashV4(headSha, baseSha, repoRoot, gitFn = git
 
 /**
  * Recompute `contentHashV5` for `<headSha>` using the FROZEN `signedMergeBase`
- * embedded in the envelope predicate (AISDLC-362).
+ * embedded in the envelope predicate (AISDLC-362, fixed AISDLC-369).
  *
  * The key difference from `computeHeadContentHashV4`:
  *   - v4 enumerates files via `baseSha...headSha` (moving diff base).
- *   - v5 enumerates files via `signedMergeBase..headSha` (FROZEN diff base).
+ *   - v5 enumerates files via `signedMergeBase..headSha` (FROZEN diff base),
+ *     with sibling-file exclusion when `currentBaseSha` is provided.
+ *
+ * AISDLC-369 FIX — sibling-file exclusion:
+ *   After a merge-queue rebase, `signedMergeBase..headSha` grows to include
+ *   files from sibling PRs that merged between signedMergeBase and headSha.
+ *   This is the root cause of v5 failing for non-overlapping sibling merges.
+ *
+ *   Fix: when `currentBaseSha` is provided (= the merge_group base SHA or
+ *   the current PR base SHA), we EXCLUDE files that appear in
+ *   `signedMergeBase..currentBaseSha` from the enumeration. These are the
+ *   "sibling-only" files — they were contributed by PRs that merged BEFORE
+ *   ours in the queue. Our PR didn't touch them; excluding them gives the
+ *   same file set as the original sign-time diff.
+ *
+ *   When `currentBaseSha` equals `signedMergeBase` (no sibling merges between
+ *   them) the exclude set is empty and behavior is identical to the pre-fix
+ *   algorithm.
  *
  * The frozen merge-base is read from the predicate; the verifier does NOT
  * recompute it — using the frozen value is what makes v5 stable across
@@ -610,16 +627,31 @@ export function computeHeadContentHashV4(headSha, baseSha, repoRoot, gitFn = git
  * Returns the 64-char hex sha256 on success, or `null` on git failure.
  *
  * Exported for unit testing.
+ *
+ * @param {string} headSha
+ * @param {string} signedMergeBase
+ * @param {string} repoRoot
+ * @param {Function} [gitFn]
+ * @param {string} [currentBaseSha] — optional current PR base SHA; when
+ *   provided, files in `signedMergeBase..currentBaseSha` are excluded from
+ *   the enumeration (= sibling-PR-only files). Pass undefined to skip the
+ *   exclusion (legacy behavior; does NOT correctly handle sibling merges).
  */
-export function computeHeadContentHashV5(headSha, signedMergeBase, repoRoot, gitFn = git) {
+export function computeHeadContentHashV5(
+  headSha,
+  signedMergeBase,
+  repoRoot,
+  gitFn = git,
+  currentBaseSha,
+) {
   if (typeof signedMergeBase !== 'string' || !/^[0-9a-f]{40}$/i.test(signedMergeBase)) {
     return null;
   }
   let nameOnly;
   try {
-    // Two-dot range with the FROZEN merge-base. This reproduces the EXACT
-    // file enumeration the signer used, regardless of where `origin/main`
-    // points today.
+    // Two-dot range with the FROZEN merge-base. At sign time this equals
+    // the PR-only files. After a queue rebase it may include sibling files
+    // (hence the exclusion step below when currentBaseSha is available).
     nameOnly = gitFn(
       ['diff', '--name-only', '--no-renames', `${signedMergeBase}..${headSha}`],
       repoRoot,
@@ -627,14 +659,42 @@ export function computeHeadContentHashV5(headSha, signedMergeBase, repoRoot, git
   } catch {
     return null;
   }
-  const paths = nameOnly.split('\n').filter((l) => l.length > 0);
+  const allPaths = nameOnly.split('\n').filter((l) => l.length > 0);
+
+  // AISDLC-369: build the sibling-only exclusion set when currentBaseSha
+  // differs from signedMergeBase (= sibling PRs merged between signing and
+  // queue execution). Files in signedMergeBase..currentBaseSha were touched
+  // exclusively by sibling PRs — exclude them so only PR-specific files enter
+  // the hash, exactly matching the sign-time diff.
+  const siblingFiles = new Set();
+  if (
+    typeof currentBaseSha === 'string' &&
+    /^[0-9a-f]{40}$/i.test(currentBaseSha) &&
+    currentBaseSha.toLowerCase() !== signedMergeBase.toLowerCase()
+  ) {
+    try {
+      const siblingNameOnly = gitFn(
+        ['diff', '--name-only', '--no-renames', `${signedMergeBase}..${currentBaseSha}`],
+        repoRoot,
+      );
+      for (const p of siblingNameOnly.split('\n').filter((l) => l.length > 0)) {
+        siblingFiles.add(p);
+      }
+    } catch {
+      // If we can't compute the sibling set, fall through — worst case is
+      // v5 returns null (treated as fallback to v4) rather than a false-positive.
+    }
+  }
+
   const entries = [];
-  for (const p of paths) {
+  for (const p of allPaths) {
     if (p.includes('\t') || p.includes('\n')) {
       return null;
     }
     if (isAttestationEnvelopePath(p)) continue;
     if (isIgnoredForContentHash(p)) continue;
+    // AISDLC-369: exclude sibling-only files from the hash.
+    if (siblingFiles.has(p)) continue;
     let blobSha = '';
     try {
       const lsOut = gitFn(['ls-tree', '-r', headSha, '--', p], repoRoot);
@@ -718,7 +778,7 @@ export function resolveSubjectShaForEnvelope({
     typeof signedMergeBase === 'string' &&
     /^[0-9a-f]{40}$/.test(signedMergeBase)
   ) {
-    const v5 = computeHeadContentHashV5(headSha, signedMergeBase, repoRoot, gitFn);
+    const v5 = computeHeadContentHashV5(headSha, signedMergeBase, repoRoot, gitFn, baseSha);
     if (v5 !== null && v5 === expectedContentHashV5) {
       // v5 matched at PR HEAD → no walk needed. Reuse the same subject-SHA
       // anchoring pattern as v4 for the chore-commit allowlist check.

@@ -139,11 +139,34 @@ fi
 #    in-flight backlog task drafts.
 DIRTY_TRACKED=$(git status --porcelain 2>/dev/null | grep -vE "^\?\?" | head -1 || true)
 if [ -n "$DIRTY_TRACKED" ]; then
-  echo "[orchestrator-state] WARN: parent working tree has uncommitted tracked changes; skipping reset"
-  echo "[orchestrator-state]       ${PARENT_ROOT}"
-  git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]         /'
-  echo "[orchestrator-state] Resolve manually: stash, commit, or discard. Then re-run."
-  exit 0
+  # AISDLC-369: "behind on main with no local edits" can manifest as tracked
+  # modifications when the only dirty paths are backlog task lifecycle files
+  # (backlog/tasks/*.md or backlog/completed/*.md) that were moved by a
+  # pipeline run or pre-push hook and staged/modified in the parent instead
+  # of the worktree. These modifications WILL be resolved by reset --hard to
+  # origin/main (because origin/main already has the correct state). We detect
+  # this case and proceed with the reset rather than refusing.
+  #
+  # Safety check: all dirty tracked paths must match the backlog task pattern.
+  # We use `git diff --name-only HEAD` + `git diff --name-only --cached HEAD`
+  # to enumerate changed paths without relying on porcelain's quoted-path
+  # format (which uses C-style quoting for filenames with spaces).
+  # If ANY changed path is outside backlog/{tasks,completed}/, we still refuse.
+  ALL_DIRTY_PATHS=$(
+    { git diff --name-only HEAD 2>/dev/null; git diff --name-only --cached HEAD 2>/dev/null; } \
+    | sort -u
+  )
+  NON_BACKLOG=$(echo "$ALL_DIRTY_PATHS" | grep -vE '^backlog/(tasks|completed)/' | grep -v '^$' | head -1 || true)
+  if [ -n "$NON_BACKLOG" ]; then
+    echo "[orchestrator-state] WARN: parent working tree has uncommitted tracked changes; skipping reset"
+    echo "[orchestrator-state]       ${PARENT_ROOT}"
+    git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]         /'
+    echo "[orchestrator-state] Resolve manually: stash, commit, or discard. Then re-run."
+    exit 0
+  fi
+  # All dirty paths are backlog task lifecycle files — safe to proceed with reset.
+  echo "[orchestrator-state] auto-recovering: dirty paths are backlog task lifecycle files (will be resolved by reset)"
+  git status --porcelain | grep -vE "^\?\?" | head -10 | sed 's/^/[orchestrator-state]   staging: /'
 fi
 
 # Reset HEAD + working tree in one op (also moves refs/heads/main since HEAD
