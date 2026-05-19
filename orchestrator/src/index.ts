@@ -225,7 +225,20 @@ export {
   type EnrichmentContext,
   type LifecyclePhase,
 } from './admission-enrichment.js';
-export { computeAdmissionComposite, type AdmissionComposite } from './admission-composite.js';
+export {
+  computeAdmissionComposite,
+  type AdmissionComposite,
+  type AdmissionCompositeOptions,
+} from './admission-composite.js';
+export {
+  resolveAffectedSouls,
+  applyCrossSoulRule,
+  computeTessellatedScores,
+  type DepGraphSoulEntry,
+  type SoulScores,
+  type TessellationContext,
+  type TessellatedSaResult,
+} from './tessellation-admission.js';
 export {
   parseBacklogTask,
   loadBacklogTaskFromRoot,
