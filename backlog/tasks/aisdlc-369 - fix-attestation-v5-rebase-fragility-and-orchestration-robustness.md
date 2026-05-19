@@ -45,7 +45,7 @@ Plus several queue/orchestration robustness issues compounded the pain.
 - **At verify time**: read `signedMergeBase` from envelope → diff `<signedMergeBase>..<HEAD>` → hash those files
 - Result MUST match envelope's `contentHashV5` regardless of where `origin/main` has moved
 
-In practice CI keeps reporting `contentHashV4 mismatch` once another PR (any AISDLC-XXX) lands on `main`, meaning **v5 returned null** (fell through to v4). Hypothesis: CI's shallow clone doesn't have `signedMergeBase` reachable, OR the diff produces a different file set on rebased PR HEAD than at sign time.
+In practice CI keeps reporting `contentHashV4 mismatch` once any concurrent PR lands on `main`, meaning **v5 returned null** (fell through to v4). Hypothesis: CI's shallow clone doesn't have `signedMergeBase` reachable, OR the diff produces a different file set on rebased PR HEAD than at sign time.
 
 Tasks:
 
@@ -57,7 +57,7 @@ Tasks:
 
 `auto-enable-auto-merge.yml` only fires on `pull_request opened` event. When the queue dequeues a PR (UNMERGEABLE), the auto-merge flag is cleared and operator must manually re-arm.
 
-Add a separate workflow `.github/workflows/auto-rearm-on-dequeue.yml`:
+Add a new auto-rearm workflow (target path under `.github/workflows/`):
 
 ```yaml
 on:
@@ -72,7 +72,7 @@ Job logic: for each open PR with `mergeable_state == 'clean'` and `auto_merge ==
 
 ### C. Pre-push helper: squash stacked chore-sign commits
 
-Re-sign cycles produce stacked `chore: sign v5 attestation` commits because the operator forgets `git reset --hard HEAD~1` first. Add `scripts/squash-attestation-chores.sh`:
+Re-sign cycles produce stacked `chore: sign v5 attestation` commits because the operator forgets `git reset --hard HEAD~1` first. Add a new helper script under `scripts/`:
 
 ```bash
 # When HEAD..HEAD~2 are both "chore: sign v5", squash to one
@@ -83,7 +83,7 @@ Invoke from `.husky/pre-push` defensively (idempotent).
 
 ### D. Branch-name truncation defense
 
-`gh pr list --json` returns truncated branch names in some output paths. Always resolve via `gh api repos/<owner>/<repo>/pulls/<n> --jq .head.ref` for the exact name. Document the rule in `docs/operations/merge-queue-rebase-recovery.md` + add a regression test in `scripts/check-branch-name-resolution.test.sh`.
+`gh pr list --json` returns truncated branch names in some output paths. Always resolve via `gh api repos/<owner>/<repo>/pulls/<n> --jq .head.ref` for the exact name. Document the rule in `docs/operations/merge-queue-rebase-recovery.md` + add a new regression-test helper under `scripts/`.
 
 ### E. check-orchestrator-state.sh: distinguish "behind on main" from "user-modified"
 
@@ -102,7 +102,7 @@ Parent repo in Pattern C should be on main. The script currently refuses to reco
 ## Out of scope
 
 - Replacing v5 with v6 (don't redesign — diagnose first)
-- Auto-rebase + auto-resign daemon (separate work, AISDLC-366 family)
+- Auto-rebase + auto-resign daemon (out of scope — separate orchestration work)
 - Operator UX to surface re-sign cycles in TUI (separate)
 
 ## Source
