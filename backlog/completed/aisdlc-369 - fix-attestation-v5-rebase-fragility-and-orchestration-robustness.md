@@ -1,7 +1,7 @@
 ---
 id: AISDLC-369
 title: 'fix(attestation+orchestration): v5 rebase-survives-sibling-merges + auto-rearm + pre-push helpers'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-19'
 labels:
