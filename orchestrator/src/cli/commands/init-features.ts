@@ -222,22 +222,25 @@ export function buildComplianceYaml(opts: {
 }): string {
   const { projectName, regimes, attestedBy, attestedAt, attestedNotes, derivedGates } = opts;
 
-  const regimesBlock =
-    regimes.length === 0
-      ? '  regimes: []\n'
-      : regimes
-          .map((id) => {
-            const lines = [
-              `  - id: ${id}`,
-              `    attestedBy: ${attestedBy}`,
-              `    attestedAt: "${attestedAt}"`,
-            ];
-            if (attestedNotes) {
-              lines.push(`    attestedNotes: "${attestedNotes.replace(/"/g, '\\"')}"`);
-            }
-            return lines.join('\n');
-          })
-          .join('\n') + '\n';
+  // AISDLC-324 review fix: quote attestedBy/id/attestedAt so an operator
+  // git config user.email containing ": " or other YAML-significant chars
+  // can't break the YAML structure. attestedNotes already quoted+escaped.
+  const quotedAttestedBy = `"${attestedBy.replace(/"/g, '\\"')}"`;
+  const regimeItems = regimes
+    .map((id) => {
+      // id is from hardcoded COMPLIANCE_REGIME_CHOICES (validated upstream)
+      // so it's safe to emit unquoted; YAML-significant chars never reach here.
+      const lines = [
+        `    - id: ${id}`,
+        `      attestedBy: ${quotedAttestedBy}`,
+        `      attestedAt: "${attestedAt}"`,
+      ];
+      if (attestedNotes) {
+        lines.push(`      attestedNotes: "${attestedNotes.replace(/"/g, '\\"')}"`);
+      }
+      return lines.join('\n');
+    })
+    .join('\n');
 
   const derivedGatesComment = [
     '# --- Derived gates (computed from declared regimes; read-only) ---',
@@ -251,14 +254,17 @@ export function buildComplianceYaml(opts: {
     '# See docs/operations/compliance-posture.md for override patterns.',
   ].join('\n');
 
+  // AISDLC-324 review fix: avoid duplicate `regimes:` key when empty.
+  // Inline `[]` for empty case; emit block under `regimes:` for non-empty.
+  const regimesSection = regimes.length === 0 ? `  regimes: []` : `  regimes:\n${regimeItems}`;
+
   return [
     `apiVersion: ai-sdlc.io/v1alpha1`,
     `kind: CompliancePosture`,
     `metadata:`,
-    `  name: ${projectName}`,
+    `  name: "${projectName.replace(/"/g, '\\"')}"`,
     `spec:`,
-    `  regimes:`,
-    regimesBlock.trimEnd(),
+    regimesSection,
     `  auditExports: []`,
     '',
     derivedGatesComment,

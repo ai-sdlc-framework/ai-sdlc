@@ -246,7 +246,7 @@ describe('buildComplianceYaml()', () => {
       attestedAt: '2026-05-18T00:00:00.000Z',
       derivedGates: { ...BASELINE_DERIVED_GATES },
     });
-    expect(yaml).toContain('name: my-project');
+    expect(yaml).toContain('name: "my-project"');
   });
 
   it('writes empty regimes array when no regimes are declared', () => {
@@ -269,7 +269,7 @@ describe('buildComplianceYaml()', () => {
       derivedGates: computeInitWizardDerivedGates(['HIPAA']),
     });
     expect(yaml).toContain('id: HIPAA');
-    expect(yaml).toContain('attestedBy: user@example.com');
+    expect(yaml).toContain('attestedBy: "user@example.com"');
     expect(yaml).toContain('attestedAt: "2026-05-18T12:00:00.000Z"');
   });
 
@@ -526,7 +526,7 @@ describe('runComplianceStep()', () => {
     expect(state.files.has(yamlPath)).toBe(true);
     const content = state.files.get(yamlPath)!;
     expect(content).toContain('id: HIPAA');
-    expect(content).toContain('attestedBy: user@example.com');
+    expect(content).toContain('attestedBy: "user@example.com"');
     expect(content).toContain('attestedNotes: "Test notes"');
   });
 
