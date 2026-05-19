@@ -641,6 +641,9 @@ describe('cli-orchestrator tick default spawner (AISDLC-352)', () => {
       sleep: () => Promise.resolve(),
       frontier: () => [],
       escalate: async () => {},
+      // AISDLC-363: skip real git branch check so the test is hermetic in
+      // worktrees / non-main CI branches.
+      parentBranchGuard: async () => {},
       umbrellaExecutor: async (taskId, spawnerKind) => {
         spawnerKinds.push(spawnerKind);
         return { ok: true, pipeline: approvedResult(taskId) };

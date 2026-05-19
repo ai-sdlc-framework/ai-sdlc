@@ -51,6 +51,10 @@ interface StubState {
   promptAnswers: boolean[];
   /** Map<command-prefix, response> for runCommand. */
   runResponses: Map<string, { stdout: string; exitCode: number }>;
+  /** FIFO queue of scripted multi-select answers (string[][]); returns [] if exhausted. */
+  multiSelectAnswers: string[][];
+  /** FIFO queue of scripted text-input answers (string); returns '' if exhausted. */
+  textInputAnswers: string[];
 }
 
 function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: FeatureAdapters } {
@@ -61,6 +65,8 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
     runCommandCalls: opts.runCommandCalls ?? [],
     promptAnswers: opts.promptAnswers ?? [],
     runResponses: opts.runResponses ?? new Map(),
+    multiSelectAnswers: opts.multiSelectAnswers ?? [],
+    textInputAnswers: opts.textInputAnswers ?? [],
   };
   const adapters: FeatureAdapters = {
     prompt: async (question, defaultYes) => {
@@ -70,6 +76,12 @@ function makeStub(opts: Partial<StubState> = {}): { state: StubState; adapters: 
         throw new Error(`Stub prompt exhausted on question: "${question}"`);
       }
       return ans;
+    },
+    multiSelect: async (_question, _choices) => {
+      return state.multiSelectAnswers.shift() ?? [];
+    },
+    textInput: async (_question, _defaultValue) => {
+      return state.textInputAnswers.shift() ?? '';
     },
     writeFile: (p, c) => {
       state.files.set(p, c);
