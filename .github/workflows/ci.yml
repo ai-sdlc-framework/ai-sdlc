@@ -236,14 +236,46 @@ jobs:
         with:
           node-version: 22
           cache: pnpm
+      # AISDLC-370 hotfix: docs-only PRs run zero tests, so codecov has nothing
+      # to upload → required `codecov/patch` check never posts → PR deadlocks
+      # in BLOCKED state. Detect docs-only first; if true, post a synthetic
+      # codecov/patch=success via gh api (mirror of verify-attestation.yml's
+      # AISDLC-214 short-circuit) and skip the coverage steps entirely.
+      - name: Detect docs-only changeset
+        id: docs_only
+        if: github.event_name == 'pull_request'
+        run: |
+          set -euo pipefail
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          FILES=$(git -c core.quotePath=false diff --name-only "${BASE_SHA}...${HEAD_SHA}")
+          if [ -z "${FILES}" ]; then
+            ALL_DOCS=true
+          else
+            ALL_DOCS=$(printf '%s\n' "${FILES}" | node scripts/is-docs-only-changeset.mjs)
+          fi
+          echo "all_docs=${ALL_DOCS}" >> "${GITHUB_OUTPUT}"
+          echo "[docs-only-detect] all_docs=${ALL_DOCS}"
+      - name: Short-circuit codecov/patch on docs-only
+        if: github.event_name == 'pull_request' && steps.docs_only.outputs.all_docs == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api -X POST \
+            "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
+            -f state=success \
+            -f context='codecov/patch' \
+            -f description='docs-only changeset — patch coverage N/A'
       - run: pnpm install --frozen-lockfile
+        if: steps.docs_only.outputs.all_docs != 'true' || github.event_name != 'pull_request'
       - run: pnpm build
+        if: steps.docs_only.outputs.all_docs != 'true' || github.event_name != 'pull_request'
       # AISDLC-368: PR coverage runs ONLY for tests that touch changed files
       # (vitest --changed origin/main). Cuts coverage job ~3-5min → ~30s on
       # small PRs. push/merge_group still run full coverage so the codecov
       # baseline stays accurate.
       - name: Coverage (PR — changed files only)
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && steps.docs_only.outputs.all_docs != 'true'
         run: |
           git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || true
           pnpm -r exec -- vitest run --coverage --changed origin/main || pnpm test:coverage
@@ -251,6 +283,7 @@ jobs:
         if: github.event_name != 'pull_request'
         run: pnpm test:coverage
       - uses: codecov/codecov-action@v5
+        if: steps.docs_only.outputs.all_docs != 'true' || github.event_name != 'pull_request'
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: .
