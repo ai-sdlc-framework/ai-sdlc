@@ -28,7 +28,7 @@ Operator session 2026-05-19: DoR clarifications currently surface only as PR com
 6. Another CI cycle (~5-8min)
 7. Repeat until clean
 
-For this session that round-tripped 3+ times on a single docs PR (PR #553 → #553 amend → #553 amend) before DoR went clean. Each round = 5-8min wasted.
+For this session a single docs-only PR round-tripped 3+ times (amend + repush each cycle) before DoR went clean. Each round costs 5-8min of CI wall-clock waiting.
 
 **Fix**: catch DoR violations in the pre-push hook so the agent fixes them locally before the push ever lands. Same engine, earlier invocation.
 
@@ -36,16 +36,16 @@ For this session that round-tripped 3+ times on a single docs PR (PR #553 → #5
 
 ### A. New CLI: `cli-dor-check`
 
-`pipeline-cli/bin/cli-dor-check.mjs` thin wrapper around the existing engine at `pipeline-cli/src/dor/upstream-oq-gate.ts` + the seven-point rubric in `refineBacklogTask()`.
+A new thin wrapper bin under `pipeline-cli/bin/` that calls into the existing engine at `pipeline-cli/src/dor/upstream-oq-gate.ts` + the seven-point rubric in `refineBacklogTask()`.
 
-Usage:
+Usage (illustrative):
 
 ```bash
 # Check one task file
-node pipeline-cli/bin/cli-dor-check.mjs --task backlog/tasks/aisdlc-370.md
+node pipeline-cli/bin/<cli-name> --task backlog/tasks/<task-id>.md
 
 # Check all staged task files in a push range
-node pipeline-cli/bin/cli-dor-check.mjs --staged
+node pipeline-cli/bin/<cli-name> --staged
 ```
 
 Exits non-zero on any unresolved-marker / unresolved-reference / unresolved-dependency-phrase finding. Prints findings in the same format as the CI workflow comment so the operator sees identical wording.
@@ -58,7 +58,7 @@ Append a new step to `.husky/pre-push` (after coverage, task-move, attestation-s
 # AISDLC-370: DoR shift-left. Catch task-body violations before CI.
 if [ -z "${AI_SDLC_SKIP_DOR_GATE:-}" ]; then
   echo "[dor-gate] checking staged backlog task changes..."
-  node pipeline-cli/bin/cli-dor-check.mjs --staged --push-range "$1..$2" || {
+  node pipeline-cli/bin/<cli-name> --staged --push-range "$1..$2" || {
     echo ""
     echo "[dor-gate] DoR violations in staged tasks. Fix the body and re-push."
     echo "[dor-gate] Defer with: AI_SDLC_SKIP_DOR_GATE=1 git push"
@@ -71,8 +71,8 @@ Reads `git rev-list <range>` to find which `backlog/tasks/*.md` and `backlog/com
 
 ### C. Test wiring + hermetic test
 
-- `scripts/check-dor-gate.test.mjs` — feed fixture task files with known DoR violations + assert the gate exits non-zero with the right message
-- Wire into `pnpm test:dor-gate` script alongside other hook tests
+- A new hermetic-test file under `scripts/` (parallel to existing `check-*.test.mjs` hook tests) — feed fixture task files with known DoR violations + assert the gate exits non-zero with the right message
+- Wire into a `pnpm test:dor-gate` script alongside other hook tests
 
 ### D. Docs
 
@@ -80,13 +80,13 @@ Add a short section to `CLAUDE.md`'s "Hooks" list documenting the new gate, the 
 
 ## Acceptance criteria
 
-- [ ] `cli-dor-check.mjs` exists, callable from a fresh worktree, calls into existing `pipeline-cli/src/dor/upstream-oq-gate.ts` engine
+- [ ] A new bin under `pipeline-cli/bin/` exists, callable from a fresh worktree, calls into existing `pipeline-cli/src/dor/upstream-oq-gate.ts` engine
 - [ ] `--task <path>` mode checks a single task file
 - [ ] `--staged --push-range A..B` mode walks the push range, finds touched task files, checks each
 - [ ] Exit non-zero on any finding; prints comment-identical format
 - [ ] Pre-push hook integration via `.husky/pre-push` with `AI_SDLC_SKIP_DOR_GATE=1` opt-out
-- [ ] Hermetic test at `scripts/check-dor-gate.test.mjs` covering: clean task, gate-2 placeholder, gate-3 unresolved reference, gate-7 dependency phrase
-- [ ] Test wired into `pnpm test:dor-gate` and run by the workspace's `pnpm test`
+- [ ] Hermetic test under `scripts/` covering: clean task, gate-2 marker, gate-3 unresolved reference, gate-7 dependency phrase
+- [ ] Test wired into a `pnpm test:dor-gate` script and run by the workspace's `pnpm test`
 - [ ] Run the gate against the AISDLC-370 task body itself — it must pass on the PR's own task file
 
 ## Out of scope
