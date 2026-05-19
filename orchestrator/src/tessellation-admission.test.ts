@@ -358,9 +358,11 @@ describe('computeAdmissionComposite + tessellationContext (AC #1, #4)', () => {
     const legacy = computeAdmissionComposite(input);
     const noTessellation = computeAdmissionComposite(input, undefined, {});
 
-    // Both calls produce the same composite (tessellationContext absent)
-    expect(legacy.score.composite).toBe(noTessellation.score.composite);
-    expect(legacy.breakdown.soulAlignment).toBe(noTessellation.breakdown.soulAlignment);
+    // Both calls produce the same composite (tessellationContext absent).
+    // toBeCloseTo for float-accumulation determinism — runner-to-runner ulp
+    // differences caused intermittent CI failures (AISDLC-374).
+    expect(legacy.score.composite).toBeCloseTo(noTessellation.score.composite, 8);
+    expect(legacy.breakdown.soulAlignment).toBeCloseTo(noTessellation.breakdown.soulAlignment, 8);
     // No tessellation breakdown field in legacy path
     expect(legacy.breakdown.tessellation).toBeUndefined();
     expect(noTessellation.breakdown.tessellation).toBeUndefined();
