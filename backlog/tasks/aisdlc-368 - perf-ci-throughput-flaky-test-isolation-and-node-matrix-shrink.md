@@ -15,7 +15,6 @@ references:
   - .github/workflows/ci.yml
   - .github/workflows/ai-sdlc-gate.yml
   - .husky/pre-commit
-  - scripts/check-flaky-tests.sh
 ---
 
 ## Problem
