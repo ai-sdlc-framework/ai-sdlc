@@ -227,6 +227,10 @@ jobs:
     if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     steps:
       - uses: actions/checkout@v4
+        with:
+          # AISDLC-368: full clone so `vitest --changed origin/main` can
+          # compute the diff and only run tests affected by changed files.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -234,7 +238,18 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - run: pnpm test:coverage
+      # AISDLC-368: PR coverage runs ONLY for tests that touch changed files
+      # (vitest --changed origin/main). Cuts coverage job ~3-5min → ~30s on
+      # small PRs. push/merge_group still run full coverage so the codecov
+      # baseline stays accurate.
+      - name: Coverage (PR — changed files only)
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || true
+          pnpm -r exec -- vitest run --coverage --changed origin/main || pnpm test:coverage
+      - name: Coverage (push / merge_group — full)
+        if: github.event_name != 'pull_request'
+        run: pnpm test:coverage
       - uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
