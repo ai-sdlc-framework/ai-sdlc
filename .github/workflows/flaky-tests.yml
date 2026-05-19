@@ -1,0 +1,79 @@
+name: Flaky Tests (nightly)
+
+# Runs the *.flaky.test.ts suite daily at 04:00 UTC so we know which tests
+# are still flaky vs. accidentally-skipped-real-tests. The job uses
+# continue-on-error: true — failure produces a signal in the workflow run
+# summary but does not block any PR or trigger a CI failure alert.
+#
+# Convention: docs/operations/flaky-tests.md
+# Managed by: AISDLC-371
+
+on:
+  schedule:
+    - cron: '0 4 * * *' # 04:00 UTC daily
+  workflow_dispatch: # allow manual runs for bisect / investigation
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  flaky:
+    name: Run flaky tests
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build
+        run: pnpm build
+
+      - name: Run flaky tests
+        id: run_flaky
+        # Run each package's flaky tests independently so a hang in one
+        # package doesn't prevent the others from completing. Each vitest
+        # invocation targets *.flaky.test.ts explicitly so only those files
+        # are collected (the config exclude is irrelevant here since we
+        # override the include pattern directly).
+        #
+        # `|| true` after each vitest call keeps the step alive even if
+        # a package's flaky tests fail — all output lands in the step log.
+        run: |
+          echo "## Flaky test nightly run ($(date -u +%Y-%m-%dT%H:%M:%SZ))" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+
+          pass=0
+          fail=0
+
+          for pkg in orchestrator pipeline-cli reference dogfood ai-sdlc-plugin/mcp-server; do
+            if compgen -G "$pkg/src/**/*.flaky.test.ts" > /dev/null 2>&1 || \
+               find "$pkg/src" -name "*.flaky.test.ts" 2>/dev/null | grep -q .; then
+              echo "### \`$pkg\`" >> "$GITHUB_STEP_SUMMARY"
+              if pnpm --filter "@ai-sdlc/$(basename $pkg)" exec vitest run \
+                  --reporter=verbose \
+                  --include='**/*.flaky.test.ts' 2>&1; then
+                echo "- Result: PASS" >> "$GITHUB_STEP_SUMMARY"
+                pass=$((pass + 1))
+              else
+                echo "- Result: FAIL (see logs above)" >> "$GITHUB_STEP_SUMMARY"
+                fail=$((fail + 1))
+              fi
+              echo "" >> "$GITHUB_STEP_SUMMARY"
+            fi
+          done
+
+          echo "---" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Summary:** $pass passed, $fail failed" >> "$GITHUB_STEP_SUMMARY"
+
+          # Exit 0 regardless (continue-on-error: true handles the rest).
+          exit 0

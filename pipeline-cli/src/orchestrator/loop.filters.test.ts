@@ -20,7 +20,7 @@
  *   - Idle event types distinguish "no work" from "all filtered".
  */
 
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -34,9 +34,6 @@ import {
   STUCK_CANDIDATE_THRESHOLD,
   type CadenceState,
   type OrchestratorAdapters,
-  type OrchestratorAwaitingExternalEvent,
-  type OrchestratorBlockedByDependencyEvent,
-  type OrchestratorBlockedByDorEvent,
   type OrchestratorOrphanParentEvent,
   type StuckCounterEntry,
 } from './index.js';
@@ -117,10 +114,8 @@ function approvedResult(taskId: string): PipelineResult {
 }
 
 let tmp: string;
-let logPath: string;
 beforeEach(() => {
   tmp = mkdtempSync(join(tmpdir(), 'phase3-loop-'));
-  logPath = join(tmp, 'calibration.jsonl');
   process.env[ORCHESTRATOR_FLAG] = 'experimental';
 });
 afterEach(() => {
@@ -130,106 +125,9 @@ afterEach(() => {
 // ── Acceptance fixture (Phase 3 §11) ──────────────────────────────────
 
 describe('runOrchestratorTick — Phase 3 4-task fixture acceptance', () => {
-  it.skip('dispatches only the ready task; emits the matching block events for the other three (FLAKY: times out 6s on CI under load — AISDLC-368)', async () => {
-    // Layout:
-    //   AISDLC-DEP   — depends on AISDLC-OPEN (still open) → Dependency block
-    //   AISDLC-DOR   — has a needs-clarification verdict in the log → DoR block
-    //   AISDLC-EXT   — declares a `manual` external dep with no clearance → External block
-    //   AISDLC-OK    — clean → admitted
-    writeFileSync(
-      logPath,
-      JSON.stringify({
-        ts: '2026-05-02T12:00:00Z',
-        issueId: 'AISDLC-DOR',
-        rubricVersion: 'v1',
-        evaluatorVersion: 't',
-        overallVerdict: 'needs-clarification',
-        failedGates: [4],
-        outcome: '',
-        verdict: {
-          issueId: 'AISDLC-DOR',
-          rubricVersion: 'v1',
-          overallVerdict: 'needs-clarification',
-          gates: [],
-          signedAt: '2026-05-02T12:00:00Z',
-          evaluatorVersion: 't',
-        },
-      }) + '\n',
-    );
-
-    const graph = buildGraph([
-      node('AISDLC-OPEN'),
-      node('AISDLC-DEP', { deps: ['AISDLC-OPEN'] }),
-      node('AISDLC-DOR'),
-      node('AISDLC-EXT', {
-        ext: [{ id: 'sec-review', description: 'wait', kind: 'manual' }],
-      }),
-      node('AISDLC-OK'),
-    ]);
-
-    const dispatched: string[] = [];
-    const config = defaultOrchestratorConfig({
-      workDir: tmp,
-      // maxConcurrent = 4 so the chain considers EVERY candidate (the ready
-      // task lands last in alphabetical order from the synthetic frontier).
-      maxConcurrent: 4,
-      maxTicks: 1,
-      tickIntervalSec: 0,
-    });
-    const adapters: OrchestratorAdapters = {
-      logger: silentLogger(),
-      sleep: () => Promise.resolve(),
-      // We pass the candidates excluding AISDLC-OPEN (which is a dependency
-      // not itself a frontier candidate). Order matches the §4.3 §11 spec.
-      frontier: () =>
-        ['AISDLC-DEP', 'AISDLC-DOR', 'AISDLC-EXT', 'AISDLC-OK'].map((id) => ({
-          id,
-          title: id,
-        })),
-      graphLoader: () => graph,
-      taskLabelsLoader: () => [],
-      calibrationLogPath: logPath,
-      dispatch: async (taskId) => {
-        dispatched.push(taskId);
-        return approvedResult(taskId);
-      },
-      escalate: async () => {},
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
-      parentBranchGuard: async () => {},
-    };
-    const tick = await runOrchestratorTick(config, adapters, 1);
-
-    expect(dispatched).toEqual(['AISDLC-OK']);
-    expect(tick.dispatched).toEqual(['AISDLC-OK']);
-    expect(tick.candidates).toBe(4);
-    // Filter events: 4 records (one per evaluated candidate). Three carry a
-    // blockedEvent; one (the OK one) does not.
-    expect(tick.filterEvents).toHaveLength(4);
-    const blockedById = new Map(
-      tick.filterEvents
-        .filter((e) => e.blockedEvent !== null)
-        .map((e) => [e.taskId, e.blockedEvent!]),
-    );
-    expect([...blockedById.keys()].sort()).toEqual(['AISDLC-DEP', 'AISDLC-DOR', 'AISDLC-EXT']);
-
-    const dep = blockedById.get('AISDLC-DEP') as OrchestratorBlockedByDependencyEvent;
-    expect(dep.type).toBe('OrchestratorBlockedByDependency');
-    expect(dep.blockers).toEqual(['aisdlc-open']);
-
-    const dor = blockedById.get('AISDLC-DOR') as OrchestratorBlockedByDorEvent;
-    expect(dor.type).toBe('OrchestratorBlockedByDor');
-    expect(dor.verdict).toBe('needs-clarification');
-
-    const ext = blockedById.get('AISDLC-EXT') as OrchestratorAwaitingExternalEvent;
-    expect(ext.type).toBe('OrchestratorAwaitingExternal');
-    expect(ext.externalDeps).toEqual([{ id: 'sec-review', kind: 'manual' }]);
-    expect(ext.allExternalDeps).toEqual([{ id: 'sec-review', kind: 'manual' }]);
-
-    // The fourth filter event (OK) is admitted.
-    const ok = tick.filterEvents.find((e) => e.taskId === 'AISDLC-OK');
-    expect(ok?.trace.passed).toBe(true);
-    expect(ok?.blockedEvent).toBeNull();
-  });
+  // Flaky test moved to loop.filters.flaky.test.ts (AISDLC-371).
+  // The 4-task fixture acceptance test times out 6s on CI under load and is
+  // now exercised by the nightly flaky-tests.yml workflow instead.
 
   it('logs a filter-trace block per evaluated candidate', async () => {
     const graph = buildGraph([node('AISDLC-OPEN'), node('AISDLC-DEP', { deps: ['AISDLC-OPEN'] })]);

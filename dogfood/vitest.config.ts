@@ -3,6 +3,7 @@ import { defineConfig, coverageConfigDefaults } from 'vitest/config';
 export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
+    exclude: ['node_modules/**', 'dist/**', '**/*.flaky.test.ts'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json-summary', 'json'],

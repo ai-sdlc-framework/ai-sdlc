@@ -1,3 +1,13 @@
+# AISDLC-371: attestation-only commit short-circuit.
+# When every staged file is an attestation envelope (.ai-sdlc/attestations/<sha>.dsse.json),
+# skip the expensive tsc + lint-staged checks — they cannot flag anything in a JSON envelope.
+# Saves ~10-15s per chore-sign commit on PRs that go through multiple re-sign cycles.
+STAGED=$(git diff --cached --name-only)
+if [ -n "$STAGED" ] && ! echo "$STAGED" | grep -qvE '^\.ai-sdlc/attestations/[a-f0-9]+\.dsse\.json$'; then
+  echo "[pre-commit] attestation-only commit — skipping tsc and lint-staged"
+  exit 0
+fi
+
 pnpm exec lint-staged
 pnpm typecheck
 

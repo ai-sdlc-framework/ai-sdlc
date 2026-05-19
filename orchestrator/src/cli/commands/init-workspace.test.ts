@@ -186,22 +186,9 @@ async function runInit(argv: string[], projectDir: string = tmpDir): Promise<voi
 }
 
 describe('init — single-repo (AISDLC-78 git-remote fallback)', () => {
-  it.skip('falls back to your-org placeholder when git origin is missing (FLAKY: times out 5s on CI under load — AISDLC-368)', async () => {
-    // Mark the project dir as a git repo (so detectWorkspace() sees a
-    // single-repo project) but DO NOT configure an `origin` remote so
-    // detectGitRemote returns the FALLBACK.
-    initBareRepo(tmpDir);
-    await runInit(['--skip-mcp', '--yes']);
-
-    const pipeline = readFileSync(join(tmpDir, '.ai-sdlc', 'pipeline.yaml'), 'utf-8');
-    expect(pipeline).toContain('org: your-org');
-
-    // Operator-visible message: AISDLC-78 made the fallback explicit so
-    // a fresh-init user knows why the org wasn't substituted.
-    const out = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
-    expect(out).toContain('No git origin remote detected');
-    expect(out).toContain("'your-org' placeholder");
-  });
+  // Flaky test moved to init-workspace.flaky.test.ts (AISDLC-371).
+  // The 'falls back to your-org placeholder' test times out 5s on CI under load
+  // and is now exercised by the nightly flaky-tests.yml workflow instead.
 
   it.skip('AISDLC-104/AISDLC-262: init from subdir inside a host repo resolves to the git root and uses its remote (FLAKY: times out 5s on CI under load — same pattern as AISDLC-368 sibling skip)', async () => {
     // AISDLC-104 + AISDLC-262 combined witness. Recreates the topology:
