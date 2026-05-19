@@ -45,7 +45,7 @@ Plus several queue/orchestration robustness issues compounded the pain.
 - **At verify time**: read `signedMergeBase` from envelope → diff `<signedMergeBase>..<HEAD>` → hash those files
 - Result MUST match envelope's `contentHashV5` regardless of where `origin/main` has moved
 
-In practice CI keeps reporting `contentHashV4 mismatch` once any concurrent PR lands on `main`, meaning **v5 returned null** (fell through to v4). Hypothesis: CI's shallow clone doesn't have `signedMergeBase` reachable, OR the diff produces a different file set on rebased PR HEAD than at sign time.
+In practice CI reports `contentHashV4 mismatch` whenever the queue rebases the PR's branch onto a new `main` tip, meaning **v5 returned null** (fell through to v4). Hypothesis: CI's shallow clone doesn't have `signedMergeBase` reachable, OR the diff produces a different file set on rebased PR HEAD than at sign time.
 
 Tasks:
 
