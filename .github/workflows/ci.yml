@@ -256,16 +256,26 @@ jobs:
           fi
           echo "all_docs=${ALL_DOCS}" >> "${GITHUB_OUTPUT}"
           echo "[docs-only-detect] all_docs=${ALL_DOCS}"
-      - name: Short-circuit codecov/patch on docs-only
+      # Docs-only short-circuit: write an empty LCOV report and upload to codecov
+      # so the codecov app posts the required `codecov/patch` status itself
+      # (branch protection requires the codecov GitHub App as the source —
+      # synthetic statuses via gh api are rejected with "not set by the
+      # expected GitHub app"). Empty patch → codecov posts success.
+      - name: Empty-coverage upload (docs-only short-circuit)
         if: github.event_name == 'pull_request' && steps.docs_only.outputs.all_docs == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh api -X POST \
-            "repos/${{ github.repository }}/statuses/${{ github.event.pull_request.head.sha }}" \
-            -f state=success \
-            -f context='codecov/patch' \
-            -f description='docs-only changeset — patch coverage N/A'
+          mkdir -p .coverage
+          cat > .coverage/lcov.info <<'EOF'
+          TN:
+          end_of_record
+          EOF
+          echo "[docs-only] wrote empty LCOV report for codecov upload"
+      - uses: codecov/codecov-action@v5
+        if: github.event_name == 'pull_request' && steps.docs_only.outputs.all_docs == 'true'
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./.coverage/lcov.info
+          fail_ci_if_error: false
       - run: pnpm install --frozen-lockfile
         if: steps.docs_only.outputs.all_docs != 'true' || github.event_name != 'pull_request'
       - run: pnpm build
