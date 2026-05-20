@@ -33,3 +33,11 @@ spec:
       - 'git reset --hard*'
       - 'git checkout -- .'
       - 'git restore .'
+      # AISDLC-380: deny access to reviewer signing keys directory.
+      # Reviewer sub-attestation keys live at ~/.ai-sdlc/reviewer-keys/.
+      # This blockedAction raises the bar from "trivial accident" to
+      # "deliberate workaround" for a dev subagent trying to forge
+      # reviewer sub-attestations. See docs/operations/reviewer-signing-key-runbook.md
+      # for the residual-risk note.
+      - '*reviewer-keys*'
+      - '*~/.ai-sdlc/reviewer-keys*'

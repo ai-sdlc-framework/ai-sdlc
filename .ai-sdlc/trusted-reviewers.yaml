@@ -13,16 +13,35 @@
 #   3. A maintainer reviews + merges (just like any policy change).
 #   4. After merge, `/ai-sdlc execute` will produce attestations CI accepts.
 #
-# Schema:
+# Schema (two entry types — operator entries and reviewer entries):
+#
+# OPERATOR ENTRY (existing — signs the outer DSSE envelope):
 #   - identity:  free-form string (typically email or GitHub handle)
 #   - machine:   free-form label (lets one identity register multiple keys)
 #   - pubkey:    PEM-encoded ed25519 public key (multi-line block scalar)
 #   - addedAt:   ISO 8601 date the entry was added
 #   - addedBy:   GitHub handle of the maintainer who approved this entry's PR
 #
+# REVIEWER ENTRY (AISDLC-380 — signs individual sub-attestations):
+#   - type:      'reviewer' (required to distinguish from operator entries)
+#   - reviewer:  reviewer agent name (e.g. 'code-reviewer', 'test-reviewer',
+#                'security-reviewer', 'code-reviewer-codex', 'test-reviewer-codex')
+#   - machine:   free-form label (typically the machine that runs the reviewer)
+#   - pubkey:    PEM-encoded ed25519 public key (multi-line block scalar)
+#   - addedAt:   ISO 8601 date the entry was added
+#   - addedBy:   GitHub handle of the maintainer who approved this entry's PR
+#
+# To onboard a reviewer signing key:
+#   1. Run: node ai-sdlc-plugin/scripts/init-reviewer-signing-key.mjs --reviewer-name <name>
+#   2. Copy the printed YAML block and add it below under reviewers:.
+#   3. Open a PR — a maintainer reviews + merges.
+#   4. After merge, check-attestation-sign.sh verifies sub-attestations from
+#      that reviewer before calling sign-attestation.mjs.
+#
 # REMOVING an entry: open a PR deleting the row. Existing attestations signed
 # by the removed key become invalid retroactively (CI rejects them on the
 # next push), so coordinate with the contributor before removing.
+# Reviewer key revocation: see docs/operations/reviewer-signing-key-runbook.md.
 #
 # ─── Format note (LOAD-BEARING) ───────────────────────────────────
 # CI's `scripts/verify-attestation.mjs` uses a hand-rolled YAML loader

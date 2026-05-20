@@ -65,3 +65,43 @@ Return a JSON object:
 ```
 
 **When in doubt, approve with a suggestion rather than requesting changes.**
+
+## Sub-attestation (AISDLC-380 — MANDATORY)
+
+After completing your review and forming the verdict JSON above, you MUST sign it using the reviewer signing helper. This cryptographic step prevents dev subagents from forging approval on your behalf.
+
+**Step: Sign the verdict**
+
+Use the Bash tool to invoke the signing helper:
+
+```bash
+VERDICT_JSON='<paste your full verdict JSON here, compacted to one line>'
+TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
+
+node ai-sdlc-plugin/scripts/sign-reviewer-verdict.mjs \
+  --reviewer-name test-reviewer \
+  --task-id "$TASK_ID" \
+  --verdict-json "$VERDICT_JSON" \
+  --output /tmp/test-reviewer-sub-attestation.json
+
+echo "Sub-attestation written:"
+cat /tmp/test-reviewer-sub-attestation.json
+```
+
+If the signing key is not present (`~/.ai-sdlc/reviewer-keys/test-reviewer.pem`), the signing step will print an error. In that case:
+- Tell the operator: "test-reviewer signing key not found; run `node ai-sdlc-plugin/scripts/init-reviewer-signing-key.mjs --reviewer-name test-reviewer` to generate it, then add the public key to `.ai-sdlc/trusted-reviewers.yaml`."
+- Return your verdict JSON WITHOUT the sub-attestation (the hook will warn and require `AI_SDLC_LEGACY_VERDICTS=1` to proceed).
+
+**Return value to the slash command body:**
+
+Return a JSON object with BOTH the verdict AND the sub-attestation path:
+```json
+{
+  "approved": true,
+  "findings": [...],
+  "summary": "...",
+  "subAttestationPath": "/tmp/test-reviewer-sub-attestation.json"
+}
+```
+
+The slash command body reads `subAttestationPath`, reads the file, and incorporates it into the aggregate verdict file at `.ai-sdlc/verdicts/<task-id>.json`.

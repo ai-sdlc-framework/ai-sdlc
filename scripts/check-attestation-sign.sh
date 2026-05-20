@@ -251,6 +251,60 @@ if [[ "${LAST_COMMIT_SUBJECT:-}" == "chore: auto-sign attestation for "* ]]; the
   exit 0
 fi
 
+# ── Step 4d: verify reviewer sub-attestations (AISDLC-380) ──────────
+#
+# Before invoking the signer, verify that the verdict file contains signed
+# sub-attestations from each reviewer — NOT plain fabricated JSON.
+#
+# The 2026-05-20 incident (AISDLC-377.1): a dev subagent wrote a verdict
+# file with `approved: true` for all 3 reviewers but no cryptographic proof
+# that the reviewers actually ran. The hook signed it, CI accepted it, and
+# 3 real majors shipped to main.
+#
+# Defense: `scripts/verify-reviewer-sub-attestations.mjs` checks each
+# sub-attestation's signature against `.ai-sdlc/trusted-reviewers.yaml`.
+# The verifier exits:
+#   0 → all sub-attestations verified (or AI_SDLC_LEGACY_VERDICTS=1 legacy mode)
+#   1 → verification failed; hook refuses to sign
+#   2 → internal error
+#
+# Test override: AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD can inject a stub.
+TRUSTED_REVIEWERS_YAML="$WT_ROOT/.ai-sdlc/trusted-reviewers.yaml"
+VERIFY_SUB_ATT_SCRIPT="$WT_ROOT/scripts/verify-reviewer-sub-attestations.mjs"
+
+if [ ! -f "$VERIFY_SUB_ATT_SCRIPT" ]; then
+  echo "[attestation-sign] WARN: $VERIFY_SUB_ATT_SCRIPT not found — skipping sub-attestation verification" >&2
+elif [ ! -f "$TRUSTED_REVIEWERS_YAML" ]; then
+  echo "[attestation-sign] WARN: $TRUSTED_REVIEWERS_YAML not found — skipping sub-attestation verification" >&2
+else
+  echo "[attestation-sign] Verifying reviewer sub-attestations for $TASK_ID" >&2
+
+  VERIFY_EXIT=0
+  if [ -n "${AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD:-}" ]; then
+    # Test override: split on whitespace (intentional).
+    # shellcheck disable=SC2086
+    $AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD \
+      --verdict-file "$VERDICT_FILE" \
+      --task-id "$TASK_ID" \
+      --trusted-reviewers "$TRUSTED_REVIEWERS_YAML" || VERIFY_EXIT=$?
+  else
+    node "$VERIFY_SUB_ATT_SCRIPT" \
+      --verdict-file "$VERDICT_FILE" \
+      --task-id "$TASK_ID" \
+      --trusted-reviewers "$TRUSTED_REVIEWERS_YAML" || VERIFY_EXIT=$?
+  fi
+
+  if [ "$VERIFY_EXIT" -eq 1 ]; then
+    echo "[attestation-sign] ERROR: sub-attestation verification failed — refusing to sign" >&2
+    echo "[attestation-sign]        Re-run reviewer subagents to produce signed sub-attestations." >&2
+    echo "[attestation-sign]        Emergency legacy escape: AI_SDLC_LEGACY_VERDICTS=1 git push" >&2
+    exit 2
+  elif [ "$VERIFY_EXIT" -ne 0 ]; then
+    echo "[attestation-sign] ERROR: sub-attestation verifier exited with unexpected code $VERIFY_EXIT" >&2
+    exit 2
+  fi
+fi
+
 # ── Step 5: invoke the signer ────────────────────────────────────────
 # The default signer is the same script `/ai-sdlc execute` Step 10 used to
 # call directly. Tests inject a stub via AI_SDLC_SIGN_ATTESTATION_CMD so
