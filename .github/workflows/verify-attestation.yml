@@ -82,6 +82,18 @@ on:
   # fork events, causing `gh api .../statuses` to 403 and the required
   # check to sit pending forever). See the file header for the full
   # 5-point safety guard.
+  #
+  # AISDLC-381 transitional dual-trigger: keep `pull_request` alongside
+  # `pull_request_target` so main's CURRENT version of this workflow (which
+  # has only `pull_request`) still fires on THIS PR. Without the dual-trigger
+  # neither version fires (pull_request event uses PR's version which has
+  # only pull_request_target; pull_request_target event uses main's version
+  # which has only pull_request → chicken-and-egg). Drop `pull_request` in
+  # a follow-up PR once this lands on main; `pull_request_target` then
+  # carries forward for fork-PR support.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
   pull_request_target:
     # AISDLC-218 (revised): keep `opened` (so direct-ready PRs without `--draft`
     # fire the gate) AND add `ready_for_review` (canonical fire-once trigger

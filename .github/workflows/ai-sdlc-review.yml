@@ -57,6 +57,20 @@ name: AI-SDLC PR Review
 #    step that consumes fork-controlled input.
 
 on:
+  # AISDLC-381 transitional dual-trigger: keep `pull_request` alongside
+  # `pull_request_target` so main's CURRENT version of this workflow (which
+  # has only `pull_request`) still fires on THIS PR. Without the dual-trigger
+  # neither version fires (chicken-and-egg). Drop `pull_request` in a
+  # follow-up PR once this lands on main.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+    paths-ignore:
+      - 'spec/rfcs/**'
+      - 'docs/**'
+      - 'backlog/tasks/**'
+      - 'backlog/completed/**'
+      - '*.md'
   pull_request_target:
     # AISDLC-218 (revised): keep `opened` (so direct-ready PRs without `--draft`
     # fire CI) AND add `ready_for_review` (canonical fire-once trigger when a
