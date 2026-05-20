@@ -59,8 +59,11 @@ jobs:
             if compgen -G "$pkg/src/**/*.flaky.test.ts" > /dev/null 2>&1 || \
                find "$pkg/src" -name "*.flaky.test.ts" 2>/dev/null | grep -q .; then
               echo "### \`$pkg\`" >> "$GITHUB_STEP_SUMMARY"
+              # --no-file-parallelism: run flaky tests sequentially to dodge
+              # the parallel-pool hang that motivated the rename (AISDLC-375).
               if pnpm --filter "@ai-sdlc/$(basename $pkg)" exec vitest run \
                   --reporter=verbose \
+                  --no-file-parallelism \
                   --include='**/*.flaky.test.ts' 2>&1; then
                 echo "- Result: PASS" >> "$GITHUB_STEP_SUMMARY"
                 pass=$((pass + 1))

@@ -11,12 +11,14 @@ labels:
 dependencies: []
 priority: medium
 references:
-  - pipeline-cli/src/tui/analytics/quality-classifier.test.ts
-  - pipeline-cli/src/tui/analytics/quality-metrics.test.ts
-  - pipeline-cli/src/tui/analytics/quality-router.test.ts
-  - pipeline-cli/src/tui/analytics/quality-reader.test.ts
-  - pipeline-cli/src/tui/analytics/determinism-detector.test.ts
-  - pipeline-cli/src/cli/quality-corpus.test.ts
+  - pipeline-cli/src/tui/analytics/quality-classifier.flaky.test.ts
+  - pipeline-cli/src/tui/analytics/quality-metrics.flaky.test.ts
+  - pipeline-cli/src/tui/analytics/quality-router.flaky.test.ts
+  - pipeline-cli/src/tui/analytics/quality-reader.flaky.test.ts
+  - pipeline-cli/src/tui/analytics/determinism-detector.flaky.test.ts
+  - pipeline-cli/src/cli/quality-corpus.flaky.test.ts
+  - pipeline-cli/vitest.config.ts
+  - .github/workflows/flaky-tests.yml
 ---
 
 ## Problem
