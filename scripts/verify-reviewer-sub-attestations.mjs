@@ -65,12 +65,30 @@ function sha256Hex(input) {
 }
 
 /**
+ * Recursively sort all object keys for canonical JSON serialization.
+ * Must produce the same result as `sortKeysDeep` in sign-reviewer-verdict.mjs.
+ */
+function sortKeysDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortKeysDeep);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, sortKeysDeep(v)]),
+    );
+  }
+  return value;
+}
+
+/**
  * Compute canonical content hash of a verdict object.
  * Must match `canonicalVerdictHash` in sign-reviewer-verdict.mjs.
+ * Uses deep key-sorting so nested objects are also canonicalized.
  */
 function canonicalVerdictHash(verdict) {
-  const sorted = Object.fromEntries(Object.entries(verdict).sort(([a], [b]) => a.localeCompare(b)));
-  return sha256Hex(JSON.stringify(sorted));
+  return sha256Hex(JSON.stringify(sortKeysDeep(verdict)));
 }
 
 /**
@@ -181,6 +199,31 @@ function verifySubAttestation(subAtt, taskId, registryEntries) {
   if (!reviewerName || typeof reviewerName !== 'string') {
     return 'sub-attestation missing reviewerName';
   }
+
+  // ── AISDLC-380 Bug #8: security-reviewer unsigned-exempt path ─────────
+  //
+  // security-reviewer declares disallowedTools: [Bash] so it cannot invoke
+  // the sign helper. The slash command body marks its verdict with
+  // `unsigned: true, exemptReason: 'no-bash-tool'`. Accept ONLY for
+  // 'security-reviewer' with both markers present.
+  //
+  // This gap is documented in ai-sdlc-plugin/agents/security-reviewer.md
+  // and will be closed in AISDLC-380.2.
+  if (subAtt.unsigned === true && subAtt.exemptReason === 'no-bash-tool') {
+    if (reviewerName === 'security-reviewer') {
+      if (!verdict || typeof verdict !== 'object') {
+        return `unsigned-exempt entry for 'security-reviewer' is missing its verdict object`;
+      }
+      // Accepted — no signature to check.
+      return null;
+    }
+    // Any other reviewer claiming unsigned-exempt is rejected.
+    return (
+      `sub-attestation for '${reviewerName}' claims unsigned-exempt (no-bash-tool) but only\n` +
+      `       'security-reviewer' is permitted this exemption. All other reviewers MUST be signed.`
+    );
+  }
+
   if (!attTaskId || typeof attTaskId !== 'string') {
     return 'sub-attestation missing taskId';
   }
@@ -293,6 +336,12 @@ async function main() {
 
   const { isLegacy, subAttestations, legacyVerdicts } = classifyVerdictFile(raw);
 
+  // Count expected reviewers from the trusted-reviewers registry.
+  const expectedReviewerEntries = registryEntries.filter(
+    (e) => e.type === 'reviewer' && typeof e.reviewer === 'string' && e.reviewer.length > 0,
+  );
+  const expectedReviewerNames = expectedReviewerEntries.map((e) => e.reviewer);
+
   if (isLegacy) {
     if (legacyMode) {
       const count = (legacyVerdicts ?? []).length;
@@ -328,6 +377,74 @@ async function main() {
         `         AI_SDLC_LEGACY_VERDICTS=1 git push\n`,
     );
     process.exit(1);
+  }
+
+  // ── Bug #1 fix: reject empty sub-attestations (AISDLC-380 regression) ──
+  //
+  // A verdict file of the form { taskId, subAttestations: [] } is classified
+  // as non-legacy (it has the new shape) but iterates zero entries and exits 0.
+  // This directly reproduces the forgery class from the 2026-05-20 incident.
+  //
+  // We require sub-attestations from EVERY reviewer registered in the trusted-
+  // reviewers registry.  If no reviewers are configured at all (legitimate
+  // "no reviewers yet" state), allow ONLY under AI_SDLC_LEGACY_VERDICTS=1.
+  if (subAttestations.length === 0) {
+    if (expectedReviewerNames.length === 0) {
+      // No reviewers configured — treat as legacy only when the escape hatch is set.
+      if (legacyMode) {
+        warn(
+          `verdict file at '${verdictFilePath}' has 0 sub-attestations and no reviewer entries in\n` +
+            `       .ai-sdlc/trusted-reviewers.yaml (no reviewers configured yet).\n` +
+            `       AI_SDLC_LEGACY_VERDICTS=1 — proceeding.`,
+        );
+        process.exit(0);
+      }
+      process.stderr.write(
+        `[verify-sub-attestations] ERROR: verdict file at '${verdictFilePath}' has 0 sub-attestations\n` +
+          `       and no reviewer entries exist in .ai-sdlc/trusted-reviewers.yaml.\n` +
+          `       This prevents verifying that any reviewer actually ran.\n` +
+          `       Emergency escape hatch: AI_SDLC_LEGACY_VERDICTS=1 git push\n`,
+      );
+      process.exit(1);
+    }
+    // Registry has reviewers — empty sub-attestations means ALL are missing.
+    process.stderr.write(
+      `[verify-sub-attestations] ERROR: verdict file at '${verdictFilePath}' has 0 sub-attestations\n` +
+        `       but the registry requires sub-attestations from: ${expectedReviewerNames.join(', ')}\n` +
+        `\n` +
+        `       The 2026-05-20 incident: a dev wrote { subAttestations: [] } to bypass verification.\n` +
+        `       Re-run reviewer subagents so they emit signed sub-attestations.\n` +
+        `\n` +
+        `       Emergency escape hatch (deprecated legacy flow ONLY):\n` +
+        `         AI_SDLC_LEGACY_VERDICTS=1 git push\n`,
+    );
+    process.exit(1);
+  }
+
+  // ── Completeness check: every expected reviewer must have a sub-attestation ──
+  //
+  // Even with a non-empty subAttestations array, a dev could include only one
+  // reviewer's sub-attestation and omit the others.  Verify by reviewerName.
+  if (expectedReviewerNames.length > 0) {
+    const foundNames = new Set(
+      subAttestations
+        .map((s) => (s && typeof s === 'object' ? s.reviewerName : null))
+        .filter(Boolean),
+    );
+    const missingReviewers = expectedReviewerNames.filter((name) => !foundNames.has(name));
+    if (missingReviewers.length > 0) {
+      process.stderr.write(
+        `[verify-sub-attestations] ERROR: verdict file at '${verdictFilePath}' is missing sub-attestations\n` +
+          `       from the following required reviewers: ${missingReviewers.join(', ')}\n` +
+          `       (found: ${[...foundNames].join(', ') || '(none)'})\n` +
+          `\n` +
+          `       Re-run reviewer subagents so they emit signed sub-attestations.\n` +
+          `\n` +
+          `       Emergency escape hatch (deprecated legacy flow ONLY):\n` +
+          `         AI_SDLC_LEGACY_VERDICTS=1 git push\n`,
+      );
+      process.exit(1);
+    }
   }
 
   // Verify each sub-attestation.

@@ -27,7 +27,7 @@
  *   --task-id         task ID being reviewed (e.g. AISDLC-380)
  *   --verdict-json    JSON string with the reviewer verdict
  *   --output          optional output file path; if absent writes to stdout
- *   --key-path        override the default key path (for tests only)
+ *   --key-path        override the default key path (tests only — requires AI_SDLC_TEST_MODE=1)
  *
  * Output (sub-attestation envelope JSON):
  *   {
@@ -44,7 +44,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { createHash, sign } from 'node:crypto';
 import { homedir, hostname } from 'node:os';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
 
 function fail(msg, code = 1) {
   process.stderr.write(`ERROR: ${msg}\n`);
@@ -73,13 +73,30 @@ function sha256Hex(input) {
 }
 
 /**
+ * Recursively sort all object keys for canonical JSON serialization.
+ * Must produce the same result as `sortKeysDeep` in verify-reviewer-sub-attestations.mjs.
+ */
+function sortKeysDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortKeysDeep);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, sortKeysDeep(v)]),
+    );
+  }
+  return value;
+}
+
+/**
  * Compute a canonical SHA-256 of the verdict object.
- * Canonical = sorted-key JSON (simple shallow sort for this shape).
+ * Uses deep key-sorting so nested objects are also canonicalized.
+ * Must match `canonicalVerdictHash` in verify-reviewer-sub-attestations.mjs.
  */
 function canonicalVerdictHash(verdict) {
-  // Sort top-level keys for determinism.
-  const sorted = Object.fromEntries(Object.entries(verdict).sort(([a], [b]) => a.localeCompare(b)));
-  return sha256Hex(JSON.stringify(sorted));
+  return sha256Hex(JSON.stringify(sortKeysDeep(verdict)));
 }
 
 async function main() {
@@ -115,8 +132,19 @@ async function main() {
   }
 
   // Resolve the reviewer's private key path.
+  // --key-path is for tests only — requires AI_SDLC_TEST_MODE=1 env var.
+  // Refusing in production prevents a dev from passing their own key path
+  // to sign on behalf of a reviewer without owning the legitimate reviewer key.
+  const keyPathOverride = args['key-path'];
+  if (keyPathOverride && process.env.AI_SDLC_TEST_MODE !== '1') {
+    fail(
+      '--key-path is only permitted in test mode (AI_SDLC_TEST_MODE=1).\n' +
+        '       In production, the key is always read from\n' +
+        `       ~/.ai-sdlc/reviewer-keys/<reviewer-name>.pem`,
+    );
+  }
   const keyPath =
-    args['key-path'] ?? join(homedir(), '.ai-sdlc', 'reviewer-keys', `${reviewerName}.pem`);
+    keyPathOverride ?? join(homedir(), '.ai-sdlc', 'reviewer-keys', `${reviewerName}.pem`);
 
   if (!existsSync(keyPath)) {
     fail(
@@ -167,8 +195,8 @@ async function main() {
   const output = JSON.stringify(subAttestation, null, 2) + '\n';
 
   if (outputPath) {
-    const dir = outputPath.substring(0, outputPath.lastIndexOf('/'));
-    if (dir) mkdirSync(dir, { recursive: true });
+    const dir = dirname(outputPath);
+    if (dir && dir !== '.') mkdirSync(dir, { recursive: true });
     writeFileSync(outputPath, output);
     process.stderr.write(`[sign-reviewer-verdict] wrote sub-attestation to ${outputPath}\n`);
   } else {

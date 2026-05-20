@@ -21,6 +21,12 @@ spec:
     blockedPaths:
       - '.github/workflows/**'
       - '.ai-sdlc/**'
+      # AISDLC-380 fix #3: block Write/Edit on attestation gate scripts so a dev
+      # subagent cannot disable sub-attestation verification by modifying them.
+      # Note: blockedPaths only prevents Write/Edit tool calls, not Bash `rm`
+      # (Bash-pattern gap deferred to AISDLC-380.2).
+      - 'scripts/verify-reviewer-sub-attestations.mjs'
+      - 'scripts/verify-attestation.mjs'
     blockedActions:
       - 'gh pr merge*'
       - 'git merge*'

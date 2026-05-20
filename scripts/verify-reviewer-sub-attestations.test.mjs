@@ -35,9 +35,22 @@ function sha256Hex(input) {
   return createHash('sha256').update(input, 'utf-8').digest('hex');
 }
 
+function sortKeysDeep(value) {
+  if (Array.isArray(value)) {
+    return value.map(sortKeysDeep);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => [k, sortKeysDeep(v)]),
+    );
+  }
+  return value;
+}
+
 function canonicalVerdictHash(verdict) {
-  const sorted = Object.fromEntries(Object.entries(verdict).sort(([a], [b]) => a.localeCompare(b)));
-  return sha256Hex(JSON.stringify(sorted));
+  return sha256Hex(JSON.stringify(sortKeysDeep(verdict)));
 }
 
 /**
@@ -475,6 +488,371 @@ describe('verify-reviewer-sub-attestations.mjs (AISDLC-380)', () => {
     const r = runVerifier(['--verdict-file', verdictPath, '--trusted-reviewers', reviewersYaml]);
 
     assert.equal(r.status, 2, `expected exit 2 (args error), got ${r.status}: ${r.stderr}`);
+  });
+
+  // ── Bug #1: empty subAttestations bypass ─────────────────────────────────
+  //
+  // { taskId, subAttestations: [] } is classified as non-legacy but was
+  // exiting 0 with "verified 0 sub-attestations — all OK". This reproduces
+  // the 2026-05-20 forgery class via the new envelope shape.
+
+  it('Bug#1: empty subAttestations with registry reviewers → exits 1 naming missing reviewers', () => {
+    const { publicKeyPem: codePub } = generateReviewerKeypair();
+    const { publicKeyPem: testPub } = generateReviewerKeypair();
+
+    const verdictPath = join(tmpDir, 'aisdlc-380.json');
+    // New envelope shape but zero sub-attestations.
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({ taskId: 'AISDLC-380', subAttestations: [] }, null, 2),
+    );
+
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(
+      reviewersYaml,
+      buildTrustedReviewersYaml([
+        { reviewerName: 'code-reviewer', publicKeyPem: codePub },
+        { reviewerName: 'test-reviewer', publicKeyPem: testPub },
+      ]),
+    );
+
+    const r = runVerifier([
+      '--verdict-file',
+      verdictPath,
+      '--task-id',
+      'AISDLC-380',
+      '--trusted-reviewers',
+      reviewersYaml,
+    ]);
+
+    assert.equal(
+      r.status,
+      1,
+      `expected exit 1 (empty bypass rejected), got ${r.status}: ${r.stderr}`,
+    );
+    assert.match(
+      r.stderr,
+      /code-reviewer|test-reviewer/i,
+      `stderr must name the missing reviewers: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /0 sub-attestations/i, `stderr must mention empty count: ${r.stderr}`);
+  });
+
+  it('Bug#1: empty subAttestations with no registry reviewers + no legacy mode → exits 1', () => {
+    const verdictPath = join(tmpDir, 'aisdlc-380.json');
+    writeFileSync(verdictPath, JSON.stringify({ taskId: 'AISDLC-380', subAttestations: [] }));
+
+    // Only has an operator entry (no reviewer type entries).
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(
+      reviewersYaml,
+      `reviewers:\n  - identity: 'op@example.com'\n    machine: 'laptop'\n    addedAt: '2026-05-20'\n    addedBy: 'test'\n    pubkey: |\n      -----BEGIN PUBLIC KEY-----\n      MCowBQYDK2VwAyEA7RfNqQjnRnt7dG0gjIWIkqyfvn+/aMycmbaEbq7lS7E=\n      -----END PUBLIC KEY-----\n`,
+    );
+
+    const r = runVerifier([
+      '--verdict-file',
+      verdictPath,
+      '--task-id',
+      'AISDLC-380',
+      '--trusted-reviewers',
+      reviewersYaml,
+    ]);
+
+    assert.equal(
+      r.status,
+      1,
+      `expected exit 1 (no reviewers configured + no legacy mode), got ${r.status}: ${r.stderr}`,
+    );
+    assert.match(
+      r.stderr,
+      /no reviewer entries|0 sub-attestations/i,
+      `stderr must explain situation: ${r.stderr}`,
+    );
+  });
+
+  it('Bug#1: empty subAttestations with no registry reviewers + AI_SDLC_LEGACY_VERDICTS=1 → exits 0', () => {
+    const verdictPath = join(tmpDir, 'aisdlc-380.json');
+    writeFileSync(verdictPath, JSON.stringify({ taskId: 'AISDLC-380', subAttestations: [] }));
+
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(reviewersYaml, `reviewers:\n`);
+
+    const r = runVerifier(
+      [
+        '--verdict-file',
+        verdictPath,
+        '--task-id',
+        'AISDLC-380',
+        '--trusted-reviewers',
+        reviewersYaml,
+      ],
+      { AI_SDLC_LEGACY_VERDICTS: '1' },
+    );
+
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 (no reviewers configured + legacy mode), got ${r.status}: ${r.stderr}`,
+    );
+  });
+
+  it('Bug#1: non-empty but incomplete subAttestations (missing reviewer) → exits 1', () => {
+    const { privateKeyPem: codePriv, publicKeyPem: codePub } = generateReviewerKeypair();
+    const { publicKeyPem: testPub } = generateReviewerKeypair();
+
+    const taskId = 'AISDLC-380';
+    const codeVerdict = { approved: true, findings: [], summary: 'Code LGTM' };
+    const subAttestations = [
+      buildSubAttestation({
+        reviewerName: 'code-reviewer',
+        taskId,
+        verdict: codeVerdict,
+        privateKeyPem: codePriv,
+      }),
+      // test-reviewer is missing
+    ];
+
+    const verdictPath = join(tmpDir, 'aisdlc-380.json');
+    writeFileSync(verdictPath, JSON.stringify({ taskId, subAttestations }, null, 2));
+
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(
+      reviewersYaml,
+      buildTrustedReviewersYaml([
+        { reviewerName: 'code-reviewer', publicKeyPem: codePub },
+        { reviewerName: 'test-reviewer', publicKeyPem: testPub },
+      ]),
+    );
+
+    const r = runVerifier([
+      '--verdict-file',
+      verdictPath,
+      '--task-id',
+      taskId,
+      '--trusted-reviewers',
+      reviewersYaml,
+    ]);
+
+    assert.equal(r.status, 1, `expected exit 1 (incomplete), got ${r.status}: ${r.stderr}`);
+    assert.match(
+      r.stderr,
+      /test-reviewer/i,
+      `stderr must name the missing test-reviewer: ${r.stderr}`,
+    );
+  });
+
+  // ── Bug #7: taskId binding check coverage ─────────────────────────────────
+  //
+  // The existing "wrong taskId" test tampers the envelope's taskId field, which
+  // means the sig mismatches and rejection happens at sig-verify, NOT at the
+  // binding check. This test signs legitimately for AISDLC-380, then invokes the
+  // verifier with --task-id AISDLC-999. Rejection MUST happen at the binding
+  // check (line: attNormalized !== normalizedTaskId) before sig-verify.
+
+  it('Bug#7: taskId binding check — legit AISDLC-380 sig rejected when verifier gets --task-id AISDLC-999', () => {
+    const { privateKeyPem: priv, publicKeyPem: pub } = generateReviewerKeypair();
+    const verdict = { approved: true, findings: [], summary: 'LGTM' };
+
+    // Sign legitimately for AISDLC-380.
+    const subAtt = buildSubAttestation({
+      reviewerName: 'code-reviewer',
+      taskId: 'AISDLC-380',
+      verdict,
+      privateKeyPem: priv,
+    });
+
+    const verdictPath = join(tmpDir, 'aisdlc-380.json');
+    writeFileSync(verdictPath, JSON.stringify([subAtt]));
+
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(
+      reviewersYaml,
+      buildTrustedReviewersYaml([{ reviewerName: 'code-reviewer', publicKeyPem: pub }]),
+    );
+
+    // Invoke verifier with AISDLC-999 — should reject at binding check.
+    const r = runVerifier([
+      '--verdict-file',
+      verdictPath,
+      '--task-id',
+      'AISDLC-999', // ← different task
+      '--trusted-reviewers',
+      reviewersYaml,
+    ]);
+
+    assert.equal(
+      r.status,
+      1,
+      `expected exit 1 (taskId binding mismatch), got ${r.status}: ${r.stderr}`,
+    );
+    // Error message must include BOTH task IDs so the operator can diagnose.
+    assert.match(
+      r.stderr,
+      /AISDLC-380/i,
+      `stderr must include the sub-attestation's bound taskId: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /AISDLC-999/i, `stderr must include the expected taskId: ${r.stderr}`);
+  });
+
+  // ── Bug #8: security-reviewer unsigned-exempt path ────────────────────────
+  //
+  // security-reviewer declares disallowedTools: [Bash] so it cannot invoke the
+  // sign helper. Option B: accept entries with unsigned: true, exemptReason: 'no-bash-tool'
+  // ONLY for reviewerName === 'security-reviewer'. All other reviewers must be signed.
+
+  it('Bug#8: security-reviewer unsigned-exempt entry → accepted alongside signed others', () => {
+    const { privateKeyPem: codePriv, publicKeyPem: codePub } = generateReviewerKeypair();
+    const { privateKeyPem: testPriv, publicKeyPem: testPub } = generateReviewerKeypair();
+
+    const taskId = 'AISDLC-380';
+    const codeVerdict = { approved: true, findings: [], summary: 'Code LGTM' };
+    const testVerdict = { approved: true, findings: [], summary: 'Tests pass' };
+    const secVerdict = { approved: true, findings: [], summary: 'No security issues' };
+
+    const subAttestations = [
+      buildSubAttestation({
+        reviewerName: 'code-reviewer',
+        taskId,
+        verdict: codeVerdict,
+        privateKeyPem: codePriv,
+      }),
+      buildSubAttestation({
+        reviewerName: 'test-reviewer',
+        taskId,
+        verdict: testVerdict,
+        privateKeyPem: testPriv,
+      }),
+      // security-reviewer is unsigned-exempt (no Bash tool)
+      {
+        reviewerName: 'security-reviewer',
+        unsigned: true,
+        exemptReason: 'no-bash-tool',
+        verdict: secVerdict,
+      },
+    ];
+
+    const verdictPath = join(tmpDir, 'aisdlc-380.json');
+    writeFileSync(verdictPath, JSON.stringify({ taskId, subAttestations }, null, 2));
+
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(
+      reviewersYaml,
+      buildTrustedReviewersYaml([
+        { reviewerName: 'code-reviewer', publicKeyPem: codePub },
+        { reviewerName: 'test-reviewer', publicKeyPem: testPub },
+        // security-reviewer has no registry entry (it's always exempt)
+      ]),
+    );
+
+    const r = runVerifier([
+      '--verdict-file',
+      verdictPath,
+      '--task-id',
+      taskId,
+      '--trusted-reviewers',
+      reviewersYaml,
+    ]);
+
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 (security-reviewer exempt accepted), got ${r.status}: ${r.stderr}`,
+    );
+  });
+
+  it('Bug#8: non-security-reviewer claiming unsigned-exempt → rejected', () => {
+    const { privateKeyPem: codePriv, publicKeyPem: codePub } = generateReviewerKeypair();
+    const taskId = 'AISDLC-380';
+
+    const subAttestations = [
+      // code-reviewer trying to claim the security-reviewer exemption
+      {
+        reviewerName: 'code-reviewer',
+        unsigned: true,
+        exemptReason: 'no-bash-tool',
+        verdict: { approved: true, findings: [], summary: 'LGTM' },
+      },
+    ];
+
+    const verdictPath = join(tmpDir, 'aisdlc-380.json');
+    writeFileSync(verdictPath, JSON.stringify({ taskId, subAttestations }, null, 2));
+
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(
+      reviewersYaml,
+      buildTrustedReviewersYaml([{ reviewerName: 'code-reviewer', publicKeyPem: codePub }]),
+    );
+
+    const r = runVerifier([
+      '--verdict-file',
+      verdictPath,
+      '--task-id',
+      taskId,
+      '--trusted-reviewers',
+      reviewersYaml,
+    ]);
+
+    assert.equal(
+      r.status,
+      1,
+      `expected exit 1 (only security-reviewer may claim exempt), got ${r.status}: ${r.stderr}`,
+    );
+    assert.match(
+      r.stderr,
+      /only.*security-reviewer.*permitted|unsigned-exempt/i,
+      `stderr must explain that only security-reviewer may claim exempt: ${r.stderr}`,
+    );
+  });
+
+  // ── Bug #9: recursive canonical JSON sort (regression) ───────────────────
+  //
+  // A verdict with nested objects (e.g. findings array with objects) must be
+  // sorted recursively so signer and verifier agree on the canonical hash
+  // even when the schema gains nested objects.
+
+  it('Bug#9: nested verdict object — signer and verifier agree on canonical hash', () => {
+    const { privateKeyPem: priv, publicKeyPem: pub } = generateReviewerKeypair();
+    const taskId = 'AISDLC-380';
+
+    // Verdict with nested objects — keys deliberately out of alphabetical order.
+    const verdict = {
+      summary: 'Nested test',
+      approved: true,
+      findings: [{ severity: 'minor', message: 'test', file: 'foo.ts', line: 1 }],
+      metadata: { reviewedAt: '2026-05-20', reviewer: 'code-reviewer' },
+    };
+
+    const subAtt = buildSubAttestation({
+      reviewerName: 'code-reviewer',
+      taskId,
+      verdict,
+      privateKeyPem: priv,
+    });
+
+    const verdictPath = join(tmpDir, 'aisdlc-380.json');
+    writeFileSync(verdictPath, JSON.stringify([subAtt]));
+
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(
+      reviewersYaml,
+      buildTrustedReviewersYaml([{ reviewerName: 'code-reviewer', publicKeyPem: pub }]),
+    );
+
+    const r = runVerifier([
+      '--verdict-file',
+      verdictPath,
+      '--task-id',
+      taskId,
+      '--trusted-reviewers',
+      reviewersYaml,
+    ]);
+
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 (nested verdict canonical hash matches), got ${r.status}: ${r.stderr}`,
+    );
+    assert.match(r.stderr, /verified 1/i, `stderr must confirm verification: ${r.stderr}`);
   });
 
   // ── check-attestation-sign.sh integration: sub-attestation verification ─

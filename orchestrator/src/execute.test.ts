@@ -229,11 +229,13 @@ describe('executePipeline()', () => {
 
     expect(runner.run).toHaveBeenCalledWith(
       expect.objectContaining({
-        constraints: {
+        constraints: expect.objectContaining({
           maxFilesPerChange: 15,
           requireTests: true,
-          blockedPaths: ['.github/workflows/**', '.ai-sdlc/**'],
-        },
+          // AISDLC-380 fix #3: added verifier scripts to blockedPaths — use arrayContaining
+          // so the test doesn't need to enumerate every entry (forward-compatible).
+          blockedPaths: expect.arrayContaining(['.github/workflows/**', '.ai-sdlc/**']),
+        }),
       }),
     );
   });
