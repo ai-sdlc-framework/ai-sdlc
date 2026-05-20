@@ -100,9 +100,15 @@ The Conductor's failed/ poll (Step 4) then escalates.
 ## Step 3 — Pick up `done/` verdicts and fan out reviewers
 
 ```bash
-VERDICTS_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" collect-verdicts --board-dir "$BOARD_DIR")
+VERDICTS_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" collect-verdicts --board-dir "$BOARD_DIR" --include-failed)
 echo "[orchestrator-tick] done/+failed/ verdicts: $VERDICTS_JSON"
 ```
+
+The `--include-failed` flag is required so failed-side verdicts surface in
+`$VERDICTS_JSON`. Without it the CLI's `includeFailed` default is `false`
+(see `pipeline-cli/src/cli/dispatch.ts`), and Step 4's `outcome ∈ {failed,
+quota-exhausted, blocked}` iteration would silently see zero entries —
+stale-heartbeat reaps and `noClaimBefore` cool-downs would never fire.
 
 For each verdict in the array with `outcome === 'success'`:
 
