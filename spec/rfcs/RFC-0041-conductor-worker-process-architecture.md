@@ -38,6 +38,7 @@ requiresDocs: []
 | Version | Date | Author | Notes |
 |---|---|---|---|
 | v1 | 2026-05-20 | dominique | Initial draft. Surfaces the Conductor/Worker process split that RFC-0015 implies but never named. Closes the "in-CC-session dispatch" gap exposed by 2026-05-20 4-wide drain attempt (6/7 dev subagents killed by Anthropic platform's 600s background-agent watchdog). |
+| v2 | 2026-05-20 | dominique | Per-operator-2026-05-20 feedback: surface the 2026-06-15 Agent SDK credit cost wall. v1's single Worker model (`claude -p` shell-out) would become API-token-billed post-2026-06-15. v2 makes Worker invocation **pluggable** with two kinds: `in-session-agent` (foreground `Agent` in operator-opened CC session, preserves subscription quota indefinitely per AISDLC-353) and `claude-p-shell` (supervisor-spawned, Agent SDK credit pool, for headless/CI contexts). Adds `workerKind` to manifest schema, `.ai-sdlc/dispatch-config.yaml` for operator default, reorders implementation phases (in-session-agent now Phase 1; supervisor demoted to Phase 2). |
 
 ---
 
@@ -125,7 +126,22 @@ Workers are textbook OS processes. Run them as separate `claude -p` invocations 
 
 ## 4. Architecture
 
-### 4.1 Process model
+### 4.1 The cost-model constraint (post-2026-06-15)
+
+Before describing the process model, the economic constraint that shapes it: after **2026-06-15**, every `claude -p` invocation (whether via `--spawner claude` shell-out or via the Claude Code SDK) draws from the per-plan **Agent SDK credit pool** (~$200/mo on Max-20x), with overflow billed at API-token rates. The pre-2026-06-15 model where shell-spawned `claude -p` ran on subscription interactive quota does not survive.
+
+The only invocation path that remains on subscription quota indefinitely is the one documented in AISDLC-353: **the `Agent` tool called from a slash-command body inside an operator's live Claude Code session.** That call is interpreted by Anthropic as part of an interactive turn (which the operator's subscription covers), not as an Agent SDK invocation (which the credit pool covers).
+
+This means RFC-0041 cannot specify a single Worker model. It must support two interchangeable kinds against the same Dispatch Board protocol:
+
+| Worker kind | Watchdog | Cost post-2026-06-15 | Parallelism | Best for |
+|---|---|---|---|---|
+| `in-session-agent` (foreground `Agent` call from slash-command body) | None observed (interactive) | **Subscription quota** (no incremental cost) | One per CC session; N sessions = N parallel | High-volume autonomous drain on operator's subscription |
+| `claude-p-shell` (supervisor spawns `env -u CLAUDECODE claude -p`) | Our own 30 min (`ShellClaudePSpawner`) | Agent SDK credit pool then API tokens | N from one supervisor | Headless CI, true daemon, ops contexts where no CC session is available |
+
+The Dispatch Board protocol (§4.4) is shared. The Conductor writes the same manifest regardless. The two Worker kinds plug into different sides of the same board.
+
+### 4.2 Process model
 
 ```
 ┌──────────────────────────────────────────────────────────────────┐
@@ -151,28 +167,36 @@ Workers are textbook OS processes. Run them as separate `claude -p` invocations 
   │   .ai-sdlc/dispatch/done/<task-id>.verdict.json              │
   │   .ai-sdlc/dispatch/failed/<task-id>.diagnostic.json         │
   └──────────────────────────────────────────────────────────────┘
-             ▲                                       │
-             │ claim by atomic rename                │ pickup
-             │                                       ▼
+             ▲                                       ▲
+             │                                       │
+       ┌─────┴─────┐                           ┌─────┴─────┐
+       │ kind A    │                           │ kind B    │
+       │ in-session│                           │ claude-p- │
+       │ -agent    │                           │ shell     │
+       │ (Sub-$)   │                           │ (SDK-$)   │
+       └─────┬─────┘                           └─────┬─────┘
+             │ claim via foreground Agent          │ claim via supervisor atomic rename
+             ▼                                       ▼
   ┌────────────────────────┐  ┌────────────────────────┐  ┌─────────────┐
-  │ Worker Supervisor      │  │ Worker N               │  │ ...         │
-  │ - Tiny daemon (~150    │  │ - claude -p invocation │  │             │
-  │   LOC, supervised by   │  │ - env -u CLAUDECODE    │  │             │
-  │   launchd/systemd or   │  │ - 30 min budget        │  │             │
-  │   manual `pnpm dev`)   │  │ - one task, one PR     │  │             │
-  │ - Polls queue/         │  │ - exits with verdict   │  │             │
-  │ - Atomic claim → spawn │  │   written to done/ or  │  │             │
-  │ - Bounded concurrency  │  │   failed/              │  │             │
+  │ N parallel CC sessions │  │ Worker Supervisor      │  │ ...         │
+  │ each running           │  │ - Tiny daemon (~150    │  │             │
+  │ /ai-sdlc orchestrator- │  │   LOC, supervised by   │  │             │
+  │ tick on a loop;        │  │   launchd/systemd or   │  │             │
+  │ each tick claims one   │  │   manual `pnpm dev`)   │  │             │
+  │ manifest, invokes      │  │ - Polls queue/         │  │             │
+  │ Agent foreground       │  │ - Atomic claim → spawn │  │             │
+  │ (no watchdog kill)     │  │   env -u CLAUDECODE    │  │             │
   └────────────────────────┘  └────────────────────────┘  └─────────────┘
 ```
 
-Key properties:
+Key properties (shared across both Worker kinds):
 
-1. **Process boundary** — Conductor (CLAUDECODE=1) and Workers (CLAUDECODE unset) never share a process tree. Nested-session error is structurally impossible.
+1. **Process boundary** — Conductor (CLAUDECODE=1) and Worker execution context never share a process tree directly. For `claude-p-shell`, the supervisor scrubs `CLAUDECODE` before spawn. For `in-session-agent`, the Worker IS a separate CC session (different shell, different operator-opened terminal) running its own `/ai-sdlc orchestrator-tick` loop.
 2. **Asynchronous hand-off** — Conductor writes a dispatch manifest and walks away. Workers pick up when ready. Conductor polls the Dispatch Board (cheap filesystem stat) at its own cadence; no streaming connection.
-3. **No background-agent watchdog** — Workers don't run inside the Conductor's Anthropic Agent queue. They run as OS processes with our own 30-minute watchdog (already in `shell-claude-p-spawner.ts`).
-4. **Stateless Workers** — each Worker handles exactly one task, writes a verdict, exits. The Conductor (or a supervisor) restarts on failure; no in-Worker recovery state.
-5. **Bounded parallelism by supervisor** — the supervisor enforces `parallelism.maxConcurrent` from `WorktreePool` (RFC-0010 §6.7). Conductor can write more manifests than the supervisor will run concurrently; surplus manifests sit in `queue/` until a Worker frees up.
+3. **Watchdog ownership** — `claude-p-shell` Workers use our 30-min watchdog in `shell-claude-p-spawner.ts`. `in-session-agent` Workers run inside foreground `Agent` calls in their own CC session, which have no background-agent 600s watchdog (foreground calls show a live spinner; the platform trusts them).
+4. **Stateless Workers** — each Worker handles exactly one task, writes a verdict, exits. The Conductor restarts dispatch on failure; no in-Worker recovery state.
+5. **Pluggable backend per manifest** — a manifest can declare `workerKind: in-session-agent` or `workerKind: claude-p-shell` (default: operator's project-level config). The Dispatch Board doesn't care; only the Worker-side claim logic differs.
+6. **Bounded parallelism** — for `claude-p-shell`, the supervisor enforces `parallelism.maxConcurrent` from `WorktreePool` (RFC-0010 §6.7). For `in-session-agent`, parallelism = number of operator-opened CC sessions, each running one task at a time. Both bound on the same project-level cap.
 
 ### 4.2 Roles
 
@@ -204,7 +228,69 @@ Key properties:
 | Attestation signing | | ❌ — Conductor (or pre-push hook) signs after review |
 | Resumption of prior failed run | | ❌ — Workers are idempotent-by-restart, not stateful |
 
-### 4.3 Dispatch Board protocol
+### 4.3 Worker kinds
+
+Two pluggable backends against the Dispatch Board. A manifest's `workerKind` field declares which kind owns it; the Conductor sets the default from `.ai-sdlc/dispatch-config.yaml` and may override per-task. Adopters MAY ship only one kind; both is recommended for cost flexibility.
+
+#### 4.3.1 `in-session-agent` — subscription-quota, operator-parallel
+
+Each Worker is its own Claude Code interactive session opened in a separate terminal. The session runs `/ai-sdlc orchestrator-tick` on a `ScheduleWakeup` loop. Each tick:
+
+1. Looks for an unclaimed manifest in `queue/` matching `workerKind ∈ {any, in-session-agent}`.
+2. Claims it via atomic `rename` to `inflight/`.
+3. Invokes the `ai-sdlc:developer` agent via a **foreground** `Agent` call from the slash-command body. Foreground calls inside an interactive CC session are not subject to the background-agent 600s watchdog.
+4. On agent return, writes the verdict to `done/` (success) or `failed/` (with diagnostic), then `ScheduleWakeup` for the next tick.
+5. If `queue/` is empty for `workerKind ∈ {any, in-session-agent}`, the session hibernates 30-60s and tries again.
+
+**Cost model**: Foreground `Agent` calls in an interactive CC session draw from the operator's **subscription interactive quota**, not the Agent SDK credit pool. This is the AISDLC-353 path. As long as the operator keeps N sessions open, N tasks run in parallel at zero incremental cost.
+
+**Parallelism**: 1 task per session at any time. Operator-controlled parallelism by opening more terminals. Practical ceiling: ~6-8 sessions per operator before subscription quota starts queuing requests (operator-observed).
+
+**Trade-off**: requires N terminals to be open (`tmux`, iTerm tabs, etc.). Each session needs the operator's Anthropic credentials. Sessions don't survive a laptop reboot without explicit operator action — recommend `tmux` + `claude` + a startup script.
+
+**Failure modes specific to this kind**:
+- *Session crashes mid-tick* — heartbeat goes stale → supervisor (or Conductor sweep) moves manifest back to `queue/` after 35 min idle.
+- *Subscription quota exhausted* — `Agent` tool returns rate-limit error → Worker writes `failed/<id>.diagnostic.json` with `cause: quota-exhausted`, Conductor backs off all dispatch for the operator-configured cool-down period.
+
+#### 4.3.2 `claude-p-shell` — Agent-SDK-credit, supervisor-parallel
+
+Each Worker is a `claude -p` subprocess spawned by a supervisor daemon. The supervisor scrubs `CLAUDECODE` from the env and enforces the project-level concurrency cap.
+
+**Cost model** (post-2026-06-15): Each `claude -p` invocation draws from the per-plan **Agent SDK credit pool** (~$200/mo on Max-20x). Overflow billed at API-token rates. Suitable for headless CI, ops-driven cron, or environments without an operator-opened CC session.
+
+**Parallelism**: N from a single supervisor (bounded by `WorktreePool.spec.parallelism.maxConcurrent` from RFC-0010 §6.7). No operator terminal required.
+
+**Trade-off**: costs money post-2026-06-15. Best for bursts the operator wants to run without interactive supervision (overnight catch-up, CI-triggered batch).
+
+**Failure modes specific to this kind**:
+- *Spawn refused* (no signing key, no Anthropic credentials) — supervisor writes `failed/<id>.diagnostic.json` with `cause: spawn-rejected`, no retry.
+- *30 min watchdog fires* — supervisor's `setTimeout` in `shell-claude-p-spawner.ts` sends SIGTERM, writes `failed/<id>.diagnostic.json` with `cause: shell-watchdog-fired`.
+- *Anthropic credit pool exhausted* — `claude -p` exits non-zero with quota error; supervisor writes diagnostic + backs off subsequent spawns.
+
+#### 4.3.3 Choosing a default
+
+The Conductor reads `.ai-sdlc/dispatch-config.yaml`:
+
+```yaml
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DispatchConfig
+metadata:
+  name: ai-sdlc-dispatch
+spec:
+  defaultWorkerKind: in-session-agent   # 'in-session-agent' | 'claude-p-shell'
+  parallelism:
+    inSessionAgentMaxSessions: 4          # operator's expected open-terminal count
+    claudePShellMaxConcurrent: 0          # 0 = supervisor disabled; bump to enable
+  inSessionAgent:
+    quotaBackoffSec: 600                  # cool-down on rate-limit
+  claudePShell:
+    watchdogMs: 1800000                   # 30 min default
+    supervisorPidFile: .ai-sdlc/dispatch/.supervisor.pid
+```
+
+Adopters that never want API-token billing can set `claudePShellMaxConcurrent: 0` and only operate in-session-agent. Adopters running headless CI can flip the default to `claude-p-shell` and accept the credit-pool cost.
+
+### 4.4 Dispatch Board protocol
 
 The Dispatch Board lives at `<project-root>/.ai-sdlc/dispatch/` with four subdirectories:
 
@@ -224,6 +310,7 @@ failed/     diagnostics written by Workers (or supervisor) on failure
   "branch": "ai-sdlc/aisdlc-305-feat-rfc-0025-refit-phase-4",
   "worktree": ".worktrees/aisdlc-305",
   "baseSha": "a084c681",
+  "workerKind": "in-session-agent",
   "dispatchedAt": "2026-05-20T10:14:33Z",
   "dispatchedBy": "conductor-session-<short-uuid>",
   "spec": {
@@ -234,6 +321,8 @@ failed/     diagnostics written by Workers (or supervisor) on failure
   }
 }
 ```
+
+`workerKind` is one of `in-session-agent` | `claude-p-shell` | `any`. `any` means either backend may claim it (use when the operator wants the first available Worker regardless of cost). The Conductor sets `workerKind` from `.ai-sdlc/dispatch-config.yaml` `spec.defaultWorkerKind` and may override per task.
 
 **Verdict shape** (`done/<task-id>.verdict.json`, schema `dispatch-verdict.v1.schema.json`):
 
@@ -341,9 +430,11 @@ The Conductor's poll loop on each ScheduleWakeup tick:
 
 ### 5.1 Cardinality
 
-- One Conductor per project per operator session. Operators with multiple concurrent sessions should use distinct project worktrees or accept the race (manifests are atomic; the worse case is two Conductors writing the same task ID, which the supervisor resolves by atomic rename — one wins, the other observes the manifest moved out of `queue/` and skips).
-- One Supervisor per project. The supervisor stores its PID at `.ai-sdlc/dispatch/.supervisor.pid` and refuses to start if a live PID is already there. Re-up is `kill <pid> && pnpm supervisor:start`.
-- N Workers (N = `parallelism.maxConcurrent`). Each is a short-lived `claude -p` subprocess.
+- **Conductor** — exactly one per project. Usually the operator's primary CC session. If multiple, the latest manifest write wins (Conductors are stateless w.r.t. the board; they observe and respond).
+- **Supervisor (`claude-p-shell` only)** — optional. Zero or one per project. PID stored at `.ai-sdlc/dispatch/.supervisor.pid`; refuses to start if a live PID is already there. Adopters running only `in-session-agent` don't need a supervisor at all.
+- **Workers** — N total across both kinds:
+  - `in-session-agent` Workers: 0 to ~8 (operator-opened terminal count). Each is its own CC session running `/ai-sdlc orchestrator-tick` on a `ScheduleWakeup` loop.
+  - `claude-p-shell` Workers: 0 to `parallelism.maxConcurrent` (`WorktreePool` cap). Each is a `claude -p` subprocess spawned by the supervisor.
 
 ### 5.2 Failure modes (Worker-side)
 
@@ -388,31 +479,36 @@ Unchanged. The Conductor still consults `cli-deps frontier` + `RefinementVerdict
 
 ## 7. Implementation Plan
 
-Three phases, each shippable independently.
+Three phases, each shippable independently. **Phase 1 prioritizes the `in-session-agent` Worker kind** because it preserves the subscription-quota cost model post-2026-06-15 (per AISDLC-353) and unblocks the immediate operator pain point without a daemon dependency. The supervisor (`claude-p-shell` Worker kind) is a Phase 2 add for headless contexts.
 
-### Phase 1 — Dispatch Board protocol + supervisor MVP
+### Phase 1 — Dispatch Board protocol + `in-session-agent` Worker
 
-- [ ] Publish `spec/schemas/dispatch-manifest.v1.schema.json` and `dispatch-verdict.v1.schema.json`
-- [ ] `pipeline-cli/bin/cli-dispatch-supervisor.mjs` — ~150 LOC daemon with atomic claim, spawn, heartbeat sweep, exit handling
+- [ ] Publish `spec/schemas/dispatch-manifest.v1.schema.json` and `dispatch-verdict.v1.schema.json` (manifest includes `workerKind` field)
+- [ ] Conductor-side library in `pipeline-cli/src/dispatch/`: `writeManifest()`, `collectVerdicts()`, `peekQueue()`, `claimNext(workerKind)`
+- [ ] Update `/ai-sdlc orchestrator-tick` slash command to use the new dispatch-board library: emit manifests instead of `Agent(... run_in_background)`, foreground-poll `done/` on each `ScheduleWakeup` tick
+- [ ] New slash command `/ai-sdlc dispatch-worker` (or extend `orchestrator-tick`): the operator opens N CC sessions and fires this in each; the slash-command body claims a manifest, foreground-invokes the `ai-sdlc:developer` agent on it, writes the verdict, ScheduleWakeup-loops
+- [ ] `.ai-sdlc/dispatch-config.yaml` schema with `defaultWorkerKind: in-session-agent` default
+- [ ] Hermetic test: simulate 3-manifest queue + 2 Worker sessions; verify atomic claim, no double-pickup, both Workers go idle when queue empties
+- [ ] Hermetic test: Conductor pickup loop handles `success`, `iterate-needed`, `failed` verdict outcomes correctly
+- [ ] Acceptance: this session as Conductor + 2 operator-opened sibling CC sessions as Workers drain 2 frontier tasks concurrently with zero 600s kills
+
+### Phase 2 — Supervisor + `claude-p-shell` Worker (headless path)
+
+- [ ] `pipeline-cli/bin/cli-dispatch-supervisor.mjs` — ~150 LOC daemon: atomic claim, `env -u CLAUDECODE claude -p` spawn, heartbeat sweep, exit handling
 - [ ] `pnpm supervisor:start` / `supervisor:status` / `supervisor:stop` scripts
 - [ ] `docs/operations/dispatch-supervisor-install.md` with `launchd` plist + `systemd --user` unit
-- [ ] Hermetic test: simulate Conductor writing 4 manifests, supervisor spawning 4 mock Workers, all 4 verdicts collected
-- [ ] Acceptance: a single Worker dispatched via supervisor completes `/ai-sdlc execute <task-id>` end-to-end (same outcome as the manual slash command, just driven from the board)
+- [ ] Conductor logic: detect `.ai-sdlc/dispatch/.supervisor.pid` presence + use it for manifests tagged `workerKind: claude-p-shell` or `any`
+- [ ] Cost-warning UX: Conductor prints projected Agent SDK credit cost when first manifest with `claude-p-shell` is queued in a session
+- [ ] Hermetic test: 3 mock manifests, supervisor spawns 3 mock workers (subprocess stubs), all 3 verdicts collected
+- [ ] Acceptance: a headless cron job runs `cli-dispatch-supervisor` continuously; Conductor in a separate CC session emits manifests; drain succeeds with no operator-opened Worker sessions
 
-### Phase 2 — Conductor manifest emission + done-poll loop
+### Phase 3 — Deprecate `--spawner claude-cli`, tune defaults
 
-- [ ] New CLI: `cli-orchestrator tick --spawner dispatch-board` that emits manifests instead of spawning workers in-process
-- [ ] Conductor-side library: `dispatchBoard.writeManifest()`, `dispatchBoard.collectVerdicts()`, `dispatchBoard.peekQueue()` for backpressure
-- [ ] Update `/ai-sdlc orchestrator-tick` slash command to consume the dispatch-board path when the supervisor PID file is present
-- [ ] Hermetic test: 3-task fixture with one passing, one failing, one timing out — verify Conductor's pickup loop handles all three correctly
-- [ ] Acceptance: a Conductor running in this Claude Code session, plus a supervisor running in a tmux pane, drains 3 frontier tasks concurrently without any 600s kill
-
-### Phase 3 — Deprecate `claude-cli` in-session spawner
-
-- [ ] Add deprecation warning to `--spawner claude-cli` mode pointing at `--spawner dispatch-board`
-- [ ] Operator runbook update: documentation that in-CC dispatch goes through the board, not the Agent tool
-- [ ] After one release with the deprecation warning, remove the `claude-cli` spawner kind entirely (separate PR)
-- [ ] Acceptance: `/ai-sdlc orchestrator-tick` from a Claude Code session no longer attempts `Agent(... run_in_background: true)` for dev work
+- [ ] Add deprecation warning to `--spawner claude-cli` (the legacy in-CC path that races the 600s watchdog)
+- [ ] Operator runbook: documentation of the three patterns (in-session-agent, claude-p-shell, hybrid)
+- [ ] `cli-deps frontier` annotates each frontier entry with `recommendedWorkerKind` based on estimated cost + task size
+- [ ] After one release with the deprecation warning, remove `claude-cli` spawner kind entirely (separate PR)
+- [ ] Acceptance: no `Agent(... run_in_background: true)` calls remain in the dispatch hot path; existing `/ai-sdlc execute` (single-task interactive) unchanged
 
 ## 8. Backward Compatibility
 
@@ -451,12 +547,15 @@ Three phases, each shippable independently.
 3. Heartbeat threshold (35 min default) — is that adequate for the slowest realistic task? Empirically, the longest observed `pnpm test` runs were ~12 min. 35 min leaves headroom but isn't so long that genuinely-hung Workers tie up resources for hours. Revisit after Phase 2 dogfood.
 4. Should the Worker re-spawn for the iterate-dev case (verifier fails, RFC-0015 §5 budget=2)? Two options: (a) Worker handles iteration internally (one Worker per task, two iterations possible); (b) Worker exits after one iteration, Conductor writes a new manifest with `iteration: 2`. Option (b) is simpler and lets the supervisor enforce concurrency consistently. Recommend (b); flag as OQ for operator walkthrough.
 5. Cross-soul / multi-host scaling — RFC-0015 §10 deferred this. RFC-0041 also defers. Note: the Dispatch Board protocol is filesystem-local; multi-host would require either a shared filesystem (NFS) or replacing the board with a real queue (Redis, NATS). Future RFC.
+6. **Default `workerKind` when both Worker kinds are configured.** When the operator has both `in-session-agent` sessions open AND a `claude-p-shell` supervisor running, a manifest tagged `workerKind: any` could be claimed by either. Three strategies: (a) cost-first (always prefer `in-session-agent` while sessions are idle, fall through to shell only when in-session is saturated); (b) latency-first (claim from whichever queue picks up first); (c) explicit per-task tagging (Conductor decides at emission time). Recommend (a) — cost-first — but flag as OQ. Implementation: `in-session-agent` Workers poll on a tighter cadence (5s vs supervisor's 5s) so they win the race; if the operator wants to force shell, they tag the manifest explicitly. AISDLC-353 economics argue for this default.
+7. **Subscription quota detection.** The `in-session-agent` Worker cannot directly observe the operator's remaining interactive quota until a rate-limit error fires. Should we add a pre-flight check (`/usage` parse) before claim, or just react to the rate-limit error post-hoc? Pre-flight adds API surface and complexity; post-hoc is simpler but bursty. Recommend post-hoc with structured backoff in the diagnostic; revisit if false starts become common.
 
 ## 11. References
 
 - RFC-0010 Parallel Execution and Worktree Pooling — `spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md`
 - RFC-0012 Two-Tier Pipeline (slash-command + library composition) — `spec/rfcs/RFC-0012-...md`
 - RFC-0015 Autonomous Pipeline Orchestrator — `spec/rfcs/RFC-0015-autonomous-pipeline-orchestrator.md`
+- AISDLC-353 — subscription-only autonomous-tick path post-2026-06-15 — `backlog/completed/aisdlc-353 - feat-document-subscription-only-tick-path-post-agent-sdk-credit.md`. Documents the AISDLC-198/225 finding that foreground `Agent` calls in slash-command bodies stay on subscription quota; this RFC names that path as the `in-session-agent` Worker kind.
 - 2026-05-20 session memory `feedback_watchdog_systemic_failure.md` — empirical 6-of-7 kill rate documenting the failure mode this RFC closes
 - Claude Code client repo (investigated, no override found): `/Users/dominique/Documents/dev/ai-sdlc/claude-code`
 - `pipeline-cli/src/runtime/shell-claude-p-spawner.ts` — existing 30-min watchdog the supervisor would reuse
