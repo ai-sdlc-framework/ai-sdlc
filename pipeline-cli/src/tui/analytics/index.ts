@@ -66,10 +66,12 @@ export {
   type PipelineMetrics,
 } from './metrics.js';
 
-// ── RFC-0025 Framework Quality Monitoring — Phase 1 substrate ─────────
-// Salvaged from closed PR #481 (AISDLC-270). Misaligned implementations
-// are marked with TODO stubs; later Refit phases (AISDLC-303..307) will
-// reshape each accordingly.
+// ── RFC-0025 Framework Quality Monitoring — Phase 1 substrate + Phase 3 ─
+// Phase 1: Salvaged from closed PR #481 (AISDLC-270). Misaligned
+// implementations are marked with TODO stubs; later Refit phases
+// (AISDLC-303..307) will reshape each accordingly.
+// Phase 3 (AISDLC-304): multi-window recurrence (OQ-3), first-capture
+// MTTR label (OQ-8), v2 MTTD substrate, per-org config loader.
 
 export {
   classifyFailure,
@@ -102,11 +104,28 @@ export {
   computeQualityMetrics,
   formatMttr,
   formatCoverageRate,
+  formatRecurrenceEntry,
   type QualityMetrics,
   type MttrEntry,
   type RecurrenceEntry,
+  type RecurrenceByWindow,
+  type MttdV2Substrate,
   type ComputeQualityMetricsOpts,
 } from './quality-metrics.js';
+
+// ── RFC-0025 Quality Monitoring Config — Phase 3 (AISDLC-304) ────────
+// Per-org configurable recurrence windows and related settings.
+// Config file: `.ai-sdlc/quality-monitoring.yaml` (§13.1).
+
+export {
+  loadQualityMonitoringConfig,
+  parseQualityMonitoringConfigYaml,
+  parseDurationDays,
+  DEFAULT_RECURRENCE_WINDOWS,
+  QUALITY_MONITORING_CONFIG_DEFAULTS,
+  type QualityMonitoringConfig,
+  type LoadQualityMonitoringConfigOpts,
+} from './quality-monitoring-config.js';
 
 export {
   shouldSampleDeterminism,

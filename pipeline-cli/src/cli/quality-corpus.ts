@@ -1,25 +1,24 @@
 /**
  * `cli-quality-corpus` — aggregate the framework-quality capture corpus.
  * RFC-0025 Phase 1 substrate / AISDLC-302 (salvaged from PR #481).
+ * Updated for Phase 3 (AISDLC-304): multi-window recurrence + MTTR label.
  *
  * Sister CLI to `cli-orchestrator-corpus`, `cli-deps-corpus`, and
  * `cli-dor-corpus`. Reads `$ARTIFACTS_DIR/_quality/captures.jsonl`
  * and computes the RFC-0025 §8 self-improvement metrics:
  *
  *   - Reliability trend (week-over-week framework-bug captures per run)
- *   - MTTR per subclass (first capture → fix done date; OQ-8 aligned)
- *   - Recurrence rate (fixed bugs that recurred within the window; OQ-3 placeholder)
+ *   - MTTR per subclass (first capture → fix done date; OQ-8 — clock from
+ *     first capture, output labeled "MTTR (from first capture)")
+ *   - Recurrence rate (7d / 30d / 90d simultaneous windows; OQ-3)
  *   - Coverage rate (fraction of captures classified vs. ambiguous)
- *
- * This is the aggregate CLI the `quality-reader.ts` always referenced as
- * "eventual" — it reads the same `captures.jsonl` that
- * `readReliabilityTrend()` produces, then computes the full §8 metric set.
  *
  * Usage:
  *   $ cli-quality-corpus aggregate
  *   $ cli-quality-corpus aggregate --artifacts-dir ./my-artifacts
  *   $ cli-quality-corpus aggregate --format table
  *   $ cli-quality-corpus aggregate --work-dir /path/to/repo
+ *   $ cli-quality-corpus aggregate --recurrence-windows 7d,30d,90d
  *
  * Output is JSON on stdout; `--format table` renders an ASCII summary.
  *
@@ -35,6 +34,7 @@ import {
   type QualityMetrics,
   formatMttr,
   formatCoverageRate,
+  formatRecurrenceEntry,
 } from '../tui/analytics/quality-metrics.js';
 import { formatReliabilityTrend } from '../tui/analytics/metrics.js';
 
@@ -55,7 +55,16 @@ export interface AggregateQualityCorpusOpts {
   artifactsDir?: string;
   workDir?: string;
   now?: () => Date;
-  recurrenceWindowDays?: number;
+  /**
+   * Recurrence windows to compute (OQ-3 — multi-window simultaneous).
+   *
+   * Each entry is a duration string matching `\d+d` (e.g. `'7d'`, `'30d'`,
+   * `'90d'`). When omitted, auto-loaded from
+   * `.ai-sdlc/quality-monitoring.yaml` (defaults: `['7d', '30d', '90d']`).
+   */
+  recurrenceWindows?: string[];
+  /** Config file path override for quality-monitoring.yaml. */
+  qualityMonitoringConfigPath?: string;
 }
 
 /**
@@ -74,7 +83,8 @@ export function aggregateQualityCorpus(opts: AggregateQualityCorpusOpts = {}): Q
     artifactsDir: opts.artifactsDir,
     workDir: opts.workDir,
     now,
-    recurrenceWindowDays: opts.recurrenceWindowDays,
+    recurrenceWindows: opts.recurrenceWindows,
+    qualityMonitoringConfigPath: opts.qualityMonitoringConfigPath,
   });
 
   return {
@@ -115,10 +125,10 @@ function renderTable(report: QualityCorpusReport): string {
     ``,
   ];
 
-  // MTTR table
+  // MTTR table — labeled "MTTR (from first capture)" per OQ-8
   if (metrics.mttr.length > 0) {
-    lines.push(`MTTR (Mean Time to Remediation — clock starts at first capture per OQ-8)`);
-    lines.push(`----------------------------------------------------------------------`);
+    lines.push(`${metrics.mttrLabel} — per subclass`);
+    lines.push(`${'─'.repeat(metrics.mttrLabel.length + 18)}`);
     for (const entry of metrics.mttr) {
       lines.push(`  ${formatMttr(entry)}`);
     }
@@ -130,26 +140,37 @@ function renderTable(report: QualityCorpusReport): string {
             remediatedAt: '',
             mttrMs: metrics.meanMttrMs,
           })
-        : 'MEAN: — (no remediations yet)';
+        : `${metrics.mttrLabel} — MEAN: — (no remediations yet)`;
     lines.push(`  ${meanLabel}`);
-    lines.push('');
-  } else {
-    lines.push('MTTR: no framework-bug captures yet');
-    lines.push('');
-  }
-
-  // Recurrence table
-  if (metrics.recurrence.length > 0) {
-    lines.push(`Recurrence Rate (within ${30} days of fix — OQ-3 placeholder window)`);
-    lines.push(`-------------------------------------------------------------------`);
-    for (const entry of metrics.recurrence) {
+    // v2 MTTD substrate note
+    if (!metrics.mttdV2.enabled) {
       lines.push(
-        `  ${entry.subclass}: ${entry.recurrences}/${entry.fixes} fixes recurred (${(entry.recurrenceRate * 100).toFixed(1)}%)`,
+        `  [v2 MTTD (from first occurrence) disabled — ships when first-occurrence inference is reliable]`,
       );
     }
     lines.push('');
   } else {
-    lines.push('Recurrence rate: no completed framework-bug tasks found');
+    lines.push(`${metrics.mttrLabel}: no framework-bug captures yet`);
+    lines.push('');
+  }
+
+  // Multi-window recurrence table (OQ-3)
+  if (metrics.recurrenceByWindow.length > 0) {
+    const windowLabels = metrics.recurrenceByWindow.map((r) => r.window).join(' / ');
+    lines.push(`Recurrence Rate — simultaneous windows: ${windowLabels} (OQ-3)`);
+    lines.push(`${'─'.repeat(54 + windowLabels.length)}`);
+    for (const byWindow of metrics.recurrenceByWindow) {
+      if (byWindow.entries.length === 0) {
+        lines.push(`  [${byWindow.window}] no completed framework-bug tasks`);
+      } else {
+        for (const entry of byWindow.entries) {
+          lines.push(`  ${formatRecurrenceEntry(entry, byWindow.window)}`);
+        }
+      }
+    }
+    lines.push('');
+  } else {
+    lines.push('Recurrence rate: no recurrence windows configured');
     lines.push('');
   }
 
@@ -157,6 +178,17 @@ function renderTable(report: QualityCorpusReport): string {
 }
 
 // ── CLI builder ────────────────────────────────────────────────────────
+
+/**
+ * Parse a comma-separated recurrence windows string into an array.
+ * e.g. '7d,30d,90d' → ['7d', '30d', '90d'].
+ */
+function parseRecurrenceWindowsArg(arg: string): string[] {
+  return arg
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
 
 export function buildQualityCorpusCli(): Argv {
   return yargs(hideBin(process.argv))
@@ -177,11 +209,13 @@ export function buildQualityCorpusCli(): Argv {
             describe:
               'Project root for backlog/ walk (MTTR + recurrence computation). Defaults to cwd.',
           })
-          .option('recurrence-window-days', {
-            type: 'number',
-            default: 30,
+          .option('recurrence-windows', {
+            type: 'string',
+            default: '',
             describe:
-              'Recurrence-detection window in days (OQ-3 placeholder default: 30). Phase 3 (AISDLC-304) will add multi-window support.',
+              'Comma-separated recurrence windows (OQ-3 multi-window). ' +
+              "e.g. '7d,30d,90d'. When empty, auto-loaded from " +
+              "`.ai-sdlc/quality-monitoring.yaml` (defaults: '7d,30d,90d').",
           })
           .option('format', {
             type: 'string',
@@ -191,10 +225,13 @@ export function buildQualityCorpusCli(): Argv {
               "Output format. 'json' emits a JSON envelope; 'table' renders an ASCII summary.",
           }),
       async (argv) => {
+        const windowsArg = argv['recurrence-windows'] as string;
+        const recurrenceWindows = windowsArg ? parseRecurrenceWindowsArg(windowsArg) : undefined;
+
         const report = aggregateQualityCorpus({
           artifactsDir: argv['artifacts-dir'] as string | undefined,
           workDir: argv['work-dir'] as string | undefined,
-          recurrenceWindowDays: argv['recurrence-window-days'] as number,
+          recurrenceWindows,
         });
         if (String(argv.format) === 'table') emitText(renderTable(report));
         else emit(report);

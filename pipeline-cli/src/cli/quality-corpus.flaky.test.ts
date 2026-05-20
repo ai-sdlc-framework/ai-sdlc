@@ -62,14 +62,17 @@ describe('aggregateQualityCorpus', () => {
     expect(report.metrics.ambiguousCaptures).toBe(1);
   });
 
-  it('respects recurrenceWindowDays parameter', () => {
-    // Just verify the option is forwarded (behavior tested in quality-metrics.test.ts)
+  it('respects recurrenceWindows parameter (OQ-3 multi-window)', () => {
+    // Verify the multi-window option is forwarded and returns the correct number of windows.
     const report = aggregateQualityCorpus({
       artifactsDir: workdir,
       workDir: workdir,
       now: () => NOW,
-      recurrenceWindowDays: 7,
+      recurrenceWindows: ['7d'],
     });
     expect(report).toBeDefined();
+    // Passing a single window should produce exactly one recurrenceByWindow entry
+    expect(report.metrics.recurrenceByWindow).toHaveLength(1);
+    expect(report.metrics.recurrenceByWindow[0]!.window).toBe('7d');
   });
 });
