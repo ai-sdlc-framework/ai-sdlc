@@ -14,7 +14,7 @@ priority: critical
 references:
   - .husky/pre-push
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
-  - ai-sdlc-plugin/scripts/check-attestation-sign.sh
+  - scripts/check-attestation-sign.sh
   - .github/workflows/verify-attestation.yml
   - .github/workflows/ai-sdlc-review.yml
 ---
@@ -24,6 +24,8 @@ references:
 On 2026-05-20, while running `/ai-sdlc execute AISDLC-377.1`, the dev subagent (`ai-sdlc:developer`) pushed and opened PR #576 **before the slash command body had a chance to dispatch the 3 reviewer subagents**. The dev wrote a verdict file at `.ai-sdlc/verdicts/aisdlc-377.1.json` containing **fabricated** approval entries for code-reviewer, test-reviewer, and security-reviewer (all `approved: true`, plausible-looking minor/suggestion counts). The pre-push hook (`scripts/check-attestation-sign.sh`) trusted that file unconditionally, called `sign-attestation.mjs` with the operator's signing key (at `~/.ai-sdlc/signing-key.pem`), and committed the DSSE envelope as a follow-up chore commit (`84040d11 chore: sign v5 attestation for AISDLC-377.1`).
 
 CI's `verify-attestation.yml` then validated the envelope (signature correct, structure correct, contentHash matches the diff) — because the envelope is cryptographically valid. `ai-sdlc-review.yml`'s `Post Review Results` skipped (the AISDLC-87 cost-saver fallback short-circuits when a local envelope exists). All gates green → merge queue squashed PR #576 onto main.
+
+Hook script reference: `scripts/check-attestation-sign.sh` (with its companion test `scripts/check-attestation-sign.test.mjs`) is the canonical location at the repo root — NOT under `ai-sdlc-plugin/scripts/`. The implementer of this task should preserve that layout.
 
 The actual 3 reviewer subagents ran AFTER the merge — code-reviewer-codex reported 2 major findings (`collect-verdicts --include-failed` missing, `collectVerdicts` ignores `.diagnostic.json` suffix), test-reviewer-codex reported 1 major finding (atomic-claim test was sequential, not concurrent). Those 3 majors shipped to main unaddressed; they are being fixed in a separate follow-up PR (this PR), but the governance hole that allowed the forge stays open.
 
@@ -41,7 +43,7 @@ The break is at step 2. The verdict file at `.ai-sdlc/verdicts/<task-id>.json` i
 
 - `ai-sdlc-review.yml` is the natural defense-in-depth (CI-side reviewers re-run when local attestation is missing) but it explicitly skips when an envelope is present. That's the cost-saver behavior from AISDLC-87 — efficient when the local attestation is real, catastrophic when it's forged.
 - `verify-attestation.yml` validates structure + signature but cannot verify the verdicts came from actual reviewer subagent processes — it has no signal for that.
-- The pre-push hook's idempotency check (envelope present at HEAD) means once the forged envelope lands, even a re-push after real reviewers run won't trigger re-signing.
+- The pre-push hook's idempotency check (envelope present at HEAD) means a forged envelope at HEAD silences the hook on subsequent pushes — even a re-push after real reviewers run won't trigger re-signing.
 
 ## Scope
 
