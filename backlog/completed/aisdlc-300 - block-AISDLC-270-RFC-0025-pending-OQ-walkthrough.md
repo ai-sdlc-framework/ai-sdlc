@@ -10,6 +10,8 @@ labels:
   - block
   - rfc-0025
 priority: high
+blocked:
+  reason: "Task is Done (completed 2026-05-19). RFC-0025 is referenced for audit context only — this task's implementation work predates RFC-0025's Signed Off promotion. Upstream-OQ gate acknowledged."
 dependencies: []
 references:
   - spec/rfcs/RFC-0025-framework-quality-monitoring.md

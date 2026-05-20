@@ -29,7 +29,7 @@ priority: medium
 
 1. PR #481 (the original implementation attempt) was closed on 2026-05-16. See [`docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md`](../../docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md) for the full audit.
 2. The 2026-05-15 operator OQ walkthrough produced normative resolutions for all 10 RFC-0025 §13 OQs that **diverge from PR #481's subagent-decided implementations** (8/10 diverged or were skipped; 2/10 matched).
-3. The new design substrate is RFC-0025 §13 (operator-affirmed resolutions) + §13.1 (consolidated `.ai-sdlc/quality-monitoring.yaml` per-org config schema). Implementation against the new design is broken into 6 phases:
+3. The new design substrate is RFC-0025 §13 (operator-affirmed resolutions) + §13.1 (consolidated ".ai-sdlc/quality-monitoring.yaml" per-org config schema, to be created by AISDLC-305). Implementation against the new design is broken into 6 phases:
    - **AISDLC-302** — Substrate cleanup + salvage from closed PR #481 (~30-40% of code cherry-picks)
    - **AISDLC-303** — Confidence-bucketed classifier (OQ-1)
    - **AISDLC-304** — Multi-window recurrence + first-capture MTTR (OQ-3 + OQ-8)
