@@ -113,19 +113,49 @@ export {
   type ComputeQualityMetricsOpts,
 } from './quality-metrics.js';
 
-// ── RFC-0025 Quality Monitoring Config — Phase 3 (AISDLC-304) ────────
-// Per-org configurable recurrence windows and related settings.
+// ── RFC-0025 Quality Monitoring Config — Phase 3 + Phase 6 ──────────
+// Per-org configurable recurrence windows + Phase 6 (AISDLC-307)
+// upstream-reporting (OQ-5) and vendor-namespace (OQ-10) settings.
 // Config file: `.ai-sdlc/quality-monitoring.yaml` (§13.1).
 
 export {
   loadQualityMonitoringConfig,
   parseQualityMonitoringConfigYaml,
   parseDurationDays,
+  enforceVendorNamespaceConfig,
+  QualityMonitoringConfigError,
   DEFAULT_RECURRENCE_WINDOWS,
+  DEFAULT_UPSTREAM_TEMPLATE_PATH,
+  DEFAULT_VENDOR_NAMESPACE_ENFORCE,
   QUALITY_MONITORING_CONFIG_DEFAULTS,
   type QualityMonitoringConfig,
   type LoadQualityMonitoringConfigOpts,
+  type UpstreamReportingConfig,
+  type VendorNamespaceConfig,
+  type VendorNamespaceEnforce,
 } from './quality-monitoring-config.js';
+
+// ── RFC-0025 §13 OQ-5 Upstream Reporting — Phase 6 (AISDLC-307) ─────
+// Operator-initiated, pre-filled GitHub issue for framework-bug
+// captures. No telemetry pipeline.
+
+export {
+  anonymiseText,
+  buildCaptureId,
+  buildUpstreamReport,
+  loadCaptureRecord,
+  openInBrowser,
+  relatedPathsForSubclass,
+  renderIssueBody,
+  suggestFixForSubclass,
+  BUILTIN_UPSTREAM_TEMPLATE,
+  UpstreamReportError,
+  type BuildUpstreamReportOpts,
+  type LoadCaptureOpts,
+  type OpenInBrowserOpts,
+  type RenderIssueBodyOpts,
+  type UpstreamReport,
+} from './upstream-reporter.js';
 
 export {
   shouldSampleDeterminism,

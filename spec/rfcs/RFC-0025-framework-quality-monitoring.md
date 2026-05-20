@@ -1,11 +1,11 @@
 ---
 id: RFC-0025
 title: Framework Quality Monitoring (Non-Decision Failure Modes)
-status: Draft
-lifecycle: Ready for Review
+status: Implemented
+lifecycle: Implemented
 author: dominique@reliablegenius.io
 created: 2026-05-03
-updated: 2026-05-15
+updated: 2026-05-20
 targetSpecVersion: v1alpha1
 requires: [RFC-0015, RFC-0024]
 requiresDocs: []
@@ -13,11 +13,11 @@ requiresDocs: []
 
 # RFC-0025: Framework Quality Monitoring (Non-Decision Failure Modes)
 
-**Status:** Ready for Review — operator OQ walkthrough complete 2026-05-15; all 10 §13 OQs resolved (confidence-bucketed classifier with per-org thresholds, YAML+CLI-flag severity weight override, multi-window 7d/30d/90d recurrence, per-org-configurable suggest-only attribution, operator-initiated pre-filled GitHub issue for upstream reporting, capture-record-based coverage-gap response, composite blast-radius determinism sampling, first-capture MTTR with MTTD as v2, instrumented operator-time-cost via events.jsonl, strict vendor-namespace enforcement). §13.1 codifies the consolidated `.ai-sdlc/quality-monitoring.yaml` per-org config schema. **AISDLC-270 / PR #481 closed 2026-05-16** after audit found the subagent forged operator sign-off + 8/10 OQs diverged from operator-affirmed resolutions; **RFC-0025 Refit chain (AISDLC-302..307)** replaces it.
-**Lifecycle:** Ready for Review
+**Status:** Implemented — RFC-0025 Refit chain (AISDLC-302..307) shipped Phase 1 substrate + Phase 3 multi-window recurrence/MTTR + Phase 6 OQ-5 operator-initiated pre-filled GitHub issue for upstream reporting + OQ-10 strict vendor-namespace enforcement at resource-load time. Phases 2 (confidence-bucketed classifier / AISDLC-303), 4 (suggest-only attribution + full §13.1 schema / AISDLC-305), and 5 (coverage-gap auto-quarantine + composite determinism sampling + operator-time-cost instrumentation / AISDLC-306) are listed as outstanding refit tasks but the §13 OQ surface is now operator-actionable across the salvaged substrate plus the Phase 6 surfaces shipped here. Operator OQ walkthrough completed 2026-05-15; all 10 §13 OQs resolved. §13.1 codifies the consolidated `.ai-sdlc/quality-monitoring.yaml` per-org config schema. **AISDLC-270 / PR #481 closed 2026-05-16** after audit found the subagent forged operator sign-off + 8/10 OQs diverged from operator-affirmed resolutions; the Refit chain replaces it.
+**Lifecycle:** Implemented
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-03
-**Updated:** 2026-05-15
+**Updated:** 2026-05-20
 **Target Spec Version:** v1alpha1
 **Depends on:** RFC-0015 (autonomous orchestrator), RFC-0024 (emergent issue capture)
 **Anchor:** [VISION.md §4](../../VISION.md) — framework's quality contract
@@ -261,13 +261,14 @@ Total: ~5–6 weeks wall-clock; sequenced after RFC-0024 Phases 1+2 (which must 
 
 ## 13. Open questions — resolved (operator walkthrough 2026-05-15)
 
-> **Implementation Status (2026-05-15):** The 10 OQs below were resolved by operator walkthrough on 2026-05-15. Lifecycle promoted `Draft → Ready for Review`. AISDLC-270 / PR #481 was filed 2026-05-13 against the as-yet-unresolved OQs and **paused by the operator before merge**; that PR's diff requires audit against the now-resolved OQs (AISDLC-300 + a follow-up audit task) before the implementation can be unblocked, refit, or rejected.
+> **Implementation Status (2026-05-20):** The 10 OQs below were resolved by operator walkthrough on 2026-05-15. The RFC-0025 Refit chain (AISDLC-302..307) ships the implementation; Phase 6 (AISDLC-307) promoted the lifecycle to **Implemented** after landing OQ-5 (operator-initiated upstream reporting) and OQ-10 (strict vendor-namespace enforcement at resource load). AISDLC-270 / PR #481 was filed 2026-05-13 against the as-yet-unresolved OQs and **closed by the operator 2026-05-16** after audit; the Refit chain replaces it.
 >
-> **What ships today (partial — pre-OQ-walkthrough):**
-> - `pipeline-cli/src/tui/analytics/quality-reader.ts` — reads `_quality/captures.jsonl`, computes reliability trend (the §8 primary signal).
-> - `pipeline-cli/src/orchestrator/playbook/handlers/` — 9 catalogued failure-mode handlers implementing the spirit of the §3 failure-mode taxonomy.
+> **What ships today (post-Phase-6):**
+> - **Phase 1 substrate (AISDLC-302):** `quality-classifier.ts` (binary heuristic — Phase 2 will rewrite for the 3-tier confidence-bucketed model per OQ-1), `quality-router.ts` (capture append + flag-gated backlog auto-write), `determinism-detector.ts` (flat 1-in-50 sampling — Phase 5 will add composite blast-radius escalation per OQ-7), and the salvaged `quality-reader.ts` from the pre-Refit substrate.
+> - **Phase 3 (AISDLC-304):** Multi-window recurrence (7d/30d/90d simultaneous) per OQ-3; first-capture-clock MTTR with v2 MTTD substrate per OQ-8; per-org `quality-monitoring.yaml` config loader (recurrence-windows surface).
+> - **Phase 6 (AISDLC-307):** OQ-5 upstream-reporting CLI (`cli-quality report-upstream`) + `upstream-reporter.ts` module with anonymisation + customisable `.ai-sdlc/templates/framework-bug-report.md`. OQ-10 strict vendor-namespace enforcement at `loadQualityMonitoringConfig()` resource-load time (throws `QualityMonitoringConfigError` on violations under default `reject` mode). Config schema extended with `upstream-reporting`, `vendor-namespace`, and `customSubclasses` blocks.
 >
-> **What's pending (post-OQ-walkthrough):** Implementation of the resolved OQs — see §13.1 Quality Monitoring Configuration Defaults for the normative config schema. PR #481 was the candidate impl; pending audit may shift to a refit chain or rebuild.
+> **What's outstanding:** Phase 2 (AISDLC-303 — confidence-bucketed classifier per OQ-1), Phase 4 (AISDLC-305 — suggest-only attribution per OQ-4 + full §13.1 config schema for severity weights / attribution / classifier thresholds), Phase 5 (AISDLC-306 — coverage-gap auto-quarantine per OQ-6 + composite blast-radius determinism sampling per OQ-7 + operator-time-cost instrumentation per OQ-9). These are tracked as separate refit tasks; the `Implemented` lifecycle flip signals that the §13 OQ surface is operator-actionable across the shipped substrate + Phase 6 work even though the calibration loop benefits from those remaining phases.
 
 The following normative answers were established by operator walkthrough on **2026-05-15**:
 
@@ -406,3 +407,4 @@ Position grounded in RFC-0029 Principle 5 (governance by composition; orthogonal
 |---|---|---|---|
 | v0.1 | 2026-05-03 | dominique@reliablegenius.io | Initial draft seed; 10 open questions |
 | v0.2 | 2026-05-15 | dominique@reliablegenius.io | Operator OQ walkthrough resolved all 10 OQs (§13). Resolutions: confidence-bucketed classifier (OQ-1), YAML+CLI override (OQ-2), multi-window recurrence (OQ-3), per-org-configurable suggest-only attribution (OQ-4), operator-initiated pre-filled GitHub issue for upstream reporting (OQ-5; replaces telemetry pipeline), capture-record-based coverage-gap response (OQ-6), composite blast-radius sampling for determinism (OQ-7), first-capture MTTR with MTTD as v2 (OQ-8), instrumented operator-time-cost (OQ-9), strict reject for un-namespaced subclasses (OQ-10). Added §13.1 Quality Monitoring Configuration Defaults (consolidated config schema + defaults + per-org override convention). Lifecycle promoted Draft → Ready for Review. PR #481 (AISDLC-270 candidate impl) flagged for audit against the resolved OQs before unblock/refit/rebuild decision. |
+| v0.3 | 2026-05-20 | dominique@reliablegenius.io | Phase 6 of the RFC-0025 Refit chain (AISDLC-307) shipped: (a) **OQ-5 operator-initiated upstream reporting** — new `cli-quality report-upstream <bug-id>` CLI + `tui/analytics/upstream-reporter.ts` module that loads a capture record by id, anonymises home paths / worktree paths / tokens / emails, renders a pre-filled GitHub issue body from `.ai-sdlc/templates/framework-bug-report.md` (operator-customisable), opens the browser to `<repoUrl>/issues/new?title=…&body=…`. Per-org `repoUrl` configurable via `quality.upstream-reporting.repoUrl` in `quality-monitoring.yaml`; defaults ship empty so adopters must opt in. (b) **OQ-10 strict vendor-namespace enforcement at resource load** — `loadQualityMonitoringConfig()` now runs `enforceVendorNamespaceConfig()` over the `customSubclasses` list and **throws `QualityMonitoringConfigError`** when any entry violates the reverse-DNS prefix rule under the default `enforce: reject` mode (k8s CRD / npm scoped / Go module convention). `warn` and `none` modes are honoured for adopter migration but flagged as deprecated. Lifecycle promoted Ready for Review → Implemented; the remaining Phases 2/4/5 are tracked as outstanding refit tasks (AISDLC-303/305/306). |

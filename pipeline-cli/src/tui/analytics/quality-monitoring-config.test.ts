@@ -10,7 +10,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import {
   DEFAULT_RECURRENCE_WINDOWS,
+  DEFAULT_UPSTREAM_TEMPLATE_PATH,
   QUALITY_MONITORING_CONFIG_DEFAULTS,
+  QualityMonitoringConfigError,
+  enforceVendorNamespaceConfig,
   loadQualityMonitoringConfig,
   parseDurationDays,
   parseQualityMonitoringConfigYaml,
@@ -142,5 +145,167 @@ describe('loadQualityMonitoringConfig', () => {
   it('returns defaults when file is unreadable', () => {
     const cfg = loadQualityMonitoringConfig({ filePath: '/nonexistent/path/config.yaml' });
     expect(cfg).toEqual(QUALITY_MONITORING_CONFIG_DEFAULTS);
+  });
+});
+
+// ── Phase 6 (AISDLC-307) — upstream-reporting (OQ-5) ─────────────────
+
+describe('parseQualityMonitoringConfigYaml — upstream-reporting (OQ-5)', () => {
+  it('ships empty repoUrl + default template path', () => {
+    const cfg = parseQualityMonitoringConfigYaml('');
+    expect(cfg.upstreamReporting.repoUrl).toBe('');
+    expect(cfg.upstreamReporting.prefilledIssueTemplate).toBe(DEFAULT_UPSTREAM_TEMPLATE_PATH);
+  });
+
+  it('parses upstream-reporting.repoUrl and prefilledIssueTemplate', () => {
+    const yaml = [
+      'quality:',
+      '  upstream-reporting:',
+      '    repoUrl: "https://github.com/example/repo"',
+      '    prefilledIssueTemplate: ".ai-sdlc/templates/custom-bug.md"',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.upstreamReporting.repoUrl).toBe('https://github.com/example/repo');
+    expect(cfg.upstreamReporting.prefilledIssueTemplate).toBe('.ai-sdlc/templates/custom-bug.md');
+  });
+
+  it('handles unquoted repoUrl', () => {
+    const yaml = ['upstream-reporting:', '  repoUrl: https://github.com/example/repo'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.upstreamReporting.repoUrl).toBe('https://github.com/example/repo');
+  });
+});
+
+// ── Phase 6 (AISDLC-307) — vendor-namespace + customSubclasses (OQ-10)
+
+describe('parseQualityMonitoringConfigYaml — vendor-namespace (OQ-10)', () => {
+  it('defaults to enforce: reject', () => {
+    const cfg = parseQualityMonitoringConfigYaml('');
+    expect(cfg.vendorNamespace.enforce).toBe('reject');
+  });
+
+  it('parses enforce: warn', () => {
+    const yaml = ['quality:', '  vendor-namespace:', '    enforce: warn'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.vendorNamespace.enforce).toBe('warn');
+  });
+
+  it('parses enforce: none', () => {
+    const yaml = ['vendor-namespace:', '  enforce: none'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.vendorNamespace.enforce).toBe('none');
+  });
+
+  it('ignores unknown enforce values (keeps default)', () => {
+    const yaml = ['vendor-namespace:', '  enforce: panic-and-quit'].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.vendorNamespace.enforce).toBe('reject');
+  });
+
+  it('parses customSubclasses list', () => {
+    const yaml = [
+      'quality:',
+      '  customSubclasses:',
+      '    - acme-corp:custom-gate-faulty',
+      '    - acme-corp:billing-timeout',
+    ].join('\n');
+    const cfg = parseQualityMonitoringConfigYaml(yaml);
+    expect(cfg.customSubclasses).toEqual([
+      'acme-corp:custom-gate-faulty',
+      'acme-corp:billing-timeout',
+    ]);
+  });
+});
+
+describe('enforceVendorNamespaceConfig (OQ-10)', () => {
+  it('no-op when customSubclasses is empty', () => {
+    expect(() =>
+      enforceVendorNamespaceConfig({
+        recurrenceWindows: [],
+        upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
+        vendorNamespace: { enforce: 'reject' },
+        customSubclasses: [],
+      }),
+    ).not.toThrow();
+  });
+
+  it('no-op when enforce: none, even with illegal subclass', () => {
+    expect(() =>
+      enforceVendorNamespaceConfig({
+        recurrenceWindows: [],
+        upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
+        vendorNamespace: { enforce: 'none' },
+        customSubclasses: ['un-namespaced-bad'],
+      }),
+    ).not.toThrow();
+  });
+
+  it('throws QualityMonitoringConfigError on reject mode with illegal subclass', () => {
+    expect(() =>
+      enforceVendorNamespaceConfig({
+        recurrenceWindows: [],
+        upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
+        vendorNamespace: { enforce: 'reject' },
+        customSubclasses: ['acme-corp:legit', 'un-namespaced-bad'],
+      }),
+    ).toThrow(QualityMonitoringConfigError);
+  });
+
+  it('logs to provided logger on warn mode with illegal subclass', () => {
+    const warnings: string[] = [];
+    const logger = { warn: (m: string): void => void warnings.push(m) };
+    expect(() =>
+      enforceVendorNamespaceConfig(
+        {
+          recurrenceWindows: [],
+          upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
+          vendorNamespace: { enforce: 'warn' },
+          customSubclasses: ['un-namespaced-bad'],
+        },
+        { logger },
+      ),
+    ).not.toThrow();
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toMatch(/vendor-namespace/);
+    expect(warnings[0]).toMatch(/un-namespaced-bad/);
+  });
+
+  it('does not throw on reject mode when all custom subclasses are valid', () => {
+    expect(() =>
+      enforceVendorNamespaceConfig({
+        recurrenceWindows: [],
+        upstreamReporting: { repoUrl: '', prefilledIssueTemplate: '' },
+        vendorNamespace: { enforce: 'reject' },
+        customSubclasses: ['acme-corp:custom-gate-faulty', 'my-company:billing-timeout'],
+      }),
+    ).not.toThrow();
+  });
+});
+
+describe('loadQualityMonitoringConfig — OQ-10 enforcement at load time', () => {
+  it('throws QualityMonitoringConfigError when illegal customSubclass under default reject', () => {
+    const dir = join(workdir, '.ai-sdlc');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'quality-monitoring.yaml'),
+      ['customSubclasses:', '  - un-namespaced-bad'].join('\n'),
+    );
+    expect(() => loadQualityMonitoringConfig({ workDir: workdir })).toThrow(
+      QualityMonitoringConfigError,
+    );
+  });
+
+  it('loads cleanly when illegal subclass + enforce: none', () => {
+    const dir = join(workdir, '.ai-sdlc');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'quality-monitoring.yaml'),
+      ['vendor-namespace:', '  enforce: none', 'customSubclasses:', '  - un-namespaced-bad'].join(
+        '\n',
+      ),
+    );
+    const cfg = loadQualityMonitoringConfig({ workDir: workdir });
+    expect(cfg.customSubclasses).toEqual(['un-namespaced-bad']);
+    expect(cfg.vendorNamespace.enforce).toBe('none');
   });
 });

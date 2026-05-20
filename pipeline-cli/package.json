@@ -39,6 +39,7 @@
     "cli-estimate": "bin/cli-estimate.mjs",
     "cli-verify-attestation-debug": "bin/cli-verify-attestation-debug.mjs",
     "cli-quality-corpus": "bin/cli-quality-corpus.mjs",
+    "cli-quality": "bin/cli-quality.mjs",
     "cli-dor-check": "bin/cli-dor-check.mjs"
   },
   "exports": {
