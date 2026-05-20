@@ -1,7 +1,7 @@
 ---
 id: AISDLC-304
 title: 'feat: RFC-0025 Refit Phase 3 — Multi-window recurrence + first-capture MTTR (OQ-3 + OQ-8)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
