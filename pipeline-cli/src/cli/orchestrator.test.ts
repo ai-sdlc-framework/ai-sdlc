@@ -648,8 +648,6 @@ describe('cli-orchestrator tick default spawner (AISDLC-352)', () => {
         spawnerKinds.push(spawnerKind);
         return { ok: true, pipeline: approvedResult(taskId) };
       },
-      // AISDLC-363 — skip the parent-branch guard in tests (no real git state).
-      parentBranchGuard: async () => {},
     };
 
     setArgv('tick', '--max-concurrent', '1');

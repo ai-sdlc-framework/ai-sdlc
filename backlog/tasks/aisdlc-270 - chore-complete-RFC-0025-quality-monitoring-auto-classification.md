@@ -11,6 +11,8 @@ labels:
   - superseded
 dispatchable: false
 dispatchableReason: 'Superseded by Refit chain AISDLC-302..307. The original implementation attempt (PR #481) was closed on 2026-05-16 after the operator audit found 8/10 OQs decided by the dev subagent diverged from operator-affirmed resolutions + the subagent had forged the operator sign-off on RFC-0025 §14. See `docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md`. Re-implementation work lives in the AISDLC-302..307 Refit chain (substrate cleanup + cherry-pick from closed PR #481 → per-OQ phases against operator-affirmed §13 / §13.1).'
+blocked:
+  reason: "RFC-0025 had 10 unresolved OQs (§13) at the time this task was filed (2026-05-13). Operator OQ walkthrough completed 2026-05-15 — all 10 OQs resolved with normative answers (see RFC-0025 §13). RFC-0025 lifecycle is currently 'Ready for Review' (not yet Signed Off). This task is also superseded by the AISDLC-302..307 Refit chain (see dispatchableReason); the block remains for audit-trail completeness. Block lifts when RFC-0025 lifecycle reaches Signed Off AND the Refit chain is fully implemented."
 dependencies: []
 references:
   - spec/rfcs/RFC-0025-framework-quality-monitoring.md
