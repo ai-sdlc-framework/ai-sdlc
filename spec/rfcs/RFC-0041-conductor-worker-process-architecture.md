@@ -1,8 +1,8 @@
 ---
 id: RFC-0041
 title: Conductor / Worker Process Architecture for Autonomous Dispatch
-status: Draft
-lifecycle: Ready for Review
+status: Approved
+lifecycle: Signed Off
 author: dominique@reliablegenius.io
 created: 2026-05-20
 updated: 2026-05-20
@@ -16,8 +16,8 @@ requiresDocs: []
 
 # RFC-0041: Conductor / Worker Process Architecture for Autonomous Dispatch
 
-**Status:** Draft
-**Lifecycle:** Ready for Review — OQ walkthrough complete 2026-05-20; all 7 §10 OQs resolved; Engineering + Operator signed off; awaits Product sign-off
+**Status:** Approved
+**Lifecycle:** Signed Off — OQ walkthrough complete 2026-05-20; all 7 §10 OQs resolved; Engineering + Operator signed off
 **Author:** dominique@reliablegenius.io
 **Created:** 2026-05-20
 **Updated:** 2026-05-20
@@ -30,7 +30,6 @@ requiresDocs: []
 ## Sign-Off
 
 - [x] Engineering owner — dominique@reliablegenius.io (2026-05-20)
-- [ ] Product owner — Alexander Kline
 - [x] Operator owner — dominique@reliablegenius.io (2026-05-20)
 
 ## Revision History

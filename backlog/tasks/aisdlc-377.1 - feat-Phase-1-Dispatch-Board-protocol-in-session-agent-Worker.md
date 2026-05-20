@@ -1,0 +1,75 @@
+---
+id: AISDLC-377.1
+title: 'feat(dispatch): RFC-0041 Phase 1 — Dispatch Board protocol + in-session-agent Worker'
+status: To Do
+assignee: []
+created_date: '2026-05-20'
+labels:
+  - rfc-0041
+  - phase-1
+  - dispatch-board
+  - in-session-agent
+  - critical
+parentTaskId: AISDLC-377
+dependencies: []
+priority: critical
+references:
+  - spec/rfcs/RFC-0041-conductor-worker-process-architecture.md
+  - pipeline-cli/src/runtime/shell-claude-p-spawner.ts
+  - ai-sdlc-plugin/commands/orchestrator-tick.md
+  - backlog/completed/aisdlc-353 - feat-document-subscription-only-tick-path-post-agent-sdk-credit.md
+---
+
+## Scope (RFC-0041 §4.3 + §4.4 + §7 Phase 1)
+
+Phase 1 ships the **Dispatch Board protocol** + the **`in-session-agent` Worker kind** end-to-end. No supervisor, no `claude -p` shell-out — that's Phase 2 (AISDLC-377.3). Phase 1 is the subscription-preserving path operators can use immediately once it lands.
+
+### Deliverables
+
+1. **JSON schemas:**
+   - `spec/schemas/dispatch-manifest.v1.schema.json` — shape per RFC §4.4 (taskId, branch, worktree, baseSha, workerKind, dispatchedAt, dispatchedBy, spec.{taskFile, model, budgetMs, verifyCommands})
+   - `spec/schemas/dispatch-verdict.v1.schema.json` — shape per RFC §4.4 (taskId, outcome, commitSha, pushedBranch, prUrl, verifications, acceptanceCriteriaMet, notes, completedAt, workerId)
+
+2. **Conductor-side library (`pipeline-cli/src/dispatch/`):**
+   - `board.ts` exports `writeManifest()`, `collectVerdicts()`, `peekQueue()`, `claimNext(workerKind)`, `releaseInflight()`, `sweepStaleHeartbeats()`
+   - Filesystem layout: `<root>/.ai-sdlc/dispatch/{queue,inflight,done,failed}/`
+   - Atomic claim via `fs.renameSync` (POSIX-atomic on same filesystem)
+   - Heartbeat read/write helpers on `inflight/<id>.state.json`
+
+3. **`.ai-sdlc/dispatch-config.yaml` schema** (`spec/schemas/dispatch-config.v1.schema.json`):
+   - `spec.defaultWorkerKind: in-session-agent | claude-p-shell` (default `in-session-agent`)
+   - `spec.parallelism.{inSessionAgentMaxSessions, claudePShellMaxConcurrent}`
+   - `spec.inSessionAgent.{pollIntervalSec, quotaBackoffSec, quotaBackoffMaxSec, quotaBackoffMultiplier}`
+   - `spec.claudePShell.{pollIntervalSec, watchdogMs, supervisorPidFile}` (read by Phase 2; declared here for forward-compat)
+
+4. **`/ai-sdlc orchestrator-tick` Conductor changes** (`ai-sdlc-plugin/commands/orchestrator-tick.md`):
+   - Replace existing `Agent(... run_in_background: true)` dispatch with `dispatch.writeManifest()` calls
+   - On each `ScheduleWakeup` tick, poll `done/` and `failed/` directories; fan-out reviewers for new verdicts (foreground Agent calls, within 600s budget)
+   - Backpressure: if `queue/` + `inflight/` count ≥ `inSessionAgentMaxSessions`, skip emitting new manifests
+
+5. **New slash command `/ai-sdlc dispatch-worker`** (in-session-agent Worker entry point):
+   - Operator opens a new CC session, fires this command
+   - Slash-command body loops: claim a manifest matching `workerKind ∈ {any, in-session-agent}`, invoke `ai-sdlc:developer` **foreground** Agent, write verdict, `ScheduleWakeup(5s)`
+   - Empty queue → `ScheduleWakeup(30s)` hibernate
+   - Quota exhaustion (429) → write `failed/<id>.diagnostic.json` with `{cause: "quota-exhausted", retryAfter}`, hibernate per OQ-7 cool-down
+
+## Acceptance criteria
+
+- [ ] #1 `spec/schemas/dispatch-manifest.v1.schema.json` + `dispatch-verdict.v1.schema.json` published, validated by `pnpm validate-schemas`
+- [ ] #2 `pipeline-cli/src/dispatch/board.ts` exports all functions listed in Deliverable 2; atomic-claim integration test (two concurrent claim attempts on same manifest → exactly one wins, no double-pickup)
+- [ ] #3 `spec/schemas/dispatch-config.v1.schema.json` published with operator defaults; example at `spec/examples/dispatch-config/in-session-agent-only.yaml`
+- [ ] #4 `/ai-sdlc orchestrator-tick` updated: poll `done/` + `failed/` on every tick; emit manifests when `queue/` empty AND under concurrency cap; spawn reviewer fan-out + sign + push + arm auto-merge from done verdicts (existing finalization logic reused)
+- [ ] #5 `/ai-sdlc dispatch-worker` slash command exists; loops claim → foreground Agent → verdict → ScheduleWakeup; handles empty-queue hibernation + 429 cool-down per OQ-7
+- [ ] #6 Hermetic test: 3-manifest queue + 2 in-session-agent Worker sessions; verify atomic claim (no double-pickup), all 3 verdicts collected by Conductor, Workers idle when queue empties
+- [ ] #7 End-to-end acceptance: this CC session as Conductor + 2 operator-opened sibling CC sessions as Workers drain 2 real frontier tasks concurrently; zero Anthropic 600s watchdog kills observed; verdicts land in `done/` with all 4 verifications passing
+- [ ] #8 New code reaches 80%+ patch coverage
+
+## Out of scope
+
+- Supervisor + `claude-p-shell` Worker (Phase 2 / AISDLC-377.3)
+- Iteration mechanism (Phase 1.5 / AISDLC-377.2)
+- `cli-deps frontier --workerKind` annotation (Phase 3.2 / AISDLC-377.5)
+
+## Source
+
+RFC-0041 §7 Phase 1; operator OQ-1 + OQ-2 + OQ-3 + OQ-5 + OQ-6 + OQ-7 resolutions (2026-05-20 walkthrough).
