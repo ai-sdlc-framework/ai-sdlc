@@ -6,6 +6,57 @@ name: AI-SDLC Verify Review Attestation
 # current PR state (commit SHA, diff hash, policy hash, agent file hashes,
 # schema version).
 #
+# ── AISDLC-381: pull_request_target migration (fork-PR support) ──────
+# This workflow MUST be able to POST the `ai-sdlc/attestation` commit
+# status on EVERY PR HEAD (branch protection on main requires it — see
+# AISDLC-193 + AISDLC-214). On fork PRs, the legacy `pull_request` event
+# silently downgraded GITHUB_TOKEN to read-only, so `gh api .../statuses`
+# returned 403 ("Resource not accessible by integration") and the
+# required check sat pending forever (blocking external contributor
+# PRs at the merge queue — incident PR #568 by @akillies).
+#
+# `pull_request_target` runs in the target repo's context with full
+# write permissions even for fork PRs, but it runs against the BASE
+# branch's checkout by default — NOT the PR's HEAD. To verify the
+# attestation we must read the fork's `.ai-sdlc/attestations/<sha>.dsse.json`
+# and diff fork PR HEAD vs base; those are read as DATA only into a
+# sandboxed `pr-content/` path that is NEVER executed.
+#
+# ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
+#    § Fork-PR workflow safety pattern) ────────────────────────────────
+#
+# 1. Workflow logic checks out the TARGET repo's main (via the default
+#    `actions/checkout@v4` with no `ref:` — pull_request_target defaults
+#    to the BASE branch tip). That's what supplies the verifier scripts
+#    (`scripts/verify-attestation.mjs`, `scripts/is-docs-only-changeset.mjs`),
+#    the orchestrator runtime needed for envelope parsing, and
+#    `pnpm-lock.yaml`. Fork code is NEVER the source of these scripts.
+#
+# 2. Fork PR content is checked out SEPARATELY into a sandboxed
+#    `pr-content/` subdirectory (a second `actions/checkout@v4` with
+#    `ref: ${{ github.event.pull_request.head.sha }}` and `path: pr-content`).
+#    The workflow reads files from `pr-content/.ai-sdlc/attestations/*.dsse.json`
+#    and does `git -C pr-content/ diff` operations on it — both DATA-only
+#    reads. The sandbox is NEVER added to PATH, never npm-installed,
+#    and no script from it is invoked with `run:` / `node`.
+#
+# 3. NEVER `pnpm install` / `pnpm build` / script execution from the
+#    `pr-content/` sandbox. The verifier runs from main's checkout only;
+#    `pnpm install --frozen-lockfile` reads `pnpm-lock.yaml` from main.
+#
+# 4. NEVER use fork-provided actions. Every `uses:` here references a
+#    pinned action (`actions/checkout@v4`, `pnpm/action-setup@v4`,
+#    `actions/setup-node@v4`) from a vetted publisher; no `uses: ./...`
+#    relative-path references that would resolve into fork content.
+#
+# 5. Secrets: `${{ github.token }}` is used for the status POST and gh
+#    API calls. No signing keys, NPM tokens, AI_SDLC_PAT, or other
+#    privileged credentials are piped into any step that consumes
+#    fork-controlled input. The `pr-content/` sandbox never sees any
+#    secret env var (the gh-API steps that need github.token operate
+#    on data extracted from pr-content/ into shell strings — they
+#    never `cd pr-content/` or execute from there).
+#
 # AISDLC-193: this workflow posts the `ai-sdlc/attestation` commit status
 # again (success when verifier returns valid; failure when invalid with
 # reason in description). Branch protection on `main` requires this status
@@ -24,7 +75,14 @@ on:
   # protection doesn't deadlock. Docs-only PRs are short-circuited inside the
   # workflow via the docs-only detect step below — no envelope verify, just
   # post `success` directly.
-  pull_request:
+  #
+  # AISDLC-381: migrated from `pull_request` to `pull_request_target` so the
+  # workflow runs in target-repo context with `statuses:write` honored on
+  # fork PRs (previously read-only-downgraded by GitHub on `pull_request`
+  # fork events, causing `gh api .../statuses` to 403 and the required
+  # check to sit pending forever). See the file header for the full
+  # 5-point safety guard.
+  pull_request_target:
     # AISDLC-218 (revised): keep `opened` (so direct-ready PRs without `--draft`
     # fire the gate) AND add `ready_for_review` (canonical fire-once trigger
     # when a draft flips to ready). The job-level `if: !draft` guard skips
@@ -34,7 +92,9 @@ on:
     branches: [main]
   # AISDLC-113: also verify inside the merge-queue's gh-readonly-queue branch
   # so a sibling PR merging into the same files between PR-head verification
-  # and merge-queue execution is still surfaced in the audit log.
+  # and merge-queue execution is still surfaced in the audit log. merge_group
+  # events always run in target-repo context already (no fork-token-downgrade
+  # quirk) so they're unaffected by the AISDLC-381 migration.
   merge_group:
     types: [checks_requested]
 
@@ -51,8 +111,13 @@ jobs:
     # `ai-sdlc/attestation` status (branch-protection required check) so the
     # release PR can merge. Posting is handled by the inline release-please
     # short-circuit step below (symmetric with the docs-only short-circuit).
+    # AISDLC-381: rewrite the gate so the draft skip applies on BOTH the
+    # legacy `pull_request` event AND the migrated `pull_request_target`
+    # event. The old form (`event_name != 'pull_request' || draft == false`)
+    # silently allowed drafts through under pull_request_target because the
+    # event_name no longer matches the first disjunct.
     if: >-
-      github.event_name != 'pull_request' || github.event.pull_request.draft == false
+      github.event_name == 'merge_group' || github.event.pull_request.draft == false
     permissions:
       contents: read
       statuses: write
@@ -82,10 +147,100 @@ jobs:
             echo "is_merge_group=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # AISDLC-381 Safety guard #1: checkout the TARGET repo's main (no
+      # `ref:` arg = pull_request_target defaults to the base branch tip).
+      # This is what supplies the verifier scripts + orchestrator runtime
+      # below. We deliberately do NOT checkout the fork's HEAD here —
+      # running scripts from the fork's tree under pull_request_target
+      # would execute fork-controlled code with the elevated GITHUB_TOKEN
+      # (statuses:write, pull-requests:read), which is the exact attack
+      # vector pull_request_target is dangerous for if mishandled.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # AISDLC-381 Safety guard #2: checkout the fork PR's HEAD into a
+      # SANDBOXED subdirectory `pr-content/` for READ-ONLY DATA access
+      # (the DSSE envelope file + the git tree we need to diff against
+      # main). NO step below ever `cd`s into pr-content/, runs npm/pnpm
+      # install/build from it, or invokes any script from it — see the
+      # safety guards on every subsequent step.
+      - name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
+        if: github.event_name != 'merge_group'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
           ref: ${{ steps.resolve.outputs.head_sha }}
+          path: pr-content
+          # `persist-credentials: false` so the auth token from this
+          # checkout never lives inside the sandbox. The outer checkout
+          # (main) keeps credentials for the gh api status POST below.
+          persist-credentials: false
+
+      # AISDLC-381 Safety guard #2 (continued): copy ONLY the DSSE envelope
+      # file from the fork sandbox into main's working tree, so the verifier
+      # (running from main's scripts/verify-attestation.mjs) can resolve
+      # `.ai-sdlc/attestations/<head-sha>.dsse.json` at the expected path.
+      # We use `cp -- <src> <dst>` (no `-r`, no globs that could expand
+      # against a maliciously-named file). The envelope is JSON read by
+      # `JSON.parse(readFileSync(...))` — a DATA-only consumption pattern.
+      #
+      # Also fetches the fork HEAD SHA into main's git store so the
+      # verifier's `git diff <base>...<head>` operations resolve.
+      #
+      # For merge_group events, the head_sha is a queue ref in the origin
+      # repo — already reachable from the main checkout's fetch-depth: 0;
+      # no extra fetch needed. We just need to surface the envelope from
+      # that queue ref into the working tree via `git checkout <sha> -- path`.
+      - name: Stage fork envelope for verifier (DATA-ONLY copy)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
+          IS_MERGE_GROUP: ${{ steps.resolve.outputs.is_merge_group }}
+          HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          if [ "$IS_MERGE_GROUP" = "true" ]; then
+            # merge_group: fetch the queue head SHA, then surface the
+            # `.ai-sdlc/attestations` tree from it into our working tree.
+            # Queue refs live in the same upstream repo so they're already
+            # reachable after the main checkout's fetch-depth: 0; the
+            # `git fetch origin <sha>` is a defensive belt-and-braces.
+            git fetch --no-tags --depth=0 origin "$HEAD_SHA" 2>/dev/null \
+              || git fetch --unshallow origin 2>/dev/null \
+              || true
+            git checkout "$HEAD_SHA" -- '.ai-sdlc/attestations' 2>/dev/null || true
+            echo "[verify-attestation] merge_group: surfaced .ai-sdlc/attestations from $HEAD_SHA (if present)"
+          else
+            # pull_request_target: copy the envelope from the sandboxed
+            # pr-content/ checkout. The sandbox MAY not have an envelope
+            # (e.g. fork PR pushed without /ai-sdlc execute) — that's
+            # expected; the verifier will report `no envelope present at
+            # <sha>` and the status poster below will post FAILURE.
+            mkdir -p .ai-sdlc/attestations
+            if [ -f "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" ]; then
+              # NO shell expansion, NO glob — explicit single-file copy.
+              # Source path is constructed from $HEAD_SHA which is a
+              # GitHub-validated 40-char hex; cannot inject path traversal.
+              cp -- "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" \
+                    ".ai-sdlc/attestations/${HEAD_SHA}.dsse.json"
+              echo "[verify-attestation] staged envelope for $HEAD_SHA"
+            else
+              echo "[verify-attestation] no envelope at pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json — verifier will report missing"
+            fi
+            # Fetch the fork HEAD SHA into main's git store so the
+            # verifier's `git diff <base>...<head>` operations resolve.
+            # The fork's clone URL is resolved via a target-context API
+            # call. The fetch refspec is SHA-anchored (`+${HEAD_SHA}:...`)
+            # so a malicious fork cannot influence which ref is fetched
+            # under what local name (the SHA is server-validated).
+            if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "${{ github.repository }}" ]; then
+              FORK_URL=$(gh api "repos/${HEAD_REPO_FULL}" --jq '.clone_url' 2>/dev/null || echo "")
+              if [ -n "$FORK_URL" ]; then
+                git fetch --no-tags "$FORK_URL" "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}" 2>/dev/null || true
+              fi
+            fi
+          fi
 
       # AISDLC-214: short-circuit on docs-only changesets (BOTH pull_request AND
       # merge_group). The former fallback workflow `verify-attestation-docs-only.yml`
@@ -97,6 +252,11 @@ jobs:
       #
       # Detection runs unconditionally; the short-circuit posts `success` and the
       # subsequent verify steps skip when all_docs == 'true'.
+      #
+      # AISDLC-381 Safety: the script `scripts/is-docs-only-changeset.mjs` is
+      # executed from MAIN's checkout (cwd is the main checkout root), NOT
+      # from `pr-content/`. The `git diff` operates against the base SHA
+      # and head SHA — both of which were fetched into the main repo above.
       - name: Detect docs-only changeset
         id: docs_only
         env:

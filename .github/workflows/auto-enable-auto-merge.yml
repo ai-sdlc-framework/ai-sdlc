@@ -6,6 +6,38 @@ name: Auto-enable auto-merge on PR open
 # which then rebases against the queue tip + runs CI on the merge commit
 # + merges if green. No human click needed.
 #
+# ── AISDLC-381: pull_request_target migration (fork-PR support) ──────
+# This workflow fires on `pull_request_target` (NOT `pull_request`) so that
+# fork PRs receive an elevated GITHUB_TOKEN. On `pull_request` events from
+# forks, GitHub silently downgrades GITHUB_TOKEN (and secrets) to read-only
+# regardless of the workflow's declared `permissions:` block — every
+# `gh pr merge --auto` call against a fork PR returned HTTP 403 (Resource
+# not accessible by integration), so fork PRs sat unarmed forever. The
+# `pull_request_target` event runs in the target repo's context with full
+# write permissions even for fork PRs (per AISDLC-377.X external-contributor
+# UX). The same-repo / fork distinction at the JOB level (skip fork-armed
+# auto-merge — see `Skip drafts, fork PRs, and release-please PRs` step
+# below) is unchanged: we intentionally still SKIP arming auto-merge on
+# fork PRs because drive-by contributors should never get auto-merge for
+# free. The migration is purely about giving the workflow the right
+# context to talk to the GitHub API at all (for status posting on the
+# fork's commit-status thread on future task expansion).
+#
+# ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
+#    § Fork-PR workflow safety pattern) ────────────────────────────────
+# 1. NO `actions/checkout` here. We never touch fork content. The workflow
+#    only invokes `gh pr merge` / `gh api` against the target-repo's API.
+# 2. Fork PR content is read as DATA only via `gh pr view --json ...` —
+#    never executed.
+# 3. NO `pnpm install` / `pnpm build` / script execution. This workflow
+#    only makes API calls.
+# 4. NO fork-provided actions. Every `uses:` here pins to a vetted action
+#    from main (or the GitHub-hosted ubuntu-latest runner).
+# 5. Secrets: `secrets.AI_SDLC_PAT` is intentionally NOT exposed to any
+#    fork content (no checkout, no script run, no `env:` propagation to
+#    a step that consumes fork-controlled input). The PAT is used solely
+#    for the `gh pr merge` API call which is target-repo-scoped.
+#
 # Why no `--rebase` / `--squash` flag (AISDLC-221, 2026-05-06):
 # GitHub's merge-queue ruleset on `main` now ENFORCES its configured
 # strategy (currently SQUASH) on every auto-merge arming and overrides
@@ -64,7 +96,13 @@ name: Auto-enable auto-merge on PR open
 # clears GitHub's cached state and triggers immediate queue admission.
 
 on:
-  pull_request:
+  # AISDLC-381: migrated from `pull_request` to `pull_request_target` so
+  # the workflow gets an elevated GITHUB_TOKEN on fork PRs (without it
+  # every `gh pr merge` API call returned 403 for fork PRs). The
+  # job-level `Skip drafts, fork PRs, and release-please PRs` step still
+  # skips fork PRs from being armed — this migration only fixes the
+  # workflow-context permission level, not the policy on fork auto-merge.
+  pull_request_target:
     # AISDLC-218: include `ready_for_review` so this fires when the new
     # draft-PR flow flips a draft to ready (which is the FIRST time the PR
     # should arm auto-merge). The existing job-level `draft == false` guard
@@ -73,6 +111,9 @@ on:
   # AISDLC-230: re-fire when a check_suite completes so auto-merge is
   # re-evaluated after CI finishes. Same `--disable-auto` / `--auto`
   # cycle is what unsticks PRs that go CLEAN+armed-but-not-queued.
+  # `check_suite` and `status` events ALWAYS run in target-repo context
+  # already (they don't have the pull_request fork-token-downgrade quirk),
+  # so they are unchanged by the AISDLC-381 migration.
   check_suite:
     types: [completed]
   # AISDLC-230: status events (used by some external CI providers like
@@ -94,6 +135,9 @@ jobs:
           GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
           GH_REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
+          # AISDLC-381: both pull_request and pull_request_target events
+          # expose the PR number under github.event.pull_request.number with
+          # an identical payload schema, so the same accessor handles both.
           PR_NUMBER_FROM_PR_EVENT: ${{ github.event.pull_request.number }}
           # check_suite + status events expose the head SHA differently.
           # Either field is empty when the OTHER event fires; cat with || true
@@ -101,7 +145,11 @@ jobs:
           HEAD_SHA: ${{ github.event.check_suite.head_sha || github.event.sha || github.sha }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ]; then
+          # AISDLC-381: match BOTH `pull_request` and `pull_request_target`
+          # since the workflow's trigger was migrated to the latter for
+          # fork-PR token elevation; the legacy `pull_request` branch is
+          # kept for forward compatibility if the trigger is ever reverted.
+          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
             echo "pr=$PR_NUMBER_FROM_PR_EVENT" >> "$GITHUB_OUTPUT"
           else
             # Look up the open PR for this head SHA. Pick the first one

@@ -47,9 +47,16 @@ function loadWorkflowPathsIgnore(workflowFile) {
   const wf = JSON.parse(json);
   // 'on' key is serialized as 'True' by PyYAML → json.dumps
   const onBlock = wf['True'];
-  const pathsIgnore = onBlock?.pull_request?.['paths-ignore'];
+  // AISDLC-381: ai-sdlc-review.yml migrated from `pull_request` to
+  // `pull_request_target` so fork PRs get an elevated GITHUB_TOKEN. Check
+  // BOTH event names for the paths-ignore block — whichever one carries
+  // the workflow's PR-event trigger is the source of truth.
+  const pathsIgnore =
+    onBlock?.pull_request?.['paths-ignore'] ?? onBlock?.pull_request_target?.['paths-ignore'];
   if (!Array.isArray(pathsIgnore)) {
-    throw new Error(`Could not find on.pull_request.paths-ignore in ${workflowFile}`);
+    throw new Error(
+      `Could not find on.pull_request.paths-ignore or on.pull_request_target.paths-ignore in ${workflowFile}`,
+    );
   }
   return pathsIgnore;
 }

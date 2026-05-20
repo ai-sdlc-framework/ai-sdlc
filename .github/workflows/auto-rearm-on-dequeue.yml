@@ -4,6 +4,26 @@ name: Auto-rearm auto-merge after merge-queue dequeue
 # clears the auto-merge flag. The operator then has to manually re-arm with
 # `gh pr merge --auto`. This workflow automates that re-arm.
 #
+# ── AISDLC-381: pull_request_target migration (fork-PR support) ──────
+# Same migration rationale as `auto-enable-auto-merge.yml`: on fork PR
+# events `pull_request` ships a read-only GITHUB_TOKEN regardless of the
+# declared `permissions:` block, so any `gh pr merge` / `gh api` call
+# against the upstream repo returns 403. `pull_request_target` runs in
+# the target repo's context with full write permissions. The fork-PR
+# skip policy at the job level (see `Skip forks` below) is unchanged —
+# fork PRs are still excluded from auto-arming.
+#
+# ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
+#    § Fork-PR workflow safety pattern) ────────────────────────────────
+# 1. NO `actions/checkout`. The workflow only invokes `gh pr merge` /
+#    `gh pr view` API calls against the target repo.
+# 2. Fork PR metadata read as DATA only via `gh pr view --json ...`.
+# 3. NO `pnpm install` / `pnpm build` / script execution.
+# 4. NO fork-provided actions used (`uses:` is omitted entirely —
+#    everything runs as bash on ubuntu-latest).
+# 5. `secrets.AI_SDLC_PAT` only flows to `gh pr merge` / `gh pr view`
+#    API calls; never piped to a step that reads fork-controlled input.
+#
 # GitHub doesn't expose a direct "dequeued" event. The workaround is:
 #   1. Re-arm on PR synchronize + ready_for_review (covers force-push + re-sign
 #      cycles that are the most common cause of dequeue + re-arm need).
@@ -24,11 +44,18 @@ name: Auto-rearm auto-merge after merge-queue dequeue
 # Skip: draft PRs, fork PRs, release-please PRs (same guards as auto-enable).
 
 on:
-  pull_request:
+  # AISDLC-381: migrated from `pull_request` to `pull_request_target` so
+  # fork PRs get an elevated GITHUB_TOKEN (the workflow file's body runs
+  # in the target repo's context, not the fork's). The `Skip forks` job
+  # step still excludes fork PRs from auto-rearm; the migration only
+  # fixes the workflow's permission level on the call.
+  pull_request_target:
     types: [synchronize, ready_for_review]
   # Cron: every 5 minutes — catches PRs dequeued between event-driven runs.
   # GitHub cron resolution is ~1 minute; using */5 is the documented minimum
-  # for high-frequency schedules.
+  # for high-frequency schedules. Cron runs ALWAYS execute in target-repo
+  # context (no fork-token-downgrade quirk), so they're unaffected by the
+  # AISDLC-381 migration.
   schedule:
     - cron: '*/5 * * * *'
 
@@ -50,7 +77,10 @@ jobs:
           PR_NUMBER_FROM_EVENT: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = "pull_request" ]; then
+          # AISDLC-381: match BOTH `pull_request` and `pull_request_target`
+          # since the trigger was migrated to the latter for fork-PR token
+          # elevation; the legacy `pull_request` branch is kept defensively.
+          if [ "$EVENT_NAME" = "pull_request" ] || [ "$EVENT_NAME" = "pull_request_target" ]; then
             # Event-driven: only re-arm the PR that triggered us.
             echo "prs=${PR_NUMBER_FROM_EVENT}" >> "$GITHUB_OUTPUT"
           else

@@ -1,7 +1,63 @@
 name: AI-SDLC PR Review
 
+# ── AISDLC-381: pull_request_target migration (fork-PR support) ──────
+# This workflow MUST be able to POST the `Post Review Results` commit
+# status and the PR review comments / inline findings on EVERY PR HEAD
+# (branch protection on main requires the status — see AISDLC-193 +
+# AISDLC-214). On fork PRs, the legacy `pull_request` event silently
+# downgraded GITHUB_TOKEN to read-only, so `gh api .../statuses` returned
+# 403 and the required check sat pending forever (blocking external
+# contributor PRs — incident PR #568 by @akillies).
+#
+# `pull_request_target` runs in the target repo's context with full
+# write permissions even for fork PRs, but it runs against the BASE
+# branch's checkout by default — NOT the PR's HEAD. To run reviewers
+# against the fork's diff we must read fork content as DATA only.
+#
+# ── 5-point safety guard (AISDLC-381 — see docs/operations/operator-runbook.md
+#    § Fork-PR workflow safety pattern) ────────────────────────────────
+#
+# 1. Workflow logic checks out the TARGET repo's main (via the default
+#    `actions/checkout@v4` with no `ref:` — pull_request_target defaults
+#    to the BASE branch tip). All scripts (`scripts/is-docs-only-changeset.mjs`,
+#    pipeline-cli CLIs, the @ai-sdlc/dogfood review subagent) execute
+#    from main's checkout — NEVER from fork content.
+#
+# 2. Fork PR content is checked out into a sandboxed `pr-content/`
+#    subdirectory for READ-ONLY DATA access. The workflow:
+#      - Reads PR diff via `git diff <base>...<head>` (operates on git
+#        objects after `git fetch <fork-clone-url> +<sha>:fork/<sha>`)
+#      - Reads PR comments via `gh pr view --json comments` (target API)
+#      - Reads docs-only filenames via `git diff --name-only` (objects)
+#    None of these consume fork-controlled SHELL or NODE code.
+#
+# 3. NEVER `pnpm install` / `pnpm build` / script execution from the
+#    `pr-content/` sandbox. The analyze job's `pnpm install --frozen-lockfile`
+#    + `pnpm build` operate on MAIN's `package.json` + `pnpm-lock.yaml`
+#    only. A fork-PR `package.json` `preinstall` hook cannot run.
+#
+# 4. NEVER use fork-provided actions. All `uses:` references pin to
+#    vetted publishers (`actions/checkout@v4`, `pnpm/action-setup@v4`,
+#    `actions/setup-node@v4`, `actions/github-script@v7`,
+#    `actions/upload-artifact@v4`).
+#
+# 5. Secrets: `secrets.ANTHROPIC_API_KEY` is used only by the analyze
+#    job, which runs the dogfood reviewer subagent. The reviewer reads
+#    `/tmp/review-diff.txt` (data — fork diff content as a string) as
+#    LLM input. Even if a malicious fork PR attempts a prompt-injection
+#    attack to coerce the LLM into emitting an APPROVE verdict, the
+#    LLM has NO GitHub write capability — the report job posts the
+#    verdict using `github.token` based on a JSON parse. The blast
+#    radius is bounded to "we post APPROVE on a malicious PR"; the
+#    PR still must pass `ai-sdlc/pr-ready` (build/test/coverage gates)
+#    and requires human review to actually merge.
+#    `secrets.MARKER_HMAC_SECRET` and `secrets.SLACK_BOT_TOKEN` are
+#    used only by target-context job steps that take data-only inputs.
+#    No signing keys, NPM tokens, or AI_SDLC_PAT are exposed to any
+#    step that consumes fork-controlled input.
+
 on:
-  pull_request:
+  pull_request_target:
     # AISDLC-218 (revised): keep `opened` (so direct-ready PRs without `--draft`
     # fire CI) AND add `ready_for_review` (canonical fire-once trigger when a
     # draft flips to ready). The job-level `if: !draft` guards skip draft opens
@@ -67,7 +123,9 @@ jobs:
     # AISDLC-218: draft guard for `synchronize` events (which fire on draft
     # pushes too). `merge_group` events are unaffected — drafts can't enter
     # the merge queue.
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
+    # AISDLC-381: include `pull_request_target` in the PR-event match (we
+    # migrated the trigger so this is the PR-event channel now).
+    if: github.event_name == 'merge_group' || github.event.pull_request.draft == false
     permissions:
       contents: read
       statuses: write
@@ -85,17 +143,16 @@ jobs:
             echo "is_merge_group=false" >> "${GITHUB_OUTPUT}"
           fi
 
-      # Always checkout — both event types invoke `node scripts/is-docs-only-changeset.mjs`
-      # which requires the script on disk. (Was previously merge_group-only because
-      # the file enumeration was via gh api for PR events, but the script invocation
-      # always needs the working tree.)
-      - name: Checkout
+      # AISDLC-381 Safety guard #1: checkout the TARGET repo's main (no
+      # `ref:` arg = pull_request_target defaults to the base branch tip).
+      # This is what supplies `scripts/is-docs-only-changeset.mjs`. We
+      # deliberately do NOT checkout the fork's HEAD here — running a
+      # script from the fork's tree under pull_request_target would
+      # execute fork-controlled code with the elevated GITHUB_TOKEN.
+      - name: Checkout target main (workflow logic)
         uses: actions/checkout@v4
         with:
-          # merge_group needs full history for `git diff base...head`; pull_request
-          # only needs the script file but full fetch is harmless.
           fetch-depth: 0
-          ref: ${{ steps.resolve.outputs.head_sha }}
 
       - name: Detect docs-only changeset
         id: detect
@@ -108,10 +165,18 @@ jobs:
           HEAD_SHA: ${{ steps.resolve.outputs.head_sha }}
         run: |
           set -euo pipefail
+          # AISDLC-381 Safety guard #2: file enumeration uses the GitHub
+          # API (`gh api .../pulls/<N>/files`) for pull_request_target
+          # events instead of `git diff <fork-sha>`. The API returns
+          # filenames as DATA strings without requiring local git
+          # reachability of fork-only commits — no fork checkout needed.
+          # For merge_group events the queue ref IS in the upstream repo
+          # so `git diff` works (and is unaffected by the fork concern).
           if [ "${IS_MERGE_GROUP}" = "true" ]; then
             # -c core.quotePath=false emits raw UTF-8 filenames (AISDLC-205 round 3 fix).
             FILES=$(git -c core.quotePath=false diff --name-only "${BASE_SHA}...${HEAD_SHA}")
           else
+            # AISDLC-381: API-based enumeration (DATA-only, no fork checkout).
             FILES=$(gh api "repos/${REPO}/pulls/${PR_NUMBER}/files" --paginate --jq '.[].filename')
           fi
 
@@ -173,12 +238,14 @@ jobs:
   attestation-precheck:
     name: Attestation precheck
     runs-on: ubuntu-latest
-    # AISDLC-214: only run on pull_request events; merge_group events are handled
+    # AISDLC-214: only run on PR events; merge_group events are handled
     # by the docs-only-check job above (which short-circuits with success for
     # docs-only queue commits; code/mixed queue commits rely on verify-attestation.yml).
     # AISDLC-218: also skip drafts (synchronize fires on draft pushes too).
+    # AISDLC-381: trigger migrated to pull_request_target — gate matches both
+    # the new event and the legacy one (forward-compatibility on revert).
     if: >-
-      github.event_name == 'pull_request' &&
+      (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
       !startsWith(github.head_ref, 'release-please--') &&
       github.event.pull_request.draft == false
     permissions:
@@ -189,10 +256,49 @@ jobs:
       # existing analyze + report path runs unchanged.
       skip: ${{ steps.verify.outputs.skip }}
     steps:
+      # AISDLC-381 Safety guard #1: checkout MAIN (no `ref:`) — supplies
+      # scripts/verify-attestation.mjs + the orchestrator runtime barrel.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # AISDLC-381 Safety guard #2: sandboxed fork checkout for DATA-only
+      # envelope access. NEVER `npm/pnpm install` against this directory,
+      # never `cd` into it, never `uses: ./pr-content/...`.
+      - name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
+          path: pr-content
+          persist-credentials: false
+
+      # AISDLC-381 Safety guard #2 (continued): stage the envelope from
+      # the sandbox into main's working tree so the verifier finds it at
+      # the expected `.ai-sdlc/attestations/<head-sha>.dsse.json` path.
+      - name: Stage fork envelope for verifier (DATA-ONLY copy)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p .ai-sdlc/attestations
+          if [ -f "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" ]; then
+            # No globs, no shell expansion. $HEAD_SHA is server-validated 40-char hex.
+            cp -- "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" \
+                  ".ai-sdlc/attestations/${HEAD_SHA}.dsse.json"
+            echo "[attestation-precheck] staged envelope for $HEAD_SHA"
+          else
+            echo "[attestation-precheck] no envelope present; verifier will report missing"
+          fi
+          # Fetch the fork HEAD SHA into main's git store for git diff ops.
+          if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "${{ github.repository }}" ]; then
+            FORK_URL=$(gh api "repos/${HEAD_REPO_FULL}" --jq '.clone_url' 2>/dev/null || echo "")
+            if [ -n "$FORK_URL" ]; then
+              git fetch --no-tags "$FORK_URL" "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}" 2>/dev/null || true
+            fi
+          fi
 
       - uses: pnpm/action-setup@v4
 
@@ -201,6 +307,9 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # AISDLC-381 Safety guard #3: pnpm install reads pnpm-lock.yaml +
+      # package.json from MAIN's checkout — fork content cannot inject a
+      # malicious preinstall/postinstall script here.
       - name: Install (verifier needs the orchestrator runtime barrel)
         run: pnpm install --frozen-lockfile
 
@@ -255,7 +364,8 @@ jobs:
     name: Analyze PR
     needs: [attestation-precheck]
     runs-on: ubuntu-latest
-    if: "github.event_name == 'pull_request' && !startsWith(github.head_ref, 'release-please--') && needs.attestation-precheck.outputs.skip != 'true'"
+    # AISDLC-381: gate matches both pull_request and pull_request_target.
+    if: "(github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && !startsWith(github.head_ref, 'release-please--') && needs.attestation-precheck.outputs.skip != 'true'"
     # AISDLC-142: analyze needs `pull-requests: read` to fetch existing PR
     # comments for the incremental-review marker. Read-only — write happens
     # in the `report` job (which already has `pull-requests: write`).
@@ -285,9 +395,33 @@ jobs:
       budget_aggregate: ${{ steps.budget.outputs.aggregate }}
       budget_exhausted_count: ${{ steps.budget.outputs.exhausted_count }}
     steps:
+      # AISDLC-381 Safety guard #1: checkout MAIN (no `ref:`) — supplies
+      # all reviewer scripts + pipeline-cli + @ai-sdlc/dogfood subagents.
+      # Fork content is NEVER the source of any executable code here.
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      # AISDLC-381 Safety guard #2: fetch the fork HEAD SHA into the main
+      # git store so `git diff <base>...<head>` resolves. We do NOT
+      # checkout fork content into the working tree — we fetch into the
+      # local object database so commits are reachable for diff, but the
+      # working tree remains MAIN. Diff output is text DATA written to
+      # /tmp/pr-diff.txt which the reviewer subagent consumes as a string.
+      - name: Fetch fork PR HEAD SHA into main git store (DATA-ONLY)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "${HEAD_REPO_FULL:-}" ] && [ "$HEAD_REPO_FULL" != "${{ github.repository }}" ]; then
+            FORK_URL=$(gh api "repos/${HEAD_REPO_FULL}" --jq '.clone_url' 2>/dev/null || echo "")
+            if [ -n "$FORK_URL" ]; then
+              git fetch --no-tags "$FORK_URL" "+${HEAD_SHA}:refs/remotes/fork/${HEAD_SHA}" 2>/dev/null \
+                || echo "[analyze] WARN: could not fetch fork HEAD; diff steps may fall back to empty"
+            fi
+          fi
 
       - uses: pnpm/action-setup@v4
 
@@ -296,6 +430,10 @@ jobs:
           node-version: 22
           cache: pnpm
 
+      # AISDLC-381 Safety guard #3: pnpm install + pnpm build operate on
+      # MAIN's lockfile + package.json only. No fork-controlled lifecycle
+      # script can run here (no `node` invocation against pr-content/, and
+      # the working tree is main's only).
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
@@ -307,6 +445,9 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # Generate the diff + a paths-only file for the classifier (AISDLC-141).
+          # AISDLC-381: git operates against fetched objects (base SHA in
+          # main's origin tree + fork HEAD fetched above) — diff output
+          # is captured as DATA into /tmp/pr-*.txt for reviewer consumption.
           git diff "$BASE_SHA"..."$HEAD_SHA" > /tmp/pr-diff.txt
           git diff --name-only "$BASE_SHA"..."$HEAD_SHA" > /tmp/pr-files.txt
 
@@ -747,8 +888,9 @@ jobs:
     name: Post Review Results
     runs-on: ubuntu-latest
     needs: [analyze]
-    # AISDLC-214: only run on pull_request events; merge_group is handled by docs-only-check.
-    if: always() && github.event_name == 'pull_request'
+    # AISDLC-214: only run on PR events; merge_group is handled by docs-only-check.
+    # AISDLC-381: gate matches both pull_request and pull_request_target.
+    if: always() && (github.event_name == 'pull_request' || github.event_name == 'pull_request_target')
     permissions:
       pull-requests: write
       issues: read
@@ -1330,10 +1472,11 @@ jobs:
     name: Post auto-approved verdicts (attestation valid)
     runs-on: ubuntu-latest
     needs: [attestation-precheck, analyze]
-    # AISDLC-214: only run on pull_request events; merge_group is handled by docs-only-check.
+    # AISDLC-214: only run on PR events; merge_group is handled by docs-only-check.
+    # AISDLC-381: gate matches both pull_request and pull_request_target.
     if: |
       always() &&
-      github.event_name == 'pull_request' &&
+      (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
       needs.attestation-precheck.result == 'success' &&
       needs.attestation-precheck.outputs.skip == 'true' &&
       needs.analyze.result == 'skipped'

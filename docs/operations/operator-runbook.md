@@ -1142,6 +1142,211 @@ flag-flip procedure).
 
 ---
 
+## Fork-PR workflow safety pattern (AISDLC-381)
+
+External-contributor PRs from forks (witnessed at PR #568 by @akillies) get
+blocked at the merge queue when the upstream's required status checks
+(`Backlog Drift`, `ai-sdlc/pr-ready`, `ai-sdlc/attestation`) cannot post
+because GitHub silently downgrades GITHUB_TOKEN to read-only on
+`pull_request` events from forks — regardless of the workflow's declared
+`permissions:` block. The fix is to migrate the affected workflows to
+`pull_request_target`, which runs in the upstream repo's context with full
+write permissions even for fork PRs. The footgun: `pull_request_target`
+exposes secrets and write tokens to the workflow, so any execution of
+fork-controlled code under that context is a takeover vector.
+
+### The 5-point safety guard
+
+Every workflow that fires on `pull_request_target` MUST apply ALL FIVE
+of the following constraints. The hermetic test at
+`.github/workflows/__tests__/fork-pr-safety.test.mjs` greps for the
+forbidden patterns; CI fails the PR if any guard is violated. The
+specific workflows currently in scope are:
+
+- `.github/workflows/verify-attestation.yml` (posts `ai-sdlc/attestation`)
+- `.github/workflows/ai-sdlc-review.yml` (posts `Post Review Results` + review comments)
+- `.github/workflows/auto-enable-auto-merge.yml` (arms auto-merge on PR open)
+- `.github/workflows/auto-rearm-on-dequeue.yml` (re-arms after queue dequeue)
+
+#### Guard 1 — Workflow logic checks out the TARGET repo's main, NOT the fork's HEAD
+
+`actions/checkout@v4` with no `ref:` argument defaults to the workflow
+file's source ref. On a `pull_request_target` event that's the BASE
+branch tip (target main), which is exactly what we want — every script
+under `scripts/`, `pipeline-cli/`, `ai-sdlc-plugin/agents/`, etc. is
+sourced from main, never from fork content. A fork PR cannot inject a
+malicious `scripts/verify-attestation.mjs` that runs with `statuses:write`.
+
+CORRECT:
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+    # NO ref: arg — defaults to main
+```
+
+WRONG (executes fork code with target's secrets):
+
+```yaml
+- uses: actions/checkout@v4
+  with:
+    ref: ${{ github.event.pull_request.head.sha }}  # fork content
+```
+
+#### Guard 2 — Fork PR content is read as DATA only, via a sandboxed checkout
+
+When the workflow legitimately needs fork content (e.g. the
+`.ai-sdlc/attestations/<sha>.dsse.json` envelope that the verifier reads
+as JSON), do a SECOND `actions/checkout@v4` with `path: pr-content` so
+the fork tree lands in a sandboxed subdirectory. Subsequent steps:
+
+- READ files from `pr-content/` (e.g. `cp -- pr-content/.ai-sdlc/attestations/<sha>.dsse.json .ai-sdlc/attestations/`)
+- DIFF git objects fetched from the fork SHA (e.g. `git diff <base>...<head>`)
+- Read PR metadata via `gh api .../pulls/<N>/...` (target-context API)
+
+NEVER `cd pr-content/`, `pushd pr-content/`, `node pr-content/<script>`,
+`bash pr-content/<script>`, `./pr-content/<script>`, set
+`working-directory: pr-content`, etc. The sandbox is a DATA source, not
+an execution target.
+
+CORRECT (sandboxed fork checkout for envelope read):
+
+```yaml
+- name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
+  uses: actions/checkout@v4
+  with:
+    fetch-depth: 0
+    ref: ${{ github.event.pull_request.head.sha }}
+    path: pr-content
+    persist-credentials: false   # token never lives in the sandbox
+```
+
+The `persist-credentials: false` is load-bearing: it prevents `git`
+operations from any step that subsequently runs in `pr-content/` from
+authenticating as the workflow's token. Even if guard 3 fails (someone
+adds a `cd pr-content/`), at least the fork code can't talk to the API.
+
+#### Guard 3 — NEVER `pnpm install` / `pnpm build` / script execution against `pr-content/`
+
+`pnpm install` triggers lifecycle scripts (`preinstall`, `install`,
+`postinstall`) defined in `package.json`. A fork's `package.json`
+preinstall hook would run with the workflow's elevated token. The
+workflow's install step MUST run against MAIN's `package.json` and
+`pnpm-lock.yaml`:
+
+CORRECT:
+
+```yaml
+- run: pnpm install --frozen-lockfile  # main's lockfile (default cwd)
+- run: pnpm build                       # main's package.json
+```
+
+WRONG:
+
+```yaml
+- run: cd pr-content && pnpm install   # fork's preinstall fires
+- run: pnpm install --filter ./pr-content/...  # same
+```
+
+The hermetic test greps for these patterns and fails the PR if found.
+
+#### Guard 4 — NEVER use fork-provided actions
+
+Every `uses:` reference MUST be either a vetted publisher (e.g.
+`actions/checkout@v4`, `pnpm/action-setup@v4`) or pinned to a specific
+commit SHA. NEVER a relative-path reference that resolves into fork
+content:
+
+WRONG:
+
+```yaml
+- uses: ./pr-content/.github/actions/my-action  # fork-controlled
+```
+
+CORRECT:
+
+```yaml
+- uses: actions/checkout@v4                     # vetted publisher
+- uses: some-org/some-action@a1b2c3d            # pinned SHA
+```
+
+#### Guard 5 — Minimum-needed secrets; NEVER signing keys into fork context
+
+Workflows under `pull_request_target` MUST declare exactly the
+permissions and secrets they need. Suggested matrix:
+
+| Workflow | `permissions:` | Secrets allowed |
+|---|---|---|
+| `verify-attestation.yml` | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only |
+| `ai-sdlc-review.yml` (docs-only-check) | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only |
+| `ai-sdlc-review.yml` (analyze) | `contents:read`, `pull-requests:read` | `ANTHROPIC_API_KEY`, `MARKER_HMAC_SECRET` |
+| `ai-sdlc-review.yml` (report) | `pull-requests:write`, `issues:read`, `statuses:write` | `github.token`, `SLACK_BOT_TOKEN` |
+| `auto-enable-auto-merge.yml` | `pull-requests:write`, `contents:write` | `AI_SDLC_PAT` |
+| `auto-rearm-on-dequeue.yml` | `pull-requests:write`, `contents:write` | `AI_SDLC_PAT` |
+
+NEVER:
+
+- `AI_SDLC_ATTESTATION_PRIVATE_KEY` (DSSE signing key)
+- `NPM_TOKEN` (release publishing)
+- Any AWS / GCP / cloud-provider credentials
+
+These belong in `release.yml` which fires on `push` to `main` (no fork
+PR triggers). The hermetic test catches accidental references.
+
+The `analyze` job's `ANTHROPIC_API_KEY` is a partial exception: it IS
+exposed to a step that reads fork-controlled content (the PR diff). The
+mitigation is structural — the analyze job has NO GitHub write
+permissions, so even if the LLM is prompt-injected into emitting an
+APPROVE verdict, the JSON output cannot affect the repo. The `report`
+job (which posts the verdict using `github.token`) only consumes the
+verdict as parsed JSON — never as code — and the rollup gate
+`ai-sdlc/pr-ready` (build/test/coverage) plus human review provide
+defense-in-depth.
+
+### Verification
+
+When migrating a new workflow to `pull_request_target`, run the
+hermetic test locally before pushing:
+
+```bash
+pnpm test:fork-pr-safety
+```
+
+The test enforces all 5 guards across every workflow in the
+`AFFECTED_WORKFLOWS` array in `fork-pr-safety.test.mjs`. Add your new
+workflow to that array as part of the migration commit.
+
+### End-to-end fork-PR verification
+
+The hermetic test can't actually create a fork PR — that requires an
+external GitHub account. To prove a migration works end-to-end:
+
+1. Find a contributor with a fork (or create one yourself from a
+   secondary GitHub account)
+2. Have them open a trivial fork PR (e.g. fix a typo)
+3. Watch the workflow run logs: confirm `gh api .../statuses` returns
+   201 (was 403 pre-AISDLC-381), and the three required status checks
+   land green
+4. Watch the merge-queue admission step: confirm the PR is admitted
+   without operator bypass
+
+If a contributor's fork PR is currently blocked (e.g. PR #568), the
+re-trigger procedure is:
+
+```bash
+# Re-run all checks against the existing PR head SHA
+gh pr checks <pr-number>          # confirm current status
+gh workflow run verify-attestation.yml --ref <fork-branch-ref>
+gh workflow run ai-sdlc-review.yml --ref <fork-branch-ref>
+# auto-enable + auto-rearm re-fire automatically on the next push
+# (and via the */5 cron poll for auto-rearm)
+```
+
+If the fork PR still fails after re-trigger, capture the workflow run
+logs and file a backlog task referencing AISDLC-381 + the fork PR
+number for follow-up investigation.
+
 ## Related Documents
 
 - [RFC-0010 — Parallel Execution and Worktree Pooling](../../spec/rfcs/RFC-0010-parallel-execution-worktree-pooling.md) — full normative spec for everything this runbook references
