@@ -69,6 +69,11 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
     const result = runHook(tempDirWithConfig);
     assert.ok(result.output, 'should produce output');
     const parsed = JSON.parse(result.output);
+    assert.equal(
+      parsed.hookSpecificOutput?.hookEventName,
+      'SubagentStart',
+      'should emit hookEventName per Claude Code hook protocol',
+    );
     const ctx = parsed.hookSpecificOutput?.additionalContext;
     assert.ok(ctx, 'should have additionalContext');
     assert.ok(ctx.includes('AI-SDLC Governance (subagent context)'), 'subagent header');

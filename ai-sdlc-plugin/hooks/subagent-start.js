@@ -92,6 +92,7 @@ this — writes outside your cwd that aren't in the allowlist will be denied.`;
 
 const result = {
   hookSpecificOutput: {
+    hookEventName: 'SubagentStart',
     additionalContext: context,
   },
 };

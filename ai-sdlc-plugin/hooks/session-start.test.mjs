@@ -70,6 +70,11 @@ describe('ai-sdlc-plugin session-start hook', () => {
     const result = runHook(tempDirWithConfig);
     assert.ok(result.output, 'should produce output');
     const parsed = JSON.parse(result.output);
+    assert.equal(
+      parsed.hookSpecificOutput?.hookEventName,
+      'SessionStart',
+      'should emit hookEventName per Claude Code hook protocol',
+    );
     const ctx = parsed.hookSpecificOutput?.additionalContext;
     assert.ok(ctx, 'should have additionalContext');
     assert.ok(ctx.includes('AI-SDLC Governance Active'), 'should include governance header');
