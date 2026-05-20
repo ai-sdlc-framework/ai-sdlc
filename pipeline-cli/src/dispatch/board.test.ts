@@ -20,6 +20,7 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { Worker } from 'node:worker_threads';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
@@ -207,26 +208,100 @@ describe('claimNext (atomic claim)', () => {
     expect(fourth.claimed).toBe(false);
   });
 
-  it('two concurrent claim attempts on the same manifest yield exactly one winner (AC #6)', () => {
+  it('two real-concurrent worker threads racing on the same manifest yield exactly one winner (AC #2 / #6)', async () => {
     const boardDir = mkBoard();
     writeManifest(boardDir, mkManifest('AISDLC-400'));
 
-    // Race: invoke claimNext twice with no awaits in between. Because
-    // claimNext is synchronous and renameSync is POSIX-atomic, the first
-    // caller wins; the second sees ENOENT on the rename and falls through
-    // to return claimed:false. The test simulates the race by calling
-    // back-to-back in a tight sequence.
+    const queuePath = path.join(boardDir, 'queue', 'AISDLC-400.dispatch.json');
+    const inflightPath = path.join(boardDir, 'inflight', 'AISDLC-400.dispatch.json');
+
+    // Spawn two worker_threads. Each blocks on a shared SharedArrayBuffer
+    // barrier so they both START the rename at the same instant (not just
+    // "soon after each other in the same JS thread") — that is the only
+    // way to demonstrate kernel-level fs.renameSync atomicity rather than
+    // sequential idempotence. Once Atomics.notify fires, both workers
+    // race their renameSync to inflight/. POSIX guarantees rename
+    // atomicity on the same filesystem: exactly one rename observes the
+    // source file, the other gets ENOENT.
+    //
+    // Each worker reports { won: boolean, errCode?: string } back to the
+    // test. The aggregate invariant: exactly one won === true; the loser
+    // returned errCode === 'ENOENT'. This is what claimNext relies on at
+    // its core — the wrapper's ENOENT handling is already covered by
+    // the back-to-back idempotence assertions elsewhere in this suite.
+    const sab = new SharedArrayBuffer(4);
+    const barrier = new Int32Array(sab);
+    // 1 = workers wait, 0 = go. Initialised at 1; the main thread sets
+    // 0 + Atomics.notify(barrier, 0, 2) to release both workers at once.
+    Atomics.store(barrier, 0, 1);
+
+    const workerSource = `
+      const { parentPort, workerData } = require('node:worker_threads');
+      const fs = require('node:fs');
+      const barrier = new Int32Array(workerData.sab);
+      // Wait until main thread flips barrier[0] to 0.
+      Atomics.wait(barrier, 0, 1);
+      try {
+        fs.renameSync(workerData.src, workerData.dst);
+        parentPort.postMessage({ won: true });
+      } catch (err) {
+        parentPort.postMessage({ won: false, errCode: err && err.code });
+      }
+    `;
+
+    function spawnRacer(): Promise<{ won: boolean; errCode?: string }> {
+      return new Promise((resolve, reject) => {
+        const w = new Worker(workerSource, {
+          eval: true,
+          workerData: { sab, src: queuePath, dst: inflightPath },
+        });
+        w.once('message', (msg: { won: boolean; errCode?: string }) => resolve(msg));
+        w.once('error', reject);
+      });
+    }
+
+    const racerA = spawnRacer();
+    const racerB = spawnRacer();
+
+    // Tiny scheduling yield so both workers are parked in Atomics.wait
+    // before we release them. Without this, an unlucky scheduler may
+    // start racer B's rename before racer A even reaches the wait, which
+    // would still be correct but defeats the "simultaneous start" point.
+    await new Promise((r) => setTimeout(r, 50));
+    Atomics.store(barrier, 0, 0);
+    Atomics.notify(barrier, 0, 2);
+
+    const [a, b] = await Promise.all([racerA, racerB]);
+
+    // Invariants:
+    //   1. Exactly one worker reported won === true.
+    //   2. The losing worker reported ENOENT (the file vanished mid-race).
+    //   3. The destination exists and the source is gone.
+    const winners = [a, b].filter((r) => r.won);
+    const losers = [a, b].filter((r) => !r.won);
+    expect(winners).toHaveLength(1);
+    expect(losers).toHaveLength(1);
+    expect(losers[0]!.errCode).toBe('ENOENT');
+    expect(existsSync(inflightPath)).toBe(true);
+    expect(existsSync(queuePath)).toBe(false);
+  });
+
+  it('sequential claimNext calls are idempotent (the wrapper handles its own ENOENT)', () => {
+    // Companion to the worker_threads race above: this asserts the
+    // claimNext function itself (not just the bare renameSync primitive)
+    // returns `claimed: false` when called against an empty queue or
+    // after the manifest has already been claimed. Together the two
+    // tests cover both layers — POSIX-atomic rename at the kernel and
+    // ENOENT handling at the JS wrapper.
+    const boardDir = mkBoard();
+    writeManifest(boardDir, mkManifest('AISDLC-401'));
     const a = claimNext(boardDir, 'in-session-agent');
     const b = claimNext(boardDir, 'in-session-agent');
-
-    expect([a.claimed, b.claimed].sort()).toEqual([false, true]);
-    if (a.claimed) {
-      expect(a.manifest?.taskId).toBe('AISDLC-400');
-    } else {
-      expect(b.manifest?.taskId).toBe('AISDLC-400');
-    }
-    expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-400.dispatch.json'))).toBe(true);
-    expect(existsSync(path.join(boardDir, 'queue', 'AISDLC-400.dispatch.json'))).toBe(false);
+    expect(a.claimed).toBe(true);
+    expect(a.manifest?.taskId).toBe('AISDLC-401');
+    expect(b.claimed).toBe(false);
+    expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-401.dispatch.json'))).toBe(true);
+    expect(existsSync(path.join(boardDir, 'queue', 'AISDLC-401.dispatch.json'))).toBe(false);
   });
 
   it('3-manifest queue + 2 Worker sessions: each Worker claims a disjoint subset (AC #6)', () => {
@@ -382,6 +457,85 @@ describe('writeVerdict + collectVerdicts', () => {
     ensureBoardDirs(boardDir);
     writeFileSync(path.join(boardDir, 'done', 'BAD.verdict.json'), '{not json', 'utf-8');
     expect(collectVerdicts(boardDir)).toEqual([]);
+  });
+
+  it('reads .diagnostic.json files (written by sweepStaleHeartbeats) from failed/ when includeFailed=true', () => {
+    // Round-2 review finding: collectVerdicts originally filtered only
+    // by VERDICT_SUFFIX, so stale-heartbeat reaps written via
+    // writeDiagnostic (DIAGNOSTIC_SUFFIX) were invisible to the
+    // Conductor even when --include-failed was passed. This test drives
+    // the sweeper, which is the only public caller of writeDiagnostic,
+    // and asserts the resulting diagnostic surfaces in collectVerdicts.
+    const boardDir = mkBoard();
+    // Manifest A: stale → reaped to failed/ as a .diagnostic.json
+    writeManifest(
+      boardDir,
+      mkManifest('AISDLC-950', 'in-session-agent', {
+        dispatchedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+      }),
+    );
+    claimNext(boardDir, 'in-session-agent');
+    // Manifest B: Worker-reported failure → failed/ as a .verdict.json
+    writeManifest(boardDir, mkManifest('AISDLC-951'));
+    claimNext(boardDir, 'in-session-agent');
+    writeVerdict(
+      boardDir,
+      mkVerdict('AISDLC-951', 'failed', {
+        completedAt: '2026-05-20T11:00:00.000Z',
+      }),
+    );
+    // Trigger the sweep; this writes failed/AISDLC-950.diagnostic.json.
+    const sweep = sweepStaleHeartbeats(boardDir, { staleMs: 30 * 60_000 });
+    expect(sweep.reapedTaskIds).toContain('AISDLC-950');
+    expect(existsSync(path.join(boardDir, 'failed', 'AISDLC-950.diagnostic.json'))).toBe(true);
+
+    const collected = collectVerdicts(boardDir, { includeFailed: true });
+    const ids = collected.map((v) => v.taskId);
+    // Both must appear: the .verdict.json (AISDLC-951) and the .diagnostic.json (AISDLC-950).
+    expect(ids).toContain('AISDLC-950');
+    expect(ids).toContain('AISDLC-951');
+    const diag = collected.find((v) => v.taskId === 'AISDLC-950');
+    expect(diag?.cause).toBe('stale-heartbeat');
+    expect(diag?.outcome).toBe('failed');
+  });
+
+  it('does NOT read .diagnostic.json from failed/ when includeFailed=false', () => {
+    // Regression guard: include-failed=false must continue to short-circuit
+    // the failed/ subdir entirely, regardless of which suffix it contains.
+    const boardDir = mkBoard();
+    writeManifest(
+      boardDir,
+      mkManifest('AISDLC-960', 'in-session-agent', {
+        dispatchedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+      }),
+    );
+    claimNext(boardDir, 'in-session-agent');
+    sweepStaleHeartbeats(boardDir, { staleMs: 30 * 60_000 });
+    expect(existsSync(path.join(boardDir, 'failed', 'AISDLC-960.diagnostic.json'))).toBe(true);
+    expect(collectVerdicts(boardDir, { includeFailed: false })).toEqual([]);
+  });
+
+  it('does NOT read .diagnostic.json from done/ (only failed/ accepts that suffix)', () => {
+    // Defensive: ensure the suffix relaxation is scoped to failed/. A
+    // mis-routed .diagnostic.json in done/ would indicate a bug
+    // elsewhere; collectVerdicts should not silently smooth that over.
+    const boardDir = mkBoard();
+    ensureBoardDirs(boardDir);
+    // Hand-craft a diagnostic-shaped JSON in done/ — collectVerdicts
+    // must ignore it (only .verdict.json files are read from done/).
+    writeFileSync(
+      path.join(boardDir, 'done', 'AISDLC-970.diagnostic.json'),
+      JSON.stringify({
+        schemaVersion: 'v1',
+        taskId: 'AISDLC-970',
+        outcome: 'failed',
+        completedAt: '2026-05-20T10:00:00.000Z',
+        workerId: 'rogue',
+        cause: 'stale-heartbeat',
+      }),
+      'utf-8',
+    );
+    expect(collectVerdicts(boardDir, { includeFailed: true })).toEqual([]);
   });
 });
 

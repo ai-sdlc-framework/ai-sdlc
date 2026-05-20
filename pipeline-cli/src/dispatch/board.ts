@@ -240,8 +240,17 @@ export function collectVerdicts(
 
   for (const sub of includeFailed ? (['done', 'failed'] as const) : (['done'] as const)) {
     const dir = path.join(boardDir, sub);
+    // done/ only holds `.verdict.json` files. failed/ holds both `.verdict.json`
+    // (Worker-written failures via writeVerdict) AND `.diagnostic.json` (the
+    // supervisor's sweepStaleHeartbeats writes via writeDiagnostic). We must
+    // read both suffixes from failed/ so the Conductor sees stale-heartbeat
+    // reaps + spawn-rejected paths in the same poll. This mirrors how
+    // countDiagnostics and removeVerdict already handle the dual suffix.
+    const acceptDiagnostic = sub === 'failed';
     for (const entry of safeReaddir(dir)) {
-      if (!entry.endsWith(VERDICT_SUFFIX)) continue;
+      const isVerdict = entry.endsWith(VERDICT_SUFFIX);
+      const isDiagnostic = acceptDiagnostic && entry.endsWith(DIAGNOSTIC_SUFFIX);
+      if (!isVerdict && !isDiagnostic) continue;
       const verdict = readVerdict(path.join(dir, entry));
       if (verdict) verdicts.push(verdict);
     }
