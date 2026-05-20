@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/dispatch-config.v1.schema.json",
+  "title": "AI-SDLC DispatchConfig",
+  "description": "Per-project configuration for the Dispatch Board (RFC-0041 §4.3.3). Lives on disk at .ai-sdlc/dispatch-config.yaml. Declares the default Worker kind, parallelism caps, and per-kind tuning knobs. Phase 1 fields under spec.inSessionAgent are consumed; spec.claudePShell is declared for forward-compat with Phase 2 (AISDLC-377.3).",
+  "type": "object",
+  "required": ["apiVersion", "kind", "spec"],
+  "properties": {
+    "apiVersion": { "$ref": "common.schema.json#/$defs/apiVersion" },
+    "kind": { "type": "string", "const": "DispatchConfig" },
+    "metadata": { "$ref": "common.schema.json#/$defs/metadata" },
+    "spec": {
+      "type": "object",
+      "required": ["defaultWorkerKind"],
+      "properties": {
+        "defaultWorkerKind": {
+          "type": "string",
+          "enum": ["in-session-agent", "claude-p-shell"],
+          "default": "in-session-agent",
+          "description": "Which Worker kind the Conductor assigns when a manifest does not declare one explicitly. Phase 1 default is in-session-agent (subscription-preserving)."
+        },
+        "parallelism": {
+          "type": "object",
+          "description": "Per-kind concurrency caps. The Conductor uses these to apply backpressure: it stops emitting manifests when queue+inflight count for a kind reaches the cap.",
+          "properties": {
+            "inSessionAgentMaxSessions": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 4,
+              "description": "Operator's expected open-terminal count for in-session-agent Workers. The Conductor sizes its dispatch batch against this cap. Set to 0 to disable in-session-agent dispatch entirely."
+            },
+            "claudePShellMaxConcurrent": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "Supervisor concurrent claude -p Worker cap (Phase 2). 0 = supervisor disabled; bump to enable headless dispatch once Phase 2 ships."
+            }
+          },
+          "additionalProperties": false
+        },
+        "inSessionAgent": {
+          "type": "object",
+          "description": "Tuning knobs for the in-session-agent Worker kind.",
+          "properties": {
+            "pollIntervalSec": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 5,
+              "description": "RFC-0041 OQ-6 cost-first bias — in-session-agent Workers poll the queue every 5 seconds (faster than claude-p-shell at 15s) so they preferentially claim 'any' manifests."
+            },
+            "quotaBackoffSec": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 600,
+              "description": "OQ-7 — base cool-down (seconds) after a subscription quota exhaustion (429) when Anthropic's Retry-After header is absent."
+            },
+            "quotaBackoffMaxSec": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3600,
+              "description": "OQ-7 — exponential-backoff ceiling for repeated quota exhaustions."
+            },
+            "quotaBackoffMultiplier": {
+              "type": "number",
+              "minimum": 1,
+              "default": 2,
+              "description": "OQ-7 — multiplier applied per consecutive 429 (capped at quotaBackoffMaxSec)."
+            },
+            "emptyQueueHibernateSec": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 30,
+              "description": "Seconds the in-session-agent Worker waits before re-polling when the queue is empty. Distinct from pollIntervalSec, which applies when work is being claimed."
+            }
+          },
+          "additionalProperties": false
+        },
+        "claudePShell": {
+          "type": "object",
+          "description": "Tuning knobs for the claude-p-shell Worker kind. Read by Phase 2 (AISDLC-377.3); declared in Phase 1 for forward-compat.",
+          "properties": {
+            "pollIntervalSec": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 15,
+              "description": "OQ-6 — supervisor polls every 15 seconds, biased slower than in-session-agent so subscription Workers win 'any' races first."
+            },
+            "watchdogMs": {
+              "type": "integer",
+              "minimum": 60000,
+              "default": 1800000,
+              "description": "Per-Worker wall-clock watchdog (matches ShellClaudePSpawner.DEFAULT_TIMEOUT_MS per OQ-3)."
+            },
+            "supervisorPidFile": {
+              "type": "string",
+              "minLength": 1,
+              "default": ".ai-sdlc/dispatch/.supervisor.pid",
+              "description": "Lock-file location for the supervisor singleton (Phase 2)."
+            }
+          },
+          "additionalProperties": false
+        },
+        "boardDir": {
+          "type": "string",
+          "minLength": 1,
+          "default": ".ai-sdlc/dispatch",
+          "description": "Repo-relative root of the Dispatch Board filesystem layout (queue/inflight/done/failed subdirs)."
+        },
+        "heartbeatStaleSec": {
+          "type": "integer",
+          "minimum": 60,
+          "default": 1800,
+          "description": "OQ-3 — inflight heartbeats older than this are presumed dead. 1800s (30 min) matches ShellClaudePSpawner.DEFAULT_TIMEOUT_MS."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

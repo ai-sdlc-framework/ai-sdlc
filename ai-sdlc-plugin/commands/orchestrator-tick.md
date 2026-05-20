@@ -1,82 +1,80 @@
 ---
 name: orchestrator-tick
 description: >-
-  [SUBSCRIPTION-ONLY PATH post-2026-06-15] Run one orchestrator tick inline —
-  reads the dispatch frontier, invokes the Agent tool for any admitted task (via
-  the ClaudeCliInlineSpawner manifest protocol), writes the result back for the
-  orchestrator tick loop, then wakes again via ScheduleWakeup(30s). Because the
-  Agent tool call runs inside this interactive session turn, it draws from the
-  operator's interactive Max-20x quota — NOT the $200/mo Agent SDK credit pool.
-  Zero incremental cost above the subscription fee. Preferred over
-  `cli-orchestrator tick --spawner claude` (cron/daemon) for high-throughput
-  backlog churning as long as one Claude Code session stays alive. See
-  docs/operations/billing-and-cost-optimization.md §1b. This is the
-  consumer-bridge half of AISDLC-198 Option 3.
+  [SUBSCRIPTION-ONLY PATH post-2026-06-15 — RFC-0041 Phase 1] Run one
+  Conductor tick. Reads the dispatch frontier, emits manifests to the
+  Dispatch Board for Worker sessions to claim, then polls the done/ + failed/
+  subdirs for newly-landed verdicts. For each successful verdict, fans out
+  3 reviewer subagents (foreground Agent calls — within the 600s budget),
+  signs the attestation, pushes the branch, and arms auto-merge. Because
+  reviewers run foreground in this interactive session, they draw the
+  operator's subscription quota — not the Agent SDK credit pool. Pair with
+  one or more sibling sessions running /ai-sdlc dispatch-worker to drain
+  the queue end-to-end at zero incremental cost. See RFC-0041 §4.6 +
+  docs/operations/billing-and-cost-optimization.md §1b.
 argument-hint: "[--once]"
 allowed-tools:
   - Read
   - Bash
-  - Agent(developer, code-reviewer, test-reviewer, security-reviewer)
+  - Agent(code-reviewer, test-reviewer, security-reviewer)
 model: inherit
 ---
 
-Run one autonomous orchestrator tick in the current Claude Code session.
+Run one autonomous orchestrator tick in the current Claude Code session as
+**Conductor** (RFC-0041 §4.2).
 
-This slash command is the **consumer bridge** for the `--spawner claude-cli`
-inline path (AISDLC-225 / RFC-0015). The `ClaudeCliInlineSpawner` (AISDLC-198)
-produces a dispatch manifest; this command reads that manifest, invokes the
-`Agent` tool, writes the result back to disk, and returns control to the
-orchestrator's tick loop.
+This command shifted in RFC-0041 Phase 1 (AISDLC-377.1). The previous
+behavior — invoke `Agent` directly to dispatch dev subagents in-session —
+hit Anthropic's 600s background-agent watchdog (~85% kill rate, RFC-0041
+§2.1). The new flow decouples dispatch from execution: the Conductor only
+emits Dispatch Board manifests; Worker sessions (one or more sibling CC
+sessions running `/ai-sdlc dispatch-worker`) claim them atomically and run
+the dev subagent in their own foreground context.
 
 > **Why this lives in the slash command body (not a subagent).** Plugin
-> subagents cannot use the `Agent` tool — Claude Code filters it out one level
-> deep, regardless of frontmatter declarations. The slash command body runs in
-> the main Claude Code session which DOES have the `Agent` tool. See CLAUDE.md
-> "Why this lives in the slash command body".
+> subagents cannot use the `Agent` tool — Claude Code filters it out one
+> level deep. The reviewer fan-out per verdict must therefore happen here.
 
 ## Hard rules (identical to `/ai-sdlc execute`)
 
 1. **Never merge any PR.** Do not run `gh pr merge`.
-2. **Never force-push.** No `git push --force` / `-f`.
+2. **Never force-push.** Use `--force-with-lease` only after the mandatory rebase.
 3. **Never close PRs or issues.** No `gh pr close`, `gh issue close`.
 4. **Never delete branches.** No `git branch -D` / `-d`.
 5. **Never edit `.ai-sdlc/**` or `.github/workflows/**`.**
 6. **Never run destructive git operations.** No `git reset --hard`.
 7. **Never write CI-skip tokens** (`[skip ci]`, `[ci skip]`, etc.) in commits.
 
-## Protocol overview
+## Protocol overview (RFC-0041 Phase 1)
 
 ```
-/ai-sdlc orchestrator-tick
+/ai-sdlc orchestrator-tick (Conductor)
   │
   ├── 1. Check AI_SDLC_AUTONOMOUS_ORCHESTRATOR is set
-  ├── 2. node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1
-  │         └── if spawner=claude-cli: writes dispatch-manifest.json,
-  │               returns {status: 'manifest-emitted'}
-  ├── 3. Detect manifest-emitted in tick output
-  ├── 4. Read $ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json
-  ├── 5. Invoke Agent tool with manifest parameters
-  ├── 6. Write result to $ARTIFACTS_DIR/_orchestrator/dispatch-result.json
-  ├── 7. node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick (continues pipeline)
-  └── 8. ScheduleWakeup(30s) — OR exit if --once passed
+  ├── 2. Sweep stale heartbeats (reap dead Workers into failed/)
+  ├── 3. Poll done/ subdir — for each new verdict:
+  │       a. Spawn 3 reviewer subagents (foreground Agent calls)
+  │       b. Sign attestation
+  │       c. Push branch + arm auto-merge
+  │       d. Remove the consumed verdict
+  ├── 4. Poll failed/ subdir — escalate diagnostics to operator
+  ├── 5. Peek queue + inflight counts — if under cap, emit new manifests
+  │       (one per frontier-admitted task, via cli-deps frontier)
+  └── 6. ScheduleWakeup(30s) — OR exit if --once passed
 ```
 
-## Path resolution (AISDLC-245.4)
-
-<!-- PATH-RESOLUTION:BEGIN
-  Same convention as /ai-sdlc execute. See ai-sdlc-plugin/README.md
-  "Path resolution conventions" for details.
-PATH-RESOLUTION:END -->
+## Path resolution
 
 ```bash
-# AISDLC-245.4: Resolve pipeline-cli binaries portably.
-#   - Adopter install: $CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin
-#   - Dogfood monorepo (CLAUDE_PLUGIN_DIR unset): ./pipeline-cli/bin
+# Same convention as /ai-sdlc execute (see ai-sdlc-plugin/README.md).
 if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
   PIPELINE_CLI_BIN="$CLAUDE_PLUGIN_DIR/node_modules/@ai-sdlc/pipeline-cli/bin"
+  PLUGIN_SCRIPTS_DIR="$CLAUDE_PLUGIN_DIR/scripts"
 else
   PIPELINE_CLI_BIN="$(pwd)/pipeline-cli/bin"
+  PLUGIN_SCRIPTS_DIR="$(pwd)/ai-sdlc-plugin/scripts"
 fi
+BOARD_DIR="${AI_SDLC_DISPATCH_BOARD_DIR:-$(pwd)/.ai-sdlc/dispatch}"
 ```
 
 ## Step 1 — Feature-flag guard
@@ -88,147 +86,90 @@ if [ -z "$AI_SDLC_AUTONOMOUS_ORCHESTRATOR" ]; then
 fi
 ```
 
-## Step 2 — Run one orchestrator tick
-
-Run the tick via the direct-node invocation pattern (CLAUDE.md "CI behavior" /
-AISDLC-156 — never `pnpm --filter ... exec cli-orchestrator`):
+## Step 2 — Sweep stale heartbeats
 
 ```bash
-# --spawner claude-cli is REQUIRED here: the default changed to `claude` in
-# AISDLC-352 (shell-out via claude -p), but the /ai-sdlc orchestrator-tick
-# slash command body needs `claude-cli` (manifest-emit mode) so it can read
-# the manifest + invoke Agent. Without the explicit flag, the new default
-# silently breaks the subscription-preserving path documented in AISDLC-353.
-TICK_OUTPUT=$(AI_SDLC_AUTONOMOUS_ORCHESTRATOR="$AI_SDLC_AUTONOMOUS_ORCHESTRATOR" \
-  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1 --spawner claude-cli 2>&1)
-TICK_EXIT=$?
-echo "[orchestrator-tick] tick exited $TICK_EXIT"
-echo "$TICK_OUTPUT"
+SWEEP_RESULT=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" sweep --board-dir "$BOARD_DIR")
+echo "[orchestrator-tick] sweep: $SWEEP_RESULT"
 ```
 
-Parse the JSON output to check for `manifest-emitted`:
+The sweeper moves any inflight Workers with stale heartbeats (>30 min by
+default, RFC-0041 OQ-3) to `failed/` with a `stale-heartbeat` diagnostic.
+The Conductor's failed/ poll (Step 4) then escalates.
+
+## Step 3 — Pick up `done/` verdicts and fan out reviewers
 
 ```bash
-# Extract manifest-emitted status from tick outcomes
-MANIFEST_EMITTED=$(echo "$TICK_OUTPUT" | node -e "
-  const chunks = [];
-  process.stdin.on('data', d => chunks.push(d));
-  process.stdin.on('end', () => {
-    const raw = chunks.join('');
-    // Find last JSON object in output (tick emits JSON to stdout)
-    const lines = raw.split('\n').filter(l => l.trim().startsWith('{'));
-    for (let i = lines.length - 1; i >= 0; i--) {
-      try {
-        const obj = JSON.parse(lines[i]);
-        if (obj.ok && obj.tick) {
-          const outcomes = obj.tick.outcomes || [];
-          const emitted = outcomes.find(o => o.manifestEmitted);
-          if (emitted) {
-            process.stdout.write(JSON.stringify(emitted));
-          }
-        }
-        break;
-      } catch {}
-    }
-  });
-" 2>/dev/null)
+VERDICTS_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" collect-verdicts --board-dir "$BOARD_DIR")
+echo "[orchestrator-tick] done/+failed/ verdicts: $VERDICTS_JSON"
 ```
 
-## Step 3 — Detect and handle manifest-emitted dispatches
+For each verdict in the array with `outcome === 'success'`:
 
-When the spawner detected a task to dispatch and emitted a manifest:
+1. Read the PR branch / commit SHA from the verdict.
+2. **Spawn 3 reviewer subagents in parallel** via foreground `Agent` calls:
+   - `code-reviewer` — `Read`/`Bash`/`Grep` tools, reviews the diff
+   - `test-reviewer` — same toolset, focuses on test coverage + ACs
+   - `security-reviewer` — same toolset, security audit
+   Each reviewer subagent fits in <600s (they read diff JSON, emit verdict JSON,
+   exit). The foreground call is what makes this safe — no platform watchdog.
+3. Aggregate the 3 verdicts, write them to `.ai-sdlc/verdicts/<task-id>.json`.
+4. Sign the attestation:
+   ```bash
+   node "$PLUGIN_SCRIPTS_DIR/sign-attestation.mjs" \
+     --review-verdicts ".ai-sdlc/verdicts/<task-id>.json" \
+     --task-id <task-id>
+   ```
+5. Rebase + push the branch (`git fetch origin main && git rebase origin/main && git push --force-with-lease`).
+6. Arm auto-merge: `gh pr merge --auto <PR#>`.
+7. Remove the consumed verdict:
+   ```bash
+   node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" remove-verdict \
+     --board-dir "$BOARD_DIR" --task-id <task-id> --from done
+   ```
+
+For verdicts with `outcome === 'iterate-needed'` (Phase 1.5 / AISDLC-377.2),
+the Conductor will write an iteration resume signal. Phase 1 just escalates
+these to the operator.
+
+## Step 4 — Pick up `failed/` diagnostics
+
+For each verdict with `outcome ∈ {failed, quota-exhausted, blocked}`:
+
+- `quota-exhausted` → set `noClaimBefore` on subsequent in-session-agent
+  manifests for `retryAfter` seconds (OQ-7 cool-down). Do NOT emit new
+  `in-session-agent` manifests during the cool-down window.
+- `failed` (verification-failed, schema-violation, etc.) → escalate via
+  `AskUserQuestion` summarising the diagnostic.
+- `blocked` → the Worker stopped on a precondition (e.g. upstream OQ).
+  Surface the `notes` field to the operator.
+
+Remove the consumed diagnostic from `failed/` after handling.
+
+## Step 5 — Peek board occupancy + emit new manifests
 
 ```bash
-if [ -n "$MANIFEST_EMITTED" ]; then
-  # Resolve the manifest path
-  ARTIFACTS_DIR="${ARTIFACTS_DIR:-$(pwd)/artifacts}"
-  MANIFEST_PATH="$ARTIFACTS_DIR/_orchestrator/dispatch-manifest.json"
-  RESULT_PATH="$ARTIFACTS_DIR/_orchestrator/dispatch-result.json"
-
-  echo "[orchestrator-tick] manifest-emitted: reading $MANIFEST_PATH"
-
-  # Read the manifest
-  MANIFEST=$(cat "$MANIFEST_PATH" 2>/dev/null)
-  if [ -z "$MANIFEST" ]; then
-    echo "ERROR: dispatch-manifest.json not found at $MANIFEST_PATH"
-    exit 1
-  fi
-
-  TASK_ID=$(echo "$MANIFEST" | node -e "const d=[]; process.stdin.on('data',c=>d.push(c)); process.stdin.on('end',()=>{ const m=JSON.parse(d.join('')); process.stdout.write(m.taskId||''); })")
-  SUBAGENT_TYPE=$(echo "$MANIFEST" | node -e "const d=[]; process.stdin.on('data',c=>d.push(c)); process.stdin.on('end',()=>{ const m=JSON.parse(d.join('')); process.stdout.write(m.subagentType||'developer'); })")
-  MODEL=$(echo "$MANIFEST" | node -e "const d=[]; process.stdin.on('data',c=>d.push(c)); process.stdin.on('end',()=>{ const m=JSON.parse(d.join('')); process.stdout.write(m.model||''); })")
-  CWD=$(echo "$MANIFEST" | node -e "const d=[]; process.stdin.on('data',c=>d.push(c)); process.stdin.on('end',()=>{ const m=JSON.parse(d.join('')); process.stdout.write(m.cwd||process.cwd()); })")
-  PROMPT=$(echo "$MANIFEST" | node -e "const d=[]; process.stdin.on('data',c=>d.push(c)); process.stdin.on('end',()=>{ const m=JSON.parse(d.join('')); process.stdout.write(m.prompt||''); })")
-
-  echo "[orchestrator-tick] dispatching $SUBAGENT_TYPE subagent for $TASK_ID (model=$MODEL cwd=$CWD)"
+PEEK_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" peek --board-dir "$BOARD_DIR")
+# Parse PEEK_JSON.queued + .inflight; if their sum < inSessionAgentMaxSessions
+# (default 4, per .ai-sdlc/dispatch-config.yaml spec.parallelism), pick more
+# frontier tasks via:
+#   node "$PIPELINE_CLI_BIN/cli-deps.mjs" frontier --format json
+# For each admitted task, build a DispatchManifest (RFC-0041 §4.4) and write it:
+#   echo '<manifest-json>' > /tmp/manifest.json
+#   node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" write-manifest \
+#     --board-dir "$BOARD_DIR" --json /tmp/manifest.json
 ```
 
-## Step 4 — Invoke the Agent tool
+Backpressure: if `peek.queued + peek.inflight >= inSessionAgentMaxSessions`,
+skip emitting new manifests this tick. The Worker sessions are saturated;
+no point in piling up.
 
-This is where the actual LLM dispatch happens. The Agent tool is invoked with
-the parameters from the manifest. The `subagentType` maps to the
-`ai-sdlc-plugin/agents/<type>.md` system prompt.
+Each manifest declares `workerKind: in-session-agent` (the default per
+`.ai-sdlc/dispatch-config.yaml`). The Conductor MAY override to
+`claude-p-shell` for tasks the operator wants run headlessly (Phase 2 only
+— Phase 1 Worker sessions ignore `claude-p-shell` manifests).
 
-Use the Agent tool to spawn a `$SUBAGENT_TYPE` subagent in `$CWD` with
-`$PROMPT`. Pass `$MODEL` as the model override when set. The subagent runs
-the full developer/reviewer flow and returns a structured JSON result.
-
-After the Agent call completes, write its result to the result file so the
-orchestrator tick loop can continue. The orchestrator session is expected to
-extract three values from the Agent's structured return:
-
-- `$AGENT_RESULT_JSON` — the raw stdout/text the Agent returned (full envelope,
-  for diagnostics).
-- `$DEV_JSON_ENVELOPE` — the developer's JSON return envelope, parsed out of
-  `$AGENT_RESULT_JSON`. This MUST be passed as `--parsed` so the continuation
-  tick can hand a populated `SubagentResult.parsed` to `executePipeline` Steps
-  6+. Without it, `parseDeveloperReturn()` treats `parsed: undefined` as a
-  contract violation and the continuation tick aborts with
-  `developer-json-contract-violated`.
-- `$STATUS` — `"success"` when the Agent returned a well-formed envelope,
-  `"error"` when it failed (Agent tool errored, the developer JSON didn't
-  parse, etc.). REQUIRED — `--status` is `demandOption: true` on the CLI; if
-  omitted, yargs exits 1 and the `2>/dev/null || true` swallows the error,
-  silently making the bridge a no-op.
-
-```bash
-  # Write the Agent result to disk for the orchestrator to consume
-  DISPATCH_START_MS=$(date +%s%3N)
-
-  # ... (Agent tool invocation happens here — this is the live dispatch) ...
-  # The operator session captures the Agent's structured return into
-  # $AGENT_RESULT_JSON, extracts the developer JSON envelope into
-  # $DEV_JSON_ENVELOPE, and decides $STATUS based on whether the dispatch
-  # succeeded.
-
-  # After Agent completes, write dispatch-result.json
-  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" write-dispatch-result \
-    --task-id "$TASK_ID" \
-    --subagent-type "$SUBAGENT_TYPE" \
-    --status "$STATUS" \
-    --output "$AGENT_RESULT_JSON" \
-    --parsed "$DEV_JSON_ENVELOPE" \
-    --result-path "$RESULT_PATH" \
-    --start-ms "$DISPATCH_START_MS" \
-    2>/dev/null || true
-fi
-```
-
-## Step 5 — Continue the tick loop (reads dispatch-result.json)
-
-After the Agent result is written, run the continuation tick that picks up
-`dispatch-result.json` and advances the pipeline to Steps 6+:
-
-```bash
-CONTINUATION_OUTPUT=$(AI_SDLC_AUTONOMOUS_ORCHESTRATOR="$AI_SDLC_AUTONOMOUS_ORCHESTRATOR" \
-  node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs" tick --max-concurrent 1 --spawner claude-cli \
-    --continue-from-result 2>&1)
-echo "[orchestrator-tick] continuation tick: $CONTINUATION_OUTPUT"
-```
-
-## Step 6 — ScheduleWakeup (loop control)
-
-Unless `--once` was passed in `$ARGUMENTS`, schedule the next tick:
+## Step 6 — ScheduleWakeup
 
 ```bash
 ONCE_FLAG="${ARGUMENTS:-}"
@@ -238,40 +179,30 @@ if [ "$ONCE_FLAG" != "--once" ]; then
 fi
 ```
 
-> **Operator loop pattern.** Instead of ScheduleWakeup you can also use
-> `/loop /ai-sdlc orchestrator-tick` which Claude Code natively loops.
-> ScheduleWakeup is preferred when you want the operator to remain in
-> interactive mode between ticks (the wakeup fires in the background while
-> you can still type other commands).
+---
+
+## Why this is safe (no 600s watchdog)
+
+The Conductor:
+
+- Never invokes `Agent(... run_in_background: true)` — the failure mode
+  RFC-0041 §2.1 documented.
+- Only spawns foreground reviewer subagents (each <600s — they read a diff,
+  emit JSON, exit).
+- Does all Worker-bound dispatch through the filesystem-backed Dispatch
+  Board. Workers live in their own CC sessions where the watchdog does not
+  apply.
+
+Operator runbook for opening Worker sessions: see `/ai-sdlc dispatch-worker`.
+Reference manifest emit: see RFC-0041 §4.4. Heartbeat sweep + stale-claim
+recovery: see RFC-0041 §5.2 (WorkerStaleHeartbeat row).
 
 ---
 
-## Implementation note — live Agent invocation
+## Implementation note — legacy `claude-cli` inline-manifest path
 
-When the manifest indicates a `developer` subagent, the slash command body
-invokes the Agent tool to run the `ai-sdlc-plugin/agents/developer.md` system
-prompt with the task prompt from the manifest. This is the same dispatch the
-`/ai-sdlc execute` command does in its Step 5.
-
-The Agent result is a structured JSON object (the developer's return envelope).
-Write it to `$ARTIFACTS_DIR/_orchestrator/dispatch-result.json`:
-
-```json
-{
-  "version": 1,
-  "taskId": "AISDLC-123",
-  "subagentType": "developer",
-  "status": "success",
-  "output": "<raw Agent output>",
-  "parsed": { ...developer JSON return... },
-  "durationMs": 42000,
-  "writtenAt": "2026-05-06T00:00:00.000Z"
-}
-```
-
-The `parsed` field carries the developer's JSON return envelope — the same
-shape `executePipeline()` expects from any `SubagentResult`. The orchestrator
-tick loop reads this file, constructs a `SubagentResult` from it, and
-continues to Steps 6+ (reviewer dispatch, attestation, PR open).
-
-See `docs/operations/orchestrator-inline-loop.md` for the full protocol.
+The pre-RFC-0041 path (`cli-orchestrator tick --spawner claude-cli` +
+in-session `Agent` dispatch) is retained for backward-compat but
+**deprecated**. The Dispatch Board path is preferred for any operator who
+wants to drain >1 task at a time. The legacy path will be removed in
+RFC-0041 Phase 3.3 (AISDLC-377.6) after a one-release deprecation window.

@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/dispatch-verdict.v1.schema.json",
+  "title": "AI-SDLC DispatchVerdict",
+  "description": "Worker-emitted verdict landed at .ai-sdlc/dispatch/done/<task-id>.verdict.json (or failed/ for diagnostics) per RFC-0041 §4.4. The Conductor's done/-pickup loop consumes successful verdicts to fan out reviewer subagents; failed verdicts are routed to the operator via escalation events.",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "outcome",
+    "completedAt",
+    "workerId"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["v1"],
+      "description": "Verdict schema version. Pinned for forward-compat."
+    },
+    "taskId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$",
+      "description": "Backlog task identifier — MUST match the manifest's taskId."
+    },
+    "outcome": {
+      "type": "string",
+      "enum": ["success", "iterate-needed", "failed", "quota-exhausted", "blocked"],
+      "description": "Verdict outcome. 'success' = ready for reviewer fan-out; 'iterate-needed' = Phase 1.5 resume signal (RFC-0015 §5); 'failed' = unrecoverable, Conductor escalates; 'quota-exhausted' = OQ-7 cool-down trigger; 'blocked' = Worker stopped because a precondition (e.g. open upstream OQ) requires operator action."
+    },
+    "commitSha": {
+      "type": ["string", "null"],
+      "description": "Short SHA of the Worker's final commit. Null when outcome is failed/quota-exhausted/blocked AND no commit landed."
+    },
+    "pushedBranch": {
+      "type": ["string", "null"],
+      "description": "The feature branch the Worker pushed (matches manifest.branch on success). Null when nothing pushed."
+    },
+    "prUrl": {
+      "type": ["string", "null"],
+      "description": "GitHub PR URL the Worker (or its developer subagent) opened. Null when the Worker did not open a PR (e.g. Conductor handles PR creation post-attestation)."
+    },
+    "verifications": {
+      "type": "object",
+      "description": "Per-verify-command outcomes. Field keys: build, test, lint, format (plus any extra commands from manifest.spec.verifyCommands).",
+      "properties": {
+        "build": { "type": "string", "enum": ["passed", "failed", "skipped"] },
+        "test": { "type": "string", "enum": ["passed", "failed", "skipped"] },
+        "lint": { "type": "string", "enum": ["passed", "failed", "skipped"] },
+        "format": { "type": "string", "enum": ["passed", "failed", "skipped"] }
+      },
+      "additionalProperties": { "type": "string", "enum": ["passed", "failed", "skipped"] }
+    },
+    "acceptanceCriteriaMet": {
+      "type": "array",
+      "items": { "type": "integer", "minimum": 1 },
+      "description": "Indices of the task's acceptance criteria the Worker self-assessed as met."
+    },
+    "notes": {
+      "type": "string",
+      "description": "Optional Worker-side notes — escalation reason, follow-up tasks, etc."
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp the verdict was emitted."
+    },
+    "workerId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier of the Worker that produced this verdict (e.g. 'worker-<pid>-<rand>' for in-session-agent, 'supervisor-<pid>-<rand>' for claude-p-shell)."
+    },
+    "workerKind": {
+      "type": "string",
+      "enum": ["in-session-agent", "claude-p-shell"],
+      "description": "Which Worker backend produced this verdict. Audit-only — the manifest already declared which kind claimed it."
+    },
+    "retryAfter": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "OQ-7 — when outcome is 'quota-exhausted', how many seconds the Conductor should wait before re-emitting (Anthropic Retry-After header value, default 600)."
+    },
+    "cause": {
+      "type": "string",
+      "description": "When outcome is 'failed' or 'quota-exhausted', a short machine-readable cause code (e.g. 'quota-exhausted', 'stale-heartbeat', 'schema-violation', 'spawn-rejected', 'verification-failed')."
+    },
+    "durationMs": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Worker wall-clock duration in milliseconds from claim to verdict emit."
+    }
+  },
+  "additionalProperties": false
+}

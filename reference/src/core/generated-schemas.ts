@@ -2998,6 +2998,374 @@ export const designSystemBindingSchema = {
   additionalProperties: false,
 } as const;
 
+export const dispatchConfigV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/dispatch-config.v1.schema.json',
+  title: 'AI-SDLC DispatchConfig',
+  description:
+    'Per-project configuration for the Dispatch Board (RFC-0041 §4.3.3). Lives on disk at .ai-sdlc/dispatch-config.yaml. Declares the default Worker kind, parallelism caps, and per-kind tuning knobs. Phase 1 fields under spec.inSessionAgent are consumed; spec.claudePShell is declared for forward-compat with Phase 2 (AISDLC-377.3).',
+  type: 'object',
+  required: ['apiVersion', 'kind', 'spec'],
+  properties: {
+    apiVersion: { $ref: 'common.schema.json#/$defs/apiVersion' },
+    kind: { type: 'string', const: 'DispatchConfig' },
+    metadata: { $ref: 'common.schema.json#/$defs/metadata' },
+    spec: {
+      type: 'object',
+      required: ['defaultWorkerKind'],
+      properties: {
+        defaultWorkerKind: {
+          type: 'string',
+          enum: ['in-session-agent', 'claude-p-shell'],
+          default: 'in-session-agent',
+          description:
+            'Which Worker kind the Conductor assigns when a manifest does not declare one explicitly. Phase 1 default is in-session-agent (subscription-preserving).',
+        },
+        parallelism: {
+          type: 'object',
+          description:
+            'Per-kind concurrency caps. The Conductor uses these to apply backpressure: it stops emitting manifests when queue+inflight count for a kind reaches the cap.',
+          properties: {
+            inSessionAgentMaxSessions: {
+              type: 'integer',
+              minimum: 0,
+              default: 4,
+              description:
+                "Operator's expected open-terminal count for in-session-agent Workers. The Conductor sizes its dispatch batch against this cap. Set to 0 to disable in-session-agent dispatch entirely.",
+            },
+            claudePShellMaxConcurrent: {
+              type: 'integer',
+              minimum: 0,
+              default: 0,
+              description:
+                'Supervisor concurrent claude -p Worker cap (Phase 2). 0 = supervisor disabled; bump to enable headless dispatch once Phase 2 ships.',
+            },
+          },
+          additionalProperties: false,
+        },
+        inSessionAgent: {
+          type: 'object',
+          description: 'Tuning knobs for the in-session-agent Worker kind.',
+          properties: {
+            pollIntervalSec: {
+              type: 'integer',
+              minimum: 1,
+              default: 5,
+              description:
+                "RFC-0041 OQ-6 cost-first bias — in-session-agent Workers poll the queue every 5 seconds (faster than claude-p-shell at 15s) so they preferentially claim 'any' manifests.",
+            },
+            quotaBackoffSec: {
+              type: 'integer',
+              minimum: 1,
+              default: 600,
+              description:
+                "OQ-7 — base cool-down (seconds) after a subscription quota exhaustion (429) when Anthropic's Retry-After header is absent.",
+            },
+            quotaBackoffMaxSec: {
+              type: 'integer',
+              minimum: 1,
+              default: 3600,
+              description: 'OQ-7 — exponential-backoff ceiling for repeated quota exhaustions.',
+            },
+            quotaBackoffMultiplier: {
+              type: 'number',
+              minimum: 1,
+              default: 2,
+              description:
+                'OQ-7 — multiplier applied per consecutive 429 (capped at quotaBackoffMaxSec).',
+            },
+            emptyQueueHibernateSec: {
+              type: 'integer',
+              minimum: 1,
+              default: 30,
+              description:
+                'Seconds the in-session-agent Worker waits before re-polling when the queue is empty. Distinct from pollIntervalSec, which applies when work is being claimed.',
+            },
+          },
+          additionalProperties: false,
+        },
+        claudePShell: {
+          type: 'object',
+          description:
+            'Tuning knobs for the claude-p-shell Worker kind. Read by Phase 2 (AISDLC-377.3); declared in Phase 1 for forward-compat.',
+          properties: {
+            pollIntervalSec: {
+              type: 'integer',
+              minimum: 1,
+              default: 15,
+              description:
+                "OQ-6 — supervisor polls every 15 seconds, biased slower than in-session-agent so subscription Workers win 'any' races first.",
+            },
+            watchdogMs: {
+              type: 'integer',
+              minimum: 60000,
+              default: 1800000,
+              description:
+                'Per-Worker wall-clock watchdog (matches ShellClaudePSpawner.DEFAULT_TIMEOUT_MS per OQ-3).',
+            },
+            supervisorPidFile: {
+              type: 'string',
+              minLength: 1,
+              default: '.ai-sdlc/dispatch/.supervisor.pid',
+              description: 'Lock-file location for the supervisor singleton (Phase 2).',
+            },
+          },
+          additionalProperties: false,
+        },
+        boardDir: {
+          type: 'string',
+          minLength: 1,
+          default: '.ai-sdlc/dispatch',
+          description:
+            'Repo-relative root of the Dispatch Board filesystem layout (queue/inflight/done/failed subdirs).',
+        },
+        heartbeatStaleSec: {
+          type: 'integer',
+          minimum: 60,
+          default: 1800,
+          description:
+            'OQ-3 — inflight heartbeats older than this are presumed dead. 1800s (30 min) matches ShellClaudePSpawner.DEFAULT_TIMEOUT_MS.',
+        },
+      },
+      additionalProperties: false,
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+export const dispatchManifestV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/dispatch-manifest.v1.schema.json',
+  title: 'AI-SDLC DispatchManifest',
+  description:
+    "Dispatch manifest written by the Conductor to .ai-sdlc/dispatch/queue/<task-id>.dispatch.json and picked up by a Worker (RFC-0041 §4.4). One file per dispatched task; the manifest's full lifecycle is queue/ → inflight/ (atomic rename on claim) → done/ (verdict landed) or failed/ (diagnostic landed). Phase 1 only the in-session-agent Worker kind is implemented; claude-p-shell is declared here for forward-compat with Phase 2 (AISDLC-377.3).",
+  type: 'object',
+  required: [
+    'schemaVersion',
+    'taskId',
+    'branch',
+    'worktree',
+    'baseSha',
+    'workerKind',
+    'dispatchedAt',
+    'dispatchedBy',
+    'spec',
+  ],
+  properties: {
+    schemaVersion: {
+      type: 'string',
+      enum: ['v1'],
+      description:
+        "Manifest schema version. Pinned so older Workers can refuse manifests they don't understand.",
+    },
+    taskId: {
+      type: 'string',
+      minLength: 1,
+      pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$',
+      description: "Stable backlog task identifier (e.g. 'AISDLC-305', 'AISDLC-377.1').",
+    },
+    branch: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "The feature branch the Worker will commit + push to. Format: 'ai-sdlc/<task-id-lower>-<slug>'.",
+    },
+    worktree: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Path to the per-task git worktree (relative to project root, e.g. '.worktrees/aisdlc-305') where the Worker will operate.",
+    },
+    baseSha: {
+      type: 'string',
+      minLength: 7,
+      description:
+        'Git SHA the worktree was forked from. Used by the Worker to detect drift (origin/main may have moved during dispatch latency).',
+    },
+    workerKind: {
+      type: 'string',
+      enum: ['in-session-agent', 'claude-p-shell', 'any'],
+      description:
+        "Which Worker backend may claim this manifest. 'in-session-agent' (Phase 1) = foreground Agent call in an operator-opened CC session, draws subscription quota. 'claude-p-shell' (Phase 2) = supervisor-spawned claude -p subprocess, draws Agent SDK credit pool post-2026-06-15. 'any' = first-available wins.",
+    },
+    dispatchedAt: {
+      type: 'string',
+      format: 'date-time',
+      description: 'ISO-8601 timestamp the Conductor wrote the manifest.',
+    },
+    dispatchedBy: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Short identifier of the Conductor that wrote this manifest (e.g. 'conductor-session-<short-uuid>'). Audit-only; the Dispatch Board does not enforce single-Conductor.",
+    },
+    spec: {
+      type: 'object',
+      required: ['taskFile', 'verifyCommands'],
+      description:
+        'Worker-side execution parameters. The Conductor authors these once; the Worker treats them as authoritative.',
+      properties: {
+        taskFile: {
+          type: 'string',
+          minLength: 1,
+          description:
+            "Repo-relative path to the backlog task file (e.g. 'backlog/tasks/aisdlc-305 - feat-...md').",
+        },
+        model: {
+          type: 'string',
+          minLength: 1,
+          description:
+            "Optional model override (e.g. 'claude-sonnet-4-6'). When absent the Worker uses its default per-role model.",
+        },
+        budgetMs: {
+          type: 'integer',
+          minimum: 60000,
+          description:
+            'Per-Worker wall-clock budget in milliseconds. Default 1800000 (30 min) — matches ShellClaudePSpawner.DEFAULT_TIMEOUT_MS per RFC-0041 OQ-3.',
+        },
+        verifyCommands: {
+          type: 'array',
+          minItems: 1,
+          items: { type: 'string', minLength: 1 },
+          description:
+            "Shell commands the Worker MUST run before commit (e.g. ['pnpm build', 'pnpm test', 'pnpm lint', 'pnpm format:check']).",
+        },
+        permittedExternalPaths: {
+          type: 'array',
+          items: { type: 'string', minLength: 1 },
+          description:
+            'Optional sibling-repo allowlist passed through from the backlog task frontmatter. PreToolUse hook honors these.',
+        },
+      },
+      additionalProperties: false,
+    },
+    iterationsAttempted: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Phase 1.5 (AISDLC-377.2) — number of iteration cycles already burned. Initialized to 0 by the Conductor; incremented by the Worker on resume.',
+    },
+    iterationBudget: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'Phase 1.5 (AISDLC-377.2) — max iteration count before escalation (RFC-0015 §5 budget=2 default). Declared in Phase 1 for forward-compat; Phase 1 Workers ignore it.',
+    },
+    lastSessionId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured on first attempt for context-preserving resume. Phase 1 Workers do not set this.',
+    },
+    noClaimBefore: {
+      type: 'string',
+      format: 'date-time',
+      description:
+        'OQ-7 (RFC-0041) — quota-backoff gate. When set, Workers MUST refuse to claim this manifest until the wall-clock passes this timestamp. Used by the Conductor to honor Anthropic Retry-After after a 429.',
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+export const dispatchVerdictV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/dispatch-verdict.v1.schema.json',
+  title: 'AI-SDLC DispatchVerdict',
+  description:
+    "Worker-emitted verdict landed at .ai-sdlc/dispatch/done/<task-id>.verdict.json (or failed/ for diagnostics) per RFC-0041 §4.4. The Conductor's done/-pickup loop consumes successful verdicts to fan out reviewer subagents; failed verdicts are routed to the operator via escalation events.",
+  type: 'object',
+  required: ['schemaVersion', 'taskId', 'outcome', 'completedAt', 'workerId'],
+  properties: {
+    schemaVersion: {
+      type: 'string',
+      enum: ['v1'],
+      description: 'Verdict schema version. Pinned for forward-compat.',
+    },
+    taskId: {
+      type: 'string',
+      minLength: 1,
+      pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$',
+      description: "Backlog task identifier — MUST match the manifest's taskId.",
+    },
+    outcome: {
+      type: 'string',
+      enum: ['success', 'iterate-needed', 'failed', 'quota-exhausted', 'blocked'],
+      description:
+        "Verdict outcome. 'success' = ready for reviewer fan-out; 'iterate-needed' = Phase 1.5 resume signal (RFC-0015 §5); 'failed' = unrecoverable, Conductor escalates; 'quota-exhausted' = OQ-7 cool-down trigger; 'blocked' = Worker stopped because a precondition (e.g. open upstream OQ) requires operator action.",
+    },
+    commitSha: {
+      type: ['string', 'null'],
+      description:
+        "Short SHA of the Worker's final commit. Null when outcome is failed/quota-exhausted/blocked AND no commit landed.",
+    },
+    pushedBranch: {
+      type: ['string', 'null'],
+      description:
+        'The feature branch the Worker pushed (matches manifest.branch on success). Null when nothing pushed.',
+    },
+    prUrl: {
+      type: ['string', 'null'],
+      description:
+        'GitHub PR URL the Worker (or its developer subagent) opened. Null when the Worker did not open a PR (e.g. Conductor handles PR creation post-attestation).',
+    },
+    verifications: {
+      type: 'object',
+      description:
+        'Per-verify-command outcomes. Field keys: build, test, lint, format (plus any extra commands from manifest.spec.verifyCommands).',
+      properties: {
+        build: { type: 'string', enum: ['passed', 'failed', 'skipped'] },
+        test: { type: 'string', enum: ['passed', 'failed', 'skipped'] },
+        lint: { type: 'string', enum: ['passed', 'failed', 'skipped'] },
+        format: { type: 'string', enum: ['passed', 'failed', 'skipped'] },
+      },
+      additionalProperties: { type: 'string', enum: ['passed', 'failed', 'skipped'] },
+    },
+    acceptanceCriteriaMet: {
+      type: 'array',
+      items: { type: 'integer', minimum: 1 },
+      description: "Indices of the task's acceptance criteria the Worker self-assessed as met.",
+    },
+    notes: {
+      type: 'string',
+      description: 'Optional Worker-side notes — escalation reason, follow-up tasks, etc.',
+    },
+    completedAt: {
+      type: 'string',
+      format: 'date-time',
+      description: 'ISO-8601 timestamp the verdict was emitted.',
+    },
+    workerId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Identifier of the Worker that produced this verdict (e.g. 'worker-<pid>-<rand>' for in-session-agent, 'supervisor-<pid>-<rand>' for claude-p-shell).",
+    },
+    workerKind: {
+      type: 'string',
+      enum: ['in-session-agent', 'claude-p-shell'],
+      description:
+        'Which Worker backend produced this verdict. Audit-only — the manifest already declared which kind claimed it.',
+    },
+    retryAfter: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        "OQ-7 — when outcome is 'quota-exhausted', how many seconds the Conductor should wait before re-emitting (Anthropic Retry-After header value, default 600).",
+    },
+    cause: {
+      type: 'string',
+      description:
+        "When outcome is 'failed' or 'quota-exhausted', a short machine-readable cause code (e.g. 'quota-exhausted', 'stale-heartbeat', 'schema-violation', 'spawn-rejected', 'verification-failed').",
+    },
+    durationMs: {
+      type: 'integer',
+      minimum: 0,
+      description: 'Worker wall-clock duration in milliseconds from claim to verdict emit.',
+    },
+  },
+  additionalProperties: false,
+} as const;
+
 export const dorConfigV1Schema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/dor-config.v1.schema.json',
@@ -5611,6 +5979,9 @@ export const SCHEMAS: Record<string, object> = {
   'deps-snapshot.v1.schema.json': depsSnapshotV1Schema,
   'design-intent-document.schema.json': designIntentDocumentSchema,
   'design-system-binding.schema.json': designSystemBindingSchema,
+  'dispatch-config.v1.schema.json': dispatchConfigV1Schema,
+  'dispatch-manifest.v1.schema.json': dispatchManifestV1Schema,
+  'dispatch-verdict.v1.schema.json': dispatchVerdictV1Schema,
   'dor-config.v1.schema.json': dorConfigV1Schema,
   'orchestrator-events.v1.schema.json': orchestratorEventsV1Schema,
   'pipeline.schema.json': pipelineSchema,

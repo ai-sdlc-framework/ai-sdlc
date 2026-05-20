@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ai-sdlc.io/schemas/v1alpha1/dispatch-manifest.v1.schema.json",
+  "title": "AI-SDLC DispatchManifest",
+  "description": "Dispatch manifest written by the Conductor to .ai-sdlc/dispatch/queue/<task-id>.dispatch.json and picked up by a Worker (RFC-0041 §4.4). One file per dispatched task; the manifest's full lifecycle is queue/ → inflight/ (atomic rename on claim) → done/ (verdict landed) or failed/ (diagnostic landed). Phase 1 only the in-session-agent Worker kind is implemented; claude-p-shell is declared here for forward-compat with Phase 2 (AISDLC-377.3).",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "taskId",
+    "branch",
+    "worktree",
+    "baseSha",
+    "workerKind",
+    "dispatchedAt",
+    "dispatchedBy",
+    "spec"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "enum": ["v1"],
+      "description": "Manifest schema version. Pinned so older Workers can refuse manifests they don't understand."
+    },
+    "taskId": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$",
+      "description": "Stable backlog task identifier (e.g. 'AISDLC-305', 'AISDLC-377.1')."
+    },
+    "branch": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The feature branch the Worker will commit + push to. Format: 'ai-sdlc/<task-id-lower>-<slug>'."
+    },
+    "worktree": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Path to the per-task git worktree (relative to project root, e.g. '.worktrees/aisdlc-305') where the Worker will operate."
+    },
+    "baseSha": {
+      "type": "string",
+      "minLength": 7,
+      "description": "Git SHA the worktree was forked from. Used by the Worker to detect drift (origin/main may have moved during dispatch latency)."
+    },
+    "workerKind": {
+      "type": "string",
+      "enum": ["in-session-agent", "claude-p-shell", "any"],
+      "description": "Which Worker backend may claim this manifest. 'in-session-agent' (Phase 1) = foreground Agent call in an operator-opened CC session, draws subscription quota. 'claude-p-shell' (Phase 2) = supervisor-spawned claude -p subprocess, draws Agent SDK credit pool post-2026-06-15. 'any' = first-available wins."
+    },
+    "dispatchedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO-8601 timestamp the Conductor wrote the manifest."
+    },
+    "dispatchedBy": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short identifier of the Conductor that wrote this manifest (e.g. 'conductor-session-<short-uuid>'). Audit-only; the Dispatch Board does not enforce single-Conductor."
+    },
+    "spec": {
+      "type": "object",
+      "required": ["taskFile", "verifyCommands"],
+      "description": "Worker-side execution parameters. The Conductor authors these once; the Worker treats them as authoritative.",
+      "properties": {
+        "taskFile": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the backlog task file (e.g. 'backlog/tasks/aisdlc-305 - feat-...md')."
+        },
+        "model": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional model override (e.g. 'claude-sonnet-4-6'). When absent the Worker uses its default per-role model."
+        },
+        "budgetMs": {
+          "type": "integer",
+          "minimum": 60000,
+          "description": "Per-Worker wall-clock budget in milliseconds. Default 1800000 (30 min) — matches ShellClaudePSpawner.DEFAULT_TIMEOUT_MS per RFC-0041 OQ-3."
+        },
+        "verifyCommands": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Shell commands the Worker MUST run before commit (e.g. ['pnpm build', 'pnpm test', 'pnpm lint', 'pnpm format:check'])."
+        },
+        "permittedExternalPaths": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Optional sibling-repo allowlist passed through from the backlog task frontmatter. PreToolUse hook honors these."
+        }
+      },
+      "additionalProperties": false
+    },
+    "iterationsAttempted": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Phase 1.5 (AISDLC-377.2) — number of iteration cycles already burned. Initialized to 0 by the Conductor; incremented by the Worker on resume."
+    },
+    "iterationBudget": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Phase 1.5 (AISDLC-377.2) — max iteration count before escalation (RFC-0015 §5 budget=2 default). Declared in Phase 1 for forward-compat; Phase 1 Workers ignore it."
+    },
+    "lastSessionId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured on first attempt for context-preserving resume. Phase 1 Workers do not set this."
+    },
+    "noClaimBefore": {
+      "type": "string",
+      "format": "date-time",
+      "description": "OQ-7 (RFC-0041) — quota-backoff gate. When set, Workers MUST refuse to claim this manifest until the wall-clock passes this timestamp. Used by the Conductor to honor Anthropic Retry-After after a 429."
+    }
+  },
+  "additionalProperties": false
+}

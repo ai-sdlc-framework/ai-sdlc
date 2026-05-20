@@ -1,7 +1,7 @@
 ---
 id: AISDLC-377.1
 title: 'feat(dispatch): RFC-0041 Phase 1 — Dispatch Board protocol + in-session-agent Worker'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-20'
 labels:

@@ -40,7 +40,8 @@
     "cli-verify-attestation-debug": "bin/cli-verify-attestation-debug.mjs",
     "cli-quality-corpus": "bin/cli-quality-corpus.mjs",
     "cli-quality": "bin/cli-quality.mjs",
-    "cli-dor-check": "bin/cli-dor-check.mjs"
+    "cli-dor-check": "bin/cli-dor-check.mjs",
+    "cli-dispatch": "bin/cli-dispatch.mjs"
   },
   "exports": {
     ".": {
@@ -86,6 +87,10 @@
     "./orchestrator": {
       "types": "./dist/orchestrator/index.d.ts",
       "import": "./dist/orchestrator/index.js"
+    },
+    "./dispatch": {
+      "types": "./dist/dispatch/index.d.ts",
+      "import": "./dist/dispatch/index.js"
     },
     "./estimation": {
       "types": "./dist/estimation/index.d.ts",

@@ -1,0 +1,35 @@
+# Reference DispatchConfig for the Dispatch Board (RFC-0041 §4.3.3).
+# Phase 1 default — in-session-agent only, subscription-quota preserving.
+# Operators copy this to .ai-sdlc/dispatch-config.yaml as a starting point.
+apiVersion: ai-sdlc.io/v1alpha1
+kind: DispatchConfig
+metadata:
+  name: ai-sdlc-dispatch
+spec:
+  # Subscription-quota preserving (RFC-0041 §4.3.1 / AISDLC-353).
+  # Switch to 'claude-p-shell' only after Phase 2 (AISDLC-377.3) ships AND
+  # you accept Agent SDK credit pool / API-token billing post-2026-06-15.
+  defaultWorkerKind: in-session-agent
+
+  parallelism:
+    # Bound the Conductor's manifest emission to the number of CC sessions
+    # the operator is expected to keep open. Increase as you scale terminals.
+    inSessionAgentMaxSessions: 4
+    # Phase 2 supervisor disabled until claude-p-shell Workers ship.
+    claudePShellMaxConcurrent: 0
+
+  inSessionAgent:
+    pollIntervalSec: 5 # RFC-0041 OQ-6 cost-first bias
+    quotaBackoffSec: 600 # OQ-7 base cool-down on 429
+    quotaBackoffMaxSec: 3600 # OQ-7 exponential ceiling
+    quotaBackoffMultiplier: 2 # OQ-7 doubling per consecutive 429
+    emptyQueueHibernateSec: 30 # Hibernate when queue empty
+
+  # Phase 2 forward-compat — Workers ignore this until claude-p-shell ships.
+  claudePShell:
+    pollIntervalSec: 15
+    watchdogMs: 1800000 # 30 min, matches ShellClaudePSpawner default
+    supervisorPidFile: .ai-sdlc/dispatch/.supervisor.pid
+
+  boardDir: .ai-sdlc/dispatch
+  heartbeatStaleSec: 1800 # 30 min — RFC-0041 OQ-3

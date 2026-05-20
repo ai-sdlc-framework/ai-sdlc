@@ -1,9 +1,11 @@
 /**
- * Tests for the /ai-sdlc orchestrator-tick slash command (AISDLC-225).
+ * Tests for the /ai-sdlc orchestrator-tick slash command.
  *
- * This is the consumer-bridge slash command that reads the dispatch manifest
- * produced by `ClaudeCliInlineSpawner`, invokes the Agent tool, and writes
- * the result back for the orchestrator tick loop.
+ * Original purpose (AISDLC-225): guard the legacy claude-cli inline-manifest
+ * consumer-bridge contract. Replaced by RFC-0041 Phase 1 (AISDLC-377.1):
+ * the Conductor now emits Dispatch Board manifests + polls done/+failed/
+ * verdicts in foreground; Worker sessions running /ai-sdlc dispatch-worker
+ * own the actual `Agent` dispatch.
  *
  * Body-contract assertions read from `orchestrator-tick.md` itself,
  * mirroring the pattern in `execute.test.mjs`.
@@ -64,34 +66,44 @@ describe('/ai-sdlc orchestrator-tick frontmatter', () => {
     assert.ok(Array.isArray(frontmatter['allowed-tools']), 'allowed-tools must be an array');
   });
 
-  it('grants Agent tool access (the core reason this lives in a slash command)', () => {
+  it('grants Agent tool access for reviewer fan-out', () => {
     const tools = frontmatter['allowed-tools'];
     assert.ok(Array.isArray(tools), 'allowed-tools must be an array');
     const hasAgent = tools.some((t) => t === 'Agent' || t.startsWith('Agent('));
     assert.ok(
       hasAgent,
-      'orchestrator-tick must grant the Agent tool so it can dispatch subagents inline. Got: ' +
+      'orchestrator-tick must grant the Agent tool so it can fan out reviewer subagents. Got: ' +
         JSON.stringify(tools),
     );
   });
 
-  it('grants Agent access to developer subagent type', () => {
+  it('grants Agent access to the 3 reviewer subagent types (RFC-0041 Phase 1)', () => {
     const tools = frontmatter['allowed-tools'];
     const agentTool = tools.find((t) => t.startsWith('Agent('));
     if (agentTool) {
+      // Conductor only fans out reviewers; the developer subagent is invoked
+      // by Workers in their own CC sessions (not in this slash command).
       assert.ok(
-        agentTool.includes('developer'),
-        'Agent tool grant must include developer subagent type',
+        agentTool.includes('code-reviewer'),
+        'Agent tool grant must include code-reviewer subagent type',
+      );
+      assert.ok(
+        agentTool.includes('test-reviewer'),
+        'Agent tool grant must include test-reviewer subagent type',
+      );
+      assert.ok(
+        agentTool.includes('security-reviewer'),
+        'Agent tool grant must include security-reviewer subagent type',
       );
     }
   });
 
-  it('grants Bash tool (needed to run cli-orchestrator and read files)', () => {
+  it('grants Bash tool (needed to run cli-dispatch + cli-deps)', () => {
     const tools = frontmatter['allowed-tools'];
     assert.ok(Array.isArray(tools) && tools.includes('Bash'), 'Bash must be in allowed-tools');
   });
 
-  it('grants Read tool (needed to read dispatch manifest)', () => {
+  it('grants Read tool', () => {
     const tools = frontmatter['allowed-tools'];
     assert.ok(Array.isArray(tools) && tools.includes('Read'), 'Read must be in allowed-tools');
   });
@@ -101,7 +113,7 @@ describe('/ai-sdlc orchestrator-tick frontmatter', () => {
   });
 });
 
-describe('/ai-sdlc orchestrator-tick body — consumer bridge protocol', () => {
+describe('/ai-sdlc orchestrator-tick body — RFC-0041 Phase 1 Dispatch Board protocol', () => {
   it('references the feature flag AI_SDLC_AUTONOMOUS_ORCHESTRATOR', () => {
     assert.ok(
       cmdBody.includes('AI_SDLC_AUTONOMOUS_ORCHESTRATOR'),
@@ -109,55 +121,60 @@ describe('/ai-sdlc orchestrator-tick body — consumer bridge protocol', () => {
     );
   });
 
-  it('uses direct-node invocation for cli-orchestrator via $PIPELINE_CLI_BIN (AISDLC-156, AISDLC-245.4)', () => {
-    // AISDLC-245.4: the bare relative path `node pipeline-cli/bin/cli-orchestrator.mjs`
-    // was replaced with `node "$PIPELINE_CLI_BIN/cli-orchestrator.mjs"` so the command
-    // works in adopter installs (CLAUDE_PLUGIN_DIR set) and the dogfood monorepo.
+  it('uses direct-node invocation for cli-dispatch via $PIPELINE_CLI_BIN', () => {
     assert.ok(
-      cmdBody.includes('cli-orchestrator.mjs'),
-      'must reference cli-orchestrator.mjs binary',
+      cmdBody.includes('cli-dispatch.mjs'),
+      'must reference cli-dispatch.mjs binary for Dispatch Board operations',
     );
     assert.ok(
       cmdBody.includes('PIPELINE_CLI_BIN'),
-      'must use $PIPELINE_CLI_BIN variable for cli-orchestrator invocation (AISDLC-245.4)',
+      'must use $PIPELINE_CLI_BIN variable for portable invocation (AISDLC-245.4)',
     );
     assert.ok(
-      !cmdBody.includes('node pipeline-cli/bin/cli-orchestrator.mjs'),
-      'must NOT use bare relative path node pipeline-cli/bin/... (AISDLC-245.4)',
-    );
-    assert.ok(
-      !cmdBody.includes('pnpm --filter @ai-sdlc/pipeline-cli exec cli-orchestrator'),
-      'must NOT invoke cli-orchestrator via pnpm exec (AISDLC-156)',
+      !cmdBody.includes('pnpm --filter @ai-sdlc/pipeline-cli exec cli-dispatch'),
+      'must NOT invoke cli-dispatch via pnpm exec (AISDLC-156)',
     );
   });
 
-  it('references the dispatch manifest path', () => {
+  it('references the Dispatch Board subdirectories', () => {
     assert.ok(
-      cmdBody.includes('dispatch-manifest.json'),
-      'must reference dispatch-manifest.json to read the manifest',
+      cmdBody.match(/queue\/|inflight\/|done\/|failed\//),
+      'must reference at least one Dispatch Board subdir name (queue/inflight/done/failed)',
     );
   });
 
-  it('references the dispatch result path', () => {
+  it('describes verdict pickup from done/', () => {
     assert.ok(
-      cmdBody.includes('dispatch-result.json'),
-      'must reference dispatch-result.json to write the Agent result',
+      /collect-verdicts|done\//.test(cmdBody),
+      'must describe polling done/ verdicts via collect-verdicts',
     );
   });
 
-  it('references manifest-emitted status detection', () => {
+  it('describes manifest emission via write-manifest', () => {
     assert.ok(
-      cmdBody.includes('manifest-emitted'),
-      'must detect manifest-emitted status from the tick output',
+      cmdBody.includes('write-manifest'),
+      'must describe emitting manifests via write-manifest subcommand',
     );
   });
 
-  it('references ScheduleWakeup or loop control', () => {
-    const hasScheduleWakeup = cmdBody.includes('ScheduleWakeup');
-    const hasLoop = cmdBody.includes('/loop');
+  it('references the stale-heartbeat sweep', () => {
     assert.ok(
-      hasScheduleWakeup || hasLoop,
-      'must reference ScheduleWakeup or /loop for loop control',
+      cmdBody.includes('sweep'),
+      'must reference the sweep subcommand for stale-heartbeat reclamation',
+    );
+  });
+
+  it('references the dispatch-worker companion slash command', () => {
+    assert.ok(
+      cmdBody.includes('dispatch-worker'),
+      'must point operators at /ai-sdlc dispatch-worker for Worker sessions',
+    );
+  });
+
+  it('references ScheduleWakeup for loop control', () => {
+    assert.ok(
+      cmdBody.includes('ScheduleWakeup'),
+      'must reference ScheduleWakeup for autonomous loop continuation',
     );
   });
 
@@ -168,18 +185,8 @@ describe('/ai-sdlc orchestrator-tick body — consumer bridge protocol', () => {
     );
   });
 
-  it('references the orchestrator-inline-loop documentation', () => {
-    assert.ok(
-      cmdBody.includes('orchestrator-inline-loop'),
-      'must reference docs/operations/orchestrator-inline-loop.md',
-    );
-  });
-
-  it('references ARTIFACTS_DIR for resolving manifest and result paths', () => {
-    assert.ok(
-      cmdBody.includes('ARTIFACTS_DIR'),
-      'must use ARTIFACTS_DIR to resolve paths (consistent with ClaudeCliInlineSpawner)',
-    );
+  it('references RFC-0041 as the source of truth', () => {
+    assert.ok(cmdBody.includes('RFC-0041'), 'must cite RFC-0041 as the architecture reference');
   });
 });
 
@@ -191,10 +198,19 @@ describe('/ai-sdlc orchestrator-tick body — hard rules', () => {
     );
   });
 
-  it('declares the no-force-push rule', () => {
+  it('declares the no-force-push (or force-with-lease) rule', () => {
     assert.ok(
-      cmdBody.includes('Never force-push') || cmdBody.includes('no.*force-push'),
-      'must declare the no-force-push rule',
+      cmdBody.includes('Never force-push') ||
+        cmdBody.includes('no.*force-push') ||
+        cmdBody.includes('--force-with-lease'),
+      'must declare force-push policy (Never force-push, or only --force-with-lease)',
+    );
+  });
+
+  it('forbids editing .ai-sdlc/** and .github/workflows/**', () => {
+    assert.ok(
+      cmdBody.includes('.ai-sdlc') && cmdBody.includes('.github/workflows'),
+      'must declare the governance no-edit list',
     );
   });
 });
@@ -211,54 +227,10 @@ describe('/ai-sdlc orchestrator-tick body — AISDLC-245.4 path resolution', () 
     );
   });
 
-  it('all cli-orchestrator invocations use $PIPELINE_CLI_BIN, not bare relative paths', () => {
-    // Every actual invocation must use the portable variable.
-    // Prose explanations of the OLD pattern are allowed in backtick-quoted spans.
-    const lines = cmdBody.split('\n');
-    const violations = lines.filter((line) => {
-      const trimmed = line.trimStart();
-      if (trimmed.startsWith('#') || trimmed.startsWith('>') || trimmed.startsWith('//'))
-        return false;
-      // Strip backtick-quoted spans (inline code in prose warnings) before checking
-      const lineWithoutBackticks = line.replace(/`[^`]*`/g, '``');
-      return /\bnode pipeline-cli\/bin\//.test(lineWithoutBackticks);
-    });
-    assert.equal(
-      violations.length,
-      0,
-      `Found bare relative-path invocations (must use $PIPELINE_CLI_BIN):\n${violations.join('\n')}`,
-    );
-  });
-
   it('includes dogfood fallback when CLAUDE_PLUGIN_DIR is unset', () => {
     assert.ok(
       cmdBody.includes('pipeline-cli/bin'),
       'must include fallback path to dogfood monorepo pipeline-cli/bin',
-    );
-  });
-});
-
-describe('/ai-sdlc orchestrator-tick body — dispatch result protocol', () => {
-  it('describes the dispatch-result.json shape', () => {
-    assert.ok(
-      cmdBody.includes('"version"') ||
-        cmdBody.includes('version:') ||
-        cmdBody.includes('writtenAt'),
-      'must describe the dispatch-result.json shape',
-    );
-  });
-
-  it('describes the Agent invocation step', () => {
-    assert.ok(
-      cmdBody.includes('Agent tool'),
-      'must describe invoking the Agent tool with manifest parameters',
-    );
-  });
-
-  it('mentions the subagent type mapping from manifest', () => {
-    assert.ok(
-      cmdBody.includes('subagentType') || cmdBody.includes('SUBAGENT_TYPE'),
-      'must reference subagentType from the manifest',
     );
   });
 });

@@ -158,3 +158,31 @@ export {
   type Resolver,
   type ResolverOpts,
 } from './dor/index.js';
+
+// RFC-0041 Phase 1 (AISDLC-377.1) — Dispatch Board protocol + in-session-agent Worker.
+export {
+  claimNext as dispatchClaimNext,
+  collectVerdicts as dispatchCollectVerdicts,
+  DEFAULT_BOARD_DIR as DISPATCH_DEFAULT_BOARD_DIR,
+  DEFAULT_HEARTBEAT_STALE_MS as DISPATCH_DEFAULT_HEARTBEAT_STALE_MS,
+  ensureBoardDirs as dispatchEnsureBoardDirs,
+  peekQueue as dispatchPeekQueue,
+  readHeartbeat as dispatchReadHeartbeat,
+  releaseInflight as dispatchReleaseInflight,
+  removeVerdict as dispatchRemoveVerdict,
+  sweepStaleHeartbeats as dispatchSweepStaleHeartbeats,
+  writeHeartbeat as dispatchWriteHeartbeat,
+  writeManifest as dispatchWriteManifest,
+  writeVerdict as dispatchWriteVerdict,
+  type BoardSubdir as DispatchBoardSubdir,
+  type ClaimResult as DispatchClaimResult,
+  type DispatchManifest,
+  type DispatchVerdict,
+  type InflightHeartbeat as DispatchInflightHeartbeat,
+  type ManifestWorkerKind as DispatchManifestWorkerKind,
+  type QueueCounts as DispatchQueueCounts,
+  type SweepResult as DispatchSweepResult,
+  type VerdictOutcome as DispatchVerdictOutcome,
+  type VerificationStatus as DispatchVerificationStatus,
+  type WorkerKind as DispatchWorkerKind,
+} from './dispatch/index.js';
