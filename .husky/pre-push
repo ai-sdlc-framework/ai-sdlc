@@ -33,7 +33,13 @@
 #      ORDER: MUST run BEFORE attestation-sign (item 5 below) so the
 #      squashed HEAD is the one the attestation is signed against.
 #      No-op when there is 0 or 1 chore-sign commit at HEAD.
-#   5. Auto-sign attestation (AISDLC-133) — when the worktree has an active
+#   5. DoR gate (AISDLC-370) — runs `cli-dor-check --task <path>` against any
+#      `backlog/{tasks,completed}/*.md` files staged in this push, so DoR
+#      violations (gate-2 markers, gate-3 unresolved references, gate-7
+#      dependency phrases, upstream-OQ blocks) fail locally before CI cycles.
+#      ORDER: AFTER task-move (paths may have just changed) and BEFORE
+#      attestation-sign so a DoR-failed task body doesn't get signed.
+#   6. Auto-sign attestation (AISDLC-133) — when the worktree has an active
 #      task + reviewer verdict file but no attestation at current HEAD, signs
 #      a chore commit on top + exits 1 with "re-push required". This removes
 #      the sign-attestation step from /ai-sdlc execute's LLM responsibility
@@ -42,12 +48,16 @@
 # Skip individual gates with their respective env vars
 # (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_TASK_MOVE=1,
 # AI_SDLC_SKIP_MCP_BUNDLE_SYNC=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
-# AI_SDLC_SKIP_ATTESTATION_SIGN=1)
+# AI_SDLC_SKIP_DOR_GATE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
 
 set -euo pipefail
+
+# Read git's pre-push stdin once so multiple gates can consume the range info.
+# (AISDLC-370: DoR gate uses the push range to walk touched task files.)
+PUSH_STDIN="$(cat || true)"
 
 ./scripts/check-coverage.sh
 ./scripts/check-task-moved.sh
@@ -55,4 +65,5 @@ set -euo pipefail
 if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
   ./scripts/squash-attestation-chores.sh
 fi
+printf '%s\n' "$PUSH_STDIN" | ./scripts/check-dor-gate.sh
 ./scripts/check-attestation-sign.sh

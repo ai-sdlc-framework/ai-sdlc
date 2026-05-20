@@ -12,7 +12,7 @@
   "scripts": {
     "typecheck": "pnpm -r --parallel exec tsc --noEmit",
     "build": "pnpm -r build",
-    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:sign-attestation-gate && pnpm test:verify-attestation-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:docs-only-classifier && pnpm test:audit-gate && pnpm test:mcp-bundle-sync-gate && pnpm test:drop-stale-envelope",
+    "test": "pnpm -r test && pnpm docs:test && pnpm docs:check && pnpm test:publishable && pnpm rfc:test && pnpm rfc:check && pnpm test:drift-gate && pnpm test:task-move-gate && pnpm test:attestation-sign-gate && pnpm test:sign-attestation-gate && pnpm test:verify-attestation-gate && pnpm test:orchestrator-state-gate && pnpm test:gate-workflow && pnpm test:review-workflow && pnpm test:docs-only-classifier && pnpm test:audit-gate && pnpm test:mcp-bundle-sync-gate && pnpm test:drop-stale-envelope && pnpm test:dor-gate",
     "test:coverage": "pnpm -r test:coverage",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -38,6 +38,7 @@
     "test:audit-gate": "node --test scripts/audit-with-ignores.test.mjs",
     "test:mcp-bundle-sync-gate": "node --test scripts/check-mcp-bundle-sync.test.mjs",
     "test:drop-stale-envelope": "node --test scripts/drop-stale-attestation-envelope.test.mjs",
+    "test:dor-gate": "node --test scripts/check-dor-gate.test.mjs",
     "rfc:check": "node scripts/check-rfc-docs.mjs",
     "rfc:test": "node --test scripts/check-rfc-docs.test.mjs && node --test scripts/check-rfc-lifecycle-transitions.test.mjs",
     "rfc:lifecycle-check": "node scripts/check-rfc-lifecycle-transitions.mjs",

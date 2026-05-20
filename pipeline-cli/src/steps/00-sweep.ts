@@ -142,7 +142,6 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
       // non-zero exit returns code != 0 instead of throwing). Either way,
       // we don't have a reliable signal that the tree is clean.
       if (status.code !== 0) {
-        // eslint-disable-next-line no-console
         console.warn(
           `[step-0-sweep] ${branch}: SKIPPED removal — git status check failed ` +
             `(exit ${status.code}) at ${wt}. Conservative skip; inspect manually.`,
@@ -153,7 +152,7 @@ export async function sweepMergedWorktrees(opts: SweepOptions): Promise<SweepRes
         // Dirty worktree — skip removal, log + leave for operator to inspect.
         // Not pushing this to `swept` so the consumer (orchestrator loop)
         // doesn't emit a misleading OrchestratorWorktreeSwept event.
-        // eslint-disable-next-line no-console
+
         console.warn(
           `[step-0-sweep] ${branch}: SKIPPED removal — worktree has uncommitted changes ` +
             `at ${wt} despite PR being MERGED. Inspect manually before re-running.`,
