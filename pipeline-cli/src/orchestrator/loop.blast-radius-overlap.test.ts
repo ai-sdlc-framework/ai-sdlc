@@ -154,6 +154,15 @@ describe('runOrchestratorTick — blast-radius overlap integration (Major 3)', (
       escalate: async () => {},
       parentBranchGuard: async () => {},
       emitEvent: (ev) => emittedEvents.push(ev),
+      // AISDLC-300: hermetic AlreadyInFlight stub — prevents the subprocess
+      // detection signal (c) from firing when a live `claude --print` process
+      // for a fixture task ID (e.g. AISDLC-300) happens to match the running
+      // dev subagent's argv. The test comment says "fully hermetic: no real gh,
+      // no real filesystem access" — subprocess detection must be suppressed too.
+      alreadyInFlightOpts: {
+        detectSubprocess: false,
+        listOpenPRs: () => [],
+      },
       blastRadiusOverlapOpts: {
         // AISDLC-100 has an open PR from a prior tick — visible to all candidates.
         // Branch name uses canonical ai-sdlc/aisdlc-NNN pattern so extractTaskIdFromBranch resolves it.
