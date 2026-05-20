@@ -1,7 +1,7 @@
 ---
 id: AISDLC-380
 title: 'feat(attestation): require reviewer-side proof of provenance in the verdict file — dev subagent must not be able to forge approval'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:
