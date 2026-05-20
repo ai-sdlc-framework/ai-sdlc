@@ -28,24 +28,24 @@ Removes the legacy `--spawner claude-cli` path entirely. This is a **breaking ch
 
 ### Deliverables
 
-1. **Remove `--spawner claude-cli` handling** from `pipeline-cli/src/cli/cli-orchestrator.ts`:
+1. **Remove the spawner kind handling** from the cli-orchestrator source under pipeline-cli/src/cli/:
    - Delete the spawner kind from the CLI's argument parser
-   - Delete `pipeline-cli/src/runtime/claude-cli-spawner.ts`
-   - Delete tests under `pipeline-cli/src/runtime/claude-cli-spawner.test.ts`
+   - Delete the claude-cli inline spawner module under pipeline-cli/src/runtime/spawners/ (path: claude-cli-inline.ts in current repo layout)
+   - Delete its co-located test file
 
 2. **Update CLAUDE.md** to remove the deprecated row entirely from the spawner kinds table
 
-3. **Update `pipeline-cli/docs/spawner.md`** to remove the "Deprecated" section
+3. **Update the pipeline-cli spawner docs** (under pipeline-cli/docs/) to remove the Deprecated section
 
-4. **Operator migration breadcrumb**: keep a brief `docs/operations/migrating-from-claude-cli-spawner.md` for one more release in case anyone still has the deprecated form in a script
+4. **Operator migration breadcrumb**: ship a brief migration doc under docs/operations/ for one more release in case anyone still has the deprecated form in a script
 
 ## Acceptance criteria
 
-- [ ] #1 `claude-cli` spawner code + tests removed from `pipeline-cli/`
-- [ ] #2 `cli-orchestrator tick --spawner claude-cli` now errors with: `Unknown spawner kind 'claude-cli'. See docs/operations/migrating-from-claude-cli-spawner.md.`
-- [ ] #3 CLAUDE.md + `pipeline-cli/docs/spawner.md` no longer reference `claude-cli` (except in the migration breadcrumb)
-- [ ] #4 `docs/operations/migrating-from-claude-cli-spawner.md` exists with the recommended replacement paths
-- [ ] #5 No `Agent(... run_in_background: true)` calls remain in the dispatch hot path (grep test in CI)
+- [ ] #1 claude-cli spawner code + tests removed from pipeline-cli
+- [ ] #2 cli-orchestrator tick --spawner claude-cli now errors with an Unknown-spawner-kind message pointing at the new migration doc
+- [ ] #3 CLAUDE.md + pipeline-cli docs no longer reference claude-cli (except in the migration breadcrumb)
+- [ ] #4 The new docs/operations/ migration breadcrumb exists with the recommended replacement paths
+- [ ] #5 No Agent(... run_in_background: true) calls remain in the dispatch hot path (grep test in CI)
 - [ ] #6 New code reaches 80%+ patch coverage (mostly removal — coverage drops are expected and gate-allowed)
 
 ## Out of scope

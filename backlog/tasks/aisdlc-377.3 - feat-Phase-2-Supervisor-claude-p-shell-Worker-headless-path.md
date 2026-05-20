@@ -25,47 +25,47 @@ Phase 2 adds the **`claude-p-shell` Worker kind** + the **supervisor daemon** th
 
 ### Deliverables
 
-1. **`pipeline-cli/bin/cli-dispatch-supervisor.mjs`** (~150 LOC target):
-   - Tiny Node daemon (per OQ-1: lives in `pipeline-cli/bin/`, NOT a separate package)
-   - Polls `.ai-sdlc/dispatch/queue/` every `claudePShell.pollIntervalSec` (default 15s per OQ-6 cost-first bias)
-   - For each manifest with `workerKind ∈ {claude-p-shell, any}`: atomic-rename to `inflight/`, spawn `env -u CLAUDECODE claude -p ...` subprocess (per RFC §4.4 environment isolation)
-   - Concurrency cap: `claudePShellMaxConcurrent` from `dispatch-config.yaml`
-   - Stale-heartbeat sweeper: any inflight manifest with `state.json.lastHeartbeat > 30 min ago` (per OQ-3) → kill PID + move to `failed/` with `cause: stale-heartbeat`
-   - PID file at `.ai-sdlc/dispatch/.supervisor.pid`; refuse to start if live PID already exists
+1. **A new supervisor daemon bin under pipeline-cli/bin/** (~150 LOC target):
+   - Tiny Node daemon (per OQ-1: lives in the pipeline-cli bins, NOT a separate package)
+   - Polls the dispatch queue subdir every claudePShell.pollIntervalSec (default 15s per OQ-6 cost-first bias)
+   - For each manifest with workerKind ∈ {claude-p-shell, any}: atomic-rename to the inflight subdir, spawn an env -u CLAUDECODE claude -p subprocess (per RFC §4.4 environment isolation)
+   - Concurrency cap: claudePShellMaxConcurrent from the dispatch-config
+   - Stale-heartbeat sweeper: any inflight manifest with lastHeartbeat > 30 min ago (per OQ-3) → kill PID + move to failed subdir with cause: stale-heartbeat
+   - A supervisor PID file inside .ai-sdlc/dispatch/; refuse to start if live PID already exists
    - Inherits operator env (per OQ-2): no new auth mode
 
-2. **`pnpm` scripts** (root `package.json`):
-   - `supervisor:start` → `node pipeline-cli/bin/cli-dispatch-supervisor.mjs start`
-   - `supervisor:status` → reads PID file + signals 0 to check liveness; prints stats (inflight count, queue depth)
-   - `supervisor:stop` → reads PID, `kill -TERM`, waits, force-kill if needed
+2. **pnpm scripts in root package.json**:
+   - supervisor:start → invokes the new supervisor bin
+   - supervisor:status → reads PID file + signals 0 to check liveness; prints stats (inflight count, queue depth)
+   - supervisor:stop → reads PID, kill -TERM, waits, force-kill if needed
 
-3. **Operator install docs** (`docs/operations/dispatch-supervisor-install.md`):
-   - macOS `launchd` plist template
-   - Linux `systemd --user` unit template
-   - Manual `tmux` pane recipe
+3. **A new operator install runbook under docs/operations/**:
+   - macOS launchd plist template
+   - Linux systemd --user unit template
+   - Manual tmux pane recipe
    - Troubleshooting (stale PID, log inspection, restart procedure)
 
-4. **Conductor cost-warning UX** — when Conductor emits the first manifest with `workerKind: claude-p-shell` (or `any` that gets claimed by shell) in a session:
-   - Print: `[dispatch-board] First claude-p-shell manifest emitted this session. Post-2026-06-15, this draws Agent SDK credit pool (~$200/mo Max-20x). Estimated cost per task: ~$X.YY based on rolling average.`
-   - Computed from `pipeline-cli/src/cost-governance.ts` rolling ledger
-   - Suppressible via `dispatch-config.yaml` `spec.claudePShell.suppressCostWarning: true`
+4. **Conductor cost-warning UX** — when Conductor emits the first manifest with workerKind: claude-p-shell (or any that gets claimed by shell) in a session:
+   - Print a one-line cost notice naming the post-2026-06-15 Agent SDK credit pool draw with an estimate per task from the rolling cost ledger
+   - Estimate computed from the existing cost-governance module under pipeline-cli/src/ (search for the cost-governance source)
+   - Suppressible via a dispatch-config suppressCostWarning flag
 
 5. **Failure modes** per RFC §5.2:
-   - `WorkerSupervisorMissing` (Conductor side): queue manifests accumulating + no live PID → AskUserQuestion to operator
-   - `WorkerSpawnRefused` (supervisor side): `claude -p` exits immediately non-zero → `failed/` with `cause: spawn-rejected`
-   - `WorkerStaleHeartbeat`: per OQ-3 sweep above
+   - WorkerSupervisorMissing (Conductor side): queue manifests accumulating + no live PID → AskUserQuestion to operator
+   - WorkerSpawnRefused (supervisor side): claude -p exits immediately non-zero → failed-diagnostic written with cause: spawn-rejected
+   - WorkerStaleHeartbeat: per OQ-3 sweep above
 
 ## Acceptance criteria
 
-- [ ] #1 `cli-dispatch-supervisor.mjs` exists in `pipeline-cli/bin/`, ≤200 LOC, registered in `pipeline-cli/package.json` bin section
+- [ ] #1 The new supervisor bin exists under pipeline-cli/bin/, ≤200 LOC, registered in pipeline-cli's package.json bin section
 - [ ] #2 Supervisor performs atomic rename for claim (test: 2 concurrent spawn attempts → exactly one wins)
-- [ ] #3 PID file management: refuses second start when first is live; `supervisor:stop` cleans up gracefully
-- [ ] #4 Stale heartbeat sweep fires at 30-min threshold per OQ-3; SIGTERM Worker; manifest moves to `failed/`
-- [ ] #5 `env -u CLAUDECODE` confirmed before spawn (test: spawn under `CLAUDECODE=1` env, child process sees it unset)
-- [ ] #6 `docs/operations/dispatch-supervisor-install.md` published with launchd plist + systemd unit + manual recipe
-- [ ] #7 Conductor cost-warning fires on first `claude-p-shell` manifest emission per session; uses rolling cost ledger
+- [ ] #3 PID file management: refuses second start when first is live; supervisor:stop cleans up gracefully
+- [ ] #4 Stale heartbeat sweep fires at 30-min threshold per OQ-3; SIGTERM Worker; manifest moves to failed subdir
+- [ ] #5 env -u CLAUDECODE confirmed before spawn (test: spawn under CLAUDECODE=1 env, child process sees it unset)
+- [ ] #6 The new docs/operations/ install runbook published with launchd plist + systemd unit + manual recipe
+- [ ] #7 Conductor cost-warning fires on first claude-p-shell manifest emission per session; uses rolling cost ledger
 - [ ] #8 Hermetic test: 3-manifest queue + supervisor with mock spawn (subprocess stub) → 3 verdicts collected, supervisor concurrency cap respected
-- [ ] #9 End-to-end acceptance: supervisor running in tmux pane (operator-started); Conductor in separate CC session emits `claude-p-shell` manifest; PR lands; supervisor process count returns to 0
+- [ ] #9 End-to-end acceptance: supervisor running in tmux pane (operator-started); Conductor in separate CC session emits claude-p-shell manifest; PR lands; supervisor process count returns to 0
 - [ ] #10 New code reaches 80%+ patch coverage
 
 ## Out of scope

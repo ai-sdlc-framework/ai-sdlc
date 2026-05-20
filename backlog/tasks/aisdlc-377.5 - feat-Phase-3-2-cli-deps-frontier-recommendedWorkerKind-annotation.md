@@ -32,29 +32,23 @@ For each frontier task, recommend:
 
 ### Deliverables
 
-1. **Heuristic implementation** in `pipeline-cli/src/cli/cli-deps.ts`:
-   - Read `dispatch-config.yaml` for `claudePShellMaxConcurrent`
-   - Read subscription quota utilization from `$ARTIFACTS_DIR/_ledger/`
-   - Read `estimatedTokens` from task frontmatter (RFC-0010 §6.5)
-   - Output `recommendedWorkerKind` column
+1. **Heuristic implementation** in the cli-deps source under pipeline-cli/src/cli/:
+   - Read the dispatch-config for claudePShellMaxConcurrent
+   - Read subscription quota utilization from the artifacts ledger directory
+   - Read estimatedTokens from task frontmatter (RFC-0010 §6.5)
+   - Output a recommendedWorkerKind column
 
-2. **Table format update**:
-```
-ID            Title                      EffPri  CPL  Deps      RecKind         Notes
------------   -----------------------    ------  ---  --------  --------------- -----
-AISDLC-378.1  feat: small docs change    3       0    (none)    in-session-agent
-AISDLC-379    feat: huge RFC-0010 phase  4       2    AISDLC-X  claude-p-shell  high tokens
-```
+2. **Table format update**: add a new column (RecKind) between Deps and Notes; populate per the heuristic above. Illustrative shape only; no actual task IDs in this row description.
 
-3. **Format flags**: `--format json` emits the field; `--format table` adds the column; legacy callers unaffected
+3. **Format flags**: json format emits the field; table format adds the column; legacy callers unaffected
 
 ## Acceptance criteria
 
-- [ ] #1 `recommendedWorkerKind` field added to `cli-deps frontier --format json` output (one of `in-session-agent | claude-p-shell | any`)
-- [ ] #2 `--format table` includes new `RecKind` column
-- [ ] #3 Heuristic implemented per §Scope; reads `dispatch-config.yaml` + quota utilization + task `estimatedTokens`
-- [ ] #4 When `dispatch-config.yaml` absent or `claudePShellMaxConcurrent: 0`, every entry recommends `in-session-agent`
-- [ ] #5 When task `estimatedTokens` absent, recommends `any` (no signal)
+- [ ] #1 recommendedWorkerKind field added to cli-deps frontier json output (one of in-session-agent | claude-p-shell | any)
+- [ ] #2 Table format includes a new RecKind column
+- [ ] #3 Heuristic implemented per §Scope; reads dispatch-config + quota utilization + task estimatedTokens
+- [ ] #4 When dispatch-config absent or claudePShellMaxConcurrent: 0, every entry recommends in-session-agent
+- [ ] #5 When task estimatedTokens absent, recommends any (no signal)
 - [ ] #6 Hermetic test: 3-task fixture with varying token estimates + simulated quota states → correct recommendations emitted
 - [ ] #7 New code reaches 80%+ patch coverage
 
