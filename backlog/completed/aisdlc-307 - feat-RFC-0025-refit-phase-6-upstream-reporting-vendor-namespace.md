@@ -26,7 +26,7 @@ RFC-0025 Refit Phase 6. Implements the OQ-5-affirmed operator-initiated pre-fill
 
 - `cli-quality report-upstream <bug-id>` command + TUI prompt surface.
 - Pre-generates an issue body (anonymized repro, classifier output, suggested fix, related code paths).
-- Opens browser to `https://github.com/<framework-repo>/issues/new?body=<pre-filled>`.
+- Opens browser to the framework repo's `issues/new` URL with the body query parameter pre-filled (per-org `repoUrl` resolves the host).
 - Per-org `repoUrl` configurable in `quality-monitoring.yaml`.
 - `.ai-sdlc/templates/framework-bug-report.md` template that the operator can customize.
 - Industry parallel: `bun --report-bug`, VS Code Report Issue, Rust panic handler.
