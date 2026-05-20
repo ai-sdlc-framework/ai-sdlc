@@ -122,8 +122,12 @@ on:
   status:
 
 permissions:
+  # AISDLC-381 iter-2 MINOR (security-reviewer): `contents: write` was
+  # dropped — this workflow only invokes `gh pr merge --auto` and
+  # `gh pr view`, both of which need `pull-requests: write` only. There
+  # is no `git push` / file write to `contents` at any point. Reducing
+  # the surface limits blast radius under pull_request_target.
   pull-requests: write
-  contents: write
 
 jobs:
   enable-auto-merge:

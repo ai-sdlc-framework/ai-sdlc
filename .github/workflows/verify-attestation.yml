@@ -169,6 +169,14 @@ jobs:
         if: github.event_name != 'merge_group'
         uses: actions/checkout@v4
         with:
+          # AISDLC-381 iter-2 MAJOR fix: explicit `repository:` arg.
+          # Under pull_request_target, actions/checkout defaults to the
+          # TARGET repo — for a real fork PR, the fork-only head SHA is
+          # unreachable from the target, so the checkout fails before the
+          # verifier ever runs. Pin the repository to the PR head's
+          # full_name (which equals github.repository for same-repo PRs,
+          # so the same step works for both same-repo and fork PRs).
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           fetch-depth: 0
           ref: ${{ steps.resolve.outputs.head_sha }}
           path: pr-content
@@ -338,12 +346,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           PR_HEAD_REF: ${{ github.head_ref }}
+          # AISDLC-381 iter-2 CRITICAL fix: under pull_request_target a
+          # fork PR with branch name release-please--evil would otherwise
+          # bypass attestation by matching the prefix-only trust path.
+          # The fork-source guard inside the script below requires
+          # PR_HEAD_REPO_FULL == REPO before honoring the release-please
+          # short-circuit; falls through to full verifier otherwise.
+          PR_HEAD_REPO_FULL: ${{ github.event.pull_request.head.repo.full_name }}
           MERGE_GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
         run: |
           set -euo pipefail
           IS_RP='false'
 
-          # Trust signal: the `release-please--` branch-name prefix.
+          # Trust signal: the `release-please--` branch-name prefix +
+          # a fork-source guard (same-repo only).
           #
           # We previously gated on BOTH the prefix AND a bot-identity allowlist
           # (github-actions[bot] / release-please[bot] / app/github-actions).
@@ -353,23 +369,47 @@ jobs:
           # legit release-please PR fell through to full verification and
           # posted `contentHashV4 mismatch`.
           #
-          # The defense-in-depth concern (a same-repo pusher could create a
-          # branch named `release-please--evil` and bypass attestation) is
-          # already mitigated by `auto-enable-auto-merge.yml`'s release-please
-          # skip (PR #445): release-please PRs do NOT auto-merge. The operator
-          # MUST manually arm `gh pr merge <N> --auto` to ship one. That
-          # human-in-the-loop step IS the trust gate. If a contributor opens
-          # a `release-please--evil` PR, the operator notices when reviewing
-          # before manually arming.
+          # For SAME-REPO PRs, the prefix-only trust is sufficient — the
+          # `auto-enable-auto-merge.yml` release-please skip (PR #445) means
+          # release-please PRs do NOT auto-merge: the operator MUST manually
+          # arm `gh pr merge <N> --auto` to ship one. That human-in-the-loop
+          # is the trust gate for prefix bypasses by same-repo pushers.
           #
-          # Net: branch-prefix-only trust matches the actual security model.
-          # See PR #455 for the rationale + the security review verdict.
+          # AISDLC-381 (pull_request_target migration) introduced a NEW attack
+          # vector: a malicious FORK PR with branch `release-please--evil`
+          # would otherwise match this prefix and post
+          # `ai-sdlc/attestation: success` on the fork's HEAD SHA — fully
+          # bypassing the DSSE attestation gate. The operator-trust argument
+          # above DOES NOT cover fork PRs because the malicious code is
+          # already in the PR diff at the moment the workflow fires + posts
+          # the success status; an operator could miss the prefix bypass
+          # entirely until merge. The fix is the fork-source guard below:
+          # only honor the prefix when PR_HEAD_REPO_FULL == REPO. Fork PRs
+          # with this prefix fall through to the full verifier which will
+          # correctly report `no envelope` or `invalid` → status:failure.
+          #
+          # Net: branch-prefix + fork-source guard matches the actual model.
+          # See PR #455 for the original rationale + PR #X (AISDLC-381 iter-2)
+          # for the fork-source guard addition.
 
-          # pull_request: branch prefix is sufficient
+          # pull_request: branch prefix is sufficient — BUT the prefix
+          # is only trustworthy when the PR comes from the SAME repo
+          # (not a fork). Under pull_request_target a fork PR with branch
+          # name `release-please--evil` would otherwise bypass the
+          # attestation verifier entirely and post `ai-sdlc/attestation:
+          # success` on a malicious head SHA. The fork-source guard
+          # below restricts the short-circuit to same-repo PRs only;
+          # any release-please-named branch from a fork falls through
+          # to the full envelope verifier path (which will report
+          # missing/invalid → status:failure). AISDLC-381 iter-2 CRITICAL.
           case "${PR_HEAD_REF:-}" in
             release-please--*)
-              IS_RP='true'
-              echo "pull_request release-please match: head_ref='${PR_HEAD_REF}'"
+              if [ "${PR_HEAD_REPO_FULL:-}" = "${REPO}" ]; then
+                IS_RP='true'
+                echo "pull_request release-please match: head_ref='${PR_HEAD_REF}' head_repo='${PR_HEAD_REPO_FULL}' (same-repo trust)"
+              else
+                echo "pull_request release-please prefix on FORK PR ('${PR_HEAD_REPO_FULL}' != '${REPO}') — NOT trusting prefix; falling through to full verification"
+              fi
               ;;
           esac
 

@@ -196,15 +196,133 @@ describe('AISDLC-381: AC #3 — workflow permissions blocks are correct', () => 
     assert.notEqual(job.permissions.contents, 'write', 'report must NOT have contents:write');
   });
 
-  it('auto-enable-auto-merge.yml: pull-requests:write (no statuses needed)', () => {
+  it('auto-enable-auto-merge.yml: pull-requests:write, no contents:write', () => {
     const wf = loadYaml('auto-enable-auto-merge.yml');
     // Workflow-level permissions block.
     assert.equal(wf.permissions['pull-requests'], 'write', 'must arm auto-merge via API');
+    // AISDLC-381 iter-2 MINOR (security-reviewer): the workflow only invokes
+    // `gh pr merge --auto` + `gh pr view` and never writes to `contents`.
+    // Under pull_request_target, granting `contents: write` would let a
+    // compromised step push to the upstream repo. Drop the surface.
+    assert.notEqual(
+      wf.permissions.contents,
+      'write',
+      'auto-enable-auto-merge.yml must NOT have contents:write (fork-PR safety guard #5; only needs pull-requests:write)',
+    );
   });
 
-  it('auto-rearm-on-dequeue.yml: pull-requests:write (no statuses needed)', () => {
+  it('auto-rearm-on-dequeue.yml: pull-requests:write, no contents:write', () => {
     const wf = loadYaml('auto-rearm-on-dequeue.yml');
     assert.equal(wf.permissions['pull-requests'], 'write');
+    // AISDLC-381 iter-2 MINOR (security-reviewer): same as auto-enable —
+    // only uses `gh pr merge` / `gh pr view`, no git writes; drop
+    // `contents: write` to reduce blast radius under pull_request_target.
+    assert.notEqual(
+      wf.permissions.contents,
+      'write',
+      'auto-rearm-on-dequeue.yml must NOT have contents:write (fork-PR safety guard #5; only needs pull-requests:write)',
+    );
+  });
+});
+
+describe('AISDLC-381 iter-2: release-please short-circuits require fork-source guard', () => {
+  // CRITICAL fix iter-2: the legacy release-please short-circuit
+  // (`startsWith(github.head_ref, 'release-please--')`) is only
+  // trustworthy when the PR comes from the SAME repo. Under the
+  // pull_request_target trigger introduced in iter-1, a fork PR with
+  // branch name `release-please--evil` would otherwise bypass the
+  // attestation verifier + the 3-reviewer fan-out — fully GREENing
+  // both required checks on malicious content.
+  //
+  // Every release-please `if:` condition (or the equivalent inline
+  // bash branch inside the Detect step) MUST include a fork-source
+  // check matching:
+  //
+  //   github.event.pull_request.head.repo.full_name == github.repository
+  //
+  // or (in shell): `PR_HEAD_REPO_FULL == REPO`. The two forms are
+  // semantically equivalent; the regex below matches either.
+
+  // Pattern matches:
+  //   github.event.pull_request.head.repo.full_name == github.repository
+  //   head.repo.full_name == github.repository
+  //   PR_HEAD_REPO_FULL = ${{ github.event.pull_request.head.repo.full_name }}  (env wiring)
+  //   $PR_HEAD_REPO_FULL = $REPO (shell-side check)
+  const FORK_SOURCE_GUARD_RE =
+    /(head\.repo\.full_name\s*==\s*github\.repository|head\.repo\.full_name\s*==\s*\$\{\{\s*github\.repository\s*\}\}|PR_HEAD_REPO_FULL.*REPO|head\.repo\.full_name|head_repo_full)/i;
+
+  it('verify-attestation.yml: Detect release-please PR step has fork-source guard', () => {
+    const wf = loadYaml('verify-attestation.yml');
+    const verifyJob = wf.jobs.verify;
+    const detectStep = (verifyJob.steps ?? []).find(
+      (s) => typeof s.name === 'string' && /Detect release-please PR/i.test(s.name),
+    );
+    assert.ok(detectStep, 'verify-attestation.yml must declare a "Detect release-please PR" step');
+
+    // The fork-source guard can live in either the `env:` wiring (where
+    // PR_HEAD_REPO_FULL gets pulled in) AND the inline bash (where the
+    // comparison happens). Both must be present for the guard to be
+    // load-bearing.
+    const envBlob = JSON.stringify(detectStep.env ?? {});
+    const runBlob = String(detectStep.run ?? '');
+    assert.match(
+      envBlob,
+      /head\.repo\.full_name/i,
+      'Detect step env: must wire `github.event.pull_request.head.repo.full_name` so the script can compare it',
+    );
+    assert.match(
+      runBlob,
+      /PR_HEAD_REPO_FULL.*REPO|head_repo_full/i,
+      'Detect step run: must compare PR_HEAD_REPO_FULL against REPO before honoring the release-please prefix (fork-source guard)',
+    );
+  });
+
+  it('ai-sdlc-review.yml: attestation-precheck `if:` includes fork-source guard on the release-please skip', () => {
+    const wf = loadYaml('ai-sdlc-review.yml');
+    const job = wf.jobs['attestation-precheck'];
+    assert.ok(job, 'attestation-precheck job must exist');
+    const cond = String(job.if ?? '');
+    assert.match(cond, /release-please--/, 'still skips release-please branch prefix');
+    assert.match(
+      cond,
+      FORK_SOURCE_GUARD_RE,
+      'attestation-precheck `if:` MUST include a fork-source guard (head.repo.full_name == github.repository) before honoring the release-please skip',
+    );
+  });
+
+  it('ai-sdlc-review.yml: analyze `if:` includes fork-source guard on the release-please skip', () => {
+    const wf = loadYaml('ai-sdlc-review.yml');
+    const job = wf.jobs.analyze;
+    assert.ok(job, 'analyze job must exist');
+    const cond = String(job.if ?? '');
+    assert.match(cond, /release-please--/, 'still skips release-please branch prefix');
+    assert.match(
+      cond,
+      FORK_SOURCE_GUARD_RE,
+      'analyze `if:` MUST include a fork-source guard (head.repo.full_name == github.repository) before honoring the release-please skip',
+    );
+  });
+});
+
+describe('AISDLC-381 iter-2: auto-enable-auto-merge.yml still skips fork PRs (transitive defense)', () => {
+  // The other reviewers' rebuttal to AISDLC-381's threat model relies on
+  // the fact that `auto-enable-auto-merge.yml` already EXCLUDES fork PRs
+  // from being armed for auto-merge (so a malicious fork PR cannot
+  // self-merge even if it satisfied every check). This is a load-bearing
+  // assumption that MUST NOT silently regress in a future PR. Assert
+  // the fork-skip is still present in the workflow body.
+
+  it('auto-enable-auto-merge.yml contains an explicit fork-PR skip in its guard step', () => {
+    const raw = readFileSync(resolve(WORKFLOWS_DIR, 'auto-enable-auto-merge.yml'), 'utf-8');
+    // Match either of these forms (both occur in the current source):
+    //   [auto-enable] PR #$PR is from a fork
+    //   "$HEAD_FULL" != "$REPO"   (same-repo check that doubles as fork rejection)
+    const hasForkLogMessage = /is from a fork/.test(raw);
+    const hasSameRepoCheck = /HEAD_FULL.*!=.*REPO/.test(raw);
+    assert.ok(
+      hasForkLogMessage && hasSameRepoCheck,
+      'auto-enable-auto-merge.yml must still skip fork PRs (the documented transitive defense for AISDLC-381 — both the same-repo check and the "is from a fork" log line must be present)',
+    );
   });
 });
 
@@ -285,19 +403,25 @@ describe('AISDLC-381: AC #4 (safety guard #2) — fork checkouts are sandboxed u
     const forkCheckout = checkouts.find(
       (c) => typeof c.ref === 'string' && c.ref.includes('head_sha'),
     );
-    if (forkCheckout) {
-      assert.equal(
-        forkCheckout.path,
-        'pr-content',
-        'fork-data checkout MUST use path: pr-content (sandboxed subdirectory)',
-      );
-      assert.equal(
-        forkCheckout.persistCredentials,
-        false,
-        'fork-data checkout MUST disable persist-credentials so fork code never sees a token',
-      );
-    }
-    // If no fork-data checkout is present (e.g. only merge_group path), that's fine.
+    // AISDLC-381 iter-2 MINOR (test-reviewer): hard-assert the fork-data
+    // checkout EXISTS (vs the prior `if (forkCheckout) {}` pattern that
+    // silently became a no-op the moment someone deleted the block).
+    // pull_request_target ALWAYS requires this sandboxed checkout so the
+    // verifier can stage the fork's DSSE envelope.
+    assert.ok(
+      forkCheckout,
+      'verify-attestation.yml MUST include a fork-HEAD sandboxed checkout (the DSSE envelope only exists in the fork tree under pull_request_target)',
+    );
+    assert.equal(
+      forkCheckout.path,
+      'pr-content',
+      'fork-data checkout MUST use path: pr-content (sandboxed subdirectory)',
+    );
+    assert.equal(
+      forkCheckout.persistCredentials,
+      false,
+      'fork-data checkout MUST disable persist-credentials so fork code never sees a token',
+    );
   });
 
   it('ai-sdlc-review.yml attestation-precheck fork checkout uses path: pr-content', () => {
@@ -473,12 +597,46 @@ describe('AISDLC-381: AC #4 (safety guard #5) — secrets are not leaked into fo
   //      INSIDE the analyze job (which has no GitHub write perms),
   //      not propagated to report/post-skip-results.
 
+  // Forbidden — these secrets MUST NEVER appear in fork-PR workflows
+  // because they grant supply-chain or signing authority that a fork
+  // could exfiltrate (even via a step that only treats the secret as
+  // env data — `set -x` / `env` / `process.env` accidental log lines
+  // are routine pitfalls). All four belong in release.yml only.
   const FORBIDDEN_SECRETS_IN_FORK_PR_WORKFLOWS = [
     /AI_SDLC_ATTESTATION_PRIVATE_KEY/i,
     /\bNPM_TOKEN\b/i,
     /\bAWS_/i,
     /\bGCP_/i,
   ];
+
+  // Allowed — these secrets DO appear in some fork-impacted workflows
+  // and the documentation below justifies why each is safe:
+  //
+  // - `AI_SDLC_PAT` (auto-enable-auto-merge.yml + auto-rearm-on-dequeue.yml)
+  //   The PAT is only used to call `gh pr merge --auto` and `gh pr view`
+  //   against the TARGET repo. Both workflows have NO `actions/checkout`,
+  //   NO `pnpm install`, and NO `node`/`bash` invocation against
+  //   fork-controlled scripts — there is no execution path where fork
+  //   code could read the secret. The workflow guard also skips fork
+  //   PRs entirely from auto-merge arming (transitive defense — see the
+  //   "auto-enable-auto-merge.yml still skips fork PRs" regression
+  //   test above).
+  //
+  // - `SLACK_BOT_TOKEN` (ai-sdlc-review.yml report job)
+  //   Used only by the `Notify Slack` step in the report job. The
+  //   report job has NO fork-content checkout — it reads the analyze
+  //   job's structured JSON outputs (verdict arrays) as data, never
+  //   executes fork code. The Slack message body is constructed from
+  //   parsed JSON fields, not raw fork content.
+  //
+  // - `MARKER_HMAC_SECRET` (ai-sdlc-review.yml analyze job)
+  //   Used only by `cli-incremental-decide` (a vetted script from
+  //   MAIN's checkout, NOT from pr-content/) to verify v2 marker
+  //   HMACs. The secret never crosses the sandbox boundary — it's
+  //   consumed by a node process running against main's working tree.
+  //
+  // None of the above need to be in FORBIDDEN_SECRETS — their flow
+  // paths are structurally safe.
 
   for (const name of AFFECTED_WORKFLOWS) {
     it(`${name} does NOT reference signing keys / publish tokens`, () => {

@@ -244,9 +244,15 @@ jobs:
     # AISDLC-218: also skip drafts (synchronize fires on draft pushes too).
     # AISDLC-381: trigger migrated to pull_request_target — gate matches both
     # the new event and the legacy one (forward-compatibility on revert).
+    # AISDLC-381 iter-2 CRITICAL fix: the release-please skip is only
+    # trusted for SAME-REPO PRs. A fork PR named `release-please--evil`
+    # would otherwise skip attestation-precheck entirely under
+    # pull_request_target, leaving `Post Review Results` (a required
+    # check) to fall through with no signal. Fork-source guard:
+    # `github.event.pull_request.head.repo.full_name == github.repository`.
     if: >-
       (github.event_name == 'pull_request' || github.event_name == 'pull_request_target') &&
-      !startsWith(github.head_ref, 'release-please--') &&
+      !(github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-please--')) &&
       github.event.pull_request.draft == false
     permissions:
       contents: read
@@ -265,9 +271,15 @@ jobs:
       # AISDLC-381 Safety guard #2: sandboxed fork checkout for DATA-only
       # envelope access. NEVER `npm/pnpm install` against this directory,
       # never `cd` into it, never `uses: ./pr-content/...`.
+      # AISDLC-381 iter-2 MAJOR fix: explicit `repository:` so this
+      # resolves against the fork (where the head SHA actually lives),
+      # not the target repo (where the fork-only SHA is unreachable).
+      # For same-repo PRs head.repo.full_name == github.repository so
+      # the same step works for both same-repo and fork PRs.
       - name: Checkout fork PR HEAD into sandboxed pr-content/ (DATA-ONLY)
         uses: actions/checkout@v4
         with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
           path: pr-content
@@ -365,7 +377,10 @@ jobs:
     needs: [attestation-precheck]
     runs-on: ubuntu-latest
     # AISDLC-381: gate matches both pull_request and pull_request_target.
-    if: "(github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && !startsWith(github.head_ref, 'release-please--') && needs.attestation-precheck.outputs.skip != 'true'"
+    # AISDLC-381 iter-2 CRITICAL fix: same fork-source guard as
+    # attestation-precheck. A fork PR named `release-please--evil` must
+    # NOT be skipped here under pull_request_target.
+    if: "(github.event_name == 'pull_request' || github.event_name == 'pull_request_target') && !(github.event.pull_request.head.repo.full_name == github.repository && startsWith(github.head_ref, 'release-please--')) && needs.attestation-precheck.outputs.skip != 'true'"
     # AISDLC-142: analyze needs `pull-requests: read` to fetch existing PR
     # comments for the incremental-review marker. Read-only — write happens
     # in the `report` job (which already has `pull-requests: write`).

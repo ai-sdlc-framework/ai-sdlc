@@ -60,8 +60,11 @@ on:
     - cron: '*/5 * * * *'
 
 permissions:
+  # AISDLC-381 iter-2 MINOR (security-reviewer): `contents: write` was
+  # dropped — this workflow only invokes `gh pr merge` / `gh pr view`,
+  # all of which need `pull-requests: write` only. Reducing the surface
+  # limits blast radius under pull_request_target.
   pull-requests: write
-  contents: write
 
 jobs:
   rearm:

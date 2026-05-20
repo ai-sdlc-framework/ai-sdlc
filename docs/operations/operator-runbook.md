@@ -1282,8 +1282,8 @@ permissions and secrets they need. Suggested matrix:
 | `ai-sdlc-review.yml` (docs-only-check) | `contents:read`, `statuses:write`, `pull-requests:read` | `github.token` only |
 | `ai-sdlc-review.yml` (analyze) | `contents:read`, `pull-requests:read` | `ANTHROPIC_API_KEY`, `MARKER_HMAC_SECRET` |
 | `ai-sdlc-review.yml` (report) | `pull-requests:write`, `issues:read`, `statuses:write` | `github.token`, `SLACK_BOT_TOKEN` |
-| `auto-enable-auto-merge.yml` | `pull-requests:write`, `contents:write` | `AI_SDLC_PAT` |
-| `auto-rearm-on-dequeue.yml` | `pull-requests:write`, `contents:write` | `AI_SDLC_PAT` |
+| `auto-enable-auto-merge.yml` | `pull-requests:write` | `AI_SDLC_PAT` |
+| `auto-rearm-on-dequeue.yml` | `pull-requests:write` | `AI_SDLC_PAT` |
 
 NEVER:
 
