@@ -26,7 +26,7 @@ The DoR ingress CI workflow (the `Evaluate backlog tasks changed by PR` check) c
 
 Result: a PR with multiple Gate 3 (unresolved-reference) violations across 5 task files looked CLEAN in the merge state and was auto-mergeable. The DoR feedback was informational-only, not blocking.
 
-**2026-05-20 incident** — PR #573 (RFC-0041 task breakdown) hit Gate 3 violations on every task file but `Evaluate backlog tasks changed by PR` returned SUCCESS. State CLEAN. Auto-merge armed. The whole point of the DoR gate (per AISDLC-296) was to refuse-or-fix at the boundary, not to passively log violations.
+**2026-05-20 incident** — an earlier task-breakdown PR (the AISDLC-377 phase files) (RFC-0041 task breakdown) hit Gate 3 violations on every task file but `Evaluate backlog tasks changed by PR` returned SUCCESS. State CLEAN. Auto-merge armed. The whole point of the DoR gate (per AISDLC-296) was to refuse-or-fix at the boundary, not to passively log violations.
 
 ## Fix (single PR)
 
@@ -88,4 +88,4 @@ A test fixture under .github/workflows/__tests__/ that simulates:
 
 ## Source
 
-Operator 2026-05-20 frustration during RFC-0041 task breakdown: "shouldn't this be a gate" — referring to the DoR ingress workflow that posts a comment but doesn't block merge. Confirmed by inspecting PR #573 check rollup: Evaluate backlog tasks changed by PR returned SUCCESS despite posting a 5-task violations comment.
+Operator 2026-05-20 frustration during RFC-0041 task breakdown: "shouldn't this be a gate" — referring to the DoR ingress workflow that posts a comment but doesn't block merge. Confirmed by inspecting an earlier task-breakdown PR (the AISDLC-377 phase files) check rollup: Evaluate backlog tasks changed by PR returned SUCCESS despite posting a 5-task violations comment.
