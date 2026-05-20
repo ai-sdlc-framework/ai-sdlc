@@ -1,7 +1,7 @@
 ---
 id: AISDLC-381
 title: 'fix(ci): fork PR workflows must use pull_request_target so the required GitHub Actions app can post statuses + post-back comments'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:
