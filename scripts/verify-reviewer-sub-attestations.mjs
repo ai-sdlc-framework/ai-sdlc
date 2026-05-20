@@ -426,11 +426,24 @@ async function main() {
   // Even with a non-empty subAttestations array, a dev could include only one
   // reviewer's sub-attestation and omit the others.  Verify by reviewerName.
   if (expectedReviewerNames.length > 0) {
-    const foundNames = new Set(
-      subAttestations
-        .map((s) => (s && typeof s === 'object' ? s.reviewerName : null))
-        .filter(Boolean),
-    );
+    // AISDLC-380 iter-3: reject duplicate reviewerName entries. Without this
+    // check, a dev could submit N copies of one valid sub-attestation to
+    // satisfy a single-reviewer registry's completeness check without other
+    // reviewers ever running. The Set-based foundNames dedupes silently, so
+    // we compare counts directly. (code-reviewer iter-2 finding.)
+    const reviewerNames = subAttestations
+      .map((s) => (s && typeof s === 'object' ? s.reviewerName : null))
+      .filter(Boolean);
+    const foundNames = new Set(reviewerNames);
+    if (foundNames.size !== reviewerNames.length) {
+      const duplicates = reviewerNames.filter((name, i, arr) => arr.indexOf(name) !== i);
+      process.stderr.write(
+        `[verify-sub-attestations] ERROR: verdict file at '${verdictFilePath}' contains duplicate\n` +
+          `       sub-attestations for reviewer(s): ${[...new Set(duplicates)].join(', ')}\n` +
+          `       Each reviewer may appear at most once in the verdict file.\n`,
+      );
+      process.exit(1);
+    }
     const missingReviewers = expectedReviewerNames.filter((name) => !foundNames.has(name));
     if (missingReviewers.length > 0) {
       process.stderr.write(

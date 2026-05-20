@@ -286,10 +286,13 @@ VERIFY_SUB_ATT_SCRIPT="$WT_ROOT/scripts/verify-reviewer-sub-attestations.mjs"
 
 if [ "${DOCS_ONLY_SYNTHESIZED:-0}" = "1" ]; then
   echo "[attestation-sign] docs-only synthesized verdict — skipping sub-attestation verification (no reviewer fan-out)" >&2
-elif [ -n "${AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD:-}" ]; then
+elif [ -n "${AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD:-}" ] && [ "${AI_SDLC_TEST_MODE:-0}" = "1" ]; then
   # Test override: use the stub verifier directly, bypassing file-existence checks.
   # This lets tests exercise the hook's signing + commit logic without needing
   # real verifier/registry files in the test repo. Production code never sets this.
+  # AISDLC-380 fix iter-3: GATE on AI_SDLC_TEST_MODE=1 so a dev subagent cannot
+  # set AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD=true to bypass the fail-CLOSED gate
+  # when verifier or registry files are missing (security-reviewer iter-2 finding).
   echo "[attestation-sign] Verifying reviewer sub-attestations for $TASK_ID (using test override)" >&2
   VERIFY_EXIT=0
   # shellcheck disable=SC2086

@@ -641,6 +641,56 @@ describe('verify-reviewer-sub-attestations.mjs (AISDLC-380)', () => {
     );
   });
 
+  // ── iter-3: duplicate-reviewerName bypass ────────────────────────────────
+  //
+  // code-reviewer iter-2 finding: the foundNames Set dedupes silently. If a
+  // registry has only [code-reviewer] and the verdict file has two valid
+  // code-reviewer sub-attestations, the completeness check passes with only
+  // one reviewer actually running. Fix: reject when duplicate reviewerName
+  // entries are present in the subAttestations array.
+
+  it('iter-3: duplicate code-reviewer sub-attestations → exits 1 with duplicates named', () => {
+    const { privateKeyPem: codePriv, publicKeyPem: codePub } = generateReviewerKeypair();
+
+    const taskId = 'AISDLC-380';
+    const codeVerdict = { approved: true, findings: [], summary: 'Code LGTM' };
+    const oneAttestation = buildSubAttestation({
+      reviewerName: 'code-reviewer',
+      taskId,
+      verdict: codeVerdict,
+      privateKeyPem: codePriv,
+    });
+    // Submit TWO copies of the same valid sub-attestation. Without the
+    // uniqueness check, foundNames = {'code-reviewer'} satisfies the
+    // single-reviewer registry's completeness check.
+    const subAttestations = [oneAttestation, oneAttestation];
+
+    const verdictPath = join(tmpDir, 'aisdlc-380-dup.json');
+    writeFileSync(verdictPath, JSON.stringify({ taskId, subAttestations }, null, 2));
+
+    const reviewersYaml = join(tmpDir, 'trusted-reviewers.yaml');
+    writeFileSync(
+      reviewersYaml,
+      buildTrustedReviewersYaml([{ reviewerName: 'code-reviewer', publicKeyPem: codePub }]),
+    );
+
+    const r = runVerifier([
+      '--verdict-file',
+      verdictPath,
+      '--task-id',
+      taskId,
+      '--trusted-reviewers',
+      reviewersYaml,
+    ]);
+
+    assert.equal(r.status, 1, `expected exit 1 (duplicates), got ${r.status}: ${r.stderr}`);
+    assert.match(
+      r.stderr,
+      /duplicate[\s\S]*code-reviewer/i,
+      `stderr must name the duplicate reviewer: ${r.stderr}`,
+    );
+  });
+
   // ── Bug #7: taskId binding check coverage ─────────────────────────────────
   //
   // The existing "wrong taskId" test tampers the envelope's taskId field, which

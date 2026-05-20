@@ -44,8 +44,13 @@ function cleanEnv(extra = {}) {
   // verdict files (legacy plain-JSON shape) pass through without signature
   // checking. Tests that specifically test sub-attestation verification
   // unset AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD in their env overrides.
+  //
+  // AISDLC-380 iter-3: the hook now gates the override on AI_SDLC_TEST_MODE=1
+  // so a dev subagent cannot use it to bypass the fail-CLOSED gate. Tests must
+  // therefore also set AI_SDLC_TEST_MODE=1 when using the override.
   if (!('AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD' in extra)) {
     env.AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD = 'true';
+    env.AI_SDLC_TEST_MODE = '1';
   }
   for (const [k, v] of Object.entries(extra)) env[k] = v;
   return env;
@@ -757,6 +762,64 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
         r.stderr,
         /trusted-reviewers\.yaml.*not found|trusted-reviewers registry missing/i,
         `stderr must explain registry is missing: ${r.stderr}`,
+      );
+    } finally {
+      rmSync(bareRoot, { recursive: true, force: true });
+    }
+  });
+
+  // ── AISDLC-380 iter-3: env-override must require AI_SDLC_TEST_MODE=1 ────
+
+  it('AISDLC-380 iter-3: AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD without AI_SDLC_TEST_MODE=1 does NOT bypass fail-CLOSED', () => {
+    // Security-reviewer iter-2 finding: the env-override branch was placed
+    // before the fail-CLOSED file-existence checks. A dev could set
+    // AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD=true to bypass the gate even
+    // when the verifier or registry was missing. The iter-3 fix gates the
+    // override on AI_SDLC_TEST_MODE=1. This test asserts the gate fires:
+    // setting the override WITHOUT the test-mode flag falls through to
+    // the fail-CLOSED file-existence checks.
+    const bareRoot = mkdtempSync(join(tmpdir(), 'ai-sdlc-att-iter3-'));
+    try {
+      git(['init', '-q', '-b', 'main'], bareRoot);
+      git(['config', 'user.email', 'test@test.com'], bareRoot);
+      git(['config', 'user.name', 'test'], bareRoot);
+      git(['config', 'commit.gpgsign', 'false'], bareRoot);
+      writeFileSync(join(bareRoot, 'README.md'), 'baseline\n');
+      git(['add', '.'], bareRoot);
+      git(['commit', '-q', '-m', 'baseline'], bareRoot);
+      git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], bareRoot);
+
+      writeFileSync(join(bareRoot, '.active-task'), 'AISDLC-380E\n');
+
+      const dir = join(bareRoot, '.ai-sdlc', 'verdicts');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, 'aisdlc-380e.json'),
+        JSON.stringify([
+          { agentId: 'code-reviewer', approved: true, findings: [], summary: 'test' },
+        ]),
+      );
+
+      // No verifier script, no registry — fail-CLOSED conditions met.
+      // BUT dev sets the override hoping to bypass. Without TEST_MODE=1
+      // the override is ignored and the hook exits 2.
+      const { cmd } = installFakeSigner(bareRoot);
+      const r = runHook(bareRoot, {
+        AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+        AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
+        // NOTE: AI_SDLC_TEST_MODE intentionally NOT set.
+        AI_SDLC_TEST_MODE: '',
+      });
+
+      assert.equal(
+        r.status,
+        2,
+        `expected exit 2 (override ignored without TEST_MODE), got ${r.status}: stderr=${r.stderr}`,
+      );
+      assert.match(
+        r.stderr,
+        /not found|sub-attestation gate unavailable|trusted-reviewers registry missing/i,
+        `stderr must show fail-CLOSED path, not test-override path: ${r.stderr}`,
       );
     } finally {
       rmSync(bareRoot, { recursive: true, force: true });
