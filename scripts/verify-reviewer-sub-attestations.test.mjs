@@ -992,6 +992,9 @@ exit 0`,
           AI_SDLC_SIGN_ATTESTATION_CMD: `bash ${shimPath}`,
           // Force v5 mode to exercise the audit-only path.
           AI_SDLC_SCHEMA_VERSION: 'v5',
+          // AISDLC-383.6 gating: audit-only fires only when cutover is active.
+          // Without this, v5 mode hard-fails (the new gated default).
+          AI_SDLC_V6_CUTOVER_ACTIVE: '1',
           // Explicitly unset stub verifier so the real verifier runs.
           AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: '',
           AI_SDLC_TEST_MODE: '',

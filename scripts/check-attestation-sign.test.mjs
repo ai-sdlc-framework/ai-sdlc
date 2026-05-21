@@ -37,6 +37,16 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
   delete env.AI_SDLC_ITERATION_COUNT;
   delete env.AI_SDLC_HARNESS_NOTE;
+  // AISDLC-383.6: schema version env vars must not leak from operator shell.
+  delete env.AI_SDLC_SCHEMA_VERSION;
+  delete env.AI_SDLC_V6_CUTOVER_ACTIVE;
+  // AISDLC-383.6 default: most tests assume cutover-active (so v6 is the
+  // effective default + AISDLC-380 gate is audit-only). Tests that
+  // specifically need the gated/non-cutover state pass an explicit
+  // AI_SDLC_V6_CUTOVER_ACTIVE: '0' (or any non-'1' value) in `extra`.
+  if (!('AI_SDLC_V6_CUTOVER_ACTIVE' in extra)) {
+    env.AI_SDLC_V6_CUTOVER_ACTIVE = '1';
+  }
   // AISDLC-250: don't inherit CODEX_VERSION from the host env so tests that
   // assert the "absent" path are hermetic even when the operator has exported it.
   delete env.CODEX_VERSION;
@@ -230,18 +240,20 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     assert.equal(r.status, 0, `expected 0 with no verdict file, got ${r.status}: ${r.stderr}`);
   });
 
-  it('AC #4: idempotent — exits 0 when attestation already exists at HEAD (v6 default)', () => {
+  it('AC #4: idempotent — exits 0 when v6 attestation already exists at HEAD (cutover active)', () => {
     writeFileSync(join(root, '.active-task'), 'AISDLC-133\n');
     writeVerdictFile(root, 'AISDLC-133');
-    // Simulate a pre-existing attestation at current HEAD.
-    // RFC-0042 Phase 3: default schema is v6 → file is <sha>.v6.dsse.json.
+    // Simulate a pre-existing v6 attestation at current HEAD.
+    // RFC-0042 Phase 3 cutover gated on AI_SDLC_V6_CUTOVER_ACTIVE=1.
     const head = git(['rev-parse', 'HEAD'], root).trim();
     const attDir = join(root, '.ai-sdlc', 'attestations');
     mkdirSync(attDir, { recursive: true });
     writeFileSync(join(attDir, `${head}.v6.dsse.json`), '{"existing":true,"schemaVersion":"v6"}\n');
-    // Even with a "fail-everything" signer, idempotent skip should NOT invoke it.
     const { cmd, logPath } = installFakeSigner(root, { fail: true });
-    const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_V6_CUTOVER_ACTIVE: '1',
+    });
     assert.equal(r.status, 0, `expected 0 for idempotent skip, got ${r.status}: ${r.stderr}`);
     assert.equal(
       existsSync(logPath),
@@ -1043,6 +1055,50 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     } finally {
       rmSync(bareRoot, { recursive: true, force: true });
     }
+  });
+
+  it('RFC-0042 Phase 3 gating: WITHOUT AI_SDLC_V6_CUTOVER_ACTIVE=1, default is v5 + sub-attestation gate is hard-fail', () => {
+    // Per AISDLC-383.6 security review: the v6 default flip + audit-only
+    // downgrade are gated on AI_SDLC_V6_CUTOVER_ACTIVE=1. Without the env var:
+    //   - default is v5 (sign writes <sha>.dsse.json, not <sha>.v6.dsse.json)
+    //   - sub-attestation gate hard-fails on missing verifier/registry/sub-attestations
+    // This preserves the 2026-05-20 AISDLC-380 forgery defense during the
+    // scaffolding-shipped-but-not-active window.
+
+    writeFileSync(join(root, '.active-task'), 'AISDLC-383H\n');
+    // Legacy plain-JSON verdict (no sub-attestations) — would have failed pre-cutover.
+    const dir = join(root, '.ai-sdlc', 'verdicts');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'aisdlc-383h.json'),
+      JSON.stringify([
+        { agentId: 'code-reviewer', harness: 'claude-code', approved: true, findings: {} },
+      ]),
+    );
+
+    // The verifier + registry are missing (not installed in this test repo) —
+    // the gated path should hard-fail when cutover-active is OFF.
+    const { cmd } = installFakeSigner(root);
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      // Explicitly OFF — overrides the cleanEnv default of '1'.
+      AI_SDLC_V6_CUTOVER_ACTIVE: '0',
+      // Real verifier path (stub off).
+      AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: '',
+      AI_SDLC_TEST_MODE: '',
+    });
+
+    // Hard-fail expected: exit non-zero, with a clear error mentioning the gating.
+    assert.notEqual(
+      r.status,
+      0,
+      `expected non-zero exit (hard-fail), got ${r.status}: ${r.stderr}`,
+    );
+    assert.match(
+      r.stderr,
+      /AI_SDLC_V6_CUTOVER_ACTIVE=1|fails closed|push BLOCKED/i,
+      `stderr must mention the cutover gating: ${r.stderr}`,
+    );
   });
 
   it('RFC-0042 Phase 3: default schema version is v6 (AI_SDLC_SCHEMA_VERSION unset)', () => {

@@ -154,9 +154,17 @@ async function main() {
     return;
   }
 
-  // RFC-0042 Phase 3 cutover (AISDLC-383.6): default flipped from v5 to v6.
-  // Pass --schema-version v5 explicitly to force the legacy v5 path.
-  const schemaVersion = args['schema-version'] ?? 'v6';
+  // RFC-0042 Phase 3 cutover (AISDLC-383.6): scaffolding shipped, default
+  // STILL v5. Per the 383.6 security review, the v6 default flip is gated
+  // on AI_SDLC_V6_CUTOVER_ACTIVE=1 which the operator sets only when:
+  //   1. AISDLC-383.4 (v6 CI verifier) is live in production
+  //   2. A code path that appends transcript leaves to
+  //      .ai-sdlc/transcript-leaves.jsonl runs during normal pipeline
+  //      execution (gap in 383.X scope — see follow-up).
+  // Pass --schema-version v6 explicitly OR export AI_SDLC_V6_CUTOVER_ACTIVE=1
+  // to use the new path.
+  const defaultSchema = process.env['AI_SDLC_V6_CUTOVER_ACTIVE'] === '1' ? 'v6' : 'v5';
+  const schemaVersion = args['schema-version'] ?? defaultSchema;
 
   // ──────────────────────────────────────────────────────────────────
   // RFC-0042 Phase 2: --schema-version v6 mode
