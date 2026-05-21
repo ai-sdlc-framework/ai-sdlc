@@ -1,7 +1,7 @@
 ---
 id: AISDLC-377.4
 title: 'feat(deprecation): RFC-0041 Phase 3.1 — deprecate --spawner claude-cli (warning + operator runbook)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:
