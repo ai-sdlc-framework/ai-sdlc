@@ -49,6 +49,7 @@ import {
 } from '../runtime/spawners/dispatch-result.js';
 import { checkAndRebuildIfStale, type DistStalenessOptions } from './dist-staleness.js';
 import { SPAWNER_KINDS, type SpawnerKind } from './execute.js';
+import { emitClaudeCliDeprecationWarning } from '../orchestrator/deprecation-warnings.js';
 
 function emit(result: unknown): void {
   process.stdout.write(JSON.stringify(result, null, 2) + '\n');
@@ -221,6 +222,10 @@ export function buildOrchestratorCli(
         const resolvedAdapters = buildAdapters(argv as Record<string, unknown>, adapters);
         // AISDLC-352 — emit billing-safety warnings before dispatch
         emitBillingSafetyWarnings(resolveUmbrellaSpawnerKind(resolvedAdapters));
+        // RFC-0041 Phase 3.1 (AISDLC-377.4) — deprecation warning for claude-cli
+        if (resolveUmbrellaSpawnerKind(resolvedAdapters) === 'claude-cli') {
+          emitClaudeCliDeprecationWarning(process.stderr, process.env);
+        }
         try {
           const ticks = await runOrchestratorLoop(config, resolvedAdapters);
           emit({
@@ -284,6 +289,14 @@ export function buildOrchestratorCli(
 
         // AISDLC-352 — emit billing-safety warnings before dispatch
         emitBillingSafetyWarnings(resolveUmbrellaSpawnerKind(tickAdapters));
+
+        // RFC-0041 Phase 3.1 (AISDLC-377.4) — deprecation warning for the
+        // legacy claude-cli spawner path that races the Anthropic 600s
+        // background-agent watchdog. Suppressible via
+        // AI_SDLC_SUPPRESS_DEPRECATION_WARNING=1 for transitional CI.
+        if (resolveUmbrellaSpawnerKind(tickAdapters) === 'claude-cli') {
+          emitClaudeCliDeprecationWarning(process.stderr, process.env);
+        }
 
         const result = await runOrchestratorTick(config, tickAdapters, 1);
         emit({ ok: true, mode: 'tick', tick: result });

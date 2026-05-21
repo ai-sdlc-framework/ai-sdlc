@@ -23,7 +23,9 @@
 |---|---|---|
 | **`/ai-sdlc execute` slash command body (Tier 1)** | None — slash command body uses the main session's `Agent` tool directly | Operator's interactive Claude Code quota. `executePipeline()` is NOT called from Tier 1; the slash command body interleaves CLI subcommands with `Agent` tool calls. |
 | **`cli-orchestrator tick` (default, autonomous tick from cron/daemon)** | `ShellClaudePSpawner` via `--spawner claude` (AISDLC-352 default — no flag required) | Operator's monthly Agent SDK credit ($200/mo on Max-20x). **High-throughput alternative that draws zero Agent SDK credit**: use `/ai-sdlc orchestrator-tick` inside an active Claude Code session instead — the `Agent` tool call runs in the interactive quota. See [`docs/operations/billing-and-cost-optimization.md §1b`](../../docs/operations/billing-and-cost-optimization.md) for the trade-offs and cost-projection table. |
-| **`cli-orchestrator tick --spawner claude-cli` (slash command body path)** | `ClaudeCliInlineSpawner` — emits manifest; slash command body invokes `Agent` tool | Operator's interactive Claude Code quota. Only valid inside an active Claude Code session. |
+| **`cli-orchestrator tick --spawner claude-cli` (slash command body path)** | `ClaudeCliInlineSpawner` — emits manifest; slash command body invokes `Agent` tool. **DEPRECATED** — see [Deprecated spawners](#deprecated-spawners) below | Operator's interactive Claude Code quota. Only valid inside an active Claude Code session. |
+| **RFC-0041 `in-session-agent` Workers** | N operator-opened CC sessions each running `/ai-sdlc dispatch-worker` — claims manifests from the Dispatch Board, dispatches via foreground `Agent` calls | Subscription interactive quota — **zero incremental cost**. Recommended default for autonomous drain. |
+| **RFC-0041 `claude-p-shell` Workers** | `cli-dispatch-supervisor` spawns `env -u CLAUDECODE claude -p` — operator-controlled 30 min watchdog | Agent SDK credit pool ($200/mo on Max-20x) then API tokens. For headless/CI contexts. |
 | **`cli-orchestrator start` (autonomous loop)** | `ShellClaudePSpawner` via the `claude` default spawner (AISDLC-352) | Operator's monthly Agent SDK credit ($200/mo on Max-20x). `claude -p` is explicitly covered by the new SDK credit pool. |
 | **`pnpm --filter @ai-sdlc/dogfood watch` (Tier 2, subscription)** | `defaultSpawner()` → `ShellClaudePSpawner` | Same — Agent SDK credit pool. |
 | **CI runner / webhook server / Forge tenant (Tier 2, SDK + API key)** | `defaultSpawner()` → resolves to `ClaudeCodeSDKSpawner` when `ANTHROPIC_API_KEY` is set | If the API key authenticates against a paid Claude subscription: Agent SDK credit pool first, then API-key overflow. Pure API key (no subscription): pay-as-you-go directly. Also: install `@anthropic-ai/claude-code` (lazy peer — see below). |
@@ -35,7 +37,7 @@
 The two kinds look similar but do different things:
 
 - **`--spawner claude`** (AISDLC-349) — actually shells out to `claude -p` via `child_process.spawn`. **This is the default for `cli-orchestrator tick` since AISDLC-352.** Use this for cron / daemon / sidecar dispatch from a plain shell where there is no slash command body. Uses the operator's logged-in subscription auth. Honors the same per-role model split (`developer`/`code-reviewer`/`test-reviewer` → `claude-sonnet-4-6`; `security-reviewer` → `claude-opus-4-6`) that `ClaudeCliInlineSpawner` emits in its manifest.
-- **`--spawner claude-cli`** — emits a `dispatch-manifest.json` to `$ARTIFACTS_DIR/_orchestrator/`; the calling Claude Code slash command body reads the manifest + invokes the `Agent` tool. Use this explicitly for the `/ai-sdlc orchestrator-tick` slash command body path. **Silently fails with `developer-json-contract-violated` when run from a plain shell** because nothing reads the manifest.
+- **`--spawner claude-cli`** — **DEPRECATED** (see below). Emits a `dispatch-manifest.json` to `$ARTIFACTS_DIR/_orchestrator/`; the calling Claude Code slash command body reads the manifest + invokes the `Agent` tool. **Silently fails with `developer-json-contract-violated` when run from a plain shell** because nothing reads the manifest.
 
 When in doubt, call `defaultSpawner()` — it picks the right one for your
 environment and throws a clear instructional error if neither subscription nor
@@ -457,6 +459,42 @@ class MyCustomSpawner implements SubagentSpawner {
    all N results come back in input order. (`Promise.all`, however, is the
    default for a reason: the three reviewers are read-only and dispatch
    independently, so wall-clock time wins.)
+
+## Deprecated spawners
+
+### `--spawner claude-cli` (removed in v0.11)
+
+**Status: DEPRECATED** — RFC-0041 Phase 3.1 (AISDLC-377.4). Prints a warning to stderr on every
+invocation. Will be removed entirely in v0.11 (tracked in AISDLC-377.6).
+
+**Why it was deprecated:**
+
+The `claude-cli` spawner (`ClaudeCliInlineSpawner`) emits a `dispatch-manifest.json` and waits for
+the calling slash-command body to invoke `Agent(... run_in_background: true)` to process it. This
+works for trivially short tasks but races the Anthropic platform's hardcoded 600-second background-
+agent watchdog. Empirical data from the 2026-05-20 4-wide drain attempt showed a **~85% kill rate**
+on real backlog tasks — dev subagents killed mid-`pnpm test` because the watchdog cannot distinguish
+"working hard" from "hung". Each kill discarded 25+ minutes of subscription tokens.
+
+**What to use instead:**
+
+| Goal | Replacement |
+|---|---|
+| Subscription-quota autonomous drain (recommended) | `in-session-agent` via Dispatch Board + `/ai-sdlc dispatch-worker` in N operator-opened CC sessions. Foreground `Agent` calls have no background-agent watchdog. |
+| Headless/CI dispatch without active CC session | `claude-p-shell` via `cli-dispatch-supervisor` — operator-controlled 30 min watchdog, draws Agent SDK credit pool. |
+
+**Migration guide:** see
+[`docs/operations/operator-runbook.md` § "Choosing a dispatch model"](../../docs/operations/operator-runbook.md#choosing-a-dispatch-model).
+
+**Suppressing the deprecation warning** (for transitional CI that has acknowledged the deprecation):
+
+```bash
+AI_SDLC_SUPPRESS_DEPRECATION_WARNING=1 cli-orchestrator tick --spawner claude-cli
+```
+
+The suppression env var only silences the stderr warning; it does NOT affect behaviour.
+
+---
 
 ## Why Tier 1 doesn't use a spawner
 
