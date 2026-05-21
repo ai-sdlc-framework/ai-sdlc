@@ -12,7 +12,8 @@
     "rootHash",
     "rootSignature",
     "nonce",
-    "leafCount"
+    "leafCount",
+    "signedAt"
   ],
   "additionalProperties": false,
   "properties": {

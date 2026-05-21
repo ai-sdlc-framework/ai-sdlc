@@ -456,6 +456,7 @@ export const attestationEnvelopeV6Schema = {
     'rootSignature',
     'nonce',
     'leafCount',
+    'signedAt',
   ],
   additionalProperties: false,
   properties: {

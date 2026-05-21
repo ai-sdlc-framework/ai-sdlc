@@ -22,8 +22,10 @@
  *                     .ai-sdlc/transcript-leaves.jsonl, computes the Merkle
  *                     root + per-leaf inclusion proofs, signs the root, and
  *                     writes .ai-sdlc/attestations/<head-sha>.v6.dsse.json.
- *                     The --review-verdicts flag is still required in v6 mode
- *                     to identify the task-id for leaf selection.
+ *                     In v6 mode the task-id is resolved from --task-id or
+ *                     the .active-task sentinel; --review-verdicts is NOT
+ *                     consulted (v6 derives reviewer evidence from the
+ *                     committed transcript leaves, not the verdict JSON).
  *   --task-id          (v6 only) task ID for filtering transcript leaves
  *                     (e.g. AISDLC-383.3). Falls back to the task ID parsed
  *                     from the active-task sentinel at .active-task.

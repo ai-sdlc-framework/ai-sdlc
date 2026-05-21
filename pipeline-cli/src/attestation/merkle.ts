@@ -259,11 +259,13 @@ export function verifyInclusion(
   leafCount: number,
 ): boolean {
   if (!root || !leafHash) return false;
-  // Bound-check: reject attacker-supplied out-of-range indices.
-  // Without this, an attacker claiming leafIndex === leafCount exploits the
-  // odd-leaf duplication padding (CVE-2012-2459-class second-preimage attack).
-  if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= leafCount) return false;
+  // Validate leafCount FIRST (catches float / Infinity / non-positive).
+  // Then bound-check leafIndex against it. Reject attacker-supplied
+  // out-of-range indices: without this, claiming leafIndex === leafCount
+  // exploits the odd-leaf duplication padding (CVE-2012-2459-class
+  // second-preimage attack).
   if (!Number.isInteger(leafCount) || leafCount <= 0) return false;
+  if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= leafCount) return false;
 
   let current = leafHash;
   let idx = leafIndex;

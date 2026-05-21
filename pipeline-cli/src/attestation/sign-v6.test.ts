@@ -16,7 +16,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { generateKeyPairSync } from 'node:crypto';
+import { createPublicKey, generateKeyPairSync, verify as cryptoVerify } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -31,12 +31,16 @@ import {
 
 // ── Key generation helpers ────────────────────────────────────────────────────
 
+let lastPublicKeyPem: string;
+
 function generateTestKeyPair(): { privateKeyPem: string; publicKeyPem: string } {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
-  return {
+  const pair = {
     privateKeyPem: privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
     publicKeyPem: publicKey.export({ format: 'pem', type: 'spki' }).toString(),
   };
+  lastPublicKeyPem = pair.publicKeyPem;
+  return pair;
 }
 
 // ── Fixture helpers ───────────────────────────────────────────────────────────
@@ -436,5 +440,73 @@ describe('schema-invalid envelope detection', () => {
     // The real schema validator (JSON Schema) would reject this.
     // Here we just confirm the test fixture reflects the constraint.
     expect(envelope.rootHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+// ── Sign / verify roundtrip ───────────────────────────────────────────────────
+//
+// The signer produces an ed25519 signature; the verifier (Phase 3 / AISDLC-383.4)
+// will reconstruct the signed bytes and call crypto.verify(). This test runs
+// the same verify call from the test fixture against the freshly-produced
+// envelope so a regression that breaks the signed-payload encoding (wrong
+// bytes, wrong algorithm, wrong format) fails here loudly instead of silently
+// shipping envelopes that no real verifier will accept.
+
+describe('signRootHash — ed25519 sign/verify roundtrip', () => {
+  it('verifies the produced signature against the matching public key', () => {
+    const leaf0 = makeLeaf({ leafIndex: 0, reviewerName: 'code-reviewer' });
+    const leaf1 = makeLeaf({ leafIndex: 1, reviewerName: 'test-reviewer' });
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0, leaf1],
+      allLeaves: [leaf0, leaf1],
+      nonce: 'r'.repeat(64),
+      privateKeyPem,
+    });
+
+    // Reconstruct the signed bytes exactly as the signer encoded them.
+    // signRootHash signs the UTF-8 encoding of the hex rootHash string.
+    const signedBytes = Buffer.from(envelope.rootHash, 'utf8');
+    const signatureBytes = Buffer.from(envelope.rootSignature, 'base64');
+    const publicKey = createPublicKey({ key: lastPublicKeyPem, format: 'pem' });
+
+    // ed25519 verify: algorithm arg must be null (per Node docs).
+    const valid = cryptoVerify(null, signedBytes, publicKey, signatureBytes);
+    expect(valid).toBe(true);
+  });
+
+  it('rejects a signature from a different keypair', () => {
+    const leaf0 = makeLeaf({ leafIndex: 0 });
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 's'.repeat(64),
+      privateKeyPem,
+    });
+    // Generate an UNRELATED keypair; its pubkey must NOT verify the signature.
+    const { publicKeyPem: foreignPub } = generateTestKeyPair();
+    const signedBytes = Buffer.from(envelope.rootHash, 'utf8');
+    const signatureBytes = Buffer.from(envelope.rootSignature, 'base64');
+    const foreignKey = createPublicKey({ key: foreignPub, format: 'pem' });
+    expect(cryptoVerify(null, signedBytes, foreignKey, signatureBytes)).toBe(false);
+  });
+
+  it('rejects a signature when rootHash is tampered', () => {
+    const leaf0 = makeLeaf({ leafIndex: 0 });
+    const envelope = buildV6Envelope({
+      headSha: FAKE_HEAD_SHA,
+      prLeaves: [leaf0],
+      allLeaves: [leaf0],
+      nonce: 't'.repeat(64),
+      privateKeyPem,
+    });
+    // Flip one hex char of rootHash — verify must fail.
+    const tampered = envelope.rootHash.slice(0, -1) + (envelope.rootHash.endsWith('0') ? '1' : '0');
+    expect(tampered).not.toBe(envelope.rootHash);
+    const signedBytes = Buffer.from(tampered, 'utf8');
+    const signatureBytes = Buffer.from(envelope.rootSignature, 'base64');
+    const publicKey = createPublicKey({ key: lastPublicKeyPem, format: 'pem' });
+    expect(cryptoVerify(null, signedBytes, publicKey, signatureBytes)).toBe(false);
   });
 });
