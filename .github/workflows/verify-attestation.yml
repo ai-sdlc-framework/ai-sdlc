@@ -589,8 +589,18 @@ jobs:
           set -euo pipefail
           if [ "$STATUS" = "valid" ]; then
             STATE=success
-            DESC="valid envelope at HEAD"
-            echo "::notice::ai-sdlc attestation valid on $HEAD_SHA"
+            # Surface the verifier's reason in the success description so
+            # soft-fail / spot-check qualifiers ("soft-fail: …") are visible
+            # on the GitHub status surface, not just buried in workflow logs.
+            # Per AISDLC-383.4 security review: a hardcoded clean string
+            # would mask the soft-fail caveat from operators reviewing PR
+            # status. Truncate to 130 chars (GitHub limit is 140) with
+            # a sensible default when the reason is empty.
+            DESC="${REASON:0:130}"
+            if [ -z "${DESC:-}" ]; then
+              DESC="valid envelope at HEAD"
+            fi
+            echo "::notice::ai-sdlc attestation valid on $HEAD_SHA: $REASON"
           elif [ -z "${STATUS:-}" ]; then
             # Verifier crashed before emitting status= to GITHUB_OUTPUT.
             STATE=failure

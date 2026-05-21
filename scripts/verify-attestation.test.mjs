@@ -3185,8 +3185,10 @@ describe('verifyV6Envelope (unit)', () => {
     }
   });
 
-  it('AC#6: soft-fail when transcript-leaves.jsonl is missing (OQ-3)', () => {
+  it('AC#6: CI-mode REJECTS when transcript-leaves.jsonl is missing (replay-attack mitigation per AISDLC-383.4 security review)', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    const prev = process.env['AI_SDLC_V6_SPOT_CHECK_MODE'];
+    delete process.env['AI_SDLC_V6_SPOT_CHECK_MODE']; // ensure CI mode
     try {
       // Build envelope but do NOT write transcript-leaves.jsonl
       const leaves = [
@@ -3200,7 +3202,7 @@ describe('verifyV6Envelope (unit)', () => {
         join(tmp, '.ai-sdlc', 'attestations', `${HEAD_SHA}.v6.dsse.json`),
         JSON.stringify(envelope, null, 2),
       );
-      // No transcript-leaves.jsonl written → soft-fail path
+      // No transcript-leaves.jsonl → CI mode must reject (was soft-fail pre-iter-2)
       const result = verifyV6Envelope({
         envelope,
         envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
@@ -3208,9 +3210,79 @@ describe('verifyV6Envelope (unit)', () => {
         trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
         repoRoot: tmp,
       });
-      // OQ-3: soft-fail → exit 0 with informational warning
-      assert.equal(result.status, 'valid', `soft-fail must return valid, got: ${result.reason}`);
+      assert.equal(
+        result.status,
+        'invalid',
+        `CI mode must reject missing leaves, got: ${result.reason}`,
+      );
+      assert.match(result.reason, /transcript-leaves\.jsonl is missing or empty/);
+      assert.match(result.reason, /Replay attack mitigation/);
+    } finally {
+      if (prev !== undefined) process.env['AI_SDLC_V6_SPOT_CHECK_MODE'] = prev;
+      else delete process.env['AI_SDLC_V6_SPOT_CHECK_MODE'];
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#6: spot-check mode (AI_SDLC_V6_SPOT_CHECK_MODE=1) opts into soft-fail (OQ-3)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    const prev = process.env['AI_SDLC_V6_SPOT_CHECK_MODE'];
+    process.env['AI_SDLC_V6_SPOT_CHECK_MODE'] = '1';
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const envelope = buildValidV6Envelope(HEAD_SHA, leaves, keys.privateKeyPem);
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'attestations', `${HEAD_SHA}.v6.dsse.json`),
+        JSON.stringify(envelope, null, 2),
+      );
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(
+        result.status,
+        'valid',
+        `spot-check mode must return valid, got: ${result.reason}`,
+      );
       assert.match(result.reason, /soft-fail/);
+    } finally {
+      if (prev !== undefined) process.env['AI_SDLC_V6_SPOT_CHECK_MODE'] = prev;
+      else delete process.env['AI_SDLC_V6_SPOT_CHECK_MODE'];
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('replay attack: rejects envelope whose subject.digest.sha1 does not match headSha (defence-in-depth)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    try {
+      const leaves = [makeLeaf(0, 'code-reviewer')];
+      const STOLEN_SHA = 'a'.repeat(40); // envelope signed for a different PR
+      const VICTIM_SHA = 'b'.repeat(40);
+      // Build envelope bound to STOLEN_SHA internally but rename file to VICTIM_SHA.
+      const envelope = buildValidV6Envelope(STOLEN_SHA, leaves, keys.privateKeyPem);
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'attestations', `${VICTIM_SHA}.v6.dsse.json`),
+        JSON.stringify(envelope, null, 2),
+      );
+      // Even with the (matching) leaves file present, the subject mismatch must reject.
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${VICTIM_SHA}.v6.dsse.json`,
+        headSha: VICTIM_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /subject\.digest\.sha1.*does not match head SHA/);
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }

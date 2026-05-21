@@ -516,11 +516,13 @@ export function verifyV6Envelope({
     return { status: 'invalid', reason: 'v6: subject.digest.sha1 must be a 40-char hex string' };
   }
 
-  // ── 2. Head-commit binding via filename ─────────────────────────────────
-  // The file path `.ai-sdlc/attestations/<headSha>.v6.dsse.json` is the
-  // cryptographic binding between the envelope and the head commit.
-  // We verify the filename (without extension) encodes the headSha so an
-  // attacker cannot replay an envelope from a different PR by renaming it.
+  // ── 2. Head-commit binding (defence-in-depth) ──────────────────────────
+  // Two independent checks must agree for the envelope to belong to this PR:
+  //   (a) the file path  `.ai-sdlc/attestations/<headSha>.v6.dsse.json`
+  //   (b) the envelope-internal `subject.digest.sha1` field
+  // If either disagrees with `headSha`, an attacker may be replaying or
+  // mis-binding an envelope. Requiring both removes the single point of
+  // failure of relying on filename alone.
   const expectedFileName = `${headSha.toLowerCase()}.v6.dsse.json`;
   if (envelopeFileName.toLowerCase() !== expectedFileName) {
     return {
@@ -528,19 +530,49 @@ export function verifyV6Envelope({
       reason: `v6: envelope filename '${envelopeFileName}' does not match expected '<headSha>.v6.dsse.json' for head ${headSha.slice(0, 7)}`,
     };
   }
+  if (envelopeSubjectSha.toLowerCase() !== headSha.toLowerCase()) {
+    return {
+      status: 'invalid',
+      reason: `v6: envelope.subject.digest.sha1 '${envelopeSubjectSha.slice(0, 7)}' does not match head SHA '${headSha.slice(0, 7)}' (possible replay)`,
+    };
+  }
 
   // ── 3. Load on-disk transcript leaves ──────────────────────────────────
   // CRITICAL: recompute from on-disk leaves, not from envelope fields.
-  // OQ-3 (RFC-0042): soft-fail when the leaves file is missing.
+  //
+  // OQ-3 (RFC-0042) "soft-fail on missing transcript" was scoped to
+  // OPERATOR-TRIGGERED `cli-attestation spot-check <pr>` on PRs whose
+  // transcripts had been GC'd per the 90-day retention. The CI verifier
+  // is the OPPOSITE situation — a freshly-pushed PR on Day 0 with no
+  // transcript at all MUST NOT be accepted, otherwise an attacker can
+  // replay any historic trusted-reviewer-signed v6 envelope by simply
+  // omitting transcript-leaves.jsonl from the PR diff.
+  //
+  // Therefore: soft-fail is opt-in via `AI_SDLC_V6_SPOT_CHECK_MODE=1`. The
+  // workflow MUST NOT set this var; only the spot-check CLI surface sets it.
   const onDiskLeaves = v6LoadLeaves(repoRoot);
   if (onDiskLeaves.length === 0) {
-    // Soft-fail per OQ-3: no transcript-leaves.jsonl or empty — informational only.
+    const spotCheckMode = process.env['AI_SDLC_V6_SPOT_CHECK_MODE'] === '1';
+    if (!spotCheckMode) {
+      return {
+        status: 'invalid',
+        reason:
+          'v6: transcript-leaves.jsonl is missing or empty — required for CI verification. ' +
+          'Replay attack mitigation per AISDLC-383.4 security review. If this is an ' +
+          "operator-triggered spot-check on a PR whose transcripts were GC'd per the " +
+          '90-day retention policy, set AI_SDLC_V6_SPOT_CHECK_MODE=1 to allow soft-fail.',
+      };
+    }
+    // Spot-check mode: explicitly opted in by the operator via CLI surface.
+    // Verifies the rootSignature against the envelope's claimed rootHash —
+    // this proves key possession at the time the envelope was signed, but
+    // does NOT verify the Merkle chain (transcripts are GC'd). Document
+    // the limitation in the returned reason so the operator surface shows it.
     process.stderr.write(
-      '[v6-verifier] INFO: transcript-leaves.jsonl is missing or empty — ' +
-        'Merkle proof verification skipped (soft-fail per OQ-3, RFC-0042). ' +
-        'The rootSignature will still be verified against trusted-reviewers.\n',
+      '[v6-verifier] INFO: spot-check mode (AI_SDLC_V6_SPOT_CHECK_MODE=1) — ' +
+        'transcript-leaves.jsonl missing, verifying key possession only ' +
+        '(Merkle chain skipped per OQ-3, RFC-0042).\n',
     );
-    // Still verify the root signature (it's the primary trust anchor).
     return verifyV6RootSignature(envelope, trustedReviewers);
   }
 
