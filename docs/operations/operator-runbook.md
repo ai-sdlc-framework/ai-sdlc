@@ -20,6 +20,51 @@ the bidirectional review convention and pilot procedure.
 
 ---
 
+## Choosing a dispatch model
+
+RFC-0041 (Conductor/Worker Process Architecture) defines three patterns for
+dispatching developer Workers. Choose one based on your cost posture and
+infrastructure constraints.
+
+| Pattern | How Workers run | Watchdog | Cost post-2026-06-15 | Parallelism | Best for |
+|---|---|---|---|---|---|
+| **`in-session-agent`** (Dispatch Board + `/ai-sdlc dispatch-worker`) | Foreground `Agent` call in each operator-opened CC session | None observed (interactive) | **Subscription quota** — zero incremental cost | One task per CC session; open N sessions for N-wide parallel | High-volume autonomous drain on operator's subscription. Recommended default. |
+| **`claude-p-shell`** (supervisor daemon + `claude -p`) | `env -u CLAUDECODE claude -p` subprocess spawned by `cli-dispatch-supervisor` | Operator-controlled 30 min (`ShellClaudePSpawner`) | Agent SDK credit pool then API tokens | N from one supervisor (bounded by `WorktreePool.parallelism.maxConcurrent`) | Headless CI, true daemon, ops contexts where no active CC session is available |
+| **`--spawner claude-cli`** (legacy, **DEPRECATED**) | `Agent(... run_in_background: true)` inside the Conductor's own CC session | Anthropic's hardcoded 600s background-agent watchdog (~85% kill rate on tasks >10 min) | Subscription interactive quota | Limited by the 600s watchdog; most tasks exceed it | **Do not use.** Will be removed in v0.11. See migration recipe below. |
+
+### Migration recipe — from `--spawner claude-cli` to `dispatch-worker`
+
+If you currently run `/ai-sdlc orchestrator-tick` (or `cli-orchestrator tick --spawner claude-cli`)
+and rely on `Agent(... run_in_background)` to dispatch developer Workers:
+
+1. **Set up the Dispatch Board** — ensure `.ai-sdlc/dispatch-config.yaml` exists with:
+   ```yaml
+   apiVersion: ai-sdlc.io/v1alpha1
+   kind: DispatchConfig
+   spec:
+     defaultWorkerKind: in-session-agent
+   ```
+2. **Open N operator CC sessions** (iTerm tabs, tmux panes, separate terminals) and run
+   `/ai-sdlc dispatch-worker` in each. Each session claims manifests from the board and
+   executes tasks via foreground `Agent` calls (no watchdog, subscription quota).
+3. **Switch the Conductor** to emit manifests instead of calling `Agent(... run_in_background)`.
+   The Conductor continues to use `/ai-sdlc orchestrator-tick` on its `ScheduleWakeup` loop —
+   the change is that ticks now write `queue/<id>.dispatch.json` and poll `done/` rather than
+   dispatching inline agents.
+4. **Remove `--spawner claude-cli`** from any cron entries, shell aliases, or CI steps.
+   The deprecation warning fires on every invocation until the flag is removed.
+
+**Suppressing the warning during transition** (for CI contexts that have already acknowledged
+the deprecation):
+```bash
+AI_SDLC_SUPPRESS_DEPRECATION_WARNING=1 cli-orchestrator tick --spawner claude-cli
+```
+
+**For the supervisor (`claude-p-shell`) path** (headless/CI without active CC sessions), see
+[`docs/operations/dispatch-supervisor-install.md`](./dispatch-supervisor-install.md).
+
+---
+
 ## What this role is
 
 The Pipeline Operator owns the **policy, posture, and triage layer** of an AI-SDLC pipeline. Three engineering capabilities had to land before this role could exist coherently:

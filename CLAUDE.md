@@ -169,9 +169,13 @@ This prevents retroactive blocking of in-flight tasks and allows a graceful migr
 **Spawner kinds for `cli-orchestrator tick --spawner <kind>`** (AISDLC-349, default changed AISDLC-352):
 - `mock` — fixtures only; for plumbing tests. Billing: none.
 - `api-key` — uses `ANTHROPIC_API_KEY` via the Claude Code SDK. Billing: API token (pay-as-you-go or Agent SDK credit pool post-2026-06-15).
-- `claude-cli` — emits a `dispatch-manifest.json` for the calling slash command body to consume via the `Agent` tool. **Only works when called from inside a Claude Code session** (e.g. via `/ai-sdlc orchestrator-tick`); fails silently with `developer-json-contract-violated` when run from a plain shell. Billing: operator's interactive Claude Code quota.
+- `claude-cli` — **DEPRECATED** (RFC-0041 Phase 3.1, removal in v0.11). Emits a `dispatch-manifest.json` for the calling slash command body to consume via the `Agent` tool. **Only works when called from inside a Claude Code session**; fails silently with `developer-json-contract-violated` from a plain shell. Races the Anthropic 600s background-agent watchdog (~85% kill rate on real tasks). Migrate to `in-session-agent` (Dispatch Board + `/ai-sdlc dispatch-worker`) — see `docs/operations/operator-runbook.md` §"Choosing a dispatch model". Suppressible: `AI_SDLC_SUPPRESS_DEPRECATION_WARNING=1`.
 - `claude` — **(DEFAULT since AISDLC-352)** shells out to `claude -p` via `child_process.spawn`. **Use this for autonomous tick from a shell** (cron/daemon/sidecar context where no slash command body is around). Billing: subscription (Agent SDK credit pool, $200/mo on Max-20x). AISDLC-349. **Warning**: if `ANTHROPIC_API_KEY` is also set in env and `AI_SDLC_ORCHESTRATOR_SPAWNER_FALLBACK=api-key` is configured, a spawner error can silently fall through to paid API tokens — the CLI warns at tick start.
 - `codex` — dispatches via Codex CLI bridge (`CODEX_SPAWN_AGENT_BIN`). Billing: Codex plan.
+
+**New dispatch patterns (RFC-0041 Conductor/Worker Architecture)**:
+- `in-session-agent` — each Worker is a separate operator-opened CC session running `/ai-sdlc dispatch-worker`; tasks are claimed from the Dispatch Board (`.ai-sdlc/dispatch/queue/`) via foreground `Agent` calls (no watchdog, subscription quota). **Recommended default for autonomous drain.** N sessions = N-wide parallelism at zero incremental cost.
+- `claude-p-shell` — Workers are `env -u CLAUDECODE claude -p` subprocesses spawned by `cli-dispatch-supervisor`. Operator-controlled 30 min watchdog. Draws Agent SDK credit pool post-2026-06-15. For headless/CI contexts where no operator CC session is available.
 
 The Step 0-13 pipeline lives in `pipeline-cli/` (`@ai-sdlc/pipeline-cli`). Tier 1 = slash command body (subscription). Tier 2 = `executePipeline()` library + `SubagentSpawner` injection (API-key, MockSpawner, etc.). Refs: `pipeline-cli/{README,docs/spawner,docs/steps}.md`, RFC-0012.
 
