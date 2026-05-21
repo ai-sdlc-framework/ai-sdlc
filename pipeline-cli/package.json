@@ -97,6 +97,10 @@
     "./estimation": {
       "types": "./dist/estimation/index.d.ts",
       "import": "./dist/estimation/index.js"
+    },
+    "./attestation": {
+      "types": "./dist/attestation/merkle.d.ts",
+      "import": "./dist/attestation/merkle.js"
     }
   },
   "publishConfig": {

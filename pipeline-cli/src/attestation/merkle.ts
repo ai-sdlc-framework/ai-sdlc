@@ -73,9 +73,11 @@ export interface MerkleResult {
   /** SHA-256 root of the full tree. Empty string when leaves array is empty. */
   root: string;
   /**
-   * Per-leaf inclusion proofs keyed by leafIndex.
-   * Each proof is a list of sibling hashes from leaf level up to (but not including)
-   * the root. Pass to `verifyInclusion` together with the leaf hash and root.
+   * Per-leaf inclusion proofs keyed by the leaf's 0-based array position
+   * (NOT TranscriptLeaf.leafIndex — the two diverge if loadLeaves skips
+   * corrupt JSONL lines). Each proof is a list of sibling hashes from leaf
+   * level up to (but not including) the root. Pass to `verifyInclusion`
+   * together with the leaf hash and root.
    */
   proofs: Record<number, string[]>;
 }
@@ -233,12 +235,18 @@ export function verifyInclusion(
 /**
  * Generate a 32-byte hex nonce bound to the PR's head SHA.
  *
- * Derivation: SHA-256(headSha || 16-random-bytes) → 64 hex chars = 32 bytes.
+ * Derivation: SHA-256(headSha_utf8 || hex(16-random-bytes)_utf8) → 64 hex
+ * chars = 32 bytes. (The random bytes are hex-encoded and the hash input is
+ * the UTF-8 encoding of that hex string, not the 16 raw bytes — output
+ * cryptographic strength is unchanged either way.)
  *
  * Properties:
  *   - Unique per invocation (random component).
- *   - Cryptographically bound to this PR's head SHA.
- *   - Replay-resistant: the same nonce can't be reused for a different PR's head.
+ *   - Cryptographically bound to this PR's head SHA at GENERATION time only —
+ *     the resulting 32-byte nonce is opaque, so a verifier cannot recover
+ *     headSha from the nonce alone. The "replay-resistant" property is
+ *     realized by the Layer-5 CI verifier (RFC-0042 §Layer 5 step 4) matching
+ *     transcriptLeaves[].nonce against a CI-issued nonce store.
  *
  * Per OQ-6: first push IS genesis — no ceremony required.
  */
