@@ -8,11 +8,11 @@ description: >-
   with continue:true to preserve prior conversation state) OR atomically
   claims a fresh Dispatch Board manifest matching workerKind ∈ {any,
   in-session-agent} and invokes the ai-sdlc:developer agent on it as a
-  FOREGROUND Agent call (no 600s watchdog kill — RFC-0041 §4.3.1). Writes
-  the resulting verdict to done/ or failed/, then loops via
-  ScheduleWakeup. Operator opens N sibling CC sessions and fires this
-  command in each to drain the queue at zero incremental subscription
-  cost (per AISDLC-353). See RFC-0041 §4.3.1 + §10 OQ-4 resolution.
+  FOREGROUND Agent call. Writes the resulting verdict to done/ or
+  failed/, then loops via ScheduleWakeup. Operator opens N sibling CC
+  sessions and fires this command in each to drain the queue at zero
+  incremental subscription cost (per AISDLC-353). See RFC-0041 §4.3.1 +
+  §10 OQ-4 resolution.
 argument-hint: "[--once]"
 allowed-tools:
   - Read
@@ -36,15 +36,22 @@ When the queue is empty the session hibernates for ~30 seconds (configurable
 via `.ai-sdlc/dispatch-config.yaml` `spec.inSessionAgent.emptyQueueHibernateSec`)
 before re-polling — this avoids burning subscription tokens on busy-waits.
 
-## Why this is safe vs. the legacy run_in_background pattern
+## Worker isolation rationale
 
-The previous pattern dispatched dev subagents via
-`Agent(subagent_type: 'developer', run_in_background: true)` from inside the
-Conductor's session. That triggered Anthropic's hardcoded 600s silent-stdout
-background-agent watchdog (~85% kill rate during `pnpm test` per RFC-0041
-§2.1). The Dispatch Board protocol moves Workers to their own CC sessions
-where they invoke `Agent` in **foreground** — the platform shows a live
-spinner and trusts the call. No background-agent watchdog applies.
+Workers run in their own Claude Code sessions and invoke `Agent` in
+foreground. This isolation provides operator-controlled parallelism (N
+sessions = N workers), explicit subscription-quota visibility, and
+independence from the Conductor's session lifecycle.
+
+**Historical note (2026-05-21):** RFC-0041 §2.1 originally cited Anthropic's
+"600s silent-stdout background-agent watchdog (~85% kill rate during pnpm
+test)" as the primary motivation for moving Workers out of the Conductor's
+session. That claim was a misdiagnosis — forensic re-measurement of 73 dev
+subagent transcripts via `python3 ~/.claude/skills/audit-subagent/audit.py`
+found **0 watchdog-shape kills** and 80.8% clean completion (median 16 min,
+max 2.5 h). The 19.2% failures were operator-initiated interrupts, not
+system kills. The Dispatch Board pattern stands on the other rationales
+above; the watchdog-avoidance framing has been removed.
 
 ## Hard rules (identical to `/ai-sdlc execute`)
 
@@ -224,8 +231,7 @@ the default sweep threshold is 30 min per OQ-3).
 
 Use the `Agent` tool to spawn `ai-sdlc:developer` against the manifest's
 worktree + task file. **This is a foreground call** — the slash command
-body waits for the result. The platform shows a live spinner; no 600s
-watchdog applies. Required parameters:
+body waits for the result. The platform shows a live spinner. Required parameters:
 
 - `subagent_type`: `developer`
 - `cwd`: the manifest's `worktree` (absolute or repo-relative)

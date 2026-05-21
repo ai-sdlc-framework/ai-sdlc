@@ -467,21 +467,39 @@ class MyCustomSpawner implements SubagentSpawner {
 **Status: DEPRECATED** — RFC-0041 Phase 3.1 (AISDLC-377.4). Prints a warning to stderr on every
 invocation. Will be removed entirely in v0.11 (tracked in AISDLC-377.6).
 
-**Why it was deprecated:**
+**Deprecation rationale — UNDER REVIEW as of 2026-05-21:**
 
-The `claude-cli` spawner (`ClaudeCliInlineSpawner`) emits a `dispatch-manifest.json` and waits for
-the calling slash-command body to invoke `Agent(... run_in_background: true)` to process it. This
-works for trivially short tasks but races the Anthropic platform's hardcoded 600-second background-
-agent watchdog. Empirical data from the 2026-05-20 4-wide drain attempt showed a **~85% kill rate**
-on real backlog tasks — dev subagents killed mid-`pnpm test` because the watchdog cannot distinguish
-"working hard" from "hung". Each kill discarded 25+ minutes of subscription tokens.
+The original deprecation rationale claimed the `claude-cli` spawner
+(`ClaudeCliInlineSpawner`) "races the Anthropic platform's hardcoded 600-second
+background-agent watchdog" with a "~85% kill rate" observed during the
+2026-05-20 4-wide drain attempt. **That claim was a misdiagnosis.**
 
-**What to use instead:**
+Forensic re-measurement on 2026-05-21 via `python3 ~/.claude/skills/audit-subagent/audit.py`
+across 73 dev subagent transcripts (~30 days):
+
+- **0 watchdog-shape kills** (`tool_use_pending` signature: 0)
+- **80.8% clean completion** (`stop_reason=end_turn` with JSON envelope or text body)
+- **19.2% operator-initiated interrupts** (literal `[Request interrupted by user]` in transcript)
+- Clean dev duration: median **16 min**, max **150 min (2.5 hours)**
+- 83% of clean runs exceed 600s; a hard 600s wall-clock watchdog cannot exist
+
+The 2026-05-20 "85% kill rate" almost certainly counted operator-initiated
+wave-cancellations as system kills without reading the transcript files. The
+diagnostic skill above is the source of truth going forward; re-run it
+whenever a subagent-reliability claim needs to be made.
+
+The `claude-cli` spawner's deprecation status pending re-evaluation against
+this corrected baseline. The replacements below remain documented because
+they provide useful properties (operator-controlled parallelism, billing-pool
+isolation post-2026-06-15) — but the watchdog-avoidance framing has been
+removed.
+
+**What to use instead (until the deprecation is re-evaluated):**
 
 | Goal | Replacement |
 |---|---|
-| Subscription-quota autonomous drain (recommended) | `in-session-agent` via Dispatch Board + `/ai-sdlc dispatch-worker` in N operator-opened CC sessions. Foreground `Agent` calls have no background-agent watchdog. |
-| Headless/CI dispatch without active CC session | `claude-p-shell` via `cli-dispatch-supervisor` — operator-controlled 30 min watchdog, draws Agent SDK credit pool. |
+| Subscription-quota autonomous drain | `in-session-agent` via Dispatch Board + `/ai-sdlc dispatch-worker` in N operator-opened CC sessions. Foreground `Agent` calls integrate cleanly with the operator's interactive workflow. |
+| Headless/CI dispatch without active CC session | `claude-p-shell` via `cli-dispatch-supervisor` — operator-controlled 30 min watchdog (a real watchdog this time, in the supervisor process), draws Agent SDK credit pool. |
 
 **Migration guide:** see
 [`docs/operations/operator-runbook.md` § "Choosing a dispatch model"](../../docs/operations/operator-runbook.md#choosing-a-dispatch-model).

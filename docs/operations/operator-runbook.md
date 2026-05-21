@@ -26,11 +26,22 @@ RFC-0041 (Conductor/Worker Process Architecture) defines three patterns for
 dispatching developer Workers. Choose one based on your cost posture and
 infrastructure constraints.
 
-| Pattern | How Workers run | Watchdog | Cost post-2026-06-15 | Parallelism | Best for |
+> **Correction note (2026-05-21):** an earlier version of this table cited
+> "Anthropic's hardcoded 600s background-agent watchdog (~85% kill rate)" as
+> a reason to avoid `--spawner claude-cli`. That claim was a misdiagnosis.
+> Forensic scan of 73 dev subagent transcripts (`python3 ~/.claude/skills/audit-subagent/audit.py`)
+> found **0 watchdog-shape kills** and **80.8% clean completion** (median 16 min,
+> max 2.5 h). The 19.2% failures were operator-initiated interrupts (literal
+> `[Request interrupted by user]` in the transcript), not system kills. The
+> `claude-cli` deprecation should be re-evaluated against this corrected
+> baseline — the table below preserves the deprecation for now but with the
+> rationale honestly cited.
+
+| Pattern | How Workers run | Background-agent kill behavior | Cost post-2026-06-15 | Parallelism | Best for |
 |---|---|---|---|---|---|
 | **`in-session-agent`** (Dispatch Board + `/ai-sdlc dispatch-worker`) | Foreground `Agent` call in each operator-opened CC session | None observed (interactive) | **Subscription quota** — zero incremental cost | One task per CC session; open N sessions for N-wide parallel | High-volume autonomous drain on operator's subscription. Recommended default. |
 | **`claude-p-shell`** (supervisor daemon + `claude -p`) | `env -u CLAUDECODE claude -p` subprocess spawned by `cli-dispatch-supervisor` | Operator-controlled 30 min (`ShellClaudePSpawner`) | Agent SDK credit pool then API tokens | N from one supervisor (bounded by `WorktreePool.parallelism.maxConcurrent`) | Headless CI, true daemon, ops contexts where no active CC session is available |
-| **`--spawner claude-cli`** (legacy, **DEPRECATED**) | `Agent(... run_in_background: true)` inside the Conductor's own CC session | Anthropic's hardcoded 600s background-agent watchdog (~85% kill rate on tasks >10 min) | Subscription interactive quota | Limited by the 600s watchdog; most tasks exceed it | **Do not use.** Will be removed in v0.11. See migration recipe below. |
+| **`--spawner claude-cli`** (legacy, **DEPRECATION UNDER REVIEW**) | `Agent(... run_in_background: true)` inside the Conductor's own CC session | **Previously claimed: 600s/85% kill rate. Re-measured 2026-05-21: 0 watchdog kills in 73 dev transcripts, 80.8% clean, median 16 min, max 2.5 h.** Failures are operator-initiated interrupts. | Subscription interactive quota | Unbounded by any observed watchdog | **Deprecation status pending re-evaluation.** Was scheduled for removal in v0.11 based on the now-corrected claim. |
 
 ### Migration recipe — from `--spawner claude-cli` to `dispatch-worker`
 

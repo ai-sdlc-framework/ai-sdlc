@@ -5,8 +5,8 @@ description: >-
   Conductor tick. Reads the dispatch frontier, emits manifests to the
   Dispatch Board for Worker sessions to claim, then polls the done/ + failed/
   subdirs for newly-landed verdicts. For each successful verdict, fans out
-  3 reviewer subagents (foreground Agent calls — within the 600s budget),
-  signs the attestation, pushes the branch, and arms auto-merge. Because
+  3 reviewer subagents (foreground Agent calls), signs the attestation,
+  pushes the branch, and arms auto-merge. Because
   reviewers run foreground in this interactive session, they draw the
   operator's subscription quota — not the Agent SDK credit pool. Pair with
   one or more sibling sessions running /ai-sdlc dispatch-worker to drain
@@ -23,13 +23,18 @@ model: inherit
 Run one autonomous orchestrator tick in the current Claude Code session as
 **Conductor** (RFC-0041 §4.2).
 
-This command shifted in RFC-0041 Phase 1 (AISDLC-377.1). The previous
-behavior — invoke `Agent` directly to dispatch dev subagents in-session —
-hit Anthropic's 600s background-agent watchdog (~85% kill rate, RFC-0041
-§2.1). The new flow decouples dispatch from execution: the Conductor only
-emits Dispatch Board manifests; Worker sessions (one or more sibling CC
-sessions running `/ai-sdlc dispatch-worker`) claim them atomically and run
-the dev subagent in their own foreground context.
+This command shifted in RFC-0041 Phase 1 (AISDLC-377.1). The previous behavior
+invoked `Agent` directly to dispatch dev subagents in-session. The original
+RFC-0041 §2.1 rationale cited a "600s background-agent watchdog (~85% kill
+rate)" — **that claim was a misdiagnosis** (forensic re-measurement
+2026-05-21 via `python3 ~/.claude/skills/audit-subagent/audit.py` found 0
+watchdog kills and 80.8% clean completion across 73 dev subagents, median
+16 min, max 2.5 h). The Conductor/Worker decoupling pattern provides real
+benefits (operator-controlled parallelism, billing visibility, cost-pool
+isolation post-2026-06-15) that stand independently of the now-corrected
+watchdog claim; this command continues to use the pattern for those reasons.
+The cost-pool comparison should be re-evaluated against the corrected
+baseline.
 
 > **Why this lives in the slash command body (not a subagent).** Plugin
 > subagents cannot use the `Agent` tool — Claude Code filters it out one
@@ -124,8 +129,8 @@ For each verdict in the array with `outcome === 'success'`:
    - `code-reviewer` — `Read`/`Bash`/`Grep` tools, reviews the diff
    - `test-reviewer` — same toolset, focuses on test coverage + ACs
    - `security-reviewer` — same toolset, security audit
-   Each reviewer subagent fits in <600s (they read diff JSON, emit verdict JSON,
-   exit). The foreground call is what makes this safe — no platform watchdog.
+   Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
+   Foreground `Agent` calls are well-suited regardless of duration.
 3. Aggregate the 3 verdicts, write them to `.ai-sdlc/verdicts/<task-id>.json`.
 4. Sign the attestation:
    ```bash
@@ -267,17 +272,22 @@ fi
 
 ---
 
-## Why this is safe (no 600s watchdog)
+## Conductor architecture
 
 The Conductor:
 
-- Never invokes `Agent(... run_in_background: true)` — the failure mode
-  RFC-0041 §2.1 documented.
-- Only spawns foreground reviewer subagents (each <600s — they read a diff,
-  emit JSON, exit).
-- Does all Worker-bound dispatch through the filesystem-backed Dispatch
-  Board. Workers live in their own CC sessions where the watchdog does not
-  apply.
+- Does all Worker-bound dispatch through the filesystem-backed Dispatch Board.
+  Workers live in their own CC sessions and can run as long as needed.
+- Only spawns foreground reviewer subagents (short-lived: read diff, emit
+  JSON, exit).
+
+**Historical note (2026-05-21):** RFC-0041 §2.1 originally documented a "600s
+background-agent watchdog" as the reason to avoid `Agent(... run_in_background)`.
+That claim was a misdiagnosis — forensic re-measurement found 0 watchdog kills
+in 73 dev subagents (`python3 ~/.claude/skills/audit-subagent/audit.py`). The
+Conductor/Worker decoupling still provides useful properties (operator-controlled
+parallelism, billing-pool isolation), so this command continues to use the
+pattern; the watchdog-avoidance framing has been removed.
 
 Operator runbook for opening Worker sessions: see `/ai-sdlc dispatch-worker`.
 Reference manifest emit: see RFC-0041 §4.4. Heartbeat sweep + stale-claim
