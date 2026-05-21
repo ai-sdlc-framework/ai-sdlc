@@ -1,7 +1,7 @@
 ---
 id: AISDLC-383.1
 title: 'feat(attestation): RFC-0042 Phase 1 — transcript capture in reviewer subagents'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:
@@ -36,13 +36,13 @@ Per RFC-0042 §Design Layer 1, transcripts are **gitignored**. Operator retains 
 
 ### Acceptance criteria
 
-- [ ] #1 All 5 reviewer agent definitions emit transcripts to `.ai-sdlc/transcripts/<task-id>/<reviewer-name>.jsonl`
-- [ ] #2 `.gitignore` excludes `.ai-sdlc/transcripts/`
-- [ ] #3 Transcript JSONL is well-formed: one event per line, includes `{role, content, timestamp}` and tool-call events
-- [ ] #4 Hermetic test in `pipeline-cli/src/attestation/transcript-capture.test.ts` (or equivalent location) covers happy path + missing-prompt edge case
-- [ ] #5 `cli-attestation transcripts list <task-id>` lists captured transcripts with counts (events, tokens, bytes)
-- [ ] #6 Operator runbook docs/operations/transcript-management.md created — explains retention policy, GC, remote storage opt-in
-- [ ] #7 New code reaches 80%+ patch coverage
+- [x] #1 All 5 reviewer agent definitions emit transcripts to `.ai-sdlc/transcripts/<task-id>/<reviewer-name>.jsonl`
+- [x] #2 `.gitignore` excludes `.ai-sdlc/transcripts/`
+- [x] #3 Transcript JSONL is well-formed: one event per line, includes `{role, content, timestamp}` and tool-call events
+- [x] #4 Hermetic test in `pipeline-cli/src/attestation/transcript-capture.test.ts` covers happy path + missing-prompt edge case
+- [x] #5 `cli-attestation transcripts list <task-id>` lists captured transcripts with counts (events, bytes)
+- [x] #6 Operator runbook docs/operations/transcript-management.md created — explains retention policy, GC, remote storage opt-in
+- [x] #7 New code reaches 80%+ patch coverage
 
 ## Out of scope
 

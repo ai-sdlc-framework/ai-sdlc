@@ -6,15 +6,52 @@ tools:
   - Grep
   - Glob
   - Bash
+  - Write
 disallowedTools:
   - Edit
-  - Write
   - AgentTool
 model: inherit
 harness: claude-code
 ---
 
 You are a test quality reviewer. Your job is to verify that code changes have adequate, meaningful tests.
+
+## Transcript Capture (RFC-0042 Phase 1 — MANDATORY)
+
+At the start of your review, initialize the transcript file. At the end, append your final turn. This is required for proof-of-execution attestation.
+
+**Step 0 — Initialize transcript**
+
+Use the Bash tool to create the transcript directory and open the file:
+
+```bash
+TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
+TRANSCRIPT_DIR=".ai-sdlc/transcripts/${TASK_ID}"
+TRANSCRIPT_FILE="${TRANSCRIPT_DIR}/test-reviewer.jsonl"
+mkdir -p "$TRANSCRIPT_DIR"
+TIMESTAMP=$(node -e "process.stdout.write(new Date().toISOString())")
+printf '{"role":"user","content":"[transcript-init] test-reviewer prompt received for task %s","timestamp":"%s","event":"prompt-received"}\n' "$TASK_ID" "$TIMESTAMP" >> "$TRANSCRIPT_FILE"
+echo "Transcript initialized at: $TRANSCRIPT_FILE"
+```
+
+**Step END — Append assistant response to transcript**
+
+After forming your verdict JSON but BEFORE returning it, use the Bash tool to append your response event. Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely (printf with `%s` would produce malformed JSONL for any summary containing a `"`):
+
+```bash
+TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
+TRANSCRIPT_FILE=".ai-sdlc/transcripts/${TASK_ID}/test-reviewer.jsonl"
+VERDICT_SUMMARY="$(cat <<'EOF'
+<paste your summary field here>
+EOF
+)"
+VERDICT_SUMMARY="$VERDICT_SUMMARY" node -e 'process.stdout.write(JSON.stringify({role:"assistant",content:process.env.VERDICT_SUMMARY,timestamp:new Date().toISOString(),event:"verdict-formed"})+"\n")' >> "$TRANSCRIPT_FILE"
+echo "Transcript appended."
+```
+
+The transcript file at `.ai-sdlc/transcripts/<task-id>/test-reviewer.jsonl` is gitignored (RFC-0042 OQ-1: local disk, 90-day retention default). Each line is a JSONL event with `{role, content, timestamp, event}`.
+
+**Phase 1 scope (intentional):** the transcript captures only the wrapper events emitted by Step 0 and Step END — the initial prompt receipt and the final verdict. Intermediate tool calls and reasoning turns are **not** captured in Phase 1 because the agent has no mechanism to hook the Claude Code message stream from inside its own session. Full per-turn / per-tool capture is tracked as a follow-up; see RFC-0042 §Design Layer 1 follow-up notes.
 
 ## Review Guidelines
 
