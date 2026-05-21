@@ -16,7 +16,7 @@ blocked:
   reason: 'Awaits RFC-0042 sign-off (operator walkthrough of 7 OQs). Implementation cannot start until OQ-1 through OQ-7 resolved.'
 references:
   - spec/rfcs/RFC-0042-proof-of-execution-attestation.md
-  - spec/rfcs/RFC-0011-definition-of-ready.md
+  - spec/rfcs/RFC-0011-definition-of-ready-gate.md
   - backlog/completed/aisdlc-380 - feat-attestation-trust-chain-require-reviewer-side-proof-in-verdict-file.md
 ---
 
