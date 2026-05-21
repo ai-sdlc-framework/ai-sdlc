@@ -9,6 +9,11 @@
 
 set -euo pipefail
 
+if [ "${AI_SDLC_BYPASS_ALL_GATES:-0}" = "1" ]; then
+  echo "[coverage-gate] AI_SDLC_BYPASS_ALL_GATES=1 — skipping" >&2
+  exit 0
+fi
+
 if [ "${AI_SDLC_SKIP_COVERAGE_GATE:-}" = "1" ]; then
   echo "[coverage-gate] skipped (AI_SDLC_SKIP_COVERAGE_GATE=1)"
   exit 0

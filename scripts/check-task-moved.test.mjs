@@ -41,6 +41,7 @@ function cleanEnv(extra = {}) {
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
   // Don't inherit stale overrides from the host env.
+  delete env.AI_SDLC_BYPASS_ALL_GATES;
   delete env.AI_SDLC_SKIP_TASK_MOVE;
   delete env.AI_SDLC_TASK_COMPLETE_CMD;
   for (const [k, v] of Object.entries(extra)) env[k] = v;
@@ -192,6 +193,48 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
     // A new commit must have landed on top.
     const newSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
     assert.match(newSubject, /chore: auto-close AISDLC-999/i);
+  });
+
+  // ── (bypass) Master bypass env var ──────────────────────────────────
+
+  it('AI_SDLC_BYPASS_ALL_GATES=1 exits 0 immediately without moving any file', () => {
+    writeTaskFile(root, 'AISDLC-999');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: add feature (AISDLC-999)'], root);
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+
+    const { cmd, logPath } = installFakeCli(root);
+    const r = runHook(root, {
+      env: { AI_SDLC_TASK_COMPLETE_CMD: cmd, AI_SDLC_BYPASS_ALL_GATES: '1' },
+    });
+
+    assert.equal(r.status, 0, `expected exit 0 with bypass, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /AI_SDLC_BYPASS_ALL_GATES=1/);
+    // CLI must NOT be invoked.
+    assert.equal(existsSync(logPath), false, 'CLI must NOT run when bypass is set');
+    // HEAD must not change.
+    const headAfter = git(['rev-parse', 'HEAD'], root).trim();
+    assert.equal(headAfter, headBefore, 'HEAD must not change when bypass is set');
+  });
+
+  it('AI_SDLC_BYPASS_ALL_GATES=0 does NOT bypass (falls through to normal logic)', () => {
+    // When the var is explicitly 0, the bypass block must NOT fire.
+    writeTaskFile(root, 'AISDLC-888');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: feature (AISDLC-888)'], root);
+
+    const { cmd } = installFakeCli(root);
+    const r = runHook(root, {
+      env: { AI_SDLC_TASK_COMPLETE_CMD: cmd, AI_SDLC_BYPASS_ALL_GATES: '0' },
+    });
+
+    // Normal logic runs: task is moved → exits 1.
+    assert.equal(
+      r.status,
+      1,
+      `expected 1 (normal run) when bypass=0, got ${r.status}: ${r.stderr}`,
+    );
+    assert.doesNotMatch(r.stderr, /AI_SDLC_BYPASS_ALL_GATES=1/);
   });
 
   // ── (b) Skip env ─────────────────────────────────────────────────────
