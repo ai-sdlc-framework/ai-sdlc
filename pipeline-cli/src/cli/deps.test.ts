@@ -3,9 +3,12 @@
  * stdout/stderr. Mirrors the pattern used by cli/index.test.ts.
  */
 
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { buildDepsCli } from './deps.js';
 import { cleanupTmpProject, makeTmpProject, writeTaskFile } from '../__test-helpers/make-task.js';
+import { MAX_20X_ROLLING_WINDOW_TOKENS } from '../dispatch/recommend-worker.js';
 
 let tmp: string;
 let savedArgv: string[];
@@ -411,6 +414,206 @@ describe('cli-deps router', () => {
       await expect(buildDepsCli().parseAsync()).rejects.toThrow('process.exit(1)');
       const errOut = stderrChunks.join('');
       expect(errOut).toContain('not found');
+    });
+  });
+
+  // ── AISDLC-377.5: recommendedWorkerKind annotation ───────────────────────
+  describe('recommendedWorkerKind (RFC-0041 Phase 3.2)', () => {
+    function writeDispatchConfig(workDir: string, claudePShellMaxConcurrent: number): void {
+      mkdirSync(join(workDir, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(workDir, '.ai-sdlc', 'dispatch-config.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: DispatchConfig
+spec:
+  defaultWorkerKind: in-session-agent
+  parallelism:
+    inSessionAgentMaxSessions: 4
+    claudePShellMaxConcurrent: ${claudePShellMaxConcurrent}
+`,
+        'utf8',
+      );
+    }
+
+    function writeLedger(workDir: string, consumedTokens: number): string {
+      const artifactsDir = join(workDir, 'artifacts');
+      mkdirSync(join(artifactsDir, '_ledger'), { recursive: true });
+      writeFileSync(
+        join(artifactsDir, '_ledger', 'claude-code-abcd1234-default.json'),
+        JSON.stringify({
+          windowStart: '2026-01-01T00:00:00Z',
+          consumedTokens,
+        }),
+        'utf8',
+      );
+      return artifactsDir;
+    }
+
+    it('AC #1: frontier json output carries recommendedWorkerKind on every entry', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
+      setArgv('frontier', '--work-dir', tmp);
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        frontier: Array<{ id: string; recommendedWorkerKind: string }>;
+      };
+      expect(r.frontier).toHaveLength(1);
+      expect(r.frontier[0].recommendedWorkerKind).toBeDefined();
+      expect(['in-session-agent', 'claude-p-shell', 'any']).toContain(
+        r.frontier[0].recommendedWorkerKind,
+      );
+    });
+
+    it('AC #2: table format includes a RecKind column between CPL and Dependencies', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-A', title: 'alpha' });
+      setArgv('frontier', '--format', 'table', '--work-dir', tmp);
+      await buildDepsCli().parseAsync();
+      const text = stdoutText();
+      expect(text).toContain('RecKind');
+      // Header order: ID, Title, EffPri, CPL, RecKind, Dependencies (all completed)
+      const header = text.split('\n')[0];
+      const cplIdx = header.indexOf('CPL');
+      const recKindIdx = header.indexOf('RecKind');
+      const depsIdx = header.indexOf('Dependencies');
+      expect(cplIdx).toBeGreaterThan(-1);
+      expect(recKindIdx).toBeGreaterThan(cplIdx);
+      expect(depsIdx).toBeGreaterThan(recKindIdx);
+    });
+
+    it('AC #4: when dispatch-config is absent, every entry recommends in-session-agent (size-permitting)', async () => {
+      writeTaskFile(tmp, {
+        id: 'AISDLC-BIG',
+        title: 'big task',
+        estimatedTokens: { input: 200_000, output: 50_000 },
+      });
+      setArgv('frontier', '--work-dir', tmp);
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        frontier: Array<{ id: string; recommendedWorkerKind: string }>;
+      };
+      // No DispatchConfig + big task → in-session-agent (NOT claude-p-shell)
+      // per AC #4 — heuristic falls back to cost-preferred default.
+      expect(r.frontier[0].recommendedWorkerKind).toBe('in-session-agent');
+    });
+
+    it('AC #4: when claudePShellMaxConcurrent is 0, every entry recommends in-session-agent', async () => {
+      writeDispatchConfig(tmp, 0);
+      // High quota utilization + big task: would normally recommend claude-p-shell,
+      // but claudePShellMaxConcurrent=0 forces in-session-agent.
+      writeLedger(tmp, MAX_20X_ROLLING_WINDOW_TOKENS * 0.95);
+      writeTaskFile(tmp, {
+        id: 'AISDLC-BIG',
+        title: 'big task',
+        estimatedTokens: { input: 200_000, output: 50_000 },
+      });
+      setArgv('frontier', '--work-dir', tmp, '--artifacts-dir', join(tmp, 'artifacts'));
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        frontier: Array<{ id: string; recommendedWorkerKind: string }>;
+      };
+      expect(r.frontier[0].recommendedWorkerKind).toBe('in-session-agent');
+    });
+
+    it("AC #5: tasks without estimatedTokens recommend 'any' (no signal)", async () => {
+      writeDispatchConfig(tmp, 2);
+      writeLedger(tmp, MAX_20X_ROLLING_WINDOW_TOKENS * 0.95);
+      writeTaskFile(tmp, { id: 'AISDLC-NO-EST', title: 'no estimate' });
+      setArgv('frontier', '--work-dir', tmp, '--artifacts-dir', join(tmp, 'artifacts'));
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        frontier: Array<{ id: string; recommendedWorkerKind: string }>;
+      };
+      expect(r.frontier[0].recommendedWorkerKind).toBe('any');
+    });
+
+    // AC #6: hermetic 3-task fixture exercising every branch of the heuristic.
+    it('AC #6: 3-task fixture emits correct recommendations across the three branches', async () => {
+      writeDispatchConfig(tmp, 2);
+      // Tight quota: 95% of the rolling window consumed.
+      const artifactsDir = writeLedger(tmp, MAX_20X_ROLLING_WINDOW_TOKENS * 0.95);
+
+      // Task BIG: big tokens + tight quota + supervisor configured → claude-p-shell
+      writeTaskFile(tmp, {
+        id: 'AISDLC-BIG',
+        title: 'big',
+        estimatedTokens: { input: 200_000, output: 50_000 },
+      });
+      // Task SMALL: small tokens (under the threshold) → in-session-agent
+      writeTaskFile(tmp, {
+        id: 'AISDLC-SMALL',
+        title: 'small',
+        estimatedTokens: { input: 30_000, output: 10_000 },
+      });
+      // Task NOEST: missing estimatedTokens → any
+      writeTaskFile(tmp, { id: 'AISDLC-NOEST', title: 'no estimate' });
+
+      setArgv('frontier', '--work-dir', tmp, '--artifacts-dir', artifactsDir);
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        frontier: Array<{ id: string; recommendedWorkerKind: string }>;
+      };
+      const byId = new Map(r.frontier.map((e) => [e.id, e.recommendedWorkerKind]));
+      expect(byId.get('AISDLC-BIG')).toBe('claude-p-shell');
+      expect(byId.get('AISDLC-SMALL')).toBe('in-session-agent');
+      expect(byId.get('AISDLC-NOEST')).toBe('any');
+    });
+
+    it('table output renders the heuristic value per row', async () => {
+      writeDispatchConfig(tmp, 2);
+      const artifactsDir = writeLedger(tmp, MAX_20X_ROLLING_WINDOW_TOKENS * 0.95);
+      writeTaskFile(tmp, {
+        id: 'AISDLC-BIG',
+        title: 'big',
+        estimatedTokens: { input: 200_000, output: 50_000 },
+      });
+      setArgv('frontier', '--format', 'table', '--work-dir', tmp, '--artifacts-dir', artifactsDir);
+      await buildDepsCli().parseAsync();
+      const text = stdoutText();
+      const bigLine = text.split('\n').find((l) => l.includes('AISDLC-BIG'));
+      expect(bigLine).toBeDefined();
+      expect(bigLine).toContain('claude-p-shell');
+    });
+
+    it('backward compatibility: existing JSON fields (id, title, dependencies, dispatchable) remain', async () => {
+      writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
+      setArgv('frontier', '--work-dir', tmp);
+      await buildDepsCli().parseAsync();
+      const r = stdoutJson() as {
+        frontier: Array<{
+          id: string;
+          title: string;
+          dependencies: string[];
+          dispatchable: boolean;
+          recommendedWorkerKind: string;
+        }>;
+      };
+      expect(r.frontier[0].id).toBe('AISDLC-A');
+      expect(r.frontier[0].title).toBe('a');
+      expect(r.frontier[0].dependencies).toEqual([]);
+      expect(r.frontier[0].dispatchable).toBe(true);
+      expect(r.frontier[0].recommendedWorkerKind).toBeDefined();
+    });
+
+    it('falls back to $ARTIFACTS_DIR env var when --artifacts-dir flag is absent', async () => {
+      writeDispatchConfig(tmp, 2);
+      const artifactsDir = writeLedger(tmp, MAX_20X_ROLLING_WINDOW_TOKENS * 0.95);
+      writeTaskFile(tmp, {
+        id: 'AISDLC-BIG',
+        title: 'big',
+        estimatedTokens: { input: 200_000, output: 50_000 },
+      });
+      const priorEnv = process.env.ARTIFACTS_DIR;
+      process.env.ARTIFACTS_DIR = artifactsDir;
+      try {
+        setArgv('frontier', '--work-dir', tmp);
+        await buildDepsCli().parseAsync();
+        const r = stdoutJson() as {
+          frontier: Array<{ id: string; recommendedWorkerKind: string }>;
+        };
+        expect(r.frontier[0].recommendedWorkerKind).toBe('claude-p-shell');
+      } finally {
+        if (priorEnv === undefined) delete process.env.ARTIFACTS_DIR;
+        else process.env.ARTIFACTS_DIR = priorEnv;
+      }
     });
   });
 });

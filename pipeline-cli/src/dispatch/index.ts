@@ -67,6 +67,18 @@ export type {
   SupervisorMissingProbe,
 } from './cost-estimate.js';
 
+export {
+  BIG_TOKEN_THRESHOLD,
+  extractEstimatedTokens,
+  loadDispatchConfig,
+  MAX_20X_ROLLING_WINDOW_TOKENS,
+  readQuotaUtilization,
+  recommendWorkerKind,
+  TIGHT_QUOTA_THRESHOLD,
+} from './recommend-worker.js';
+
+export type { DispatchConfigSnapshot, RecommendWorkerInput } from './recommend-worker.js';
+
 export type {
   BoardSubdir,
   ClaimResult,

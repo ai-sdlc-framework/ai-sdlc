@@ -51,6 +51,12 @@ export interface MakeTaskOptions {
    * (backward-compatible default).
    */
   dispatchable?: boolean;
+  /**
+   * AISDLC-377.5 — RFC-0010 §6.5 `estimatedTokens` frontmatter, used by the
+   * `cli-deps frontier` recommendedWorkerKind heuristic. Renders as a nested
+   * YAML block with `input:` + `output:` keys.
+   */
+  estimatedTokens?: { input?: number; output?: number };
 }
 
 /**
@@ -107,6 +113,15 @@ export function writeTaskFile(workDir: string, opts: MakeTaskOptions): string {
   }
   if (opts.dispatchable === false) {
     fmLines.push(`dispatchable: false`);
+  }
+  if (opts.estimatedTokens) {
+    fmLines.push('estimatedTokens:');
+    if (typeof opts.estimatedTokens.input === 'number') {
+      fmLines.push(`  input: ${opts.estimatedTokens.input}`);
+    }
+    if (typeof opts.estimatedTokens.output === 'number') {
+      fmLines.push(`  output: ${opts.estimatedTokens.output}`);
+    }
   }
 
   const acLines = acs.map((ac, i) => `- [${checked[i] ? 'x' : ' '}] #${i + 1} ${ac}`).join('\n');

@@ -1,9 +1,10 @@
 ---
 id: AISDLC-377.5
 title: 'feat(cli-deps): RFC-0041 Phase 3.2 — `cli-deps frontier` recommendedWorkerKind annotation'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-20'
+updated_date: '2026-05-20'
 labels:
   - rfc-0041
   - phase-3

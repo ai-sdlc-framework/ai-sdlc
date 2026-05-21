@@ -305,9 +305,14 @@ to branch:
   "ok": true,
   "compositionEnabled": true,            // mirrors the env flag for transparency
   "frontier": [                          // backwards-compat: same shape pre-Phase-2
-    { "id": "AISDLC-DROOT", "title": "...", "dependencies": [] },
-    { "id": "AISDLC-SROOT", "title": "...", "dependencies": [] },
-    { "id": "AISDLC-ALONE", "title": "...", "dependencies": [] }
+    {
+      "id": "AISDLC-DROOT",
+      "title": "...",
+      "dependencies": [],
+      "dispatchable": true,              // AISDLC-243
+      "recommendedWorkerKind": "any"     // AISDLC-377.5 — see below
+    },
+    ...
   ],
   "ranked": [                            // new: same order as `frontier`, with metadata
     {
@@ -317,7 +322,8 @@ to branch:
       "basePriority": 2,                 // medium — what the author wrote
       "effectivePriority": 4,            // critical — inherited from a critical leaf
       "criticalPathLength": 2,           // 2 forward steps to the deepest leaf
-      "lastModified": "2026-04-30T17:14:09.871Z"
+      "lastModified": "2026-04-30T17:14:09.871Z",
+      "recommendedWorkerKind": "any"     // AISDLC-377.5 — see below
     },
     ...
   ]
@@ -332,12 +338,46 @@ without any code change.
 
 ```
 $ AI_SDLC_DEPS_COMPOSITION=1 cli-deps frontier --format table
-ID            Title             EffPri  CPL  Dependencies (all completed)
-------------  ----------------  ------  ---  ----------------------------
-AISDLC-DROOT  d-root            4       2    (none)
-AISDLC-SROOT  s-root            3       1    (none)
-AISDLC-ALONE  alone             2       0    (none)
+ID            Title             EffPri  CPL  RecKind           Dependencies (all completed)
+------------  ----------------  ------  ---  ----------------  ----------------------------
+AISDLC-DROOT  d-root            4       2    in-session-agent  (none)
+AISDLC-SROOT  s-root            3       1    any               (none)
+AISDLC-ALONE  alone             2       0    in-session-agent  (none)
 ```
+
+### `recommendedWorkerKind` annotation — RFC-0041 Phase 3.2 (AISDLC-377.5)
+
+Each frontier entry carries a `recommendedWorkerKind` field (`json`)
++ a `RecKind` column (`table`) that hints which Worker backend the
+task should be dispatched to. The hint is **operator-info only** —
+the Conductor still chooses; the annotation gives operators a
+glance-level read on where each task fits cost-wise.
+
+Values:
+
+- `in-session-agent` — subscription-quota-preserving Worker (default;
+  RFC-0041 §4.3.1). Recommended when the task is small OR the
+  subscription quota is plentiful OR no headless supervisor is
+  configured.
+- `claude-p-shell` — headless Worker (RFC-0041 §4.5). Recommended
+  ONLY when ALL THREE of: the task's `estimatedTokens > 100_000`,
+  subscription quota utilization > 80%, AND
+  `claudePShellMaxConcurrent > 0` in the DispatchConfig.
+- `any` — no clear preference. Emitted when the task lacks an
+  `estimatedTokens` declaration (no size signal — the operator + the
+  Conductor have full latitude).
+
+Inputs to the heuristic:
+
+| Input | Source | Missing → |
+|---|---|---|
+| `estimatedTokens` | Task frontmatter `estimatedTokens: { input, output }` (RFC-0010 §6.5 shape) | `any` |
+| `claudePShellMaxConcurrent` | `<workDir>/.ai-sdlc/dispatch-config.yaml` `spec.parallelism.claudePShellMaxConcurrent` | `in-session-agent` (cost-preferred fallback when headless unavailable) |
+| Quota utilization | Sum of `consumedTokens` across `$ARTIFACTS_DIR/_ledger/*.json` divided by the Max-20x rolling cap (~1M tokens) | treated as `0` (plentiful) |
+
+Override the artifacts dir for the heuristic with `--artifacts-dir`,
+or via the `$ARTIFACTS_DIR` env var. The annotation degrades
+gracefully on every input boundary; tasks always get a recommendation.
 
 ### No cache — RFC-0014 §12 Q4
 

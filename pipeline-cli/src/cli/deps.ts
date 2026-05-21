@@ -35,6 +35,13 @@ import {
   validate,
 } from '../deps/dependency-graph.js';
 import { sortFrontierByEffectivePriority, type RankedFrontierEntry } from '../deps/dispatch.js';
+import {
+  extractEstimatedTokens,
+  loadDispatchConfig,
+  readQuotaUtilization,
+  recommendWorkerKind,
+} from '../dispatch/recommend-worker.js';
+import type { ManifestWorkerKind } from '../dispatch/types.js';
 import { appendOverrideEntry, loadOverrides } from '../deps/override-log.js';
 import {
   gcRollingSnapshots,
@@ -134,19 +141,45 @@ export function buildDepsCli(): Argv {
       'frontier',
       'List open tasks whose dependencies are all in backlog/completed/ (ready to dispatch). When AI_SDLC_DEPS_COMPOSITION is ON, sorted by effectivePriority DESC → criticalPathLength DESC → recency DESC.',
       (y) =>
-        y.option('format', {
-          type: 'string',
-          choices: ['json', 'table'] as const,
-          default: 'json' as const,
-        }),
+        y
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'table'] as const,
+            default: 'json' as const,
+          })
+          .option('artifacts-dir', {
+            type: 'string',
+            describe:
+              'Override $ARTIFACTS_DIR when reading the subscription ledger for the recommendedWorkerKind heuristic (RFC-0041 Phase 3.2).',
+          }),
       async (argv) => {
-        const g = buildDependencyGraph({ workDir: argv['work-dir'] as string }, warnToStderr);
+        const workDir = argv['work-dir'] as string;
+        const g = buildDependencyGraph({ workDir }, warnToStderr);
         const baseline = frontier(g);
         // RFC-0014 Phase 2 — when the feature flag is OFF this is a no-op
         // re-render of the baseline order; when ON the depth-aware sort
         // bubbles critical-path leaves to the top per §12 Q1.
         const ranked = sortFrontierByEffectivePriority(g, baseline);
         const compositionOn = isCompositionEnabled();
+        // RFC-0041 Phase 3.2 — resolve the inputs to the recommendedWorkerKind
+        // heuristic once per call. The three inputs are static across frontier
+        // entries (the per-task signal is `estimatedTokens`, fetched per-row).
+        const cfg = loadDispatchConfig(workDir);
+        const claudePShellMaxConcurrent = cfg?.claudePShellMaxConcurrent ?? 0;
+        const artifactsDir =
+          (argv['artifacts-dir'] as string | undefined) ??
+          process.env.ARTIFACTS_DIR ??
+          join(workDir, 'artifacts');
+        const quotaUtilization = readQuotaUtilization(artifactsDir);
+        const computeRecKind = (taskId: string): ManifestWorkerKind => {
+          const node = g.nodes.get(taskId.toLowerCase());
+          const tokens = node?.filePath ? extractEstimatedTokens(node.filePath) : undefined;
+          return recommendWorkerKind({
+            estimatedTokens: tokens,
+            quotaUtilization,
+            claudePShellMaxConcurrent,
+          });
+        };
         if ((argv.format as string) === 'table') {
           const rows = ranked.map((e: RankedFrontierEntry) => {
             // AISDLC-243 — annotate non-dispatchable tasks so operators can
@@ -158,11 +191,15 @@ export function buildDepsCli(): Argv {
               e.title || '(no title)',
               String(e.effectivePriority),
               String(e.criticalPathLength),
+              computeRecKind(e.id),
               e.dependencies.length === 0 ? '(none)' : e.dependencies.join(', '),
             ];
           });
           emitText(
-            renderTable(['ID', 'Title', 'EffPri', 'CPL', 'Dependencies (all completed)'], rows),
+            renderTable(
+              ['ID', 'Title', 'EffPri', 'CPL', 'RecKind', 'Dependencies (all completed)'],
+              rows,
+            ),
           );
         } else {
           // Compatibility: keep the same `frontier` array shape callers
@@ -172,6 +209,9 @@ export function buildDepsCli(): Argv {
           // dispatcher's first pick automatically.
           // AISDLC-243 — include `dispatchable` on each entry so JSON consumers
           // can filter non-dispatchable tasks without re-reading task files.
+          // RFC-0041 Phase 3.2 — `recommendedWorkerKind` field added per
+          // task so json consumers can read the heuristic output without
+          // re-running it.
           emit({
             ok: true,
             compositionEnabled: compositionOn,
@@ -180,8 +220,12 @@ export function buildDepsCli(): Argv {
               title: r.title,
               dependencies: r.dependencies,
               dispatchable: !isNonDispatchable(g, r.id),
+              recommendedWorkerKind: computeRecKind(r.id),
             })),
-            ranked,
+            ranked: ranked.map((r) => ({
+              ...r,
+              recommendedWorkerKind: computeRecKind(r.id),
+            })),
           });
         }
       },
