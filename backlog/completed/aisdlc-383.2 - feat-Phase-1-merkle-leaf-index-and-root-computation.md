@@ -1,7 +1,7 @@
 ---
 id: AISDLC-383.2
 title: 'feat(attestation): RFC-0042 Phase 1 — Merkle leaf index + root computation'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:
