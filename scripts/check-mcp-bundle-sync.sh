@@ -48,6 +48,12 @@
 
 set -euo pipefail
 
+# ── AISDLC-383.5: master bypass (emergency only) ────────────────────
+if [ "${AI_SDLC_BYPASS_ALL_GATES:-0}" = "1" ]; then
+  echo "[mcp-bundle-sync] AI_SDLC_BYPASS_ALL_GATES=1 — skipping" >&2
+  exit 0
+fi
+
 # ── Step 1: env-var deferral ─────────────────────────────────────────
 if [ "${AI_SDLC_SKIP_MCP_BUNDLE_SYNC:-0}" = "1" ]; then
   echo "[mcp-bundle-sync] AI_SDLC_SKIP_MCP_BUNDLE_SYNC=1 — skipping auto-rebuild" >&2

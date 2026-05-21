@@ -37,6 +37,7 @@ function cleanEnv(extra = {}) {
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
+  delete env.AI_SDLC_BYPASS_ALL_GATES;
   delete env.AI_SDLC_SKIP_DOR_GATE;
   for (const [k, v] of Object.entries(extra)) env[k] = v;
   return env;
@@ -134,6 +135,40 @@ describe('check-dor-gate.sh (AISDLC-370)', () => {
   });
   afterEach(() => {
     if (root) rmSync(root, { recursive: true, force: true });
+  });
+
+  it('exit 0 immediately with AI_SDLC_BYPASS_ALL_GATES=1 even when violations exist', () => {
+    const path = writeTaskFile(root, 'aisdlc-9002', GATE2_MARKER_TASK);
+    git(['add', path], root);
+    git(['commit', '-q', '-m', 'feat: bad task'], root);
+    const head = git(['rev-parse', 'HEAD'], root).trim();
+    const base = git(['rev-parse', 'HEAD~1'], root).trim();
+
+    const r = spawnSync('bash', [join('scripts', 'check-dor-gate.sh')], {
+      cwd: root,
+      env: cleanEnv({ AI_SDLC_BYPASS_ALL_GATES: '1' }),
+      input: `refs/heads/main ${head} refs/heads/main ${base}\n`,
+      encoding: 'utf-8',
+    });
+    assert.equal(r.status, 0, `expected exit 0 with bypass, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /AI_SDLC_BYPASS_ALL_GATES=1/);
+  });
+
+  it('AI_SDLC_BYPASS_ALL_GATES=0 does NOT bypass (falls through to normal logic)', () => {
+    // When not set to 1, the bypass block must not fire; normal no-op for empty push.
+    const r = spawnSync('bash', [join('scripts', 'check-dor-gate.sh')], {
+      cwd: root,
+      env: cleanEnv({ AI_SDLC_BYPASS_ALL_GATES: '0' }),
+      input: '',
+      encoding: 'utf-8',
+    });
+    // Empty stdin → no task files → normal exit 0 (not via bypass).
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 (no-task-changes path), got ${r.status}: ${r.stderr}`,
+    );
+    assert.doesNotMatch(r.stderr, /AI_SDLC_BYPASS_ALL_GATES=1/);
   });
 
   it('exit 0 with AI_SDLC_SKIP_DOR_GATE=1 even when violations exist', () => {

@@ -60,6 +60,11 @@
 
 set -euo pipefail
 
+if [ "${AI_SDLC_BYPASS_ALL_GATES:-0}" = "1" ]; then
+  echo "[attestation-sign] AI_SDLC_BYPASS_ALL_GATES=1 — skipping" >&2
+  exit 0
+fi
+
 # ── Step 1: env-var deferral ─────────────────────────────────────────
 if [ "${AI_SDLC_SKIP_ATTESTATION_SIGN:-0}" = "1" ]; then
   echo "[attestation-sign] AI_SDLC_SKIP_ATTESTATION_SIGN=1 — skipping auto-sign" >&2

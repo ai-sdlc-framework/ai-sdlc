@@ -28,6 +28,12 @@
 
 set -euo pipefail
 
+# ── AISDLC-383.5: master bypass (emergency only) ────────────────────
+if [ "${AI_SDLC_BYPASS_ALL_GATES:-0}" = "1" ]; then
+  echo "[squash-attestation-chores] AI_SDLC_BYPASS_ALL_GATES=1 — skipping" >&2
+  exit 0
+fi
+
 # Subject pattern for chore-sign commits.
 CHORE_SIGN_RE='^chore(\(.*\))?: (sign|auto-sign) (v5 |review )?attestation'
 

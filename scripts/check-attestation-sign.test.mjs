@@ -32,6 +32,7 @@ function cleanEnv(extra = {}) {
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
   // Don't inherit stale overrides from the host env.
+  delete env.AI_SDLC_BYPASS_ALL_GATES;
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
   delete env.AI_SDLC_ITERATION_COUNT;
@@ -155,6 +156,36 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it('AI_SDLC_BYPASS_ALL_GATES=1 exits 0 immediately even when ready to sign', () => {
+    // Even with a sentinel + verdict + no existing attestation, the master
+    // bypass must prevent any sign or commit from happening.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-383\n');
+    writeVerdictFile(root, 'AISDLC-383');
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+
+    const { cmd, logPath } = installFakeSigner(root);
+    const r = runHook(root, {
+      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
+      AI_SDLC_BYPASS_ALL_GATES: '1',
+    });
+
+    assert.equal(r.status, 0, `expected exit 0 with bypass, got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /AI_SDLC_BYPASS_ALL_GATES=1/);
+    // Signer must NOT be invoked.
+    assert.equal(existsSync(logPath), false, 'signer must NOT run when bypass is set');
+    // No new commit must land.
+    const headAfter = git(['rev-parse', 'HEAD'], root).trim();
+    assert.equal(headAfter, headBefore, 'HEAD must not change when bypass is set');
+  });
+
+  it('AI_SDLC_BYPASS_ALL_GATES=0 does NOT bypass (falls through to normal sentinel check)', () => {
+    // When the var is 0, the bypass must not fire; normal no-op for missing sentinel.
+    const r = runHook(root, { AI_SDLC_BYPASS_ALL_GATES: '0' });
+    // No sentinel → normal exit 0.
+    assert.equal(r.status, 0, `expected exit 0 (no-sentinel path), got ${r.status}: ${r.stderr}`);
+    assert.doesNotMatch(r.stderr, /AI_SDLC_BYPASS_ALL_GATES=1/);
   });
 
   it('AC #2: exits 0 when the active-task sentinel is absent (chore PR / ad-hoc)', () => {
