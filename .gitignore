@@ -1,6 +1,12 @@
 # Dependencies
 node_modules/
 
+# RFC-0042 Phase 1 — reviewer subagent transcripts
+# Per RFC-0042 OQ-1: local-disk default, 90-day retention. Transcripts may
+# contain PR diff content; the Merkle leaf index (.ai-sdlc/transcript-leaves.jsonl)
+# is the durable committed artifact, not the raw transcripts.
+.ai-sdlc/transcripts/
+
 # Build output
 dist/
 *.tsbuildinfo
