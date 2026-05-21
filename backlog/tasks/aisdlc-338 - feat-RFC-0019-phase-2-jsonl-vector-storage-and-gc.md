@@ -27,7 +27,8 @@ Phase 2 of RFC-0019 §11. Pluggable storage substrate + JSONL default backend + 
 - `orchestrator/src/embedding/storage/index.ts` — backend factory keyed on `Pipeline.spec.embedding.storageBackend`.
 - `pipeline-cli/bin/cli-embedding-gc.mjs` — mtime-based retention (default 90d; per-org override in `embedding-config.yaml`).
 - Vectors written with `(embeddingProvider, embeddingModelVersion)` provenance per §2.3.
-- Unit tests: write→read round-trip; concurrent-write atomicity; GC behavior; index rewrite atomicity.
+- **OQ-1 RE-WALKTHROUGH:** Scale-escalation heuristic codified in operator runbook (`docs/operations/embedding-providers.md#scale-escalation`): emit operator-visible signal (Decision or log) when count per `(provider, modelVersion)` exceeds 100K entries OR p95 read latency exceeds 250ms — recommends swap to sqlite or vector DB via `EmbeddingStorageBackend` interface. Makes the JSONL→indexed transition operator-visible and corpus-driven, not tribal knowledge. Heuristic thresholds configurable via `embedding-config.yaml: storage.scaleEscalationHeuristic`.
+- Unit tests: write→read round-trip; concurrent-write atomicity; GC behavior; index rewrite atomicity; scale-escalation signal emission at threshold (re-walkthrough).
 
 ## Exit criteria
 
@@ -45,4 +46,6 @@ Can write 1K entries, read by textHash in <100ms median, GC removes >90d entries
 - [ ] #6 Write 1K entries; read by textHash in <100ms median
 - [ ] #7 Concurrent-write atomicity preserved
 - [ ] #8 GC removes >90d entries; tests verify retention boundary
+- [ ] #9 Scale-escalation heuristic emits operator-visible signal at >100K entries OR p95 read >250ms (re-walkthrough OQ-1)
+- [ ] #10 Operator runbook `docs/operations/embedding-providers.md` includes `#scale-escalation` section explaining JSONL→sqlite swap criteria (re-walkthrough)
 <!-- AC:END -->

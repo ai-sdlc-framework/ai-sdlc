@@ -28,10 +28,12 @@ Phase 4 of RFC-0019 §11. Pipeline schema integration + spec-level wiring for RF
 
 - Schema amendment: add `Pipeline.spec.embedding` per §10.1 (provider + storageBackend + staleVectorPolicy + deprecation overrides).
 - Pipeline-load wires `Pipeline.spec.embedding` → registry lookup → adapter instantiation → storage backend instantiation.
-- **First downstream consumer spec-level wiring:** `Eτ_tessellation_drift` rule from RFC-0009 OQ-6 / RFC-0009 Phase 4.2 (AISDLC-317). Spec-level wiring lands here; runtime usage activates once RFC-0009 Phase 4.2 ships.
+- **First downstream consumer spec-level wiring:** `Eτ_tessellation_drift` rule from RFC-0009 OQ-6 / RFC-0009 Phase 4.2 (AISDLC-317). Spec-level wiring lands here; runtime usage activates once RFC-0009 Phase 4.2 ships. Eτ consumer pins `staleVectorPolicy: 'fail-loud'` at API site (re-walkthrough OQ-2 — preserves historical-trajectory fidelity for drift signal).
 - Cost-tracker integration per RFC-0004 — `embeddingTokens` line item flows into pipeline-level cost-budget.
+- **OQ-6 RE-WALKTHROUGH per-consumer attribution:** cost-tracker records `consumerLabel` dimension alongside `(provider, modelVersion, accountId)`; pipeline-load wires `consumerLabel` propagation from `embed()` call sites through to cost-tracker.
+- **OQ-7 RE-WALKTHROUGH unified-cost-report:** new cost-tracker view `cli-cost-report --unified` aggregates `inputTokens` + `outputTokens` + `embeddingTokens` + SubscriptionLedger window consumption (cost-converted) with explicit `costModel` label per row. Answers finance's monthly-spend query in one place. Documented in operator runbook.
 - `.ai-sdlc/embedding-config.yaml` schema published; `ai-sdlc init` template ships with documented defaults.
-- Operator runbook: `docs/operations/embedding-providers.md` covering: choosing an adapter, configuring stale-vector policy, monitoring deprecation lifecycle, running `cli-embedding-bump`, GC strategy.
+- Operator runbook: `docs/operations/embedding-providers.md` covering: choosing an adapter, configuring stale-vector policy (incl. per-consumer override examples), monitoring deprecation lifecycle (milestone dedup), running `cli-embedding-bump`, GC strategy, scale-escalation heuristic (JSONL→sqlite swap criteria), unified cost report.
 
 ## Exit criteria
 
@@ -43,9 +45,10 @@ End-to-end pipeline run with `AI_SDLC_EMBEDDING_PROVIDER=on` writes vectors duri
 <!-- AC:BEGIN -->
 - [ ] #1 Schema amendment: `Pipeline.spec.embedding` per §10.1
 - [ ] #2 Pipeline-load wires spec → registry lookup → adapter + storage instantiation
-- [ ] #3 Spec-level wiring for `Eτ_tessellation_drift` rule (composes with RFC-0009 Phase 4.2)
-- [ ] #4 Cost-tracker integration: `embeddingTokens` line item flows to pipeline cost-budget
-- [ ] #5 `.ai-sdlc/embedding-config.yaml` schema published; `ai-sdlc init` template ships
-- [ ] #6 Operator runbook `docs/operations/embedding-providers.md` published
-- [ ] #7 End-to-end pipeline run with embedding enabled writes vectors + records cost
+- [ ] #3 Spec-level wiring for `Eτ_tessellation_drift` rule; consumer pins `staleVectorPolicy: 'fail-loud'` (re-walkthrough OQ-2)
+- [ ] #4 Cost-tracker integration: `embeddingTokens` line item with `consumerLabel` dimension propagated from embed() call sites (re-walkthrough OQ-6)
+- [ ] #5 `cli-cost-report --unified` ships aggregating embeddingTokens + chat tokens + SubscriptionLedger with `costModel` labels (re-walkthrough OQ-7)
+- [ ] #6 `.ai-sdlc/embedding-config.yaml` schema published; `ai-sdlc init` template ships with re-walkthrough fields (scaleEscalationHeuristic, perConsumerOverridesAllowed, crossProviderPolicy split, catalogDedup milestones, unifiedCostReport, adapterBillingModelRespected)
+- [ ] #7 Operator runbook `docs/operations/embedding-providers.md` published with sections: choosing an adapter, stale-vector policy (incl. per-consumer override examples), deprecation lifecycle (milestone dedup), `cli-embedding-bump`, GC, scale-escalation heuristic, unified cost report (re-walkthrough)
+- [ ] #8 End-to-end pipeline run with embedding enabled writes vectors + records cost with consumerLabel
 <!-- AC:END -->
