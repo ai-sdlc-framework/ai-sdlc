@@ -3233,8 +3233,8 @@ var require_utils = __commonJS({
       }
       return ind;
     }
-    function removeDotSegments(path2) {
-      let input = path2;
+    function removeDotSegments(path4) {
+      let input = path4;
       const output = [];
       let nextSlash = -1;
       let len = 0;
@@ -3433,8 +3433,8 @@ var require_schemes = __commonJS({
         wsComponent.secure = void 0;
       }
       if (wsComponent.resourceName) {
-        const [path2, query] = wsComponent.resourceName.split("?");
-        wsComponent.path = path2 && path2 !== "/" ? path2 : void 0;
+        const [path4, query] = wsComponent.resourceName.split("?");
+        wsComponent.path = path4 && path4 !== "/" ? path4 : void 0;
         wsComponent.query = query;
         wsComponent.resourceName = void 0;
       }
@@ -7007,10 +7007,10 @@ function assignProp(target, prop, value) {
     configurable: true
   });
 }
-function getElementAtPath(obj, path2) {
-  if (!path2)
+function getElementAtPath(obj, path4) {
+  if (!path4)
     return obj;
-  return path2.reduce((acc, key) => acc?.[key], obj);
+  return path4.reduce((acc, key) => acc?.[key], obj);
 }
 function promiseAllObject(promisesObj) {
   const keys = Object.keys(promisesObj);
@@ -7330,11 +7330,11 @@ function aborted(x, startIndex = 0) {
   }
   return false;
 }
-function prefixIssues(path2, issues) {
+function prefixIssues(path4, issues) {
   return issues.map((iss) => {
     var _a2;
     (_a2 = iss).path ?? (_a2.path = []);
-    iss.path.unshift(path2);
+    iss.path.unshift(path4);
     return iss;
   });
 }
@@ -13395,8 +13395,8 @@ function getErrorMap() {
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/helpers/parseUtil.js
 var makeIssue = (params) => {
-  const { data, path: path2, errorMaps, issueData } = params;
-  const fullPath = [...path2, ...issueData.path || []];
+  const { data, path: path4, errorMaps, issueData } = params;
+  const fullPath = [...path4, ...issueData.path || []];
   const fullIssue = {
     ...issueData,
     path: fullPath
@@ -13512,11 +13512,11 @@ var errorUtil;
 
 // ../../node_modules/.pnpm/zod@3.25.76/node_modules/zod/v3/types.js
 var ParseInputLazyPath = class {
-  constructor(parent, value, path2, key) {
+  constructor(parent, value, path4, key) {
     this._cachedPath = [];
     this.parent = parent;
     this.data = value;
-    this._path = path2;
+    this._path = path4;
     this._key = key;
   }
   get path() {
@@ -21486,8 +21486,8 @@ function registerTaskEdit(server2, deps) {
             isError: true
           };
         }
-        const { path: path2 } = located;
-        const before = readFileSync5(path2, "utf-8");
+        const { path: path4 } = located;
+        const before = readFileSync5(path4, "utf-8");
         const after = applyTaskEdit(before, {
           status,
           acceptanceCriteriaCheck,
@@ -21495,9 +21495,9 @@ function registerTaskEdit(server2, deps) {
           updatedDate
         });
         if (after !== before) {
-          writeFileSync(path2, after, "utf-8");
+          writeFileSync(path4, after, "utf-8");
         }
-        const summaryParts = [`# task_edit: ${id}`, `Path: ${path2}`];
+        const summaryParts = [`# task_edit: ${id}`, `Path: ${path4}`];
         if (status !== void 0) summaryParts.push(`Status \u2192 ${status}`);
         if (acceptanceCriteriaCheck && acceptanceCriteriaCheck.length > 0) {
           summaryParts.push(`Checked ACs: ${acceptanceCriteriaCheck.join(", ")}`);
@@ -27430,11 +27430,11 @@ var parser = new YargsParser({
   resolve: resolve4,
   // TODO: figure  out a  way to combine ESM and CJS coverage, such  that
   // we can exercise all the lines below:
-  require: (path2) => {
+  require: (path4) => {
     if (typeof __require !== "undefined") {
-      return __require(path2);
-    } else if (path2.match(/\.json$/)) {
-      return JSON.parse(readFileSync11(path2, "utf8"));
+      return __require(path4);
+    } else if (path4.match(/\.json$/)) {
+      return JSON.parse(readFileSync11(path4, "utf8"));
     } else {
       throw Error("only .json config files are supported in ESM");
     }
@@ -31002,11 +31002,11 @@ var Yargs = YargsFactory(esm_default);
 // ../../pipeline-cli/dist/cli/complete-task.js
 var SymbolicLinkError = class extends Error {
   path;
-  constructor(path2) {
-    super(`[cli-task-complete] SECURITY: ${path2} is a symbolic link.
+  constructor(path4) {
+    super(`[cli-task-complete] SECURITY: ${path4} is a symbolic link.
 Refusing to read/write through a symlink \u2014 resolve the target manually.`);
     this.name = "SymbolicLinkError";
-    this.path = path2;
+    this.path = path4;
   }
 };
 var DuplicateTaskFileError = class extends Error {
@@ -31853,6 +31853,20 @@ import { join as join49 } from "node:path";
 import { existsSync as existsSync46, mkdirSync as mkdirSync20, readdirSync as readdirSync19, readFileSync as readFileSync44, renameSync as renameSync4, rmSync as rmSync2, statSync as statSync14, utimesSync, writeFileSync as writeFileSync16 } from "node:fs";
 import path from "node:path";
 var DEFAULT_HEARTBEAT_STALE_MS = 30 * 60 * 1e3;
+
+// ../../pipeline-cli/dist/dispatch/supervisor.js
+import { existsSync as existsSync48 } from "node:fs";
+import path3 from "node:path";
+import process4 from "node:process";
+
+// ../../pipeline-cli/dist/dispatch/pid-lock.js
+import { existsSync as existsSync47, mkdirSync as mkdirSync21, readFileSync as readFileSync45, rmSync as rmSync3, writeFileSync as writeFileSync17 } from "node:fs";
+import path2 from "node:path";
+import process3 from "node:process";
+
+// ../../pipeline-cli/dist/dispatch/recommend-worker.js
+import { existsSync as existsSync49, readdirSync as readdirSync20, readFileSync as readFileSync46 } from "node:fs";
+import { join as join50 } from "node:path";
 
 // ../../pipeline-cli/dist/dispatch/claude-p-resume.js
 import { randomUUID as randomUUID2 } from "node:crypto";
