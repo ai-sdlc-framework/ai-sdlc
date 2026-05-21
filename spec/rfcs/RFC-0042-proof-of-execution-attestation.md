@@ -1,9 +1,9 @@
 ---
 id: RFC-0042
 title: Proof-of-Execution Attestation via In-Repo Merkle Transcripts
-status: Draft
-lifecycle: Draft
-author: Dominique Demers
+status: Approved
+lifecycle: Signed Off
+author: Dominique Legault
 created: 2026-05-20
 updated: 2026-05-20
 targetSpecVersion: v1alpha1
@@ -13,9 +13,9 @@ requiresDocs: [operator-runbook]
 
 # RFC-0042: Proof-of-Execution Attestation via In-Repo Merkle Transcripts
 
-**Status:** Draft
-**Lifecycle:** Draft
-**Author:** Dominique Demers
+**Status:** Approved
+**Lifecycle:** Signed Off
+**Author:** Dominique Legault
 **Created:** 2026-05-20
 **Updated:** 2026-05-20
 **Target Spec Version:** v1alpha1
@@ -328,72 +328,77 @@ CI runs the 3 reviewers, signs with OIDC, no operator-side signing at all.
 
 ### OQ-1: Transcript retention default
 
-How long should the operator's local transcripts be retained by default?
+**Resolution (2026-05-20):** **90 days.**
 
-- 30 days — small disk footprint, spot-checks only work for recent PRs
-- 90 days — moderate footprint, covers most "post-merge audit" use cases
-- 1 year — large footprint, covers retrospective compliance audits
-- Indefinite — let the operator GC; framework doesn't impose
+Aligns with AWS CloudTrail + GitHub Actions defaults + SOC 2 evidence-window minimum. Storage cost negligible (~13MB at 100 PRs/month). Covers the realistic incident-response window (most forgery investigations happen within weeks-to-3-months). The cryptographic chain (Merkle root + committed leaves, NEVER GC'd) preserves the forensic claim "an attestation existed for this PR" indefinitely — only raw transcript content access is bounded by this retention window.
 
-**No default chosen.** Operator decides per-repo via `.ai-sdlc/config.yaml`.
+Override per-repo via `.ai-sdlc/config.yaml retention: <days>`. Operators with longer compliance windows (SOC 2 full year, HIPAA 6 years) opt in explicitly.
 
-### OQ-2: Spot-check sampling rate
+Selected over 30 days (incident-response blind spot for forgery investigations surfacing weeks later), 1 year (over-budgeted for median case + override is trivial), and indefinite (silent disk bloat contradicts operator-respect principle).
 
-What fraction of PRs should CI spot-check (re-hash the transcript against the committed leaf)?
+### OQ-2: Spot-check sampling rate (v1)
 
-- 5% — minimal CI cost, statistically detects systematic forgery
-- 25% — significant deterrent, moderate CI cost
-- 100% (every PR) — full enforcement, requires transcript always available, defeats the storage-pruning benefit
+**Resolution (2026-05-20):** **0% automated; on-demand operator-triggered only.**
 
-**No default chosen.** Recommend starting at 25% during cutover, dropping to 5% after 90 days of clean operation.
+Spot-check has two layers: (1) hash verification — does fetched content match committed hash; (2) content plausibility — does fetched content actually review THIS PR's diff. Layer 1 has near-zero forgery-detection value (attacker who fabricates content can commit its hash and pass Layer 1 trivially). Layer 2 is the real deterrent but requires LLM-as-judge — research-grade, not v1-implementable.
 
-### OQ-3: Transcript availability requirement for old PRs
+Automating Layer 1 at any sample rate creates security theater + couples retention policy to spot-check coverage for no real benefit. Defer to a future RFC that scopes Layer 2 content plausibility; the sample-rate question gets re-litigated then with actual deterrent value attached.
 
-If an old PR's transcript has been GC'd and a spot-check is needed (e.g. forensic audit), what's the policy?
+V1 implementation: `cli-attestation spot-check <pr>` triggers fetch + hash verify on demand (for incident response). Automated sample rate stays at 0% until Layer 2 ships.
 
-- Soft fail (warning) — root + leaves preserve cryptographic audit; content access is best-effort
-- Hard fail (revoke PR's attestation status) — pressure operators to retain transcripts longer
+Selected over 5%/25%/100% automated because automating hash-only verification adds CI cost + retention coupling without proportional security benefit.
 
-**Lean: soft fail.** Cryptographic audit (root + leaves) is the durable claim; transcript content is convenience.
+### OQ-3: GC'd-transcript spot-check policy
 
-### OQ-4: Multi-operator (multi-maintainer) signing
+**Resolution (2026-05-20):** **Soft fail — informational warning, exit 0.**
 
-If multiple maintainers can sign roots, how is operator-key compromise handled?
+When an operator triggers a spot-check on a PR whose transcript has been garbage-collected (per the 90-day retention from OQ-1), the verifier returns "transcript GC'd per retention policy; Merkle proof valid; on-demand spot-check unavailable." Exit 0.
 
-- Single operator key (current) — simpler, single point of failure
-- Threshold signature (M-of-N) — more complex, no single point of failure
-- Multiple independent operator keys, any-of-N (current AISDLC-74 model) — simple, any key compromise = invalidate that key's signed roots
+The cryptographic claim (Merkle root signed by operator key) is what proves attestation existed. The transcript is convenience for spot-checks; absence past the retention window isn't a security failure — it's the operator's retention policy operating as designed. Hard-failing would conflate "retention expired" with "attestation invalid," which is wrong.
 
-**Lean: keep any-of-N (current model).** Threshold signatures are over-engineering for current team size.
+If a forgery is suspected on an old PR with GC'd transcript, investigation continues via other channels (operator's reflog, Anthropic API logs if signed receipts ship, manual diff-vs-commit review). The framework shouldn't lock incident response into "transcript must exist."
 
-### OQ-5: Storage hosting for transcripts
+Selected over hard-fail (false-alarm noise), per-PR configurability (adds friction), and hard-fail-with-grace (confusing boundary).
 
-Where do operators store transcripts for spot-check fetchability?
+### OQ-4: Multi-operator signing model
 
-- Local disk only (operator-managed) — no infrastructure
-- Repo-configured S3 bucket — adds AWS dep but standard
-- Git LFS — keeps in-tree but bloats clone size
-- IPFS / Sigstore artifact store — decentralized
+**Resolution (2026-05-20):** **Independent any-of-N keys (current `trusted-reviewers.yaml` schema, AISDLC-74).**
 
-**Lean: local disk + configurable URL.** Default to `~/.ai-sdlc/transcripts/` with optional remote URL for distributed teams.
+Multiple operator keys may be registered in `.ai-sdlc/trusted-reviewers.yaml`; any registered key signs Merkle roots. Compromise handling: revoke the offending pubkey from the registry; signatures by that key become invalid retroactively; affected PRs get re-signed by remaining trusted keys.
+
+Selected over single-key (no redundancy if operator machine fails or key is lost), threshold M-of-N (unworkable per-signing friction at 1-2 maintainer team size — every signature blocks until M people available), and Fulcio-style OIDC short-lived certs (requires OIDC issuer infrastructure, re-introduces external-service dependency rejected with Rekor).
+
+Future migration path: if team grows to 5+ active maintainers AND blast-radius cost rises, threshold becomes worth revisiting. Today, any-of-N with prompt revocation is the practical posture.
+
+### OQ-5: Transcript storage hosting
+
+**Resolution (2026-05-20):** **Local disk default (`~/.ai-sdlc/transcripts/`) + opt-in remote URL via `.ai-sdlc/config.yaml transcript_storage_url`.**
+
+Zero-friction for solo operators (the AI-SDLC default user). Distributed teams configure a remote URL (S3 / IPFS / equivalent) for cross-machine spot-check fetchability. Per OQ-3 (soft-fail on missing transcript), unavailable storage is graceful — no hard requirement to mandate infrastructure.
+
+CLI surfaces a warning at first push when team has multiple operator keys but no remote storage configured: "Multiple operator keys registered but transcript storage is local-only. Consider configuring `transcript_storage_url` for cross-machine spot-checks."
+
+Selected over remote-only (forces infrastructure on solo operators), Git LFS in-tree (clone-size growth + LFS install dependency), and mandatory framework-picked backend (contradicts no-external-dependency principle).
 
 ### OQ-6: Bootstrap behavior
 
-The first reviewer transcript in a fresh repo has no prior leaves. What does verification do?
+**Resolution (2026-05-20):** **First push IS the genesis (no ceremony).**
 
-- Accept any signed root with leafCount > 0 — assume operator's intent
-- Require a "genesis" leaf manually committed by the operator — explicit bootstrap step
+The first signed Merkle root establishes the trust anchor. Matches Git's model: the first signed commit/tag IS the genesis. Whether the tree has 1 leaf or 10,000 leaves, the cryptographic property is identical — the operator's signature on the root is what proves the leaves were committed.
 
-**Lean: accept any signed root.** No genesis ceremony; the operator's first push IS the genesis.
+Genesis ceremony would add setup friction (contradicting the friction-removal principle driving this entire RFC) without adding security: an attacker with the operator key can craft a fake "genesis" equally well. The real key-compromise mitigation is multi-key any-of-N (OQ-4) + prompt revocation.
 
-### OQ-7: Migration from existing AISDLC-380 envelopes
+Selected over explicit genesis ceremony (setup friction, no security benefit) and external timestamp anchor (re-introduces external-service dependency).
 
-Existing envelopes use schemaVersion v5. After v6 ships, do v5 envelopes remain verifiable indefinitely?
+### OQ-7: Backward-compat for v3/v4/v5 envelopes
 
-- Yes — v5 verifier code stays in `verify-attestation.mjs` permanently
-- No — v5 sunsets 1 year post-cutover; old PRs grandfather under "merge-time was valid"
+**Resolution (2026-05-20):** **Keep v3/v4/v5 verifier code indefinitely (read-only).**
 
-**Lean: keep v5 verifier indefinitely.** Cost of maintaining backward-compat is small; benefit of "every historical PR is still verifiable" is real.
+Signer code for v3/v4/v5 is deleted in Phase 4 (no new envelopes use legacy formats). Verifier code stays in a clearly-marked `legacy/` subdirectory or behind `// Pre-v6: read-only` headers. ~200 lines of read-only code; cheap to carry; never modified.
+
+Benefit: every PR ever merged with v3/v4/v5 attestation remains independently verifiable forever — critical for compliance, security forensics, and audit-trail-continuity properties. The expensive parts of the legacy chain (chore-commit hooks, rebase-fragility workarounds, exclusion lists, AISDLC-274 stale-envelope detection, AISDLC-381 fork-PR migration code) all get deleted in Phase 4. Only the READ side stays.
+
+Selected over sunset (1 year or 3 years — break audit-trail continuity at a hard cliff; confuses incident response on old PRs) and transcode (synthesizing fake v6 transcripts from v5 envelopes is dishonest about what was actually committed).
 
 ## Implementation tasks
 
@@ -411,12 +416,12 @@ The friction audit of the remaining ~14 non-attestation gates is tracked separat
 
 ## Sign-off
 
-Per AISDLC-118 lifecycle (Draft → Ready for Review → Signed Off → Implemented). This RFC is currently in Draft.
+Per AISDLC-118 lifecycle (Draft → Ready for Review → Signed Off → Implemented). All 7 OQs walked through 2026-05-20 with operator using decision-rubric skill; resolutions inline above. RFC promoted Draft → Ready for Review → **Signed Off** on 2026-05-20.
 
-- [ ] **Engineering owner:** dominique@reliablegenius.io
-- [ ] **Operator:** dominique@reliablegenius.io
+- [x] **Engineering owner:** dominique@reliablegenius.io (2026-05-20)
+- [x] **Operator:** dominique@reliablegenius.io (2026-05-20)
 
-Sign-off pending operator walkthrough of OQs.
+Implementation tracked under AISDLC-383 umbrella + 7 phase sub-tasks (AISDLC-383.1 through 383.7).
 
 ## Source
 
