@@ -8,7 +8,10 @@ created: 2026-05-20
 updated: 2026-05-20
 targetSpecVersion: v1alpha1
 requires: [RFC-0011]
-requiresDocs: [operator-runbook]
+requiresDocs:
+  - operator-runbook
+deferredDocs: true
+deferredDocsDeadline: '2026-07-15'
 ---
 
 # RFC-0042: Proof-of-Execution Attestation via In-Repo Merkle Transcripts
