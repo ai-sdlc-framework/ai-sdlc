@@ -42,7 +42,8 @@
     "cli-quality": "bin/cli-quality.mjs",
     "cli-dor-check": "bin/cli-dor-check.mjs",
     "cli-dispatch": "bin/cli-dispatch.mjs",
-    "cli-dispatch-supervisor": "bin/cli-dispatch-supervisor.mjs"
+    "cli-dispatch-supervisor": "bin/cli-dispatch-supervisor.mjs",
+    "cli-attestation": "bin/cli-attestation.mjs"
   },
   "exports": {
     ".": {

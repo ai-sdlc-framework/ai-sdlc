@@ -56,6 +56,12 @@ pnpm-debug.log*
 # committed; the signed envelope at .ai-sdlc/attestations/<sha>.dsse.json is
 # the durable artifact.
 .ai-sdlc/verdicts/
+# AISDLC-383.1 / RFC-0042 Phase 1: full conversation transcripts captured by
+# reviewer subagents. Gitignored per RFC-0042 §Design Layer 1 — operator
+# retains locally for 90 days by default (OQ-1). Remote storage opt-in via
+# `.ai-sdlc/config.yaml transcript_storage_url` (OQ-5).
+# See docs/operations/transcript-management.md for retention + GC runbook.
+.ai-sdlc/transcripts/
 # AISDLC-155: per-worktree active-task sentinel (AISDLC-81). The sentinel
 # lives INSIDE each worktree at `<worktree>/.active-task` and is read by the
 # PreToolUse hook to resolve which task's `permittedExternalPaths` apply for
