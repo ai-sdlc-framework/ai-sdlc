@@ -17,6 +17,16 @@
  *   node ai-sdlc-plugin/scripts/sign-attestation.mjs --print-content-hash
  *
  * Inputs (CLI flags):
+ *   --schema-version   'v5' (default during transition) | 'v6' (RFC-0042 Phase 2)
+ *                     When 'v6': reads transcript leaves from
+ *                     .ai-sdlc/transcript-leaves.jsonl, computes the Merkle
+ *                     root + per-leaf inclusion proofs, signs the root, and
+ *                     writes .ai-sdlc/attestations/<head-sha>.v6.dsse.json.
+ *                     The --review-verdicts flag is still required in v6 mode
+ *                     to identify the task-id for leaf selection.
+ *   --task-id          (v6 only) task ID for filtering transcript leaves
+ *                     (e.g. AISDLC-383.3). Falls back to the task ID parsed
+ *                     from the active-task sentinel at .active-task.
  *   --review-verdicts  path to JSON: [{ agentId, harness, approved, findings }]
  *   --iteration-count  integer (1 = single dev pass; 2 = one iteration ran)
  *   --harness-note     string (empty = independence enforced; non-empty = warning text)
@@ -142,6 +152,76 @@ async function main() {
     return;
   }
 
+  const schemaVersion = args['schema-version'] ?? 'v5';
+
+  // ──────────────────────────────────────────────────────────────────
+  // RFC-0042 Phase 2: --schema-version v6 mode
+  //
+  // Reads transcript leaves from .ai-sdlc/transcript-leaves.jsonl,
+  // builds a Merkle tree (RFC-6962 domain-separated), signs the root
+  // with the operator's key (any-of-N per OQ-4), and writes a v6
+  // envelope to .ai-sdlc/attestations/<head-sha>.v6.dsse.json.
+  //
+  // Default remains 'v5' during the Phase 2 → Phase 3 transition window.
+  // ──────────────────────────────────────────────────────────────────
+  if (schemaVersion === 'v6') {
+    // Resolve task-id: explicit flag > active-task sentinel.
+    let taskId = args['task-id'];
+    if (!taskId) {
+      const activeSentinel = join(repoRoot, '.active-task');
+      if (!existsSync(activeSentinel)) {
+        fail(
+          '--task-id is required for --schema-version v6 (or ensure .active-task exists in the worktree)',
+        );
+      }
+      taskId = readFileSync(activeSentinel, 'utf-8').trim();
+    }
+    if (!taskId) fail('--task-id is required for --schema-version v6');
+
+    // Resolve signing key (any-of-N: AISDLC_SIGNING_KEY_PATH env > default).
+    const v6KeyPath =
+      process.env['AISDLC_SIGNING_KEY_PATH'] ?? join(homedir(), '.ai-sdlc', 'signing-key.pem');
+    if (!existsSync(v6KeyPath)) {
+      fail(
+        `No signing key at ${v6KeyPath}.\n` +
+          '       Run /ai-sdlc init-signing-key once, then add your pubkey to\n' +
+          '       .ai-sdlc/trusted-reviewers.yaml via a follow-up PR.',
+      );
+    }
+    const privateKeyPem = readFileSync(v6KeyPath, 'utf-8');
+
+    // The pipeline-cli dist must be built for the v6 signer.
+    const pipelineCliSignV6 = join(repoRoot, 'pipeline-cli', 'dist', 'attestation', 'sign-v6.js');
+    if (!existsSync(pipelineCliSignV6)) {
+      fail(
+        `${pipelineCliSignV6} not found. Run \`pnpm --filter @ai-sdlc/pipeline-cli build\` first.`,
+      );
+    }
+    const { signAndWriteV6Envelope } = await import(pipelineCliSignV6);
+
+    const headSha = git(['rev-parse', 'HEAD'], repoRoot).trim();
+    const identity =
+      process.env['GIT_AUTHOR_EMAIL'] || process.env['EMAIL'] || `${userInfo().username}@local`;
+    const machine = hostname();
+
+    let outPath;
+    try {
+      outPath = signAndWriteV6Envelope({
+        repoRoot,
+        headSha,
+        taskId,
+        privateKeyPem,
+        signerIdentity: `${identity}:${machine}`,
+      });
+    } catch (err) {
+      fail(err.message ?? String(err));
+    }
+
+    process.stdout.write(`${outPath}\n`);
+    return;
+  }
+
+  // ── Legacy v5 path (default during transition) ────────────────────
   const verdictsPath = args['review-verdicts'];
   const iterationCount = Number(args['iteration-count'] ?? '1');
   const harnessNote = args['harness-note'] ?? '';

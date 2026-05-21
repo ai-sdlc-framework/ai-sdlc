@@ -113,7 +113,7 @@ describe('computeMerkleRoot — single leaf', () => {
   it('inclusion proof verifies', () => {
     const leaf = makeLeaf({ leafIndex: 0 });
     const { root, proofs } = computeMerkleRoot([leaf]);
-    expect(verifyInclusion(hashLeaf(leaf), proofs[0], root, 0)).toBe(true);
+    expect(verifyInclusion(hashLeaf(leaf), proofs[0], root, 0, 1)).toBe(true);
   });
 });
 
@@ -158,7 +158,7 @@ describe('computeMerkleRoot — multi-leaf', () => {
     );
     const { root, proofs } = computeMerkleRoot(leaves);
     for (let i = 0; i < leaves.length; i++) {
-      expect(verifyInclusion(hashLeaf(leaves[i]), proofs[i], root, i)).toBe(true);
+      expect(verifyInclusion(hashLeaf(leaves[i]), proofs[i], root, i, leaves.length)).toBe(true);
     }
   });
 
@@ -168,7 +168,7 @@ describe('computeMerkleRoot — multi-leaf', () => {
     );
     const { root, proofs } = computeMerkleRoot(leaves);
     for (let i = 0; i < leaves.length; i++) {
-      expect(verifyInclusion(hashLeaf(leaves[i]), proofs[i], root, i)).toBe(true);
+      expect(verifyInclusion(hashLeaf(leaves[i]), proofs[i], root, i, leaves.length)).toBe(true);
     }
   });
 
@@ -176,7 +176,7 @@ describe('computeMerkleRoot — multi-leaf', () => {
     const leaves = [0, 1, 2].map((i) => makeLeaf({ leafIndex: i, reviewerName: `reviewer-${i}` }));
     const { root, proofs } = computeMerkleRoot(leaves);
     for (let i = 0; i < leaves.length; i++) {
-      expect(verifyInclusion(hashLeaf(leaves[i]), proofs[i], root, i)).toBe(true);
+      expect(verifyInclusion(hashLeaf(leaves[i]), proofs[i], root, i, leaves.length)).toBe(true);
     }
   });
 });
@@ -188,14 +188,16 @@ describe('verifyInclusion — tampered leaf detection', () => {
     const leaves = [makeLeaf({ leafIndex: 0 }), makeLeaf({ leafIndex: 1 })];
     const { root, proofs } = computeMerkleRoot(leaves);
     const tamperedHash = 'f'.repeat(64);
-    expect(verifyInclusion(tamperedHash, proofs[0], root, 0)).toBe(false);
+    expect(verifyInclusion(tamperedHash, proofs[0], root, 0, leaves.length)).toBe(false);
   });
 
   it('returns false when root is wrong', () => {
     const leaves = [makeLeaf({ leafIndex: 0 }), makeLeaf({ leafIndex: 1 })];
     const { proofs } = computeMerkleRoot(leaves);
     const wrongRoot = 'a'.repeat(64);
-    expect(verifyInclusion(hashLeaf(leaves[0]), proofs[0], wrongRoot, 0)).toBe(false);
+    expect(verifyInclusion(hashLeaf(leaves[0]), proofs[0], wrongRoot, 0, leaves.length)).toBe(
+      false,
+    );
   });
 
   it('returns false when proof path is tampered', () => {
@@ -206,19 +208,19 @@ describe('verifyInclusion — tampered leaf detection', () => {
     ];
     const { root, proofs } = computeMerkleRoot(leaves);
     const tamperedProof = proofs[0].map(() => 'c'.repeat(64));
-    expect(verifyInclusion(hashLeaf(leaves[0]), tamperedProof, root, 0)).toBe(false);
+    expect(verifyInclusion(hashLeaf(leaves[0]), tamperedProof, root, 0, leaves.length)).toBe(false);
   });
 
   it('returns false for empty leaf hash', () => {
     const leaves = [makeLeaf({ leafIndex: 0 })];
     const { root, proofs } = computeMerkleRoot(leaves);
-    expect(verifyInclusion('', proofs[0], root, 0)).toBe(false);
+    expect(verifyInclusion('', proofs[0], root, 0, leaves.length)).toBe(false);
   });
 
   it('returns false for empty root', () => {
     const leaves = [makeLeaf({ leafIndex: 0 })];
     const { proofs } = computeMerkleRoot(leaves);
-    expect(verifyInclusion(hashLeaf(leaves[0]), proofs[0], '', 0)).toBe(false);
+    expect(verifyInclusion(hashLeaf(leaves[0]), proofs[0], '', 0, leaves.length)).toBe(false);
   });
 
   it('returns false when using a proof for the wrong leaf index', () => {
@@ -227,7 +229,31 @@ describe('verifyInclusion — tampered leaf detection', () => {
     );
     const { root, proofs } = computeMerkleRoot(leaves);
     // Proof for leaf 0, but claiming it is for leaf 1 — wrong direction.
-    expect(verifyInclusion(hashLeaf(leaves[0]), proofs[0], root, 1)).toBe(false);
+    expect(verifyInclusion(hashLeaf(leaves[0]), proofs[0], root, 1, leaves.length)).toBe(false);
+  });
+
+  // ── CVE-2012-2459 second-preimage regression ──────────────────────────────────
+  // 3-leaf tree [A, B, C]: attacker claims leafIndex=3 (out-of-bounds) with
+  // leafHash=hashLeaf(C) and proof=[hashLeaf(C), hashPair(A,B)].
+  // Without leafCount bound-check and RFC-6962 domain separators, the old
+  // implementation returned true because the padding node (C duplicated) at
+  // position 3 matched. Must return false.
+  it('CVE-2012-2459 regression: out-of-bounds leafIndex rejected (3-leaf tree)', () => {
+    const leaves = [0, 1, 2].map((i) => makeLeaf({ leafIndex: i, reviewerName: `reviewer-${i}` }));
+    const { root } = computeMerkleRoot(leaves);
+
+    // Attacker claims leaf at index 3 (one past the end).
+    const attackerLeafHash = hashLeaf(leaves[2]); // C
+    const attackerIndex = 3; // out-of-bounds
+    // Even if the attacker somehow constructs a proof, the leafCount check must reject.
+    expect(verifyInclusion(attackerLeafHash, [], root, attackerIndex, leaves.length)).toBe(false);
+  });
+
+  it('CVE-2012-2459 regression: leafIndex === leafCount is rejected', () => {
+    const leaves = [0, 1].map((i) => makeLeaf({ leafIndex: i, reviewerName: `reviewer-${i}` }));
+    const { root, proofs } = computeMerkleRoot(leaves);
+    // leafIndex === leafCount (2) is out of bounds.
+    expect(verifyInclusion(hashLeaf(leaves[0]), proofs[0], root, 2, leaves.length)).toBe(false);
   });
 });
 
@@ -291,7 +317,7 @@ describe('loadLeaves', () => {
     expect(loaded).toEqual(leaves);
   });
 
-  it('skips corrupt lines and reads valid ones', () => {
+  it('skips corrupt lines, reads valid ones, and logs to stderr', () => {
     const leavesFile = join(tmp, LEAVES_FILE_RELATIVE);
     mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
     const leaf0 = makeLeaf({ leafIndex: 0 });
@@ -299,10 +325,57 @@ describe('loadLeaves', () => {
     const content =
       JSON.stringify(leaf0) + '\n' + 'NOT VALID JSON ~~~\n' + JSON.stringify(leaf2) + '\n';
     writeFileSync(leavesFile, content, 'utf8');
-    const loaded = loadLeaves(tmp);
+
+    const stderrChunks: string[] = [];
+    const savedStderr = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      return true;
+    }) as typeof process.stderr.write;
+
+    let loaded: ReturnType<typeof loadLeaves>;
+    try {
+      loaded = loadLeaves(tmp);
+    } finally {
+      process.stderr.write = savedStderr;
+    }
+
     expect(loaded).toHaveLength(2);
     expect(loaded[0]).toEqual(leaf0);
     expect(loaded[1]).toEqual(leaf2);
+
+    // Malformed line logged to stderr.
+    const stderrOut = stderrChunks.join('');
+    expect(stderrOut).toContain('[merkle] WARNING: skipping malformed JSONL line');
+  });
+
+  it('logs a warning to stderr when leafIndex does not match array position', () => {
+    const leavesFile = join(tmp, LEAVES_FILE_RELATIVE);
+    mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+    // leaf0 is fine (leafIndex=0), leaf1 claims leafIndex=99 (mismatch).
+    const leaf0 = makeLeaf({ leafIndex: 0 });
+    const leaf1 = makeLeaf({ leafIndex: 99, reviewerName: 'test-reviewer' });
+    writeFileSync(leavesFile, JSON.stringify(leaf0) + '\n' + JSON.stringify(leaf1) + '\n', 'utf8');
+
+    const stderrChunks: string[] = [];
+    const savedStderr = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string | Uint8Array) => {
+      stderrChunks.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'));
+      return true;
+    }) as typeof process.stderr.write;
+
+    let loaded: ReturnType<typeof loadLeaves>;
+    try {
+      loaded = loadLeaves(tmp);
+    } finally {
+      process.stderr.write = savedStderr;
+    }
+
+    // Both leaves loaded despite mismatch.
+    expect(loaded).toHaveLength(2);
+    // Warning emitted for mismatched leafIndex.
+    const stderrOut = stderrChunks.join('');
+    expect(stderrOut).toContain('leafIndex=99');
   });
 });
 
@@ -374,7 +447,7 @@ describe('end-to-end: append → compute → verify', () => {
 
     expect(root).toHaveLength(64);
     for (let i = 0; i < loaded.length; i++) {
-      expect(verifyInclusion(hashLeaf(loaded[i]), proofs[i], root, i)).toBe(true);
+      expect(verifyInclusion(hashLeaf(loaded[i]), proofs[i], root, i, loaded.length)).toBe(true);
     }
   });
 
@@ -387,6 +460,6 @@ describe('end-to-end: append → compute → verify', () => {
 
     // Tamper with leaf 0.
     const tampered = { ...loaded[0], verdictApproved: false };
-    expect(verifyInclusion(hashLeaf(tampered), proofs[0], root, 0)).toBe(false);
+    expect(verifyInclusion(hashLeaf(tampered), proofs[0], root, 0, loaded.length)).toBe(false);
   });
 });

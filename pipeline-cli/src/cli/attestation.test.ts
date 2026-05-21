@@ -11,6 +11,7 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { generateKeyPairSync } from 'node:crypto';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -343,6 +344,178 @@ describe('merkle-proof', () => {
     let caught: Error | null = null;
     try {
       await buildAttestationCli(['merkle-proof', '99']).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+  });
+});
+
+// ── CLI: sign-v6 ──────────────────────────────────────────────────────────────
+
+describe('sign-v6', () => {
+  let keyPath: string;
+
+  beforeEach(() => {
+    // Generate a fresh ed25519 keypair for each test.
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+    keyPath = join(tmpRoot, 'test-key.pem');
+    writeFileSync(keyPath, pem, { mode: 0o600 });
+  });
+
+  it('writes a v6 envelope and prints the output path', async () => {
+    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
+    appendLeaf(
+      makeLeaf({ leafIndex: 1, taskId: 'AISDLC-383.3', reviewerName: 'test-reviewer' }),
+      tmpRoot,
+    );
+
+    await expect(
+      buildAttestationCli([
+        'sign-v6',
+        '--task-id',
+        'AISDLC-383.3',
+        '--head-sha',
+        'a'.repeat(40),
+        '--key-path',
+        keyPath,
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    const out = flushStdout();
+    expect(out).toContain('.v6.dsse.json');
+  });
+
+  it('exits 1 when no leaves match task-id', async () => {
+    // No leaves appended.
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'sign-v6',
+        '--task-id',
+        'AISDLC-383.3',
+        '--head-sha',
+        'a'.repeat(40),
+        '--key-path',
+        keyPath,
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+  });
+
+  it('exits 1 when key file does not exist', async () => {
+    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'sign-v6',
+        '--task-id',
+        'AISDLC-383.3',
+        '--head-sha',
+        'a'.repeat(40),
+        '--key-path',
+        join(tmpRoot, 'nonexistent.pem'),
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+  });
+});
+
+// ── CLI: inspect-v6 ───────────────────────────────────────────────────────────
+
+describe('inspect-v6', () => {
+  let keyPath: string;
+
+  beforeEach(() => {
+    const { privateKey } = generateKeyPairSync('ed25519');
+    const pem = privateKey.export({ format: 'pem', type: 'pkcs8' }).toString();
+    keyPath = join(tmpRoot, 'inspect-test-key.pem');
+    writeFileSync(keyPath, pem, { mode: 0o600 });
+  });
+
+  it('pretty-prints a v6 envelope in text mode', async () => {
+    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
+
+    // Sign first.
+    await buildAttestationCli([
+      'sign-v6',
+      '--task-id',
+      'AISDLC-383.3',
+      '--head-sha',
+      'b'.repeat(40),
+      '--key-path',
+      keyPath,
+    ]).parseAsync();
+
+    const envelopePath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'attestations',
+      `${'b'.repeat(40)}.v6.dsse.json`,
+    );
+
+    // Clear stdout buffer, then inspect.
+    stdoutChunks.length = 0;
+    await buildAttestationCli(['inspect-v6', envelopePath]).parseAsync();
+
+    const out = flushStdout();
+    expect(out).toContain('Schema version : v6');
+    expect(out).toContain('Leaf count     : 1');
+  });
+
+  it('emits JSON when --json flag is set', async () => {
+    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-383.3' }), tmpRoot);
+
+    await buildAttestationCli([
+      'sign-v6',
+      '--task-id',
+      'AISDLC-383.3',
+      '--head-sha',
+      'c'.repeat(40),
+      '--key-path',
+      keyPath,
+    ]).parseAsync();
+
+    const envelopePath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'attestations',
+      `${'c'.repeat(40)}.v6.dsse.json`,
+    );
+
+    stdoutChunks.length = 0;
+    await buildAttestationCli(['inspect-v6', envelopePath, '--json']).parseAsync();
+
+    const parsed = JSON.parse(flushStdout()) as { schemaVersion: string };
+    expect(parsed.schemaVersion).toBe('v6');
+  });
+
+  it('exits 1 when envelope file does not exist', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'inspect-v6',
+        join(tmpRoot, 'nonexistent.v6.dsse.json'),
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+  });
+
+  it('exits 1 when envelope has wrong schemaVersion', async () => {
+    const fakePath = join(tmpRoot, 'bad.v6.dsse.json');
+    writeFileSync(fakePath, JSON.stringify({ schemaVersion: 'v5' }), 'utf8');
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(['inspect-v6', fakePath]).parseAsync();
     } catch (err) {
       caught = err as Error;
     }

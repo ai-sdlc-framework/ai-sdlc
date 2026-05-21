@@ -18,10 +18,18 @@
  * @module cli/attestation
  */
 
+import { existsSync, readFileSync } from 'node:fs';
+import { hostname, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import { computeMerkleRoot, hashLeaf, loadLeaves, verifyInclusion } from '../attestation/merkle.js';
+import {
+  formatV6Envelope,
+  resolveSigningKeyPath,
+  signAndWriteV6Envelope,
+  type AttestationEnvelopeV6,
+} from '../attestation/sign-v6.js';
 import { formatTranscriptTable, listTranscripts } from '../attestation/transcript-capture.js';
 
 // ── Repo root resolution ──────────────────────────────────────────────────────
@@ -189,7 +197,7 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
 
           let verified: boolean | undefined;
           if (args['verify']) {
-            verified = verifyInclusion(leafHash, proof, root, idx);
+            verified = verifyInclusion(leafHash, proof, root, idx, leaves.length);
           }
 
           if (args['json']) {
@@ -216,7 +224,130 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           }
         },
       )
-      .demandCommand(1, 'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof)')
+      // ── sign-v6 ─────────────────────────────────────────────────────────────────
+      .command(
+        'sign-v6',
+        'Build and sign a v6 attestation envelope (RFC-0042 Phase 2). ' +
+          'Reads leaves from .ai-sdlc/transcript-leaves.jsonl, selects the PR subset ' +
+          'by --task-id, signs the Merkle root, and writes .ai-sdlc/attestations/<head-sha>.v6.dsse.json.',
+        (y: Argv) =>
+          y
+            .option('task-id', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                'Task ID to select which transcript leaves belong to this PR (e.g. AISDLC-383.3).',
+            })
+            .option('head-sha', {
+              type: 'string',
+              demandOption: true,
+              describe: 'Git commit SHA (40 hex chars) to bind the envelope to.',
+            })
+            .option('key-path', {
+              type: 'string',
+              describe:
+                'Path to the operator ed25519 private key PEM. ' +
+                'Defaults to AISDLC_SIGNING_KEY_PATH env or ~/.ai-sdlc/signing-key.pem.',
+            }),
+        (args) => {
+          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
+          const taskId = args['task-id'] as string;
+          const headSha = args['head-sha'] as string;
+          const keyPathArg = args['key-path'] as string | undefined;
+
+          // Resolve signing key path: CLI arg > env var > default.
+          const keyPath = keyPathArg ?? resolveSigningKeyPath();
+          if (!keyPath) {
+            process.stderr.write(
+              '[cli-attestation] sign-v6: no signing key found. ' +
+                'Set AISDLC_SIGNING_KEY_PATH, --key-path, or run /ai-sdlc init-signing-key.\n',
+            );
+            process.exit(1);
+          }
+          if (!existsSync(keyPath)) {
+            process.stderr.write(`[cli-attestation] sign-v6: key file not found: ${keyPath}\n`);
+            process.exit(1);
+          }
+          const privateKeyPem = readFileSync(keyPath, 'utf8');
+
+          // Build signer identity (informational).
+          const identity =
+            process.env['GIT_AUTHOR_EMAIL'] ||
+            process.env['EMAIL'] ||
+            `${userInfo().username}@local`;
+          const machine = hostname();
+          const signerIdentity = `${identity}:${machine}`;
+
+          let outPath: string;
+          try {
+            outPath = signAndWriteV6Envelope({
+              repoRoot,
+              headSha,
+              taskId,
+              privateKeyPem,
+              signerIdentity,
+            });
+          } catch (err) {
+            process.stderr.write(`[cli-attestation] sign-v6: ${(err as Error).message}\n`);
+            process.exit(1);
+          }
+
+          emitText(outPath);
+        },
+      )
+      // ── inspect-v6 ──────────────────────────────────────────────────────────────
+      .command(
+        'inspect-v6 <envelope>',
+        'Pretty-print a v6 attestation envelope from file. ' +
+          'Pass --json to get machine-readable output.',
+        (y: Argv) =>
+          y
+            .positional('envelope', {
+              type: 'string',
+              demandOption: true,
+              describe: 'Absolute or relative path to a .v6.dsse.json envelope file.',
+            })
+            .option('json', {
+              type: 'boolean',
+              default: false,
+              describe: 'Emit the envelope as raw JSON instead of human-readable format.',
+            }),
+        (args) => {
+          const envelopePath = resolve(args['envelope'] as string);
+
+          if (!existsSync(envelopePath)) {
+            process.stderr.write(`[cli-attestation] inspect-v6: file not found: ${envelopePath}\n`);
+            process.exit(1);
+          }
+
+          let envelope: AttestationEnvelopeV6;
+          try {
+            envelope = JSON.parse(readFileSync(envelopePath, 'utf8')) as AttestationEnvelopeV6;
+          } catch (err) {
+            process.stderr.write(
+              `[cli-attestation] inspect-v6: failed to parse envelope: ${(err as Error).message}\n`,
+            );
+            process.exit(1);
+          }
+
+          if (envelope.schemaVersion !== 'v6') {
+            process.stderr.write(
+              `[cli-attestation] inspect-v6: not a v6 envelope (schemaVersion='${envelope.schemaVersion}')\n`,
+            );
+            process.exit(1);
+          }
+
+          if (args['json']) {
+            emitJson(envelope);
+          } else {
+            emitText(formatV6Envelope(envelope));
+          }
+        },
+      )
+      .demandCommand(
+        1,
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6)',
+      )
       .help()
       .alias('h', 'help')
       .version(false)

@@ -440,6 +440,139 @@ export const agentRoleSchema = {
   },
 } as const;
 
+export const attestationEnvelopeV6Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.dev/schemas/attestation-envelope-v6.schema.json',
+  title: 'AttestationEnvelopeV6',
+  description:
+    'RFC-0042 §Design Layer 4 — per-PR proof bundle. Carries per-reviewer transcript hashes, per-leaf Merkle inclusion proofs, the operator-signed root, and the PR-bound nonce. Replaces v5 envelopes (contentHashV3/V4/V5) during RFC-0042 Phase 2.',
+  type: 'object',
+  required: [
+    'schemaVersion',
+    'subject',
+    'transcriptLeaves',
+    'merkleProofs',
+    'rootHash',
+    'rootSignature',
+    'nonce',
+    'leafCount',
+  ],
+  additionalProperties: false,
+  properties: {
+    schemaVersion: {
+      type: 'string',
+      enum: ['v6'],
+      description: "Schema version — always 'v6' for this schema.",
+    },
+    subject: {
+      type: 'object',
+      description: 'The Git commit this envelope attests to.',
+      required: ['digest'],
+      additionalProperties: false,
+      properties: {
+        digest: {
+          type: 'object',
+          required: ['sha1'],
+          additionalProperties: false,
+          properties: {
+            sha1: {
+              type: 'string',
+              pattern: '^[0-9a-f]{40}$',
+              description: 'Git commit SHA (40 hex chars) this envelope is bound to.',
+            },
+          },
+        },
+      },
+    },
+    transcriptLeaves: {
+      type: 'array',
+      description: "Summary of each reviewer's transcript leaf included in this PR's proof bundle.",
+      items: {
+        type: 'object',
+        required: ['leafIndex', 'reviewerName', 'transcriptHash'],
+        additionalProperties: false,
+        properties: {
+          leafIndex: {
+            type: 'integer',
+            minimum: 0,
+            description: '0-based sequential position in .ai-sdlc/transcript-leaves.jsonl.',
+          },
+          reviewerName: {
+            type: 'string',
+            minLength: 1,
+            description:
+              "Reviewer subagent role (e.g. 'code-reviewer', 'test-reviewer', 'security-reviewer').",
+          },
+          transcriptHash: {
+            type: 'string',
+            pattern: '^[0-9a-f]{64}$',
+            description: 'SHA-256 hex of the raw reviewer transcript JSONL file.',
+          },
+        },
+      },
+    },
+    merkleProofs: {
+      type: 'array',
+      description:
+        'Per-leaf RFC-6962 Merkle inclusion proofs. Each proof is a sibling-hash path from leaf level to (but not including) the root.',
+      items: {
+        type: 'object',
+        required: ['leafIndex', 'proof'],
+        additionalProperties: false,
+        properties: {
+          leafIndex: {
+            type: 'integer',
+            minimum: 0,
+            description: '0-based position of the leaf this proof attests to.',
+          },
+          proof: {
+            type: 'array',
+            description: 'Ordered list of sibling SHA-256 hashes from leaf level to root.',
+            items: {
+              type: 'string',
+              pattern: '^[0-9a-f]{64}$',
+            },
+          },
+        },
+      },
+    },
+    rootHash: {
+      type: 'string',
+      pattern: '^[0-9a-f]{64}$',
+      description:
+        'SHA-256 Merkle root over all leaves in .ai-sdlc/transcript-leaves.jsonl at sign time.',
+    },
+    rootSignature: {
+      type: 'string',
+      minLength: 1,
+      description:
+        'Operator ed25519 signature over rootHash (base64-encoded). Verified against any key in .ai-sdlc/trusted-reviewers.yaml (any-of-N per OQ-4).',
+    },
+    nonce: {
+      type: 'string',
+      pattern: '^[0-9a-f]{64}$',
+      description:
+        "32-byte hex nonce bound to the PR's head SHA (replay protection). Derived from SHA-256(headSha || random) per RFC-0042 §Nonce binding (OQ-6).",
+    },
+    leafCount: {
+      type: 'integer',
+      minimum: 1,
+      description:
+        'Total number of leaves in the tree at sign time. Required by verifyInclusion to reject out-of-bounds leafIndex (CVE-2012-2459 second-preimage mitigation).',
+    },
+    signerIdentity: {
+      type: 'string',
+      description:
+        'Free-form identity string of the key holder who signed (typically email:hostname). Informational; not verified.',
+    },
+    signedAt: {
+      type: 'string',
+      format: 'date-time',
+      description: 'ISO-8601 UTC timestamp when this envelope was signed.',
+    },
+  },
+} as const;
+
 export const auditIgnoresSchema = {
   $schema: 'https://json-schema.org/draft/2020-12/schema',
   $id: 'https://ai-sdlc.io/schemas/v1alpha1/audit-ignores.schema.json',
@@ -6041,6 +6174,7 @@ export const worktreePoolSchema = {
 export const SCHEMAS: Record<string, object> = {
   'adapter-binding.schema.json': adapterBindingSchema,
   'agent-role.schema.json': agentRoleSchema,
+  'attestation-envelope-v6.schema.json': attestationEnvelopeV6Schema,
   'audit-ignores.schema.json': auditIgnoresSchema,
   'autonomy-policy.schema.json': autonomyPolicySchema,
   'capture-record.v1.schema.json': captureRecordV1Schema,

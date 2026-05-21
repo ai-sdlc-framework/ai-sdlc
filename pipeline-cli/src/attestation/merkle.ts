@@ -2,11 +2,15 @@
  * RFC-0042 §Design Layers 2-3 — Append-only Merkle leaf index + root computation.
  *
  * Pure-TypeScript, no external dependencies. Uses Node's built-in `node:crypto`
- * for SHA-256 hashing. Implements a standard binary Merkle tree where:
- *   - Each leaf is SHA-256 of its canonical JSON serialisation.
- *   - Internal nodes are SHA-256 of (left ++ right), where "++" is byte concatenation.
+ * for SHA-256 hashing. Implements a binary Merkle tree with RFC-6962 domain
+ * separation (CVE-2012-2459 second-preimage mitigation):
+ *   - Each leaf is SHA-256 of (0x00 || canonical_json_utf8).
+ *   - Internal nodes are SHA-256 of (0x01 || left_bytes || right_bytes).
  *   - Odd-length levels duplicate the last node to make the count even (standard
  *     binary Merkle padding).
+ *   - `verifyInclusion` accepts a mandatory `leafCount` parameter and rejects
+ *     `leafIndex >= leafCount` to prevent second-preimage attacks via out-of-bounds
+ *     attacker-supplied indices.
  *
  * ## File layout
  *
@@ -26,9 +30,10 @@
  *
  * ## Inclusion proof API
  *
- * `verifyInclusion(leafHash, proof, root, leafIndex)` is the canonical verification
- * function. It is direction-aware (uses `leafIndex` to know left/right at each level)
- * and returns true only when the reconstructed root matches exactly.
+ * `verifyInclusion(leafHash, proof, root, leafIndex, leafCount)` is the canonical
+ * verification function. It is direction-aware (uses `leafIndex` to know left/right
+ * at each level), bounds-checks `leafIndex` against `leafCount`, and returns true
+ * only when the reconstructed root matches exactly.
  *
  * @module attestation/merkle
  */
@@ -89,9 +94,37 @@ export function sha256(data: string): string {
   return createHash('sha256').update(data, 'utf8').digest('hex');
 }
 
-/** SHA-256 of two hex-encoded hashes concatenated as bytes (left || right). */
+/**
+ * RFC-6962 domain separator bytes.
+ *
+ * Using 0x00 for leaf hashes and 0x01 for internal node hashes prevents the
+ * CVE-2012-2459-class second-preimage attack where an attacker can claim an
+ * internal node value as a leaf hash (or vice versa) to forge a proof path.
+ */
+const LEAF_DOMAIN = Buffer.from([0x00]);
+const NODE_DOMAIN = Buffer.from([0x01]);
+
+/**
+ * RFC-6962 leaf hash: SHA-256(0x00 || canonical_json_utf8).
+ *
+ * The 0x00 domain separator prevents an internal-node hash from being
+ * presented as a valid leaf hash (second-preimage defense).
+ *
+ * @internal — use `hashLeaf(leaf)` for the public API.
+ */
+function hashLeafData(canonicalJson: string): string {
+  return createHash('sha256').update(LEAF_DOMAIN).update(canonicalJson, 'utf8').digest('hex');
+}
+
+/**
+ * RFC-6962 internal node hash: SHA-256(0x01 || left_bytes || right_bytes).
+ *
+ * The 0x01 domain separator prevents a leaf hash from being substituted for
+ * an internal node (second-preimage defense).
+ */
 function hashPair(left: string, right: string): string {
   return createHash('sha256')
+    .update(NODE_DOMAIN)
     .update(Buffer.from(left, 'hex'))
     .update(Buffer.from(right, 'hex'))
     .digest('hex');
@@ -100,8 +133,11 @@ function hashPair(left: string, right: string): string {
 // ── Leaf hashing ──────────────────────────────────────────────────────────────
 
 /**
- * Canonical leaf hash: SHA-256 of the JSON serialisation with keys in the
- * fixed RFC-0042 order. Deterministic across implementations.
+ * Canonical leaf hash: SHA-256(0x00 || canonical_json_utf8) per RFC-6962.
+ *
+ * The 0x00 domain prefix prevents second-preimage attacks (CVE-2012-2459).
+ * Keys are ordered per RFC-0042 §Layer 2 schema for determinism across
+ * implementations.
  */
 export function hashLeaf(leaf: TranscriptLeaf): string {
   // Fixed key order per RFC-0042 §Layer 2 schema.
@@ -122,7 +158,7 @@ export function hashLeaf(leaf: TranscriptLeaf): string {
     },
     signedAt: leaf.signedAt,
   };
-  return sha256(JSON.stringify(ordered));
+  return hashLeafData(JSON.stringify(ordered));
 }
 
 // ── Merkle tree computation ───────────────────────────────────────────────────
@@ -202,17 +238,32 @@ export function computeMerkleRoot(leaves: TranscriptLeaf[]): MerkleResult {
  * `leafIndex` is the 0-based position of the leaf in the leaves array. It is
  * always available from `TranscriptLeaf.leafIndex`.
  *
+ * `leafCount` is the total number of leaves in the tree (i.e. the length of
+ * the leaves array). It is used to bounds-check `leafIndex` and prevent the
+ * CVE-2012-2459 second-preimage attack where an attacker supplies an
+ * out-of-bounds `leafIndex` (e.g. equal to `leafCount`) that happens to land
+ * on a duplicated padding node, allowing an attacker-controlled hash to pass
+ * verification against the real root.
+ *
  * Returns:
- *   - `true`  when the reconstructed root matches `root` exactly.
- *   - `false` for any tampered leaf hash, invalid proof, or wrong root.
+ *   - `true`  when the reconstructed root matches `root` exactly AND
+ *             `leafIndex` is strictly less than `leafCount`.
+ *   - `false` for any tampered leaf hash, invalid proof, wrong root,
+ *             out-of-bounds index, or empty/missing inputs.
  */
 export function verifyInclusion(
   leafHash: string,
   proof: string[],
   root: string,
   leafIndex: number,
+  leafCount: number,
 ): boolean {
   if (!root || !leafHash) return false;
+  // Bound-check: reject attacker-supplied out-of-range indices.
+  // Without this, an attacker claiming leafIndex === leafCount exploits the
+  // odd-leaf duplication padding (CVE-2012-2459-class second-preimage attack).
+  if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= leafCount) return false;
+  if (!Number.isInteger(leafCount) || leafCount <= 0) return false;
 
   let current = leafHash;
   let idx = leafIndex;
@@ -272,7 +323,9 @@ export function leavesFilePath(repoRoot?: string): string {
  * Load all leaves from `.ai-sdlc/transcript-leaves.jsonl`.
  *
  * Returns an empty array when the file does not exist.
- * Lines that fail JSON.parse are silently skipped (corruption-resistant read).
+ * Lines that fail JSON.parse are skipped and logged to stderr.
+ * Lines where `leaf.leafIndex !== arrayPosition` are also logged to stderr
+ * (index mismatch indicates a file corruption or concurrent write race).
  */
 export function loadLeaves(repoRoot?: string): TranscriptLeaf[] {
   const filePath = leavesFilePath(repoRoot);
@@ -280,14 +333,28 @@ export function loadLeaves(repoRoot?: string): TranscriptLeaf[] {
 
   const content = readFileSync(filePath, 'utf8');
   const leaves: TranscriptLeaf[] = [];
+  let lineNo = 0;
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
+    lineNo++;
     if (!trimmed) continue;
+    let leaf: TranscriptLeaf;
     try {
-      leaves.push(JSON.parse(trimmed) as TranscriptLeaf);
-    } catch {
-      // Skip corrupt lines — prior valid lines remain intact.
+      leaf = JSON.parse(trimmed) as TranscriptLeaf;
+    } catch (err) {
+      process.stderr.write(
+        `[merkle] WARNING: skipping malformed JSONL line ${lineNo} in ${filePath}: ${String(err)}\n`,
+      );
+      continue;
     }
+    const arrayPosition = leaves.length;
+    if (leaf.leafIndex !== arrayPosition) {
+      process.stderr.write(
+        `[merkle] WARNING: leaf at line ${lineNo} has leafIndex=${leaf.leafIndex} ` +
+          `but array position is ${arrayPosition} — possible file corruption or concurrent write\n`,
+      );
+    }
+    leaves.push(leaf);
   }
   return leaves;
 }
