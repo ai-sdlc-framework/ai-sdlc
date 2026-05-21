@@ -1,5 +1,26 @@
 # Reviewer Signing Key Runbook (AISDLC-380)
 
+> **DEPRECATED — RFC-0042 Phase 3 cutover (AISDLC-383.6, 2026-05-21)**
+>
+> The AISDLC-380 sub-attestation architecture (per-reviewer signing keys,
+> `verify-reviewer-sub-attestations.mjs`, `init-reviewer-signing-key.mjs`)
+> is superseded by RFC-0042's Merkle-transcript-based proof-of-execution.
+>
+> **If you are onboarding a new machine or setting up AI-SDLC for the first time:**
+> Do NOT follow the "Onboarding a new reviewer signing key" steps below.
+> The v6 envelope (default since AISDLC-383.6) does not require per-reviewer
+> keys. Only the operator's signing key (`~/.ai-sdlc/signing-key.pem`) is needed.
+>
+> **If you have existing reviewer keys:** they will continue to work during the
+> 30-day soak window, but the pre-push hook Step 4d gate is now audit-only
+> (warnings only, no push blocking). The gate and keys will be removed in
+> AISDLC-383.7 (Phase 4 cleanup).
+>
+> **For the current attestation model**, see CLAUDE.md § "Review attestations"
+> and RFC-0042 (`spec/rfcs/RFC-0042-proof-of-execution-attestation.md`).
+
+---
+
 This runbook documents how to manage per-reviewer signing keys for the
 sub-attestation trust chain introduced in AISDLC-380.
 

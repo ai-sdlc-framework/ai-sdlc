@@ -1,9 +1,10 @@
 ---
 id: AISDLC-383.6
 title: 'chore(attestation): RFC-0042 Phase 3 cutover — disable AISDLC-380 sub-attestation gate'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
+completed_date: '2026-05-21'
 labels:
   - rfc-0042
   - phase-3
@@ -18,6 +19,25 @@ references:
   - scripts/check-attestation-sign.sh
   - scripts/verify-reviewer-sub-attestations.mjs
 ---
+
+## Final Summary
+
+RFC-0042 Phase 3 cutover implemented. Default schema version is now v6 (Merkle-transcript-based). AISDLC-380 sub-attestation gate downgraded to audit-only. AISDLC-380.2 marked Superseded. CLAUDE.md and operator runbook updated. Hermetic tests updated and new cutover tests added.
+
+### Changes
+
+- `ai-sdlc-plugin/scripts/sign-attestation.mjs`: Default schema version flipped from v5 to v6.
+- `scripts/check-attestation-sign.sh`: Step 4d downgraded to audit-only. v6 mode: gate skipped entirely. v5 mode: failures emit WARN + exit 0. Idempotency and stale-envelope detection handle both `.dsse.json` (v5) and `.v6.dsse.json` (v6).
+- `backlog/completed/aisdlc-380.2 - ...`: AISDLC-380.2 moved to completed with status Superseded.
+- `CLAUDE.md`: Attestation section updated — v6 is the default, v3/v4/v5 verifier retained, gate is audit-only.
+- `docs/operations/reviewer-signing-key-runbook.md`: Added DEPRECATED banner.
+- `scripts/check-attestation-sign.test.mjs`: Updated for v6 default + new cutover tests.
+
+### ACs met
+
+1, 2, 3, 4, 5, 6, 7
+
+
 
 ## Scope (RFC-0042 Phase 3)
 

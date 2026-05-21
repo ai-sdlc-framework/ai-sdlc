@@ -154,7 +154,9 @@ async function main() {
     return;
   }
 
-  const schemaVersion = args['schema-version'] ?? 'v5';
+  // RFC-0042 Phase 3 cutover (AISDLC-383.6): default flipped from v5 to v6.
+  // Pass --schema-version v5 explicitly to force the legacy v5 path.
+  const schemaVersion = args['schema-version'] ?? 'v6';
 
   // ──────────────────────────────────────────────────────────────────
   // RFC-0042 Phase 2: --schema-version v6 mode

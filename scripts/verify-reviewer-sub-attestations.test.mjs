@@ -907,10 +907,14 @@ describe('verify-reviewer-sub-attestations.mjs (AISDLC-380)', () => {
 
   // ── check-attestation-sign.sh integration: sub-attestation verification ─
 
-  it('AC#6 integration: check-attestation-sign.sh rejects forged plain-JSON verdict via verify sub-attestations step', () => {
-    // This test verifies that the full hook chain (check-attestation-sign.sh)
-    // refuses to sign when the verdict file is a dev-forged plain-JSON shape.
-    // We use AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD to inject a real verifier call.
+  it('AC#6 integration (RFC-0042 Phase 3): v5 audit-only — check-attestation-sign.sh warns but does NOT block on forged plain-JSON verdict', () => {
+    // RFC-0042 Phase 3 (AISDLC-383.6) behavioral change:
+    // Pre-cutover: hook exited 2 (blocked) on forged plain-JSON verdicts in v5 mode.
+    // Post-cutover: v5 mode is audit-only — hook warns + proceeds to sign (exit 1 = re-push).
+    // Default (v6): sub-attestation gate skipped entirely.
+    //
+    // This test uses AI_SDLC_SCHEMA_VERSION=v5 to verify that the v5 audit-only
+    // path emits a warning but does NOT block the push.
 
     // Set up a git repo.
     const root = mkdtempSync(join(tmpdir(), 'ai-sdlc-hook-int-'));
@@ -950,7 +954,7 @@ describe('verify-reviewer-sub-attestations.mjs (AISDLC-380)', () => {
         ]),
       );
 
-      // Set up trusted-reviewers.yaml with no reviewer entries.
+      // Set up trusted-reviewers.yaml with no reviewer entries (so verifier has something to check).
       mkdirSync(join(root, '.ai-sdlc'), { recursive: true });
       writeFileSync(
         join(root, '.ai-sdlc', 'trusted-reviewers.yaml'),
@@ -961,6 +965,21 @@ describe('verify-reviewer-sub-attestations.mjs (AISDLC-380)', () => {
       mkdirSync(join(root, 'scripts'), { recursive: true });
       execFileSync('cp', [SCRIPT, join(root, 'scripts', 'verify-reviewer-sub-attestations.mjs')]);
 
+      // Install a fake signer that writes the right .dsse.json (v5 mode).
+      const attDir = join(root, '.ai-sdlc', 'attestations');
+      mkdirSync(attDir, { recursive: true });
+      const shimPath = join(root, 'fake-signer.sh');
+      writeFileSync(
+        shimPath,
+        `#!/usr/bin/env bash
+WT_ROOT=$(git rev-parse --show-toplevel)
+HEAD=$(git rev-parse HEAD)
+mkdir -p "$WT_ROOT/.ai-sdlc/attestations"
+printf '{"_test":"stub"}' > "$WT_ROOT/.ai-sdlc/attestations/$HEAD.dsse.json"
+exit 0`,
+      );
+      execFileSync('chmod', ['+x', shimPath]);
+
       const hookScript = join(__dirname, 'check-attestation-sign.sh');
 
       const hookResult = spawnSync('bash', [hookScript], {
@@ -970,22 +989,27 @@ describe('verify-reviewer-sub-attestations.mjs (AISDLC-380)', () => {
           GIT_DIR: undefined,
           GIT_WORK_TREE: undefined,
           AI_SDLC_SKIP_ATTESTATION_SIGN: undefined,
-          // Use a fake signer that would succeed but we expect to never reach it.
-          AI_SDLC_SIGN_ATTESTATION_CMD: 'echo fake-signer-should-not-be-called',
+          AI_SDLC_SIGN_ATTESTATION_CMD: `bash ${shimPath}`,
+          // Force v5 mode to exercise the audit-only path.
+          AI_SDLC_SCHEMA_VERSION: 'v5',
+          // Explicitly unset stub verifier so the real verifier runs.
+          AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: '',
+          AI_SDLC_TEST_MODE: '',
         },
         encoding: 'utf-8',
       });
 
-      // The hook must exit 2 (sub-attestation verification failure).
+      // RFC-0042 Phase 3: audit-only → hook warns but proceeds to sign (exit 1 = re-push needed).
       assert.equal(
         hookResult.status,
-        2,
-        `expected exit 2 (refused to sign forged verdict), got ${hookResult.status}: stderr=${hookResult.stderr}`,
+        1,
+        `expected exit 1 (audit-only: warned + signed), got ${hookResult.status}: stderr=${hookResult.stderr}`,
       );
+      // Must emit audit-only warning.
       assert.match(
         hookResult.stderr,
-        /sub-attestation verification failed|legacy plain-JSON|ERROR/i,
-        `stderr must explain the refusal: ${hookResult.stderr}`,
+        /WARN.*sub-attestation verification failed.*audit-only|WARN.*push not blocked/i,
+        `stderr must show audit-only warning: ${hookResult.stderr}`,
       );
     } finally {
       rmSync(root, { recursive: true, force: true });
