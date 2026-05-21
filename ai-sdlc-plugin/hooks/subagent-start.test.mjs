@@ -70,9 +70,9 @@ describe('ai-sdlc-plugin subagent-start hook', () => {
     assert.ok(result.output, 'should produce output');
     const parsed = JSON.parse(result.output);
     assert.equal(
-      parsed.hookEventName,
+      parsed.hookSpecificOutput?.hookEventName,
       'SubagentStart',
-      'should include hookEventName: SubagentStart',
+      'should include hookSpecificOutput.hookEventName: SubagentStart',
     );
     const ctx = parsed.hookSpecificOutput?.additionalContext;
     assert.ok(ctx, 'should have additionalContext');

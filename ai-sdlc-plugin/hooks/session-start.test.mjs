@@ -71,9 +71,9 @@ describe('ai-sdlc-plugin session-start hook', () => {
     assert.ok(result.output, 'should produce output');
     const parsed = JSON.parse(result.output);
     assert.equal(
-      parsed.hookEventName,
+      parsed.hookSpecificOutput?.hookEventName,
       'SessionStart',
-      'should include hookEventName: SessionStart',
+      'should include hookSpecificOutput.hookEventName: SessionStart',
     );
     const ctx = parsed.hookSpecificOutput?.additionalContext;
     assert.ok(ctx, 'should have additionalContext');
