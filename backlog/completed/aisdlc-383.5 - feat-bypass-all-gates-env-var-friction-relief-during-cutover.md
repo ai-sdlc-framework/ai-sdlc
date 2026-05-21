@@ -1,7 +1,7 @@
 ---
 id: AISDLC-383.5
 title: 'feat(hooks): bypass-all-gates env var for friction relief during RFC-0042 cutover'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:

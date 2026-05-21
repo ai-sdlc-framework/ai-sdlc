@@ -3,12 +3,14 @@
 ## When to use
 
 `AI_SDLC_BYPASS_ALL_GATES=1` is a **single env var that stops the entire pre-push chain**.
-All 4 pre-push hooks exit 0 immediately when it is set:
+All 6 pre-push hooks exit 0 immediately when it is set:
 
 1. `scripts/check-coverage.sh`
 2. `scripts/check-task-moved.sh`
-3. `scripts/check-dor-gate.sh`
-4. `scripts/check-attestation-sign.sh`
+3. `scripts/check-mcp-bundle-sync.sh`
+4. `scripts/squash-attestation-chores.sh`
+5. `scripts/check-dor-gate.sh`
+6. `scripts/check-attestation-sign.sh`
 
 **Use this only in the following narrow circumstances:**
 
@@ -36,7 +38,7 @@ Never leave `AI_SDLC_BYPASS_ALL_GATES=1` in your shell profile or a committed `.
 
 - `git push --no-verify` is a separate escape hatch that skips the entire husky pre-push chain including the bypass logic. If both are set, `--no-verify` wins (git never invokes the hook).
 - CI-side gates are independent. Bypassing locally does not affect `verify-attestation.yml`, `ai-sdlc-review.yml`, or any other required status on `main`.
-- `scripts/check-skip-ci-marker.sh` is a pre-push hook but is NOT part of the 4 gates above. It is NOT bypassed by `AI_SDLC_BYPASS_ALL_GATES`. If your commit contains a `(skip ci marker)` token, that check still fires.
+- `scripts/check-skip-ci-marker.sh` is a pre-push hook but is NOT part of the 6 gates above. It is NOT bypassed by `AI_SDLC_BYPASS_ALL_GATES`. If your commit contains a `(skip ci marker)` token, that check still fires.
 
 ## Per-gate bypasses remain available independently
 
