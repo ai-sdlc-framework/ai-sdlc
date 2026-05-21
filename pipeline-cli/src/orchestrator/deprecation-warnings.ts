@@ -27,7 +27,7 @@ export const CLAUDE_CLI_DEPRECATION_SUPPRESS_ENV = 'AI_SDLC_SUPPRESS_DEPRECATION
  */
 export const CLAUDE_CLI_DEPRECATION_WARNING_LINES = [
   '[deprecated] --spawner claude-cli will be removed in v0.11.',
-  'Use --spawner dispatch-board with N operator-opened CC sessions running /ai-sdlc dispatch-worker.',
+  'Migrate to in-session-agent Workers: open N CC sessions running /ai-sdlc dispatch-worker (claims from the Dispatch Board).',
   'See docs/operations/dispatch-supervisor-install.md for migration guide.',
 ] as const;
 
