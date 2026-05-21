@@ -41,6 +41,11 @@ import {
   resolveAncestorDepth,
   resolveSubjectShaForEnvelope,
   runVerifier,
+  v6HashLeaf,
+  v6ComputeMerkleRoot,
+  v6VerifyInclusion,
+  v6LoadLeaves,
+  verifyV6Envelope,
 } from './verify-attestation.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -2820,5 +2825,532 @@ describe('runVerifier (AISDLC-369 — contentHashV5 merge-queue rebase stability
     git(['-c', 'core.quotepath=false', 'checkout', '-q', 'pr-a-mb'], fixture.root);
     const out = runVerifier({ headSha: prAHead, baseSha: mainTip, repoRoot: fixture.root });
     assert.equal(out.status, 'valid', `v5 with true merge-base must pass; got: ${out.reason}`);
+  });
+});
+
+// ─── AISDLC-383.4 — v6 Merkle attestation verifier ───────────────────────────
+//
+// Hermetic tests for the RFC-0042 Phase 2 v6 verifier. Tests use in-process
+// key generation (Node crypto) and avoid git operations — all Merkle and
+// signature verification is pure-function.
+//
+// AC traceability:
+//   AC#1 — v6 happy path (valid envelope + valid leaves + valid signature)
+//   AC#2 — 4 rejection paths: bad signature, invalid Merkle proof, tampered leaf, wrong nonce format
+//   AC#3 — legacy v5/v4/v3 fallback when no v6 envelope present (covered via runVerifier)
+//   AC#5 — mixed-version: v6 envelope present → prefers v6, ignores legacy
+//   AC#6 — soft-fail when transcript-leaves.jsonl is missing (OQ-3)
+
+import { generateKeyPairSync, sign as cryptoSignNode } from 'node:crypto';
+
+/** Generate an ed25519 keypair (PEM strings) for v6 test fixtures. */
+function genV6KeyPair() {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  return {
+    privateKeyPem: privateKey.export({ format: 'pem', type: 'pkcs8' }).toString(),
+    publicKeyPem: publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+  };
+}
+
+/** Sign a rootHash string with an ed25519 private key. Returns base64. */
+function signV6Root(rootHash, privateKeyPem) {
+  const sig = cryptoSignNode(null, Buffer.from(rootHash, 'utf8'), privateKeyPem);
+  return sig.toString('base64');
+}
+
+/**
+ * Build a minimal TranscriptLeaf for tests.
+ */
+function makeLeaf(leafIndex, reviewerName, transcriptHash) {
+  return {
+    leafIndex,
+    taskId: 'AISDLC-TEST',
+    reviewerName,
+    transcriptHash: transcriptHash ?? 'a'.repeat(64),
+    nonce: 'b'.repeat(64),
+    harness: 'claude-code',
+    model: 'sonnet',
+    verdictApproved: true,
+    findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    signedAt: '2026-05-21T00:00:00.000Z',
+  };
+}
+
+/**
+ * Build a well-formed v6 envelope from leaves.
+ * Uses the real Merkle computation + ed25519 signing.
+ */
+function buildValidV6Envelope(headSha, leaves, privateKeyPem, overrides = {}) {
+  const { root: rootHash, proofs } = v6ComputeMerkleRoot(leaves);
+  const rootSignature = signV6Root(rootHash, privateKeyPem);
+
+  const transcriptLeaves = leaves.map((l, i) => ({
+    leafIndex: l.leafIndex,
+    reviewerName: l.reviewerName,
+    transcriptHash: l.transcriptHash,
+  }));
+  const merkleProofs = leaves.map((l, i) => ({
+    leafIndex: l.leafIndex,
+    proof: proofs[i] ?? [],
+  }));
+
+  return {
+    schemaVersion: 'v6',
+    subject: { digest: { sha1: headSha } },
+    transcriptLeaves,
+    merkleProofs,
+    rootHash,
+    rootSignature,
+    nonce: 'c'.repeat(64),
+    leafCount: leaves.length,
+    signedAt: '2026-05-21T00:00:00.000Z',
+    ...overrides,
+  };
+}
+
+/**
+ * Write a v6 envelope to disk and transcript-leaves.jsonl.
+ */
+function writeV6Fixture(root, headSha, leaves, privateKeyPem, envelopeOverrides = {}) {
+  // Ensure directories exist.
+  mkdirSync(join(root, '.ai-sdlc', 'attestations'), { recursive: true });
+
+  // Write transcript-leaves.jsonl
+  const leavesContent = leaves.map((l) => JSON.stringify(l)).join('\n') + '\n';
+  writeFileSync(join(root, '.ai-sdlc', 'transcript-leaves.jsonl'), leavesContent);
+
+  // Build and write v6 envelope
+  const envelope = buildValidV6Envelope(headSha, leaves, privateKeyPem, envelopeOverrides);
+  const envPath = join(root, '.ai-sdlc', 'attestations', `${headSha}.v6.dsse.json`);
+  writeFileSync(envPath, JSON.stringify(envelope, null, 2) + '\n');
+  return { envelope, envPath };
+}
+
+describe('v6 Merkle primitives', () => {
+  it('v6HashLeaf produces a 64-char hex string', () => {
+    const leaf = makeLeaf(0, 'code-reviewer');
+    const hash = v6HashLeaf(leaf);
+    assert.match(hash, /^[0-9a-f]{64}$/);
+  });
+
+  it('v6HashLeaf is deterministic (same input → same output)', () => {
+    const leaf = makeLeaf(0, 'code-reviewer');
+    assert.equal(v6HashLeaf(leaf), v6HashLeaf(leaf));
+  });
+
+  it('v6HashLeaf differs when leafIndex differs', () => {
+    const l1 = makeLeaf(0, 'code-reviewer');
+    const l2 = makeLeaf(1, 'code-reviewer');
+    assert.notEqual(v6HashLeaf(l1), v6HashLeaf(l2));
+  });
+
+  it('v6ComputeMerkleRoot returns empty root for empty leaves', () => {
+    const { root } = v6ComputeMerkleRoot([]);
+    assert.equal(root, '');
+  });
+
+  it('v6ComputeMerkleRoot returns leaf hash as root for single leaf', () => {
+    const leaf = makeLeaf(0, 'code-reviewer');
+    const { root, proofs } = v6ComputeMerkleRoot([leaf]);
+    assert.equal(root, v6HashLeaf(leaf));
+    assert.deepEqual(proofs[0], []);
+  });
+
+  it('v6VerifyInclusion returns true for a valid 3-leaf tree', () => {
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    const { root, proofs } = v6ComputeMerkleRoot(leaves);
+    for (let i = 0; i < leaves.length; i++) {
+      const leafHash = v6HashLeaf(leaves[i]);
+      assert.ok(
+        v6VerifyInclusion(leafHash, proofs[i], root, i, leaves.length),
+        `inclusion proof failed for leaf ${i}`,
+      );
+    }
+  });
+
+  it('v6VerifyInclusion rejects tampered leaf hash', () => {
+    const leaves = [makeLeaf(0, 'code-reviewer'), makeLeaf(1, 'test-reviewer')];
+    const { root, proofs } = v6ComputeMerkleRoot(leaves);
+    const tamperedHash = 'dead'.repeat(16); // 64 hex chars, wrong value
+    assert.equal(v6VerifyInclusion(tamperedHash, proofs[0], root, 0, leaves.length), false);
+  });
+
+  it('v6VerifyInclusion rejects out-of-bounds leafIndex (CVE-2012-2459)', () => {
+    const leaves = [makeLeaf(0, 'code-reviewer'), makeLeaf(1, 'test-reviewer')];
+    const { root, proofs } = v6ComputeMerkleRoot(leaves);
+    const leafHash = v6HashLeaf(leaves[0]);
+    // leafIndex === leafCount is the CVE-2012-2459 boundary condition
+    assert.equal(v6VerifyInclusion(leafHash, proofs[0], root, 2, 2), false);
+  });
+
+  it('v6LoadLeaves returns empty array when file missing', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-leaves-test-'));
+    try {
+      const leaves = v6LoadLeaves(tmp);
+      assert.deepEqual(leaves, []);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('v6LoadLeaves parses well-formed JSONL', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-leaves-test-'));
+    try {
+      mkdirSync(join(tmp, '.ai-sdlc'), { recursive: true });
+      const leaf = makeLeaf(0, 'code-reviewer');
+      writeFileSync(join(tmp, '.ai-sdlc', 'transcript-leaves.jsonl'), JSON.stringify(leaf) + '\n');
+      const leaves = v6LoadLeaves(tmp);
+      assert.equal(leaves.length, 1);
+      assert.equal(leaves[0].leafIndex, 0);
+      assert.equal(leaves[0].reviewerName, 'code-reviewer');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('verifyV6Envelope (unit)', () => {
+  let keys;
+  const HEAD_SHA = 'a'.repeat(40);
+
+  before(() => {
+    keys = genV6KeyPair();
+  });
+
+  function makeTrustedReviewers(publicKeyPem) {
+    return [
+      {
+        identity: 'test@example.com',
+        machine: 'test',
+        pubkey: publicKeyPem,
+        addedAt: '2026-05-21',
+        addedBy: 'test',
+      },
+    ];
+  }
+
+  it('AC#1: verifies a valid v6 envelope with 3 leaves', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem);
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'valid', `expected valid, got: ${result.reason}`);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#2a: rejects when rootSignature is from an untrusted key', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem);
+      const unknownKeys = genV6KeyPair();
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        // Only the unknown key is trusted — signature won't verify
+        trustedReviewers: makeTrustedReviewers(unknownKeys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /rootSignature did not match any trusted reviewer pubkey/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#2b: rejects when Merkle proof is invalid (tampered proof)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      // Build envelope with tampered proof (replace first proof sibling)
+      const { root, proofs } = v6ComputeMerkleRoot(leaves);
+      const rootSignature = signV6Root(root, keys.privateKeyPem);
+      const tamperedProofs = leaves.map((l, i) => ({
+        leafIndex: l.leafIndex,
+        proof: i === 0 ? ['dead'.repeat(16)] : proofs[i], // tamper proof[0]
+      }));
+      const envelope = {
+        schemaVersion: 'v6',
+        subject: { digest: { sha1: HEAD_SHA } },
+        transcriptLeaves: leaves.map((l) => ({
+          leafIndex: l.leafIndex,
+          reviewerName: l.reviewerName,
+          transcriptHash: l.transcriptHash,
+        })),
+        merkleProofs: tamperedProofs,
+        rootHash: root,
+        rootSignature,
+        nonce: 'c'.repeat(64),
+        leafCount: leaves.length,
+        signedAt: '2026-05-21T00:00:00.000Z',
+      };
+      const leavesContent = leaves.map((l) => JSON.stringify(l)).join('\n') + '\n';
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(join(tmp, '.ai-sdlc', 'transcript-leaves.jsonl'), leavesContent);
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'attestations', `${HEAD_SHA}.v6.dsse.json`),
+        JSON.stringify(envelope, null, 2),
+      );
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /Merkle inclusion proof invalid/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#2c: rejects when leaf transcriptHash is tampered', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem);
+      // Tamper the transcriptHash in the envelope (not on disk — mismatch with on-disk leaf)
+      const tamperedEnvelope = {
+        ...envelope,
+        transcriptLeaves: envelope.transcriptLeaves.map((l, i) =>
+          i === 0 ? { ...l, transcriptHash: 'dead'.repeat(16) } : l,
+        ),
+      };
+      const result = verifyV6Envelope({
+        envelope: tamperedEnvelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /transcriptHash mismatch/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#2d: rejects when nonce format is invalid (structural check)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem);
+      const badNonceEnvelope = { ...envelope, nonce: 'not-a-valid-hex-nonce' };
+      const result = verifyV6Envelope({
+        envelope: badNonceEnvelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /nonce must be a 64-char hex string/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('AC#6: soft-fail when transcript-leaves.jsonl is missing (OQ-3)', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    try {
+      // Build envelope but do NOT write transcript-leaves.jsonl
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const envelope = buildValidV6Envelope(HEAD_SHA, leaves, keys.privateKeyPem);
+      mkdirSync(join(tmp, '.ai-sdlc', 'attestations'), { recursive: true });
+      writeFileSync(
+        join(tmp, '.ai-sdlc', 'attestations', `${HEAD_SHA}.v6.dsse.json`),
+        JSON.stringify(envelope, null, 2),
+      );
+      // No transcript-leaves.jsonl written → soft-fail path
+      const result = verifyV6Envelope({
+        envelope,
+        envelopeFileName: `${HEAD_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      // OQ-3: soft-fail → exit 0 with informational warning
+      assert.equal(result.status, 'valid', `soft-fail must return valid, got: ${result.reason}`);
+      assert.match(result.reason, /soft-fail/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('head-sha binding: rejects when filename does not match headSha', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'v6-unit-'));
+    try {
+      const leaves = [
+        makeLeaf(0, 'code-reviewer'),
+        makeLeaf(1, 'test-reviewer'),
+        makeLeaf(2, 'security-reviewer'),
+      ];
+      const { envelope } = writeV6Fixture(tmp, HEAD_SHA, leaves, keys.privateKeyPem);
+      const WRONG_SHA = 'b'.repeat(40);
+      const result = verifyV6Envelope({
+        envelope,
+        // Wrong filename (different SHA) — should reject
+        envelopeFileName: `${WRONG_SHA}.v6.dsse.json`,
+        headSha: HEAD_SHA,
+        trustedReviewers: makeTrustedReviewers(keys.publicKeyPem),
+        repoRoot: tmp,
+      });
+      assert.equal(result.status, 'invalid');
+      assert.match(result.reason, /envelope filename.*does not match expected/i);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('runVerifier — v6 integration', () => {
+  let fixture;
+  let v6Keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    v6Keys = genV6KeyPair();
+    writeTrustedReviewersYaml(fixture.root, v6Keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  it('AC#1: runVerifier returns valid for a correct v6 envelope', () => {
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    writeV6Fixture(fixture.root, fixture.headSha, leaves, v6Keys.privateKeyPem);
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'valid', `expected valid, got: ${out.reason}`);
+    assert.equal(out.reason, 'ok');
+  });
+
+  it('AC#3: falls back to legacy verifier when no v6 envelope is present', () => {
+    // Only write a legacy (v3/v5) envelope — no v6 file.
+    // Use the same keypair for both trusted reviewers + legacy signing.
+    // We need to use the orchestrator's signAttestation for the legacy envelope,
+    // but with the v6Keys' publicKeyPem registered in trusted-reviewers.
+    // Since writeAttestation uses `signAttestation` (orchestrator) which takes
+    // privateKeyPem, use `generateSigningKeyPair()` to get a pair and register it.
+    const legacyKeys = generateSigningKeyPair();
+    // Re-write trusted reviewers with the legacy key (since writeAttestation uses its own key).
+    writeTrustedReviewersYaml(fixture.root, legacyKeys.publicKeyPem);
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      legacyKeys.privateKeyPem,
+    );
+    // No v6 envelope present → falls back to legacy path.
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    // Legacy path was used → no v6-specific reason string.
+    assert.ok(!out.reason.includes('v6:'), `expected non-v6 reason, got: ${out.reason}`);
+    // The legacy verifier should find a matching envelope and accept it.
+    assert.equal(out.status, 'valid', `legacy fallback must return valid, got: ${out.reason}`);
+  });
+
+  it('AC#5 (mixed-version): prefers v6 when both v6 and legacy envelopes are present', () => {
+    // Write a valid v6 envelope for the head SHA.
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    writeV6Fixture(fixture.root, fixture.headSha, leaves, v6Keys.privateKeyPem);
+    // Also write a legacy envelope with a separate key — these keys are NOT
+    // in trusted-reviewers.yaml (which only has v6Keys), so legacy would fail.
+    // The test verifies v6 is preferred by checking the result is valid (v6 path)
+    // rather than invalid (what the legacy path would return with wrong keys).
+    const legacyOnlyKeys = generateSigningKeyPair();
+    writeAttestation(
+      fixture.root,
+      fixture.headSha,
+      fixture.baseSha,
+      fixture.headSha,
+      legacyOnlyKeys.privateKeyPem,
+    );
+    // v6 envelope is preferred → valid.
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(
+      out.status,
+      'valid',
+      `mixed-version: expected v6 to be preferred and valid, got: ${out.reason}`,
+    );
+    assert.equal(out.reason, 'ok');
+  });
+
+  it('AC#2: runVerifier returns invalid with v6-specific reason on bad signature', () => {
+    const leaves = [
+      makeLeaf(0, 'code-reviewer'),
+      makeLeaf(1, 'test-reviewer'),
+      makeLeaf(2, 'security-reviewer'),
+    ];
+    // Write envelope signed with a different (untrusted) key.
+    // v6Keys is registered as trusted, but untrustedKeys is used to sign.
+    const untrustedKeys = genV6KeyPair();
+    writeV6Fixture(fixture.root, fixture.headSha, leaves, untrustedKeys.privateKeyPem);
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+    assert.equal(out.status, 'invalid');
+    assert.match(out.reason, /rootSignature did not match any trusted reviewer pubkey/);
   });
 });

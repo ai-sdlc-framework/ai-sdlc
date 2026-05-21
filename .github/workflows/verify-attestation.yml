@@ -230,7 +230,9 @@ jobs:
               || git fetch --unshallow origin 2>/dev/null \
               || true
             git checkout "$HEAD_SHA" -- '.ai-sdlc/attestations' 2>/dev/null || true
-            echo "[verify-attestation] merge_group: surfaced .ai-sdlc/attestations from $HEAD_SHA (if present)"
+            # AISDLC-383.4: also surface transcript-leaves.jsonl for v6 verifier.
+            git checkout "$HEAD_SHA" -- '.ai-sdlc/transcript-leaves.jsonl' 2>/dev/null || true
+            echo "[verify-attestation] merge_group: surfaced .ai-sdlc/attestations + transcript-leaves.jsonl from $HEAD_SHA (if present)"
           else
             # pull_request_target: copy the envelope from the sandboxed
             # pr-content/ checkout. The sandbox MAY not have an envelope
@@ -238,15 +240,35 @@ jobs:
             # expected; the verifier will report `no envelope present at
             # <sha>` and the status poster below will post FAILURE.
             mkdir -p .ai-sdlc/attestations
+            STAGED=0
             if [ -f "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" ]; then
               # NO shell expansion, NO glob — explicit single-file copy.
               # Source path is constructed from $HEAD_SHA which is a
               # GitHub-validated 40-char hex; cannot inject path traversal.
               cp -- "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" \
                     ".ai-sdlc/attestations/${HEAD_SHA}.dsse.json"
-              echo "[verify-attestation] staged envelope for $HEAD_SHA"
-            else
-              echo "[verify-attestation] no envelope at pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json — verifier will report missing"
+              echo "[verify-attestation] staged legacy envelope for $HEAD_SHA"
+              STAGED=1
+            fi
+            # AISDLC-383.4: also stage v6 envelope if present.
+            if [ -f "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.v6.dsse.json" ]; then
+              cp -- "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.v6.dsse.json" \
+                    ".ai-sdlc/attestations/${HEAD_SHA}.v6.dsse.json"
+              echo "[verify-attestation] staged v6 envelope for $HEAD_SHA"
+              STAGED=1
+            fi
+            if [ "$STAGED" = "0" ]; then
+              echo "[verify-attestation] no envelope at pr-content/.ai-sdlc/attestations/${HEAD_SHA}(.v6).dsse.json — verifier will report missing"
+            fi
+            # AISDLC-383.4: stage transcript-leaves.jsonl from fork PR content
+            # for v6 Merkle verification. This is DATA-ONLY — the file is
+            # read by the verifier (running from main's scripts/) as a JSON
+            # record source; it is never executed or loaded as a script.
+            if [ -f "pr-content/.ai-sdlc/transcript-leaves.jsonl" ]; then
+              mkdir -p .ai-sdlc
+              cp -- "pr-content/.ai-sdlc/transcript-leaves.jsonl" \
+                    ".ai-sdlc/transcript-leaves.jsonl"
+              echo "[verify-attestation] staged transcript-leaves.jsonl from fork PR"
             fi
             # Fetch the fork HEAD SHA into main's git store so the
             # verifier's `git diff <base>...<head>` operations resolve.

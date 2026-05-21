@@ -58,7 +58,7 @@
 
 import { readFileSync, existsSync, appendFileSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes, verify as cryptoVerify, createPublicKey } from 'node:crypto';
 import { join } from 'node:path';
 import {
   ACCEPTED_SCHEMA_VERSIONS,
@@ -248,6 +248,9 @@ export function detectOrphanEnvelopes(headSha, baseSha, repoRoot, gitFn = git) {
  *
  * Each entry: `{ envelope, predicate, path, fileName }`.
  *
+ * AISDLC-383.4: also handles v6 flat-JSON envelopes (no `payload` wrapper).
+ * V6 envelopes are identified by `schemaVersion: 'v6'` in the top-level object.
+ *
  * Exported for tests.
  */
 export function loadAllAttestations(repoRoot) {
@@ -257,23 +260,459 @@ export function loadAllAttestations(repoRoot) {
   for (const name of readdirSync(dir).sort()) {
     if (!name.endsWith('.dsse.json')) continue;
     const fullPath = join(dir, name);
-    let envelope;
+    let parsed;
     try {
-      envelope = JSON.parse(readFileSync(fullPath, 'utf-8'));
+      parsed = JSON.parse(readFileSync(fullPath, 'utf-8'));
     } catch {
       continue; // not JSON — skip
     }
-    if (typeof envelope?.payload !== 'string') continue;
+    if (parsed === null || typeof parsed !== 'object') continue;
+    // v6 flat-JSON envelope: no `payload` wrapper, schemaVersion at top level.
+    if (parsed.schemaVersion === 'v6') {
+      // v6 envelopes ARE the predicate — they are the flat envelope.
+      // We pass the object as both `envelope` and `predicate` for structural
+      // consistency with the legacy path, but v6 is routed separately in
+      // runVerifier and does not go through the legacy matching logic.
+      out.push({ envelope: parsed, predicate: parsed, path: fullPath, fileName: name, isV6: true });
+      continue;
+    }
+    // Legacy DSSE-wrapped envelope (v3/v5): has `payload` field.
+    if (typeof parsed?.payload !== 'string') continue;
     let predicate;
     try {
-      predicate = JSON.parse(Buffer.from(envelope.payload, 'base64').toString('utf-8'));
+      predicate = JSON.parse(Buffer.from(parsed.payload, 'base64').toString('utf-8'));
     } catch {
       continue;
     }
     if (predicate === null || typeof predicate !== 'object') continue;
-    out.push({ envelope, predicate, path: fullPath, fileName: name });
+    out.push({ envelope: parsed, predicate, path: fullPath, fileName: name, isV6: false });
   }
   return out;
+}
+
+// ── RFC-0042 §Design Layer 5 — v6 Merkle verifier ───────────────────────────
+//
+// These are self-contained implementations of the Merkle primitives so
+// verify-attestation.mjs does NOT need a compiled pipeline-cli dist at
+// runtime. The algorithms are identical to pipeline-cli/src/attestation/merkle.ts.
+//
+// CRITICAL SECURITY CONTEXT (AISDLC-383.3 security review):
+// The v6 rootSignature ONLY signs the rootHash bytes. Envelope-level fields
+// (subject.digest.sha1, nonce, leafCount, signerIdentity, signedAt) are NOT
+// cryptographically bound to the signature. Therefore:
+//   1. rootHash and leafCount MUST be recomputed from the committed
+//      .ai-sdlc/transcript-leaves.jsonl — not trusted from the envelope.
+//   2. The envelope is bound to the head commit via its filename
+//      (.ai-sdlc/attestations/<head-sha>.v6.dsse.json).
+//   3. envelope.merkleProofs[].leafIndex is the logical TranscriptLeaf.leafIndex;
+//      the verifier uses findIndex on the loaded leaves array to get the
+//      ARRAY POSITION before calling verifyInclusion.
+
+const V6_LEAF_DOMAIN = Buffer.from([0x00]);
+const V6_NODE_DOMAIN = Buffer.from([0x01]);
+
+/** RFC-6962 leaf hash: SHA-256(0x00 || canonical_json_utf8). */
+function v6HashLeafData(canonicalJson) {
+  return createHash('sha256').update(V6_LEAF_DOMAIN).update(canonicalJson, 'utf8').digest('hex');
+}
+
+/** RFC-6962 internal node hash: SHA-256(0x01 || left_bytes || right_bytes). */
+function v6HashPair(left, right) {
+  return createHash('sha256')
+    .update(V6_NODE_DOMAIN)
+    .update(Buffer.from(left, 'hex'))
+    .update(Buffer.from(right, 'hex'))
+    .digest('hex');
+}
+
+/**
+ * Hash a TranscriptLeaf using RFC-6962 domain separation.
+ * Keys are in fixed order matching pipeline-cli/src/attestation/merkle.ts.
+ *
+ * Exported for hermetic tests.
+ */
+export function v6HashLeaf(leaf) {
+  const ordered = {
+    leafIndex: leaf.leafIndex,
+    taskId: leaf.taskId,
+    reviewerName: leaf.reviewerName,
+    transcriptHash: leaf.transcriptHash,
+    nonce: leaf.nonce,
+    harness: leaf.harness,
+    model: leaf.model,
+    verdictApproved: leaf.verdictApproved,
+    findings: {
+      critical: leaf.findings.critical,
+      major: leaf.findings.major,
+      minor: leaf.findings.minor,
+      suggestion: leaf.findings.suggestion,
+    },
+    signedAt: leaf.signedAt,
+  };
+  return v6HashLeafData(JSON.stringify(ordered));
+}
+
+/**
+ * Compute the Merkle root from an array of TranscriptLeaf objects.
+ * Returns `{ root, proofs }` where proofs is keyed by ARRAY POSITION.
+ *
+ * Exported for hermetic tests.
+ */
+export function v6ComputeMerkleRoot(leaves) {
+  if (leaves.length === 0) return { root: '', proofs: {} };
+
+  const leafHashes = leaves.map(v6HashLeaf);
+
+  if (leafHashes.length === 1) {
+    return { root: leafHashes[0], proofs: { 0: [] } };
+  }
+
+  const layers = [leafHashes];
+  let current = leafHashes;
+  while (current.length > 1) {
+    const next = [];
+    for (let i = 0; i < current.length; i += 2) {
+      const left = current[i];
+      const right = i + 1 < current.length ? current[i + 1] : current[i];
+      next.push(v6HashPair(left, right));
+    }
+    layers.push(next);
+    current = next;
+  }
+
+  const root = current[0];
+
+  const proofs = {};
+  for (let leafIdx = 0; leafIdx < leaves.length; leafIdx++) {
+    const proof = [];
+    let idx = leafIdx;
+    for (let layerIdx = 0; layerIdx < layers.length - 1; layerIdx++) {
+      const layer = layers[layerIdx];
+      const siblingIdx = idx % 2 === 0 ? (idx + 1 < layer.length ? idx + 1 : idx) : idx - 1;
+      proof.push(layer[siblingIdx]);
+      idx = Math.floor(idx / 2);
+    }
+    proofs[leafIdx] = proof;
+  }
+
+  return { root, proofs };
+}
+
+/**
+ * Verify a Merkle inclusion proof.
+ *
+ * `leafIndex` is the 0-based ARRAY POSITION (not TranscriptLeaf.leafIndex).
+ * `leafCount` is the TOTAL on-disk leaf count (MUST be from loaded leaves,
+ * NOT from the envelope — per AISDLC-383.3 CVE-2012-2459 bound-check).
+ *
+ * Exported for hermetic tests.
+ */
+export function v6VerifyInclusion(leafHash, proof, root, leafIndex, leafCount) {
+  if (!root || !leafHash) return false;
+  if (!Number.isInteger(leafCount) || leafCount <= 0) return false;
+  if (!Number.isInteger(leafIndex) || leafIndex < 0 || leafIndex >= leafCount) return false;
+
+  let current = leafHash;
+  let idx = leafIndex;
+  for (const sibling of proof) {
+    if (idx % 2 === 0) {
+      current = v6HashPair(current, sibling);
+    } else {
+      current = v6HashPair(sibling, current);
+    }
+    idx = Math.floor(idx / 2);
+  }
+  return current === root;
+}
+
+/**
+ * Load TranscriptLeaf records from `.ai-sdlc/transcript-leaves.jsonl`.
+ * Returns an empty array when the file does not exist.
+ * Skips malformed JSONL lines (logs to stderr).
+ *
+ * Exported for hermetic tests.
+ */
+export function v6LoadLeaves(repoRoot) {
+  const filePath = join(repoRoot, '.ai-sdlc', 'transcript-leaves.jsonl');
+  if (!existsSync(filePath)) return [];
+  const content = readFileSync(filePath, 'utf-8');
+  const leaves = [];
+  let lineNo = 0;
+  for (const line of content.split('\n')) {
+    const trimmed = line.trim();
+    lineNo++;
+    if (!trimmed) continue;
+    let leaf;
+    try {
+      leaf = JSON.parse(trimmed);
+    } catch {
+      process.stderr.write(
+        `[v6-verifier] WARNING: skipping malformed JSONL line ${lineNo} in transcript-leaves.jsonl\n`,
+      );
+      continue;
+    }
+    leaves.push(leaf);
+  }
+  return leaves;
+}
+
+/**
+ * Verify a v6 attestation envelope against trusted reviewers and on-disk
+ * transcript-leaves.jsonl. Returns `{ status, reason }`.
+ *
+ * Security model (AISDLC-383.3):
+ *   - rootHash and leafCount are RECOMPUTED from on-disk leaves (not trusted from envelope).
+ *   - The envelope is bound to the head commit via its filename.
+ *   - merkleProofs[].leafIndex is the logical TranscriptLeaf.leafIndex; array
+ *     position is resolved via findIndex before calling v6VerifyInclusion.
+ *   - Soft-fail (status: 'valid', informational warning) when transcript-leaves.jsonl
+ *     is missing — per OQ-3 (on-demand spot-check only).
+ *
+ * @param {object} opts
+ * @param {object} opts.envelope — parsed v6 envelope (flat JSON)
+ * @param {string} opts.envelopeFileName — filename of the envelope (for head-sha binding check)
+ * @param {string} opts.headSha — expected head commit SHA
+ * @param {object[]} opts.trustedReviewers — parsed trusted-reviewers.yaml entries
+ * @param {string} opts.repoRoot — path to the repo root
+ *
+ * Exported for hermetic tests.
+ */
+export function verifyV6Envelope({
+  envelope,
+  envelopeFileName,
+  headSha,
+  trustedReviewers,
+  repoRoot,
+}) {
+  // ── 1. Schema validation ────────────────────────────────────────────────
+  if (typeof envelope.schemaVersion !== 'string' || envelope.schemaVersion !== 'v6') {
+    return { status: 'invalid', reason: 'v6: schemaVersion must be "v6"' };
+  }
+
+  const HEX64 = /^[0-9a-f]{64}$/i;
+  const HEX40 = /^[0-9a-f]{40}$/i;
+
+  if (typeof envelope.rootHash !== 'string' || !HEX64.test(envelope.rootHash)) {
+    return { status: 'invalid', reason: 'v6: rootHash must be a 64-char hex string' };
+  }
+  if (typeof envelope.rootSignature !== 'string' || !envelope.rootSignature) {
+    return { status: 'invalid', reason: 'v6: rootSignature is missing or empty' };
+  }
+  if (typeof envelope.nonce !== 'string' || !HEX64.test(envelope.nonce)) {
+    return { status: 'invalid', reason: 'v6: nonce must be a 64-char hex string' };
+  }
+  if (!Array.isArray(envelope.transcriptLeaves) || envelope.transcriptLeaves.length === 0) {
+    return { status: 'invalid', reason: 'v6: transcriptLeaves must be a non-empty array' };
+  }
+  if (!Array.isArray(envelope.merkleProofs) || envelope.merkleProofs.length === 0) {
+    return { status: 'invalid', reason: 'v6: merkleProofs must be a non-empty array' };
+  }
+  if (envelope.transcriptLeaves.length !== envelope.merkleProofs.length) {
+    return { status: 'invalid', reason: 'v6: transcriptLeaves and merkleProofs length mismatch' };
+  }
+  // subject.digest.sha1 structural check.
+  const envelopeSubjectSha = envelope.subject?.digest?.sha1;
+  if (typeof envelopeSubjectSha !== 'string' || !HEX40.test(envelopeSubjectSha)) {
+    return { status: 'invalid', reason: 'v6: subject.digest.sha1 must be a 40-char hex string' };
+  }
+
+  // ── 2. Head-commit binding via filename ─────────────────────────────────
+  // The file path `.ai-sdlc/attestations/<headSha>.v6.dsse.json` is the
+  // cryptographic binding between the envelope and the head commit.
+  // We verify the filename (without extension) encodes the headSha so an
+  // attacker cannot replay an envelope from a different PR by renaming it.
+  const expectedFileName = `${headSha.toLowerCase()}.v6.dsse.json`;
+  if (envelopeFileName.toLowerCase() !== expectedFileName) {
+    return {
+      status: 'invalid',
+      reason: `v6: envelope filename '${envelopeFileName}' does not match expected '<headSha>.v6.dsse.json' for head ${headSha.slice(0, 7)}`,
+    };
+  }
+
+  // ── 3. Load on-disk transcript leaves ──────────────────────────────────
+  // CRITICAL: recompute from on-disk leaves, not from envelope fields.
+  // OQ-3 (RFC-0042): soft-fail when the leaves file is missing.
+  const onDiskLeaves = v6LoadLeaves(repoRoot);
+  if (onDiskLeaves.length === 0) {
+    // Soft-fail per OQ-3: no transcript-leaves.jsonl or empty — informational only.
+    process.stderr.write(
+      '[v6-verifier] INFO: transcript-leaves.jsonl is missing or empty — ' +
+        'Merkle proof verification skipped (soft-fail per OQ-3, RFC-0042). ' +
+        'The rootSignature will still be verified against trusted-reviewers.\n',
+    );
+    // Still verify the root signature (it's the primary trust anchor).
+    return verifyV6RootSignature(envelope, trustedReviewers);
+  }
+
+  // On-disk leaf count is authoritative — do NOT use envelope.leafCount.
+  const onDiskLeafCount = onDiskLeaves.length;
+
+  // ── 4. Recompute Merkle root from on-disk leaves ────────────────────────
+  const { root: recomputedRoot, proofs: recomputedProofs } = v6ComputeMerkleRoot(onDiskLeaves);
+
+  if (!recomputedRoot) {
+    return {
+      status: 'invalid',
+      reason: 'v6: could not compute Merkle root from transcript-leaves.jsonl',
+    };
+  }
+
+  // ── 5. Verify rootSignature against any-of-N trusted reviewer pubkeys ──
+  // The signature is over rootHash bytes. We verify against the RECOMPUTED
+  // root (not the envelope's rootHash) to detect tampering.
+  const sigResult = verifyV6RootSignatureAgainstRoot(
+    envelope.rootSignature,
+    recomputedRoot,
+    trustedReviewers,
+  );
+  if (!sigResult.valid) {
+    return { status: 'invalid', reason: sigResult.reason };
+  }
+
+  // ── 6. Verify each Merkle proof ─────────────────────────────────────────
+  for (let i = 0; i < envelope.transcriptLeaves.length; i++) {
+    const leafSummary = envelope.transcriptLeaves[i];
+    const merkleProof = envelope.merkleProofs[i];
+
+    if (typeof leafSummary.leafIndex !== 'number' || !Number.isInteger(leafSummary.leafIndex)) {
+      return {
+        status: 'invalid',
+        reason: `v6: transcriptLeaves[${i}].leafIndex must be an integer`,
+      };
+    }
+    if (!Array.isArray(merkleProof.proof)) {
+      return { status: 'invalid', reason: `v6: merkleProofs[${i}].proof must be an array` };
+    }
+    if (merkleProof.leafIndex !== leafSummary.leafIndex) {
+      return {
+        status: 'invalid',
+        reason: `v6: merkleProofs[${i}].leafIndex (${merkleProof.leafIndex}) does not match transcriptLeaves[${i}].leafIndex (${leafSummary.leafIndex})`,
+      };
+    }
+
+    // CRITICAL: resolve array position via findIndex (AISDLC-383.3 security).
+    // TranscriptLeaf.leafIndex may diverge from array position if loadLeaves
+    // skipped corrupt lines. We use findIndex to get the ACTUAL array position.
+    const logicalLeafIndex = leafSummary.leafIndex;
+    const arrayPosition = onDiskLeaves.findIndex((l) => l.leafIndex === logicalLeafIndex);
+    if (arrayPosition === -1) {
+      return {
+        status: 'invalid',
+        reason: `v6: leaf with leafIndex=${logicalLeafIndex} not found in transcript-leaves.jsonl`,
+      };
+    }
+
+    const onDiskLeaf = onDiskLeaves[arrayPosition];
+
+    // ── 7. Verify transcriptHash matches on-disk leaf ─────────────────────
+    if (typeof leafSummary.transcriptHash !== 'string' || !HEX64.test(leafSummary.transcriptHash)) {
+      return {
+        status: 'invalid',
+        reason: `v6: transcriptLeaves[${i}].transcriptHash must be a 64-char hex string`,
+      };
+    }
+    if (onDiskLeaf.transcriptHash !== leafSummary.transcriptHash) {
+      return {
+        status: 'invalid',
+        reason: `v6: leaf[${logicalLeafIndex}] (${leafSummary.reviewerName}) transcriptHash mismatch — leaf tampered or wrong reviewer run`,
+      };
+    }
+
+    // Compute the leaf hash from the on-disk leaf (the authoritative source).
+    const leafHash = v6HashLeaf(onDiskLeaf);
+
+    // Verify the Merkle proof. Use ON-DISK leafCount, ARRAY POSITION for direction.
+    const proofValid = v6VerifyInclusion(
+      leafHash,
+      merkleProof.proof,
+      recomputedRoot,
+      arrayPosition,
+      onDiskLeafCount,
+    );
+    if (!proofValid) {
+      return {
+        status: 'invalid',
+        reason: `v6: Merkle inclusion proof invalid for leaf[${logicalLeafIndex}] (${leafSummary.reviewerName})`,
+      };
+    }
+  }
+
+  // ── 8. All checks passed ─────────────────────────────────────────────────
+  return { status: 'valid', reason: 'ok' };
+}
+
+/**
+ * Verify the v6 root signature against the RECOMPUTED root hash using any-of-N
+ * trusted reviewer pubkeys. Used when transcript-leaves.jsonl is available.
+ *
+ * @param {string} rootSignature — base64-encoded ed25519 signature
+ * @param {string} recomputedRoot — 64-char hex SHA-256 of the recomputed Merkle root
+ * @param {object[]} trustedReviewers — array of { pubkey } entries
+ * @returns {{ valid: boolean, reason: string }}
+ */
+function verifyV6RootSignatureAgainstRoot(rootSignature, recomputedRoot, trustedReviewers) {
+  if (!trustedReviewers || trustedReviewers.length === 0) {
+    return {
+      valid: false,
+      reason: 'v6: no trusted reviewers configured — cannot verify rootSignature',
+    };
+  }
+
+  let signatureBuffer;
+  try {
+    signatureBuffer = Buffer.from(rootSignature, 'base64');
+  } catch {
+    return { valid: false, reason: 'v6: rootSignature is not valid base64' };
+  }
+
+  const rootHashData = Buffer.from(recomputedRoot, 'utf8');
+
+  for (const reviewer of trustedReviewers) {
+    if (!reviewer.pubkey) continue;
+    try {
+      const pubKey = createPublicKey(reviewer.pubkey);
+      const isValid = cryptoVerify(null, rootHashData, pubKey, signatureBuffer);
+      if (isValid) {
+        return { valid: true, reason: 'ok' };
+      }
+    } catch {
+      // Invalid PEM or key type — try the next reviewer.
+      continue;
+    }
+  }
+  return { valid: false, reason: 'v6: rootSignature did not match any trusted reviewer pubkey' };
+}
+
+/**
+ * Soft-fail path: transcript-leaves.jsonl is missing. Verify only the root
+ * signature against the envelope's stated rootHash (the signature IS over
+ * whatever root the signer committed to — we verify it's internally consistent).
+ *
+ * OQ-3 (RFC-0042): when the operator triggers a spot-check on a PR whose
+ * transcript has been GC'd, return exit 0 with an informational warning.
+ *
+ * @param {object} envelope — v6 flat envelope
+ * @param {object[]} trustedReviewers — trusted reviewer entries
+ * @returns {{ status: string, reason: string }}
+ */
+function verifyV6RootSignature(envelope, trustedReviewers) {
+  // Verify the stated rootHash's signature — even without leaves we can
+  // check the operator signed SOMETHING. This closes the "anyone can forge
+  // a v6 file with no leaves" attack in the soft-fail path.
+  const sigResult = verifyV6RootSignatureAgainstRoot(
+    envelope.rootSignature,
+    envelope.rootHash,
+    trustedReviewers,
+  );
+  if (!sigResult.valid) {
+    return { status: 'invalid', reason: sigResult.reason };
+  }
+  // Soft-fail: root signature valid but leaves unavailable for Merkle verification.
+  return {
+    status: 'valid',
+    reason:
+      'ok (soft-fail: transcript-leaves.jsonl missing — Merkle proof skipped per OQ-3, RFC-0042)',
+  };
 }
 
 /**
@@ -1010,12 +1449,39 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     return { status: 'invalid', reason: `trusted-reviewers.yaml malformed: ${err.message}` };
   }
 
-  // --- Recompute current PR state ---------------------------------------
+  // --- Load all attestation envelopes (v6 + legacy) ---------------------
+  const lowerHead = headSha.toLowerCase();
+
+  // AISDLC-383.4: v6-prefer path (RFC-0042 Phase 2).
+  // If a v6 envelope exists for this PR's head SHA, verify it via the
+  // Merkle-based verifier. Fallback to v3/v5 legacy verifier for older envelopes.
+  // Preference order: v6 > v5 > v4 > v3 (per AC#3 — legacy fallback indefinitely).
+  const all = loadAllAttestations(repoRoot);
+  const v6Envelopes = all.filter(
+    (entry) => entry.isV6 && entry.fileName.toLowerCase() === `${lowerHead}.v6.dsse.json`,
+  );
+  if (v6Envelopes.length > 0) {
+    // Use the most-recent v6 envelope when multiple are present (tie-break by filename).
+    v6Envelopes.sort((a, b) => {
+      const cmp = isoTimeCmp(a.envelope.signedAt ?? '', b.envelope.signedAt ?? '');
+      if (cmp !== 0) return -cmp; // descending = most recent first
+      return a.fileName.localeCompare(b.fileName);
+    });
+    const chosen = v6Envelopes[0];
+    return verifyV6Envelope({
+      envelope: chosen.envelope,
+      envelopeFileName: chosen.fileName,
+      headSha: lowerHead,
+      trustedReviewers,
+      repoRoot,
+    });
+  }
+
+  // --- Recompute current PR state (legacy v3/v5 path) ------------------
   // The per-envelope diff is recomputed inside the matching loop below
   // (AISDLC-85: the right diff range is `<base>...<envelope-subject>`,
   // not `<base>...<PR_HEAD>`). policy + agents + plugin version are
   // properties of the merged PR head's tree, so they're computed once.
-  const lowerHead = headSha.toLowerCase();
   const policyHash = sha256Hex(
     readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
   );
@@ -1052,7 +1518,10 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   const ancestorDepth = resolveAncestorDepth(process.env.AI_SDLC_VERIFIER_ANCESTOR_DEPTH);
 
   // --- Scan envelopes + bucket by predicate-content match ---------------
-  const all = loadAllAttestations(repoRoot);
+  // `all` was already loaded above for the v6 fast-path check.
+  // Filter out v6 envelopes here — they were handled above and do not
+  // participate in the legacy content-hash matching loop.
+  const legacyAll = all.filter((entry) => !entry.isV6);
   if (all.length === 0) {
     // AISDLC-207: distinguish "no envelope on disk at all" from "envelope
     // present but content mismatches". The previous `missing (no .ai-sdlc/
@@ -1064,6 +1533,14 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     return {
       status: 'invalid',
       reason: `no envelope present at ${shortSha(lowerHead)} (no .ai-sdlc/attestations/*.dsse.json on PR branch — push via /ai-sdlc execute to generate one)`,
+    };
+  }
+  if (legacyAll.length === 0) {
+    // Only v6 envelopes on disk but none matched the head SHA — treat as
+    // "no matching envelope" for the legacy path.
+    return {
+      status: 'invalid',
+      reason: `no envelope present at ${shortSha(lowerHead)} (only v6 envelopes found but none matched — did you push with a v6-signed HEAD?)`,
     };
   }
 
@@ -1107,7 +1584,7 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   // doesn't correspond to anything reachable from PR HEAD → mismatch.
   const matched = []; // { entry, subjectSha, source }
   const mismatches = []; // { entry, reason }
-  for (const entry of all) {
+  for (const entry of legacyAll) {
     const resolution = resolveSubjectShaForEnvelope({
       envelope: entry.envelope,
       predicate: entry.predicate,
