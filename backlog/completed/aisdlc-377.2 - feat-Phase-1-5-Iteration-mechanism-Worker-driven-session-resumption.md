@@ -1,7 +1,7 @@
 ---
 id: AISDLC-377.2
 title: 'feat(dispatch): RFC-0041 Phase 1.5 — Iteration mechanism (Conductor-triggered, Worker-driven session resumption)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-20'
 labels:
