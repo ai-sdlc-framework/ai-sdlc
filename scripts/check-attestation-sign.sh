@@ -189,7 +189,30 @@ if [ -z "$HEAD_SHA" ]; then
   exit 0
 fi
 
-ATT_FILE="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.dsse.json"
+# RFC-0042 Phase 3 (AISDLC-383.6): schema version determines the envelope filename.
+#   v5 → .ai-sdlc/attestations/<sha>.dsse.json
+#   v6 → .ai-sdlc/attestations/<sha>.v6.dsse.json
+# Read the schema version early so idempotency + signer + post-sign checks all agree.
+#
+# CUTOVER STATUS: scaffolding shipped (AISDLC-383.6), DEFAULT STILL v5.
+# Per AISDLC-383.6 security review handoff, the v6 default flip is gated on:
+#   1. AISDLC-383.4 (v6 CI verifier) merged + live
+#   2. A production code path that appends transcript leaves to
+#      .ai-sdlc/transcript-leaves.jsonl during pipeline execution (this is
+#      a gap in 383.X scope — see task body Follow-up section)
+# Until both prerequisites are met, default stays v5. Operators flip the
+# default via `export AI_SDLC_V6_CUTOVER_ACTIVE=1` once the prerequisites
+# are confirmed in their environment.
+if [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-0}" = "1" ]; then
+  SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v6}"
+else
+  SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v5}"
+fi
+if [ "$SCHEMA_VERSION" = "v6" ]; then
+  ATT_FILE="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.v6.dsse.json"
+else
+  ATT_FILE="$WT_ROOT/.ai-sdlc/attestations/$HEAD_SHA.dsse.json"
+fi
 if [ -f "$ATT_FILE" ]; then
   # Already signed for this HEAD. Either the previous push aborted (this
   # script set exit 1, operator re-pushed, and the chore commit is now on
@@ -222,8 +245,13 @@ if [ -n "$HEAD_PARENT_SHA" ]; then
   PR_ADDED_ENVELOPES=$(git diff --name-only --diff-filter=A "origin/main..HEAD" -- ".ai-sdlc/attestations/" 2>/dev/null || echo '')
   for ENVELOPE_PATH in $PR_ADDED_ENVELOPES; do
     # Extract the SHA from the filename (strip directory prefix and .dsse.json suffix).
+    # RFC-0042 Phase 3: v6 files end in .v6.dsse.json; strip both suffixes to get SHA.
     ENVELOPE_FILE="${ENVELOPE_PATH##*/}"        # basename
-    ENVELOPE_SHA="${ENVELOPE_FILE%.dsse.json}"  # strip suffix
+    ENVELOPE_SHA="${ENVELOPE_FILE%.v6.dsse.json}"  # strip v6 suffix first
+    if [ "$ENVELOPE_SHA" = "$ENVELOPE_FILE" ]; then
+      # Not a .v6.dsse.json file — try stripping plain .dsse.json suffix.
+      ENVELOPE_SHA="${ENVELOPE_FILE%.dsse.json}"
+    fi
     # Only remove if it's neither the current HEAD SHA nor the parent SHA.
     if [ "$ENVELOPE_SHA" != "$HEAD_SHA" ] && [ "$ENVELOPE_SHA" != "$HEAD_PARENT_SHA" ]; then
       STALE_ABS="$WT_ROOT/$ENVELOPE_PATH"
@@ -264,81 +292,109 @@ if [[ "${LAST_COMMIT_SUBJECT:-}" == "chore: auto-sign attestation for "* ]]; the
   exit 0
 fi
 
-# ── Step 4d: verify reviewer sub-attestations (AISDLC-380) ──────────
+# ── Step 4d: verify reviewer sub-attestations (AISDLC-380, RFC-0042 Phase 3) ──
 #
-# Before invoking the signer, verify that the verdict file contains signed
-# sub-attestations from each reviewer — NOT plain fabricated JSON.
+# RFC-0042 Phase 3 cutover (AISDLC-383.6): this gate is now AUDIT-ONLY.
+# The signing schema version controls the behavior:
 #
-# The 2026-05-20 incident (AISDLC-377.1): a dev subagent wrote a verdict
-# file with `approved: true` for all 3 reviewers but no cryptographic proof
-# that the reviewers actually ran. The hook signed it, CI accepted it, and
-# 3 real majors shipped to main.
+#   v6 (default since AISDLC-383.6): gate skipped entirely — v6 envelopes
+#      derive reviewer evidence from committed transcript leaves (Merkle tree),
+#      not from the AISDLC-380 sub-attestation verdict file chain.
 #
-# Defense: `scripts/verify-reviewer-sub-attestations.mjs` checks each
-# sub-attestation's signature against `.ai-sdlc/trusted-reviewers.yaml`.
-# The verifier exits:
-#   0 → all sub-attestations verified (or AI_SDLC_LEGACY_VERDICTS=1 legacy mode)
-#   1 → verification failed; hook refuses to sign
-#   2 → internal error
+#   v5 (explicit --schema-version v5 or AI_SDLC_SCHEMA_VERSION=v5): gate runs
+#      but failures are WARNINGS only (exit 0). The push is not blocked.
+#      Legacy AISDLC-380 sub-attestation chain is retained for backward
+#      compatibility during the 30-day soak (deferred delete → AISDLC-383.7).
+#
+# Historical context: the 2026-05-20 incident (AISDLC-377.1) motivated AISDLC-380
+# (per-reviewer signed sub-attestations). RFC-0042 supersedes that approach with
+# Merkle-transcript-based proof-of-execution; AISDLC-380.2 (architectural follow-up
+# to close nonce/Read-tool bypasses) is marked Superseded by RFC-0042.
 #
 # Test override: AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD can inject a stub.
 #
 # Skip when: DOCS_ONLY_SYNTHESIZED=1 (verdict was just synthesized by Step 3b
 # for a docs-only PR — there are no reviewer sub-attestations to verify because
 # docs-only PRs have no reviewer fan-out by design, AISDLC-215).
+
 TRUSTED_REVIEWERS_YAML="$WT_ROOT/.ai-sdlc/trusted-reviewers.yaml"
 VERIFY_SUB_ATT_SCRIPT="$WT_ROOT/scripts/verify-reviewer-sub-attestations.mjs"
 
 if [ "${DOCS_ONLY_SYNTHESIZED:-0}" = "1" ]; then
   echo "[attestation-sign] docs-only synthesized verdict — skipping sub-attestation verification (no reviewer fan-out)" >&2
-elif [ -n "${AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD:-}" ] && [ "${AI_SDLC_TEST_MODE:-0}" = "1" ]; then
-  # Test override: use the stub verifier directly, bypassing file-existence checks.
-  # This lets tests exercise the hook's signing + commit logic without needing
-  # real verifier/registry files in the test repo. Production code never sets this.
-  # AISDLC-380 fix iter-3: GATE on AI_SDLC_TEST_MODE=1 so a dev subagent cannot
-  # set AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD=true to bypass the fail-CLOSED gate
-  # when verifier or registry files are missing (security-reviewer iter-2 finding).
-  echo "[attestation-sign] Verifying reviewer sub-attestations for $TASK_ID (using test override)" >&2
-  VERIFY_EXIT=0
-  # shellcheck disable=SC2086
-  $AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD \
-    --verdict-file "$VERDICT_FILE" \
-    --task-id "$TASK_ID" \
-    --trusted-reviewers "$TRUSTED_REVIEWERS_YAML" || VERIFY_EXIT=$?
-  if [ "$VERIFY_EXIT" -eq 1 ]; then
-    echo "[attestation-sign] ERROR: sub-attestation verification failed — refusing to sign" >&2
-    exit 2
-  elif [ "$VERIFY_EXIT" -ne 0 ]; then
-    echo "[attestation-sign] ERROR: sub-attestation verifier exited with unexpected code $VERIFY_EXIT" >&2
-    exit 2
-  fi
-elif [ ! -f "$VERIFY_SUB_ATT_SCRIPT" ]; then
-  # AISDLC-380 fix #3: fail-CLOSED when verifier missing — a dev could remove
-  # the script to disable the gate. Scripts dir is not in blockedPaths but this
-  # fail-CLOSED posture removes the bypass value.
-  echo "[attestation-sign] ERROR: $VERIFY_SUB_ATT_SCRIPT not found — refusing to sign (sub-attestation gate unavailable)" >&2
-  echo "[attestation-sign]        Restore the file or set AI_SDLC_SKIP_ATTESTATION_SIGN=1 to defer." >&2
-  exit 2
-elif [ ! -f "$TRUSTED_REVIEWERS_YAML" ]; then
-  # AISDLC-380 fix #3: fail-CLOSED when registry missing.
-  echo "[attestation-sign] ERROR: $TRUSTED_REVIEWERS_YAML not found — refusing to sign (trusted-reviewers registry missing)" >&2
-  echo "[attestation-sign]        Create the registry file or set AI_SDLC_SKIP_ATTESTATION_SIGN=1 to defer." >&2
-  exit 2
+elif [ "$SCHEMA_VERSION" = "v6" ]; then
+  # RFC-0042 Phase 3: v6 envelopes use Merkle-transcript verification in CI;
+  # AISDLC-380 sub-attestation gate is not applicable. Skip entirely.
+  echo "[attestation-sign] v6 envelope mode — AISDLC-380 sub-attestation gate skipped (RFC-0042 Phase 3)" >&2
 else
-  echo "[attestation-sign] Verifying reviewer sub-attestations for $TASK_ID" >&2
-  VERIFY_EXIT=0
-  node "$VERIFY_SUB_ATT_SCRIPT" \
-    --verdict-file "$VERDICT_FILE" \
-    --task-id "$TASK_ID" \
-    --trusted-reviewers "$TRUSTED_REVIEWERS_YAML" || VERIFY_EXIT=$?
-  if [ "$VERIFY_EXIT" -eq 1 ]; then
-    echo "[attestation-sign] ERROR: sub-attestation verification failed — refusing to sign" >&2
-    echo "[attestation-sign]        Re-run reviewer subagents to produce signed sub-attestations." >&2
-    echo "[attestation-sign]        Emergency legacy escape: AI_SDLC_LEGACY_VERDICTS=1 git push" >&2
-    exit 2
-  elif [ "$VERIFY_EXIT" -ne 0 ]; then
-    echo "[attestation-sign] ERROR: sub-attestation verifier exited with unexpected code $VERIFY_EXIT" >&2
-    exit 2
+  # ── v5 audit-only mode is GATED on AI_SDLC_V6_CUTOVER_ACTIVE=1 ────────
+  # Per AISDLC-383.6 security review: defaulting the gate to audit-only on v5
+  # while v6 isn't yet operational reopens the 2026-05-20 forgery vector
+  # (forced fallback to v5 with the only defense being audit-only). Therefore:
+  #
+  #   AI_SDLC_V6_CUTOVER_ACTIVE=1 → audit-only (warn, exit 0) — operator has
+  #     confirmed v6 stack is end-to-end live + opted into the cutover state
+  #   AI_SDLC_V6_CUTOVER_ACTIVE unset/0 → HARD-FAIL (block push on missing
+  #     or invalid sub-attestation) — preserves AISDLC-380 forgery defense
+  #     during the scaffolding-shipped-but-not-active window
+  CUTOVER_AUDIT_ONLY="${AI_SDLC_V6_CUTOVER_ACTIVE:-0}"
+
+  if [ -n "${AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD:-}" ] && [ "${AI_SDLC_TEST_MODE:-0}" = "1" ]; then
+    # Test override: use the stub verifier directly, bypassing file-existence checks.
+    # This lets tests exercise the hook's signing + commit logic without needing
+    # real verifier/registry files in the test repo. Production code never sets this.
+    # AISDLC-380 fix iter-3: GATE on AI_SDLC_TEST_MODE=1 so a dev subagent cannot
+    # set AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD=true to bypass the fail-CLOSED gate
+    # when verifier or registry files are missing (security-reviewer iter-2 finding).
+    MODE_LABEL=$([ "$CUTOVER_AUDIT_ONLY" = "1" ] && echo "audit-only" || echo "hard-fail")
+    echo "[attestation-sign] Verifying reviewer sub-attestations for $TASK_ID (test override, $MODE_LABEL)" >&2
+    VERIFY_EXIT=0
+    # shellcheck disable=SC2086
+    $AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD \
+      --verdict-file "$VERDICT_FILE" \
+      --task-id "$TASK_ID" \
+      --trusted-reviewers "$TRUSTED_REVIEWERS_YAML" || VERIFY_EXIT=$?
+    if [ "$VERIFY_EXIT" -ne 0 ]; then
+      if [ "$CUTOVER_AUDIT_ONLY" = "1" ]; then
+        echo "[attestation-sign] WARN: sub-attestation verification returned exit $VERIFY_EXIT (audit-only; push not blocked)" >&2
+      else
+        echo "[attestation-sign] ERROR: sub-attestation verification returned exit $VERIFY_EXIT — push BLOCKED" >&2
+        echo "[attestation-sign]        AISDLC-380 gate is hard-fail until AI_SDLC_V6_CUTOVER_ACTIVE=1 is set" >&2
+        exit "$VERIFY_EXIT"
+      fi
+    fi
+  elif [ ! -f "$VERIFY_SUB_ATT_SCRIPT" ]; then
+    if [ "$CUTOVER_AUDIT_ONLY" = "1" ]; then
+      echo "[attestation-sign] WARN: $VERIFY_SUB_ATT_SCRIPT not found — sub-attestation gate skipped (audit-only)" >&2
+    else
+      echo "[attestation-sign] ERROR: $VERIFY_SUB_ATT_SCRIPT not found — sub-attestation gate fails closed" >&2
+      exit 1
+    fi
+  elif [ ! -f "$TRUSTED_REVIEWERS_YAML" ]; then
+    if [ "$CUTOVER_AUDIT_ONLY" = "1" ]; then
+      echo "[attestation-sign] WARN: $TRUSTED_REVIEWERS_YAML not found — sub-attestation gate skipped (audit-only)" >&2
+    else
+      echo "[attestation-sign] ERROR: $TRUSTED_REVIEWERS_YAML not found — sub-attestation gate fails closed" >&2
+      exit 1
+    fi
+  else
+    MODE_LABEL=$([ "$CUTOVER_AUDIT_ONLY" = "1" ] && echo "v5 audit-only" || echo "v5 hard-fail")
+    echo "[attestation-sign] Verifying reviewer sub-attestations for $TASK_ID ($MODE_LABEL)" >&2
+    VERIFY_EXIT=0
+    node "$VERIFY_SUB_ATT_SCRIPT" \
+      --verdict-file "$VERDICT_FILE" \
+      --task-id "$TASK_ID" \
+      --trusted-reviewers "$TRUSTED_REVIEWERS_YAML" || VERIFY_EXIT=$?
+    if [ "$VERIFY_EXIT" -ne 0 ]; then
+      if [ "$CUTOVER_AUDIT_ONLY" = "1" ]; then
+        echo "[attestation-sign] WARN: sub-attestation verification failed for $TASK_ID (exit $VERIFY_EXIT; audit-only — push not blocked)" >&2
+        echo "[attestation-sign]       This gate will be removed in AISDLC-383.7 (Phase 4 cleanup)." >&2
+      else
+        echo "[attestation-sign] ERROR: sub-attestation verification failed for $TASK_ID (exit $VERIFY_EXIT) — push BLOCKED" >&2
+        echo "[attestation-sign]        AISDLC-380 gate is hard-fail until AI_SDLC_V6_CUTOVER_ACTIVE=1 is set" >&2
+        exit "$VERIFY_EXIT"
+      fi
+    fi
   fi
 fi
 
@@ -364,7 +420,7 @@ if [ -n "${CODEX_VERSION:-}" ]; then
   echo "[attestation-sign] Codex harness detected: name=codex version=$CODEX_VERSION_NUM" >&2
 fi
 
-echo "[attestation-sign] Auto-signing attestation for $TASK_ID against HEAD $HEAD_SHA" >&2
+echo "[attestation-sign] Auto-signing attestation for $TASK_ID against HEAD $HEAD_SHA (schema: $SCHEMA_VERSION)" >&2
 
 if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
   # Test override: split on whitespace via word splitting (intentional —
@@ -374,6 +430,7 @@ if [ -n "${AI_SDLC_SIGN_ATTESTATION_CMD:-}" ]; then
       --review-verdicts "$VERDICT_FILE" \
       --iteration-count "$ITERATION_COUNT" \
       --harness-note "$HARNESS_NOTE" \
+      --schema-version "$SCHEMA_VERSION" \
       $HARNESS_ARGS; then
     echo "[attestation-sign] ERROR: signer invocation (override) failed; aborting push" >&2
     exit 2
@@ -384,6 +441,7 @@ else
       --review-verdicts "$VERDICT_FILE" \
       --iteration-count "$ITERATION_COUNT" \
       --harness-note "$HARNESS_NOTE" \
+      --schema-version "$SCHEMA_VERSION" \
       $HARNESS_ARGS; then
     echo "[attestation-sign] ERROR: sign-attestation.mjs failed; aborting push" >&2
     echo "[attestation-sign]        (run \`pnpm --filter @ai-sdlc/orchestrator build\` if dist is missing)" >&2

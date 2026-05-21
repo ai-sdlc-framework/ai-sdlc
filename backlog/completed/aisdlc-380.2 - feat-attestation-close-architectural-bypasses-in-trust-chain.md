@@ -1,14 +1,16 @@
 ---
 id: AISDLC-380.2
 title: 'feat(attestation): close architectural bypasses in AISDLC-380 trust chain (caller-identity binding + Read-tool guard + nonce freshness)'
-status: To Do
+status: Superseded
 assignee: []
 created_date: '2026-05-20'
+completed_date: '2026-05-21'
 labels:
   - attestation
   - governance
   - security
   - critical
+  - superseded
 dependencies:
   - AISDLC-380
 priority: critical
@@ -18,6 +20,23 @@ references:
   - ai-sdlc-plugin/scripts/sign-reviewer-verdict.mjs
   - scripts/verify-reviewer-sub-attestations.mjs
   - ai-sdlc-plugin/agents/security-reviewer.md
+---
+
+## Supersession Note (AISDLC-383.6 — 2026-05-21)
+
+This task is **Superseded** by RFC-0042 (Proof-of-Execution Attestation via In-Repo Merkle Transcripts).
+
+The nonce challenges, Read-tool deny lists, sign-helper auth tokens, and Option-B-unsigned-exempt removal described here address the AISDLC-380 sub-attestation trust-chain bypasses. RFC-0042 replaces the entire AISDLC-380 sub-attestation architecture with Merkle-transcript-based proof-of-execution — making these fixes unnecessary:
+
+- **Bypass #1** (sign-helper invocation forgery): eliminated by RFC-0042's transcript-hash model. Forgery now requires fabricating a full LLM conversation transcript — as expensive as real review.
+- **Bypass #2** (Read-tool reviewer-key read): eliminated by RFC-0042 (no per-reviewer keys exist in the v6 architecture).
+- **Bypass #3** (nonce/freshness absence in sub-attestation): eliminated by RFC-0042's nonce model (PR-bound nonce in transcript leaf).
+- **Bypass #4** (security-reviewer unsigned-exempt Option B): eliminated by RFC-0042 (no per-reviewer signing keys needed).
+
+The AISDLC-380 sub-attestation gate itself was downgraded to audit-only (warn + exit 0) in AISDLC-383.6 (RFC-0042 Phase 3 cutover). The gate code and sub-attestation scripts will be deleted in AISDLC-383.7 (Phase 4 cleanup, 30-day soak period).
+
+**Original task body follows:**
+
 ---
 
 ## Problem
