@@ -205,6 +205,26 @@ describe('/ai-sdlc orchestrator-tick body — Phase 1.5 iteration (AISDLC-377.2)
     );
   });
 
+  it('MINOR (iteration-2 review): write-resume-signal invocation includes --task-id and --feedback', () => {
+    // Tighter contract than the keyword-grep check above: the bash
+    // invocation must pass the two required flags on the same invocation
+    // (writeResumeSignal's TS surface requires both — a regression that
+    // drops --feedback would silently emit a useless signal).
+    const idx = cmdBody.indexOf('write-resume-signal');
+    assert.ok(idx >= 0);
+    // 400-char window after the invocation is enough to span the line-
+    // continued bash command.
+    const window = cmdBody.slice(idx, idx + 400);
+    assert.ok(
+      /--task-id\s+"\$TASK_ID"/.test(window),
+      'write-resume-signal must pass --task-id "$TASK_ID"',
+    );
+    assert.ok(
+      /--feedback\s+"\$FEEDBACK_TEXT"/.test(window),
+      'write-resume-signal must pass --feedback "$FEEDBACK_TEXT" (the Worker would otherwise resume with no context)',
+    );
+  });
+
   it('escalates with iteration-exhausted when budget is exhausted', () => {
     assert.ok(
       /write-iteration-exhausted/.test(cmdBody),
@@ -217,6 +237,60 @@ describe('/ai-sdlc orchestrator-tick body — Phase 1.5 iteration (AISDLC-377.2)
     assert.ok(
       cmdBody.includes('iteration-exhausted') || cmdBody.includes('iteration budget'),
       'must describe budget exhaustion handling',
+    );
+  });
+
+  it('MAJOR #2 (iteration-2 review): assigns ATTEMPTS and BUDGET from PROBE_JSON BEFORE invoking write-iteration-exhausted', () => {
+    // Earlier revisions referenced $ATTEMPTS / $BUDGET as positional args
+    // on the write-iteration-exhausted invocation without ever assigning
+    // them from PROBE_JSON — that emitted empty numeric args, causing the
+    // escalated diagnostic to carry NaN/invalid values. We assert against
+    // the actual `node ... cli-dispatch.mjs write-iteration-exhausted`
+    // INVOCATION line (not any incidental mention of the subcommand in
+    // prose/comments above it).
+    const invocationRe =
+      /node\s+"\$PIPELINE_CLI_BIN\/cli-dispatch\.mjs"\s+write-iteration-exhausted/;
+    const invocationMatch = invocationRe.exec(cmdBody);
+    assert.ok(
+      invocationMatch,
+      'orchestrator-tick.md must invoke `node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" write-iteration-exhausted`',
+    );
+    const invocationIdx = invocationMatch.index;
+    // The two assignments must use a node -e (or jq) extraction off PROBE_JSON
+    // and assign to ATTEMPTS / BUDGET respectively. Crucially, both
+    // assignments must precede the invocation so the variables are bound
+    // when the invocation reads them.
+    const attemptsAssignRe = /ATTEMPTS=\$\(/;
+    const budgetAssignRe = /BUDGET=\$\(/;
+    const attemptsMatch = attemptsAssignRe.exec(cmdBody);
+    const budgetMatch = budgetAssignRe.exec(cmdBody);
+    assert.ok(
+      attemptsMatch,
+      'orchestrator-tick.md must assign ATTEMPTS from the probe-iteration-budget output',
+    );
+    assert.ok(
+      budgetMatch,
+      'orchestrator-tick.md must assign BUDGET from the probe-iteration-budget output',
+    );
+    assert.ok(
+      attemptsMatch.index < invocationIdx,
+      `ATTEMPTS= must be assigned BEFORE the write-iteration-exhausted invocation (assignment at ${attemptsMatch.index}, invocation at ${invocationIdx})`,
+    );
+    assert.ok(
+      budgetMatch.index < invocationIdx,
+      `BUDGET= must be assigned BEFORE the write-iteration-exhausted invocation (assignment at ${budgetMatch.index}, invocation at ${invocationIdx})`,
+    );
+    // And the invocation MUST reference both vars on the same line as
+    // --iterations-attempted / --iteration-budget. We extract a 400-char
+    // window around the invocation and grep for the flag/var pairs.
+    const window = cmdBody.slice(invocationIdx, invocationIdx + 400);
+    assert.ok(
+      /--iterations-attempted\s+"\$ATTEMPTS"/.test(window),
+      'write-iteration-exhausted invocation must pass --iterations-attempted "$ATTEMPTS"',
+    );
+    assert.ok(
+      /--iteration-budget\s+"\$BUDGET"/.test(window),
+      'write-iteration-exhausted invocation must pass --iteration-budget "$BUDGET"',
     );
   });
 });

@@ -158,6 +158,27 @@ EXHAUSTED=$(echo "$PROBE_JSON" | node -e "
   });
 ")
 
+# MAJOR #2 (iteration-2 review): parse ATTEMPTS + BUDGET out of the probe
+# BEFORE either branch consumes them. Earlier revisions referenced these
+# as bash positionals without ever assigning them — that emitted empty
+# numeric arguments to write-iteration-exhausted, causing NaN/invalid
+# values in the escalated diagnostic. The assignment uses the same
+# stdin-piped node -e pattern as EXHAUSTED above (no jq dependency).
+ATTEMPTS=$(echo "$PROBE_JSON" | node -e "
+  const d=[]; process.stdin.on('data',c=>d.push(c));
+  process.stdin.on('end',()=>{
+    const r = JSON.parse(d.join(''));
+    process.stdout.write(String(r.attempts));
+  });
+")
+BUDGET=$(echo "$PROBE_JSON" | node -e "
+  const d=[]; process.stdin.on('data',c=>d.push(c));
+  process.stdin.on('end',()=>{
+    const r = JSON.parse(d.join(''));
+    process.stdout.write(String(r.budget));
+  });
+")
+
 if [ "$EXHAUSTED" = "yes" ]; then
   # 2a. Budget cap hit — escalate, do NOT trigger another resume.
   node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" write-iteration-exhausted \

@@ -347,6 +347,25 @@ export function writeVerdict(boardDir: string, verdict: DispatchVerdict): string
         /* ignore */
       }
     }
+  } else if (typeof verdict.iterationsAttempted === 'number') {
+    // Phase 1.5 (AISDLC-377.2) — MAJOR #1 close-out (iteration-2 review). When
+    // a Worker writes an iterate-needed verdict, the manifest is the canonical
+    // record the Conductor's `probeIterationBudget` reads from. If we leave
+    // `manifest.iterationsAttempted` untouched, the budget gate stays mute:
+    // verdict reports attempts=1 but the manifest still says 0, so the gate
+    // would let the Conductor keep writing resume signals past the cap.
+    //
+    // Atomically rewrite the inflight manifest's iterationsAttempted to
+    // match the verdict (the Worker's authoritative burn count). Temp + same-
+    // dir rename so the Conductor never sees a partial parse.
+    const inflightManifestPath = manifestPathIn(boardDir, 'inflight', verdict.taskId);
+    const manifest = readManifest(inflightManifestPath);
+    if (manifest) {
+      manifest.iterationsAttempted = verdict.iterationsAttempted;
+      const tmpM = `${inflightManifestPath}.tmp-${process.pid}-${Date.now()}`;
+      writeFileSync(tmpM, JSON.stringify(manifest, null, 2) + '\n', 'utf-8');
+      renameSync(tmpM, inflightManifestPath);
+    }
   }
   // Always clear any lingering resume signal — it was specific to the
   // previous iteration cycle, and we don't want the Worker's next-poll
@@ -642,6 +661,33 @@ export function readResumeSignal(boardDir: string, taskId: string): ResumeSignal
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Worker-side (RFC-0041 OQ-4): list every pending resume signal in
+ * `inflight/`. Returns `[{ taskId, signalPath }]` for each
+ * `<task-id>.resume.json` file present. The Worker's poll loop MUST scan
+ * this list BEFORE falling back to env-var lookup
+ * (`AI_SDLC_DISPATCH_RESUME_TASK_ID`) — env vars are lost on Worker session
+ * restart, but the filesystem-durable signal survives. Without the scan, a
+ * restart between Conductor's resume-write and Worker's next tick would
+ * silently strand the inflight slot until the supervisor's stale-heartbeat
+ * sweep reaps it (~30 min later) — the entire iteration burns timeout
+ * latency instead of progressing.
+ *
+ * Returns an empty array when the board is unset up or no signals exist.
+ * Caller is responsible for matching signal taskIds against manifest
+ * workerKind compatibility before consuming.
+ */
+export function listResumeSignals(boardDir: string): { taskId: string; signalPath: string }[] {
+  const inflightDir = path.join(boardDir, 'inflight');
+  const out: { taskId: string; signalPath: string }[] = [];
+  for (const entry of safeReaddir(inflightDir)) {
+    if (!entry.endsWith(RESUME_SIGNAL_SUFFIX)) continue;
+    const taskId = entry.slice(0, -RESUME_SIGNAL_SUFFIX.length);
+    out.push({ taskId, signalPath: path.join(inflightDir, entry) });
+  }
+  return out;
 }
 
 /**

@@ -39,6 +39,11 @@
  *   - `read-resume-signal --task-id <id>` — Worker polls for a Conductor-
  *     written signal. Prints `{present:false}` or `{present:true,signal}`.
  *   - `remove-resume-signal --task-id <id>` — Worker consumes the signal.
+ *   - `list-resume-signals` — list every pending resume signal in inflight/.
+ *     Filesystem-durable resume discovery (MAJOR #3 iteration-2 close-out):
+ *     the Worker scans this BEFORE its env-var lookup so a session restart
+ *     between Conductor's write and Worker's next tick doesn't strand the
+ *     inflight slot. Prints `{signals:[{taskId,signalPath}]}`.
  *   - `probe-iteration-budget --task-id <id>` — Conductor inspects the
  *     manifest's iteration fields. Prints
  *     `{taskId,attempts,budget,exhausted,hasManifest}`.
@@ -60,6 +65,7 @@ import {
   claimNext,
   collectVerdicts,
   DEFAULT_BOARD_DIR,
+  listResumeSignals,
   peekQueue,
   probeIterationBudget,
   readResumeSignal,
@@ -257,6 +263,17 @@ export async function runDispatchCli(
       return 0;
     }
 
+    case 'list-resume-signals': {
+      // MAJOR #3 (iteration-2 review): filesystem-durable resume discovery.
+      // The Worker scans this list BEFORE falling back to its
+      // AI_SDLC_DISPATCH_RESUME_TASK_ID env var so a Worker-session restart
+      // between Conductor's resume-write and Worker's next tick doesn't
+      // strand the inflight slot until the stale-heartbeat sweep reaps it.
+      const signals = listResumeSignals(boardDir);
+      out({ signals });
+      return 0;
+    }
+
     case 'probe-iteration-budget': {
       const taskId = requireFlag(flags, 'task-id');
       const probe = probeIterationBudget(boardDir, taskId);
@@ -385,6 +402,7 @@ Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
                       [--iteration-budget <n>] [--iterations-attempted <n>]
   read-resume-signal --task-id <id>
   remove-resume-signal --task-id <id>
+  list-resume-signals
   probe-iteration-budget --task-id <id>
   write-iteration-exhausted --task-id <id>
                             --iterations-attempted <n> --iteration-budget <n>

@@ -212,6 +212,22 @@ describe('/ai-sdlc dispatch-worker body — Phase 1.5 iteration (AISDLC-377.2)',
     );
   });
 
+  it('MINOR (iteration-2 review): write-verdict invocation that records resume burn count passes --iterations-attempted with $NEW_ITERATIONS_ATTEMPTED', () => {
+    // The Worker's success-after-resume write-verdict must explicitly bind
+    // --iterations-attempted to NEW_ITERATIONS_ATTEMPTED (= PRIOR + 1).
+    // A regression that drops the flag would leave the Conductor with no
+    // way to know whether this verdict came from iteration 1 or 2.
+    const idx = cmdBody.indexOf('write-verdict');
+    assert.ok(idx >= 0, 'dispatch-worker.md must mention write-verdict');
+    const window = cmdBody.slice(idx, idx + 1200);
+    assert.ok(
+      /--iterations-attempted\s+"?\$\{?NEW_ITERATIONS_ATTEMPTED/.test(window) ||
+        /--iterations-attempted\s+"?\$\{?PRIOR_ITERATION/.test(window) ||
+        /--iterations-attempted\s+"?\$/.test(window),
+      'write-verdict must pass --iterations-attempted bound to a shell variable (NEW_ITERATIONS_ATTEMPTED / PRIOR_ITERATION) rather than a hard-coded literal',
+    );
+  });
+
   it('describes the iterate-needed outcome path', () => {
     assert.ok(
       cmdBody.includes('iterate-needed'),
@@ -223,6 +239,45 @@ describe('/ai-sdlc dispatch-worker body — Phase 1.5 iteration (AISDLC-377.2)',
     assert.ok(
       cmdBody.includes('OQ-4') || cmdBody.includes('Phase 1.5'),
       'must cite OQ-4 (or Phase 1.5) as the source of the iteration contract',
+    );
+  });
+
+  it('MAJOR #3 (iteration-2 review): scans inflight/ via list-resume-signals BEFORE falling back to env-var lookup', () => {
+    // Filesystem-durable resume discovery: a Worker session restart between
+    // the Conductor's resume-write and the Worker's next tick must not
+    // silently strand the inflight slot. The env var is lost on restart;
+    // the filesystem signal survives. We assert against the BASH
+    // INVOCATION order (not prose mentions in the surrounding markdown):
+    // the `node ... list-resume-signals` invocation must precede the
+    // bash test that reads $AI_SDLC_DISPATCH_RESUME_TASK_ID.
+    const listInvocationRe = /node\s+"\$PIPELINE_CLI_BIN\/cli-dispatch\.mjs"\s+list-resume-signals/;
+    const listMatch = listInvocationRe.exec(cmdBody);
+    assert.ok(
+      listMatch,
+      'must invoke `node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" list-resume-signals` for on-disk discovery',
+    );
+    // The env-var READ in bash looks like `${AI_SDLC_DISPATCH_RESUME_TASK_ID:-}`
+    // or `"$AI_SDLC_DISPATCH_RESUME_TASK_ID"`. Prose mentions of the var
+    // name (in surrounding markdown) are intentionally allowed before the
+    // scan — they document the fallback. We only need to gate the FIRST
+    // bash read against the list-resume-signals invocation.
+    const envReadRe = /\$\{AI_SDLC_DISPATCH_RESUME_TASK_ID:-\}/;
+    const envReadMatch = envReadRe.exec(cmdBody);
+    if (envReadMatch) {
+      assert.ok(
+        envReadMatch.index > listMatch.index,
+        `Bash read of $AI_SDLC_DISPATCH_RESUME_TASK_ID must come AFTER the list-resume-signals invocation (env read at ${envReadMatch.index}, scan at ${listMatch.index}). Filesystem discovery is canonical; env var is fallback only.`,
+      );
+    }
+  });
+
+  it('MAJOR #3: gates Step 2b claim on IS_RESUME so resume + claim do not race in the same tick', () => {
+    // When the resume scan surfaces a signal, the Worker MUST NOT also
+    // claim a fresh manifest in the same tick — burning a slot for nothing
+    // would defeat the iteration-as-continuation contract.
+    assert.ok(
+      /if\s+\[\s+"\$IS_RESUME"\s+!=\s+"yes"\s+\]/.test(cmdBody),
+      'Step 2b must be guarded by `if [ "$IS_RESUME" != "yes" ]` so a resume tick does not also claim a fresh manifest',
     );
   });
 });

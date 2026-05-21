@@ -25,6 +25,7 @@ export {
   DEFAULT_BOARD_DIR,
   DEFAULT_HEARTBEAT_STALE_MS,
   ensureBoardDirs,
+  listResumeSignals,
   peekQueue,
   probeIterationBudget,
   readHeartbeat,

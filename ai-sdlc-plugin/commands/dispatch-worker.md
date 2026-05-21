@@ -80,54 +80,87 @@ fi
 ## Step 2a — Resume-signal check (Phase 1.5 / AISDLC-377.2)
 
 **Before** claiming a fresh manifest, check whether ANY inflight manifest
-this Worker session previously completed-as-iterate-needed now has a
-resume signal next to it. The Worker tracks the taskId of its last
-iterate-needed completion in `$AI_SDLC_DISPATCH_RESUME_TASK_ID` (set at the
-end of Step 5 — see below).
+has a pending resume signal. The Worker's discovery is **filesystem-first**
+(MAJOR #3, iteration-2 close-out): a resume signal is a `*.resume.json` file
+under `inflight/`, which survives Worker session restarts. The env-var
+`AI_SDLC_DISPATCH_RESUME_TASK_ID` (exported at the end of Step 5) is only a
+fast-path optimization — relying on it alone would silently strand the
+inflight slot if the Worker session died and was re-launched between
+Conductor's resume-write and the Worker's next tick.
 
 ```bash
-RESUME_TASK_ID="${AI_SDLC_DISPATCH_RESUME_TASK_ID:-}"
-if [ -n "$RESUME_TASK_ID" ]; then
-  SIGNAL_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" read-resume-signal \
-    --board-dir "$BOARD_DIR" --task-id "$RESUME_TASK_ID")
-  PRESENT=$(echo "$SIGNAL_JSON" | node -e "
-    const d=[]; process.stdin.on('data',c=>d.push(c));
-    process.stdin.on('end',()=>{
-      const r = JSON.parse(d.join(''));
-      process.stdout.write(r.present ? 'yes' : 'no');
-    });
-  ")
-  if [ "$PRESENT" = "yes" ]; then
-    # The Conductor has written a resume signal for the prior iteration.
-    # Skip Step 2b's claim and resume the prior session instead — see
-    # Step 4-Resume below for the Agent invocation shape.
-    TASK_ID="$RESUME_TASK_ID"
-    WORKTREE=$(echo "$SIGNAL_JSON" | node -e "
+IS_RESUME=no
+RESUME_TASK_ID=""
+
+# 1. Scan inflight/ for any pending resume signals — filesystem-durable,
+#    survives Worker session restart. This is the canonical discovery path.
+SIGNALS_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" list-resume-signals \
+  --board-dir "$BOARD_DIR")
+FIRST_RESUMABLE_TASK=$(echo "$SIGNALS_JSON" | node -e "
+  const d=[]; process.stdin.on('data',c=>d.push(c));
+  process.stdin.on('end',()=>{
+    const r = JSON.parse(d.join(''));
+    const signals = Array.isArray(r.signals) ? r.signals : [];
+    // The Worker can resume any signal whose corresponding manifest
+    // declares a compatible workerKind. Phase 1 ships only in-session-agent
+    // so the first available signal is always claimable here; Phase 2 will
+    // need to read the inflight manifest's workerKind before resuming.
+    process.stdout.write(signals.length > 0 ? signals[0].taskId : '');
+  });
+")
+
+if [ -n "$FIRST_RESUMABLE_TASK" ]; then
+  RESUME_TASK_ID="$FIRST_RESUMABLE_TASK"
+  IS_RESUME=yes
+  echo "[dispatch-worker] resume signal discovered on disk for $RESUME_TASK_ID — running iteration 2"
+else
+  # 2. No on-disk signal. Fall through to the env-var fast path for the
+  #    common single-session case (Worker stayed alive across the
+  #    Conductor's write). This is now redundant defense-in-depth: if a
+  #    signal exists for this task ID, the scan above already picked it up.
+  ENV_RESUME_TASK_ID="${AI_SDLC_DISPATCH_RESUME_TASK_ID:-}"
+  if [ -n "$ENV_RESUME_TASK_ID" ]; then
+    SIGNAL_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" read-resume-signal \
+      --board-dir "$BOARD_DIR" --task-id "$ENV_RESUME_TASK_ID")
+    PRESENT=$(echo "$SIGNAL_JSON" | node -e "
       const d=[]; process.stdin.on('data',c=>d.push(c));
       process.stdin.on('end',()=>{
         const r = JSON.parse(d.join(''));
-        // The worktree isn't on the signal; read it back from the
-        // still-inflight manifest. Done below via cli-dispatch peek+grep.
-        process.stdout.write('');
+        process.stdout.write(r.present ? 'yes' : 'no');
       });
     ")
-    echo "[dispatch-worker] resume signal detected for $RESUME_TASK_ID — running iteration 2"
-    # Fall through to Step 4-Resume.
-    IS_RESUME=yes
+    if [ "$PRESENT" = "yes" ]; then
+      RESUME_TASK_ID="$ENV_RESUME_TASK_ID"
+      IS_RESUME=yes
+      echo "[dispatch-worker] resume signal detected via env for $RESUME_TASK_ID — running iteration 2"
+    fi
   fi
+fi
+
+if [ "$IS_RESUME" = "yes" ]; then
+  # Resume path: TASK_ID + WORKTREE will be re-read from the still-inflight
+  # manifest in Step 4-Resume; fall through past Step 2b's claim.
+  TASK_ID="$RESUME_TASK_ID"
 fi
 ```
 
-If no resume signal is present, proceed to Step 2b to claim a fresh
-manifest.
+If no resume signal is present (`IS_RESUME=no`), proceed to Step 2b to
+claim a fresh manifest.
 
 ## Step 2b — Claim a manifest (fresh dispatch)
 
+Only executed when Step 2a did not surface a resume signal (`IS_RESUME=no`).
+When resuming, the Worker already has its TASK_ID + must continue against
+the still-inflight manifest — claiming a NEW manifest in the same tick
+would burn a slot for nothing.
+
 ```bash
+if [ "$IS_RESUME" != "yes" ]; then
 CLAIM_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" claim \
   --board-dir "$BOARD_DIR" \
   --worker-kind in-session-agent)
 echo "[dispatch-worker] claim: $CLAIM_JSON"
+fi
 ```
 
 Parse the JSON:

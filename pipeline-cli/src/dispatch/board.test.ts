@@ -29,6 +29,7 @@ import {
   claimNext,
   collectVerdicts,
   ensureBoardDirs,
+  listResumeSignals,
   peekQueue,
   probeIterationBudget,
   readHeartbeat,
@@ -879,6 +880,51 @@ describe('writeResumeSignal + readResumeSignal + removeResumeSignal', () => {
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-3008.resume.json'))).toBe(false);
   });
 
+  it('MAJOR #3 (iteration-2 review): listResumeSignals returns every pending signal in inflight/', () => {
+    // Filesystem-durable resume discovery: the Worker scans the on-disk
+    // list BEFORE its env-var fast path so a session restart between
+    // Conductor's resume-write and Worker's next tick doesn't strand the
+    // inflight slot.
+    const boardDir = mkBoard();
+    // Empty board → empty array (no false positives, no throw).
+    expect(listResumeSignals(boardDir)).toEqual([]);
+    // Set up 2 inflight manifests, write a resume signal next to each.
+    writeManifest(boardDir, mkManifest('AISDLC-3050'));
+    writeManifest(boardDir, mkManifest('AISDLC-3051'));
+    claimNext(boardDir, 'in-session-agent');
+    claimNext(boardDir, 'in-session-agent');
+    writeResumeSignal(boardDir, mkResumeSignal('AISDLC-3050'));
+    writeResumeSignal(boardDir, mkResumeSignal('AISDLC-3051'));
+    const signals = listResumeSignals(boardDir);
+    const taskIds = signals.map((s) => s.taskId).sort();
+    expect(taskIds).toEqual(['AISDLC-3050', 'AISDLC-3051']);
+    // Every entry carries a resolvable signalPath.
+    for (const s of signals) {
+      expect(existsSync(s.signalPath)).toBe(true);
+      expect(s.signalPath.endsWith('.resume.json')).toBe(true);
+    }
+  });
+
+  it('MAJOR #3: listResumeSignals does NOT include manifests/heartbeats — only resume signals', () => {
+    // Defensive filter: the helper distinguishes resume-signal files from
+    // dispatch.json and state.json files that live in the same dir.
+    const boardDir = mkBoard();
+    writeManifest(boardDir, mkManifest('AISDLC-3052'));
+    claimNext(boardDir, 'in-session-agent');
+    writeHeartbeat(boardDir, mkHeartbeat('AISDLC-3052'));
+    // No resume signal written — helper must return empty.
+    expect(listResumeSignals(boardDir)).toEqual([]);
+  });
+
+  it('MAJOR #3: listResumeSignals on a non-existent boardDir returns empty (no throw)', () => {
+    // Pre-board init: the Worker poll loop may run before the Conductor
+    // has ever called ensureBoardDirs. The helper must be safe in that
+    // state.
+    const boardDir = mkBoard();
+    expect(() => listResumeSignals(boardDir)).not.toThrow();
+    expect(listResumeSignals(boardDir)).toEqual([]);
+  });
+
   it('sweepStaleHeartbeats sweeps a lingering resume signal on reap', () => {
     const boardDir = mkBoard();
     writeManifest(
@@ -1054,14 +1100,13 @@ describe('Phase 1.5 hermetic end-to-end (AC #6, #7)', () => {
     expect(existsSync(path.join(boardDir, 'done', 'AISDLC-3300.verdict.json'))).toBe(true);
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-3300.dispatch.json'))).toBe(true);
 
-    // The Worker bumps the manifest's iterationsAttempted = 1 in place so
-    // the Conductor's budget probe sees the actual burn count. (Without
-    // this the manifest still shows attempts=0 even though the verdict
-    // says 1 — the manifest is the source of truth for budget decisions.)
-    const inflightManifestPath = path.join(boardDir, 'inflight', 'AISDLC-3300.dispatch.json');
-    const m1 = JSON.parse(readFileSync(inflightManifestPath, 'utf-8')) as DispatchManifest;
-    m1.iterationsAttempted = 1;
-    writeFileSync(inflightManifestPath, JSON.stringify(m1, null, 2) + '\n', 'utf-8');
+    // MAJOR #1 (iteration-2 review close-out): writeVerdict propagates the
+    // verdict's iterationsAttempted onto the inflight manifest in lockstep.
+    // The Conductor's `probeIterationBudget` reads the manifest, NOT the
+    // verdict, so the manifest must reflect the actual burn count for the
+    // budget gate to fire correctly. This test no longer manually mutates
+    // the manifest — if the propagation is wired through, the probe below
+    // will see attempts=1.
 
     // ── Step 3: Conductor probes the budget — attempts=1, budget=2,
     // exhausted=false → write a resume signal.
@@ -1104,6 +1149,88 @@ describe('Phase 1.5 hermetic end-to-end (AC #6, #7)', () => {
     // All inflight artifacts cleared by the terminal success verdict.
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-3300.dispatch.json'))).toBe(false);
     expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-3300.resume.json'))).toBe(false);
+  });
+
+  it('MAJOR #1: writeVerdict(iterate-needed) propagates iterationsAttempted onto the inflight manifest in lockstep', () => {
+    // Iteration-2 review close-out: the manifest is the canonical record
+    // probeIterationBudget reads. If writeVerdict doesn't propagate the
+    // Worker's iterationsAttempted onto the manifest, the budget gate sees
+    // attempts=0 forever — Conductor keeps writing resume signals past the
+    // cap. This test asserts the fix is wired through.
+    const boardDir = mkBoard();
+    writeManifest(
+      boardDir,
+      mkManifest('AISDLC-3303', 'in-session-agent', {
+        iterationsAttempted: 0,
+        iterationBudget: 2,
+      }),
+    );
+    claimNext(boardDir, 'in-session-agent');
+    writeVerdict(boardDir, mkVerdict('AISDLC-3303', 'iterate-needed', { iterationsAttempted: 1 }));
+    // Read the on-disk manifest directly — no manual mutation, just verify
+    // writeVerdict did the propagation as part of its iterate-needed branch.
+    const m = JSON.parse(
+      readFileSync(path.join(boardDir, 'inflight', 'AISDLC-3303.dispatch.json'), 'utf-8'),
+    ) as DispatchManifest;
+    expect(m.iterationsAttempted).toBe(1);
+  });
+
+  it('MAJOR #1: probeIterationBudget reads the manifest writeVerdict updated, so the budget gate fires at the cap', () => {
+    // End-to-end: emit manifest with attempts=0/budget=2 → write
+    // iterate-needed verdict #1 (attempts:=1) → probe shows attempts=1,
+    // not exhausted → write iterate-needed verdict #2 (attempts:=2) →
+    // probe shows attempts=2, exhausted → writeResumeSignal refuses.
+    const boardDir = mkBoard();
+    writeManifest(
+      boardDir,
+      mkManifest('AISDLC-3304', 'in-session-agent', {
+        iterationsAttempted: 0,
+        iterationBudget: 2,
+      }),
+    );
+    claimNext(boardDir, 'in-session-agent');
+
+    writeVerdict(boardDir, mkVerdict('AISDLC-3304', 'iterate-needed', { iterationsAttempted: 1 }));
+    const probe1 = probeIterationBudget(boardDir, 'AISDLC-3304');
+    expect(probe1.attempts).toBe(1);
+    expect(probe1.exhausted).toBe(false);
+
+    // Conductor would write a resume signal here — allowed because <budget.
+    writeResumeSignal(boardDir, mkResumeSignal('AISDLC-3304', { priorIteration: 1 }));
+    removeResumeSignal(boardDir, 'AISDLC-3304');
+
+    // Worker's second-attempt iterate-needed lands → manifest moves to attempts=2.
+    writeVerdict(boardDir, mkVerdict('AISDLC-3304', 'iterate-needed', { iterationsAttempted: 2 }));
+    const probe2 = probeIterationBudget(boardDir, 'AISDLC-3304');
+    expect(probe2.attempts).toBe(2);
+    expect(probe2.exhausted).toBe(true);
+
+    // Conductor MUST refuse a third resume — the gate now fires correctly
+    // because the manifest reflects the actual burn count.
+    expect(() => writeResumeSignal(boardDir, mkResumeSignal('AISDLC-3304'))).toThrow(
+      /iteration budget exhausted/i,
+    );
+  });
+
+  it('MAJOR #1: writeVerdict(iterate-needed) without iterationsAttempted leaves the manifest field untouched', () => {
+    // Backward-compat: a Worker that omits iterationsAttempted on the
+    // verdict (v1.0 client / non-Phase-1.5 callsite) must NOT zero-out the
+    // manifest's existing value. writeVerdict only propagates when the
+    // verdict carries the field.
+    const boardDir = mkBoard();
+    writeManifest(
+      boardDir,
+      mkManifest('AISDLC-3305', 'in-session-agent', {
+        iterationsAttempted: 1,
+        iterationBudget: 2,
+      }),
+    );
+    claimNext(boardDir, 'in-session-agent');
+    writeVerdict(boardDir, mkVerdict('AISDLC-3305', 'iterate-needed'));
+    const m = JSON.parse(
+      readFileSync(path.join(boardDir, 'inflight', 'AISDLC-3305.dispatch.json'), 'utf-8'),
+    ) as DispatchManifest;
+    expect(m.iterationsAttempted).toBe(1); // unchanged from initial
   });
 
   it('writeVerdict preserves inflight artifacts on iterate-needed (iteration semantics)', () => {
