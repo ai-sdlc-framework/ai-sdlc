@@ -190,6 +190,37 @@ describe('/ai-sdlc orchestrator-tick body — RFC-0041 Phase 1 Dispatch Board pr
   });
 });
 
+describe('/ai-sdlc orchestrator-tick body — Phase 1.5 iteration (AISDLC-377.2)', () => {
+  it('handles iterate-needed verdicts via probe-iteration-budget', () => {
+    assert.ok(
+      /probe-iteration-budget/.test(cmdBody),
+      'must invoke `cli-dispatch probe-iteration-budget` for iterate-needed decisions',
+    );
+  });
+
+  it('writes a resume signal when budget is not exhausted', () => {
+    assert.ok(
+      /write-resume-signal/.test(cmdBody),
+      'must invoke `cli-dispatch write-resume-signal` to trigger Worker iteration',
+    );
+  });
+
+  it('escalates with iteration-exhausted when budget is exhausted', () => {
+    assert.ok(
+      /write-iteration-exhausted/.test(cmdBody),
+      'must invoke `cli-dispatch write-iteration-exhausted` at budget cap',
+    );
+  });
+
+  it('describes the iterate-needed → resume-or-escalate decision', () => {
+    assert.ok(cmdBody.includes('iterate-needed'), 'must describe the iterate-needed outcome path');
+    assert.ok(
+      cmdBody.includes('iteration-exhausted') || cmdBody.includes('iteration budget'),
+      'must describe budget exhaustion handling',
+    );
+  });
+});
+
 describe('/ai-sdlc orchestrator-tick body — hard rules', () => {
   it('declares the no-merge rule', () => {
     assert.ok(

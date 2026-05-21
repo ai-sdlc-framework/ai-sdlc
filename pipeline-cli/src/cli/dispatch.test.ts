@@ -49,7 +49,7 @@ function mkBoard(): string {
   return path.join(mkdtempSync(path.join(tmpdir(), 'dispatch-cli-')), 'dispatch');
 }
 
-function mkManifest(taskId: string): DispatchManifest {
+function mkManifest(taskId: string, overrides: Partial<DispatchManifest> = {}): DispatchManifest {
   return {
     schemaVersion: 'v1',
     taskId,
@@ -63,6 +63,7 @@ function mkManifest(taskId: string): DispatchManifest {
       taskFile: `backlog/tasks/${taskId.toLowerCase()}.md`,
       verifyCommands: ['pnpm build'],
     },
+    ...overrides,
   };
 }
 
@@ -321,8 +322,282 @@ describe('runDispatchCli', () => {
     expect(captured.raw).toMatch(/Subcommands/);
   });
 
+  it('help mentions Phase 1.5 iteration subcommands', async () => {
+    const { captured } = await captureStdout(() => runDispatchCli(['help']));
+    expect(captured.raw).toMatch(/write-resume-signal/);
+    expect(captured.raw).toMatch(/probe-iteration-budget/);
+    expect(captured.raw).toMatch(/write-iteration-exhausted/);
+  });
+
   it('unknown subcommand exits 2', async () => {
     const { exit } = await captureStdout(() => runDispatchCli(['no-such-cmd']));
     expect(exit).toBe(2);
+  });
+
+  // -------------------------------------------------------------------------
+  // Phase 1.5 (AISDLC-377.2) — iteration subcommands
+  // -------------------------------------------------------------------------
+
+  describe('write-resume-signal / read-resume-signal / remove-resume-signal', () => {
+    it('writes a resume signal next to an inflight manifest', async () => {
+      dispatchWriteManifest(
+        boardDir,
+        mkManifest('AISDLC-4000', { iterationsAttempted: 1, iterationBudget: 2 }),
+      );
+      await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'write-resume-signal',
+          '--board-dir',
+          boardDir,
+          '--task-id',
+          'AISDLC-4000',
+          '--feedback',
+          'reviewer wants edge-case coverage on path P',
+          '--prior-iteration',
+          '1',
+          '--triggered-by',
+          'conductor-test',
+        ]),
+      );
+      expect(exit).toBe(0);
+      const result = readLastJson(captured) as { ok: boolean; path: string };
+      expect(result.ok).toBe(true);
+      expect(result.path).toMatch(/AISDLC-4000\.resume\.json$/);
+    });
+
+    it('refuses when iteration budget already exhausted (exit 1, {ok:false,error})', async () => {
+      dispatchWriteManifest(
+        boardDir,
+        mkManifest('AISDLC-4001', { iterationsAttempted: 2, iterationBudget: 2 }),
+      );
+      await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'write-resume-signal',
+          '--board-dir',
+          boardDir,
+          '--task-id',
+          'AISDLC-4001',
+          '--feedback',
+          'fb',
+        ]),
+      );
+      expect(exit).toBe(1);
+      const result = readLastJson(captured) as { ok: boolean; error: string };
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/iteration budget exhausted/i);
+    });
+
+    it('refuses when no inflight manifest exists', async () => {
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'write-resume-signal',
+          '--board-dir',
+          boardDir,
+          '--task-id',
+          'AISDLC-NOPE',
+          '--feedback',
+          'fb',
+        ]),
+      );
+      expect(exit).toBe(1);
+      const result = readLastJson(captured) as { ok: boolean; error: string };
+      expect(result.error).toMatch(/no inflight manifest/i);
+    });
+
+    it('read-resume-signal returns {present:false} when no signal exists', async () => {
+      const { captured } = await captureStdout(() =>
+        runDispatchCli(['read-resume-signal', '--board-dir', boardDir, '--task-id', 'AISDLC-NOPE']),
+      );
+      expect(readLastJson(captured)).toEqual({ present: false });
+    });
+
+    it('read-resume-signal returns the parsed signal when present', async () => {
+      dispatchWriteManifest(
+        boardDir,
+        mkManifest('AISDLC-4002', { iterationsAttempted: 1, iterationBudget: 2 }),
+      );
+      await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
+      await runDispatchCli([
+        'write-resume-signal',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-4002',
+        '--feedback',
+        'fb',
+        '--prior-iteration',
+        '1',
+      ]);
+      const { captured } = await captureStdout(() =>
+        runDispatchCli(['read-resume-signal', '--board-dir', boardDir, '--task-id', 'AISDLC-4002']),
+      );
+      const result = readLastJson(captured) as {
+        present: boolean;
+        signal: { feedback: string; priorIteration: number };
+      };
+      expect(result.present).toBe(true);
+      expect(result.signal.feedback).toBe('fb');
+      expect(result.signal.priorIteration).toBe(1);
+    });
+
+    it('remove-resume-signal is idempotent on missing files', async () => {
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'remove-resume-signal',
+          '--board-dir',
+          boardDir,
+          '--task-id',
+          'AISDLC-NOPE',
+        ]),
+      );
+      expect(exit).toBe(0);
+      expect(readLastJson(captured)).toEqual({ ok: true });
+    });
+
+    it('remove-resume-signal deletes an existing signal', async () => {
+      dispatchWriteManifest(
+        boardDir,
+        mkManifest('AISDLC-4003', { iterationsAttempted: 1, iterationBudget: 2 }),
+      );
+      await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
+      await runDispatchCli([
+        'write-resume-signal',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-4003',
+        '--feedback',
+        'fb',
+      ]);
+      await runDispatchCli([
+        'remove-resume-signal',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-4003',
+      ]);
+      expect(existsSync(path.join(boardDir, 'inflight', 'AISDLC-4003.resume.json'))).toBe(false);
+    });
+  });
+
+  describe('probe-iteration-budget', () => {
+    it('reports defaults for a v1.0 manifest with no iteration fields', async () => {
+      dispatchWriteManifest(boardDir, mkManifest('AISDLC-4100'));
+      await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
+      const { captured } = await captureStdout(() =>
+        runDispatchCli([
+          'probe-iteration-budget',
+          '--board-dir',
+          boardDir,
+          '--task-id',
+          'AISDLC-4100',
+        ]),
+      );
+      const result = readLastJson(captured) as {
+        attempts: number;
+        budget: number;
+        exhausted: boolean;
+        hasManifest: boolean;
+      };
+      expect(result.attempts).toBe(0);
+      expect(result.budget).toBe(2); // DEFAULT_ITERATION_BUDGET
+      expect(result.exhausted).toBe(false);
+      expect(result.hasManifest).toBe(true);
+    });
+
+    it('reports exhausted=true when attempts >= budget', async () => {
+      dispatchWriteManifest(
+        boardDir,
+        mkManifest('AISDLC-4101', { iterationsAttempted: 2, iterationBudget: 2 }),
+      );
+      await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
+      const { captured } = await captureStdout(() =>
+        runDispatchCli([
+          'probe-iteration-budget',
+          '--board-dir',
+          boardDir,
+          '--task-id',
+          'AISDLC-4101',
+        ]),
+      );
+      const result = readLastJson(captured) as { exhausted: boolean };
+      expect(result.exhausted).toBe(true);
+    });
+
+    it('reports hasManifest=false when no inflight manifest exists', async () => {
+      const { captured } = await captureStdout(() =>
+        runDispatchCli([
+          'probe-iteration-budget',
+          '--board-dir',
+          boardDir,
+          '--task-id',
+          'AISDLC-MISSING',
+        ]),
+      );
+      const result = readLastJson(captured) as { hasManifest: boolean };
+      expect(result.hasManifest).toBe(false);
+    });
+  });
+
+  describe('write-iteration-exhausted', () => {
+    it('writes an iteration-exhausted diagnostic to failed/', async () => {
+      dispatchWriteManifest(
+        boardDir,
+        mkManifest('AISDLC-4200', { iterationsAttempted: 2, iterationBudget: 2 }),
+      );
+      await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
+      const { exit } = await captureStdout(() =>
+        runDispatchCli([
+          'write-iteration-exhausted',
+          '--board-dir',
+          boardDir,
+          '--task-id',
+          'AISDLC-4200',
+          '--iterations-attempted',
+          '2',
+          '--iteration-budget',
+          '2',
+          '--worker-kind',
+          'in-session-agent',
+        ]),
+      );
+      expect(exit).toBe(0);
+      const diag = JSON.parse(
+        readFileSync(path.join(boardDir, 'failed', 'AISDLC-4200.diagnostic.json'), 'utf-8'),
+      );
+      expect(diag.outcome).toBe('iteration-exhausted');
+      expect(diag.cause).toBe('iteration-budget-exhausted');
+      expect(diag.iterationsAttempted).toBe(2);
+      expect(diag.workerKind).toBe('in-session-agent');
+    });
+  });
+
+  describe('write-verdict --iterations-attempted + --session-id', () => {
+    it('threads iterationsAttempted + sessionId onto the verdict JSON', async () => {
+      dispatchWriteManifest(boardDir, mkManifest('AISDLC-4300'));
+      await runDispatchCli(['claim', '--board-dir', boardDir, '--worker-kind', 'in-session-agent']);
+      await runDispatchCli([
+        'write-verdict',
+        '--board-dir',
+        boardDir,
+        '--task-id',
+        'AISDLC-4300',
+        '--outcome',
+        'success',
+        '--worker-id',
+        'w1',
+        '--iterations-attempted',
+        '2',
+        '--session-id',
+        'abc-uuid',
+      ]);
+      const verdict = JSON.parse(
+        readFileSync(path.join(boardDir, 'done', 'AISDLC-4300.verdict.json'), 'utf-8'),
+      );
+      expect(verdict.iterationsAttempted).toBe(2);
+      expect(verdict.sessionId).toBe('abc-uuid');
+    });
   });
 });

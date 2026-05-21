@@ -25,8 +25,15 @@
     },
     "outcome": {
       "type": "string",
-      "enum": ["success", "iterate-needed", "failed", "quota-exhausted", "blocked"],
-      "description": "Verdict outcome. 'success' = ready for reviewer fan-out; 'iterate-needed' = Phase 1.5 resume signal (RFC-0015 §5); 'failed' = unrecoverable, Conductor escalates; 'quota-exhausted' = OQ-7 cool-down trigger; 'blocked' = Worker stopped because a precondition (e.g. open upstream OQ) requires operator action."
+      "enum": [
+        "success",
+        "iterate-needed",
+        "iteration-exhausted",
+        "failed",
+        "quota-exhausted",
+        "blocked"
+      ],
+      "description": "Verdict outcome. 'success' = ready for reviewer fan-out; 'iterate-needed' = Phase 1.5 Worker is asking the Conductor to trigger another iteration (RFC-0041 OQ-4); 'iteration-exhausted' = Phase 1.5 budget-exhaustion diagnostic written by the Conductor when iterate-needed lands at iterationsAttempted == iterationBudget; 'failed' = unrecoverable, Conductor escalates; 'quota-exhausted' = OQ-7 cool-down trigger; 'blocked' = Worker stopped because a precondition (e.g. open upstream OQ) requires operator action."
     },
     "commitSha": {
       "type": ["string", "null"],
@@ -88,6 +95,16 @@
       "type": "integer",
       "minimum": 0,
       "description": "Worker wall-clock duration in milliseconds from claim to verdict emit."
+    },
+    "iterationsAttempted": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Phase 1.5 (AISDLC-377.2) — total iteration cycles burned to produce this verdict. First-attempt verdicts set this to 1 (the original dispatch counts as iteration 1). Resume-attempt verdicts set this to the prior value + 1. Conductor inspects this against manifest.iterationBudget when deciding whether 'iterate-needed' triggers another resume or escalates to 'iteration-exhausted'."
+    },
+    "sessionId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured by a claude-p-shell Worker. Stored on the verdict so the Conductor can promote it onto the next iteration's manifest as manifest.lastSessionId. in-session-agent Workers leave this null."
     }
   },
   "additionalProperties": false

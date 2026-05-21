@@ -33,3 +33,12 @@ spec:
 
   boardDir: .ai-sdlc/dispatch
   heartbeatStaleSec: 1800 # 30 min — RFC-0041 OQ-3
+
+  # Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration knobs. The
+  # Conductor uses these when an `iterate-needed` verdict lands: if the
+  # manifest's iterationsAttempted < iterationBudget, write a resume signal
+  # so the same Worker continues with full prior conversation context;
+  # otherwise escalate with an `iteration-exhausted` diagnostic. Defaults
+  # match RFC-0015 §5 — one original attempt + one resume = 2.
+  iteration:
+    defaultBudget: 2 # max iteration cycles per task (1 first attempt + 1 resume)

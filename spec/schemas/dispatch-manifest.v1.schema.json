@@ -94,17 +94,17 @@
     "iterationsAttempted": {
       "type": "integer",
       "minimum": 0,
-      "description": "Phase 1.5 (AISDLC-377.2) — number of iteration cycles already burned. Initialized to 0 by the Conductor; incremented by the Worker on resume."
+      "description": "Phase 1.5 (AISDLC-377.2) — number of iteration cycles already burned. Initialized to 0 by the Conductor on first dispatch; the Worker writes the post-iteration count (= prior + 1) on the verdict it emits after consuming a resume signal. Default 0 (backward-compat with v1.0 manifests omitting the field)."
     },
     "iterationBudget": {
       "type": "integer",
       "minimum": 0,
-      "description": "Phase 1.5 (AISDLC-377.2) — max iteration count before escalation (RFC-0015 §5 budget=2 default). Declared in Phase 1 for forward-compat; Phase 1 Workers ignore it."
+      "description": "Phase 1.5 (AISDLC-377.2) — max iteration count before the Conductor escalates with 'iteration-exhausted'. RFC-0015 §5 caps at 2 (the historical /ai-sdlc execute Step 9 iterate-dev budget). Default 2 when omitted. The Conductor MUST NOT trigger a resume when iterationsAttempted == iterationBudget."
     },
     "lastSessionId": {
       "type": "string",
       "minLength": 1,
-      "description": "Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured on first attempt for context-preserving resume. Phase 1 Workers do not set this."
+      "description": "Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured on first attempt for context-preserving resume of claude-p-shell Workers. The supervisor passes --session-id <uuid> on first spawn, records the uuid here on successful exit, and re-spawns with --resume <uuid> '<conductor-feedback>' on resume signal. in-session-agent Workers leave this null (they use the Agent tool's continue:true semantics instead). Phase 2 (AISDLC-377.3) wires the supervisor side."
     },
     "noClaimBefore": {
       "type": "string",

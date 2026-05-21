@@ -45,7 +45,7 @@ the dev subagent in their own foreground context.
 6. **Never run destructive git operations.** No `git reset --hard`.
 7. **Never write CI-skip tokens** (`[skip ci]`, `[ci skip]`, etc.) in commits.
 
-## Protocol overview (RFC-0041 Phase 1)
+## Protocol overview (RFC-0041 Phase 1 + Phase 1.5)
 
 ```
 /ai-sdlc orchestrator-tick (Conductor)
@@ -53,11 +53,18 @@ the dev subagent in their own foreground context.
   ├── 1. Check AI_SDLC_AUTONOMOUS_ORCHESTRATOR is set
   ├── 2. Sweep stale heartbeats (reap dead Workers into failed/)
   ├── 3. Poll done/ subdir — for each new verdict:
-  │       a. Spawn 3 reviewer subagents (foreground Agent calls)
-  │       b. Sign attestation
-  │       c. Push branch + arm auto-merge
-  │       d. Remove the consumed verdict
+  │       outcome === 'success':
+  │         a. Spawn 3 reviewer subagents (foreground Agent calls)
+  │         b. Sign attestation
+  │         c. Push branch + arm auto-merge
+  │         d. Remove the consumed verdict
+  │       outcome === 'iterate-needed' (Phase 1.5 / AISDLC-377.2):
+  │         a. Probe iteration budget — if exhausted, write
+  │            'iteration-exhausted' diagnostic; else write a resume
+  │            signal next to the still-inflight manifest
+  │         b. Remove the consumed verdict (manifest stays in inflight/)
   ├── 4. Poll failed/ subdir — escalate diagnostics to operator
+  │       (including 'iteration-exhausted' from step 3)
   ├── 5. Peek queue + inflight counts — if under cap, emit new manifests
   │       (one per frontier-admitted task, via cli-deps frontier)
   └── 6. ScheduleWakeup(30s) — OR exit if --once passed
@@ -135,8 +142,60 @@ For each verdict in the array with `outcome === 'success'`:
    ```
 
 For verdicts with `outcome === 'iterate-needed'` (Phase 1.5 / AISDLC-377.2),
-the Conductor will write an iteration resume signal. Phase 1 just escalates
-these to the operator.
+the Conductor runs the **iteration trigger protocol** (RFC-0041 OQ-4):
+
+```bash
+# 1. Probe the manifest's iteration budget. Output:
+#    {"taskId":"...","attempts":N,"budget":M,"exhausted":<bool>,"hasManifest":true}
+PROBE_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" probe-iteration-budget \
+  --board-dir "$BOARD_DIR" --task-id "$TASK_ID")
+
+EXHAUSTED=$(echo "$PROBE_JSON" | node -e "
+  const d=[]; process.stdin.on('data',c=>d.push(c));
+  process.stdin.on('end',()=>{
+    const r = JSON.parse(d.join(''));
+    process.stdout.write(r.exhausted ? 'yes' : 'no');
+  });
+")
+
+if [ "$EXHAUSTED" = "yes" ]; then
+  # 2a. Budget cap hit — escalate, do NOT trigger another resume.
+  node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" write-iteration-exhausted \
+    --board-dir "$BOARD_DIR" \
+    --task-id "$TASK_ID" \
+    --iterations-attempted "$ATTEMPTS" \
+    --iteration-budget "$BUDGET" \
+    --worker-kind in-session-agent
+  # The Conductor will pick this up next tick as a failed-side
+  # 'iteration-exhausted' diagnostic and surface to the operator.
+else
+  # 2b. Within budget — write a resume signal.
+  # FEEDBACK_TEXT is the concatenation of:
+  #   - the verdict's `notes` field (Worker self-reported reasons),
+  #   - any verifier stderr the Worker captured,
+  #   - the Conductor's own observations (e.g. "stale-heartbeat reaped,
+  #     trying once more").
+  # Keep it terse — this is prepended to the resumed conversation.
+  node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" write-resume-signal \
+    --board-dir "$BOARD_DIR" \
+    --task-id "$TASK_ID" \
+    --feedback "$FEEDBACK_TEXT" \
+    --prior-iteration "$ATTEMPTS" \
+    --triggered-by "conductor-$$"
+fi
+
+# In BOTH cases, consume the done/ verdict so the Conductor doesn't
+# re-process it next tick. Iteration uses the SAME inflight manifest as the
+# first attempt — the manifest stays in inflight/ for the Worker to
+# continue against; only the verdict file is consumed here.
+node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" remove-verdict \
+  --board-dir "$BOARD_DIR" --task-id "$TASK_ID" --from done
+```
+
+The Worker (running `/ai-sdlc dispatch-worker` in a sibling CC session)
+detects the resume signal on its next poll and invokes the developer agent
+with `continue: true` (preserving prior conversation state) plus the
+`FEEDBACK_TEXT` prepended.
 
 ## Step 4 — Pick up `failed/` diagnostics
 

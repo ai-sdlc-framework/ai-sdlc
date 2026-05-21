@@ -30,6 +30,22 @@
  *   - `write-manifest --json <path>` — Conductor entry point. Reads a JSON
  *     manifest from `<path>` and writes it into queue/.
  *
+ * Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
+ *
+ *   - `write-resume-signal --task-id <id> --feedback <s>` — Conductor writes
+ *     a resume signal next to the still-inflight manifest. Refuses (exit 1
+ *     with `{ok:false,error}`) when no inflight manifest exists OR when
+ *     iteration budget is already exhausted.
+ *   - `read-resume-signal --task-id <id>` — Worker polls for a Conductor-
+ *     written signal. Prints `{present:false}` or `{present:true,signal}`.
+ *   - `remove-resume-signal --task-id <id>` — Worker consumes the signal.
+ *   - `probe-iteration-budget --task-id <id>` — Conductor inspects the
+ *     manifest's iteration fields. Prints
+ *     `{taskId,attempts,budget,exhausted,hasManifest}`.
+ *   - `write-iteration-exhausted --task-id <id> --iterations-attempted <n>
+ *     --iteration-budget <n>` — Conductor escalation when an
+ *     `iterate-needed` verdict lands at the budget cap.
+ *
  * All subcommands accept `--board-dir <path>` (defaults to
  * `.ai-sdlc/dispatch` relative to the current working directory). Output
  * is always JSON on stdout so slash command bodies can parse it with
@@ -45,17 +61,23 @@ import {
   collectVerdicts,
   DEFAULT_BOARD_DIR,
   peekQueue,
+  probeIterationBudget,
+  readResumeSignal,
   releaseInflight,
+  removeResumeSignal,
   removeVerdict,
   sweepStaleHeartbeats,
   writeHeartbeat,
+  writeIterationExhaustedDiagnostic,
   writeManifest,
+  writeResumeSignal,
   writeVerdict,
 } from '../dispatch/index.js';
 import type {
   DispatchManifest,
   DispatchVerdict,
   InflightHeartbeat,
+  ResumeSignal,
   VerdictOutcome,
   WorkerKind,
 } from '../dispatch/index.js';
@@ -174,7 +196,96 @@ export async function runDispatchCli(
       if (flags['duration-ms']) {
         verdict.durationMs = Number.parseInt(flags['duration-ms'], 10);
       }
+      if (flags['iterations-attempted']) {
+        verdict.iterationsAttempted = Number.parseInt(flags['iterations-attempted'], 10);
+      }
+      if (flags['session-id']) {
+        verdict.sessionId = flags['session-id'];
+      }
       const target = writeVerdict(boardDir, verdict);
+      out({ ok: true, path: target });
+      return 0;
+    }
+
+    case 'write-resume-signal': {
+      const taskId = requireFlag(flags, 'task-id');
+      const feedback = requireFlag(flags, 'feedback');
+      const signal: ResumeSignal = {
+        schemaVersion: 'v1',
+        taskId,
+        feedback,
+        triggeredAt: flags['triggered-at'] ?? new Date().toISOString(),
+        triggeredBy: flags['triggered-by'] ?? 'conductor',
+        priorOutcome: 'iterate-needed',
+      };
+      if (flags['prior-iteration']) {
+        signal.priorIteration = Number.parseInt(flags['prior-iteration'], 10);
+      }
+      const writeOpts: { iterationBudget?: number; iterationsAttempted?: number } = {};
+      if (flags['iteration-budget']) {
+        writeOpts.iterationBudget = Number.parseInt(flags['iteration-budget'], 10);
+      }
+      if (flags['iterations-attempted']) {
+        writeOpts.iterationsAttempted = Number.parseInt(flags['iterations-attempted'], 10);
+      }
+      try {
+        const target = writeResumeSignal(boardDir, signal, writeOpts);
+        out({ ok: true, path: target });
+        return 0;
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        out({ ok: false, error: message });
+        return 1;
+      }
+    }
+
+    case 'read-resume-signal': {
+      const taskId = requireFlag(flags, 'task-id');
+      const signal = readResumeSignal(boardDir, taskId);
+      if (!signal) {
+        out({ present: false });
+        return 0;
+      }
+      out({ present: true, signal });
+      return 0;
+    }
+
+    case 'remove-resume-signal': {
+      const taskId = requireFlag(flags, 'task-id');
+      removeResumeSignal(boardDir, taskId);
+      out({ ok: true });
+      return 0;
+    }
+
+    case 'probe-iteration-budget': {
+      const taskId = requireFlag(flags, 'task-id');
+      const probe = probeIterationBudget(boardDir, taskId);
+      // Strip the manifest from the JSON output — the manifest is already
+      // available via `claim` / `peek`, and including it would balloon the
+      // bash-callable surface unnecessarily.
+      out({
+        taskId,
+        attempts: probe.attempts,
+        budget: probe.budget,
+        exhausted: probe.exhausted,
+        hasManifest: probe.manifest !== undefined,
+      });
+      return 0;
+    }
+
+    case 'write-iteration-exhausted': {
+      const taskId = requireFlag(flags, 'task-id');
+      const iterationsAttempted = Number.parseInt(requireFlag(flags, 'iterations-attempted'), 10);
+      const iterationBudget = Number.parseInt(requireFlag(flags, 'iteration-budget'), 10);
+      const args: Parameters<typeof writeIterationExhaustedDiagnostic>[1] = {
+        taskId,
+        iterationsAttempted,
+        iterationBudget,
+      };
+      if (flags['worker-id']) args.workerId = flags['worker-id'];
+      if (flags['worker-kind']) args.workerKind = flags['worker-kind'] as WorkerKind;
+      if (flags['notes']) args.notes = flags['notes'];
+      const target = writeIterationExhaustedDiagnostic(boardDir, args);
       out({ ok: true, path: target });
       return 0;
     }
@@ -260,10 +371,22 @@ Subcommands:
   peek
   claim --worker-kind {in-session-agent|claude-p-shell}
   collect-verdicts [--include-failed]
-  write-verdict --task-id <id> --outcome <enum> [--commit-sha <s>] ...
+  write-verdict --task-id <id> --outcome <enum> [--commit-sha <s>]
+                [--iterations-attempted <n>] [--session-id <uuid>] ...
   remove-verdict --task-id <id> [--from done|failed]
   heartbeat --task-id <id> --worker-id <id> --worker-kind <kind>
   sweep [--stale-ms <n>]
   release --task-id <id>
   write-manifest --json <path>
+
+Phase 1.5 (RFC-0041 OQ-4 / AISDLC-377.2) — iteration mechanism:
+  write-resume-signal --task-id <id> --feedback <s>
+                      [--triggered-by <s>] [--prior-iteration <n>]
+                      [--iteration-budget <n>] [--iterations-attempted <n>]
+  read-resume-signal --task-id <id>
+  remove-resume-signal --task-id <id>
+  probe-iteration-budget --task-id <id>
+  write-iteration-exhausted --task-id <id>
+                            --iterations-attempted <n> --iteration-budget <n>
+                            [--worker-id <s>] [--worker-kind <kind>] [--notes <s>]
 `;

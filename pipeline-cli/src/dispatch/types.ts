@@ -30,6 +30,7 @@ export type ManifestWorkerKind = WorkerKind | 'any';
 export type VerdictOutcome =
   | 'success'
   | 'iterate-needed'
+  | 'iteration-exhausted'
   | 'failed'
   | 'quota-exhausted'
   | 'blocked';
@@ -94,6 +95,48 @@ export interface DispatchVerdict {
   retryAfter?: number;
   cause?: string;
   durationMs?: number;
+  /**
+   * RFC-0041 Phase 1.5 (AISDLC-377.2) — total iteration cycles the Worker
+   * burned to produce this verdict. First-attempt verdicts set this to 1;
+   * resume-attempt verdicts set this to the prior value + 1. The Conductor
+   * compares this against `manifest.iterationBudget` when an `iterate-needed`
+   * verdict lands — at the cap, the Conductor writes an
+   * `iteration-exhausted` diagnostic and stops triggering resumes.
+   */
+  iterationsAttempted?: number;
+  /**
+   * RFC-0041 Phase 1.5 (AISDLC-377.2) — `claude -p --session-id` captured by
+   * a `claude-p-shell` Worker. The Conductor promotes this onto the next
+   * iteration's manifest as `manifest.lastSessionId` so the supervisor can
+   * `--resume` against the same conversation transcript. `in-session-agent`
+   * Workers leave this undefined (they resume via Agent `continue: true`).
+   */
+  sessionId?: string;
+}
+
+/**
+ * RFC-0041 Phase 1.5 (AISDLC-377.2) — resume signal written by the Conductor
+ * under `inflight/<task-id>.resume.json` to trigger a Worker-driven iteration.
+ * The inflight manifest stays put while the iteration runs; the resume signal
+ * tells the still-alive Worker (or its supervisor-spawned successor) to
+ * continue with prior conversation context + the conductor's feedback
+ * prepended. See RFC-0041 §10 OQ-4 resolution.
+ *
+ * Schema: `spec/schemas/dispatch-resume-signal.v1.schema.json`.
+ */
+export interface ResumeSignal {
+  schemaVersion: 'v1';
+  taskId: string;
+  /** Conductor-authored feedback prepended to the Worker's next-iteration prompt. */
+  feedback: string;
+  /** ISO-8601 timestamp the Conductor wrote the signal. */
+  triggeredAt: string;
+  /** Conductor identifier (e.g. `conductor-session-<uuid>`). Audit-only. */
+  triggeredBy: string;
+  /** `iterationsAttempted` at signal-write time. Worker emits `priorIteration + 1` on its verdict. */
+  priorIteration?: number;
+  /** Always `iterate-needed` in Phase 1.5 — other outcomes are not resumable. */
+  priorOutcome?: 'iterate-needed';
 }
 
 /**
@@ -134,3 +177,11 @@ export interface SweepResult {
   /** Manifests moved from inflight/ to failed/ during this sweep. */
   reapedTaskIds: string[];
 }
+
+/**
+ * RFC-0041 Phase 1.5 (AISDLC-377.2) — default iteration budget when a manifest
+ * omits `iterationBudget`. Matches RFC-0015 §5 (iterate-dev budget = 2 — one
+ * original attempt + one resume). The Conductor honors this when deciding
+ * whether `iterate-needed` triggers another resume.
+ */
+export const DEFAULT_ITERATION_BUDGET = 2;

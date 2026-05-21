@@ -3243,25 +3243,78 @@ export const dispatchManifestV1Schema = {
       type: 'integer',
       minimum: 0,
       description:
-        'Phase 1.5 (AISDLC-377.2) — number of iteration cycles already burned. Initialized to 0 by the Conductor; incremented by the Worker on resume.',
+        'Phase 1.5 (AISDLC-377.2) — number of iteration cycles already burned. Initialized to 0 by the Conductor on first dispatch; the Worker writes the post-iteration count (= prior + 1) on the verdict it emits after consuming a resume signal. Default 0 (backward-compat with v1.0 manifests omitting the field).',
     },
     iterationBudget: {
       type: 'integer',
       minimum: 0,
       description:
-        'Phase 1.5 (AISDLC-377.2) — max iteration count before escalation (RFC-0015 §5 budget=2 default). Declared in Phase 1 for forward-compat; Phase 1 Workers ignore it.',
+        "Phase 1.5 (AISDLC-377.2) — max iteration count before the Conductor escalates with 'iteration-exhausted'. RFC-0015 §5 caps at 2 (the historical /ai-sdlc execute Step 9 iterate-dev budget). Default 2 when omitted. The Conductor MUST NOT trigger a resume when iterationsAttempted == iterationBudget.",
     },
     lastSessionId: {
       type: 'string',
       minLength: 1,
       description:
-        'Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured on first attempt for context-preserving resume. Phase 1 Workers do not set this.',
+        "Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured on first attempt for context-preserving resume of claude-p-shell Workers. The supervisor passes --session-id <uuid> on first spawn, records the uuid here on successful exit, and re-spawns with --resume <uuid> '<conductor-feedback>' on resume signal. in-session-agent Workers leave this null (they use the Agent tool's continue:true semantics instead). Phase 2 (AISDLC-377.3) wires the supervisor side.",
     },
     noClaimBefore: {
       type: 'string',
       format: 'date-time',
       description:
         'OQ-7 (RFC-0041) — quota-backoff gate. When set, Workers MUST refuse to claim this manifest until the wall-clock passes this timestamp. Used by the Conductor to honor Anthropic Retry-After after a 429.',
+    },
+  },
+  additionalProperties: false,
+} as const;
+
+export const dispatchResumeSignalV1Schema = {
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  $id: 'https://ai-sdlc.io/schemas/v1alpha1/dispatch-resume-signal.v1.schema.json',
+  title: 'AI-SDLC DispatchResumeSignal',
+  description:
+    'Resume signal written by the Conductor under .ai-sdlc/dispatch/inflight/<task-id>.resume.json to trigger a Worker-driven iteration (RFC-0041 OQ-4 resolution, Phase 1.5 / AISDLC-377.2). Iteration is a continuation, not a restart: the Conductor writes a resume signal next to the still-inflight manifest, the active Worker (in-session-agent or supervisor-spawned successor) detects the signal on its next poll and resumes its prior conversation (Agent continue:true or claude -p --resume <session-id>) with the conductor-provided feedback prepended. The inflight manifest stays put while the iteration runs; only when the second-attempt verdict lands does the manifest leave inflight.',
+  type: 'object',
+  required: ['schemaVersion', 'taskId', 'feedback', 'triggeredAt', 'triggeredBy'],
+  properties: {
+    schemaVersion: {
+      type: 'string',
+      enum: ['v1'],
+      description: 'Resume-signal schema version.',
+    },
+    taskId: {
+      type: 'string',
+      minLength: 1,
+      pattern: '^[A-Z][A-Z0-9-]*-[0-9]+(\\.[0-9]+)*$',
+      description: "Backlog task identifier — MUST match the inflight manifest's taskId.",
+    },
+    feedback: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Conductor-authored feedback text. Prepended to the Worker's next-iteration prompt (in-session-agent: passed as the second-call Agent prompt with continue:true; claude-p-shell: passed as the positional argument to claude -p --resume <session-id> '<feedback>').",
+    },
+    triggeredAt: {
+      type: 'string',
+      format: 'date-time',
+      description: 'ISO-8601 timestamp the Conductor wrote the signal.',
+    },
+    triggeredBy: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Short identifier of the Conductor (e.g. 'conductor-session-<uuid>'). Audit-only.",
+    },
+    priorIteration: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        'iterationsAttempted at the time the signal was written. The Worker uses this to compute the post-resume iterationsAttempted (= priorIteration + 1) on the verdict it emits.',
+    },
+    priorOutcome: {
+      type: 'string',
+      enum: ['iterate-needed'],
+      description:
+        "The outcome of the verdict that triggered this resume. Phase 1.5 only supports 'iterate-needed' (other outcomes are not resumable).",
     },
   },
   additionalProperties: false,
@@ -3289,9 +3342,16 @@ export const dispatchVerdictV1Schema = {
     },
     outcome: {
       type: 'string',
-      enum: ['success', 'iterate-needed', 'failed', 'quota-exhausted', 'blocked'],
+      enum: [
+        'success',
+        'iterate-needed',
+        'iteration-exhausted',
+        'failed',
+        'quota-exhausted',
+        'blocked',
+      ],
       description:
-        "Verdict outcome. 'success' = ready for reviewer fan-out; 'iterate-needed' = Phase 1.5 resume signal (RFC-0015 §5); 'failed' = unrecoverable, Conductor escalates; 'quota-exhausted' = OQ-7 cool-down trigger; 'blocked' = Worker stopped because a precondition (e.g. open upstream OQ) requires operator action.",
+        "Verdict outcome. 'success' = ready for reviewer fan-out; 'iterate-needed' = Phase 1.5 Worker is asking the Conductor to trigger another iteration (RFC-0041 OQ-4); 'iteration-exhausted' = Phase 1.5 budget-exhaustion diagnostic written by the Conductor when iterate-needed lands at iterationsAttempted == iterationBudget; 'failed' = unrecoverable, Conductor escalates; 'quota-exhausted' = OQ-7 cool-down trigger; 'blocked' = Worker stopped because a precondition (e.g. open upstream OQ) requires operator action.",
     },
     commitSha: {
       type: ['string', 'null'],
@@ -3361,6 +3421,18 @@ export const dispatchVerdictV1Schema = {
       type: 'integer',
       minimum: 0,
       description: 'Worker wall-clock duration in milliseconds from claim to verdict emit.',
+    },
+    iterationsAttempted: {
+      type: 'integer',
+      minimum: 0,
+      description:
+        "Phase 1.5 (AISDLC-377.2) — total iteration cycles burned to produce this verdict. First-attempt verdicts set this to 1 (the original dispatch counts as iteration 1). Resume-attempt verdicts set this to the prior value + 1. Conductor inspects this against manifest.iterationBudget when deciding whether 'iterate-needed' triggers another resume or escalates to 'iteration-exhausted'.",
+    },
+    sessionId: {
+      type: 'string',
+      minLength: 1,
+      description:
+        "Phase 1.5 (AISDLC-377.2) — claude -p --session-id captured by a claude-p-shell Worker. Stored on the verdict so the Conductor can promote it onto the next iteration's manifest as manifest.lastSessionId. in-session-agent Workers leave this null.",
     },
   },
   additionalProperties: false,
@@ -5981,6 +6053,7 @@ export const SCHEMAS: Record<string, object> = {
   'design-system-binding.schema.json': designSystemBindingSchema,
   'dispatch-config.v1.schema.json': dispatchConfigV1Schema,
   'dispatch-manifest.v1.schema.json': dispatchManifestV1Schema,
+  'dispatch-resume-signal.v1.schema.json': dispatchResumeSignalV1Schema,
   'dispatch-verdict.v1.schema.json': dispatchVerdictV1Schema,
   'dor-config.v1.schema.json': dorConfigV1Schema,
   'orchestrator-events.v1.schema.json': orchestratorEventsV1Schema,

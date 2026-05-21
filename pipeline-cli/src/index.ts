@@ -160,6 +160,7 @@ export {
 } from './dor/index.js';
 
 // RFC-0041 Phase 1 (AISDLC-377.1) — Dispatch Board protocol + in-session-agent Worker.
+// RFC-0041 Phase 1.5 (AISDLC-377.2) — iteration mechanism (resume signal + budget enforcement).
 // RFC-0041 Phase 2 (AISDLC-377.3) — Worker Supervisor + cost-warning hook.
 export {
   acquirePidLock as dispatchAcquirePidLock,
@@ -172,6 +173,7 @@ export {
   createSupervisorState as dispatchCreateSupervisorState,
   DEFAULT_BOARD_DIR as DISPATCH_DEFAULT_BOARD_DIR,
   DEFAULT_HEARTBEAT_STALE_MS as DISPATCH_DEFAULT_HEARTBEAT_STALE_MS,
+  DEFAULT_ITERATION_BUDGET as DISPATCH_DEFAULT_ITERATION_BUDGET,
   DEFAULT_PER_TASK_USD as DISPATCH_DEFAULT_PER_TASK_USD,
   ensureBoardDirs as dispatchEnsureBoardDirs,
   estimateClaudePShellCost as dispatchEstimateClaudePShellCost,
@@ -180,16 +182,28 @@ export {
   isSupervisorMissing as dispatchIsSupervisorMissing,
   maybeEmitCostWarning as dispatchMaybeEmitCostWarning,
   peekQueue as dispatchPeekQueue,
+  probeIterationBudget as dispatchProbeIterationBudget,
   readHeartbeat as dispatchReadHeartbeat,
   readPidFile as dispatchReadPidFile,
+  readResumeSignal as dispatchReadResumeSignal,
   releaseInflight as dispatchReleaseInflight,
   releasePidLock as dispatchReleasePidLock,
+  removeResumeSignal as dispatchRemoveResumeSignal,
   removeVerdict as dispatchRemoveVerdict,
   runSupervisorTick as dispatchRunSupervisorTick,
   sweepStaleHeartbeats as dispatchSweepStaleHeartbeats,
+  writeDiagnostic as dispatchWriteDiagnostic,
   writeHeartbeat as dispatchWriteHeartbeat,
+  writeIterationExhaustedDiagnostic as dispatchWriteIterationExhaustedDiagnostic,
   writeManifest as dispatchWriteManifest,
+  writeResumeSignal as dispatchWriteResumeSignal,
   writeVerdict as dispatchWriteVerdict,
+  buildClaudePInitialArgv as dispatchBuildClaudePInitialArgv,
+  buildClaudePResumeArgv as dispatchBuildClaudePResumeArgv,
+  DEFAULT_RESUME_AGENT as DISPATCH_DEFAULT_RESUME_AGENT,
+  extractSessionIdFromClaudeOutput as dispatchExtractSessionIdFromClaudeOutput,
+  type BuildClaudePInitialArgvOpts as DispatchBuildClaudePInitialArgvOpts,
+  type BuildClaudePResumeArgvOpts as DispatchBuildClaudePResumeArgvOpts,
   type BoardSubdir as DispatchBoardSubdir,
   type ClaimResult as DispatchClaimResult,
   type CostEstimate as DispatchCostEstimate,
@@ -201,6 +215,7 @@ export {
   type MaybeEmitOptions as DispatchMaybeEmitOptions,
   type PidLockResult as DispatchPidLockResult,
   type QueueCounts as DispatchQueueCounts,
+  type ResumeSignal as DispatchResumeSignal,
   type SupervisorMissingProbe as DispatchSupervisorMissingProbe,
   type SupervisorSpawn as DispatchSupervisorSpawn,
   type SupervisorState as DispatchSupervisorState,

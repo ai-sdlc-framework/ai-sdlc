@@ -33,11 +33,13 @@ import path from 'node:path';
 
 import {
   BOARD_SUBDIRS,
+  DEFAULT_ITERATION_BUDGET,
   type ClaimResult,
   type DispatchManifest,
   type DispatchVerdict,
   type InflightHeartbeat,
   type QueueCounts,
+  type ResumeSignal,
   type SweepResult,
   type WorkerKind,
 } from './types.js';
@@ -53,6 +55,13 @@ const VERDICT_SUFFIX = '.verdict.json';
 const STATE_SUFFIX = '.state.json';
 /** Filename suffix the dispatch protocol uses for failure diagnostics. */
 const DIAGNOSTIC_SUFFIX = '.diagnostic.json';
+/**
+ * RFC-0041 Phase 1.5 (AISDLC-377.2) — filename suffix for Conductor-written
+ * resume signals. Co-located with the still-inflight manifest under
+ * `inflight/<task-id>.resume.json` so the active Worker (or supervisor)
+ * picks it up on the next poll without touching the manifest itself.
+ */
+const RESUME_SIGNAL_SUFFIX = '.resume.json';
 
 /** Default heartbeat-stale threshold in milliseconds (RFC-0041 OQ-3 — 30 min). */
 export const DEFAULT_HEARTBEAT_STALE_MS = 30 * 60 * 1000;
@@ -201,6 +210,18 @@ export function releaseInflight(boardDir: string, taskId: string): boolean {
       /* ignore — state file is advisory */
     }
   }
+  // Phase 1.5 (AISDLC-377.2): a release surrenders the inflight slot — any
+  // pending resume signal must go with it. The Conductor would not have
+  // written a resume signal against a manifest it intended to release, but
+  // defense-in-depth.
+  const resume = path.join(boardDir, 'inflight', `${taskId}${RESUME_SIGNAL_SUFFIX}`);
+  if (existsSync(resume)) {
+    try {
+      rmSync(resume);
+    } catch {
+      /* ignore */
+    }
+  }
   renameSync(src, dst);
   return true;
 }
@@ -277,8 +298,19 @@ function readVerdict(filePath: string): DispatchVerdict | undefined {
 
 /**
  * Worker-side: emit a verdict to either `done/` (outcome === 'success' |
- * 'iterate-needed') or `failed/` (everything else). The matching manifest
- * in `inflight/` is removed because the lifecycle has ended.
+ * 'iterate-needed') or `failed/` (everything else).
+ *
+ * Inflight cleanup semantics:
+ *
+ *   - `outcome === 'iterate-needed'` (Phase 1.5 / RFC-0041 OQ-4): the
+ *     lifecycle is NOT ending — the Conductor will write a resume signal
+ *     next to the still-inflight manifest and the same Worker will
+ *     continue against it. The inflight manifest + heartbeat are
+ *     PRESERVED. Any pre-existing resume signal (from a prior iteration
+ *     of this same cycle) IS cleared so the Worker's next-poll resume
+ *     check doesn't see a stale signal.
+ *   - Every other outcome: the lifecycle has ended. Inflight manifest +
+ *     heartbeat + any lingering resume signal are all cleared.
  *
  * Atomic write: temp + rename in the destination directory.
  *
@@ -293,19 +325,41 @@ export function writeVerdict(boardDir: string, verdict: DispatchVerdict): string
   writeFileSync(tmp, JSON.stringify(verdict, null, 2) + '\n', 'utf-8');
   renameSync(tmp, verdictPath);
 
-  // Clear inflight artifacts — manifest + heartbeat state.
-  const inflightManifest = manifestPathIn(boardDir, 'inflight', verdict.taskId);
-  if (existsSync(inflightManifest)) {
-    try {
-      rmSync(inflightManifest);
-    } catch {
-      /* ignore — verdict landing is the source of truth */
+  const isIteratePending = verdict.outcome === 'iterate-needed';
+
+  // For iterate-needed, the Worker is holding the slot across the iteration
+  // — leave inflight artifacts in place. For every other outcome the
+  // lifecycle has ended; clear them.
+  if (!isIteratePending) {
+    const inflightManifest = manifestPathIn(boardDir, 'inflight', verdict.taskId);
+    if (existsSync(inflightManifest)) {
+      try {
+        rmSync(inflightManifest);
+      } catch {
+        /* ignore — verdict landing is the source of truth */
+      }
+    }
+    const inflightState = path.join(boardDir, 'inflight', `${verdict.taskId}${STATE_SUFFIX}`);
+    if (existsSync(inflightState)) {
+      try {
+        rmSync(inflightState);
+      } catch {
+        /* ignore */
+      }
     }
   }
-  const inflightState = path.join(boardDir, 'inflight', `${verdict.taskId}${STATE_SUFFIX}`);
-  if (existsSync(inflightState)) {
+  // Always clear any lingering resume signal — it was specific to the
+  // previous iteration cycle, and we don't want the Worker's next-poll
+  // resume check to see a stale signal. The Conductor will write a fresh
+  // one if (and only if) it decides to trigger another iteration.
+  const inflightResume = path.join(
+    boardDir,
+    'inflight',
+    `${verdict.taskId}${RESUME_SIGNAL_SUFFIX}`,
+  );
+  if (existsSync(inflightResume)) {
     try {
-      rmSync(inflightState);
+      rmSync(inflightResume);
     } catch {
       /* ignore */
     }
@@ -416,6 +470,16 @@ export function sweepStaleHeartbeats(
         /* ignore */
       }
     }
+    // Phase 1.5 (AISDLC-377.2): clear any pending resume signal too — the
+    // Worker that would have consumed it is presumed dead.
+    const resumePath = path.join(inflightDir, `${taskId}${RESUME_SIGNAL_SUFFIX}`);
+    if (existsSync(resumePath)) {
+      try {
+        rmSync(resumePath);
+      } catch {
+        /* ignore */
+      }
+    }
     reaped.push(taskId);
   }
 
@@ -423,16 +487,62 @@ export function sweepStaleHeartbeats(
 }
 
 /**
- * Internal: write a diagnostic JSON to `failed/<taskId>.diagnostic.json`.
- * Atomic temp+rename. Exposed so the supervisor (Phase 2) can also call it
- * for spawn-rejected paths.
+ * Write a diagnostic JSON to `failed/<taskId>.diagnostic.json`. Atomic
+ * temp+rename. Used by `sweepStaleHeartbeats` for stale-heartbeat reaps, by
+ * the supervisor (Phase 2) for spawn-rejected paths, and — Phase 1.5 — by
+ * the Conductor's done-pickup loop when an `iterate-needed` verdict lands at
+ * `iterationsAttempted == iterationBudget` (the iteration-exhausted
+ * diagnostic).
+ *
+ * Co-clears the inflight manifest + heartbeat so the lifecycle artifacts
+ * don't leak (mirrors `writeVerdict`'s cleanup contract). This matters for
+ * the iteration-exhausted path: the Conductor calls this AFTER consuming
+ * the iterate-needed verdict from `done/`, and the manifest may still be
+ * sitting in `inflight/` (the Worker left it there while it held the slot
+ * across the iteration). On budget exhaustion the slot must be released.
  */
-function writeDiagnostic(boardDir: string, verdict: DispatchVerdict): string {
+export function writeDiagnostic(boardDir: string, verdict: DispatchVerdict): string {
   ensureBoardDirs(boardDir);
   const target = path.join(boardDir, 'failed', `${verdict.taskId}${DIAGNOSTIC_SUFFIX}`);
   const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
   writeFileSync(tmp, JSON.stringify(verdict, null, 2) + '\n', 'utf-8');
   renameSync(tmp, target);
+
+  // Clear any lingering inflight artifacts (manifest + heartbeat + resume
+  // signal). The Conductor's iteration-exhausted path is the canonical
+  // caller that needs this: the Worker left the manifest in inflight/ across
+  // the iteration window, so on budget exhaustion we must release the slot
+  // explicitly. The stale-heartbeat sweep removes inflight artifacts
+  // explicitly via the sweeper's own rmSync calls; calling this codepath a
+  // second time after that is a harmless no-op (the files are already gone).
+  const inflightManifest = manifestPathIn(boardDir, 'inflight', verdict.taskId);
+  if (existsSync(inflightManifest)) {
+    try {
+      rmSync(inflightManifest);
+    } catch {
+      /* ignore — diagnostic landing is the source of truth */
+    }
+  }
+  const inflightState = path.join(boardDir, 'inflight', `${verdict.taskId}${STATE_SUFFIX}`);
+  if (existsSync(inflightState)) {
+    try {
+      rmSync(inflightState);
+    } catch {
+      /* ignore */
+    }
+  }
+  const inflightResume = path.join(
+    boardDir,
+    'inflight',
+    `${verdict.taskId}${RESUME_SIGNAL_SUFFIX}`,
+  );
+  if (existsSync(inflightResume)) {
+    try {
+      rmSync(inflightResume);
+    } catch {
+      /* ignore */
+    }
+  }
   return target;
 }
 
@@ -458,6 +568,178 @@ export function removeVerdict(
       }
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 1.5 (AISDLC-377.2) — resume signal + iteration budget
+// ---------------------------------------------------------------------------
+
+/**
+ * Conductor-side (RFC-0041 OQ-4): write a resume signal next to a still-
+ * inflight manifest. The active Worker (in-session-agent) or its supervisor-
+ * spawned successor (claude-p-shell) detects the signal on its next poll and
+ * resumes its prior conversation with `feedback` prepended.
+ *
+ * Refuses (throws) when:
+ *   - The manifest is NOT in `inflight/` (the Worker has either not claimed
+ *     it yet or has already moved it to done/failed; iteration is not safe
+ *     in either case — the Conductor should re-emit a fresh manifest if it
+ *     wants to retry).
+ *   - The iteration budget is already exhausted
+ *     (`manifest.iterationsAttempted ?? 0 >= manifest.iterationBudget ?? DEFAULT_ITERATION_BUDGET`).
+ *     The caller should write an iteration-exhausted diagnostic instead
+ *     (`writeIterationExhaustedDiagnostic` below).
+ *
+ * Atomic write (temp + rename). Returns the final signal path. Idempotent on
+ * the file itself — if an earlier resume signal exists, it is overwritten
+ * (the Conductor's done-pickup loop is the only writer, so concurrent writes
+ * are not a concern).
+ */
+export function writeResumeSignal(
+  boardDir: string,
+  signal: ResumeSignal,
+  opts: { iterationBudget?: number; iterationsAttempted?: number } = {},
+): string {
+  ensureBoardDirs(boardDir);
+  const inflightManifestPath = manifestPathIn(boardDir, 'inflight', signal.taskId);
+  if (!existsSync(inflightManifestPath)) {
+    throw new Error(
+      `dispatch.writeResumeSignal: no inflight manifest for ${signal.taskId} — Worker must own an active claim to receive a resume`,
+    );
+  }
+  const manifest = readManifest(inflightManifestPath);
+  // Caller may override the manifest's declared budget/attempts when probing
+  // (e.g. CLI flags). Fall back to the manifest's own fields, then the
+  // package default. The check uses `>=` so the very call that lands the
+  // first 'iterate-needed' (priorIteration=1, budget=2) PASSES (1<2 → resume
+  // signal allowed → second attempt → iterationsAttempted=2 → on the next
+  // iterate-needed THIS check refuses because 2>=2).
+  const attempts = opts.iterationsAttempted ?? manifest?.iterationsAttempted ?? 0;
+  const budget = opts.iterationBudget ?? manifest?.iterationBudget ?? DEFAULT_ITERATION_BUDGET;
+  if (attempts >= budget) {
+    throw new Error(
+      `dispatch.writeResumeSignal: iteration budget exhausted for ${signal.taskId} (attempts=${attempts}, budget=${budget})`,
+    );
+  }
+
+  const target = path.join(boardDir, 'inflight', `${signal.taskId}${RESUME_SIGNAL_SUFFIX}`);
+  const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
+  writeFileSync(tmp, JSON.stringify(signal, null, 2) + '\n', 'utf-8');
+  renameSync(tmp, target);
+  return target;
+}
+
+/**
+ * Worker-side (RFC-0041 OQ-4): read the resume signal co-located with the
+ * Worker's still-inflight manifest. Returns `undefined` when no signal
+ * exists (the normal case — the Worker only resumes when one was written).
+ */
+export function readResumeSignal(boardDir: string, taskId: string): ResumeSignal | undefined {
+  const target = path.join(boardDir, 'inflight', `${taskId}${RESUME_SIGNAL_SUFFIX}`);
+  if (!existsSync(target)) return undefined;
+  try {
+    return JSON.parse(readFileSync(target, 'utf-8')) as ResumeSignal;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Worker-side (RFC-0041 OQ-4): consume the resume signal after the Worker
+ * has detected it and begun the resume Agent call. Idempotent on missing
+ * files. The Worker MUST call this before invoking `writeVerdict` for the
+ * resumed attempt — otherwise the signal would persist and trigger a
+ * spurious second resume on the next Worker poll.
+ */
+export function removeResumeSignal(boardDir: string, taskId: string): void {
+  const target = path.join(boardDir, 'inflight', `${taskId}${RESUME_SIGNAL_SUFFIX}`);
+  if (existsSync(target)) {
+    try {
+      rmSync(target);
+    } catch {
+      /* ignore — best-effort cleanup */
+    }
+  }
+}
+
+/**
+ * Conductor-side helper: read the iteration budget for a task by inspecting
+ * its inflight manifest. Returns
+ * `{ attempts, budget, exhausted, manifest }` where:
+ *
+ *   - `attempts` = `manifest.iterationsAttempted ?? 0`
+ *   - `budget` = `manifest.iterationBudget ?? DEFAULT_ITERATION_BUDGET`
+ *   - `exhausted` = `attempts >= budget` (i.e. NO more resumes allowed)
+ *   - `manifest` = the parsed manifest (or undefined when missing)
+ *
+ * When the manifest is missing OR the iteration fields are absent (v1.0
+ * manifests pre-Phase 1.5), the defaults apply. This is the canonical
+ * decision surface for the Conductor's done-pickup loop:
+ *
+ *   const probe = probeIterationBudget(board, taskId);
+ *   if (probe.exhausted) {
+ *     writeIterationExhaustedDiagnostic(board, ...);
+ *   } else {
+ *     writeResumeSignal(board, ...);
+ *   }
+ */
+export function probeIterationBudget(
+  boardDir: string,
+  taskId: string,
+): {
+  attempts: number;
+  budget: number;
+  exhausted: boolean;
+  manifest: DispatchManifest | undefined;
+} {
+  const inflightManifestPath = manifestPathIn(boardDir, 'inflight', taskId);
+  const manifest = existsSync(inflightManifestPath)
+    ? readManifest(inflightManifestPath)
+    : undefined;
+  const attempts = manifest?.iterationsAttempted ?? 0;
+  const budget = manifest?.iterationBudget ?? DEFAULT_ITERATION_BUDGET;
+  return { attempts, budget, exhausted: attempts >= budget, manifest };
+}
+
+/**
+ * Conductor-side: write an iteration-budget-exhausted diagnostic to
+ * `failed/`. Called when an `iterate-needed` verdict lands at
+ * `iterationsAttempted == iterationBudget` (no more resumes allowed).
+ *
+ * The diagnostic carries `outcome: iteration-exhausted` + `cause:
+ * iteration-budget-exhausted` so the operator-facing escalation surface (TUI
+ * + events.jsonl) can render it distinctly from generic failures.
+ *
+ * Atomic write (delegates to `writeDiagnostic`). The inflight artifacts
+ * (manifest, heartbeat, resume signal) are cleared as a side effect — the
+ * lifecycle has ended.
+ */
+export function writeIterationExhaustedDiagnostic(
+  boardDir: string,
+  args: {
+    taskId: string;
+    iterationsAttempted: number;
+    iterationBudget: number;
+    workerId?: string;
+    workerKind?: WorkerKind;
+    notes?: string;
+    completedAt?: string;
+  },
+): string {
+  const diagnostic: DispatchVerdict = {
+    schemaVersion: 'v1',
+    taskId: args.taskId,
+    outcome: 'iteration-exhausted',
+    completedAt: args.completedAt ?? new Date().toISOString(),
+    workerId: args.workerId ?? 'conductor',
+    cause: 'iteration-budget-exhausted',
+    iterationsAttempted: args.iterationsAttempted,
+    notes:
+      args.notes ??
+      `iteration budget exhausted (attempts=${args.iterationsAttempted}, budget=${args.iterationBudget}); Conductor refused to trigger further resume per RFC-0041 OQ-4 cap`,
+  };
+  if (args.workerKind) diagnostic.workerKind = args.workerKind;
+  return writeDiagnostic(boardDir, diagnostic);
 }
 
 // ---------------------------------------------------------------------------

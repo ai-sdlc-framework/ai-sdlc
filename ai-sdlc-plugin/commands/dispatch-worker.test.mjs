@@ -176,6 +176,57 @@ describe('/ai-sdlc dispatch-worker body — RFC-0041 §4.3.1 protocol', () => {
   });
 });
 
+describe('/ai-sdlc dispatch-worker body — Phase 1.5 iteration (AISDLC-377.2)', () => {
+  it('checks the resume signal BEFORE claiming a fresh manifest (Step 2a)', () => {
+    assert.ok(
+      /cli-dispatch\.mjs"\s+read-resume-signal/.test(cmdBody),
+      'must invoke `cli-dispatch read-resume-signal` to detect a Conductor-written resume signal',
+    );
+  });
+
+  it('references the AI_SDLC_DISPATCH_RESUME_TASK_ID worker env tracking', () => {
+    assert.ok(
+      cmdBody.includes('AI_SDLC_DISPATCH_RESUME_TASK_ID'),
+      'must track the resume task ID via AI_SDLC_DISPATCH_RESUME_TASK_ID env var',
+    );
+  });
+
+  it('describes the Agent continue:true semantics for resumption', () => {
+    assert.ok(
+      /continue:?\s*true/i.test(cmdBody),
+      'must describe Agent continue:true semantics for context-preserving resumption',
+    );
+  });
+
+  it('consumes the resume signal via remove-resume-signal before writing verdict', () => {
+    assert.ok(
+      /cli-dispatch\.mjs"\s+remove-resume-signal/.test(cmdBody),
+      'must invoke `cli-dispatch remove-resume-signal` to consume the signal mid-iteration',
+    );
+  });
+
+  it('threads --iterations-attempted onto the verdict', () => {
+    assert.ok(
+      cmdBody.includes('--iterations-attempted'),
+      'must pass --iterations-attempted on write-verdict to record the burn count',
+    );
+  });
+
+  it('describes the iterate-needed outcome path', () => {
+    assert.ok(
+      cmdBody.includes('iterate-needed'),
+      'must describe the iterate-needed outcome for verifier-recoverable failures',
+    );
+  });
+
+  it('cites RFC-0041 OQ-4 (iteration-as-continuation resolution)', () => {
+    assert.ok(
+      cmdBody.includes('OQ-4') || cmdBody.includes('Phase 1.5'),
+      'must cite OQ-4 (or Phase 1.5) as the source of the iteration contract',
+    );
+  });
+});
+
 describe('/ai-sdlc dispatch-worker body — hard rules', () => {
   it('declares the no-merge rule', () => {
     assert.ok(
