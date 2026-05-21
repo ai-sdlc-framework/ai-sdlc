@@ -165,6 +165,7 @@ if (warnings.length > 0) {
 // ── Output ───────────────────────────────────────────────────────────
 
 const result = {
+  hookEventName: 'SessionStart',
   hookSpecificOutput: {
     additionalContext: context,
   },
