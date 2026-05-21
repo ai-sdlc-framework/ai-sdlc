@@ -96,5 +96,5 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
 
 /** Entry point for the bin shim. */
 export async function runAttestationCli(): Promise<void> {
-  buildAttestationCli(hideBin(process.argv)).parse();
+  await buildAttestationCli(hideBin(process.argv)).parseAsync();
 }

@@ -43,18 +43,22 @@ printf '{"role":"user","content":"[transcript-init] code-reviewer-codex prompt r
 echo "Transcript initialized at: $TRANSCRIPT_FILE"
 ```
 
-After forming your verdict (Step 5), before cleanup (Step 6), append your response event:
+After forming your verdict (Step 5), before cleanup (Step 6), append your response event. Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely:
 
 ```bash
 TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
 TRANSCRIPT_FILE=".ai-sdlc/transcripts/${TASK_ID}/code-reviewer-codex.jsonl"
-TIMESTAMP=$(node -e "process.stdout.write(new Date().toISOString())")
-VERDICT_SUMMARY='<paste your summary field here, escaped for JSON string>'
-printf '{"role":"assistant","content":"%s","timestamp":"%s","event":"verdict-formed","harness":"codex"}\n' "$VERDICT_SUMMARY" "$TIMESTAMP" >> "$TRANSCRIPT_FILE"
+VERDICT_SUMMARY="$(cat <<'EOF'
+<paste your summary field here>
+EOF
+)"
+VERDICT_SUMMARY="$VERDICT_SUMMARY" node -e 'process.stdout.write(JSON.stringify({role:"assistant",content:process.env.VERDICT_SUMMARY,timestamp:new Date().toISOString(),event:"verdict-formed",harness:"codex"})+"\n")' >> "$TRANSCRIPT_FILE"
 echo "Transcript appended."
 ```
 
 The transcript file is gitignored (RFC-0042 OQ-1: local disk, 90-day retention default).
+
+**Phase 1 scope (intentional):** the transcript captures only the wrapper events emitted by Step 0 and the verdict-formed step — Codex CLI's internal turns are not captured. See RFC-0042 §Design Layer 1 follow-up notes.
 
 ## Step 1 — Verify Codex CLI is available
 

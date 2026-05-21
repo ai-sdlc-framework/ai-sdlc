@@ -36,18 +36,22 @@ echo "Transcript initialized at: $TRANSCRIPT_FILE"
 
 **Step END — Append assistant response to transcript**
 
-After forming your verdict JSON but BEFORE returning it, use the Bash tool to append your response event:
+After forming your verdict JSON but BEFORE returning it, use the Bash tool to append your response event. Use the heredoc + `node -e` pattern below so any quotes, newlines, or backslashes in your summary are JSON-encoded safely (printf with `%s` would produce malformed JSONL for any summary containing a `"`):
 
 ```bash
 TASK_ID="${TASK_ID:-$(cat .active-task 2>/dev/null || echo 'UNKNOWN')}"
 TRANSCRIPT_FILE=".ai-sdlc/transcripts/${TASK_ID}/test-reviewer.jsonl"
-TIMESTAMP=$(node -e "process.stdout.write(new Date().toISOString())")
-VERDICT_SUMMARY='<paste your summary field here, escaped for JSON string>'
-printf '{"role":"assistant","content":"%s","timestamp":"%s","event":"verdict-formed"}\n' "$VERDICT_SUMMARY" "$TIMESTAMP" >> "$TRANSCRIPT_FILE"
+VERDICT_SUMMARY="$(cat <<'EOF'
+<paste your summary field here>
+EOF
+)"
+VERDICT_SUMMARY="$VERDICT_SUMMARY" node -e 'process.stdout.write(JSON.stringify({role:"assistant",content:process.env.VERDICT_SUMMARY,timestamp:new Date().toISOString(),event:"verdict-formed"})+"\n")' >> "$TRANSCRIPT_FILE"
 echo "Transcript appended."
 ```
 
 The transcript file at `.ai-sdlc/transcripts/<task-id>/test-reviewer.jsonl` is gitignored (RFC-0042 OQ-1: local disk, 90-day retention default). Each line is a JSONL event with `{role, content, timestamp, event}`.
+
+**Phase 1 scope (intentional):** the transcript captures only the wrapper events emitted by Step 0 and Step END — the initial prompt receipt and the final verdict. Intermediate tool calls and reasoning turns are **not** captured in Phase 1 because the agent has no mechanism to hook the Claude Code message stream from inside its own session. Full per-turn / per-tool capture is tracked as a follow-up; see RFC-0042 §Design Layer 1 follow-up notes.
 
 ## Review Guidelines
 

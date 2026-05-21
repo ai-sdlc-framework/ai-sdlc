@@ -45,9 +45,11 @@ If the file already exists (from Step 0), append a new line:
 {"role":"assistant","content":"<your summary, JSON-string-escaped>","timestamp":"<ISO-8601-timestamp>","event":"verdict-formed"}
 ```
 
-Note: because the Write tool overwrites rather than appends, read the existing file first, then write the full updated content with the new line appended.
+Note: because the Write tool overwrites rather than appends, read the existing file first, then write the full updated content with the new line appended. When composing the `content` field, escape `"` as `\"`, newlines as `\n`, and backslashes as `\\` — the line must be valid JSON or `parseTranscriptFile` will reject it.
 
 The transcript file at `.ai-sdlc/transcripts/<task-id>/security-reviewer.jsonl` is gitignored (RFC-0042 OQ-1: local disk, 90-day retention default).
+
+**Phase 1 scope (intentional):** the transcript captures only the wrapper events emitted by Step 0 and Step END — the initial prompt receipt and the final verdict. Intermediate tool calls (Read, Grep) and intermediate reasoning turns are **not** captured in Phase 1 because the agent has no mechanism to hook the Claude Code message stream from inside its own session. Full per-turn / per-tool capture is tracked as a follow-up; see RFC-0042 §Design Layer 1 follow-up notes.
 
 ## Review Guidelines
 

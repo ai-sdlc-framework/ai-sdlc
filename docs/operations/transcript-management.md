@@ -6,11 +6,13 @@ This runbook covers the lifecycle of reviewer subagent transcripts: what they ar
 
 ## What are transcripts?
 
-Each reviewer subagent (code-reviewer, test-reviewer, security-reviewer, and their Codex variants) captures its full conversation to a JSONL file:
+Each reviewer subagent (code-reviewer, test-reviewer, security-reviewer, and their Codex variants) captures its wrapper events to a JSONL file inside the worktree:
 
 ```
 .ai-sdlc/transcripts/<task-id>/<reviewer-name>.jsonl
 ```
+
+> **OQ-5 path resolution note.** RFC-0042 §Design Layer 1 specifies the worktree-relative path used above; the OQ-5 resolution text suggests a home-directory path (`~/.ai-sdlc/transcripts/`). Phase 1 implements the Layer 1 worktree path because (1) the worktree is the reviewer subagent's natural cwd, (2) co-locating transcripts with the PR they attest survives `git worktree remove` only via the GC step below — by design, since the Merkle root is the durable artifact — and (3) per-repo `.gitignore` covers the path with no setup. The home-directory option is reserved for future opt-in.
 
 Every line is a structured event:
 
@@ -53,15 +55,16 @@ The 90-day window covers the realistic incident-response window for forgery inve
 
 ### Override per-repo
 
-To extend retention, add to `.ai-sdlc/config.yaml`:
+To extend retention, add a flat `retention` key to `.ai-sdlc/config.yaml` per RFC-0042 OQ-1 resolution:
 
 ```yaml
 # Retain transcripts for 1 year (SOC 2 full-year compliance)
-retention:
-  transcripts_days: 365
+retention: 365
 ```
 
-Valid values: any positive integer. Operators with HIPAA requirements should set `3650` (10 years). There is no maximum.
+Valid values: any positive integer (days). Operators with HIPAA requirements should set `3650` (10 years). There is no maximum.
+
+> No code reads this key in Phase 1 — the 90-day default is enforced by the manual GC one-liner below. The key is reserved here so adopters can pre-populate it; the GC consumer ships in Phase 2.
 
 ## GC: deleting old transcripts
 
