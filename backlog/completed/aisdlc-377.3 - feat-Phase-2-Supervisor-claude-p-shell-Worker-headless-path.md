@@ -1,7 +1,7 @@
 ---
 id: AISDLC-377.3
 title: 'feat(dispatch): RFC-0041 Phase 2 — Supervisor + claude-p-shell Worker (headless path)'
-status: In Progress
+status: Done
 assignee: []
 created_date: '2026-05-20'
 updated_date: '2026-05-20'
