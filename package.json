@@ -44,6 +44,9 @@
     "rfc:check": "node scripts/check-rfc-docs.mjs",
     "rfc:test": "node --test scripts/check-rfc-docs.test.mjs && node --test scripts/check-rfc-lifecycle-transitions.test.mjs",
     "rfc:lifecycle-check": "node scripts/check-rfc-lifecycle-transitions.mjs",
+    "supervisor:start": "node pipeline-cli/bin/cli-dispatch-supervisor.mjs start",
+    "supervisor:status": "node pipeline-cli/bin/cli-dispatch-supervisor.mjs status",
+    "supervisor:stop": "node pipeline-cli/bin/cli-dispatch-supervisor.mjs stop",
     "prepare": "husky"
   },
   "lint-staged": {

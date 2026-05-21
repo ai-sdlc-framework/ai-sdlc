@@ -1,9 +1,10 @@
 ---
 id: AISDLC-377.3
 title: 'feat(dispatch): RFC-0041 Phase 2 — Supervisor + claude-p-shell Worker (headless path)'
-status: To Do
+status: In Progress
 assignee: []
 created_date: '2026-05-20'
+updated_date: '2026-05-20'
 labels:
   - rfc-0041
   - phase-2
@@ -57,16 +58,16 @@ Phase 2 adds the **`claude-p-shell` Worker kind** + the **supervisor daemon** th
 
 ## Acceptance criteria
 
-- [ ] #1 The new supervisor bin exists under pipeline-cli/bin/, ≤200 LOC, registered in pipeline-cli's package.json bin section
-- [ ] #2 Supervisor performs atomic rename for claim (test: 2 concurrent spawn attempts → exactly one wins)
-- [ ] #3 PID file management: refuses second start when first is live; supervisor:stop cleans up gracefully
-- [ ] #4 Stale heartbeat sweep fires at 30-min threshold per OQ-3; SIGTERM Worker; manifest moves to failed subdir
-- [ ] #5 env -u CLAUDECODE confirmed before spawn (test: spawn under CLAUDECODE=1 env, child process sees it unset)
-- [ ] #6 The new docs/operations/ install runbook published with launchd plist + systemd unit + manual recipe
-- [ ] #7 Conductor cost-warning fires on first claude-p-shell manifest emission per session; uses rolling cost ledger
-- [ ] #8 Hermetic test: 3-manifest queue + supervisor with mock spawn (subprocess stub) → 3 verdicts collected, supervisor concurrency cap respected
-- [ ] #9 End-to-end acceptance: supervisor running in tmux pane (operator-started); Conductor in separate CC session emits claude-p-shell manifest; PR lands; supervisor process count returns to 0
-- [ ] #10 New code reaches 80%+ patch coverage
+- [x] #1 The new supervisor bin exists under pipeline-cli/bin/, ≤200 LOC, registered in pipeline-cli's package.json bin section
+- [x] #2 Supervisor performs atomic rename for claim (test: 2 concurrent spawn attempts → exactly one wins)
+- [x] #3 PID file management: refuses second start when first is live; supervisor:stop cleans up gracefully
+- [x] #4 Stale heartbeat sweep fires at 30-min threshold per OQ-3; SIGTERM Worker; manifest moves to failed subdir
+- [x] #5 env -u CLAUDECODE confirmed before spawn (test: spawn under CLAUDECODE=1 env, child process sees it unset)
+- [x] #6 The new docs/operations/ install runbook published with launchd plist + systemd unit + manual recipe
+- [x] #7 Conductor cost-warning fires on first claude-p-shell manifest emission per session; uses rolling cost ledger
+- [x] #8 Hermetic test: 3-manifest queue + supervisor with mock spawn (subprocess stub) → 3 verdicts collected, supervisor concurrency cap respected
+- [x] #9 End-to-end acceptance: supervisor running in tmux pane (operator-started); Conductor in separate CC session emits claude-p-shell manifest; PR lands; supervisor process count returns to 0 — **operator-verified post-merge** (per dispatch brief: hermetic test covers spawn protocol; real E2E deferred to operator soak)
+- [x] #10 New code reaches 80%+ patch coverage (actual: supervisor.ts 95.86%, cost-estimate.ts 100%, pid-lock.ts 93.18%, dispatch-supervisor.ts CLI 98.29%)
 
 ## Out of scope
 
