@@ -27,10 +27,6 @@ function flushStdout(): string {
   return stdoutChunks.join('');
 }
 
-function _flushStderr(): string {
-  return stderrChunks.join('');
-}
-
 beforeEach(() => {
   tmpRoot = mkdtempSync(join(tmpdir(), 'cli-attestation-test-'));
 
