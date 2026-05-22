@@ -21,26 +21,27 @@
 #      dependency phrases, upstream-OQ blocks) fail locally before CI cycles.
 #      Runs before the orchestrator so DoR violations block the push without
 #      spending time on mechanical fixups. Skip: AI_SDLC_SKIP_DOR_GATE=1.
-#   4. Mechanical fixups orchestrator (AISDLC-386) — runs all three mechanical
+#   4. Mechanical fixups orchestrator (AISDLC-386) — runs two mechanical
 #      fixup sub-hooks in dependency order in a single pass:
-#        task-move (AISDLC-220) → mcp-bundle-sync (AISDLC-357) → attestation-sign (AISDLC-133)
+#        task-move (AISDLC-220) → attestation-sign (AISDLC-133)
+#      (mcp-bundle-sync was DELETED by AISDLC-385 — bundle now distributed via npm)
 #      If any fixup ran, exits 1 ONCE with a consolidated "re-run git push"
 #      message instead of each sub-hook exiting 1 separately (collapses the
-#      worst-case 4-push chain into 2). ORDER IS LOAD-BEARING: task-move
+#      worst-case 3-push chain into 2). ORDER IS LOAD-BEARING: task-move
 #      MUST run before attestation-sign (attestation's contentHashV4 binds
 #      {path, headBlobSha}; if move happens after sign the envelope references
 #      the old path → verify-attestation rejects).
-#   5-7. Individual sub-hook invocations (task-moved, mcp-bundle-sync,
-#      attestation-sign) remain below as defense-in-depth: on the re-push
-#      after the orchestrator exits 1, the orchestrator sees no fixups needed
-#      and exits 0. Each sub-hook's idempotency check then confirms clean state.
-#      If the orchestrator is bypassed (AI_SDLC_BYPASS_ALL_GATES), the
-#      individual hooks below also skip (they check the same bypass var).
+#   5-6. Individual sub-hook invocations (task-moved, attestation-sign) remain
+#      below as defense-in-depth: on the re-push after the orchestrator exits 1,
+#      the orchestrator sees no fixups needed and exits 0. Each sub-hook's
+#      idempotency check then confirms clean state. If the orchestrator is
+#      bypassed (AI_SDLC_BYPASS_ALL_GATES), the individual hooks below also
+#      skip (they check the same bypass var).
 #
 # Skip individual gates with their respective env vars
 # (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_TASK_MOVE=1,
-# AI_SDLC_SKIP_MCP_BUNDLE_SYNC=1, AI_SDLC_SKIP_SQUASH_CHORES=1,
-# AI_SDLC_SKIP_DOR_GATE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1)
+# AI_SDLC_SKIP_SQUASH_CHORES=1, AI_SDLC_SKIP_DOR_GATE=1,
+# AI_SDLC_SKIP_ATTESTATION_SIGN=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -57,8 +58,9 @@ if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
 fi
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-dor-gate.sh
 # AISDLC-386: orchestrator handles all mechanical fixups (task-move →
-# mcp-bundle-sync → attestation-sign) in a single pass and exits 1 ONCE if
-# any work was done. This collapses the worst-case 4-push chain into 2.
+# attestation-sign) in a single pass and exits 1 ONCE if any work was done.
+# (mcp-bundle-sync removed per AISDLC-385 — bundle now distributed via npm.)
+# This collapses the worst-case 3-push chain into 2.
 # The individual hook invocations below act as defense-in-depth: on the
 # re-push after the orchestrator exits 1, the orchestrator sees no fixups
 # needed and exits 0, then each sub-hook's own idempotency check confirms
@@ -66,5 +68,4 @@ printf '%s\n' "$PUSH_STDIN" | ./scripts/check-dor-gate.sh
 # the individual hooks below also skip (they check the same bypass var).
 printf '%s\n' "$PUSH_STDIN" | ./scripts/pre-push-fixups.sh
 ./scripts/check-task-moved.sh
-./scripts/check-mcp-bundle-sync.sh
 ./scripts/check-attestation-sign.sh

@@ -1,6 +1,8 @@
 ---
 id: AISDLC-357
-title: 'fix(infra): mcp-server stale-bundle auto-rebuild + coverage-gate flake + envelope-deletion safety'
+title: >-
+  fix(infra): mcp-server stale-bundle auto-rebuild + coverage-gate flake +
+  envelope-deletion safety
 status: To Do
 assignee: []
 created_date: '2026-05-17'
@@ -12,9 +14,16 @@ dependencies: []
 priority: medium
 references:
   - .husky/pre-push
-  - ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs
   - scripts/check-coverage.sh
   - docs/operations/merge-queue-rebase-recovery.md
+drift_log:
+  - date: '2026-05-22'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs
+    resolution: flagged
+drift_checked: '2026-05-22'
 ---
 
 ## Three build/test infrastructure friction items hit during the 282/286/323 finalization

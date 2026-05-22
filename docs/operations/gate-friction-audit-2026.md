@@ -273,7 +273,7 @@ Massive value (166 LLM-context-saves), comprehensive tests (1190 LOC), v6 makes 
 ### Two architectural follow-ups filed (not changing Gate 6's verdict)
 
 - **AISDLC-386** — UX improvement: collapse the pre-push re-push chain (Gates 2 + 3 + 6 all use exit-1 semantics; worst case operator does 3 pushes for one logical push). Orchestrator hook runs all mechanical fixups in dependency order and exits 1 ONCE.
-- **AISDLC-388** — architectural fix: make `ai-sdlc/attestation` a non-required check on main; let `ai-sdlc/pr-ready` rollup gate per-archetype (docs-only → skip attestation; code → require it). Eliminates the entire "docs need attestation status posted" workaround class. **SHIPPED** — `paths-ignore` reinstated in `verify-attestation.yml`, `ai-sdlc-gate.yml` updated with per-archetype docs. Operator action pending: update branch protection to remove `ai-sdlc/attestation` direct required check (AISDLC-388 AC-2).
+- **AISDLC-388** — architectural fix: make `ai-sdlc/attestation` a non-required check on main; let `ai-sdlc/pr-ready` rollup gate per-archetype (docs-only → skip attestation; code → require it). Eliminates the entire "docs need attestation status posted" workaround class.
 
 ### Surfaced + shipped emergency: AISDLC-387
 
@@ -314,7 +314,7 @@ The only gate in the chain defending against an EXTERNAL footgun (GitHub Actions
 |---|---|---|---|
 | 1 | `check-coverage.sh` | OPTIMIZE A+B | [AISDLC-389](../../backlog/tasks/aisdlc-389%20-%20chore-turbo-affected-package-filter-for-pre-push-coverage-plus-ci-build-and-test.md) — turbo filter + docs-only short-circuit (combined with CI Build & Test) |
 | 2 | `check-task-moved.sh` | KEEP | — |
-| 3 | `check-mcp-bundle-sync.sh` | **DELETE (architectural)** | AISDLC-385 — distribute bundle via npm, not git |
+| 3 | `check-mcp-bundle-sync.sh` | **DELETE (architectural — SHIPPED)** | AISDLC-385 — bundle distributed via `@ai-sdlc/plugin-mcp-server` npm package; hook + CI verifier + in-tree `dist/` removed |
 | 4 | `squash-attestation-chores.sh` | KEEP through cutover, DELETE post-383.7 | Fold into 383.7's v5-cleanup PR |
 | 5 | `check-dor-gate.sh` | KEEP | — |
 | 6 | `check-attestation-sign.sh` | KEEP | AISDLC-386 (UX), AISDLC-388 (architectural), AISDLC-387 (v6 incompat — PR #603, in flight) |
@@ -330,7 +330,7 @@ The only gate in the chain defending against an EXTERNAL footgun (GitHub Actions
 **Shipped during this audit pass**:
 - 2026-05-22 — `AI_SDLC_V6_CUTOVER_ACTIVE=1` flipped per RFC-0042 Phase 3 (gated v6 default per AISDLC-383.6)
 - 2026-05-22 — AISDLC-383.8 (PR #602) — transcript-leaf emission, v6 prerequisite stack complete
-- 2026-05-22 — AISDLC-388 — architectural fix: `ai-sdlc/attestation` removed as direct required check on main; `verify-attestation.yml` paths-ignore reinstated for docs-only PRs; `ai-sdlc/pr-ready` rollup is now the single gate with per-archetype attestation routing. Eliminates the AISDLC-214 + AISDLC-215 workaround class. Operator action required: update branch protection (see docs/operations/quality-gate.md § AISDLC-388 operator action).
+- 2026-05-22 — AISDLC-385 — distribute mcp-server bundle via npm (`@ai-sdlc/plugin-mcp-server`); deleted `check-mcp-bundle-sync.sh`, `verify-mcp-bundle.yml`, `mcp-server/scripts/verify-bundle.mjs`, and in-tree `dist/bin.js`
 
 ---
 

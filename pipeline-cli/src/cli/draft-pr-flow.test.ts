@@ -196,7 +196,6 @@ describe('AISDLC-218: workflow-changes recommendation file', () => {
     'ai-sdlc-gate.yml',
     'ci.yml',
     'dor-ingress.yml',
-    'verify-mcp-bundle.yml',
     'auto-enable-auto-merge.yml',
     'auto-rebase-open-prs.yml',
   ] as const;

@@ -9,7 +9,6 @@ labels:
 references:
   - .husky/pre-push
   - scripts/check-task-moved.sh
-  - scripts/check-mcp-bundle-sync.sh
   - scripts/squash-attestation-chores.sh
   - scripts/check-attestation-sign.sh
   - docs/operations/gate-friction-audit-2026.md
@@ -24,7 +23,7 @@ The pre-push chain has multiple hooks that exit-1 with "re-run git push" semanti
 
 1. `scripts/check-coverage.sh` — never exit-1 (just fail or pass)
 2. `scripts/check-task-moved.sh` — exit-1 after auto-mv + chore commit
-3. `scripts/check-mcp-bundle-sync.sh` — exit-1 after rebuild + chore commit (will DELETE per AISDLC-385)
+3. the `check-mcp-bundle-sync` hook (formerly under scripts/) — exit-1 after rebuild + chore commit (will DELETE per AISDLC-385)
 4. `scripts/squash-attestation-chores.sh` — silent (no exit-1)
 5. `scripts/check-dor-gate.sh` — never exit-1 (just fail or pass)
 6. `scripts/check-attestation-sign.sh` — exit-1 after sign + chore commit

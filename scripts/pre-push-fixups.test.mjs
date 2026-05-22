@@ -1,18 +1,18 @@
 /**
  * Tests for `scripts/pre-push-fixups.sh` — AISDLC-386.
  *
- * The orchestrator runs task-move → mcp-bundle-sync → attestation-sign in one
- * pass. Each sub-hook is invoked with AI_SDLC_INTERNAL_NO_EXIT_1=1 so it does
- * its work but exits 0. The orchestrator exits 1 ONCE if any fixup ran, or
- * exits 0 silently if nothing was needed.
+ * The orchestrator runs task-move → attestation-sign in one pass.
+ * (mcp-bundle-sync was removed by AISDLC-385 — bundle now distributed via npm.)
+ * Each sub-hook is invoked with AI_SDLC_INTERNAL_NO_EXIT_1=1 so it does its
+ * work but exits 0. The orchestrator exits 1 ONCE if any fixup ran, or exits 0
+ * silently if nothing was needed.
  *
- * Tests cover all 8 combinations of (task-move needed × bundle-sync needed ×
- * attestation-sign needed) to verify the orchestrator exits 1 when ≥1 fixup
- * ran and exits 0 when no fixup was needed.
+ * Tests cover all 4 combinations of (task-move needed × attestation-sign needed)
+ * to verify the orchestrator exits 1 when ≥1 fixup ran and exits 0 when no
+ * fixup was needed.
  *
  * Sub-hooks are stubbed via:
  *   AI_SDLC_TASK_COMPLETE_CMD   — stubs cli-task-complete in check-task-moved.sh
- *   AI_SDLC_MCP_BUILD_CMD       — stubs pnpm build in check-mcp-bundle-sync.sh
  *   AI_SDLC_SIGN_ATTESTATION_CMD— stubs sign-attestation.mjs in check-attestation-sign.sh
  *
  * Ordering invariant: task-move MUST run before attestation-sign (contentHashV4
@@ -53,10 +53,8 @@ function cleanEnv(extra = {}) {
   delete env.AI_SDLC_BYPASS_ALL_GATES;
   delete env.AI_SDLC_INTERNAL_NO_EXIT_1;
   delete env.AI_SDLC_SKIP_TASK_MOVE;
-  delete env.AI_SDLC_SKIP_MCP_BUNDLE_SYNC;
   delete env.AI_SDLC_SKIP_ATTESTATION_SIGN;
   delete env.AI_SDLC_TASK_COMPLETE_CMD;
-  delete env.AI_SDLC_MCP_BUILD_CMD;
   delete env.AI_SDLC_SIGN_ATTESTATION_CMD;
   // attestation-sign needs schema version env clean.
   delete env.AI_SDLC_SCHEMA_VERSION;
@@ -73,7 +71,7 @@ function git(args, cwd) {
 }
 
 /**
- * Set up a minimal git repo with all the directory structures that the three
+ * Set up a minimal git repo with all the directory structures that the two
  * sub-hooks expect.
  */
 function setupRepo() {
@@ -86,14 +84,6 @@ function setupRepo() {
   // Directory structure for task-move.
   mkdirSync(join(root, 'backlog', 'tasks'), { recursive: true });
   mkdirSync(join(root, 'backlog', 'completed'), { recursive: true });
-
-  // Directory structure for mcp-bundle-sync.
-  mkdirSync(join(root, 'pipeline-cli', 'src'), { recursive: true });
-  mkdirSync(join(root, 'ai-sdlc-plugin', 'mcp-server', 'dist'), { recursive: true });
-  writeFileSync(
-    join(root, 'ai-sdlc-plugin', 'mcp-server', 'dist', 'bin.js'),
-    '#!/usr/bin/env node\n// stale bundle\n',
-  );
 
   // Directory structure for attestation-sign.
   mkdirSync(join(root, '.ai-sdlc', 'verdicts'), { recursive: true });
@@ -139,29 +129,6 @@ if [ "\${#TASK_FILES[@]}" -gt 0 ]; then
     git -C "$WT_ROOT" mv "backlog/tasks/$BASENAME" "backlog/completed/$BASENAME"
   done
 fi
-exit 0
-`;
-  writeFileSync(shimPath, shim);
-  chmodSync(shimPath, 0o755);
-  return `bash ${shimPath}`;
-}
-
-/**
- * Install a fake mcp-build stub. When `freshen` is true, changes the bundle
- * content so the hash differs (simulating a stale bundle that needed rebuild).
- * When false, leaves bundle unchanged (no chore commit needed).
- */
-function installFakeMcpBuild(root, { freshen = false } = {}) {
-  const binDir = join(root, 'bin');
-  mkdirSync(binDir, { recursive: true });
-  const shimPath = join(binDir, 'fake-mcp-build.sh');
-  const distBin = join(root, 'ai-sdlc-plugin', 'mcp-server', 'dist', 'bin.js');
-  const newContent = freshen
-    ? '#!/usr/bin/env node\n// rebuilt bundle v2\n'
-    : readFileSync(distBin, 'utf-8'); // same content → no hash change
-  const shim = `#!/usr/bin/env bash
-# Write content that is ${freshen ? 'different from' : 'same as'} the original.
-printf '%s' '${newContent.replace(/'/g, "'\\''")}' > "${distBin}"
 exit 0
 `;
   writeFileSync(shimPath, shim);
@@ -273,19 +240,18 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     assert.equal(headAfter, headBefore, 'HEAD must not change with bypass');
   });
 
-  // ── Combination 1: no fixups needed (0/3) ───────────────────────────────
+  // ── Combination 1: no fixups needed (0/0) ──────────────────────────────
 
-  it('(combo 000) exits 0 silently when no fixup is needed', () => {
-    // No task ID in commit subject, no pipeline-cli changes, no active-task.
+  it('(combo 00) exits 0 silently when no fixup is needed', () => {
+    // No task ID in commit subject, no active-task sentinel.
     writeFileSync(join(root, 'some-file.txt'), 'content\n');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'feat: feature without any fixup triggers'], root);
     const headBefore = git(['rev-parse', 'HEAD'], root).trim();
 
     const taskCmd = installFakeTaskCli(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: false });
     const r = runOrchestrator(root, {
-      env: { AI_SDLC_TASK_COMPLETE_CMD: taskCmd, AI_SDLC_MCP_BUILD_CMD: mcpCmd },
+      env: { AI_SDLC_TASK_COMPLETE_CMD: taskCmd },
     });
 
     assert.equal(r.status, 0, `expected 0 (no fixups), got ${r.status}: ${r.stderr}`);
@@ -294,18 +260,17 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     assert.equal(headAfter, headBefore, 'HEAD must not change when no fixup needed');
   });
 
-  // ── Combination 2: task-move only (1/3) ─────────────────────────────────
+  // ── Combination 2: task-move only (1/0) ────────────────────────────────
 
-  it('(combo 100) exits 1 when only task-move runs', () => {
+  it('(combo 10) exits 1 when only task-move runs', () => {
     writeTaskFile(root, 'AISDLC-100');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'feat: task-move-only case (AISDLC-100)'], root);
     const headBefore = git(['rev-parse', 'HEAD'], root).trim();
 
     const taskCmd = installFakeTaskCli(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: false });
     const r = runOrchestrator(root, {
-      env: { AI_SDLC_TASK_COMPLETE_CMD: taskCmd, AI_SDLC_MCP_BUILD_CMD: mcpCmd },
+      env: { AI_SDLC_TASK_COMPLETE_CMD: taskCmd },
     });
 
     assert.equal(r.status, 1, `expected 1 (task-move ran), got ${r.status}: ${r.stderr}`);
@@ -325,9 +290,9 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     );
   });
 
-  // ── Combination 3: attestation-sign only (0/0/1) ────────────────────────
+  // ── Combination 3: attestation-sign only (0/1) ─────────────────────────
 
-  it('(combo 001) exits 1 when only attestation-sign runs', () => {
+  it('(combo 01) exits 1 when only attestation-sign runs', () => {
     const TASK_ID = 'AISDLC-200';
     setupAttestationConditions(root, TASK_ID);
 
@@ -345,11 +310,9 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     git(['commit', '-q', '-m', `chore: task already moved (${TASK_ID})`], root);
 
     const signCmd = installFakeSignAttestation(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: false });
     const r = runOrchestrator(root, {
       env: {
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
-        AI_SDLC_MCP_BUILD_CMD: mcpCmd,
         // Enable attestation-sign test mode (AISDLC-380 sub-attestation gate bypass).
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
@@ -363,9 +326,9 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     assert.match(r.stderr, /Re-run `git push`/i);
   });
 
-  // ── Combination 4: task-move + attestation-sign (1/0/1) ─────────────────
+  // ── Combination 4: task-move + attestation-sign (1/1) ──────────────────
 
-  it('(combo 101) exits 1 and lists both when task-move + attestation-sign both run', () => {
+  it('(combo 11) exits 1 and lists both when task-move + attestation-sign both run', () => {
     const TASK_ID = 'AISDLC-300';
     setupAttestationConditions(root, TASK_ID);
 
@@ -375,12 +338,10 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
 
     const taskCmd = installFakeTaskCli(root);
     const signCmd = installFakeSignAttestation(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: false });
     const r = runOrchestrator(root, {
       env: {
         AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
-        AI_SDLC_MCP_BUILD_CMD: mcpCmd,
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
         AI_SDLC_V6_CUTOVER_ACTIVE: '1',
@@ -395,112 +356,6 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     assert.match(r.stderr, /Re-run `git push`/i);
   });
 
-  // ── Combination 5: mcp-bundle-sync only (0/1/0) ─────────────────────────
-
-  it('(combo 010) exits 1 when only mcp-bundle-sync runs', () => {
-    // Add a pipeline-cli/src change so mcp-bundle-sync triggers.
-    writeFileSync(join(root, 'pipeline-cli', 'src', 'index.ts'), 'export const x = 1;\n');
-    git(['add', '.'], root);
-    git(['commit', '-q', '-m', 'feat: pipeline-cli change (no task ID)'], root);
-
-    const taskCmd = installFakeTaskCli(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: true });
-    const r = runOrchestrator(root, {
-      env: { AI_SDLC_TASK_COMPLETE_CMD: taskCmd, AI_SDLC_MCP_BUILD_CMD: mcpCmd },
-    });
-
-    assert.equal(r.status, 1, `expected 1 (mcp-bundle-sync ran), got ${r.status}: ${r.stderr}`);
-    assert.match(r.stderr, /Auto-fixed:.*mcp-bundle-sync/i);
-    assert.match(r.stderr, /Re-run `git push`/i);
-  });
-
-  // ── Combination 6: task-move + mcp-bundle-sync (1/1/0) ──────────────────
-
-  it('(combo 110) exits 1 when task-move + mcp-bundle-sync both run', () => {
-    writeTaskFile(root, 'AISDLC-400');
-    writeFileSync(join(root, 'pipeline-cli', 'src', 'index.ts'), 'export const x = 2;\n');
-    git(['add', '.'], root);
-    git(['commit', '-q', '-m', 'feat: both fixups needed (AISDLC-400)'], root);
-
-    const taskCmd = installFakeTaskCli(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: true });
-    const r = runOrchestrator(root, {
-      env: { AI_SDLC_TASK_COMPLETE_CMD: taskCmd, AI_SDLC_MCP_BUILD_CMD: mcpCmd },
-    });
-
-    assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
-    assert.match(r.stderr, /task-move/i);
-    assert.match(r.stderr, /mcp-bundle-sync/i);
-  });
-
-  // ── Combination 7: mcp-bundle-sync + attestation-sign (0/1/1) ───────────
-
-  it('(combo 011) exits 1 when mcp-bundle-sync + attestation-sign both run', () => {
-    const TASK_ID = 'AISDLC-500';
-    setupAttestationConditions(root, TASK_ID);
-
-    writeFileSync(join(root, 'pipeline-cli', 'src', 'foo.ts'), 'export const foo = 1;\n');
-    // Task already in completed so task-move doesn't fire.
-    const taskIdLower = TASK_ID.toLowerCase();
-    writeFileSync(
-      join(root, 'backlog', 'completed', `${taskIdLower} - Test Task.md`),
-      `---\nid: ${TASK_ID}\nstatus: Done\n---\n`,
-    );
-    git(['add', '.'], root);
-    git(['commit', '-q', '-m', `feat: pipeline-cli + attest (${TASK_ID})`], root);
-
-    const taskCmd = installFakeTaskCli(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: true });
-    const signCmd = installFakeSignAttestation(root);
-    const r = runOrchestrator(root, {
-      env: {
-        AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
-        AI_SDLC_MCP_BUILD_CMD: mcpCmd,
-        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
-        AI_SDLC_TEST_MODE: '1',
-        AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
-        AI_SDLC_V6_CUTOVER_ACTIVE: '1',
-        AI_SDLC_SCHEMA_VERSION: 'v5',
-      },
-    });
-
-    assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
-    assert.match(r.stderr, /mcp-bundle-sync/i);
-    assert.match(r.stderr, /attestation-sign/i);
-  });
-
-  // ── Combination 8: all three run (1/1/1) ────────────────────────────────
-
-  it('(combo 111) exits 1 and lists all three when all fixups run', () => {
-    const TASK_ID = 'AISDLC-600';
-    setupAttestationConditions(root, TASK_ID);
-
-    writeTaskFile(root, TASK_ID);
-    writeFileSync(join(root, 'pipeline-cli', 'src', 'bar.ts'), 'export const bar = 1;\n');
-    git(['add', '.'], root);
-    git(['commit', '-q', '-m', `feat: all three fixups needed (${TASK_ID})`], root);
-
-    const taskCmd = installFakeTaskCli(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: true });
-    const signCmd = installFakeSignAttestation(root);
-    const r = runOrchestrator(root, {
-      env: {
-        AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
-        AI_SDLC_MCP_BUILD_CMD: mcpCmd,
-        AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
-        AI_SDLC_TEST_MODE: '1',
-        AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
-        AI_SDLC_V6_CUTOVER_ACTIVE: '1',
-        AI_SDLC_SCHEMA_VERSION: 'v5',
-      },
-    });
-
-    assert.equal(r.status, 1, `expected 1, got ${r.status}: ${r.stderr}`);
-    assert.match(r.stderr, /task-move/i);
-    assert.match(r.stderr, /mcp-bundle-sync/i);
-    assert.match(r.stderr, /attestation-sign/i);
-  });
-
   // ── Ordering invariant ────────────────────────────────────────────────────
 
   it('task-move commit appears BEFORE attestation-sign commit in git log', () => {
@@ -512,12 +367,10 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     git(['commit', '-q', '-m', `feat: ordering test (${TASK_ID})`], root);
 
     const taskCmd = installFakeTaskCli(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: false });
     const signCmd = installFakeSignAttestation(root);
     const r = runOrchestrator(root, {
       env: {
         AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
-        AI_SDLC_MCP_BUILD_CMD: mcpCmd,
         AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
         AI_SDLC_TEST_MODE: '1',
         AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
@@ -553,11 +406,9 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     git(['commit', '-q', '-m', `feat: idempotency test (${TASK_ID})`], root);
 
     const taskCmd = installFakeTaskCli(root);
-    const mcpCmd = installFakeMcpBuild(root, { freshen: false });
     const signCmd = installFakeSignAttestation(root);
     const sharedEnv = {
       AI_SDLC_TASK_COMPLETE_CMD: taskCmd,
-      AI_SDLC_MCP_BUILD_CMD: mcpCmd,
       AI_SDLC_SIGN_ATTESTATION_CMD: signCmd,
       AI_SDLC_TEST_MODE: '1',
       AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: 'true',
@@ -668,6 +519,16 @@ describe('pre-push-fixups.sh (AISDLC-386)', () => {
     assert.ok(
       attestationIdx !== -1,
       `check-attestation-sign.sh must be in .husky/pre-push:\n${content}`,
+    );
+
+    // check-mcp-bundle-sync.sh must NOT appear as an executable line (AISDLC-385 deleted it).
+    const mcpBundleIdx = lines.findIndex(
+      (l) => l.includes('check-mcp-bundle-sync.sh') && !l.trimStart().startsWith('#'),
+    );
+    assert.equal(
+      mcpBundleIdx,
+      -1,
+      `check-mcp-bundle-sync.sh must NOT appear as an executable line in .husky/pre-push (deleted by AISDLC-385):\n${content}`,
     );
 
     assert.ok(

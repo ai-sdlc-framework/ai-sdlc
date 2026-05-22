@@ -46,46 +46,69 @@ _is_usable() {
   [ -d "$candidate" ] && ls "$candidate"/cli-*.mjs &>/dev/null 2>&1
 }
 
+# AISDLC-385: also check for plugin-mcp-server bundle. Self-heal should
+# trigger if EITHER dep is missing (not just pipeline-cli). Otherwise an
+# upgrade where pipeline-cli is already installed but mcp-server is not
+# (e.g. operator ran `pnpm clean` then resumed without `npm install`)
+# leaves the MCP server silently unreachable at Claude Code startup.
+_mcp_usable() {
+  local plugin_dir="$1"
+  [ -f "$plugin_dir/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js" ]
+}
+
+# Combined self-heal trigger: returns 0 (needs heal) if pipeline-cli OR
+# mcp-server is missing in the plugin dir.
+_deps_complete() {
+  local plugin_dir="$1"
+  _is_usable "$plugin_dir/$PIPELINE_CLI_REL" && _mcp_usable "$plugin_dir"
+}
+
 # ── Topology 1: CLAUDE_PLUGIN_DIR set + deps bundled ────────────────────────
 if [ -n "${CLAUDE_PLUGIN_DIR:-}" ]; then
   CANDIDATE="$CLAUDE_PLUGIN_DIR/$PIPELINE_CLI_REL"
-  if _is_usable "$CANDIDATE"; then
+  # AISDLC-385: fast-path requires BOTH pipeline-cli AND mcp-server present.
+  if _deps_complete "$CLAUDE_PLUGIN_DIR"; then
     printf '%s' "$CANDIDATE"
     exit 0
   fi
 
   # ── Topology 2: CLAUDE_PLUGIN_DIR set + deps missing (broken install) ─────
   # Attempt self-heal: run install-runtime-deps.sh if it ships with the plugin.
+  # AISDLC-385: triggers when EITHER pipeline-cli OR mcp-server is missing.
   SELF_HEAL_SCRIPT="$CLAUDE_PLUGIN_DIR/scripts/install-runtime-deps.sh"
   if [ -f "$SELF_HEAL_SCRIPT" ]; then
-    echo "resolve-pipeline-cli.sh: @ai-sdlc/pipeline-cli missing in $CLAUDE_PLUGIN_DIR — attempting self-heal..." >&2
+    MISSING="pipeline-cli"
+    _is_usable "$CANDIDATE" && MISSING="plugin-mcp-server"
+    echo "resolve-pipeline-cli.sh: @ai-sdlc/$MISSING missing in $CLAUDE_PLUGIN_DIR — attempting self-heal..." >&2
     if bash "$SELF_HEAL_SCRIPT" "$CLAUDE_PLUGIN_DIR" >&2; then
-      CANDIDATE="$CLAUDE_PLUGIN_DIR/$PIPELINE_CLI_REL"
-      if _is_usable "$CANDIDATE"; then
+      if _deps_complete "$CLAUDE_PLUGIN_DIR"; then
         echo "resolve-pipeline-cli.sh: self-heal succeeded" >&2
         printf '%s' "$CANDIDATE"
         exit 0
       fi
     fi
-    echo "resolve-pipeline-cli.sh: self-heal did not produce a usable install — continuing fallback chain" >&2
+    echo "resolve-pipeline-cli.sh: self-heal did not produce a complete install — continuing fallback chain" >&2
   fi
 fi
 
 # ── Topology 3: CLAUDE_PLUGIN_ROOT set (always injected by Claude Code) ─────
 if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
   CANDIDATE="$CLAUDE_PLUGIN_ROOT/$PIPELINE_CLI_REL"
-  if _is_usable "$CANDIDATE"; then
+  # AISDLC-385: fast-path requires BOTH pipeline-cli AND mcp-server present.
+  if _deps_complete "$CLAUDE_PLUGIN_ROOT"; then
     printf '%s' "$CANDIDATE"
     exit 0
   fi
 
   # CLAUDE_PLUGIN_ROOT is set but deps are missing — try self-heal here too.
+  # AISDLC-385: triggers when EITHER pipeline-cli OR mcp-server is missing.
   SELF_HEAL_SCRIPT="$CLAUDE_PLUGIN_ROOT/scripts/install-runtime-deps.sh"
   if [ -f "$SELF_HEAL_SCRIPT" ]; then
-    echo "resolve-pipeline-cli.sh: @ai-sdlc/pipeline-cli missing in $CLAUDE_PLUGIN_ROOT — attempting self-heal..." >&2
+    MISSING="pipeline-cli"
+    _is_usable "$CANDIDATE" && MISSING="plugin-mcp-server"
+    echo "resolve-pipeline-cli.sh: @ai-sdlc/$MISSING missing in $CLAUDE_PLUGIN_ROOT — attempting self-heal..." >&2
     if bash "$SELF_HEAL_SCRIPT" "$CLAUDE_PLUGIN_ROOT" >&2; then
-      CANDIDATE="$CLAUDE_PLUGIN_ROOT/$PIPELINE_CLI_REL"
-      if _is_usable "$CANDIDATE"; then
+      if _deps_complete "$CLAUDE_PLUGIN_ROOT"; then
         echo "resolve-pipeline-cli.sh: self-heal (CLAUDE_PLUGIN_ROOT) succeeded" >&2
         printf '%s' "$CANDIDATE"
         exit 0
