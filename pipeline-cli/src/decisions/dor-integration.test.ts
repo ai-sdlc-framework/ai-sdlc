@@ -235,8 +235,11 @@ describe('AC#5 — DoR clarification round → queryable Decisions via cli-decis
     const verdict = stripDurationMs(stageA);
     expect(verdict.questions?.length ?? 0).toBeGreaterThan(0);
 
-    // Bridge with flag OFF.
-    const bridgeResult = emitDorDecisions(verdict, { workDir, env: {} as NodeJS.ProcessEnv });
+    // Bridge with flag explicitly OFF (AISDLC-392: default is now ON; opt-out required).
+    const bridgeResult = emitDorDecisions(verdict, {
+      workDir,
+      env: { AI_SDLC_DECISION_CATALOG: 'off' } as NodeJS.ProcessEnv,
+    });
     expect(bridgeResult.enabled).toBe(false);
     expect(bridgeResult.emitted).toBe(0);
 

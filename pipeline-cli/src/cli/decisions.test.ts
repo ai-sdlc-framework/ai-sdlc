@@ -87,8 +87,8 @@ function stderrText(): string {
 // ── Feature flag (AC#6) ───────────────────────────────────────────────────────
 
 describe('AC#6 — AI_SDLC_DECISION_CATALOG feature flag', () => {
-  it('list degrades open with stderr notice when flag is unset', async () => {
-    delete process.env.AI_SDLC_DECISION_CATALOG;
+  it('list degrades open with stderr notice when flag is opt-out (off)', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off'; // AISDLC-392 default-on; opt-out explicit
     setArgv('list', '--format', 'json');
     await buildDecisionsCli().parseAsync();
     const r = stdoutJson<{ ok: boolean; enabled: boolean; decisions: unknown[] }>();
@@ -98,8 +98,8 @@ describe('AC#6 — AI_SDLC_DECISION_CATALOG feature flag', () => {
     expect(stderrText()).toMatch(/AI_SDLC_DECISION_CATALOG/);
   });
 
-  it('show degrades open with stderr notice when flag is unset', async () => {
-    delete process.env.AI_SDLC_DECISION_CATALOG;
+  it('show degrades open with stderr notice when flag is opt-out (off)', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off'; // AISDLC-392 default-on; opt-out explicit
     setArgv('show', 'DEC-0001', '--format', 'json');
     await buildDecisionsCli().parseAsync();
     const r = stdoutJson<{ ok: boolean; enabled: boolean; decision: null }>();
@@ -107,8 +107,8 @@ describe('AC#6 — AI_SDLC_DECISION_CATALOG feature flag', () => {
     expect(r.decision).toBeNull();
   });
 
-  it('add refuses to mutate when flag is unset', async () => {
-    delete process.env.AI_SDLC_DECISION_CATALOG;
+  it('add refuses to mutate when flag is opt-out (off)', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off'; // AISDLC-392 default-on; opt-out explicit
     setArgv('add', '--summary', 'x', '--scope', 'workspace', '--option', 'opt-a:Yes');
     await expect(buildDecisionsCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
     expect(stderrText()).toMatch(/refusing to mutate/);
@@ -399,8 +399,8 @@ describe('score-a subcommand (Phase 2 AC#1 AC#2 AC#3 AC#4)', () => {
     expect(showResult.decision.status.evaluation?.stageA).toBeTruthy();
   });
 
-  it('degrades open when flag is unset', async () => {
-    delete process.env.AI_SDLC_DECISION_CATALOG;
+  it('degrades open when flag is opt-out (off)', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off'; // AISDLC-392 default-on; opt-out explicit
     setArgv('score-a', 'DEC-0001', '--format', 'json');
     await buildDecisionsCli().parseAsync();
     const r = stdoutJson<{ enabled: boolean }>();
@@ -470,8 +470,8 @@ describe('coverage subcommand (Phase 2 AC#6)', () => {
     expect(r.coverage.meetsTarget).toBe(true);
   });
 
-  it('degrades open when flag is unset', async () => {
-    delete process.env.AI_SDLC_DECISION_CATALOG;
+  it('degrades open when flag is opt-out (off)', async () => {
+    process.env.AI_SDLC_DECISION_CATALOG = 'off'; // AISDLC-392 default-on; opt-out explicit
     setArgv('coverage', '--format', 'json');
     await buildDecisionsCli().parseAsync();
     const r = stdoutJson<{ enabled: boolean }>();

@@ -35,7 +35,8 @@ function makeVerdict(
 }
 
 const FLAG_ON = { [DECISION_CATALOG_FLAG]: 'experimental' } as NodeJS.ProcessEnv;
-const FLAG_OFF = {} as NodeJS.ProcessEnv;
+// AISDLC-392: flag is default-ON; explicit opt-out is required for "off" tests.
+const FLAG_OFF = { AI_SDLC_DECISION_CATALOG: 'off' } as NodeJS.ProcessEnv;
 
 let workDir: string;
 

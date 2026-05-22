@@ -86,9 +86,20 @@ When a dev subagent encounters an open question that blocks or constrains implem
 
 If an OQ is genuinely non-blocking (implementation can proceed without resolving it), proceed with a documented assumption in the PR body — not a Resolution marker in the RFC.
 
-### Long-term replacement: RFC-0035 Decision Catalog
+### RFC-0035 Decision Catalog (default-ON since AISDLC-392)
 
-The long-term mechanism for OQ resolution is the [Decision Catalog (RFC-0035)](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md). OQs in RFC bodies will eventually project into the catalog as `Decision` records, routed to the appropriate actor (Engineering / Product / Operator), resolved asynchronously with full audit trail. Until that ships, escalate by returning `prUrl: null` per the protocol above.
+The mechanism for architectural / OQ-style decision routing is the [Decision Catalog (RFC-0035)](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md). OQs project into the catalog as `Decision` records, routed to the appropriate actor (Engineering / Product / Operator), resolved asynchronously with full audit trail.
+
+**Feature flag `AI_SDLC_DECISION_CATALOG` is default-ON (AISDLC-392, 2026-05-22).** File decisions with:
+
+```bash
+node pipeline-cli/bin/cli-decisions.mjs add --summary "<one-line>" --scope <area> --option "<id>:<description>"
+node pipeline-cli/bin/cli-decisions.mjs list
+```
+
+To opt out: set `AI_SDLC_DECISION_CATALOG=off` (or `0`/`false`/`no`/`disabled`).
+
+Dev subagents that hit an OQ-class architectural question during implementation should still escalate by returning `prUrl: null` per the protocol above. The Decision Catalog is for OPERATOR-side decision routing, not a license for dev subagents to resolve OQs in code.
 
 ### Reviewer gate (AISDLC-298)
 
