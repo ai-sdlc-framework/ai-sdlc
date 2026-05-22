@@ -341,7 +341,7 @@ The only gate in the chain defending against an EXTERNAL footgun (GitHub Actions
 
 ## CI Gate 1 — `Build & Test (Node 22)`
 
-**Verdict: OPTIMIZE — turbo affected-package filter (shipped via AISDLC-389, combined with pre-push Gate 1)**
+**Verdict: OPTIMIZE — pnpm affected-package filter (shipped via AISDLC-389, combined with pre-push Gate 1)**
 
 ### Read
 
@@ -356,12 +356,61 @@ The only gate in the chain defending against an EXTERNAL footgun (GitHub Actions
 ### Friction observations
 
 1. **Runs on EVERY PR including docs-only** — ~4 min wasted per docs PR. Confirmed during this audit on PRs #604 (docs-only) and #603 (5-line bash change).
-2. **Full workspace `pnpm build` + `pnpm test`** — no turbo affected-package filter
+2. **Full workspace `pnpm build` + `pnpm test`** — no affected-package filter
 3. **Sequential** within the job — no parallelism between build / test / validate-schemas
 4. **Already optimized once**: AISDLC-368 dropped Node 20 from matrix → halved wall-clock
 
 ### Decision: OPTIMIZE — shipped via AISDLC-389
 
-Same turbo `--filter=...[origin/main]` fix as pre-push Gate 1; combining into one task because the filter logic + invocation pattern is shared. See [AISDLC-389](../../backlog/tasks/aisdlc-389%20-%20chore-turbo-affected-package-filter-for-pre-push-coverage-plus-ci-build-and-test.md) for the full ACs covering both gates.
+Same `pnpm --filter "...[origin/main]"` fix as pre-push Gate 1; combining into one task because the filter logic + invocation pattern is shared. See [AISDLC-389](../../backlog/tasks/aisdlc-389%20-%20chore-turbo-affected-package-filter-for-pre-push-coverage-plus-ci-build-and-test.md) for the full ACs covering both gates.
 
 Docs-only short-circuiting at the workflow level is intentionally NOT in AISDLC-389's scope — that's folded into AISDLC-388's `pr-ready` archetype routing, which is the cleaner architectural fix.
+
+---
+
+## CI Gate 2 — `Coverage`
+
+**Verdict: KEEP (already optimized via AISDLC-368 + AISDLC-372)**
+
+### Read
+
+`.github/workflows/ci.yml` job `coverage`. Steps: checkout (fetch-depth: 0) → pnpm install (cached) → pnpm build → `vitest --changed origin/main` (PR) OR `pnpm test:coverage` (push/merge_group) → codecov upload (informational, `fail_ci_if_error: false`).
+
+### Live timing
+
+- 186-320s mean ~273s
+- Runs in PARALLEL with Build & Test
+- Critical-path overall: max(Build&Test, Coverage) ≈ 4-5 min
+
+### Already optimized
+
+- **AISDLC-368**: `vitest --changed origin/main` on PR events — cuts 3-5min → ~30s on small PRs
+- **AISDLC-372**: `codecov/patch` removed from required branch protection — codecov is now informational
+
+### Decision: KEEP
+
+The main optimization angles already shipped. Marginal further gains (fold into Build & Test, move to post-merge) defer until AISDLC-389 lands — symmetry between Build & Test and Coverage gets cleaner then.
+
+---
+
+## CI Gate 3 — `Integration Tests`
+
+**Verdict: KEEP (no change)**
+
+### Read
+
+`.github/workflows/ci.yml` job `integration`. Steps: checkout → pnpm install (cached) → pnpm build → `pnpm --filter @ai-sdlc/reference test`. Skips on fork PRs (needs GITHUB_TOKEN secret) and draft PRs (AISDLC-218).
+
+### Live timing
+
+- 100-118s mean ~107s (~1.8 min) across last 5 successful runs
+- Faster than Build & Test + Coverage — not on critical path
+- Gates merge via `ci-ok` aggregator but finishes before slower siblings
+
+### Decision: KEEP
+
+Tight scope (single package), security isolation (fork-PR skip is a structural reason to keep separate), not blocking critical path. Runner-cycle waste from third redundant install/build is real but not impactful enough to warrant YAML refactor risk.
+
+### Filed during this gate review
+
+None. The cross-gate concern — three CI jobs sharing identical install/build setup — is a low-priority cleanup. Could file an AISDLC-390 to factor setup into a reusable workflow or composite action; deferred for now.
