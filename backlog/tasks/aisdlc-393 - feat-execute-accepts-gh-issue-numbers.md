@@ -7,8 +7,6 @@ labels:
   - dogfood
   - ux
 references:
-  - 'gh-issue:612'
-  - 'gh-issue:610'
   - ai-sdlc-plugin/commands/execute.md
   - dogfood/src/cli-watch.ts
   - dogfood/src/cli.ts
@@ -30,9 +28,9 @@ This task tracks #612.
 ## Acceptance criteria
 
 - [ ] AC-1: `/ai-sdlc execute <arg>` detects the argument form:
-  - `^[A-Za-z][A-Za-z0-9]*-\d+$` (e.g. `AISDLC-42`, `INGEST-101`) → existing backlog-task path, no behavior change
-  - `^#?\d+$` (e.g. `42`, `#42`) → new GH-issue path
-  - `^gh:\d+$` (e.g. `gh:42`) → optional explicit form for unambiguous routing
+  - `^[A-Za-z][A-Za-z0-9]*-\d+$` (a prefixed task id like `AISDLC-NN` or `INGEST-NN`) → existing backlog-task path, no behavior change
+  - `^#?\d+$` (a bare numeric or hash-prefixed numeric form) → new GH-issue path
+  - `^gh:\d+$` (a `gh:`-prefixed explicit form) → unambiguous routing for the GH-issue path
 - [ ] AC-2: On the GH-issue path, the slash command reuses `dogfood/src/cli-watch.ts` (or refactored shared helper) to fetch the issue, run admission scoring, set up the per-task worktree, and dispatch — same logic the watcher already implements.
 - [ ] AC-3: The GH-issue dispatch path uses the **subscription `SubagentSpawner`** (the same one `/ai-sdlc execute <task-id>` uses today), not the API-key spawner the watcher uses.
 - [ ] AC-4: No backlog task file is created as a side effect when dispatching from a GH issue. The GH issue remains the single source of truth; the PR closes the issue directly via `Closes #N` in the PR body.
@@ -44,7 +42,7 @@ This task tracks #612.
 
 ## Implementation sketch
 
-1. Refactor the GH-issue→pipeline codepath out of `dogfood/src/cli-watch.ts` into a shared helper (e.g. `dogfood/src/dispatch-from-issue.ts`) that takes a `SubagentSpawner` injection point per RFC-0012.
+1. Refactor the GH-issue→pipeline codepath out of `dogfood/src/cli-watch.ts` into a shared helper (e.g. a new dispatch-from-issue module under dogfood/src/) that takes a `SubagentSpawner` injection point per RFC-0012.
 2. The watcher continues to pass the API-key spawner; the slash command's GH-issue branch passes the subscription spawner.
 3. In the slash-command entry (`ai-sdlc-plugin/commands/execute.md` body, or wherever the parsing actually lives), add the argument-form detection and route to the right handler.
 4. Update `CLAUDE.md` canonical-execution-paths table.
