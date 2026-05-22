@@ -113,8 +113,19 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
   });
 
-  it('declares all six required jobs by canonical names (AC #3)', () => {
-    const expectedJobs = ['detect', 'lint', 'build-test', 'coverage', 'integration', 'pr-ready'];
+  it('declares all seven required jobs by canonical names (AC #3)', () => {
+    // AISDLC-388: attestation-gate added — re-introduces machine enforcement
+    // of ai-sdlc/attestation for code PRs (skipped on docs-only) via the
+    // rollup layer, after AISDLC-388 removed it from branch protection.
+    const expectedJobs = [
+      'detect',
+      'lint',
+      'build-test',
+      'coverage',
+      'integration',
+      'attestation-gate',
+      'pr-ready',
+    ];
     assert.deepEqual(Object.keys(workflow.jobs).sort(), expectedJobs.sort());
   });
 
@@ -140,7 +151,16 @@ describe('ai-sdlc-gate.yml — workflow structure (AC #1, #4)', () => {
     );
     // `needs` may be parsed as an array of strings.
     const needs = Array.isArray(agg.needs) ? agg.needs : [agg.needs];
-    for (const required of ['detect', 'lint', 'build-test', 'coverage', 'integration']) {
+    // AISDLC-388: attestation-gate added to needs to re-introduce machine
+    // enforcement of code-PR attestation via the rollup.
+    for (const required of [
+      'detect',
+      'lint',
+      'build-test',
+      'coverage',
+      'integration',
+      'attestation-gate',
+    ]) {
       assert.ok(needs.includes(required), `pr-ready needs: ${required}`);
     }
 

@@ -36,7 +36,6 @@ CMD=(
   "repos/${REPO}/branches/${BRANCH}/protection/required_status_checks"
   -F "contexts[]=Backlog Drift"
   -F "contexts[]=ai-sdlc/pr-ready"
-  -F "contexts[]=ai-sdlc/attestation"
   -F "strict=true"
 )
 
@@ -47,14 +46,13 @@ if [ "${DRY_RUN:-}" = "1" ]; then
   echo "[apply-codecov-drop] Resulting required contexts:"
   echo "  - Backlog Drift"
   echo "  - ai-sdlc/pr-ready"
-  echo "  - ai-sdlc/attestation"
-  echo "  (codecov/patch removed)"
+  echo "  (codecov/patch removed; ai-sdlc/attestation NOT required per AISDLC-388 — conditional contributor to ai-sdlc/pr-ready)"
   exit 0
 fi
 
 echo "[apply-codecov-drop] Patching required_status_checks on ${REPO}/${BRANCH}..."
-echo "[apply-codecov-drop] New contexts: Backlog Drift, ai-sdlc/pr-ready, ai-sdlc/attestation"
-echo "[apply-codecov-drop] Dropped: codecov/patch"
+echo "[apply-codecov-drop] New contexts: Backlog Drift, ai-sdlc/pr-ready"
+echo "[apply-codecov-drop] Dropped: codecov/patch (ai-sdlc/attestation also non-required per AISDLC-388)"
 echo ""
 
 "${CMD[@]}"

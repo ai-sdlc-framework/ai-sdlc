@@ -1,7 +1,7 @@
 ---
 id: AISDLC-388
 title: 'chore: exclude docs-only PRs from attestation requirement (architectural)'
-status: To Do
+status: Done
 labels:
   - architecture
   - attestation

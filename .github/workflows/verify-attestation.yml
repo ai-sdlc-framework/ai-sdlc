@@ -70,11 +70,24 @@ name: AI-SDLC Verify Review Attestation
 # `{path, headBlobSha}` map, base-independent) to close that rebase gap.
 
 on:
-  # AISDLC-214: paths-ignore REMOVED. The required `ai-sdlc/attestation` status
-  # must be posted on EVERY PR head SHA (including docs-only) so branch
-  # protection doesn't deadlock. Docs-only PRs are short-circuited inside the
-  # workflow via the docs-only detect step below — no envelope verify, just
-  # post `success` directly.
+  # AISDLC-388: paths-ignore REINSTATED for docs-only paths on pull_request
+  # events. AISDLC-214 removed this because `ai-sdlc/attestation` was a
+  # REQUIRED branch-protection check and paths-ignore-skipped workflows leave
+  # their check pending forever. AISDLC-388 removes `ai-sdlc/attestation` as
+  # a direct required check (replaced by the per-archetype logic in
+  # ai-sdlc-gate.yml / pr-ready rollup), so the deadlock no longer applies:
+  # docs-only PRs never need the `ai-sdlc/attestation` status posted.
+  #
+  # On merge_group events (where paths-ignore does not apply), the inline
+  # docs-only short-circuit below still fires cheaply — no change needed there.
+  #
+  # AISDLC-214 cleanup note: the "always post status on every head SHA" code
+  # path (Short-circuit — post ai-sdlc/attestation success) below is marked
+  # for deletion in a FOLLOW-UP PR after the operator updates branch protection
+  # (AISDLC-388 AC-4). It is intentionally retained here to avoid a race:
+  # if branch protection is still requiring `ai-sdlc/attestation` when this
+  # lands, removing the short-circuit would deadlock docs-only PRs immediately.
+  # The operator MUST update branch protection BEFORE the follow-up deletion PR.
   #
   # AISDLC-381: migrated from `pull_request` to `pull_request_target` so the
   # workflow runs in target-repo context with `statuses:write` honored on
@@ -94,6 +107,17 @@ on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     branches: [main]
+    # AISDLC-388: reinstate paths-ignore for docs-only paths now that
+    # `ai-sdlc/attestation` is no longer a direct required check on main.
+    # Docs-only PRs do not need an attestation status posted; skipping
+    # this workflow on docs paths avoids unnecessary CI compute and
+    # eliminates the "docs require attestation" workaround class.
+    paths-ignore:
+      - 'spec/rfcs/**'
+      - 'docs/**'
+      - 'backlog/tasks/**'
+      - 'backlog/completed/**'
+      - '*.md'
   pull_request_target:
     # AISDLC-218 (revised): keep `opened` (so direct-ready PRs without `--draft`
     # fire the gate) AND add `ready_for_review` (canonical fire-once trigger
@@ -284,13 +308,28 @@ jobs:
             fi
           fi
 
-      # AISDLC-214: short-circuit on docs-only changesets (BOTH pull_request AND
-      # merge_group). The former fallback workflow `verify-attestation-docs-only.yml`
-      # used to handle pull_request docs-only by posting `ai-sdlc/attestation:
-      # success` on the PR head SHA. After retiring that workflow, we MUST post
-      # the same status here on docs-only PR HEADs or branch protection
-      # deadlocks the PR (per docs/operations/quality-gate.md: paths-ignore-skipped
-      # workflows leave their required check pending forever).
+      # AISDLC-214: short-circuit on docs-only changesets.
+      #
+      # For pull_request events: the reinstated paths-ignore (AISDLC-388) means
+      # this workflow no longer fires on docs-only PRs, so the short-circuit is
+      # only reachable on pull_request if a docs-only PR somehow bypasses paths-
+      # ignore (e.g. a file added to paths-ignore that the action predicate
+      # misses). It acts as a safety net.
+      #
+      # For merge_group events: paths-ignore does NOT apply to merge_group
+      # (GitHub always fires merge_group regardless of changed paths). The
+      # short-circuit is ESSENTIAL here — without it a docs-only merge-group
+      # commit would reach the full verifier, fail with "no envelope", and
+      # block the merge queue.
+      #
+      # AISDLC-388 AC-4 deletion note: the "Short-circuit — post
+      # ai-sdlc/attestation success (docs-only)" step below can be DELETED
+      # once branch protection no longer requires `ai-sdlc/attestation` directly.
+      # At that point docs-only merge_group commits can simply skip to end
+      # without posting any status (the pr-ready rollup handles the gate).
+      # Do NOT delete before the operator completes the branch-protection update
+      # (AISDLC-388 AC-2) or docs-only PRs in the merge queue will hit
+      # "failed_checks" and be ejected.
       #
       # Detection runs unconditionally; the short-circuit posts `success` and the
       # subsequent verify steps skip when all_docs == 'true'.

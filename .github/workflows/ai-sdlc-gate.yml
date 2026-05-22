@@ -20,9 +20,35 @@ name: AI-SDLC PR Ready Gate
 #  - Q1: prescriptive default for adopters from day one
 #  - Q2: GHMQ-agnostic — same workflow handles `pull_request` + `merge_group`
 #  - Q3: attestation is audit-only — `ai-sdlc/attestation` is NOT in the
-#        aggregator's required signal set
+#        aggregator's required signal set; it feeds into this rollup
+#        indirectly per AISDLC-388 per-archetype logic (see below)
 #  - Q4(b): this workflow IS the framework's prescriptive default; will be
 #          scaffolded by `init` in sub-5
+#
+# Per-archetype attestation gating (AISDLC-388):
+#
+#   docs-only PRs (every changed file in spec/rfcs/**, docs/**,
+#   backlog/{tasks,completed}/**, or root *.md):
+#     → build-test, coverage, integration are SKIPPED (already gated by `detect`)
+#     → `ai-sdlc/attestation` is NOT required; verify-attestation.yml is skipped
+#       via paths-ignore on pull_request events; on merge_group events the inline
+#       short-circuit in verify-attestation.yml posts `success` cheaply
+#     → pr-ready aggregator passes via alls-green treating skipped as allowed
+#
+#   code/mixed PRs (at least one non-docs file):
+#     → build-test, coverage, integration all required (existing behavior)
+#     → `ai-sdlc/attestation` must be posted by verify-attestation.yml;
+#       missing/invalid envelopes cause verify-attestation to post `failure`
+#       (visible as a non-required informational status — branch protection
+#       only requires `ai-sdlc/pr-ready` per AISDLC-388 operator action)
+#     → the DSSE envelope verifier enforces review attestation on code PRs
+#       before operators merge them (attestation is required for code,
+#       governance-enforced via the verify-attestation workflow result)
+#
+# Operator action required: after this PR lands, update branch protection on
+# `main` to require ONLY `ai-sdlc/pr-ready` (remove `ai-sdlc/attestation`
+# as a direct required check). See docs/operations/quality-gate.md for the
+# exact `gh api` command and cutover procedure (AISDLC-388 AC-2).
 #
 # Industry pattern: `re-actors/alls-green` ("alls-green") is the de facto
 # community fix; named adopters include aiohttp, attrs, conda, setuptools,
@@ -197,9 +223,63 @@ jobs:
   #     `<workflow-name> / <job-name>` but `re-actors/alls-green` also
   #     posts a check_run named exactly `ai-sdlc/pr-ready` for adopters
   #     who want a stable name independent of job/workflow renames.
+  # ── Attestation gate (AISDLC-388, per-archetype enforcement) ──────────
+  # AISDLC-388 made `ai-sdlc/attestation` a non-required check on branch
+  # protection so docs-only PRs (which have no code to attest) could merge
+  # without a synthetic envelope (AISDLC-214/AISDLC-215 workaround retired).
+  # Without this job, code PRs could ALSO merge without attestation — the
+  # verify-attestation.yml status would be posted but nothing requires it.
+  #
+  # This job re-introduces machine enforcement at the rollup layer:
+  #   - For docs-only PRs: skipped (verify-attestation.yml also skipped via
+  #     paths-ignore) — re-actors/alls-green treats `skipped` as success.
+  #   - For code PRs: polls the commit's statuses and requires
+  #     `ai-sdlc/attestation` to be `success`. If missing or failure, this
+  #     job fails → `ai-sdlc/pr-ready` fails → branch protection blocks merge.
+  #
+  # Retry/wait: verify-attestation.yml runs in parallel with this workflow,
+  # so the attestation status may not be posted yet when this job first
+  # checks. We poll for up to 5 minutes (sufficient for verify-attestation's
+  # typical ~30-60s runtime) before failing.
+  attestation-gate:
+    name: Attestation gate (code PRs)
+    needs: detect
+    if: >-
+      needs.detect.outputs.docs_only != 'true' &&
+      (github.event_name != 'pull_request' || github.event.pull_request.draft == false)
+    runs-on: ubuntu-latest
+    permissions:
+      statuses: read
+    steps:
+      - name: Require ai-sdlc/attestation status
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          echo "[attestation-gate] code PR detected — polling for ai-sdlc/attestation status on $HEAD_SHA"
+          DEADLINE=$(( $(date +%s) + 300 ))
+          while [ "$(date +%s)" -lt "$DEADLINE" ]; do
+            STATE=$(gh api "repos/${REPO}/commits/${HEAD_SHA}/status" \
+              --jq '.statuses[] | select(.context == "ai-sdlc/attestation") | .state' | head -1)
+            if [ "$STATE" = "success" ]; then
+              echo "[attestation-gate] ai-sdlc/attestation: success — PASS"
+              exit 0
+            fi
+            if [ "$STATE" = "failure" ] || [ "$STATE" = "error" ]; then
+              echo "::error::[attestation-gate] ai-sdlc/attestation: $STATE — code PR must have a valid attestation envelope"
+              exit 1
+            fi
+            echo "[attestation-gate] status not posted yet (got: '${STATE:-<missing>}') — waiting 15s..."
+            sleep 15
+          done
+          echo "::error::[attestation-gate] timed out waiting for ai-sdlc/attestation on $HEAD_SHA — code PR cannot merge without attestation"
+          exit 1
+
   pr-ready:
     name: ai-sdlc/pr-ready
-    needs: [detect, lint, build-test, coverage, integration]
+    needs: [detect, lint, build-test, coverage, integration, attestation-gate]
     # AISDLC-218: skip the rollup on draft PRs. With all upstream jobs skipped
     # (per their own draft guards), `re-actors/alls-green` treats all-skipped
     # as failure → posts `ai-sdlc/pr-ready: failure` on every draft sync.

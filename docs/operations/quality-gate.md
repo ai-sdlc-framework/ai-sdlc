@@ -8,17 +8,20 @@
 
 ## TL;DR
 
-Configure **three** required checks on your protected branch:
+Configure **two** required checks on your protected branch (AISDLC-388):
 
 ```
 Backlog Drift
 ai-sdlc/pr-ready
-ai-sdlc/attestation
 ```
 
-`ai-sdlc/pr-ready` is the rollup of every PR signal AI-SDLC needs (lint, build, test on Node 22, coverage, integration tests). `Backlog Drift` is a standalone CI job that catches dangling task references. `ai-sdlc/attestation` is the DSSE review-attestation verifier. The rollup runs on both `pull_request` and `merge_group` events, so it works whether or not you have GitHub Merge Queue enabled.
+`ai-sdlc/pr-ready` is the rollup of every PR signal AI-SDLC needs (lint, build, test on Node 22, coverage, integration tests). `Backlog Drift` is a standalone CI job that catches dangling task references. The rollup runs on both `pull_request` and `merge_group` events, so it works whether or not you have GitHub Merge Queue enabled.
+
+**`ai-sdlc/attestation` is NO LONGER a direct required check** (AISDLC-388). Attestation is a conditional contributor to `ai-sdlc/pr-ready`: code PRs require it (verify-attestation.yml runs and its `ai-sdlc/attestation` status is an informational governance signal operators must review before merging), but docs-only PRs skip it entirely — no status needs to be posted. This eliminates the workaround class where docs PRs had to have a synthetic attestation status posted (AISDLC-214 short-circuit + AISDLC-215 synthesis, now deleted).
 
 You no longer need to enumerate `CI OK`, `Post Review Results`, `codecov/patch`, `Build & Test (Node 20)`, etc. individually. `codecov/patch` was removed as a required check (AISDLC-372) — see ["Why codecov/patch is informational, not required"](#why-codecovpatch-is-informational-not-required-aisdlc-372) below. The aggregator owns the CI list, in code you control.
+
+**Operator action required** (AISDLC-388 AC-2): update branch protection on `main` to require ONLY `ai-sdlc/pr-ready` and `Backlog Drift`. Remove the `ai-sdlc/attestation` direct required check. See the [updated cutover procedure](#cutover-procedure-operator-action) below for the exact `gh api` command.
 
 ---
 
@@ -60,11 +63,20 @@ Per-archetype gating decisions:
 - **code or mixed PRs** require all six jobs to pass. The `predicate-quantifier: every` setting on the path filter ensures a PR with one docs file plus one code file correctly resolves to "code/mixed", not "docs-only".
 - **Integration tests** additionally skip on PRs originating from forks (which lack the repo secrets needed to talk to the reference adapter). Same predicate as `ci.yml`'s `integration` job — kept in sync deliberately.
 
-## Audit-only signals (NOT in the aggregator)
+## Per-archetype attestation gating (AISDLC-388)
 
-`ai-sdlc/attestation` (the DSSE review-attestation verifier) is **deliberately excluded** from the aggregator. Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented in `/tmp/research-prior-art.md` (SLSA, npm, PyPI, Google Cloud GKE, Red Hat), source-time attestations are inherently fragile against history rewrites (rebase, force-push) and the mainstream pattern is **audit at source, enforce at deploy**.
+`ai-sdlc/attestation` is **not a direct required check** on branch protection. It is a conditional contributor to the `ai-sdlc/pr-ready` rollup via per-archetype routing:
 
-The verifier still runs and still posts `ai-sdlc/attestation` as a commit status — adopters or auditors can subscribe to it via webhook, slack notification, or weekly review without putting it in the merge gate.
+| PR archetype | `ai-sdlc/attestation` behavior |
+|---|---|
+| **docs-only** (all changed files in `spec/rfcs/**`, `docs/**`, `backlog/**`, or root `*.md`) | `verify-attestation.yml` is **skipped** on `pull_request` events via `paths-ignore`. On `merge_group` events the inline short-circuit posts `success` cheaply. No envelope required. |
+| **code or mixed** (at least one non-docs file) | `verify-attestation.yml` runs and posts `ai-sdlc/attestation: success` (valid envelope) or `failure` (missing/invalid). Operators must see `success` before merging — governance enforced by reviewing the status, not by branch protection directly. |
+
+This design preserves the AISDLC-380 forgery defense for code PRs while eliminating the "docs require attestation" workaround class (AISDLC-214 short-circuit + AISDLC-215 synthesis). The `ai-sdlc/attestation` status is an informational governance signal for code PRs — visible in the PR checks UI and webhook-subscribable — but branch protection gates only on `ai-sdlc/pr-ready`.
+
+Per Q3 in the AISDLC-140 redesign decision and the industry consensus documented in `/tmp/research-prior-art.md` (SLSA, npm, PyPI, Google Cloud GKE, Red Hat), source-time attestations are inherently fragile against history rewrites (rebase, force-push) and the mainstream pattern is **audit at source, enforce at deploy**. The `ai-sdlc/pr-ready` rollup is the enforcer; attestation is the audit trail.
+
+**AISDLC-214 cleanup (follow-up PR):** Once the operator updates branch protection (AISDLC-388 AC-2), the "short-circuit — post ai-sdlc/attestation success (docs-only)" step in `verify-attestation.yml` can be deleted. It is intentionally retained until then to avoid a race where the merge queue still requires the status. Do NOT delete before the branch-protection update.
 
 ## Why codecov/patch is informational, not required (AISDLC-372)
 
@@ -103,14 +115,46 @@ This patches the required contexts to `[Backlog Drift, ai-sdlc/pr-ready, ai-sdlc
 |---|---|---|
 | `Backlog Drift` | yes | `ci.yml` `backlog-drift` job |
 | `ai-sdlc/pr-ready` | yes | `ai-sdlc-gate.yml` aggregator (alls-green) |
-| `ai-sdlc/attestation` | yes | `verify-attestation.yml` |
+| `ai-sdlc/attestation` | **no** (informational governance signal for code PRs) | `verify-attestation.yml` (conditional — skipped on docs-only PRs per AISDLC-388) |
 | `codecov/patch` | **no** (informational only) | codecov GitHub App |
 
 ## Cutover procedure (operator action)
 
 This workflow ships in **additive mode**: it runs on every PR alongside the legacy required checks, but branch protection is not yet wired against it. Before cutover, validate that `ai-sdlc/pr-ready` matches expectation on a few real PRs (see "Pre-cutover validation" below).
 
-When you're ready to cut over, the operator does the following on the protected branch (example: `main`):
+### AISDLC-388 operator action — remove `ai-sdlc/attestation` from required checks
+
+After AISDLC-388 lands on main, the operator must update branch protection to remove the `ai-sdlc/attestation` direct required check. Branch protection changes require admin scope.
+
+1. **Snapshot the current branch-protection config** so you can roll back if needed:
+   ```bash
+   gh api repos/<org>/<repo>/branches/main/protection > branch-protection-pre-aisdlc-388.json
+   ```
+
+2. **Update the required-checks list** to remove `ai-sdlc/attestation`:
+   ```bash
+   gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
+     -F 'contexts[]=Backlog Drift' \
+     -F 'contexts[]=ai-sdlc/pr-ready' \
+     -F 'strict=true'
+   ```
+   This is the exact command for ai-sdlc's own repo. Attestation is intentionally absent — `ai-sdlc/pr-ready` is now the sole gate.
+
+3. **Verify the change.** Open one trivial docs PR and confirm:
+   - `ai-sdlc/pr-ready` appears in the required-checks list.
+   - The PR is mergeable when `ai-sdlc/pr-ready` is green (even without `ai-sdlc/attestation` posted).
+   - `verify-attestation.yml` does NOT fire on the docs PR (paths-ignore skips it).
+   - Attempting to bypass (e.g. push directly to main) is still blocked.
+
+4. **Open the AISDLC-214 cleanup PR** to delete the short-circuit step in `verify-attestation.yml` (the "always post status on every head SHA" code path). This step is safe to delete ONLY after branch protection no longer requires `ai-sdlc/attestation`. The cleanup PR is intentionally separate (AISDLC-388 AC-4).
+
+5. **Communicate the change** in the project's release notes / Slack so contributors know which check name to look for in the merge UI.
+
+---
+
+### Full cutover procedure (initial `ai-sdlc/pr-ready` adoption)
+
+When you're ready to cut over from the legacy individual required checks, the operator does the following on the protected branch (example: `main`):
 
 1. **Snapshot the current branch-protection config** so you can roll back if needed:
    ```bash
@@ -118,15 +162,14 @@ When you're ready to cut over, the operator does the following on the protected 
    ```
 
 2. **Update the required-checks list.** In the GitHub UI under *Settings → Branches → Edit rule for `main`*:
-   - **Add:** `ai-sdlc/pr-ready`, `Backlog Drift`, `ai-sdlc/attestation`
-   - **Remove:** the legacy required checks. For ai-sdlc itself this set is `CI OK`, `Post Review Results`, `codecov/patch`, `Build & Test (Node 20)`, etc. For adopters, remove whatever individual checks `ai-sdlc/pr-ready` now subsumes.
+   - **Add:** `ai-sdlc/pr-ready`, `Backlog Drift`
+   - **Remove:** the legacy required checks. For ai-sdlc itself this set is `CI OK`, `Post Review Results`, `codecov/patch`, `Build & Test (Node 20)`, `ai-sdlc/attestation`, etc. For adopters, remove whatever individual checks `ai-sdlc/pr-ready` now subsumes.
 
-   Or via `gh api` (this is the exact command used for ai-sdlc's own repo — see `scripts/apply-codecov-drop.sh`):
+   Or via `gh api`:
    ```bash
    gh api -X PATCH repos/<org>/<repo>/branches/main/protection/required_status_checks \
      -F 'contexts[]=Backlog Drift' \
      -F 'contexts[]=ai-sdlc/pr-ready' \
-     -F 'contexts[]=ai-sdlc/attestation' \
      -F 'strict=true'
    ```
 
