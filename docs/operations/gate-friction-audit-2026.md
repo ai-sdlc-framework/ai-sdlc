@@ -415,3 +415,98 @@ Tight scope (single package), security isolation (fork-PR skip is a structural r
 ### Filed during this gate review
 
 None. The cross-gate concern — three CI jobs sharing identical install/build setup — is a low-priority cleanup. Could file an AISDLC-390 to factor setup into a reusable workflow or composite action; deferred for now.
+
+---
+
+## CI Gate 4 — `Lint & Format`
+
+**Verdict: KEEP**
+
+`.github/workflows/ci.yml` job `lint`. Steps: pnpm install → pnpm lint (eslint) → pnpm format:check (prettier). 60-69s mean ~65s. Skips on draft PRs (AISDLC-218). Caught prettier failures on PRs #603 + #606 during this session — real recurring value. Not on critical path. Decision: KEEP. (The dev-subagent-keeps-missing-prettier pattern is a subagent instruction issue, not a CI gate issue.)
+
+---
+
+## CI Gate 5 — `Detect Changes` (paths-filter)
+
+**Verdict: KEEP**
+
+`.github/workflows/ci.yml` job `changes`. Outputs `python`/`go` booleans for SDK tests via `dorny/paths-filter@v3`. Has merge_group fallback (ephemeral refs delete the queue head before paths-filter can fetch). <10s. Cheap, correct, no friction.
+
+---
+
+## CI Gate 6 — `Backlog Drift` (CI)
+
+**Verdict: KEEP**
+
+`.github/workflows/ci.yml` job `backlog-drift`. Severity-aware: only `error`-severity blocks (info/warning are informational per AISDLC-125). Promoted from advisory → required when PR #192 cleared the 297-issue legacy backlog. Caught drift errors on PRs #604, #605, #607, #609 during this session — real ongoing value. Auto-fix via `npx backlog-drift fix --task <id>` is well-documented.
+
+---
+
+## CI Gate 7 — `Evaluate backlog tasks` (DoR ingress)
+
+**Verdict: KEEP**
+
+Lives in `.github/workflows/dor-ingress.yml`. Already covered by the AISDLC-296 + 370 work. Evaluates DoR rubric on changed task files at PR time. Mirrored locally by pre-push Gate 5 (`check-dor-gate.sh`). Defense-in-depth, no friction beyond Gate 5's call.
+
+---
+
+## CI Gate 8 — `Post Review Results` (CI-side reviewer fallback)
+
+**Verdict: KEEP**
+
+Lives in `.github/workflows/ai-sdlc-review.yml`. CI-side reviewer fallback when local attestation is missing (cost-saver). AISDLC-388 didn't touch this — it remains the parallel review-tier check for code PRs that didn't run `/ai-sdlc execute`. Working as designed.
+
+---
+
+## CI Gate 9 — `ai-sdlc/pr-ready` (alls-green rollup)
+
+**Verdict: KEEP (just restructured by AISDLC-388)**
+
+`.github/workflows/ai-sdlc-gate.yml`. Single required check on `main` per AISDLC-388. Rollup uses `re-actors/alls-green@release/v1` (industry-standard, named adopters include aiohttp, attrs, pytest, Mergify). AISDLC-388 added `attestation-gate` to the `needs:` list so code PRs require attestation via this rollup. No further friction to address — the design is now what 388 set out to deliver.
+
+---
+
+## CI Gate 10 — `issue-link`
+
+**Verdict: KEEP**
+
+Standard governance — PR must link to an issue. Posted by GitHub's bot integration or simple workflow. <1s. No friction.
+
+---
+
+## CI Gate 11 — `verify-attestation`
+
+**Verdict: KEEP (just restructured by AISDLC-388)**
+
+`.github/workflows/verify-attestation.yml`. Reinstated `paths-ignore` for docs paths on pull_request events per AISDLC-388. Inline docs-only short-circuit retained on merge_group events per AISDLC-214 (intentionally — operator must update branch protection before deleting). The AISDLC-388 follow-up to delete the short-circuit lives in the existing AC-4 deletion-note in the workflow. No further friction.
+
+---
+
+## Summary — CI chain verdicts (Gates 1-11)
+
+| # | Gate | Verdict | Follow-up |
+|---|---|---|---|
+| 1 | Build & Test | OPTIMIZE | AISDLC-389 ✅ merged (stopgapped — see AISDLC-390 below) |
+| 2 | Coverage | KEEP | — |
+| 3 | Integration Tests | KEEP | — |
+| 4 | Lint & Format | KEEP | — |
+| 5 | Detect Changes | KEEP | — |
+| 6 | Backlog Drift | KEEP | — |
+| 7 | Evaluate backlog tasks | KEEP | — |
+| 8 | Post Review Results | KEEP | — |
+| 9 | pr-ready rollup | KEEP | AISDLC-388 ✅ merged (added attestation-gate) |
+| 10 | issue-link | KEEP | — |
+| 11 | verify-attestation | KEEP | AISDLC-388 ✅ merged (paths-ignore reinstated) |
+
+*Verify dist/bin.js — DELETED by AISDLC-385 ✅; no longer in inventory.*
+
+---
+
+## Status — Audit COMPLETE
+
+All 7 pre-push hooks + 11 CI gates audited. 4 follow-up tasks shipped via the audit (AISDLC-385, 386, 388, 389). 2 decisions filed in the Decision Catalog (RFC-0035) for architectural questions raised in review (`tarball-sig`, `ship-shrinkwrap` — view with `AI_SDLC_DECISION_CATALOG=experimental node pipeline-cli/bin/cli-decisions.mjs list`). 2 audit-driven follow-ups still to file:
+
+- **AISDLC-390** — pnpm `--filter "...[origin/main]"` doesn't build transitive deps; CI Build & Test temporarily stopgapped to `pnpm -r build` in AISDLC-385 PR. Need to either restore the filter with a pre-step that builds workspace foundations, or accept the stopgap and close the filter optimization for Build & Test.
+- **AISDLC-391** — 383.8 security minors that never got filed: head-sha shape validation (40-hex-char check) + transcript-path traversal hardening (constrain to `<repo-root>/.ai-sdlc/`).
+
+AISDLC-384 task can now move to `backlog/completed/` once this PR merges.
