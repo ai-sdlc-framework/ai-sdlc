@@ -16,7 +16,16 @@
  * @module decisions/event-log
  */
 
-import { appendFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 
 import {
@@ -46,6 +55,95 @@ export function resolveEventLogPath(workDir: string = process.cwd()): string {
 function ensureParentDir(path: string): void {
   const dir = dirname(path);
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+}
+
+// ── File lock (AISDLC-395 round-1 MAJOR #2) ──────────────────────────────────
+
+/**
+ * Cross-process advisory lock around the event log. Used by callers that
+ * need atomic `nextDecisionId()` + `appendDecisionEvent()` so two concurrent
+ * orchestrator ticks cannot allocate the same DEC-NNNN id.
+ *
+ * Implementation: `open(path, 'wx')` (O_CREAT | O_EXCL) on a sibling
+ * `<events.jsonl>.lock` file. The first process to win creates the file;
+ * concurrent attempts get EEXIST and retry. Stale locks (older than
+ * `STALE_LOCK_MS`) are forcibly cleared — a crashed process must not block
+ * the orchestrator indefinitely.
+ */
+const STALE_LOCK_MS = 30_000;
+const LOCK_RETRY_INTERVAL_MS = 25;
+const LOCK_MAX_WAIT_MS = 5_000;
+
+function lockPathFor(eventLogPath: string): string {
+  return `${eventLogPath}.lock`;
+}
+
+function clearIfStale(lockPath: string): void {
+  try {
+    const st = statSync(lockPath);
+    if (Date.now() - st.mtimeMs > STALE_LOCK_MS) unlinkSync(lockPath);
+  } catch {
+    // lock file disappeared between stat and unlink — fine.
+  }
+}
+
+// Synchronous sleep that yields the thread (vs a CPU-pinning busy-wait).
+// Uses Atomics.wait on a private SharedArrayBuffer — supported since Node 14.
+function syncSleepMs(ms: number): void {
+  if (ms <= 0) return;
+  const sab = new SharedArrayBuffer(4);
+  Atomics.wait(new Int32Array(sab), 0, 0, ms);
+}
+
+export function acquireEventLogLock(opts: ReadEventsOpts = {}): () => void {
+  const path = opts.filePath ?? resolveEventLogPath(opts.workDir);
+  ensureParentDir(path);
+  const lockPath = lockPathFor(path);
+  const deadline = Date.now() + LOCK_MAX_WAIT_MS;
+  let fd: number | null = null;
+  let lastErr: unknown;
+  while (Date.now() < deadline) {
+    try {
+      fd = openSync(lockPath, 'wx');
+      break;
+    } catch (err) {
+      lastErr = err;
+      clearIfStale(lockPath);
+      syncSleepMs(LOCK_RETRY_INTERVAL_MS);
+    }
+  }
+  if (fd === null) {
+    throw new Error(
+      `[decisions] could not acquire event-log lock at ${lockPath} within ${LOCK_MAX_WAIT_MS}ms` +
+        (lastErr instanceof Error ? `: ${lastErr.message}` : ''),
+    );
+  }
+  return function release(): void {
+    try {
+      closeSync(fd as number);
+    } catch {
+      /* ignore — best-effort close */
+    }
+    try {
+      unlinkSync(lockPath);
+    } catch {
+      /* ignore — lock file already gone */
+    }
+  };
+}
+
+/**
+ * Run `fn` while holding the event-log lock. Use this whenever a caller
+ * needs allocate-and-append atomicity — `nextDecisionId()` followed by
+ * `appendDecisionEvent()`. Reads inside the closure see a stable file.
+ */
+export function withEventLogLock<T>(opts: ReadEventsOpts, fn: () => T): T {
+  const release = acquireEventLogLock(opts);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
 }
 
 // ── Writer ───────────────────────────────────────────────────────────────────

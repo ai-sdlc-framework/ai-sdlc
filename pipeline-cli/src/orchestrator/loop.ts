@@ -79,6 +79,8 @@ import {
 import { writeEvent, type OrchestratorEvent } from './events.js';
 import { isOrchestratorEnabled, orchestratorDisabledMessage } from './feature-flag.js';
 import { formatFilterTrace, runFilterChain } from './filters/index.js';
+import { readLatestVerdictForTask } from './filters/dor-readiness.js';
+import { emitDorDecisions } from '../decisions/dor-bridge.js';
 import type { FilterChainResult } from './filters/types.js';
 import {
   claimInFlight,
@@ -806,6 +808,51 @@ export async function runOrchestratorTick(
     // the cli-orchestrator status surface.
     if (event.blockedEvent) {
       emit(toEmittableBlockedEvent(event.blockedEvent));
+
+      // AISDLC-395 (RFC-0035 Phase 5) — when the DorReadiness filter blocks
+      // a candidate, auto-file Decision records for each blocking question so
+      // the operator can route them asynchronously via cli-decisions or the TUI
+      // decisions pane. Gated on the Decision Catalog feature flag (AC-2);
+      // idempotent by scope+summary dedup so repeated ticks don't re-file
+      // the same Decision (AC-4). Best-effort: a thrown error is swallowed so
+      // a catalog I/O hiccup never crashes the orchestrator hot loop.
+      if (event.blockedEvent.type === 'OrchestratorBlockedByDor') {
+        try {
+          const dorOpts = {
+            ...(adapters.calibrationLogPath !== undefined
+              ? { calibrationLogPath: adapters.calibrationLogPath }
+              : {}),
+            ...(adapters.artifactsDir !== undefined ? { artifactsDir: adapters.artifactsDir } : {}),
+            taskId: candidate.id,
+          };
+          const verdict = readLatestVerdictForTask(dorOpts);
+          if (verdict && (verdict.questions ?? []).length > 0) {
+            const decisionOpts = {
+              workDir: config.workDir,
+              // skipDuplicates defaults to true — idempotency across ticks.
+            };
+            const decisionResult = emitDorDecisions(verdict, decisionOpts);
+            if (decisionResult.enabled && decisionResult.emitted > 0) {
+              // AC-5 — emit the audit-trail link between "DoR blocked task X"
+              // and "Decision DEC-NNN exists for it" on the orchestrator events bus.
+              emit({
+                type: 'OrchestratorEmittedDecision',
+                taskId: candidate.id,
+                decisionIds: decisionResult.decisionIds,
+                emitted: decisionResult.emitted,
+                scope: `issue:${candidate.id}`,
+                skippedDuplicates: decisionResult.skippedDuplicates,
+              });
+            }
+          }
+        } catch (err) {
+          // Best-effort: swallow catalog write errors so the orchestrator
+          // hot loop is never crashed by a transient disk hiccup.
+          logger.warn(
+            `[orchestrator] emitDorDecisions failed for ${candidate.id}: ${err}; continuing`,
+          );
+        }
+      }
     }
     if (event.stuckEvent) {
       emit({

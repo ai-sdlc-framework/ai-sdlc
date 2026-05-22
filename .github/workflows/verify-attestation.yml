@@ -265,24 +265,37 @@ jobs:
             # <sha>` and the status poster below will post FAILURE.
             mkdir -p .ai-sdlc/attestations
             STAGED=0
-            if [ -f "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" ]; then
-              # NO shell expansion, NO glob — explicit single-file copy.
-              # Source path is constructed from $HEAD_SHA which is a
-              # GitHub-validated 40-char hex; cannot inject path traversal.
-              cp -- "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.dsse.json" \
-                    ".ai-sdlc/attestations/${HEAD_SHA}.dsse.json"
-              echo "[verify-attestation] staged legacy envelope for $HEAD_SHA"
-              STAGED=1
-            fi
-            # AISDLC-383.4: also stage v6 envelope if present.
-            if [ -f "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.v6.dsse.json" ]; then
-              cp -- "pr-content/.ai-sdlc/attestations/${HEAD_SHA}.v6.dsse.json" \
-                    ".ai-sdlc/attestations/${HEAD_SHA}.v6.dsse.json"
-              echo "[verify-attestation] staged v6 envelope for $HEAD_SHA"
-              STAGED=1
+            # AISDLC-395 root-cause fix: copy EVERY envelope in pr-content/.ai-sdlc/attestations/
+            # whose filename matches the strict <40hex>[.v6].dsse.json pattern, NOT just the
+            # one named after $HEAD_SHA.
+            #
+            # The HEAD_SHA-only copy was the root cause of PR #616's apparent v4-kick:
+            # when /ai-sdlc execute Step 10 signs an envelope on top of the dev commit
+            # then adds it via a separate `chore: sign attestation` commit, the envelope
+            # filename is the DEV commit's SHA (the sign target) — NOT the chore commit's
+            # SHA (which is what GitHub reports as PR HEAD). The single-file copy silently
+            # skipped it, the verifier walked only main's historical envelopes, and the
+            # closest-match heuristic surfaced an irrelevant v4 mismatch.
+            #
+            # Filename validation (<40hex>[.v6].dsse.json) is the path-traversal guard —
+            # a malicious fork PR cannot smuggle e.g. `../../etc/passwd.dsse.json` past
+            # the regex. Signature verification by the downstream verifier remains the
+            # trust boundary; bulk-copying overwrites is safe because envelopes are
+            # content-addressed and any forged content would fail signature check.
+            if [ -d "pr-content/.ai-sdlc/attestations" ]; then
+              for envfile in pr-content/.ai-sdlc/attestations/*.dsse.json; do
+                [ -f "$envfile" ] || continue
+                basename="${envfile##*/}"
+                # Strict pattern match: 40 lowercase hex + optional .v6 + .dsse.json.
+                if [[ "$basename" =~ ^[0-9a-f]{40}(\.v6)?\.dsse\.json$ ]]; then
+                  cp -- "$envfile" ".ai-sdlc/attestations/$basename"
+                  STAGED=$((STAGED + 1))
+                fi
+              done
+              echo "[verify-attestation] staged $STAGED envelope(s) from pr-content/"
             fi
             if [ "$STAGED" = "0" ]; then
-              echo "[verify-attestation] no envelope at pr-content/.ai-sdlc/attestations/${HEAD_SHA}(.v6).dsse.json — verifier will report missing"
+              echo "[verify-attestation] no envelopes in pr-content/.ai-sdlc/attestations/ — verifier will report missing"
             fi
             # AISDLC-383.4: stage transcript-leaves.jsonl from fork PR content
             # for v6 Merkle verification. This is DATA-ONLY — the file is

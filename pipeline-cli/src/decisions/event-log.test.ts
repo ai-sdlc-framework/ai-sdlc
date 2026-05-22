@@ -8,12 +8,14 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import {
+  acquireEventLogLock,
   appendDecisionEvent,
   makeDecisionOpenedEvent,
   nextDecisionId,
   readDecisionEvents,
   resolveDecisionsDir,
   resolveEventLogPath,
+  withEventLogLock,
 } from './event-log.js';
 
 let workDir: string;
@@ -173,6 +175,42 @@ describe('nextDecisionId', () => {
       { workDir },
     );
     expect(nextDecisionId({ workDir })).toBe('DEC-0008');
+  });
+
+  // AISDLC-395 code-review round 1 MAJOR #2 — file lock prevents TOCTOU
+  // collisions when two callers race allocate+append on an empty log.
+  it('serialises concurrent allocate-and-append via withEventLogLock', () => {
+    const ids: string[] = [];
+    const append = () => {
+      withEventLogLock({ workDir }, () => {
+        const id = nextDecisionId({ workDir });
+        appendDecisionEvent(
+          makeDecisionOpenedEvent({
+            decisionId: id,
+            source: 'ad-hoc',
+            scope: 'workspace',
+            summary: `summary-${id}`,
+            options: [{ id: 'opt-a', description: 'A' }],
+          }),
+          { workDir },
+        );
+        ids.push(id);
+      });
+    };
+    append();
+    append();
+    append();
+    expect(ids).toEqual(['DEC-0001', 'DEC-0002', 'DEC-0003']);
+    // All three were durably appended in order — no collisions, no overwrites.
+    const { events } = readDecisionEvents({ workDir });
+    expect(events.map((e) => e.decisionId)).toEqual(['DEC-0001', 'DEC-0002', 'DEC-0003']);
+  });
+
+  it('releases the lock so a subsequent acquire succeeds', () => {
+    const release1 = acquireEventLogLock({ workDir });
+    release1();
+    const release2 = acquireEventLogLock({ workDir });
+    release2();
   });
 
   it('ignores malformed decisionIds when scanning for the max', () => {

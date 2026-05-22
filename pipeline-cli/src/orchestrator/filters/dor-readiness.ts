@@ -32,6 +32,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolveCalibrationLogPath } from '../../dor/calibration-log.js';
 import type { CalibrationEntry } from '../../dor/calibration-log.js';
+import type { RefinementVerdict } from '../../dor/types.js';
 import type { FilterResult } from './types.js';
 
 /** Stable label name that triggers maintainer-override admission (RFC-0011 §7.4). */
@@ -158,4 +159,27 @@ function isCalibrationEntry(value: unknown): value is CalibrationEntry {
     (v.overallVerdict === 'admit' || v.overallVerdict === 'needs-clarification') &&
     typeof v.outcome === 'string'
   );
+}
+
+/**
+ * Read the most-recent `RefinementVerdict` for a task from the calibration
+ * log. Returns `null` when the log is absent, the task has no entry, or the
+ * latest entry carries no verdict (override-only rows). Used by the
+ * orchestrator loop to retrieve the questions list for `emitDorDecisions`
+ * after a DorReadiness filter block.
+ *
+ * Accepts the same path-override opts as `checkDorReadiness` for testability.
+ */
+export function readLatestVerdictForTask(opts: CheckDorReadinessOpts): RefinementVerdict | null {
+  const path = resolveCalibrationLogPath({
+    ...(opts.calibrationLogPath !== undefined ? { filePath: opts.calibrationLogPath } : {}),
+    ...(opts.artifactsDir !== undefined ? { artifactsDir: opts.artifactsDir } : {}),
+  });
+  if (!existsSync(path)) return null;
+
+  const entry = readLatestEntry(path, opts.taskId);
+  if (!entry) return null;
+  if (!entry.verdict) return null;
+
+  return entry.verdict;
 }

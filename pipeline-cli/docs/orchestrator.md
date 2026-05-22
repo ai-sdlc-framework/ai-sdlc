@@ -214,6 +214,55 @@ for the comment-loop). Phase 5 soak will surface whether "no-verdict-found"
 is a real source of false admits; if so, a future config knob
 (`requireVerdict: true`) can flip the default.
 
+### Decision Catalog integration (AISDLC-395, RFC-0035 Phase 5)
+
+When `DorReadiness` blocks a candidate AND the `AI_SDLC_DECISION_CATALOG`
+feature flag is on (the default since AISDLC-392), the orchestrator
+automatically files one `Decision` record per blocking clarification
+question into `.ai-sdlc/_decisions/events.jsonl`. Operators can then
+route and resolve these Decisions asynchronously via `cli-decisions` or
+the TUI decisions pane — without needing to manually re-run the DoR check.
+
+The flow per tick:
+
+```
+[orchestrator-tick]
+   ↓ DorReadiness filter: FAIL (verdict=needs-clarification, N questions)
+   ↓ OrchestratorBlockedByDor event emitted → events.jsonl
+   ↓ emitDorDecisions() called for each question
+   ↓   (idempotent: questions already filed are skipped)
+   ↓ OrchestratorEmittedDecision event emitted → events.jsonl
+   ↓ continue tick (skip this task, evaluate next frontier candidate)
+
+[operator, async]
+   node pipeline-cli/bin/cli-decisions.mjs list
+   node pipeline-cli/bin/cli-decisions.mjs resolve DEC-NNN <option>
+   # manually update the task file with the chosen answer
+
+[next orchestrator-tick]
+   ↓ DorReadiness re-admission: if verdict is now 'admit' → dispatch proceeds
+```
+
+**Idempotency (AC-4):** each question is keyed by `scope + summary`. If
+an open Decision already exists with the same scope (`issue:<taskId>`)
+and the same summary (verbatim question text), that question is skipped on
+subsequent ticks. The `OrchestratorEmittedDecision` event's
+`skippedDuplicates` field reports how many questions were suppressed.
+
+**Degrade-open (AC-2):** when `AI_SDLC_DECISION_CATALOG` is off (set to
+any falsy value: empty string, `0`, `false`, `no`), the Decision filing
+step is a no-op. The `DorReadiness` filter continues to block the task
+regardless — the Decision filing is purely additive observability.
+
+**Audit trail (AC-5):** after decisions are filed, the orchestrator emits
+an `OrchestratorEmittedDecision` event to the orchestrator `events.jsonl`
+bus (distinct from the decision catalog's own events). This event links
+"DoR blocked task X on tick N" to "Decision DEC-NNN was filed for it" —
+greppable without loading the decision catalog reader.
+
+**Feature flag:** `AI_SDLC_DECISION_CATALOG` (default `experimental`).
+To opt out: `export AI_SDLC_DECISION_CATALOG=off`.
+
 ### Filter 3 — External dependencies
 
 Parses the candidate's `externalDependencies:` frontmatter (already
@@ -856,6 +905,7 @@ spawner-unavailable failures and what to do when the umbrella fails mid-tick.
 | 4 | AISDLC-169.4 | Shipped | `events.jsonl` writer + `cli-status --orchestrator` view + canonical schema for downstream consumers. |
 | 5 | AISDLC-169.5 | Shipped | Soak corpus aggregator (`cli-orchestrator-corpus`), chaos test harness, hybrid promotion runbook. |
 | 6 | AISDLC-229 | Shipped | Tick invokes `ai-sdlc-pipeline execute` umbrella (AISDLC-182) instead of bare `executePipeline()`. Full Step 0-13 per dispatch. Spawner fallback env. Rich `pipeline` + `failure` outcome fields. |
+| RFC-0035 Ph5 | AISDLC-395 | Shipped | Decision Catalog integration: `DorReadiness` block auto-files `Decision` records via `emitDorDecisions()`; idempotent by scope+summary dedup; `OrchestratorEmittedDecision` event bridges orchestrator + decision streams; degrade-open when `AI_SDLC_DECISION_CATALOG` is off. |
 
 ## Cross-references
 

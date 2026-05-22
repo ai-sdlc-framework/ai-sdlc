@@ -28,9 +28,11 @@ import {
   makeDecisionOpenedEvent,
   makeOperatorAnsweredEvent,
   nextDecisionId,
+  withEventLogLock,
   type AnswerDecisionInput,
   type ReadEventsOpts,
 } from './event-log.js';
+import { listDecisions } from './projection.js';
 import type { DecisionOption } from './decision-record.js';
 import type { RefinementVerdict } from '../dor/types.js';
 
@@ -92,6 +94,17 @@ export interface EmitDorDecisionsOpts extends ReadEventsOpts {
   now?: Date;
   /** Optional `process.env` override for feature-flag check (tests). */
   env?: NodeJS.ProcessEnv;
+  /**
+   * AISDLC-395 (RFC-0035 Phase 5) — idempotency guard. When `true`
+   * (the default), `emitDorDecisions` skips any clarification question
+   * that already has an open Decision with the same `scope` + `summary`
+   * in the catalog. This prevents repeated orchestrator ticks from
+   * filing duplicate Decision records for the same blocking task.
+   *
+   * Set to `false` only in tests that explicitly verify the raw emit
+   * behaviour without dedup filtering.
+   */
+  skipDuplicates?: boolean;
 }
 
 export interface EmitDorDecisionsResult {
@@ -101,6 +114,12 @@ export interface EmitDorDecisionsResult {
   emitted: number;
   /** DEC-NNNN ids of the emitted decisions, in clarification-question order. */
   decisionIds: string[];
+  /**
+   * AISDLC-395 — number of questions skipped because an open Decision
+   * with the same scope + summary already existed in the catalog.
+   * Zero when `skipDuplicates` is `false` or the catalog was empty.
+   */
+  skippedDuplicates: number;
   /**
    * Informational message when the feature flag is off (AC#4 degrade-open).
    * Undefined when `enabled` is true.
@@ -138,41 +157,78 @@ export function emitDorDecisions(
       enabled: false,
       emitted: 0,
       decisionIds: [],
+      skippedDuplicates: 0,
       disabledReason: decisionCatalogDisabledMessage(),
     };
   }
 
   const questions = verdict.questions ?? [];
   if (questions.length === 0) {
-    return { enabled: true, emitted: 0, decisionIds: [] };
+    return { enabled: true, emitted: 0, decisionIds: [], skippedDuplicates: 0 };
   }
 
   const scope = opts.issueScope ?? `issue:${verdict.issueId}`;
   const logOpts: ReadEventsOpts = { workDir: opts.workDir, filePath: opts.filePath };
   const options = dorClarificationOptions();
   const decisionIds: string[] = [];
+  let skippedDuplicates = 0;
 
-  for (const question of questions) {
-    const decisionId = nextDecisionId(logOpts);
-    const event = makeDecisionOpenedEvent({
-      decisionId,
-      source: 'dor-clarification',
-      scope,
-      summary: question,
-      body:
-        `DoR clarification required for \`${verdict.issueId}\` ` +
-        `(verdict: ${verdict.overallVerdict}, rubric: ${verdict.rubricVersion}, ` +
-        `evaluator: ${verdict.evaluatorVersion}). ` +
-        `Resolve this question to unblock the issue from DoR admission.`,
-      reversible: true,
-      options,
-      now: opts.now,
-    });
-    appendDecisionEvent(event, logOpts);
-    decisionIds.push(decisionId);
-  }
+  // AISDLC-395 (RFC-0035 Phase 5) — idempotency: build a set of summaries
+  // for already-open Decisions with this scope so repeated ticks don't
+  // file duplicate records. Default is `skipDuplicates: true`; callers
+  // that want the raw emit behaviour (tests) pass `skipDuplicates: false`.
+  const shouldDedup = opts.skipDuplicates !== false;
 
-  return { enabled: true, emitted: decisionIds.length, decisionIds };
+  // AISDLC-395 code-review round 1 MAJOR #2: hold the event-log lock across
+  // the entire allocate-and-append loop. Without the lock, two concurrent
+  // `emitDorDecisions` calls (e.g. two orchestrator ticks racing on the same
+  // tickIntervalSec) can each read the same `max` from `nextDecisionId()`
+  // and allocate identical DEC-NNNN ids. The lock ensures every allocate +
+  // append is observed atomically by any concurrent caller.
+  withEventLogLock(logOpts, () => {
+    const existingSummaries = new Set<string>();
+    if (shouldDedup) {
+      const { decisions } = listDecisions(logOpts);
+      for (const d of decisions) {
+        // Dedup against ALL lifecycles for the same scope+summary, not just
+        // `open`/`proposed`. Re-filing a Decision the operator already
+        // answered, deferred, archived, or superseded would pollute the
+        // catalog with stale duplicates of resolved clarifications. The
+        // dor-clarification source dimension is implied by `metadata.scope`
+        // matching `issue:<id>` for this verdict.
+        if (d.metadata.scope === scope) {
+          existingSummaries.add(d.spec.summary);
+        }
+      }
+    }
+
+    for (const question of questions) {
+      if (shouldDedup && existingSummaries.has(question)) {
+        skippedDuplicates += 1;
+        continue;
+      }
+      const decisionId = nextDecisionId(logOpts);
+      const event = makeDecisionOpenedEvent({
+        decisionId,
+        source: 'dor-clarification',
+        scope,
+        summary: question,
+        body:
+          `DoR clarification required for \`${verdict.issueId}\` ` +
+          `(verdict: ${verdict.overallVerdict}, rubric: ${verdict.rubricVersion}, ` +
+          `evaluator: ${verdict.evaluatorVersion}). ` +
+          `Resolve this question to unblock the issue from DoR admission.`,
+        reversible: true,
+        options,
+        now: opts.now,
+      });
+      appendDecisionEvent(event, logOpts);
+      decisionIds.push(decisionId);
+      existingSummaries.add(question);
+    }
+  });
+
+  return { enabled: true, emitted: decisionIds.length, decisionIds, skippedDuplicates };
 }
 
 // ── Resolve (operator-answer write path, AC#3) ───────────────────────────────

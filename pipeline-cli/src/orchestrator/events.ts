@@ -185,7 +185,24 @@ export type OrchestratorEventType =
    * Operators can grep events.jsonl for this type to find stuck tasks
    * (PRs that exist but are stuck in review or blocked mid-pipeline).
    */
-  | 'OrchestratorBlockedByOpenPullRequest';
+  | 'OrchestratorBlockedByOpenPullRequest'
+  /**
+   * AISDLC-395 (RFC-0035 Phase 5) — emitted once per tick per task when the
+   * `DorReadiness` admission filter blocks a candidate AND the orchestrator
+   * successfully files Decision record(s) into the Decision Catalog for the
+   * blocking questions. Per-event fields: `taskId`, `decisionIds` (array of
+   * DEC-NNNN ids filed in this tick), `emitted` (count), `scope`
+   * (`'issue:<taskId>'` by default), `skippedDuplicates` (count of questions
+   * that already had a Decision and were not re-filed — the idempotency signal).
+   *
+   * NOT emitted when:
+   * - `AI_SDLC_DECISION_CATALOG` is off (degrade-open; the DorReadiness block
+   *   still fires — only the Decision filing is skipped).
+   * - The verdict has no clarification questions (no-op).
+   * - All questions already have a matching open Decision for this scope (all
+   *   duplicates, nothing new to file).
+   */
+  | 'OrchestratorEmittedDecision';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

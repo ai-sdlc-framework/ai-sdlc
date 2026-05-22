@@ -96,6 +96,14 @@ fi
 # packages that were not in scope (avoids false-positive failures from stale
 # coverage/coverage-summary.json files left by prior full runs).
 AFFECTED_PKGS_JSON="$(pnpm --filter "...[origin/main]" list --json --depth -1 2>/dev/null || echo '[]')"
+# AISDLC-395: pnpm's git-ref filter exits 0 with EMPTY stdout when no packages
+# match (e.g. when running from a git worktree where the diff detection has
+# trouble resolving origin/main). The `|| echo '[]'` only fires on non-zero
+# exit; empty-stdout-with-exit-0 falls through and JSON.parse('') throws.
+# Treat empty stdout the same as the explicit empty array.
+if [ -z "$AFFECTED_PKGS_JSON" ]; then
+  AFFECTED_PKGS_JSON='[]'
+fi
 # Extract package paths (the "path" field in each JSON object).
 # Store paths in a temp file to avoid bash 3 mapfile incompatibility.
 AFFECTED_PATHS_FILE="$(mktemp /tmp/ai-sdlc-affected-pkgs.XXXXXX)"
