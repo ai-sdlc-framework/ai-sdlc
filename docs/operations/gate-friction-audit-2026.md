@@ -312,7 +312,7 @@ The only gate in the chain defending against an EXTERNAL footgun (GitHub Actions
 
 | # | Gate | Verdict | Follow-up |
 |---|---|---|---|
-| 1 | `check-coverage.sh` | OPTIMIZE A+B | turbo filter + docs-only short-circuit (not yet filed — scope under 384) |
+| 1 | `check-coverage.sh` | OPTIMIZE A+B | [AISDLC-389](../../backlog/tasks/aisdlc-389%20-%20chore-turbo-affected-package-filter-for-pre-push-coverage-plus-ci-build-and-test.md) — turbo filter + docs-only short-circuit (combined with CI Build & Test) |
 | 2 | `check-task-moved.sh` | KEEP | — |
 | 3 | `check-mcp-bundle-sync.sh` | **DELETE (architectural)** | AISDLC-385 — distribute bundle via npm, not git |
 | 4 | `squash-attestation-chores.sh` | KEEP through cutover, DELETE post-383.7 | Fold into 383.7's v5-cleanup PR |
@@ -324,7 +324,8 @@ The only gate in the chain defending against an EXTERNAL footgun (GitHub Actions
 - AISDLC-385 — distribute mcp-server bundle via npm
 - AISDLC-386 — collapse pre-push re-push chain
 - AISDLC-388 — exclude docs from attestation requirement (architectural)
-- AISDLC-387 — fix AISDLC-215 v6 incompat (PR #603, in flight; emergency surfaced mid-audit during Gate 6)
+- AISDLC-387 — fix AISDLC-215 v6 incompat (MERGED as PR #603; emergency surfaced mid-audit during Gate 6)
+- AISDLC-389 — turbo affected-package filter for pre-push coverage + CI Build & Test (combined; surfaced by both pre-push Gate 1 and CI Gate Build & Test review)
 
 **Shipped during this audit pass**:
 - 2026-05-22 — `AI_SDLC_V6_CUTOVER_ACTIVE=1` flipped per RFC-0042 Phase 3 (gated v6 default per AISDLC-383.6)
@@ -334,4 +335,33 @@ The only gate in the chain defending against an EXTERNAL footgun (GitHub Actions
 
 ## Status
 
-**This document is a checkpoint.** Pre-push hooks 1-7 audited and verdicts in. CI-side gates (12 entries listed in Gate inventory) still TODO. Follow-up audit pass to cover those + revisit pre-push verdicts after AISDLC-385/386/388 land.
+**This document is a checkpoint.** Pre-push hooks 1-7 audited and verdicts in. CI-side gates partially audited (Build & Test reviewed; 11 remaining: Coverage, Integration Tests, Lint & Format, Detect Changes, Verify dist/bin.js, Backlog Drift, Evaluate backlog tasks, Post Review Results, pr-ready rollup, issue-link, verify-attestation). Follow-up audit pass to cover the rest + revisit pre-push verdicts after AISDLC-385/386/388/389 land.
+
+---
+
+## CI Gate 1 — `Build & Test (Node 22)`
+
+**Verdict: OPTIMIZE — turbo affected-package filter (shipped via AISDLC-389, combined with pre-push Gate 1)**
+
+### Read
+
+`.github/workflows/ci.yml` job `build`. ~25 LOC. Steps: checkout → pnpm install (cached) → `pnpm build` → `pnpm test` → `pnpm validate-schemas`. Single-entry matrix (Node 22 only after AISDLC-368 dropped Node 20).
+
+### Live timing
+
+- Last 5 successful runs: 199, 267, 210, 257, 248 seconds → mean ~236s (~4 min)
+- Runs on every PR including docs-only (no `paths-ignore`, no in-job docs detection)
+- Critical path of `ai-sdlc/pr-ready` rollup
+
+### Friction observations
+
+1. **Runs on EVERY PR including docs-only** — ~4 min wasted per docs PR. Confirmed during this audit on PRs #604 (docs-only) and #603 (5-line bash change).
+2. **Full workspace `pnpm build` + `pnpm test`** — no turbo affected-package filter
+3. **Sequential** within the job — no parallelism between build / test / validate-schemas
+4. **Already optimized once**: AISDLC-368 dropped Node 20 from matrix → halved wall-clock
+
+### Decision: OPTIMIZE — shipped via AISDLC-389
+
+Same turbo `--filter=...[origin/main]` fix as pre-push Gate 1; combining into one task because the filter logic + invocation pattern is shared. See [AISDLC-389](../../backlog/tasks/aisdlc-389%20-%20chore-turbo-affected-package-filter-for-pre-push-coverage-plus-ci-build-and-test.md) for the full ACs covering both gates.
+
+Docs-only short-circuiting at the workflow level is intentionally NOT in AISDLC-389's scope — that's folded into AISDLC-388's `pr-ready` archetype routing, which is the cleaner architectural fix.
