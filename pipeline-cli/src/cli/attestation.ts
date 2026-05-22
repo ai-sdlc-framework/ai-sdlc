@@ -1,16 +1,18 @@
 /**
- * `cli-attestation` — RFC-0042 Phase 1 attestation CLI.
+ * `cli-attestation` — RFC-0042 Phase 1-3 attestation CLI.
  *
  * Operator and slash-command-body surfaces for the proof-of-execution
  * attestation workflow:
  *   - inspecting reviewer-subagent transcript files (Phase 1.1 / 383.1)
  *   - computing Merkle roots and inclusion proofs over the committed
  *     leaf index (Phase 1.2 / 383.2)
+ *   - emitting transcript leaves after each reviewer run (Phase 3 / 383.8)
  *
  * Subcommands:
  *   transcripts list [<task-id>]  — list captured transcripts with metadata
  *   merkle-root                   — print current Merkle root + leaf count
  *   merkle-proof <index>          — print inclusion proof for a leaf by index
+ *   emit-leaf                     — append a transcript leaf for one reviewer run
  *
  * Output is plain text by default; pass `--json` for machine-readable JSON
  * on the merkle-* subcommands; transcripts list accepts `--json` for the same.
@@ -18,12 +20,21 @@
  * @module cli/attestation
  */
 
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
-import { computeMerkleRoot, hashLeaf, loadLeaves, verifyInclusion } from '../attestation/merkle.js';
+import {
+  appendLeaf,
+  computeMerkleRoot,
+  generateNonce,
+  hashLeaf,
+  loadLeaves,
+  type TranscriptLeaf,
+  verifyInclusion,
+} from '../attestation/merkle.js';
 import {
   formatV6Envelope,
   resolveSigningKeyPath,
@@ -344,9 +355,166 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           }
         },
       )
+      // ── emit-leaf ───────────────────────────────────────────────────────────────
+      .command(
+        'emit-leaf',
+        'Append a transcript leaf to .ai-sdlc/transcript-leaves.jsonl after a reviewer run. ' +
+          'Idempotent: skips if a leaf with the same (taskId, reviewerName, transcriptHash) already exists. ' +
+          'Required before v6 signing (RFC-0042 Phase 3 / AISDLC-383.8).',
+        (y: Argv) =>
+          y
+            .option('task-id', {
+              type: 'string',
+              demandOption: true,
+              describe: 'Task ID, e.g. AISDLC-383.8.',
+            })
+            .option('reviewer', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                'Reviewer name: code-reviewer | test-reviewer | security-reviewer | ' +
+                'code-reviewer-codex | test-reviewer-codex.',
+            })
+            .option('transcript-path', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                'Absolute path to the reviewer transcript JSONL file whose SHA-256 is hashed into the leaf.',
+            })
+            .option('verdict-path', {
+              type: 'string',
+              demandOption: true,
+              describe:
+                'Absolute path to the verdict JSON file (shape: { approved, findings: { critical, major, minor, suggestion } }).',
+            })
+            .option('head-sha', {
+              type: 'string',
+              demandOption: true,
+              describe: '40-char hex git commit SHA of the PR head. Used to generate the nonce.',
+            })
+            .option('harness', {
+              type: 'string',
+              demandOption: true,
+              describe: 'Harness: claude-code | codex.',
+            })
+            .option('model', {
+              type: 'string',
+              demandOption: true,
+              describe: 'LLM model identifier, e.g. claude-sonnet-4-6.',
+            }),
+        (args) => {
+          const repoRoot = resolveRepoRoot(args['repo-root'] as string | undefined);
+          const taskId = args['task-id'] as string;
+          const reviewerName = args['reviewer'] as string;
+          const transcriptPath = resolve(args['transcript-path'] as string);
+          const verdictPath = resolve(args['verdict-path'] as string);
+          const headSha = args['head-sha'] as string;
+          const harness = args['harness'] as string;
+          const model = args['model'] as string;
+
+          // Validate transcript file exists.
+          if (!existsSync(transcriptPath)) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: transcript file not found: ${transcriptPath}\n`,
+            );
+            process.exit(1);
+          }
+
+          // Validate verdict file exists.
+          if (!existsSync(verdictPath)) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: verdict file not found: ${verdictPath}\n`,
+            );
+            process.exit(1);
+          }
+
+          // Compute SHA-256 of the transcript file.
+          const transcriptContent = readFileSync(transcriptPath);
+          const transcriptHash = createHash('sha256').update(transcriptContent).digest('hex');
+
+          // Parse verdict JSON.
+          let verdict: {
+            approved?: boolean;
+            verdictApproved?: boolean;
+            findings?: { critical?: number; major?: number; minor?: number; suggestion?: number };
+          };
+          try {
+            verdict = JSON.parse(readFileSync(verdictPath, 'utf8')) as typeof verdict;
+          } catch (err) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: failed to parse verdict file: ${(err as Error).message}\n`,
+            );
+            process.exit(1);
+          }
+
+          // Extract verdictApproved (supports both `approved` and `verdictApproved` keys for
+          // compatibility with the slash-command-body verdicts format which uses `approved`).
+          const verdictApproved = Boolean(verdict.verdictApproved ?? verdict.approved ?? false);
+
+          const findings = {
+            critical: verdict.findings?.critical ?? 0,
+            major: verdict.findings?.major ?? 0,
+            minor: verdict.findings?.minor ?? 0,
+            suggestion: verdict.findings?.suggestion ?? 0,
+          };
+
+          // Idempotency check: skip if a leaf with this (taskId, reviewerName, transcriptHash) triple exists.
+          const existingLeaves = loadLeaves(repoRoot);
+          const alreadyEmitted = existingLeaves.some(
+            (l) =>
+              l.taskId === taskId &&
+              l.reviewerName === reviewerName &&
+              l.transcriptHash === transcriptHash,
+          );
+
+          if (alreadyEmitted) {
+            emitText(
+              `[cli-attestation] emit-leaf: leaf already exists for (${taskId}, ${reviewerName}, ${transcriptHash.slice(0, 8)}...) — skipping (idempotent)`,
+            );
+            return;
+          }
+
+          // Determine next leafIndex (sequential across ALL leaves in the file, not just this task).
+          const leafIndex = existingLeaves.length;
+
+          // Generate nonce bound to this PR's head SHA (replay-resistance per RFC-0042 §Nonce binding).
+          const nonce = generateNonce(headSha);
+
+          const signedAt = new Date().toISOString();
+
+          const leaf: TranscriptLeaf = {
+            leafIndex,
+            taskId,
+            reviewerName,
+            transcriptHash,
+            nonce,
+            harness,
+            model,
+            verdictApproved,
+            findings,
+            signedAt,
+          };
+
+          // Append atomically via write-to-tmp + renameSync.
+          // Concurrent callers on different reviewer subagents are expected to be
+          // sequential in the slash command body (reviewers complete, THEN emit-leaf
+          // is called per-reviewer) so the TOCTOU window is minimal. On the rare
+          // case of a true race, the last writer wins and the index-mismatch warning
+          // in loadLeaves() will surface it on the next run. A follow-up advisory
+          // lock can be added when parallel emission is required (tracked as a
+          // known limitation in the AISDLC-383.8 PR body).
+          appendLeaf(leaf, repoRoot);
+
+          emitText(
+            `[cli-attestation] emit-leaf: leaf #${leafIndex} appended ` +
+              `(taskId=${taskId}, reviewer=${reviewerName}, ` +
+              `transcriptHash=${transcriptHash.slice(0, 8)}..., approved=${verdictApproved})`,
+          );
+        },
+      )
       .demandCommand(
         1,
-        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6)',
+        'Specify a subcommand (e.g. transcripts list, merkle-root, merkle-proof, sign-v6, inspect-v6, emit-leaf)',
       )
       .help()
       .alias('h', 'help')

@@ -132,6 +132,29 @@ For each verdict in the array with `outcome === 'success'`:
    Reviewer subagents are short-lived (read diff JSON, emit verdict JSON, exit).
    Foreground `Agent` calls are well-suited regardless of duration.
 3. Aggregate the 3 verdicts, write them to `.ai-sdlc/verdicts/<task-id>.json`.
+3a. **Emit transcript leaves (RFC-0042 Phase 3 / AISDLC-383.8)** — after aggregating verdicts, emit one Merkle leaf per reviewer before signing. Required for v6 signing; harmless in v5 mode:
+   ```bash
+   HEAD_SHA_FOR_NONCE="<PR head SHA from verdict>"
+   TASK_ID_LOWER="$(echo '<task-id>' | tr '[:upper:]' '[:lower:]')"
+   WORKTREE_PATH=".worktrees/${TASK_ID_LOWER}"
+   EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-claude-sonnet-4-6}"
+   for AGENT_NAME in code-reviewer test-reviewer security-reviewer; do
+     TRANSCRIPT_FILE="${WORKTREE_PATH}/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.jsonl"
+     VERDICT_FILE="${WORKTREE_PATH}/.ai-sdlc/verdicts/${AGENT_NAME}-${TASK_ID_LOWER}.json"
+     [ -f "$TRANSCRIPT_FILE" ] || { echo "[orchestrator-tick] transcript missing for $AGENT_NAME — skipping leaf" >&2; continue; }
+     [ -f "$VERDICT_FILE" ] || { echo "[orchestrator-tick] verdict missing for $AGENT_NAME — skipping leaf" >&2; continue; }
+     node "$PIPELINE_CLI_BIN/cli-attestation.mjs" emit-leaf \
+       --repo-root "$WORKTREE_PATH" \
+       --task-id "<task-id>" \
+       --reviewer "$AGENT_NAME" \
+       --transcript-path "$TRANSCRIPT_FILE" \
+       --verdict-path "$VERDICT_FILE" \
+       --head-sha "$HEAD_SHA_FOR_NONCE" \
+       --harness "claude-code" \
+       --model "$EMIT_MODEL" \
+       || echo "[orchestrator-tick] emit-leaf for $AGENT_NAME exited non-zero (non-fatal in v5 mode)"
+   done
+   ```
 4. Sign the attestation:
    ```bash
    node "$PLUGIN_SCRIPTS_DIR/sign-attestation.mjs" \

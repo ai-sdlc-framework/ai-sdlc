@@ -605,6 +605,79 @@ Each returns a verdict JSON: `{ approved, findings, summary }`. When the classif
 
 > **Reviewer concurrency at scale.** N parallel `/ai-sdlc execute` runs each spawn AT MOST 3 reviewer subagents in parallel, so the worst-case concurrent reviewer count is `3N` (unchanged from the pre-AISDLC-141 ceiling — the classifier only ever shrinks fan-out, never grows it). Reviewers are read-only (`disallowedTools: [Edit, Write, Bash?]`) and the only shared resource is the file system, which is safe for concurrent reads. The husky `pre-push` hook (in `.husky/pre-push`) does serialise across runs if multiple finish at the same moment, but the per-run review fan-out itself does not block on anything cross-run.
 
+### Step 7c — Emit transcript leaves (RFC-0042 Phase 3 / AISDLC-383.8)
+
+After all spawned reviewer Agent calls complete and each reviewer's verdict JSON has been written, emit one Merkle leaf per reviewer. This step is **required before `sign-attestation.mjs --schema-version v6`** — the v6 signer reads `.ai-sdlc/transcript-leaves.jsonl` and exits 1 if no leaves are found for the task. When `AI_SDLC_V6_CUTOVER_ACTIVE` is unset (v5 default), the leaves are harmless overhead.
+
+```bash
+# Capture the PR's head SHA once; used to derive the nonce.
+HEAD_SHA_FOR_NONCE=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
+
+# Emit one leaf per reviewer that actually ran (skip classifier-skipped and
+# INCR_SKIP-skipped reviewers — their auto-approved verdicts are synthetic and
+# have no real transcript file to hash). Each invocation is sequential so the
+# leafIndex counter in transcript-leaves.jsonl increments correctly without races.
+#
+# Harness detection: default to claude-code; reviewers declared harness:codex
+# in their agent frontmatter run under the codex CLI when available.
+EMIT_HARNESS="claude-code"
+if which codex >/dev/null 2>&1; then
+  EMIT_HARNESS="codex"
+fi
+# Model is informational; use the known subagent model if set, otherwise a
+# descriptive placeholder that the operator can update from reviewer metadata.
+EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-claude-sonnet-4-6}"
+
+for REVIEWER_NAME in $SELECTED; do
+  # Map classifier name → subagent / transcript name.
+  case "$REVIEWER_NAME" in
+    testing) AGENT_NAME="test-reviewer" ;;
+    critic)  AGENT_NAME="code-reviewer" ;;
+    security) AGENT_NAME="security-reviewer" ;;
+    # Already-mapped names (code-reviewer, test-reviewer, security-reviewer,
+    # code-reviewer-codex, test-reviewer-codex) pass through unchanged.
+    *) AGENT_NAME="$REVIEWER_NAME" ;;
+  esac
+
+  # Skip if INCR_SKIP is active — no real transcript was produced.
+  if [ "$INCR_SKIP" = "true" ]; then
+    continue
+  fi
+
+  TRANSCRIPT_FILE="$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.jsonl"
+  VERDICT_FILE="$WORKTREE_PATH/.ai-sdlc/verdicts/${AGENT_NAME}-${TASK_ID_LOWER}.json"
+
+  # If the transcript file is missing (e.g. the reviewer subagent didn't write one),
+  # log a warning and continue — don't abort the pipeline.
+  if [ ! -f "$TRANSCRIPT_FILE" ]; then
+    echo "[ai-sdlc-progress] Step 7c: transcript not found for ${AGENT_NAME} at ${TRANSCRIPT_FILE} — skipping leaf emission for this reviewer" >&2
+    continue
+  fi
+
+  if [ ! -f "$VERDICT_FILE" ]; then
+    echo "[ai-sdlc-progress] Step 7c: verdict not found for ${AGENT_NAME} at ${VERDICT_FILE} — skipping leaf emission for this reviewer" >&2
+    continue
+  fi
+
+  node "$PIPELINE_CLI_BIN/cli-attestation.mjs" emit-leaf \
+    --repo-root "$WORKTREE_PATH" \
+    --task-id "$TASK_ID" \
+    --reviewer "$AGENT_NAME" \
+    --transcript-path "$TRANSCRIPT_FILE" \
+    --verdict-path "$VERDICT_FILE" \
+    --head-sha "$HEAD_SHA_FOR_NONCE" \
+    --harness "$EMIT_HARNESS" \
+    --model "$EMIT_MODEL" \
+    || echo "[ai-sdlc-progress] Step 7c: emit-leaf for ${AGENT_NAME} exited non-zero — continuing (non-fatal in v5 mode)"
+done
+
+echo "[ai-sdlc-progress] Step 7c: transcript leaf emission complete (leaves at $WORKTREE_PATH/.ai-sdlc/transcript-leaves.jsonl)"
+```
+
+> **Concurrency note (AISDLC-383.8).** Leaves are emitted sequentially (one per reviewer in the `for` loop) after all reviewer Agent calls complete. This is the safest ordering: leafIndex is determined by the number of lines in `transcript-leaves.jsonl` at emission time, and sequential writes ensure no TOCTOU race. Parallel emission (emitting all three simultaneously via background jobs) would require an advisory lock on the JSONL file — tracked as a follow-up if throughput becomes a bottleneck.
+
+> **Non-fatal in v5 mode.** When `AI_SDLC_V6_CUTOVER_ACTIVE` is not set, the v6 signer is never invoked, so a failed `emit-leaf` call is logged but does not abort the pipeline. When `AI_SDLC_V6_CUTOVER_ACTIVE=1`, the v6 signer will fail if leaves are missing — the operator should investigate the Step 7c warning before retrying.
+
 ## Step 8 — Aggregate verdicts
 
 Combine the three verdicts:

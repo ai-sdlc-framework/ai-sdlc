@@ -11,11 +11,11 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { generateKeyPairSync } from 'node:crypto';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { createHash, generateKeyPairSync } from 'node:crypto';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { appendLeaf, type TranscriptLeaf } from '../attestation/merkle.js';
+import { appendLeaf, loadLeaves, type TranscriptLeaf } from '../attestation/merkle.js';
 import { buildAttestationCli } from './attestation.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
@@ -424,6 +424,456 @@ describe('sign-v6', () => {
       caught = err as Error;
     }
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
+  });
+});
+
+// ── CLI: emit-leaf ────────────────────────────────────────────────────────────
+
+describe('emit-leaf — happy path', () => {
+  it('appends one leaf for a single reviewer run', async () => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = join(tmpRoot, 'verdict-code-reviewer.json');
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 1, suggestion: 2 },
+      }),
+    );
+
+    await expect(
+      buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'claude-sonnet-4-6',
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    const leaves = loadLeaves(tmpRoot);
+    expect(leaves).toHaveLength(1);
+    const leaf = leaves[0];
+    expect(leaf.leafIndex).toBe(0);
+    expect(leaf.taskId).toBe('AISDLC-383.8');
+    expect(leaf.reviewerName).toBe('code-reviewer');
+    expect(leaf.harness).toBe('claude-code');
+    expect(leaf.model).toBe('claude-sonnet-4-6');
+    expect(leaf.verdictApproved).toBe(true);
+    expect(leaf.findings).toEqual({ critical: 0, major: 0, minor: 1, suggestion: 2 });
+    expect(leaf.transcriptHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(leaf.nonce).toMatch(/^[0-9a-f]{64}$/);
+    expect(leaf.signedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('transcriptHash is SHA-256 of the transcript file content', async () => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = join(tmpRoot, 'verdict.json');
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      }),
+    );
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-383.8',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'a'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+    ]).parseAsync();
+
+    const expectedHash = createHash('sha256').update(readFileSync(transcriptPath)).digest('hex');
+    const leaves = loadLeaves(tmpRoot);
+    expect(leaves[0].transcriptHash).toBe(expectedHash);
+  });
+
+  it('sets verdictApproved=false for CHANGES_REQUESTED verdict', async () => {
+    makeTranscript('aisdlc-383.8', 'security-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'security-reviewer.jsonl',
+    );
+    const verdictPath = join(tmpRoot, 'verdict-security.json');
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({
+        approved: false,
+        findings: { critical: 1, major: 0, minor: 0, suggestion: 0 },
+      }),
+    );
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-383.8',
+      '--reviewer',
+      'security-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'b'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'claude-opus-4-5',
+    ]).parseAsync();
+
+    const leaves = loadLeaves(tmpRoot);
+    expect(leaves[0].verdictApproved).toBe(false);
+    expect(leaves[0].findings.critical).toBe(1);
+  });
+
+  it('supports verdictApproved key in verdict JSON', async () => {
+    makeTranscript('aisdlc-383.8', 'test-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'test-reviewer.jsonl',
+    );
+    const verdictPath = join(tmpRoot, 'verdict-test.json');
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({
+        verdictApproved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 1 },
+      }),
+    );
+
+    await buildAttestationCli([
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-383.8',
+      '--reviewer',
+      'test-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'c'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+    ]).parseAsync();
+
+    const leaves = loadLeaves(tmpRoot);
+    expect(leaves[0].verdictApproved).toBe(true);
+  });
+});
+
+describe('emit-leaf — leafIndex monotonicity across multiple reviewers', () => {
+  it('three sequential calls produce leafIndex 0, 1, 2', async () => {
+    const reviewers = ['code-reviewer', 'test-reviewer', 'security-reviewer'] as const;
+    for (const reviewer of reviewers) {
+      makeTranscript('aisdlc-383.8', reviewer);
+      const transcriptPath = join(
+        tmpRoot,
+        '.ai-sdlc',
+        'transcripts',
+        'aisdlc-383.8',
+        `${reviewer}.jsonl`,
+      );
+      const verdictPath = join(tmpRoot, `verdict-${reviewer}.json`);
+      writeFileSync(
+        verdictPath,
+        JSON.stringify({
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        }),
+      );
+
+      // Reset stdout for next call.
+      stdoutChunks.length = 0;
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        reviewer,
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    }
+
+    const leaves = loadLeaves(tmpRoot);
+    expect(leaves).toHaveLength(3);
+    expect(leaves[0].leafIndex).toBe(0);
+    expect(leaves[1].leafIndex).toBe(1);
+    expect(leaves[2].leafIndex).toBe(2);
+    expect(leaves[0].reviewerName).toBe('code-reviewer');
+    expect(leaves[1].reviewerName).toBe('test-reviewer');
+    expect(leaves[2].reviewerName).toBe('security-reviewer');
+  });
+
+  it('leafIndex continues sequentially across multiple task runs', async () => {
+    // Simulate two different task runs, 2 reviewers each.
+    const tasks = [
+      { taskId: 'AISDLC-383.8', reviewer: 'code-reviewer' },
+      { taskId: 'AISDLC-383.8', reviewer: 'test-reviewer' },
+      { taskId: 'AISDLC-400', reviewer: 'code-reviewer' },
+      { taskId: 'AISDLC-400', reviewer: 'security-reviewer' },
+    ];
+
+    for (const { taskId, reviewer } of tasks) {
+      const taskIdLower = taskId.toLowerCase();
+      makeTranscript(taskIdLower, reviewer);
+      const transcriptPath = join(
+        tmpRoot,
+        '.ai-sdlc',
+        'transcripts',
+        taskIdLower,
+        `${reviewer}.jsonl`,
+      );
+      const verdictPath = join(tmpRoot, `verdict-${taskIdLower}-${reviewer}.json`);
+      writeFileSync(
+        verdictPath,
+        JSON.stringify({
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        }),
+      );
+
+      stdoutChunks.length = 0;
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        taskId,
+        '--reviewer',
+        reviewer,
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    }
+
+    const leaves = loadLeaves(tmpRoot);
+    expect(leaves).toHaveLength(4);
+    // leafIndex must be strictly monotonic regardless of taskId.
+    expect(leaves.map((l) => l.leafIndex)).toEqual([0, 1, 2, 3]);
+  });
+});
+
+describe('emit-leaf — idempotent re-emission', () => {
+  it('skips on second call with same (taskId, reviewerName, transcriptHash)', async () => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = join(tmpRoot, 'verdict.json');
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      }),
+    );
+
+    const args = [
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-383.8',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      'a'.repeat(40),
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+    ];
+
+    // First call — should append.
+    await buildAttestationCli(args).parseAsync();
+    expect(loadLeaves(tmpRoot)).toHaveLength(1);
+
+    // Second call — should skip (idempotent).
+    stdoutChunks.length = 0;
+    await buildAttestationCli(args).parseAsync();
+    expect(loadLeaves(tmpRoot)).toHaveLength(1);
+    expect(flushStdout()).toContain('skipping (idempotent)');
+  });
+});
+
+describe('emit-leaf — missing-transcript edge case', () => {
+  it('exits 1 when transcript file does not exist', async () => {
+    const verdictPath = join(tmpRoot, 'verdict.json');
+    writeFileSync(
+      verdictPath,
+      JSON.stringify({
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      }),
+    );
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        join(tmpRoot, 'nonexistent.jsonl'),
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    const stderrOut = stderrChunks.join('');
+    expect(stderrOut).toContain('transcript file not found');
+  });
+
+  it('exits 1 when verdict file does not exist', async () => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        join(tmpRoot, 'nonexistent-verdict.json'),
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    const stderrOut = stderrChunks.join('');
+    expect(stderrOut).toContain('verdict file not found');
+  });
+
+  it('exits 1 when verdict file contains invalid JSON', async () => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = join(tmpRoot, 'bad-verdict.json');
+    writeFileSync(verdictPath, 'NOT VALID JSON {{{');
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    const stderrOut = stderrChunks.join('');
+    expect(stderrOut).toContain('failed to parse verdict file');
   });
 });
 
