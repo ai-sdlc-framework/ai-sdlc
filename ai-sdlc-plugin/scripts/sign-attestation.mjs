@@ -310,8 +310,6 @@ async function main() {
   //     (written by resume-from-draft after the Bug 2 fix)
   //   Nested object:    {taskId, decision, counts, verdicts: [...]}
   //     (written by writeVerdictFile in execute.ts / VerdictFilePayload shape)
-  //   Docs-only shape:  [{agentId, harness, approved, findings, summary}, ...]
-  //     (synthesized by check-attestation-sign.sh for docs-only PRs, AISDLC-215)
   // Extract the flat array from whichever shape was written.
   let verdicts;
   if (Array.isArray(verdictsRaw)) {

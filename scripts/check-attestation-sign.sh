@@ -20,7 +20,10 @@
 #   3. Read the verdict file at `<worktree>/.ai-sdlc/verdicts/<task-id>.json`.
 #      Verdict file absent → exit 0 (reviewers haven't run yet; the verdict
 #      file is the explicit "we're ready to attest" handoff from /ai-sdlc
-#      execute).
+#      execute). Note: docs-only PRs are handled entirely by CI (AISDLC-214)
+#      per RFC-0042 Phase 3. The hook does NOT synthesize verdicts for
+#      docs-only changesets — it exits 0 as a no-op, same as any other case
+#      where the verdict file is absent.
 #   4. Idempotency: if `.ai-sdlc/attestations/<head-sha>.dsse.json` already
 #      exists at current HEAD, exit 0 (we already signed this commit).
 #   5. Invoke the signer (default:
@@ -107,10 +110,6 @@ fi
 TASK_ID_LOWER=$(printf '%s' "$TASK_ID" | tr '[:upper:]' '[:lower:]')
 VERDICT_DIR="$WT_ROOT/.ai-sdlc/verdicts"
 VERDICT_FILE=""
-# AISDLC-380 fix: track whether this verdict was synthesized for a docs-only PR.
-# When set to 1, Step 4d skips sub-attestation verification because docs-only
-# PRs have no reviewer fan-out by design.
-DOCS_ONLY_SYNTHESIZED=0
 for candidate in "$VERDICT_DIR/$TASK_ID_LOWER.json" "$VERDICT_DIR/$TASK_ID.json"; do
   if [ -f "$candidate" ]; then
     VERDICT_FILE="$candidate"
@@ -119,67 +118,13 @@ for candidate in "$VERDICT_DIR/$TASK_ID_LOWER.json" "$VERDICT_DIR/$TASK_ID.json"
 done
 
 if [ -z "$VERDICT_FILE" ]; then
-  # ── Step 3b: docs-only auto-approve (AISDLC-215) ─────────────────
-  # Docs-only PRs never get reviewer fan-out (no real code to review),
-  # so no verdict file is ever written. Rather than requiring a manual
-  # sign for every docs-only PR, detect the case here and synthesize
-  # auto-approved verdicts inline (transient — gitignored via
-  # `.ai-sdlc/verdicts/`).
-  #
-  # The predicate is the canonical `scripts/is-docs-only-changeset.mjs`
-  # (AISDLC-206) so the definition stays in one place and stays in sync
-  # with the `paths-ignore` lists in verify-attestation.yml and
-  # ai-sdlc-review.yml.
-  # CRITICAL: only use origin/main as the diff base. The HEAD~1 fallback would
-  # misclassify multi-commit branches where a tip docs commit follows code commits
-  # (only the tip would be inspected → false-positive docs-only → false-positive
-  # auto-sign of unverified code). If origin/main is unreachable (offline session,
-  # shallow clone, network partition), fail-CLOSED — skip auto-sign and require
-  # manual sign. Aligns the predicate's diff range with sign-attestation.mjs's
-  # own origin/main dependency.
-  CHANGED_FILES=$(git diff --name-only "origin/main...HEAD" 2>/dev/null || echo '__UNAVAILABLE__')
-  if [ "$CHANGED_FILES" = "__UNAVAILABLE__" ]; then
-    echo "[attestation-sign] no verdicts file and origin/main unreachable — skipping (manual sign required)" >&2
-    exit 0
-  fi
-  if [ -z "$CHANGED_FILES" ]; then
-    # Empty diff (no changes vs origin/main) — nothing to attest, nothing to sign.
-    echo "[attestation-sign] no verdicts file and changeset is empty — skipping" >&2
-    exit 0
-  fi
-
-  # Resolve the path to is-docs-only-changeset.mjs relative to this script.
-  SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  DOCS_ONLY_SCRIPT="$SCRIPT_DIR/is-docs-only-changeset.mjs"
-
-  if [ ! -f "$DOCS_ONLY_SCRIPT" ]; then
-    echo "[attestation-sign] no verdicts file and $DOCS_ONLY_SCRIPT not found — skipping" >&2
-    exit 0
-  fi
-
-  ALL_DOCS=$(printf '%s\n' "$CHANGED_FILES" | node "$DOCS_ONLY_SCRIPT" 2>/dev/null || echo 'false')
-
-  if [ "$ALL_DOCS" = "true" ]; then
-    echo "[attestation-sign] docs-only changeset detected — synthesizing auto-approved verdicts for $TASK_ID" >&2
-    mkdir -p "$VERDICT_DIR"
-    VERDICT_FILE="$VERDICT_DIR/$TASK_ID_LOWER.json"
-    # Mark as synthesized so Step 4d skips sub-attestation verification.
-    # Docs-only PRs have no reviewer fan-out by design (AISDLC-215),
-    # so there are no signed sub-attestations to verify.
-    DOCS_ONLY_SYNTHESIZED=1
-    cat > "$VERDICT_FILE" <<'VERDICTS_EOF'
-[
-  {"agentId":"code-reviewer","harness":"claude-code","approved":true,"findings":{"critical":0,"major":0,"minor":0,"suggestion":0},"summary":"Docs-only PR — auto-approved by check-attestation-sign.sh (AISDLC-215)"},
-  {"agentId":"test-reviewer","harness":"claude-code","approved":true,"findings":{"critical":0,"major":0,"minor":0,"suggestion":0},"summary":"Docs-only PR — no code to test."},
-  {"agentId":"security-reviewer","harness":"claude-code","approved":true,"findings":{"critical":0,"major":0,"minor":0,"suggestion":0},"summary":"Docs-only PR — no attack surface."}
-]
-VERDICTS_EOF
-  else
-    # No verdicts file + not docs-only — skip auto-sign as before.
-    # The verifier's fallback comment will handle it on the PR side.
-    echo "[attestation-sign] no verdicts file at $VERDICT_DIR/$TASK_ID_LOWER.json and changeset is not docs-only — skipping" >&2
-    exit 0
-  fi
+  # No verdict file — reviewers haven't run yet (or this is a docs-only PR,
+  # chore commit, or ad-hoc push). Docs-only PRs are handled entirely by CI
+  # (AISDLC-214 short-circuits verify-attestation.yml with a direct
+  # `ai-sdlc/attestation: success` status) per RFC-0042 Phase 3. No verdict
+  # synthesis is performed here — exit 0 as a no-op.
+  echo "[attestation-sign] no verdicts file at $VERDICT_DIR/$TASK_ID_LOWER.json — skipping (no attestation needed)" >&2
+  exit 0
 fi
 
 # ── Step 4: idempotency check + stale-envelope detection ─────────────
@@ -312,17 +257,11 @@ fi
 # to close nonce/Read-tool bypasses) is marked Superseded by RFC-0042.
 #
 # Test override: AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD can inject a stub.
-#
-# Skip when: DOCS_ONLY_SYNTHESIZED=1 (verdict was just synthesized by Step 3b
-# for a docs-only PR — there are no reviewer sub-attestations to verify because
-# docs-only PRs have no reviewer fan-out by design, AISDLC-215).
 
 TRUSTED_REVIEWERS_YAML="$WT_ROOT/.ai-sdlc/trusted-reviewers.yaml"
 VERIFY_SUB_ATT_SCRIPT="$WT_ROOT/scripts/verify-reviewer-sub-attestations.mjs"
 
-if [ "${DOCS_ONLY_SYNTHESIZED:-0}" = "1" ]; then
-  echo "[attestation-sign] docs-only synthesized verdict — skipping sub-attestation verification (no reviewer fan-out)" >&2
-elif [ "$SCHEMA_VERSION" = "v6" ]; then
+if [ "$SCHEMA_VERSION" = "v6" ]; then
   # RFC-0042 Phase 3: v6 envelopes use Merkle-transcript verification in CI;
   # AISDLC-380 sub-attestation gate is not applicable. Skip entirely.
   echo "[attestation-sign] v6 envelope mode — AISDLC-380 sub-attestation gate skipped (RFC-0042 Phase 3)" >&2

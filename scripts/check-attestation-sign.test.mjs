@@ -81,9 +81,8 @@ function setupRepo() {
   writeFileSync(join(root, 'README.md'), 'baseline\n');
   git(['add', '.'], root);
   git(['commit', '-q', '-m', 'baseline'], root);
-  // Synthesize an `origin/main` ref pointing at the baseline so the docs-only
-  // predicate can compute `git diff origin/main...HEAD`. The hook fail-CLOSEs
-  // when origin/main is unreachable (AISDLC-215 review fix), so tests that
+  // Synthesize an `origin/main` ref pointing at the baseline so the stale-envelope
+  // detection (Step 4c) can compute `git diff origin/main..HEAD`. Tests that
   // simulate dev branches MUST configure this baseline ref.
   git(['update-ref', 'refs/remotes/origin/main', 'HEAD'], root);
   return root;
@@ -503,101 +502,47 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     assert.notEqual(logAfter, logBefore, 'signer must be re-invoked for the brand-new dev commit');
   });
 
-  // ── AISDLC-215: docs-only auto-approve ────────────────────────────────
+  // ── AISDLC-387: docs-only changeset with no verdict file is a no-op ─────────
+  //
+  // The AISDLC-215 docs-only auto-approve synthesis path was removed in AISDLC-387
+  // because it is incompatible with the v6 signer (which requires transcript leaves).
+  // Docs-only PRs are handled by CI (AISDLC-214). The hook must simply exit 0.
 
-  it('AISDLC-215: docs-only PR + missing verdicts → auto-signs (no-op second push)', () => {
+  it('AISDLC-387: docs-only changeset + missing verdict file → exit 0 (no-op, no synthesis)', () => {
     // A docs-only commit (README.md change) with an active-task sentinel but
-    // no verdict file. The hook must synthesize verdicts and sign, exiting 1
-    // with "re-push required". The second push (HEAD is auto-sign chore)
-    // must be a no-op per AISDLC-135.
+    // no verdict file. The hook must exit 0 without synthesizing verdicts or
+    // invoking the signer. CI (AISDLC-214) handles docs-only attestation.
     // NOTE: write .active-task AFTER the docs commit so git diff doesn't
     // include .active-task (in production .active-task is gitignored; the
     // test repo has no .gitignore, so we avoid git-adding it by writing
     // the sentinel after the commit that captures the docs-only files).
 
-    // Add a docs-only commit so HEAD~1...HEAD shows a markdown-only diff.
+    // Add a docs-only commit so the PR diff shows a markdown-only change.
     mkdirSync(join(root, 'docs'), { recursive: true });
     writeFileSync(join(root, 'docs', 'guide.md'), '# Guide\nContent.\n');
     git(['add', '.'], root);
     git(['commit', '-q', '-m', 'docs: add guide'], root);
 
     // Write sentinel AFTER commit so it is not tracked/staged.
-    writeFileSync(join(root, '.active-task'), 'AISDLC-215\n');
-    // No verdict file written — this is the docs-only path.
+    writeFileSync(join(root, '.active-task'), 'AISDLC-387T\n');
+    // No verdict file — docs-only PR with no reviewer fan-out.
 
-    const devHead = git(['rev-parse', 'HEAD'], root).trim();
-    const { cmd } = installFakeSigner(root);
-
-    // First push — hook should detect docs-only, synthesize verdicts, sign.
-    const r1 = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
-    assert.equal(
-      r1.status,
-      1,
-      `expected 1 (auto-signed docs-only), got ${r1.status}: ${r1.stderr}`,
-    );
-    assert.match(r1.stderr, /docs-only changeset detected/i);
-    assert.match(r1.stderr, /synthesizing auto-approved verdicts/i);
-
-    // Attestation must exist at dev HEAD.
-    // RFC-0042 Phase 3: default v6 → .v6.dsse.json.
-    const attPath = join(root, '.ai-sdlc', 'attestations', `${devHead}.v6.dsse.json`);
-    assert.equal(existsSync(attPath), true, 'v6 attestation file must exist after auto-sign');
-
-    // A chore commit must have been added.
-    const choreHead = git(['rev-parse', 'HEAD'], root).trim();
-    assert.notEqual(choreHead, devHead, 'a chore commit must have been added on top of HEAD');
-    const choreSubject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
-    assert.match(choreSubject, /^chore: auto-sign attestation for AISDLC-215/);
-
-    // The synthesized verdict file must mention "auto-approved".
-    const verdictPath = join(root, '.ai-sdlc', 'verdicts', 'aisdlc-215.json');
-    assert.equal(existsSync(verdictPath), true, 'synthesized verdict file must exist');
-    const verdictContent = JSON.parse(execFileSync('cat', [verdictPath], { encoding: 'utf-8' }));
-    assert.ok(
-      Array.isArray(verdictContent) && verdictContent.length === 3,
-      'must have 3 reviewer entries',
-    );
-    assert.ok(
-      verdictContent.every((v) => v.approved === true),
-      'all reviewers must be approved=true',
-    );
-    assert.ok(
-      verdictContent.some((v) => /auto-approved/i.test(v.summary)),
-      'at least one summary must mention auto-approved',
-    );
-  });
-
-  it('AISDLC-215: code PR + missing verdicts → no-op (original behavior preserved)', () => {
-    // A code commit (src/index.ts change) with an active-task sentinel but
-    // no verdict file. The hook must NOT synthesize verdicts — it should exit
-    // 0 with "not docs-only — skipping" so code PRs still require real review.
-    // NOTE: write .active-task AFTER the commit (see docs-only test above).
-
-    // Add a code commit so HEAD~1...HEAD shows a non-docs file.
-    mkdirSync(join(root, 'src'), { recursive: true });
-    writeFileSync(join(root, 'src', 'index.ts'), 'export const x = 1;\n');
-    git(['add', '.'], root);
-    git(['commit', '-q', '-m', 'feat: add index'], root);
-
-    // Write sentinel AFTER commit so it is not tracked/staged.
-    writeFileSync(join(root, '.active-task'), 'AISDLC-215\n');
-    // No verdict file written — simulates reviewers not having run yet.
-
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
     const { cmd, logPath } = installFakeSigner(root);
+
     const r = runHook(root, { AI_SDLC_SIGN_ATTESTATION_CMD: cmd });
 
-    assert.equal(
-      r.status,
-      0,
-      `expected 0 (no-op for code PR without verdicts), got ${r.status}: ${r.stderr}`,
-    );
-    assert.match(r.stderr, /not docs-only — skipping/i);
+    // Hook must be a no-op: exits 0, no new commit, no envelope, no signer invocation.
+    assert.equal(r.status, 0, `expected exit 0 (no-op), got ${r.status}: ${r.stderr}`);
+    assert.match(r.stderr, /no verdicts file.*skipping/i);
     // Signer must NOT be invoked.
-    assert.equal(
-      existsSync(logPath),
-      false,
-      'signer must NOT run when changeset is not docs-only and verdicts are missing',
-    );
+    assert.equal(existsSync(logPath), false, 'signer must NOT run when verdict file is absent');
+    // HEAD must not change (no chore commit was added).
+    const headAfter = git(['rev-parse', 'HEAD'], root).trim();
+    assert.equal(headAfter, headBefore, 'HEAD must not change (no chore commit for docs-only)');
+    // No envelope must exist.
+    const attDir = join(root, '.ai-sdlc', 'attestations');
+    assert.equal(existsSync(attDir), false, 'attestations dir must not exist when hook is a no-op');
   });
 
   // ── AISDLC-250: CODEX_VERSION env var harness passthrough ────────────────
@@ -665,81 +610,6 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
         `chore commit body must not contain "${tok}": ${body}`,
       );
     }
-  });
-
-  // ── AISDLC-380 Bug #2: docs-only post-380 regression ─────────────────────
-  //
-  // After AISDLC-380 added sub-attestation verification (Step 4d), the
-  // synthesized docs-only plain-JSON verdict was being passed to the verifier,
-  // which classified it as legacy and refused to sign. The fix sets
-  // DOCS_ONLY_SYNTHESIZED=1 so Step 4d is skipped for synthesized verdicts.
-
-  it('AISDLC-380 Bug#2: docs-only PR succeeds after sub-attestation gate added', () => {
-    // A docs-only commit with no verdict file. The hook must synthesize verdicts
-    // AND skip sub-attestation verification (because docs-only PRs have no
-    // reviewer fan-out). The sign step must proceed and exit 1 (re-push).
-    mkdirSync(join(root, 'docs'), { recursive: true });
-    writeFileSync(join(root, 'docs', 'guide2.md'), '# Guide 2\nContent.\n');
-    git(['add', '.'], root);
-    git(['commit', '-q', '-m', 'docs: add guide2'], root);
-
-    writeFileSync(join(root, '.active-task'), 'AISDLC-380B\n');
-    // No verdict file — docs-only path.
-
-    // Set up trusted-reviewers.yaml with reviewer entries so the verifier
-    // would normally require sub-attestations.
-    mkdirSync(join(root, '.ai-sdlc'), { recursive: true });
-    writeFileSync(
-      join(root, '.ai-sdlc', 'trusted-reviewers.yaml'),
-      `# Test\nreviewers:\n  - type: 'reviewer'\n    reviewer: 'code-reviewer'\n    machine: 'testmachine'\n    addedAt: '2026-05-20'\n    addedBy: 'test'\n    pubkey: |\n      -----BEGIN PUBLIC KEY-----\n      MCowBQYDK2VwAyEA7RfNqQjnRnt7dG0gjIWIkqyfvn+/aMycmbaEbq7lS7E=\n      -----END PUBLIC KEY-----\n`,
-    );
-
-    // Copy verify script so the hook can find it.
-    mkdirSync(join(root, 'scripts'), { recursive: true });
-    execFileSync('cp', [
-      join(__dirname, 'verify-reviewer-sub-attestations.mjs'),
-      join(root, 'scripts', 'verify-reviewer-sub-attestations.mjs'),
-    ]);
-
-    // Install the REAL verifier and a registry with reviewer entries, so that
-    // if the DOCS_ONLY_SYNTHESIZED bypass fails, the hook would exit 2.
-    mkdirSync(join(root, 'scripts'), { recursive: true });
-    execFileSync('cp', [
-      join(__dirname, 'verify-reviewer-sub-attestations.mjs'),
-      join(root, 'scripts', 'verify-reviewer-sub-attestations.mjs'),
-    ]);
-    mkdirSync(join(root, '.ai-sdlc'), { recursive: true });
-    writeFileSync(
-      join(root, '.ai-sdlc', 'trusted-reviewers.yaml'),
-      `# Test\nreviewers:\n  - type: 'reviewer'\n    reviewer: 'code-reviewer'\n    machine: 'testmachine'\n    addedAt: '2026-05-20'\n    addedBy: 'test'\n    pubkey: |\n      -----BEGIN PUBLIC KEY-----\n      MCowBQYDK2VwAyEA7RfNqQjnRnt7dG0gjIWIkqyfvn+/aMycmbaEbq7lS7E=\n      -----END PUBLIC KEY-----\n`,
-    );
-
-    const { cmd } = installFakeSigner(root);
-    const r = runHook(root, {
-      AI_SDLC_SIGN_ATTESTATION_CMD: cmd,
-      // Unset the default stub so the real verifier is used via the file path.
-      // This tests that docs-only skips sub-attestation verification via
-      // DOCS_ONLY_SYNTHESIZED=1, NOT by having the stub bypass it.
-      AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD: '',
-    });
-
-    // The hook must succeed (exit 1 = signed + re-push needed, NOT exit 2 = refused).
-    assert.equal(
-      r.status,
-      1,
-      `expected exit 1 (docs-only auto-signed), got ${r.status}: stderr=${r.stderr}`,
-    );
-    assert.match(
-      r.stderr,
-      /docs-only changeset detected/i,
-      `stderr must confirm docs-only: ${r.stderr}`,
-    );
-    // Must NOT emit sub-attestation verification failure.
-    assert.equal(
-      r.stderr.includes('sub-attestation verification failed'),
-      false,
-      `docs-only must NOT hit sub-attestation verification: ${r.stderr}`,
-    );
   });
 
   // ── AISDLC-380 Bug #3: fail-CLOSED when verifier or registry missing (v5 mode) ──
