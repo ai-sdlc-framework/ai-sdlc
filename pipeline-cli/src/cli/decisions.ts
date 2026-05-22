@@ -8,9 +8,10 @@
  *
  * Storage: `.ai-sdlc/_decisions/events.jsonl` (event-sourced per OQ-1).
  *
- * Feature flag: `AI_SDLC_DECISION_CATALOG`. Per RFC-0035 §14 the flag is
- * opt-in (`experimental`/`1`/`true`/`yes`/`on`). When unset the CLI
- * degrades open: read subcommands (`list`, `show`) return empty results
+ * Feature flag: `AI_SDLC_DECISION_CATALOG`. **Default-ON since AISDLC-392**
+ * (operator promotion 2026-05-22). To opt out, set the var to
+ * `off`/`0`/`false`/`no`/`disabled` (case-insensitive). When opted out the
+ * CLI degrades open: read subcommands (`list`, `show`) return empty results
  * with an explanatory note on stderr instead of erroring; the mutating
  * `add` subcommand refuses with a clear message + exit 1.
  *
