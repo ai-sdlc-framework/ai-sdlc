@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Husky pre-push hook. Order matters:
 #
-#   1. Coverage gate (existing) — fails fast on under-tested code so we don't
+#   1. Coverage gate — fails fast on under-tested code so we don't
 #      sign an attestation for a build we'd reject anyway.
 #      NOTE: pnpm test:coverage is known to show transient failures (up to 17
 #      tests across 3 files) when multiple worktrees run pre-push hooks
@@ -9,41 +9,33 @@
 #      retry with AI_SDLC_SKIP_COVERAGE_GATE=1 git push once, then re-run
 #      coverage in isolation. See docs/operations/merge-queue-rebase-recovery.md
 #      "Coverage gate flake" section for the full retry recipe (AISDLC-357).
-#   2. Auto-close backlog task (AISDLC-220) — when any commit in the push range
-#      has `(AISDLC-N)` in its subject and the task file is still in
-#      `backlog/tasks/`, moves the file to `backlog/completed/` via the
-#      AISDLC-203 atomic helper and commits the move as a chore commit, then
-#      exits 1 with "re-push required". ORDER IS LOAD-BEARING — MUST run
-#      BEFORE attestation-sign (item 4 below). The attestation envelope's
-#      `contentHashV4` field binds `{path, headBlobSha}` per changed file;
-#      if the task move happens AFTER attestation sign, the envelope hashes the
-#      OLD path (`backlog/tasks/…`) while the PR diff contains the NEW path
-#      (`backlog/completed/…`) — verify-attestation would reject the envelope.
-#   3. MCP server bundle sync (AISDLC-357) — when any commit in the push range
-#      touches `pipeline-cli/src/**`, rebuilds `@ai-sdlc/plugin-mcp-server`
-#      and commits the updated `dist/bin.js` if it changed, then exits 1 with
-#      "re-push required". ORDER IS LOAD-BEARING — MUST run BEFORE
-#      attestation-sign (item 4 below): the attestation envelope binds
-#      {path, headBlobSha} per changed file; if the bundle rebuild happens
-#      AFTER attestation sign, the envelope hashes the OLD bundle while the
-#      PR diff contains the NEW bundle → verify-attestation rejects.
-#   4. Squash stacked chore-sign commits (AISDLC-369) — when multiple
+#   2. Squash stacked chore-sign commits (AISDLC-369) — when multiple
 #      consecutive "chore: sign attestation" commits accumulate at HEAD
 #      (from re-sign cycles), squashes them into one to keep history clean.
-#      ORDER: MUST run BEFORE attestation-sign (item 5 below) so the
+#      ORDER: MUST run BEFORE attestation-sign (item 4 below) so the
 #      squashed HEAD is the one the attestation is signed against.
 #      No-op when there is 0 or 1 chore-sign commit at HEAD.
-#   5. DoR gate (AISDLC-370) — runs `cli-dor-check --task <path>` against any
+#   3. DoR gate (AISDLC-370) — runs `cli-dor-check --task <path>` against any
 #      `backlog/{tasks,completed}/*.md` files staged in this push, so DoR
 #      violations (gate-2 markers, gate-3 unresolved references, gate-7
 #      dependency phrases, upstream-OQ blocks) fail locally before CI cycles.
-#      ORDER: AFTER task-move (paths may have just changed) and BEFORE
-#      attestation-sign so a DoR-failed task body doesn't get signed.
-#   6. Auto-sign attestation (AISDLC-133) — when the worktree has an active
-#      task + reviewer verdict file but no attestation at current HEAD, signs
-#      a chore commit on top + exits 1 with "re-push required". This removes
-#      the sign-attestation step from /ai-sdlc execute's LLM responsibility
-#      (per the 2026-05-01 "mechanical → hook, never LLM" design discussion).
+#      Runs before the orchestrator so DoR violations block the push without
+#      spending time on mechanical fixups. Skip: AI_SDLC_SKIP_DOR_GATE=1.
+#   4. Mechanical fixups orchestrator (AISDLC-386) — runs all three mechanical
+#      fixup sub-hooks in dependency order in a single pass:
+#        task-move (AISDLC-220) → mcp-bundle-sync (AISDLC-357) → attestation-sign (AISDLC-133)
+#      If any fixup ran, exits 1 ONCE with a consolidated "re-run git push"
+#      message instead of each sub-hook exiting 1 separately (collapses the
+#      worst-case 4-push chain into 2). ORDER IS LOAD-BEARING: task-move
+#      MUST run before attestation-sign (attestation's contentHashV4 binds
+#      {path, headBlobSha}; if move happens after sign the envelope references
+#      the old path → verify-attestation rejects).
+#   5-7. Individual sub-hook invocations (task-moved, mcp-bundle-sync,
+#      attestation-sign) remain below as defense-in-depth: on the re-push
+#      after the orchestrator exits 1, the orchestrator sees no fixups needed
+#      and exits 0. Each sub-hook's idempotency check then confirms clean state.
+#      If the orchestrator is bypassed (AI_SDLC_BYPASS_ALL_GATES), the
+#      individual hooks below also skip (they check the same bypass var).
 #
 # Skip individual gates with their respective env vars
 # (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_TASK_MOVE=1,
@@ -60,10 +52,19 @@ set -euo pipefail
 PUSH_STDIN="$(cat || true)"
 
 ./scripts/check-coverage.sh
-./scripts/check-task-moved.sh
-./scripts/check-mcp-bundle-sync.sh
 if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
   ./scripts/squash-attestation-chores.sh
 fi
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-dor-gate.sh
+# AISDLC-386: orchestrator handles all mechanical fixups (task-move →
+# mcp-bundle-sync → attestation-sign) in a single pass and exits 1 ONCE if
+# any work was done. This collapses the worst-case 4-push chain into 2.
+# The individual hook invocations below act as defense-in-depth: on the
+# re-push after the orchestrator exits 1, the orchestrator sees no fixups
+# needed and exits 0, then each sub-hook's own idempotency check confirms
+# the state is clean. If the orchestrator is bypassed (AI_SDLC_BYPASS_ALL_GATES)
+# the individual hooks below also skip (they check the same bypass var).
+printf '%s\n' "$PUSH_STDIN" | ./scripts/pre-push-fixups.sh
+./scripts/check-task-moved.sh
+./scripts/check-mcp-bundle-sync.sh
 ./scripts/check-attestation-sign.sh

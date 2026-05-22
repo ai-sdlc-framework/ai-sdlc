@@ -3,14 +3,20 @@
 ## When to use
 
 `AI_SDLC_BYPASS_ALL_GATES=1` is a **single env var that stops the entire pre-push chain**.
-All 6 pre-push hooks exit 0 immediately when it is set:
+All hooks exit 0 immediately when it is set:
 
 1. `scripts/check-coverage.sh`
-2. `scripts/check-task-moved.sh`
-3. `scripts/check-mcp-bundle-sync.sh`
-4. `scripts/squash-attestation-chores.sh`
-5. `scripts/check-dor-gate.sh`
-6. `scripts/check-attestation-sign.sh`
+2. `scripts/squash-attestation-chores.sh`
+3. `scripts/check-dor-gate.sh`
+4. `scripts/pre-push-fixups.sh` (AISDLC-386 mechanical-fixups orchestrator)
+5. `scripts/check-task-moved.sh`
+6. `scripts/check-mcp-bundle-sync.sh`
+7. `scripts/check-attestation-sign.sh`
+
+The orchestrator (`scripts/pre-push-fixups.sh`) and its three sub-hooks all
+check `AI_SDLC_BYPASS_ALL_GATES` at the very top and exit 0 immediately. Setting
+the bypass once therefore skips both the orchestrator pass AND each sub-hook's
+defense-in-depth invocation.
 
 **Use this only in the following narrow circumstances:**
 

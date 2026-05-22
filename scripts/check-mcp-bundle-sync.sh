@@ -206,7 +206,16 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>" >&2
   exit 2
 }
 
-# ── Step 10: re-push required ─────────────────────────────────────────
+# ── Step 10: re-push required (or orchestrator mode) ──────────────────
+# When AI_SDLC_INTERNAL_NO_EXIT_1=1 is set, the pre-push-fixups.sh
+# orchestrator (AISDLC-386) is managing the exit-1 cycle itself. In that mode
+# exit 0 after doing the work so the orchestrator can continue to the next
+# sub-hook. Standalone invocations retain exit-1 for backward compat.
+if [ "${AI_SDLC_INTERNAL_NO_EXIT_1:-0}" = "1" ]; then
+  echo "[mcp-bundle-sync] fixup done (orchestrator mode — suppressing exit-1)" >&2
+  exit 0
+fi
+
 {
   echo ""
   echo "[mcp-bundle-sync] Hook rebuilt the mcp-server bundle and committed"

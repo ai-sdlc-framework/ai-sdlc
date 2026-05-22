@@ -233,7 +233,19 @@ Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>" >&2
   exit 2
 }
 
-# ── Step 8: re-push required ─────────────────────────────────────────
+# ── Step 8: re-push required (or orchestrator mode) ──────────────────
+# When AI_SDLC_INTERNAL_NO_EXIT_1=1 is set, the pre-push-fixups.sh
+# orchestrator (AISDLC-386) is managing the exit-1 cycle itself. It invokes
+# all mechanical fixup sub-hooks in one pass and emits a single consolidated
+# "re-run git push" message after all of them have run. In that mode the
+# sub-hook must exit 0 after doing its work so the orchestrator can continue
+# to the next sub-hook (attestation-sign, etc.). Standalone invocations (e.g.
+# from .husky/pre-push direct or from tests) retain exit-1 for backward compat.
+if [ "${AI_SDLC_INTERNAL_NO_EXIT_1:-0}" = "1" ]; then
+  echo "[task-move] fixup done (orchestrator mode — suppressing exit-1)" >&2
+  exit 0
+fi
+
 {
   echo ""
   echo "[task-move] Hook moved $MOVED_LABEL to backlog/completed/ and committed"

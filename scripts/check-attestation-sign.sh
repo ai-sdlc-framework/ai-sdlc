@@ -415,7 +415,18 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>" >&2
   exit 2
 }
 
-# ── Step 7: re-push required ─────────────────────────────────────────
+# ── Step 7: re-push required (or orchestrator mode) ──────────────────
+# When AI_SDLC_INTERNAL_NO_EXIT_1=1 is set, the pre-push-fixups.sh
+# orchestrator (AISDLC-386) is managing the exit-1 cycle itself. It invokes
+# all mechanical fixup sub-hooks in one pass and emits a single consolidated
+# "re-run git push" message after all of them have run. In that mode the
+# sub-hook must exit 0 after doing its work so the orchestrator can continue
+# to the next sub-hook. Standalone invocations retain exit-1 for backward compat.
+if [ "${AI_SDLC_INTERNAL_NO_EXIT_1:-0}" = "1" ]; then
+  echo "[attestation-sign] fixup done (orchestrator mode — suppressing exit-1)" >&2
+  exit 0
+fi
+
 {
   echo ""
   echo "[attestation-sign] Hook added an attestation chore commit on top of"
