@@ -178,8 +178,23 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm build
-      - run: pnpm test
+      # AISDLC-389: use pnpm's native affected-package filter so a small PR
+      # (e.g. a bash-script change) does not re-build the entire workspace.
+      # On merge_group events pnpm's `...[origin/main]` ref may not resolve
+      # correctly (ephemeral queue head), so fall back to full -r run there.
+      # `pnpm validate-schemas` always runs — it's cheap + cross-cutting.
+      - name: Build (affected packages)
+        if: github.event_name != 'merge_group'
+        run: pnpm --filter "...[origin/main]" build
+      - name: Build (full — merge_group fallback)
+        if: github.event_name == 'merge_group'
+        run: pnpm -r build
+      - name: Test (affected packages)
+        if: github.event_name != 'merge_group'
+        run: pnpm --filter "...[origin/main]" test
+      - name: Test (full — merge_group fallback)
+        if: github.event_name == 'merge_group'
+        run: pnpm -r test
       - run: pnpm validate-schemas
 
   test-python:

@@ -1,18 +1,32 @@
 /**
  * Tests for `scripts/check-coverage.sh`.
  *
- * Focuses on the env-var bypass paths (AI_SDLC_BYPASS_ALL_GATES and
- * AI_SDLC_SKIP_COVERAGE_GATE) which are pure bash logic — no pnpm
- * build or coverage data required. The full coverage-threshold path
- * is exercised by running pnpm test:coverage in CI against real data.
+ * Section 1 — bypass env vars (AI_SDLC_BYPASS_ALL_GATES, AI_SDLC_SKIP_COVERAGE_GATE):
+ *   Pure bash logic — no pnpm build or coverage data required.
+ *
+ * Section 2 — docs-only short-circuit (AC-1 / AISDLC-389):
+ *   Feed synthetic pre-push stdin records and assert the script exits 0
+ *   immediately when all changed files are docs-only.
+ *
+ * Section 3 — coverage threshold-walk scope (AC-4 / AISDLC-389):
+ *   Build a hermetic git repo + coverage-summary.json fixtures and assert
+ *   that only affected packages are walked (single-package vs cross-cutting).
  *
  * Run with: node --test scripts/check-coverage.test.mjs
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, beforeEach, afterEach, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync, chmodSync } from 'node:fs';
-import { spawnSync } from 'node:child_process';
+import {
+  mkdtempSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  rmSync,
+  chmodSync,
+  realpathSync,
+} from 'node:fs';
+import { spawnSync, execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -32,13 +46,16 @@ function cleanEnv(extra = {}) {
   return env;
 }
 
-function runScript(cwd, envOverrides = {}) {
+function runScript(cwd, envOverrides = {}, stdinData = '') {
   return spawnSync('bash', [SCRIPT], {
     cwd,
     env: cleanEnv(envOverrides),
     encoding: 'utf-8',
+    input: stdinData,
   });
 }
+
+// ── Section 1: bypass env vars ────────────────────────────────────────────────
 
 describe('check-coverage.sh — bypass env vars', () => {
   let tmpDir;
@@ -93,5 +110,225 @@ describe('check-coverage.sh — bypass env vars', () => {
     });
     assert.equal(r.status, 0);
     assert.match(r.stderr, /AI_SDLC_BYPASS_ALL_GATES=1/);
+  });
+});
+
+// ── Section 2: docs-only short-circuit (AC-1 / AISDLC-389) ──────────────────
+
+describe('check-coverage.sh — docs-only short-circuit (AC-1)', () => {
+  // We build a real hermetic git repo so the script can run `git diff --name-only`
+  // and `node scripts/is-docs-only-changeset.mjs` against actual commit history.
+  let tmpDir;
+
+  before(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'ai-sdlc-coverage-docs-only-'));
+    tmpDir = realpathSync(tmpDir);
+    chmodSync(SCRIPT, 0o755);
+
+    const gitOpts = { cwd: tmpDir, encoding: 'utf-8' };
+    execFileSync('git', ['init', '-b', 'main'], gitOpts);
+    execFileSync('git', ['config', 'user.name', 'Test'], gitOpts);
+    execFileSync('git', ['config', 'user.email', 'test@test.com'], gitOpts);
+
+    // Initial commit (origin/main reference point)
+    writeFileSync(join(tmpDir, 'package.json'), JSON.stringify({ name: 'root' }));
+    execFileSync('git', ['add', 'package.json'], gitOpts);
+    execFileSync('git', ['commit', '-m', 'chore: initial commit'], gitOpts);
+
+    // Tag this as "remote/main" so the diff base works
+    execFileSync('git', ['branch', '-M', 'main'], gitOpts);
+    // Create a fake origin/main ref pointing to HEAD
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', 'HEAD'], gitOpts);
+
+    // Second commit — docs-only change
+    mkdirSync(join(tmpDir, 'docs'), { recursive: true });
+    writeFileSync(join(tmpDir, 'docs/NOTES.md'), '# Notes\n');
+    execFileSync('git', ['add', 'docs/NOTES.md'], gitOpts);
+    execFileSync('git', ['commit', '-m', 'docs: add notes'], gitOpts);
+  });
+
+  after(() => {
+    try {
+      rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      // cleanup best-effort
+    }
+  });
+
+  it('exits 0 and prints docs-only message when all changed files are docs-only', () => {
+    // Get the current HEAD SHA and origin/main SHA for the pre-push stdin record.
+    const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+      cwd: tmpDir,
+      encoding: 'utf-8',
+    }).trim();
+    const originMain = execFileSync('git', ['rev-parse', 'refs/remotes/origin/main'], {
+      cwd: tmpDir,
+      encoding: 'utf-8',
+    }).trim();
+
+    // Simulate the pre-push stdin format: "<local-ref> <local-sha> <remote-ref> <remote-sha>"
+    const stdinRecord = `refs/heads/main ${head} refs/remotes/origin/main ${originMain}\n`;
+
+    const r = runScript(tmpDir, { AI_SDLC_BYPASS_ALL_GATES: '0' }, stdinRecord);
+
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 (docs-only skip), got ${r.status}.\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    assert.match(
+      r.stdout + r.stderr,
+      /docs-only changeset — skipping/,
+      'expected docs-only skip message in output',
+    );
+  });
+});
+
+// ── Section 3: coverage threshold-walk scope (AC-4 / AISDLC-389) ─────────────
+
+describe('check-coverage.sh — coverage threshold-walk scope (AC-4)', () => {
+  // This section tests that the coverage-summary.json walk only visits packages
+  // in the affected set. We stub out pnpm by injecting a fake `pnpm` script in
+  // PATH that:
+  //   - On `--filter "...[origin/main]" build` → exits 0 (success)
+  //   - On `--filter "...[origin/main]" test:coverage` → exits 0 (success)
+  //   - On `--filter "...[origin/main]" list --json --depth -1` → returns a
+  //     JSON array with only the affected package(s)
+  // Then we place coverage-summary.json fixtures at both packages and assert
+  // the walk log only mentions the affected package.
+
+  let tmpDir;
+  let pkgADir;
+  let pkgBDir;
+
+  // Helpers to write a passing or failing coverage-summary.json
+  function writeCoverageSummary(pkgDir, pct) {
+    const covDir = join(pkgDir, 'coverage');
+    mkdirSync(covDir, { recursive: true });
+    writeFileSync(
+      join(covDir, 'coverage-summary.json'),
+      JSON.stringify({
+        total: { lines: { pct } },
+      }),
+    );
+  }
+
+  function writeFakePnpm(binDir, affectedPkgPath) {
+    // Fake pnpm script that handles the commands the coverage script calls.
+    const script = `#!/usr/bin/env bash
+set -euo pipefail
+ARGS=("$@")
+# Detect the command pattern and respond appropriately.
+CMD_STR="${'${ARGS[*]}'}"
+if [[ "$CMD_STR" == *"list"*"--json"* ]]; then
+  # Return a JSON array listing only the affected package
+  printf '[{"name":"pkg-a","version":"1.0.0","path":"%s"}]\\n' "${affectedPkgPath}"
+  exit 0
+fi
+if [[ "$CMD_STR" == *"build"* ]] || [[ "$CMD_STR" == *"test:coverage"* ]]; then
+  exit 0
+fi
+# Unknown command — passthrough to real pnpm if available, else fail
+exit 0
+`;
+    mkdirSync(binDir, { recursive: true });
+    const fakePnpm = join(binDir, 'pnpm');
+    writeFileSync(fakePnpm, script);
+    chmodSync(fakePnpm, 0o755);
+    return fakePnpm;
+  }
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'ai-sdlc-coverage-scope-'));
+    tmpDir = realpathSync(tmpDir);
+    chmodSync(SCRIPT, 0o755);
+
+    // Create two fake packages
+    pkgADir = join(tmpDir, 'pkg-a');
+    pkgBDir = join(tmpDir, 'pkg-b');
+    mkdirSync(pkgADir, { recursive: true });
+    mkdirSync(pkgBDir, { recursive: true });
+    writeFileSync(join(pkgADir, 'package.json'), JSON.stringify({ name: 'pkg-a' }));
+    writeFileSync(join(pkgBDir, 'package.json'), JSON.stringify({ name: 'pkg-b' }));
+
+    // Create a scripts/ dir with the is-docs-only-changeset.mjs symlink so
+    // the script can find it relative to ROOT.
+    const scriptsDir = join(tmpDir, 'scripts');
+    mkdirSync(scriptsDir, { recursive: true });
+    // Copy the real is-docs-only-changeset.mjs into the temp dir's scripts/
+    const realScript = join(__dirname, 'is-docs-only-changeset.mjs');
+    const scriptContent = readFileSync(realScript, 'utf-8');
+    writeFileSync(join(scriptsDir, 'is-docs-only-changeset.mjs'), scriptContent);
+  });
+
+  afterEach(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('single-package push — only that package coverage is walked', () => {
+    // Both packages have coverage files, but pnpm filter only returns pkg-a.
+    // AI_SDLC_WORKSPACE_ROOT is set so `find` scans tmpDir, not the real repo.
+    writeCoverageSummary(pkgADir, 90);
+    writeCoverageSummary(pkgBDir, 90);
+
+    const binDir = join(tmpDir, '.fake-bin');
+    writeFakePnpm(binDir, pkgADir);
+
+    const r = runScript(
+      tmpDir,
+      {
+        AI_SDLC_BYPASS_ALL_GATES: '0',
+        AI_SDLC_SKIP_COVERAGE_GATE: '0',
+        AI_SDLC_WORKSPACE_ROOT: tmpDir,
+        PATH: `${binDir}:${process.env.PATH}`,
+      },
+      // No stdin → docs-only check reads empty stdin, LOCAL_SHA empty → skipped
+      '',
+    );
+
+    // The walk should mention pkg-a but NOT pkg-b.
+    const output = r.stdout + r.stderr;
+    assert.match(output, /pkg-a/, 'expected pkg-a to appear in coverage walk output');
+    assert.doesNotMatch(output, /pkg-b/, 'expected pkg-b to be absent from coverage walk output');
+  });
+
+  it('cross-cutting push — all packages walked (pnpm returns all packages)', () => {
+    // Simulate a cross-cutting push: fake pnpm returns both packages.
+    // AI_SDLC_WORKSPACE_ROOT is set so `find` scans tmpDir, not the real repo.
+    writeCoverageSummary(pkgADir, 90);
+    writeCoverageSummary(pkgBDir, 90);
+
+    const binDir = join(tmpDir, '.fake-bin-cross');
+    mkdirSync(binDir, { recursive: true });
+
+    // Fake pnpm that returns both packages on list --json
+    const script = `#!/usr/bin/env bash
+set -euo pipefail
+CMD_STR="$*"
+if [[ "$CMD_STR" == *"list"*"--json"* ]]; then
+  printf '[{"name":"pkg-a","version":"1.0.0","path":"${pkgADir}"},{"name":"pkg-b","version":"1.0.0","path":"${pkgBDir}"}]\\n'
+  exit 0
+fi
+exit 0
+`;
+    const fakePnpm = join(binDir, 'pnpm');
+    writeFileSync(fakePnpm, script);
+    chmodSync(fakePnpm, 0o755);
+
+    const r = runScript(
+      tmpDir,
+      {
+        AI_SDLC_BYPASS_ALL_GATES: '0',
+        AI_SDLC_SKIP_COVERAGE_GATE: '0',
+        AI_SDLC_WORKSPACE_ROOT: tmpDir,
+        PATH: `${binDir}:${process.env.PATH}`,
+      },
+      '',
+    );
+
+    // Both packages should appear in coverage walk output.
+    const output = r.stdout + r.stderr;
+    assert.match(output, /pkg-a/, 'expected pkg-a to appear in coverage walk output');
+    assert.match(output, /pkg-b/, 'expected pkg-b to appear in coverage walk output');
   });
 });
