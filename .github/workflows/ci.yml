@@ -172,28 +172,43 @@ jobs:
         node-version: [22]
     steps:
       - uses: actions/checkout@v4
+        with:
+          # AISDLC-389: full clone so `pnpm --filter "...[origin/main]"` can
+          # resolve origin/main as a real ref. Mirrors the coverage job pattern.
+          # Without this, the default shallow depth=1 produces
+          # `ERR_PNPM_FILTER_CHANGED: bad revision 'origin/main'`.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      # AISDLC-389: ensure origin/main ref is locally available for the filter
+      # (pull_request events fetch the PR head + merge ref but not always main).
+      - name: Ensure origin/main ref present
+        if: github.event_name == 'pull_request'
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || true
       # AISDLC-389: use pnpm's native affected-package filter so a small PR
       # (e.g. a bash-script change) does not re-build the entire workspace.
-      # On merge_group events pnpm's `...[origin/main]` ref may not resolve
-      # correctly (ephemeral queue head), so fall back to full -r run there.
+      # Use the filter ONLY on pull_request events where origin/main is a
+      # real base ref. Fall back to full -r run on:
+      #   - merge_group: ephemeral queue head; `...[origin/main]` may not resolve
+      #   - push (to main): shallow checkout makes origin/main == HEAD after
+      #     the push, so the filter would select 0 packages and silently no-op
+      #     (code review caught this regression class — AISDLC-389 review).
       # `pnpm validate-schemas` always runs — it's cheap + cross-cutting.
       - name: Build (affected packages)
-        if: github.event_name != 'merge_group'
+        if: github.event_name == 'pull_request'
         run: pnpm --filter "...[origin/main]" build
-      - name: Build (full — merge_group fallback)
-        if: github.event_name == 'merge_group'
+      - name: Build (full — push/merge_group)
+        if: github.event_name != 'pull_request'
         run: pnpm -r build
       - name: Test (affected packages)
-        if: github.event_name != 'merge_group'
+        if: github.event_name == 'pull_request'
         run: pnpm --filter "...[origin/main]" test
-      - name: Test (full — merge_group fallback)
-        if: github.event_name == 'merge_group'
+      - name: Test (full — push/merge_group)
+        if: github.event_name != 'pull_request'
         run: pnpm -r test
       - run: pnpm validate-schemas
 
