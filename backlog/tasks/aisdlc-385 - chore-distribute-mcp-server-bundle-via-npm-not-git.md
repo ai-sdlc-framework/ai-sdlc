@@ -11,7 +11,8 @@ references:
   - ai-sdlc-plugin/mcp-server/package.json
   - ai-sdlc-plugin/scripts/install-runtime-deps.sh
   - scripts/check-mcp-bundle-sync.sh
-  - scripts/verify-bundle.mjs
+  - ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs
+  - .github/workflows/verify-mcp-bundle.yml
   - docs/operations/gate-friction-audit-2026.md
 parentTaskId: AISDLC-384
 ---
@@ -23,7 +24,7 @@ Surfaced by the AISDLC-384 gate-friction audit (Gate 3 review).
 The `ai-sdlc-plugin/mcp-server/dist/bin.js` bundle is currently committed to git at every commit because the Claude Code plugin marketplace clones the repo source without running `pnpm install`. Two gates exist solely to keep this checked-in artifact correct:
 
 - `scripts/check-mcp-bundle-sync.sh` — pre-push hook (223 LOC) that auto-rebuilds the bundle whenever `pipeline-cli/src/**` changes (5 lifetime fires; 10-30s rebuild per fire)
-- `scripts/verify-bundle.mjs` — CI gate that rejects PRs whose committed bundle is stale
+- `ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs` — CI gate that rejects PRs whose committed bundle is stale
 
 Both exist to paper over a deeper architectural choice: committing a generated artifact to the source tree.
 
@@ -36,7 +37,7 @@ Both exist to paper over a deeper architectural choice: committing a generated a
 - [ ] AC-3: `scripts/install-runtime-deps.sh` — extended to install `@ai-sdlc/plugin-mcp-server` on first plugin invocation if not present.
 - [ ] AC-4: `ai-sdlc-plugin/mcp-server/.gitignore` — adds `dist/` (and `dist/` removed from git history in the same PR via `git rm`).
 - [ ] AC-5: `scripts/check-mcp-bundle-sync.sh` — DELETED (no longer needed).
-- [ ] AC-6: `scripts/verify-bundle.mjs` + `Verify dist/bin.js` CI check — DELETED.
+- [ ] AC-6: `ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs` + `Verify dist/bin.js` CI check — DELETED.
 - [ ] AC-7: `.husky/pre-push` — `check-mcp-bundle-sync.sh` invocation removed; ordering doc updated.
 - [ ] AC-8: Dogfood path validated — operator can still run the plugin from a local checkout by running `pnpm --filter @ai-sdlc/plugin-mcp-server build` once, with plugin self-heal preferring local `dist/` when present (topology 2 per `ai-sdlc-plugin/README.md`).
 - [ ] AC-9: First-version chicken-and-egg handled — the PR that ships this MUST land alongside a release-please version bump that publishes `@ai-sdlc/plugin-mcp-server` to npm at the new version. Document the cutover in the PR body.
