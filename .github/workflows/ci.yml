@@ -198,11 +198,12 @@ jobs:
       #     the push, so the filter would select 0 packages and silently no-op
       #     (code review caught this regression class — AISDLC-389 review).
       # `pnpm validate-schemas` always runs — it's cheap + cross-cutting.
-      - name: Build (affected packages)
-        if: github.event_name == 'pull_request'
-        run: pnpm --filter "...[origin/main]" build
-      - name: Build (full — push/merge_group)
-        if: github.event_name != 'pull_request'
+      # AISDLC-385 stopgap: always full `pnpm -r build`. The AISDLC-389 filter
+      # selects dependents (e.g. dogfood) without rebuilding their unchanged
+      # deps (e.g. orchestrator), producing TS2307 'Cannot find module' on
+      # dependents that need the dep's dist/. Filed as a 389 follow-up;
+      # safe fix for now is to always rebuild the workspace.
+      - name: Build (full — always)
         run: pnpm -r build
       - name: Test (affected packages)
         if: github.event_name == 'pull_request'

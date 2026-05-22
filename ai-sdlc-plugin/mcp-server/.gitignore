@@ -1,0 +1,5 @@
+# Build output — distributed via npm package (@ai-sdlc/plugin-mcp-server), not committed to git.
+# See AISDLC-385: https://github.com/ai-sdlc-framework/ai-sdlc/pull/AISDLC-385
+dist/
+*.tsbuildinfo
+node_modules/

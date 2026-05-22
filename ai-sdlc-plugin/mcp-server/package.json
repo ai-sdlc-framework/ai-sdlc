@@ -34,8 +34,7 @@
     "bundle": "node scripts/bundle.mjs",
     "clean": "rm -rf dist *.tsbuildinfo",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "verify-bundle": "node scripts/verify-bundle.mjs"
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@ai-sdlc/pipeline-cli": "workspace:*",

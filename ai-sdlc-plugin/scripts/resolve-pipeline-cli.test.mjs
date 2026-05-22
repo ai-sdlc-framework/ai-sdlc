@@ -41,6 +41,21 @@ function createFakePipelineBin(dir) {
 }
 
 /**
+ * AISDLC-385: create a minimal fake mcp-server bundle at the expected path so
+ * `_mcp_usable` passes. After AISDLC-385, resolve-pipeline-cli's fast path
+ * requires BOTH pipeline-cli AND mcp-server to be present — otherwise it
+ * triggers the self-heal flow (the same flow that's tested in Topology 2).
+ *
+ * Pass the PLUGIN_DIR (not the bin dir) — this creates
+ * <pluginDir>/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js.
+ */
+function createFakeMcpBundle(pluginDir) {
+  const bundleDir = join(pluginDir, 'node_modules/@ai-sdlc/plugin-mcp-server/dist');
+  mkdirSync(bundleDir, { recursive: true });
+  writeFileSync(join(bundleDir, 'bin.js'), '#!/usr/bin/env node\n// fake mcp-server\n');
+}
+
+/**
  * Run resolve-pipeline-cli.sh with custom env and optional cwd.
  * Returns { stdout, stderr, exitCode }.
  */
@@ -109,6 +124,8 @@ describe('Topology 1: CLAUDE_PLUGIN_DIR set + node_modules present (happy path)'
     const pluginDir = join(tmpDir, 'topology1-plugin');
     const expectedBin = join(pluginDir, PIPELINE_CLI_REL);
     createFakePipelineBin(expectedBin);
+    // AISDLC-385: fast path now requires BOTH pipeline-cli AND mcp-server.
+    createFakeMcpBundle(pluginDir);
 
     const { stdout, exitCode } = runScript({ CLAUDE_PLUGIN_DIR: pluginDir });
 
@@ -150,6 +167,8 @@ describe('Topology 3: CLAUDE_PLUGIN_DIR unset + CLAUDE_PLUGIN_ROOT set + deps pr
     const pluginRoot = join(tmpDir, 'topology3-plugin-root');
     const expectedBin = join(pluginRoot, PIPELINE_CLI_REL);
     createFakePipelineBin(expectedBin);
+    // AISDLC-385: fast path now requires BOTH pipeline-cli AND mcp-server.
+    createFakeMcpBundle(pluginRoot);
 
     const { stdout, exitCode } = runScript({
       CLAUDE_PLUGIN_DIR: '',

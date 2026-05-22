@@ -3,20 +3,23 @@
 # AISDLC-386: Orchestrator hook — collapse pre-push "re-push required" chain
 # into a single pass.
 #
-# Problem: the pre-push chain has up to three hooks that each exit-1 with
+# Problem: the pre-push chain has up to two hooks that each exit-1 with
 # "re-run git push" after doing mechanical work:
 #   1. check-task-moved.sh  — auto-mv + chore commit
-#   2. check-mcp-bundle-sync.sh — rebuild + chore commit (DELETE per AISDLC-385)
-#   3. check-attestation-sign.sh — sign + chore commit
+#   2. check-attestation-sign.sh — sign + chore commit
 #
-# Worst case: operator runs `git push` FOUR times (one per fixup, then one
+# (check-mcp-bundle-sync.sh was DELETED by AISDLC-385 — the mcp-server bundle
+# is now distributed via the @ai-sdlc/plugin-mcp-server npm package and is no
+# longer committed to git.)
+#
+# Worst case: operator runs `git push` THREE times (one per fixup, then one
 # final push). This orchestrator collapses those into AT MOST TWO: one to
 # trigger fixups, one to actually send.
 #
 # How it works:
-#   1. Invoke each sub-hook in dependency order (task-move → mcp-bundle-sync
-#      → attestation-sign) with AI_SDLC_INTERNAL_NO_EXIT_1=1 set. That env var
-#      suppresses the exit-1-after-fixup in each sub-hook but still does the work.
+#   1. Invoke each sub-hook in dependency order (task-move → attestation-sign)
+#      with AI_SDLC_INTERNAL_NO_EXIT_1=1 set. That env var suppresses the
+#      exit-1-after-fixup in each sub-hook but still does the work.
 #   2. Track whether any fixup made changes (via its stdout sentinel or exit code).
 #   3. After all sub-hooks complete: if ANY fixup ran, exit 1 ONCE with a
 #      consolidated summary. If no fixups ran, exit 0 silently.
@@ -40,8 +43,7 @@
 #   AI_SDLC_BYPASS_ALL_GATES=1 git push — skips this orchestrator and all sub-hooks.
 #
 # Individual sub-hook bypasses:
-#   AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_MCP_BUNDLE_SYNC=1,
-#   AI_SDLC_SKIP_ATTESTATION_SIGN=1 — forwarded to sub-hooks as-is.
+#   AI_SDLC_SKIP_TASK_MOVE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1 — forwarded to sub-hooks as-is.
 #
 # Exit codes:
 #   0 — no fixups were needed (sub-hooks all exited 0)
@@ -127,24 +129,9 @@ if [ "$HEAD_BEFORE_TASK_MOVE" != "$HEAD_AFTER_TASK_MOVE" ]; then
   FIXED+=("task-move")
 fi
 
-# ── Sub-hook 2: mcp-bundle-sync ───────────────────────────────────────
-# Will be removed in AISDLC-385. Included here per task spec (386 ships
-# before 385 deletes the hook).
-HEAD_BEFORE_MCP=$(git rev-parse HEAD 2>/dev/null || echo '')
-MCP_EXIT=0
-run_sub_hook "mcp-bundle-sync" "$SCRIPT_DIR/check-mcp-bundle-sync.sh" || MCP_EXIT=$?
-
-if [ "$MCP_EXIT" -ge 2 ]; then
-  echo "[pre-push-fixups] mcp-bundle-sync hard-failed (exit $MCP_EXIT) — aborting push" >&2
-  exit "$MCP_EXIT"
-fi
-
-HEAD_AFTER_MCP=$(git rev-parse HEAD 2>/dev/null || echo '')
-if [ "$HEAD_BEFORE_MCP" != "$HEAD_AFTER_MCP" ]; then
-  FIXED+=("mcp-bundle-sync")
-fi
-
-# ── Sub-hook 3: attestation-sign ─────────────────────────────────────
+# ── Sub-hook 2: attestation-sign ─────────────────────────────────────
+# (Sub-hook "mcp-bundle-sync" was here — deleted by AISDLC-385. The mcp-server
+# bundle is now distributed via the @ai-sdlc/plugin-mcp-server npm package.)
 # Dependency: MUST run AFTER task-move so the envelope hashes the moved path.
 HEAD_BEFORE_ATTEST=$(git rev-parse HEAD 2>/dev/null || echo '')
 ATTEST_EXIT=0

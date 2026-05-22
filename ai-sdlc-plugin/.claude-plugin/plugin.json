@@ -83,13 +83,14 @@
     ]
   },
   "runtimeDependencies": {
-    "@ai-sdlc/pipeline-cli": "^0.10.0"
+    "@ai-sdlc/pipeline-cli": "^0.10.0",
+    "@ai-sdlc/plugin-mcp-server": "0.9.2"
   },
   "mcpServers": {
     "ai-sdlc": {
       "command": "node",
       "args": [
-        "${CLAUDE_PLUGIN_ROOT}/mcp-server/dist/bin.js"
+        "${CLAUDE_PLUGIN_ROOT}/node_modules/@ai-sdlc/plugin-mcp-server/dist/bin.js"
       ],
       "env": {
         "AI_SDLC_PROJECT_ROOT": "${CLAUDE_PLUGIN_DATA}"

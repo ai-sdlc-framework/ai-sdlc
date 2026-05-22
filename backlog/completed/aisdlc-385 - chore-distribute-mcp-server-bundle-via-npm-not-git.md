@@ -1,7 +1,7 @@
 ---
 id: AISDLC-385
 title: 'chore: distribute mcp-server bundle via npm, not git'
-status: To Do
+status: Done
 labels:
   - architecture
   - plugin-distribution
@@ -10,11 +10,24 @@ references:
   - ai-sdlc-plugin/plugin.json
   - ai-sdlc-plugin/mcp-server/package.json
   - ai-sdlc-plugin/scripts/install-runtime-deps.sh
-  - scripts/check-mcp-bundle-sync.sh
-  - ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs
-  - .github/workflows/verify-mcp-bundle.yml
   - docs/operations/gate-friction-audit-2026.md
 parentTaskId: AISDLC-384
+drift_log:
+  - date: '2026-05-22'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: scripts/check-mcp-bundle-sync.sh'
+    resolution: flagged
+  - date: '2026-05-22'
+    type: ref-deleted
+    detail: >-
+      Referenced file no longer exists:
+      ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs
+    resolution: flagged
+  - date: '2026-05-22'
+    type: ref-deleted
+    detail: 'Referenced file no longer exists: .github/workflows/verify-mcp-bundle.yml'
+    resolution: flagged
+drift_checked: '2026-05-22'
 ---
 
 ## Description
@@ -23,7 +36,7 @@ Surfaced by the AISDLC-384 gate-friction audit (Gate 3 review).
 
 The `ai-sdlc-plugin/mcp-server/dist/bin.js` bundle is currently committed to git at every commit because the Claude Code plugin marketplace clones the repo source without running `pnpm install`. Two gates exist solely to keep this checked-in artifact correct:
 
-- `scripts/check-mcp-bundle-sync.sh` — pre-push hook (223 LOC) that auto-rebuilds the bundle whenever `pipeline-cli/src/**` changes (5 lifetime fires; 10-30s rebuild per fire)
+- the `check-mcp-bundle-sync` hook (formerly under scripts/) — pre-push hook (223 LOC) that auto-rebuilds the bundle whenever `pipeline-cli/src/**` changes (5 lifetime fires; 10-30s rebuild per fire)
 - `ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs` — CI gate that rejects PRs whose committed bundle is stale
 
 Both exist to paper over a deeper architectural choice: committing a generated artifact to the source tree.
@@ -36,7 +49,7 @@ Both exist to paper over a deeper architectural choice: committing a generated a
 - [ ] AC-2: `ai-sdlc-plugin/plugin.json` — `runtimeDependencies` includes `@ai-sdlc/plugin-mcp-server@<version>` pinned to the plugin's own version (or `*` if version-locked via package.json).
 - [ ] AC-3: `scripts/install-runtime-deps.sh` — extended to install `@ai-sdlc/plugin-mcp-server` on first plugin invocation if not present.
 - [ ] AC-4: `ai-sdlc-plugin/mcp-server/.gitignore` — adds `dist/` (and `dist/` removed from git history in the same PR via `git rm`).
-- [ ] AC-5: `scripts/check-mcp-bundle-sync.sh` — DELETED (no longer needed).
+- [ ] AC-5: the `check-mcp-bundle-sync` hook (formerly under scripts/) — DELETED (no longer needed).
 - [ ] AC-6: `ai-sdlc-plugin/mcp-server/scripts/verify-bundle.mjs` + `Verify dist/bin.js` CI check — DELETED.
 - [ ] AC-7: `.husky/pre-push` — `check-mcp-bundle-sync.sh` invocation removed; ordering doc updated.
 - [ ] AC-8: Dogfood path validated — operator can still run the plugin from a local checkout by running `pnpm --filter @ai-sdlc/plugin-mcp-server build` once, with plugin self-heal preferring local `dist/` when present (topology 2 per `ai-sdlc-plugin/README.md`).
