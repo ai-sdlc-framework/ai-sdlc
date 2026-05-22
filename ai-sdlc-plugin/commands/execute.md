@@ -618,31 +618,62 @@ HEAD_SHA_FOR_NONCE=$(cd "$WORKTREE_PATH" && git rev-parse HEAD)
 # have no real transcript file to hash). Each invocation is sequential so the
 # leafIndex counter in transcript-leaves.jsonl increments correctly without races.
 #
-# Harness detection: default to claude-code; reviewers declared harness:codex
-# in their agent frontmatter run under the codex CLI when available.
-EMIT_HARNESS="claude-code"
-if which codex >/dev/null 2>&1; then
-  EMIT_HARNESS="codex"
-fi
+# Harness is determined per-reviewer below (security-reviewer always runs under
+# claude-code; code-reviewer/test-reviewer use the codex variant when available).
+#
 # Model is informational; use the known subagent model if set, otherwise a
 # descriptive placeholder that the operator can update from reviewer metadata.
 EMIT_MODEL="${AISDLC_REVIEWER_MODEL:-claude-sonnet-4-6}"
+CODEX_AVAILABLE="false"
+if which codex >/dev/null 2>&1; then
+  CODEX_AVAILABLE="true"
+fi
 
 for REVIEWER_NAME in $SELECTED; do
-  # Map classifier name → subagent / transcript name.
-  case "$REVIEWER_NAME" in
-    testing) AGENT_NAME="test-reviewer" ;;
-    critic)  AGENT_NAME="code-reviewer" ;;
-    security) AGENT_NAME="security-reviewer" ;;
-    # Already-mapped names (code-reviewer, test-reviewer, security-reviewer,
-    # code-reviewer-codex, test-reviewer-codex) pass through unchanged.
-    *) AGENT_NAME="$REVIEWER_NAME" ;;
-  esac
-
-  # Skip if INCR_SKIP is active — no real transcript was produced.
+  # Skip if INCR_SKIP is active — no real transcript was produced. (Early-exit
+  # before the case mapping to avoid wasted work per code-review finding.)
   if [ "$INCR_SKIP" = "true" ]; then
     continue
   fi
+
+  # Map classifier name → subagent / transcript name AND choose per-reviewer
+  # harness. security-reviewer is hard-coded to claude-code because no
+  # security-reviewer-codex variant ships today — using codex here would bake
+  # incorrect harness metadata into the Merkle leaf hash (AISDLC-383.8 code
+  # review MAJOR finding).
+  case "$REVIEWER_NAME" in
+    testing)
+      AGENT_NAME="test-reviewer"
+      REVIEWER_HARNESS="claude-code"
+      [ "$CODEX_AVAILABLE" = "true" ] && REVIEWER_HARNESS="codex"
+      ;;
+    critic)
+      AGENT_NAME="code-reviewer"
+      REVIEWER_HARNESS="claude-code"
+      [ "$CODEX_AVAILABLE" = "true" ] && REVIEWER_HARNESS="codex"
+      ;;
+    security)
+      AGENT_NAME="security-reviewer"
+      REVIEWER_HARNESS="claude-code"
+      ;;
+    code-reviewer-codex|test-reviewer-codex)
+      AGENT_NAME="$REVIEWER_NAME"
+      REVIEWER_HARNESS="codex"
+      ;;
+    security-reviewer)
+      AGENT_NAME="$REVIEWER_NAME"
+      REVIEWER_HARNESS="claude-code"
+      ;;
+    code-reviewer|test-reviewer)
+      AGENT_NAME="$REVIEWER_NAME"
+      REVIEWER_HARNESS="claude-code"
+      [ "$CODEX_AVAILABLE" = "true" ] && REVIEWER_HARNESS="codex"
+      ;;
+    *)
+      AGENT_NAME="$REVIEWER_NAME"
+      REVIEWER_HARNESS="claude-code"
+      ;;
+  esac
 
   TRANSCRIPT_FILE="$WORKTREE_PATH/.ai-sdlc/transcripts/${TASK_ID_LOWER}/${AGENT_NAME}.jsonl"
   VERDICT_FILE="$WORKTREE_PATH/.ai-sdlc/verdicts/${AGENT_NAME}-${TASK_ID_LOWER}.json"
@@ -666,7 +697,7 @@ for REVIEWER_NAME in $SELECTED; do
     --transcript-path "$TRANSCRIPT_FILE" \
     --verdict-path "$VERDICT_FILE" \
     --head-sha "$HEAD_SHA_FOR_NONCE" \
-    --harness "$EMIT_HARNESS" \
+    --harness "$REVIEWER_HARNESS" \
     --model "$EMIT_MODEL" \
     || echo "[ai-sdlc-progress] Step 7c: emit-leaf for ${AGENT_NAME} exited non-zero — continuing (non-fatal in v5 mode)"
 done
