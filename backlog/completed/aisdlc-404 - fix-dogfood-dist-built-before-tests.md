@@ -1,7 +1,7 @@
 ---
 id: AISDLC-404
 title: 'fix(ci): dogfood test imports dist/runner/index.js — ensure build runs before tests'
-status: In Progress
+status: Done
 labels: [ci, dogfood, build, operator-merge]
 references:
   - dogfood/src/runner/exports.test.ts
