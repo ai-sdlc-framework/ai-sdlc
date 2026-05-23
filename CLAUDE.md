@@ -31,6 +31,7 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 - Run `pnpm build && pnpm test && pnpm lint && pnpm format:check` before pushing.
 - `.husky/pre-push` is the canonical gate; local pre-flight makes it a no-op.
 - Hook scripts (`ai-sdlc-plugin/hooks/*.js`) use Node built-in `node --test`. Orchestrator + MCP server use Vitest.
+- `@ai-sdlc/dogfood` tests (`dogfood/src/runner/exports.test.ts`) import from `dist/runner/index.js` to validate the built exports surface. The `pretest` lifecycle hook in `dogfood/package.json` runs `pnpm build` automatically before `pnpm test`, so `pnpm --filter @ai-sdlc/dogfood test` always works. Do NOT remove the `pretest` hook — it prevents CI failures on PRs where dogfood is selected by the `...[origin/main]` test filter but dist wasn't explicitly built (AISDLC-404).
 
 ## Hooks
 
