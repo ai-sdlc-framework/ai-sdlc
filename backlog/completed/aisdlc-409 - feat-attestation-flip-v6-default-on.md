@@ -1,7 +1,7 @@
 ---
 id: AISDLC-409
 title: 'feat(attestation): flip AI_SDLC_V6_CUTOVER_ACTIVE default-ON — make v6 the default schema'
-status: In Progress
+status: Done
 labels: [attestation, rfc-0042, promotion, operator-merge]
 references:
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
