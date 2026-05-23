@@ -41,6 +41,13 @@ export interface BeginTaskOptions {
   workDir: string;
   /** Set the status to a value other than 'In Progress' (test override). */
   status?: string;
+  /**
+   * AISDLC-393 — when `'gh-issue'`, skip the backlog frontmatter patch
+   * (no file exists on disk to patch). The sentinel write still fires —
+   * the PreToolUse hook needs it to resolve `permittedExternalPaths`
+   * regardless of source kind.
+   */
+  sourceKind?: 'backlog' | 'gh-issue';
 }
 
 /**
@@ -74,21 +81,28 @@ export function patchFrontmatterStatus(raw: string, newStatus: string): string {
 
 export async function beginTask(opts: BeginTaskOptions): Promise<BeginTaskResult> {
   const status = opts.status ?? 'In Progress';
-  // AISDLC-199 — prefer the worktree-local copy (the fresh Step 3 checkout
-  // from origin/main). Falls back to the parent `workDir` so the standalone
-  // `pipeline-cli begin-task` CLI subcommand and tests that don't pre-stage
-  // a worktree task file still work. Mirrors the same fallback chain Step 10
-  // finalize already uses, so both lifecycle edits land on the same file.
-  const taskFile =
-    findTaskFile(opts.taskId, opts.worktreePath) ?? findTaskFile(opts.taskId, opts.workDir);
-  if (!taskFile) {
-    throw new Error(
-      `Step 4 begin-task: no task file found for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`,
-    );
+
+  // AISDLC-393 — GH-issue path: no backlog file exists, skip the frontmatter
+  // patch entirely. The sentinel write below still fires unchanged — the
+  // PreToolUse hook resolves `permittedExternalPaths` from the spec's
+  // frontmatter regardless of where the spec came from.
+  if (opts.sourceKind !== 'gh-issue') {
+    // AISDLC-199 — prefer the worktree-local copy (the fresh Step 3 checkout
+    // from origin/main). Falls back to the parent `workDir` so the standalone
+    // `pipeline-cli begin-task` CLI subcommand and tests that don't pre-stage
+    // a worktree task file still work. Mirrors the same fallback chain Step 10
+    // finalize already uses, so both lifecycle edits land on the same file.
+    const taskFile =
+      findTaskFile(opts.taskId, opts.worktreePath) ?? findTaskFile(opts.taskId, opts.workDir);
+    if (!taskFile) {
+      throw new Error(
+        `Step 4 begin-task: no task file found for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`,
+      );
+    }
+    const raw = readFileSync(taskFile, 'utf8');
+    const patched = patchFrontmatterStatus(raw, status);
+    writeFileSync(taskFile, patched, 'utf8');
   }
-  const raw = readFileSync(taskFile, 'utf8');
-  const patched = patchFrontmatterStatus(raw, status);
-  writeFileSync(taskFile, patched, 'utf8');
 
   // Per-worktree sentinel (AISDLC-81). Lives INSIDE the worktree so the
   // PreToolUse hook can resolve it by walking up from the agent's cwd.

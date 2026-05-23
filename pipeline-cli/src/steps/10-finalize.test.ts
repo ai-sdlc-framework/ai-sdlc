@@ -283,6 +283,81 @@ describe('Step 10 — finalizeTask', () => {
     expect(commitCall!.args.join(' ')).toContain(v5PathInStdout);
   });
 
+  // ── AISDLC-393 — gh-issue source skips backlog file move/patch ──────
+
+  it('AISDLC-393: gh-issue source skips tasks/→completed/ move (no file exists)', async () => {
+    // No backlog file is staged — the issue is the source of truth and
+    // there's nothing to move. The previous (file-required) path would
+    // throw "cannot locate task file"; the gh-issue branch must NOT.
+    const fake = new FakeRunner();
+    const r = await finalizeTask({
+      taskId: 'gh-issue-612',
+      workDir: tmp,
+      worktreePath: tmp,
+      // Use an inline spec mirroring what fetchGhIssueAsTaskSpec produces.
+      task: {
+        id: 'gh-issue-612',
+        title: 'demo issue',
+        status: 'To Do',
+        acceptanceCriteria: ['a'],
+        acceptanceCriteriaChecked: [false],
+        description: 'body',
+        rawBody: 'body',
+        filePath: '<gh-issue:612>',
+      },
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+      runner: fake.toRunner(),
+      skipCommit: true,
+      sourceKind: 'gh-issue',
+    });
+
+    expect(r.skipped).toBe(false);
+    // No backlog file should have been created or moved.
+    expect(existsSync(join(tmp, 'backlog', 'tasks', 'gh-issue-612 - demo-issue.md'))).toBe(false);
+    expect(existsSync(join(tmp, 'backlog', 'completed', 'gh-issue-612 - demo-issue.md'))).toBe(
+      false,
+    );
+    // finalSummary is still rendered (orchestrator needs it for PR body).
+    expect(r.finalSummary).toContain('## Summary');
+    expect(r.finalSummary).toContain('shipped X');
+  });
+
+  it('AISDLC-393: gh-issue source skips chore commit when no attestation was signed', async () => {
+    // Without an attestation envelope to stage AND no backlog file to add,
+    // there's nothing to commit on the gh-issue path. The runner should
+    // never be invoked with `git add` / `git commit` in that case.
+    const fake = new FakeRunner();
+    const r = await finalizeTask({
+      taskId: 'gh-issue-7',
+      workDir: tmp,
+      worktreePath: tmp,
+      task: {
+        id: 'gh-issue-7',
+        title: 't',
+        status: 'To Do',
+        acceptanceCriteria: ['a'],
+        acceptanceCriteriaChecked: [false],
+        description: '',
+        rawBody: '',
+        filePath: '<gh-issue:7>',
+      },
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+      runner: fake.toRunner(),
+      // skipCommit: false (default-ish) — to verify the no-op decision lives
+      // inside the gh-issue branch, not in skipCommit.
+      sourceKind: 'gh-issue',
+    });
+
+    expect(r.choreCommitSha).toBeNull();
+    const gitCalls = fake.calls.filter((c) => c.command === 'git');
+    expect(gitCalls.find((c) => c.args[0] === 'add')).toBeUndefined();
+    expect(gitCalls.find((c) => c.args[0] === 'commit')).toBeUndefined();
+  });
+
   it('AC #4: regression — Codex workflow does not create duplicate backlog entries', async () => {
     // AISDLC-201 root cause: the Codex workflow copied the file to
     // backlog/completed/ WITHOUT removing it from backlog/tasks/. This left

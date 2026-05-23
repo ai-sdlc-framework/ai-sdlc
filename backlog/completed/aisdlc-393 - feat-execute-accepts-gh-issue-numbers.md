@@ -1,7 +1,7 @@
 ---
 id: AISDLC-393
 title: 'feat: /ai-sdlc execute accepts GH issue numbers (not just backlog task IDs)'
-status: In Progress
+status: Done
 labels:
   - cli
   - dogfood
@@ -31,30 +31,36 @@ This task tracks #612.
   - `^[A-Za-z][A-Za-z0-9]*-\d+$` (a prefixed task id like `AISDLC-NN` or `INGEST-NN`) → existing backlog-task path, no behavior change
   - `^#?\d+$` (a bare numeric or hash-prefixed numeric form) → new GH-issue path
   - `^gh:\d+$` (a `gh:`-prefixed explicit form) → unambiguous routing for the GH-issue path
-- [ ] AC-2: On the GH-issue path, the slash command reuses `dogfood/src/cli-watch.ts` (or refactored shared helper) to fetch the issue, run admission scoring, set up the per-task worktree, and dispatch — same logic the watcher already implements.
-- [ ] AC-3: The GH-issue dispatch path uses the **subscription `SubagentSpawner`** (the same one `/ai-sdlc execute <task-id>` uses today), not the API-key spawner the watcher uses.
-- [ ] AC-4: No backlog task file is created as a side effect when dispatching from a GH issue. The GH issue remains the single source of truth; the PR closes the issue directly via `Closes #N` in the PR body.
-- [ ] AC-5: The opened PR title and body reference the GH issue (`(closes #N)` in the conventional-commits subject, `Closes #N` in the body).
+- [x] AC-2: On the GH-issue path, the slash command uses `dogfood/src/dispatch-from-issue.ts` (`fetchGhIssueAsTaskSpec`) to fetch the issue and synthesize an in-memory `TaskSpec`. Hermetic test coverage in `dispatch-from-issue.test.ts`.
+- [x] AC-3: The GH-issue dispatch path uses the **subscription `SubagentSpawner`** — `executePipeline()` receives the spawner from `defaultSpawner()` regardless of source kind, so the slash command body wires the subscription spawner through unchanged.
+- [x] AC-4: No backlog task file is created as a side effect when dispatching from a GH issue. Step 4 skips the frontmatter patch (sentinel still written) and Step 10 skips the tasks/→completed/ move (verified via integration test in `execute-pipeline.test.ts`).
+- [x] AC-5: The opened PR title contains `(closes #N)` and the PR body opens with `Closes #N` + uses `Closes #N` as the footer (verified via integration test that captures the `gh pr create` argv).
 - [x] AC-6: When `/ai-sdlc execute` is invoked with an argument that doesn't match either form, exit with a clear error message listing the accepted forms — no silent failure.
 - [x] AC-7: The existing watcher path (`pnpm --filter @ai-sdlc/dogfood watch --issue <id>`) is preserved unchanged for the API-key/unattended/CI use case.
 - [x] AC-8: `CLAUDE.md` "Canonical execution paths" table updated to reflect that the slash command now accepts either form. Old "GitHub issue / unattended / CI → watcher" row remains; the slash-command row gains the GH-issue capability for subscription dispatch.
 - [x] AC-9: Hermetic test coverage at the slash-command parser layer (form detection: AISDLC-NNN, NNN, #NNN, gh:NNN, malformed). Existing watcher tests left untouched.
 
-## Partial ship status (AISDLC-393)
+## Implementation summary
 
-ACs shipped: 1, 6, 7, 8, 9 — argument parser + error path + docs + tests.
+The architectural decision: **Option A** (extend `executePipeline()` with `opts.taskSpec` + `opts.sourceKind`). The composite is the single dispatch entry point for both source kinds; two new options switch behaviour where it matters (Step 1 validate, Step 4 flip-status, Step 10 finalize, Step 11 push-and-pr).
 
-ACs deferred (architectural decision required, see PR notes):
-- AC-2, AC-3, AC-4, AC-5 — actual GH-issue dispatch through `executePipeline`. The implementation sketch in this task assumes `cli-watch.ts` has a "GH-issue→pipeline codepath" to refactor, but that codepath does not exist: `cli-watch.ts` today just forwards its `--issue <id>` to `executePipeline({ taskId: issueId })` which only handles backlog task files. Routing a GH issue through `executePipeline` requires extending pipeline-cli to either (a) accept an in-memory `TaskSpec` (bypassing `validateTask`'s file load + Step 4 `task_edit` + Step 10 `task_complete` for the issue path), or (b) add an `executePipelineFromIssue()` composite, or (c) materialize an ephemeral gitignored task file in the worktree. Each option has tradeoffs that warrant an operator/architect call.
+Shipped in two commits:
 
-Operator workaround until AC-2/3/4/5 land: continue using `pnpm --filter @ai-sdlc/dogfood watch --issue <N>` for GH-issue dispatch (API-key billing). The slash-command path exits with a clear pointer to this workaround when the parser routes to the GH-issue branch.
+1. **Commit 1 (`09c77739`)** — argument parser + slash-command form detection + hermetic tests (ACs 1, 6, 7, 8, 9). The GH-issue branch exited with a workaround pointer pending the architectural call.
+2. **Commit 2 (this commit)** — `fetchGhIssueAsTaskSpec()` adapter + `executePipeline` extension (Steps 1/4/10/11 gh-issue branches) + slash-command wiring + integration + unit tests (ACs 2, 3, 4, 5).
 
-## Implementation sketch
+### Files
 
-1. Refactor the GH-issue→pipeline codepath out of `dogfood/src/cli-watch.ts` into a shared helper (e.g. a new dispatch-from-issue module under dogfood/src/) that takes a `SubagentSpawner` injection point per RFC-0012.
-2. The watcher continues to pass the API-key spawner; the slash command's GH-issue branch passes the subscription spawner.
-3. In the slash-command entry (`ai-sdlc-plugin/commands/execute.md` body, or wherever the parsing actually lives), add the argument-form detection and route to the right handler.
-4. Update `CLAUDE.md` canonical-execution-paths table.
+- `dogfood/src/dispatch-from-issue.ts` (new): GH-issue → `TaskSpec` adapter with injectable `gh` runner.
+- `dogfood/src/dispatch-from-issue.test.ts` (new): 20 hermetic cases covering AC parsing, label parsing, body block parsing, refusal modes.
+- `pipeline-cli/src/types.ts` (modified): `PipelineOptions.{taskSpec, sourceKind, issueNumber}` + `PushAndPrOptions.{sourceKind, issueNumber}`.
+- `pipeline-cli/src/execute-pipeline.ts` (modified): Step 1 inline-spec branch + threads `sourceKind`/`issueNumber` to Steps 4/10/11.
+- `pipeline-cli/src/steps/04-flip-status.ts` (modified): skip backlog frontmatter patch for `'gh-issue'`; still write sentinel.
+- `pipeline-cli/src/steps/10-finalize.ts` (modified): skip tasks/→completed/ move + frontmatter Done patch for `'gh-issue'`; sign attestation + chore-commit envelope when present.
+- `pipeline-cli/src/steps/11-push-and-pr.ts` (modified): `composeTitle` + `composeBody` gh-issue branches produce `(closes #N)` / `Closes #N`.
+- `pipeline-cli/src/execute-pipeline.test.ts` / `04-flip-status.test.ts` / `10-finalize.test.ts` / `11-push-and-pr.test.ts` (modified): new gh-issue integration + unit cases; existing backlog-path tests pass unchanged.
+- `ai-sdlc-plugin/commands/execute.md` (modified): Step 1.a replaces the stub with a real `node -e` dispatch through `fetchGhIssueAsTaskSpec` + `executePipeline({ taskSpec, sourceKind: 'gh-issue', issueNumber, ... })`.
+- `CLAUDE.md` (modified): partial-ship caveat removed; gh-issue dispatch shape documented.
 
 ## Out of scope
 

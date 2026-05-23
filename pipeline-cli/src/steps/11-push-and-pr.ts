@@ -96,6 +96,10 @@ export function readTitleTemplate(workDir: string, logger?: PipelineLogger): str
  * Compose the final PR title applying the optional `[needs-human-attention]`
  * suffix per `execute-orchestrator.md` Step 9.
  *
+ * AISDLC-393 — when `sourceKind === 'gh-issue'`, the `{issueId}` placeholder
+ * is replaced with `closes #N` so the resulting title reads e.g.
+ * `feat: <title> (closes #612)` and GitHub auto-closes the issue on merge.
+ *
  * Exported for unit tests.
  */
 export function composeTitle(
@@ -103,19 +107,32 @@ export function composeTitle(
   taskId: string,
   taskTitle: string,
   needsHumanAttention: boolean,
+  opts?: { sourceKind?: 'backlog' | 'gh-issue'; issueNumber?: number },
 ): string {
   const tagged = needsHumanAttention ? `${taskTitle} [needs-human-attention]` : taskTitle;
-  return template.replace(/\{issueTitle\}/g, tagged).replace(/\{issueId\}/g, taskId);
+  const idReplacement =
+    opts?.sourceKind === 'gh-issue' && opts.issueNumber !== undefined
+      ? `closes #${opts.issueNumber}`
+      : taskId;
+  return template.replace(/\{issueTitle\}/g, tagged).replace(/\{issueId\}/g, idReplacement);
 }
 
 /**
  * Compose the PR body — developer summary, changed-files list, and a
  * collapsed code-reviewer details block. Exported for unit tests.
+ *
+ * AISDLC-393 — when `sourceKind === 'gh-issue'`, prepend `Closes #N` so
+ * GitHub's keyword-resolver auto-closes the issue on merge, and replace the
+ * footer's `References <taskId>` line (the synthetic `gh-issue-N` id is
+ * not meaningful outside the pipeline).
  */
 export function composeBody(opts: PushAndPrOptions): string {
+  const isGhIssue = opts.sourceKind === 'gh-issue' && opts.issueNumber !== undefined;
+
   const headerWarning = opts.needsHumanAttention
     ? `> **⚠ This PR exceeded the auto-iteration cap with unresolved review findings. Human review/intervention requested.**\n\n`
     : '';
+  const closesHeader = isGhIssue ? `Closes #${opts.issueNumber}\n\n` : '';
   const filesBlock =
     opts.developerReturn.filesChanged.length > 0
       ? opts.developerReturn.filesChanged.map((f) => `- ${f}`).join('\n')
@@ -128,12 +145,15 @@ export function composeBody(opts: PushAndPrOptions): string {
       }\n\n</details>\n`
     : '';
 
+  const footer = isGhIssue ? `\nCloses #${opts.issueNumber}\n` : `\nReferences ${opts.taskId}\n`;
+
   return (
     headerWarning +
+    closesHeader +
     `${opts.developerReturn.summary}\n\n` +
     `## Changed files\n${filesBlock}\n` +
     reviewBlock +
-    `\nReferences ${opts.taskId}\n`
+    footer
   );
 }
 
@@ -226,6 +246,11 @@ export async function pushAndPr(opts: PushAndPrStepOptions): Promise<PushAndPrRe
     opts.taskId,
     opts.task.title,
     !!opts.needsHumanAttention,
+    // AISDLC-393 — thread sourceKind + issueNumber so the title swaps
+    // `(AISDLC-N)` for `(closes #N)` on the gh-issue path.
+    opts.sourceKind === 'gh-issue' && opts.issueNumber !== undefined
+      ? { sourceKind: 'gh-issue', issueNumber: opts.issueNumber }
+      : undefined,
   );
   const body = composeBody(opts);
 

@@ -41,6 +41,7 @@ import {
   type PipelineResult,
   type ReviewerType,
   type ReviewerVerdict,
+  type TaskSpec,
 } from './types.js';
 
 const REVIEWER_TYPES: ReviewerType[] = ['code-reviewer', 'test-reviewer', 'security-reviewer'];
@@ -62,23 +63,47 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     logger.info(`[ai-sdlc-progress] 00-sweep: removed ${sweep.swept.length} merged worktree(s)`);
   }
 
-  // Step 1
-  logger.progress('01-validate', `validating ${opts.taskId}`);
-  // AISDLC-373 — thread the optional task-file path override through Step 1
-  // so the single-PR `--task-from-file` operator flow can resolve a task file
-  // living inside `.worktrees/<id>/backlog/tasks/` (invisible to the default
+  // AISDLC-393 — resolve the source kind once so downstream steps can branch
+  // consistently. Defaults to 'backlog' when not provided so legacy callers
+  // (and the orchestrator path) keep their existing behaviour.
+  const sourceKind: 'backlog' | 'gh-issue' = opts.sourceKind ?? 'backlog';
+
+  // Step 1 — Validate task.
+  //
+  // AISDLC-393 — when `opts.taskSpec` is provided, use it directly and skip
+  // `findTaskFile`. This is the gh-issue path: the spec was synthesized from
+  // the issue body by `fetchGhIssueAsTaskSpec()` in the dogfood layer; no
+  // backlog file exists on disk. We still run the same shape-validation
+  // checks the file-loaded path applies (at least one AC, title non-empty)
+  // so the dispatch refuses garbage input regardless of source.
+  //
+  // AISDLC-373 — when no taskSpec is provided, thread the optional
+  // task-file path override through Step 1 so the single-PR
+  // `--task-from-file` operator flow can resolve a task file living inside
+  // `.worktrees/<id>/backlog/tasks/` (invisible to the default
   // `findTaskFile()` scan rooted at `<workDir>/backlog/tasks/`).
-  const validation = await validateTask({
-    taskId: opts.taskId,
-    workDir: opts.workDir,
-    ...(opts.taskFilePathOverride !== undefined
-      ? { taskFilePathOverride: opts.taskFilePathOverride }
-      : {}),
-  });
-  if (!validation.ok || !validation.task) {
-    return abort(opts, '', '', null, validation.reason ?? 'validation failed');
+  let task: TaskSpec;
+  if (opts.taskSpec) {
+    logger.progress('01-validate', `validating inline ${opts.taskId} (${sourceKind})`);
+    const reason = validateInlineTaskSpec(opts.taskSpec);
+    if (reason) {
+      return abort(opts, '', '', null, reason);
+    }
+    task = opts.taskSpec;
+  } else {
+    logger.progress('01-validate', `validating ${opts.taskId}`);
+    const validation = await validateTask({
+      taskId: opts.taskId,
+      workDir: opts.workDir,
+      ...(opts.taskFilePathOverride !== undefined
+        ? { taskFilePathOverride: opts.taskFilePathOverride }
+        : {}),
+    });
+    if (!validation.ok || !validation.task) {
+      return abort(opts, '', '', null, validation.reason ?? 'validation failed');
+    }
+    task = validation.task;
   }
-  const task = validation.task;
 
   // Step 2
   logger.progress('02-compute-branch', 'computing branch name');
@@ -181,6 +206,9 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       taskId: opts.taskId,
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
+      // AISDLC-393 — `'gh-issue'` skips the frontmatter patch (no file on disk)
+      // but still writes the per-worktree sentinel the PreToolUse hook needs.
+      sourceKind,
     });
     setupCompleted = true;
 
@@ -310,6 +338,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       iterations: loop.iterations,
       runner: opts.runner,
       skipCommit: opts.skipFinalizeCommit,
+      // AISDLC-393 — `'gh-issue'` skips the backlog file move/patch but still
+      // signs the attestation envelope + commits it as a chore so push lands
+      // a valid envelope at HEAD.
+      sourceKind,
     });
 
     // Step 11 — push + open PR
@@ -323,6 +355,10 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       verdict: loop.finalVerdict,
       needsHumanAttention: loop.needsHumanAttention,
       runner: opts.runner,
+      // AISDLC-393 — `'gh-issue'` formats the PR title with `(closes #N)` and
+      // prepends `Closes #N` to the body so the issue auto-closes on merge.
+      sourceKind,
+      ...(opts.issueNumber !== undefined ? { issueNumber: opts.issueNumber } : {}),
     });
     if (!push.pushed) {
       if (push.rebaseConflict) {
@@ -481,6 +517,36 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     finalVerdict: finalAggregated,
     notes: finalNotes,
   };
+}
+
+/**
+ * AISDLC-393 — shape-validate an inline `TaskSpec` passed in via
+ * `opts.taskSpec`. Mirrors the file-loaded path's acceptance gates so
+ * inline dispatch refuses the same garbage shapes the file path refuses:
+ *
+ *   - Title must be non-empty (the developer prompt and PR title both
+ *     depend on it).
+ *   - At least one acceptance criterion must exist (Step 1 has always
+ *     required this; the gh-issue adapter inserts a placeholder when the
+ *     issue body has no `## Acceptance criteria` section, so this only
+ *     fails on programmer error — callers passing a hand-constructed
+ *     TaskSpec with `acceptanceCriteria: []`).
+ *
+ * Returns null on success, a human-readable refusal string on failure.
+ *
+ * Status checks (Done/Draft/Needs Clarification) are intentionally NOT
+ * applied here: the inline path is used for GH-issues (which use a fixed
+ * synthesized status of 'To Do') and for tests that script arbitrary
+ * specs. The file-loaded path keeps its full Backlog.md status semantics.
+ */
+function validateInlineTaskSpec(spec: TaskSpec): string | null {
+  if (!spec.title || spec.title.trim().length === 0) {
+    return 'inline TaskSpec validation: title is empty';
+  }
+  if (!Array.isArray(spec.acceptanceCriteria) || spec.acceptanceCriteria.length === 0) {
+    return 'inline TaskSpec validation: at least one acceptance criterion is required';
+  }
+  return null;
 }
 
 function abort(

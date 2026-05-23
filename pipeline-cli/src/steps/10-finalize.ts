@@ -50,6 +50,14 @@ export interface FinalizeStepOptions extends FinalizeTaskOptions {
    * AISDLC-202.3 — AC #3: Codex execution path Step 10 must use this flag.
    */
   useAtomicCompletion?: boolean;
+  /**
+   * AISDLC-393 — when `'gh-issue'`, skip the backlog frontmatter patch +
+   * tasks/→completed/ move (no backlog file exists). Attestation signing +
+   * chore commit (for the attestation envelope) still fire so the signing
+   * path produces a valid envelope at HEAD before push. Final summary is
+   * still built so the orchestrator's PR-body composition has it.
+   */
+  sourceKind?: 'backlog' | 'gh-issue';
 }
 
 /**
@@ -122,41 +130,48 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
 
   const { finalSummary, acceptanceCriteriaCheck } = buildFinalSummary(opts);
 
-  // 1. Flip status to Done in the on-disk task file (key-preserving patch).
-  // Prefer the worktree-local copy (that's what gets committed in the chore
-  // commit). Fall back to the project workDir for environments where the
-  // worktree isn't a real git checkout (e.g. integration tests, dry-run mode).
-  const taskFile =
-    findTaskFile(opts.taskId, opts.worktreePath) ?? findTaskFile(opts.taskId, opts.workDir);
-  if (!taskFile) {
-    throw new Error(
-      `finalize: cannot locate task file for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`,
-    );
-  }
+  // AISDLC-393 — GH-issue path skips steps 1-2 entirely (backlog file move
+  // + frontmatter patch). The issue is the source of truth and closes via
+  // `Closes #N` in the PR body. We still build the final summary above and
+  // proceed to attestation signing + chore commit below so the signed
+  // envelope lands at HEAD before push.
+  if (opts.sourceKind !== 'gh-issue') {
+    // 1. Flip status to Done in the on-disk task file (key-preserving patch).
+    // Prefer the worktree-local copy (that's what gets committed in the chore
+    // commit). Fall back to the project workDir for environments where the
+    // worktree isn't a real git checkout (e.g. integration tests, dry-run mode).
+    const taskFile =
+      findTaskFile(opts.taskId, opts.worktreePath) ?? findTaskFile(opts.taskId, opts.workDir);
+    if (!taskFile) {
+      throw new Error(
+        `finalize: cannot locate task file for ${opts.taskId} under ${opts.worktreePath} or ${opts.workDir}`,
+      );
+    }
 
-  // 2. Move tasks/ → completed/ using the appropriate strategy.
-  //
-  // `useAtomicCompletion` (AISDLC-202.3 AC #3): use `completeTaskAtomically`
-  // (the AISDLC-203 shared helper) which performs an atomic write+rename with
-  // duplicate detection and single-location verification. This is the required
-  // path for the Codex execution path where multiple processes may operate on
-  // the same backlog. `completeTaskAtomically` also patches the status to Done
-  // internally, so we skip the manual patch below.
-  //
-  // Default (backward-compat): plain `renameSync`-based `moveTaskToCompleted`
-  // followed by a manual status patch — this is the pre-202.3 Claude Code path.
-  let completedPath: string;
-  if (opts.useAtomicCompletion) {
-    const result = completeTaskAtomically(opts.taskId, opts.worktreePath);
-    completedPath = result.alreadyDone ? result.location : result.to;
-  } else {
-    const raw = readFileSync(taskFile, 'utf8');
-    const patched = patchFrontmatterStatus(raw, 'Done');
-    writeFileSync(taskFile, patched, 'utf8');
-    completedPath = moveTaskToCompleted(taskFile);
+    // 2. Move tasks/ → completed/ using the appropriate strategy.
+    //
+    // `useAtomicCompletion` (AISDLC-202.3 AC #3): use `completeTaskAtomically`
+    // (the AISDLC-203 shared helper) which performs an atomic write+rename with
+    // duplicate detection and single-location verification. This is the required
+    // path for the Codex execution path where multiple processes may operate on
+    // the same backlog. `completeTaskAtomically` also patches the status to Done
+    // internally, so we skip the manual patch below.
+    //
+    // Default (backward-compat): plain `renameSync`-based `moveTaskToCompleted`
+    // followed by a manual status patch — this is the pre-202.3 Claude Code path.
+    let completedPath: string;
+    if (opts.useAtomicCompletion) {
+      const result = completeTaskAtomically(opts.taskId, opts.worktreePath);
+      completedPath = result.alreadyDone ? result.location : result.to;
+    } else {
+      const raw = readFileSync(taskFile, 'utf8');
+      const patched = patchFrontmatterStatus(raw, 'Done');
+      writeFileSync(taskFile, patched, 'utf8');
+      completedPath = moveTaskToCompleted(taskFile);
+    }
+    // Re-parse to make sure the on-disk shape stayed valid (defensive).
+    parseTaskFile(completedPath);
   }
-  // Re-parse to make sure the on-disk shape stayed valid (defensive).
-  parseTaskFile(completedPath);
 
   // 3. Attestation signing — best-effort. The helper script lives in the
   //    plugin and isn't always available when running pipeline-cli standalone.
@@ -181,29 +196,48 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
   }
 
   // 4. Chore commit (move + attestation if signed). Skip in tests without a repo.
+  //
+  // AISDLC-393 — GH-issue path: no backlog dirs to add. Only the attestation
+  // envelope is staged. If no envelope was signed, there's nothing to commit
+  // and we skip the commit entirely (returning choreCommitSha=null).
   let choreCommitSha: string | null = null;
   if (!opts.skipCommit) {
-    const addArgs = ['add', 'backlog/tasks', 'backlog/completed'];
+    const addArgs: string[] = ['add'];
+    if (opts.sourceKind !== 'gh-issue') {
+      addArgs.push('backlog/tasks', 'backlog/completed');
+    }
     if (attestationPath) addArgs.push('.ai-sdlc/attestations');
-    await runner('git', addArgs, { cwd: opts.worktreePath, allowFailure: true });
-    const message =
-      `chore: mark ${opts.taskId} complete\n\n` +
-      `Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in this PR.\n` +
-      (attestationPath
-        ? `Signed review attestation included at ${attestationPath} (AISDLC-74) so CI's ` +
-          `verify-attestation workflow can skip the duplicate review run.\n\n`
-        : `\n`) +
-      `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n`;
-    const commitResult = await runner('git', ['commit', '-m', message], {
-      cwd: opts.worktreePath,
-      allowFailure: true,
-    });
-    if (commitResult.code === 0) {
-      const sha = await runner('git', ['rev-parse', '--short', 'HEAD'], {
+
+    // For gh-issue with no attestation: skip the commit (nothing to stage).
+    if (addArgs.length > 1) {
+      await runner('git', addArgs, { cwd: opts.worktreePath, allowFailure: true });
+      const message =
+        opts.sourceKind === 'gh-issue'
+          ? `chore: sign attestation for ${opts.taskId}\n\n` +
+            `Auto-generated by /ai-sdlc execute (GH-issue path). Reviews approved.\n` +
+            (attestationPath
+              ? `Signed review attestation at ${attestationPath} (AISDLC-74) so CI's ` +
+                `verify-attestation workflow can skip the duplicate review run.\n\n`
+              : `\n`) +
+            `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n`
+          : `chore: mark ${opts.taskId} complete\n\n` +
+            `Auto-generated by /ai-sdlc execute. Reviews approved; task lifecycle landed in this PR.\n` +
+            (attestationPath
+              ? `Signed review attestation included at ${attestationPath} (AISDLC-74) so CI's ` +
+                `verify-attestation workflow can skip the duplicate review run.\n\n`
+              : `\n`) +
+            `Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>\n`;
+      const commitResult = await runner('git', ['commit', '-m', message], {
         cwd: opts.worktreePath,
         allowFailure: true,
       });
-      if (sha.code === 0) choreCommitSha = sha.stdout.trim();
+      if (commitResult.code === 0) {
+        const sha = await runner('git', ['rev-parse', '--short', 'HEAD'], {
+          cwd: opts.worktreePath,
+          allowFailure: true,
+        });
+        if (sha.code === 0) choreCommitSha = sha.stdout.trim();
+      }
     }
   }
 

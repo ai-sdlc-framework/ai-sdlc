@@ -209,6 +209,26 @@ describe('Step 11 — composeTitle', () => {
       'demo [needs-human-attention] (AISDLC-1)',
     );
   });
+
+  // AISDLC-393 — GH-issue path: {issueId} is swapped for `closes #N` so the
+  // title reads e.g. `feat: demo (closes #612)` and GitHub auto-closes on merge.
+  it('substitutes {issueId} with `closes #N` for gh-issue source (AISDLC-393)', () => {
+    expect(
+      composeTitle('feat: {issueTitle} ({issueId})', 'gh-issue-612', 'demo', false, {
+        sourceKind: 'gh-issue',
+        issueNumber: 612,
+      }),
+    ).toBe('feat: demo (closes #612)');
+  });
+
+  it('still appends [needs-human-attention] on gh-issue path (AISDLC-393)', () => {
+    expect(
+      composeTitle('feat: {issueTitle} ({issueId})', 'gh-issue-7', 'demo', true, {
+        sourceKind: 'gh-issue',
+        issueNumber: 7,
+      }),
+    ).toBe('feat: demo [needs-human-attention] (closes #7)');
+  });
 });
 
 describe('Step 11 — composeBody', () => {
@@ -241,6 +261,43 @@ describe('Step 11 — composeBody', () => {
       needsHumanAttention: true,
     });
     expect(body).toMatch(/⚠ This PR exceeded the auto-iteration cap/);
+  });
+
+  // AISDLC-393 — GH-issue path: body opens with `Closes #N` (auto-closes
+  // the issue on merge) and the footer's `References <taskId>` line is
+  // replaced with `Closes #N`.
+  it('prepends Closes #N and replaces References footer for gh-issue source (AISDLC-393)', () => {
+    const body = composeBody({
+      taskId: 'gh-issue-612',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      sourceKind: 'gh-issue',
+      issueNumber: 612,
+    });
+    // Opens with Closes #N (above the summary)
+    expect(body.startsWith('Closes #612\n')).toBe(true);
+    // Footer is `Closes #N`, not `References gh-issue-612`
+    expect(body.endsWith('\nCloses #612\n')).toBe(true);
+    expect(body).not.toContain('References gh-issue-612');
+  });
+
+  it('keeps References footer for backlog source (no regression on AISDLC-393)', () => {
+    const body = composeBody({
+      taskId: 'AISDLC-1',
+      workDir: tmp,
+      worktreePath: tmp,
+      branch: 'b',
+      task,
+      developerReturn: dev,
+      verdict: approved,
+      sourceKind: 'backlog',
+    });
+    expect(body).toContain('References AISDLC-1');
+    expect(body).not.toContain('Closes #');
   });
 });
 

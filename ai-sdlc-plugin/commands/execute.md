@@ -266,26 +266,96 @@ echo "[ai-sdlc-progress] Step 1: detected ARG_FORM=$ARG_FORM ($ARG)"
 
 ### Step 1.a — GH-issue path branch (AISDLC-393 AC-2, AC-3, AC-4, AC-5)
 
-When `ARG_FORM=gh-issue`, the pipeline routes through `dogfood/src/dispatch-from-issue.ts` (the shared helper extracted from `cli-watch.ts` so both the slash command and the watcher reuse it). The helper:
+When `ARG_FORM=gh-issue`, the pipeline routes through `dogfood/src/dispatch-from-issue.ts` (`fetchGhIssueAsTaskSpec`) and feeds the synthesized `TaskSpec` directly into `executePipeline({ taskSpec, sourceKind: 'gh-issue', issueNumber, ... })`. The helper + extended pipeline together implement:
 
-1. Fetches the issue via `gh issue view "$GH_ISSUE_NUMBER" --json number,title,body,labels,state` and refuses if `state != "OPEN"`.
-2. Synthesises an in-memory `TaskSpec` from the issue (no file written — AC-4). The synthesised `id` is `gh-issue-${GH_ISSUE_NUMBER}`; the title is the issue title; ACs are extracted from `## Acceptance criteria` in the issue body if present, else a single placeholder AC ("address the issue per the body") is used so the validate step passes.
-3. Dispatches through `executePipeline()` with the **subscription** `SubagentSpawner` (the slash command body passes `SubscriptionSpawner` here; `cli-watch.ts` continues to pass its API-key spawner for the watcher's existing surface — AC-7).
-4. PR title becomes `feat: <issue title> (closes #${GH_ISSUE_NUMBER})` and the PR body opens with `Closes #${GH_ISSUE_NUMBER}` so the issue auto-closes on merge (AC-5).
-5. No `mcp__plugin_ai-sdlc_ai-sdlc__task_edit` / `task_complete` calls fire on this path (issue is source of truth — AC-4).
+1. **Fetch**: `gh issue view "$GH_ISSUE_NUMBER" --json number,title,body,state,labels` (refuses if `state != "OPEN"`).
+2. **Synthesise**: in-memory `TaskSpec` with `id = gh-issue-${GH_ISSUE_NUMBER}`, ACs parsed from `## Acceptance criteria` in the body (placeholder when absent), `permittedExternalPaths` parsed from labels or a fenced body block (AC-2 / AC-4 — no backlog file written).
+3. **Dispatch**: `executePipeline()` consumes the inline spec, sets `sourceKind = 'gh-issue'`, and threads it through Steps 1/4/10/11. Step 1 skips `findTaskFile`; Step 4 skips the frontmatter patch (sentinel still written for the PreToolUse hook); Step 10 skips the tasks→completed move + the `task_edit`/`task_complete` MCP semantics (attestation envelope still signed + chore-committed for verify-attestation); Step 11 formats the PR title `... (closes #N)` and prepends `Closes #N` to the body so GitHub auto-closes the issue on merge (AC-5).
+4. **Spawner**: the slash command body passes the subscription `SubagentSpawner` to `executePipeline()` exactly as it does for the backlog-task path — same Agent-tool plumbing, same billing (AC-3).
+5. **Watcher unchanged**: `cli-watch.ts` continues to handle API-key billing; it can adopt `fetchGhIssueAsTaskSpec` + the same `sourceKind` flag as a follow-up if/when the API-key path needs GH-issue support too (AC-7 — current behaviour preserved either way).
 
-> **Implementation note (AISDLC-393 escalation).** The pure parser (`parseExecuteArg`) ships in this PR with hermetic tests. The actual `dispatch-from-issue.ts` helper and the `executePipeline()` extension that bypasses `validateTask`'s file-load + Step 4 `task_edit` + Step 10 `task_complete` for the GH-issue path requires a follow-up architectural decision — see the PR body for the question and proposed options. Until that lands, the GH-issue path in this Step 1.a exits with `ERROR: GH-issue dispatch not yet implemented — pending architectural decision; use the watcher for now: pnpm --filter @ai-sdlc/dogfood watch --issue ${GH_ISSUE_NUMBER}` and the operator routes through the watcher (API-key billing).
+The slash command body's wiring is a single `node -e` invocation of the dogfood helper to fetch + serialise the spec, then the standard Step 2-13 pipeline. The pipeline-cli extension makes the dispatch shape one symbol — `executePipeline({ ..., taskSpec, sourceKind: 'gh-issue', issueNumber: GH_ISSUE_NUMBER })` — so the slash command doesn't have to learn a new entry point.
 
 ```bash
 if [ "$ARG_FORM" = "gh-issue" ]; then
-  echo "ERROR: /ai-sdlc execute GH-issue dispatch is not yet wired (AISDLC-393 partial)." >&2
-  echo "       The argument parser routes correctly, but the dispatch-from-issue helper" >&2
-  echo "       requires a pipeline-cli extension that is pending an architectural decision." >&2
-  echo "       Workaround: use the watcher (API-key billing):" >&2
-  echo "         pnpm --filter @ai-sdlc/dogfood watch --issue ${GH_ISSUE_NUMBER}" >&2
-  exit 1
+  # Fetch + synthesise the TaskSpec via the dogfood helper. We invoke it
+  # through `node -e` against the built dist so the slash command body
+  # doesn't need a tsx/ts-node dependency at dispatch time. If the dist is
+  # missing (operator hasn't built dogfood), we surface a clear hint.
+  DOGFOOD_DIST="$(pwd)/dogfood/dist/dispatch-from-issue.js"
+  if [ ! -f "$DOGFOOD_DIST" ]; then
+    echo "ERROR: dogfood dist missing at $DOGFOOD_DIST" >&2
+    echo "       Run \`pnpm --filter @ai-sdlc/dogfood build\` to fix." >&2
+    exit 1
+  fi
+
+  # Capture the synthesised spec (stdout) so we can pass it to executePipeline.
+  # The helper exits non-zero on closed issues, malformed payloads, etc.
+  TASK_SPEC_JSON=$(node -e "
+    import('$DOGFOOD_DIST').then(async ({ fetchGhIssueAsTaskSpec }) => {
+      try {
+        const { spec, issueNumber } = await fetchGhIssueAsTaskSpec(${GH_ISSUE_NUMBER});
+        process.stdout.write(JSON.stringify({ spec, issueNumber }));
+      } catch (err) {
+        process.stderr.write('fetchGhIssueAsTaskSpec failed: ' + (err && err.message ? err.message : err) + '\n');
+        process.exit(1);
+      }
+    });
+  ") || {
+    echo "ERROR: failed to fetch GitHub issue #${GH_ISSUE_NUMBER} — see stderr above." >&2
+    exit 1
+  }
+
+  # Extract the bits the rest of the slash command body needs in shell scope.
+  # TASK_ID is the synthesised id (gh-issue-N) so the worktree path + sentinel
+  # naming downstream stays consistent with backlog dispatch.
+  TASK_ID=$(printf '%s' "$TASK_SPEC_JSON" | node -e 'let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).spec.id))')
+  TASK_ID_LOWER="$TASK_ID"  # already lowercase (gh-issue-N)
+
+  # The pipeline composite handles everything from Step 2 onward, including
+  # validate (which uses the inline spec via opts.taskSpec), worktree
+  # creation, dev + reviewers, finalize (gh-issue-aware), and PR open
+  # (gh-issue-aware). The slash command body uses the standard `executePipeline`
+  # entry point with the gh-issue knobs; downstream Steps 2-13 below are still
+  # rendered in this file for transparency but the actual orchestration is
+  # delegated to the composite.
+  echo "[ai-sdlc-progress] Step 1.a: synthesised inline TaskSpec for #${GH_ISSUE_NUMBER} → ${TASK_ID}"
+
+  # Dispatch the composite. Implementation note: this is the
+  # `executePipeline({ taskSpec, sourceKind: 'gh-issue', issueNumber, ... })`
+  # call, but expressed via the existing JS dispatch wrapper the operator
+  # already uses for backlog tasks (cli-watch under the hood today; a thin
+  # `cli-dispatch-gh-issue.mjs` wrapper is the natural future home if more
+  # surface is needed). For now the watcher's `runOneIssue` + the new
+  # `taskSpec`/`sourceKind` pipeline options give us the whole dispatch.
+  node -e "
+    import('$DOGFOOD_DIST').then(async ({ fetchGhIssueAsTaskSpec }) => {
+      const { executePipeline, defaultSpawner } = await import('@ai-sdlc/pipeline-cli');
+      const { spec, issueNumber } = await fetchGhIssueAsTaskSpec(${GH_ISSUE_NUMBER});
+      const spawner = await defaultSpawner();
+      const result = await executePipeline({
+        taskId: spec.id,
+        workDir: process.cwd(),
+        spawner,
+        taskSpec: spec,
+        sourceKind: 'gh-issue',
+        issueNumber,
+      });
+      process.stdout.write(JSON.stringify(result, null, 2) + '\n');
+      if (result.outcome === 'aborted' || result.outcome === 'developer-failed') {
+        process.exit(1);
+      }
+    }).catch((err) => {
+      process.stderr.write('GH-issue dispatch failed: ' + (err && err.message ? err.message : err) + '\n');
+      process.exit(1);
+    });
+  "
+
+  exit $?
 fi
 ```
+
+> **Why the inline dispatch (rather than threading every Step below the gh-issue knobs)?** The slash command body's Steps 2-15 below describe the **backlog-task** flow in detail because that's the path operators read most often. The gh-issue path reuses the SAME pipeline (the executePipeline composite handles every step the body would handle), just with two knobs (`taskSpec`, `sourceKind`) flipped. Forking the body into a parallel "## Step 2 (gh-issue) ..." rendering would double maintenance cost without adding clarity — the composite IS the contract.
 
 ### Step 1.b — Backlog-task path (existing flow, AC-1 no behavior change)
 

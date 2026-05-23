@@ -114,6 +114,28 @@ describe('Step 4 — beginTask', () => {
     expect(readFileSync(worktreeTaskPath, 'utf8')).toContain('status: In Progress');
   });
 
+  // AISDLC-393 — gh-issue source skips the backlog frontmatter patch but
+  // still writes the sentinel. The PreToolUse hook needs the sentinel
+  // regardless of source kind, but there's no on-disk file to patch.
+  it('AISDLC-393: gh-issue source skips frontmatter patch + still writes sentinel', async () => {
+    const worktreePath = join(tmp, '.worktrees', 'gh-issue-612');
+    mkdirSync(worktreePath, { recursive: true });
+    // Crucially: NO backlog file exists for `gh-issue-612` — the issue is
+    // the source of truth. The previous (file-loading) path would throw
+    // here with `no task file found`; the gh-issue branch must NOT throw.
+
+    const r = await beginTask({
+      taskId: 'gh-issue-612',
+      worktreePath,
+      workDir: tmp,
+      sourceKind: 'gh-issue',
+    });
+
+    expect(r.sentinelPath).toBe(join(worktreePath, '.active-task'));
+    const sentinel = readFileSync(r.sentinelPath, 'utf8');
+    expect(sentinel.trim()).toBe('gh-issue-612');
+  });
+
   it('AISDLC-199: falls back to workDir when the worktree has no task file', async () => {
     // Standalone CLI invocation path — operator runs `pipeline-cli begin-task`
     // with `--worktree-path` pointing somewhere that doesn't have the file.
