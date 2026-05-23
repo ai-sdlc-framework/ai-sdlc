@@ -111,7 +111,7 @@ $HEAD_SHA
 origin/main
 
 ## Conflict resolution rules (the 80%)
-1. CHANGELOG Unreleased > Added overlaps → KEEP BOTH bullets (earliest first)
+1. CHANGELOG.md conflict on a feature branch → ACCEPT MAIN SIDE, DROP feature-branch edits (AISDLC-401: CHANGELOG is release-please's domain; feature branches must not edit it)
 2. Test file additions to same describe → KEEP BOTH it() blocks
 3. Code additions, non-overlapping → KEEP BOTH; escalate if shared identifier
 4. Run `pnpm exec prettier --write <file>` on every resolved file before

@@ -1,32 +1,9 @@
 # @ai-sdlc/orchestrator
 
-## Unreleased
-
-### Bug Fixes
-
-* convention detector — eliminate three false-positives surfaced by the React/Vite dogfood case (AISDLC-80): (1) PascalCase components + camelCase hooks/stores no longer flagged as `mixed` when `package.json` declares React; (2) testing convention enumerates ALL detected directories (`__tests__/`, `tests/`, `tests/e2e/`, `src/tests/`, `cypress/`, `e2e/`, ...) plus collocated `*.test.*` instead of collapsing to a single label; (3) Vite/TS/webpack path aliases (`@components`, `@engine`, ...) now parsed from `vite.config.{js,ts,mjs,cjs}`, `tsconfig.json`, `jsconfig.json`, and `webpack.config.*` and reported as their own bucket. `detectConventions` is now async and accepts an optional `{ repoPath }` for project-config-aware detection (legacy file-only signature still works without `repoPath`).
-
-### Added
-
-* **RFC-0011 Phase 8 — DoR gate promoted from warn-only to enforce (AISDLC-115.9).** DoR gate now enforces `Needs Clarification` issues at PPA admission + `/ai-sdlc execute` start (no longer warn-only). The dogfood project's `.ai-sdlc/dor-config.yaml` flips `evaluationMode: warn-only → enforce` per RFC-0011 Phase 8. Promotion went via the operator-override path documented in `docs/operations/dor-promotion.md` (operator judgment based on current evidence, not corpus-rigorous decision — the corpus path unblocks once post-AISDLC-161 data accumulates). Maintainer escape hatch: apply `dor-bypass` label per RFC-0011 §7.4. To revert: flip `evaluationMode` back to `warn-only`; the calibration log keeps writing in either mode.
-* **RFC-0010 Phase 5 follow-up — `AI_SDLC_PARALLELISM` promoted to default-on (AISDLC-116).** The flag now defaults to `'on'` per maintainer directive 2026-05-01 — corpus-driven (zero parallelism-related incidents in the trailing observation window) rather than calendar-driven. The original Phase 5 AC #4 ("1 week of dogfood pipeline running with `AI_SDLC_PARALLELISM=experimental`") calendar gate is dropped. Backwards compat preserved: explicit `'experimental'` still routes to the pre-promotion mode for callers that want to pin it; explicit `'off'` / `'disabled'` / `'false'` / `'0'` is the opt-out path. Pre-promotion fail-safe-off behavior changes to fail-on for unknown values (typos like `'enable'` or `'yes'` no longer silently disable parallelism). RFC-0010 revision history extended with v21 (Phase 5 hardening shipped) and v22 (default-on promotion).
-
-### Features
-
-* `init --role <tier>` flag for `agent-role.yaml` tool defaults (AISDLC-79). Three tiers ship with intent-driven tool surfaces: `coding` (default — `Edit, Write, Read, Glob, Grep, Bash, NotebookEdit`), `research` (coding + `WebFetch, WebSearch`), `meta` (research + `Task, Skill`). Invalid `--role` values exit 1 with the accepted list. **Migration: nothing changes for current users** — `init` with no flag uses the `coding` tier (the previous default plus `NotebookEdit`), and existing `agent-role.yaml` files are still skipped (never overwritten). See `backlog/decisions/AISDLC-79-agent-role-tools-defaults.md` for rationale and tier rationale.
-* `ai-sdlc init` UX overhaul (AISDLC-78): prints a 3-line version block (CLI + orchestrator + plugin) on every init and on `--version`, with a `WARN  versions out of sync` warning when components disagree. `pipeline.yaml` substitutes `your-org` from `git remote get-url origin` (https + ssh forms). `.mcp.json` pins `@ai-sdlc/mcp-advisor@<version>` to the orchestrator that ran init, with an inline `_aiSdlcComment` documenting how to opt back into floating-latest. Cursor MCP config requires explicit opt-in (`--cursor` flag, project-local `.cursor/`, or user-global `~/.cursor/`). `ai-sdlc health` rewords the State Store status to "deferred (initializes on first pipeline run)" and gains a `--init-state` flag for eager initialization. `ai-sdlc agents` reads `agent-role.yaml` and surfaces declared-but-not-executed agents. Unknown subcommands now hint at version drift / upgrade.
-* RFC-0010 Phase 1: deterministic port allocator + worktree slug/ownership verification + JSON schemas (`Pipeline.spec.parallelism`, `WorktreePool`, `SubscriptionPlan`, `DatabaseBranchPool`).
-* RFC-0010 Phase 2: WorktreePoolManager (allocate/adopt/reclaim/cleanupOnMerge/list/reclaimStale) with strict cross-clone ownership guard. Wired into `execute.ts` behind `AI_SDLC_PARALLELISM=experimental`.
-* RFC-0010 Phase 2.5: per-stage model routing + ModelRegistry with deprecation lifecycle + conditional review fan-out classifier with confident/confidence consistency rule + calibration log + cli-model-bump + cli-classifier-feedback. Cost-governance gains `model_alias` and `shadow_cost_usd` columns (Migration V13).
-* RFC-0010 Phase 2.7: HarnessAdapter framework with shipped Claude Code + Codex adapters, version probe (open-ended upper bound default), independence enforcement (`requiresIndependentHarnessFrom`), cyclic-constraint validation. Adapter-authoring guide at `docs/operations/adapter-authoring.md`.
-* RFC-0010 Phase 2.8: SubscriptionLedger with `(harness, accountId, tenant)` keying + schedule-aware dispatcher (4 modes) + rolling token-estimate calibration + EstimateBootstrapped + frozen estimates + burn-down report + tier analysis + cli-tier-recommendation. Reference plans at `spec/examples/subscription-plans/`.
-* RFC-0010 Phase 3: WorkerPool (bounded concurrency, PPA-priority ordering) + file-based MergeGate (with timeout + force-release) + decideRequeue (failure-type taxonomy + RetriageStorm detection + triage-history JSONL). Per project policy: orchestrator never executes `gh pr merge`.
-* RFC-0010 Phase 4: dual-format artifact directory (`.md` + schema-conformant `.json`), 5 JSON schemas at `spec/schemas/artifacts/`, StateWriter with 60s heartbeat + 5min stale detection, `_events.jsonl` event stream, atomic JSON writes, cli-status command.
-* RFC-0010 Phase 5: extended operator runbook with five new failure-mode recovery playbooks (WorktreeOwnershipMismatch, RebaseConflict, stuck heartbeats, IndependenceViolated, MigrationDiverged, BranchQuotaExceeded), chaos test plan, feature-flag promotion ritual.
-
-### Notes
-
-The `AI_SDLC_PARALLELISM` flag defaults to `on` as of AISDLC-116 (this Unreleased cycle). The original promotion criteria — chaos-test plan in `docs/operations/operator-runbook.md` plus a 1-week dogfood soak window — were dropped by maintainer directive 2026-05-01 in favor of substantive readiness (no parallelism-related incidents in the trailing observation window). Operators who want to pin the pre-promotion mode can still set `AI_SDLC_PARALLELISM=experimental`; operators who want to disable parallelism entirely can set `AI_SDLC_PARALLELISM=off` (or `disabled`/`false`/`0`).
+<!-- CHANGELOG is maintained by release-please. Do NOT manually add an
+     Unreleased section — release-please accumulates all changes from
+     conventional-commit messages and prepends a dated section when the
+     rolling release PR lands. See docs/operations/release-flow.md. -->
 
 ## [0.10.0](https://github.com/ai-sdlc-framework/ai-sdlc/compare/orchestrator-v0.9.0...orchestrator-v0.10.0) (2026-05-11)
 

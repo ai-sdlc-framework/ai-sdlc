@@ -7,7 +7,7 @@
 - **Always rebase** feature branches onto main; never merge main in.
 - Update branch: `git fetch origin && git rebase origin/main`, then `git push --force-with-lease`.
 - Never `gh api pulls/N/update-branch` with merge method. Keep linear history.
-- `/ai-sdlc rebase <pr>` automates mechanical conflicts (CHANGELOG `Unreleased`, test additions to same `describe`, prettier drift) and re-signs the attestation only when `contentHash` changed. Escalates semantic conflicts, modify-vs-delete, verification failures, and 3-attempt iteration cap. Refuses force-push to `main`/`master`.
+- `/ai-sdlc rebase <pr>` automates mechanical conflicts (test additions to same `describe`, prettier drift) and re-signs the attestation only when `contentHash` changed. Escalates semantic conflicts, modify-vs-delete, verification failures, and 3-attempt iteration cap. Refuses force-push to `main`/`master`. **CHANGELOG.md conflicts should not arise on feature branches** — if a rebase surfaces one, remove the CHANGELOG change from the feature branch rather than merging both sides (AISDLC-401).
 
 ## CI marker hygiene
 
@@ -305,6 +305,22 @@ Plugin subagents cannot use the `Agent` tool (Claude Code filters it one level d
 - Exploration/spikes (retroactively if it becomes real work).
 
 ## Releases
+
+**CHANGELOG.md is managed exclusively by release-please. Contributors MUST NOT edit it manually.**
+
+### release-please rolling PR model (AISDLC-401)
+
+`release.yml` fires on every push to `main`, runs `googleapis/release-please-action@v4`, and
+maintains a **single rolling PR** (`chore: release main` on branch `release-please--branches--main`).
+The rolling PR accumulates version bumps + CHANGELOG entries from conventional-commit messages.
+Regular feature PRs MUST NOT touch CHANGELOG.md — parallel-merge conflicts are the penalty
+(root cause of AISDLC-401, made visible after AISDLC-400 dropped the merge queue).
+
+The pre-push hook (`scripts/check-changelog-edit.sh`) WARNs when a feature branch touches
+CHANGELOG.md. If you see that warning, revert the CHANGELOG changes — release-please will
+reconstruct them from your commit messages. See [`docs/operations/release-flow.md`](docs/operations/release-flow.md) for the full flow.
+
+### Package configuration
 
 `.github/workflows/release.yml` runs `pnpm -r publish --no-git-checks` with no `--access` flag. Every non-`"private": true` workspace package MUST carry:
 

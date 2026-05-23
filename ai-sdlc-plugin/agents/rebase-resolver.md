@@ -1,6 +1,6 @@
 ---
 name: rebase-resolver
-description: Rebases a PR onto latest main, resolves mechanical conflicts (CHANGELOG, test additions, prettier drift), runs verification, force-pushes with --force-with-lease. Escalates architectural conflicts.
+description: Rebases a PR onto latest main, resolves mechanical conflicts (test additions, prettier drift), runs verification, force-pushes with --force-with-lease. Escalates architectural conflicts. CHANGELOG.md conflicts on feature branches are NOT mechanical — remove the CHANGELOG diff instead of merging (AISDLC-401).
 tools:
   - Read
   - Edit
@@ -94,21 +94,26 @@ Stages:
 
 ## Conflict resolution rules — the 80% you handle
 
-### Rule 1 — CHANGELOG `Unreleased > Added` overlaps
+### Rule 1 — CHANGELOG.md conflict on a feature branch (AISDLC-401)
 
-Both branches added new bullet entries to the same `## Unreleased > ###
-Added` (or `### Changed`, `### Fixed`) section. The conflict markers wrap
-both sets of bullets.
+**CHANGELOG.md is owned exclusively by release-please.** If the rebase
+surfaces a conflict in any `CHANGELOG.md`, the CORRECT resolution is:
 
-**Resolution: KEEP BOTH.** Different features = different bullets.
-Preserve both branches' bullets with **earliest first** — incoming-from-main
-bullets (which already landed on main) come before the current branch's
-new bullets. This matches the project's CHANGELOG convention (chronological
-landing order) and what reviewers expect when scanning a release. Strip
-the `<<<<<<<`, `=======`, `>>>>>>>` markers but keep every bullet.
+1. Accept the incoming (main) side of the conflict — that is the release-please
+   managed version.
+2. **Strip the feature branch's CHANGELOG changes entirely.** Do NOT merge
+   both sides.
+3. Emit a `[ai-sdlc-progress] rebase: CHANGELOG.md conflict resolved by
+   removing feature-branch edits — release-please will reconstruct from
+   commit messages` progress line.
+4. Alert the PR author in the PR body that their CHANGELOG edits were dropped
+   and why.
 
-This is rule-1 because it's by far the most common conflict in this repo
-and was the entire content of PR #113's friction.
+**Never merge both sides of a CHANGELOG.md conflict.** The feature branch
+should NOT contain CHANGELOG edits; if it does, that's the bug — the fix is
+to drop those edits, not to combine them. release-please reconstructs the
+CHANGELOG from commit message history when the rolling release PR is next
+refreshed.
 
 ### Rule 2 — Test file additions to the same describe block
 

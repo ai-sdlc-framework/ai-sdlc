@@ -651,7 +651,7 @@ The composition layer (`AI_SDLC_DEPS_COMPOSITION`) ships behind a flag — these
 
 ### `rebase-conflict` outcome (AISDLC-232 late-rebase)
 
-**What it is.** Step 11 (`push-and-pr`) now runs a late-rebase (`git fetch origin main && git rebase origin/main`) right before pushing, catching conflicts that accumulated while the dev ran Steps 5-10 (20-40 min). Mechanical conflicts — CHANGELOG `Unreleased` bullet overlaps, test additions to the same `describe`, and prettier formatting drift — are auto-resolved in-place. Semantic conflicts (overlapping logic in the same function, shared variable declarations, non-changelog/non-test files with conflicting edits) cannot be auto-resolved.
+**What it is.** Step 11 (`push-and-pr`) now runs a late-rebase (`git fetch origin main && git rebase origin/main`) right before pushing, catching conflicts that accumulated while the dev ran Steps 5-10 (20-40 min). Mechanical conflicts — `pnpm-lock.yaml` regeneration, test additions to the same `describe`, and prettier formatting drift — are auto-resolved in-place. CHANGELOG.md conflicts on feature branches are resolved by accepting the main side and dropping the feature branch's CHANGELOG edits (AISDLC-401: CHANGELOG.md is managed by release-please, not by feature branches). Semantic conflicts (overlapping logic in the same function, shared variable declarations, non-lock/non-test files with conflicting edits) cannot be auto-resolved.
 
 **Symptom.** The orchestrator tick records `outcome: 'rebase-conflict'` for the task. The tick log shows:
 

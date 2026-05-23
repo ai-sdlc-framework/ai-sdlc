@@ -40,8 +40,8 @@
 #
 # Skip individual gates with their respective env vars
 # (AI_SDLC_SKIP_COVERAGE_GATE=1, AI_SDLC_SKIP_TASK_MOVE=1,
-# AI_SDLC_SKIP_SQUASH_CHORES=1, AI_SDLC_SKIP_DOR_GATE=1,
-# AI_SDLC_SKIP_ATTESTATION_SIGN=1)
+# AI_SDLC_SKIP_SQUASH_CHORES=1, AI_SDLC_SKIP_CHANGELOG_CHECK=1,
+# AI_SDLC_SKIP_DOR_GATE=1, AI_SDLC_SKIP_ATTESTATION_SIGN=1)
 # or skip all pre-push hooks via `git push --no-verify` (use sparingly —
 # these gates exist because the things they guard have failed silently in
 # the past).
@@ -56,6 +56,9 @@ PUSH_STDIN="$(cat || true)"
 if [ "${AI_SDLC_SKIP_SQUASH_CHORES:-}" != "1" ]; then
   ./scripts/squash-attestation-chores.sh
 fi
+# AISDLC-401: warn when CHANGELOG.md is staged on a feature branch.
+# release-please owns CHANGELOG.md; manual edits cause rebase conflicts.
+printf '%s\n' "$PUSH_STDIN" | ./scripts/check-changelog-edit.sh
 printf '%s\n' "$PUSH_STDIN" | ./scripts/check-dor-gate.sh
 # AISDLC-386: orchestrator handles all mechanical fixups (task-move →
 # attestation-sign) in a single pass and exits 1 ONCE if any work was done.
