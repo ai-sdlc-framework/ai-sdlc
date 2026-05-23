@@ -94,11 +94,16 @@ export function computePatchId(
   // Step 2: pipe the diff output into `git patch-id --stable`.
   // We cannot use gitFn here because `git patch-id` reads from stdin, so
   // we always use spawnSync directly (or the injected patchIdFn in tests).
+  //
+  // AISDLC-398 fix (Finding #4): bump maxBuffer to 128 MB to match the
+  // upstream diff buffer used in Step 1. The default 64 KB maxBuffer causes
+  // silent truncation on large diffs → null patch-id → falls back to SHA →
+  // v4-kick failure mode resurfaces on large PRs.
   const result = spawnSync('git', ['patch-id', '--stable'], {
     input: diffOutput,
     cwd: repoRoot,
     encoding: 'utf-8',
-    maxBuffer: 64 * 1024,
+    maxBuffer: 128 * 1024 * 1024,
   });
 
   if (result.status !== 0 || !result.stdout) {

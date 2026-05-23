@@ -293,6 +293,41 @@ describe('patch-id helpers (AISDLC-398 AC-4)', () => {
     });
   });
 
+  // ── AISDLC-398 fix #4: large diff (>64KB) maxBuffer ────────────────────
+  it('(fix #4) large diff (>64KB) patch-id computation succeeds', () => {
+    // Create a branch with a large file (>64KB) to verify that spawnSync's
+    // maxBuffer bump (128MB) does not truncate the output silently.
+    sh('git checkout -b feat-large-diff', repoDir);
+
+    // Generate a file larger than 64KB (65536 bytes).
+    // Each line: "export const line<n> = <n>; // padding: <64 spaces>\n" ≈ 100+ bytes.
+    // 700 such lines > 70KB.
+    const PAD = ' '.repeat(64);
+    const largeContent = Array.from(
+      { length: 700 },
+      (_, i) => `export const line${i} = ${i}; // padding:${PAD}\n`,
+    ).join('');
+    expect(Buffer.byteLength(largeContent, 'utf8')).toBeGreaterThan(64 * 1024);
+
+    writeFileSync(join(repoDir, 'large-file.ts'), largeContent);
+    sh('git add large-file.ts', repoDir);
+    sh('git commit -m "feat: add large file (>64KB)"', repoDir);
+
+    const head = sh('git rev-parse HEAD', repoDir);
+    const base = sh('git merge-base main HEAD', repoDir);
+
+    const patchId = computePatchId(base, head, repoDir);
+
+    // Must NOT return null (which would indicate truncation/failure).
+    expect(patchId).not.toBeNull();
+    // Must be a valid 40-char hex string.
+    expect(patchId).toMatch(/^[0-9a-f]{40}$/);
+
+    sh('git checkout main', repoDir);
+    sh('git branch -D feat-large-diff', repoDir);
+    rmSync(join(repoDir, 'large-file.ts'), { force: true });
+  });
+
   // ── computeMergeBase ────────────────────────────────────────────────────
   describe('computeMergeBase', () => {
     it('returns null when gitFn throws', () => {

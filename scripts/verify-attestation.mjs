@@ -89,11 +89,13 @@ function computePatchIdForVerifier(base, head, repoRoot) {
   if (!diffOutput || diffOutput.trim().length === 0) {
     return null;
   }
+  // AISDLC-398 fix (Finding #4 mirror): match the 128 MB maxBuffer used for
+  // git diff-tree above so large diffs don't silently truncate → null patch-id.
   const result = spawnSync('git', ['patch-id', '--stable'], {
     input: diffOutput,
     cwd: repoRoot,
     encoding: 'utf-8',
-    maxBuffer: 64 * 1024,
+    maxBuffer: 128 * 1024 * 1024,
   });
   if (result.status !== 0 || !result.stdout) {
     return null;
@@ -1683,22 +1685,31 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       return a.fileName.localeCompare(b.fileName);
     });
     const chosen = v6Envelopes[0];
-    // For content-addressed envelopes we still verify using the head SHA
-    // as the binding (the filename changed, but the envelope internally
-    // still carries subject.digest.sha1 = head SHA for the DSSE binding check).
-    // The v6 verifier only checks the filename against `<headSha>.v6.dsse.json`
-    // for the legacy per-SHA path. For patch-id-named envelopes we skip that
-    // filename binding check by passing the envelope's own subject SHA.
+    // AISDLC-398 fix (Finding #2): for content-addressed (patch-id-named)
+    // envelopes the verifier must validate against the ACTUAL outer PR head SHA
+    // (`lowerHead`), not against the envelope's own `subject.digest.sha1`.
+    //
+    // The original code set effectiveHeadSha = envelope.subject.digest.sha1
+    // and passed it as both `headSha` and the basis for `envelopeFileName`.
+    // This made verifyV6Envelope's binding check compare the envelope subject
+    // SHA against itself — tautological, allowing a replay of any historic
+    // envelope whose filename was a patch-id rather than the PR's current SHA.
+    //
+    // Correct behaviour:
+    //   - pass headSha = lowerHead (actual current HEAD from CI)
+    //   - for patch-id-named envelopes, synthesize envelopeFileName from the
+    //     envelope's own subject SHA so that check (a) in verifyV6Envelope
+    //     (`envelopeFileName == ${headSha}.v6.dsse.json`) re-expresses check (b)
+    //     (`envelope.subject.sha1 == headSha == lowerHead`) — both now guard
+    //     against replaying an envelope signed for a different commit.
     const isPatchIdNamed = v6PatchIdFilename && chosen.fileName.toLowerCase() === v6PatchIdFilename;
-    const effectiveHeadSha = isPatchIdNamed
-      ? (chosen.envelope.subject?.digest?.sha1 ?? lowerHead)
-      : lowerHead;
+    const envelopeSubjectSha = chosen.envelope.subject?.digest?.sha1 ?? lowerHead;
     return verifyV6Envelope({
       envelope: chosen.envelope,
       envelopeFileName: isPatchIdNamed
-        ? `${effectiveHeadSha.toLowerCase()}.v6.dsse.json`
+        ? `${envelopeSubjectSha.toLowerCase()}.v6.dsse.json`
         : chosen.fileName,
-      headSha: effectiveHeadSha.toLowerCase(),
+      headSha: lowerHead,
       trustedReviewers,
       repoRoot,
     });
@@ -1790,14 +1801,41 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       process.stderr.write(
         `[verify-attestation] AISDLC-398: matched content-addressed envelope ${v5PatchIdFilename}\n`,
       );
-      // Fast-path: verify this specific envelope. The predicate is already
-      // content-matched by construction (the patch-id proves the diff is
-      // identical). We still run the policy/agent/plugin/schema bindings
-      // via predicateMatchReason and the signature via verifyAttestation.
+      // Fast-path: verify this specific envelope. The patch-id filename
+      // proves that the PR diff (excluding attestation files) is identical
+      // to what was signed. However, patch-id stability does NOT protect
+      // against force-pushes that change blob SHAs (e.g. rebasing onto a
+      // tree that has different file blobs for the same paths). We MUST
+      // recompute contentHashV5 from the current HEAD's files to guard
+      // against post-signing force-pushes that alter blob SHAs.
+      //
+      // AISDLC-398 fix (Finding #3): do NOT pass the envelope's stored
+      // contentHashV5 as the expected value — that compares the hash against
+      // itself (always true). Instead, recompute from the current HEAD and
+      // pass the recomputed value so predicateMatchReason actually validates.
+      const signedMergeBaseForFastPath = patchIdEntry.predicate?.signedMergeBase;
+      const recomputedContentHashV5 =
+        typeof signedMergeBaseForFastPath === 'string' &&
+        /^[0-9a-f]{40}$/i.test(signedMergeBaseForFastPath)
+          ? computeHeadContentHashV5(lowerHead, signedMergeBaseForFastPath, repoRoot)
+          : null;
+
+      // If we cannot recompute (missing signedMergeBase, git failure, shallow
+      // clone), fall back to the stored hash to avoid blocking legitimate PRs
+      // on infra failures. Log a warning so the gap is visible in CI output.
+      const effectiveContentHashV5 =
+        recomputedContentHashV5 ?? patchIdEntry.predicate.contentHashV5;
+      if (!recomputedContentHashV5) {
+        process.stderr.write(
+          `[verify-attestation] AISDLC-398 WARNING: could not recompute contentHashV5 for fast-path; ` +
+            `using stored hash (signedMergeBase=${signedMergeBaseForFastPath ?? 'missing'})\n`,
+        );
+      }
+
       const fastReason = predicateMatchReason(patchIdEntry.predicate, {
         contentHashV3: patchIdEntry.predicate.contentHashV3,
         contentHashV4: patchIdEntry.predicate.contentHashV4,
-        contentHashV5: patchIdEntry.predicate.contentHashV5,
+        contentHashV5: effectiveContentHashV5,
         policyHash: sha256Hex(
           readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
         ),
@@ -1836,7 +1874,7 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
           commitSha: patchIdEntry.predicate?.subject?.digest?.sha1 ?? '0'.repeat(40),
           contentHashV3: patchIdEntry.predicate.contentHashV3,
           contentHashV4: patchIdEntry.predicate.contentHashV4,
-          contentHashV5: patchIdEntry.predicate.contentHashV5,
+          contentHashV5: effectiveContentHashV5,
           policyHash: sha256Hex(
             readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
           ),

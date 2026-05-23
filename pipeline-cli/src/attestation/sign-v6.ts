@@ -206,6 +206,18 @@ export interface SignAndWriteV6EnvelopeOptions {
   privateKeyPem: string;
   /** Optional identity string embedded in the envelope. */
   signerIdentity?: string;
+  /**
+   * Optional content-addressed patch-id (AISDLC-398).
+   *
+   * When provided, the envelope is written to BOTH:
+   *   - `<patchId>.v6.dsse.json` (primary content-addressed filename)
+   *   - `<headSha>.v6.dsse.json`  (legacy compat bridge)
+   *
+   * When absent, only the per-SHA filename is written (pre-AISDLC-398 behaviour).
+   *
+   * The primary path is returned. The legacy bridge path is written silently.
+   */
+  patchId?: string;
 }
 
 /**
@@ -218,7 +230,7 @@ export interface SignAndWriteV6EnvelopeOptions {
  * @throws {Error} when no leaves exist for `taskId` in the leaf file.
  */
 export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): string {
-  const { repoRoot, headSha, taskId, privateKeyPem, signerIdentity } = opts;
+  const { repoRoot, headSha, taskId, privateKeyPem, signerIdentity, patchId } = opts;
 
   // Load ALL leaves (full tree for root computation).
   const allLeaves = loadLeaves(repoRoot);
@@ -244,12 +256,25 @@ export function signAndWriteV6Envelope(opts: SignAndWriteV6EnvelopeOptions): str
     signerIdentity,
   });
 
+  const serialized = JSON.stringify(envelope, null, 2) + '\n';
   const outDir = join(repoRoot, '.ai-sdlc', 'attestations');
   mkdirSync(outDir, { recursive: true });
-  const outPath = join(outDir, `${headSha}.v6.dsse.json`);
-  writeFileSync(outPath, JSON.stringify(envelope, null, 2) + '\n', { encoding: 'utf8' });
 
-  return outPath;
+  // AISDLC-398: content-addressed dual-write.
+  // When a patch-id is available, write the primary content-addressed file
+  // AND the legacy per-SHA bridge file for backward compat.
+  // When no patch-id is available, write only the per-SHA file (pre-AISDLC-398).
+  const legacyPath = join(outDir, `${headSha}.v6.dsse.json`);
+  if (patchId) {
+    const primaryPath = join(outDir, `${patchId}.v6.dsse.json`);
+    writeFileSync(primaryPath, serialized, { encoding: 'utf8' });
+    // Bridge: same envelope content under the per-SHA name for legacy lookups.
+    writeFileSync(legacyPath, serialized, { encoding: 'utf8' });
+    return primaryPath;
+  }
+
+  writeFileSync(legacyPath, serialized, { encoding: 'utf8' });
+  return legacyPath;
 }
 
 // ── Pretty-print (inspect-v6) ─────────────────────────────────────────────────
