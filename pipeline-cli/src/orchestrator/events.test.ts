@@ -58,9 +58,10 @@ describe('eventsFilePath', () => {
   });
 });
 
-describe('writeEvent — feature-flag gating', () => {
-  it('no-ops when the flag is unset', () => {
-    delete process.env[ORCHESTRATOR_FLAG];
+describe('writeEvent — feature-flag gating (post-AISDLC-411 default-ON)', () => {
+  it('no-ops when the flag is explicitly disabled (off)', () => {
+    // AISDLC-411: post-cutover unset = ON; explicit opt-out via the FALSY set.
+    process.env[ORCHESTRATOR_FLAG] = 'off';
     const ok = writeEvent(
       { ts: '2026-05-02T00:00:00Z', type: 'OrchestratorTick' },
       { artifactsDir: workdir },
@@ -69,13 +70,15 @@ describe('writeEvent — feature-flag gating', () => {
     expect(existsSync(eventsDirPath(workdir))).toBe(false);
   });
 
-  it('no-ops when the flag value is not in the truthy set', () => {
+  it('writes when flag is an unknown value — fail-safe ON (e.g. "maybe" not in FALSY set)', () => {
+    // AISDLC-411: only the canonical FALSY set ({off,0,false,no}) opts out.
+    // Any other value (including 'maybe' which was previously rejected) is ON.
     process.env[ORCHESTRATOR_FLAG] = 'maybe';
     const ok = writeEvent(
       { ts: '2026-05-02T00:00:00Z', type: 'OrchestratorTick' },
-      { artifactsDir: workdir },
+      { artifactsDir: workdir, now: () => new Date('2026-05-02T00:00:00Z') },
     );
-    expect(ok).toBe(false);
+    expect(ok).toBe(true);
   });
 
   it('writes when the flag is truthy', () => {
@@ -88,7 +91,7 @@ describe('writeEvent — feature-flag gating', () => {
   });
 
   it('honors the isEnabled override (tests bypass without env mutation)', () => {
-    delete process.env[ORCHESTRATOR_FLAG];
+    process.env[ORCHESTRATOR_FLAG] = 'off';
     const ok = writeEvent(
       { ts: '2026-05-02T00:00:00Z', type: 'OrchestratorTick' },
       { artifactsDir: workdir, isEnabled: () => true },

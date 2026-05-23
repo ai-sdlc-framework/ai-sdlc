@@ -141,16 +141,19 @@ describe('runOrchestratorLoop — feature flag enforcement', () => {
     process.env = saved;
   });
 
-  it('refuses to start when the feature flag is unset', async () => {
-    delete process.env[ORCHESTRATOR_FLAG];
+  it('refuses to start when the feature flag is explicitly disabled (off)', async () => {
+    // AISDLC-411: post-cutover unset = ON; explicit opt-out via 'off'.
+    process.env[ORCHESTRATOR_FLAG] = 'off';
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxTicks: 1 });
     await expect(runOrchestratorLoop(config, { logger: silentLogger() })).rejects.toBeInstanceOf(
       OrchestratorDisabledError,
     );
   });
 
-  it('refuses to start when the flag value is not in the truthy set', async () => {
-    process.env[ORCHESTRATOR_FLAG] = 'maybe';
+  it('refuses to start when the flag value is in the FALSY set (0/false/no)', async () => {
+    // AISDLC-411: only the FALSY set opts out post-cutover; unknown values
+    // are fail-safe-ON. This test exercises the explicit-opt-out path.
+    process.env[ORCHESTRATOR_FLAG] = 'false';
     const config = defaultOrchestratorConfig({ workDir: '/tmp', maxTicks: 1 });
     await expect(runOrchestratorLoop(config, { logger: silentLogger() })).rejects.toBeInstanceOf(
       OrchestratorDisabledError,

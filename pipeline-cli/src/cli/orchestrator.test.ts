@@ -128,8 +128,9 @@ function fakeAdapters(ids: string[]): OrchestratorAdapters {
 
 describe('cli-orchestrator router', () => {
   describe('start', () => {
-    it('refuses to start when AI_SDLC_AUTONOMOUS_ORCHESTRATOR is unset (exit 2)', async () => {
-      delete process.env[ORCHESTRATOR_FLAG];
+    it('refuses to start when AI_SDLC_AUTONOMOUS_ORCHESTRATOR=off (post-AISDLC-411 opt-out)', async () => {
+      // AISDLC-411: post-cutover unset = ON; explicit opt-out via 'off'.
+      process.env[ORCHESTRATOR_FLAG] = 'off';
       setArgv('start', '--max-ticks', '1');
       await expect(buildOrchestratorCli(fakeAdapters([])).parseAsync()).rejects.toThrow(
         'process.exit(2)',
@@ -193,8 +194,9 @@ describe('cli-orchestrator router', () => {
   });
 
   describe('tick', () => {
-    it('refuses to run when the flag is unset', async () => {
-      delete process.env[ORCHESTRATOR_FLAG];
+    it('refuses to run when the flag is explicitly disabled (off)', async () => {
+      // AISDLC-411: post-cutover unset = ON; opt-out via 'off'.
+      process.env[ORCHESTRATOR_FLAG] = 'off';
       setArgv('tick');
       await expect(buildOrchestratorCli(fakeAdapters([])).parseAsync()).rejects.toThrow(
         'process.exit(2)',
@@ -258,8 +260,9 @@ describe('cli-orchestrator router', () => {
 
   describe('status', () => {
     it('emits frontier + queue depth + flag name (no dispatch, ignores flag)', async () => {
-      // status is read-only — it should work whether or not the flag is set.
-      delete process.env[ORCHESTRATOR_FLAG];
+      // status is read-only — it should work whether or not the flag is enabled.
+      // AISDLC-411: explicitly opt out so `enabled` is observably false here.
+      process.env[ORCHESTRATOR_FLAG] = 'off';
       setArgv('status');
       await buildOrchestratorCli(fakeAdapters(['AISDLC-A', 'AISDLC-B'])).parseAsync();
       const out = stdoutJson() as {

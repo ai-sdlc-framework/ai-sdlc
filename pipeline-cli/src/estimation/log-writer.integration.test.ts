@@ -213,7 +213,8 @@ describe('RFC-0016 Phase 1 + Phase 2 integration', () => {
   });
 
   it('still writes log.jsonl when the orchestrator events flag is off', () => {
-    delete process.env[ORCHESTRATOR_FLAG];
+    // AISDLC-411: post-cutover unset = ON; explicit opt-out via 'off'.
+    process.env[ORCHESTRATOR_FLAG] = 'off';
     writeTaskFile(workDir, {
       id: 'AISDLC-INT-6',
       title: 'feat: events-off probe',

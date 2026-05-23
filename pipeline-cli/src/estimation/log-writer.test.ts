@@ -303,7 +303,8 @@ describe('captureEstimate — events.jsonl wiring (RFC-0015)', () => {
   });
 
   it('still writes log.jsonl when AI_SDLC_AUTONOMOUS_ORCHESTRATOR is off', () => {
-    delete process.env[ORCHESTRATOR_FLAG];
+    // AISDLC-411: post-cutover unset = ON; explicit opt-out via 'off'.
+    process.env[ORCHESTRATOR_FLAG] = 'off';
     const out = captureEstimate({
       stageA: buildStageA(),
       taskTitle: 't',
