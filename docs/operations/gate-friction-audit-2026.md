@@ -312,7 +312,7 @@ The only gate in the chain defending against an EXTERNAL footgun (GitHub Actions
 
 | # | Gate | Verdict | Follow-up |
 |---|---|---|---|
-| 1 | `check-coverage.sh` | OPTIMIZE A+B | [AISDLC-389](../../backlog/tasks/aisdlc-389%20-%20chore-turbo-affected-package-filter-for-pre-push-coverage-plus-ci-build-and-test.md) — turbo filter + docs-only short-circuit (combined with CI Build & Test) |
+| 1 | `check-coverage.sh` | **OPTIMIZE A+B — SHIPPED (AISDLC-389 ✅)** | [AISDLC-389](../../backlog/completed/aisdlc-389%20-%20chore-turbo-affected-package-filter-for-pre-push-coverage-plus-ci-build-and-test.md) — pnpm affected-package filter + docs-only short-circuit; merged PR #607 + AISDLC-390 fix PR #617 |
 | 2 | `check-task-moved.sh` | KEEP | — |
 | 3 | `check-mcp-bundle-sync.sh` | **DELETE (architectural — SHIPPED)** | AISDLC-385 — bundle distributed via `@ai-sdlc/plugin-mcp-server` npm package; hook + CI verifier + in-tree `dist/` removed |
 | 4 | `squash-attestation-chores.sh` | KEEP through cutover, DELETE post-383.7 | Fold into 383.7's v5-cleanup PR |
@@ -486,7 +486,7 @@ Standard governance — PR must link to an issue. Posted by GitHub's bot integra
 
 | # | Gate | Verdict | Follow-up |
 |---|---|---|---|
-| 1 | Build & Test | OPTIMIZE | AISDLC-389 ✅ merged (stopgapped — see AISDLC-390 below) |
+| 1 | Build & Test | OPTIMIZE | AISDLC-389 ✅ merged (PR #607) + AISDLC-390 ✅ merged (PR #617, restores foundation filters) |
 | 2 | Coverage | KEEP | — |
 | 3 | Integration Tests | KEEP | — |
 | 4 | Lint & Format | KEEP | — |
@@ -504,9 +504,8 @@ Standard governance — PR must link to an issue. Posted by GitHub's bot integra
 
 ## Status — Audit COMPLETE
 
-All 7 pre-push hooks + 11 CI gates audited. 4 follow-up tasks shipped via the audit (AISDLC-385, 386, 388, 389). 2 decisions filed in the Decision Catalog (RFC-0035) for architectural questions raised in review (`tarball-sig`, `ship-shrinkwrap` — view with `AI_SDLC_DECISION_CATALOG=experimental node pipeline-cli/bin/cli-decisions.mjs list`). 2 audit-driven follow-ups still to file:
+All 7 pre-push hooks + 11 CI gates audited. 5 follow-up tasks shipped via the audit (AISDLC-385, 386, 388, 389, 390). 2 decisions filed in the Decision Catalog (RFC-0035) for architectural questions raised in review (`tarball-sig`, `ship-shrinkwrap` — view with `AI_SDLC_DECISION_CATALOG=experimental node pipeline-cli/bin/cli-decisions.mjs list`). 1 audit-driven follow-up still to file:
 
-- **AISDLC-390** — pnpm `--filter "...[origin/main]"` doesn't build transitive deps; CI Build & Test temporarily stopgapped to `pnpm -r build` in AISDLC-385 PR. Need to either restore the filter with a pre-step that builds workspace foundations, or accept the stopgap and close the filter optimization for Build & Test.
 - **AISDLC-391** — 383.8 security minors that never got filed: head-sha shape validation (40-hex-char check) + transcript-path traversal hardening (constrain to `<repo-root>/.ai-sdlc/`).
 
 AISDLC-384 task can now move to `backlog/completed/` once this PR merges.
