@@ -347,10 +347,7 @@ describe('check-coverage.sh — foundation filter args (AISDLC-390 AC-2)', () =>
   // literal filter args in the script is the closest mechanical guard.
 
   it('pre-coverage build includes orchestrator/pipeline-cli/reference foundation filters', () => {
-    const SCRIPT = readFileSync(
-      join(import.meta.dirname, 'check-coverage.sh'),
-      'utf-8',
-    );
+    const SCRIPT = readFileSync(join(import.meta.dirname, 'check-coverage.sh'), 'utf-8');
     // The build invocation must reference all three foundation packages.
     assert.match(SCRIPT, /--filter "@ai-sdlc\/orchestrator"/, 'orchestrator missing');
     assert.match(SCRIPT, /--filter "@ai-sdlc\/pipeline-cli"/, 'pipeline-cli missing');
