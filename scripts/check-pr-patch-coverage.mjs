@@ -119,6 +119,11 @@ const NON_INSTRUMENTED_PATTERNS = [
   /(^|\/)src\/.*\/index\.ts$/,
   // Generated schemas — sanctioned exclusion per CLAUDE.md.
   /(^|\/)generated-schemas\.ts$/,
+  // bin/*.mjs CLI entrypoint shims — these are thin argv-parse thunks that
+  // delegate to library code; the libraries are unit-tested directly, and the
+  // shims themselves are exercised via subprocess invocation which istanbul
+  // can't instrument. Same rationale as `src/cli-*.ts` above.
+  /(^|\/)bin\/.+\.mjs$/,
 ];
 
 // ── Argv parsing ─────────────────────────────────────────────────────────────
