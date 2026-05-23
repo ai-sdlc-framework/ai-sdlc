@@ -215,14 +215,21 @@ describe('sign-attestation.mjs', () => {
       { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
     );
     assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
-    const expectedPath = join(
+    // AISDLC-398 dual-write: the SHA-keyed bridge envelope is always written.
+    const shaEnvelopePath = join(
       fixture.root,
       '.ai-sdlc',
       'attestations',
       `${fixture.headSha}.dsse.json`,
     );
-    assert.ok(existsSync(expectedPath), `expected envelope at ${expectedPath}`);
-    assert.ok(res.stdout.includes(expectedPath), 'stdout should print the written path');
+    assert.ok(existsSync(shaEnvelopePath), `expected SHA bridge envelope at ${shaEnvelopePath}`);
+    // Stdout prints the PRIMARY envelope path (patch-id when available, SHA when not).
+    // Either way it must be a .dsse.json path that actually exists.
+    const printedPath = res.stdout.trim();
+    assert.ok(
+      printedPath.endsWith('.dsse.json') && existsSync(printedPath),
+      `stdout should print a valid written .dsse.json path, got: ${printedPath}`,
+    );
   });
 
   // ── AISDLC-102: --print-content-hash oracle mode ──────────────────
@@ -600,13 +607,112 @@ describe('sign-attestation.mjs', () => {
     );
     assert.ok(existsSync(round2Envelope), 'round-2 envelope must exist at the new HEAD SHA');
 
-    // Exactly 1 envelope must remain.
+    // Dual-write (AISDLC-398) produces 1 or 2 envelopes:
+    //   - 1 envelope  → patch-id computation failed; only the SHA bridge was written
+    //   - 2 envelopes → patch-id succeeded; primary (<patch-id>.dsse.json) + bridge (<sha>.dsse.json)
     const attDir = join(fixture.root, '.ai-sdlc', 'attestations');
     const envelopes = readdirSync(attDir).filter((f) => f.endsWith('.dsse.json'));
+    assert.ok(
+      envelopes.length >= 1 && envelopes.length <= 2,
+      `dual-write produces 1 (no patch-id) or 2 (patch-id + bridge) envelopes, got ${envelopes.length}: ${envelopes.join(', ')}`,
+    );
+
+    // Exactly ONE non-bridge envelope must exist.
+    // The bridge is identified by its filename: <newHeadSha>.dsse.json.
+    // The primary is any envelope whose filename is NOT the SHA bridge.
+    const bridgeFilename = `${newHeadSha}.dsse.json`;
+    const primaryEnvelopes = envelopes.filter((f) => f !== bridgeFilename);
     assert.equal(
-      envelopes.length,
+      primaryEnvelopes.length,
       1,
-      `expected exactly 1 envelope after round-2 sign, got ${envelopes.length}: ${envelopes.join(', ')}`,
+      `expected exactly 1 non-bridge (primary) envelope after round-2 sign, got ${primaryEnvelopes.length}: ${primaryEnvelopes.join(', ')}`,
+    );
+  });
+
+  it('computePatchIdForFilename succeeds for diffs >64KB (AISDLC-398 maxBuffer fix)', () => {
+    // Regression test for the AISDLC-398 round-2 finding: the spawnSync call
+    // to `git patch-id --stable` in computePatchIdForFilename previously used
+    // maxBuffer: 64 * 1024 (64KB). Large diffs (thousands of lines, common for
+    // generated files or large feature branches) would cause spawnSync to throw
+    // ENOBUFS, silently returning null and falling back to the per-SHA envelope
+    // filename. The fix bumps to 128MB to match the git diff-tree call.
+    //
+    // This test commits a file >80KB so the unified diff output exceeds 64KB,
+    // then signs and asserts that the content-addressed patch-id envelope
+    // (<patch-id>.dsse.json) was written — confirming that computePatchIdForFilename
+    // returned non-null rather than null-falling-back.
+
+    writeKey(tmpHome);
+
+    // Generate a >80KB text file to produce a large diff.
+    // 80KB / ~50 chars per line ≈ 1600 lines. We use 2000 lines to be safe.
+    const lines = [];
+    for (let i = 0; i < 2000; i++) {
+      lines.push(`line ${i}: ${'x'.repeat(40)}`);
+    }
+    const largeContent = lines.join('\n') + '\n';
+    assert.ok(Buffer.byteLength(largeContent, 'utf-8') > 64 * 1024, 'fixture must be >64KB');
+
+    writeFileSync(join(fixture.root, 'large-fixture.txt'), largeContent);
+    git(['add', 'large-fixture.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: add large fixture for diff >64KB'], fixture.root);
+    const newHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Update origin/main to still point at the base so the diff range covers
+    // the large-fixture commit.
+    execFileSync('git', ['update-ref', 'refs/remotes/origin/main', fixture.baseSha], {
+      cwd: fixture.root,
+      env: cleanEnv(),
+    });
+
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify([
+        {
+          agentId: 'code-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'test-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'security-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+      ]),
+    );
+
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
+    );
+    assert.equal(res.status, 0, `sign failed for large diff: ${res.stderr}`);
+
+    // The content-addressed (patch-id) envelope must have been written.
+    // If computePatchIdForFilename returned null due to ENOBUFS, only
+    // <head-sha>.dsse.json would exist, not a <patch-id>.dsse.json.
+    const attDir = join(fixture.root, '.ai-sdlc', 'attestations');
+    const envelopes = readdirSync(attDir).filter((f) => f.endsWith('.dsse.json'));
+    const patchIdEnvelopes = envelopes.filter((f) => f !== `${newHead}.dsse.json`);
+    assert.ok(
+      patchIdEnvelopes.length > 0,
+      `expected a content-addressed (patch-id) envelope for large diff but found only: ${envelopes.join(', ')}. ` +
+        `This indicates computePatchIdForFilename failed (ENOBUFS from 64KB maxBuffer).`,
+    );
+    // The patch-id envelope filename must be 40 hex chars + '.dsse.json'.
+    assert.match(
+      patchIdEnvelopes[0],
+      /^[0-9a-f]{40}\.dsse\.json$/i,
+      `content-addressed envelope filename should be <40-hex-patch-id>.dsse.json, got: ${patchIdEnvelopes[0]}`,
     );
   });
 });

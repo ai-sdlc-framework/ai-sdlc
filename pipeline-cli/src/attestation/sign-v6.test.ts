@@ -443,6 +443,72 @@ describe('schema-invalid envelope detection', () => {
   });
 });
 
+// ── AISDLC-398: patchId content-addressed dual-write ─────────────────────────
+
+describe('signAndWriteV6Envelope — content-addressed dual-write (AISDLC-398 fix #1)', () => {
+  it('writes <patchId>.v6.dsse.json AND <headSha>.v6.dsse.json when patchId is provided', () => {
+    const FAKE_PATCH_ID = 'd'.repeat(40);
+    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-398' }), tmpRoot);
+
+    const outPath = signAndWriteV6Envelope({
+      repoRoot: tmpRoot,
+      headSha: FAKE_HEAD_SHA,
+      taskId: 'AISDLC-398',
+      privateKeyPem,
+      patchId: FAKE_PATCH_ID,
+    });
+
+    // Primary filename is the patch-id-named file.
+    expect(outPath).toContain(`${FAKE_PATCH_ID}.v6.dsse.json`);
+    const primaryContent = readFileSync(outPath, 'utf8');
+    const primaryParsed = JSON.parse(primaryContent);
+    expect(primaryParsed.schemaVersion).toBe('v6');
+
+    // Legacy bridge file must also exist with identical content.
+    const legacyPath = join(tmpRoot, '.ai-sdlc', 'attestations', `${FAKE_HEAD_SHA}.v6.dsse.json`);
+    const legacyContent = readFileSync(legacyPath, 'utf8');
+    expect(legacyContent).toBe(primaryContent);
+  });
+
+  it('returns <headSha>.v6.dsse.json path and writes only one file when patchId is absent', () => {
+    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-398' }), tmpRoot);
+
+    const outPath = signAndWriteV6Envelope({
+      repoRoot: tmpRoot,
+      headSha: FAKE_HEAD_SHA,
+      taskId: 'AISDLC-398',
+      privateKeyPem,
+      // patchId intentionally omitted
+    });
+
+    expect(outPath).toContain(`${FAKE_HEAD_SHA}.v6.dsse.json`);
+    const parsed = JSON.parse(readFileSync(outPath, 'utf8'));
+    expect(parsed.schemaVersion).toBe('v6');
+
+    // No extra file should exist for a fake patch-id (we just verify the path).
+    expect(outPath).not.toContain('.v6.dsse.json.v6.dsse.json');
+  });
+
+  it('envelope subject.digest.sha1 is always the headSha, not the patchId', () => {
+    const FAKE_PATCH_ID = 'e'.repeat(40);
+    appendLeaf(makeLeaf({ leafIndex: 0, taskId: 'AISDLC-398' }), tmpRoot);
+
+    const outPath = signAndWriteV6Envelope({
+      repoRoot: tmpRoot,
+      headSha: FAKE_HEAD_SHA,
+      taskId: 'AISDLC-398',
+      privateKeyPem,
+      patchId: FAKE_PATCH_ID,
+    });
+
+    const parsed = JSON.parse(readFileSync(outPath, 'utf8')) as AttestationEnvelopeV6;
+    // The envelope's internal subject SHA must be the actual HEAD SHA,
+    // NOT the patchId — this is what the verifier checks for replay protection.
+    expect(parsed.subject.digest.sha1).toBe(FAKE_HEAD_SHA);
+    expect(parsed.subject.digest.sha1).not.toBe(FAKE_PATCH_ID);
+  });
+});
+
 // ── Sign / verify roundtrip ───────────────────────────────────────────────────
 //
 // The signer produces an ed25519 signature; the verifier (Phase 3 / AISDLC-383.4)
