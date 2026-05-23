@@ -658,8 +658,16 @@ export interface RichDispatchResult {
  */
 export type UmbrellaDispatchFn = (taskId: string) => Promise<RichDispatchResult>;
 
-/** Adapter that fetches the dispatch frontier (defaults to cli-deps frontier()). */
-export type FrontierFn = () => Array<{ id: string; title: string }>;
+/**
+ * Adapter that fetches the dispatch frontier (defaults to cli-deps frontier()).
+ *
+ * `filePath` is OPTIONAL and only populated by the AISDLC-373 single-PR
+ * `--task-from-file` path. The autonomous frontier (`cli-deps frontier()`)
+ * leaves it undefined; downstream code uses it to override the default
+ * `findTaskFile()` lookup so a worktree-local task file (one that hasn't
+ * been observed by the dependency-graph scan on `main`) still resolves.
+ */
+export type FrontierFn = () => Array<{ id: string; title: string; filePath?: string }>;
 
 /** Adapter that tags a PR with `needs-human-attention`. Shells out to `gh` in production. */
 export type EscalateFn = (taskId: string, reason: string, prUrl: string | null) => Promise<void>;

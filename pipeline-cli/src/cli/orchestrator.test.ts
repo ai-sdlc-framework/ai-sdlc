@@ -10,8 +10,8 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { tmpdir } from 'node:os';
 import {
   buildOrchestratorCli,
@@ -662,5 +662,226 @@ describe('cli-orchestrator tick default spawner (AISDLC-352)', () => {
     const out = stdoutJson() as { ok: boolean; mode: string };
     expect(out.ok).toBe(true);
     expect(out.mode).toBe('tick');
+  });
+});
+
+// ── AISDLC-373: tick --task-from-file (single-PR operator-driven flow) ─────
+
+describe('cli-orchestrator tick --task-from-file (AISDLC-373)', () => {
+  let tmpDir: string;
+  let cleanup: () => void;
+
+  beforeEach(() => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'aisdlc-373-tff-'));
+    cleanup = () => rmSync(tmpDir, { recursive: true, force: true });
+    process.env[ORCHESTRATOR_FLAG] = 'experimental';
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  function writeTaskFile(relativePath: string, id: string, title: string): string {
+    const absolute = join(tmpDir, relativePath);
+    // Use path.dirname for cross-platform correctness — lastIndexOf('/') breaks
+    // on Windows where the separator is '\\'. (Round-2 reviewer minor fix.)
+    mkdirSync(dirname(absolute), { recursive: true });
+    writeFileSync(
+      absolute,
+      [`---`, `id: ${id}`, `title: ${title}`, `status: To Do`, `---`, ``, `## Problem`, `x`].join(
+        '\n',
+      ),
+      'utf8',
+    );
+    return absolute;
+  }
+
+  it('synthesizes a one-element frontier from the resolved task file', async () => {
+    const taskFile = writeTaskFile(
+      '.worktrees/aisdlc-500/backlog/tasks/aisdlc-500 - manual-pick.md',
+      'AISDLC-500',
+      'manual pick test',
+    );
+
+    const dispatchedIds: string[] = [];
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      sleep: () => Promise.resolve(),
+      // Inject a frontier that returns the WRONG task. The CLI's
+      // --task-from-file should override this with the resolved task file.
+      frontier: () => [{ id: 'AISDLC-WRONG', title: 'wrong' }],
+      dispatch: async (taskId) => {
+        dispatchedIds.push(taskId);
+        return approvedResult(taskId);
+      },
+      escalate: async () => {},
+      parentBranchGuard: async () => {},
+    };
+
+    setArgv('tick', '--max-concurrent', '1', '--task-from-file', taskFile);
+    await buildOrchestratorCli(adapters).parseAsync();
+
+    const out = stdoutJson() as {
+      ok: boolean;
+      mode: string;
+      tick: { dispatched: string[]; candidates: number };
+    };
+    expect(out.ok).toBe(true);
+    expect(out.mode).toBe('tick');
+    expect(out.tick.candidates).toBe(1);
+    expect(out.tick.dispatched).toEqual(['AISDLC-500']);
+    expect(dispatchedIds).toEqual(['AISDLC-500']);
+  });
+
+  it('bypasses the §4.3 admission filter chain (no graphLoader needed)', async () => {
+    const taskFile = writeTaskFile(
+      'backlog/tasks/aisdlc-501 - bypass-test.md',
+      'AISDLC-501',
+      'bypass test',
+    );
+
+    // graphLoader is INTENTIONALLY omitted to prove the loop never calls
+    // it. If the filter chain weren't bypassed, the default in-process
+    // graph builder would walk the tmp tmpDir and dispatch would happen
+    // (or fail) based on the filter outcome rather than the bypass.
+    const dispatchedIds: string[] = [];
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      sleep: () => Promise.resolve(),
+      frontier: () => [],
+      dispatch: async (taskId) => {
+        dispatchedIds.push(taskId);
+        return approvedResult(taskId);
+      },
+      escalate: async () => {},
+      parentBranchGuard: async () => {},
+    };
+
+    setArgv('tick', '--work-dir', tmpDir, '--max-concurrent', '1', '--task-from-file', taskFile);
+    await buildOrchestratorCli(adapters).parseAsync();
+
+    const out = stdoutJson() as {
+      ok: boolean;
+      tick: { dispatched: string[]; filterEvents: unknown[] };
+    };
+    expect(out.ok).toBe(true);
+    expect(out.tick.dispatched).toEqual(['AISDLC-501']);
+    // No filter chain ran → no filter events.
+    expect(out.tick.filterEvents).toEqual([]);
+    expect(dispatchedIds).toEqual(['AISDLC-501']);
+  });
+
+  it('exits 1 with a structured error when the task file does not exist', async () => {
+    setArgv('tick', '--max-concurrent', '1', '--task-from-file', join(tmpDir, 'no-such-file.md'));
+    await expect(
+      buildOrchestratorCli({
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        parentBranchGuard: async () => {},
+      }).parseAsync(),
+    ).rejects.toThrow('process.exit(1)');
+
+    const err = stderrJson() as { ok: boolean; reason: string };
+    expect(err.ok).toBe(false);
+    expect(err.reason).toContain('--task-from-file');
+    expect(err.reason).toContain('does not exist');
+  });
+
+  it('exits 1 with a structured error when the filename does not match the convention', async () => {
+    const badFile = join(tmpDir, 'random-name.md');
+    writeFileSync(badFile, '---\nid: X\n---\n', 'utf8');
+
+    setArgv('tick', '--max-concurrent', '1', '--task-from-file', badFile);
+    await expect(
+      buildOrchestratorCli({
+        logger: silentLogger(),
+        sleep: () => Promise.resolve(),
+        parentBranchGuard: async () => {},
+      }).parseAsync(),
+    ).rejects.toThrow('process.exit(1)');
+
+    const err = stderrJson() as { ok: boolean; reason: string };
+    expect(err.ok).toBe(false);
+    expect(err.reason).toContain('does not match');
+  });
+
+  // Round-2 reviewer MAJOR fix — integration: drive the REAL umbrella dispatch
+  // path (not a mocked `dispatch` adapter) end-to-end with `--task-from-file`
+  // pointing at a worktree-local file. Assert that the executor receives the
+  // resolved `taskFilePathOverride` so the downstream `runExecuteCommand` →
+  // `executePipeline` → Step 1 `validateTask` chain can actually find the
+  // operator-supplied file.
+  //
+  // The previous test in this block used the legacy `dispatch` adapter which
+  // bypasses the umbrella path entirely; that left the documented runbook
+  // (operator creates `.worktrees/aisdlc-NNN/backlog/tasks/<...>.md` then runs
+  // `cli-orchestrator tick --task-from-file <path>`) silently broken because
+  // the inner `findTaskFile()` scan only looks at `<workDir>/backlog/tasks/`.
+  it('threads --task-from-file path through the umbrella dispatch to runExecuteCommand', async () => {
+    const taskFile = writeTaskFile(
+      '.worktrees/aisdlc-502/backlog/tasks/aisdlc-502 - umbrella-thread.md',
+      'AISDLC-502',
+      'umbrella thread test',
+    );
+
+    const executorCalls: Array<{ taskId: string; taskFilePathOverride?: string }> = [];
+    const adapters: OrchestratorAdapters = {
+      logger: silentLogger(),
+      sleep: () => Promise.resolve(),
+      // umbrellaExecutor IS the test seam closest to the real
+      // `runExecuteCommand` call — it sits inside `buildDefaultUmbrellaDispatch`
+      // immediately above `runExecuteCommand(...)`. Asserting that the
+      // executor sees `taskFilePathOverride` proves the threading wires all
+      // the way from CLI parse → synthetic frontier → per-tick file-path map
+      // → default umbrella dispatch → executor invocation.
+      umbrellaExecutor: async (taskId, spawnerKind, opts) => {
+        executorCalls.push({
+          taskId,
+          ...(opts?.taskFilePathOverride !== undefined
+            ? { taskFilePathOverride: opts.taskFilePathOverride }
+            : {}),
+        });
+        return {
+          ok: true,
+          pipeline: approvedResult(taskId),
+        };
+      },
+      escalate: async () => {},
+      parentBranchGuard: async () => {},
+      graphLoader: () => ({ nodes: new Map(), openIds: [], completedIds: [] }),
+      taskLabelsLoader: () => [],
+      calibrationLogPath: '/nonexistent-bypass.jsonl',
+    };
+
+    setArgv(
+      'tick',
+      '--work-dir',
+      tmpDir,
+      '--max-concurrent',
+      '1',
+      '--task-from-file',
+      taskFile,
+      // Default spawner is `claude`; pass `codex` so we don't trip the
+      // ANTHROPIC_API_KEY billing-safety warning emit path.
+      '--spawner',
+      'codex',
+    );
+
+    await buildOrchestratorCli(adapters).parseAsync();
+
+    expect(executorCalls).toHaveLength(1);
+    expect(executorCalls[0].taskId).toBe('AISDLC-502');
+    // The critical assertion: the override the operator passed via
+    // `--task-from-file` reached the executor. Without the round-2 threading
+    // fix this field was undefined, leaving the inner validateTask to scan
+    // `<workDir>/backlog/tasks/` and fail with `no task file for AISDLC-502`.
+    expect(executorCalls[0].taskFilePathOverride).toBe(taskFile);
+
+    const out = stdoutJson() as {
+      ok: boolean;
+      tick: { dispatched: string[] };
+    };
+    expect(out.ok).toBe(true);
+    expect(out.tick.dispatched).toEqual(['AISDLC-502']);
   });
 });

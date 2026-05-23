@@ -1016,6 +1016,111 @@ babysitting.
 - Defer the auto-move for a specific push: `AI_SDLC_SKIP_TASK_MOVE=1 git push`.
   You are then responsible for moving the file manually before or after push.
 
+## Single-PR operator-driven flow (AISDLC-373)
+
+**Preferred path for operator-driven work.** Collapses the legacy 2-PR
+pattern (task-file PR → wait for merge → implementation PR) into one PR
+that contains BOTH the task body and the implementation.
+
+The 2-PR pattern remains valid — and required — for autonomous orchestrator
+dispatches, because the frontier-on-main scan cannot see worktree-local
+task files. The single-PR flow is purely additive: a new mode you opt into
+when YOU are picking the next task by hand.
+
+### When to use
+
+| Path | Use this when |
+|---|---|
+| Single-PR flow (this section) | You are manually triggering work on a task you just decided to do. You know the implementation shape; you don't need a separate plan-review checkpoint. |
+| Legacy 2-PR pattern (file task → wait → implement) | Autonomous orchestrator dispatches (`cli-orchestrator tick` without `--task-from-file`). Frontier scan reads `main`-state task files. |
+| `/ai-sdlc execute <task-id>` | Slash-command path that already follows the spirit of single-PR — it creates the worktree, dispatches the dev, and commits task + impl together. Recommended over manual `--task-from-file` for the operator's day-to-day. |
+
+### The flow
+
+```bash
+# 1. Create the task file under a worktree-local path. The simplest shape:
+#    one worktree per task, file lives under `.worktrees/<id>/backlog/tasks/`.
+mkdir -p .worktrees/aisdlc-NNN/backlog/tasks
+$EDITOR .worktrees/aisdlc-NNN/backlog/tasks/aisdlc-NNN\ -\ <slug>.md
+
+# 2. Dispatch a developer subagent against the worktree-local file.
+#    The orchestrator bypasses the frontier query and the §4.3 admission
+#    filter chain (you already chose the task; the dependency graph
+#    hasn't observed the file yet).
+cli-orchestrator tick \
+  --task-from-file .worktrees/aisdlc-NNN/backlog/tasks/aisdlc-NNN\ -\ <slug>.md
+
+# 3. The dev subagent works in the same `.worktrees/aisdlc-NNN/`,
+#    implements the task, commits BOTH the task file and the implementation,
+#    runs the pre-push gates (DoR check, attestation sign, task-move), and
+#    opens the PR.
+
+# 4. The PR contains:
+#    - The task body (new file under `backlog/tasks/` or `backlog/completed/`)
+#    - The implementation diff
+#    - The chore commit moving `tasks/` → `completed/` (added by the
+#      pre-push `check-task-moved.sh` hook on first push)
+```
+
+### What changed under the hood
+
+- **`cli-orchestrator tick --task-from-file <path>`** (this task): resolves
+  the file into `{id, title}`, synthesizes a one-element frontier, and
+  sets `bypassFilters: true` on the orchestrator adapters. Filters
+  skipped: `DependencyReadiness`, `Blocked`, `Dispatchability`,
+  `DorReadiness`, `BlastRadiusOverlap`, `AlreadyInFlight`,
+  `OpenPullRequestExists`, `ExternalDependencies`. The in-flight claim
+  guard, the parent-branch guard, and the per-tick worktree sweep all
+  continue to run — those are correctness invariants, not §4.3 admission
+  filters.
+- **DoR ingress on the PR diff**: the existing
+  `.github/workflows/dor-ingress.yml` already runs `dor-evaluate` against
+  every `backlog/tasks/*.md` file newly added on the PR side (the
+  `--diff-filter=AM` `git diff` covers Added + Modified). So as long as
+  the dev places the task file under `backlog/tasks/` at PR-open time
+  (which is the default — `check-task-moved.sh` runs at push time and
+  produces the chore commit moving it to `completed/`), the DoR
+  evaluation fires on the same PR that carries the implementation. The
+  workflow does NOT today scan `backlog/completed/*.md` additions; if a
+  future revision lands the task body directly in `completed/`, extending
+  the `paths:` filter is a follow-up workflow change tracked separately
+  (no code work needed in this task).
+- **Frontier behavior unchanged**: `cli-orchestrator tick` (no
+  `--task-from-file`) still consults the dependency-graph frontier on
+  `main` and runs the full filter chain. Autonomous loops behave
+  identically to before AISDLC-373.
+
+### Why the bypass is safe
+
+The §4.3 admission filters exist to protect the autonomous orchestrator
+from picking bad work — tasks blocked on upstream RFCs, tasks whose
+dependencies aren't done, tasks already in flight from a sibling worktree.
+When the operator manually invokes `--task-from-file`, those signals are
+either irrelevant (the operator has already weighed the trade-off) or
+covered by other gates:
+
+- **Upstream OQ status** — the pre-push `check-dor-gate.sh` hook still
+  runs `cli-dor-check` against the task file in enforce mode, so an
+  upstream-OQ violation in a worktree-local file blocks the push the same
+  way it blocks an autonomous dispatch.
+- **Already in-flight** — the orchestrator's in-flight claim guard (a
+  correctness invariant, not a §4.3 filter) continues to fire; a duplicate
+  `--task-from-file` while the first is mid-dispatch is rejected.
+- **Parent on `main`** — the parent-branch guard runs first thing in the
+  tick, regardless of `bypassFilters`.
+
+### Operator errors and resolution
+
+- **`--task-from-file: task file does not exist`** — check the path is
+  absolute or relative to `cwd`. Spaces in filenames need backslash-
+  escaping or quoting (`aisdlc-NNN\ -\ slug.md`).
+- **`--task-from-file: task filename does not match …`** — the helper
+  enforces the Backlog.md convention `aisdlc-NN[.M] - <slug>.md`. Rename
+  the file to match before dispatching.
+- **`--task-from-file: failed to read task file …`** — usually a
+  frontmatter parse error. Open the file and confirm the leading `---`
+  fences + valid YAML.
+
 ## Step 0.5 — path-mismatch reconciliation (AISDLC-222)
 
 Step 0.5 (`pipeline-cli/src/steps/00-5-sync-parent.ts`) detects untracked
