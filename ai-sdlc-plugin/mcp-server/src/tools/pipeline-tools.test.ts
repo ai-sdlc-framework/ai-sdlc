@@ -582,7 +582,7 @@ describe('pipeline_step_12_sibling_prs', () => {
 
 describe('pipeline_step_13_cleanup', () => {
   it('invokes cleanupTask and returns sentinelRemoved', async () => {
-    const clean = vi.fn(async () => ({ sentinelRemoved: true }));
+    const clean = vi.fn(async () => ({ sentinelRemoved: true, syntheticTaskFileRemoved: false }));
     const { server, tools } = createServerStub();
     registerPipelineTools(server, {
       stepRunners: makeRunnersWithDefaults({ cleanupTask: clean }),
