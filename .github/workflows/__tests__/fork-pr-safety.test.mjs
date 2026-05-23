@@ -682,15 +682,15 @@ describe('AISDLC-381: regression — required statuses still produced for same-r
     assert.match(raw, /Post Review Results/, 'must post Post Review Results status');
   });
 
-  it('verify-attestation.yml still triggers on merge_group (sibling-rebase coverage)', () => {
+  it('verify-attestation.yml does NOT trigger on merge_group (AISDLC-400: queue dropped)', () => {
     const wf = loadYaml('verify-attestation.yml');
     const triggers = getTriggers(wf);
-    assert.ok('merge_group' in triggers, 'must still trigger on merge_group');
+    assert.ok(!('merge_group' in triggers), 'must NOT trigger on merge_group post-AISDLC-400');
   });
 
-  it('ai-sdlc-review.yml still triggers on merge_group (docs-only queue commits)', () => {
+  it('ai-sdlc-review.yml does NOT trigger on merge_group (AISDLC-400: queue dropped)', () => {
     const wf = loadYaml('ai-sdlc-review.yml');
     const triggers = getTriggers(wf);
-    assert.ok('merge_group' in triggers, 'must still trigger on merge_group');
+    assert.ok(!('merge_group' in triggers), 'must NOT trigger on merge_group post-AISDLC-400');
   });
 });
