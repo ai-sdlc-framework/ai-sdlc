@@ -9,7 +9,12 @@
 # `cli-dor-check --staged --push-range` to walk the touched task files.
 #
 # Skip with AI_SDLC_SKIP_DOR_GATE=1.
-# No-op when the bin isn't built yet (fresh worktree before pnpm build).
+#
+# AISDLC-378: when the push touches backlog task files AND pipeline-cli/dist
+# is missing, FAIL LOUD with a build instruction (don't silently no-op —
+# that's how the 2026-05-20 incident slipped 5 violating task files past
+# the gate). When the push has NO task changes and dist is missing, still
+# silently exit 0 so fresh-worktree pushes of unrelated code aren't blocked.
 
 set -euo pipefail
 
@@ -23,14 +28,11 @@ if [ "${AI_SDLC_SKIP_DOR_GATE:-}" = "1" ]; then
   exit 0
 fi
 
-# Locate the bin. Fresh worktrees may not have built pipeline-cli yet —
-# in that case no-op so the hook doesn't block a first-build push.
+# Locate the bin + compiled module. Whether a missing dist is fatal depends
+# on whether the push touches backlog task files — that check is deferred
+# until after we've walked the push range.
 BIN="pipeline-cli/bin/cli-dor-check.mjs"
 DIST="pipeline-cli/dist/cli/dor-check.js"
-if [ ! -f "$BIN" ] || [ ! -f "$DIST" ]; then
-  # Bin or compiled module missing — fresh worktree. Silently skip.
-  exit 0
-fi
 
 # Parse pre-push stdin protocol. Each line: <local ref> <local sha> <remote ref> <remote sha>
 # Aggregate every touched task file across all push lines, then run ONE check.
@@ -66,8 +68,20 @@ done
 TASK_FILES=$(printf '%s' "$TASK_FILES" | sort -u | sed '/^$/d')
 
 if [ -z "$TASK_FILES" ]; then
-  # No backlog task changes in this push — nothing to check
+  # No backlog task changes in this push — nothing to check, even if dist
+  # is missing. Don't block first-build pushes of unrelated code.
   exit 0
+fi
+
+# AISDLC-378: push touches backlog task files. Bin/dist MUST be present —
+# silently skipping here is what allowed the 2026-05-20 incident to ship
+# 5 violating task files past the gate. Refuse and point at the build cmd.
+if [ ! -f "$BIN" ] || [ ! -f "$DIST" ]; then
+  echo "[dor-gate] ERROR: push touches backlog task files but pipeline-cli is not built." >&2
+  echo "[dor-gate]   Missing: $DIST" >&2
+  echo "[dor-gate] Run: pnpm --filter @ai-sdlc/pipeline-cli build" >&2
+  echo "[dor-gate] Or skip with: AI_SDLC_SKIP_DOR_GATE=1 git push (NOT RECOMMENDED)" >&2
+  exit 1
 fi
 
 echo "[dor-gate] checking $(echo "$TASK_FILES" | wc -l | tr -d ' ') backlog task file(s)..."

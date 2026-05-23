@@ -239,12 +239,15 @@ describe('check-dor-gate.sh (AISDLC-370)', () => {
       assert.match(r.stdout, /XXX|placeholder/i);
     });
 
-    it('exit 0 when the bin is missing (fresh worktree pre-build)', () => {
-      // Simulate fresh worktree by pointing at a non-existent pipeline-cli dist.
-      // We re-symlink dist/ to a missing path.
+    it('exit 1 when bin/dist missing AND push touches backlog tasks (AISDLC-378)', () => {
+      // Simulate fresh worktree by removing the symlinked dist directory.
+      // The push range INCLUDES a backlog task file, so this must fail loud
+      // — silently skipping here is what allowed the 2026-05-20 incident
+      // to ship 5 violating task files past the gate.
       const distDir = join(root, 'pipeline-cli', 'dist');
       rmSync(distDir, { recursive: true, force: true });
       mkdirSync(distDir, { recursive: true });
+      // Note: dist/cli/dor-check.js is now absent.
 
       const path = writeTaskFile(root, 'aisdlc-9002', GATE2_MARKER_TASK);
       git(['add', path], root);
@@ -253,8 +256,30 @@ describe('check-dor-gate.sh (AISDLC-370)', () => {
       const base = git(['rev-parse', 'HEAD~1'], root).trim();
 
       const r = runGate(root, `refs/heads/main ${head} refs/heads/main ${base}\n`);
-      // dist/cli/dor-check.js is missing — should silently skip with exit 0.
-      assert.equal(r.code, 0, `expected silent no-op, got: ${r.stdout}\n${r.stderr}`);
+      assert.equal(r.code, 1, `expected exit 1 (fail loud), got: ${r.stdout}\n${r.stderr}`);
+      assert.match(r.stderr, /pipeline-cli is not built/);
+      assert.match(r.stderr, /pnpm --filter @ai-sdlc\/pipeline-cli build/);
+    });
+
+    it('exit 0 when bin/dist missing AND push has NO task changes (fresh worktree)', () => {
+      // Even without dist, a push of unrelated code (no backlog tasks)
+      // should still silently no-op so first-build pushes aren't blocked.
+      const distDir = join(root, 'pipeline-cli', 'dist');
+      rmSync(distDir, { recursive: true, force: true });
+      mkdirSync(distDir, { recursive: true });
+
+      writeFileSync(join(root, 'src.txt'), 'code\n');
+      git(['add', 'src.txt'], root);
+      git(['commit', '-q', '-m', 'feat: non-task change'], root);
+      const head = git(['rev-parse', 'HEAD'], root).trim();
+      const base = git(['rev-parse', 'HEAD~1'], root).trim();
+
+      const r = runGate(root, `refs/heads/main ${head} refs/heads/main ${base}\n`);
+      assert.equal(
+        r.code,
+        0,
+        `expected silent no-op (no task changes), got: ${r.stdout}\n${r.stderr}`,
+      );
     });
   } else {
     it.skip('skipped: pipeline-cli bin/dist not built (run pnpm build first)', () => {});
