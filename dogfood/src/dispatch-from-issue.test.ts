@@ -11,6 +11,7 @@ import {
   extractAcceptanceCriteria,
   extractPermittedExternalPaths,
   fetchGhIssueAsTaskSpec,
+  isValidExternalPath,
 } from './dispatch-from-issue.js';
 
 function ghStubReturning(payload: object): (args: string[]) => Promise<string> {
@@ -103,6 +104,102 @@ describe('extractPermittedExternalPaths (AISDLC-393)', () => {
     expect(
       extractPermittedExternalPaths('no relevant block', [{ name: 'random' }]),
     ).toBeUndefined();
+  });
+
+  // AISDLC-393 round 3 — security review (CRITICAL) — gh-issue body/labels
+  // crosses a trust boundary; reject shapes the operator-vetted backlog
+  // path would never use.
+  it('rejects absolute paths from the label form (host filesystem escape)', () => {
+    const labels = [
+      { name: 'permitted-external-paths:/Users/dominique/.ssh' },
+      { name: 'permitted-external-paths:../legitimate/' },
+    ];
+    const result = extractPermittedExternalPaths('', labels);
+    expect(result).toEqual(['../legitimate/']);
+  });
+
+  it('rejects absolute paths from the body form (host filesystem escape)', () => {
+    const body = ['```permitted-external-paths', '/etc/passwd', '../legitimate/', '```'].join('\n');
+    const result = extractPermittedExternalPaths(body, []);
+    expect(result).toEqual(['../legitimate/']);
+  });
+
+  it('rejects deep + mid-path `..` traversal but accepts single leading `..` sibling', () => {
+    const body = [
+      '```permitted-external-paths',
+      '../../../Users/dominique/.aws/credentials',
+      '../legitimate/',
+      'foo/../bar',
+      '```',
+    ].join('\n');
+    const result = extractPermittedExternalPaths(body, []);
+    expect(result).toEqual(['../legitimate/']);
+  });
+
+  it("rejects entries containing single quotes (defense-in-depth vs synthesizer's YAML emission)", () => {
+    const body = ['```permitted-external-paths', "foo'evil/", '../legitimate/', '```'].join('\n');
+    const result = extractPermittedExternalPaths(body, []);
+    expect(result).toEqual(['../legitimate/']);
+  });
+
+  it('returns undefined when ALL entries are rejected (no false-positive synthetic-file)', () => {
+    const labels = [{ name: 'permitted-external-paths:/Users/dominique/.ssh' }];
+    const body = ['```permitted-external-paths', '../../../etc/passwd', '```'].join('\n');
+    expect(extractPermittedExternalPaths(body, labels)).toBeUndefined();
+  });
+});
+
+describe('isValidExternalPath (AISDLC-393 round 3 — security)', () => {
+  it('accepts safe relative sibling paths', () => {
+    expect(isValidExternalPath('../ai-sdlc-io/')).toBe(true);
+    expect(isValidExternalPath('../other/')).toBe(true);
+    expect(isValidExternalPath('subdir/')).toBe(true);
+    expect(isValidExternalPath('a/b/c')).toBe(true);
+  });
+
+  it('rejects empty / whitespace-only', () => {
+    expect(isValidExternalPath('')).toBe(false);
+    expect(isValidExternalPath('   ')).toBe(false);
+    expect(isValidExternalPath('\t\n')).toBe(false);
+  });
+
+  it('rejects absolute paths (Unix + Windows)', () => {
+    expect(isValidExternalPath('/etc/passwd')).toBe(false);
+    expect(isValidExternalPath('/Users/dominique/.ssh')).toBe(false);
+    expect(isValidExternalPath('//unc/share')).toBe(false);
+  });
+
+  it('accepts a single leading `..` segment (canonical sibling-repo pattern)', () => {
+    expect(isValidExternalPath('..')).toBe(true);
+    expect(isValidExternalPath('../foo')).toBe(true);
+    expect(isValidExternalPath('../ai-sdlc-io/')).toBe(true);
+  });
+
+  it('rejects `..` at non-leading position (mid-path traversal)', () => {
+    expect(isValidExternalPath('foo/../bar')).toBe(false);
+    expect(isValidExternalPath('foo/bar/..')).toBe(false);
+  });
+
+  it('rejects multiple `..` segments (deep traversal)', () => {
+    expect(isValidExternalPath('../..')).toBe(false);
+    expect(isValidExternalPath('../../foo')).toBe(false);
+    expect(isValidExternalPath('../../../etc/passwd')).toBe(false);
+  });
+
+  it('accepts paths that contain `..` as a substring but not a path segment', () => {
+    expect(isValidExternalPath('foo..bar/')).toBe(true);
+    expect(isValidExternalPath('.../weird/')).toBe(true);
+  });
+
+  it('rejects single quotes (YAML-injection defense-in-depth)', () => {
+    expect(isValidExternalPath("foo'/")).toBe(false);
+    expect(isValidExternalPath("'/etc/")).toBe(false);
+  });
+
+  it('rejects newlines and NUL (fenced-block escape)', () => {
+    expect(isValidExternalPath('foo\nbar')).toBe(false);
+    expect(isValidExternalPath('foo\rbar')).toBe(false);
+    expect(isValidExternalPath('foo\0bar')).toBe(false);
   });
 });
 

@@ -16,10 +16,55 @@
  * @module dispatch-from-issue
  */
 import { execFile } from 'node:child_process';
+import { isAbsolute } from 'node:path';
 import { promisify } from 'node:util';
 import type { TaskSpec } from '@ai-sdlc/pipeline-cli';
 
 const execFileAsync = promisify(execFile);
+
+/**
+ * Validate a `permittedExternalPaths` entry sourced from an untrusted GitHub
+ * issue body or label. The PreToolUse hook trusts this allowlist as if it
+ * were operator-vetted (it grants Write/Edit on anything that resolves under
+ * the path), so we MUST reject shapes that would let an attacker escape the
+ * worktree directory.
+ *
+ * Rejects:
+ *   - Absolute paths (`/foo`, `C:\foo`) — would target host filesystem directly.
+ *   - Traversal segments containing `..` — `../../..` escapes the worktree
+ *     even when relative-looking.
+ *   - Single quotes — defense-in-depth against the synthesiser's lenient
+ *     single-quoted YAML emission (security review MINOR).
+ *   - Newlines / NUL — prevent fenced-block-injection past the splitter.
+ *   - Empty / whitespace-only strings.
+ *
+ * Operator-authored backlog task files have ALWAYS been able to declare any
+ * `permittedExternalPaths` shape (no upstream validation in pipeline-cli);
+ * that's fine because the operator vetted the file. The new gh-issue path
+ * crosses a trust boundary, so it gets stricter rules. The two sources can
+ * diverge by design.
+ *
+ * Exported for unit tests.
+ */
+export function isValidExternalPath(p: string): boolean {
+  const trimmed = p.trim();
+  if (trimmed.length === 0) return false;
+  if (isAbsolute(trimmed)) return false;
+  if (/['\n\r\0]/.test(trimmed)) return false;
+  // Allow at most ONE leading `..` segment — the canonical sibling-repo
+  // pattern (`../ai-sdlc-io/`). Reject deeper traversal (`../../../etc/`)
+  // and mid-path traversal (`foo/../bar`). Operator-vetted backlog tasks
+  // have always used the single-`..` pattern; the gh-issue path adopts
+  // the same shape with stricter enforcement at the trust boundary.
+  const segs = trimmed.split(/[/\\]/);
+  const dotDotIndices: number[] = [];
+  for (let i = 0; i < segs.length; i++) {
+    if (segs[i] === '..') dotDotIndices.push(i);
+  }
+  if (dotDotIndices.length > 1) return false;
+  if (dotDotIndices.length === 1 && dotDotIndices[0] !== 0) return false;
+  return true;
+}
 
 /**
  * Subset of `gh issue view` JSON output we depend on. Unknown keys are ignored.
@@ -141,14 +186,22 @@ export function extractPermittedExternalPaths(
   labels: Array<{ name: string }> = [],
 ): string[] | undefined {
   const paths = new Set<string>();
+  const rejected: string[] = [];
+
+  const addIfValid = (candidate: string): void => {
+    const trimmed = candidate.trim();
+    if (trimmed.length === 0) return;
+    if (isValidExternalPath(trimmed)) {
+      paths.add(trimmed);
+    } else {
+      rejected.push(trimmed);
+    }
+  };
 
   // Label form.
   for (const lbl of labels) {
     const m = lbl.name.match(/^permitted-external-paths:(.+)$/);
-    if (m) {
-      const p = m[1].trim();
-      if (p.length > 0) paths.add(p);
-    }
+    if (m) addIfValid(m[1]);
   }
 
   // Body fenced-block form.
@@ -156,9 +209,15 @@ export function extractPermittedExternalPaths(
   if (blockMatch) {
     const lines = blockMatch[1].split('\n');
     for (const line of lines) {
-      const cleaned = line.replace(/^\s*-\s*/, '').trim();
-      if (cleaned.length > 0) paths.add(cleaned);
+      const cleaned = line.replace(/^\s*-\s*/, '');
+      addIfValid(cleaned);
     }
+  }
+
+  if (rejected.length > 0) {
+    process.stderr.write(
+      `[dispatch-from-issue] WARNING: ${rejected.length} permittedExternalPaths entries rejected (absolute, '..' segments, or unsafe chars): ${JSON.stringify(rejected)}\n`,
+    );
   }
 
   if (paths.size === 0) return undefined;
