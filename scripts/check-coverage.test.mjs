@@ -81,14 +81,18 @@ describe('check-coverage.sh — bypass env vars', () => {
   });
 
   it('does NOT bypass when AI_SDLC_BYPASS_ALL_GATES is unset', () => {
-    // Without the bypass, the script tries to run pnpm test:coverage which will
-    // fail in the temp dir (no pnpm, no workspace). We just verify the bypass
-    // logic doesn't fire — exit should be non-zero (the build/coverage step fails).
+    // Verify the bypass guard does not fire when the env var is unset. We
+    // assert positively that the script entered the coverage-walk branch (it
+    // logged the 'running pnpm test:coverage' header) rather than relying on
+    // an exit-code invariant — check-coverage.sh now exits 0 gracefully when
+    // it finds 0 walkable packages, so a non-zero exit assertion is stale.
     const r = runScript(tmpDir, { AI_SDLC_BYPASS_ALL_GATES: '0' });
-    // Should NOT have the bypass message in stderr.
     assert.doesNotMatch(r.stderr ?? '', /AI_SDLC_BYPASS_ALL_GATES=1/);
-    // Script should not exit 0 because coverage cannot pass in a scratch dir.
-    assert.notEqual(r.status, 0, 'expected non-zero exit (no pnpm workspace) when bypass not set');
+    assert.match(
+      (r.stdout ?? '') + (r.stderr ?? ''),
+      /running pnpm test:coverage/,
+      'expected coverage-walk branch entered (positive proof bypass guard did not fire)',
+    );
   });
 
   it('exits 0 immediately when AI_SDLC_SKIP_COVERAGE_GATE=1 (per-gate skip still works)', () => {
