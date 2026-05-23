@@ -172,7 +172,10 @@ export async function finalizeTask(opts: FinalizeStepOptions): Promise<FinalizeT
       allowFailure: true,
     });
     if (signResult.code === 0) {
-      const m = signResult.stdout.match(/\.ai-sdlc\/attestations\/[a-f0-9]+\.dsse\.json/);
+      // AISDLC-409: v6 envelope filenames have a `.v6` infix (e.g.
+      // `<sha>.v6.dsse.json`) — match both v5 and v6 forms so the chore
+      // commit message names the real envelope path on the v6-default path.
+      const m = signResult.stdout.match(/\.ai-sdlc\/attestations\/[a-f0-9]+(?:\.v6)?\.dsse\.json/);
       attestationPath = m ? m[0] : null;
     }
   }

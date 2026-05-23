@@ -927,13 +927,17 @@ describe('check-attestation-sign.sh (AISDLC-133)', () => {
     }
   });
 
-  it('RFC-0042 Phase 3 gating: WITHOUT AI_SDLC_V6_CUTOVER_ACTIVE=1, default is v5 + sub-attestation gate is hard-fail', () => {
-    // Per AISDLC-383.6 security review: the v6 default flip + audit-only
-    // downgrade are gated on AI_SDLC_V6_CUTOVER_ACTIVE=1. Without the env var:
+  it('AISDLC-409 backward-compat: AI_SDLC_V6_CUTOVER_ACTIVE=0 still forces v5 default + hard-fail gate', () => {
+    // Post-AISDLC-409 (2026-05-23), v6 is the default. The legacy
+    // AI_SDLC_V6_CUTOVER_ACTIVE=0 opt-out is preserved for backward-compat —
+    // operators who pinned the old env to 0 (to lock down to v5 + sub-attestation
+    // hard-fail) keep that behavior. This test exercises that legacy path:
     //   - default is v5 (sign writes <sha>.dsse.json, not <sha>.v6.dsse.json)
     //   - sub-attestation gate hard-fails on missing verifier/registry/sub-attestations
-    // This preserves the 2026-05-20 AISDLC-380 forgery defense during the
-    // scaffolding-shipped-but-not-active window.
+    // Note: cleanEnv() in this file still injects AI_SDLC_V6_CUTOVER_ACTIVE=1
+    // for most tests — that value is now inert post-cutover (any value other
+    // than '0' defaults to v6). This test explicitly overrides with '0' to
+    // exercise the backward-compat path.
 
     writeFileSync(join(root, '.active-task'), 'AISDLC-383H\n');
     // Legacy plain-JSON verdict (no sub-attestations) — would have failed pre-cutover.

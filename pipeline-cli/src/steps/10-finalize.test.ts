@@ -212,6 +212,77 @@ describe('Step 10 — finalizeTask', () => {
     expect(readFileSync(completedPath, 'utf8')).toContain('status: Done');
   });
 
+  it('AISDLC-409: extracts v6 envelope path (.v6.dsse.json) from sign-attestation stdout', async () => {
+    // The regex at 10-finalize.ts:178 must match BOTH the v5 form
+    // (<sha>.dsse.json) and the v6 form (<sha>.v6.dsse.json). Post-AISDLC-409,
+    // v6 is the default signing schema, so this test guards against a regression
+    // where the chore commit message would say "Signed at null" because the
+    // pre-cutover regex required `\.dsse\.json` to follow the hex SHA directly.
+    writeTaskFile(tmp, { id: 'AISDLC-7', title: 'seven', status: 'In Progress' });
+    // Fake helper script: just needs to exist so the existsSync guard passes.
+    const fakeHelper = join(tmp, 'fake-sign-attestation.mjs');
+    writeFileSync(fakeHelper, '// noop\n');
+    const v6PathInStdout =
+      '.ai-sdlc/attestations/a0b1c2d3e4f5061728394a5b6c7d8e9f00112233.v6.dsse.json';
+    const fake = new FakeRunner()
+      // The signer invocation prints the envelope path to stdout.
+      .on(/^node .*fake-sign-attestation\.mjs/, ok(`${v6PathInStdout}\n`))
+      .on(/^git add/, ok())
+      .on(/^git commit/, ok())
+      .on(/^git rev-parse --short HEAD/, ok('abc1234\n'));
+    const r = await finalizeTask({
+      taskId: 'AISDLC-7',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+      runner: fake.toRunner(),
+      signAttestationScript: fakeHelper,
+    });
+    expect(r.skipped).toBe(false);
+    // The commit message must reference the v6 envelope path verbatim,
+    // proving the regex matched and `attestationPath` was extracted (not null).
+    const commitCall = fake.calls.find((c) => c.command === 'git' && c.args[0] === 'commit');
+    expect(commitCall, 'expected a git commit call').toBeDefined();
+    expect(commitCall!.args.join(' ')).toContain(v6PathInStdout);
+    // Sanity: the regex must NOT have matched a v5 (.dsse.json) form that
+    // accidentally captured only the hex prefix without the .v6 infix.
+    expect(commitCall!.args.join(' ')).not.toContain(
+      '.ai-sdlc/attestations/a0b1c2d3e4f5061728394a5b6c7d8e9f00112233.dsse.json',
+    );
+  });
+
+  it('AISDLC-409: still extracts v5 envelope path (.dsse.json) — backward-compat', async () => {
+    // Same regex must continue matching the v5 (legacy) form so opt-out flows
+    // (AI_SDLC_V5_LEGACY=1) keep working.
+    writeTaskFile(tmp, { id: 'AISDLC-8', title: 'eight', status: 'In Progress' });
+    const fakeHelper = join(tmp, 'fake-sign-attestation-v5.mjs');
+    writeFileSync(fakeHelper, '// noop\n');
+    const v5PathInStdout =
+      '.ai-sdlc/attestations/aabbccddeeff00112233445566778899aabbccdd.dsse.json';
+    const fake = new FakeRunner()
+      .on(/^node .*fake-sign-attestation-v5\.mjs/, ok(`${v5PathInStdout}\n`))
+      .on(/^git add/, ok())
+      .on(/^git commit/, ok())
+      .on(/^git rev-parse --short HEAD/, ok('def5678\n'));
+    const r = await finalizeTask({
+      taskId: 'AISDLC-8',
+      workDir: tmp,
+      worktreePath: tmp,
+      task,
+      developerReturn: dev,
+      verdict: approved(),
+      iterations: 1,
+      runner: fake.toRunner(),
+      signAttestationScript: fakeHelper,
+    });
+    expect(r.skipped).toBe(false);
+    const commitCall = fake.calls.find((c) => c.command === 'git' && c.args[0] === 'commit');
+    expect(commitCall!.args.join(' ')).toContain(v5PathInStdout);
+  });
+
   it('AC #4: regression — Codex workflow does not create duplicate backlog entries', async () => {
     // AISDLC-201 root cause: the Codex workflow copied the file to
     // backlog/completed/ WITHOUT removing it from backlog/tasks/. This left
