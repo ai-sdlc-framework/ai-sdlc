@@ -1,10 +1,12 @@
 /**
- * `cli-estimate` subcommand router — RFC-0016 Phase 1–5 (AISDLC-279/283).
+ * `cli-estimate` subcommand router — RFC-0016 Phase 1-6 (AISDLC-279..284).
  *
  * Subcommands:
  *  - `stage-a <task-id>`   — emit Stage A signals + candidate bucket.
  *  - `show <class>`        — per-class bias stats + Stage A/B accuracy (Phase 5).
  *  - `render-pr-comment`   — render the `<!-- ai-sdlc:estimate -->` comment body (Phase 5).
+ *  - `digest`              — weekly calibration digest across all classes
+ *                            including Stage-A-coverage rate (Phase 6 AC #2, #3).
  *
  * Output is JSON on stdout by default; pass `--format table` for a
  * human-readable column layout. Behind feature flag
@@ -31,6 +33,7 @@ import { computeBiasStats, computeStageAVsStageBAccuracy } from '../estimation/b
 import { readEstimateLog } from '../estimation/log-writer.js';
 import { listCalibrationFiles, queryHistoricalActuals } from '../estimation/calibration-writer.js';
 import { renderEstimateComment } from '../estimation/pr-comment.js';
+import { generateDigest, formatDigestText } from '../estimation/digest.js';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { findTaskFile, parseTaskFile } from '../steps/01-validate.js';
@@ -465,7 +468,51 @@ export function buildEstimateCli(): Argv {
         }
       },
     )
-    .demandCommand(1, 'A subcommand is required (try `stage-a <task-id>` or `show <class>`).')
+    .command(
+      'digest',
+      'Generate weekly calibration digest with Stage-A-coverage metrics (Phase 6).',
+      (y) =>
+        y
+          .option('workdir', {
+            type: 'string',
+            default: process.cwd(),
+            describe: 'Project root (passed to resolveArtifactsDir).',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'table'] as const,
+            default: 'json' as const,
+          }),
+      (argv) => {
+        if (!isEstimationEnabled()) {
+          process.stderr.write(estimationDisabledMessage() + '\n');
+          emit({
+            ok: false,
+            disabled: true,
+            flag: ESTIMATION_FLAG,
+            message: estimationDisabledMessage(),
+          });
+          return;
+        }
+
+        try {
+          const artifactsDir = resolveArtifactsDir(String(argv.workdir));
+          const digest = generateDigest({ artifactsDir });
+
+          if (argv.format === 'json') {
+            emit(digest);
+          } else {
+            emitText(formatDigestText(digest));
+          }
+        } catch (err) {
+          fail(err instanceof Error ? err.message : String(err));
+        }
+      },
+    )
+    .demandCommand(
+      1,
+      'A subcommand is required (try `stage-a <task-id>`, `show <class>`, or `digest`).',
+    )
     .strict()
     .help()
     .alias('h', 'help')

@@ -178,6 +178,18 @@ export type OrchestratorEventType =
    */
   | 'EstimateActualsRecorded'
   /**
+   * AISDLC-284 (RFC-0016 Phase 6 §7.4) — emitted when the bias drift
+   * detector identifies that the bias multiplier has been over-corrected:
+   * the overall mean bucket miss is positive (historical overestimate bias)
+   * but the last ≥3 consecutive calibration records have all flipped to
+   * ≤ 0 (underestimate or exact). Per-event fields: `taskClass`,
+   * `consecutiveMisses`, `meanMissOverall`, `meanMissRecent`,
+   * `windowSignature` (SHA-256 idempotency key for the tail window).
+   * Idempotent: the detector scans existing events for the same
+   * `taskClass` + `windowSignature` pair and skips re-emission.
+   */
+  | 'EstimateBiasOverCorrected'
+  /**
    * AISDLC-361 — emitted on every tick that the `OpenPullRequestExists`
    * admission filter rejects a candidate because the task's canonical branch
    * already has an open GitHub PR. Per-event fields: `taskId`, `prNumber`,

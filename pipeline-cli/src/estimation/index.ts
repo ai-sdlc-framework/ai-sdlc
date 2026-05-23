@@ -92,3 +92,38 @@ export {
   type RenderEstimateCommentOpts,
   type RenderEstimateCommentResult,
 } from './pr-comment.js';
+export {
+  detectBiasDrift,
+  type DetectBiasDriftOpts,
+  type DetectBiasDriftResult,
+  type DriftCheckResult,
+} from './bias-drift.js';
+export {
+  generateDigest,
+  formatDigestText,
+  queryStageACoverage,
+  digestCalibrationState,
+  formatCalibrationStateToken,
+  medianOf,
+  type DigestCalibrationState,
+  type ClassDigestRow,
+  type CalibrationDigest,
+  type GenerateDigestOpts,
+  type StageACoverageResult,
+} from './digest.js';
+export {
+  readProposals,
+  appendProposal,
+  clusterProposals,
+  listPendingProposals,
+  autoPromote,
+  readClassesYaml,
+  STARTER_CLASSES,
+  type ClassProposal,
+  type ProposalCluster,
+  type ReadProposalsOpts,
+  type ClusterProposalsOpts,
+  type AutoPromoteOpts,
+  type AutoPromoteResult,
+  type AppendProposalOpts,
+} from './class-proposals.js';
