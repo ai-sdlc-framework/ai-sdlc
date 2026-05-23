@@ -1,7 +1,7 @@
 ---
 id: AISDLC-410
 title: 'feat(deps): promote AI_SDLC_DEPS_COMPOSITION to default-ON (RFC-0014 Phase 5)'
-status: In Progress
+status: Done
 labels: [deps, rfc-0014, promotion, operator-merge]
 references:
   - pipeline-cli/src/deps/snapshot.ts
