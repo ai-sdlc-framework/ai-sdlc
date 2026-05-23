@@ -384,7 +384,7 @@ jobs:
             -X POST \
             -f state=success \
             -f context='ai-sdlc/attestation' \
-            -f description='docs-only changeset — attestation N/A (AISDLC-214)'
+            -f description='docs-only changeset — attestation N/A'
           echo "Posted ai-sdlc/attestation: success (docs-only short-circuit) on ${HEAD_SHA}"
 
       # release-please PRs change package.json versions + workspace

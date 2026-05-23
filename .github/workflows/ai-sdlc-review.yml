@@ -226,7 +226,7 @@ jobs:
             -X POST \
             -f state=success \
             -f context='Post Review Results' \
-            -f description='docs-only changeset — review N/A (AISDLC-214)' \
+            -f description='docs-only changeset — review N/A' \
             "${TARGET_URL_FLAG[@]}"
           echo "Posted Post Review Results: success (docs-only short-circuit) on ${HEAD_SHA}"
 
@@ -758,7 +758,7 @@ jobs:
             if [ "$INCR_DELTA_ONLY" = "true" ]; then
               DIFF_FILE="/tmp/review-diff-${TYPE}.txt"
               {
-                echo "## INCREMENTAL REVIEW (AISDLC-142)"
+                echo "## INCREMENTAL REVIEW"
                 echo ""
                 echo "The FULL PR diff was reviewed earlier at SHA ${INCR_LAST_SHA}."
                 echo "This incremental review only covers the delta from ${INCR_LAST_SHA} to HEAD"
@@ -791,7 +791,7 @@ jobs:
             # see notes on the classify + decide steps above.
             INCR_AUTO_APPROVED=$(node pipeline-cli/bin/cli-incremental-decide.mjs auto-approved-verdict \
               --reviewed-sha "$INCR_LAST_SHA" 2>/dev/null \
-              || printf '%s' '{"approved":true,"findings":[],"summary":"Skipped by incremental review (AISDLC-142) — content unchanged."}')
+              || printf '%s' '{"approved":true,"findings":[],"summary":"Skipped by incremental review — content unchanged since last review."}')
             for TYPE in testing critic security; do
               printf '%s\n' "$INCR_AUTO_APPROVED" > "/tmp/review-${TYPE}.txt"
               : > "/tmp/review-${TYPE}-stderr.txt"
@@ -994,9 +994,9 @@ jobs:
               '',
               `${exhausted}/3 review agents failed with HTTP 400 \`invalid_request_error\``,
               '("credit balance is too low"). The remaining agent(s) either succeeded or were',
-              'skipped by the AISDLC-141 conditional classifier. Since every reviewer that',
-              'DIDN\'T succeed only failed due to budget, the noisy CHANGES_REQUESTED has been',
-              'suppressed.',
+              'skipped by the conditional-review classifier (which selects reviewers based on the',
+              'changed file types). Since every reviewer that DIDN\'T succeed only failed due to',
+              'budget, the noisy CHANGES_REQUESTED has been suppressed.',
               '',
               '**What this means**:',
               '- This PR has been only partially reviewed by the automated agents.',
@@ -1006,7 +1006,7 @@ jobs:
               '- A human reviewer should manually validate this PR before merging,',
               '  or top up the Anthropic API credit balance and push again to re-trigger.',
               '',
-              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — AISDLC-147 budget circuit breaker (AISDLC-157 broadened gate)*',
+              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — budget circuit breaker*',
             ].join('\n');
 
             const { data: existing } = await github.rest.issues.listComments({
@@ -1339,13 +1339,13 @@ jobs:
               core.warning(
                 'MARKER_HMAC_SECRET is not set — writing v1 (no HMAC) marker. ' +
                   'Provision via `gh secret set MARKER_HMAC_SECRET --body "$(openssl rand -hex 32)"` ' +
-                  'to enable v2 integrity (AISDLC-146).',
+                  'to enable v2 integrity (HMAC-signed marker for incremental review).',
               );
               marker = `<!-- ai-sdlc:last-reviewed-contenthash:v1:${b64} -->`;
             }
             const body =
               `## AI-SDLC: incremental review state\n\n` +
-              `_Auto-managed by \`ai-sdlc-review.yml\` (AISDLC-142). ` +
+              `_Auto-managed by \`ai-sdlc-review.yml\` (incremental-review state marker). ` +
               `Editing this comment will break incremental review for this PR ` +
               `until the next full review re-creates it._\n\n` +
               `${marker}\n`;
@@ -1530,7 +1530,7 @@ jobs:
             -X POST \
             -f state=success \
             -f context='Post Review Results' \
-            -f description='auto-approved by local attestation (AISDLC-147)' \
+            -f description='auto-approved by local attestation' \
             -f target_url="${PR_URL}"
           echo "✓ Posted Post Review Results: success on ${HEAD_SHA} (attestation cost-saver path)"
 
@@ -1554,13 +1554,13 @@ jobs:
               '- Plugin version',
               '',
               'CI re-running the same 3 agents would produce the same verdict at the cost',
-              'of ~3 Anthropic API invocations. Per AISDLC-147 patch 1, we trust the local',
-              'attestation as a SOFT signal and skip the duplicate review.',
+              'of ~3 Anthropic API invocations. We trust the local attestation as a SOFT',
+              'signal and skip the duplicate review.',
               '',
-              '_Note: Attestation remains AUDIT-ONLY as a merge gate (per AISDLC-140 sub-4)._',
+              '_Note: attestation is required for code PRs (machine-enforced via the `ai-sdlc/pr-ready` rollup). Docs-only PRs skip the check entirely._',
               '_The `re-actors/alls-green` aggregator (`ai-sdlc/pr-ready`) is the single merge gate._',
               '',
-              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — AISDLC-147 attestation cost-saver*',
+              '*Posted by [AI-SDLC Review Agents](https://github.com/ai-sdlc-framework/ai-sdlc) — attestation cost-saver*',
             ].join('\n');
 
             // Idempotent comment — find prior by marker, update in place.
@@ -1600,7 +1600,7 @@ jobs:
                 repo: context.repo.repo,
                 pull_number: prNumber,
                 event: 'APPROVE',
-                body: 'Auto-approved by valid local DSSE attestation (AISDLC-147 patch 1).',
+                body: 'Auto-approved: a valid local DSSE attestation envelope is present on the PR head SHA, so the CI-side reviewer fan-out is skipped as a cost-saver (the local attestation IS the review). See docs/operations/quality-gate.md for the attestation chain.',
               });
               core.info(`Posted APPROVE review on PR #${prNumber} (attestation cost-saver)`);
             } catch (err) {
