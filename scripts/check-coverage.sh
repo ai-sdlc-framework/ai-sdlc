@@ -77,7 +77,14 @@ cd "$ROOT"
 # This was the root cause of AISDLC-212 (dogfood exports.test.ts timing out
 # under concurrent pnpm -r when dist/ was missing).
 echo "[coverage-gate] building affected packages before coverage run..."
-if ! pnpm --filter "...[origin/main]" build > /tmp/ai-sdlc-build.log 2>&1; then
+# AISDLC-390: include always-on foundation packages so dependents-of-changed
+# can resolve their workspace imports against built dist/. See ci.yml comment
+# above the "Build (affected + always-on foundations)" step for full rationale.
+if ! pnpm --filter "...[origin/main]" \
+          --filter "@ai-sdlc/orchestrator" \
+          --filter "@ai-sdlc/pipeline-cli" \
+          --filter "@ai-sdlc/reference" \
+          build > /tmp/ai-sdlc-build.log 2>&1; then
   echo "[coverage-gate] FAIL: pre-coverage build failed. Last 30 lines:"
   tail -30 /tmp/ai-sdlc-build.log
   exit 1

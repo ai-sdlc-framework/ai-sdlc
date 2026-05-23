@@ -1,7 +1,7 @@
 ---
 id: AISDLC-390
 title: 'chore: restore pnpm affected-filter for CI Build & Test after fixing transitive-dep build order'
-status: To Do
+status: Done
 labels:
   - ci
   - performance

@@ -198,13 +198,33 @@ jobs:
       #     the push, so the filter would select 0 packages and silently no-op
       #     (code review caught this regression class — AISDLC-389 review).
       # `pnpm validate-schemas` always runs — it's cheap + cross-cutting.
-      # AISDLC-385 stopgap: always full `pnpm -r build`. The AISDLC-389 filter
-      # selects dependents (e.g. dogfood) without rebuilding their unchanged
-      # deps (e.g. orchestrator), producing TS2307 'Cannot find module' on
-      # dependents that need the dep's dist/. Filed as a 389 follow-up;
-      # safe fix for now is to always rebuild the workspace.
-      - name: Build (full — always)
-        run: pnpm -r build
+      # AISDLC-390: restore affected-package build with always-on foundations.
+      #
+      # The AISDLC-389 filter `...[origin/main]` selects packages changed since
+      # `origin/main` AND their dependents (downstream). It does NOT then walk
+      # the OTHER dependencies of those dependents. Concrete failure (PR #609):
+      # pipeline-cli changes → dogfood is selected via the dependents-walk
+      # (dogfood depends on pipeline-cli) → but orchestrator (which dogfood
+      # ALSO depends on, but pipeline-cli does NOT) is NOT selected because
+      # pnpm doesn't compose "deps-of-dependents". Result: dogfood's `tsc`
+      # build fails with TS2307 'Cannot find module @ai-sdlc/orchestrator'
+      # because orchestrator's `dist/` was never built in this CI run.
+      #
+      # Fix: build the affected set AND the 3 foundation packages always.
+      # Wall-clock cost: ~70s of always-on builds (orchestrator ~30s +
+      # pipeline-cli ~30s + reference ~10s) vs full `pnpm -r build` at ~5min
+      # — still a substantial win on small PRs. pnpm unions multiple
+      # --filter args, so duplicates (when a foundation IS in the affected
+      # set) collapse to one build.
+      #
+      # AISDLC-385 stopgap (full `pnpm -r build`) removed by this PR.
+      - name: Build (affected + always-on foundations)
+        run: |
+          pnpm --filter "...[origin/main]" \
+               --filter "@ai-sdlc/orchestrator" \
+               --filter "@ai-sdlc/pipeline-cli" \
+               --filter "@ai-sdlc/reference" \
+               build
       - name: Test (affected packages)
         if: github.event_name == 'pull_request'
         run: pnpm --filter "...[origin/main]" test

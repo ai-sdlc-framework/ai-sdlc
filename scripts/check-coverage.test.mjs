@@ -332,3 +332,52 @@ exit 0
     assert.match(output, /pkg-b/, 'expected pkg-b to appear in coverage walk output');
   });
 });
+
+describe('check-coverage.sh — foundation filter args (AISDLC-390 AC-2)', () => {
+  // Regression guard for AISDLC-390: the pre-coverage build MUST include the
+  // three foundation packages (@ai-sdlc/orchestrator, @ai-sdlc/pipeline-cli,
+  // @ai-sdlc/reference) as always-on --filter args. Without these, pnpm's
+  // affected-package filter selects dependents of changed packages but skips
+  // those dependents' own foundation deps (the AISDLC-385 stopgap class).
+  //
+  // The check is a string match on the script content, NOT a runtime
+  // execution — the runtime contract (`pnpm --filter "...[origin/main]"
+  // --filter @ai-sdlc/orchestrator ...`) is opaque to a hermetic shell
+  // simulator; pnpm itself is the union-of-filters engine. Asserting the
+  // literal filter args in the script is the closest mechanical guard.
+
+  it('pre-coverage build includes orchestrator/pipeline-cli/reference foundation filters', () => {
+    const SCRIPT = readFileSync(join(import.meta.dirname, 'check-coverage.sh'), 'utf-8');
+    // The build invocation must reference all three foundation packages.
+    assert.match(SCRIPT, /--filter "@ai-sdlc\/orchestrator"/, 'orchestrator missing');
+    assert.match(SCRIPT, /--filter "@ai-sdlc\/pipeline-cli"/, 'pipeline-cli missing');
+    assert.match(SCRIPT, /--filter "@ai-sdlc\/reference"/, 'reference missing');
+    // And the affected-set filter must still be present.
+    assert.match(
+      SCRIPT,
+      /--filter "\.\.\.\[origin\/main\]"/,
+      'affected-set filter ...[origin/main] missing',
+    );
+  });
+
+  it('CI workflow Build step includes the same foundation filters (symmetry with check-coverage.sh)', () => {
+    // Symmetry guard: the CI Build & Test job MUST use the same filter set as
+    // the local pre-push coverage gate. If they diverge, a regression that
+    // re-introduces TS2307 could pass local pre-push (because the local script
+    // builds foundations) but fail CI (because ci.yml doesn't). The single
+    // root cause this PR fixes lives in BOTH files; the regression guard
+    // must too.
+    const WORKFLOW = readFileSync(
+      join(import.meta.dirname, '..', '.github', 'workflows', 'ci.yml'),
+      'utf-8',
+    );
+    assert.match(WORKFLOW, /--filter "@ai-sdlc\/orchestrator"/, 'orchestrator missing in ci.yml');
+    assert.match(WORKFLOW, /--filter "@ai-sdlc\/pipeline-cli"/, 'pipeline-cli missing in ci.yml');
+    assert.match(WORKFLOW, /--filter "@ai-sdlc\/reference"/, 'reference missing in ci.yml');
+    assert.match(
+      WORKFLOW,
+      /--filter "\.\.\.\[origin\/main\]"/,
+      'affected-set filter ...[origin/main] missing in ci.yml',
+    );
+  });
+});
