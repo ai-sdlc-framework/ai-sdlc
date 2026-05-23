@@ -65,3 +65,18 @@ reviewers:
       -----BEGIN PUBLIC KEY-----
       MCowBQYDK2VwAyEA7RfNqQjnRnt7dG0gjIWIkqyfvn+/aMycmbaEbq7lS7E=
       -----END PUBLIC KEY-----
+  # CI re-sign bot (AISDLC-397) — signs attestations after merge-queue rebases.
+  # Public key corresponds to the private key stored as the AI_SDLC_CI_SIGNING_KEY
+  # repo secret. Generate + register with:
+  #   node ai-sdlc-plugin/scripts/init-signing-key.mjs --pem-only \
+  #     | base64 | gh secret set AI_SDLC_CI_SIGNING_KEY
+  # Then replace the placeholder pubkey below with the printed public key.
+  # See .github/workflows/resign-attestation-on-rebase.yml header for full setup.
+  - identity: 'ci-resign-bot'
+    machine: 'github-actions'
+    addedAt: '2026-05-23'
+    addedBy: 'deefactorial'
+    pubkey: |
+      PLACEHOLDER — operator must replace with actual CI signing public key.
+      Run: node ai-sdlc-plugin/scripts/init-signing-key.mjs --pem-only
+      Then set AI_SDLC_CI_SIGNING_KEY secret and paste the public key here.

@@ -1,0 +1,378 @@
+name: Re-sign attestation after merge-queue rebase
+
+# Motivating incident (AISDLC-397 / PR #626, 2026-05-23):
+# When the merge-queue's update-branch step rebases an open PR onto fresh main,
+# all commit SHAs change. The DSSE attestation envelope is named after the
+# pre-rebase HEAD SHA (e.g. `.ai-sdlc/attestations/<old-sha>.dsse.json`), so
+# `verify-attestation.yml` fires on the new SHA, walks the attestation tree,
+# finds no matching envelope, and posts `ai-sdlc/attestation: failure`.
+#
+# The operator (or autonomous overnight loop) then manually re-signs and
+# force-pushes -- only to have the NEXT sibling-PR merge trigger another
+# update-branch, invalidating the fresh envelope again. PR #626 (AISDLC-373)
+# cycled 3 times before being marked STUCK; the autonomous loop wasted ~6
+# hours. This workflow closes the loop by re-signing in CI automatically.
+#
+# How it works:
+# Triggers on `pull_request.synchronize`. Detects whether the synchronize was
+# an update-branch rebase (not an operator push) by checking:
+#   1. `github.event.before` had an attestation envelope in the tree.
+#   2. `github.event.after` (current HEAD) does NOT have a matching envelope.
+# When both hold, the workflow signs a new envelope for the current HEAD using
+# a CI-side ed25519 key (`AI_SDLC_CI_SIGNING_KEY` secret), commits the chore,
+# and force-pushes back to the PR branch. `verify-attestation.yml` then fires
+# on the chore commit's SHA, finds a valid envelope, and posts success.
+#
+# Short-circuits (AC-4): the workflow exits early (with a PR comment) when:
+#   a. No `.active-task` sentinel exists -- this is not an AI-SDLC task PR;
+#      skipping silently avoids false fires on manual PRs.
+#   b. No verdict file exists at `.ai-sdlc/verdicts/<task-id-lower>.json` --
+#      without a verdict the signer cannot build a valid predicate.
+#   c. The HEAD commit message starts with `chore: re-sign attestation` --
+#      avoids an infinite loop where the chore commit re-triggers this workflow.
+#   d. The secret `AI_SDLC_CI_SIGNING_KEY` is empty -- CI signing key was not
+#      provisioned; post a comment and exit.
+#
+# CI signing key setup (AC-7 / operator action):
+#
+# Option A -- automated (preferred):
+#   node ai-sdlc-plugin/scripts/init-signing-key.mjs --pem-only \
+#     | base64 | gh secret set AI_SDLC_CI_SIGNING_KEY
+#   # Then copy the printed public-key YAML block and add it to
+#   # .ai-sdlc/trusted-reviewers.yaml under `reviewers:` as shown below.
+#
+# Option B -- manual:
+#   openssl genpkey -algorithm ed25519 -out ci-signing-key.pem
+#   openssl pkey -in ci-signing-key.pem -pubout -out ci-signing-key.pub.pem
+#   cat ci-signing-key.pem | base64 | gh secret set AI_SDLC_CI_SIGNING_KEY
+#   rm ci-signing-key.pem   # never commit the private key
+#
+# Add the PUBLIC key to `.ai-sdlc/trusted-reviewers.yaml` under the
+# `ci-resign-bot` entry (the placeholder is already scaffolded there):
+#
+#   - identity: 'ci-resign-bot'
+#     machine: 'github-actions'
+#     addedAt: '<YYYY-MM-DD>'
+#     addedBy: '<your-github-handle>'
+#     pubkey: |
+#       -----BEGIN PUBLIC KEY-----
+#       <base64-encoded-public-key-from-above>
+#       -----END PUBLIC KEY-----
+#
+# Key rotation: generate a new keypair, set the new private PEM as the secret,
+# and replace the pubkey entry in trusted-reviewers.yaml via a PR. Existing
+# envelopes signed by the old CI key become invalid on the next verify run.
+#
+# AI_SDLC_LEGACY_VERDICTS support (AC-8):
+# When the verdict file is a plain JSON object (ad-hoc reviewer mode), set
+# `AI_SDLC_LEGACY_VERDICTS=1` in the repo's Actions variables (not a secret)
+# and the signer will accept the plain-JSON form.
+#
+# Security surface:
+# This workflow uses `pull_request` (NOT `pull_request_target`) to avoid
+# running fork-controlled content with write permissions. The signing step
+# only runs on SAME-REPO PRs (enforced by the `if: same-repo` job condition).
+# Fork PRs skip the signing step entirely.
+#
+# References: AISDLC-397, PR #626 (STUCK, 2026-05-23)
+
+on:
+  pull_request:
+    types: [synchronize]
+    branches: [main]
+    # Only fire on code paths (not docs-only) -- docs-only PRs skip attestation
+    # entirely (verify-attestation.yml has paths-ignore for them, AISDLC-388).
+    paths-ignore:
+      - 'spec/rfcs/**'
+      - 'docs/**'
+      - 'backlog/tasks/**'
+      - 'backlog/completed/**'
+      - '*.md'
+
+# Cancel in-progress re-sign runs for the same PR when a new synchronize event
+# fires -- the new event is already running a fresh re-sign.
+concurrency:
+  group: resign-attestation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  # contents:write to push the chore commit back to the PR branch.
+  contents: write
+  # pull-requests:write to post the short-circuit comment on the PR.
+  pull-requests: write
+
+jobs:
+  resign:
+    name: Re-sign attestation after merge-queue rebase
+    runs-on: ubuntu-latest
+    # Only run on same-repo PRs -- fork PRs cannot access the CI signing key
+    # secret, and allowing fork-owned code to trigger a signing step under
+    # elevated permissions is the exact pull_request_target attack surface.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+
+    steps:
+      - name: Resolve event SHAs
+        id: shas
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          AFTER_SHA: ${{ github.event.after }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          echo "before_sha=${BEFORE_SHA}" >> "$GITHUB_OUTPUT"
+          echo "after_sha=${AFTER_SHA}" >> "$GITHUB_OUTPUT"
+          echo "pr_number=${PR_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "pr_head_ref=${PR_HEAD_REF}" >> "$GITHUB_OUTPUT"
+          echo "[resign] before=${BEFORE_SHA} after=${AFTER_SHA} pr=#${PR_NUMBER} ref=${PR_HEAD_REF}"
+
+      # Check out the PR's current HEAD (the post-rebase tree) to inspect
+      # the attestation directory + sentinel + verdict file.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.shas.outputs.after_sha }}
+          fetch-depth: 2
+          # We need push access to the branch; use the default GITHUB_TOKEN
+          # which has contents:write on same-repo PRs.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # AC-4c guard: skip if HEAD commit is already a chore re-sign commit
+      # (avoids infinite loop where the chore commit re-triggers this workflow).
+      - name: Check if HEAD commit is a re-sign chore (loop guard)
+        id: loop_guard
+        run: |
+          set -euo pipefail
+          HEAD_MSG=$(git log -1 --format='%s')
+          echo "[resign] HEAD commit subject: ${HEAD_MSG}"
+          if printf '%s' "$HEAD_MSG" | grep -qE '^chore: re-sign attestation'; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "[resign] HEAD is already a re-sign chore -- skipping to avoid infinite loop"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Detect update-branch rebase (AC-1 heuristic)
+        id: detect
+        if: steps.loop_guard.outputs.skip != 'true'
+        env:
+          BEFORE_SHA: ${{ steps.shas.outputs.before_sha }}
+          AFTER_SHA: ${{ steps.shas.outputs.after_sha }}
+        run: |
+          set -euo pipefail
+
+          # Heuristic: the synchronize was an update-branch rebase when:
+          #   1. An attestation envelope for BEFORE_SHA existed in the previous tree.
+          #   2. No matching envelope for AFTER_SHA exists in the current tree.
+          #
+          # If the operator pushed new code (not an update-branch), BEFORE_SHA
+          # would typically NOT have had an envelope (the previous push was the
+          # dev commit; the sign is pending). The rare case where an operator
+          # pushes immediately after a signed commit is benign -- the new push
+          # would have a new envelope from their local sign step anyway.
+
+          ATTDIR=".ai-sdlc/attestations"
+          BEFORE_ENV="${ATTDIR}/${BEFORE_SHA}.dsse.json"
+          BEFORE_ENV_V6="${ATTDIR}/${BEFORE_SHA}.v6.dsse.json"
+          AFTER_ENV="${ATTDIR}/${AFTER_SHA}.dsse.json"
+          AFTER_ENV_V6="${ATTDIR}/${AFTER_SHA}.v6.dsse.json"
+
+          # Check whether the BEFORE SHA had an envelope (read it from git
+          # object store -- it may not be in the working tree since we checked
+          # out AFTER_SHA). Fetch before SHA to make it available.
+          git fetch --depth=1 origin "${BEFORE_SHA}" 2>/dev/null || true
+
+          BEFORE_HAD_ENV=false
+          if git cat-file -e "${BEFORE_SHA}:${BEFORE_ENV}" 2>/dev/null; then
+            BEFORE_HAD_ENV=true
+            echo "[resign] BEFORE SHA had v5 envelope: ${BEFORE_ENV}"
+          elif git cat-file -e "${BEFORE_SHA}:${BEFORE_ENV_V6}" 2>/dev/null; then
+            BEFORE_HAD_ENV=true
+            echo "[resign] BEFORE SHA had v6 envelope: ${BEFORE_ENV_V6}"
+          else
+            echo "[resign] BEFORE SHA had no attestation envelope"
+          fi
+
+          # Check whether the AFTER SHA (current tree) has an envelope.
+          AFTER_HAS_ENV=false
+          if [ -f "${AFTER_ENV}" ] || [ -f "${AFTER_ENV_V6}" ]; then
+            AFTER_HAS_ENV=true
+            echo "[resign] AFTER SHA already has envelope -- no re-sign needed"
+          else
+            echo "[resign] AFTER SHA has no envelope -- re-sign may be needed"
+          fi
+
+          echo "before_had_env=${BEFORE_HAD_ENV}" >> "$GITHUB_OUTPUT"
+          echo "after_has_env=${AFTER_HAS_ENV}" >> "$GITHUB_OUTPUT"
+
+          # Re-sign only when the before had an envelope and the after does not.
+          if [ "${BEFORE_HAD_ENV}" = "true" ] && [ "${AFTER_HAS_ENV}" = "false" ]; then
+            echo "needs_resign=true" >> "$GITHUB_OUTPUT"
+            echo "[resign] update-branch rebase detected -- re-sign needed"
+          else
+            echo "needs_resign=false" >> "$GITHUB_OUTPUT"
+            echo "[resign] no re-sign needed"
+          fi
+
+      # AC-2 / AC-4d: validate CI signing key secret is set.
+      - name: Validate CI signing key secret (AC-2 / AC-4d)
+        id: key_check
+        if: steps.detect.outputs.needs_resign == 'true'
+        env:
+          CI_SIGNING_KEY: ${{ secrets.AI_SDLC_CI_SIGNING_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.shas.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ -z "${CI_SIGNING_KEY:-}" ]; then
+            echo "key_present=false" >> "$GITHUB_OUTPUT"
+            echo "[resign] AI_SDLC_CI_SIGNING_KEY is empty -- posting comment"
+            gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+              -X POST \
+              -f body="**ai-sdlc resign-attestation:** CI signing key not provisioned.
+
+          The \`AI_SDLC_CI_SIGNING_KEY\` repository secret is empty. This workflow cannot re-sign the attestation envelope after the merge-queue rebase.
+
+          **To fix:**
+          \`\`\`
+          node ai-sdlc-plugin/scripts/init-signing-key.mjs --pem-only | base64 | gh secret set AI_SDLC_CI_SIGNING_KEY
+          \`\`\`
+          Then add the printed public key to \`.ai-sdlc/trusted-reviewers.yaml\` under the \`ci-resign-bot\` entry.
+
+          See the workflow header in \`.github/workflows/resign-attestation-on-rebase.yml\` for full setup instructions (AC-7)." || true
+          else
+            echo "key_present=true" >> "$GITHUB_OUTPUT"
+            echo "[resign] CI signing key is present"
+          fi
+
+      # AC-4a / AC-4b: check for .active-task sentinel and verdict file.
+      - name: Check sentinel + verdict file (AC-4a, AC-4b)
+        id: prereqs
+        if: steps.detect.outputs.needs_resign == 'true' && steps.key_check.outputs.key_present == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ steps.shas.outputs.pr_number }}
+          REPO: ${{ github.repository }}
+          LEGACY_VERDICTS: ${{ vars.AI_SDLC_LEGACY_VERDICTS }}
+        run: |
+          set -euo pipefail
+
+          # AC-4a: .active-task sentinel
+          if [ ! -f ".active-task" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "[resign] no .active-task sentinel -- this is not an AI-SDLC task PR; skipping silently"
+            exit 0
+          fi
+
+          TASK_ID=$(cat .active-task | tr -d '[:space:]')
+          TASK_ID_LOWER=$(printf '%s' "$TASK_ID" | tr '[:upper:]' '[:lower:]')
+          echo "task_id=${TASK_ID}" >> "$GITHUB_OUTPUT"
+          echo "task_id_lower=${TASK_ID_LOWER}" >> "$GITHUB_OUTPUT"
+          echo "[resign] task ID: ${TASK_ID}"
+
+          # AC-4b: verdict file
+          VERDICT_FILE=".ai-sdlc/verdicts/${TASK_ID_LOWER}.json"
+          if [ ! -f "${VERDICT_FILE}" ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "[resign] no verdict file at ${VERDICT_FILE} -- posting comment"
+            gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+              -X POST \
+              -f body="**ai-sdlc resign-attestation:** Cannot re-sign after merge-queue rebase.
+
+          No verdict file found at \`.ai-sdlc/verdicts/${TASK_ID_LOWER}.json\`. The attestation signer requires reviewer verdicts to build a valid predicate.
+
+          This PR was likely pushed without running \`/ai-sdlc execute\` first (which generates the verdict file and initial attestation). The operator must run the review pipeline and re-sign locally before auto-merge can proceed." || true
+            exit 0
+          fi
+
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "[resign] prereqs met: sentinel=${TASK_ID}, verdict=${VERDICT_FILE}"
+
+      # Install Node + pnpm so we can run sign-attestation.mjs.
+      - uses: pnpm/action-setup@v4
+        if: steps.prereqs.outputs.ready == 'true'
+
+      - uses: actions/setup-node@v4
+        if: steps.prereqs.outputs.ready == 'true'
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies (orchestrator runtime for signer)
+        if: steps.prereqs.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Build orchestrator + dependencies (signer imports compiled JS)
+        if: steps.prereqs.outputs.ready == 'true'
+        run: pnpm --filter "@ai-sdlc/orchestrator..." build
+
+      # AC-2 / AC-3: write the CI signing key to disk, sign the envelope,
+      # commit as github-actions[bot], and push back to the PR branch.
+      - name: Sign attestation + commit + push (AC-2, AC-3)
+        if: steps.prereqs.outputs.ready == 'true'
+        env:
+          CI_SIGNING_KEY_B64: ${{ secrets.AI_SDLC_CI_SIGNING_KEY }}
+          TASK_ID: ${{ steps.prereqs.outputs.task_id }}
+          TASK_ID_LOWER: ${{ steps.prereqs.outputs.task_id_lower }}
+          AFTER_SHA: ${{ steps.shas.outputs.after_sha }}
+          PR_HEAD_REF: ${{ steps.shas.outputs.pr_head_ref }}
+          REPO: ${{ github.repository }}
+          LEGACY_VERDICTS: ${{ vars.AI_SDLC_LEGACY_VERDICTS }}
+        run: |
+          set -euo pipefail
+
+          # Write the private key to a temp file with restrictive permissions.
+          # The base64-encoded PEM is decoded back to PEM format.
+          KEY_DIR="${HOME}/.ai-sdlc"
+          mkdir -p "${KEY_DIR}"
+          chmod 700 "${KEY_DIR}"
+          KEY_PATH="${KEY_DIR}/signing-key.pem"
+          printf '%s' "${CI_SIGNING_KEY_B64}" | base64 -d > "${KEY_PATH}"
+          chmod 600 "${KEY_PATH}"
+          echo "[resign] CI signing key written to ${KEY_PATH}"
+
+          # Resolve the verdict file path.
+          VERDICT_FILE=".ai-sdlc/verdicts/${TASK_ID_LOWER}.json"
+
+          # AC-8: AI_SDLC_LEGACY_VERDICTS support.
+          # The signer accepts --review-verdicts pointing at either a JSON array
+          # (structured mode) or a plain JSON object (legacy ad-hoc mode) when
+          # AI_SDLC_LEGACY_VERDICTS=1 is set. The script reads the env var.
+          export AI_SDLC_LEGACY_VERDICTS="${LEGACY_VERDICTS:-}"
+
+          # Run the signer against the current HEAD.
+          echo "[resign] running signer for ${AFTER_SHA}"
+          node ai-sdlc-plugin/scripts/sign-attestation.mjs \
+            --review-verdicts "${VERDICT_FILE}" \
+            --iteration-count 1 \
+            --harness-note "CI re-sign after merge-queue rebase (AISDLC-397)"
+
+          # Verify the envelope was written.
+          ENVELOPE=".ai-sdlc/attestations/${AFTER_SHA}.dsse.json"
+          ENVELOPE_V6=".ai-sdlc/attestations/${AFTER_SHA}.v6.dsse.json"
+          if [ ! -f "${ENVELOPE}" ] && [ ! -f "${ENVELOPE_V6}" ]; then
+            echo "::error::Signer ran but no envelope found at expected path ${ENVELOPE}"
+            exit 1
+          fi
+          echo "[resign] envelope written"
+
+          # AC-3: commit as github-actions[bot].
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add ".ai-sdlc/attestations/"
+
+          COMMIT_MSG="chore: re-sign attestation for ${TASK_ID} after merge-queue rebase (AISDLC-397)"
+          git commit -m "${COMMIT_MSG}"
+          echo "[resign] committed: ${COMMIT_MSG}"
+
+          # Push with --force-with-lease to the PR branch.
+          # The lease protects against concurrent pushes -- if another commit
+          # landed between our checkout and this push, git will reject and the
+          # workflow will fail cleanly (rather than silently clobbering).
+          git push --force-with-lease origin "HEAD:refs/heads/${PR_HEAD_REF}"
+          echo "[resign] pushed to ${PR_HEAD_REF} (--force-with-lease)"
+
+          # Clean up the private key from disk.
+          rm -f "${KEY_PATH}"
+          echo "[resign] private key removed from runner"
