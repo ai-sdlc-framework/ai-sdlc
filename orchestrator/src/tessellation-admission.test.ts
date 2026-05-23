@@ -160,11 +160,11 @@ describe('applyCrossSoulRule', () => {
   const scores = { 'soul-a': 0.9, 'soul-b': 0.6, 'soul-c': 0.3 };
 
   it('min rule returns the lowest soul score', () => {
-    expect(applyCrossSoulRule(['soul-a', 'soul-b', 'soul-c'], scores, 'min')).toBe(0.3);
+    expect(applyCrossSoulRule(['soul-a', 'soul-b', 'soul-c'], scores, 'min')).toBeCloseTo(0.3, 8);
   });
 
   it('max rule returns the highest soul score', () => {
-    expect(applyCrossSoulRule(['soul-a', 'soul-b', 'soul-c'], scores, 'max')).toBe(0.9);
+    expect(applyCrossSoulRule(['soul-a', 'soul-b', 'soul-c'], scores, 'max')).toBeCloseTo(0.9, 8);
   });
 
   it('mean rule returns the arithmetic mean', () => {
@@ -173,23 +173,29 @@ describe('applyCrossSoulRule', () => {
   });
 
   it('weighted-traffic degenerates to min (no weight data available)', () => {
-    expect(applyCrossSoulRule(['soul-a', 'soul-c'], scores, 'weighted-traffic')).toBe(0.3);
+    expect(applyCrossSoulRule(['soul-a', 'soul-c'], scores, 'weighted-traffic')).toBeCloseTo(
+      0.3,
+      8,
+    );
   });
 
   it('weighted-revenue degenerates to min (no weight data available)', () => {
-    expect(applyCrossSoulRule(['soul-a', 'soul-c'], scores, 'weighted-revenue')).toBe(0.3);
+    expect(applyCrossSoulRule(['soul-a', 'soul-c'], scores, 'weighted-revenue')).toBeCloseTo(
+      0.3,
+      8,
+    );
   });
 
   it('undefined rule defaults to min', () => {
-    expect(applyCrossSoulRule(['soul-a', 'soul-b'], scores, undefined)).toBe(0.6);
+    expect(applyCrossSoulRule(['soul-a', 'soul-b'], scores, undefined)).toBeCloseTo(0.6, 8);
   });
 
   it('returns fallback when no matching soul scores exist', () => {
-    expect(applyCrossSoulRule(['soul-z'], scores, 'min', 0.42)).toBe(0.42);
+    expect(applyCrossSoulRule(['soul-z'], scores, 'min', 0.42)).toBeCloseTo(0.42, 8);
   });
 
   it('returns fallback when soulIds array is empty', () => {
-    expect(applyCrossSoulRule([], scores, 'min', 0.42)).toBe(0.42);
+    expect(applyCrossSoulRule([], scores, 'min', 0.42)).toBeCloseTo(0.42, 8);
   });
 });
 
@@ -213,8 +219,8 @@ describe('computeTessellatedScores', () => {
     expect(result.routingPath).toBe('single-soul');
     expect(result.affectedSoulIds).toEqual(['soul-a']);
     // Soul-A has soulAlignment=0.9, er4=0.8 — per-soul DSB lifted above platform aggregate
-    expect(result.soulAlignment).toBe(0.9);
-    expect(result.er4).toBe(0.8);
+    expect(result.soulAlignment).toBeCloseTo(0.9, 8);
+    expect(result.er4).toBeCloseTo(0.8, 8);
   });
 
   // ── AC #5 Fixture 2: tessellated DID + substrate-only change ─────
@@ -231,9 +237,9 @@ describe('computeTessellatedScores', () => {
     expect(result.routingPath).toBe('substrate-only');
     expect(result.affectedSoulIds).toEqual([]);
     // min over ALL souls: min(0.9, 0.6, 0.3) = 0.3 for soulAlignment
-    expect(result.soulAlignment).toBe(0.3);
+    expect(result.soulAlignment).toBeCloseTo(0.3, 8);
     // min over ALL souls: min(0.8, 0.5, 0.4) = 0.4 for er4
-    expect(result.er4).toBe(0.4);
+    expect(result.er4).toBeCloseTo(0.4, 8);
   });
 
   it('AC #3 [fixture-2 variant]: work item missing from snapshot → substrate-only degenerate', () => {
@@ -246,7 +252,7 @@ describe('computeTessellatedScores', () => {
     const result = computeTessellatedScores('AISDLC-999', 0.5, 0.5, ctx);
 
     expect(result.routingPath).toBe('substrate-only');
-    expect(result.soulAlignment).toBe(0.3); // min over all
+    expect(result.soulAlignment).toBeCloseTo(0.3, 8); // min over all
   });
 
   // ── AC #5 Fixture 3: non-tessellated DID (legacy path) ───────────
@@ -257,8 +263,8 @@ describe('computeTessellatedScores', () => {
     expect(result.routingPath).toBe('non-tessellated');
     expect(result.affectedSoulIds).toEqual([]);
     // Fallback values are preserved unchanged (single-DID semantics)
-    expect(result.soulAlignment).toBe(0.75);
-    expect(result.er4).toBe(0.65);
+    expect(result.soulAlignment).toBeCloseTo(0.75, 8);
+    expect(result.er4).toBeCloseTo(0.65, 8);
   });
 
   // ── Multi-soul path ─────────────────────────────────────────────
@@ -275,8 +281,8 @@ describe('computeTessellatedScores', () => {
 
     expect(result.routingPath).toBe('multi-soul');
     expect(result.affectedSoulIds).toEqual(['soul-b', 'soul-c']);
-    expect(result.soulAlignment).toBe(0.3); // min(0.6, 0.3)
-    expect(result.er4).toBe(0.4); // min(0.5, 0.4)
+    expect(result.soulAlignment).toBeCloseTo(0.3, 8); // min(0.6, 0.3)
+    expect(result.er4).toBeCloseTo(0.4, 8); // min(0.5, 0.4)
   });
 
   it('AC #4: non-default crossSoulScoringRule (max) is respected', () => {
@@ -289,8 +295,8 @@ describe('computeTessellatedScores', () => {
     const result = computeTessellatedScores('AISDLC-100', 0.5, 0.5, ctx);
 
     expect(result.routingPath).toBe('multi-soul');
-    expect(result.soulAlignment).toBe(0.6); // max(0.6, 0.3)
-    expect(result.er4).toBe(0.5); // max(0.5, 0.4)
+    expect(result.soulAlignment).toBeCloseTo(0.6, 8); // max(0.6, 0.3)
+    expect(result.er4).toBeCloseTo(0.5, 8); // max(0.5, 0.4)
   });
 });
 
@@ -324,9 +330,9 @@ describe('computeAdmissionComposite + tessellationContext (AC #1, #4)', () => {
     // The per-soul Eρ₄ (0.80) lifts executionReality above the platform-aggregate (0.28).
     // This produces a higher composite — demonstrating the "Design pillar lift" §11.4.
     expect(tessellated.score.composite).toBeGreaterThan(baseline.score.composite);
-    expect(tessellated.breakdown.soulAlignment).toBe(0.9); // per-soul Sα (soul-a)
+    expect(tessellated.breakdown.soulAlignment).toBeCloseTo(0.9, 8); // per-soul Sα (soul-a)
     // soul-a's Eρ₄=0.8 > platform-aggregate 0.28 → execution reality lifted
-    expect(tessellated.breakdown.designSystemReadiness).toBe(0.8);
+    expect(tessellated.breakdown.designSystemReadiness).toBeCloseTo(0.8, 8);
     expect(tessellated.breakdown.tessellation?.routingPath).toBe('single-soul');
     expect(tessellated.breakdown.tessellation?.affectedSoulIds).toEqual(['soul-a']);
   });
@@ -345,8 +351,8 @@ describe('computeAdmissionComposite + tessellationContext (AC #1, #4)', () => {
     });
 
     // Substrate-only: min over all souls → soul-c's low scores dominate
-    expect(tessellated.breakdown.soulAlignment).toBe(0.3); // min(0.9, 0.6, 0.3)
-    expect(tessellated.breakdown.designSystemReadiness).toBe(0.4); // min(0.8, 0.5, 0.4)
+    expect(tessellated.breakdown.soulAlignment).toBeCloseTo(0.3, 8); // min(0.9, 0.6, 0.3)
+    expect(tessellated.breakdown.designSystemReadiness).toBeCloseTo(0.4, 8); // min(0.8, 0.5, 0.4)
     expect(tessellated.breakdown.tessellation?.routingPath).toBe('substrate-only');
     expect(tessellated.breakdown.tessellation?.affectedSoulIds).toEqual([]);
   });
@@ -385,7 +391,7 @@ describe('computeAdmissionComposite + tessellationContext (AC #1, #4)', () => {
     expect(withoutTessellation.breakdown.tessellation).toBeUndefined();
     // Both inputs have soulAlignment=0.9 from the 'spec' label heuristic;
     // tessellation routes to soul-a which also has soulAlignment=0.9 → same.
-    expect(withTessellation.breakdown.soulAlignment).toBe(0.9);
+    expect(withTessellation.breakdown.soulAlignment).toBeCloseTo(0.9, 8);
     // The key tessellation lift is in designSystemReadiness (Eρ₄):
     //   - no-tessellation: platform-aggregate DSB (coverage=40%) → er4 ≈ 0.28
     //   - with-tessellation: soul-a's DSB (er4=0.8) → lifted
