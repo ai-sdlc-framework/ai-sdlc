@@ -99,6 +99,18 @@ function makeTranscript(taskId: string, reviewer: string): void {
   );
 }
 
+/**
+ * Write a verdict JSON file under `<tmpRoot>/.ai-sdlc/verdicts/<name>` so it
+ * satisfies the AISDLC-391 traversal-hardening guard. Returns the absolute path.
+ */
+function writeVerdict(name: string, contents: unknown): string {
+  const verdictsDir = join(tmpRoot, '.ai-sdlc', 'verdicts');
+  mkdirSync(verdictsDir, { recursive: true });
+  const verdictPath = join(verdictsDir, name);
+  writeFileSync(verdictPath, typeof contents === 'string' ? contents : JSON.stringify(contents));
+  return verdictPath;
+}
+
 function makeLeaf(overrides: Partial<TranscriptLeaf> = {}): TranscriptLeaf {
   return {
     leafIndex: 0,
@@ -439,14 +451,10 @@ describe('emit-leaf — happy path', () => {
       'aisdlc-383.8',
       'code-reviewer.jsonl',
     );
-    const verdictPath = join(tmpRoot, 'verdict-code-reviewer.json');
-    writeFileSync(
-      verdictPath,
-      JSON.stringify({
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 1, suggestion: 2 },
-      }),
-    );
+    const verdictPath = writeVerdict('verdict-code-reviewer.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 1, suggestion: 2 },
+    });
 
     await expect(
       buildAttestationCli([
@@ -492,14 +500,10 @@ describe('emit-leaf — happy path', () => {
       'aisdlc-383.8',
       'code-reviewer.jsonl',
     );
-    const verdictPath = join(tmpRoot, 'verdict.json');
-    writeFileSync(
-      verdictPath,
-      JSON.stringify({
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      }),
-    );
+    const verdictPath = writeVerdict('verdict.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
 
     await buildAttestationCli([
       'emit-leaf',
@@ -533,14 +537,10 @@ describe('emit-leaf — happy path', () => {
       'aisdlc-383.8',
       'security-reviewer.jsonl',
     );
-    const verdictPath = join(tmpRoot, 'verdict-security.json');
-    writeFileSync(
-      verdictPath,
-      JSON.stringify({
-        approved: false,
-        findings: { critical: 1, major: 0, minor: 0, suggestion: 0 },
-      }),
-    );
+    const verdictPath = writeVerdict('verdict-security.json', {
+      approved: false,
+      findings: { critical: 1, major: 0, minor: 0, suggestion: 0 },
+    });
 
     await buildAttestationCli([
       'emit-leaf',
@@ -574,14 +574,10 @@ describe('emit-leaf — happy path', () => {
       'aisdlc-383.8',
       'test-reviewer.jsonl',
     );
-    const verdictPath = join(tmpRoot, 'verdict-test.json');
-    writeFileSync(
-      verdictPath,
-      JSON.stringify({
-        verdictApproved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 1 },
-      }),
-    );
+    const verdictPath = writeVerdict('verdict-test.json', {
+      verdictApproved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 1 },
+    });
 
     await buildAttestationCli([
       'emit-leaf',
@@ -618,14 +614,10 @@ describe('emit-leaf — leafIndex monotonicity across multiple reviewers', () =>
         'aisdlc-383.8',
         `${reviewer}.jsonl`,
       );
-      const verdictPath = join(tmpRoot, `verdict-${reviewer}.json`);
-      writeFileSync(
-        verdictPath,
-        JSON.stringify({
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        }),
-      );
+      const verdictPath = writeVerdict(`verdict-${reviewer}.json`, {
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      });
 
       // Reset stdout for next call.
       stdoutChunks.length = 0;
@@ -677,14 +669,10 @@ describe('emit-leaf — leafIndex monotonicity across multiple reviewers', () =>
         taskIdLower,
         `${reviewer}.jsonl`,
       );
-      const verdictPath = join(tmpRoot, `verdict-${taskIdLower}-${reviewer}.json`);
-      writeFileSync(
-        verdictPath,
-        JSON.stringify({
-          approved: true,
-          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-        }),
-      );
+      const verdictPath = writeVerdict(`verdict-${taskIdLower}-${reviewer}.json`, {
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      });
 
       stdoutChunks.length = 0;
       await buildAttestationCli([
@@ -723,14 +711,10 @@ describe('emit-leaf — idempotent re-emission', () => {
       'aisdlc-383.8',
       'code-reviewer.jsonl',
     );
-    const verdictPath = join(tmpRoot, 'verdict.json');
-    writeFileSync(
-      verdictPath,
-      JSON.stringify({
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      }),
-    );
+    const verdictPath = writeVerdict('verdict.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
 
     const args = [
       'emit-leaf',
@@ -764,14 +748,10 @@ describe('emit-leaf — idempotent re-emission', () => {
 
 describe('emit-leaf — missing-transcript edge case', () => {
   it('exits 1 when transcript file does not exist', async () => {
-    const verdictPath = join(tmpRoot, 'verdict.json');
-    writeFileSync(
-      verdictPath,
-      JSON.stringify({
-        approved: true,
-        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
-      }),
-    );
+    const verdictPath = writeVerdict('verdict.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
 
     let caught: Error | null = null;
     try {
@@ -782,7 +762,7 @@ describe('emit-leaf — missing-transcript edge case', () => {
         '--reviewer',
         'code-reviewer',
         '--transcript-path',
-        join(tmpRoot, 'nonexistent.jsonl'),
+        join(tmpRoot, '.ai-sdlc', 'transcripts', 'nonexistent.jsonl'),
         '--verdict-path',
         verdictPath,
         '--head-sha',
@@ -821,7 +801,7 @@ describe('emit-leaf — missing-transcript edge case', () => {
         '--transcript-path',
         transcriptPath,
         '--verdict-path',
-        join(tmpRoot, 'nonexistent-verdict.json'),
+        join(tmpRoot, '.ai-sdlc', 'verdicts', 'nonexistent-verdict.json'),
         '--head-sha',
         'a'.repeat(40),
         '--harness',
@@ -846,8 +826,7 @@ describe('emit-leaf — missing-transcript edge case', () => {
       'aisdlc-383.8',
       'code-reviewer.jsonl',
     );
-    const verdictPath = join(tmpRoot, 'bad-verdict.json');
-    writeFileSync(verdictPath, 'NOT VALID JSON {{{');
+    const verdictPath = writeVerdict('bad-verdict.json', 'NOT VALID JSON {{{');
 
     let caught: Error | null = null;
     try {
@@ -874,6 +853,375 @@ describe('emit-leaf — missing-transcript edge case', () => {
     expect(caught?.message).toMatch(/process\.exit\(1\)/);
     const stderrOut = stderrChunks.join('');
     expect(stderrOut).toContain('failed to parse verdict file');
+  });
+});
+
+// ── CLI: emit-leaf input-validation hardening (AISDLC-391) ────────────────────
+
+describe('emit-leaf — --head-sha shape validation (AISDLC-391 AC-1)', () => {
+  /**
+   * Build a complete, valid emit-leaf argv with one override slot. The transcript
+   * and verdict fixtures are written under `<tmpRoot>/.ai-sdlc/` so they satisfy
+   * the AISDLC-391 path-traversal guard — the only knob the test varies is
+   * `--head-sha`, isolating the validation under test.
+   */
+  function buildValidArgsWithHeadSha(headShaValue: string): string[] {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('verdict-head-sha-test.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+    return [
+      'emit-leaf',
+      '--task-id',
+      'AISDLC-383.8',
+      '--reviewer',
+      'code-reviewer',
+      '--transcript-path',
+      transcriptPath,
+      '--verdict-path',
+      verdictPath,
+      '--head-sha',
+      headShaValue,
+      '--harness',
+      'claude-code',
+      '--model',
+      'sonnet',
+    ];
+  }
+
+  it('accepts a valid 40-hex-char lowercase SHA', async () => {
+    await expect(
+      buildAttestationCli(buildValidArgsWithHeadSha('a'.repeat(40))).parseAsync(),
+    ).resolves.not.toThrow();
+    expect(loadLeaves(tmpRoot)).toHaveLength(1);
+  });
+
+  it('rejects empty string', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(buildValidArgsWithHeadSha('')).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
+    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+  });
+
+  it('rejects too-short SHA (39 chars)', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(buildValidArgsWithHeadSha('a'.repeat(39))).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
+    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+  });
+
+  it('rejects too-long SHA (41 chars)', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(buildValidArgsWithHeadSha('a'.repeat(41))).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
+    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+  });
+
+  it('rejects uppercase hex (git emits lowercase; uppercase indicates caller bug)', async () => {
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli(buildValidArgsWithHeadSha('A'.repeat(40))).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
+    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+  });
+
+  it('rejects non-hex characters', async () => {
+    let caught: Error | null = null;
+    try {
+      // 40 chars but with 'z' which isn't hex.
+      await buildAttestationCli(buildValidArgsWithHeadSha('z'.repeat(40))).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
+    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+  });
+
+  it('rejects multi-line input (newline embedded)', async () => {
+    let caught: Error | null = null;
+    try {
+      // First 39 'a' + newline = 40 chars but newline isn't hex.
+      await buildAttestationCli(buildValidArgsWithHeadSha('a'.repeat(39) + '\n')).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--head-sha must be exactly 40 lowercase hex');
+    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+  });
+});
+
+describe('emit-leaf — --transcript-path traversal hardening (AISDLC-391 AC-2)', () => {
+  it('accepts transcript-path inside .ai-sdlc/', async () => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    const verdictPath = writeVerdict('v.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    await expect(
+      buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync(),
+    ).resolves.not.toThrow();
+
+    expect(loadLeaves(tmpRoot)).toHaveLength(1);
+  });
+
+  it('rejects transcript-path outside .ai-sdlc/ (sibling of repo root)', async () => {
+    // Write a "transcript" outside .ai-sdlc/ — attacker scenario: path
+    // injected via unsanitized bash variable points at /etc/passwd or similar.
+    const evilPath = join(tmpRoot, 'evil-transcript.jsonl');
+    writeFileSync(evilPath, '{"role":"user","content":"hi"}\n');
+    const verdictPath = writeVerdict('v.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        evilPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--transcript-path must resolve inside');
+    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+  });
+
+  it('rejects transcript-path that escapes via ../ segments', async () => {
+    // Build a path that LOOKS like it's under .ai-sdlc but ../-escapes out.
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      '..',
+      '..',
+      'evil-transcript.jsonl',
+    );
+    // Materialize the file so the existence check (if it ran) wouldn't be the
+    // blocker — but the traversal guard runs first.
+    writeFileSync(join(tmpRoot, 'evil-transcript.jsonl'), '{"role":"user","content":"hi"}\n');
+    const verdictPath = writeVerdict('v.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--transcript-path must resolve inside');
+  });
+
+  it('rejects transcript-path at absolute /etc/passwd-style location', async () => {
+    const verdictPath = writeVerdict('v.json', {
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    });
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        '/etc/passwd',
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--transcript-path must resolve inside');
+  });
+});
+
+describe('emit-leaf — --verdict-path traversal hardening (AISDLC-391 AC-3)', () => {
+  it('rejects verdict-path outside .ai-sdlc/', async () => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    // Verdict written directly under tmpRoot (sibling of .ai-sdlc, outside it).
+    const evilVerdictPath = join(tmpRoot, 'evil-verdict.json');
+    writeFileSync(
+      evilVerdictPath,
+      JSON.stringify({
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      }),
+    );
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        evilVerdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--verdict-path must resolve inside');
+    expect(loadLeaves(tmpRoot)).toHaveLength(0);
+  });
+
+  it('rejects verdict-path that escapes via ../ segments', async () => {
+    makeTranscript('aisdlc-383.8', 'code-reviewer');
+    const transcriptPath = join(
+      tmpRoot,
+      '.ai-sdlc',
+      'transcripts',
+      'aisdlc-383.8',
+      'code-reviewer.jsonl',
+    );
+    // Path looks like it's under .ai-sdlc but ../-escapes out.
+    const verdictPath = join(tmpRoot, '.ai-sdlc', 'verdicts', '..', '..', 'evil-verdict.json');
+    writeFileSync(
+      join(tmpRoot, 'evil-verdict.json'),
+      JSON.stringify({
+        approved: true,
+        findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+      }),
+    );
+
+    let caught: Error | null = null;
+    try {
+      await buildAttestationCli([
+        'emit-leaf',
+        '--task-id',
+        'AISDLC-383.8',
+        '--reviewer',
+        'code-reviewer',
+        '--transcript-path',
+        transcriptPath,
+        '--verdict-path',
+        verdictPath,
+        '--head-sha',
+        'a'.repeat(40),
+        '--harness',
+        'claude-code',
+        '--model',
+        'sonnet',
+      ]).parseAsync();
+    } catch (err) {
+      caught = err as Error;
+    }
+    expect(caught?.message).toMatch(/process\.exit\(1\)/);
+    expect(stderrChunks.join('')).toContain('--verdict-path must resolve inside');
   });
 });
 

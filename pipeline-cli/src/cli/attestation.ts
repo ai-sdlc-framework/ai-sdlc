@@ -23,7 +23,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { hostname, userInfo } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import {
@@ -61,6 +61,41 @@ function emitText(text: string): void {
 
 function emitJson(value: unknown): void {
   process.stdout.write(JSON.stringify(value, null, 2) + '\n');
+}
+
+// ── Input validation helpers (AISDLC-391) ─────────────────────────────────────
+
+/**
+ * Validate that a string is exactly 40 lowercase-hex characters (a git commit SHA).
+ * Used to guard `--head-sha` on `emit-leaf`: the nonce-binding invariant in
+ * RFC-0042 requires the head SHA be well-formed; an empty or multi-line value
+ * silently weakens replay resistance.
+ */
+function isValidHeadSha(value: string): boolean {
+  return /^[0-9a-f]{40}$/.test(value);
+}
+
+/**
+ * Return true iff `candidate` (already resolved to an absolute path) lies
+ * inside `<repoRoot>/.ai-sdlc/` (or is the directory itself). Used to guard
+ * `--transcript-path` and `--verdict-path` on `emit-leaf` against caller bugs
+ * or `../`-injection through unsanitized bash variables that would otherwise
+ * let the CLI hash arbitrary files into the Merkle tree.
+ *
+ * The check uses path.relative() so it correctly handles symlinks-as-strings
+ * and cross-platform separators; a `..` prefix or an absolute relative result
+ * means the candidate escapes the base.
+ */
+function isPathInside(baseDir: string, candidate: string): boolean {
+  const resolvedBase = resolve(baseDir);
+  const resolvedCandidate = resolve(candidate);
+  const rel = relative(resolvedBase, resolvedCandidate);
+  if (rel === '') return true; // candidate IS the base directory
+  if (rel.startsWith('..' + sep) || rel === '..') return false;
+  // On POSIX, an absolute `rel` indicates the candidate is on a different
+  // device/root than the base — treat as outside.
+  if (resolve(rel) === rel) return false;
+  return true;
 }
 
 // ── CLI builder ───────────────────────────────────────────────────────────────
@@ -411,6 +446,37 @@ export function buildAttestationCli(argv: string[]): ReturnType<typeof yargs> {
           const headSha = args['head-sha'] as string;
           const harness = args['harness'] as string;
           const model = args['model'] as string;
+
+          // AISDLC-391 Finding 1: validate --head-sha is a well-formed 40-hex-char
+          // git commit SHA. RFC-0042's nonce-binding invariant assumes a real SHA;
+          // an empty or multi-line value (e.g. from a silently-failed `git rev-parse`)
+          // would weaken replay resistance.
+          if (!isValidHeadSha(headSha)) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --head-sha must be exactly 40 lowercase hex characters ` +
+                `(got ${headSha.length}-char value: ${JSON.stringify(headSha.slice(0, 80))})\n`,
+            );
+            process.exit(1);
+          }
+
+          // AISDLC-391 Finding 2: validate --transcript-path resolves inside
+          // <repo-root>/.ai-sdlc/. Defense-in-depth against `../` injection through
+          // unsanitized bash variables in the slash-command-body caller.
+          const aiSdlcDir = join(repoRoot, '.ai-sdlc');
+          if (!isPathInside(aiSdlcDir, transcriptPath)) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --transcript-path must resolve inside ` +
+                `${aiSdlcDir}/ (got: ${transcriptPath})\n`,
+            );
+            process.exit(1);
+          }
+          if (!isPathInside(aiSdlcDir, verdictPath)) {
+            process.stderr.write(
+              `[cli-attestation] emit-leaf: --verdict-path must resolve inside ` +
+                `${aiSdlcDir}/ (got: ${verdictPath})\n`,
+            );
+            process.exit(1);
+          }
 
           // Validate transcript file exists.
           if (!existsSync(transcriptPath)) {
