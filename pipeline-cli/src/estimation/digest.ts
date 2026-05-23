@@ -270,7 +270,9 @@ function buildClassRow(
   if (n > 0) {
     meanBucketMiss = records.reduce((s, r) => s + r.bucketMiss, 0) / n;
     const sorted = [...records].map((r) => r.bucketMiss).sort((a, b) => a - b);
-    medianBucketMiss = sorted[Math.floor(sorted.length / 2)]!;
+    const mid = Math.floor(sorted.length / 2);
+    medianBucketMiss =
+      sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
     oneBucketMissRate = records.filter((r) => Math.abs(r.bucketMiss) <= 1).length / n;
     threeBucketMissRate = records.filter((r) => Math.abs(r.bucketMiss) >= 3).length / n;
   }
@@ -407,7 +409,8 @@ export function queryStageACoverage(opts: {
 export function medianOf(values: number[]): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
-  return sorted[Math.floor(sorted.length / 2)]!;
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0 ? (sorted[mid - 1]! + sorted[mid]!) / 2 : sorted[mid]!;
 }
 
 /**

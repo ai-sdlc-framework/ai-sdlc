@@ -353,6 +353,8 @@ function readCalibrationRecords(artifactsDir: string, taskClass: TaskClass): Cal
           typeof r === 'object' &&
           typeof r.taskId === 'string' &&
           typeof r.actualBucket === 'string' &&
+          typeof r.bucketMiss === 'number' &&
+          Number.isFinite(r.bucketMiss) &&
           r.class === taskClass
         ) {
           records.push(r);

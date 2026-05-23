@@ -313,6 +313,25 @@ export function autoPromote(opts: AutoPromoteOpts = {}): AutoPromoteResult {
     return { promotedCount: 0, promotedClasses: [], yamlUpdated: false };
   }
 
+  // Mark promoted proposals as accepted in the JSONL audit log.
+  // Rewrite the proposals file with `accepted: true` on every proposal whose
+  // normalised class name matches one of the newly-promoted clusters. The
+  // full-rewrite (rather than append) keeps the file compact and avoids a
+  // read-then-skip-duplicate pattern on subsequent runs.
+  const promotedSet = new Set(promotedClasses);
+  const proposalsPath = resolveProposalsPath(opts.aiSdlcDir);
+  try {
+    const allProposals = readProposals(opts);
+    const updated = allProposals.map((p) =>
+      promotedSet.has(normaliseClassName(p.proposedClass)) ? { ...p, accepted: true } : p,
+    );
+    writeFileSync(proposalsPath, updated.map((p) => JSON.stringify(p)).join('\n') + '\n', {
+      encoding: 'utf8',
+    });
+  } catch {
+    // Best-effort: JSONL update failure must not roll back the YAML write.
+  }
+
   return {
     promotedCount: promotedClasses.length,
     promotedClasses,

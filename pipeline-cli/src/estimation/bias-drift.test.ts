@@ -6,8 +6,10 @@
  *  - Over-correction detection algorithm (§7.4).
  *  - Insufficient-data guard (no detection when n < threshold).
  *  - Non-triggering cases (no historical bias, mixed recent records).
+ *  - Window-signature idempotency contract (alreadyEmitted=true, eventEmitted=false).
  */
 
+import { createHash } from 'node:crypto';
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -176,5 +178,92 @@ describe('detectBiasDrift — AC #1 over-correction detection', () => {
     expect(featureCheck?.overCorrected).toBe(true);
     const bugCheck = result.checks.find((c) => c.taskClass === 'bug');
     expect(bugCheck?.overCorrected).toBe(false);
+  });
+});
+
+// ── Window-signature idempotency contract ─────────────────────────────────
+
+/**
+ * Helper: compute the same windowSignature as bias-drift.ts does internally —
+ * SHA-256 of sorted `taskId@ts` tuples of the tail `windowSize` records
+ * (already sorted ascending by ts by the caller).
+ */
+function computeWindowSignature(
+  sortedByTs: Array<{ taskId: string; ts: string }>,
+  windowSize: number,
+): string {
+  const tail = sortedByTs.slice(-windowSize);
+  const canonical = tail
+    .map((r) => `${r.taskId}@${r.ts}`)
+    .sort()
+    .join('|');
+  return createHash('sha256').update(canonical).digest('hex');
+}
+
+describe('detectBiasDrift — window-signature idempotency', () => {
+  it('returns alreadyEmitted=true and eventEmitted=false when the event was previously emitted for this calibration window', () => {
+    // Calibration state: 3 historical overestimates + 3 recent underestimates.
+    // This is the identical over-correction pattern used in the AC #1 test.
+    const tailRecords = [
+      { taskId: 'AISDLC-6', ts: '2026-05-01T10:00:00Z', bucketMiss: -1 },
+      { taskId: 'AISDLC-7', ts: '2026-05-02T10:00:00Z', bucketMiss: 0 },
+      { taskId: 'AISDLC-8', ts: '2026-05-03T10:00:00Z', bucketMiss: -1 },
+    ];
+
+    writeCalibration(tmpDir, [
+      { taskId: 'AISDLC-1', class: 'feature', bucketMiss: 2, ts: '2026-04-01T10:00:00Z' },
+      { taskId: 'AISDLC-2', class: 'feature', bucketMiss: 1, ts: '2026-04-02T10:00:00Z' },
+      { taskId: 'AISDLC-3', class: 'feature', bucketMiss: 2, ts: '2026-04-03T10:00:00Z' },
+      { taskId: 'AISDLC-4', class: 'feature', bucketMiss: 1, ts: '2026-04-04T10:00:00Z' },
+      { taskId: 'AISDLC-5', class: 'feature', bucketMiss: 1, ts: '2026-04-05T10:00:00Z' },
+      ...tailRecords.map((r) => ({ ...r, class: 'feature' as const })),
+    ]);
+
+    // Pre-compute the signature that bias-drift.ts will derive for this window.
+    // sortedByTs ascending: same order as the tail slice of all 8 records sorted by ts.
+    const allSortedByTs = [
+      { taskId: 'AISDLC-1', ts: '2026-04-01T10:00:00Z' },
+      { taskId: 'AISDLC-2', ts: '2026-04-02T10:00:00Z' },
+      { taskId: 'AISDLC-3', ts: '2026-04-03T10:00:00Z' },
+      { taskId: 'AISDLC-4', ts: '2026-04-04T10:00:00Z' },
+      { taskId: 'AISDLC-5', ts: '2026-04-05T10:00:00Z' },
+      ...tailRecords.map((r) => ({ taskId: r.taskId, ts: r.ts })),
+    ];
+    const windowSignature = computeWindowSignature(allSortedByTs, 3);
+
+    // Seed the events file with a prior EstimateBiasOverCorrected event
+    // carrying the same taskClass + windowSignature.
+    const orchestratorDir = join(tmpDir, '_orchestrator');
+    mkdirSync(orchestratorDir, { recursive: true });
+    const eventsFile = join(orchestratorDir, 'events-2026-05-01.jsonl');
+    writeFileSync(
+      eventsFile,
+      JSON.stringify({
+        ts: '2026-05-01T10:00:00Z',
+        type: 'EstimateBiasOverCorrected',
+        taskClass: 'feature',
+        consecutiveMisses: 3,
+        meanMissOverall: 1.0,
+        meanMissRecent: -0.667,
+        windowSignature,
+      }) + '\n',
+      { encoding: 'utf8' },
+    );
+
+    // Now call detectBiasDrift with the same calibration state.
+    const result = detectBiasDrift({
+      artifactsDir: tmpDir,
+      taskClass: 'feature',
+      consecutiveThreshold: 3,
+    });
+
+    const featureCheck = result.checks.find((c) => c.taskClass === 'feature');
+    // Over-correction IS detected (the calibration state qualifies).
+    expect(featureCheck?.overCorrected).toBe(true);
+    // But the event was already emitted — skip re-emission.
+    expect(featureCheck?.alreadyEmitted).toBe(true);
+    expect(featureCheck?.eventEmitted).toBe(false);
+    // The signature must match what we pre-seeded.
+    expect(featureCheck?.windowSignature).toBe(windowSignature);
   });
 });
