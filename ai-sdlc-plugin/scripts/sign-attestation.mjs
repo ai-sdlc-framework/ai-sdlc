@@ -1,7 +1,21 @@
 #!/usr/bin/env node
 /**
  * Build + sign the DSSE review attestation for the current commit and write it
- * to `.ai-sdlc/attestations/<head-sha>.dsse.json` (AISDLC-74).
+ * to `.ai-sdlc/attestations/<patch-id>.dsse.json` (AISDLC-398, primary) and
+ * `.ai-sdlc/attestations/<head-sha>.dsse.json` (AISDLC-74, legacy compat).
+ *
+ * AISDLC-398 — content-addressed filenames:
+ *   The primary filename is now `<git-patch-id>.dsse.json` where the patch-id
+ *   is computed from `git diff-tree --no-color -p <merge-base>..<head>` with
+ *   `.ai-sdlc/attestations/**` excluded. This decouples the envelope lookup
+ *   key from git commit history, eliminating the v4-kick failure mode (PR #626)
+ *   where a conflict-free queue rebase changed the commit SHA → changed the
+ *   envelope filename → CI could not find the envelope.
+ *
+ *   The per-SHA legacy filename is ALSO written as a compatibility bridge for
+ *   one release (deferred deletion to a follow-up after soak). Verifiers
+ *   check patch-id filename first; fall back to per-SHA for pre-AISDLC-398
+ *   envelopes.
  *
  * Backs `/ai-sdlc execute` Step 10. Imports `buildPredicate` + `signAttestation`
  * from `@ai-sdlc/orchestrator/runtime` so the same hash + canonicalization
@@ -21,7 +35,7 @@
  *                     When 'v6': reads transcript leaves from
  *                     .ai-sdlc/transcript-leaves.jsonl, computes the Merkle
  *                     root + per-leaf inclusion proofs, signs the root, and
- *                     writes .ai-sdlc/attestations/<head-sha>.v6.dsse.json.
+ *                     writes .ai-sdlc/attestations/<patch-id>.v6.dsse.json.
  *                     In v6 mode the task-id is resolved from --task-id or
  *                     the .active-task sentinel; --review-verdicts is NOT
  *                     consulted (v6 derives reviewer evidence from the
@@ -53,15 +67,59 @@
  *   - ~/.ai-sdlc/signing-key.pem (the private key)
  *
  * Writes:
- *   - .ai-sdlc/attestations/<head-sha>.dsse.json
+ *   - .ai-sdlc/attestations/<patch-id>.dsse.json  (primary, AISDLC-398)
+ *   - .ai-sdlc/attestations/<head-sha>.dsse.json  (legacy compat bridge)
  *
- * Prints the written path to stdout on success.
+ * Prints the primary written path to stdout on success.
  */
 
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { homedir, hostname, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
+
+/**
+ * AISDLC-398: Compute git patch-id for content-addressed envelope filenames.
+ *
+ * Uses `git diff-tree --no-color -p <base>..<head> -- ':!.ai-sdlc/attestations/'`
+ * piped to `git patch-id --stable`.
+ *
+ * Returns the 40-char hex patch-id, or null on failure (caller falls back to
+ * per-SHA filename for legacy compatibility).
+ */
+function computePatchIdForFilename(base, head, repoRoot) {
+  if (!/^[0-9a-f]{40}$/i.test(base) || !/^[0-9a-f]{40}$/i.test(head)) {
+    return null;
+  }
+  let diffOutput;
+  try {
+    diffOutput = execFileSync(
+      'git',
+      ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', ':!.ai-sdlc/attestations/'],
+      {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        maxBuffer: 128 * 1024 * 1024,
+      },
+    );
+  } catch {
+    return null;
+  }
+  if (!diffOutput || diffOutput.trim().length === 0) {
+    return null;
+  }
+  const result = spawnSync('git', ['patch-id', '--stable'], {
+    input: diffOutput,
+    cwd: repoRoot,
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024,
+  });
+  if (result.status !== 0 || !result.stdout) {
+    return null;
+  }
+  const match = result.stdout.trim().match(/^([0-9a-f]{40})/i);
+  return match ? match[1].toLowerCase() : null;
+}
 
 function fail(msg, code = 1) {
   process.stderr.write(`ERROR: ${msg}\n`);
@@ -216,6 +274,18 @@ async function main() {
       process.env['GIT_AUTHOR_EMAIL'] || process.env['EMAIL'] || `${userInfo().username}@local`;
     const machine = hostname();
 
+    // AISDLC-398: compute content-addressed patch-id for primary filename.
+    let v6MergeBase = null;
+    try {
+      v6MergeBase = git(['merge-base', 'origin/main', 'HEAD'], repoRoot).trim();
+      if (!/^[0-9a-f]{40}$/i.test(v6MergeBase)) v6MergeBase = null;
+    } catch {
+      v6MergeBase = null;
+    }
+    const v6PatchId = v6MergeBase
+      ? computePatchIdForFilename(v6MergeBase, headSha, repoRoot)
+      : null;
+
     let outPath;
     try {
       outPath = signAndWriteV6Envelope({
@@ -224,6 +294,9 @@ async function main() {
         taskId,
         privateKeyPem,
         signerIdentity: `${identity}:${machine}`,
+        // AISDLC-398: pass patch-id so the signer can write the primary
+        // content-addressed filename. Falls back to per-SHA when null.
+        patchId: v6PatchId ?? undefined,
       });
     } catch (err) {
       fail(err.message ?? String(err));
@@ -471,9 +544,55 @@ async function main() {
     }
   }
 
-  const outPath = join(outDir, `${headSha}.dsse.json`);
-  writeFileSync(outPath, JSON.stringify(envelope, null, 2) + '\n');
-  process.stdout.write(`${outPath}\n`);
+  // AISDLC-398: compute content-addressed patch-id for the primary filename.
+  //
+  // The patch-id is stable across conflict-free rebases (queue rebases that
+  // change the commit SHA but not the diff content). This eliminates the
+  // v4-kick failure mode where a rebase shifted the head SHA → the verifier
+  // looked for <new-sha>.dsse.json → couldn't find it → posted failure.
+  //
+  // We compute merge-base ONCE here so both the patch-id and v5Result use
+  // the same frozen base — they should, since v5Result.signedMergeBase was
+  // already computed above.
+  let patchIdMergeBase = v5Result?.signedMergeBase ?? null;
+  if (!patchIdMergeBase) {
+    try {
+      const mb = git(['merge-base', 'origin/main', 'HEAD'], repoRoot).trim();
+      if (/^[0-9a-f]{40}$/i.test(mb)) patchIdMergeBase = mb.toLowerCase();
+    } catch {
+      patchIdMergeBase = null;
+    }
+  }
+
+  const patchId = patchIdMergeBase
+    ? computePatchIdForFilename(patchIdMergeBase, headSha, repoRoot)
+    : null;
+
+  const envelopeJson = JSON.stringify(envelope, null, 2) + '\n';
+
+  // Primary: content-addressed filename (AISDLC-398)
+  const primaryOutPath = patchId
+    ? join(outDir, `${patchId}.dsse.json`)
+    : join(outDir, `${headSha}.dsse.json`);
+  writeFileSync(primaryOutPath, envelopeJson);
+  if (patchId) {
+    process.stderr.write(
+      `[sign-attestation] wrote primary envelope (patch-id): .ai-sdlc/attestations/${patchId}.dsse.json\n`,
+    );
+  }
+
+  // Legacy compat bridge: per-SHA filename (one-release soak, AISDLC-398).
+  // Verifiers that haven't been updated yet will still find the envelope via
+  // the SHA-keyed filename. Scheduled for deletion in the AISDLC-398 follow-up.
+  if (patchId) {
+    const legacyOutPath = join(outDir, `${headSha}.dsse.json`);
+    writeFileSync(legacyOutPath, envelopeJson);
+    process.stderr.write(
+      `[sign-attestation] wrote legacy bridge envelope (SHA): .ai-sdlc/attestations/${headSha}.dsse.json\n`,
+    );
+  }
+
+  process.stdout.write(`${primaryOutPath}\n`);
 }
 
 main().catch((err) => fail(err.message ?? String(err)));

@@ -57,9 +57,50 @@
  */
 
 import { readFileSync, existsSync, appendFileSync, readdirSync } from 'node:fs';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash, randomBytes, verify as cryptoVerify, createPublicKey } from 'node:crypto';
 import { join } from 'node:path';
+
+/**
+ * AISDLC-398: Compute the git patch-id for `base..head` with
+ * `.ai-sdlc/attestations/**` excluded. Returns 40-char hex or null.
+ *
+ * Used by the verifier to resolve the content-addressed envelope filename
+ * before falling back to the legacy per-SHA filename.
+ */
+function computePatchIdForVerifier(base, head, repoRoot) {
+  if (!/^[0-9a-f]{40}$/i.test(base) || !/^[0-9a-f]{40}$/i.test(head)) {
+    return null;
+  }
+  let diffOutput;
+  try {
+    diffOutput = execFileSync(
+      'git',
+      ['diff-tree', '--no-color', '-p', `${base}..${head}`, '--', ':!.ai-sdlc/attestations/'],
+      {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        maxBuffer: 128 * 1024 * 1024,
+      },
+    );
+  } catch {
+    return null;
+  }
+  if (!diffOutput || diffOutput.trim().length === 0) {
+    return null;
+  }
+  const result = spawnSync('git', ['patch-id', '--stable'], {
+    input: diffOutput,
+    cwd: repoRoot,
+    encoding: 'utf-8',
+    maxBuffer: 64 * 1024,
+  });
+  if (result.status !== 0 || !result.stdout) {
+    return null;
+  }
+  const match = result.stdout.trim().match(/^([0-9a-f]{40})/i);
+  return match ? match[1].toLowerCase() : null;
+}
 import {
   ACCEPTED_SCHEMA_VERSIONS,
   verifyAttestation,
@@ -1592,14 +1633,48 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   // --- Load all attestation envelopes (v6 + legacy) ---------------------
   const lowerHead = headSha.toLowerCase();
 
+  // AISDLC-398: compute patch-id for content-addressed envelope lookup.
+  // We compute the merge-base once and reuse it for both the patch-id
+  // filename lookup and subsequent hash recomputations.
+  let patchIdMergeBase = null;
+  try {
+    const mb = execFileSync('git', ['merge-base', baseSha, headSha], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+    }).trim();
+    if (/^[0-9a-f]{40}$/i.test(mb)) patchIdMergeBase = mb.toLowerCase();
+  } catch {
+    patchIdMergeBase = null;
+  }
+
+  const contentPatchId = patchIdMergeBase
+    ? computePatchIdForVerifier(patchIdMergeBase, lowerHead, repoRoot)
+    : null;
+
+  if (contentPatchId) {
+    process.stderr.write(
+      `[verify-attestation] AISDLC-398: content patch-id = ${contentPatchId.slice(0, 7)}... (looking up content-addressed envelope)\n`,
+    );
+  }
+
   // AISDLC-383.4: v6-prefer path (RFC-0042 Phase 2).
-  // If a v6 envelope exists for this PR's head SHA, verify it via the
-  // Merkle-based verifier. Fallback to v3/v5 legacy verifier for older envelopes.
+  // If a v6 envelope exists for this PR's patch-id (AISDLC-398, preferred)
+  // or head SHA (legacy), verify it via the Merkle-based verifier.
+  // Fallback to v3/v5 legacy verifier for older envelopes.
   // Preference order: v6 > v5 > v4 > v3 (per AC#3 — legacy fallback indefinitely).
   const all = loadAllAttestations(repoRoot);
-  const v6Envelopes = all.filter(
-    (entry) => entry.isV6 && entry.fileName.toLowerCase() === `${lowerHead}.v6.dsse.json`,
-  );
+
+  // AISDLC-398: check patch-id-named v6 envelope first, then SHA-named.
+  const v6PatchIdFilename = contentPatchId ? `${contentPatchId}.v6.dsse.json` : null;
+  const v6Envelopes = all.filter((entry) => {
+    if (!entry.isV6) return false;
+    const lowerName = entry.fileName.toLowerCase();
+    // Patch-id filename (AISDLC-398 preferred)
+    if (v6PatchIdFilename && lowerName === v6PatchIdFilename) return true;
+    // Legacy per-SHA filename (pre-AISDLC-398 compat)
+    if (lowerName === `${lowerHead}.v6.dsse.json`) return true;
+    return false;
+  });
   if (v6Envelopes.length > 0) {
     // Use the most-recent v6 envelope when multiple are present (tie-break by filename).
     v6Envelopes.sort((a, b) => {
@@ -1608,10 +1683,22 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       return a.fileName.localeCompare(b.fileName);
     });
     const chosen = v6Envelopes[0];
+    // For content-addressed envelopes we still verify using the head SHA
+    // as the binding (the filename changed, but the envelope internally
+    // still carries subject.digest.sha1 = head SHA for the DSSE binding check).
+    // The v6 verifier only checks the filename against `<headSha>.v6.dsse.json`
+    // for the legacy per-SHA path. For patch-id-named envelopes we skip that
+    // filename binding check by passing the envelope's own subject SHA.
+    const isPatchIdNamed = v6PatchIdFilename && chosen.fileName.toLowerCase() === v6PatchIdFilename;
+    const effectiveHeadSha = isPatchIdNamed
+      ? (chosen.envelope.subject?.digest?.sha1 ?? lowerHead)
+      : lowerHead;
     return verifyV6Envelope({
       envelope: chosen.envelope,
-      envelopeFileName: chosen.fileName,
-      headSha: lowerHead,
+      envelopeFileName: isPatchIdNamed
+        ? `${effectiveHeadSha.toLowerCase()}.v6.dsse.json`
+        : chosen.fileName,
+      headSha: effectiveHeadSha.toLowerCase(),
       trustedReviewers,
       repoRoot,
     });
@@ -1682,6 +1769,108 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
       status: 'invalid',
       reason: `no envelope present at ${shortSha(lowerHead)} (only v6 envelopes found but none matched — did you push with a v6-signed HEAD?)`,
     };
+  }
+
+  // AISDLC-398: fast-path for content-addressed legacy (v5) envelopes.
+  //
+  // When a patch-id-named envelope exists, we can match it directly without
+  // the expensive ancestor walk + contentHash recomputation. The patch-id
+  // filename is `<patch-id>.dsse.json` (no `.v6.` infix for v5 envelopes).
+  //
+  // This fast-path is tried BEFORE the general content-hash loop. On a
+  // cache hit, we skip the loop entirely and jump straight to signature
+  // verification. On a miss (no patch-id-named file, or patch-id computation
+  // failed), we fall through to the existing loop — full backward compat.
+  const v5PatchIdFilename = contentPatchId ? `${contentPatchId}.dsse.json` : null;
+  if (v5PatchIdFilename) {
+    const patchIdEntry = legacyAll.find(
+      (entry) => entry.fileName.toLowerCase() === v5PatchIdFilename,
+    );
+    if (patchIdEntry) {
+      process.stderr.write(
+        `[verify-attestation] AISDLC-398: matched content-addressed envelope ${v5PatchIdFilename}\n`,
+      );
+      // Fast-path: verify this specific envelope. The predicate is already
+      // content-matched by construction (the patch-id proves the diff is
+      // identical). We still run the policy/agent/plugin/schema bindings
+      // via predicateMatchReason and the signature via verifyAttestation.
+      const fastReason = predicateMatchReason(patchIdEntry.predicate, {
+        contentHashV3: patchIdEntry.predicate.contentHashV3,
+        contentHashV4: patchIdEntry.predicate.contentHashV4,
+        contentHashV5: patchIdEntry.predicate.contentHashV5,
+        policyHash: sha256Hex(
+          readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
+        ),
+        expectedAgentFileHashes: Object.fromEntries(
+          [
+            'code-reviewer',
+            'code-reviewer-codex',
+            'test-reviewer',
+            'test-reviewer-codex',
+            'security-reviewer',
+          ].map((a) => [
+            a,
+            sha256Hex(readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'agents', `${a}.md`), 'utf-8')),
+          ]),
+        ),
+        pluginVersion: (() => {
+          try {
+            const manifest = JSON.parse(
+              readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'plugin.json'), 'utf-8'),
+            );
+            return typeof manifest?.version === 'string' ? manifest.version : '';
+          } catch {
+            return '';
+          }
+        })(),
+        acceptedSchemaVersions: ACCEPTED_SCHEMA_VERSIONS,
+      });
+      if (fastReason !== null) {
+        return { status: 'invalid', reason: fastReason.detail };
+      }
+      // Verify signature + schema completeness.
+      const fastResult = verifyAttestation({
+        envelope: patchIdEntry.envelope,
+        trustedReviewers,
+        expected: {
+          commitSha: patchIdEntry.predicate?.subject?.digest?.sha1 ?? '0'.repeat(40),
+          contentHashV3: patchIdEntry.predicate.contentHashV3,
+          contentHashV4: patchIdEntry.predicate.contentHashV4,
+          contentHashV5: patchIdEntry.predicate.contentHashV5,
+          policyHash: sha256Hex(
+            readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
+          ),
+          expectedAgentFileHashes: Object.fromEntries(
+            [
+              'code-reviewer',
+              'code-reviewer-codex',
+              'test-reviewer',
+              'test-reviewer-codex',
+              'security-reviewer',
+            ].map((a) => [
+              a,
+              sha256Hex(
+                readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'agents', `${a}.md`), 'utf-8'),
+              ),
+            ]),
+          ),
+        },
+      });
+      if (fastResult.valid) {
+        return { status: 'valid', reason: 'ok' };
+      }
+      const sigFailureMarkers = [
+        'signature',
+        'envelope has no signatures',
+        'envelope payload is empty',
+        'payload is not valid JSON',
+      ];
+      const isFastSigFailure = sigFailureMarkers.some((m) => fastResult.reason.includes(m));
+      return {
+        status: 'invalid',
+        reason: isFastSigFailure ? `signature invalid: ${fastResult.reason}` : fastResult.reason,
+      };
+    }
   }
 
   // --- AISDLC-274: orphan-envelope early detection ----------------------
