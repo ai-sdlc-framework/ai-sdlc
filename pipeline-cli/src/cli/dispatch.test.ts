@@ -859,6 +859,122 @@ describe('runDispatchCli', () => {
       );
     });
 
+    it('honors yaml inSessionAgentMaxSessions as the max-sessions fallback (AC-5)', async () => {
+      // AISDLC-396 round-2 MAJOR-3 fix: when the operator sets a custom
+      // inSessionAgentMaxSessions in dispatch-config.yaml, the CLI must
+      // default --max-sessions from that value (not unconditionally to 4).
+      // Build a workDir with .ai-sdlc/dispatch-config.yaml setting cap=2
+      // and .ai-sdlc/dispatch/ as the board dir under it.
+      const workDir = mkdtempSync(path.join(tmpdir(), 'workdir-yaml-'));
+      const aiSdlcDir = path.join(workDir, '.ai-sdlc');
+      const boardDirUnderWork = path.join(aiSdlcDir, 'dispatch');
+      dispatchEnsureBoardDirs(boardDirUnderWork);
+      writeFileSync(
+        path.join(aiSdlcDir, 'dispatch-config.yaml'),
+        `apiVersion: ai-sdlc.io/v1alpha1
+kind: DispatchConfig
+spec:
+  defaultWorkerKind: in-session-agent
+  parallelism:
+    inSessionAgentMaxSessions: 2
+`,
+        'utf8',
+      );
+      // Pre-populate inflight/ with 2 manifests — at cap=2 from yaml, the
+      // 3rd dispatch must be refused even though no --max-sessions was passed.
+      const manifestA = mkManifest('AISDLC-5800');
+      const manifestB = mkManifest('AISDLC-5801');
+      const manifestC = mkManifest('AISDLC-5802');
+      const writeInflight = (m: DispatchManifest): string => {
+        const target = path.join(boardDirUnderWork, 'inflight', `${m.taskId}.dispatch.json`);
+        writeFileSync(target, JSON.stringify(m, null, 2), 'utf-8');
+        return target;
+      };
+      writeInflight(manifestA);
+      writeInflight(manifestB);
+      const manifestPath = writeInflight(manifestC);
+      // 3 in inflight; subtract current → 2 OTHER; cap from yaml = 2 → refuse.
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'dispatch-bg-agent',
+          '--board-dir',
+          boardDirUnderWork,
+          '--manifest-path',
+          manifestPath,
+        ]),
+      );
+      expect(exit).toBe(1);
+      const result = readLastJson(captured) as { maxSessions: number };
+      expect(result.maxSessions).toBe(2);
+      rmSync(workDir, { recursive: true, force: true });
+    });
+
+    it('falls back to default cap=4 when yaml is missing AND --max-sessions not passed', async () => {
+      // Sanity check for the cap precedence: with no yaml + no flag, the
+      // CLI must use DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS (4). Place 5
+      // manifests so the 5th dispatch trips the default cap.
+      writeManifestToInflight('AISDLC-5810');
+      writeManifestToInflight('AISDLC-5811');
+      writeManifestToInflight('AISDLC-5812');
+      writeManifestToInflight('AISDLC-5813');
+      const manifestPath = writeManifestToInflight('AISDLC-5814');
+      // 5 in inflight; subtract current → 4 OTHER; default cap = 4 → refuse.
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'dispatch-bg-agent',
+          '--board-dir',
+          boardDir,
+          '--manifest-path',
+          manifestPath,
+        ]),
+      );
+      expect(exit).toBe(1);
+      const result = readLastJson(captured) as { maxSessions: number };
+      expect(result.maxSessions).toBe(4);
+    });
+
+    it('explicit --max-sessions still overrides yaml (cap precedence: flag > yaml > default)', async () => {
+      // Build workDir with yaml cap=8 and pass --max-sessions=1 → flag wins.
+      const workDir = mkdtempSync(path.join(tmpdir(), 'workdir-precedence-'));
+      const aiSdlcDir = path.join(workDir, '.ai-sdlc');
+      const boardDirUnderWork = path.join(aiSdlcDir, 'dispatch');
+      dispatchEnsureBoardDirs(boardDirUnderWork);
+      writeFileSync(
+        path.join(aiSdlcDir, 'dispatch-config.yaml'),
+        `spec:
+  parallelism:
+    inSessionAgentMaxSessions: 8
+`,
+        'utf8',
+      );
+      const writeInflight = (taskId: string): string => {
+        const m = mkManifest(taskId);
+        const target = path.join(boardDirUnderWork, 'inflight', `${m.taskId}.dispatch.json`);
+        writeFileSync(target, JSON.stringify(m, null, 2), 'utf-8');
+        return target;
+      };
+      writeInflight('AISDLC-5820');
+      writeInflight('AISDLC-5821');
+      const manifestPath = writeInflight('AISDLC-5822');
+      // 3 in inflight; subtract current → 2 OTHER. With --max-sessions=1
+      // we refuse; if we'd respected yaml (8) we'd accept. Asserts flag-wins.
+      const { exit, captured } = await captureStdout(() =>
+        runDispatchCli([
+          'dispatch-bg-agent',
+          '--board-dir',
+          boardDirUnderWork,
+          '--manifest-path',
+          manifestPath,
+          '--max-sessions',
+          '1',
+        ]),
+      );
+      expect(exit).toBe(1);
+      const result = readLastJson(captured) as { maxSessions: number };
+      expect(result.maxSessions).toBe(1);
+      rmSync(workDir, { recursive: true, force: true });
+    });
+
     it('help mentions Pattern X subcommands', async () => {
       const { captured } = await captureStdout(() => runDispatchCli(['help']));
       expect(captured.raw).toMatch(/dispatch-bg-agent/);

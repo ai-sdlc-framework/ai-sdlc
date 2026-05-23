@@ -352,7 +352,7 @@ operator-effort + billing profile.
 
 | Pattern | Worker mechanism | Operator effort | Billing | When to use |
 |---|---|---|---|---|
-| **X (default, AISDLC-396)** | `/ai-sdlc orchestrator-tick` Conductor spawns dev `Agent(developer)` calls in-session via the `bg-agent-request/` coordination protocol | Open ONE CC session, fire `orchestrator-tick`, walk away. ScheduleWakeup loops indefinitely. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. | The default for interactive operator sessions. ONE session = autonomous drain. Capped at `inSessionAgentMaxSessions` (default 4) — bump for more parallelism in `.ai-sdlc/dispatch-config.yaml`. |
+| **X (default, AISDLC-396 v2 reconcile)** | `/ai-sdlc orchestrator-tick` Conductor dispatches background `Agent(developer)` per manifest; the dev follows its standard Definition-of-Done (commit → rebase → push → open DRAFT PR). Conductor's next tick **reconciles after-the-fact**: parses the dev's return JSON into a verdict, fans out 3 reviewers, signs attestation, force-pushes the chore commit on top of the dev's branch, flips draft → ready. | Open ONE CC session, fire `orchestrator-tick`, walk away. ScheduleWakeup loops indefinitely. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. | The default for interactive operator sessions. ONE session = autonomous drain. Capped at `inSessionAgentMaxSessions` (default 4, configurable in `.ai-sdlc/dispatch-config.yaml`). |
 | **Y** | `cli-orchestrator tick --spawner claude` shells out to `claude -p` subprocesses | One-time daemon setup (cron/systemd/launchd), session-independent. | Subscription Agent SDK credit pool ($200/mo on Max-20x post-2026-06-15). | Headless/CI contexts where no operator CC session is available. Cron-driven background drain. |
 | **Z (legacy)** | Operator opens N sibling CC sessions running `/ai-sdlc dispatch-worker` | Open N+1 sessions per drain. | Subscription interactive quota. | When N>4 parallel devs needed (large backlog burst). Pattern X's `inSessionAgentMaxSessions` cap can be bumped, but >4 starts hitting per-session attention-tax. |
 
@@ -385,27 +385,67 @@ The cap governs the union of `bg-agent-request/` (pending) +
 refuses to write a new request when the cap is saturated and waits for a
 Step 2.5 sweep to drain the backlog.
 
-### Operator runbook — kicking off Pattern X
+### Operator runbook — kicking off Pattern X (v2 reconcile flow)
 
 1. Ensure `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental` (or the
    default-on equivalent if the flip is done).
 2. Open one CC session in the project root.
 3. `/ai-sdlc orchestrator-tick` — the Conductor:
-   - Emits up to `inSessionAgentMaxSessions` manifests to `queue/`
-   - Claims each into `inflight/` and writes a `bg-agent-request/`
-   - The next tick's Step 2.5 fires `Agent(developer)` in-session for
-     each pending request
-   - Reviewer fanout + sign + push + auto-merge happens via Step 3 on
-     each dev verdict
+   - **Step 5 fill-to-cap loop**: emits + claims manifests up to
+     `inSessionAgentMaxSessions`, writes a `bg-agent-request/` per claim
+   - **Step 2.5 Phase B**: fires `Agent(developer)` (background) for each
+     pending request, writes a `bg-agent-pending/` sentinel per dispatch
+   - Dev follows its standard contract: commit → rebase → push
+     `--force-with-lease` → `gh pr create --draft` → return JSON envelope
+     with `prUrl`
+   - **Step 2.5 Phase A** (next tick): parses each completed dev's return
+     envelope into a verdict via `cli-dispatch write-verdict`
+   - **Step 3**: per success-verdict, fans out 3 reviewers, signs
+     attestation, **force-pushes the attestation chore commit on top of
+     the dev's branch**, flips `gh pr ready <#>` (draft → ready triggers
+     CI exactly once on the fully-attested HEAD), arms auto-merge
 4. ScheduleWakeup runs the next tick every 30s; the session can be
    left open indefinitely.
 5. Operator monitors via `cli-status --orchestrator` or the events.jsonl
    tail.
 
 If the session crashes or the operator closes it, the on-disk state
-(`queue/`, `inflight/`, `bg-agent-request/`) survives. The next session
-opening the same project picks up where this one left off — pending
-requests fire, stale heartbeats reap, the drain continues.
+(`queue/`, `inflight/`, `bg-agent-request/`, `bg-agent-pending/`)
+survives. The next session opening the same project picks up where this
+one left off — Phase A reconciles any completed dev's notification that
+arrives in the new session; Phase B fires bg Agents for any pending
+requests; stale heartbeats reap; the drain continues.
+
+### Why "dev pushes + Conductor reconciles" (v2 reframe history)
+
+The original Pattern X framing (round 1, commit `ec64e326`) told the dev
+"DO NOT push or open a PR — the Conductor handles sign+push+PR." That
+framing had two fundamental problems:
+
+1. **It fought the dev agent's hardwired contract.** The developer
+   subagent system prompt (`ai-sdlc-plugin/agents/developer.md` lines
+   25-36) declares push + open-PR as core deliverables on equal footing
+   with the commit itself, and explicitly rejects "my role ends at
+   commit, the orchestrator handles push + PR" as the failure mode the
+   prompt was rewritten to eliminate. Per
+   `feedback_dev_subagents_violate_no_push.md`, dev subagents push even
+   when told not to — so the "DO NOT push" instruction was producing a
+   no-op contradiction.
+
+2. **It silently dropped the Agent return value.** The slash command
+   body's bash isn't a JS event loop; it has no listener for
+   `Agent(... run_in_background:true)` completion notifications. Round 1
+   fired the Agent + removed the request file, and never wrote a
+   verdict. The hermetic test masked this by calling
+   `dispatchWriteVerdict` directly; in production, NOTHING wrote the
+   verdict and Conductor's Step 3 polled `done/` forever.
+
+Round 2 reframes to match what actually works: dev does its standard
+push + draft-PR contract, Conductor reconciles after-the-fact by adding
+the attestation chore commit on top of the dev's branch and flipping
+the PR ready. The "DO NOT push" anti-instruction is gone; the
+filesystem-coordinated reconcile via `bg-agent-pending/<task-id>.json`
+sentinels solves the missing-verdict gap.
 
 ---
 

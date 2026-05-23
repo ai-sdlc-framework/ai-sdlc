@@ -146,13 +146,48 @@ export function ensureBgAgentRequestDir(boardDir: string): void {
 
 /**
  * Build the prompt the slash command body will pass to the developer
- * `Agent` call. Mirrors the `dispatch-worker.md` Step 4-Fresh contract so
- * the dev subagent receives the same context regardless of whether it was
- * dispatched by Pattern X (this) or Pattern Z (sibling session).
+ * `Agent` call. **Honors the dev subagent's hardwired Definition-of-Done
+ * contract** (`ai-sdlc-plugin/agents/developer.md` lines 25-36): the dev
+ * commits, rebases, pushes, AND opens a DRAFT PR, returning a JSON
+ * envelope with `prUrl` populated.
  *
- * Kept terse — the dev agent's own system prompt carries the full
- * Definition-of-Done / hard-rules / return-envelope contract. We only need
- * to tell it WHICH task to work on and WHERE.
+ * ## Why this prompt does NOT say "DO NOT push or open a PR"
+ *
+ * An earlier revision (Pattern X v1, AISDLC-396 first iteration) told the
+ * dev "DO NOT push or open a PR — the Conductor handles sign+push+PR after
+ * this Agent call returns." That framing fought the dev agent's hardwired
+ * contract:
+ *
+ *   - The developer.md system prompt declares push + open-PR as core
+ *     deliverables on equal footing with the commit itself, explicitly
+ *     rejecting "my role ends at commit, the orchestrator handles push +
+ *     PR" as the failure mode the prompt was rewritten to eliminate
+ *     (operator memory `feedback_dev_subagents_violate_no_push.md`).
+ *   - Per the same memory, dev subagents push even when told not to — so
+ *     telling them not to was producing a no-op contradiction that
+ *     confused the contract reader (the dev) without changing behavior.
+ *
+ * ## Reframe: dev pushes + opens DRAFT PR; Conductor RECONCILES
+ *
+ * The de-facto pattern that has been working manually across the autonomous
+ * loop:
+ *
+ *   1. Dev follows its hardwired contract → commits, rebases onto
+ *      origin/main, pushes with --force-with-lease, opens a **draft** PR,
+ *      returns its JSON envelope with `prUrl` populated.
+ *   2. The dev's verdict (parsed from the Agent return value) lands in
+ *      `done/<task-id>.verdict.json` via the slash command body's Step 2.5
+ *      reconcile path.
+ *   3. The Conductor's Step 3 (next tick) picks up the verdict, fans out 3
+ *      reviewers, signs the attestation, **force-pushes** the
+ *      attestation chore commit on top of the dev's branch, and flips
+ *      the draft PR to ready-for-review — triggering CI exactly once on
+ *      the fully-attested HEAD.
+ *
+ * The DRAFT instruction is load-bearing: opening as draft prevents CI from
+ * firing on the unsigned HEAD (AISDLC-218). The Conductor's reconcile step
+ * flips draft → ready after the attestation chore lands, gating CI on the
+ * complete attestation envelope.
  */
 export function buildDevPromptFromManifest(manifest: DispatchManifest): string {
   const taskFile = manifest.spec.taskFile;
@@ -172,8 +207,14 @@ export function buildDevPromptFromManifest(manifest: DispatchManifest): string {
       ? manifest.spec.verifyCommands.map((c) => `- \`${c}\``).join('\n')
       : '- (no manifest-declared verify commands; fall back to project defaults)',
     '',
+    '## Definition of Done — follow your standard contract',
+    'Honor the developer agent system prompt verbatim: commit, rebase onto `origin/main`, push with `--force-with-lease`, and open a **DRAFT** PR via `gh pr create --draft`. Capture the PR URL into the `prUrl` field of your return envelope.',
+    '',
+    '## Why DRAFT specifically (Pattern X reconcile contract)',
+    'The orchestrator-tick Conductor picks up your return verdict on its next tick, fans out 3 reviewer subagents (code/test/security), signs an attestation envelope, and **force-pushes the attestation chore commit on top of your branch**. It then flips the draft → ready-for-review via `gh pr ready <number>`, which triggers CI exactly ONCE on the fully-attested HEAD. Opening the PR as ready (non-draft) would fire CI immediately on the unattested HEAD — wasting a CI cycle and posting an attestation failure status that the operator must manually re-trigger.',
+    '',
     '## Return value',
-    'Return the standard developer JSON envelope (`summary`, `filesChanged`, `commitSha`, `prUrl`, `verifications`, `acceptanceCriteriaMet`, `notes`). DO NOT push or open a PR — the orchestrator-tick Conductor handles sign+push+PR after this Agent call returns.',
+    'Return the standard developer JSON envelope (`summary`, `filesChanged`, `commitSha`, `prUrl`, `verifications`, `acceptanceCriteriaMet`, `notes`). `prUrl` MUST be populated — the Conductor reads it to locate the PR to flip from draft to ready.',
   ].join('\n');
 }
 

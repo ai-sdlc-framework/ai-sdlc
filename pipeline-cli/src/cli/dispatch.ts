@@ -105,6 +105,7 @@ import type {
   VerdictOutcome,
   WorkerKind,
 } from '../dispatch/index.js';
+import { loadDispatchConfig } from '../dispatch/recommend-worker.js';
 import {
   countInFlightBgAgents,
   DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS,
@@ -400,7 +401,21 @@ export async function runDispatchCli(
       // Concurrency cap — Conductor MUST respect inSessionAgentMaxSessions.
       // We re-check here as a defense-in-depth measure even though the
       // Conductor's Step 5 also gates on `peek` before calling us.
-      const maxSessions = parseMaxSessions(flags, DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS);
+      //
+      // AISDLC-396 round-2 MAJOR-3 fix — cap precedence:
+      //   1. Explicit `--max-sessions <n>` flag wins (operator override or
+      //      slash command body passing the resolved cap forward).
+      //   2. Fall back to `spec.parallelism.inSessionAgentMaxSessions` from
+      //      `<workDir>/.ai-sdlc/dispatch-config.yaml` (where workDir is
+      //      derived from `--work-dir` flag OR the boardDir's parent's parent —
+      //      .ai-sdlc/dispatch/ → .ai-sdlc/ → workDir).
+      //   3. Final fallback: DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS (4).
+      // Previously the yaml field was non-functional: the CLI always used 4
+      // and the operator's `inSessionAgentMaxSessions: 6` setting was silently
+      // ignored.
+      const yamlMaxSessions = resolveYamlInSessionAgentMaxSessions(flags, boardDir);
+      const fallback = yamlMaxSessions ?? DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS;
+      const maxSessions = parseMaxSessions(flags, fallback);
       const inFlight = countInFlightBgAgents(boardDir);
       // Subtract the manifest we're about to dispatch FOR — it's already
       // counted in inflight (the Conductor's Step 5 claims before calling
@@ -499,6 +514,44 @@ function parseMaxSessions(flags: Record<string, string>, fallback: number): numb
   const n = Number.parseInt(raw, 10);
   if (!Number.isFinite(n) || n < 0) return fallback;
   return n;
+}
+
+/**
+ * Resolve the yaml `spec.parallelism.inSessionAgentMaxSessions` knob
+ * (AISDLC-396 round-2 MAJOR-3 fix). Returns `undefined` when the yaml is
+ * missing, the field is absent, OR the value is non-numeric — callers
+ * fall through to {@link DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS}.
+ *
+ * The workDir is derived from `--work-dir <path>` if supplied, otherwise
+ * inferred from `boardDir`:
+ *   - boardDir = `<workDir>/.ai-sdlc/dispatch` → workDir = `<two parents up>`
+ *   - boardDir = `<workDir>/.ai-sdlc/dispatch/` → same
+ *   - bespoke boardDir paths (test fixtures pointing at /tmp/...) → workDir
+ *     defaults to the boardDir's grandparent if it looks like an `.ai-sdlc`
+ *     parent; else we can't locate the yaml and return undefined.
+ *
+ * Tests can pass `--work-dir <tmp>` explicitly to drive the yaml load.
+ */
+function resolveYamlInSessionAgentMaxSessions(
+  flags: Record<string, string>,
+  boardDir: string,
+): number | undefined {
+  const explicit = flags['work-dir'];
+  let workDir: string | undefined = explicit ? path.resolve(explicit) : undefined;
+  if (!workDir) {
+    // boardDir naming convention: <workDir>/.ai-sdlc/dispatch
+    // → two `..` hops up. If boardDir doesn't match, we leave workDir
+    // undefined and skip the yaml load (test fixtures often supply ad-hoc
+    // tmp dirs that aren't structured as <workDir>/.ai-sdlc/dispatch).
+    const parent = path.dirname(boardDir); // .ai-sdlc
+    const grandparent = path.dirname(parent); // workDir
+    if (path.basename(parent) === '.ai-sdlc') {
+      workDir = grandparent;
+    }
+  }
+  if (!workDir) return undefined;
+  const cfg = loadDispatchConfig(workDir);
+  return cfg?.inSessionAgentMaxSessions;
 }
 
 const HELP_TEXT = `cli-dispatch — Dispatch Board operator CLI (RFC-0041 §4.4)

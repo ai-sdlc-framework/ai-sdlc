@@ -203,8 +203,35 @@ describe('bg-agent-request — library API', () => {
     expect(prompt).toContain('backlog/tasks/aisdlc-6050.md');
     expect(prompt).toContain('pnpm build');
     expect(prompt).toContain('pnpm lint');
-    // Explicit DO NOT push/PR contract — Conductor owns those steps.
-    expect(prompt).toMatch(/DO NOT push or open a PR/);
+  });
+
+  it('buildDevPromptFromManifest honors the dev standard push+draft-PR contract (Pattern X v2 reconcile)', () => {
+    // Pattern X v2 reframe (AISDLC-396 round 2): the prompt MUST NOT tell
+    // the dev "DO NOT push" — that fights the developer agent's hardwired
+    // Definition-of-Done (developer.md lines 25-36) and was a no-op
+    // anyway per feedback_dev_subagents_violate_no_push.md. Instead the
+    // prompt:
+    //   - reiterates the standard contract (commit + rebase + push +
+    //     open PR)
+    //   - tells the dev to open the PR as DRAFT so CI doesn't fire
+    //     before the Conductor's reconcile attestation lands
+    //   - asserts the prUrl field MUST be populated so the Conductor's
+    //     Step 3 reconcile can find the PR to flip ready
+    const manifest = mkManifest('AISDLC-6060');
+    const prompt = buildDevPromptFromManifest(manifest);
+    // No "DO NOT push" anti-instruction — the dev's hardwired contract
+    // owns push + open PR. (Negative assertion guards against regression
+    // back to the v1 framing.)
+    expect(prompt).not.toMatch(/DO NOT push/i);
+    // Explicit DRAFT instruction.
+    expect(prompt).toMatch(/DRAFT/);
+    expect(prompt).toMatch(/gh pr create --draft/);
+    // prUrl required for reconcile path.
+    expect(prompt).toMatch(/prUrl/);
+    // Reference to the Conductor's reconcile / attestation chore flow so
+    // the dev understands WHY DRAFT (not just WHAT).
+    expect(prompt).toMatch(/Conductor/);
+    expect(prompt).toMatch(/attestation/);
   });
 
   it('buildDevPromptFromManifest tolerates empty verifyCommands', () => {
@@ -217,21 +244,30 @@ describe('bg-agent-request — library API', () => {
 });
 
 // ---------------------------------------------------------------------------
-// AC-7 — hermetic 3-task drain simulation.
+// AC-7 — hermetic 3-task drain simulation (Pattern X v2 reconcile flow).
+//
+// REFRAME from v1 (AISDLC-396 round 2):
+//   v1 modeled "dev returns commit-only verdict; Conductor owns push+PR".
+//   v2 models the REAL flow: dev pushes + opens DRAFT PR per its standard
+//   contract; verdict carries `prUrl`; Conductor's Step 3 next-tick
+//   reconciles by force-pushing the attestation chore commit on top.
 //
 // We simulate a single autonomous-loop tick:
-//   1. Conductor emits 3 manifests to inflight/ + 3 bg-agent-requests
-//   2. Slash command body sweeps the requests, fires "Agent" (here: a
-//      synthetic verdict-writer), removes each consumed request
-//   3. Conductor's next-tick verdict pickup finds 3 done/ verdicts
+//   1. Conductor Step 5 emits 3 manifests to inflight/ + 3 bg-agent-requests
+//   2. Slash command body Step 2.5 sweeps the requests, fires `Agent`
+//      (here stubbed by a verdict-writer that mirrors the real dev's
+//      return-envelope-with-prUrl), removes each consumed request
+//   3. Conductor's Step 3 verdict pickup finds 3 done/ verdicts each
+//      with prUrl set, ready for reviewer fanout + attestation reconcile
 //
-// The real reviewer fan-out / sign / push happens in the slash command
-// body's existing Step 3. This test asserts only that the Pattern X
-// coordination layer correctly stages 3 verdicts for that downstream
-// pickup to consume.
+// The real reviewer fan-out / sign / force-push-chore / flip-draft-ready
+// happens in the slash command body's existing Step 3 (orchestrator-tick.md).
+// This test asserts only that the Pattern X coordination layer correctly
+// stages 3 verdicts WITH prUrl populated for that downstream pickup to
+// consume.
 // ---------------------------------------------------------------------------
 
-describe('Pattern X — hermetic 3-task drain (AC-7)', () => {
+describe('Pattern X — hermetic 3-task drain (AC-7, reconcile flow)', () => {
   let boardDir: string;
 
   beforeEach(() => {
@@ -247,7 +283,7 @@ describe('Pattern X — hermetic 3-task drain (AC-7)', () => {
     }
   });
 
-  it('drains 3 tasks: Conductor emits → sweep fires → Workers write verdicts → cleanup', () => {
+  it('drains 3 tasks: Conductor emits → sweep fires → devs push+open-PR → verdicts staged for reconcile', () => {
     const taskIds = ['AISDLC-7001', 'AISDLC-7002', 'AISDLC-7003'];
 
     // === Conductor Step 5 — emit + claim + request ===
@@ -261,21 +297,28 @@ describe('Pattern X — hermetic 3-task drain (AC-7)', () => {
     expect(countInFlightBgAgents(boardDir)).toBe(3);
     expect(listBgAgentRequests(boardDir)).toHaveLength(3);
 
-    // === Slash command body Step 2.5 — sweep, fire Agent, write verdict ===
+    // === Slash command body Step 2.5 — sweep, fire Agent, parse return,
+    //     write verdict ===
     // In the real flow the "fire Agent" step is the slash command body's
-    // `Agent(developer)` call. Here we stub it with the verdict-writer
-    // that the `dispatch-worker` Step 5 path uses, mirroring what the dev
-    // subagent's success-return triggers.
+    // `Agent(developer)` call. The dev follows its standard contract:
+    // commit → rebase → push --force-with-lease → gh pr create --draft →
+    // return JSON envelope with prUrl populated. Step 2.5's reconcile
+    // path parses that return and writes the verdict.
     const requests = listBgAgentRequests(boardDir);
     for (const req of requests) {
-      // Simulate Agent fire — dev subagent runs, returns success envelope.
+      // Simulate Agent fire — dev subagent runs, returns success envelope
+      // with prUrl populated (the v2 reconcile contract).
+      const taskIdLower = req.taskId.toLowerCase();
       dispatchWriteVerdict(boardDir, {
         schemaVersion: 'v1',
         taskId: req.taskId,
         outcome: 'success',
-        commitSha: `sha-${req.taskId.toLowerCase()}`,
-        pushedBranch: null, // dev didn't push (Conductor owns push)
-        prUrl: null, // dev didn't open PR (Conductor opens it)
+        commitSha: `sha-${taskIdLower}`,
+        // Dev DID push (per its standard Definition of Done).
+        pushedBranch: `ai-sdlc/${taskIdLower}`,
+        // Dev DID open a draft PR (per Pattern X v2 reconcile contract).
+        // Conductor's Step 3 will flip draft → ready after attestation.
+        prUrl: `https://github.com/org/repo/pull/${1000 + taskIds.indexOf(req.taskId)}`,
         verifications: { build: 'passed', test: 'passed', lint: 'passed' },
         acceptanceCriteriaMet: [1, 2, 3],
         completedAt: new Date().toISOString(),
@@ -288,7 +331,7 @@ describe('Pattern X — hermetic 3-task drain (AC-7)', () => {
       removeBgAgentRequest(boardDir, req.taskId);
     }
 
-    // === Assertions — 3 verdicts staged, 0 requests left ===
+    // === Assertions — 3 verdicts staged with prUrl, 0 requests left ===
     expect(listBgAgentRequests(boardDir)).toHaveLength(0);
     for (const taskId of taskIds) {
       const verdictPath = path.join(boardDir, 'done', `${taskId}.verdict.json`);
@@ -296,9 +339,58 @@ describe('Pattern X — hermetic 3-task drain (AC-7)', () => {
       const verdict = JSON.parse(readFileSync(verdictPath, 'utf-8'));
       expect(verdict.outcome).toBe('success');
       expect(verdict.commitSha).toBe(`sha-${taskId.toLowerCase()}`);
+      // Reconcile contract: dev pushed + opened PR; verdict carries both.
+      expect(verdict.pushedBranch).toBe(`ai-sdlc/${taskId.toLowerCase()}`);
+      expect(verdict.prUrl).toMatch(/^https:\/\/github\.com\/.+\/pull\/\d+$/);
     }
     // The 3 inflight manifests have been cleared by writeVerdict.
     expect(countInFlightBgAgents(boardDir)).toBe(0);
+  });
+
+  it('Step 2.5 verdict-write path: Agent return JSON with prUrl populated lands as a success verdict', () => {
+    // This test asserts the AC-2 contract: when the bg Agent returns with
+    // a populated `prUrl` (v2 reconcile flow), Step 2.5 must correctly
+    // translate that into a verdict file with the same prUrl so Step 3
+    // can pick it up for attestation force-push + draft→ready flip.
+    const manifest = mkManifest('AISDLC-7200');
+    placeManifestInflight(boardDir, manifest);
+    writeBgAgentRequest(boardDir, manifest);
+
+    // Simulate Step 2.5 parsing the Agent return JSON:
+    //   { commitSha: "...", prUrl: "https://github.com/...", ... }
+    // and translating it into a DispatchVerdict via dispatchWriteVerdict.
+    const agentReturn = {
+      commitSha: 'abc1234',
+      prUrl: 'https://github.com/org/repo/pull/4321',
+      verifications: { build: 'passed' as const, test: 'passed' as const, lint: 'passed' as const },
+      acceptanceCriteriaMet: [1, 2, 3, 4],
+    };
+    dispatchWriteVerdict(boardDir, {
+      schemaVersion: 'v1',
+      taskId: 'AISDLC-7200',
+      outcome: 'success',
+      commitSha: agentReturn.commitSha,
+      pushedBranch: manifest.branch,
+      prUrl: agentReturn.prUrl,
+      verifications: agentReturn.verifications,
+      acceptanceCriteriaMet: agentReturn.acceptanceCriteriaMet,
+      completedAt: '2026-05-22T11:00:00.000Z',
+      workerId: 'in-session-agent-test',
+      workerKind: 'in-session-agent',
+      durationMs: 60_000,
+      iterationsAttempted: 1,
+    });
+    removeBgAgentRequest(boardDir, 'AISDLC-7200');
+
+    const verdictPath = path.join(boardDir, 'done', 'AISDLC-7200.verdict.json');
+    expect(existsSync(verdictPath)).toBe(true);
+    const verdict = JSON.parse(readFileSync(verdictPath, 'utf-8'));
+    expect(verdict.outcome).toBe('success');
+    expect(verdict.commitSha).toBe('abc1234');
+    expect(verdict.prUrl).toBe('https://github.com/org/repo/pull/4321');
+    expect(verdict.pushedBranch).toBe(manifest.branch);
+    // The bg-agent-request is consumed so Step 2.5 doesn't double-fire.
+    expect(existsSync(bgAgentRequestPath(boardDir, 'AISDLC-7200'))).toBe(false);
   });
 
   it('cross-session survivability (AC-6): bg-agent-request persists across "session exit"', () => {

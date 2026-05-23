@@ -49,6 +49,17 @@ export interface DispatchConfigSnapshot {
    * the supervisor is not configured and headless dispatch is unavailable.
    */
   claudePShellMaxConcurrent: number;
+  /**
+   * `spec.parallelism.inSessionAgentMaxSessions` — the Pattern X / AISDLC-396
+   * concurrency cap for in-session background `Agent(developer)` dispatches.
+   * Schema default is 4 (see `spec/schemas/dispatch-config.v1.schema.json`);
+   * `undefined` here means the yaml was missing OR the field was absent, so
+   * the CLI should fall back to its built-in default. We do NOT clamp to 4
+   * here — `undefined` and `4` are semantically different (missing vs.
+   * explicitly-set to 4) and a future operator may want to disable Pattern
+   * X by setting it to `0`. AISDLC-396 round-2 MAJOR-3 fix.
+   */
+  inSessionAgentMaxSessions: number | undefined;
 }
 
 /**
@@ -77,19 +88,25 @@ export function loadDispatchConfig(workDir: string): DispatchConfigSnapshot | un
     return undefined;
   }
   if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    return { claudePShellMaxConcurrent: 0 };
+    return { claudePShellMaxConcurrent: 0, inSessionAgentMaxSessions: undefined };
   }
   const spec = (parsed as { spec?: unknown }).spec;
   if (spec === null || typeof spec !== 'object' || Array.isArray(spec)) {
-    return { claudePShellMaxConcurrent: 0 };
+    return { claudePShellMaxConcurrent: 0, inSessionAgentMaxSessions: undefined };
   }
   const parallelism = (spec as { parallelism?: unknown }).parallelism;
   if (parallelism === null || typeof parallelism !== 'object' || Array.isArray(parallelism)) {
-    return { claudePShellMaxConcurrent: 0 };
+    return { claudePShellMaxConcurrent: 0, inSessionAgentMaxSessions: undefined };
   }
   const raw_n = (parallelism as { claudePShellMaxConcurrent?: unknown }).claudePShellMaxConcurrent;
   const n = typeof raw_n === 'number' && Number.isFinite(raw_n) && raw_n >= 0 ? raw_n : 0;
-  return { claudePShellMaxConcurrent: n };
+  // inSessionAgentMaxSessions — distinct semantics from claudePShellMaxConcurrent:
+  // missing yields `undefined` (caller decides default), not 0 (which would
+  // disable Pattern X entirely). A typo / non-numeric also yields undefined
+  // so the CLI's built-in default applies; an explicit 0 is respected.
+  const raw_s = (parallelism as { inSessionAgentMaxSessions?: unknown }).inSessionAgentMaxSessions;
+  const s = typeof raw_s === 'number' && Number.isFinite(raw_s) && raw_s >= 0 ? raw_s : undefined;
+  return { claudePShellMaxConcurrent: n, inSessionAgentMaxSessions: s };
 }
 
 /**

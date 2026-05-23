@@ -47,30 +47,42 @@ spec:
     claudePShellMaxConcurrent: 2
 `);
     const cfg = loadDispatchConfig(tmp);
-    expect(cfg).toEqual({ claudePShellMaxConcurrent: 2 });
+    expect(cfg).toEqual({ claudePShellMaxConcurrent: 2, inSessionAgentMaxSessions: undefined });
   });
 
-  it('defaults to 0 when the field is absent', () => {
+  it('defaults claudePShellMaxConcurrent to 0 when the field is absent (and returns parsed inSessionAgentMaxSessions)', () => {
     writeDispatchConfig(`
 spec:
   defaultWorkerKind: in-session-agent
   parallelism:
     inSessionAgentMaxSessions: 4
 `);
-    expect(loadDispatchConfig(tmp)).toEqual({ claudePShellMaxConcurrent: 0 });
+    // AISDLC-396 round-2 MAJOR-3 fix: loadDispatchConfig now extracts
+    // inSessionAgentMaxSessions so the CLI can default --max-sessions
+    // from yaml instead of unconditionally hard-coding to 4.
+    expect(loadDispatchConfig(tmp)).toEqual({
+      claudePShellMaxConcurrent: 0,
+      inSessionAgentMaxSessions: 4,
+    });
   });
 
-  it('defaults to 0 when parallelism block is missing', () => {
+  it('defaults both to 0/undefined when parallelism block is missing', () => {
     writeDispatchConfig(`
 spec:
   defaultWorkerKind: in-session-agent
 `);
-    expect(loadDispatchConfig(tmp)).toEqual({ claudePShellMaxConcurrent: 0 });
+    expect(loadDispatchConfig(tmp)).toEqual({
+      claudePShellMaxConcurrent: 0,
+      inSessionAgentMaxSessions: undefined,
+    });
   });
 
-  it('defaults to 0 when spec is missing', () => {
+  it('defaults both to 0/undefined when spec is missing', () => {
     writeDispatchConfig(`apiVersion: ai-sdlc.io/v1alpha1\nkind: DispatchConfig\n`);
-    expect(loadDispatchConfig(tmp)).toEqual({ claudePShellMaxConcurrent: 0 });
+    expect(loadDispatchConfig(tmp)).toEqual({
+      claudePShellMaxConcurrent: 0,
+      inSessionAgentMaxSessions: undefined,
+    });
   });
 
   it('returns claudePShellMaxConcurrent=0 when value is a non-numeric string', () => {
@@ -79,7 +91,10 @@ spec:
   parallelism:
     claudePShellMaxConcurrent: "bogus"
 `);
-    expect(loadDispatchConfig(tmp)).toEqual({ claudePShellMaxConcurrent: 0 });
+    expect(loadDispatchConfig(tmp)).toEqual({
+      claudePShellMaxConcurrent: 0,
+      inSessionAgentMaxSessions: undefined,
+    });
   });
 
   it('returns 0 on negative values (clamped to non-negative)', () => {
@@ -88,7 +103,44 @@ spec:
   parallelism:
     claudePShellMaxConcurrent: -1
 `);
-    expect(loadDispatchConfig(tmp)).toEqual({ claudePShellMaxConcurrent: 0 });
+    expect(loadDispatchConfig(tmp)).toEqual({
+      claudePShellMaxConcurrent: 0,
+      inSessionAgentMaxSessions: undefined,
+    });
+  });
+
+  it('returns inSessionAgentMaxSessions=undefined on a non-numeric value (CLI falls back to default)', () => {
+    writeDispatchConfig(`
+spec:
+  parallelism:
+    inSessionAgentMaxSessions: "four"
+`);
+    const cfg = loadDispatchConfig(tmp);
+    expect(cfg).toEqual({ claudePShellMaxConcurrent: 0, inSessionAgentMaxSessions: undefined });
+  });
+
+  it('respects inSessionAgentMaxSessions=0 (operator opts out of Pattern X entirely)', () => {
+    writeDispatchConfig(`
+spec:
+  parallelism:
+    inSessionAgentMaxSessions: 0
+`);
+    const cfg = loadDispatchConfig(tmp);
+    expect(cfg).toEqual({ claudePShellMaxConcurrent: 0, inSessionAgentMaxSessions: 0 });
+  });
+
+  it('returns both knobs together when both are present', () => {
+    writeDispatchConfig(`
+spec:
+  defaultWorkerKind: in-session-agent
+  parallelism:
+    claudePShellMaxConcurrent: 2
+    inSessionAgentMaxSessions: 6
+`);
+    expect(loadDispatchConfig(tmp)).toEqual({
+      claudePShellMaxConcurrent: 2,
+      inSessionAgentMaxSessions: 6,
+    });
   });
 
   it('returns undefined on YAML parse error', () => {
