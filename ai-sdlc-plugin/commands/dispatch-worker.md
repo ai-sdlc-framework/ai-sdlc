@@ -78,10 +78,15 @@ WORKER_ID="${AI_SDLC_WORKER_ID:-worker-$$-$(date +%s)}"
 ## Step 1 — Feature-flag guard
 
 ```bash
-if [ -z "$AI_SDLC_AUTONOMOUS_ORCHESTRATOR" ]; then
-  echo "ERROR: AI_SDLC_AUTONOMOUS_ORCHESTRATOR is not set. Set it to 'experimental' to enable."
-  exit 1
-fi
+# AISDLC-411 (2026-05-23) flipped AI_SDLC_AUTONOMOUS_ORCHESTRATOR to default-ON.
+# Worker is enabled unless the operator explicitly opted out via the FALSY set.
+case "$(echo "${AI_SDLC_AUTONOMOUS_ORCHESTRATOR:-}" | tr '[:upper:]' '[:lower:]')" in
+  off|0|false|no)
+    echo "ERROR: AI_SDLC_AUTONOMOUS_ORCHESTRATOR is explicitly disabled (\"$AI_SDLC_AUTONOMOUS_ORCHESTRATOR\")."
+    echo "Unset it (or set to a non-opt-out value) to re-enable; default-ON since AISDLC-411."
+    exit 1
+    ;;
+esac
 ```
 
 ## Step 2a — Resume-signal check (Phase 1.5 / AISDLC-377.2)
