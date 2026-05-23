@@ -43,6 +43,7 @@ import {
   type PrTaskVerdict,
   type RenderCommentOpts,
 } from '../dor/comment-loop.js';
+import { computePrViolations } from '../dor/pr-violations.js';
 import type { RefinementVerdict } from '../dor/types.js';
 import { readFileSync } from 'node:fs';
 import { beginTask } from '../steps/04-flip-status.js';
@@ -675,6 +676,69 @@ export function buildCli(): Argv {
             channel: argv.channel as RenderCommentOpts['channel'],
           });
           process.stdout.write(body);
+        },
+      )
+      // RFC-0011 / AISDLC-379 — workflow gate oracle for the DoR ingress
+      // workflow. Consumes the SAME JSONL `dor-render-pr-summary` reads,
+      // returns a JSON envelope `{has_violations, blocking[], overridden[]}`
+      // so the GitHub Action can decide whether to fail the status check.
+      // Centralising the `blocked.reason` override semantics here keeps the
+      // workflow gate in lockstep with `refineBacklogTask()` (the
+      // `/ai-sdlc execute` ingress shim) — the bug AISDLC-379 fixed was that
+      // the workflow had NO such oracle and silently passed the check on
+      // every PR regardless of how many violations were posted.
+      .command(
+        'dor-pr-has-violations',
+        'AISDLC-379 — compute whether any PR-task verdict is blocking (needs-clarification without blocked.reason override).',
+        (y) =>
+          y
+            .option('verdicts-file', {
+              type: 'string',
+              demandOption: true,
+              describe: "Path to a JSONL file (or '-' for stdin). One PrTaskVerdict per line.",
+            })
+            .option('fail-on-violations', {
+              type: 'boolean',
+              default: false,
+              describe:
+                'When true, exit non-zero if has_violations=true. Defaults false so callers can capture the JSON and decide.',
+            }),
+        async (argv) => {
+          const file = String(argv['verdicts-file']);
+          const raw = file === '-' ? await readStdin() : readFileSync(file, 'utf8');
+          const lines = raw.split('\n').filter((l) => l.trim().length > 0);
+          let verdicts: PrTaskVerdict[];
+          try {
+            verdicts = lines.map((l) => JSON.parse(l) as PrTaskVerdict);
+          } catch (err) {
+            fail(`failed to parse verdicts JSONL ${file}: ${(err as Error).message}`);
+          }
+          const result = computePrViolations(verdicts, {
+            workDir: argv['work-dir'] as string,
+          });
+          emit({
+            has_violations: result.hasViolations,
+            blocking: result.blocking.map((d) => ({
+              file: d.file,
+              taskId: d.taskId,
+              overallVerdict: d.overallVerdict,
+            })),
+            overridden: result.overridden.map((d) => ({
+              file: d.file,
+              taskId: d.taskId,
+              blockedReason: d.blockedReason,
+            })),
+            decisions: result.decisions.map((d) => ({
+              file: d.file,
+              taskId: d.taskId,
+              overallVerdict: d.overallVerdict,
+              hasBlockedReason: d.hasBlockedReason,
+              blocking: d.blocking,
+            })),
+          });
+          if (result.hasViolations && argv['fail-on-violations']) {
+            process.exit(1);
+          }
         },
       )
       .demandCommand(1, 'A subcommand is required. Run with --help for the list.')

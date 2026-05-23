@@ -229,6 +229,111 @@ describe('CLI router', () => {
     expect(out).toContain('Issue ready for execution');
   });
 
+  it('dor-pr-has-violations returns has_violations=true for needs-clarification without override (AISDLC-379)', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    mkdirSync(join(tmp, 'backlog', 'tasks'), { recursive: true });
+    const taskPath = `backlog/tasks/aisdlc-y - bad.md`;
+    writeFileSync(join(tmp, taskPath), `---\nid: AISDLC-y\nstatus: To Do\n---\n\nbody`, 'utf8');
+    const file = join(tmp, 'results.jsonl');
+    const v1 = {
+      issueId: 'AISDLC-y',
+      rubricVersion: 'v1',
+      overallVerdict: 'needs-clarification',
+      gates: [
+        {
+          gateId: 3,
+          verdict: 'fail',
+          severity: 'block',
+          stage: 'A',
+          confidence: 'high',
+          finding: 'unresolved ref',
+        },
+      ],
+      signedAt: '2026-05-20T12:00:00.000Z',
+      evaluatorVersion: 'test-v1',
+      __file: taskPath,
+    };
+    writeFileSync(file, JSON.stringify(v1) + '\n');
+    setArgv('dor-pr-has-violations', '--verdicts-file', file, '--work-dir', tmp);
+    await buildCli().parseAsync();
+    const result = stdoutJson() as {
+      has_violations: boolean;
+      blocking: Array<{ taskId: string }>;
+      overridden: Array<{ taskId: string }>;
+    };
+    expect(result.has_violations).toBe(true);
+    expect(result.blocking).toHaveLength(1);
+    expect(result.blocking[0]!.taskId).toBe('AISDLC-y');
+    expect(result.overridden).toEqual([]);
+  });
+
+  it('dor-pr-has-violations honors blocked.reason override (AISDLC-379)', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    mkdirSync(join(tmp, 'backlog', 'tasks'), { recursive: true });
+    const taskPath = `backlog/tasks/aisdlc-z - override.md`;
+    writeFileSync(
+      join(tmp, taskPath),
+      `---\nid: AISDLC-z\nblocked:\n  reason: 'operator noted'\n---\n\nbody`,
+      'utf8',
+    );
+    const file = join(tmp, 'results.jsonl');
+    const v1 = {
+      issueId: 'AISDLC-z',
+      rubricVersion: 'v1',
+      overallVerdict: 'needs-clarification',
+      gates: [
+        {
+          gateId: 3,
+          verdict: 'fail',
+          severity: 'block',
+          stage: 'A',
+          confidence: 'high',
+          finding: 'unresolved ref',
+        },
+      ],
+      signedAt: '2026-05-20T12:00:00.000Z',
+      evaluatorVersion: 'test-v1',
+      __file: taskPath,
+    };
+    writeFileSync(file, JSON.stringify(v1) + '\n');
+    setArgv('dor-pr-has-violations', '--verdicts-file', file, '--work-dir', tmp);
+    await buildCli().parseAsync();
+    const result = stdoutJson() as {
+      has_violations: boolean;
+      overridden: Array<{ taskId: string; blockedReason: string }>;
+    };
+    expect(result.has_violations).toBe(false);
+    expect(result.overridden).toHaveLength(1);
+    expect(result.overridden[0]!.blockedReason).toMatch(/operator noted/);
+  });
+
+  it('dor-pr-has-violations --fail-on-violations exits non-zero when has_violations (AISDLC-379)', async () => {
+    const { writeFileSync, mkdirSync } = await import('node:fs');
+    mkdirSync(join(tmp, 'backlog', 'tasks'), { recursive: true });
+    const taskPath = `backlog/tasks/aisdlc-w - bad.md`;
+    writeFileSync(join(tmp, taskPath), `---\nid: AISDLC-w\n---\nbody`, 'utf8');
+    const file = join(tmp, 'results.jsonl');
+    const v1 = {
+      issueId: 'AISDLC-w',
+      rubricVersion: 'v1',
+      overallVerdict: 'needs-clarification',
+      gates: [],
+      signedAt: '2026-05-20T12:00:00.000Z',
+      evaluatorVersion: 'test-v1',
+      __file: taskPath,
+    };
+    writeFileSync(file, JSON.stringify(v1) + '\n');
+    setArgv(
+      'dor-pr-has-violations',
+      '--verdicts-file',
+      file,
+      '--fail-on-violations',
+      '--work-dir',
+      tmp,
+    );
+    await expect(buildCli().parseAsync()).rejects.toThrow(/process\.exit\(1\)/);
+  });
+
   it('dor-render-pr-summary redacts secrets in per-task findings', async () => {
     const { writeFileSync } = await import('node:fs');
     const file = join(tmp, 'results.jsonl');

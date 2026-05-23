@@ -272,6 +272,7 @@ jobs:
           fi
 
       - name: Evaluate each changed task
+        id: dor_eval
         if: steps.changed.outputs.no-changes != 'true'
         # AISDLC-161: ARTIFACTS_DIR exported so each `dor-evaluate` invocation
         # below appends its calibration entry to the same path the upload
@@ -393,3 +394,44 @@ jobs:
           path: /tmp/dor/artifacts/_dor/calibration.jsonl
           retention-days: 90
           if-no-files-found: ignore
+
+      # AISDLC-379 — compute the workflow-gate signal `has_violations` from
+      # the SAME JSONL the renderer above consumed, applying the
+      # `blocked.reason` operator-override rule from
+      # `pipeline-cli/src/dor/upstream-oq-gate.ts` so the gate stays in
+      # lockstep with the `refineBacklogTask()` ingress shim used by
+      # `/ai-sdlc execute`. Pre-AISDLC-379, the workflow posted a
+      # comment listing violations and then exited 0 — the `Evaluate
+      # backlog tasks changed by PR` check flipped to SUCCESS regardless,
+      # and auto-merge armed against PRs with unresolved Gate-3 violations
+      # (the 2026-05-20 RFC-0041 task-breakdown incident).
+      - name: Compute has_violations
+        id: compute_violations
+        if: steps.changed.outputs.no-changes != 'true'
+        run: |
+          # Write the gate envelope to disk and parse it from there so the
+          # subsequent `node -e` calls don't have to deal with shell-escaping
+          # an arbitrary JSON blob (the renderer output above uses the same
+          # write-then-read pattern for the same reason — see the SECURITY
+          # comment under "Evaluate each changed task").
+          node pipeline-cli/bin/ai-sdlc-pipeline.mjs \
+            dor-pr-has-violations --verdicts-file /tmp/dor/results.jsonl \
+            > /tmp/dor/violations.json
+          cat /tmp/dor/violations.json
+          HAS=$(node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync('/tmp/dor/violations.json','utf8')).has_violations))")
+          COUNT=$(node -e "process.stdout.write(String(JSON.parse(require('fs').readFileSync('/tmp/dor/violations.json','utf8')).blocking.length))")
+          echo "has_violations=$HAS" >> "$GITHUB_OUTPUT"
+          echo "blocking_count=$COUNT" >> "$GITHUB_OUTPUT"
+
+      # AISDLC-379 — actually fail the check when has_violations=true. The
+      # comment posted above tells the operator WHAT to fix; this step
+      # blocks the merge so they DO fix it (or set blocked.reason in
+      # frontmatter as the explicit override). Skipped when no backlog
+      # files changed (no-op PR), or when has_violations stayed false
+      # (clean PR or all violations overridden).
+      - name: Fail check on unresolved violations
+        if: steps.changed.outputs.no-changes != 'true' && steps.compute_violations.outputs.has_violations == 'true'
+        run: |
+          echo "::error::DoR violations detected in ${{ steps.compute_violations.outputs.blocking_count }} staged backlog task change(s). See PR comment for details."
+          echo "::error::Fix the offending task body or set blocked.reason in frontmatter; push to re-evaluate."
+          exit 1

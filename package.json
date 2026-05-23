@@ -35,6 +35,7 @@
     "test:gate-workflow": "node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs",
     "test:review-workflow": "node --test .github/workflows/__tests__/ai-sdlc-review.test.mjs",
     "test:fork-pr-safety": "node --test .github/workflows/__tests__/fork-pr-safety.test.mjs",
+    "test:dor-ingress-workflow": "node --test .github/workflows/__tests__/dor-ingress.test.mjs",
     "test:docs-only-classifier": "node --test scripts/is-docs-only-changeset.test.mjs",
     "test:audit-gate": "node --test scripts/audit-with-ignores.test.mjs",
     "test:drop-stale-envelope": "node --test scripts/drop-stale-attestation-envelope.test.mjs",
