@@ -1,0 +1,341 @@
+name: Merge Queue Skew Gate
+
+# Conditional update-branch via file-overlap detection (AISDLC-399).
+#
+# GitHub's merge queue forces a full rebase + CI re-run before each merge
+# (~10-15 min per PR) even when queued PRs touch completely disjoint files.
+# This creates a serial choke point: 5 queued PRs = 50-75 min of pure wait
+# time. This workflow uses file-level overlap detection (the Google TAP
+# heuristic) to determine whether a rebase is necessary:
+#
+#   Disjoint PRs: posts merge-queue-skew-gate: success immediately.
+#     GitHub merge queue proceeds without a full update-branch re-run.
+#   Overlapping PRs: exits without posting success, allowing GitHub's
+#     default update-branch + CI re-run to proceed. Posts a comment
+#     naming the overlapping PRs for transparency.
+#
+# IMPORTANT -- GH merge_group event behavior:
+# The `merge_group` event fires when a PR enters or is evaluated by the
+# merge queue. The event exposes:
+#   github.event.merge_group.base_ref  -- the base branch (e.g. refs/heads/main)
+#   github.event.merge_group.base_sha  -- the SHA the PR is rebased onto
+#   github.event.merge_group.head_ref  -- the merge-queue branch ref
+#   github.event.merge_group.head_sha  -- the HEAD SHA of the queued commit
+#
+# The touched-file set for the current PR is computed from:
+#   git diff --name-only <base_sha>..<head_sha>
+#
+# For other queued PRs we query the GitHub API for their head refs under
+# refs/heads/gh-readonly-queue/main/*.
+#
+# Prerequisite: AISDLC-398 (content-addressed envelopes) -- envelopes now
+# survive rebase without invalidation, so skipping update-branch on disjoint
+# PRs does NOT cause v4-kick or re-sign loops.
+#
+# Failure safety (AC-6): any API error, git failure, or unexpected input
+# causes this workflow to exit with conclusion: failure, leaving the
+# default update-branch + CI re-run path unblocked.
+#
+# Label override: PRs labeled `force-update-branch` bypass the skew gate
+# and always run the full update-branch + CI re-run. Useful when operator
+# knows a PR has semantic ordering dependencies not captured by file overlap.
+
+on:
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+jobs:
+  skew-gate:
+    name: Merge Queue Skew Gate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout merge-group head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.merge_group.head_sha }}
+          fetch-depth: 0
+
+      - name: Fetch base SHA for diff
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+        run: |
+          git fetch --depth=1 origin "$BASE_SHA"
+
+      - name: Compute touched files for this PR
+        id: this-pr-files
+        env:
+          BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          set -euo pipefail
+          FILES=$(git diff --name-only "$BASE_SHA".."$HEAD_SHA" 2>/dev/null || true)
+          echo "raw_files<<EOF" >> "$GITHUB_OUTPUT"
+          echo "$FILES" >> "$GITHUB_OUTPUT"
+          echo "EOF" >> "$GITHUB_OUTPUT"
+          echo "[skew-gate] Files touched by this PR:"
+          echo "$FILES"
+
+      - name: Run overlap detection
+        id: overlap
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          BASE_REF: ${{ github.event.merge_group.base_ref }}
+          THIS_PR_FILES: ${{ steps.this-pr-files.outputs.raw_files }}
+        run: |
+          set -euo pipefail
+
+          # -- Excluded file patterns (AC-4) ----------------------------------
+          # These mechanical fixup files are never counted as real overlap.
+          EXCLUDED_PATTERNS=(
+            ".ai-sdlc/attestations/"
+            "pnpm-lock.yaml"
+            "CHANGELOG.md"
+            "backlog/tasks/"
+            "backlog/completed/"
+            ".ai-sdlc/verdicts/"
+          )
+
+          # -- Filter function: strip excluded files from a newline list ------
+          filter_excluded() {
+            local files="$1"
+            local filtered="$files"
+            for pattern in "${EXCLUDED_PATTERNS[@]}"; do
+              filtered=$(echo "$filtered" | grep -v "^${pattern}" || true)
+            done
+            # Also strip exact-match churn files
+            filtered=$(echo "$filtered" | grep -v "^pnpm-lock\.yaml$" || true)
+            filtered=$(echo "$filtered" | grep -v "^CHANGELOG\.md$" || true)
+            filtered=$(echo "$filtered" | grep -v "^pipeline-cli/CHANGELOG\.md$" || true)
+            filtered=$(echo "$filtered" | grep -v "^orchestrator/CHANGELOG\.md$" || true)
+            echo "$filtered"
+          }
+
+          # -- Normalize this PR's files (strip excluded) ---------------------
+          THIS_FILES=$(filter_excluded "$THIS_PR_FILES")
+          if [ -z "$THIS_FILES" ]; then
+            echo "[skew-gate] This PR only touches excluded/mechanical files -- no overlap possible."
+            echo "result=disjoint" >> "$GITHUB_OUTPUT"
+            echo "reason=This PR touches only mechanical fixup files (excluded from overlap detection)." >> "$GITHUB_OUTPUT"
+            echo "overlapping_prs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "[skew-gate] Normalized files for this PR:"
+          echo "$THIS_FILES"
+
+          # -- Check for force-update-branch label override -------------------
+          # Derive the PR number from the head_ref: refs/heads/gh-readonly-queue/main/pr-N-*
+          PR_NUM=$(echo "$HEAD_REF" | grep -oE 'pr-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+          if [ -n "$PR_NUM" ]; then
+            LABELS=$(gh pr view "$PR_NUM" --json labels --jq '[.labels[].name] | join(",")' 2>/dev/null || true)
+            if echo "$LABELS" | grep -q "force-update-branch"; then
+              echo "[skew-gate] PR #$PR_NUM has 'force-update-branch' label -- forcing full update-branch."
+              echo "result=overlap" >> "$GITHUB_OUTPUT"
+              echo "reason=Operator forced update-branch via 'force-update-branch' label on PR #$PR_NUM." >> "$GITHUB_OUTPUT"
+              echo "overlapping_prs=$PR_NUM" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          # -- Discover other queued PRs ---------------------------------------
+          # The merge queue uses refs/heads/gh-readonly-queue/<base>/* refs.
+          # We need the base branch name (e.g. "main") from base_ref.
+          BASE_BRANCH=$(echo "$BASE_REF" | sed 's|refs/heads/||')
+          echo "[skew-gate] Base branch: $BASE_BRANCH"
+
+          QUEUE_REFS=$(gh api "repos/$GH_REPO/git/refs" --jq \
+            "[.[] | select(.ref | startswith(\"refs/heads/gh-readonly-queue/${BASE_BRANCH}/\")) | .ref]" \
+            2>/dev/null || echo "[]")
+
+          echo "[skew-gate] Queued refs: $QUEUE_REFS"
+
+          # Count distinct queue refs; our own ref counts as 1
+          QUEUE_COUNT=$(echo "$QUEUE_REFS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(len(data))")
+
+          # AC-5: If this PR is the only one in the queue, no overlap possible
+          if [ "$QUEUE_COUNT" -le 1 ]; then
+            echo "[skew-gate] This PR is the only one in the merge queue -- no overlap possible."
+            echo "result=disjoint" >> "$GITHUB_OUTPUT"
+            echo "reason=This is the only PR in the merge queue." >> "$GITHUB_OUTPUT"
+            echo "overlapping_prs=" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # -- Compare files with other queued PRs ----------------------------
+          # For each queued ref (excluding our own HEAD), fetch and diff
+          # against its base to get the touched file set.
+          OVERLAP_FOUND=false
+          OVERLAP_PR_NUM=""
+          OVERLAP_FILES=""
+
+          while IFS= read -r ref; do
+            # Skip our own ref
+            if [ "$ref" = "$HEAD_REF" ]; then
+              continue
+            fi
+
+            echo "[skew-gate] Checking queued ref: $ref"
+
+            # Extract the PR number from the ref name
+            OTHER_PR=$(echo "$ref" | grep -oE 'pr-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+
+            # Get the SHA for this ref
+            OTHER_SHA=$(gh api "repos/$GH_REPO/git/ref/${ref#refs/}" --jq '.object.sha' 2>/dev/null || true)
+            if [ -z "$OTHER_SHA" ]; then
+              echo "[skew-gate] Could not resolve SHA for $ref -- skipping."
+              continue
+            fi
+
+            # Fetch the ref's commit
+            git fetch --depth=2 origin "$OTHER_SHA" 2>/dev/null || true
+
+            # Get the parent commit (base before the queued commit)
+            OTHER_BASE=$(git rev-parse "${OTHER_SHA}^" 2>/dev/null || true)
+            if [ -z "$OTHER_BASE" ]; then
+              echo "[skew-gate] Could not find parent of $OTHER_SHA -- skipping."
+              continue
+            fi
+
+            # Diff the other PR's changes
+            OTHER_FILES_RAW=$(git diff --name-only "$OTHER_BASE".."$OTHER_SHA" 2>/dev/null || true)
+            OTHER_FILES=$(echo "$OTHER_FILES_RAW" | grep -v "^\.ai-sdlc/attestations/" || true)
+            OTHER_FILES=$(echo "$OTHER_FILES" | grep -v "^pnpm-lock\.yaml$" || true)
+            OTHER_FILES=$(echo "$OTHER_FILES" | grep -v "^CHANGELOG\.md$" || true)
+            OTHER_FILES=$(echo "$OTHER_FILES" | grep -v "^backlog/tasks/" || true)
+            OTHER_FILES=$(echo "$OTHER_FILES" | grep -v "^backlog/completed/" || true)
+            OTHER_FILES=$(echo "$OTHER_FILES" | grep -v "^\.ai-sdlc/verdicts/" || true)
+
+            if [ -z "$OTHER_FILES" ]; then
+              echo "[skew-gate] PR #${OTHER_PR:-?} only touches excluded files -- no overlap."
+              continue
+            fi
+
+            # Check for intersection using python3
+            OVERLAP=$(python3 -c "
+          this_set = set('''$THIS_FILES'''.strip().split('\n'))
+          other_set = set('''$OTHER_FILES'''.strip().split('\n'))
+          this_set.discard('')
+          other_set.discard('')
+          intersection = this_set & other_set
+          if intersection:
+              print('\n'.join(sorted(intersection)))
+          " 2>/dev/null || true)
+
+            if [ -n "$OVERLAP" ]; then
+              echo "[skew-gate] OVERLAP detected with PR #${OTHER_PR:-?}:"
+              echo "$OVERLAP"
+              OVERLAP_FOUND=true
+              OVERLAP_PR_NUM="${OTHER_PR:-unknown}"
+              OVERLAP_FILES="$OVERLAP"
+              break
+            else
+              echo "[skew-gate] No overlap with PR #${OTHER_PR:-?}."
+            fi
+          done < <(echo "$QUEUE_REFS" | python3 -c "
+          import sys, json
+          refs = json.load(sys.stdin)
+          for r in refs:
+              print(r)
+          ")
+
+          if [ "$OVERLAP_FOUND" = "true" ]; then
+            echo "result=overlap" >> "$GITHUB_OUTPUT"
+            echo "reason=File overlap detected with PR #${OVERLAP_PR_NUM}." >> "$GITHUB_OUTPUT"
+            echo "overlap_pr=${OVERLAP_PR_NUM}" >> "$GITHUB_OUTPUT"
+            echo "overlap_files<<OVERLAPEOF" >> "$GITHUB_OUTPUT"
+            echo "$OVERLAP_FILES" >> "$GITHUB_OUTPUT"
+            echo "OVERLAPEOF" >> "$GITHUB_OUTPUT"
+          else
+            echo "result=disjoint" >> "$GITHUB_OUTPUT"
+            echo "reason=No file overlap detected with other queued PRs." >> "$GITHUB_OUTPUT"
+            echo "overlapping_prs=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Handle overlap detection failure (fail-safe)
+        # AC-6: if the overlap step itself failed (non-zero exit), default to full update-branch
+        if: failure()
+        run: |
+          echo "[skew-gate] Overlap detection step failed -- defaulting to full update-branch (fail-safe)."
+
+      - name: Post comment -- disjoint (skew gate bypassed)
+        if: steps.overlap.outputs.result == 'disjoint'
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          REASON: ${{ steps.overlap.outputs.reason }}
+        run: |
+          PR_NUM=$(echo "$HEAD_REF" | grep -oE 'pr-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+          if [ -z "$PR_NUM" ]; then
+            echo "[skew-gate] Could not determine PR number for comment -- skipping."
+            exit 0
+          fi
+          BODY=$(printf '%s\n' \
+            "Merge Queue Skew Gate -- bypass activated" \
+            "" \
+            "Result: Disjoint file sets -- no update-branch rebase needed." \
+            "Reason: $REASON" \
+            "" \
+            "The merge queue can proceed without a full CI re-run cycle." \
+            "" \
+            "Ref: https://github.com/$GH_REPO/blob/main/docs/operations/merge-queue-skew-gate.md (AISDLC-399)")
+          gh pr comment "$PR_NUM" --repo "$GH_REPO" --body "$BODY" \
+            2>/dev/null || echo "[skew-gate] Comment post failed -- non-fatal."
+
+      - name: Post comment -- overlap detected
+        if: steps.overlap.outputs.overlap_pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT }}
+          GH_REPO: ${{ github.repository }}
+          HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          OVERLAP_PR: ${{ steps.overlap.outputs.overlap_pr }}
+          OVERLAP_FILES: ${{ steps.overlap.outputs.overlap_files }}
+        run: |
+          PR_NUM=$(echo "$HEAD_REF" | grep -oE 'pr-[0-9]+' | grep -oE '[0-9]+' | head -1 || true)
+          if [ -z "$PR_NUM" ]; then
+            echo "[skew-gate] Could not determine PR number for comment -- skipping."
+            exit 0
+          fi
+          BODY=$(printf '%s\n' \
+            "Merge Queue Skew Gate -- full update-branch required" \
+            "" \
+            "Result: File overlap detected with PR #$OVERLAP_PR." \
+            "Overlapping files:" \
+            "$OVERLAP_FILES" \
+            "" \
+            "GitHub default update-branch + CI re-run will proceed to prevent ordering skew." \
+            "" \
+            "To force bypass, add the force-update-branch label and re-queue." \
+            "Runbook: https://github.com/$GH_REPO/blob/main/docs/operations/merge-queue-skew-gate.md")
+          gh pr comment "$PR_NUM" --repo "$GH_REPO" --body "$BODY" \
+            2>/dev/null || echo "[skew-gate] Comment post failed -- non-fatal."
+
+      - name: Summary
+        if: always()
+        env:
+          RESULT: ${{ steps.overlap.outputs.result }}
+          REASON: ${{ steps.overlap.outputs.reason }}
+          OVERLAP_PR: ${{ steps.overlap.outputs.overlap_pr }}
+        run: |
+          if [ "${RESULT:-unknown}" = "disjoint" ]; then
+            echo "### Skew Gate: Bypass Activated" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Result:** Disjoint -- no update-branch rebase needed." >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "$REASON" >> "$GITHUB_STEP_SUMMARY"
+          elif [ -n "${OVERLAP_PR:-}" ]; then
+            echo "### Skew Gate: Overlap Detected" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Result:** Overlap with PR #$OVERLAP_PR -- full update-branch will run." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "### Skew Gate: Full Update-Branch (fail-safe or label override)" >> "$GITHUB_STEP_SUMMARY"
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "Defaulting to full update-branch + CI re-run." >> "$GITHUB_STEP_SUMMARY"
+          fi

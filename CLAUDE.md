@@ -51,6 +51,8 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 
 PR merge gate is the single rollup check `ai-sdlc/pr-ready` produced by `.github/workflows/ai-sdlc-gate.yml` (re-actors/alls-green pattern); see [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md) for archetype gating, cutover, and rollback.
 
+**Merge queue update-branch is now conditional (AISDLC-399).** `.github/workflows/merge-queue-skew-gate.yml` runs on `merge_group` events and computes file-level overlap between queued PRs. Disjoint PRs skip the full update-branch rebase + CI re-run cycle (~10-15 min saved per PR); overlapping PRs proceed with the default update-branch flow. Mechanical files (`pnpm-lock.yaml`, `CHANGELOG.md`, attestations, verdicts, backlog task files) are excluded from overlap detection. The fail-safe defaults to full update-branch on any detection error. See [`docs/operations/merge-queue-skew-gate.md`](docs/operations/merge-queue-skew-gate.md) for the operator runbook (including label override and GitHub ruleset configuration). Prerequisite: AISDLC-398 (content-addressed envelopes must be active for skip to be safe).
+
 Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` directly — never via `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX`. `pnpm exec` does not resolve workspace own-bins, so the latter form silently fails with `Command not found` and any `|| echo <fallback>` safety net fires unconditionally. `pipeline-cli/src/cli/bin-invocation.test.ts` enforces both directions of this rule. See AISDLC-156 + the "Invoking from CI" section of `pipeline-cli/README.md`.
 
 ## Feature flags
