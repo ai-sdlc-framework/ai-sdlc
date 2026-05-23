@@ -64,6 +64,55 @@ Per-archetype gating decisions:
 - **code or mixed PRs** require all six jobs to pass. The `predicate-quantifier: every` setting on the path filter ensures a PR with one docs file plus one code file correctly resolves to "code/mixed", not "docs-only".
 - **Integration tests** additionally skip on PRs originating from forks (which lack the repo secrets needed to talk to the reference adapter). Same predicate as `ci.yml`'s `integration` job — kept in sync deliberately.
 
+## Historical workaround — `ai-sdlc/attestation: FAILURE` after a cancelled verify-attestation run (AISDLC-412)
+
+**Fixed in AISDLC-412 (2026-05-23).** PRs opened before that fix landed may still show the symptom; the workarounds below remain valid for those.
+
+### Symptom
+
+The PR's check list shows two `AI-SDLC Verify Review Attestation` runs:
+- one **CANCELLED** (older)
+- one **SUCCESS** (newer)
+
+…but the rollup `ai-sdlc/attestation: FAILURE` commit status persists, blocking the PR. Inspecting the failure description shows `verifier crashed before emitting result — see workflow logs` — that's the cancelled run's POST.
+
+### Why it happened
+
+`verify-attestation.yml` declares `concurrency.cancel-in-progress: true`, so a newer push on the same PR cancels the in-flight run mid-execution. The pre-AISDLC-412 `Post ai-sdlc/attestation status` step used `if: always()`, which fires even on cancellation. The cancelled run's `Verify attestation` step never produced a `STATUS` output, so the step posted `ai-sdlc/attestation: failure` with the "crashed before emitting result" description.
+
+GitHub commit-status semantics keep the most-recent status per context. Two parallel runs racing to POST can land in either order — when the cancelled run's FAILURE POST happens to win against the new run's SUCCESS POST, the rollup reads FAILURE and the PR sits stuck.
+
+### Operator workarounds (pre-AISDLC-412 PRs only)
+
+Pick any one — all force a fresh attestation post on the current HEAD:
+
+1. **Re-run the cancelled workflow** (fastest, no commit overhead):
+   ```bash
+   gh run rerun <cancelled-run-id>
+   ```
+   Find the cancelled run ID via `gh run list --workflow=verify-attestation.yml --status=cancelled --limit 5` filtered by your PR's branch.
+
+2. **Push an empty commit** to re-trigger a clean workflow run:
+   ```bash
+   git commit --allow-empty -m "chore: re-trigger verify-attestation (AISDLC-412 workaround)"
+   git push
+   ```
+
+3. **Wait for the next push event on the branch.** Any subsequent push will trigger a fresh verify-attestation run that posts SUCCESS — provided no further cancellation race occurs.
+
+### Why the fix is `(success() || failure())` instead of `always()`
+
+GitHub status-check function semantics:
+
+| Function | Fires on |
+|---|---|
+| `success()` | no prior step failed |
+| `failure()` | at least one prior step failed |
+| `cancelled()` | workflow was cancelled |
+| `always()` | UNION of the above three |
+
+`success() || failure()` is the canonical "run on crash, NOT on cancel" pattern. It preserves the verifier-crash recovery branch (uncaught exception in the verifier → `failure()` fires → step posts `STATE=failure` with "verifier crashed before emitting result") while ensuring a cancelled run leaves the previous status untouched. Static YAML assertions guard the contract in `.github/workflows/__tests__/verify-attestation-cancelled.test.mjs`.
+
 ## Per-archetype attestation gating (AISDLC-388)
 
 `ai-sdlc/attestation` is **not a direct required check** on branch protection. It is a conditional contributor to the `ai-sdlc/pr-ready` rollup via per-archetype routing:

@@ -453,7 +453,17 @@ describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race 
         'install step must skip when docs-only short-circuit fires',
       );
 
-      // The always() status-posting step must also exclude the docs-only case
+      // AISDLC-412 (2026-05-23): the status-posting step MUST run on
+      // verifier-crash recovery (failure()) AND on the normal happy path
+      // (success()), but MUST NOT fire on CANCELLED runs — `always()`
+      // was the original choice and got replaced with `(success() ||
+      // failure())` because cancelled runs were posting stale FAILURE on
+      // top of the new run's SUCCESS during concurrency-triggered cancel
+      // races. The assertion below previously demanded `always()`;
+      // post-AISDLC-412 it requires both halves of the canonical
+      // "run-on-crash-but-not-on-cancel" pattern. See
+      // `.github/workflows/__tests__/verify-attestation-cancelled.test.mjs`
+      // for the full AISDLC-412 contract.
       const postStep = verifyJob.steps.find(
         (s) => typeof s.name === 'string' && s.name.startsWith('Post ai-sdlc/attestation status'),
       );
@@ -461,8 +471,18 @@ describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race 
       const postIf = String(postStep.if ?? '');
       assert.match(
         postIf,
-        /always\(\)/,
-        'status-posting step must use always() for crash recovery',
+        /\bsuccess\s*\(\s*\)/,
+        'status-posting step must include success() (happy-path POST) — AISDLC-412',
+      );
+      assert.match(
+        postIf,
+        /\bfailure\s*\(\s*\)/,
+        'status-posting step must include failure() (verifier-crash recovery POST) — AISDLC-412',
+      );
+      assert.doesNotMatch(
+        postIf,
+        /\balways\s*\(\s*\)/,
+        'status-posting step must NOT use always() — AISDLC-412 banned it because it fires on CANCELLED runs',
       );
       assert.match(
         postIf,

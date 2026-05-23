@@ -619,16 +619,40 @@ jobs:
       # merge_group tip (queue-time re-verification with sibling-rebase
       # state) so a sibling PR merging into the same files between PR-head
       # verification and queue execution surfaces here.
+      #
+      # AISDLC-412: this step MUST NOT run when the job is CANCELLED.
+      # The concurrency block above (`cancel-in-progress: true`) means a
+      # newer push on the same PR cancels the in-flight run mid-execution.
+      # Before AISDLC-412, this step used `if: always()`, which fires even
+      # on cancellation. The cancelled run's `Verify attestation` step
+      # never produced a STATUS output, so the cancelled run posted
+      # `ai-sdlc/attestation: failure` (with description "verifier crashed
+      # before emitting result"). GitHub commit-status semantics keep the
+      # MOST RECENT status per context — but two parallel runs racing to
+      # POST can land in any order, and the cancelled-run's FAILURE
+      # frequently overwrote the new run's SUCCESS, leaving PRs stuck on
+      # a FAILURE status that did NOT reflect the current HEAD's
+      # verification result. Workarounds operators used: `gh run rerun
+      # <cancelled-id>` or empty-commit push to re-trigger cleanly.
+      #
+      # The fix is to use `(success() || failure())` instead of `always()`.
+      # GitHub's status-check functions:
+      #   - `success()`  → true when no prior step failed (default)
+      #   - `failure()`  → true when at least one prior step failed
+      #   - `cancelled()` → true when the workflow was cancelled
+      #   - `always()`   → true regardless (UNION of the above three)
+      # `success() || failure()` is the canonical pattern for "run even
+      # on crashes, but NOT on cancellation" — it preserves the crash
+      # recovery behavior (a verifier exception still triggers
+      # STATE=failure post with a clear reason) while ensuring a
+      # cancelled run leaves the previous (correct) status untouched.
+      #
+      # Preserved: when the verifier crashes (raises uncaught), `failure()`
+      # is true, the step runs, and STATUS is empty → STATE=failure with
+      # "verifier crashed before emitting result". That recovery branch
+      # is still load-bearing.
       - name: Post ai-sdlc/attestation status
-        # `always() && not-short-circuited` so the status is posted even when
-        # the prior `Verify attestation` step throws (uncaught exception, OOM,
-        # etc.), but NOT when one of the short-circuits (docs-only,
-        # release-please) already posted success above. Without this, a
-        # verifier crash leaves the gate UN-posted forever and the PR sits
-        # BLOCKED with no surfaced reason. With this, a crash falls through
-        # to STATE=failure with a clear "verifier crashed" reason — operator
-        # sees red status, opens workflow log.
-        if: always() && steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
+        if: (success() || failure()) && steps.docs_only.outputs.all_docs != 'true' && steps.release_please.outputs.is_release_please != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
