@@ -607,7 +607,7 @@ Each returns a verdict JSON: `{ approved, findings, summary }`. When the classif
 
 ### Step 7c — Emit transcript leaves (RFC-0042 Phase 3 / AISDLC-383.8)
 
-After all spawned reviewer Agent calls complete and each reviewer's verdict JSON has been written, emit one Merkle leaf per reviewer. This step is **required before `sign-attestation.mjs --schema-version v6`** — the v6 signer reads `.ai-sdlc/transcript-leaves.jsonl` and exits 1 if no leaves are found for the task. When `AI_SDLC_V6_CUTOVER_ACTIVE` is unset (v5 default), the leaves are harmless overhead.
+After all spawned reviewer Agent calls complete and each reviewer's verdict JSON has been written, emit one Merkle leaf per reviewer. This step is **required for v6 signing (the default post-AISDLC-409)** — the v6 signer reads `.ai-sdlc/transcript-leaves.jsonl` and exits 1 if no leaves are found for the task. When `AI_SDLC_V5_LEGACY=1` (or legacy `AI_SDLC_V6_CUTOVER_ACTIVE=0`) is set, the signer falls back to v5 and the leaves become harmless overhead.
 
 ```bash
 # Capture the PR's head SHA once; used to derive the nonce.
@@ -699,7 +699,7 @@ for REVIEWER_NAME in $SELECTED; do
     --head-sha "$HEAD_SHA_FOR_NONCE" \
     --harness "$REVIEWER_HARNESS" \
     --model "$EMIT_MODEL" \
-    || echo "[ai-sdlc-progress] Step 7c: emit-leaf for ${AGENT_NAME} exited non-zero — continuing (non-fatal in v5 mode)"
+    || echo "[ai-sdlc-progress] Step 7c: emit-leaf for ${AGENT_NAME} exited non-zero — non-fatal here, but the v6-default sign step will block (use AI_SDLC_V5_LEGACY=1 to fall back to v5)"
 done
 
 echo "[ai-sdlc-progress] Step 7c: transcript leaf emission complete (leaves at $WORKTREE_PATH/.ai-sdlc/transcript-leaves.jsonl)"
@@ -707,7 +707,7 @@ echo "[ai-sdlc-progress] Step 7c: transcript leaf emission complete (leaves at $
 
 > **Concurrency note (AISDLC-383.8).** Leaves are emitted sequentially (one per reviewer in the `for` loop) after all reviewer Agent calls complete. This is the safest ordering: leafIndex is determined by the number of lines in `transcript-leaves.jsonl` at emission time, and sequential writes ensure no TOCTOU race. Parallel emission (emitting all three simultaneously via background jobs) would require an advisory lock on the JSONL file — tracked as a follow-up if throughput becomes a bottleneck.
 
-> **Non-fatal in v5 mode.** When `AI_SDLC_V6_CUTOVER_ACTIVE` is not set, the v6 signer is never invoked, so a failed `emit-leaf` call is logged but does not abort the pipeline. When `AI_SDLC_V6_CUTOVER_ACTIVE=1`, the v6 signer will fail if leaves are missing — the operator should investigate the Step 7c warning before retrying.
+> **Failure handling.** Post-AISDLC-409, v6 is the default — the v6 signer will fail if leaves are missing, so an `emit-leaf` failure here means the subsequent sign step will block. The operator should investigate the Step 7c warning before retrying. When `AI_SDLC_V5_LEGACY=1` (or legacy `AI_SDLC_V6_CUTOVER_ACTIVE=0`) is set, the signer falls back to v5 and a failed `emit-leaf` is logged but does not abort the pipeline.
 
 ## Step 8 — Aggregate verdicts
 

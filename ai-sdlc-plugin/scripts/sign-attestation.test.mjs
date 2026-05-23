@@ -334,6 +334,58 @@ describe('sign-attestation.mjs', () => {
     );
   });
 
+  it('explicit --schema-version v5 wins even when V5_LEGACY is unset (post-AISDLC-409)', () => {
+    // AC-4: "honors explicit --schema-version flag in both cases". This
+    // exercises the priority: --schema-version v5 + AI_SDLC_V5_LEGACY=''
+    // (opted out of cleanEnv's legacy default) must still produce a v5
+    // envelope because the explicit flag wins over the env default.
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify([
+        {
+          agentId: 'code-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'test-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'security-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+      ]),
+    );
+    const res = runHelper(
+      fixture.root,
+      [
+        '--review-verdicts',
+        verdictsPath,
+        '--iteration-count',
+        '1',
+        '--harness-note',
+        '',
+        '--schema-version',
+        'v5',
+      ],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com', AI_SDLC_V5_LEGACY: '' },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
+    const printedPath = res.stdout.trim();
+    assert.ok(
+      printedPath.endsWith('.dsse.json') && !printedPath.endsWith('.v6.dsse.json'),
+      `expected v5 envelope path (explicit --schema-version v5), got: ${printedPath}`,
+    );
+  });
+
   it('legacy AI_SDLC_V6_CUTOVER_ACTIVE=0 still forces v5 (backward-compat)', () => {
     writeKey(tmpHome);
     const verdictsPath = join(fixture.root, 'verdicts.json');

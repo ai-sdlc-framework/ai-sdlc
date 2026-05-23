@@ -139,19 +139,24 @@ fi
 #   v6 → .ai-sdlc/attestations/<sha>.v6.dsse.json
 # Read the schema version early so idempotency + signer + post-sign checks all agree.
 #
-# CUTOVER STATUS: scaffolding shipped (AISDLC-383.6), DEFAULT STILL v5.
-# Per AISDLC-383.6 security review handoff, the v6 default flip is gated on:
-#   1. AISDLC-383.4 (v6 CI verifier) merged + live
-#   2. A production code path that appends transcript leaves to
-#      .ai-sdlc/transcript-leaves.jsonl during pipeline execution (this is
-#      a gap in 383.X scope — see task body Follow-up section)
-# Until both prerequisites are met, default stays v5. Operators flip the
-# default via `export AI_SDLC_V6_CUTOVER_ACTIVE=1` once the prerequisites
-# are confirmed in their environment.
-if [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-0}" = "1" ]; then
-  SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v6}"
-else
+# CUTOVER STATUS: v6 is the DEFAULT post-AISDLC-409 (2026-05-23). The
+# prerequisite (transcript leaves emitted by /ai-sdlc execute Step 7c and the
+# orchestrator-tick reconciliation step) is in place. The polarity here MUST
+# mirror sign-attestation.mjs's defaultSchema logic so the hook and the signer
+# agree — otherwise the hook would force a v5 envelope on the canonical
+# /ai-sdlc execute path even though the signer's default is v6, which would
+# silently regress the AISDLC-380 forgery defense (security finding on the
+# AISDLC-409 PR review).
+#
+# Operator opt-outs (in precedence order):
+#   - AI_SDLC_SCHEMA_VERSION=v5 explicit pin
+#   - AI_SDLC_V5_LEGACY=1
+#   - Legacy: AI_SDLC_V6_CUTOVER_ACTIVE=0 (operators who pinned the old env
+#     to 0 keep that behavior; any other value of that env now defaults to v6)
+if [ "${AI_SDLC_V5_LEGACY:-0}" = "1" ] || [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-1}" = "0" ]; then
   SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v5}"
+else
+  SCHEMA_VERSION="${AI_SDLC_SCHEMA_VERSION:-v6}"
 fi
 
 # AISDLC-398: compute content-addressed patch-id for the idempotency check.
@@ -347,7 +352,7 @@ else
         echo "[attestation-sign] WARN: sub-attestation verification returned exit $VERIFY_EXIT (audit-only; push not blocked)" >&2
       else
         echo "[attestation-sign] ERROR: sub-attestation verification returned exit $VERIFY_EXIT — push BLOCKED" >&2
-        echo "[attestation-sign]        AISDLC-380 gate is hard-fail until AI_SDLC_V6_CUTOVER_ACTIVE=1 is set" >&2
+        echo "[attestation-sign]        AISDLC-380 gate is in hard-fail mode (AI_SDLC_V5_LEGACY=1 or AI_SDLC_V6_CUTOVER_ACTIVE=0). Unset both to use the post-AISDLC-409 default (audit-only)." >&2
         exit "$VERIFY_EXIT"
       fi
     fi
@@ -379,7 +384,7 @@ else
         echo "[attestation-sign]       This gate will be removed in AISDLC-383.7 (Phase 4 cleanup)." >&2
       else
         echo "[attestation-sign] ERROR: sub-attestation verification failed for $TASK_ID (exit $VERIFY_EXIT) — push BLOCKED" >&2
-        echo "[attestation-sign]        AISDLC-380 gate is hard-fail until AI_SDLC_V6_CUTOVER_ACTIVE=1 is set" >&2
+        echo "[attestation-sign]        AISDLC-380 gate is in hard-fail mode (AI_SDLC_V5_LEGACY=1 or AI_SDLC_V6_CUTOVER_ACTIVE=0). Unset both to use the post-AISDLC-409 default (audit-only)." >&2
         exit "$VERIFY_EXIT"
       fi
     fi
