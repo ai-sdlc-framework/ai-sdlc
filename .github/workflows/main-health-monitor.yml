@@ -1,0 +1,196 @@
+name: Main Health Monitor
+
+# AISDLC-406: Reactive complement to the no-queue direct-merge model introduced
+# by AISDLC-400. Without a merge queue, concurrent merges can combine to break
+# main even when each individual PR was green at merge time. This workflow runs
+# the FULL test suite on every push to main and creates a GitHub issue when main
+# goes red, giving the operator immediate signal to bisect + revert.
+#
+# Motivating incident: AISDLC-398 + AISDLC-400 + AISDLC-405 all had green CI
+# individually but combined to break main's test suite (AISDLC-405 was the
+# cleanup PR that blocked 5 other PRs from merging while main was red).
+#
+# This is NOT a PR gate — it fires only on push to main (post-merge). It is
+# explicitly decoupled from `ai-sdlc/pr-ready` (per-PR gate) and `ci.yml`
+# (push-to-main also fires ci.yml, but ci.yml runs affected-package filtering
+# on PR events; this workflow always runs the full suite).
+#
+# See docs/operations/main-health-monitor.md for the full operator runbook.
+
+on:
+  push:
+    branches: [main]
+  # No pull_request trigger — this is a post-merge health check, not a PR gate.
+
+# AC-3: cancel-in-progress: false — every main push gets its own health check.
+# Rationale: if push N is failing and push N+1 lands (a fix attempt), we want
+# BOTH health checks to complete so we can confirm the fix resolved the failure.
+# Cancelling N when N+1 arrives would leave the failure unconfirmed and the
+# GitHub issue open with no follow-up evidence.
+concurrency:
+  group: main-health-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  health-check:
+    name: Full Suite Health Check
+    runs-on: ubuntu-latest
+    # Output the test result so the alert job can read it.
+    outputs:
+      test_status: ${{ steps.test-outcome.outputs.status }}
+      commit_sha: ${{ github.sha }}
+      commit_message: ${{ github.event.head_commit.message }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (full workspace)
+        run: pnpm build
+
+      # AC-1: Run the full pnpm test suite. This is intentionally the full suite
+      # (not affected-package filtered) because the whole point of this workflow
+      # is to catch cross-package skew that per-PR affected-package CI misses.
+      - name: Test (full suite)
+        id: full-test
+        # Don't fail-fast — capture the outcome and let the alert job decide.
+        continue-on-error: true
+        run: pnpm -r test
+
+      # AC-1: Also run the workflow-test suite under .github/workflows/__tests__/.
+      # These tests validate workflow YAML structure and are separate from per-package
+      # unit tests — they're included here so a broken workflow file (e.g. a merge
+      # conflict that corrupts YAML) surfaces as a named failure rather than a silent
+      # CI breakage.
+      - name: Test (workflow YAML tests)
+        id: workflow-test
+        continue-on-error: true
+        run: |
+          node --test .github/workflows/__tests__/ai-sdlc-gate.test.mjs
+          node --test .github/workflows/__tests__/ai-sdlc-review.test.mjs
+          node --test .github/workflows/__tests__/fork-pr-safety.test.mjs
+          node --test .github/workflows/__tests__/dor-ingress.test.mjs
+
+      # Consolidate the two step outcomes into a single job output.
+      - name: Determine test outcome
+        id: test-outcome
+        run: |
+          full="${{ steps.full-test.outcome }}"
+          workflow="${{ steps.workflow-test.outcome }}"
+          echo "full-test outcome: $full"
+          echo "workflow-test outcome: $workflow"
+          if [[ "$full" == "success" && "$workflow" == "success" ]]; then
+            echo "status=success" >> "$GITHUB_OUTPUT"
+            echo "[main-health] all suites PASS"
+          else
+            echo "status=failure" >> "$GITHUB_OUTPUT"
+            echo "[main-health] FAIL — full-test=$full workflow-test=$workflow"
+          fi
+
+      # Exit non-zero when any suite failed so this job itself is marked red.
+      # The alert job will also fire. This makes the health check visible in the
+      # GitHub Actions run list as a failing job (not just an issue being filed).
+      - name: Fail on test failure
+        if: steps.test-outcome.outputs.status == 'failure'
+        run: |
+          echo "::error::main health check FAILED — full-test=${{ steps.full-test.outcome }} workflow-test=${{ steps.workflow-test.outcome }}"
+          echo "::error::See the steps above for failing test output."
+          echo "::error::Runbook: docs/operations/main-health-monitor.md"
+          exit 1
+
+  # AC-2: On failure, create a GitHub issue to page the operator.
+  alert:
+    name: File Red-Main Issue
+    needs: health-check
+    # Only fire when the health check failed. `if: failure()` matches when ANY
+    # upstream job in `needs` has result=failure. This includes the case where
+    # the health-check job itself exits non-zero on the "Fail on test failure"
+    # step (which is the intended path).
+    if: failure()
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create red-main issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          COMMIT_SHA: ${{ github.sha }}
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          SHORT_SHA="${COMMIT_SHA:0:8}"
+          TITLE="[main-health] main is RED at ${SHORT_SHA}"
+
+          # Check if an open issue with this title already exists to avoid duplicates.
+          # (Two quick successive pushes could race — idempotent check prevents noise.)
+          EXISTING=$(gh issue list \
+            --state open \
+            --search "in:title [main-health] main is RED" \
+            --json number,title \
+            --jq 'length')
+          if [[ "$EXISTING" != "0" ]]; then
+            echo "[main-health] open red-main issue already exists — skipping duplicate creation"
+            exit 0
+          fi
+
+          BODY="## Main branch is RED
+
+          **Commit:** [\`${SHORT_SHA}\`](${{ github.server_url }}/${{ github.repository }}/commit/${COMMIT_SHA})
+          **Message:** ${COMMIT_MSG}
+          **CI run:** ${RUN_URL}
+
+          ## What failed
+
+          The full test suite failed on push to main. This indicates a merge-skew regression: individual PRs were green, but their combined effect breaks the suite.
+
+          Check the [CI run](${RUN_URL}) for the specific failing test names and stack traces.
+
+          ## Triage steps
+
+          See [docs/operations/main-health-monitor.md](https://github.com/${{ github.repository }}/blob/main/docs/operations/main-health-monitor.md) for the full runbook.
+
+          Quick-start:
+          \`\`\`bash
+          # Find the last green commit before this one
+          git log --oneline main -20
+
+          # Bisect the regression
+          git bisect start
+          git bisect bad ${COMMIT_SHA}
+          # Mark the last known-good commit:
+          git bisect good <last-green-sha>
+          git bisect run pnpm test
+          \`\`\`
+
+          ## References
+
+          - Motivating incident: AISDLC-398 + AISDLC-400 + AISDLC-405
+          - Runbook: \`docs/operations/main-health-monitor.md\`
+          - AISDLC-406 — this monitoring workflow
+          "
+
+          gh issue create \
+            --title "${TITLE}" \
+            --body "${BODY}" \
+            --assignee "deefactorial" \
+            --label "ci,main-red"

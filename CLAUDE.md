@@ -52,6 +52,8 @@ GitHub Actions silently skips ALL workflows when ANY commit body contains `[skip
 
 PR merge gate is the single rollup check `ai-sdlc/pr-ready` produced by `.github/workflows/ai-sdlc-gate.yml` (re-actors/alls-green pattern); see [`docs/operations/quality-gate.md`](docs/operations/quality-gate.md) for archetype gating, cutover, and rollback.
 
+**Main health monitor** (AISDLC-406): `.github/workflows/main-health-monitor.yml` fires on every push to `main` and runs the full test suite (`pnpm -r test` + workflow YAML tests). When any test fails, it creates a GitHub issue titled `[main-health] main is RED at <commit>` assigned to `@deefactorial`. This is the reactive complement to the no-queue direct-merge model (AISDLC-400): per-PR CI uses affected-package filtering and cannot detect cross-package merge-skew regressions, but the health monitor always runs the full suite post-merge. See [`docs/operations/main-health-monitor.md`](docs/operations/main-health-monitor.md) for the triage runbook. Motivating incident: AISDLC-398 + AISDLC-400 + AISDLC-405 each had green per-PR CI but combined to break `main`.
+
 Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` directly — never via `pnpm --filter @ai-sdlc/pipeline-cli exec cli-XXX`. `pnpm exec` does not resolve workspace own-bins, so the latter form silently fails with `Command not found` and any `|| echo <fallback>` safety net fires unconditionally. `pipeline-cli/src/cli/bin-invocation.test.ts` enforces both directions of this rule. See AISDLC-156 + the "Invoking from CI" section of `pipeline-cli/README.md`.
 
 ## Feature flags
