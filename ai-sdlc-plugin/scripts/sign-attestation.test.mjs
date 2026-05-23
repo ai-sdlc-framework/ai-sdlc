@@ -45,6 +45,14 @@ function cleanEnv(extra = {}) {
   delete env.GIT_DIR;
   delete env.GIT_WORK_TREE;
   delete env.GIT_INDEX_FILE;
+  // AISDLC-409 cutover: signer now defaults to v6, which requires staged
+  // Merkle leaves. Most existing tests exercise the v5 sign+write path. Set
+  // V5_LEGACY by default so they keep running on v5; tests that need to
+  // exercise v6 default behavior pass AI_SDLC_V5_LEGACY: '' (empty string)
+  // in extra to opt back into the post-cutover v6 default.
+  if (env.AI_SDLC_V5_LEGACY === undefined) {
+    env.AI_SDLC_V5_LEGACY = '1';
+  }
   return env;
 }
 
@@ -209,9 +217,22 @@ describe('sign-attestation.mjs', () => {
         },
       ]),
     );
+    // AISDLC-409: v6 is the default post-cutover; this test exercises the v5
+    // signing+writing path explicitly so it doesn't fail on missing transcript
+    // leaves (which v6 requires). Schema-selection behavior is covered by the
+    // dedicated tests below.
     const res = runHelper(
       fixture.root,
-      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      [
+        '--review-verdicts',
+        verdictsPath,
+        '--iteration-count',
+        '1',
+        '--harness-note',
+        '',
+        '--schema-version',
+        'v5',
+      ],
       { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com' },
     );
     assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
@@ -229,6 +250,126 @@ describe('sign-attestation.mjs', () => {
     assert.ok(
       printedPath.endsWith('.dsse.json') && existsSync(printedPath),
       `stdout should print a valid written .dsse.json path, got: ${printedPath}`,
+    );
+  });
+
+  // ── AISDLC-409: v6 default cutover (RFC-0042 Phase 3) ─────────────────
+  //
+  // Post-cutover, the signer defaults to schema v6 unless the operator opts
+  // back to v5 via --schema-version v5, AI_SDLC_V5_LEGACY=1, or the legacy
+  // AI_SDLC_V6_CUTOVER_ACTIVE=0.
+
+  it('defaults to v6 schema post-AISDLC-409 cutover (fails without leaves)', () => {
+    // v6 signing requires .ai-sdlc/transcript-leaves.jsonl with leaves for
+    // the task. Without them, the signer errors with a v6-specific message —
+    // which confirms the v6 code path was taken (not v5).
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify([
+        {
+          agentId: 'code-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+      ]),
+    );
+    // Pass AI_SDLC_V5_LEGACY: '' to opt OUT of the cleanEnv default and let
+    // the signer's true default (v6) take effect.
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--task-id', 'AISDLC-409', '--iteration-count', '1'],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com', AI_SDLC_V5_LEGACY: '' },
+    );
+    // Exit non-zero because v6 needs leaves and none are staged.
+    assert.notEqual(res.status, 0);
+    // Error message must reference v6 / leaves / merkle to confirm v6 path.
+    const combined = `${res.stderr}\n${res.stdout}`;
+    assert.match(
+      combined,
+      /v6|leaves|merkle/i,
+      `expected v6-specific error, got stderr: ${res.stderr}\nstdout: ${res.stdout}`,
+    );
+  });
+
+  it('AI_SDLC_V5_LEGACY=1 forces v5 signing (post-AISDLC-409 opt-out)', () => {
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify([
+        {
+          agentId: 'code-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'test-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'security-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+      ]),
+    );
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com', AI_SDLC_V5_LEGACY: '1' },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
+    // Confirm a v5 envelope landed (not v6 — its filename ends .v6.dsse.json).
+    const printedPath = res.stdout.trim();
+    assert.ok(
+      printedPath.endsWith('.dsse.json') && !printedPath.endsWith('.v6.dsse.json'),
+      `expected v5 envelope path, got: ${printedPath}`,
+    );
+  });
+
+  it('legacy AI_SDLC_V6_CUTOVER_ACTIVE=0 still forces v5 (backward-compat)', () => {
+    writeKey(tmpHome);
+    const verdictsPath = join(fixture.root, 'verdicts.json');
+    writeFileSync(
+      verdictsPath,
+      JSON.stringify([
+        {
+          agentId: 'code-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'test-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+        {
+          agentId: 'security-reviewer',
+          harness: 'codex',
+          approved: true,
+          findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+        },
+      ]),
+    );
+    const res = runHelper(
+      fixture.root,
+      ['--review-verdicts', verdictsPath, '--iteration-count', '1', '--harness-note', ''],
+      { HOME: tmpHome, GIT_AUTHOR_EMAIL: 'dev@example.com', AI_SDLC_V6_CUTOVER_ACTIVE: '0' },
+    );
+    assert.equal(res.status, 0, `stderr: ${res.stderr}\nstdout: ${res.stdout}`);
+    const printedPath = res.stdout.trim();
+    assert.ok(
+      printedPath.endsWith('.dsse.json') && !printedPath.endsWith('.v6.dsse.json'),
+      `expected v5 envelope path, got: ${printedPath}`,
     );
   });
 

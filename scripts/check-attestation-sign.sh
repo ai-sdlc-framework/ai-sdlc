@@ -305,17 +305,27 @@ if [ "$SCHEMA_VERSION" = "v6" ]; then
   # AISDLC-380 sub-attestation gate is not applicable. Skip entirely.
   echo "[attestation-sign] v6 envelope mode — AISDLC-380 sub-attestation gate skipped (RFC-0042 Phase 3)" >&2
 else
-  # ── v5 audit-only mode is GATED on AI_SDLC_V6_CUTOVER_ACTIVE=1 ────────
-  # Per AISDLC-383.6 security review: defaulting the gate to audit-only on v5
-  # while v6 isn't yet operational reopens the 2026-05-20 forgery vector
-  # (forced fallback to v5 with the only defense being audit-only). Therefore:
+  # ── v5 gate post-AISDLC-409 cutover: audit-only is the DEFAULT ───────
+  # Per AISDLC-409 (v6 cutover, 2026-05-23): v6 is now the default schema, so
+  # new envelopes derive reviewer evidence from Merkle transcript leaves
+  # (forgery-resistant by construction). Existing v5 envelopes on main are
+  # legacy; the AISDLC-380 sub-attestation chain is retained but the gate
+  # downgrades to audit-only by default for v5 envelopes.
   #
-  #   AI_SDLC_V6_CUTOVER_ACTIVE=1 → audit-only (warn, exit 0) — operator has
-  #     confirmed v6 stack is end-to-end live + opted into the cutover state
-  #   AI_SDLC_V6_CUTOVER_ACTIVE unset/0 → HARD-FAIL (block push on missing
-  #     or invalid sub-attestation) — preserves AISDLC-380 forgery defense
-  #     during the scaffolding-shipped-but-not-active window
-  CUTOVER_AUDIT_ONLY="${AI_SDLC_V6_CUTOVER_ACTIVE:-0}"
+  # Opt back into pre-cutover hard-fail mode (for operators who want to keep
+  # v5 sub-attestation defense locked down — typically because they sign v5
+  # envelopes from an ad-hoc reviewer flow and want forgery protection):
+  #
+  #   AI_SDLC_V5_LEGACY=1 → HARD-FAIL (block push on missing/invalid v5
+  #     sub-attestation) — preserves AISDLC-380 forgery defense
+  #
+  # Legacy backward-compat: AI_SDLC_V6_CUTOVER_ACTIVE=0 is honored as opt-in
+  # to hard-fail mode for operators who pinned the old env to 0.
+  if [ "${AI_SDLC_V5_LEGACY:-0}" = "1" ] || [ "${AI_SDLC_V6_CUTOVER_ACTIVE:-1}" = "0" ]; then
+    CUTOVER_AUDIT_ONLY="0"
+  else
+    CUTOVER_AUDIT_ONLY="1"
+  fi
 
   if [ -n "${AI_SDLC_VERIFY_SUB_ATTESTATIONS_CMD:-}" ] && [ "${AI_SDLC_TEST_MODE:-0}" = "1" ]; then
     # Test override: use the stub verifier directly, bypassing file-existence checks.

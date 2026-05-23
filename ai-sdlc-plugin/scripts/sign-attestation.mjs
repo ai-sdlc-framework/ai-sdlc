@@ -212,16 +212,28 @@ async function main() {
     return;
   }
 
-  // RFC-0042 Phase 3 cutover (AISDLC-383.6): scaffolding shipped, default
-  // STILL v5. Per the 383.6 security review, the v6 default flip is gated
-  // on AI_SDLC_V6_CUTOVER_ACTIVE=1 which the operator sets only when:
+  // RFC-0042 Phase 3 cutover (AISDLC-409): v6 is now the DEFAULT schema.
+  // Prerequisites that justified the flip (per the 383.6 security review):
   //   1. AISDLC-383.4 (v6 CI verifier) is live in production
-  //   2. A code path that appends transcript leaves to
-  //      .ai-sdlc/transcript-leaves.jsonl runs during normal pipeline
-  //      execution (gap in 383.X scope — see follow-up).
-  // Pass --schema-version v6 explicitly OR export AI_SDLC_V6_CUTOVER_ACTIVE=1
-  // to use the new path.
-  const defaultSchema = process.env['AI_SDLC_V6_CUTOVER_ACTIVE'] === '1' ? 'v6' : 'v5';
+  //   2. The canonical pipeline paths (/ai-sdlc execute, /ai-sdlc orchestrator-tick)
+  //      emit transcript leaves to .ai-sdlc/transcript-leaves.jsonl via
+  //      cli-attestation.mjs emit-leaf as part of their reviewer fan-out.
+  //
+  // Operator opt-outs (in precedence order):
+  //   - Pass --schema-version v5 explicitly
+  //   - Export AI_SDLC_V5_LEGACY=1 (forces v5 for ad-hoc / legacy flows)
+  //   - Legacy: AI_SDLC_V6_CUTOVER_ACTIVE=0 is honored for backward-compat
+  //     (operators who pinned the old env to 0 to lock down to v5 keep that
+  //     behavior; any other value of the legacy env, set or unset, defaults
+  //     to v6 now).
+  //
+  // Ad-hoc reviewer spawning (outside the two canonical skill bodies) does
+  // NOT yet emit transcript leaves — operators on that path should pass
+  // --schema-version v5 explicitly or set AI_SDLC_V5_LEGACY=1. Tracked as a
+  // follow-up to AISDLC-409.
+  const v5LegacyOptOut =
+    process.env['AI_SDLC_V5_LEGACY'] === '1' || process.env['AI_SDLC_V6_CUTOVER_ACTIVE'] === '0';
+  const defaultSchema = v5LegacyOptOut ? 'v5' : 'v6';
   const schemaVersion = args['schema-version'] ?? defaultSchema;
 
   // ──────────────────────────────────────────────────────────────────
