@@ -335,6 +335,33 @@ describe('check-pr-patch-coverage — skip on 0 changed code files', () => {
     const parsed = JSON.parse(r.stdout);
     assert.equal(parsed.reason, 'no-instrumentable-changes');
   });
+
+  it('exits 0 when only bin/*.mjs shim changed (AISDLC-403)', () => {
+    // bin/*.mjs entrypoints are subprocess-tested; istanbul can't instrument
+    // them. They must be excluded from the enforcement denominator, regardless
+    // of whether coverage data exists for them.
+    const base = commitFile(repo, 'README.md', '# x\n', 'init');
+    const head = commitFile(
+      repo,
+      'pkg/bin/cli-foo.mjs',
+      [
+        '#!/usr/bin/env node',
+        "import { run } from '../src/foo.js';",
+        'run(process.argv.slice(2));',
+      ].join('\n') + '\n',
+      'feat: add cli-foo bin shim',
+    );
+    // No coverage file written — the gate must skip, not fail, for bin shims.
+    const r = runGate(repo, { base, head, json: true });
+    assert.equal(
+      r.status,
+      0,
+      `expected exit 0 for bin shim, got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    const parsed = JSON.parse(r.stdout);
+    assert.equal(parsed.reason, 'no-instrumentable-changes');
+    assert.deepEqual(parsed.changedCodeFiles, []);
+  });
 });
 
 // ── AC 4: failure with diagnostic when coverage data missing ─────────────────
