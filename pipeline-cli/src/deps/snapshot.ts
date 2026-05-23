@@ -129,8 +129,9 @@ export interface WriteSnapshotResult {
   bytes: number;
   /**
    * Feature-flag indicator. When `false` the writer skipped the actual disk
-   * write (per Phase 1 policy `AI_SDLC_DEPS_COMPOSITION` defaults OFF). The
-   * caller can still observe what _would_ have been written via `recordCount`.
+   * write (operator explicitly opted out via `AI_SDLC_DEPS_COMPOSITION=off`;
+   * post-AISDLC-410 the flag defaults ON). The caller can still observe what
+   * _would_ have been written via `recordCount`.
    */
   written: boolean;
 }

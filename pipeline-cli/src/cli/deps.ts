@@ -329,7 +329,7 @@ export function buildDepsCli(): Argv {
     )
     .command(
       'snapshot',
-      'RFC-0014 Phase 1 — write a JSONL snapshot of the dependency graph to $ARTIFACTS_DIR/_deps/. No-op when AI_SDLC_DEPS_COMPOSITION is unset.',
+      'RFC-0014 — write a JSONL snapshot of the dependency graph to $ARTIFACTS_DIR/_deps/. Active by default (AISDLC-410); no-op when AI_SDLC_DEPS_COMPOSITION=off.',
       (y) =>
         y
           .option('tag', {
@@ -347,12 +347,13 @@ export function buildDepsCli(): Argv {
         const workDir = argv['work-dir'] as string;
         const artifactsDir = argv['artifacts-dir'] as string | undefined;
         if (!isCompositionEnabled()) {
-          // Phase 1 is opt-in. Surface a clear noop message + the env var so the
-          // operator can flip it on without re-reading the runbook.
+          // Operator explicitly opted out of RFC-0014 (default-ON since
+          // AISDLC-410). Surface a clear no-op message naming the opt-out env.
           emit({
             ok: true,
             written: false,
-            reason: 'AI_SDLC_DEPS_COMPOSITION is OFF — snapshot skipped (set to 1 to enable)',
+            reason:
+              'AI_SDLC_DEPS_COMPOSITION=off — snapshot skipped (unset the env var to re-enable)',
             tag,
           });
           return;
