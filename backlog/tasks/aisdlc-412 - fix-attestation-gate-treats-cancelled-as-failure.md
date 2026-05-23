@@ -15,7 +15,7 @@ permittedExternalPaths: []
 
 The `Attestation gate (code PRs)` rollup check reads the most recent `ai-sdlc/attestation` commit status. When two `verify-attestation` workflow runs race (the common case after a push that supersedes an in-flight push), the CANCELLED run posts `ai-sdlc/attestation: failure` as its terminal commit status. A later run posts `success` on the same commit SHA, but the rollup seems to read the FAILURE one — leaving PRs stuck even though the actual verifier succeeded on the current HEAD.
 
-Symptom (observed today on PRs #626, #637, #642): `ai-sdlc/attestation: FAILURE` with one CANCELLED + one SUCCESS verify-attestation job listed in the status checks. The PR cannot merge until either (a) operator manually runs `gh run rerun <cancelled-id>` or (b) an empty commit re-triggers the workflow cleanly.
+Symptom (observed today on several open PRs): `ai-sdlc/attestation: FAILURE` with one CANCELLED + one SUCCESS verify-attestation job listed in the status checks. The PR cannot merge until either (a) operator manually runs `gh run rerun <cancelled-id>` or (b) an empty commit re-triggers the workflow cleanly.
 
 Today's workarounds (operator-time-expensive):
 - `gh run rerun <cancelled-run-id>` per stuck PR
