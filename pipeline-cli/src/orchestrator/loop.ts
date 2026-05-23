@@ -225,10 +225,17 @@ export interface OrchestratorAdapters {
   /**
    * AISDLC-229 — umbrella executor. When provided, overrides the default
    * `runExecuteCommand` call. Tests inject a stub to avoid spawning a real
-   * process. The function receives the task ID and spawner kind and returns
-   * an `ExecuteCommandResult`.
+   * process. The function receives the task ID, spawner kind, and an optional
+   * options bag carrying per-dispatch overrides (e.g. AISDLC-373
+   * `taskFilePathOverride` from `--task-from-file`) and returns an
+   * `ExecuteCommandResult`. The third argument is OPTIONAL so existing tests
+   * with the legacy `(taskId, spawnerKind) =>` signature continue to type-check.
    */
-  umbrellaExecutor?: (taskId: string, spawnerKind: SpawnerKind) => Promise<ExecuteCommandResult>;
+  umbrellaExecutor?: (
+    taskId: string,
+    spawnerKind: SpawnerKind,
+    opts?: { taskFilePathOverride?: string },
+  ) => Promise<ExecuteCommandResult>;
   /** Optional injected `Runner` for the default frontier + escalate paths. */
   runner?: Runner;
   /**
@@ -429,6 +436,20 @@ export interface OrchestratorAdapters {
    * When undefined, the production `runParentBranchGuard()` is called.
    */
   parentBranchGuard?: () => Promise<void>;
+  /**
+   * AISDLC-373 — single-PR operator-driven path. When set to true, the
+   * §4.3 admission filter chain (DependencyReadiness, Blocked, DoR, etc.)
+   * is skipped and every frontier candidate flows straight to dispatch.
+   *
+   * The in-flight pre-filter (claim guard) still runs — that's a
+   * correctness invariant, not a §4.3 filter. The parent-branch guard
+   * and worktree sweep still run.
+   *
+   * Set by `cli-orchestrator tick --task-from-file <path>` when the
+   * operator has manually chosen a single worktree-local task. The
+   * autonomous frontier scan path (no `--task-from-file`) is unchanged.
+   */
+  bypassFilters?: boolean;
 }
 
 /**
@@ -570,6 +591,15 @@ export async function runOrchestratorTick(
   // even when the env flag is absent. Without this special-case the umbrella
   // tests fail because `buildDefaultUmbrellaDispatch` is no longer the default.
   const testWantsUmbrella = adapters.umbrellaExecutor !== undefined;
+  // AISDLC-373 — per-task file-path map for the single-PR `--task-from-file`
+  // flow. Populated below AFTER `frontierFn()` returns (the synthetic
+  // frontier entry carries the resolved `filePath`); the closure passed to
+  // the dispatch builders reads from this map at dispatch time, so we can
+  // build the dispatchers up-front (preserving existing ordering) while still
+  // looking up the operator-supplied path per task.
+  const taskFilePathByTaskId = new Map<string, string>();
+  const lookupTaskFilePath = (taskId: string): string | undefined =>
+    taskFilePathByTaskId.get(taskId) ?? taskFilePathByTaskId.get(taskId.toUpperCase());
   const richDispatchFn: UmbrellaDispatchFn = (() => {
     if (adapters.umbrellaDispatch) return adapters.umbrellaDispatch;
     // AISDLC-225 — consumer-bridge continuation. When `continueFromResultPath`
@@ -586,9 +616,9 @@ export async function runOrchestratorTick(
       return async (taskId: string) => ({ result: await legacyFn(taskId) });
     }
     if (useUmbrella || testWantsUmbrella) {
-      return buildDefaultUmbrellaDispatch(config, adapters, emit);
+      return buildDefaultUmbrellaDispatch(config, adapters, emit, lookupTaskFilePath);
     }
-    const legacyFn = buildDefaultDispatch(config, adapters, emit);
+    const legacyFn = buildDefaultDispatch(config, adapters, emit, lookupTaskFilePath);
     return async (taskId: string) => ({ result: await legacyFn(taskId) });
   })();
   // NOTE: `tryPlaybookOnError` builds its own dispatchFn from
@@ -607,6 +637,17 @@ export async function runOrchestratorTick(
   const inFlight = adapters.inFlight ?? makeInFlightMap();
 
   const candidates = frontierFn();
+  // AISDLC-373 — populate the per-task file-path map BEFORE any dispatch so
+  // the closure baked into the dispatch builders above can look up the
+  // operator-supplied task-file path at dispatch time. Autonomous-frontier
+  // candidates have `filePath: undefined` and contribute nothing to the map
+  // (preserving the default `findTaskFile()` scan behaviour).
+  for (const c of candidates) {
+    if (typeof c.filePath === 'string' && c.filePath.length > 0) {
+      taskFilePathByTaskId.set(c.id, c.filePath);
+      taskFilePathByTaskId.set(c.id.toUpperCase(), c.filePath);
+    }
+  }
   logger.progress(
     'orchestrator-tick',
     `tick=${tickNumber} frontier=${candidates.length} maxConcurrent=${config.maxConcurrent}`,
@@ -743,6 +784,16 @@ export async function runOrchestratorTick(
 
   for (const candidate of dispatchableCandidates) {
     if (picks.length >= budget) break;
+    // AISDLC-373 — single-PR operator-driven path: skip the §4.3 admission
+    // filter chain entirely when `bypassFilters: true` is set. Used by
+    // `cli-orchestrator tick --task-from-file <path>` where the operator has
+    // already chosen the task by name and the dependency graph hasn't
+    // observed the worktree-local task file yet.
+    if (adapters.bypassFilters === true) {
+      logger.info(`[orchestrator] bypass-filters candidate=${candidate.id} (operator-chosen)`);
+      picks.push(candidate.id);
+      continue;
+    }
     const labels = labelsLoader(candidate.id);
     const blockedFm = blockedLoader(candidate.id);
     const dispatchableFm = dispatchableLoader(candidate.id);
@@ -2536,14 +2587,31 @@ function buildDefaultUmbrellaDispatch(
   config: OrchestratorConfig,
   adapters: OrchestratorAdapters,
   emit: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void,
+  /**
+   * AISDLC-373 — per-task file-path lookup for the single-PR `--task-from-file`
+   * flow. Populated by the tick-body after `frontierFn()` returns. Returns
+   * `undefined` for autonomous-frontier tasks (the file is already at the
+   * default `<workDir>/backlog/tasks/` location, no override needed).
+   */
+  taskFilePathLookup?: (taskId: string) => string | undefined,
 ): UmbrellaDispatchFn {
   const logger = adapters.logger ?? DEFAULT_LOGGER;
   const spawnerKind = resolveUmbrellaSpawnerKind(adapters);
   const executor = adapters.umbrellaExecutor;
 
   return async (taskId): Promise<import('./types.js').RichDispatchResult> => {
+    const taskFilePathOverride = taskFilePathLookup?.(taskId);
     const runUmbrella = async (kind: SpawnerKind): Promise<ExecuteCommandResult> => {
-      if (executor) return executor(taskId, kind);
+      if (executor) {
+        // AISDLC-373 — forward the override to the test-injected executor when
+        // present. Existing tests using the legacy `(taskId, kind) =>`
+        // signature ignore the third arg without trouble.
+        return executor(
+          taskId,
+          kind,
+          taskFilePathOverride !== undefined ? { taskFilePathOverride } : undefined,
+        );
+      }
       return runExecuteCommand({
         taskId,
         workDir: config.workDir,
@@ -2552,6 +2620,11 @@ function buildDefaultUmbrellaDispatch(
         dryRun: false,
         run: true,
         logger,
+        // AISDLC-373 — forward the operator-supplied task-file path through
+        // to runExecuteCommand → executePipeline → Step 1 (validateTask) so the
+        // worktree-local task file is found instead of returning `no task file
+        // for <id>`.
+        ...(taskFilePathOverride !== undefined ? { taskFilePathOverride } : {}),
       });
     };
 
@@ -2655,9 +2728,15 @@ function buildDefaultDispatch(
   config: OrchestratorConfig,
   adapters: OrchestratorAdapters,
   emit: (event: Omit<OrchestratorEvent, 'ts'> & { ts?: string }) => void,
+  /**
+   * AISDLC-373 — per-task file-path lookup for the single-PR `--task-from-file`
+   * flow (see `buildDefaultUmbrellaDispatch` docs for the full rationale).
+   */
+  taskFilePathLookup?: (taskId: string) => string | undefined,
 ): DispatchFn {
   return async (taskId): Promise<PipelineResult> => {
     const spawner = adapters.spawner ?? (await defaultSpawner());
+    const taskFilePathOverride = taskFilePathLookup?.(taskId);
     return executePipeline({
       taskId,
       workDir: config.workDir,
@@ -2667,6 +2746,9 @@ function buildDefaultDispatch(
       // AISDLC-224 — set autonomousMode so Step 3 can self-heal stale
       // branches automatically (guarded by AI_SDLC_ORCHESTRATOR_AUTO_CLEANUP).
       autonomousMode: true,
+      // AISDLC-373 — forward the operator-supplied task-file path through to
+      // Step 1 (validateTask) so the worktree-local task file is found.
+      ...(taskFilePathOverride !== undefined ? { taskFilePathOverride } : {}),
       // AISDLC-176 — forward the `DeveloperContractRetry` recovery
       // signal from `executePipeline()`'s Step 6 onto the orchestrator
       // events.jsonl bus. High-frequency emission of this event tells

@@ -96,6 +96,18 @@ export interface PipelineOptions {
    * no behaviour change for the single-dispatch path).
    */
   mutexOpts?: import('./runtime/worktree-mutex.js').WithWorktreeMutexOptions;
+  /**
+   * AISDLC-373 — explicit task-file path override. When set, Step 1
+   * (`validateTask`) uses this path instead of scanning `<workDir>/backlog/tasks/`
+   * for `<id-lower> - *.md`. Threaded through by the single-PR
+   * `cli-orchestrator tick --task-from-file <path>` flow where the operator's
+   * task file lives inside a `.worktrees/<id>/backlog/tasks/` subdirectory
+   * the default `findTaskFile()` scan never visits.
+   *
+   * Mirrors the same knob `refineBacklogTask({ taskFilePathOverride })` already
+   * exposes for `cli-dor-check`.
+   */
+  taskFilePathOverride?: string;
 }
 
 /**

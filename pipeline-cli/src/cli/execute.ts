@@ -354,6 +354,15 @@ export interface ExecuteCommandOptions {
   reworkPrRunner?: typeof runReworkPr;
   /** Override the logger — tests inject a stub. */
   logger?: PipelineLogger;
+  /**
+   * AISDLC-373 — explicit task-file path override. When set, the pre-flight
+   * `validateTask({ taskId, workDir })` calls AND the inner `executePipeline()`
+   * invocation receive this path so a worktree-local task file (e.g.
+   * `<parent>/.worktrees/aisdlc-NN/backlog/tasks/<...>.md`) resolves even
+   * though it lives outside `<workDir>/backlog/tasks/`. Threaded by the
+   * orchestrator's single-PR `--task-from-file` flow.
+   */
+  taskFilePathOverride?: string;
 }
 
 export interface ExecuteCommandResult {
@@ -432,7 +441,15 @@ export async function runExecuteCommand(
   if (!opts.run || opts.dryRun) {
     // Pre-flight only: validate the task + compute the branch/worktree path
     // so the operator sees what WOULD run. Don't touch the worktree.
-    const validation = await validateTask({ taskId: opts.taskId, workDir: opts.workDir });
+    // AISDLC-373 — thread the optional task-file path override so the dry-run
+    // plan stays consistent with the run-mode validation.
+    const validation = await validateTask({
+      taskId: opts.taskId,
+      workDir: opts.workDir,
+      ...(opts.taskFilePathOverride !== undefined
+        ? { taskFilePathOverride: opts.taskFilePathOverride }
+        : {}),
+    });
     if (!validation.ok || !validation.task) {
       return { ok: false, reason: validation.reason ?? 'validation failed' };
     }
@@ -550,7 +567,17 @@ export async function runExecuteCommand(
   // will flip it to "In Progress", and the AISDLC-177 rollback path needs the
   // ORIGINAL status to revert TO on developer-failed outcomes. The orchestrator
   // captures the same value for the same reason (see loop.ts maybeRollback).
-  const validation = await validateTask({ taskId: opts.taskId, workDir: opts.workDir });
+  // AISDLC-373 — same task-file path override threaded into the run-mode
+  // validation. Without this, a worktree-local task file passed via
+  // `--task-from-file` would fail the pre-dispatch validation here even
+  // though the dry-run plan above succeeded.
+  const validation = await validateTask({
+    taskId: opts.taskId,
+    workDir: opts.workDir,
+    ...(opts.taskFilePathOverride !== undefined
+      ? { taskFilePathOverride: opts.taskFilePathOverride }
+      : {}),
+  });
   if (!validation.ok || !validation.task) {
     return { ok: false, reason: validation.reason ?? 'validation failed' };
   }
@@ -569,6 +596,13 @@ export async function runExecuteCommand(
       spawner,
       maxReviewIterations: opts.maxIterations,
       logger,
+      // AISDLC-373 — forward into executePipeline so its inner Step 1
+      // validateTask gets the same override (the single-PR flow's task file
+      // lives in `.worktrees/<id>/backlog/tasks/`, invisible to the default
+      // scan).
+      ...(opts.taskFilePathOverride !== undefined
+        ? { taskFilePathOverride: opts.taskFilePathOverride }
+        : {}),
       onProgress: (iteration, verdict) => {
         lastIteration = iteration;
         try {

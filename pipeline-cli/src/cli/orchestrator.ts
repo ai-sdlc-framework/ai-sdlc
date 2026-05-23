@@ -36,9 +36,11 @@ import {
   ORCHESTRATOR_SPAWNER_ENV,
   orchestratorDisabledMessage,
   OrchestratorDisabledError,
+  resolveTaskFromFile,
   resolveUmbrellaSpawnerKind,
   runOrchestratorLoop,
   runOrchestratorTick,
+  TaskFromFileResolutionError,
   type OrchestratorAdapters,
   type OrchestratorConfig,
 } from '../orchestrator/index.js';
@@ -263,6 +265,17 @@ export function buildOrchestratorCli(
             // Allow `--continue-from-result` without a value (boolean-style).
             // Yargs treats a `string` option without a value as an empty string;
             // we normalize that below.
+          })
+          .option('task-from-file', {
+            describe:
+              'AISDLC-373 — single-PR operator-driven path. Path to a backlog ' +
+              'task file (under `backlog/tasks/` or `backlog/completed/`, often ' +
+              'inside `.worktrees/<id>/`) the operator has already created. ' +
+              'Bypasses the frontier scan AND the §4.3 admission filter chain ' +
+              'and dispatches a developer subagent against the file directly. ' +
+              'The dispatched dev commits the task file alongside the ' +
+              'implementation, landing both in a single PR.',
+            type: 'string',
           }),
       async (argv) => {
         if (!isOrchestratorEnabled()) {
@@ -282,9 +295,44 @@ export function buildOrchestratorCli(
               : resolveResultPath() // bare flag → default path
             : undefined;
 
+        // AISDLC-373 — single-PR operator-driven path. When --task-from-file
+        // is set, synthesize a one-element frontier from the resolved task file
+        // and bypass the §4.3 admission filter chain. The operator has already
+        // chosen the task; the dependency-graph frontier hasn't observed the
+        // worktree-local task file yet, so consulting it would return empty.
+        const rawTaskFromFile = argv['task-from-file'];
+        let taskFromFileFrontier: OrchestratorAdapters['frontier'] | undefined;
+        let bypassFilters = false;
+        if (typeof rawTaskFromFile === 'string' && rawTaskFromFile.length > 0) {
+          try {
+            const resolved = resolveTaskFromFile(rawTaskFromFile, config.workDir);
+            // AISDLC-373 round 2 — include the resolved absolute `filePath` on
+            // the synthetic frontier entry so the orchestrator loop can build
+            // its per-task taskFilePathOverride map (consumed by the default
+            // dispatchers when calling `runExecuteCommand` / `executePipeline`).
+            // Without this, the inner Step 1 `validateTask` would scan
+            // `<workDir>/backlog/tasks/` and never find the worktree-local
+            // file the operator created — breaking the documented runbook.
+            taskFromFileFrontier = () => [
+              { id: resolved.id, title: resolved.title, filePath: resolved.filePath },
+            ];
+            bypassFilters = true;
+          } catch (err) {
+            if (err instanceof TaskFromFileResolutionError) {
+              fail(`--task-from-file: ${err.message}`, 1);
+            }
+            throw err;
+          }
+        }
+
+        const baseAdapters = buildAdapters(argv as Record<string, unknown>, adapters);
         const tickAdapters: OrchestratorAdapters = {
-          ...buildAdapters(argv as Record<string, unknown>, adapters),
+          ...baseAdapters,
           ...(continueFromResultPath !== undefined ? { continueFromResultPath } : {}),
+          // --task-from-file overrides any injected frontier (CLI flag wins
+          // over test-injected fakes that didn't anticipate this path).
+          ...(taskFromFileFrontier !== undefined ? { frontier: taskFromFileFrontier } : {}),
+          ...(bypassFilters ? { bypassFilters: true } : {}),
         };
 
         // AISDLC-352 — emit billing-safety warnings before dispatch

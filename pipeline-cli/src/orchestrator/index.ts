@@ -65,6 +65,13 @@ export {
   ORCHESTRATOR_FLAG,
   orchestratorDisabledMessage,
 } from './feature-flag.js';
+// AISDLC-373 — single-PR operator-driven path: resolve a worktree-local
+// task file into the `{id, title}` pair the synthetic frontier needs.
+export {
+  resolveTaskFromFile,
+  TaskFromFileResolutionError,
+  type ResolvedTaskFromFile,
+} from './task-from-file.js';
 export {
   eventsDirPath,
   eventsFilePath,

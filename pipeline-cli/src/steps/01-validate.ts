@@ -22,6 +22,16 @@ import type { TaskSpec, ValidateResult } from '../types.js';
 export interface ValidateTaskOptions {
   taskId: string;
   workDir: string;
+  /**
+   * AISDLC-373 — explicit task-file path override. When set, validateTask
+   * skips the `<workDir>/backlog/tasks/<id-lower> - *.md` scan and uses this
+   * path directly. The path is verified to exist (returns the standard
+   * `no task file for <id>` reason when missing) so callers still get the
+   * unified rejection envelope. Used by the single-PR `--task-from-file`
+   * orchestrator flow where the task file is inside a worktree subtree
+   * the default scan never visits.
+   */
+  taskFilePathOverride?: string;
 }
 
 /** Locate `<workDir>/backlog/tasks/<id-lower> - *.md`. Case-insensitive ID match. */
@@ -139,7 +149,14 @@ export function parseSimpleYaml(raw: string): Record<string, unknown> {
 }
 
 export async function validateTask(opts: ValidateTaskOptions): Promise<ValidateResult> {
-  const filePath = findTaskFile(opts.taskId, opts.workDir);
+  // AISDLC-373 — honour the explicit path override before falling back to
+  // the default backlog/tasks scan. The override path must exist on disk;
+  // a missing override is treated identically to a missing default-scan
+  // file so callers see one consistent rejection shape.
+  const filePath =
+    opts.taskFilePathOverride && existsSync(opts.taskFilePathOverride)
+      ? opts.taskFilePathOverride
+      : findTaskFile(opts.taskId, opts.workDir);
   if (!filePath) {
     return { ok: false, reason: `no task file for ${opts.taskId}` };
   }

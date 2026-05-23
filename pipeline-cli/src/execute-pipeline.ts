@@ -64,7 +64,17 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
 
   // Step 1
   logger.progress('01-validate', `validating ${opts.taskId}`);
-  const validation = await validateTask({ taskId: opts.taskId, workDir: opts.workDir });
+  // AISDLC-373 — thread the optional task-file path override through Step 1
+  // so the single-PR `--task-from-file` operator flow can resolve a task file
+  // living inside `.worktrees/<id>/backlog/tasks/` (invisible to the default
+  // `findTaskFile()` scan rooted at `<workDir>/backlog/tasks/`).
+  const validation = await validateTask({
+    taskId: opts.taskId,
+    workDir: opts.workDir,
+    ...(opts.taskFilePathOverride !== undefined
+      ? { taskFilePathOverride: opts.taskFilePathOverride }
+      : {}),
+  });
   if (!validation.ok || !validation.task) {
     return abort(opts, '', '', null, validation.reason ?? 'validation failed');
   }
