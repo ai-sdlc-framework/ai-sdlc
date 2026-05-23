@@ -382,10 +382,11 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
     assert.match(r.stderr, /did not produce backlog\/completed/i);
   });
 
-  // ── (f) Task already in completed/ ───────────────────────────────────
+  // ── (f) Task already in completed/ — AISDLC-402 silent skip ──────────
 
-  it('(f) exits 0 when task is already in backlog/completed/', () => {
-    // Put the file directly in completed/ (already moved).
+  it('(f) exits 0 silently when task is already tracked in backlog/completed/ (AISDLC-402)', () => {
+    // Simulate the /ai-sdlc execute path: dev subagent already moved the file
+    // to backlog/completed/ and committed it before push.
     const taskIdLower = 'aisdlc-999';
     const filename = `${taskIdLower} - Test Task for AISDLC-999.md`;
     writeFileSync(
@@ -400,10 +401,90 @@ describe('check-task-moved.sh (AISDLC-220)', () => {
     const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
 
     assert.equal(r.status, 0, `expected 0 (already in completed/), got ${r.status}: ${r.stderr}`);
-    assert.match(r.stderr, /already in backlog\/completed\//i);
+    // AISDLC-402: must be SILENT — no "[task-move] already in backlog/completed/" noise.
+    assert.doesNotMatch(
+      r.stderr,
+      /already in backlog\/completed\//i,
+      'hook must be silent when file already in completed/ (no log noise per AISDLC-402)',
+    );
+    // No chore commit must be generated.
     assert.equal(existsSync(logPath), false, 'CLI must NOT run when task is already in completed/');
     const headAfter = git(['rev-parse', 'HEAD'], root).trim();
     assert.equal(headAfter, headBefore, 'HEAD must not change when task already in completed/');
+  });
+
+  // ── (f2) AISDLC-402 — file in completed but not git-tracked ──────────
+
+  it('(f2) proceeds to move when file is in completed/ directory but NOT git-tracked (AISDLC-402)', () => {
+    // Edge case: file exists on filesystem in completed/ but is untracked.
+    // git ls-files won't see it, so the hook should NOT skip — it should
+    // attempt the normal move logic. In practice this means: if the task file
+    // is also NOT in tasks/, the hook exits 0 with "nothing to move".
+    const taskIdLower = 'aisdlc-888';
+    const filename = `${taskIdLower} - Test Task for AISDLC-888.md`;
+    // Write file to completed/ but do NOT git add (untracked).
+    writeFileSync(
+      join(root, 'backlog', 'completed', filename),
+      '---\nid: AISDLC-888\nstatus: Done\n---\n',
+    );
+    // Commit something with the task ref (but NOT the completed/ file).
+    writeFileSync(join(root, 'some-other.txt'), 'work\n');
+    git(['add', 'some-other.txt'], root);
+    git(['commit', '-q', '-m', 'feat: something (AISDLC-888)'], root);
+    const headBefore = git(['rev-parse', 'HEAD'], root).trim();
+
+    const { cmd } = installFakeCli(root);
+    const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+    // File not in tasks/ either → nothing to move → exit 0.
+    assert.equal(r.status, 0, `expected 0 (nothing in tasks/), got ${r.status}: ${r.stderr}`);
+    const headAfter = git(['rev-parse', 'HEAD'], root).trim();
+    assert.equal(headAfter, headBefore, 'HEAD must not change');
+  });
+
+  // ── (f3) AISDLC-402 — multiple tasks, one already moved ──────────────
+
+  it('(f3) silently skips already-moved tasks and only moves remaining ones (AISDLC-402)', () => {
+    // AISDLC-901: already in completed/ (moved by dev subagent).
+    const filename901 = 'aisdlc-901 - Test Task for AISDLC-901.md';
+    writeFileSync(
+      join(root, 'backlog', 'completed', filename901),
+      '---\nid: AISDLC-901\nstatus: Done\n---\n',
+    );
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'chore: seed (AISDLC-901 already done)'], root);
+
+    // AISDLC-902: still in tasks/ (external contributor path).
+    writeTaskFile(root, 'AISDLC-902');
+    git(['add', '.'], root);
+    git(['commit', '-q', '-m', 'feat: two tasks (AISDLC-901) (AISDLC-902)'], root);
+
+    const { cmd } = installFakeCli(root);
+    const r = runHook(root, { env: { AI_SDLC_TASK_COMPLETE_CMD: cmd } });
+
+    // Only AISDLC-902 needed moving → chore commit + exit 1.
+    assert.equal(r.status, 1, `expected 1 (AISDLC-902 moved), got ${r.status}: ${r.stderr}`);
+
+    // AISDLC-902 must be in completed/.
+    const filename902 = 'aisdlc-902 - Test Task for AISDLC-902.md';
+    assert.equal(
+      existsSync(join(root, 'backlog', 'completed', filename902)),
+      true,
+      'AISDLC-902 must be in backlog/completed/',
+    );
+
+    // Chore commit subject must reference AISDLC-902 but NOT AISDLC-901.
+    const subject = git(['log', '-1', '--format=%s', 'HEAD'], root).trim();
+    assert.match(subject, /AISDLC-902/i);
+    // AISDLC-401 was already done — hook skips it silently (no mention in chore).
+    assert.doesNotMatch(
+      subject,
+      /AISDLC-901/i,
+      'chore commit must not include already-moved AISDLC-901',
+    );
+
+    // No "[task-move] already in backlog/completed/" noise for AISDLC-901.
+    assert.doesNotMatch(r.stderr, /already in backlog\/completed\//i);
   });
 
   // ── (g) Load-bearing order assertion (AC #2) ─────────────────────────

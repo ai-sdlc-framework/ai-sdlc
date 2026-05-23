@@ -135,9 +135,14 @@ while IFS= read -r TASK_ID; do
   [ -z "$TASK_ID" ] && continue
   TASK_ID_LOWER=$(printf '%s' "$TASK_ID" | tr '[:upper:]' '[:lower:]')
 
-  # Check if already in completed/ (idempotent).
-  if compgen -G "$WT_ROOT/backlog/completed/$TASK_ID_LOWER - "*.md > /dev/null 2>&1; then
-    echo "[task-move] $TASK_ID already in backlog/completed/ — skipping" >&2
+  # Check if already in completed/ — use git ls-files so we match git-tracked
+  # state rather than filesystem state. Silent exit 0 (no log noise, no chore
+  # commit) — this is the normal path for /ai-sdlc execute PRs where the dev
+  # subagent already moved the file before push. (AISDLC-402)
+  # -c core.quotePath=false ensures non-ASCII filenames render unquoted so the
+  # grep pattern matches consistently regardless of unicode chars in titles.
+  if git -C "$WT_ROOT" -c core.quotePath=false ls-files "backlog/completed/" 2>/dev/null | \
+      grep -qi "^backlog/completed/$TASK_ID_LOWER "; then
     continue
   fi
 
