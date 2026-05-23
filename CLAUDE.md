@@ -186,9 +186,10 @@ This prevents retroactive blocking of in-flight tasks and allows a graceful migr
 | Use case | Command | Billing |
 |---|---|---|
 | Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` | Subscription (Claude Code Max) |
-| **Autonomous loop — zero incremental cost post-2026-06-15** | `/ai-sdlc orchestrator-tick` (once, then ScheduleWakeup loops) | Subscription interactive quota only — Agent SDK credit NOT drawn. Requires active Claude Code session. See `docs/operations/billing-and-cost-optimization.md` §1b. |
+| **Autonomous loop — single-session drain (Pattern X, AISDLC-396)** | `/ai-sdlc orchestrator-tick` (once, ScheduleWakeup loops; in-session background Agent for dev + reviewer fanout) | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. One operator-opened CC session suffices. |
+| **Autonomous loop — N>4 parallel via sibling Workers (Pattern Z)** | `/ai-sdlc orchestrator-tick` + N sibling sessions running `/ai-sdlc dispatch-worker` | Subscription interactive quota only. Use when Pattern X's `inSessionAgentMaxSessions` (default 4) is insufficient for the backlog burst. |
 | Manual cleanup | `/ai-sdlc cleanup [<task-id>]` | n/a |
-| Shell-driven autonomous tick (cron/daemon/sidecar) | `cli-orchestrator tick --spawner claude` | Subscription (shells out to `claude -p`; draws Agent SDK credit pool post-2026-06-15) |
+| Shell-driven autonomous tick (cron/daemon/sidecar; Pattern Y) | `cli-orchestrator tick --spawner claude` | Subscription (shells out to `claude -p`; draws Agent SDK credit pool post-2026-06-15). Use when no operator CC session is available. |
 | GitHub issue / unattended / CI | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
 
 `/ai-sdlc execute` is the default for internal work. Worktree-isolated, auto-creates sibling-repo PRs from `permittedExternalPaths`, marks Done + moves task file in the same PR.

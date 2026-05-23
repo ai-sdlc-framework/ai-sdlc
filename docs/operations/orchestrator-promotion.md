@@ -343,12 +343,80 @@ hermetic injection harness), the procedure is:
 
 ---
 
+## Dispatch patterns — X / Y / Z (AISDLC-396)
+
+Once the orchestrator default-on flip is done, the operator has three
+ways to dispatch dev Workers. They are NOT mutually exclusive — the same
+Dispatch Board accepts manifests from any mix — but each has a different
+operator-effort + billing profile.
+
+| Pattern | Worker mechanism | Operator effort | Billing | When to use |
+|---|---|---|---|---|
+| **X (default, AISDLC-396)** | `/ai-sdlc orchestrator-tick` Conductor spawns dev `Agent(developer)` calls in-session via the `bg-agent-request/` coordination protocol | Open ONE CC session, fire `orchestrator-tick`, walk away. ScheduleWakeup loops indefinitely. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. | The default for interactive operator sessions. ONE session = autonomous drain. Capped at `inSessionAgentMaxSessions` (default 4) — bump for more parallelism in `.ai-sdlc/dispatch-config.yaml`. |
+| **Y** | `cli-orchestrator tick --spawner claude` shells out to `claude -p` subprocesses | One-time daemon setup (cron/systemd/launchd), session-independent. | Subscription Agent SDK credit pool ($200/mo on Max-20x post-2026-06-15). | Headless/CI contexts where no operator CC session is available. Cron-driven background drain. |
+| **Z (legacy)** | Operator opens N sibling CC sessions running `/ai-sdlc dispatch-worker` | Open N+1 sessions per drain. | Subscription interactive quota. | When N>4 parallel devs needed (large backlog burst). Pattern X's `inSessionAgentMaxSessions` cap can be bumped, but >4 starts hitting per-session attention-tax. |
+
+### Escalation criteria (X → Y → Z)
+
+Start with **X**. Escalate as follows:
+
+- **X → Y**: when the operator wants to walk away for >24h. Pattern X
+  needs a live CC session to drive the slash command body; Pattern Y is
+  daemonized.
+- **X → Z**: when the operator wants N>4 parallel devs and isn't ready to
+  draw the paid Agent SDK pool. Z is the "scale up subscription
+  parallelism" lever — open more terminals.
+- **Y → Z** (or **Y → X**): when the Agent SDK credit pool is exhausted
+  or the operator wants to verify a single task interactively before
+  re-arming the daemon.
+
+### Concurrency-cap tuning (Pattern X)
+
+`.ai-sdlc/dispatch-config.yaml`:
+
+```yaml
+spec:
+  parallelism:
+    inSessionAgentMaxSessions: 4  # default; bump to 6-8 for bigger drains
+```
+
+The cap governs the union of `bg-agent-request/` (pending) +
+`inflight/` (running dev Agent) Pattern X tasks. The Conductor's Step 5
+refuses to write a new request when the cap is saturated and waits for a
+Step 2.5 sweep to drain the backlog.
+
+### Operator runbook — kicking off Pattern X
+
+1. Ensure `AI_SDLC_AUTONOMOUS_ORCHESTRATOR=experimental` (or the
+   default-on equivalent if the flip is done).
+2. Open one CC session in the project root.
+3. `/ai-sdlc orchestrator-tick` — the Conductor:
+   - Emits up to `inSessionAgentMaxSessions` manifests to `queue/`
+   - Claims each into `inflight/` and writes a `bg-agent-request/`
+   - The next tick's Step 2.5 fires `Agent(developer)` in-session for
+     each pending request
+   - Reviewer fanout + sign + push + auto-merge happens via Step 3 on
+     each dev verdict
+4. ScheduleWakeup runs the next tick every 30s; the session can be
+   left open indefinitely.
+5. Operator monitors via `cli-status --orchestrator` or the events.jsonl
+   tail.
+
+If the session crashes or the operator closes it, the on-disk state
+(`queue/`, `inflight/`, `bg-agent-request/`) survives. The next session
+opening the same project picks up where this one left off — pending
+requests fire, stale heartbeats reap, the drain continues.
+
+---
+
 ## References
 
 - RFC-0015 §11 Phase 5 (corpus-driven exit criteria)
 - RFC-0015 §13 Q2 (stateless + idempotent finalize → no resume code path)
 - RFC-0015 §13 Q8 (UnknownFailureMode catch-all → needs-human-attention)
-- AISDLC-169.5 (this PR — chaos test + corpus aggregator + this runbook)
+- RFC-0041 §4.4 (Dispatch Board protocol — Pattern X coordination layer)
+- AISDLC-396 (Pattern X — in-session background Agent dispatch — this section)
+- AISDLC-169.5 (chaos test + corpus aggregator)
 - AISDLC-169.4 (Phase 4 — events.jsonl writer + cli-status --orchestrator)
 - AISDLC-169.2 (Phase 2 — failure playbook this aggregator counts)
 - [`pipeline-cli/docs/orchestrator.md`](../../pipeline-cli/docs/orchestrator.md) — operator guide for the flag

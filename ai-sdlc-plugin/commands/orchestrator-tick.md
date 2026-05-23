@@ -1,22 +1,22 @@
 ---
 name: orchestrator-tick
 description: >-
-  [SUBSCRIPTION-ONLY PATH post-2026-06-15 — RFC-0041 Phase 1] Run one
-  Conductor tick. Reads the dispatch frontier, emits manifests to the
-  Dispatch Board for Worker sessions to claim, then polls the done/ + failed/
-  subdirs for newly-landed verdicts. For each successful verdict, fans out
-  3 reviewer subagents (foreground Agent calls), signs the attestation,
-  pushes the branch, and arms auto-merge. Because
-  reviewers run foreground in this interactive session, they draw the
-  operator's subscription quota — not the Agent SDK credit pool. Pair with
-  one or more sibling sessions running /ai-sdlc dispatch-worker to drain
-  the queue end-to-end at zero incremental cost. See RFC-0041 §4.6 +
-  docs/operations/billing-and-cost-optimization.md §1b.
+  [SUBSCRIPTION-ONLY PATH post-2026-06-15 — RFC-0041 Phase 1 + AISDLC-396
+  Pattern X] Run one Conductor tick. Reads the dispatch frontier, emits
+  manifests to the Dispatch Board, dispatches a developer Agent for each
+  emitted manifest as an in-session background call (Pattern X — single
+  session autonomous drain), then polls the done/ + failed/ subdirs for
+  newly-landed verdicts. For each successful verdict, fans out 3 reviewer
+  subagents (foreground Agent calls), signs the attestation, pushes the
+  branch, and arms auto-merge. ONE operator-opened CC session is sufficient
+  for end-to-end autonomous drain. The legacy Pattern Z fallback (sibling
+  /ai-sdlc dispatch-worker sessions) is still supported when N>4 parallel
+  is needed. See RFC-0041 §4.6 + docs/operations/billing-and-cost-optimization.md §1b.
 argument-hint: "[--once]"
 allowed-tools:
   - Read
   - Bash
-  - Agent(code-reviewer, test-reviewer, security-reviewer)
+  - Agent(developer, code-reviewer, test-reviewer, security-reviewer)
 model: inherit
 ---
 
@@ -50,13 +50,16 @@ baseline.
 6. **Never run destructive git operations.** No `git reset --hard`.
 7. **Never write CI-skip tokens** (`[skip ci]`, `[ci skip]`, etc.) in commits.
 
-## Protocol overview (RFC-0041 Phase 1 + Phase 1.5)
+## Protocol overview (RFC-0041 Phase 1 + Phase 1.5 + AISDLC-396 Pattern X)
 
 ```
 /ai-sdlc orchestrator-tick (Conductor)
   │
   ├── 1. Check AI_SDLC_AUTONOMOUS_ORCHESTRATOR is set
   ├── 2. Sweep stale heartbeats (reap dead Workers into failed/)
+  ├── 2.5. [Pattern X / AISDLC-396] Sweep bg-agent-request/ — for each
+  │       pending request, fire a background `Agent(developer)` call and
+  │       remove the consumed request file. Also GC orphaned requests.
   ├── 3. Poll done/ subdir — for each new verdict:
   │       outcome === 'success':
   │         a. Spawn 3 reviewer subagents (foreground Agent calls)
@@ -71,7 +74,10 @@ baseline.
   ├── 4. Poll failed/ subdir — escalate diagnostics to operator
   │       (including 'iteration-exhausted' from step 3)
   ├── 5. Peek queue + inflight counts — if under cap, emit new manifests
-  │       (one per frontier-admitted task, via cli-deps frontier)
+  │       (one per frontier-admitted task, via cli-deps frontier).
+  │       [Pattern X / AISDLC-396] After emitting each manifest, ALSO
+  │       write a bg-agent-request so Step 2.5 of the next tick dispatches
+  │       a developer Agent in-session (no sibling session needed).
   └── 6. ScheduleWakeup(30s) — OR exit if --once passed
 ```
 
@@ -108,6 +114,72 @@ echo "[orchestrator-tick] sweep: $SWEEP_RESULT"
 The sweeper moves any inflight Workers with stale heartbeats (>30 min by
 default, RFC-0041 OQ-3) to `failed/` with a `stale-heartbeat` diagnostic.
 The Conductor's failed/ poll (Step 4) then escalates.
+
+## Step 2.5 — Sweep `bg-agent-request/` and fire in-session dev dispatches (Pattern X / AISDLC-396)
+
+**Pattern X (single-session autonomous drain):** Step 5 of the previous
+tick may have written one or more `bg-agent-request/<task-id>.json` files
+describing dev dispatches that need a foreground `Agent` call. This step
+fires those dispatches in the main session.
+
+> **Why this lives in the slash command body** — plugin subagents cannot
+> use `Agent` (AISDLC-98), so the Conductor cannot directly spawn a dev
+> subagent inline. Instead, Step 5 writes a synthetic request file and
+> Step 2.5 (the slash command body, where `Agent` is available) picks it
+> up. This filesystem coordination is the core of Pattern X.
+
+```bash
+# 1. GC any requests whose inflight manifest has been reaped by the
+#    stale-heartbeat sweeper (Step 2 above). Safe to call every tick.
+PRUNED_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" prune-orphaned-bg-agent-requests \
+  --board-dir "$BOARD_DIR")
+echo "[orchestrator-tick] bg-agent-request prune: $PRUNED_JSON"
+
+# 2. List every pending request (oldest-first by requestedAt).
+REQUESTS_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" list-bg-agent-requests \
+  --board-dir "$BOARD_DIR")
+echo "[orchestrator-tick] bg-agent-request list: $REQUESTS_JSON"
+```
+
+For each request in the `requests` array (parse with `node -e ...`),
+**fire a background `Agent` call** to the `developer` subagent with:
+
+- `subagent_type`: `developer`
+- `cwd`: the request's `worktree` value
+- `run_in_background`: `true` — so the slash command body can fire all
+  pending dispatches in parallel without blocking on any one. The dev
+  subagents write their JSON envelopes to stdout; Claude Code's
+  background-Agent machinery delivers a completion notification when each
+  finishes. The receiving handler (the slash command body's listener for
+  background-Agent completions) runs the dispatch-worker Step 5
+  verdict-write protocol to land the outcome into `done/<task-id>.json`.
+- `prompt`: the request's `prompt` field (built by `dispatch-bg-agent`
+  from the manifest; already includes the task ID, worktree path, branch,
+  and verify commands).
+
+After firing the Agent call for a request, **remove the request file** so
+the next tick's sweep does not double-fire:
+
+```bash
+node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" remove-bg-agent-request \
+  --board-dir "$BOARD_DIR" --task-id "$REQ_TASK_ID"
+```
+
+> **Cross-session survivability (AC-6).** If the slash command body exits
+> between Step 5 (request written) and Step 2.5 (Agent fired), the request
+> survives on disk. The next `orchestrator-tick` — in a fresh session —
+> sees the pending request in `list-bg-agent-requests` and fires the
+> `Agent` call. The dev subagent re-launches from scratch (no continuation
+> state to preserve since it hasn't started yet). If a request's inflight
+> manifest has gone stale during the gap, the stale-heartbeat sweeper
+> reaps the manifest and `prune-orphaned-bg-agent-requests` deletes the
+> orphaned request — no double-dispatch risk.
+
+> **Concurrency cap (AC-5).** Step 5 (below) enforces the
+> `inSessionAgentMaxSessions` cap (default 4) BEFORE writing each request,
+> so the count of pending+inflight Pattern X tasks never exceeds the cap.
+> Step 2.5 does not need its own cap — it fires whatever Step 5 already
+> admitted.
 
 ## Step 3 — Pick up `done/` verdicts and fan out reviewers
 
@@ -260,7 +332,7 @@ For each verdict with `outcome ∈ {failed, quota-exhausted, blocked}`:
 
 Remove the consumed diagnostic from `failed/` after handling.
 
-## Step 5 — Peek board occupancy + emit new manifests
+## Step 5 — Peek board occupancy + emit new manifests + Pattern X dispatch
 
 ```bash
 PEEK_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" peek --board-dir "$BOARD_DIR")
@@ -274,14 +346,75 @@ PEEK_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" peek --board-dir "$BOARD_D
 #     --board-dir "$BOARD_DIR" --json /tmp/manifest.json
 ```
 
+**Pattern X (AISDLC-396) — in-session dev dispatch:** after writing each
+manifest, ALSO claim it into `inflight/` and write a `bg-agent-request`
+so the next tick's Step 2.5 fires the dev `Agent` call in this session.
+
+```bash
+# 1. Claim the just-written manifest (atomic rename from queue/ to inflight/).
+CLAIM_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" claim \
+  --board-dir "$BOARD_DIR" \
+  --worker-kind in-session-agent)
+TASK_ID=$(echo "$CLAIM_JSON" | node -e "
+  const d=[]; process.stdin.on('data',c=>d.push(c));
+  process.stdin.on('end',()=>{
+    const r = JSON.parse(d.join(''));
+    process.stdout.write(r.claimed ? r.manifest.taskId : '');
+  });
+")
+MANIFEST_PATH=$(echo "$CLAIM_JSON" | node -e "
+  const d=[]; process.stdin.on('data',c=>d.push(c));
+  process.stdin.on('end',()=>{
+    const r = JSON.parse(d.join(''));
+    process.stdout.write(r.claimed ? r.manifestPath : '');
+  });
+")
+
+if [ -n "$TASK_ID" ] && [ -n "$MANIFEST_PATH" ]; then
+  # 2. Write a heartbeat so the stale-heartbeat sweeper (Step 2) tolerates
+  #    the gap between Conductor-claim and Step-2.5-Agent-fire.
+  node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" heartbeat \
+    --board-dir "$BOARD_DIR" \
+    --task-id "$TASK_ID" \
+    --worker-id "in-session-conductor-$$" \
+    --worker-kind in-session-agent \
+    --current-step bg-agent-pending
+
+  # 3. Write the bg-agent-request that Step 2.5 will fire next tick.
+  #    The CLI enforces the inSessionAgentMaxSessions cap; exit code 1
+  #    indicates the cap is saturated and Step 2.5 will catch up first.
+  DISPATCH_JSON=$(node "$PIPELINE_CLI_BIN/cli-dispatch.mjs" dispatch-bg-agent \
+    --board-dir "$BOARD_DIR" \
+    --manifest-path "$MANIFEST_PATH" \
+    --requested-by "conductor-tick-$$" || true)
+  echo "[orchestrator-tick] bg-agent-request dispatch: $DISPATCH_JSON"
+fi
+```
+
 Backpressure: if `peek.queued + peek.inflight >= inSessionAgentMaxSessions`,
-skip emitting new manifests this tick. The Worker sessions are saturated;
-no point in piling up.
+skip emitting new manifests this tick. The Worker sessions (or Pattern X
+in-session Agents) are saturated; no point in piling up. The
+`dispatch-bg-agent` subcommand also re-checks the cap as defense-in-depth
+— if Step 5 races with Step 2.5 such that the cap is briefly exceeded,
+the cap check exits 1 with `{ok:false, inFlight, maxSessions}` and the
+manifest stays in inflight/ for the next tick to pick up.
 
 Each manifest declares `workerKind: in-session-agent` (the default per
 `.ai-sdlc/dispatch-config.yaml`). The Conductor MAY override to
 `claude-p-shell` for tasks the operator wants run headlessly (Phase 2 only
 — Phase 1 Worker sessions ignore `claude-p-shell` manifests).
+
+### Operator escalation X → Y → Z
+
+| Trigger | Switch to |
+|---|---|
+| Default | Pattern X (this command alone, single session, in-session Agent dispatch) |
+| Subscription quota exhausted mid-drain | Pattern Y (`cli-orchestrator tick --spawner claude` — shells out to `claude -p`, draws Agent SDK credit pool) |
+| N>4 parallel devs needed (large backlog burst) | Pattern Z (open N sibling sessions running `/ai-sdlc dispatch-worker`) |
+
+Patterns coexist — the same Dispatch Board accepts manifests from any
+mix of Workers. The `bg-agent-request/` subdir only governs Pattern X
+dispatch; Pattern Y/Z Workers ignore it.
 
 ## Step 6 — ScheduleWakeup
 

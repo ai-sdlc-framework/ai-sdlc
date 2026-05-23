@@ -156,6 +156,30 @@ export {
   type WorkerStateTransitionEvent,
 } from './playbook/index.js';
 
+// AISDLC-396 — Pattern X bg-agent-request coordination protocol.
+// In-session-agent dispatch via filesystem coordination between the
+// Conductor (slash command body) and the slash command body's foreground
+// Agent-fire sweep. Plugin subagents can't use Agent (AISDLC-98) so the
+// Conductor cannot dispatch a dev directly — it writes a request file the
+// slash command body picks up and converts into an Agent tool call.
+export {
+  BG_AGENT_REQUEST_SCHEMA_VERSION,
+  BG_AGENT_REQUEST_SUBDIR,
+  bgAgentRequestPath,
+  buildDevPromptFromManifest,
+  countInFlightBgAgents,
+  DEFAULT_IN_SESSION_AGENT_MAX_SESSIONS,
+  ensureBgAgentRequestDir,
+  listBgAgentRequests,
+  pruneOrphanedBgAgentRequests,
+  readBgAgentRequest,
+  removeBgAgentRequest,
+  writeBgAgentRequest,
+  type BgAgentRequest,
+  type BgAgentRequestStatus,
+  type WriteBgAgentRequestOptions,
+} from './dispatch-bg-agent.js';
+
 // RFC-0015 Phase 3 — pre-dispatch admission filters (AISDLC-169.3).
 // AISDLC-175 — orphan-parent filter (parent task whose every child is done).
 // AISDLC-223 — blocked filter (operator-marked tasks with blocked.reason).
