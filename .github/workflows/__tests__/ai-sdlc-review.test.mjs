@@ -343,19 +343,20 @@ describe('AISDLC-193: verify-attestation.yml posts ai-sdlc/attestation as requir
     );
   });
 
-  it('verify-attestation.yml retains merge_group trigger (AISDLC-113 queue-time re-verification)', () => {
-    // Critical for sibling-rebase scenarios: the queue rebases the PR onto a
-    // fresh tip, content-bound attestation may invalidate. merge_group event
-    // fires verification against the queue tip, surfacing rebase-invalidations
-    // as a blocking status before merge happens.
+  it('verify-attestation.yml does NOT trigger on merge_group (AISDLC-400: merge queue dropped)', () => {
+    // AISDLC-400 (2026-05-23): the GitHub merge queue was dropped. The
+    // merge_group trigger was removed from verify-attestation.yml because
+    // there are no longer gh-readonly-queue/* probe commits to re-verify.
+    // Content-addressed envelopes (AISDLC-398 patch-id) already survive
+    // squash-merge without queue re-verification.
     const verifyPath = resolve(__dirname, '..', 'verify-attestation.yml');
     const verify = loadYaml(verifyPath);
     // YAML 1.2 quirk: `on` parses to boolean true unless quoted; safe_load may
     // expose under different keys. Try both.
     const triggers = verify.on || verify[true] || {};
     assert.ok(
-      'merge_group' in triggers,
-      'verify-attestation.yml must trigger on merge_group for queue-time re-verification',
+      !('merge_group' in triggers),
+      'verify-attestation.yml must NOT trigger on merge_group after AISDLC-400 dropped the merge queue',
     );
   });
 });
@@ -471,17 +472,19 @@ describe('AISDLC-214: docs-only short-circuit eliminates fallback workflow race 
     });
   });
 
-  // AC-2: ai-sdlc-review.yml short-circuits on docs-only merge_group commits
+  // AC-2: ai-sdlc-review.yml short-circuits on docs-only PR commits
+  // AISDLC-400 (2026-05-23): merge_group trigger removed; docs-only short-circuit
+  // now applies to pull_request/pull_request_target events only.
   describe('ai-sdlc-review.yml docs-only short-circuit (AC-2)', () => {
-    it('ai-sdlc-review.yml now triggers on merge_group', () => {
+    it('ai-sdlc-review.yml does NOT trigger on merge_group (AISDLC-400: merge queue dropped)', () => {
       const triggers = reviewWorkflow.on || reviewWorkflow[true] || {};
       assert.ok(
-        'merge_group' in triggers,
-        'ai-sdlc-review.yml must now trigger on merge_group for docs-only queue commits (AISDLC-214)',
+        !('merge_group' in triggers),
+        'ai-sdlc-review.yml must NOT trigger on merge_group after AISDLC-400 dropped the merge queue',
       );
     });
 
-    it('has a docs-only-check job that handles both merge_group and pull_request docs-only', () => {
+    it('has a docs-only-check job that handles pull_request docs-only', () => {
       const job = reviewWorkflow.jobs['docs-only-check'];
       assert.ok(job, 'ai-sdlc-review.yml must have a docs-only-check job');
       assert.ok(job.steps, 'docs-only-check must have steps');

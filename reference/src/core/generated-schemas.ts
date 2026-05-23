@@ -4154,6 +4154,7 @@ export const orchestratorEventsV1Schema = {
         'OrchestratorWorktreeSwept',
         'EstimateCaptured',
         'EstimateInputChanged',
+        'SubagentDispatchedWithChainedScope',
       ],
     },
   },
