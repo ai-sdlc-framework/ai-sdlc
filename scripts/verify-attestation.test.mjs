@@ -3892,4 +3892,166 @@ describe('runVerifier (AISDLC-398 fix #3 — v5 fast-path content-hash recompute
       /signature/i.test(out.reason); // sig invalid when predicate is tampered
     assert.ok(isContentMismatch, `expected contentHashV5-related rejection, got: ${out.reason}`);
   });
+
+  it('rejects a tampered-v5 patch-id envelope when signedMergeBase is invalid (null-recompute anti-bypass)', () => {
+    // Regression test for the AISDLC-398 round-2 self-comparison vulnerability.
+    //
+    // Attack scenario:
+    //   An attacker constructs a patch-id-named v5 envelope where:
+    //   (a) contentHashV5 is a garbage value (all zeros),
+    //   (b) signedMergeBase is set to an invalid SHA (not 40 hex chars),
+    //       so computeHeadContentHashV5 returns null in the fast-path, AND
+    //   (c) contentHashV3 is also garbage (all zeros), so the general loop
+    //       cannot match the envelope via the v3 content-binding path.
+    //   The signature over this crafted payload is valid (attacker controls
+    //   the private key in this synthetic test).
+    //
+    // Old behavior (self-comparison vulnerability):
+    //   Fast-path: signedMergeBase invalid → recomputedContentHashV5 = null
+    //   effectiveContentHashV5 = stored (garbage) → predicateMatchReason
+    //   compares garbage-vs-garbage = EQUAL → PASSES the content check →
+    //   proceeds to verifyAttestation → signature valid → returns 'valid'
+    //   (FALSE POSITIVE — garbage v5 hash accepted without recompute).
+    //
+    // New behavior (this fix):
+    //   Fast-path: recomputedContentHashV5 = null → falls through to general
+    //   loop → resolveSubjectShaForEnvelope uses contentHashV3 = all-zeros →
+    //   no commit on the branch has matching v3 hash → general loop returns
+    //   'invalid' (correct rejection).
+
+    // Compute the patch-id for fixture's base→head range.
+    const patchId = (() => {
+      let diffOutput;
+      try {
+        diffOutput = execFileSync(
+          'git',
+          [
+            'diff-tree',
+            '--no-color',
+            '-p',
+            `${fixture.baseSha}..${fixture.headSha}`,
+            '--',
+            ':!.ai-sdlc/attestations/',
+          ],
+          { cwd: fixture.root, encoding: 'utf-8', maxBuffer: 128 * 1024 * 1024 },
+        );
+      } catch {
+        return null;
+      }
+      if (!diffOutput || diffOutput.trim().length === 0) return null;
+      const result = spawnSyncNode('git', ['patch-id', '--stable'], {
+        input: diffOutput,
+        cwd: fixture.root,
+        encoding: 'utf-8',
+        maxBuffer: 128 * 1024 * 1024,
+      });
+      if (result.status !== 0 || !result.stdout) return null;
+      const m = result.stdout.trim().match(/^([0-9a-f]{40})/i);
+      return m ? m[1].toLowerCase() : null;
+    })();
+
+    if (!patchId) {
+      console.log('[SKIP] patch-id unavailable — skipping null-recompute anti-bypass test');
+      return;
+    }
+
+    // Build a legitimate v5 predicate (needed for schema validation to pass),
+    // then overwrite both contentHashV5, contentHashV3, and signedMergeBase
+    // with garbage values to simulate the crafted-envelope scenario.
+    const signedMergeBase = git(
+      ['merge-base', fixture.baseSha, fixture.headSha],
+      fixture.root,
+    ).trim();
+    const nameOnly = git(
+      ['diff', '--name-only', '--no-renames', `${signedMergeBase}..${fixture.headSha}`],
+      fixture.root,
+    );
+    const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+    const v5Entries = paths.map((p) => {
+      let blobSha = '';
+      try {
+        const lsOut = git(['ls-tree', '-r', fixture.headSha, '--', p], fixture.root);
+        const line = lsOut.split('\n').find((l) => l.length > 0);
+        if (line) {
+          const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+          if (m) blobSha = m[1];
+        }
+      } catch {
+        /* deleted file */
+      }
+      return { path: p, blobSha };
+    });
+    const changedFileDeltas = collectChangedFileDeltaEntries(
+      fixture.root,
+      fixture.baseSha,
+      fixture.headSha,
+    );
+    const policy = readFileSync(join(fixture.root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
+    const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
+      agentId,
+      agentFileContent: content,
+      harness: 'codex',
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    }));
+    const predicate = buildPredicate({
+      commitSha: fixture.headSha,
+      policy,
+      reviewers,
+      pluginVersion: PLUGIN_VERSION,
+      iterationCount: 1,
+      harnessNote: '',
+      signedAt: '2026-05-23T00:00:00.000Z',
+      changedFileDeltas,
+      v5Entries,
+      v5MergeBase: signedMergeBase,
+    });
+
+    // Overwrite with garbage to craft the attack payload:
+    //   - contentHashV5 = all-zeros (invalid hash)
+    //   - signedMergeBase = 'not-a-sha' (triggers null recompute)
+    //   - contentHashV3 = all-zeros (prevents general loop from matching via v3)
+    predicate.contentHashV5 = '0'.repeat(64);
+    predicate.signedMergeBase = 'not-a-sha'; // invalid → recomputedContentHashV5 = null
+    predicate.contentHashV3 = '0'.repeat(64); // sentinel → general loop cannot match v3
+
+    const envelope = signAttestation({
+      predicate,
+      privateKeyPem: keys.privateKeyPem,
+      keyid: 'dev@example.com:laptop',
+    });
+
+    // Write the envelope under the patch-id filename.
+    const envPath = join(fixture.root, '.ai-sdlc', 'attestations', `${patchId}.dsse.json`);
+    writeFileSync(envPath, JSON.stringify(envelope, null, 2));
+
+    // Run the verifier. With the fix applied:
+    //   - Fast-path: signedMergeBase 'not-a-sha' → recomputedContentHashV5 = null
+    //     → falls through to general loop (does NOT self-compare garbage hashes)
+    //   - General loop: contentHashV3 = all-zeros → resolveSubjectShaForEnvelope
+    //     finds no commit with v3 = 0*64 → no match → returns 'invalid'
+    const out = runVerifier({
+      headSha: fixture.headSha,
+      baseSha: fixture.baseSha,
+      repoRoot: fixture.root,
+    });
+
+    assert.equal(
+      out.status,
+      'invalid',
+      `expected invalid (crafted garbage-hash envelope must be rejected when fast-path cannot recompute), got: ${out.reason}`,
+    );
+    // Confirm the rejection is due to content/hash mismatch or schema validation
+    // (schema validator may also catch the invalid signedMergeBase before the
+    // content-hash loop, which is also a correct rejection — the attack payload
+    // is structurally invalid).
+    const isValidRejectionReason =
+      /contentHash|mismatch|v3|v4|v5|no envelope|schema validation|signedMergeBase/i.test(
+        out.reason,
+      );
+    assert.ok(
+      isValidRejectionReason,
+      `expected a content/hash or schema rejection, got: ${out.reason}`,
+    );
+  });
 });

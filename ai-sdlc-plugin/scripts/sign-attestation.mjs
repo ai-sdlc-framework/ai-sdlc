@@ -112,7 +112,7 @@ function computePatchIdForFilename(base, head, repoRoot) {
     input: diffOutput,
     cwd: repoRoot,
     encoding: 'utf-8',
-    maxBuffer: 64 * 1024,
+    maxBuffer: 128 * 1024 * 1024,
   });
   if (result.status !== 0 || !result.stdout) {
     return null;

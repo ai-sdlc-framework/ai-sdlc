@@ -1821,57 +1821,22 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
           : null;
 
       // If we cannot recompute (missing signedMergeBase, git failure, shallow
-      // clone), fall back to the stored hash to avoid blocking legitimate PRs
-      // on infra failures. Log a warning so the gap is visible in CI output.
-      const effectiveContentHashV5 =
-        recomputedContentHashV5 ?? patchIdEntry.predicate.contentHashV5;
+      // clone), do NOT fall back to stored-vs-stored comparison — that would
+      // always pass and re-introduce the round-1 self-comparison vulnerability.
+      // Instead, abandon the fast-path entirely and fall through to the general
+      // content-hash loop, which has its own recompute logic and proper error
+      // semantics for shallow clones and git failures.
       if (!recomputedContentHashV5) {
         process.stderr.write(
-          `[verify-attestation] AISDLC-398 WARNING: could not recompute contentHashV5 for fast-path; ` +
-            `using stored hash (signedMergeBase=${signedMergeBaseForFastPath ?? 'missing'})\n`,
+          `[verify-attestation] AISDLC-398: could not recompute contentHashV5 for fast-path ` +
+            `(signedMergeBase=${signedMergeBaseForFastPath ?? 'missing'}); ` +
+            `falling through to general loop\n`,
         );
-      }
+        // Do not return here — fall through to the general loop below.
+      } else {
+        const effectiveContentHashV5 = recomputedContentHashV5;
 
-      const fastReason = predicateMatchReason(patchIdEntry.predicate, {
-        contentHashV3: patchIdEntry.predicate.contentHashV3,
-        contentHashV4: patchIdEntry.predicate.contentHashV4,
-        contentHashV5: effectiveContentHashV5,
-        policyHash: sha256Hex(
-          readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
-        ),
-        expectedAgentFileHashes: Object.fromEntries(
-          [
-            'code-reviewer',
-            'code-reviewer-codex',
-            'test-reviewer',
-            'test-reviewer-codex',
-            'security-reviewer',
-          ].map((a) => [
-            a,
-            sha256Hex(readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'agents', `${a}.md`), 'utf-8')),
-          ]),
-        ),
-        pluginVersion: (() => {
-          try {
-            const manifest = JSON.parse(
-              readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'plugin.json'), 'utf-8'),
-            );
-            return typeof manifest?.version === 'string' ? manifest.version : '';
-          } catch {
-            return '';
-          }
-        })(),
-        acceptedSchemaVersions: ACCEPTED_SCHEMA_VERSIONS,
-      });
-      if (fastReason !== null) {
-        return { status: 'invalid', reason: fastReason.detail };
-      }
-      // Verify signature + schema completeness.
-      const fastResult = verifyAttestation({
-        envelope: patchIdEntry.envelope,
-        trustedReviewers,
-        expected: {
-          commitSha: patchIdEntry.predicate?.subject?.digest?.sha1 ?? '0'.repeat(40),
+        const fastReason = predicateMatchReason(patchIdEntry.predicate, {
           contentHashV3: patchIdEntry.predicate.contentHashV3,
           contentHashV4: patchIdEntry.predicate.contentHashV4,
           contentHashV5: effectiveContentHashV5,
@@ -1892,22 +1857,64 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
               ),
             ]),
           ),
-        },
-      });
-      if (fastResult.valid) {
-        return { status: 'valid', reason: 'ok' };
-      }
-      const sigFailureMarkers = [
-        'signature',
-        'envelope has no signatures',
-        'envelope payload is empty',
-        'payload is not valid JSON',
-      ];
-      const isFastSigFailure = sigFailureMarkers.some((m) => fastResult.reason.includes(m));
-      return {
-        status: 'invalid',
-        reason: isFastSigFailure ? `signature invalid: ${fastResult.reason}` : fastResult.reason,
-      };
+          pluginVersion: (() => {
+            try {
+              const manifest = JSON.parse(
+                readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'plugin.json'), 'utf-8'),
+              );
+              return typeof manifest?.version === 'string' ? manifest.version : '';
+            } catch {
+              return '';
+            }
+          })(),
+          acceptedSchemaVersions: ACCEPTED_SCHEMA_VERSIONS,
+        });
+        if (fastReason !== null) {
+          return { status: 'invalid', reason: fastReason.detail };
+        }
+        // Verify signature + schema completeness.
+        const fastResult = verifyAttestation({
+          envelope: patchIdEntry.envelope,
+          trustedReviewers,
+          expected: {
+            commitSha: patchIdEntry.predicate?.subject?.digest?.sha1 ?? '0'.repeat(40),
+            contentHashV3: patchIdEntry.predicate.contentHashV3,
+            contentHashV4: patchIdEntry.predicate.contentHashV4,
+            contentHashV5: effectiveContentHashV5,
+            policyHash: sha256Hex(
+              readFileSync(join(repoRoot, '.ai-sdlc', 'review-policy.md'), 'utf-8'),
+            ),
+            expectedAgentFileHashes: Object.fromEntries(
+              [
+                'code-reviewer',
+                'code-reviewer-codex',
+                'test-reviewer',
+                'test-reviewer-codex',
+                'security-reviewer',
+              ].map((a) => [
+                a,
+                sha256Hex(
+                  readFileSync(join(repoRoot, 'ai-sdlc-plugin', 'agents', `${a}.md`), 'utf-8'),
+                ),
+              ]),
+            ),
+          },
+        });
+        if (fastResult.valid) {
+          return { status: 'valid', reason: 'ok' };
+        }
+        const sigFailureMarkers = [
+          'signature',
+          'envelope has no signatures',
+          'envelope payload is empty',
+          'payload is not valid JSON',
+        ];
+        const isFastSigFailure = sigFailureMarkers.some((m) => fastResult.reason.includes(m));
+        return {
+          status: 'invalid',
+          reason: isFastSigFailure ? `signature invalid: ${fastResult.reason}` : fastResult.reason,
+        };
+      } // end else (recomputedContentHashV5 !== null)
     }
   }
 
