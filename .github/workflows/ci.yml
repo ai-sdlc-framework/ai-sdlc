@@ -308,6 +308,24 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: .
           fail_ci_if_error: false
+      # AISDLC-376: server-side patch-coverage gate (replaces dropped codecov/patch).
+      # Asserts ≥80% of newly added/modified lines on this PR are covered by tests.
+      # Runs ONLY on pull_request events because that is the only context where the
+      # "patch" — diff vs main — has a meaningful definition. push/merge_group runs
+      # produce full-repo coverage which is already gated by the per-package vitest
+      # `thresholds.lines: 80` config. The local pre-push gate
+      # (scripts/check-coverage.sh) remains the authoritative fast-feedback line of
+      # defense; this CI step closes the gap where the local gate was bypassed via
+      # AI_SDLC_SKIP_COVERAGE_GATE=1 and no CI mirror caught the resulting drop
+      # (PR #550 landed at 0.6% patch coverage — the exact failure mode this gate
+      # exists to prevent). See docs/operations/quality-gate.md for the policy.
+      - name: Patch coverage gate (≥80%)
+        if: github.event_name == 'pull_request'
+        run: |
+          node scripts/check-pr-patch-coverage.mjs \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --threshold 80
 
   integration:
     name: Integration Tests

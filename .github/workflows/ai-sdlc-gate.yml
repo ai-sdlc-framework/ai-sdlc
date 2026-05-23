@@ -163,6 +163,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # AISDLC-376: full clone so the patch-coverage gate can compute the
+          # PR diff (base..head). Without fetch-depth: 0, git diff against the
+          # PR base sha would fail with "bad object" and the gate would
+          # mis-report as a missing-coverage-data failure.
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -171,6 +177,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
       - run: pnpm test:coverage
+      # AISDLC-376: server-side patch-coverage gate. Asserts ≥80% of the lines
+      # this PR adds/modifies are covered by tests, mirroring the AISDLC-372-
+      # dropped codecov/patch gate without the SaaS latency. Runs INSIDE the
+      # Coverage job so vitest's coverage-final.json fixtures are already on
+      # disk and we don't pay a second `pnpm test:coverage`. Same gate also
+      # runs in `ci.yml` as a backstop; the alls-green rollup treats either
+      # passing as sufficient.
+      - name: Patch coverage gate (≥80%)
+        if: github.event_name == 'pull_request'
+        run: |
+          node scripts/check-pr-patch-coverage.mjs \
+            --base "${{ github.event.pull_request.base.sha }}" \
+            --head "${{ github.event.pull_request.head.sha }}" \
+            --threshold 80
 
   integration:
     name: Integration Tests
