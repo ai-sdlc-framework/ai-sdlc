@@ -67,6 +67,18 @@
  * coverage wasn't generated, or the file is genuinely untested. The
  * conservative default is to fail loudly rather than silently pass.
  *
+ * Forgery defense (AISDLC-376 security review): the walker finds ALL
+ * `coverage-final.json` files under the coverage root with no provenance
+ * check — naively, a PR could ride along a fabricated coverage report
+ * (e.g. `attacker-pkg/coverage/coverage-final.json`) claiming every new
+ * line is covered and the suffix-match resolver would accept it.
+ * `loadFusedCoverage` mitigates this by rejecting any coverage file that
+ * is tracked by git (`isCoverageFileTracked`). Legitimate vitest output
+ * is always written to a gitignored `<pkg>/coverage/` directory and is
+ * never tracked, so the rejection list is restricted to actual forgeries
+ * (or coverage files accidentally committed in violation of `.gitignore`).
+ * Rejected paths are surfaced on stderr for operator visibility.
+ *
  * Hermetic tests: see `scripts/check-pr-patch-coverage.test.mjs`.
  */
 
@@ -218,6 +230,37 @@ export function changedLinesForFile({ base, head, file, cwd }) {
 // ── Coverage walk ────────────────────────────────────────────────────────────
 
 /**
+ * Returns true if `absPath` is tracked by git in the repo rooted at `repoRoot`.
+ *
+ * **Forgery defense.** A PR can commit a fabricated `coverage-final.json`
+ * anywhere in the tree — without this check, `findCoverageFiles` would
+ * silently union the forgery into the fused map, the suffix-match resolver
+ * would accept its (attacker-chosen) hit counts as authoritative coverage
+ * for new source files, and the 80% gate would pass on uncovered malicious
+ * code. Legitimate `coverage-final.json` is always written by vitest into a
+ * gitignored `<pkg>/coverage/` directory and is NEVER tracked. So: any
+ * tracked coverage file in a PR is by definition a forgery (or an
+ * accidentally-committed local file that needs to be removed regardless).
+ *
+ * The check returns false when not in a git repo (no provenance to enforce
+ * against — typically local-dev or test fixtures where `--coverage-root` is
+ * a freshly-initialised temp dir). Test fixtures explicitly write coverage
+ * files without committing them, so they remain untracked and trusted.
+ */
+export function isCoverageFileTracked(absPath, repoRoot) {
+  try {
+    const out = execFileSync('git', ['ls-files', '--error-unmatch', '--', absPath], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return out.trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Recursively find all `coverage-final.json` files under `root`, ignoring
  * node_modules, dist, and nested .next directories. Async + breadth-first
  * to avoid stack pressure on large monorepos.
@@ -306,8 +349,25 @@ export function summarizeCoverageFile(absPath) {
  * Later files merge into earlier ones — a line covered by ANY package's
  * coverage data counts as covered. This is the conservative direction.
  */
-export async function loadFusedCoverage(coverageRoot) {
-  const files = await findCoverageFiles(coverageRoot);
+export async function loadFusedCoverage(coverageRoot, gitRoot = coverageRoot) {
+  const allFiles = await findCoverageFiles(coverageRoot);
+  const rejectedFiles = [];
+  const files = [];
+  for (const f of allFiles) {
+    if (isCoverageFileTracked(f, gitRoot)) {
+      rejectedFiles.push(f);
+    } else {
+      files.push(f);
+    }
+  }
+  if (rejectedFiles.length > 0) {
+    process.stderr.write(
+      `[patch-coverage] REJECTED ${rejectedFiles.length} tracked coverage-final.json file(s) as suspected forgeries (legitimate vitest output is always untracked under <pkg>/coverage/):\n`,
+    );
+    for (const r of rejectedFiles) {
+      process.stderr.write(`[patch-coverage]   - ${r}\n`);
+    }
+  }
   const fused = new Map();
   for (const f of files) {
     let summary;
@@ -412,7 +472,7 @@ export async function computePatchCoverage({ base, head, threshold, cwd, coverag
     };
   }
 
-  const { fused, sourceFileCount } = await loadFusedCoverage(coverageRoot);
+  const { fused, sourceFileCount } = await loadFusedCoverage(coverageRoot, cwd);
 
   // AC: missing LCOV → failure with diagnostic. We treat "zero coverage-final.json
   // files anywhere in the workspace AND changed code files exist" as missing

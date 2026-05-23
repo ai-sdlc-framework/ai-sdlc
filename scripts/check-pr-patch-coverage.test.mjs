@@ -527,6 +527,143 @@ describe('check-pr-patch-coverage — threshold customization', () => {
   });
 });
 
+// ── Security: forgery defense (AISDLC-376 security review) ──────────────────
+
+describe('check-pr-patch-coverage — rejects tracked (committed) coverage forgeries', () => {
+  let repo;
+
+  beforeEach(() => {
+    repo = initRepo();
+  });
+
+  afterEach(() => {
+    try {
+      rmSync(repo, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+  });
+
+  it('treats a committed coverage-final.json as a forgery and ignores its hit counts', () => {
+    // Threat model: an attacker PR adds uncovered source code + a fabricated
+    // coverage-final.json claiming every new line is covered. Without the
+    // tracked-file rejection, the gate would walk the forgery, union its
+    // attacker-chosen hit counts into the fused map, and pass at "100%".
+    // The defense: any coverage-final.json that git ls-files reports as
+    // tracked is rejected. Legitimate vitest output is always written to a
+    // gitignored coverage/ dir and is therefore untracked.
+    const base = commitFile(repo, 'pkg/src/x.ts', 'export const x = 1;\n', 'init');
+    const head = commitFile(
+      repo,
+      'pkg/src/x.ts',
+      'export const x = 1;\nexport const y = 2;\nexport const z = 3;\n',
+      'add untested y and z',
+    );
+
+    // Build a forged coverage file in a directory the attacker controls,
+    // claiming both new lines are covered.
+    const forgeryDir = join(repo, 'forgery', 'coverage');
+    mkdirSync(forgeryDir, { recursive: true });
+    const forgedJson = {
+      [join(repo, 'pkg', 'src', 'x.ts')]: {
+        path: join(repo, 'pkg', 'src', 'x.ts'),
+        statementMap: {
+          0: { start: { line: 2, column: 0 }, end: { line: 2, column: 80 } },
+          1: { start: { line: 3, column: 0 }, end: { line: 3, column: 80 } },
+        },
+        s: { 0: 99, 1: 99 },
+        fnMap: {},
+        f: {},
+        branchMap: {},
+        b: {},
+      },
+    };
+    writeFileSync(join(forgeryDir, 'coverage-final.json'), JSON.stringify(forgedJson));
+
+    // CRITICAL: commit the forgery so it's tracked by git. This is what
+    // attackers would do — the file has to be in the PR to ride along.
+    execFileSync('git', ['add', '--', 'forgery/coverage/coverage-final.json'], {
+      cwd: repo,
+      encoding: 'utf-8',
+    });
+    execFileSync('git', ['commit', '-q', '-m', 'chore: add coverage report'], {
+      cwd: repo,
+      encoding: 'utf-8',
+    });
+
+    const r = runGate(repo, { base, head, json: true });
+
+    // The forged file MUST be rejected. With no legitimate coverage data,
+    // the gate fails with missing-coverage-data (no other coverage-final.json
+    // exists in this hermetic fixture).
+    assert.equal(
+      r.status,
+      1,
+      `expected exit 1 (gate must NOT accept forgery), got ${r.status}\nstdout: ${r.stdout}\nstderr: ${r.stderr}`,
+    );
+    const parsed = JSON.parse(r.stdout);
+    assert.equal(parsed.ok, false);
+    assert.equal(parsed.reason, 'missing-coverage-data');
+    // Confirm the rejection was reported to stderr so the operator can see it.
+    assert.match(r.stderr, /REJECTED.*tracked coverage-final\.json/i);
+    assert.match(r.stderr, /forgery\/coverage\/coverage-final\.json/);
+  });
+
+  it('accepts legitimate untracked coverage-final.json alongside a rejected tracked forgery', () => {
+    // Confirms the filter is per-file: a forgery doesn't poison the
+    // legitimate signal next to it.
+    const base = commitFile(repo, 'pkg/src/x.ts', 'export const x = 1;\n', 'init');
+    const head = commitFile(
+      repo,
+      'pkg/src/x.ts',
+      'export const x = 1;\nexport const y = 2;\n',
+      'add y (covered)',
+    );
+
+    // Legitimate untracked vitest output: covers the new line.
+    writeCoverageFile(repo, {
+      'pkg/src/x.ts': { lines: { 2: 1 } },
+    });
+
+    // Plus a tracked forgery elsewhere claiming line 2 is uncovered (would
+    // flip the verdict if it weren't rejected — the fusion treats absence as
+    // uncovered).
+    const forgeryDir = join(repo, 'forgery', 'coverage');
+    mkdirSync(forgeryDir, { recursive: true });
+    writeFileSync(
+      join(forgeryDir, 'coverage-final.json'),
+      JSON.stringify({
+        [join(repo, 'pkg', 'src', 'x.ts')]: {
+          path: join(repo, 'pkg', 'src', 'x.ts'),
+          statementMap: {
+            0: { start: { line: 2, column: 0 }, end: { line: 2, column: 80 } },
+          },
+          s: { 0: 0 },
+          fnMap: {},
+          f: {},
+          branchMap: {},
+          b: {},
+        },
+      }),
+    );
+    execFileSync('git', ['add', '--', 'forgery/coverage/coverage-final.json'], {
+      cwd: repo,
+      encoding: 'utf-8',
+    });
+    execFileSync('git', ['commit', '-q', '-m', 'chore: forged coverage'], {
+      cwd: repo,
+      encoding: 'utf-8',
+    });
+
+    const r = runGate(repo, { base, head, json: true });
+    assert.equal(r.status, 0, `expected exit 0 with legitimate coverage; stderr: ${r.stderr}`);
+    const parsed = JSON.parse(r.stdout);
+    assert.equal(parsed.ok, true);
+    assert.equal(parsed.coveredLines, 1);
+    assert.match(r.stderr, /REJECTED/);
+  });
+});
+
 // ── Multi-file: union of per-file diffs feeds totals ─────────────────────────
 
 describe('check-pr-patch-coverage — multi-file aggregation', () => {
