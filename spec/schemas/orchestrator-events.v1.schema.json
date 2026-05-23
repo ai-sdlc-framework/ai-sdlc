@@ -306,7 +306,8 @@
         "WorktreeAutoCleaned",
         "OrchestratorWorktreeSwept",
         "EstimateCaptured",
-        "EstimateInputChanged"
+        "EstimateInputChanged",
+        "SubagentDispatchedWithChainedScope"
       ]
     }
   }
