@@ -6,7 +6,6 @@ labels: [ci, attestation, operator-merge, throughput]
 references:
   - .github/workflows/ai-sdlc-gate.yml
   - .github/workflows/verify-attestation.yml
-  - scripts/check-pr-status-attestation.sh
 priority: high
 permittedExternalPaths: []
 ---
