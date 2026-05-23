@@ -54,6 +54,7 @@ at Stage A and skip Stage B entirely.
    parses your output as structured data; conversational wrapping
    breaks the parse and silently degrades the verdict to "skip" with
    low confidence (which escalates to a human triager).
+5. **Never create backlog tasks or dispatch downstream work (AISDLC-308).** Your role is advisory output only. Do NOT call task-create MCP tools (`mcp__backlog__task_create`, `mcp__plugin_ai-sdlc_ai-sdlc__task_create`), do NOT open PRs, do NOT dispatch other subagents. Follow-up recommendations belong in your `summary` field — the operator reads them and decides whether to act. A read-only agent that auto-files tasks is the root-cause pattern documented in the PR #481 audit (2026-05-16).
 
 ## Your input
 

@@ -202,7 +202,38 @@ export type OrchestratorEventType =
    * - All questions already have a matching open Decision for this scope (all
    *   duplicates, nothing new to file).
    */
-  | 'OrchestratorEmittedDecision';
+  | 'OrchestratorEmittedDecision'
+  /**
+   * AISDLC-308 — emitted when a dispatch's originating user prompt did NOT
+   * contain explicit authorization for the dispatched task (chained-scope
+   * detection). Per-event fields:
+   *  - `taskId`            — the task being dispatched.
+   *  - `originatingPrompt` — truncated (first 500 chars) text of the user prompt
+   *                          that started the chain. Empty string when the
+   *                          originating prompt could not be determined.
+   *  - `dispatchChain`     — ordered list of task IDs tracing the dispatch
+   *                          ancestry (first element = original dispatch, last =
+   *                          this dispatch). Minimum 2 entries for a chained
+   *                          dispatch (length 1 = direct, not chained).
+   *  - `reason`            — human-readable one-line explanation of why the
+   *                          system classified this as a chained-scope dispatch
+   *                          (e.g. "originating prompt did not mention taskId").
+   *
+   * This is an AUDIT event — it does NOT block the dispatch. Operators can
+   * grep events.jsonl for `SubagentDispatchedWithChainedScope` to identify
+   * scope-creep chains and decide whether to intervene. The governance fix
+   * is in the developer agent prompt (AISDLC-308 hard rule #9) and reviewer
+   * gates (code-reviewer + test-reviewer scope-creep check), not in the
+   * orchestrator's dispatch path.
+   *
+   * Emitted by: `cli-orchestrator tick` default dispatcher when
+   * `AI_SDLC_AUTONOMOUS_ORCHESTRATOR` is set and a dispatch is initiated
+   * from a context where the originating prompt is carried in the dispatch
+   * manifest. Best-effort: emitted only when the dispatch-manifest JSON
+   * includes an `originatingPrompt` field; silent on manifests that predate
+   * this field (backward-compatible).
+   */
+  | 'SubagentDispatchedWithChainedScope';
 
 /**
  * One JSONL line on the events stream. Common envelope (`ts`, optional

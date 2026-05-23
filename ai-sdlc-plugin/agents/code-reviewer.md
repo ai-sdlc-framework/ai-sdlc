@@ -74,6 +74,24 @@ The transcript file at `.ai-sdlc/transcripts/<task-id>/code-reviewer.jsonl` is g
 
 **If you cannot describe a concrete failure scenario, it is NOT critical or major.**
 
+## Agentic Scope Creep Detection (AISDLC-308)
+
+**Flag as `critical`** any PR that BOTH (a) implements a "review", "audit", or "read-only" task AND (b) adds new files under `backlog/tasks/`.
+
+**How to detect:**
+1. Read the task title / description referenced in the PR (look for keywords: "review", "audit", "annotate", "survey", "explore", "read").
+2. Check the PR diff for new files matching `backlog/tasks/*.md` (added with `+++ b/backlog/tasks/`).
+3. If both conditions are true, flag as `critical` with:
+   - Message: "scope-creep candidate — verify operator authorized task creation. The original ask was a read/audit task; creating backlog tasks requires explicit operator authorization at this boundary."
+   - File: the new backlog task file path.
+
+**Failure scenario:** An agent dispatched to review or audit work auto-files follow-up tasks without operator authorization. This is the root cause documented in the PR #481 audit (2026-05-16): an agent asked to review RFCs filed 3 implementation tasks and dispatched their implementation within 1.5 hours — ignoring its own written "operator walkthrough required" note.
+
+Do NOT flag:
+- PRs where the task title is explicitly "create backlog tasks for X" (task creation IS the ask)
+- Backlog task files that were already present before the diff (only flag `+++ b/backlog/tasks/` new-file additions)
+- Updates to existing task files in `backlog/tasks/` (edits, not new files)
+
 ## RFC Open Question Governance (AISDLC-298)
 
 **Flag as `critical`** any PR diff that adds a `**Resolution:**`, `RESOLVED:`, or `✅ RESOLVED` marker inside an RFC `## Open Questions` section.

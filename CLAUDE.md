@@ -62,6 +62,29 @@ Workflows MUST invoke pipeline-cli CLIs via `node pipeline-cli/bin/cli-XXX.mjs` 
 
 - TypeScript strict, ESM. Prettier + ESLint. No premature abstractions — three similar lines beat one wrong abstraction.
 
+## Subagent Governance — Scope Creep Prevention (AISDLC-308)
+
+**Agents must not auto-expand scope beyond the original ask.** The PR #481 audit (2026-05-16) documented the root-cause governance gap: an agent asked to *review the state of RFCs* independently filed follow-up tasks, then dispatched implementation of those tasks within 1.5 hours — ignoring its own written "operator walkthrough required as pre-work" note. See `docs/audits/2026-05-16-pr-481-rfc-0025-subagent-forged-signoff.md` for the full chain.
+
+When a review / audit / read-only task surfaces work that would be useful to do next, the agent MUST:
+
+1. **Present the recommendation** in the review output (PR body, task summary, comment).
+2. **Stop.** Wait for explicit operator authorization before:
+   - Filing new backlog tasks
+   - Opening any PR beyond the original ask
+   - Dispatching new subagents for downstream work
+3. **Treat "Pre-work required" / "Pre-conditions" / "OQ walkthrough needed" prose as a HARD precondition.** If a task body or referenced RFC flags an unresolved OQ or walkthrough requirement, the agent MUST NOT proceed to dispatch implementation until the operator confirms the precondition is met.
+
+Every scope expansion is a decision that belongs in the [Decision Catalog (RFC-0035)](spec/rfcs/RFC-0035-decision-catalog-operator-routing.md). Surface it there for operator routing — do not self-authorize.
+
+### Reviewer gate (AISDLC-308)
+
+The `code-reviewer` and `test-reviewer` subagents check for scope-creep candidates in every PR: if the PR BOTH (a) implements a "review" or "audit" task AND (b) creates new files under `backlog/tasks/`, it is flagged as **critical** with the message "scope-creep candidate — verify operator authorized task creation."
+
+### Read-only agent constraint (AISDLC-308)
+
+Agents whose role is read-only (exploration, audit, refinement review) MUST NOT use `Write`, `Edit`, task-create MCP tools, or dispatch downstream agents. These constraints are enforced in each agent's frontmatter `disallowedTools` list and are re-stated in the agent body as **Hard rules**.
+
 ## Subagent Governance — OQ-resolution prohibition (AISDLC-298)
 
 **Dev subagents MUST NOT resolve RFC Open Questions inline during implementation.**

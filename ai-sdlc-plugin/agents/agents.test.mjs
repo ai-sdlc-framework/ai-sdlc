@@ -406,3 +406,109 @@ describe('AISDLC-298: OQ-resolution prohibition reviewer gate', () => {
     );
   });
 });
+
+describe('AISDLC-308: agentic scope-creep prevention reviewer gate', () => {
+  // The PR #481 audit (2026-05-16) documented the root cause: an agent asked to
+  // "review the state of RFCs" auto-filed 3 implementation tasks and dispatched
+  // their implementation within 1.5 hours — ignoring its own "operator walkthrough
+  // required" note. This suite verifies the reviewer gates can detect that pattern.
+
+  it('code-reviewer.md body instructs checking for scope-creep candidates (review+backlog-task combo)', () => {
+    const body = readFileSync(join(__dirname, 'code-reviewer.md'), 'utf-8');
+    assert.ok(
+      body.includes('scope-creep'),
+      'code-reviewer must include scope-creep detection instruction',
+    );
+    assert.ok(
+      body.includes('backlog/tasks'),
+      'code-reviewer must check for new files in backlog/tasks/',
+    );
+    assert.ok(
+      body.includes('critical'),
+      'code-reviewer must flag scope-creep candidates as critical severity',
+    );
+  });
+
+  it('test-reviewer.md body instructs checking for scope-creep candidates', () => {
+    const body = readFileSync(join(__dirname, 'test-reviewer.md'), 'utf-8');
+    assert.ok(
+      body.includes('scope-creep'),
+      'test-reviewer must include scope-creep detection instruction',
+    );
+    assert.ok(
+      body.includes('backlog/tasks'),
+      'test-reviewer must check for new files in backlog/tasks/',
+    );
+  });
+
+  it('developer.md body includes pre-work escalation as a hard rule (stop at pre-work flags)', () => {
+    const body = readFileSync(join(__dirname, 'developer.md'), 'utf-8');
+    assert.ok(
+      body.includes('Pre-work required') || body.includes('pre-work'),
+      'developer must include pre-work escalation instruction',
+    );
+    assert.ok(
+      body.includes('self-authorize') || body.includes('scope expansion'),
+      'developer must prohibit self-authorization of scope expansion',
+    );
+  });
+
+  it('synthetic diff: review task + new backlog task file matches scope-creep pattern', () => {
+    // Fixture: a diff from a PR that (a) was implementing a "review" task and
+    // (b) auto-created a new backlog task — the exact anti-pattern from PR #469.
+    const scopeCreepDiff = [
+      'diff --git a/backlog/tasks/aisdlc-999 - chore-complete-RFC-9999.md b/backlog/tasks/aisdlc-999 - chore-complete-RFC-9999.md',
+      'new file mode 100644',
+      '--- /dev/null',
+      '+++ b/backlog/tasks/aisdlc-999 - chore-complete-RFC-9999.md',
+      '@@ -0,0 +1,10 @@',
+      '+---',
+      '+id: AISDLC-999',
+      '+title: "chore: complete RFC-9999"',
+      '+---',
+      '+',
+      '+## Description',
+      '+Auto-filed by reviewer subagent.',
+    ].join('\n');
+
+    // The reviewer detects new files under backlog/tasks/ in a PR diff.
+    // Pattern: "+++ b/backlog/tasks/" on an added line signals a new task file.
+    const newBacklogTaskPattern = /^\+\+\+ b\/backlog\/tasks\//m;
+    assert.ok(
+      newBacklogTaskPattern.test(scopeCreepDiff),
+      'synthetic scope-creep diff with new backlog task file must match reviewer detection pattern',
+    );
+  });
+
+  it('synthetic diff: update to existing backlog task does NOT match new-file pattern', () => {
+    // Negative fixture: editing an existing backlog task is fine, not scope-creep
+    const legitimateEditDiff = [
+      'diff --git a/backlog/tasks/aisdlc-100 - existing-task.md b/backlog/tasks/aisdlc-100 - existing-task.md',
+      '--- a/backlog/tasks/aisdlc-100 - existing-task.md',
+      '+++ b/backlog/tasks/aisdlc-100 - existing-task.md',
+      '@@ -5,3 +5,4 @@',
+      ' status: In Progress',
+      '+assignee: [developer]',
+    ].join('\n');
+
+    // The new-file detection pattern checks for "new file mode" or "/dev/null" source.
+    // A regular edit diff does not have "--- /dev/null" as the source.
+    const newFileSourcePattern = /^--- \/dev\/null/m;
+    assert.ok(
+      !newFileSourcePattern.test(legitimateEditDiff),
+      'edit to existing backlog task must NOT be detected as a new-file scope-creep',
+    );
+  });
+
+  it('refinement-reviewer.md Hard rules explicitly prohibit task-create MCP tools (AISDLC-308)', () => {
+    const body = readFileSync(join(__dirname, 'refinement-reviewer.md'), 'utf-8');
+    assert.ok(
+      body.includes('task_create') || body.includes('task-create'),
+      'refinement-reviewer must explicitly prohibit task-create MCP tools',
+    );
+    assert.ok(
+      body.includes('AISDLC-308'),
+      'refinement-reviewer hard rule must reference AISDLC-308',
+    );
+  });
+});

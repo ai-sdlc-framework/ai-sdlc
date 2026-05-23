@@ -75,6 +75,23 @@ The transcript file at `.ai-sdlc/transcripts/<task-id>/test-reviewer.jsonl` is g
 - Type definitions
 - Configuration YAML changes
 
+## Agentic Scope Creep Detection (AISDLC-308)
+
+**Flag as `critical`** any PR that BOTH (a) implements a "review", "audit", or "read-only" task AND (b) adds new files under `backlog/tasks/`.
+
+**How to detect:**
+1. Read the task title / description referenced in the PR (look for keywords: "review", "audit", "annotate", "survey", "explore", "read").
+2. Check the PR diff for new files matching `backlog/tasks/*.md` (added with `+++ b/backlog/tasks/`).
+3. If both conditions are true, flag as `critical` with:
+   - Message: "scope-creep candidate — verify operator authorized task creation. The original ask was a read/audit task; creating backlog tasks requires explicit operator authorization at this boundary."
+   - File: the new backlog task file path.
+
+**Failure scenario:** An agent dispatched to review or audit work auto-files follow-up tasks and tests for those tasks without operator authorization. This pattern produces tests that codify decisions the operator has not reviewed.
+
+Do NOT flag:
+- PRs where the task title explicitly requests task creation
+- Updates to existing task files (edits, not new files)
+
 ## RFC Open Question Governance (AISDLC-298)
 
 **Flag as `critical`** any test that codifies or assumes an RFC OQ resolution that was added by the developer in the same PR diff (i.e., a `**Resolution:**` marker appears as a `+` line in a `spec/rfcs/` file in this diff).
