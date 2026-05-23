@@ -1454,6 +1454,109 @@ export function resolveSubjectShaForEnvelope({
 }
 
 /**
+ * Detect the "queue rebase invalidated the envelope" pattern (AISDLC-360).
+ *
+ * Failure mode:
+ *   1. PR's branch HEAD was signed cleanly — envelope's v5/v4 hash matches
+ *      what the dev commit's tree state hashes to.
+ *   2. A sibling PR merges that touched an overlapping file (with v5 since
+ *      AISDLC-362 the non-overlapping case is already absorbed; only
+ *      overlapping-sibling rebases reach this hint).
+ *   3. The merge queue rebases this PR onto the new main tip → the probe
+ *      SHA's tree differs from the dev commit's tree → v5 hash flips →
+ *      verifier returns `invalid`.
+ *
+ * Without the hint, operators see only `contentHashV5 mismatch` on the
+ * queue probe SHA and have to grep `gh api .../commits/<sha>/status` plus
+ * `gh pr view --json statusCheckRollup` to figure out it's a queue-rebase
+ * artifact (not local tampering). With the hint, they get an actionable
+ * line in the workflow log telling them to run `/ai-sdlc rebase <pr>`.
+ *
+ * Detection: for the closest-content-mismatch envelope, check whether the
+ * envelope's `subject.digest.sha1` resolves to a real git object AND
+ * recomputing the v5 / v4 hash against THAT subject SHA (using the
+ * envelope's own signedMergeBase for v5, or the subject SHA itself as
+ * base for v4) reproduces the envelope's claimed hash. If yes, the
+ * original sign was valid against its own tree state — the mismatch
+ * against the queue probe is downstream rebase drift, not tampering.
+ *
+ * Returns `true` when the queue-rebase pattern is confirmed, `false` otherwise.
+ *
+ * Exported for hermetic testing.
+ *
+ * @param {object} mismatchEntry — `{ entry: { predicate, fileName }, reason: { field } }`
+ * @param {string} repoRoot
+ * @param {Function} [gitFn]
+ */
+export function detectQueueRebaseInvalidation(mismatchEntry, repoRoot, gitFn = git) {
+  const predicate = mismatchEntry?.entry?.predicate;
+  const field = mismatchEntry?.reason?.field;
+  // Only fire the hint for content-hash mismatches — schemaVersion / policy /
+  // agent / plugin-version mismatches are NOT queue-rebase artifacts.
+  if (field !== 'contentHashV5' && field !== 'contentHashV4') return false;
+  if (!predicate || typeof predicate !== 'object') return false;
+
+  const subjectShaRaw = predicate?.subject?.digest?.sha1;
+  const subjectSha = typeof subjectShaRaw === 'string' ? subjectShaRaw.toLowerCase() : null;
+  if (!subjectSha || !/^[0-9a-f]{40}$/.test(subjectSha)) return false;
+
+  // The subject SHA must resolve as a real git object on this checkout.
+  // After a queue rebase the subject SHA is typically NOT an ancestor of
+  // the probe HEAD (rebase rewrites ancestry) — but the original commit
+  // is still in the object store as long as it's reachable from some
+  // other ref (PR HEAD branch, reflog, fork-PR sandbox checkout).
+  try {
+    gitFn(['rev-parse', '--verify', `${subjectSha}^{commit}`], repoRoot);
+  } catch {
+    return false;
+  }
+
+  // v5 path: recompute against the FROZEN signedMergeBase. If the
+  // recomputed hash at the subject SHA matches the envelope's claimed
+  // v5 hash, the original sign was internally consistent — the mismatch
+  // we observed at the probe SHA is downstream rebase drift.
+  if (field === 'contentHashV5') {
+    const expectedHash = predicate.contentHashV5;
+    const signedMergeBase = predicate.signedMergeBase;
+    if (typeof expectedHash !== 'string' || expectedHash.length === 0) return false;
+    if (typeof signedMergeBase !== 'string' || !/^[0-9a-f]{40}$/.test(signedMergeBase)) {
+      return false;
+    }
+    const recomputed = computeHeadContentHashV5(
+      subjectSha,
+      signedMergeBase,
+      repoRoot,
+      gitFn,
+      undefined,
+    );
+    return recomputed !== null && recomputed === expectedHash;
+  }
+
+  // v4 path: v4 is base-independent, but the diff enumeration still walks
+  // `<base>...<subject>`. Use the envelope's `subject` itself for both
+  // sides — `subjectSha...subjectSha` is empty so we pass the MERGE-BASE
+  // of subject onto its first parent as base. This conservative choice
+  // means we recompute the dev commit's own tree state.
+  if (field === 'contentHashV4') {
+    const expectedHash = predicate.contentHashV4;
+    if (typeof expectedHash !== 'string' || expectedHash.length === 0) return false;
+    // Use the subject's first-parent as the base for v4 recomputation
+    // (= the "before PR-A's commits" tree state).
+    let parentSha;
+    try {
+      parentSha = gitFn(['rev-parse', '--verify', `${subjectSha}^`], repoRoot).trim();
+    } catch {
+      return false;
+    }
+    if (!/^[0-9a-f]{40}$/.test(parentSha)) return false;
+    const recomputed = computeHeadContentHashV4(subjectSha, parentSha, repoRoot, gitFn);
+    return recomputed !== null && recomputed === expectedHash;
+  }
+
+  return false;
+}
+
+/**
  * Run the verifier. Returns `{ status, reason }` — does not write to
  * GITHUB_OUTPUT directly (the caller does that, so unit tests can call this
  * without CI env). Pure-ish: reads files + runs `git diff`.
@@ -1467,6 +1570,11 @@ export function resolveSubjectShaForEnvelope({
  * rewrote ancestry, by walking PR HEAD's first-parent ancestors). After a
  * match, the diff between the matched subject and PR HEAD must touch only
  * chore-commit-allowlisted paths (attestation file + backlog task file).
+ *
+ * AISDLC-360: when a content-hash mismatch is the closest reason and the
+ * envelope's subject SHA still hashes valid against its original tree state,
+ * emit a `[verify-attestation] HINT` line to stderr telling the operator to
+ * run `/ai-sdlc rebase <pr>` (the queue-rebase-invalidated case).
  */
 export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
   // --- Load trusted reviewers + ACCEPTED_SCHEMA_VERSIONS first ---------
@@ -1747,6 +1855,31 @@ export function runVerifier({ headSha, baseSha, repoRoot = process.cwd() }) {
     } else if (closest.reason.field === 'contentHashV5') {
       detail = 'contentHashV5 mismatch';
     }
+
+    // AISDLC-360: queue-rebase invalidation hint.
+    //
+    // When a content-hash mismatch is the closest reason AND the envelope's
+    // subject SHA still hashes valid against its original tree state, this
+    // is almost certainly a queue-rebase artifact — the dev-commit's
+    // attestation was valid when signed; an overlapping sibling merge in
+    // the queue probe SHA invalidated it. Emit a HINT line to stderr (the
+    // workflow log) telling the operator the exact recovery action.
+    //
+    // The hint is informational: status / reason are unchanged so branch
+    // protection still blocks merge until the operator (or the
+    // auto-rebase-on-queue-kick workflow) rebases + re-signs.
+    try {
+      if (detectQueueRebaseInvalidation(closest, repoRoot)) {
+        process.stderr.write(
+          '[verify-attestation] HINT: PR HEAD attestation is valid; queue rebase invalidated ' +
+            (closest.reason.field === 'contentHashV5' ? 'v5' : 'v4') +
+            ' due to sibling-file overlap. Run `/ai-sdlc rebase <pr>` to recover.\n',
+        );
+      }
+    } catch {
+      // Hint detection is best-effort; never let it fail the verifier.
+    }
+
     return {
       status: 'invalid',
       reason: detail,

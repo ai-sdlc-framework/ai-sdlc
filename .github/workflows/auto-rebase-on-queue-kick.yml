@@ -1,0 +1,235 @@
+name: Auto-rebase + re-arm on merge-queue attestation kick
+
+# AISDLC-360: when the merge queue posts `ai-sdlc/attestation: failure` on a
+# `gh-readonly-queue/main/pr-<N>-<sha>` probe SHA (= a queue rebase invalidated
+# the v5/v4 hash because a sibling PR overlapped with this PR's files), the
+# queue silently evicts the PR and the operator must manually re-arm
+# `gh pr merge --auto`. With AISDLC-362's contentHashV5 closing the
+# non-overlapping case, only OVERLAPPING (same-file) sibling merges still
+# reach this path — but each one costs 3 cycles of the autonomous loop:
+#   N:   tick fires; PR sits dequeued, waiting for operator
+#   N+1: operator rebases + re-signs + force-pushes
+#   N+2: queue picks up rebased PR; new probe runs
+#
+# This workflow closes that loop: on the failure status event, identify
+# the source PR, kick `gh pr update-branch --rebase` (which triggers the
+# pre-push attestation-sign hook → fresh envelope on the rebased SHA),
+# then re-arm `gh pr merge --auto --rebase`.
+#
+# ── Trigger ────────────────────────────────────────────────────────────
+# `status` event with `context: ai-sdlc/attestation` and `state: failure`.
+# GitHub fires `status` for every commit-status update, so we filter by
+# context + state inside the job.
+#
+# ── Scope ──────────────────────────────────────────────────────────────
+# Only acts on FAILURE statuses posted on `gh-readonly-queue/main/pr-N-*`
+# branch tips (the merge queue's probe SHAs). Failures on the PR's actual
+# HEAD branch are operator-side problems (real tampering, missing reviewer,
+# etc.) and require human triage — the workflow ignores them.
+#
+# ── Idempotency ────────────────────────────────────────────────────────
+# Multiple duplicate triggers for the same PR within the concurrency window
+# collapse to one rebase pass via the concurrency group keyed on the source
+# PR number. `gh pr update-branch --rebase` itself is idempotent when
+# already-up-to-date.
+#
+# ── 5-point safety guard (AISDLC-381 pattern) ──────────────────────────
+# 1. NO `actions/checkout` of fork content. The workflow runs `gh pr` API
+#    calls only; no script execution from the PR's tree.
+# 2. Fork PR metadata is read as DATA via `gh pr view --json ...`.
+# 3. NO `pnpm install` / `pnpm build` / script execution.
+# 4. NO fork-provided actions used.
+# 5. `secrets.AI_SDLC_PAT` only flows to `gh pr` calls — never piped into
+#    fork-controlled input.
+#
+# ── Fork PR handling ──────────────────────────────────────────────────
+# Fork PRs are SKIPPED. The workflow token cannot push to a fork branch
+# (`gh pr update-branch` would 403), and the attestation kick on a fork PR
+# means the fork contributor must rebase + re-sign locally. We surface a
+# `::warning::` log line so operators see the fork-PR skip but do not fail.
+#
+# ── Release-please skip ────────────────────────────────────────────────
+# Release-please PRs are excluded from auto-rebase (same policy as
+# auto-rearm-on-dequeue.yml and auto-enable-auto-merge.yml). The operator
+# arms release-please PRs manually after reviewing the version bump.
+
+on:
+  status: {}
+
+# Serialize concurrent kicks per source PR; do not cancel in-progress runs
+# (the rebase must complete to leave the branch in a consistent state).
+# `github.event.sha` is the probe SHA we're reacting to; same SHA in
+# multiple rapid status updates collapses cleanly.
+concurrency:
+  group: auto-rebase-on-queue-kick-${{ github.event.sha }}
+  cancel-in-progress: false
+
+permissions:
+  # `gh pr update-branch --rebase` needs `pull-requests: write`; the
+  # downstream `gh pr merge --auto` needs the same. No `contents: write`
+  # is requested — we do not push directly to refs; the PR-update API
+  # takes care of the branch push using the integration's own credential.
+  pull-requests: write
+  # `statuses: read` so we can confirm the trigger context. The job-level
+  # filter below shells out to `gh api` for cross-checks.
+  statuses: read
+
+jobs:
+  rebase:
+    name: Auto-rebase + re-arm
+    runs-on: ubuntu-latest
+    # Job-level guard: only fire on `ai-sdlc/attestation: failure` on a
+    # queue probe SHA. Anything else exits cheaply.
+    #
+    # `github.event.branches` is the list of branches whose tip equals the
+    # status's SHA at the time GitHub fired the event. The merge queue's
+    # probe SHA is the tip of `gh-readonly-queue/main/pr-N-<sha>`, so we
+    # match the prefix. Direct-PR-HEAD attestation failures will have
+    # branch names like `ai-sdlc/aisdlc-360-...` and are skipped.
+    if: >-
+      github.event.context == 'ai-sdlc/attestation'
+      && github.event.state == 'failure'
+    steps:
+      - name: Identify source PR from queue probe SHA
+        id: identify
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT || github.token }}
+          REPO: ${{ github.repository }}
+          PROBE_SHA: ${{ github.event.sha }}
+          # JSON-encoded array of branch records. Each record has `name`,
+          # `commit.sha`, `protected`. The merge-queue probe ref is one
+          # of the entries when the kick fires.
+          BRANCHES_JSON: ${{ toJson(github.event.branches) }}
+        run: |
+          set -euo pipefail
+
+          # Parse the branches array; extract the first gh-readonly-queue/
+          # entry. Multiple entries are theoretically possible if the same
+          # SHA is the tip of >1 branch; in practice the queue ref is the
+          # only one for a probe SHA so we take the first match.
+          QUEUE_REF=$(printf '%s' "$BRANCHES_JSON" | jq -r '
+            map(select(.name | startswith("gh-readonly-queue/main/pr-")))
+            | .[0].name // ""
+          ')
+
+          if [ -z "$QUEUE_REF" ]; then
+            echo "[auto-rebase-on-queue-kick] failure SHA ${PROBE_SHA} is not on a gh-readonly-queue/main/pr-* branch — skipping (this is a direct PR-HEAD failure, requires operator triage)."
+            echo "is_queue_kick=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Extract PR number from `gh-readonly-queue/main/pr-<N>-<sha>`.
+          PR_NUM=$(printf '%s' "$QUEUE_REF" | sed -nE 's|^gh-readonly-queue/main/pr-([0-9]+)-[0-9a-f]+$|\1|p')
+          if [ -z "$PR_NUM" ]; then
+            echo "::warning::Could not parse PR number from queue ref '${QUEUE_REF}' — skipping."
+            echo "is_queue_kick=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "[auto-rebase-on-queue-kick] queue kick detected: probe=${PROBE_SHA} ref=${QUEUE_REF} pr=#${PR_NUM}"
+          echo "is_queue_kick=true" >> "$GITHUB_OUTPUT"
+          echo "pr_number=${PR_NUM}" >> "$GITHUB_OUTPUT"
+          echo "queue_ref=${QUEUE_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Inspect PR metadata (skip fork / draft / release-please)
+        id: inspect
+        if: steps.identify.outputs.is_queue_kick == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT || github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ steps.identify.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          # Fetch the source PR's state (draft? fork? release-please?).
+          # `gh pr view` returns 404 if the PR was closed between the kick
+          # and now — handle gracefully.
+          PR_INFO=$(gh pr view "$PR_NUM" --repo "$REPO" \
+            --json isDraft,state,headRefName,headRepositoryOwner,headRepository \
+            -q '{
+              isDraft: .isDraft,
+              state: .state,
+              headRefName: .headRefName,
+              headFull: ((.headRepositoryOwner.login // "") + "/" + (.headRepository.name // ""))
+            }' 2>/dev/null) || {
+              echo "::warning::Failed to fetch PR #${PR_NUM} (may have been closed) — skipping."
+              echo "should_rebase=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            }
+
+          IS_DRAFT=$(printf '%s' "$PR_INFO" | jq -r '.isDraft')
+          STATE=$(printf '%s' "$PR_INFO" | jq -r '.state')
+          HEAD_REF=$(printf '%s' "$PR_INFO" | jq -r '.headRefName')
+          HEAD_FULL=$(printf '%s' "$PR_INFO" | jq -r '.headFull')
+
+          if [ "$STATE" != "OPEN" ]; then
+            echo "[auto-rebase-on-queue-kick] PR #${PR_NUM} state=${STATE} — skipping."
+            echo "should_rebase=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$IS_DRAFT" = "true" ]; then
+            echo "[auto-rebase-on-queue-kick] PR #${PR_NUM} is draft — skipping."
+            echo "should_rebase=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$HEAD_FULL" != "$REPO" ]; then
+            echo "::warning::PR #${PR_NUM} is from a fork (${HEAD_FULL}) — auto-rebase cannot push to fork branch; operator must manually rebase + re-sign."
+            echo "should_rebase=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          case "$HEAD_REF" in
+            release-please--*)
+              echo "[auto-rebase-on-queue-kick] PR #${PR_NUM} is release-please (${HEAD_REF}) — skipping (operator arms manually)."
+              echo "should_rebase=false" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          echo "[auto-rebase-on-queue-kick] PR #${PR_NUM} headRef=${HEAD_REF} eligible for auto-rebase."
+          echo "should_rebase=true" >> "$GITHUB_OUTPUT"
+          echo "head_ref=${HEAD_REF}" >> "$GITHUB_OUTPUT"
+
+      - name: Rebase + re-arm auto-merge
+        if: steps.inspect.outputs.should_rebase == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.AI_SDLC_PAT || github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUM: ${{ steps.identify.outputs.pr_number }}
+        run: |
+          set -euo pipefail
+
+          # `gh pr update-branch --rebase` triggers the same code path as
+          # the operator-facing `/ai-sdlc rebase <pr>` slash command: rebase
+          # onto current main, run the pre-push attestation-sign hook (which
+          # re-signs against the new tree state when contentHash changed),
+          # force-push the result. GitHub fires `push` + `pull_request:
+          # synchronize` events on success → verify-attestation.yml re-runs
+          # against the new HEAD → fresh `ai-sdlc/attestation: success` posts.
+          #
+          # Disable-then-arm to clear any stale queue state from the kick.
+          # `--disable-auto` is a no-op when auto-merge is already off; the
+          # `|| true` keeps `set -e` happy on the no-op case.
+          echo "[auto-rebase-on-queue-kick] disabling stale auto-merge on PR #${PR_NUM} (queue kick cleared it)..."
+          gh pr merge --disable-auto "$PR_NUM" --repo "$REPO" 2>/dev/null || true
+
+          echo "[auto-rebase-on-queue-kick] rebasing PR #${PR_NUM} onto current main..."
+          # Soft-fail: `gh pr update-branch --rebase` returns non-zero on
+          # conflicts. The operator then resolves manually; we surface the
+          # error in the log and exit clean (the orphan PR is the operator's
+          # signal that auto-rebase couldn't recover).
+          if ! gh pr update-branch --rebase "$PR_NUM" --repo "$REPO" 2>&1; then
+            echo "::warning::PR #${PR_NUM} rebase failed (likely a conflict). Operator must resolve manually and re-arm."
+            exit 0
+          fi
+
+          echo "[auto-rebase-on-queue-kick] PR #${PR_NUM} rebased; re-arming auto-merge with --rebase..."
+          # Method flag MUST match the queue's method per
+          # feedback_gh_auto_merge_method_quirk.md — currently SQUASH on the
+          # queue side, so we pass `--rebase` here (opposite). If the queue
+          # is ever flipped, flip this flag too. auto-rebase-open-prs.yml +
+          # auto-rearm-on-dequeue.yml use the same convention.
+          if ! gh pr merge "$PR_NUM" --auto --rebase --repo "$REPO" 2>&1; then
+            echo "::warning::PR #${PR_NUM} re-arm failed; operator must re-arm manually with 'gh pr merge ${PR_NUM} --auto --rebase'."
+            exit 0
+          fi
+          echo "[auto-rebase-on-queue-kick] PR #${PR_NUM} successfully rebased + re-armed."

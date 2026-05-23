@@ -1,9 +1,10 @@
 ---
 id: AISDLC-360
 title: 'bug(orchestrator): merge queue silently drops PR after queue probe ai-sdlc/attestation status FAILURE — needs auto-rebase-and-resign'
-status: To Do
-assignee: []
+status: Done
+assignee: ['@claude']
 created_date: '2026-05-17'
+completed_date: '2026-05-22'
 labels:
   - orchestrator
   - merge-queue

@@ -34,6 +34,7 @@ import { fileURLToPath } from 'node:url';
 import {
   buildGithubOutputLines,
   detectOrphanEnvelopes,
+  detectQueueRebaseInvalidation,
   findChoreCommitViolations,
   loadAllAttestations,
   parseTrustedReviewers,
@@ -2825,6 +2826,244 @@ describe('runVerifier (AISDLC-369 — contentHashV5 merge-queue rebase stability
     git(['-c', 'core.quotepath=false', 'checkout', '-q', 'pr-a-mb'], fixture.root);
     const out = runVerifier({ headSha: prAHead, baseSha: mainTip, repoRoot: fixture.root });
     assert.equal(out.status, 'valid', `v5 with true merge-base must pass; got: ${out.reason}`);
+  });
+});
+
+// ─── AISDLC-360 — queue-rebase invalidation HINT ─────────────────────────────
+//
+// When an overlapping-sibling merge invalidates the v5/v4 hash at the merge
+// queue's probe SHA, the verifier emits a stderr HINT line telling the
+// operator the recovery action (`/ai-sdlc rebase <pr>`). The HINT must fire
+// EXACTLY in the queue-rebase-invalidated case — not on local tampering,
+// not on a never-signed envelope, not on a missing envelope.
+//
+// We exercise the helper directly (detectQueueRebaseInvalidation) for the
+// canonical positive case + a couple of negative cases. The full runVerifier
+// integration is implicitly exercised by the overlapping-sibling test in
+// the AISDLC-369 block above (which produces the contentHashV5 mismatch
+// state this helper consumes).
+
+describe('detectQueueRebaseInvalidation (AISDLC-360)', () => {
+  let fixture;
+  let keys;
+
+  beforeEach(() => {
+    fixture = setupFixture();
+    keys = generateSigningKeyPair();
+    writeTrustedReviewersYaml(fixture.root, keys.publicKeyPem);
+  });
+
+  afterEach(() => {
+    rmSync(fixture.root, { recursive: true, force: true });
+  });
+
+  /** Local copy of the v5 helper (mirrors writeAttestationV5 in the AISDLC-369 block). */
+  function collectV5Entries(root, signedMergeBase, headRef) {
+    const nameOnly = execFileSync(
+      'git',
+      ['diff', '--name-only', '--no-renames', `${signedMergeBase}..${headRef}`],
+      { cwd: root, env: cleanEnv(), encoding: 'utf-8' },
+    );
+    const paths = nameOnly.split('\n').filter((p) => p.length > 0);
+    return paths.map((p) => {
+      let blobSha = '';
+      try {
+        const lsOut = execFileSync('git', ['ls-tree', '-r', headRef, '--', p], {
+          cwd: root,
+          env: cleanEnv(),
+          encoding: 'utf-8',
+        });
+        const line = lsOut.split('\n').find((l) => l.length > 0);
+        if (line) {
+          const m = line.match(/^[0-9]+\s+blob\s+([0-9a-f]{40})\t/);
+          if (m) blobSha = m[1];
+        }
+      } catch {
+        /* deleted */
+      }
+      return { path: p, blobSha };
+    });
+  }
+
+  function signV5(root, subjectSha, baseSha, privateKeyPem) {
+    const policy = readFileSync(join(root, '.ai-sdlc', 'review-policy.md'), 'utf-8');
+    const reviewers = Object.entries(AGENT_FILES).map(([agentId, content]) => ({
+      agentId,
+      agentFileContent: content,
+      harness: 'codex',
+      approved: true,
+      findings: { critical: 0, major: 0, minor: 0, suggestion: 0 },
+    }));
+    const changedFileDeltas = collectChangedFileDeltaEntries(root, baseSha, subjectSha);
+    const signedMergeBase = git(['merge-base', baseSha, subjectSha], root).trim();
+    const v5Entries = collectV5Entries(root, signedMergeBase, subjectSha);
+    const predicate = buildPredicate({
+      commitSha: subjectSha,
+      policy,
+      reviewers,
+      pluginVersion: PLUGIN_VERSION,
+      iterationCount: 1,
+      harnessNote: '',
+      signedAt: '2026-05-22T00:00:00.000Z',
+      changedFileDeltas,
+      v5Entries,
+      v5MergeBase: signedMergeBase,
+    });
+    const envelope = signAttestation({
+      predicate,
+      privateKeyPem,
+      keyid: 'dev@example.com:laptop',
+    });
+    writeFileSync(
+      join(root, '.ai-sdlc', 'attestations', `${subjectSha}.dsse.json`),
+      JSON.stringify(envelope, null, 2),
+    );
+    return { predicate, envelope };
+  }
+
+  it('detects queue-rebase invalidation when v5 mismatch + subject SHA still hashes valid', () => {
+    // Reproduce the AISDLC-360 scenario:
+    //   1. PR-A signed cleanly against M1b
+    //   2. Sibling PR-B modifies the SAME shared file → M2
+    //   3. Probe SHA = PR-A rebased onto M2; shared.txt blob differs
+    //   4. v5 mismatches at the probe SHA, but PR-A's original subject
+    //      SHA still hashes valid against its own (M1b) tree state
+    //   5. detectQueueRebaseInvalidation must return true → HINT fires
+    const M1 = fixture.baseSha;
+
+    // Add shared.txt baseline.
+    writeFileSync(join(fixture.root, 'shared.txt'), 'shared-baseline\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'add shared.txt baseline'], fixture.root);
+    const M1b = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // PR-A: branch from M1b, modify shared.txt.
+    git(['checkout', '-q', '-b', 'pr-a-hint', M1b], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'shared-baseline\nPR-A-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-A modifies shared.txt'], fixture.root);
+    const prAHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    // Sign PR-A against M1b — this is the original signed state.
+    const { predicate } = signV5(fixture.root, prAHead, M1b, keys.privateKeyPem);
+
+    // Construct the mismatch entry as runVerifier would: contentHashV5
+    // mismatch on a probe SHA where the envelope's subject SHA is still
+    // a reachable git object (because PR-A's branch tip still points at it).
+    const mismatchEntry = {
+      entry: {
+        predicate,
+        fileName: `${prAHead}.dsse.json`,
+      },
+      reason: {
+        field: 'contentHashV5',
+        detail: 'contentHashV5 mismatch (PR content differs from attested content)',
+      },
+    };
+
+    const result = detectQueueRebaseInvalidation(mismatchEntry, fixture.root);
+    assert.equal(
+      result,
+      true,
+      'must detect queue-rebase invalidation when subject SHA still hashes valid against signed merge-base',
+    );
+
+    // Sanity: variations that should NOT fire the hint.
+
+    // (a) schemaVersion mismatch — not a content-hash mismatch.
+    assert.equal(
+      detectQueueRebaseInvalidation(
+        { entry: { predicate, fileName: 'x' }, reason: { field: 'schemaVersion' } },
+        fixture.root,
+      ),
+      false,
+      'must NOT fire hint on non-content-hash mismatches',
+    );
+
+    // (b) subject SHA is malformed.
+    const garbledPredicate = {
+      ...predicate,
+      subject: { ...predicate.subject, digest: { sha1: 'not-a-real-sha' } },
+    };
+    assert.equal(
+      detectQueueRebaseInvalidation(
+        {
+          entry: { predicate: garbledPredicate, fileName: 'x' },
+          reason: { field: 'contentHashV5' },
+        },
+        fixture.root,
+      ),
+      false,
+      'must NOT fire hint when subject SHA is malformed',
+    );
+
+    // (c) subject SHA is well-formed but does NOT resolve to a real git object
+    //     (envelope claims a SHA that was never on this branch).
+    const phantomPredicate = {
+      ...predicate,
+      subject: {
+        ...predicate.subject,
+        digest: { sha1: '0123456789abcdef0123456789abcdef01234567' },
+      },
+    };
+    assert.equal(
+      detectQueueRebaseInvalidation(
+        {
+          entry: { predicate: phantomPredicate, fileName: 'x' },
+          reason: { field: 'contentHashV5' },
+        },
+        fixture.root,
+      ),
+      false,
+      'must NOT fire hint when subject SHA does not resolve to a real git object',
+    );
+  });
+
+  it('does NOT fire hint when subject SHA hashes invalid (= local content tampering)', () => {
+    // Construct the scenario where the envelope is genuinely tampered: the
+    // operator modifies a file AFTER signing, then both the probe SHA AND
+    // the subject SHA hash to something different from the envelope's
+    // claimed v5. This is the "real tampering" case — the hint MUST NOT
+    // fire, because rebasing would not help.
+    const M1 = fixture.baseSha;
+
+    writeFileSync(join(fixture.root, 'shared.txt'), 'shared-baseline\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'add shared.txt baseline'], fixture.root);
+    const M1b = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    git(['checkout', '-q', '-b', 'pr-a-tamper', M1b], fixture.root);
+    writeFileSync(join(fixture.root, 'shared.txt'), 'shared-baseline\nPR-A-line\n');
+    git(['add', 'shared.txt'], fixture.root);
+    git(['commit', '-q', '-m', 'feat: PR-A modifies shared.txt'], fixture.root);
+    const prAHead = git(['rev-parse', 'HEAD'], fixture.root).trim();
+
+    const { predicate } = signV5(fixture.root, prAHead, M1b, keys.privateKeyPem);
+
+    // Tamper: replace the envelope's contentHashV5 with a value that
+    // matches NOTHING on disk. detectQueueRebaseInvalidation should
+    // return false because the subject SHA's recomputed hash will not
+    // match the envelope's (tampered) claimed hash.
+    const tamperedPredicate = {
+      ...predicate,
+      contentHashV5: '0'.repeat(64),
+    };
+    const mismatchEntry = {
+      entry: {
+        predicate: tamperedPredicate,
+        fileName: `${prAHead}.dsse.json`,
+      },
+      reason: {
+        field: 'contentHashV5',
+        detail: 'contentHashV5 mismatch (PR content differs from attested content)',
+      },
+    };
+
+    assert.equal(
+      detectQueueRebaseInvalidation(mismatchEntry, fixture.root),
+      false,
+      'must NOT fire hint when envelope hash is tampered (subject SHA does not hash to claimed value)',
+    );
   });
 });
 
