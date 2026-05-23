@@ -13,7 +13,7 @@ permittedExternalPaths: []
 
 ## Description
 
-Per operator directive 2026-05-23: promote `AI_SDLC_DEPS_COMPOSITION` (RFC-0014) from default-OFF to default-ON. RFC-0014 Phases 1-5 are implemented but gated; Phase 5 includes the corpus aggregator + operator-override capture + this promotion runbook. The operator's directive constitutes the **override-path** evidence per `docs/operations/deps-composition-promotion.md` (corpus path requires ≥30 snapshots; operator judgment is the documented alternative).
+Per operator directive 2026-05-23: promote `AI_SDLC_DEPS_COMPOSITION` (RFC-0014) from default-OFF to default-ON. RFC-0014 Phases 1-5 are implemented but gated; Phase 5 includes the corpus aggregator + operator-override capture + this promotion runbook. The operator's directive constitutes the **override-path** evidence per `docs/operations/deps-composition-promotion.md` (the corpus path is documented as needing ≥30 snapshots; operator judgment is the alternative).
 
 Follow Option A from the runbook ("flip the default in the parser") — invert the polarity of `isCompositionEnabled` so absent env = ON, opt-out via `AI_SDLC_DEPS_COMPOSITION=off` (or `0`/`false`/`no` case-insensitively); truthy values (`1`/`true`/`yes`/`on`) are honored for backward-compat.
 
