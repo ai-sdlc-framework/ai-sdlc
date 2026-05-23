@@ -617,4 +617,75 @@ describe('AISDLC-355 — spawnReviewerWithRetry (Bug 3: degenerate-reviewer one-
     expect(verdict.approved).toBe(false);
     expect(verdict.findings[0].severity).toBe('critical');
   });
+
+  // ── AISDLC-359 regression pin ────────────────────────────────────────────
+  // The original AISDLC-359 incident (2026-05-17, test-reviewer on AISDLC-283
+  // dispatch) reported `status=success` from the spawner, NOT `status=error`.
+  // The reviewer LLM produced content that defeated all 3 fence-strip parser
+  // strategies (pure prose, no JSON, no fenced block, no `{...}` substring),
+  // so `parseClaudeOutput` returned `undefined`, `r.parsed` was `undefined`,
+  // and `coerceReviewerVerdict` synthesised the critical placeholder. The
+  // pre-AISDLC-359/355 codepath then propagated that placeholder verbatim;
+  // the retry layer now recovers when the second attempt parses cleanly.
+  //
+  // The earlier "retries once on degenerate first result and uses second
+  // result" test exercises the `status=error` arm. This test pins the
+  // *exact* AISDLC-359 failure mode: `status=success` + unparseable content.
+  it('AISDLC-359 regression: retries when status=success but output is unparseable prose', async () => {
+    const retryLogs: string[] = [];
+    const mockLogger = {
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      progress: (stage: string, status: string) => retryLogs.push(`${stage}: ${status}`),
+    };
+
+    const spawner = new MockSpawner({
+      'test-reviewer': (_opts, callIndex): SubagentResult => {
+        if (callIndex === 0) {
+          // Exact shape from the AISDLC-359 incident: the spawner reported
+          // `success`, but the reviewer LLM returned narrative prose with
+          // no JSON envelope (no fences, no `{...}`). All 3 parser
+          // strategies fail, `r.parsed` is undefined, and the verdict
+          // coerces to the synthetic-critical placeholder.
+          return {
+            type: 'test-reviewer',
+            output:
+              'I reviewed the tests and they look mostly correct. Coverage seems fine. ' +
+              'No JSON returned — context window hit, or the model decided to summarise ' +
+              'rather than emit the requested envelope.',
+            status: 'success',
+            durationMs: 1234,
+          };
+        }
+        // Second attempt: the model produces the proper verdict envelope.
+        return {
+          type: 'test-reviewer',
+          output: '',
+          parsed: {
+            approved: true,
+            findings: [],
+            summary: 'tests reviewed on retry; coverage adequate',
+          },
+          status: 'success',
+          durationMs: 1500,
+        };
+      },
+    });
+
+    const verdict = await spawnReviewerWithRetry(
+      spawner,
+      { type: 'test-reviewer', prompt: 'review the tests', cwd: tmp },
+      'test-reviewer',
+      mockLogger,
+    );
+
+    // Recovery: second attempt's substantive verdict is used.
+    expect(verdict.approved).toBe(true);
+    expect(verdict.summary).toBe('tests reviewed on retry; coverage adequate');
+    expect(spawner.getCallCount('test-reviewer')).toBe(2);
+    // Operator-visibility: the progress line MUST fire so unattended runs
+    // surface the retry in the orchestrator's events.jsonl tail.
+    expect(retryLogs).toContain('reviewer-retry: test-reviewer attempt=2');
+  });
 });
