@@ -223,7 +223,8 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 
 | Use case | Command | Billing |
 |---|---|---|
-| Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` | Subscription (Claude Code Max) |
+| Internal dogfood (backlog tasks) | `/ai-sdlc execute <task-id>` (e.g. `AISDLC-393`) | Subscription (Claude Code Max) |
+| Internal dogfood (GitHub issues, subscription billing) | `/ai-sdlc execute <issue-number>` (e.g. `612`, `#612`, `gh:612`) | Subscription (Claude Code Max) — AISDLC-393 |
 | **Autonomous loop — single-session drain (Pattern X v2, AISDLC-396)** | `/ai-sdlc orchestrator-tick` (once, ScheduleWakeup loops). Conductor dispatches background `Agent(developer)` per manifest; dev follows its standard contract (commit → rebase → push → open DRAFT PR). Conductor's next tick **reconciles after-the-fact**: parses dev's return JSON into a verdict, fans out 3 reviewers, signs attestation, force-pushes the chore commit on top of the dev's branch, flips draft → ready. | Subscription interactive quota only — Sonnet for dev/code/test, Opus only for security. One operator-opened CC session suffices. |
 | **Autonomous loop — N>4 parallel via sibling Workers (Pattern Z)** | `/ai-sdlc orchestrator-tick` + N sibling sessions running `/ai-sdlc dispatch-worker` | Subscription interactive quota only. Use when Pattern X's `inSessionAgentMaxSessions` (default 4) is insufficient for the backlog burst. |
 | Operator-driven single-PR (task file + impl land together) | `cli-orchestrator tick --task-from-file <path>` (AISDLC-373) | Same as the configured `--spawner` (subscription on default `claude`) |
@@ -232,6 +233,8 @@ The decision is computed by `pipeline-cli dor-pr-has-violations`, which consumes
 | GitHub issue / unattended / CI | `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` | API key |
 
 `/ai-sdlc execute` is the default for internal work. Worktree-isolated, auto-creates sibling-repo PRs from `permittedExternalPaths`, marks Done + moves task file in the same PR.
+
+**AISDLC-393 — argument forms.** `/ai-sdlc execute` accepts (in this precedence order): `gh:<n>` (explicit GH-issue), `<prefix>-<number>` (backlog task ID like `AISDLC-393`, including hierarchical sub-IDs like `AISDLC-100.5`), `<number>` / `#<number>` (bare/hash-prefixed numeric → GH-issue). The reference parser lives in `dogfood/src/dispatch-execute-arg.ts` (`parseExecuteArg`) with hermetic test coverage. On the GH-issue path, NO backlog task file is created — the issue is the source of truth and the PR closes it via `Closes #N`. The watcher path (`pnpm --filter @ai-sdlc/dogfood watch --issue <id>`) accepts the same argument forms via the same parser, preserved unchanged for API-key/unattended/CI use. **NOTE (partial-ship):** as of AISDLC-393, the slash command's argument parser routes correctly to GH-issue, but the `dispatch-from-issue` pipeline-cli bridge is pending an architectural decision; until that lands, the GH-issue path exits with a workaround pointer to the watcher. Backlog-task path is unchanged.
 
 **Spawner kinds for `cli-orchestrator tick --spawner <kind>`** (AISDLC-349, default changed AISDLC-352):
 - `mock` — fixtures only; for plumbing tests. Billing: none.

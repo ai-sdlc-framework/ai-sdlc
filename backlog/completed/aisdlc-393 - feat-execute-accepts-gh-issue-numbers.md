@@ -1,7 +1,7 @@
 ---
 id: AISDLC-393
 title: 'feat: /ai-sdlc execute accepts GH issue numbers (not just backlog task IDs)'
-status: To Do
+status: In Progress
 labels:
   - cli
   - dogfood
@@ -27,7 +27,7 @@ This task tracks #612.
 
 ## Acceptance criteria
 
-- [ ] AC-1: `/ai-sdlc execute <arg>` detects the argument form:
+- [x] AC-1: `/ai-sdlc execute <arg>` detects the argument form:
   - `^[A-Za-z][A-Za-z0-9]*-\d+$` (a prefixed task id like `AISDLC-NN` or `INGEST-NN`) → existing backlog-task path, no behavior change
   - `^#?\d+$` (a bare numeric or hash-prefixed numeric form) → new GH-issue path
   - `^gh:\d+$` (a `gh:`-prefixed explicit form) → unambiguous routing for the GH-issue path
@@ -35,10 +35,19 @@ This task tracks #612.
 - [ ] AC-3: The GH-issue dispatch path uses the **subscription `SubagentSpawner`** (the same one `/ai-sdlc execute <task-id>` uses today), not the API-key spawner the watcher uses.
 - [ ] AC-4: No backlog task file is created as a side effect when dispatching from a GH issue. The GH issue remains the single source of truth; the PR closes the issue directly via `Closes #N` in the PR body.
 - [ ] AC-5: The opened PR title and body reference the GH issue (`(closes #N)` in the conventional-commits subject, `Closes #N` in the body).
-- [ ] AC-6: When `/ai-sdlc execute` is invoked with an argument that doesn't match either form, exit with a clear error message listing the accepted forms — no silent failure.
-- [ ] AC-7: The existing watcher path (`pnpm --filter @ai-sdlc/dogfood watch --issue <id>`) is preserved unchanged for the API-key/unattended/CI use case.
-- [ ] AC-8: `CLAUDE.md` "Canonical execution paths" table updated to reflect that the slash command now accepts either form. Old "GitHub issue / unattended / CI → watcher" row remains; the slash-command row gains the GH-issue capability for subscription dispatch.
-- [ ] AC-9: Hermetic test coverage at the slash-command parser layer (form detection: AISDLC-NNN, NNN, #NNN, gh:NNN, malformed). Existing watcher tests left untouched.
+- [x] AC-6: When `/ai-sdlc execute` is invoked with an argument that doesn't match either form, exit with a clear error message listing the accepted forms — no silent failure.
+- [x] AC-7: The existing watcher path (`pnpm --filter @ai-sdlc/dogfood watch --issue <id>`) is preserved unchanged for the API-key/unattended/CI use case.
+- [x] AC-8: `CLAUDE.md` "Canonical execution paths" table updated to reflect that the slash command now accepts either form. Old "GitHub issue / unattended / CI → watcher" row remains; the slash-command row gains the GH-issue capability for subscription dispatch.
+- [x] AC-9: Hermetic test coverage at the slash-command parser layer (form detection: AISDLC-NNN, NNN, #NNN, gh:NNN, malformed). Existing watcher tests left untouched.
+
+## Partial ship status (AISDLC-393)
+
+ACs shipped: 1, 6, 7, 8, 9 — argument parser + error path + docs + tests.
+
+ACs deferred (architectural decision required, see PR notes):
+- AC-2, AC-3, AC-4, AC-5 — actual GH-issue dispatch through `executePipeline`. The implementation sketch in this task assumes `cli-watch.ts` has a "GH-issue→pipeline codepath" to refactor, but that codepath does not exist: `cli-watch.ts` today just forwards its `--issue <id>` to `executePipeline({ taskId: issueId })` which only handles backlog task files. Routing a GH issue through `executePipeline` requires extending pipeline-cli to either (a) accept an in-memory `TaskSpec` (bypassing `validateTask`'s file load + Step 4 `task_edit` + Step 10 `task_complete` for the issue path), or (b) add an `executePipelineFromIssue()` composite, or (c) materialize an ephemeral gitignored task file in the worktree. Each option has tradeoffs that warrant an operator/architect call.
+
+Operator workaround until AC-2/3/4/5 land: continue using `pnpm --filter @ai-sdlc/dogfood watch --issue <N>` for GH-issue dispatch (API-key billing). The slash-command path exits with a clear pointer to this workaround when the parser routes to the GH-issue branch.
 
 ## Implementation sketch
 

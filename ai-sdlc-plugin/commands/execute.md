@@ -1,7 +1,7 @@
 ---
 name: execute
-description: Execute a backlog task end-to-end — worktree → developer subagent → 3 parallel reviewer subagents → PR. Runs inline in the main Claude Code session so the Agent tool is available without a subagent middleman.
-argument-hint: <task-id>
+description: Execute a backlog task OR GitHub issue end-to-end — worktree → developer subagent → 3 parallel reviewer subagents → PR. Runs inline in the main Claude Code session so the Agent tool is available without a subagent middleman.
+argument-hint: <task-id | gh-issue-number | gh:N | #N>
 allowed-tools:
   - Read
   - Grep
@@ -14,7 +14,28 @@ allowed-tools:
 model: inherit
 ---
 
-Execute backlog task `$ARGUMENTS` end-to-end. The Step 0-15 pipeline below runs inline in the main Claude Code session — worktree creation, developer subagent fan-out, 3 parallel reviewer subagents, attestation signing, PR open.
+Execute work item `$ARGUMENTS` end-to-end. `$ARGUMENTS` is either a backlog task ID (e.g. `AISDLC-393`, `INGEST-42`) or a GitHub issue (`612`, `#612`, or explicit `gh:612`) — see [Argument forms](#argument-forms-aisdlc-393) below. The Step 0-15 pipeline below runs inline in the main Claude Code session — worktree creation, developer subagent fan-out, 3 parallel reviewer subagents, attestation signing, PR open.
+
+## Argument forms (AISDLC-393)
+
+`/ai-sdlc execute` accepts three argument forms, detected via three regexes evaluated in this order:
+
+| Form | Regex | Routes to | Example |
+| --- | --- | --- | --- |
+| Explicit GitHub issue | `^gh:\d+$` | GH-issue path (subscription billing) | `/ai-sdlc execute gh:612` |
+| Prefixed backlog task ID | `^[A-Za-z][A-Za-z0-9]*-\d+(\.\d+)*$` | backlog-task path (existing Step 0-15 flow) | `/ai-sdlc execute AISDLC-393` |
+| Bare numeric / `#`-prefixed | `^#?\d+$` | GH-issue path (subscription billing) | `/ai-sdlc execute 612` / `/ai-sdlc execute #612` |
+
+The `gh:` form has highest precedence so an operator can be unambiguous when they need to be (e.g. when a task-id-like string would otherwise be matched). The regex shapes are the contract — the JS reference implementation lives in `dogfood/src/dispatch-execute-arg.ts` (`parseExecuteArg`) with hermetic coverage in `dispatch-execute-arg.test.ts`; the shell pipeline in Step 1 mirrors the same shapes for the slash-command body.
+
+**Both paths use the subscription `SubagentSpawner`** — the difference is the source of truth for the work item:
+
+- **Backlog-task path**: backlog file in `backlog/tasks/<id> -*.md` carries the title, ACs, references, and `permittedExternalPaths`. Task lifecycle is closed by moving the file to `backlog/completed/` in the PR.
+- **GH-issue path**: GitHub issue is the source of truth (NO backlog task file is created). Issue title + body + labels feed the developer prompt; PR body uses `Closes #N` so the issue auto-closes on merge.
+
+If `$ARGUMENTS` matches none of the three regexes, the command exits 1 with a clear error listing the accepted forms (AC-6).
+
+**Preserved unchanged (AC-7):** the existing watcher `pnpm --filter @ai-sdlc/dogfood watch --issue <id>` continues to work for API-key billing / unattended / CI use cases. It accepts the same forms as the slash command via the same `parseExecuteArg` parser.
 
 > **AISDLC-218 — 1 CI run per PR.** Prior to this change, opening the PR before reviewers completed triggered CI run #1 (failing verify-attestation), then the attestation chore commit triggered CI run #2. The fix: the developer opens the PR as a **draft** (`gh pr create --draft`). Reviewers run + attestation signs while still draft. Step 13 calls `gh pr ready` to flip draft→ready_for_review, which triggers CI exactly once on the fully-signed, reviewer-approved state. ~50% CI-minute reduction per PR.
 
@@ -198,12 +219,79 @@ echo "[Step 0.5] $SYNC_RESULT"
 
 > **Non-blocking contract.** Even when the sync PR opens, Step 0.5 returns immediately and Step 1 proceeds. The parent's untracked files remain until the operator runs `git clean -f backlog/tasks/aisdlc-N*.md` (or until the next Step 0 self-heal after the sync PR merges — at that point the files are on `origin/main`, `git reset --hard origin/main` is safe, and the parent is fully clean again).
 
-## Step 1 — Validate the task
+## Step 1 — Detect argument form, validate the work item
 
-Find the task file and read its frontmatter:
+First, classify `$ARGUMENTS` into one of the three forms documented in [Argument forms](#argument-forms-aisdlc-393) above (AISDLC-393). The shell pipeline below mirrors `parseExecuteArg` in `dogfood/src/dispatch-execute-arg.ts`; the precedence order is **explicit `gh:` first**, then **prefixed task ID**, then **bare/`#`-prefixed numeric** as the GH-issue fallback.
 
 ```bash
-TASK_ID="$ARGUMENTS"   # e.g. AISDLC-68
+ARG="$ARGUMENTS"
+# Trim surrounding whitespace (matches parseExecuteArg behaviour).
+ARG="$(printf '%s' "$ARG" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')"
+
+if [ -z "$ARG" ]; then
+  echo "ERROR: no argument given. Accepted forms:" >&2
+  echo "  - <prefix>-<number>   e.g. 'AISDLC-393' (backlog task ID)" >&2
+  echo "  - <number> or #<number>   e.g. '612', '#612' (GitHub issue)" >&2
+  echo "  - gh:<number>   e.g. 'gh:612' (explicit GitHub issue routing)" >&2
+  exit 1
+fi
+
+# 1. Explicit `gh:<n>` — highest precedence.
+if printf '%s' "$ARG" | grep -qE '^gh:[0-9]+$'; then
+  ARG_FORM="gh-issue"
+  GH_ISSUE_NUMBER="$(printf '%s' "$ARG" | sed -E 's/^gh://')"
+# 2. Prefixed backlog task ID (allows hierarchical sub-IDs like AISDLC-100.5).
+elif printf '%s' "$ARG" | grep -qE '^[A-Za-z][A-Za-z0-9]*-[0-9]+(\.[0-9]+)*$'; then
+  ARG_FORM="backlog-task"
+  TASK_ID="$ARG"
+# 3. Bare numeric / `#`-prefixed → GH-issue.
+elif printf '%s' "$ARG" | grep -qE '^#?[0-9]+$'; then
+  ARG_FORM="gh-issue"
+  GH_ISSUE_NUMBER="$(printf '%s' "$ARG" | sed -E 's/^#//')"
+else
+  echo "ERROR: invalid execute argument '$ARG'. Accepted forms:" >&2
+  echo "  - <prefix>-<number>   e.g. 'AISDLC-393' (backlog task ID)" >&2
+  echo "  - <number> or #<number>   e.g. '612', '#612' (GitHub issue)" >&2
+  echo "  - gh:<number>   e.g. 'gh:612' (explicit GitHub issue routing)" >&2
+  exit 1
+fi
+
+if [ "$ARG_FORM" = "gh-issue" ] && [ "$GH_ISSUE_NUMBER" -le 0 ] 2>/dev/null; then
+  echo "ERROR: GitHub issue numbers must be positive (got '$ARG')." >&2
+  exit 1
+fi
+
+echo "[ai-sdlc-progress] Step 1: detected ARG_FORM=$ARG_FORM ($ARG)"
+```
+
+### Step 1.a — GH-issue path branch (AISDLC-393 AC-2, AC-3, AC-4, AC-5)
+
+When `ARG_FORM=gh-issue`, the pipeline routes through `dogfood/src/dispatch-from-issue.ts` (the shared helper extracted from `cli-watch.ts` so both the slash command and the watcher reuse it). The helper:
+
+1. Fetches the issue via `gh issue view "$GH_ISSUE_NUMBER" --json number,title,body,labels,state` and refuses if `state != "OPEN"`.
+2. Synthesises an in-memory `TaskSpec` from the issue (no file written — AC-4). The synthesised `id` is `gh-issue-${GH_ISSUE_NUMBER}`; the title is the issue title; ACs are extracted from `## Acceptance criteria` in the issue body if present, else a single placeholder AC ("address the issue per the body") is used so the validate step passes.
+3. Dispatches through `executePipeline()` with the **subscription** `SubagentSpawner` (the slash command body passes `SubscriptionSpawner` here; `cli-watch.ts` continues to pass its API-key spawner for the watcher's existing surface — AC-7).
+4. PR title becomes `feat: <issue title> (closes #${GH_ISSUE_NUMBER})` and the PR body opens with `Closes #${GH_ISSUE_NUMBER}` so the issue auto-closes on merge (AC-5).
+5. No `mcp__plugin_ai-sdlc_ai-sdlc__task_edit` / `task_complete` calls fire on this path (issue is source of truth — AC-4).
+
+> **Implementation note (AISDLC-393 escalation).** The pure parser (`parseExecuteArg`) ships in this PR with hermetic tests. The actual `dispatch-from-issue.ts` helper and the `executePipeline()` extension that bypasses `validateTask`'s file-load + Step 4 `task_edit` + Step 10 `task_complete` for the GH-issue path requires a follow-up architectural decision — see the PR body for the question and proposed options. Until that lands, the GH-issue path in this Step 1.a exits with `ERROR: GH-issue dispatch not yet implemented — pending architectural decision; use the watcher for now: pnpm --filter @ai-sdlc/dogfood watch --issue ${GH_ISSUE_NUMBER}` and the operator routes through the watcher (API-key billing).
+
+```bash
+if [ "$ARG_FORM" = "gh-issue" ]; then
+  echo "ERROR: /ai-sdlc execute GH-issue dispatch is not yet wired (AISDLC-393 partial)." >&2
+  echo "       The argument parser routes correctly, but the dispatch-from-issue helper" >&2
+  echo "       requires a pipeline-cli extension that is pending an architectural decision." >&2
+  echo "       Workaround: use the watcher (API-key billing):" >&2
+  echo "         pnpm --filter @ai-sdlc/dogfood watch --issue ${GH_ISSUE_NUMBER}" >&2
+  exit 1
+fi
+```
+
+### Step 1.b — Backlog-task path (existing flow, AC-1 no behavior change)
+
+When `ARG_FORM=backlog-task`, continue with the existing backlog-task validation. `TASK_ID` is already set from the form detection above; find the task file and read its frontmatter:
+
+```bash
 TASK_ID_LOWER="$(echo "$TASK_ID" | tr '[:upper:]' '[:lower:]')"
 TASK_FILE=$(ls "backlog/tasks/${TASK_ID_LOWER} -"* 2>/dev/null | head -1)
 [ -z "$TASK_FILE" ] && { echo "ERROR: no task file for $TASK_ID"; exit 1; }
