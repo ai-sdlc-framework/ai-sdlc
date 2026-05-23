@@ -30,7 +30,7 @@ import {
   sweepMergedWorktrees,
   validateTask,
 } from './steps/index.js';
-import { existsSync } from 'node:fs';
+import { existsSync, unlinkSync } from 'node:fs';
 import { defaultRunner } from './runtime/exec.js';
 import {
   DEFAULT_LOGGER,
@@ -138,6 +138,12 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   // and any developer commits would be silently lost.
   let setupCompleted = false;
   const cleanupWarnings: string[] = [];
+  // AISDLC-393 (round 2, AC-2 fix) — captured Step 4 synthetic-file path so
+  // the `finally` block can pass it to `cleanupTask`. Undefined for the
+  // backlog path AND for gh-issue dispatches that don't declare
+  // `permittedExternalPaths` (no synthetic file is ever materialised in
+  // those cases).
+  let syntheticTaskFile: string | undefined;
 
   try {
     // Step 3
@@ -202,14 +208,22 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
     // the regression test in `execute-pipeline.test.ts` ('Step 4 lifecycle
     // edits land on worktree, not parent') for the proof.
     logger.progress('04-flip-status', 'flipping status to In Progress + writing sentinel');
-    await beginTask({
+    const beginResult = await beginTask({
       taskId: opts.taskId,
       worktreePath: branch.worktreePath,
       workDir: opts.workDir,
       // AISDLC-393 — `'gh-issue'` skips the frontmatter patch (no file on disk)
       // but still writes the per-worktree sentinel the PreToolUse hook needs.
       sourceKind,
+      // AISDLC-393 (round 2, AC-2 fix) — pass the inline spec so Step 4 can
+      // materialise the synthetic task file the PreToolUse hook reads to
+      // resolve `permittedExternalPaths`. Without this the hook returns
+      // `[]` on gh-issue dispatches and DENIES every external-path write
+      // even when the issue's `permitted-external-paths` label declares
+      // a valid allowlist. See `BeginTaskOptions.taskSpec` doc-comment.
+      ...(opts.taskSpec ? { taskSpec: opts.taskSpec } : {}),
     });
+    syntheticTaskFile = beginResult.syntheticTaskFile;
     setupCompleted = true;
 
     // Step 5 — build developer prompt
@@ -344,6 +358,31 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
       sourceKind,
     });
 
+    // AISDLC-393 (round 2, AC-2 fix) — explicit pre-push synthetic-file
+    // removal. Step 4 wrote a transient allowlist marker into
+    // `<worktree>/backlog/tasks/` so the PreToolUse hook could resolve
+    // `permittedExternalPaths` for the dev subagent. The file MUST NOT land
+    // in the commit/PR — delete it before push (Step 11). The `finally`
+    // block below also removes it as belt-and-braces in case Step 11 throws
+    // before we reach push.
+    if (syntheticTaskFile && existsSync(syntheticTaskFile)) {
+      try {
+        unlinkSync(syntheticTaskFile);
+        logger.progress(
+          '04-flip-status',
+          `pre-push: removed synthetic gh-issue task file (${syntheticTaskFile})`,
+        );
+      } catch (err) {
+        // Non-fatal — Step 13's cleanup will retry. Surface as a warning so
+        // operators see it in the events stream.
+        logger.warn(
+          `[ai-sdlc] pre-push synthetic-file removal failed (non-fatal): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+
     // Step 11 — push + open PR
     const push = await pushAndPr({
       taskId: opts.taskId,
@@ -447,8 +486,18 @@ export async function executePipeline(opts: PipelineOptions): Promise<PipelineRe
   } finally {
     // Step 13 — always cleanup the per-worktree sentinel. Safe even when
     // the sentinel doesn't exist (`cleanupTask` checks first).
+    //
+    // AISDLC-393 (round 2, AC-2 fix) — also remove the synthetic gh-issue
+    // task file (transient hook-allowlist marker). The pre-push removal
+    // above is the primary path; this is defense-in-depth for failure
+    // paths where the pre-push step was never reached.
     try {
-      await cleanupTask({ taskId: opts.taskId, worktreePath: branch.worktreePath });
+      await cleanupTask({
+        taskId: opts.taskId,
+        worktreePath: branch.worktreePath,
+        ...(syntheticTaskFile ? { syntheticTaskFile } : {}),
+        ...(opts.taskSpec ? { taskSpec: opts.taskSpec } : {}),
+      });
     } catch (err) {
       const reason = err instanceof Error ? err.message : String(err);
       cleanupWarnings.push(`sentinel cleanup failed: ${reason}`);

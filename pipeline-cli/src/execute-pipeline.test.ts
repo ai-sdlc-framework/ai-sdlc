@@ -8,7 +8,9 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, join, resolve } from 'node:path';
 import { executePipeline } from './execute-pipeline.js';
 import { MockSpawner } from './runtime/subagent-spawner.js';
 import { defaultSpawner } from './runtime/default-spawner.js';
@@ -1123,6 +1125,148 @@ describe('integration — executePipeline (full Step 0-13)', () => {
       });
       expect(result.outcome).toBe('aborted');
       expect(result.notes).toMatch(/acceptance criterion/);
+    });
+
+    // AISDLC-393 round 2 (AC-2 fix) — REAL-HOOK integration test.
+    //
+    // The unit tests above prove Step 4 writes the synthetic file and
+    // Step 13 removes it. This test goes further: it runs the actual
+    // `ai-sdlc-plugin/hooks/enforce-blocked-actions.js` PreToolUse hook
+    // against a representative tool input and asserts the hook resolves
+    // `permittedExternalPaths` correctly on the gh-issue dispatch path.
+    // This would have caught the original AC-2 bug (`loadPermittedExternalPaths`
+    // returns `[]` because no backlog file exists → hook denies every
+    // external write) — none of the MockSpawner-driven tests exercise the
+    // hook so the bug was invisible at the integration level.
+    //
+    // Test strategy:
+    //   1. Materialise the worktree + minimal `.ai-sdlc/agent-role.yaml`
+    //      so the hook has something to load.
+    //   2. Call `beginTask` directly with the gh-issue inputs (no need to
+    //      drive the full pipeline — Step 4 is the surface that produces
+    //      the synthetic file, and the hook is the surface that consumes
+    //      it).
+    //   3. Invoke the hook via `child_process.spawnSync(node, hook)` with
+    //      stdin JSON simulating a Write to an external-path target,
+    //      CLAUDE_PROJECT_DIR pointing at the worktree, and `cwd` set so
+    //      the per-worktree sentinel lookup walks up correctly.
+    //   4. Assert the hook EXITS 0 with no `deny` decision on stdout —
+    //      i.e. the allowlist resolved and the external write was
+    //      permitted.
+    //   5. As a negative-control: run the same hook against a Write to
+    //      a NON-allowlisted external path and confirm it DOES deny.
+    it('AC-2 (real-hook): synthetic file enables the PreToolUse hook to resolve permittedExternalPaths', async () => {
+      const { beginTask } = await import('./steps/04-flip-status.js');
+      const worktreePath = join(tmp, '.worktrees', 'gh-issue-700');
+      mkdirSync(worktreePath, { recursive: true });
+
+      // Minimal agent-role.yaml — the hook loads blockedPaths +
+      // blockedActions from here; if absent, the hook fails-safe and
+      // allows everything, which would mask the bug.
+      mkdirSync(join(worktreePath, '.ai-sdlc'), { recursive: true });
+      writeFileSync(
+        join(worktreePath, '.ai-sdlc', 'agent-role.yaml'),
+        `apiVersion: v1\nkind: AgentRole\nspec:\n  constraints:\n    blockedPaths:\n      - '.ai-sdlc/**'\n    blockedActions:\n      - 'gh pr merge*'\n`,
+        'utf8',
+      );
+
+      // Step 4 surface — writes the synthetic task file + sentinel.
+      const beginResult = await beginTask({
+        taskId: 'gh-issue-700',
+        worktreePath,
+        workDir: tmp,
+        sourceKind: 'gh-issue',
+        taskSpec: {
+          id: 'gh-issue-700',
+          title: 'allowlist demo',
+          status: 'To Do',
+          acceptanceCriteria: ['x'],
+          acceptanceCriteriaChecked: [false],
+          description: '',
+          rawBody: '',
+          filePath: '<gh-issue:700>',
+          // The label-driven allowlist the issue declares.
+          permittedExternalPaths: ['../ai-sdlc-io/'],
+        },
+      });
+      expect(beginResult.syntheticTaskFile).toBeDefined();
+      expect(existsSync(beginResult.syntheticTaskFile!)).toBe(true);
+
+      // Resolve the hook script path — sit next to this test file in the
+      // monorepo at `<repo-root>/ai-sdlc-plugin/hooks/enforce-blocked-actions.js`.
+      const here = dirname(fileURLToPath(import.meta.url));
+      const hookPath = resolve(
+        here,
+        '..',
+        '..',
+        'ai-sdlc-plugin',
+        'hooks',
+        'enforce-blocked-actions.js',
+      );
+      expect(existsSync(hookPath)).toBe(true);
+
+      // The hook's task-ID resolution chain:
+      //   (1) per-worktree sentinel walk-up (Pattern C: cwd under
+      //       `<CLAUDE_PROJECT_DIR>/.worktrees/<id>/`)
+      //   (2) legacy project-level sentinel
+      //   (3) `AI_SDLC_ACTIVE_TASK_ID` env var
+      // For this hermetic test the worktree is its own `CLAUDE_PROJECT_DIR`
+      // (matching `git rev-parse --show-toplevel` inside a worktree), so
+      // (1) and (2) don't apply — we drive the lookup via (3), which is
+      // what the dev subagent's env carries in production anyway (per
+      // `ai-sdlc-plugin/agents/developer.md` line 123).
+      const hookEnv = {
+        ...process.env,
+        CLAUDE_PROJECT_DIR: worktreePath,
+        AI_SDLC_ACTIVE_TASK_ID: 'gh-issue-700',
+      };
+
+      // POSITIVE case — Write to a path under permittedExternalPaths.
+      // Hook reads CLAUDE_PROJECT_DIR/backlog/tasks/ (= worktree's
+      // `backlog/tasks/`), finds the synthetic file via the `${id} -`
+      // prefix match, parses `permittedExternalPaths: ['../ai-sdlc-io/']`,
+      // resolves it relative to the project root, and allows the Write.
+      const allowedTarget = resolve(worktreePath, '..', 'ai-sdlc-io', 'README.md');
+      const allowedInput = {
+        tool_name: 'Write',
+        tool_input: { file_path: allowedTarget, content: 'x' },
+        cwd: worktreePath,
+      };
+      const allowedRun = spawnSync('node', [hookPath], {
+        input: JSON.stringify(allowedInput),
+        env: hookEnv,
+        encoding: 'utf8',
+      });
+      // No deny → either empty stdout or no `permissionDecision: deny`.
+      // The hook exits 0 on both allow and deny — distinguish by output.
+      // This is the assertion that would have caught the original bug:
+      // before the fix, the hook returned `[]` for the allowlist (no
+      // backlog file found) and denied this write.
+      expect(allowedRun.status).toBe(0);
+      const allowedStdout = allowedRun.stdout || '';
+      expect(allowedStdout).not.toContain('"permissionDecision": "deny"');
+
+      // NEGATIVE case — Write to an external path that is NOT in the
+      // allowlist. Hook MUST deny, otherwise we've regressed AC-2 from
+      // "the allowlist enforces" into "every external write is permitted".
+      const blockedTarget = resolve(worktreePath, '..', 'unauthorized-sibling', 'evil.txt');
+      const blockedInput = {
+        tool_name: 'Write',
+        tool_input: { file_path: blockedTarget, content: 'x' },
+        cwd: worktreePath,
+      };
+      const blockedRun = spawnSync('node', [hookPath], {
+        input: JSON.stringify(blockedInput),
+        env: hookEnv,
+        encoding: 'utf8',
+      });
+      expect(blockedRun.status).toBe(0);
+      const blockedStdout = blockedRun.stdout || '';
+      expect(blockedStdout).toContain('"permissionDecision": "deny"');
+      // The deny reason mentions the specific allowlist entries — proves
+      // the hook DID parse permittedExternalPaths (not the silent `[]`
+      // failure mode the bug introduced).
+      expect(blockedStdout).toContain('../ai-sdlc-io/');
     });
 
     it('backlog path (no taskSpec) is unchanged — regression guard', async () => {

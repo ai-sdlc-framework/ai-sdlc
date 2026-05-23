@@ -278,10 +278,36 @@ The slash command body's wiring is a single `node -e` invocation of the dogfood 
 
 ```bash
 if [ "$ARG_FORM" = "gh-issue" ]; then
-  # Fetch + synthesise the TaskSpec via the dogfood helper. We invoke it
-  # through `node -e` against the built dist so the slash command body
-  # doesn't need a tsx/ts-node dependency at dispatch time. If the dist is
-  # missing (operator hasn't built dogfood), we surface a clear hint.
+  # ── Pre-flight 1: `claude` CLI MUST be on PATH (AISDLC-393 round 2, FINDING 2 fix) ──
+  #
+  # The gh-issue path's billing claim ("Subscription — Claude Code Max") in
+  # CLAUDE.md is only true when the dispatch uses the subscription spawner
+  # (`ShellClaudePSpawner`, shelling out to `claude -p`). If `claude` is NOT
+  # on PATH but `ANTHROPIC_API_KEY` is set, `defaultSpawner()` silently falls
+  # through to `ClaudeCodeSDKSpawner` and the dispatch burns API tokens
+  # instead — billing drift between what the operator was told and what
+  # actually ran. Refuse early with a clear error rather than silently
+  # switching billing rails.
+  #
+  # The backlog-task path (Step 1.b below) doesn't hit this — it dispatches
+  # the developer subagent via the main session's `Agent` tool, which
+  # never enters defaultSpawner.
+  if ! command -v claude >/dev/null 2>&1; then
+    echo "ERROR: /ai-sdlc execute <gh-issue> requires the \`claude\` CLI on PATH" >&2
+    echo "       (subscription billing path). Install it via:" >&2
+    echo "         https://docs.claude.com/claude-code/installation" >&2
+    echo "" >&2
+    echo "       Refusing to fall back to ANTHROPIC_API_KEY-based dispatch" >&2
+    echo "       (paid API tokens) without explicit operator opt-in. If you" >&2
+    echo "       want the API-key path, use the watcher instead:" >&2
+    echo "         pnpm --filter @ai-sdlc/dogfood watch --issue ${GH_ISSUE_NUMBER}" >&2
+    exit 1
+  fi
+
+  # ── Pre-flight 2: dogfood dist build artefact ──
+  # We invoke `fetchGhIssueAsTaskSpec` through `node -e` against the built dist
+  # so the slash command body doesn't need a tsx/ts-node dependency at dispatch
+  # time. If the dist is missing (operator hasn't built dogfood), surface a clear hint.
   DOGFOOD_DIST="$(pwd)/dogfood/dist/dispatch-from-issue.js"
   if [ ! -f "$DOGFOOD_DIST" ]; then
     echo "ERROR: dogfood dist missing at $DOGFOOD_DIST" >&2
@@ -289,9 +315,24 @@ if [ "$ARG_FORM" = "gh-issue" ]; then
     exit 1
   fi
 
-  # Capture the synthesised spec (stdout) so we can pass it to executePipeline.
+  # ── Fetch the GH issue ONCE, cache to a tmpfile (AISDLC-393 round 2, FINDING 3 fix) ──
+  #
+  # Previously this block called `fetchGhIssueAsTaskSpec` TWICE — once here
+  # to extract `TASK_ID` for shell-scope use, once inside the dispatch
+  # `node -e` block to obtain the spec. Each call shells out `gh issue view`
+  # (latency + race condition if the issue body changes between the two calls,
+  # e.g. operator amends the AC list mid-dispatch). One fetch, cached to a
+  # tmpfile, threaded into both consumers.
+  #
+  # The tmpfile lives under /tmp/aisdlc-393-spec-<issue>.json (process-PID-suffixed
+  # so parallel `/ai-sdlc execute` dispatches don't collide). We clean it up
+  # right before `exit $?` — `trap` ensures cleanup on signal interruption too.
+  SPEC_TMPFILE="${TMPDIR:-/tmp}/aisdlc-393-spec-${GH_ISSUE_NUMBER}-$$.json"
+  # shellcheck disable=SC2064  # we want the variable interpolated NOW, not on EXIT.
+  trap "rm -f \"$SPEC_TMPFILE\"" EXIT INT TERM
+
   # The helper exits non-zero on closed issues, malformed payloads, etc.
-  TASK_SPEC_JSON=$(node -e "
+  node -e "
     import('$DOGFOOD_DIST').then(async ({ fetchGhIssueAsTaskSpec }) => {
       try {
         const { spec, issueNumber } = await fetchGhIssueAsTaskSpec(${GH_ISSUE_NUMBER});
@@ -301,15 +342,16 @@ if [ "$ARG_FORM" = "gh-issue" ]; then
         process.exit(1);
       }
     });
-  ") || {
+  " > "$SPEC_TMPFILE" || {
     echo "ERROR: failed to fetch GitHub issue #${GH_ISSUE_NUMBER} — see stderr above." >&2
     exit 1
   }
 
   # Extract the bits the rest of the slash command body needs in shell scope.
   # TASK_ID is the synthesised id (gh-issue-N) so the worktree path + sentinel
-  # naming downstream stays consistent with backlog dispatch.
-  TASK_ID=$(printf '%s' "$TASK_SPEC_JSON" | node -e 'let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(JSON.parse(s).spec.id))')
+  # naming downstream stays consistent with backlog dispatch. Reads from the
+  # cached tmpfile — no second `gh issue view` shell-out.
+  TASK_ID=$(node -e 'process.stdout.write(JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).spec.id)' "$SPEC_TMPFILE")
   TASK_ID_LOWER="$TASK_ID"  # already lowercase (gh-issue-N)
 
   # The pipeline composite handles everything from Step 2 onward, including
@@ -328,11 +370,26 @@ if [ "$ARG_FORM" = "gh-issue" ]; then
   # `cli-dispatch-gh-issue.mjs` wrapper is the natural future home if more
   # surface is needed). For now the watcher's `runOneIssue` + the new
   # `taskSpec`/`sourceKind` pipeline options give us the whole dispatch.
+  #
+  # AISDLC-393 round 2 (FINDING 2 fix): we pre-validated `claude` is on PATH
+  # above, so `defaultSpawner()` will pick `ShellClaudePSpawner` (subscription).
+  # We pass `which` explicitly with a forced-true probe AND set the env-reader
+  # to return undefined for `ANTHROPIC_API_KEY` to make the no-API-key-fallback
+  # contract a hard guarantee inside this dispatch (defence-in-depth — if
+  # `claude` somehow disappears between pre-flight and spawn, defaultSpawner
+  # throws rather than silently switching billing rails).
   node -e "
     import('$DOGFOOD_DIST').then(async ({ fetchGhIssueAsTaskSpec }) => {
       const { executePipeline, defaultSpawner } = await import('@ai-sdlc/pipeline-cli');
-      const { spec, issueNumber } = await fetchGhIssueAsTaskSpec(${GH_ISSUE_NUMBER});
-      const spawner = await defaultSpawner();
+      const fs = await import('node:fs');
+      const cached = JSON.parse(fs.readFileSync(process.argv[1], 'utf8'));
+      const spec = cached.spec;
+      const issueNumber = cached.issueNumber;
+      // FINDING 2 fix: refuse API-key fallback. The shell-side pre-flight
+      // already verified \`claude\` is on PATH, so passing \`env: () => undefined\`
+      // (i.e. pretend ANTHROPIC_API_KEY is unset) keeps the resolution chain
+      // honest: ShellClaudePSpawner wins, or defaultSpawner throws.
+      const spawner = await defaultSpawner({ env: () => undefined });
       const result = await executePipeline({
         taskId: spec.id,
         workDir: process.cwd(),
@@ -349,9 +406,12 @@ if [ "$ARG_FORM" = "gh-issue" ]; then
       process.stderr.write('GH-issue dispatch failed: ' + (err && err.message ? err.message : err) + '\n');
       process.exit(1);
     });
-  "
+  " "$SPEC_TMPFILE"
 
-  exit $?
+  DISPATCH_EXIT=$?
+  rm -f "$SPEC_TMPFILE"
+  trap - EXIT INT TERM
+  exit $DISPATCH_EXIT
 fi
 ```
 

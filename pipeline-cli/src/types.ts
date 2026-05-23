@@ -298,6 +298,18 @@ export interface BeginTaskResult {
   taskId: string;
   worktreePath: string;
   sentinelPath: string;
+  /**
+   * AISDLC-393 (round 2, AC-2 fix) — absolute path to the synthetic task
+   * file Step 4 materialised for the gh-issue path so the PreToolUse hook
+   * can resolve `permittedExternalPaths`. Present ONLY when ALL of:
+   *   - `sourceKind === 'gh-issue'`
+   *   - `opts.taskSpec` was provided
+   *   - `opts.taskSpec.permittedExternalPaths` is a non-empty array
+   *
+   * Step 13 cleanup removes this file (re-deriving the path via
+   * `syntheticTaskFilePath`) before push, so it never lands in a commit.
+   */
+  syntheticTaskFile?: string;
 }
 
 // ── Step 5 — Build developer prompt ──────────────────────────────────
@@ -525,10 +537,31 @@ export interface SiblingPrResult {
 export interface CleanupOptions {
   taskId: string;
   worktreePath: string;
+  /**
+   * AISDLC-393 (round 2, AC-2 fix) — absolute path to the synthetic gh-issue
+   * task file Step 4 materialised. When provided, Step 13 removes it
+   * (idempotent). When undefined but `taskSpec.permittedExternalPaths` is
+   * non-empty, Step 13 re-derives the path via `syntheticTaskFilePath()`.
+   * Pass undefined for the backlog path (no synthetic file is ever created).
+   */
+  syntheticTaskFile?: string;
+  /**
+   * AISDLC-393 (round 2, AC-2 fix) — inline `TaskSpec`, used as a fallback
+   * source-of-truth for the synthetic file's location when
+   * `syntheticTaskFile` was not threaded through. Optional.
+   */
+  taskSpec?: TaskSpec;
 }
 
 export interface CleanupResult {
   sentinelRemoved: boolean;
+  /**
+   * AISDLC-393 (round 2, AC-2 fix) — true iff a synthetic gh-issue task
+   * file existed AND was successfully removed. False on the backlog path
+   * (no synthetic file), false when no file was found, false when
+   * removal threw.
+   */
+  syntheticTaskFileRemoved: boolean;
 }
 
 // ── SubagentSpawner abstraction (RFC-0012 §8) ────────────────────────
