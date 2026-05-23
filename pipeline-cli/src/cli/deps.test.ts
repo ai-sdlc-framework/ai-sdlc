@@ -276,8 +276,8 @@ describe('cli-deps router', () => {
       else process.env.AI_SDLC_DEPS_COMPOSITION = priorFlag;
     });
 
-    it('snapshot is a no-op when AI_SDLC_DEPS_COMPOSITION is unset', async () => {
-      delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    it('snapshot is a no-op when AI_SDLC_DEPS_COMPOSITION=off (post-AISDLC-410 opt-out)', async () => {
+      process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
       writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
       setArgv('snapshot', '--tag', 'rolling', '--work-dir', tmp);
       await buildDepsCli().parseAsync();

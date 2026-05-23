@@ -164,7 +164,8 @@ describe('renderClarificationComment — RFC-0014 Phase 3 callouts', () => {
   });
 
   it('omits the callout when flag OFF (RFC-0011 baseline preserved)', () => {
-    delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    // AISDLC-410: opt-out explicitly (default-ON post-cutover).
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
     const body = renderClarificationComment(blockedVerdict(), {
       blastRadius: radius(7, ['AISDLC-101']),
     });
@@ -227,7 +228,8 @@ describe('renderBypassBlastRadiusComment — RFC-0014 Phase 3 / Q5', () => {
   });
 
   it('returns empty string when flag is OFF (no FYI fired)', () => {
-    delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    // AISDLC-410: opt-out explicitly (default-ON post-cutover).
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
     const out = renderBypassBlastRadiusComment('AISDLC-100', radius(5, ['A', 'B', 'C', 'D', 'E']));
     expect(out).toBe('');
   });

@@ -163,6 +163,19 @@ describe('cli-dor-stats', () => {
 });
 
 describe('cli-dor-digest', () => {
+  // AISDLC-410: post-cutover DEPS_COMPOSITION defaults ON, so digests
+  // auto-include the critical-path section. Opt-out so we exercise the
+  // baseline 3-block CLI render.
+  let priorDeps: string | undefined;
+  beforeEach(() => {
+    priorDeps = process.env.AI_SDLC_DEPS_COMPOSITION;
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
+  });
+  afterEach(() => {
+    if (priorDeps === undefined) delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    else process.env.AI_SDLC_DEPS_COMPOSITION = priorDeps;
+  });
+
   it('emits Slack Block Kit JSON by default', async () => {
     seedTwo();
     setArgv('--log', logPath, '--since-days', '365');

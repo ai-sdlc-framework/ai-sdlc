@@ -49,7 +49,9 @@ function setMtime(path: string, isoString: string): void {
 
 describe('sortFrontierByEffectivePriority — feature flag OFF (baseline / regression)', () => {
   beforeEach(() => {
-    delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    // AISDLC-410: post-cutover the default is ON, so explicitly opt-out to
+    // exercise the baseline (flag-OFF) behavior these tests assert.
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
   });
 
   it('preserves the baseline (id-ASC) order when the flag is OFF', () => {
@@ -198,7 +200,8 @@ describe('sortFrontierByEffectivePriority — feature flag ON (Phase 2 behaviour
 
 describe('sortFrontierByEffectivePriority — force flags', () => {
   beforeEach(() => {
-    delete process.env.AI_SDLC_DEPS_COMPOSITION; // make sure env is OFF
+    // AISDLC-410: ensure flag is OFF so we exercise the force-flag override path.
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
   });
 
   it('forceComposition=true overrides flag-OFF env', () => {
@@ -274,7 +277,8 @@ describe('compareForDispatch — pure comparator', () => {
 
 describe('rankAllByEffectivePriority — convenience helper', () => {
   it('honours the feature flag identically to sortFrontierByEffectivePriority', () => {
-    delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    // AISDLC-410: opt-out explicitly to exercise the flag-OFF baseline path.
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
     writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a', priority: 'low' });
     writeTaskFile(tmp, { id: 'AISDLC-B', title: 'b', priority: 'critical' });
     const g = buildDependencyGraph({ workDir: tmp });

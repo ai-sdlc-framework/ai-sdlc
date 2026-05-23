@@ -136,14 +136,24 @@ export interface WriteSnapshotResult {
 }
 
 /**
- * Phase-1 feature flag (RFC-0014 §9). When unset/0/false the writer is a no-op
- * — `writeSnapshot` returns `{ written: false }` and prints nothing to disk.
- * Truthy values: `1`, `true`, `yes`, `on` (case-insensitive). Anything else =
- * off, so a typo can't accidentally enable composition.
+ * RFC-0014 feature flag — DEFAULT-ON since AISDLC-410 (2026-05-23 operator
+ * promotion via override-path per `docs/operations/deps-composition-promotion.md`).
+ *
+ * Polarity: absent env = ON. Operator opts OUT with one of the falsy values
+ * (`off`, `0`, `false`, `no`, case-insensitive). Truthy values
+ * (`1`, `true`, `yes`, `on`) are honored for backward-compat and remain ON.
+ * Anything else (including unset) defaults to ON.
+ *
+ * Pre-promotion behavior (now retained as opt-out): when the operator wants
+ * the composition layer disabled — e.g. running in a sparse repo where the
+ * `_deps` snapshot writer is unwanted overhead — they set
+ * `AI_SDLC_DEPS_COMPOSITION=off`.
  */
 export function isCompositionEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   const raw = (env.AI_SDLC_DEPS_COMPOSITION ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+  const FALSY = new Set(['off', '0', 'false', 'no']);
+  if (FALSY.has(raw)) return false;
+  return true;
 }
 
 /**

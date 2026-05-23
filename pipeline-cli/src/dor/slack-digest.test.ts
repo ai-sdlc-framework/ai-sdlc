@@ -164,6 +164,20 @@ describe('buildDigestAggregate', () => {
 });
 
 describe('buildWeeklyDigest', () => {
+  // AISDLC-410: post-cutover DEPS_COMPOSITION defaults ON, so the critical-path
+  // section auto-appends to digests. These base-shape tests opt-out so they
+  // exercise the original 3-block render; the critical-path-section tests
+  // below already explicitly set includeCriticalPath.
+  let priorDeps: string | undefined;
+  beforeEach(() => {
+    priorDeps = process.env.AI_SDLC_DEPS_COMPOSITION;
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
+  });
+  afterEach(() => {
+    if (priorDeps === undefined) delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    else process.env.AI_SDLC_DEPS_COMPOSITION = priorDeps;
+  });
+
   it('emits Slack Block Kit shape with 3 blocks + fallback text', () => {
     seedFixture();
     const digest = buildWeeklyDigest({ logPath, sinceDays: 7, now: NOW });
@@ -239,13 +253,17 @@ describe('shouldIncludeCriticalPath (RFC-0014 Phase 4)', () => {
     expect(shouldIncludeCriticalPath({ includeCriticalPath: false })).toBe(false);
   });
 
-  it('falls back to AI_SDLC_DEPS_COMPOSITION when no explicit opt', () => {
+  it('falls back to AI_SDLC_DEPS_COMPOSITION when no explicit opt (post-AISDLC-410 default-ON)', () => {
+    // Pre-AISDLC-410: unset env = OFF. Post-AISDLC-410: unset env = ON
+    // (operator promotion via override-path); '0' / 'off' is the opt-out.
     process.env.AI_SDLC_DEPS_COMPOSITION = '1';
     expect(shouldIncludeCriticalPath()).toBe(true);
     process.env.AI_SDLC_DEPS_COMPOSITION = '0';
     expect(shouldIncludeCriticalPath()).toBe(false);
-    delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
     expect(shouldIncludeCriticalPath()).toBe(false);
+    delete process.env.AI_SDLC_DEPS_COMPOSITION;
+    expect(shouldIncludeCriticalPath()).toBe(true);
   });
 });
 

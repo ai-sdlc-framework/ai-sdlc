@@ -97,30 +97,42 @@ function appendExternalDeps(
   writeFileSync(path, `---\n${newFm}${rest}`, 'utf8');
 }
 
-describe('isCompositionEnabled', () => {
-  it('treats unset / empty / 0 / false / random as OFF', () => {
-    for (const v of ['', '0', 'false', 'no', 'off', 'whatever']) {
-      expect(isCompositionEnabled({ AI_SDLC_DEPS_COMPOSITION: v })).toBe(false);
+describe('isCompositionEnabled (post-AISDLC-410 default-ON)', () => {
+  it('treats unset / empty / random non-falsy value as ON (post-promotion default)', () => {
+    expect(isCompositionEnabled({})).toBe(true);
+    for (const v of ['', 'whatever', '2', 'enabled']) {
+      expect(isCompositionEnabled({ AI_SDLC_DEPS_COMPOSITION: v })).toBe(true);
     }
-    expect(isCompositionEnabled({})).toBe(false);
   });
 
-  it('treats 1 / true / yes / on (any case) as ON', () => {
+  it('treats off / 0 / false / no (any case) as OFF (operator opt-out)', () => {
+    for (const v of ['off', 'OFF', '0', 'false', 'FALSE', 'no', 'NO']) {
+      expect(isCompositionEnabled({ AI_SDLC_DEPS_COMPOSITION: v })).toBe(false);
+    }
+  });
+
+  it('treats 1 / true / yes / on (any case) as ON (backward-compat truthy)', () => {
     for (const v of ['1', 'true', 'TRUE', 'yes', 'YES', 'on', 'On']) {
       expect(isCompositionEnabled({ AI_SDLC_DEPS_COMPOSITION: v })).toBe(true);
     }
   });
 });
 
-describe('writeSnapshot — feature flag OFF', () => {
-  it('returns written=false and does not touch disk when AI_SDLC_DEPS_COMPOSITION is unset', () => {
-    delete process.env.AI_SDLC_DEPS_COMPOSITION;
-    writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
-    const r = writeSnapshot('rolling', { workDir: tmp, artifactsDir });
-    expect(r.written).toBe(false);
-    expect(r.bytes).toBe(0);
-    expect(existsSync(r.path)).toBe(false);
-    expect(existsSync(resolveSnapshotDir({ workDir: tmp, artifactsDir }))).toBe(false);
+describe('writeSnapshot — feature flag OFF (operator opt-out)', () => {
+  it('returns written=false and does not touch disk when AI_SDLC_DEPS_COMPOSITION=off', () => {
+    const prior = process.env.AI_SDLC_DEPS_COMPOSITION;
+    process.env.AI_SDLC_DEPS_COMPOSITION = 'off';
+    try {
+      writeTaskFile(tmp, { id: 'AISDLC-A', title: 'a' });
+      const r = writeSnapshot('rolling', { workDir: tmp, artifactsDir });
+      expect(r.written).toBe(false);
+      expect(r.bytes).toBe(0);
+      expect(existsSync(r.path)).toBe(false);
+      expect(existsSync(resolveSnapshotDir({ workDir: tmp, artifactsDir }))).toBe(false);
+    } finally {
+      if (prior === undefined) delete process.env.AI_SDLC_DEPS_COMPOSITION;
+      else process.env.AI_SDLC_DEPS_COMPOSITION = prior;
+    }
   });
 });
 
