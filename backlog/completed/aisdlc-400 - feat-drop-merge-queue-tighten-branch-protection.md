@@ -1,7 +1,7 @@
 ---
 id: AISDLC-400
 title: 'feat(ci): drop GH merge queue, replace with branch-protection rules + repo settings for parallel direct-merge'
-status: In Progress
+status: Done
 labels: [ci, merge-queue, throughput, operator-merge, architecture]
 references:
   - .github/workflows/auto-enable-auto-merge.yml

@@ -1,7 +1,7 @@
 ---
 id: AISDLC-403
 title: 'fix(ci): patch-coverage gate excludes bin/*.mjs CLI shims (AISDLC-376 follow-up)'
-status: To Do
+status: Done
 labels: [ci, coverage-gate, operator-merge]
 references:
   - scripts/check-pr-patch-coverage.mjs

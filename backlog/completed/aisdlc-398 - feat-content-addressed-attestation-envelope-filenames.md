@@ -1,7 +1,7 @@
 ---
 id: AISDLC-398
 title: 'feat(attestation): content-address envelope filenames via git patch-id (decouple from commit SHA)'
-status: In Progress
+status: Done
 labels: [attestation, ci, merge-queue, v4-kick, root-cause-fix]
 references:
   - ai-sdlc-plugin/scripts/sign-attestation.mjs
