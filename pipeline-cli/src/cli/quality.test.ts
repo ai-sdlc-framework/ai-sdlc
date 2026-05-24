@@ -11,7 +11,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { runReportUpstream } from './quality.js';
+import { runReportUpstream, runSeverityWeights } from './quality.js';
 import { UpstreamReportError } from '../tui/analytics/upstream-reporter.js';
 import {
   FRAMEWORK_QUALITY_CAPTURES_FILE,
@@ -179,5 +179,45 @@ describe('runReportUpstream', () => {
         print: true,
       }),
     ).toThrow(UpstreamReportError);
+  });
+});
+
+// ── severity-weights (AISDLC-305 / Phase 4) ──────────────────────────
+
+describe('runSeverityWeights (OQ-2)', () => {
+  it('returns shipping defaults with no overrides + no YAML', () => {
+    const result = runSeverityWeights({ workDir: workdir });
+    expect(result.resolved).toEqual({
+      operatorTimeCost: 1.0,
+      frameworkRecurrence: 1.0,
+      blastRadius: 1.0,
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('applies CLI overrides on top of YAML', () => {
+    const dir = join(workdir, '.ai-sdlc');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'quality-monitoring.yaml'),
+      ['quality:', '  severity-weights:', '    operator-time-cost: 1.5'].join('\n'),
+    );
+    const result = runSeverityWeights({
+      workDir: workdir,
+      severityWeight: ['blast-radius=2.5'],
+    });
+    expect(result.resolved.operatorTimeCost).toBeCloseTo(1.5); // YAML
+    expect(result.resolved.blastRadius).toBeCloseTo(2.5); // CLI
+    expect(result.resolved.frameworkRecurrence).toBe(1.0); // default
+  });
+
+  it('surfaces a warning for malformed override (continues with rest)', () => {
+    const result = runSeverityWeights({
+      workDir: workdir,
+      severityWeight: ['blast-radius=2.0', 'unknown-axis=5'],
+    });
+    expect(result.resolved.blastRadius).toBeCloseTo(2.0);
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]).toMatch(/unknown severity-weight axis/);
   });
 });

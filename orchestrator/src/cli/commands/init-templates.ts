@@ -816,6 +816,199 @@ export const CLASSIFIER_TEMPLATES: FeatureTemplateSet = {
 };
 
 /**
+ * `.ai-sdlc/quality-monitoring.yaml` stub — RFC-0025 §13.1 per-org config.
+ *
+ * AISDLC-305 / Phase 4: ships the documented §13.1 defaults across all
+ * resolved OQ surfaces:
+ *   - OQ-1 confidence-bucketed classifier thresholds
+ *   - OQ-2 per-axis severity weights
+ *   - OQ-3 multi-window recurrence
+ *   - OQ-4 framework-bug suggest-only attribution
+ *   - OQ-5 upstream reporting (operator-initiated)
+ *   - OQ-6 coverage-gap response
+ *   - OQ-7 composite determinism sampling
+ *   - OQ-9 operator-time-cost instrumentation
+ *   - OQ-10 vendor-namespace enforcement (strict by default)
+ *
+ * All values are commented-out so the file is documentation-as-data: the
+ * defaults inside `pipeline-cli/src/tui/analytics/quality-monitoring-config.ts`
+ * remain the source of truth, but operators get a complete cribsheet of
+ * what they can tune by un-commenting and editing.
+ */
+export const QUALITY_MONITORING_CONFIG_STUB = `# RFC-0025 Framework Quality Monitoring configuration (§13.1).
+#
+# Per-org overrides for the AI-SDLC framework's failure-mode taxonomy,
+# severity rubric, attribution UX, and self-improvement metrics. Every
+# block below ships with sensible small-to-medium-team defaults
+# (un-commented entries override the defaults).
+#
+# Lifecycle:
+#   - Drop this file in \`.ai-sdlc/\` to override defaults org-wide.
+#   - Pass \`--severity-weight <axis>=<value>\` on relevant CLIs for a
+#     one-shot debugging override (precedence: CLI > YAML > defaults).
+#   - The loader rejects un-namespaced custom subclasses by default
+#     (OQ-10 strict enforcement); set \`vendor-namespace.enforce: warn\`
+#     to downgrade to a soft warning during migration (deprecated).
+#
+# See RFC-0025 §13.1 for the full schema rationale + OQ resolutions.
+
+quality:
+  # OQ-1 / Phase 2 — Confidence-bucketed classifier (three-tier).
+  # classifier:
+  #   confidenceThresholds:
+  #     autoClassify: 0.7   # ≥ this → auto-classify into the resolved class
+  #     ambiguous: 0.3      # ≥ this and < autoClassify → ambiguous;
+  #                         # < this → unclassified, log-only
+
+  # OQ-2 / Phase 4 — Per-axis severity weights for the §7 composite rubric.
+  # Multiplies the qualitative axis (low=0, medium=1, high=2) before the
+  # max + frequency bump. A weight of 1.0 is the qualitative-bucket default.
+  # severity-weights:
+  #   operator-time-cost: 1.0
+  #   framework-recurrence: 1.0
+  #   blast-radius: 1.0
+
+  # OQ-3 / Phase 3 — Multi-window recurrence (simultaneously computed).
+  # recurrence-windows:
+  #   - 7d   # flap detection
+  #   - 30d  # standard recurrence
+  #   - 90d  # legacy regression
+
+  # OQ-4 / Phase 4 — Framework-bug attribution UX. Default is suggest-only
+  # (small-team-safe per the operator-affirmed OQ-4 resolution). Flip
+  # \`autoAttribute: true\` to force-assign the top candidates on creation.
+  # framework-bug:
+  #   autoAttribute: false
+  #   suggestionCount: 3
+  #   attributionSources:
+  #     - codeowners
+  #     # - git-blame   # v2 extension (RFC-0025 §13.1)
+  #     # - recent-pr   # v2 extension
+
+  # OQ-5 / Phase 6 — Operator-initiated upstream reporting. Set
+  # \`repoUrl\` to your framework-repo to enable \`cli-quality report-upstream\`.
+  # upstream-reporting:
+  #   repoUrl: "https://github.com/<org>/<repo>"
+  #   prefilledIssueTemplate: ".ai-sdlc/templates/framework-bug-report.md"
+
+  # OQ-6 / Phase 5 — Coverage-gap response. Composes with RFC-0024
+  # emergent capture (capture-record with source: framework-coverage-gap).
+  # coverage-gap:
+  #   autoQuarantine: true
+  #   fileCapture: true
+
+  # OQ-7 / Phase 5 — Composite determinism-detection sampling. Risk-based
+  # concentration via blast-radius matches the framework's deterministic-
+  # first preflight ladder (RFC-0035 §5).
+  # determinism-detection:
+  #   defaultSampleRate: 0.02            # 1-in-50 baseline
+  #   alwaysOnRequiresDeterminism: true
+  #   alwaysOnTopBlastRadiusDecile: true
+
+  # OQ-9 / Phase 5 — Operator-time-cost instrumentation. AFK filter zeroes
+  # out elapsed-time over inactivity gaps > N minutes (default 30).
+  # operator-time-cost:
+  #   afkInactivityMinutes: 30
+
+  # OQ-10 / Phase 6 — Vendor-namespace enforcement for custom failure-mode
+  # subclasses. Matches Kubernetes CRD / npm scoped / Go module convention.
+  # vendor-namespace:
+  #   enforce: reject    # or 'warn' (deprecated) / 'none' (deprecated)
+
+  # OQ-10 / Phase 6 — Adopter-declared custom failure-mode subclasses.
+  # Each entry MUST use a vendor reverse-DNS prefix under the default
+  # \`enforce: reject\`. Un-prefixed entries error at resource-load time.
+  # customSubclasses:
+  #   - acme-corp:custom-gate-faulty
+  #   - acme-corp:billing-timeout
+`;
+
+/**
+ * `.ai-sdlc/templates/framework-bug-report.md` stub — adopter-customisable
+ * template for the OQ-5 upstream-reporting CLI (\`cli-quality report-upstream\`).
+ *
+ * The template uses double-brace placeholders that the
+ * \`tui/analytics/upstream-reporter.ts\` module replaces at render time:
+ *   {{subclass}}, {{severity_composite}}, {{severity_otc}},
+ *   {{severity_blast}}, {{severity_freq}}, {{ts}}, {{task_id}},
+ *   {{worker_id}}, {{rationale}}, {{suggested_fix}}, {{related_paths}},
+ *   {{exit_code}}, {{source}}, {{stderr_tail}}
+ *
+ * Adopters can re-order sections + add markdown but should keep the
+ * placeholder names — the renderer's substitution table is fixed.
+ */
+export const FRAMEWORK_BUG_REPORT_TEMPLATE_STUB = `## Framework bug — {{subclass}}
+
+**Severity:** {{severity_composite}} (operator-time-cost={{severity_otc}}, blast-radius={{severity_blast}}, frequency={{severity_freq}})
+**Subclass:** \`{{subclass}}\`
+**Reported at (capture timestamp):** {{ts}}
+**Related task:** {{task_id}}
+**Worker:** {{worker_id}}
+
+### What happened
+
+The AI-SDLC framework's RFC-0025 quality monitor classified this failure as
+\`framework-misbehaved\` / \`{{subclass}}\`. Per the classifier's rationale:
+
+> {{rationale}}
+
+### Suggested fix (heuristic — please verify)
+
+{{suggested_fix}}
+
+### Related code paths
+
+{{related_paths}}
+
+### Anonymised repro
+
+The framework anonymised the failure context before this template
+rendered: absolute home paths were collapsed to \`~/…\`, worktree paths to
+\`<worktree>\`, and any apparent secret tokens (sk-…, ghp_…, xoxb-…) or
+email addresses were replaced with \`<REDACTED-…>\`. The operator should
+still inspect the body before submitting.
+
+\`\`\`
+exit code: {{exit_code}}
+source:    {{source}}
+
+{{stderr_tail}}
+\`\`\`
+
+### Operator checklist (before clicking Submit)
+
+- [ ] I have reviewed the anonymised repro for any remaining sensitive context.
+- [ ] The classifier's rationale matches what I observed locally.
+- [ ] The suggested fix and related paths look correct for this failure.
+- [ ] I am willing to follow up on the issue if the maintainers ask for more context.
+
+---
+
+_This issue was pre-generated by \`cli-quality report-upstream\` (RFC-0025 §13 OQ-5)._
+_The operator reviewed and submitted this report. No automatic telemetry was transmitted._
+`;
+
+/**
+ * Quality-monitoring template set scaffolded by the wizard's
+ * \`--with-quality-monitoring\` / \`--add quality-monitoring\` flag
+ * (AISDLC-305). Bundles the OQ-2 + OQ-4 + OQ-5 surfaces:
+ *
+ *   1. \`.ai-sdlc/quality-monitoring.yaml\` — RFC-0025 §13.1 per-org config
+ *      with all blocks commented-out (shipping defaults documented inline).
+ *   2. \`.ai-sdlc/templates/framework-bug-report.md\` — adopter-customisable
+ *      template for the OQ-5 upstream-reporting CLI.
+ *
+ * Idempotent: files already present at the target paths are skipped by the
+ * dispatcher.
+ */
+export const QUALITY_MONITORING_TEMPLATES: FeatureTemplateSet = {
+  files: {
+    '.ai-sdlc/quality-monitoring.yaml': QUALITY_MONITORING_CONFIG_STUB,
+    '.ai-sdlc/templates/framework-bug-report.md': FRAMEWORK_BUG_REPORT_TEMPLATE_STUB,
+  },
+};
+
+/**
  * Workflow template set scaffolded by `--with-workflows` / `--add workflows`
  * (AISDLC-261). Bundles all four canonical GitHub Actions workflow files that
  * an adopter needs for the AI-SDLC framework to function end-to-end:
@@ -844,9 +1037,18 @@ export const WORKFLOWS_TEMPLATES: FeatureTemplateSet = {
  * Matches AC #4 in AISDLC-143: pipeline.yaml + agent-role.yaml +
  * quality-gate.yaml + autonomy-policy.yaml are scaffolded by `initProject`
  * (existing logic) and the gate workflow is scaffolded by this map.
+ *
+ * AISDLC-305 / Phase 4 (RFC-0025): the quality-monitoring config + the
+ * upstream-report template are part of the BASELINE because they are pure
+ * documentation-as-data (every block commented-out, shipping defaults
+ * documented inline). Adopters get the §13.1 cribsheet by default; the
+ * `.gitignore`-friendly behavior is to commit it as-is and uncomment
+ * blocks per-org as needed.
  */
 export const BASELINE_WORKFLOW_TEMPLATES: FeatureTemplateSet = {
   files: {
     '.github/workflows/ai-sdlc-gate.yml': AI_SDLC_GATE_WORKFLOW,
+    '.ai-sdlc/quality-monitoring.yaml': QUALITY_MONITORING_CONFIG_STUB,
+    '.ai-sdlc/templates/framework-bug-report.md': FRAMEWORK_BUG_REPORT_TEMPLATE_STUB,
   },
 };

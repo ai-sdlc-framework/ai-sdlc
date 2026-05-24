@@ -1,10 +1,14 @@
 /**
  * `cli-quality` — operator-facing CLI for the RFC-0025 quality monitoring
- * surface. Phase 6 / AISDLC-307.
+ * surface. Phase 6 / AISDLC-307; extended Phase 4 / AISDLC-305.
  *
  * Subcommands:
  *   report-upstream <bug-id>   — render a pre-filled GitHub issue for an
  *                                upstream framework-bug capture (OQ-5).
+ *   severity-weights           — print the resolved per-axis severity
+ *                                weight overrides (OQ-2 / Phase 4),
+ *                                layering optional CLI `--severity-weight`
+ *                                flags on top of the YAML config.
  *
  * Sister CLI to `cli-quality-corpus` (which aggregates the capture corpus
  * into self-improvement metrics).
@@ -30,7 +34,12 @@
 import yargs, { type Argv } from 'yargs';
 import { hideBin } from 'yargs/helpers';
 
-import { loadQualityMonitoringConfig } from '../tui/analytics/quality-monitoring-config.js';
+import {
+  loadQualityMonitoringConfig,
+  parseSeverityWeightFlag,
+  resolveSeverityWeights,
+  type SeverityWeightsConfig,
+} from '../tui/analytics/quality-monitoring-config.js';
 import {
   UpstreamReportError,
   buildUpstreamReport,
@@ -107,6 +116,41 @@ export function runReportUpstream(args: ReportUpstreamArgs): ReportUpstreamResul
   }
 
   return { ...report, browserOpened };
+}
+
+// ── severity-weights handler (pure for tests) ────────────────────────
+
+export interface RunSeverityWeightsArgs {
+  /** One or more `<axis>=<value>` CLI specs (one-shot overrides). */
+  severityWeight?: string[];
+  workDir?: string;
+  format?: 'json' | 'text';
+}
+
+export interface RunSeverityWeightsResult {
+  resolved: SeverityWeightsConfig;
+  /** Parse warnings — emitted on stderr by the CLI router, but surfaced
+   * here so tests + library consumers can assert on them. */
+  warnings: string[];
+}
+
+/**
+ * Pure entry point for `cli-quality severity-weights`. The CLI router
+ * thin-wraps this — tests should drive this directly with a workdir.
+ */
+export function runSeverityWeights(args: RunSeverityWeightsArgs): RunSeverityWeightsResult {
+  const warnings: string[] = [];
+  const cliOverrides: string[] = [];
+  for (const spec of args.severityWeight ?? []) {
+    const { partial, reason } = parseSeverityWeightFlag(spec);
+    if (partial) {
+      cliOverrides.push(spec);
+    } else if (reason) {
+      warnings.push(reason);
+    }
+  }
+  const resolved = resolveSeverityWeights({ workDir: args.workDir, cliOverrides });
+  return { resolved, warnings };
 }
 
 // ── CLI router ────────────────────────────────────────────────────────
@@ -201,7 +245,57 @@ export function buildQualityCli(): Argv {
         }
       },
     )
-    .demandCommand(1, 'A subcommand is required (currently: report-upstream). Run with --help.')
+    .command(
+      'severity-weights',
+      'Resolve the per-axis severity-weight overrides (RFC-0025 §13 OQ-2 / Phase 4).',
+      (y) =>
+        y
+          .option('severity-weight', {
+            type: 'string',
+            array: true,
+            describe:
+              "One-shot per-axis override of the form '<axis>=<value>'. " +
+              'Axis: operator-time-cost | framework-recurrence | blast-radius (kebab or camelCase). ' +
+              'Layered on top of `.ai-sdlc/quality-monitoring.yaml` for THIS invocation only. ' +
+              'Repeat the flag to override multiple axes.',
+          })
+          .option('work-dir', {
+            type: 'string',
+            describe: 'Project root used to locate the config. Defaults to cwd.',
+          })
+          .option('format', {
+            type: 'string',
+            choices: ['json', 'text'] as const,
+            default: 'text' as const,
+            describe: "Output format: 'json' or 'text' (default).",
+          }),
+      (argv) => {
+        const result = runSeverityWeights({
+          severityWeight: (argv['severity-weight'] as string[] | undefined) ?? [],
+          workDir: argv['work-dir'] as string | undefined,
+          format: argv.format as 'json' | 'text',
+        });
+
+        // Always surface warnings on stderr (operator may have typo'd a flag)
+        for (const w of result.warnings) {
+          process.stderr.write(`[cli-quality] ${w}\n`);
+        }
+
+        if (argv.format === 'json') {
+          emit(result.resolved);
+          return;
+        }
+
+        emitText(`Severity weights (composite = max(otc, blast) raised by 1 if frequency=high):`);
+        emitText(`  operator-time-cost:  ${result.resolved.operatorTimeCost}`);
+        emitText(`  framework-recurrence: ${result.resolved.frameworkRecurrence}`);
+        emitText(`  blast-radius:        ${result.resolved.blastRadius}`);
+      },
+    )
+    .demandCommand(
+      1,
+      'A subcommand is required (currently: report-upstream, severity-weights). Run with --help.',
+    )
     .strict()
     .help()
     .alias('h', 'help')

@@ -68,6 +68,7 @@ import type { FailureSignal } from '../../orchestrator/playbook/types.js';
 import {
   resolveClassifierConfidenceThresholds,
   type ClassifierConfidenceConfig,
+  type SeverityWeightsConfig,
 } from './quality-monitoring-config.js';
 
 export type { FailureSignal };
@@ -144,17 +145,57 @@ export interface SeverityScore {
 /**
  * §7 composite severity rubric.
  *
- * composite = max(operatorTimeCost, blastRadius) raised one level if
- * frequency is `high`.
+ * Unweighted (default — backward-compatible with pre-AISDLC-305 callers):
+ *   composite = max(operatorTimeCost, blastRadius) raised one level if
+ *   frequency is `high`.
+ *
+ * Weighted (OQ-2 / AISDLC-305): when `weights` is supplied, each
+ * qualitative axis ordinal (`low=0`, `medium=1`, `high=2`) is multiplied
+ * by the per-axis weight before taking the max + frequency bump. The
+ * resulting weighted score is re-bucketed back into `low`/`medium`/`high`
+ * using `<1 → low`, `<2 → medium`, `≥2 → high`. The frequency bump is
+ * preserved (a `high`-frequency axis with positive weight still raises
+ * the composite by one bucket, ceiling at `high`).
+ *
+ * Backward compatibility: callers that omit `weights` get exact pre-OQ-2
+ * behavior; the existing test suite covers both branches.
  */
-export function computeSeverity(axes: SeverityAxes): SeverityScore {
+export function computeSeverity(
+  axes: SeverityAxes,
+  weights?: SeverityWeightsConfig,
+): SeverityScore {
   const ORDER: Record<CompositeSeverity, number> = { low: 0, medium: 1, high: 2 };
   const FROM_ORDER: CompositeSeverity[] = ['low', 'medium', 'high'];
 
-  const base = Math.max(ORDER[axes.operatorTimeCost], ORDER[axes.blastRadius]);
-  const raised = axes.frequency === 'high' ? Math.min(base + 1, 2) : base;
-  const composite = FROM_ORDER[raised] ?? 'low';
+  if (!weights) {
+    const base = Math.max(ORDER[axes.operatorTimeCost], ORDER[axes.blastRadius]);
+    const raised = axes.frequency === 'high' ? Math.min(base + 1, 2) : base;
+    const composite = FROM_ORDER[raised] ?? 'low';
+    return { composite, axes };
+  }
 
+  // OQ-2 weighted path. Weights are guaranteed ≥ 0 by the config parser
+  // and `parseSeverityWeightFlag()`; defensive Math.max(0, ...) shields
+  // any caller that bypassed both.
+  const wOtc = Math.max(0, weights.operatorTimeCost);
+  const wBlast = Math.max(0, weights.blastRadius);
+  const wFreq = Math.max(0, weights.frameworkRecurrence);
+
+  const weightedOtc = ORDER[axes.operatorTimeCost] * wOtc;
+  const weightedBlast = ORDER[axes.blastRadius] * wBlast;
+  let weighted = Math.max(weightedOtc, weightedBlast);
+  if (axes.frequency === 'high' && wFreq > 0) {
+    weighted += 1; // §7 frequency bump — proportional to its presence, not its weight
+  }
+
+  // Re-bucket: <1 → low, <2 → medium, ≥2 → high. Matches the unweighted
+  // ORDER table boundaries so default-weights = 1.0 produces identical
+  // bucket assignments to the unweighted path.
+  let bucketIndex: number;
+  if (weighted < 1) bucketIndex = 0;
+  else if (weighted < 2) bucketIndex = 1;
+  else bucketIndex = 2;
+  const composite = FROM_ORDER[bucketIndex] ?? 'low';
   return { composite, axes };
 }
 

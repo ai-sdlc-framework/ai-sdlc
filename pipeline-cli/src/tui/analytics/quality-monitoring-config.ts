@@ -3,6 +3,9 @@
  * Phase 2 (AISDLC-303): classifier.confidenceThresholds (OQ-1) —
  * confidence-bucketed three-tier classifier per-org configuration.
  * Phase 3 (AISDLC-304): recurrence-windows.
+ * Phase 4 (AISDLC-305): severity-weights (OQ-2) per-axis multipliers +
+ * framework-bug (OQ-4) suggest-only attribution config (autoAttribute,
+ * attributionSources, suggestionCount).
  * Phase 5 (AISDLC-306): coverage-gap (OQ-6) + determinism-detection (OQ-7)
  * + operator-time-cost (OQ-9) per-org configuration.
  * Phase 6 (AISDLC-307): upstream-reporting (OQ-5) + vendor-namespace
@@ -103,6 +106,54 @@ export const DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES = 30;
  * shared with the AISDLC-321 classifier substrate.
  */
 export const DEFAULT_CLASSIFIER_AUTO_CLASSIFY_THRESHOLD = 0.7;
+
+/**
+ * Default per-axis severity multiplier per OQ-2 (§13.1). A value of 1.0 is
+ * "no change relative to the qualitative bucket"; operators tune per-org to
+ * reweight the composite-severity computation (e.g. an org that pages on
+ * blast-radius spikes might set `blast-radius: 1.5`).
+ *
+ * The multipliers compose with `computeSeverityWithWeights()` — the
+ * qualitative axis (`low`/`medium`/`high`) is first mapped to a numeric
+ * ordinal (0..2), then multiplied by the per-axis weight. The composite
+ * bucket is derived by re-bucketing the weighted maximum.
+ */
+export const DEFAULT_SEVERITY_WEIGHT = 1.0;
+
+/**
+ * Default `framework-bug.autoAttribute` flag per OQ-4 (§13.1). When false
+ * (the operator-affirmed default), the router writes the task WITHOUT an
+ * assignee — CODEOWNERS candidates are surfaced as suggestions for operator
+ * confirmation via the TUI/Slack DM. When true (per-org opt-in), the top
+ * CODEOWNERS candidate(s) are written directly to the task's `assignee:`
+ * frontmatter.
+ *
+ * Rationale (OQ-4 resolution 2026-05-15): "suggest-only" is the small-team
+ * default because wrong-assignment is more disruptive than no-assignment;
+ * larger orgs that need accountability opt-in.
+ */
+export const DEFAULT_FRAMEWORK_BUG_AUTO_ATTRIBUTE = false;
+
+/**
+ * Default `framework-bug.suggestionCount` per OQ-4 (§13.1). Capped at
+ * three CODEOWNERS candidates surfaced to the operator — matches the §13.1
+ * shipping default ("top-3 candidates").
+ *
+ * Operators may override per-org via `quality.framework-bug.suggestionCount`
+ * in `quality-monitoring.yaml`; values below 1 are silently clamped to 1
+ * (zero candidates would defeat the suggest-only UX).
+ */
+export const DEFAULT_FRAMEWORK_BUG_SUGGESTION_COUNT = 3;
+
+/**
+ * Default `framework-bug.attributionSources` list per OQ-4 (§13.1). Ships
+ * only `codeowners` in Phase 4; `git-blame` and `recent-pr` are v2
+ * extensions documented in the RFC but NOT implemented here. The router
+ * iterates the list in order and concatenates candidates.
+ */
+export const DEFAULT_FRAMEWORK_BUG_ATTRIBUTION_SOURCES: readonly string[] = Object.freeze([
+  'codeowners',
+]);
 
 /**
  * Default mid/low boundary for the OQ-1 confidence-bucketed classifier.
@@ -244,6 +295,75 @@ export interface ClassifierConfig {
   confidenceThresholds: ClassifierConfidenceConfig;
 }
 
+/**
+ * RFC-0025 §13.1 OQ-2 — per-axis severity weight overrides.
+ *
+ * Phase 4 (AISDLC-305). Per-org tuneable multipliers for the §7 composite
+ * severity rubric. A multiplier of `1.0` is the qualitative-bucket default;
+ * values above `1.0` boost the axis's contribution, below `1.0` dampen it.
+ *
+ * Negative values + non-finite values are silently clamped to the §13.1
+ * `DEFAULT_SEVERITY_WEIGHT` (`1.0`) at load time so a malformed override
+ * cannot cause a NaN-bucket cascade in the classifier.
+ *
+ * Operators may also pass a one-shot override via the
+ * `--severity-weight <axis>=<value>` CLI flag on relevant CLIs (the flag
+ * resolution takes precedence over the YAML resolution for that single
+ * invocation).
+ *
+ * Axes (each maps to the qualitative axis in `SeverityAxes`):
+ *  - `operator-time-cost`  → §7.1 (`operatorTimeCost`)
+ *  - `framework-recurrence` → §7.3 (`frequency`) — kebab-name in §13.1
+ *  - `blast-radius`        → §7.2 (`blastRadius`)
+ */
+export interface SeverityWeightsConfig {
+  /** §7.1 axis multiplier — default 1.0. */
+  operatorTimeCost: number;
+  /** §7.3 axis multiplier — default 1.0. (`framework-recurrence` in §13.1.) */
+  frameworkRecurrence: number;
+  /** §7.2 axis multiplier — default 1.0. */
+  blastRadius: number;
+}
+
+/**
+ * RFC-0025 §13.1 OQ-4 — framework-bug attribution config.
+ *
+ * Phase 4 (AISDLC-305). Controls the suggest-only-vs-auto-attribute UX for
+ * `triage: framework-bug` task creation. The §13.1 default is suggest-only
+ * (`autoAttribute: false`) per the operator-affirmed OQ-4 resolution
+ * (2026-05-15) — wrong-assignment is more disruptive in small teams than
+ * no-assignment.
+ *
+ * Per-org override path: `quality.framework-bug.*` in
+ * `.ai-sdlc/quality-monitoring.yaml`. Larger orgs that need accountability
+ * opt in by flipping `autoAttribute: true` (force-assigns the top
+ * `suggestionCount` candidates from `attributionSources`).
+ */
+export interface FrameworkBugAttributionConfig {
+  /**
+   * When `false` (default), the router writes the framework-bug task with
+   * an empty `assignee: []` and surfaces the resolved candidates as a
+   * separate suggestion list (TUI confirmation, Slack DM). When `true`,
+   * the top `suggestionCount` candidates are written directly to the
+   * task's `assignee:` frontmatter.
+   */
+  autoAttribute: boolean;
+  /**
+   * Ordered list of attribution backends to query. Ships only
+   * `'codeowners'` in Phase 4; `'git-blame'` and `'recent-pr'` are v2
+   * extensions documented in RFC-0025 §13.1 but NOT implemented here.
+   * Unknown sources are silently skipped at attribution time.
+   */
+  attributionSources: string[];
+  /**
+   * Maximum number of candidates to surface (or force-assign when
+   * `autoAttribute: true`). Default `3` per §13.1. Values < 1 are clamped
+   * to 1 at load time so the suggest-only UX always has at least one
+   * candidate to show.
+   */
+  suggestionCount: number;
+}
+
 export interface QualityMonitoringConfig {
   /**
    * Confidence-bucketed classifier thresholds (OQ-1 / Phase 2). See
@@ -291,6 +411,16 @@ export interface QualityMonitoringConfig {
    * `OperatorTimeCostConfig`.
    */
   operatorTimeCost: OperatorTimeCostConfig;
+  /**
+   * Per-axis severity weight overrides (OQ-2 / Phase 4). See
+   * `SeverityWeightsConfig`.
+   */
+  severityWeights: SeverityWeightsConfig;
+  /**
+   * Framework-bug attribution config (OQ-4 / Phase 4). See
+   * `FrameworkBugAttributionConfig`.
+   */
+  frameworkBug: FrameworkBugAttributionConfig;
 }
 
 export const QUALITY_MONITORING_CONFIG_DEFAULTS: Readonly<QualityMonitoringConfig> = Object.freeze({
@@ -320,6 +450,16 @@ export const QUALITY_MONITORING_CONFIG_DEFAULTS: Readonly<QualityMonitoringConfi
   },
   operatorTimeCost: {
     afkInactivityMinutes: DEFAULT_OPERATOR_TIME_COST_AFK_MINUTES,
+  },
+  severityWeights: {
+    operatorTimeCost: DEFAULT_SEVERITY_WEIGHT,
+    frameworkRecurrence: DEFAULT_SEVERITY_WEIGHT,
+    blastRadius: DEFAULT_SEVERITY_WEIGHT,
+  },
+  frameworkBug: {
+    autoAttribute: DEFAULT_FRAMEWORK_BUG_AUTO_ATTRIBUTE,
+    attributionSources: [...DEFAULT_FRAMEWORK_BUG_ATTRIBUTION_SOURCES],
+    suggestionCount: DEFAULT_FRAMEWORK_BUG_SUGGESTION_COUNT,
   },
 });
 
@@ -415,6 +555,13 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
     coverageGap: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap },
     determinismDetection: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection },
     operatorTimeCost: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost },
+    severityWeights: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.severityWeights },
+    frameworkBug: {
+      ...QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug,
+      // Re-clone the array so callers that mutate it don't poison the
+      // shared default.
+      attributionSources: [...QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug.attributionSources],
+    },
   };
 
   const lines = raw.split('\n');
@@ -437,10 +584,14 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
     | 'coverage-gap'
     | 'determinism-detection'
     | 'operator-time-cost'
+    | 'severity-weights'
+    | 'framework-bug'
+    | 'framework-bug-attribution-sources'
     | null;
   let block: Block = null;
   let parsedWindows: string[] = [];
   let parsedSubclasses: string[] = [];
+  let parsedAttributionSources: string[] = [];
 
   const flushWindows = (): void => {
     if (parsedWindows.length > 0) out.recurrenceWindows = parsedWindows;
@@ -449,6 +600,13 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
   const flushSubclasses = (): void => {
     out.customSubclasses = parsedSubclasses;
     parsedSubclasses = [];
+  };
+  const flushAttributionSources = (): void => {
+    // When the operator declared the key with an empty list, honour it —
+    // the suggest-only UX silently degrades to "no candidates" rather than
+    // silently falling back to defaults that the operator removed.
+    out.frameworkBug.attributionSources = parsedAttributionSources;
+    parsedAttributionSources = [];
   };
 
   // Parse a YAML scalar as a boolean per common YAML truthiness rules.
@@ -466,15 +624,24 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
     if (!trimmed || trimmed.startsWith('#')) continue;
 
     // ── Block headers (level-agnostic key match) ──────────────────────
-    if (/^classifier\s*:\s*$/.test(trimmed)) {
+    //
+    // Each header transition must flush every in-flight list-block. We
+    // factor this into a single helper to avoid the matrix of
+    // `if (block === '...') flush...()` lines (the original substrate
+    // pattern, kept inline below for the operator's mental model).
+    const flushAllLists = (): void => {
       if (block === 'recurrence-windows') flushWindows();
       if (block === 'customSubclasses') flushSubclasses();
+      if (block === 'framework-bug-attribution-sources') flushAttributionSources();
+    };
+
+    if (/^classifier\s*:\s*$/.test(trimmed)) {
+      flushAllLists();
       block = 'classifier';
       continue;
     }
     if (/^confidenceThresholds\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
-      if (block === 'customSubclasses') flushSubclasses();
+      flushAllLists();
       // Nested header — only valid inside the `classifier:` block.
       // Outside it, we still accept the header to be lenient (operators may
       // hoist the sub-block one level), since the substrate's classifier
@@ -483,52 +650,64 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
       continue;
     }
     if (/^recurrence-windows\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
-      if (block === 'customSubclasses') flushSubclasses();
+      flushAllLists();
       block = 'recurrence-windows';
       parsedWindows = [];
       continue;
     }
     if (/^upstream-reporting\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
-      if (block === 'customSubclasses') flushSubclasses();
+      flushAllLists();
       block = 'upstream-reporting';
       continue;
     }
     if (/^vendor-namespace\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
-      if (block === 'customSubclasses') flushSubclasses();
+      flushAllLists();
       block = 'vendor-namespace';
       continue;
     }
     if (/^coverage-gap\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
-      if (block === 'customSubclasses') flushSubclasses();
+      flushAllLists();
       block = 'coverage-gap';
       continue;
     }
     if (/^determinism-detection\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
-      if (block === 'customSubclasses') flushSubclasses();
+      flushAllLists();
       block = 'determinism-detection';
       continue;
     }
     if (/^operator-time-cost\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
-      if (block === 'customSubclasses') flushSubclasses();
+      flushAllLists();
       block = 'operator-time-cost';
       continue;
     }
+    if (/^severity-weights\s*:\s*$/.test(trimmed)) {
+      flushAllLists();
+      block = 'severity-weights';
+      continue;
+    }
+    if (/^framework-bug\s*:\s*$/.test(trimmed)) {
+      flushAllLists();
+      block = 'framework-bug';
+      continue;
+    }
+    if (/^attributionSources\s*:\s*$/.test(trimmed)) {
+      flushAllLists();
+      // Only valid inside the `framework-bug:` block. We are lenient and
+      // accept it at any depth (parallel to `confidenceThresholds`); the
+      // schema validator in CI enforces the proper nesting.
+      block = 'framework-bug-attribution-sources';
+      parsedAttributionSources = [];
+      continue;
+    }
     if (/^customSubclasses\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
+      flushAllLists();
       block = 'customSubclasses';
       parsedSubclasses = [];
       continue;
     }
     // Reset on the top-level `quality:` wrapper — non-list, non-recognised key
     if (/^quality\s*:\s*$/.test(trimmed)) {
-      if (block === 'recurrence-windows') flushWindows();
-      if (block === 'customSubclasses') flushSubclasses();
+      flushAllLists();
       block = null;
       continue;
     }
@@ -677,11 +856,71 @@ export function parseQualityMonitoringConfigYaml(raw: string): QualityMonitoring
       }
       block = null;
     }
+
+    if (block === 'severity-weights') {
+      const kvMatch = /^([a-zA-Z][a-zA-Z0-9_-]*)\s*:\s*(.+)$/.exec(trimmed);
+      if (kvMatch && kvMatch[1] && kvMatch[2]) {
+        const key = kvMatch[1];
+        const val = unquote(kvMatch[2]);
+        const parsed = Number(val);
+        // Accept any finite non-negative number. Negative weights would
+        // flip the bucket polarity and make the rubric meaningless; NaN
+        // would cascade through the classifier.
+        if (Number.isFinite(parsed) && parsed >= 0) {
+          // §13.1 uses the kebab axis names; map to camelCase config fields.
+          if (key === 'operator-time-cost' || key === 'operatorTimeCost') {
+            out.severityWeights.operatorTimeCost = parsed;
+          } else if (key === 'framework-recurrence' || key === 'frameworkRecurrence') {
+            out.severityWeights.frameworkRecurrence = parsed;
+          } else if (key === 'blast-radius' || key === 'blastRadius') {
+            out.severityWeights.blastRadius = parsed;
+          }
+        }
+        continue;
+      }
+      block = null;
+    }
+
+    if (block === 'framework-bug') {
+      const kvMatch = /^([a-zA-Z][a-zA-Z0-9_-]*)\s*:\s*(.+)$/.exec(trimmed);
+      if (kvMatch && kvMatch[1] && kvMatch[2]) {
+        const key = kvMatch[1];
+        const val = unquote(kvMatch[2]);
+        if (key === 'autoAttribute') {
+          const b = parseBool(val);
+          if (b !== null) out.frameworkBug.autoAttribute = b;
+        } else if (key === 'suggestionCount') {
+          const parsed = Number(val);
+          // Clamp to ≥ 1 (zero candidates defeats the suggest-only UX) and
+          // require finite + integer-coercible. Non-integers floor.
+          if (Number.isFinite(parsed) && parsed >= 0) {
+            out.frameworkBug.suggestionCount = Math.max(1, Math.floor(parsed));
+          }
+        }
+        // `attributionSources:` is handled as its own list-block — fall
+        // through to the next iteration so the header line is re-matched.
+        continue;
+      }
+      block = null;
+    }
+
+    if (block === 'framework-bug-attribution-sources') {
+      const listMatch = /^-\s*(.+)$/.exec(trimmed);
+      if (listMatch && listMatch[1]) {
+        const val = unquote(listMatch[1]);
+        if (val) parsedAttributionSources.push(val);
+        continue;
+      }
+      flushAttributionSources();
+      block = null;
+      // fall through so the line can be re-tested as a header
+    }
   }
 
   // Flush any in-flight list-block
   if (block === 'recurrence-windows') flushWindows();
   if (block === 'customSubclasses') flushSubclasses();
+  if (block === 'framework-bug-attribution-sources') flushAttributionSources();
 
   // Normalise classifier thresholds: keep `ambiguous` ≤ `autoClassify` so
   // the bucket logic in classifier.ts stays monotonic even when the
@@ -799,6 +1038,11 @@ export function loadQualityMonitoringConfig(
     coverageGap: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap },
     determinismDetection: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection },
     operatorTimeCost: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost },
+    severityWeights: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.severityWeights },
+    frameworkBug: {
+      ...QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug,
+      attributionSources: [...QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug.attributionSources],
+    },
   });
 
   if (!existsSync(filePath)) return fallback();
@@ -814,6 +1058,136 @@ export function loadQualityMonitoringConfig(
   enforceVendorNamespaceConfig(cfg, { logger: opts.logger });
   return cfg;
 }
+
+// ── Severity-weights overrides (OQ-2) ────────────────────────────────
+
+/**
+ * Parse a single `--severity-weight axis=value` CLI flag value into a
+ * `SeverityWeightsConfig` partial.
+ *
+ * Accepts §13.1 kebab axis names (`operator-time-cost`,
+ * `framework-recurrence`, `blast-radius`) as well as the camelCase
+ * equivalents the config field uses (`operatorTimeCost`,
+ * `frameworkRecurrence`, `blastRadius`) — operators get whichever form
+ * they remember.
+ *
+ * Returns `null` (with a `reason`) on:
+ *  - missing `=`
+ *  - unknown axis name
+ *  - non-finite or negative value
+ *
+ * The caller (CLI layer) is responsible for surfacing the reason as a
+ * usage error; the parser is pure so it composes cleanly with both
+ * yargs-array (`--severity-weight a=1 --severity-weight b=2`) and a
+ * single-shot string parser.
+ */
+export interface ParseSeverityWeightFlagResult {
+  /** Partial config — non-null when parse succeeded. */
+  partial: Partial<SeverityWeightsConfig> | null;
+  /** Human-readable reason when `partial` is null. */
+  reason: string | null;
+}
+
+export function parseSeverityWeightFlag(spec: string): ParseSeverityWeightFlagResult {
+  const trimmed = spec.trim();
+  const eq = trimmed.indexOf('=');
+  if (eq <= 0 || eq === trimmed.length - 1) {
+    return {
+      partial: null,
+      reason: `severity-weight spec '${spec}' must be of the form '<axis>=<value>'.`,
+    };
+  }
+  const axis = trimmed.slice(0, eq).trim();
+  const valStr = trimmed.slice(eq + 1).trim();
+  const value = Number(valStr);
+  if (!Number.isFinite(value) || value < 0) {
+    return {
+      partial: null,
+      reason: `severity-weight value '${valStr}' for axis '${axis}' must be a finite, non-negative number.`,
+    };
+  }
+  switch (axis) {
+    case 'operator-time-cost':
+    case 'operatorTimeCost':
+      return { partial: { operatorTimeCost: value }, reason: null };
+    case 'framework-recurrence':
+    case 'frameworkRecurrence':
+      return { partial: { frameworkRecurrence: value }, reason: null };
+    case 'blast-radius':
+    case 'blastRadius':
+      return { partial: { blastRadius: value }, reason: null };
+    default:
+      return {
+        partial: null,
+        reason: `unknown severity-weight axis '${axis}'. Accepted: operator-time-cost, framework-recurrence, blast-radius.`,
+      };
+  }
+}
+
+/**
+ * Resolve the per-org severity-weight overrides, with optional one-shot
+ * CLI flag specs layered on top (highest precedence).
+ *
+ * Resolution order (each layer overrides only the axes it specifies):
+ *  1. shipping defaults (`DEFAULT_SEVERITY_WEIGHT` per axis)
+ *  2. YAML resolution via `loadQualityMonitoringConfig({...})`
+ *  3. CLI flag specs (`['operator-time-cost=1.5', 'blast-radius=2.0']`)
+ *
+ * Never throws on threshold-shape issues — `loadQualityMonitoringConfig()`
+ * only throws on OQ-10 violations, which are unrelated to severity
+ * weights. Malformed CLI specs are silently skipped (caller validates via
+ * `parseSeverityWeightFlag()` for error surfacing).
+ */
+export function resolveSeverityWeights(
+  opts: LoadQualityMonitoringConfigOpts & { cliOverrides?: string[] } = {},
+): SeverityWeightsConfig {
+  let weights: SeverityWeightsConfig;
+  try {
+    const cfg = loadQualityMonitoringConfig(opts);
+    weights = { ...cfg.severityWeights };
+  } catch {
+    weights = { ...QUALITY_MONITORING_CONFIG_DEFAULTS.severityWeights };
+  }
+  for (const spec of opts.cliOverrides ?? []) {
+    const { partial } = parseSeverityWeightFlag(spec);
+    if (partial) Object.assign(weights, partial);
+  }
+  return weights;
+}
+
+/**
+ * Apply per-axis severity weights to a qualitative `SeverityAxes` to
+ * produce the composite-severity bucket per RFC-0025 §7 + OQ-2 override
+ * surface.
+ *
+ * Algorithm:
+ *   1. Map each qualitative axis (`low`/`medium`/`high`) to an ordinal
+ *      score (`0`/`1`/`2`).
+ *   2. Multiply each ordinal by its per-axis weight.
+ *   3. Take the max of (operator-time-cost, blast-radius) — matches the
+ *      §7 base composite rule.
+ *   4. Bump the result by `1` when `framework-recurrence` (frequency) is
+ *      `high` AND its weight > 0 — matches §7 frequency bump.
+ *   5. Re-bucket the weighted max into `low`/`medium`/`high` using:
+ *        weighted <  1.0 → low
+ *        weighted <  2.0 → medium
+ *        weighted ≥  2.0 → high
+ *
+ * Type-only export — the runtime mapping lives in
+ * `quality-classifier.ts` via `computeSeverity()`. This helper exists for
+ * callers that want a pre-applied weighted composite without importing
+ * the full classifier module.
+ *
+ * Returns the composite bucket (`'low'` / `'medium'` / `'high'`).
+ */
+export type CompositeSeverityBucket = 'low' | 'medium' | 'high';
+
+/**
+ * Numeric ordinal for each qualitative bucket. Exported for the
+ * classifier to compose with the weighted-composite rule.
+ */
+export const SEVERITY_AXIS_ORDINAL: Readonly<Record<'low' | 'medium' | 'high', number>> =
+  Object.freeze({ low: 0, medium: 1, high: 2 });
 
 /**
  * Convenience helper for the OQ-1 confidence-bucketed classifier

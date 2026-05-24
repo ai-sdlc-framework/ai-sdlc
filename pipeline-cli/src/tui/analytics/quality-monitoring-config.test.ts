@@ -33,8 +33,8 @@ import {
 
 // Helper: build a complete QualityMonitoringConfig from a partial; tests
 // only override the bits they care about. Phase 5 added required fields
-// (`coverageGap`, `determinismDetection`, `operatorTimeCost`) so older
-// tests need a base to spread from.
+// (`coverageGap`, `determinismDetection`, `operatorTimeCost`); Phase 4
+// added `severityWeights` + `frameworkBug` so newer tests need them.
 function baseConfig(
   enforce: VendorNamespaceEnforce,
   customSubclasses: string[] = [],
@@ -52,6 +52,11 @@ function baseConfig(
     coverageGap: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.coverageGap },
     determinismDetection: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection },
     operatorTimeCost: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost },
+    severityWeights: { ...QUALITY_MONITORING_CONFIG_DEFAULTS.severityWeights },
+    frameworkBug: {
+      ...QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug,
+      attributionSources: [...QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug.attributionSources],
+    },
   };
 }
 
@@ -588,5 +593,197 @@ describe('loadQualityMonitoringConfig — Phase 5 round-trip', () => {
       QUALITY_MONITORING_CONFIG_DEFAULTS.determinismDetection,
     );
     expect(cfg.operatorTimeCost).toEqual(QUALITY_MONITORING_CONFIG_DEFAULTS.operatorTimeCost);
+  });
+});
+
+// ── Phase 4 (OQ-2 + OQ-4) ─────────────────────────────────────────────
+
+describe('OQ-2 severity-weights', () => {
+  it('ships defaults of 1.0 per axis', () => {
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.severityWeights.operatorTimeCost).toBe(1.0);
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.severityWeights.frameworkRecurrence).toBe(1.0);
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.severityWeights.blastRadius).toBe(1.0);
+  });
+
+  it('parses kebab-named axes per §13.1', () => {
+    const cfg = parseQualityMonitoringConfigYaml(
+      [
+        'quality:',
+        '  severity-weights:',
+        '    operator-time-cost: 1.5',
+        '    framework-recurrence: 0.5',
+        '    blast-radius: 2.0',
+      ].join('\n'),
+    );
+    expect(cfg.severityWeights.operatorTimeCost).toBeCloseTo(1.5);
+    expect(cfg.severityWeights.frameworkRecurrence).toBeCloseTo(0.5);
+    expect(cfg.severityWeights.blastRadius).toBeCloseTo(2.0);
+  });
+
+  it('accepts camelCase axis aliases', () => {
+    const cfg = parseQualityMonitoringConfigYaml(
+      [
+        'quality:',
+        '  severity-weights:',
+        '    operatorTimeCost: 0.25',
+        '    frameworkRecurrence: 0.75',
+        '    blastRadius: 1.25',
+      ].join('\n'),
+    );
+    expect(cfg.severityWeights.operatorTimeCost).toBeCloseTo(0.25);
+    expect(cfg.severityWeights.frameworkRecurrence).toBeCloseTo(0.75);
+    expect(cfg.severityWeights.blastRadius).toBeCloseTo(1.25);
+  });
+
+  it('silently rejects negative + non-finite weights (falls back to default)', () => {
+    const cfg = parseQualityMonitoringConfigYaml(
+      [
+        'quality:',
+        '  severity-weights:',
+        '    operator-time-cost: -1',
+        '    framework-recurrence: NaN',
+        '    blast-radius: notanumber',
+      ].join('\n'),
+    );
+    expect(cfg.severityWeights.operatorTimeCost).toBe(1.0);
+    expect(cfg.severityWeights.frameworkRecurrence).toBe(1.0);
+    expect(cfg.severityWeights.blastRadius).toBe(1.0);
+  });
+});
+
+describe('parseSeverityWeightFlag', () => {
+  it('parses kebab + camelCase axis specs', async () => {
+    const { parseSeverityWeightFlag } = await import('./quality-monitoring-config.js');
+    expect(parseSeverityWeightFlag('operator-time-cost=1.5').partial).toEqual({
+      operatorTimeCost: 1.5,
+    });
+    expect(parseSeverityWeightFlag('blastRadius=2').partial).toEqual({ blastRadius: 2 });
+    expect(parseSeverityWeightFlag('framework-recurrence=0.5').partial).toEqual({
+      frameworkRecurrence: 0.5,
+    });
+  });
+
+  it('rejects malformed specs with a reason', async () => {
+    const { parseSeverityWeightFlag } = await import('./quality-monitoring-config.js');
+    expect(parseSeverityWeightFlag('blast-radius').partial).toBeNull();
+    expect(parseSeverityWeightFlag('blast-radius=').partial).toBeNull();
+    expect(parseSeverityWeightFlag('=1.0').partial).toBeNull();
+    expect(parseSeverityWeightFlag('unknown=1.0').partial).toBeNull();
+    expect(parseSeverityWeightFlag('blast-radius=-1').partial).toBeNull();
+    expect(parseSeverityWeightFlag('blast-radius=NaN').partial).toBeNull();
+    expect(parseSeverityWeightFlag('blast-radius=-1').reason).toMatch(/non-negative/);
+    expect(parseSeverityWeightFlag('unknown=1').reason).toMatch(/unknown severity-weight axis/);
+  });
+});
+
+describe('resolveSeverityWeights', () => {
+  it('layers CLI overrides on top of YAML resolution', async () => {
+    const { resolveSeverityWeights } = await import('./quality-monitoring-config.js');
+    const dir = join(workdir, '.ai-sdlc');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, 'quality-monitoring.yaml'),
+      [
+        'quality:',
+        '  severity-weights:',
+        '    operator-time-cost: 1.5',
+        '    blast-radius: 2.0',
+      ].join('\n'),
+    );
+    const weights = resolveSeverityWeights({
+      workDir: workdir,
+      cliOverrides: ['blast-radius=3.0'],
+    });
+    expect(weights.operatorTimeCost).toBeCloseTo(1.5); // from YAML
+    expect(weights.blastRadius).toBeCloseTo(3.0); // CLI wins
+    expect(weights.frameworkRecurrence).toBe(1.0); // default
+  });
+
+  it('uses shipping defaults when no YAML + no overrides', async () => {
+    const { resolveSeverityWeights } = await import('./quality-monitoring-config.js');
+    const weights = resolveSeverityWeights({ workDir: workdir });
+    expect(weights).toEqual(QUALITY_MONITORING_CONFIG_DEFAULTS.severityWeights);
+  });
+
+  it('silently skips malformed CLI specs', async () => {
+    const { resolveSeverityWeights } = await import('./quality-monitoring-config.js');
+    const weights = resolveSeverityWeights({
+      workDir: workdir,
+      cliOverrides: ['unknown=1', 'blast-radius=2.0', 'notarealthing'],
+    });
+    expect(weights.blastRadius).toBeCloseTo(2.0);
+    expect(weights.operatorTimeCost).toBe(1.0);
+  });
+});
+
+describe('OQ-4 framework-bug attribution config', () => {
+  it('ships suggest-only default per §13.1', () => {
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug.autoAttribute).toBe(false);
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug.suggestionCount).toBe(3);
+    expect(QUALITY_MONITORING_CONFIG_DEFAULTS.frameworkBug.attributionSources).toEqual([
+      'codeowners',
+    ]);
+  });
+
+  it('parses the §13.1 sample block', () => {
+    const cfg = parseQualityMonitoringConfigYaml(
+      [
+        'quality:',
+        '  framework-bug:',
+        '    autoAttribute: true',
+        '    suggestionCount: 5',
+        '    attributionSources:',
+        '      - codeowners',
+        '      - git-blame',
+        '      - recent-pr',
+      ].join('\n'),
+    );
+    expect(cfg.frameworkBug.autoAttribute).toBe(true);
+    expect(cfg.frameworkBug.suggestionCount).toBe(5);
+    expect(cfg.frameworkBug.attributionSources).toEqual(['codeowners', 'git-blame', 'recent-pr']);
+  });
+
+  it('clamps suggestionCount < 1 to 1', () => {
+    const cfg = parseQualityMonitoringConfigYaml(
+      ['quality:', '  framework-bug:', '    suggestionCount: 0'].join('\n'),
+    );
+    expect(cfg.frameworkBug.suggestionCount).toBe(1);
+  });
+
+  it('clamps negative suggestionCount via floor of max(1, n)', () => {
+    // Negative values are filtered by the `parsed >= 0` gate; defaults preserved.
+    const cfg = parseQualityMonitoringConfigYaml(
+      ['quality:', '  framework-bug:', '    suggestionCount: -5'].join('\n'),
+    );
+    expect(cfg.frameworkBug.suggestionCount).toBe(3); // default preserved
+  });
+
+  it('honours an empty attributionSources list (no silent default-merge)', () => {
+    const cfg = parseQualityMonitoringConfigYaml(
+      [
+        'quality:',
+        '  framework-bug:',
+        '    autoAttribute: true',
+        '    attributionSources: []',
+      ].join('\n'),
+    );
+    // The inline `[]` literal is NOT parsed as a list-block opener (only
+    // bare `:` headers open list-blocks), so it falls through and the
+    // shipping default is preserved. Operators who genuinely want to
+    // disable all backends use the block form below.
+    expect(cfg.frameworkBug.attributionSources).toEqual(['codeowners']);
+
+    const cfg2 = parseQualityMonitoringConfigYaml(
+      [
+        'quality:',
+        '  framework-bug:',
+        '    attributionSources:',
+        '  # empty by design',
+        '  vendor-namespace:',
+        '    enforce: none',
+      ].join('\n'),
+    );
+    // Block-form with no entries → empty list honoured (operator intent)
+    expect(cfg2.frameworkBug.attributionSources).toEqual([]);
   });
 });

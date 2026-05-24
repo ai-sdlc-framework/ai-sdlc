@@ -86,6 +86,99 @@ describe('computeSeverity', () => {
     const result = computeSeverity(axes);
     expect(result.axes).toEqual(axes);
   });
+
+  // ── OQ-2 (Phase 4 / AISDLC-305) weighted-composite path ─────────────
+
+  it('OQ-2 default weights (1.0 per axis) match the unweighted path', () => {
+    const axes: SeverityAxes = {
+      operatorTimeCost: 'medium',
+      blastRadius: 'low',
+      frequency: 'high',
+    };
+    const unweighted = computeSeverity(axes);
+    const weighted = computeSeverity(axes, {
+      operatorTimeCost: 1.0,
+      blastRadius: 1.0,
+      frameworkRecurrence: 1.0,
+    });
+    expect(weighted.composite).toBe(unweighted.composite);
+  });
+
+  it('OQ-2 weight 2.0 on blast-radius escalates low → high', () => {
+    const axes: SeverityAxes = {
+      operatorTimeCost: 'low',
+      blastRadius: 'medium',
+      frequency: 'low',
+    };
+    // unweighted: max(low=0, medium=1) = 1 → medium
+    expect(computeSeverity(axes).composite).toBe('medium');
+    // weighted (blast=2.0): max(0*1, 1*2) = 2 → high
+    expect(
+      computeSeverity(axes, {
+        operatorTimeCost: 1.0,
+        blastRadius: 2.0,
+        frameworkRecurrence: 1.0,
+      }).composite,
+    ).toBe('high');
+  });
+
+  it('OQ-2 weight 0.0 on operator-time-cost dampens high → low when blast is also dampened', () => {
+    const axes: SeverityAxes = {
+      operatorTimeCost: 'high',
+      blastRadius: 'high',
+      frequency: 'low',
+    };
+    // unweighted: max(2, 2) = 2 → high
+    expect(computeSeverity(axes).composite).toBe('high');
+    // weighted (otc=0, blast=0.4): max(0, 0.8) = 0.8 → low
+    expect(
+      computeSeverity(axes, {
+        operatorTimeCost: 0,
+        blastRadius: 0.4,
+        frameworkRecurrence: 1.0,
+      }).composite,
+    ).toBe('low');
+  });
+
+  it('OQ-2 frequency bump still fires when its weight > 0', () => {
+    const axes: SeverityAxes = {
+      operatorTimeCost: 'low',
+      blastRadius: 'low',
+      frequency: 'high',
+    };
+    // weighted (everything default): max(0,0) + 1 = 1 → medium
+    expect(
+      computeSeverity(axes, {
+        operatorTimeCost: 1.0,
+        blastRadius: 1.0,
+        frameworkRecurrence: 1.0,
+      }).composite,
+    ).toBe('medium');
+    // weight=0 on frequency suppresses the bump
+    expect(
+      computeSeverity(axes, {
+        operatorTimeCost: 1.0,
+        blastRadius: 1.0,
+        frameworkRecurrence: 0,
+      }).composite,
+    ).toBe('low');
+  });
+
+  it('OQ-2 negative weight is clamped (defensive — config parser should already reject)', () => {
+    const axes: SeverityAxes = {
+      operatorTimeCost: 'high',
+      blastRadius: 'low',
+      frequency: 'low',
+    };
+    // -5 should be clamped to 0; result is dominated by blast (low → 0) → low
+    expect(
+      computeSeverity(axes, {
+        operatorTimeCost: -5,
+        blastRadius: 1.0,
+        frameworkRecurrence: 1.0,
+      }).composite,
+    ).toBe('low');
+  });
 });
 
 // ── OQ-10 / §10 vendor-namespace enforcement ─────────────────────────
