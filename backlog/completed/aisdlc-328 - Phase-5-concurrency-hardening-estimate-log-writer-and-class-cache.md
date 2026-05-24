@@ -1,7 +1,7 @@
 ---
 id: AISDLC-328
 title: 'Phase-5 concurrency hardening — estimate log writer + class cache (RFC-0016 prerequisite)'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16 14:00'
 labels:
@@ -32,10 +32,10 @@ PR #498 (AISDLC-280, RFC-0016 Phase 2) round-1 code review identified two concur
 
 ## Acceptance criteria
 
-- [ ] **Lock or rotate scheme for log writer runIndex** — either (a) take exclusive flock on the log file across read+append, OR (b) rotate `runIndex` to a strictly-monotonic discriminator (e.g. `${timestampMs}-${pid}`) so concurrent writes never collide. Document the chosen approach inline.
-- [ ] **Lock or atomic-merge for class cache** — either (a) flock on cache file across read+write, OR (b) atomic-merge pattern (read → mutate → write to tmp → rename → re-read to verify). Choose the simpler one given dogfood-scale parallel dispatch volumes.
-- [ ] **Concurrency tests** — add hermetic tests that spawn N parallel `captureEstimate` / `assignClassCached` calls and assert no row/entry loss + no runIndex collisions. Use `Promise.all` with a tmp filesystem; no need for real subprocess concurrency.
-- [ ] **Document under RFC-0016 §6.x** what the chosen mechanism is, so Phase 5 implementers know the contract.
+- [x] **Lock or rotate scheme for log writer runIndex** — either (a) take exclusive flock on the log file across read+append, OR (b) rotate `runIndex` to a strictly-monotonic discriminator (e.g. `${timestampMs}-${pid}`) so concurrent writes never collide. Document the chosen approach inline.
+- [x] **Lock or atomic-merge for class cache** — either (a) flock on cache file across read+write, OR (b) atomic-merge pattern (read → mutate → write to tmp → rename → re-read to verify). Choose the simpler one given dogfood-scale parallel dispatch volumes.
+- [x] **Concurrency tests** — add hermetic tests that spawn N parallel `captureEstimate` / `assignClassCached` calls and assert no row/entry loss + no runIndex collisions. Use `Promise.all` with a tmp filesystem; no need for real subprocess concurrency.
+- [x] **Document under RFC-0016 §6.x** what the chosen mechanism is, so Phase 5 implementers know the contract.
 
 ## Out of scope
 
