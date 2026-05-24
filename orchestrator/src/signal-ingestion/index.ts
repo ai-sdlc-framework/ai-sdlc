@@ -4,6 +4,7 @@ export {
   type ManualSignalIncompleteDecision,
   type RawSignal,
   type SignalFetchResult,
+  type SignalResidencyViolationDecision,
   type SignalSourceAdapter,
   type SignalSourceName,
   type SignalTier,
@@ -73,6 +74,34 @@ export {
   type ClusteringResult,
   type DemandCluster,
 } from './clustering.js';
+
+// RFC-0030 Phase 4 — significance threshold + SA resonance filter + flooding + residency
+export {
+  assessClusterSignificance,
+  assessTier2Significance,
+  checkSignalResidency,
+  classifySaResonance,
+  DEFAULT_FLOODING_DETECTION_CONFIG,
+  detectFlooding,
+  filterSignalsByResidency,
+  SA_WEIGHT_MULTIPLIERS,
+  type AssessClusterSignificanceOptions,
+  type AssessClusterSignificanceResult,
+  type DetectFloodingOptions,
+  type FloodingDetectionConfig,
+  type FloodingResponse,
+  type FloodingSeverity,
+  type ResidencyRegimeDeclaration,
+  type SaResonanceBucket,
+  type SignalFloodingDetectedDecision,
+  type SignalLowSaForReviewDecision,
+  type SignalOutOfScopeDecision,
+  type SignalResidencyCheck,
+  type SignificanceAssessedCluster,
+  type SourceFloodingStat,
+  type Tier2SignificanceReasons,
+  type Tier2SignificanceState,
+} from './significance.js';
 
 import { CommunityThreadSignalSourceAdapter } from './adapters/community-thread.js';
 import { ManualSignalSourceAdapter } from './adapters/manual.js';
