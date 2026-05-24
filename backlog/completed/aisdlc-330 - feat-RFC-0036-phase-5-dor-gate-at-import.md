@@ -15,6 +15,8 @@ references:
   - spec/rfcs/RFC-0036-spec-kit-bridge-adopter-authoring.md
   - spec/rfcs/RFC-0011-definition-of-ready-gate.md
 priority: high
+blocked:
+  reason: 'RFC-0036 OQs all resolved at 2026-05-16 operator walkthrough; lifecycle remains Ready for Review pending Signed Off; phase 5 task implementing the resolved OQs (override per CLAUDE.md upstream-OQ gate convention)'
 ---
 
 ## Description
