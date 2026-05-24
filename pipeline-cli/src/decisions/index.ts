@@ -8,6 +8,9 @@
  * Phase 5 (AISDLC-289) adds the Stage C LLM evaluation runner
  * (`stage-c`) which composes with the RFC-0024 shared classifier
  * substrate, plus the shared corpus aggregator (`corpus-aggregator`).
+ * Phase 9 (AISDLC-293) adds the override-driven calibration loop
+ * (`pending-exemplars`, `decision-exemplars`, `calibration-sweep`,
+ * `exemplars-digest`).
  *
  * @module decisions
  */
@@ -23,3 +26,7 @@ export * from './corpus-aggregator.js';
 export * from './dor-bridge.js';
 export * from './decisions-config.js';
 export * from './notification.js';
+export * from './pending-exemplars.js';
+export * from './decision-exemplars.js';
+export * from './calibration-sweep.js';
+export * from './exemplars-digest.js';

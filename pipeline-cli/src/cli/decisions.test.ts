@@ -685,3 +685,179 @@ describe('corpus aggregate subcommand (RFC-0035 Phase 5 / AISDLC-289)', () => {
     expect(r.anchorPromotionThreshold).toBe(5);
   });
 });
+
+// ── RFC-0035 Phase 9 — exemplars subcommand (AISDLC-293) ────────────────────
+
+describe('exemplars subcommand (RFC-0035 Phase 9 / AISDLC-293)', () => {
+  // Helpers to seed substrate corpus + decision events so the exemplars CLI
+  // has data to operate on. Keep these inline (small, single-use) rather than
+  // pulling them into the test-utils since the surface is one-off.
+  async function seedSubstrateNegative(id: string): Promise<void> {
+    const { appendCorpusEntry } = await import('../classifier/substrate/index.js');
+    appendCorpusEntry(tmp, {
+      id,
+      timestamp: '2026-05-15T10:00:00Z',
+      taskType: 'decision-recommendation',
+      input: { text: 'pick an option' },
+      model: 'claude-haiku-4-5',
+      classification: 'opt-a',
+      confidence: 0.82,
+      reasoning: 'r',
+      threshold: 0.7,
+      metBehindThreshold: true,
+      polarity: 'negative',
+      operatorOverrideClassification: 'opt-b',
+      operatorOverrideReason: 'B is better',
+      operatorOverrideTimestamp: '2026-05-15T12:00:00Z',
+    });
+  }
+
+  it('exemplars list returns empty when nothing is mirrored', async () => {
+    setArgv('exemplars', 'list', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ exemplars: unknown[] }>();
+    expect(r.exemplars).toEqual([]);
+  });
+
+  it('exemplars sweep mirrors negatives by default', async () => {
+    await seedSubstrateNegative('neg-cli-1');
+    setArgv('exemplars', 'sweep', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ mirroredCount: number; mode: string }>();
+    expect(r.mirroredCount).toBe(1);
+    expect(r.mode).toBe('negatives-only');
+  });
+
+  it('exemplars list shows mirrored entries; affirm + promote lands them in decision-exemplars.yaml', async () => {
+    await seedSubstrateNegative('neg-cli-2');
+    setArgv('exemplars', 'sweep', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'list', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const listed = stdoutJson<{
+      exemplars: Array<{ id: string; classification: string; disposition: string }>;
+    }>();
+    expect(listed.exemplars).toHaveLength(1);
+    const exId = listed.exemplars[0].id;
+    expect(listed.exemplars[0].disposition).toBe('pending');
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'affirm', exId);
+    await buildDecisionsCli().parseAsync();
+    const affirmed = stdoutJson<{ disposition: string; promoted: boolean }>();
+    expect(affirmed.disposition).toBe('affirmed');
+    expect(affirmed.promoted).toBe(true);
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'paths');
+    await buildDecisionsCli().parseAsync();
+    const paths = stdoutJson<{
+      pendingExemplarsPath: string;
+      decisionExemplarsPath: string;
+      pendingCount: number;
+      decisionExemplarsCount: number;
+    }>();
+    expect(paths.pendingCount).toBe(1);
+    expect(paths.decisionExemplarsCount).toBe(1);
+
+    // The promoted file exists on disk.
+    const text = readFileSync(paths.decisionExemplarsPath, 'utf8');
+    expect(text).toContain('promotedFromCorpusEntryId: neg-cli-2');
+  });
+
+  it('reclassify requires --classification and stores it', async () => {
+    await seedSubstrateNegative('neg-cli-3');
+    setArgv('exemplars', 'sweep');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'list', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const exId = stdoutJson<{ exemplars: Array<{ id: string }> }>().exemplars[0].id;
+    stdoutChunks = [];
+
+    setArgv(
+      'exemplars',
+      'reclassify',
+      exId,
+      '--classification',
+      'opt-c',
+      '--rationale',
+      'finally settled',
+    );
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ disposition: string; promoted: boolean }>();
+    expect(r.disposition).toBe('reclassified');
+    expect(r.promoted).toBe(true);
+  });
+
+  it('reject sets disposition without promoting', async () => {
+    await seedSubstrateNegative('neg-cli-4');
+    setArgv('exemplars', 'sweep');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'list', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const exId = stdoutJson<{ exemplars: Array<{ id: string }> }>().exemplars[0].id;
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'reject', exId, '--rationale', 'duplicate of DEC-0002');
+    await buildDecisionsCli().parseAsync();
+    const r = stdoutJson<{ disposition: string }>();
+    expect(r.disposition).toBe('rejected');
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'paths');
+    await buildDecisionsCli().parseAsync();
+    const paths = stdoutJson<{ pendingCount: number; decisionExemplarsCount: number }>();
+    expect(paths.pendingCount).toBe(1);
+    expect(paths.decisionExemplarsCount).toBe(0);
+  });
+
+  it('digest emits markdown with CLI hints; JSON form is parseable', async () => {
+    await seedSubstrateNegative('neg-cli-5');
+    setArgv('exemplars', 'sweep');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'digest');
+    await buildDecisionsCli().parseAsync();
+    const md = stdoutText();
+    expect(md).toContain('# Decision calibration weekly digest');
+    expect(md).toContain('exemplars affirm');
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'digest', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const j = stdoutJson<{ digest: { windowDays: number } }>();
+    expect(j.digest.windowDays).toBe(7);
+  });
+
+  it('list filters by disposition', async () => {
+    await seedSubstrateNegative('neg-cli-6a');
+    await seedSubstrateNegative('neg-cli-6b');
+    setArgv('exemplars', 'sweep');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'list', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const before = stdoutJson<{ exemplars: Array<{ id: string }> }>();
+    expect(before.exemplars).toHaveLength(2);
+    const firstId = before.exemplars[0].id;
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'affirm', firstId, '--defer-promote');
+    await buildDecisionsCli().parseAsync();
+    stdoutChunks = [];
+
+    setArgv('exemplars', 'list', '--disposition', 'affirmed', '--format', 'json');
+    await buildDecisionsCli().parseAsync();
+    const affirmedList = stdoutJson<{ exemplars: Array<{ disposition: string }> }>();
+    expect(affirmedList.exemplars).toHaveLength(1);
+    expect(affirmedList.exemplars[0].disposition).toBe('affirmed');
+  });
+});

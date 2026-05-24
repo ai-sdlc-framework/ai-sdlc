@@ -26,9 +26,11 @@ import { hideBin } from 'yargs/helpers';
 import {
   aggregateDecisionCorpus,
   appendDecisionEvent,
+  buildPendingExemplarsDigest,
   computeStageACoverage,
   DECISION_SOURCES,
   decisionCatalogDisabledMessage,
+  disposeAndOptionallyPromote,
   isDecisionCatalogEnabled,
   isStageCAutoApplyEligible,
   listDecisions,
@@ -39,10 +41,19 @@ import {
   makeRecommendationIssuedEvent,
   makeStageCAutoApplyAnsweredEvent,
   makeStageCCompletedEvent,
+  mirrorSubstrateEntry,
   nextDecisionId,
   projectDecision,
+  promoteAllDisposedPendingExemplars,
+  readDecisionExemplars,
+  readPendingExemplars,
+  rejectPendingExemplar,
+  renderPendingExemplarsDigestMarkdown,
+  resolveDecisionExemplarsPath,
   resolveEventLogPath,
+  resolvePendingExemplarsPath,
   resolveStageCRuntimeConfig,
+  runCalibrationSweep,
   runStageA,
   runStageB,
   runStageC,
@@ -51,8 +62,9 @@ import {
   type Decision,
   type DecisionOption,
   type DecisionSource,
+  type PendingExemplar,
 } from '../decisions/index.js';
-import { recordOperatorOverride } from '../classifier/substrate/index.js';
+import { readCorpus, recordOperatorOverride } from '../classifier/substrate/index.js';
 import { buildDependencyGraph } from '../deps/dependency-graph.js';
 import { isCompositionEnabled } from '../deps/snapshot.js';
 
@@ -100,6 +112,29 @@ function renderListTable(decisions: Decision[]): string {
     d.metadata.source,
     d.metadata.created.slice(0, 10),
     d.spec.summary.length > 60 ? d.spec.summary.slice(0, 57) + '...' : d.spec.summary,
+  ]);
+  const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
+  const fmt = (cells: string[]): string =>
+    cells
+      .map((c, i) => (c ?? '').padEnd(widths[i]))
+      .join('  ')
+      .trimEnd();
+  const sep = widths.map((w) => '-'.repeat(w)).join('  ');
+  const lines = [fmt(headers as unknown as string[]), sep, ...rows.map(fmt)];
+  return lines.join('\n') + '\n';
+}
+
+function renderPendingExemplarsTable(exemplars: PendingExemplar[]): string {
+  if (exemplars.length === 0) return '(no pending exemplars)\n';
+  const headers = ['id', 'task', 'pol', 'disposition', 'class', 'override', 'decision'] as const;
+  const rows = exemplars.map((e) => [
+    e.id.slice(0, 8),
+    e.taskType,
+    e.polarity,
+    e.disposition,
+    e.classification,
+    e.operatorOverrideClassification ?? '',
+    e.decisionId ?? '',
   ]);
   const widths = headers.map((h, i) => Math.max(h.length, ...rows.map((r) => (r[i] ?? '').length)));
   const fmt = (cells: string[]): string =>
@@ -980,6 +1015,23 @@ export function buildDecisionsCli(): Argv {
           ...(typeof argv.rationale === 'string' ? { reason: String(argv.rationale) } : {}),
         });
 
+        // Phase 9 mirror — when the substrate flip succeeded, also mirror the
+        // corpus entry into pending-exemplars.yaml as a negative candidate
+        // for operator review (AC#1). Skip when the substrate flip was a
+        // no-op (no corpus entry, window expired) — there's nothing to
+        // mirror in that case.
+        let pendingMirror: { appended: boolean; entryId?: string } = { appended: false };
+        if (corpusFlip.flipped && corpusFlip.entry) {
+          const result = mirrorSubstrateEntry({
+            repoRoot: workDir,
+            entry: corpusFlip.entry,
+            decisionId: id,
+          });
+          if (result) {
+            pendingMirror = { appended: result.appended, entryId: result.entry.id };
+          }
+        }
+
         if (String(argv.format) === 'json') {
           emit({
             ok: true,
@@ -987,6 +1039,7 @@ export function buildDecisionsCli(): Argv {
             chosenOptionId: optionId,
             supersededOptionId,
             corpusFlip,
+            pendingMirror,
           });
         } else {
           emitText(`decision overridden: ${id} — ${supersededOptionId} → ${optionId}`);
@@ -994,6 +1047,13 @@ export function buildDecisionsCli(): Argv {
             emitText(`  substrate corpus: negative exemplar recorded`);
           } else {
             emitText(`  substrate corpus: no flip (${corpusFlip.reason ?? 'unknown'})`);
+          }
+          if (pendingMirror.appended) {
+            emitText(
+              `  pending-exemplars: mirrored as negative candidate (id=${pendingMirror.entryId})`,
+            );
+          } else if (corpusFlip.flipped) {
+            emitText(`  pending-exemplars: already mirrored (no-op)`);
           }
         }
       },
@@ -1062,6 +1122,283 @@ export function buildDecisionsCli(): Argv {
             },
           )
           .demandCommand(1, 'A corpus subcommand is required (e.g. aggregate).')
+          .strict(),
+    )
+    .command(
+      'exemplars',
+      'RFC-0035 Phase 9 — override-driven calibration loop (pending-exemplars.yaml).',
+      (sub) =>
+        sub
+          .command(
+            'list',
+            'List pending exemplars from .ai-sdlc/pending-exemplars.yaml.',
+            (y) =>
+              y
+                .option('format', {
+                  type: 'string',
+                  choices: ['json', 'table'] as const,
+                  default: 'table' as const,
+                })
+                .option('disposition', {
+                  type: 'string',
+                  choices: ['pending', 'affirmed', 'reclassified', 'rejected', 'all'] as const,
+                  default: 'pending' as const,
+                  describe: 'Filter by disposition. Default: pending (review queue).',
+                }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const all = readPendingExemplars(workDir);
+              const filtered =
+                argv.disposition === 'all'
+                  ? all
+                  : all.filter((e) => e.disposition === argv.disposition);
+              if (String(argv.format) === 'json') {
+                emit({ ok: true, exemplars: filtered });
+              } else {
+                if (filtered.length === 0) {
+                  emitText(`(no exemplars with disposition=${argv.disposition})`);
+                } else {
+                  process.stdout.write(renderPendingExemplarsTable(filtered));
+                }
+              }
+            },
+          )
+          .command(
+            'affirm <exemplarId>',
+            'Affirm a pending exemplar (LLM was right) — promotes to decision-exemplars.yaml.',
+            (y) =>
+              y
+                .positional('exemplarId', { type: 'string', demandOption: true })
+                .option('rationale', { type: 'string' })
+                .option('by', { type: 'string' })
+                .option('defer-promote', {
+                  type: 'boolean',
+                  default: false,
+                  describe: 'Set disposition only; defer promotion to a later `promote-all` batch.',
+                }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const result = disposeAndOptionallyPromote({
+                repoRoot: workDir,
+                exemplarId: String(argv.exemplarId),
+                disposition: 'affirmed',
+                ...(typeof argv.rationale === 'string'
+                  ? { rationale: String(argv.rationale) }
+                  : {}),
+                ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
+                autoPromote: !argv['defer-promote'],
+              });
+              if (!result.disposition.updated) {
+                if (result.disposition.reason === 'not-found') {
+                  fail(`pending exemplar not found: ${argv.exemplarId}`);
+                }
+                emitText(
+                  `no-op: ${argv.exemplarId} (${result.disposition.reason ?? 'already-disposed'})`,
+                );
+                return;
+              }
+              const promoted = result.promotion?.promoted ?? false;
+              emit({ ok: true, disposition: 'affirmed', promoted, exemplarId: argv.exemplarId });
+            },
+          )
+          .command(
+            'reclassify <exemplarId>',
+            'Reclassify a pending exemplar (operator picks a different classification).',
+            (y) =>
+              y
+                .positional('exemplarId', { type: 'string', demandOption: true })
+                .option('classification', {
+                  type: 'string',
+                  demandOption: true,
+                  describe: 'The classification the operator picks instead.',
+                })
+                .option('rationale', { type: 'string' })
+                .option('by', { type: 'string' })
+                .option('defer-promote', { type: 'boolean', default: false }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const result = disposeAndOptionallyPromote({
+                repoRoot: workDir,
+                exemplarId: String(argv.exemplarId),
+                disposition: 'reclassified',
+                classification: String(argv.classification),
+                ...(typeof argv.rationale === 'string'
+                  ? { rationale: String(argv.rationale) }
+                  : {}),
+                ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
+                autoPromote: !argv['defer-promote'],
+              });
+              if (!result.disposition.updated) {
+                if (result.disposition.reason === 'not-found') {
+                  fail(`pending exemplar not found: ${argv.exemplarId}`);
+                }
+                emitText(
+                  `no-op: ${argv.exemplarId} (${result.disposition.reason ?? 'already-disposed'})`,
+                );
+                return;
+              }
+              emit({
+                ok: true,
+                disposition: 'reclassified',
+                promoted: result.promotion?.promoted ?? false,
+                exemplarId: argv.exemplarId,
+              });
+            },
+          )
+          .command(
+            'reject <exemplarId>',
+            'Reject a pending exemplar (not a useful calibration signal).',
+            (y) =>
+              y
+                .positional('exemplarId', { type: 'string', demandOption: true })
+                .option('rationale', { type: 'string' })
+                .option('by', { type: 'string' }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const result = rejectPendingExemplar({
+                repoRoot: workDir,
+                exemplarId: String(argv.exemplarId),
+                ...(typeof argv.rationale === 'string'
+                  ? { rationale: String(argv.rationale) }
+                  : {}),
+                ...(typeof argv.by === 'string' ? { by: String(argv.by) } : {}),
+              });
+              if (!result.updated) {
+                if (result.reason === 'not-found') {
+                  fail(`pending exemplar not found: ${argv.exemplarId}`);
+                }
+                emitText(`no-op: ${argv.exemplarId} (${result.reason ?? 'already-disposed'})`);
+                return;
+              }
+              emit({ ok: true, disposition: 'rejected', exemplarId: argv.exemplarId });
+            },
+          )
+          .command(
+            'promote-all',
+            'Promote every disposed (affirmed / reclassified) pending exemplar to decision-exemplars.yaml.',
+            (y) =>
+              y.option('by', { type: 'string' }).option('format', {
+                type: 'string',
+                choices: ['json', 'text'] as const,
+                default: 'text' as const,
+              }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const result = promoteAllDisposedPendingExemplars({
+                repoRoot: workDir,
+                ...(typeof argv.by === 'string' ? { promotedBy: String(argv.by) } : {}),
+              });
+              if (String(argv.format) === 'json') {
+                emit({ ok: true, ...result });
+              } else {
+                emitText(
+                  `promoted ${result.promotedCount} pending exemplars (${result.skippedCount} already promoted).`,
+                );
+                for (const [taskType, count] of Object.entries(result.perTaskType)) {
+                  emitText(`  ${taskType}: ${count}`);
+                }
+              }
+            },
+          )
+          .command(
+            'sweep',
+            'Mirror substrate corpus polarity-resolved entries into pending-exemplars.yaml.',
+            (y) =>
+              y
+                .option('include-positives', {
+                  type: 'boolean',
+                  default: false,
+                  describe:
+                    'Also mirror positive (silence-promoted) entries. Default: negatives only.',
+                })
+                .option('format', {
+                  type: 'string',
+                  choices: ['json', 'text'] as const,
+                  default: 'text' as const,
+                }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const result = runCalibrationSweep({
+                repoRoot: workDir,
+                mode: argv['include-positives'] ? 'include-positives' : 'negatives-only',
+              });
+              if (String(argv.format) === 'json') {
+                emit({ ok: true, ...result });
+              } else {
+                emitText(
+                  `mirrored ${result.mirroredCount} substrate entries into pending-exemplars.yaml (mode=${result.mode}).`,
+                );
+                emitText(`  skipped existing: ${result.skippedExisting}`);
+                for (const [taskType, count] of Object.entries(result.perTaskType)) {
+                  emitText(`  ${taskType}: ${count}`);
+                }
+              }
+            },
+          )
+          .command(
+            'digest',
+            'Render the weekly pending-exemplars digest (AC#3).',
+            (y) =>
+              y
+                .option('window-days', { type: 'number', default: 7 })
+                .option('format', {
+                  type: 'string',
+                  choices: ['markdown', 'json'] as const,
+                  default: 'markdown' as const,
+                })
+                .option('oldest-limit', { type: 'number', default: 10 }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              const digest = buildPendingExemplarsDigest({
+                repoRoot: workDir,
+                windowDays: Number(argv['window-days']),
+                oldestLimit: Number(argv['oldest-limit']),
+              });
+              if (String(argv.format) === 'json') {
+                emit({ ok: true, digest });
+              } else {
+                process.stdout.write(renderPendingExemplarsDigestMarkdown(digest));
+              }
+            },
+          )
+          .command(
+            'paths',
+            'Print resolved pending-exemplars / decision-exemplars paths and substrate corpus dirs.',
+            (y) =>
+              y.option('format', {
+                type: 'string',
+                choices: ['json'] as const,
+                default: 'json' as const,
+              }),
+            async (argv) => {
+              const workDir = String(argv['work-dir']);
+              emit({
+                ok: true,
+                pendingExemplarsPath: resolvePendingExemplarsPath(workDir),
+                decisionExemplarsPath: resolveDecisionExemplarsPath(workDir),
+                pendingCount: readPendingExemplars(workDir).length,
+                decisionExemplarsCount: readDecisionExemplars(workDir).length,
+                // Touch readCorpus and promotePendingExemplar to keep tree-shake-safe
+                // re-exports stable (callers may inspect substrate corpus sizes separately).
+                substrateNegativeCount: ((): number => {
+                  let n = 0;
+                  for (const tt of [
+                    'capture-triage',
+                    'capture-severity',
+                    'pr-comment-is-capture',
+                    'dor-answer-is-new-concern',
+                    'decision-recommendation',
+                  ] as const) {
+                    for (const e of readCorpus(workDir, tt)) {
+                      if (e.polarity === 'negative') n++;
+                    }
+                  }
+                  return n;
+                })(),
+              });
+            },
+          )
+          .demandCommand(1, 'An exemplars subcommand is required.')
           .strict(),
     )
     .demandCommand(1, 'A subcommand is required. Run with --help for the list.')
