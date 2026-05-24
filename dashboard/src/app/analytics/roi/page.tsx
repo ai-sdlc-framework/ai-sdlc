@@ -5,7 +5,8 @@ import { getStateStore } from '@/lib/state';
 export default async function RoiPage() {
   try {
     const mod = await import('@ai-sdlc-enterprise/dashboard');
-    const { RoiDashboardPage } = mod;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { RoiDashboardPage } = mod as any;
     const store = getStateStore();
     return <RoiDashboardPage db={store.getDatabase()} />;
   } catch {

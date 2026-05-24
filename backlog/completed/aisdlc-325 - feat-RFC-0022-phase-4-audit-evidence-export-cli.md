@@ -1,7 +1,7 @@
 ---
 id: AISDLC-325
 title: 'feat: RFC-0022 Phase 4 — `cli-compliance-audit` export CLI + deterministic .tar.gz bundle + PR template'
-status: To Do
+status: Done
 assignee: []
 created_date: '2026-05-16'
 labels:
@@ -41,12 +41,12 @@ Export against fixture corpus produces valid `.tar.gz` with all five kinds; mani
 ## Acceptance Criteria
 
 <!-- AC:BEGIN -->
-- [ ] #1 `pipeline-cli/bin/cli-compliance-audit.mjs` entry point ships
-- [ ] #2 `--dry-run` enumerates evidence, counts entries, estimates bundle size
-- [ ] #3 `--export` writes `.tar.gz` + manifest per §8
-- [ ] #4 OQ-4 deterministic packing: `tar --sort=name --mtime=<period-end>` + `gzip -n`
-- [ ] #5 Two consecutive exports of unchanged corpus → byte-identical bundles (idempotency test)
-- [ ] #6 Manifest sha256s round-trip on extraction
-- [ ] #7 OQ-7 PR template addition with "Compliance impact" checkbox
-- [ ] #8 Integration test against fixture corpus (200 envelopes, 1K calibration entries) → valid bundle with all 5 kinds
+- [x] #1 `pipeline-cli/bin/cli-compliance-audit.mjs` entry point ships
+- [x] #2 `--dry-run` enumerates evidence, counts entries, estimates bundle size
+- [x] #3 `--export` writes `.tar.gz` + manifest per §8
+- [x] #4 OQ-4 deterministic packing: `tar --sort=name --mtime=<period-end>` + `gzip -n`
+- [x] #5 Two consecutive exports of unchanged corpus → byte-identical bundles (idempotency test)
+- [x] #6 Manifest sha256s round-trip on extraction
+- [x] #7 OQ-7 PR template addition with "Compliance impact" checkbox
+- [x] #8 Integration test against fixture corpus (200 envelopes, 1K calibration entries) → valid bundle with all 5 kinds
 <!-- AC:END -->
