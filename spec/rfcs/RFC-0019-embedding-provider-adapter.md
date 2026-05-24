@@ -364,11 +364,10 @@ interface VectorStoreEntry {
 ```
 <artifactsDir>/_embeddings/
 ├── openai-text-embedding-3-small-2024-01-25.jsonl
-├── openai-text-embedding-3-large-2024-01-25.jsonl   (if multi-provider in use)
-└── _index.json   (provider+version → file path map; written atomically on append)
+└── openai-text-embedding-3-large-2024-01-25.jsonl   (if multi-provider in use)
 ```
 
-One file per `(provider, modelVersion)` tuple. Append-only writes (matches the JSONL pattern in `_dor/calibration.jsonl`, `_deps/snapshot.jsonl`, etc.). GC by mtime — `cli-embedding-gc --older-than 90d` removes stale entries; the `_index.json` is rewritten to drop GC'd entries in the same atomic pass.
+One file per `(provider, modelVersion)` tuple, named `<safeProvider>-<safeModelVersion>.jsonl` where each component is sanitized to `[a-zA-Z0-9._-]`. The directory listing itself is the index — `scan()` walks `<embeddingsDir>/*.jsonl` and each entry carries its own provenance for filtering. There is no separate `_index.json` file: dropping it eliminates a read-modify-write race on concurrent first-writes for different provider/version tuples (Phase 2 iter-2 review finding). Writes use an atomic temp-then-rename (read existing content → concatenate new line → write to `<file>.<uuid>.tmp` → atomic `rename` over the target) so readers never see partial lines regardless of write size. GC by mtime — `cli-embedding-gc --older-than 90d` removes stale entries via the same temp-then-rename pattern.
 
 **Why JSONL?** Three reasons:
 
@@ -429,7 +428,7 @@ $ npx cli-embedding-bump --execute --to openai-text-embedding-3-large
 Migration complete. 12,847 vectors migrated. Pipeline.spec.embedding.provider should now be set to 'openai-text-embedding-3-large'.
 ```
 
-**Atomicity contract.** The migration writes the new JSONL file in full, then rewrites `_index.json` in a single atomic syscall (write-temp-then-rename). The original is preserved as `.bak.<timestamp>` for 30 days; `cli-embedding-gc` removes it after that window. Concurrent reads during migration MUST see either the pre-migration vectors (via the old index) or the post-migration vectors (via the new index), never a mix. The `_index.json` rename is the linearization point.
+**Atomicity contract.** The migration writes the new provider+version JSONL file in full via temp-then-rename: the final `rename(<file>.<uuid>.tmp, <newProvider>-<newModelVersion>.jsonl)` is the linearization point. Concurrent reads see either the old file (still on the deprecated provider) or the new file (on the replacement provider), never a half-written mix. The original is preserved as `.bak.<timestamp>` for 30 days; `cli-embedding-gc` removes it after that window.
 
 ### 9.3 Read-side stale-vector policy
 

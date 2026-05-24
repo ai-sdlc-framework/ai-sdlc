@@ -31,7 +31,7 @@
  * @module cli/embedding-gc
  */
 
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 import yargs from 'yargs';
@@ -48,43 +48,49 @@ interface VectorStoreEntry {
   [key: string]: unknown;
 }
 
-/** Index file format (mirrors orchestrator/src/embedding/storage/jsonl-backend.ts). */
-interface EmbeddingIndex {
-  entries: Record<string, string>;
-  updatedAt: string;
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
+/** List every `*.jsonl` file in the embeddings directory. */
+function listJsonlFiles(embeddingsDir: string): string[] {
+  if (!existsSync(embeddingsDir)) return [];
+  return readdirSync(embeddingsDir)
+    .filter((name) => name.endsWith('.jsonl'))
+    .map((name) => join(embeddingsDir, name));
 }
 
 // ── GC logic ─────────────────────────────────────────────────────────────────
 
-function readIndex(embeddingsDir: string): EmbeddingIndex {
-  const indexPath = join(embeddingsDir, '_index.json');
-  if (!existsSync(indexPath)) {
-    return { entries: {}, updatedAt: new Date().toISOString() };
-  }
-  try {
-    return JSON.parse(readFileSync(indexPath, 'utf-8')) as EmbeddingIndex;
-  } catch {
-    return { entries: {}, updatedAt: new Date().toISOString() };
-  }
-}
-
-/** Run GC over all JSONL files in the embeddings directory. */
+/**
+ * Run GC over all JSONL files in the embeddings directory.
+ *
+ * @param embeddingsDir - Absolute path to the `_embeddings/` directory.
+ * @param retentionDays - Number of days to retain entries (ignored when `cutoff` is provided).
+ * @param provider     - Optional embedding-provider filter.
+ * @param cutoff       - Optional explicit cutoff Date. When omitted, GC computes
+ *                       `cutoff = now - retentionDays` at call time. Threading the
+ *                       cutoff in lets tests assert on an exact boundary without
+ *                       a millisecond race between cutoff computation and the
+ *                       individual entry comparison (Iter 2 MAJOR #4).
+ */
 export function runGc(
   embeddingsDir: string,
   retentionDays: number,
   provider?: string,
+  cutoff?: Date,
 ): { removed: number; scanned: number; filesProcessed: number } {
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - retentionDays);
+  const effectiveCutoff =
+    cutoff ??
+    (() => {
+      const d = new Date();
+      d.setDate(d.getDate() - retentionDays);
+      return d;
+    })();
 
-  const index = readIndex(embeddingsDir);
   let removed = 0;
   let scanned = 0;
   let filesProcessed = 0;
 
-  for (const [slug, filePath] of Object.entries(index.entries)) {
-    if (!existsSync(filePath)) continue;
-
+  for (const filePath of listJsonlFiles(embeddingsDir)) {
     filesProcessed++;
     const content = readFileSync(filePath, 'utf-8');
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
@@ -108,7 +114,7 @@ export function runGc(
         }
 
         const writtenAt = new Date(entry.writtenAt);
-        if (writtenAt < cutoff) {
+        if (writtenAt < effectiveCutoff) {
           removed++;
         } else {
           surviving.push(line);
@@ -124,8 +130,6 @@ export function runGc(
       writeFileSync(tmp, surviving.join('\n') + (surviving.length > 0 ? '\n' : ''), 'utf-8');
       renameSync(tmp, filePath);
     }
-
-    void slug;
   }
 
   return { removed, scanned, filesProcessed };
@@ -140,12 +144,9 @@ export function collectStats(embeddingsDir: string): Array<{
   newestWrittenAt: string | null;
   filePath: string;
 }> {
-  const index = readIndex(embeddingsDir);
   const results: ReturnType<typeof collectStats> = [];
 
-  for (const [_slug, filePath] of Object.entries(index.entries)) {
-    if (!existsSync(filePath)) continue;
-
+  for (const filePath of listJsonlFiles(embeddingsDir)) {
     const content = readFileSync(filePath, 'utf-8');
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
 
@@ -246,12 +247,10 @@ export async function runEmbeddingGcCli(): Promise<void> {
           const cutoff = new Date();
           cutoff.setDate(cutoff.getDate() - args['retention-days']);
 
-          const index = readIndex(embeddingsDir);
           let wouldRemove = 0;
           let scanned = 0;
 
-          for (const [_slug, filePath] of Object.entries(index.entries)) {
-            if (!existsSync(filePath)) continue;
+          for (const filePath of listJsonlFiles(embeddingsDir)) {
             const content = readFileSync(filePath, 'utf-8');
             const lines = content.split('\n').filter((l) => l.trim().length > 0);
             for (const line of lines) {

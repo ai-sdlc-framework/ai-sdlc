@@ -3,11 +3,23 @@
  *
  * Storage layout:
  *   <artifactsDir>/_embeddings/
- *   ├── openai-text-embedding-3-small-2024-01-25.jsonl   (one per provider+version)
- *   └── _index.json                                       (provider+version → file path)
+ *   └── openai-text-embedding-3-small-2024-01-25.jsonl   (one per provider+version)
  *
- * Append-only writes with atomic temp-then-rename pattern for concurrent safety.
- * GC by mtime: entries with writtenAt older than retention threshold are pruned.
+ * Files are named `<safeProvider>-<safeModelVersion>.jsonl` where each component
+ * is sanitized to `[a-zA-Z0-9._-]`. The directory itself is the index — `scan()`
+ * directory-walks `<embeddingsDir>/*.jsonl` and entries carry their own
+ * `(embeddingProvider, embeddingModelVersion)` provenance for filtering.
+ *
+ * This removes the read-modify-write race on a previous `_index.json` file
+ * (Iter 2 MAJOR #2): two concurrent first-writes for different
+ * (provider, modelVersion) tuples can no longer clobber each other because the
+ * index lookup is now `existsSync(<filePath>)` rather than a JSON file rewrite.
+ *
+ * Write semantics: ALL writes use an atomic read→append→temp-then-rename pattern
+ * (Iter 2 CRITICAL #1). The previous `appendFileSync` short path for sub-PIPE_BUF
+ * lines was based on a misreading of POSIX — PIPE_BUF only applies to pipes/
+ * FIFOs/sockets, not regular files. The unified temp-then-rename path holds
+ * regardless of write size and guarantees readers never see partial lines.
  *
  * Scale escalation thresholds (RFC-0019 OQ-1 re-walkthrough):
  *   > 100K entries per provider+version → emit operator-visible signal
@@ -17,6 +29,9 @@
  *
  * Concurrency contract:
  *   - write(): atomic temp-file-then-rename ensures readers see complete lines.
+ *     NOTE: concurrent writes to the same file may still race at the read+append
+ *     step (last-rename-wins). Single-writer-per-(provider,modelVersion) is the
+ *     safe usage; multi-writer requires a per-file mutex layered above.
  *   - read(): linear scan on a stable file; safe to run concurrently with writes.
  *   - delete(): rewrites the file atomically after filtering out the entry.
  *
@@ -30,9 +45,9 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   renameSync,
   writeFileSync,
-  appendFileSync,
 } from 'node:fs';
 import { join } from 'node:path';
 import type { EmbeddingStorageBackend, VectorStoreEntry, VectorStoreFilter } from './types.js';
@@ -40,14 +55,6 @@ import type { EmbeddingStorageBackend, VectorStoreEntry, VectorStoreFilter } fro
 /** Scale escalation thresholds per RFC-0019 OQ-1 re-walkthrough. */
 export const SCALE_ESCALATION_MAX_ENTRIES = 100_000;
 export const SCALE_ESCALATION_P95_READ_MS = 250;
-
-/** Index file mapping provider+version slugs to JSONL file paths. */
-interface EmbeddingIndex {
-  /** Map from slug (e.g., 'openai-text-embedding-3-small-2024-01-25') to file path. */
-  entries: Record<string, string>;
-  /** ISO 8601 timestamp of the last index rewrite. */
-  updatedAt: string;
-}
 
 /** Scale escalation signal emitted when thresholds are crossed. */
 export interface ScaleEscalationSignal {
@@ -76,7 +83,6 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
   readonly name = 'jsonl';
 
   private readonly embeddingsDir: string;
-  private readonly indexPath: string;
 
   /**
    * Optional callback for operator-visible scale-escalation signals.
@@ -89,7 +95,6 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
     options?: { onScaleEscalation?: (signal: ScaleEscalationSignal) => void },
   ) {
     this.embeddingsDir = join(artifactsDir, '_embeddings');
-    this.indexPath = join(this.embeddingsDir, '_index.json');
     if (options?.onScaleEscalation) {
       this.onScaleEscalation = options.onScaleEscalation;
     }
@@ -102,51 +107,24 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
     }
   }
 
-  /** Read the index (or return an empty one when not yet written). */
-  private readIndex(): EmbeddingIndex {
-    this.ensureDir();
-    if (!existsSync(this.indexPath)) {
-      return { entries: {}, updatedAt: new Date().toISOString() };
-    }
-    try {
-      const raw = readFileSync(this.indexPath, 'utf-8');
-      return JSON.parse(raw) as EmbeddingIndex;
-    } catch {
-      // Corrupt index → return empty; will be rebuilt on next write.
-      return { entries: {}, updatedAt: new Date().toISOString() };
-    }
-  }
-
-  /** Atomically rewrite the index file via temp-then-rename. */
-  private writeIndex(index: EmbeddingIndex): void {
-    this.ensureDir();
-    const tmp = `${this.indexPath}.${randomUUID()}.tmp`;
-    writeFileSync(tmp, JSON.stringify(index, null, 2), 'utf-8');
-    renameSync(tmp, this.indexPath);
-  }
-
-  /** Derive the slug used as the index key and as the JSONL filename stem. */
+  /** Derive the slug used as the JSONL filename stem. */
   private slug(provider: string, modelVersion: string): string {
     // Sanitize: replace characters unsafe in filenames with '-'.
     const safe = (s: string) => s.replace(/[^a-zA-Z0-9._-]/g, '-');
     return `${safe(provider)}-${safe(modelVersion)}`;
   }
 
-  /** Return the JSONL file path for a given provider+version. Creates entry if absent. */
+  /** Return the JSONL file path for a given provider+version. */
   private jsonlPath(provider: string, modelVersion: string): string {
-    const index = this.readIndex();
-    const s = this.slug(provider, modelVersion);
-    if (index.entries[s]) {
-      return index.entries[s];
-    }
-    // Register in index and rewrite atomically.
-    const filePath = join(this.embeddingsDir, `${s}.jsonl`);
-    const updated: EmbeddingIndex = {
-      entries: { ...index.entries, [s]: filePath },
-      updatedAt: new Date().toISOString(),
-    };
-    this.writeIndex(updated);
-    return filePath;
+    return join(this.embeddingsDir, `${this.slug(provider, modelVersion)}.jsonl`);
+  }
+
+  /** List all JSONL file paths in the embeddings directory. */
+  private listJsonlFiles(): string[] {
+    if (!existsSync(this.embeddingsDir)) return [];
+    return readdirSync(this.embeddingsDir)
+      .filter((name) => name.endsWith('.jsonl'))
+      .map((name) => join(this.embeddingsDir, name));
   }
 
   /**
@@ -160,11 +138,16 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
   /**
    * Write an entry to the JSONL file for its (provider, modelVersion) tuple.
    *
-   * Concurrent writes are safe: appendFileSync is atomic at the OS level for
-   * writes smaller than PIPE_BUF (~4KB on Linux). For larger entries (very
-   * long texts), the implementation uses temp-then-rename to guarantee atomicity.
+   * All writes use atomic read→append→temp-then-rename: read existing file
+   * content, concatenate the new line, write to a temp file, then atomically
+   * rename over the target. This guarantees readers never see partial lines.
    *
    * The textHash is computed from the text if not already set (caller convenience).
+   *
+   * Single-writer-per-file safety: concurrent writes to the SAME
+   * (provider, modelVersion) target may still race at the read+append step
+   * (last-rename-wins). The intended usage is single-writer-per-tuple; if you
+   * need multi-writer-per-tuple, layer a per-file mutex above this backend.
    */
   async write(entry: VectorStoreEntry): Promise<void> {
     this.ensureDir();
@@ -179,20 +162,11 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
     const line = JSON.stringify(normalized) + '\n';
     const filePath = this.jsonlPath(normalized.embeddingProvider, normalized.embeddingModelVersion);
 
-    // For entries whose JSON line may exceed PIPE_BUF, use temp-then-append pattern.
-    // Node's appendFileSync is O_APPEND which is atomic for small writes; large writes
-    // go through a temp file to ensure readers never see partial lines.
-    const PIPE_BUF = 4096;
-    if (line.length > PIPE_BUF) {
-      const tmp = `${filePath}.${randomUUID()}.tmp`;
-      writeFileSync(tmp, line, 'utf-8');
-      // Read existing content and append.
-      const existing = existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
-      writeFileSync(tmp, existing + line, 'utf-8');
-      renameSync(tmp, filePath);
-    } else {
-      appendFileSync(filePath, line, 'utf-8');
-    }
+    // Always temp-then-rename for atomicity (Iter 2 CRITICAL #1 / MAJOR #3).
+    const existing = existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
+    const tmp = `${filePath}.${randomUUID()}.tmp`;
+    writeFileSync(tmp, existing + line, 'utf-8');
+    renameSync(tmp, filePath);
 
     // Check scale escalation threshold after write.
     // Count is computed lazily — only when near the threshold to avoid O(n) overhead.
@@ -215,11 +189,9 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
     modelVersion: string,
   ): Promise<VectorStoreEntry | null> {
     const startMs = Date.now();
-    const index = this.readIndex();
-    const s = this.slug(provider, modelVersion);
-    const filePath = index.entries[s];
+    const filePath = this.jsonlPath(provider, modelVersion);
 
-    if (!filePath || !existsSync(filePath)) {
+    if (!existsSync(filePath)) {
       return null;
     }
 
@@ -246,48 +218,23 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
 
   /**
    * Scan all entries matching an optional filter.
-   * Yields entries from each matching JSONL file in insertion order.
+   * Yields entries from each JSONL file discovered in the embeddings directory.
    */
   async *scan(filter?: VectorStoreFilter): AsyncIterable<VectorStoreEntry> {
-    const index = this.readIndex();
+    for (const filePath of this.listJsonlFiles()) {
+      const content = readFileSync(filePath, 'utf-8');
+      const lines = content.split('\n').filter((l) => l.trim().length > 0);
 
-    for (const [slug, filePath] of Object.entries(index.entries)) {
-      if (!existsSync(filePath)) continue;
-
-      // If provider or modelVersion filter is set, check the slug contains them.
-      if (filter?.provider || filter?.modelVersion) {
-        // Parse slug to check — slug is `<provider-safe>-<modelVersion-safe>`.
-        // Use the actual entries to filter accurately.
-        const content = readFileSync(filePath, 'utf-8');
-        const lines = content.split('\n').filter((l) => l.trim().length > 0);
-
-        for (const line of lines) {
-          try {
-            const entry = JSON.parse(line) as VectorStoreEntry;
-            if (filter.provider && entry.embeddingProvider !== filter.provider) continue;
-            if (filter.modelVersion && entry.embeddingModelVersion !== filter.modelVersion)
-              continue;
-            yield entry;
-          } catch {
-            // Skip malformed lines.
-          }
-        }
-      } else {
-        // No filter — yield all from this file.
-        const content = readFileSync(filePath, 'utf-8');
-        const lines = content.split('\n').filter((l) => l.trim().length > 0);
-
-        for (const line of lines) {
-          try {
-            const entry = JSON.parse(line) as VectorStoreEntry;
-            yield entry;
-          } catch {
-            // Skip malformed lines.
-          }
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line) as VectorStoreEntry;
+          if (filter?.provider && entry.embeddingProvider !== filter.provider) continue;
+          if (filter?.modelVersion && entry.embeddingModelVersion !== filter.modelVersion) continue;
+          yield entry;
+        } catch {
+          // Skip malformed lines.
         }
       }
-
-      void slug; // suppress unused-variable lint warning
     }
   }
 
@@ -297,11 +244,9 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
    * No-op when the entry does not exist.
    */
   async delete(textHash: string, provider: string, modelVersion: string): Promise<void> {
-    const index = this.readIndex();
-    const s = this.slug(provider, modelVersion);
-    const filePath = index.entries[s];
+    const filePath = this.jsonlPath(provider, modelVersion);
 
-    if (!filePath || !existsSync(filePath)) return;
+    if (!existsSync(filePath)) return;
 
     const content = readFileSync(filePath, 'utf-8');
     const lines = content.split('\n').filter((l) => l.trim().length > 0);
@@ -339,7 +284,6 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
    *
    * Entries with `writtenAt` older than `cutoffDate` are removed.
    * The JSONL file is rewritten atomically via temp-then-rename.
-   * The index is NOT modified (GC doesn't remove files, only stale entries).
    *
    * @param retentionDays - Number of days to retain entries (default 90).
    * @param filter - Optional provider/modelVersion filter; absent = all files.
@@ -359,12 +303,9 @@ export class JsonlEmbeddingStorageBackend implements EmbeddingStorageBackend {
   }
 
   private async _gcWithCutoff(cutoff: Date, filter?: VectorStoreFilter): Promise<number> {
-    const index = this.readIndex();
     let removed = 0;
 
-    for (const [_slug, filePath] of Object.entries(index.entries)) {
-      if (!existsSync(filePath)) continue;
-
+    for (const filePath of this.listJsonlFiles()) {
       const content = readFileSync(filePath, 'utf-8');
       const lines = content.split('\n').filter((l) => l.trim().length > 0);
 

@@ -194,24 +194,19 @@ from `orchestrator/src/embedding/storage/jsonl-backend.ts`.
 
 ```
 <artifactsDir>/_embeddings/
-├── _index.json                                     ← provider+version → file path map
 ├── openai-text-embedding-3-small-2024-01-25.jsonl  ← one file per (provider, modelVersion)
 └── openai-text-embedding-3-large-2024-01-25.jsonl  ← (if multi-provider in use)
 ```
 
-### `_index.json` format
+### Filename convention
 
-```json
-{
-  "entries": {
-    "openai-text-embedding-3-small-2024-01-25": "/abs/path/_embeddings/openai-text-embedding-3-small-2024-01-25.jsonl"
-  },
-  "updatedAt": "2026-05-23T12:00:00.000Z"
-}
-```
-
-The index is written atomically (temp-then-rename). Readers that see a partial write
-will fall back to the old index until the rename completes.
+Each file is named `<safeProvider>-<safeModelVersion>.jsonl` where each component is
+sanitized to the regex `[a-zA-Z0-9._-]` (unsafe characters replaced with `-`). The
+directory listing itself serves as the index — `scan()` walks `<embeddingsDir>/*.jsonl`
+and each entry carries its own `(embeddingProvider, embeddingModelVersion)` provenance
+for filtering. There is no separate index file (iter-2 review: dropping `_index.json`
+eliminates the read-modify-write race on concurrent first-writes for different
+provider/version tuples).
 
 ### JSONL entry format
 
